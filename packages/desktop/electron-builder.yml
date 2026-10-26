@@ -50,6 +50,3 @@ mac:
       - CFBundleTypeName: Folder
         CFBundleTypeRole: Viewer
         LSItemContentTypes: [public.folder]
-dmg:
-  # The blockmaps are for electron-updater, which an unsigned app cannot use.
-  writeUpdateInfo: false

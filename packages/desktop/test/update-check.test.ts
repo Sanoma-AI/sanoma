@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import {
   CHECK_EVERY_MS,
   checkDue,
@@ -69,6 +69,9 @@ test("savedNewer: the last check's release while it is later than the app", () =
   expect(savedNewer({ newer }, "0.3.0")).toBeUndefined();
   expect(savedNewer({}, "0.1.0")).toBeUndefined();
   expect(savedNewer({ newer: { version: 2 } } as never, "0.1.0")).toBeUndefined();
+  expect(
+    savedNewer({ newer: { version: "0.2.0", url: "file:///Applications/Calculator.app" } }, "0.1.0"),
+  ).toBeUndefined();
 });
 
 test("shouldNotify: once per version", () => {
@@ -90,17 +93,15 @@ test("checkDue: once a day, and again when the clock went back", () => {
   expect(checkDue(at(now + 60_000), now)).toBe(true);
 });
 
-test("settings: missing, broken or not an object reads as empty, a write merges", () => {
+test("settings: missing, broken or not an object reads as empty", () => {
   const file = join(mkdtempSync(join(tmpdir(), "sanoma-settings-")), "settings.json");
   expect(readSettings(file)).toEqual({});
   for (const text of ["{ not json", "null", "[]", "3"]) {
     writeFileSync(file, text);
     expect(readSettings(file)).toEqual({});
   }
-  writeFileSync(file, JSON.stringify({ other: 1 }));
-  writeSettings(file, { updateCheckedAt: "2026-10-25T12:00:00.000Z", newer: { version: "0.2.0", url: "u" } });
-  writeSettings(file, { newer: undefined });
-  expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ other: 1, updateCheckedAt: "2026-10-25T12:00:00.000Z" });
+  writeSettings(file, { updateCheckedAt: "2026-10-25T12:00:00.000Z", newer: undefined });
+  expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ updateCheckedAt: "2026-10-25T12:00:00.000Z" });
 });
 
 test("fetchReleases asks GitHub's API and fails on an error status", async () => {
@@ -124,10 +125,11 @@ describe("runCheck", () => {
 
   test("saves the time and the find, notifies once, then waits a day unless asked", async () => {
     const file = setup();
+    writeFileSync(file, JSON.stringify({ other: 1 }));
     const fetchImpl = github([release("desktop-v0.2.0")]);
     const first = await runCheck({ file, current: "0.1.0", asked: false, now, fetchImpl });
     expect(first).toEqual({ found: { version: "0.2.0", url: release("desktop-v0.2.0").html_url }, notify: true });
-    expect(readSettings(file)).toEqual({ updateCheckedAt: new Date(now).toISOString(), newer: first!.found });
+    expect(readSettings(file)).toEqual({ other: 1, updateCheckedAt: new Date(now).toISOString(), newer: first!.found });
     expect(await runCheck({ file, current: "0.1.0", asked: false, now: now + 60_000, fetchImpl })).toBeUndefined();
     expect(await runCheck({ file, current: "0.1.0", asked: true, now: now + 60_000, fetchImpl })).toMatchObject({
       notify: false,
@@ -140,6 +142,16 @@ describe("runCheck", () => {
       fetchImpl,
     });
     expect(later).toMatchObject({ found: { version: "0.2.0" }, notify: false });
+  });
+
+  test("no notification when the settings cannot be saved", async () => {
+    // The settings file's folder is a file: nothing can be written there.
+    const blocker = setup();
+    writeFileSync(blocker, "");
+    const file = join(blocker, "settings.json");
+    const fetchImpl = github([release("desktop-v0.2.0")]);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await runCheck({ file, current: "0.1.0", asked: false, now, fetchImpl })).toMatchObject({ notify: false });
   });
 
   test("a failed answer throws and saves nothing, so the next start checks again", async () => {

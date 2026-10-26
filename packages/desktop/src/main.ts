@@ -49,7 +49,7 @@ import { type CompanyLog, hidePasswords, openLog } from "./logs.ts";
 import { folderArgument, isCompanyFolder, syncedFolderWarning } from "./places.ts";
 import { runtimeOf } from "./runtime.ts";
 import { type Session, type SessionOptions, startSession } from "./session.ts";
-import { readSettings, runCheck, savedNewer } from "./update-check.ts";
+import { type Newer, readSettings, runCheck, savedNewer } from "./update-check.ts";
 import { fastForward, prepareUpdate } from "./update-company.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -510,30 +510,25 @@ const forFocused = (act: (path: string) => unknown) => () => {
 /** Its notification, held so that a click on it still reaches the shell once it is shown. */
 let notification: Notification | undefined;
 
-/** Checks one at a time, so two never both notify for the same version. */
-let checking: Promise<void> = Promise.resolve();
-const checkForUpdate = (asked: boolean) => {
-  checking = checking.then(() => check(asked)).catch((err: unknown) => console.error("update check:", err));
-};
-
-/**
- * The update check (`runCheck`), when a day has passed since the last, or when asked from the Help
- * menu, which then says what it found.
- */
-async function check(asked: boolean) {
+/** Checks one at a time, so two never both notify for the same version; what they found is shown outside the queue. */
+let checking: Promise<unknown> = Promise.resolve();
+function checkForUpdate(asked: boolean) {
   const current = app.getVersion();
-  let result: Awaited<ReturnType<typeof runCheck>>;
-  try {
-    result = await runCheck({ file: settingsFile(), current, asked });
-  } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
-    if (asked)
-      void dialog.showMessageBox({ type: "warning", message: "Sanoma could not check for a newer version", detail });
-    else console.error(`update check: ${detail}`);
-    return;
-  }
-  if (!result) return;
-  const { found, notify } = result;
+  const run = checking.then(() => runCheck({ file: settingsFile(), current, asked }));
+  checking = run.catch(() => {});
+  void run.then(
+    (result) => result && showCheck(asked, current, result),
+    (err: unknown) => {
+      const detail = err instanceof Error ? err.message : String(err);
+      if (asked)
+        void dialog.showMessageBox({ type: "warning", message: "Sanoma could not check for a newer version", detail });
+      else console.error(`update check: ${detail}`);
+    },
+  );
+}
+
+/** What a check found (`runCheck`): the Help menu, then a dialog when asked or a notification when due. */
+async function showCheck(asked: boolean, current: string, { found, notify }: { found?: Newer; notify: boolean }) {
   buildMenu();
   if (asked) {
     const { response } = await dialog.showMessageBox(

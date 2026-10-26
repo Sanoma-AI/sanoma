@@ -90,7 +90,7 @@ Connectors live here under `connectors/`; one moves to its own repo only when so
 
 ## Desktop (preview)
 
-The [desktop app](packages/desktop/README.md) opens a company folder, runs that company's own `sanoma` launcher and shows the app in a window, for people who will not open a terminal. Preview builds for macOS are on [GitHub Releases](https://github.com/Sanoma-AI/sanoma/releases) as `desktop-v*`.
+The [desktop app](packages/desktop/README.md) opens a company folder, runs that company's own `sanoma` launcher and shows the app in a window, for people who will not open a terminal. Its macOS preview builds are released on [GitHub Releases](https://github.com/Sanoma-AI/sanoma/releases) as `desktop-v*`, the first being 0.1.0.
 
 1. Download the arm64 build (`Sanoma-<version>-arm64.dmg`) on an Apple silicon Mac, or the x64 one on an Intel Mac, and drag Sanoma to Applications.
 2. The builds are not signed by Apple yet, so the first open is blocked: open Sanoma, dismiss the warning, then go to System Settings → Privacy & Security and click "Open Anyway" next to the message about Sanoma (on macOS 15 and later, Control-click → Open no longer gets past it).

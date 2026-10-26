@@ -4,8 +4,8 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
-/** The repository's latest releases: desktop releases share it with nothing else, but keep to the tag prefix. */
-export const RELEASES_URL = "https://api.github.com/repos/Sanoma-AI/sanoma/releases?per_page=20";
+/** The repository's latest releases, a page of 100: the desktop's `desktop-v*` among any others. */
+export const RELEASES_URL = "https://api.github.com/repos/Sanoma-AI/sanoma/releases?per_page=100";
 export const TAG_PREFIX = "desktop-v";
 /** At most one check a day, counted from the last one that answered. */
 export const CHECK_EVERY_MS = 24 * 60 * 60 * 1000;
@@ -38,6 +38,9 @@ function isLater(a: string, b: string): boolean {
   return i >= 0 && pa[i]! > pb[i]!;
 }
 
+/** The page the shell opens in the browser: GitHub's, nothing else. */
+const isReleasePage = (url: unknown) => typeof url === "string" && url.startsWith("https://github.com/");
+
 /**
  * The newest published desktop release later than `current`, if any: tags `desktop-v<x.y.z>` that
  * are neither drafts nor prereleases.
@@ -46,8 +49,7 @@ export function newerRelease(current: string, releases: readonly GitHubRelease[]
   let found: Newer | undefined;
   for (const release of releases) {
     if (release.draft || release.prerelease || !release.tag_name.startsWith(TAG_PREFIX)) continue;
-    // The page the shell opens in the browser: GitHub's, nothing else.
-    if (!release.html_url.startsWith("https://github.com/")) continue;
+    if (!isReleasePage(release.html_url)) continue;
     const version = release.tag_name.slice(TAG_PREFIX.length);
     if (isLater(version, found?.version ?? current)) found = { version, url: release.html_url };
   }
@@ -82,17 +84,19 @@ export function readSettings(file: string): Settings {
   }
 }
 
-/** Merges `next` into the file, through a temporary file and a rename. */
-export function writeSettings(file: string, next: Settings): void {
+/** Writes the settings through a temporary file and a rename. */
+export function writeSettings(file: string, settings: Settings): void {
   mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(`${file}.tmp`, `${JSON.stringify({ ...readSettings(file), ...next }, null, 2)}\n`);
+  writeFileSync(`${file}.tmp`, `${JSON.stringify(settings, null, 2)}\n`);
   renameSync(`${file}.tmp`, file);
 }
 
 /** The release the last check found, while it is still later than the app (`current`). */
 export function savedNewer(settings: Settings, current: string): Newer | undefined {
   const saved = settings.newer;
-  return saved && typeof saved.version === "string" && isLater(saved.version, current) ? saved : undefined;
+  return saved && typeof saved.version === "string" && isReleasePage(saved.url) && isLater(saved.version, current)
+    ? saved
+    : undefined;
 }
 
 /** Whether a check's find gets a notification: once per version, so not the one the last check found. */
@@ -108,8 +112,9 @@ export function checkDue(settings: Settings, now: number): boolean {
 
 /**
  * One check against the settings in `file`: skipped (undefined) unless `asked` or due, else what
- * GitHub has, saved with the time, and whether it gets a notification (once per version). Throws
- * when GitHub does not answer; a settings file that cannot be written only loses the time.
+ * GitHub has, saved with the time, and whether it gets a notification: once per version, and
+ * never when the settings could not be saved (else every hourly retry would notify again).
+ * Throws when GitHub does not answer.
  */
 export async function runCheck(options: {
   file: string;
@@ -123,9 +128,10 @@ export async function runCheck(options: {
   if (!asked && !checkDue(saved, now)) return undefined;
   const found = newerRelease(current, await fetchReleases(current, fetchImpl));
   try {
-    writeSettings(file, { updateCheckedAt: new Date(now).toISOString(), newer: found });
+    writeSettings(file, { ...saved, updateCheckedAt: new Date(now).toISOString(), newer: found });
   } catch (err) {
     console.error("update check: could not save the settings:", err);
+    return { found, notify: false };
   }
   return { found, notify: !asked && shouldNotify(saved, found) };
 }

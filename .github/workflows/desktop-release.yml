@@ -37,7 +37,7 @@ jobs:
           tag="desktop-v$version"
           # A draft has no tag yet, so the releases (drafts included) are checked as well as the tags.
           releases=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" -q '.[].tag_name')
-          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null || grep -qx "$tag" <<<"$releases"; then
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null || grep -qxF "$tag" <<<"$releases"; then
             echo "::error::$tag exists: bump version in packages/desktop/package.json, or delete the draft"
             exit 1
           fi
