@@ -6,7 +6,13 @@ import type { HarnessV1 } from "@ai-sdk/harness";
 import { HarnessAgent } from "@ai-sdk/harness/agent";
 import type { Draft, Principal } from "@sanoma-ai/workflows";
 import { errorMessage } from "@sanoma-ai/workflows/shared";
-import { createUIMessageStream, generateId, LoadAPIKeyError, type UIMessageStreamWriter } from "ai";
+import {
+  createUIMessageStream,
+  generateId,
+  type InferUIMessageChunk,
+  LoadAPIKeyError,
+  type UIMessageStreamWriter,
+} from "ai";
 import type { AppContext } from "../../context.ts";
 import { type ChatMessage, ENGINE_NAMES, noKeyText, pathOf, textOf } from "../../lib/chat.ts";
 import { checks } from "../drafts.ts";
@@ -133,12 +139,14 @@ async function runTurn(
     try {
       let result = await agent.stream({ session, prompt: textOf(said), abortSignal: signal });
       for (let first = true; ; first = false) {
-        for await (const chunk of result.toUIMessageStream<ChatMessage>({
+        for await (const chunk of result.toUIMessageStream({
           sendStart: first,
           sendFinish: false,
           generateMessageId: generateId,
         })) {
-          writer.write(chunk);
+          // As the chat's chunk: a company's install has the harness's own copy of the AI SDK (its
+          // exact pin), whose chunk types are not this one's, though the chunks are.
+          writer.write(chunk as InferUIMessageChunk<ChatMessage>);
         }
         const asked = (await result.content).filter((part) => part.type === "tool-approval-request");
         if (!asked.length || signal.aborted) break;
