@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import type { z } from "zod";
+import { type AppEntry, appsAt } from "./apps.ts";
 import { type LintProblem, readSource, type SourceFile } from "./ast.ts";
 import { type Field, recordSchemaOf } from "./collection.ts";
 import { connectorsOf, resolveConfig, rootOf, type SanomaConfig } from "./config.ts";
@@ -62,8 +63,18 @@ export {
   type Bindings,
   type Rebind,
 } from "./lockfile.ts";
+// The apps under `apps/`, read without running their `app.ts`.
+export { crossAppImports, readApps, type AppEntry } from "./apps.ts";
 // What the sites call, read from their source: a workflow's Used by.
-export { readSites, type SiteCall, type SiteEntry, type SitePage, siteContentPages, siteLocales } from "./sites.ts";
+export {
+  readSites,
+  type SiteCall,
+  type SiteEntry,
+  type SitePage,
+  siteContentPages,
+  siteLocales,
+  sitesUnder,
+} from "./sites.ts";
 // The generated SDK, `.sanoma/api.ts`: a site's `api` typed from this description.
 export { API_FILE, generateApi, writeApi, writeGenerated } from "./sdk.ts";
 // The Cedar schema, `.sanoma/schema.cedarschema`: what a company's policies are validated and decided against.
@@ -76,7 +87,10 @@ export type { ApplyInput, ApplyPlan, ApplyReport, ApplyResult, PlanAnswer, PlanS
 
 /** What a workflow is, read from its definition: enough to draw a start form and show what it may call. */
 export interface WorkflowEntry {
+  /** Its name: `<app>.<name>` for one an app's folder defines. */
   name: string;
+  /** The app whose folder defines it (`apps/<app>/workflows/`); absent for one at the root. */
+  app?: string;
   title?: string;
   /** `manual`, or the schedule it starts on (`defineWorkflow`'s `trigger`). */
   trigger: Trigger;
@@ -166,7 +180,10 @@ export interface ResourceTypeEntry {
 
 /** A collection the config declares (`collection()`). */
 export interface CollectionEntry {
+  /** Its name: `<app>.<name>` for one an app's `resources/data.ts` declares. */
   name: string;
+  /** The app whose folder declares it (`apps/<app>/resources/data.ts`); absent for one at the root. */
+  app?: string;
   title?: string;
   /** The field each record is found by. */
   key: string;
@@ -204,8 +221,14 @@ export interface ConfigDescription {
   resources: DeclaredResource[];
   /** Each binding in the lockfile (`LOCKFILE`) whose key no data file declares, as `readDataFiles` reports it. */
   orphans: DataFiles["orphans"];
-  /** What is wrong in the data files (`readDataFiles`), each at its file, relative to the root, line and column. A workflow's are on its entry. */
+  /**
+   * What is wrong in the data files (`readDataFiles`) and the apps (a folder of `apps/` that is no
+   * app, an `app.ts` that cannot be read, a collection or site at the root named as an app is),
+   * each at its file, relative to the root, line and column. A workflow's are on its entry.
+   */
   problems: ResourceProblem[];
+  /** The apps under `apps/` (`readApps`), by name. Each workflow, collection and site an app declares names it (`app`). */
+  apps: AppEntry[];
   /**
    * `defined` when the root has `policies/**\/*.cedar` (else the policy is `allowAll`), with their
    * `version`, or while they have `problems` (`policyProblems`), none: then every call and start is refused.
@@ -258,6 +281,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
   const collections: CollectionEntry[] = [...resolved.collections.values()]
     .map((c) => ({
       name: c.name,
+      ...(c.app !== undefined && { app: c.app }),
       ...(c.title !== undefined && { title: c.title }),
       key: c.key,
       fields: c.fields,
@@ -294,6 +318,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
         ];
     return {
       name: wf.name,
+      ...(wf.app !== undefined && { app: wf.app }),
       title: wf.title,
       trigger: wf.trigger,
       ...(builtin && { builtin: true as const }),
@@ -308,6 +333,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
   });
   workflows.sort((a, b) => a.name.localeCompare(b.name));
   addApiNameProblems(workflows, new Set(ops.map((op) => op.vendor)));
+  const { apps, problems: appProblems } = appsAt(resolved.root);
   const sites = readSites(
     resolved.root,
     { workflows, collections, ops },
@@ -325,7 +351,13 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     collections,
     resources: dataFiles.resources,
     orphans: dataFiles.orphans,
-    problems: [...dataFiles.problems, ...domainProblems(resolved.root, dataFiles.resources, resources, sites, read)],
+    problems: [
+      ...dataFiles.problems,
+      ...appProblems,
+      ...appClashes(apps, collections, sites),
+      ...domainProblems(resolved.root, dataFiles.resources, resources, sites, read),
+    ],
+    apps,
     policy: {
       defined: resolved.policy !== allowAll,
       ...(resolved.policy.version === undefined ? {} : { version: resolved.policy.version }),
@@ -333,6 +365,34 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     },
     sites,
   };
+}
+
+/** That the root's `kind` `name`, in `file`, is named as an app is. */
+const appClash = (kind: string, name: string, file: string): ResourceProblem => ({
+  file,
+  line: 1,
+  column: 1,
+  message: `the ${kind} ${name} is named as the app apps/${name} is: name it otherwise`,
+});
+
+/**
+ * A collection or site at the root named as an app is: `api.data.<app>` and `/sites/<app>/` are
+ * the app's, so the root's would take its place.
+ */
+function appClashes(
+  apps: readonly AppEntry[],
+  collections: readonly CollectionEntry[],
+  sites: readonly SiteEntry[],
+): ResourceProblem[] {
+  const names = new Set(apps.map((app) => app.name));
+  return [
+    ...collections
+      .filter((c) => c.app === undefined && names.has(c.name))
+      .map((c) => appClash("collection", c.name, c.declared?.file ?? "resources/data.ts")),
+    ...sites
+      .filter((site) => site.app === undefined && names.has(site.name))
+      .map((site) => appClash("site", site.name, `sites/${site.name}`)),
+  ];
 }
 
 /**

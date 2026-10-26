@@ -1002,7 +1002,7 @@ describe("a build that fails, or leaves a site out", () => {
     const repo = company({
       "sites/Not_A_Segment/routes/index.tsx": sitePage("/sites/Not_A_Segment/", "", '"Refused"'),
     });
-    expect(sitesOf(repo)).toEqual({ sites: ["hello", "intl", "members"], refused: ["Not_A_Segment"] });
+    expect(sitesOf(repo)).toEqual({ sites: ["hello", "intl", "members"], refused: ["sites/Not_A_Segment"] });
     const lines: string[] = [];
     const { distDir } = await buildApp(repo, { log: (line) => lines.push(line) });
     expect(lines).toContain(

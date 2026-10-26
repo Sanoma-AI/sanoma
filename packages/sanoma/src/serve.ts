@@ -155,8 +155,8 @@ async function appSites(
     return { distDir };
   }
   // buildApp says the same of each when there is a build to run.
-  for (const name of refused) {
-    log(`sites/${name} is not mounted: a site's folder name is a URL segment (lowercase letters, digits and dashes)`);
+  for (const dir of refused) {
+    log(`${dir} is not mounted: a site's folder name is a URL segment (lowercase letters, digits and dashes)`);
   }
   if (!sites.length) return {};
   log(`serving the app with ${named} from Vite's dev server: edits show as they are saved`);

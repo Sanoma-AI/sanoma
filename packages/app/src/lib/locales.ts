@@ -1,5 +1,5 @@
 import { trimPathRight, useRouterState } from "@tanstack/react-router";
-import LOCALES, { contentPages } from "virtual:sanoma/locales";
+import LOCALES, { contentPages, sites } from "virtual:sanoma/locales";
 import { content, type UntypedContent } from "../content.ts";
 import type { ContentKind } from "../content-types.ts";
 import { isLocalized, withoutOptional } from "../site-path.ts";
@@ -18,9 +18,12 @@ const localesOf = (site: string | undefined): string[] | undefined =>
 /** Site `site`'s default language, the first of its `locales`; none for a site with none. */
 export const defaultLocaleOf = (site: string | undefined): string | undefined => localesOf(site)?.[0];
 
-/** The site a route path is in (`/sites/<name>…`), by its folder's name. */
+/** Every site's key, longest first, so an app's `crm/pipeline` is found before a root site named `crm`. */
+const KEYS = sites.toSorted((a, b) => b.length - a.length);
+
+/** The site a route path is in (`/sites/<key>…`), by its key (`siteKey`): resolved against the build's sites. */
 export const siteOf = (path: string | undefined): string | undefined =>
-  path === undefined ? undefined : /^\/sites\/([^/]+)/.exec(path)?.[1];
+  path === undefined ? undefined : KEYS.find((key) => path === `/sites/${key}` || path.startsWith(`/sites/${key}/`));
 
 /** A route match, as much of it as says its language and its URL in another. */
 export interface LocaleMatch {

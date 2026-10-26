@@ -1,11 +1,11 @@
 import { existsSync, readdirSync } from "node:fs";
-import { join, relative, sep } from "node:path";
+import { basename, join, relative, sep } from "node:path";
 import { childrenOf, type LintProblem, type Node, readSource, type SourceFile } from "./ast.ts";
 import { type CedarPolicySource, visitorPermits } from "./cedar.ts";
 import { keyName } from "./datafile.ts";
 import type { ConfigDescription } from "./describe.ts";
 import { stringValue, unwrap } from "./outline.ts";
-import { filesUnder, isDirectory } from "./paths.ts";
+import { APPS_DIR, appFolders, filesUnder, isDirectory } from "./paths.ts";
 import { START } from "./schema.ts";
 import {
   ANONYMOUS,
@@ -14,6 +14,7 @@ import {
   DATA_VENDOR,
   LOCALE,
   SITE_NAME,
+  siteKey,
   VISITORS,
   WORKFLOW_ACTION,
 } from "./shared.ts";
@@ -64,12 +65,16 @@ export interface SitePage {
   content?: string;
 }
 
-/** A site, `sites/<name>/`, and what it calls. */
+/** A site, `sites/<name>/` or an app's `apps/<app>/sites/<name>/`, and what it calls. */
 export interface SiteEntry {
-  /** Its folder's name, where it is mounted: `/sites/<name>`. */
+  /** Its folder's name, `<app>/<name>` for an app's (`siteKey`): where it is mounted, `/sites/<name>`. */
   name: string;
+  /** The app whose folder holds it (`apps/<app>/sites/`); absent for one at the root. */
+  app?: string;
   /** `defineSite({ title })` in its `site.ts`, when that is a string literal. */
   title?: string;
+  /** `defineSite({ icon })` in its `site.ts`: a Lucide icon's name, as written. */
+  icon?: string;
   /** `defineSite({ public: true })`: served to visitors, not people. */
   public?: true;
   /** `defineSite({ login })`, the connector whose login half signs visitors in, as written: one that names none is among `problems`. */
@@ -109,12 +114,14 @@ const PARAMS: ReadonlySet<string> = new Set(["params"]);
 const ROUTE_MAKERS: ReadonlySet<string> = new Set(["createFileRoute", "createLazyFileRoute"]);
 
 /**
- * The sites under `root`: each folder of `sites/` with a `routes/` whose name is a URL segment,
- * by name (as `@sanoma-ai/app/build`'s `sitesOf` mounts them). Reads `routes/**` and
+ * The sites under `root` (`sitesUnder`): each folder of `sites/`, then of each app's
+ * `apps/<app>/sites/`, with a `routes/` whose name is a URL segment, by key (as
+ * `@sanoma-ai/app/build`'s `sitesOf` mounts them). Reads `routes/**` and
  * `components/**` (`.ts` and `.tsx`, less tests and declarations) of each with oxc, never running
  * them: each page (`SitePage`, from a route's id), each `<RunForm workflow="…" />` and each use of `api`, both imported from `sanoma/site`,
  * called or passed on (`queryFn: api.data.leads.list`):
- * `api.<name>` and `api.<name>.<method>` are a workflow, `api.data.<collection>.<op>` a collection,
+ * `api.<name>` and `api.<name>.<method>` are a workflow, `api.data.<collection>.<op>` (an app's
+ * `api.data.<app>.<collection>.<op>`) a collection,
  * and `api.<vendor>.<resource>.<op>` an operation. A name that is not written out (a variable, a
  * template with holes, a computed member) is skipped, as is a use through a namespace import or a
  * destructured `api`. A call to what `description` does not have, or to an operation a page may
@@ -133,9 +140,11 @@ export function readSites(
   policies?: readonly CedarPolicySource[],
 ): SiteEntry[] {
   if (root === undefined) return [];
-  const dir = join(root, "sites");
   const workflows = new Set(description.workflows.map((wf) => wf.name));
   const collections = new Set(description.collections.map((c) => c.name));
+  // `api.data.<app>.<collection>` passed on as a value reads as a call of `<app>`'s method: it is none.
+  const isAppCollection = ({ kind, name, method }: Written) =>
+    kind === "collection" && collections.has(`${name}.${method}`);
   const ops = new Map(description.ops.map((op) => [op.id, op]));
   // A workflow's api name to its name: two of one api name are a problem on the workflows.
   const byApiName = new Map(description.workflows.map((wf) => [apiNameOf(wf.name), wf.name]));
@@ -193,11 +202,11 @@ export function readSites(
     return { call: { kind, target, via, ...at }, ...(problem && { problem }) };
   };
 
-  return siteNames(dir).map((name) => {
-    const read = readSiteFiles(root, name);
-    const resolved = read.flatMap(({ uses }) => uses.map(resolve));
+  return sitesUnder(root).map(({ name, app, dir }) => {
+    const read = readSiteFiles(root, dir);
+    const resolved = read.flatMap(({ uses }) => uses.filter((use) => !isAppCollection(use)).map(resolve));
     const pages = pagesOf(read);
-    const siteFile = `sites/${name}/site.ts`;
+    const siteFile = `${dir}/site.ts`;
     const { problems: optionProblems, ...options } = siteOptionsOf(join(root, siteFile), connectors);
     const calls = resolved.map((r) => r.call);
     const problems = [
@@ -212,7 +221,7 @@ export function readSites(
     const warnings = options.public
       ? read.flatMap(({ route, warning }) => (warning && !pages.get(route!.path)?.content ? [warning] : []))
       : [];
-    return { name, ...options, pages: sorted, calls, problems, warnings };
+    return { name, ...(app && { app }), ...options, pages: sorted, calls, problems, warnings };
   });
 }
 
@@ -225,9 +234,9 @@ function pagesOf(read: readonly { route?: SitePage }[]): Map<string, SitePage> {
   return pages;
 }
 
-/** Each of site `name`'s files under `root`, as `readSiteFile` reads it, by path. */
-const readSiteFiles = (root: string, name: string) =>
-  SITE_DIRS.flatMap((sub) => filesUnder(join(root, "sites", name, sub), isSource))
+/** Each file of the site in `dir` (relative to `root`), as `readSiteFile` reads it, by path. */
+const readSiteFiles = (root: string, dir: string) =>
+  SITE_DIRS.flatMap((sub) => filesUnder(join(root, dir, sub), isSource))
     .toSorted()
     .flatMap((path) => {
       const file = readSource(path);
@@ -241,8 +250,8 @@ const readSiteFiles = (root: string, name: string) =>
  */
 export function siteContentPages(root: string): Record<string, string> {
   return Object.fromEntries(
-    siteNames(join(root, "sites")).flatMap((name) =>
-      [...pagesOf(readSiteFiles(root, name)).values()].flatMap(({ path, content }) =>
+    sitesUnder(root).flatMap(({ dir }) =>
+      [...pagesOf(readSiteFiles(root, dir)).values()].flatMap(({ path, content }) =>
         content ? [[path, content]] : [],
       ),
     ),
@@ -257,12 +266,28 @@ export function siteContentPages(root: string): Record<string, string> {
 export function siteLocales(root: string): Record<string, string[]> {
   const none = new Set<string>();
   return Object.fromEntries(
-    siteNames(join(root, "sites")).flatMap((name) => {
-      const { locales } = siteOptionsOf(join(root, "sites", name, "site.ts"), { vendors: none, logins: none });
+    sitesUnder(root).flatMap(({ name, dir }) => {
+      const { locales } = siteOptionsOf(join(root, dir, "site.ts"), { vendors: none, logins: none });
       return locales ? [[name, locales]] : [];
     }),
   );
 }
+
+/**
+ * The sites under `root`, by key (`siteKey`): each folder of `sites/` with a `routes/` whose name
+ * is a URL segment, then each app's `apps/<app>/sites/`, with its folder relative to `root`.
+ */
+export const sitesUnder = (root: string): { name: string; app?: string; dir: string }[] => [
+  ...siteNames(join(root, "sites")).map((name) => ({ name, dir: `sites/${name}` })),
+  ...appFolders(root).flatMap((folder) => {
+    const app = basename(folder);
+    return siteNames(join(folder, "sites")).map((name) => ({
+      name: siteKey(app, name),
+      app,
+      dir: `${APPS_DIR}/${app}/sites/${name}`,
+    }));
+  }),
+];
 
 /** The sites in `dir`: each folder with a `routes/` whose name is a URL segment, sorted. */
 const siteNames = (dir: string): string[] =>
@@ -379,9 +404,12 @@ function contentKind(callee: Node, content: ReadonlySet<string>): string | undef
 function apiPath(member: Node, api: ReadonlySet<string>): Pick<Written, "kind" | "name" | "method"> | undefined {
   const path = memberPath(member, api);
   if (!path?.length) return undefined;
-  const [first, second, third] = path as [string, ...string[]];
+  const [first, second] = path as [string, ...string[]];
+  // `api.data.<collection>.<op>`, or an app's, `api.data.<app>.<collection>.<op>`.
   if (first === DATA_VENDOR)
-    return path.length === 3 ? { kind: "collection", name: second!, method: third } : undefined;
+    return path.length === 3 || path.length === 4
+      ? { kind: "collection", name: path.slice(1, -1).join("."), method: path.at(-1) }
+      : undefined;
   if (path.length === 3) return { kind: "op", name: path.join(".") };
   if (path.length > 2) return undefined;
   return { kind: "workflow", name: first, ...(second !== undefined && { method: second }) };
@@ -414,14 +442,14 @@ const unread = (what: string, as: string) => `${what} is read without running si
 /**
  * What `site.ts` says of its site, read without running it, and what is wrong there: its default
  * export must be `defineSite({ … })` written out, so it can be read at all; then `title` when it is
- * a string, `public`, `login` and `locales`, which must be literals. `login` is kept as written; one on a
+ * a string, `icon`, `public`, `login` and `locales`, which must be literals. `login` is kept as written; one on a
  * site that is not public, or naming no connector of the config with a login half, is a problem.
  * `locales` is kept only when it has no problem.
  */
 function siteOptionsOf(
   path: string,
   connectors: SiteConnectors,
-): Pick<SiteEntry, "title" | "public" | "login" | "locales"> & { problems: LintProblem[] } {
+): Pick<SiteEntry, "title" | "icon" | "public" | "login" | "locales"> & { problems: LintProblem[] } {
   const file = readSource(path);
   if (typeof file === "string") return { problems: [] };
   const problems: LintProblem[] = [...file.problems];
@@ -453,6 +481,9 @@ function siteOptionsOf(
     options?.properties.findLast((p: Node) => isWritten(p) && keyName(p.key) === name);
 
   const title = stringValue(property("title")?.value);
+  const iconAt = property("icon");
+  const icon = stringValue(iconAt?.value);
+  if (iconAt && icon === undefined) problem(iconAt, unread("`icon`", "a string, a Lucide icon's name"));
   const publicAt = property("public");
   const flag = unwrap(publicAt?.value);
   const isPublic = flag?.type === "Literal" && flag.value === true;
@@ -495,6 +526,7 @@ function siteOptionsOf(
   if (localesMessage) problem(localesAt, localesMessage);
   return {
     ...(title !== undefined && { title }),
+    ...(icon !== undefined && { icon }),
     ...(isPublic && { public: true as const }),
     ...(login !== undefined && { login }),
     ...(localesAt && !localesMessage && isPublic && !loginAt && { locales }),

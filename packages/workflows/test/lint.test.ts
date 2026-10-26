@@ -93,7 +93,7 @@ describe("lintWorkflow", () => {
       ["../resources/github.ts", "../resources/area/data.ts", "../sanoma.config.ts"].map((spec) =>
         expect.stringMatching(
           new RegExp(
-            `^import "${spec.replaceAll(".", "\\.")}" .*outside workflows/.*only resources/data\\.ts \\(the collections\\) may be imported$`,
+            `^import "${spec.replaceAll(".", "\\.")}" .*outside workflows/.*only resources/data\\.ts \\(the collections, the root's or an app's apps/<app>/resources/data\\.ts\\) may be imported$`,
           ),
         ),
       ),

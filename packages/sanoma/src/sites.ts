@@ -1,5 +1,4 @@
 import { existsSync, realpathSync } from "node:fs";
-import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /**
@@ -8,6 +7,11 @@ import { fileURLToPath } from "node:url";
  */
 export const runtimeFrom = () => realpathSync(fileURLToPath(new URL("../package.json", import.meta.url)));
 
-/** `@sanoma-ai/app/build` when the repo has a `sites/` directory: a repo without one never loads the app's build. */
-export const siteBuild = async (root: string) =>
-  existsSync(join(root, "sites")) ? await import("@sanoma-ai/app/build") : undefined;
+/**
+ * `@sanoma-ai/app/build` when the repo has a `sites/` directory, or an app has one
+ * (`apps/<app>/sites/`): a repo without one never loads the app's build.
+ */
+export async function siteBuild(root: string) {
+  const { kindDirs } = await import("@sanoma-ai/workflows");
+  return kindDirs(root, "sites").some((dir) => existsSync(dir)) ? await import("@sanoma-ai/app/build") : undefined;
+}

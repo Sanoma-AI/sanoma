@@ -34,9 +34,6 @@ export function NewWorkflowDialog() {
           <li>
             Write <code>workflows/&lt;name&gt;.ts</code>: <code>export default defineWorkflow(&#123; … &#125;)</code>.
           </li>
-          <li>
-            List it in <code>sanoma.config.ts</code>, under <code>workflows</code>.
-          </li>
           <li>It appears here, with its graph, once the app restarts.</li>
         </ol>
         <p className="text-muted-foreground">

@@ -52,7 +52,7 @@ function scenariosDir(files: Record<string, string>, s: Scope = scope) {
 }
 
 /** Compiles the text as `file` in a directory of its own: that directory's scope, its scenarios and errors. */
-async function compiled(text: string, s: Scope = scope, file = "x.feature") {
+async function compiled(text: string, s: Scope = scope, file = "scenarios/x.feature") {
   const within = scenariosDir({ [file]: text }, s).scope;
   return { scope: within, ...(await loadScenarios(within)) };
 }
@@ -63,11 +63,11 @@ async function parseFeature(text: string, file: string, s: Scope): Promise<Scena
   if (errors.length) throw new Error(errors.map((e) => e.message).join("\n"));
   return scenarios;
 }
-const parse = (text: string, file = "announce.feature") => parseFeature(text, file, scope);
+const parse = (text: string, file = "scenarios/announce.feature") => parseFeature(text, file, scope);
 /** What compiling throws, as its message. */
 const thrown = async (text: string, s: Scope = scope) => {
   try {
-    await parseFeature(text, "x.feature", s);
+    await parseFeature(text, "scenarios/x.feature", s);
   } catch (err) {
     return (err as Error).message;
   }
@@ -170,7 +170,7 @@ describe("parseFeature", () => {
     expect(rest).toEqual([]);
     expect(scenario).toMatchObject({
       name: "Launch on time",
-      file: "announce.feature",
+      file: "scenarios/announce.feature",
       workflow: "announce",
       // Its own lines, from its keyword on, less their indent.
       text: LAUNCH.slice(LAUNCH.indexOf("Scenario:")).trimEnd().replaceAll("\n  ", "\n"),
@@ -320,7 +320,7 @@ describe("parseFeature", () => {
   });
 
   it("refuses a feature file with no scenarios", async () => {
-    expect(await thrown("Feature: Empty\n")).toBe('x.feature: no scenarios; add one with "Scenario: <name>"');
+    expect(await thrown("Feature: Empty\n")).toBe('scenarios/x.feature: no scenarios; add one with "Scenario: <name>"');
   });
 
   it("names the file and line of a step nothing matches, and lists the steps it knows, phrases under their operation", async () => {
@@ -329,7 +329,7 @@ describe("parseFeature", () => {
     When announce runs
     Then the moon is out
 `);
-    expect(message).toMatch(/^x\.feature:4: no step matches "the moon is out"\nKnown steps:\n/);
+    expect(message).toMatch(/^scenarios\/x\.feature:4: no step matches "the moon is out"\nKnown steps:\n/);
     expect(message).toContain("  Given {op} was called with (and a JSON doc string or a two-column table)\n");
     expect(message).toContain("  When {workflow} runs\n");
     expect(message).toContain(
@@ -342,10 +342,10 @@ describe("parseFeature", () => {
     expect(
       await thrown(`Feature: A\n  Scenario: S\n    Given ghost.post.burn fails once\n    When announce runs\n`),
     ).toMatch(
-      /^x\.feature:3: no operation "ghost\.post\.burn"; the config has bluesky\.post\.create, ghost\.post\.create, /,
+      /^scenarios\/x\.feature:3: no operation "ghost\.post\.burn"; the config has bluesky\.post\.create, ghost\.post\.create, /,
     );
     expect(await thrown(`Feature: A\n  Scenario: S\n    When refund runs\n`)).toBe(
-      'x.feature:3: no workflow "refund"; the config has announce',
+      'scenarios/x.feature:3: no workflow "refund"; the config has announce',
     );
   });
 
@@ -365,7 +365,7 @@ describe("parseFeature", () => {
       scopeOf([ghost, resend, bluesky, flaky]),
     );
     expect(message).toBe(
-      'x.feature:3: "ghost.post.publish fails once" is ambiguous: it matches "{op} fails once" and "{id} fails once"',
+      'scenarios/x.feature:3: "ghost.post.publish fails once" is ambiguous: it matches "{op} fails once" and "{id} fails once"',
     );
   });
 
@@ -383,7 +383,7 @@ describe("parseFeature", () => {
     it("takes a cell as text when its field takes text, else as JSON", async () => {
       const [scenario] = await parseFeature(
         tallyWith(`      | title | 123 |\n      | count | 5 |\n      | loud | true |\n      | tags | ["a", "b"] |\n`),
-        "x.feature",
+        "scenarios/x.feature",
         tallyScope,
       );
       expect(scenario?.input).toEqual({ title: "123", count: 5, loud: true, tags: ["a", "b"] });
@@ -391,16 +391,16 @@ describe("parseFeature", () => {
 
     it("refuses a value its field does not take, naming the field", async () => {
       expect(await thrown(tallyWith(`      | loud | yes |\n`), tallyScope)).toMatch(
-        /^x\.feature:3: loud in tally's input cannot be "yes": /,
+        /^scenarios\/x\.feature:3: loud in tally's input cannot be "yes": /,
       );
       expect(await thrown(tallyWith(`      | count | many |\n`), tallyScope)).toMatch(
-        /^x\.feature:3: count in tally's input cannot be "many": /,
+        /^scenarios\/x\.feature:3: count in tally's input cannot be "many": /,
       );
     });
 
     it("refuses a field the input does not have, in a table and in a doc string, naming those it has", async () => {
       expect(await thrown(tallyWith(`      | titel | Launch |\n`), tallyScope)).toBe(
-        'x.feature:3: no field "titel" in tally\'s input; it has title, count, loud, tags',
+        'scenarios/x.feature:3: no field "titel" in tally\'s input; it has title, count, loud, tags',
       );
       expect(
         await thrown(`Feature: A
@@ -411,7 +411,7 @@ describe("parseFeature", () => {
       { "titel": "Launch" }
       """
 `),
-      ).toBe('x.feature:4: no field "titel" in ghost.post.create\'s input; it has title, html, status');
+      ).toBe('scenarios/x.feature:4: no field "titel" in ghost.post.create\'s input; it has title, html, status');
     });
 
     it("checks each field of a doc string against its schema", async () => {
@@ -424,7 +424,7 @@ describe("parseFeature", () => {
       """
     When announce runs
 `),
-      ).toMatch(/^x\.feature:3: title in ghost\.post\.create's input cannot be 7: /);
+      ).toMatch(/^scenarios\/x\.feature:3: title in ghost\.post\.create's input cannot be 7: /);
     });
 
     describe("an expected call's object fields", () => {
@@ -451,7 +451,7 @@ describe("parseFeature", () => {
           doc('{ "record": { "stage": "won", "owner": {} } }'),
           '      | record | { "stage": "won", "owner": {} } |\n',
         ]) {
-          const [scenario] = await parseFeature(saving(given), "x.feature", crmScope);
+          const [scenario] = await parseFeature(saving(given), "scenarios/x.feature", crmScope);
           expect(scenario?.expect).toEqual([
             expect.objectContaining({ op: "crm.contact.save", input: { record: { stage: "won", owner: {} } } }),
           ]);
@@ -461,7 +461,7 @@ describe("parseFeature", () => {
       it("takes some fields of an object in an expect phrase too", async () => {
         const [scenario] = await parseFeature(
           `Feature: A\n  Scenario: S\n    When announce runs\n    Then a contact '{ "stage": "won" }' is saved\n`,
-          "x.feature",
+          "scenarios/x.feature",
           crmScope,
         );
         expect(scenario?.expect).toEqual([
@@ -471,7 +471,7 @@ describe("parseFeature", () => {
 
       it("takes a field a loose object does not name", async () => {
         const given = doc('{ "record": { "meta": { "campaign": "fall" } } }');
-        const [scenario] = await parseFeature(saving(given), "x.feature", crmScope);
+        const [scenario] = await parseFeature(saving(given), "scenarios/x.feature", crmScope);
         expect(scenario?.expect).toEqual([
           expect.objectContaining({ input: { record: { meta: { campaign: "fall" } } } }),
         ]);
@@ -479,16 +479,16 @@ describe("parseFeature", () => {
 
       it("checks the fields given against their schemas, naming the nested field", async () => {
         expect(await thrown(saving(doc('{ "record": { "stage": "lost" } }')), crmScope)).toMatch(
-          /^x\.feature:4: stage in record in crm\.contact\.save's input cannot be "lost": /,
+          /^scenarios\/x\.feature:4: stage in record in crm\.contact\.save's input cannot be "lost": /,
         );
         expect(await thrown(saving(doc('{ "record": { "owner": { "name": "Ada" } } }')), crmScope)).toBe(
-          'x.feature:4: no field "name" in owner in record in crm.contact.save\'s input; it has id',
+          'scenarios/x.feature:4: no field "name" in owner in record in crm.contact.save\'s input; it has id',
         );
       });
 
       it("still needs a whole object to seed a call", async () => {
         expect(await thrown(saving(doc('{ "record": { "stage": "won" } }'), "Given"), crmScope)).toMatch(
-          /^x\.feature:4: record in crm\.contact\.save's input cannot be \{"stage":"won"\}: /,
+          /^scenarios\/x\.feature:4: record in crm\.contact\.save's input cannot be \{"stage":"won"\}: /,
         );
       });
     });
@@ -506,7 +506,7 @@ describe("parseFeature", () => {
       });
       const [scenario] = await parseFeature(
         `Feature: A\n  Scenario: S\n    Given a run of "refund all" with 3 tries exists\n    When announce runs\n`,
-        "x.feature",
+        "scenarios/x.feature",
         scopeOf([ghost, resend, bluesky, runs]),
       );
       expect(scenario?.given).toEqual([
@@ -530,7 +530,9 @@ describe("parseFeature", () => {
         },
       },
     });
-    await expect(parseFeature("Feature: A\n", "x.feature", scopeOf([ghost, resend, bluesky, odd]))).rejects.toThrow(
+    await expect(
+      parseFeature("Feature: A\n", "scenarios/x.feature", scopeOf([ghost, resend, bluesky, odd])),
+    ).rejects.toThrow(
       'odd.thing.poke: its given phrase "{nope} poked" names {nope}, which is not a field of its input',
     );
   });
@@ -588,53 +590,60 @@ describe("parseFeature", () => {
 
   it("refuses a scenario with no When, a second When, and a doc string that is not JSON", async () => {
     expect(await thrown(`Feature: A\n  Scenario: Idle\n    Then the run succeeds\n`)).toMatch(
-      /^x\.feature:2: scenario "Idle" has no When/,
+      /^scenarios\/x\.feature:2: scenario "Idle" has no When/,
     );
     expect(await thrown(`Feature: A\n  Scenario: Twice\n    When announce runs\n    And announce runs\n`)).toBe(
-      "x.feature:4: a second When: a scenario runs its workflow once",
+      "scenarios/x.feature:4: a second When: a scenario runs its workflow once",
     );
     expect(
       await thrown(
         `Feature: A\n  Scenario: Bad\n    When announce runs with\n      """\n      { title: 1 }\n      """\n`,
       ),
-    ).toMatch(/^x\.feature:3: the doc string after "announce runs with" is not JSON: /);
+    ).toMatch(/^scenarios\/x\.feature:3: the doc string after "announce runs with" is not JSON: /);
   });
 });
 
 describe("loadScenarios", () => {
   const dir = mkdtempSync(join(tmpdir(), "sanoma-scenarios-"));
+  mkdirSync(join(dir, "scenarios"));
   afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
   it("loads every feature file, and refuses a name used twice across files", async () => {
-    writeFileSync(join(dir, "a.feature"), feature("Same"));
-    writeFileSync(join(dir, "b.feature"), `${feature("Same")}\n  Scenario: Other\n    When announce runs\n`);
-    writeFileSync(join(dir, "c.feature"), "Feature: A\n  Scenario: Broken\n    Then nothing\n");
+    writeFileSync(join(dir, "scenarios/a.feature"), feature("Same"));
+    writeFileSync(join(dir, "scenarios/b.feature"), `${feature("Same")}\n  Scenario: Other\n    When announce runs\n`);
+    writeFileSync(join(dir, "scenarios/c.feature"), "Feature: A\n  Scenario: Broken\n    Then nothing\n");
     const { scenarios, errors } = await loadScenarios({ ...scope, scenarios: pathToFileURL(`${dir}/`) });
     expect(scenarios.map((s) => [s.file, s.name])).toEqual([
-      ["a.feature", "Same"],
-      ["b.feature", "Other"],
+      ["scenarios/a.feature", "Same"],
+      ["scenarios/b.feature", "Other"],
     ]);
     expect(errors).toEqual([
-      { file: "b.feature", message: 'b.feature: scenario "Same" is also in a.feature; give each its own name' },
-      { file: "c.feature", message: expect.stringMatching(/^c\.feature:3: no step matches "nothing"/) },
+      {
+        file: "scenarios/b.feature",
+        message: 'scenarios/b.feature: scenario "Same" is also in scenarios/a.feature; give each its own name',
+      },
+      {
+        file: "scenarios/c.feature",
+        message: expect.stringMatching(/^scenarios\/c\.feature:3: no step matches "nothing"/),
+      },
     ]);
   });
 
   it("compiles the files again only once one has changed", async () => {
     const sub = join(dir, "cached");
-    mkdirSync(sub);
-    writeFileSync(join(sub, "a.feature"), feature("First"));
+    mkdirSync(join(sub, "scenarios"), { recursive: true });
+    writeFileSync(join(sub, "scenarios/a.feature"), feature("First"));
     const cachedScope = { ...scope, scenarios: pathToFileURL(`${sub}/`) };
     const first = await loadScenarios(cachedScope);
     expect(await loadScenarios(cachedScope)).toBe(first);
 
     // Written again, longer, so the stamp changes even where the clock is coarse.
-    writeFileSync(join(sub, "a.feature"), feature("First, renamed"));
+    writeFileSync(join(sub, "scenarios/a.feature"), feature("First, renamed"));
     const second = await loadScenarios(cachedScope);
     expect(second).not.toBe(first);
     expect(second.scenarios.map((s) => s.name)).toEqual(["First, renamed"]);
 
-    writeFileSync(join(sub, "b.feature"), feature("Second"));
+    writeFileSync(join(sub, "scenarios/b.feature"), feature("Second"));
     expect((await loadScenarios(cachedScope)).scenarios.map((s) => s.name)).toEqual(["First, renamed", "Second"]);
   });
 
@@ -773,7 +782,7 @@ const made = (fakes: ReadonlyMap<string, () => Fake<any, any>>) =>
 describe("resources and policy outcomes", () => {
   // The company fixture's connectors, which declare resource types, its fakes and its inspect workflow.
   const company = resolveConfig({ ...companyConfig([inspect]), ledger: memoryLedger() });
-  const parseCompany = (text: string) => parseFeature(text, "company.feature", company);
+  const parseCompany = (text: string) => parseFeature(text, "scenarios/company.feature", company);
   const DRIFT = `Feature: Drift
 
   Scenario: Changed at GitHub
@@ -887,7 +896,7 @@ describe("resources and policy outcomes", () => {
     });
     const [seeded] = await parseFeature(
       `Feature: Ping\n  Scenario: Seeded\n    Given acme.hook "deploys" has\n      | url | https://example.com |\n    And acme.hook "other" is gone\n    When ping runs\n`,
-      "ping.feature",
+      "scenarios/ping.feature",
       resolved,
     );
     const problem = missingResourceFake(seeded!, made(resolved.fakes));
@@ -943,13 +952,13 @@ describe("resources and policy outcomes", () => {
 
   it("names an unknown resource type, field or value, and a drift result in a scenario that does not run drift", async () => {
     expect(await thrown(drifting('    Given github.gist "x" is gone\n'), company)).toBe(
-      'x.feature:3: no resource type "github.gist"; the config has github.branch_protection, github.repository, github.team_membership, stripe.product, stripe.webhook_endpoint',
+      'scenarios/x.feature:3: no resource type "github.gist"; the config has github.branch_protection, github.repository, github.team_membership, stripe.product, stripe.webhook_endpoint',
     );
     expect(await thrown(drifting('    Given github.repository "x" has\n      | nope | 1 |\n'), company)).toMatch(
-      /^x\.feature:3: no field "nope" in github\.repository "x"; it has allow_auto_merge, /,
+      /^scenarios\/x\.feature:3: no field "nope" in github\.repository "x"; it has allow_auto_merge, /,
     );
     expect(await thrown(drifting('    Given github.repository "x" has\n      | has_wiki | yes |\n'), company)).toMatch(
-      /^x\.feature:3: has_wiki in github\.repository "x" cannot be "yes": /,
+      /^scenarios\/x\.feature:3: has_wiki in github\.repository "x" cannot be "yes": /,
     );
     expect(
       await thrown(
@@ -957,7 +966,7 @@ describe("resources and policy outcomes", () => {
         company,
       ),
     ).toBe(
-      'x.feature:2: "resources/identity/github.ts#website is clean" reads a drift report, so the scenario must run drift, not inspect',
+      'scenarios/x.feature:2: "resources/identity/github.ts#website is clean" reads a drift report, so the scenario must run drift, not inspect',
     );
   });
 
@@ -1334,38 +1343,38 @@ describe("Cucumber", () => {
 
   it("names the file and line where Gherkin cannot parse a file, and leaves it out, the others compiling", async () => {
     expect(await thrown(`Feature: A\n  Scenario: S\n    When announce runs\n  Feature: B\n`)).toMatch(
-      /^x\.feature:4: \(4:3\): expected: /,
+      /^scenarios\/x\.feature:4: \(4:3\): expected: /,
     );
     const both = await loadScenarios(
       scenariosDir({
-        "a.feature": "Feature: A\n  Scenario: S\n    When announce runs\n  Feature: B\n",
-        "b.feature": feature("Fine"),
+        "scenarios/a.feature": "Feature: A\n  Scenario: S\n    When announce runs\n  Feature: B\n",
+        "scenarios/b.feature": feature("Fine"),
       }).scope,
     );
     expect(both.scenarios.map((s) => s.name)).toEqual(["Fine"]);
-    expect(both.errors.map((e) => e.file)).toEqual(["a.feature"]);
+    expect(both.errors.map((e) => e.file)).toEqual(["scenarios/a.feature"]);
   });
 
   it("reads and checks files whose paths a glob or Cucumber would read otherwise: @, brackets, braces", async () => {
     const files = {
-      "@smoke.feature": feature("Smoke"),
-      "x[1].feature": feature("Bracketed"),
-      "d[1]{a,b}/in (2).feature": feature("Nested"),
+      "scenarios/@smoke.feature": feature("Smoke"),
+      "scenarios/x[1].feature": feature("Bracketed"),
+      "scenarios/d[1]{a,b}/in (2).feature": feature("Nested"),
     };
     const { scope: within } = scenariosDir(files);
     const { scenarios, errors } = await loadScenarios(within);
     expect(errors).toEqual([]);
     expect(scenarios.map((s) => [s.file, s.name])).toEqual([
-      ["@smoke.feature", "Smoke"],
-      ["d[1]{a,b}/in (2).feature", "Nested"],
-      ["x[1].feature", "Bracketed"],
+      ["scenarios/@smoke.feature", "Smoke"],
+      ["scenarios/d[1]{a,b}/in (2).feature", "Nested"],
+      ["scenarios/x[1].feature", "Bracketed"],
     ]);
     for (const s of scenarios) expect(await checkRun(within, s, [])).toEqual([]);
   });
 
   it("reads the connectors' steps: a seed named for an operation's own test, and a Then of the connector's own", async () => {
     const text = readFileSync(new URL("./fixtures/scenarios/compose.feature", import.meta.url), "utf8");
-    const [scenario] = await parse(text, "compose.feature");
+    const [scenario] = await parse(text, "scenarios/compose.feature");
     expect(scenario?.given).toMatchObject([
       { step: 'a Ghost draft titled "Old news"', op: "ghost.post.create", input: { title: "Old news" }, as: "draft" },
       { step: "Resend fails to send once", op: "resend.broadcast.send", fault: "failNext" },
@@ -1390,7 +1399,7 @@ describe("Cucumber", () => {
     expect(
       await thrown(`Feature: A\n  Scenario: S\n    When ghost.post.publish is called with\n      | id | p |\n`),
     ).toBe(
-      "x.feature:3: \"ghost.post.publish is called with\" calls ghost.post.publish directly: a step for an operation's own test, in its connector's features",
+      "scenarios/x.feature:3: \"ghost.post.publish is called with\" calls ghost.post.publish directly: a step for an operation's own test, in its connector's features",
     );
   });
 
@@ -1485,9 +1494,12 @@ describe("Cucumber", () => {
         { step: "the run succeeds", ok: true },
       ]);
       // The step is gone from the file: the scenario must be loaded again.
-      writeFileSync(join(fileURLToPath(within.scenarios), "x.feature"), text.replace("    And the run succeeds\n", ""));
+      writeFileSync(
+        join(fileURLToPath(within.scenarios), "scenarios/x.feature"),
+        text.replace("    And the run succeeds\n", ""),
+      );
       await expect(checkRun(within, s, records)).rejects.toThrow(
-        'x.feature:2: scenario "S" no longer has the expectations it was read with',
+        'scenarios/x.feature:2: scenario "S" no longer has the expectations it was read with',
       );
     });
   });
@@ -1499,7 +1511,7 @@ const scenarioOf = (steps: string) => `Feature: R\n  Scenario: S\n${steps}`;
 describe("people in a scenario: who is acting, held for a group, denied with a reason", () => {
   // The people fixture's root declares ada, bo, the agent refund-bot and the group finance.
   const people = resolveConfig(peopleConfig);
-  const parsePeople = (text: string) => parseFeature(text, "people.feature", people);
+  const parsePeople = (text: string) => parseFeature(text, "scenarios/people.feature", people);
 
   it("reads who starts the run, a hold for a group and a denial's reason", async () => {
     const text = readFileSync(new URL("./fixtures/people/scenarios/refund.feature", import.meta.url), "utf8");
@@ -1547,13 +1559,13 @@ describe("people in a scenario: who is acting, held for a group, denied with a r
       "people.feature:3: @moment(cy,/inbox): cy is not a declared person or agent; resources/ declares ada, bo, refund-bot, scenarios, host-check, schedule, wakeup",
     );
     expect(await thrownBy("    Given cy is acting\n    When refund runs\n")).toBe(
-      "people.feature:3: cy is not a declared person or agent; resources/ declares ada, bo, refund-bot, scenarios, host-check, schedule, wakeup",
+      "scenarios/people.feature:3: cy is not a declared person or agent; resources/ declares ada, bo, refund-bot, scenarios, host-check, schedule, wakeup",
     );
     expect(await thrownBy('    When refund runs\n    Then shop.refunds.create was held for group "sales"\n')).toBe(
-      'people.feature:4: no group "sales"; resources/ declares agents, finance, visitors',
+      'scenarios/people.feature:4: no group "sales"; resources/ declares agents, finance, visitors',
     );
     expect(await thrownBy("    Given ada is acting\n    And bo is acting\n    When refund runs\n")).toBe(
-      "people.feature:4: ada is acting already: a run has one actor",
+      "scenarios/people.feature:4: ada is acting already: a run has one actor",
     );
     // A runtime agent is always declared, and a group by a person's id is not a group.
     await expect(
@@ -1574,20 +1586,20 @@ describe("people in a scenario: who is acting, held for a group, denied with a r
     );
     const broken = { ...people, root };
     await expect(
-      parseFeature(scenarioOf("    Given ada is acting\n    When refund runs\n"), "x.feature", broken),
+      parseFeature(scenarioOf("    Given ada is acting\n    When refund runs\n"), "scenarios/x.feature", broken),
     ).rejects.toThrow(
-      /^x\.feature:3: ada cannot be admitted while the people's files have problems: resources\/people\.ts:4:1: sanoma\.person "ada" is declared twice/,
+      /^scenarios\/x\.feature:3: ada cannot be admitted while the people's files have problems: resources\/people\.ts:4:1: sanoma\.person "ada" is declared twice/,
     );
     await expect(
-      parseFeature(scenarioOf("    Given scenarios is acting\n    When refund runs\n"), "x.feature", broken),
+      parseFeature(scenarioOf("    Given scenarios is acting\n    When refund runs\n"), "scenarios/x.feature", broken),
     ).resolves.toMatchObject([{ startedBy: "scenarios" }]);
     await expect(
       parseFeature(
         scenarioOf('    When refund runs\n    Then shop.refunds.create was held for group "finance"\n'),
-        "x.feature",
+        "scenarios/x.feature",
         broken,
       ),
-    ).rejects.toThrow(/^x\.feature:4: no group can be told while the people's files have problems: /);
+    ).rejects.toThrow(/^scenarios\/x\.feature:4: no group can be told while the people's files have problems: /);
   });
 
   it("takes any id, and any group, while the data files declare no one", async () => {

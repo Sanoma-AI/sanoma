@@ -5,6 +5,7 @@ import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import { useMemo } from "react";
+import { Badge } from "#/components/ui/badge.tsx";
 import { Card, CardAction, CardContent, CardHeader } from "#/components/ui/card.tsx";
 import { Skeleton } from "#/components/ui/skeleton.tsx";
 import { cn } from "#/lib/utils.ts";
@@ -89,6 +90,7 @@ function CollectionPage() {
         }
       >
         <code className="text-muted-foreground">data.{name}</code>
+        {collection.app && <Badge variant="secondary">{collection.app}</Badge>}
         {collection.declared && (
           <span className="text-sm text-muted-foreground">
             Declared in{" "}

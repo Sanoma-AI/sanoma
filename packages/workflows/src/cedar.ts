@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { join, relative, sep } from "node:path";
+import { relative, sep } from "node:path";
 import type { CedarValueJson, DetailedError, EntityJson, Expr, PolicyJson } from "@cedar-policy/cedar-wasm/nodejs";
 import { locator } from "./ast.ts";
 import type { ResolvedConfig } from "./config.ts";
 import type { ApprovalState, Approver, Principal } from "./define.ts";
-import { filesUnder } from "./paths.ts";
+import { filesUnder, kindDirs } from "./paths.ts";
 import {
   allow,
   allowAll,
@@ -89,12 +89,14 @@ const ON_BEHALF_OF = "on-behalf-of";
 
 type Place = { line: number; column: number };
 
-/** `<root>/policies/**\/*.cedar`, sorted by path, each relative to the root with `/` between its parts. */
+/** `<root>/policies/**\/*.cedar`, then each app's `apps/<app>/policies/**\/*.cedar`, sorted by path in each, each relative to the root with `/` between its parts. */
 export function readPolicyFiles(root: string): { file: string; text: string }[] {
-  return filesUnder(join(root, POLICIES_DIR), (name) => name.endsWith(".cedar")).map((path) => ({
-    file: relative(root, path).split(sep).join("/"),
-    text: readFileSync(path, "utf8"),
-  }));
+  return kindDirs(root, POLICIES_DIR)
+    .flatMap((dir) => filesUnder(dir, (name) => name.endsWith(".cedar")))
+    .map((path) => ({
+      file: relative(root, path).split(sep).join("/"),
+      text: readFileSync(path, "utf8"),
+    }));
 }
 
 /**

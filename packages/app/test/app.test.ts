@@ -629,7 +629,7 @@ describe("scenarios and sandbox runs", () => {
     const launch = body.scenarios[0]!;
     expect(launch).toMatchObject({
       workflow: "announce",
-      file: "announce.feature",
+      file: "scenarios/announce.feature",
       text: expect.stringMatching(/^Scenario: Launch on time\n/),
     });
     expect(launch.steps).toContainEqual({
@@ -758,14 +758,14 @@ describe("scenarios that no longer load", () => {
       const broken = await detail(sandboxId);
       expect(broken.checks).toBeUndefined();
       expect(broken.checksError).toMatch(
-        /^The feature files no longer have scenario "Launch on time"; these files did not load: announce\.feature:3: no step matches "nothing"\nKnown steps:/,
+        /^The feature files no longer have scenario "Launch on time"; these files did not load: scenarios\/announce\.feature:3: no step matches "nothing"\nKnown steps:/,
       );
       const run = await page(`/workflows/announce/runs/${sandboxId}`);
       expect(run.html).toMatch(/<h2[^>]*>Checks<\/h2>/);
       expect(run.text).toContain("Could not check the run against its scenario: The feature files no longer have");
       // A workflow with no scenarios has its New run form's Sandbox disabled, and says why.
       const pane = await page("/workflows/announce?new");
-      expect(pane.text).toContain("Could not read a scenario: announce.feature:3");
+      expect(pane.text).toContain("Could not read a scenario: scenarios/announce.feature:3");
       const sandboxLink = linkTag(pane.html, "Sandbox");
       expect(sandboxLink).toContain('aria-disabled="true"');
       expect(sandboxLink).not.toContain("href=");
@@ -773,12 +773,14 @@ describe("scenarios that no longer load", () => {
       // A connector's page says why too, above its operations.
       const connector = await page("/connectors/ghost");
       expect(connector.text).toMatch(
-        /Could not read a scenario: announce\.feature:3: no step matches &quot;nothing&quot;[\s\S]*<h2[^>]*>Operations<\/h2>/,
+        /Could not read a scenario: scenarios\/announce\.feature:3: no step matches &quot;nothing&quot;[\s\S]*<h2[^>]*>Operations<\/h2>/,
       );
 
       const start = await postRun({ scenario: SCENARIO });
       expect(start.status).toBe(404);
-      expect(start.body.error).toMatch(/; these files did not load: announce\.feature:3: no step matches "nothing"/);
+      expect(start.body.error).toMatch(
+        /; these files did not load: scenarios\/announce\.feature:3: no step matches "nothing"/,
+      );
     } finally {
       writeFileSync(featureFile, text);
     }

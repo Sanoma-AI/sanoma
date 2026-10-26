@@ -1,7 +1,9 @@
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/csr/ArrowSquareOut";
 import type { ConfigDescription, SiteEntry } from "@sanoma-ai/workflows/describe";
+import { siteDir } from "@sanoma-ai/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { Badge } from "#/components/ui/badge.tsx";
 import { Card } from "#/components/ui/card.tsx";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/components/ui/table.tsx";
 import { usePublicAddress, useSites } from "#/lib/sites.ts";
@@ -22,8 +24,8 @@ const publicSitesByName = (config: ConfigDescription) =>
   new Map(config.sites.filter((site) => site.public).map((site) => [site.name, site]));
 
 /**
- * The company's sites, with how many, as a table in one card: each site under its icon, title
- * and folder, its pages (those with no path parameter, its home first), a public site's own
+ * The company's sites, with how many, as a table in one card: each site under its icon, title,
+ * its app (a badge) and folder, its pages (those with no path parameter, its home first), a public site's own
  * address, where visitors see it at the root of its host, and its languages.
  */
 function SitesPage() {
@@ -51,13 +53,14 @@ function SitesPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {sites.map(({ name, title, icon, pages }) => (
+              {sites.map(({ name, app, title, icon, pages }) => (
                 <TableRow key={name}>
                   <TableCell className="align-top font-medium">
                     <div className="flex items-center gap-2 [&_svg]:size-4">
                       <SiteIcon icon={icon} public={publicSites.has(name)} />
                       {pages[0] ? <Link to={pages[0].to}>{title}</Link> : title}
-                      <code className="text-xs font-normal text-muted-foreground">sites/{name}</code>
+                      {app && <Badge variant="secondary">{app}</Badge>}
+                      <code className="text-xs font-normal text-muted-foreground">{siteDir(name)}</code>
                     </div>
                   </TableCell>
                   <TableCell className="align-top whitespace-normal">

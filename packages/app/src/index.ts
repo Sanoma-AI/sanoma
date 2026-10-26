@@ -20,6 +20,7 @@ import {
   type Source,
 } from "@sanoma-ai/workflows";
 import { type ConfigDescription, describeConfig, readPeople, type SiteEntry } from "@sanoma-ai/workflows/describe";
+import { siteDir } from "@sanoma-ai/workflows/shared";
 import { NodeRequest, sendNodeResponse } from "srvx/node";
 import type { AppContext, LoginProvider, RequestContext, ServerEntry } from "./context.ts";
 import { admitting } from "./login/admission.ts";
@@ -29,6 +30,7 @@ import { publicFront } from "./login/public.ts";
 import { hostName, loopbackLogin, placeOf } from "./loopback.ts";
 import { type Published, PUBLISHED_FILE, publishedOf } from "./content-files.ts";
 import { seoFile } from "./seo.ts";
+import { siteHost } from "./site-path.ts";
 import { secretValues } from "./server/secrets.ts";
 
 export { ACTOR_HEADER } from "./api.ts";
@@ -310,10 +312,9 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   const sites = new Map<string, AppContext>();
   for (const site of description.sites) {
     if (!site.public) continue;
-    if (site.problems.some((p) => p.file === `sites/${site.name}/site.ts`)) {
-      console.warn(
-        `sanoma app: sites/${site.name}/site.ts has a problem: the site is served on no host until it is fixed`,
-      );
+    const file = `${siteDir(site.name)}/site.ts`;
+    if (site.problems.some((p) => p.file === file)) {
+      console.warn(`sanoma app: ${file} has a problem: the site is served on no host until it is fixed`);
       continue;
     }
     const half = site.login === undefined ? undefined : Promise.withResolvers<LoginHalf>();
@@ -366,7 +367,9 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
             [...opened].map(([name, half]) =>
               half
                 .close?.()
-                .catch((err: unknown) => console.error(`sanoma app: closing sites/${name}'s login also failed:`, err)),
+                .catch((err: unknown) =>
+                  console.error(`sanoma app: closing ${siteDir(name)}'s login also failed:`, err),
+                ),
             ),
           );
           await closeQuietly(client);
@@ -420,7 +423,7 @@ async function demoReset(client: SanomaClient, resolved: ResolvedConfig): Promis
 }
 
 /** A public site's host on this machine. */
-const localHost = (site: string) => `${site}.localhost`;
+const localHost = (site: string) => `${siteHost(site)}.localhost`;
 
 /**
  * A request's origin, https when a proxy that ends TLS says so (`x-forwarded-proto: https`), as
@@ -442,13 +445,13 @@ function publicHosts(description: ConfigDescription, domains: Record<string, str
   const hosts = new Map<string, SiteEntry>();
   const claim = (host: string, site: SiteEntry) => {
     if (!hosts.has(host)) return void hosts.set(host, site);
-    console.warn(`sanoma app: ${host} is another public site's host: sites/${site.name} is not served there`);
+    console.warn(`sanoma app: ${host} is another public site's host: ${siteDir(site.name)} is not served there`);
   };
   for (const site of description.sites) if (site.public) claim(localHost(site.name), site);
   for (const [name, domain] of Object.entries(domains)) {
     const site = description.sites.find((s) => s.name === name);
     if (!site?.public) {
-      console.warn(`sanoma app: the domain ${domain} names sites/${name}, which is not a public site: not served`);
+      console.warn(`sanoma app: the domain ${domain} names ${siteDir(name)}, which is not a public site: not served`);
       continue;
     }
     const host = domain.toLowerCase();
@@ -487,7 +490,7 @@ async function openLogins(
         opened.set(name, await half.promise);
       } catch (err) {
         console.error(
-          `sanoma app: sites/${name}'s login (${login}) could not start, so the site is not served: ${errorMessage(err)}`,
+          `sanoma app: ${siteDir(name)}'s login (${login}) could not start, so the site is not served: ${errorMessage(err)}`,
         );
       }
     }),

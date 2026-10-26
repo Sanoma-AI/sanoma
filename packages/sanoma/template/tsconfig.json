@@ -1,4 +1,13 @@
 {
   "extends": "sanoma/tsconfig.json",
-  "include": ["sanoma.config.ts", "workflows", "resources", "scenarios"]
+  "include": [
+    "sanoma.config.ts",
+    "workflows",
+    "resources",
+    "scenarios",
+    "apps/*/app.ts",
+    "apps/*/workflows",
+    "apps/*/resources",
+    "apps/*/scenarios"
+  ]
 }

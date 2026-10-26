@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { DBOS } from "@dbos-inc/dbos-sdk";
@@ -14,6 +14,7 @@ import {
   isCollection,
 } from "./collection.ts";
 import { lazyPool, type LazyPool } from "./db.ts";
+import { isDirectory, kindDirs, SCENARIOS_DIR } from "./paths.ts";
 import { callerFile, type Use, type WorkflowDefinition } from "./define.ts";
 import { DRIFT_WORKFLOW, driftWorkflow } from "./drift.ts";
 import { statusesOf, unconfigured } from "./env.ts";
@@ -56,7 +57,11 @@ import { checkDatabaseOps } from "./database.ts";
  * policies are `scenarios/`, `resources/` and `policies/` in `root`.
  */
 export interface SanomaConfig {
-  workflows: WorkflowDefinition<any, any>[];
+  /**
+   * Workflows besides those the launcher finds (`sanoma` imports every file of `workflows/` and
+   * each app's `apps/<app>/workflows/`): listing one it finds as well is no second one.
+   */
+  workflows?: WorkflowDefinition<any, any>[];
   /**
    * The connectors (from `defineConnector`, as their packages export them). The worker takes
    * each operation's effect, schemas and retry setting from here, not from the workflow, and
@@ -157,7 +162,10 @@ export interface ResolvedConfig {
   models: ReadonlyMap<string, NonNullable<ConnectorSetup["model"]>>;
   /** The remote halves the connectors attach, made once for this resolution, by vendor id in `connectors` order: `remoteFor` finds a URL's. */
   remotes: ReadonlyMap<string, RemoteHalf>;
-  /** `scenarios/` in `root`, as a `file:` URL, when that directory exists. */
+  /**
+   * `root`, as a `file:` URL, when `scenarios/` or an app's `apps/<app>/scenarios/` in it is a
+   * directory: the feature files under those, each named by its path from the root.
+   */
   scenarios?: URL;
   /** The resource types the connectors declare (and `sanoma.wakeup`, beside a host type), by `<vendor>.<type>`: what the drift workflow checks and scenarios seed. */
   types: ReadonlyMap<string, Resource>;
@@ -264,8 +272,8 @@ export function resolveConfig(config: SanomaConfig, options: ResolveOptions = {}
     throw new Error("The config needs `connectors`: the connectors its workflows call, as their packages export them");
   }
   for (const connector of config.connectors as unknown[]) checkConnector(connector);
-  if (!Array.isArray(config.workflows)) {
-    throw new Error("The config needs `workflows`: an array of defineWorkflow definitions");
+  if (config.workflows !== undefined && !Array.isArray(config.workflows)) {
+    throw new Error("The config's `workflows`, when given, is an array of defineWorkflow definitions");
   }
   // An untyped config naming fake drivers would otherwise run live. Delete once sanoma-ops has migrated.
   if (config.drivers !== undefined || config.fakes !== undefined)
@@ -315,7 +323,7 @@ export function resolveConfig(config: SanomaConfig, options: ResolveOptions = {}
   );
   if (dataStore) fakes.set(DATA_VENDOR, () => collectionsFake(declared));
   const names = new Map<string, WorkflowDefinition<any, any>>();
-  for (const wf of config.workflows) {
+  for (const wf of config.workflows ?? []) {
     if (BUILT_IN_WORKFLOWS.has(wf.name)) {
       throw new Error(`A workflow is named "${wf.name}", the name of a built-in workflow; name it otherwise`);
     }
@@ -485,11 +493,14 @@ function appNameAt(root: string | undefined): string {
   return typeof named === "string" && named.trim() ? named.trim() : "sanoma";
 }
 
-/** `<root>/scenarios/`, as a `file:` URL to the directory (with its trailing slash), when it is a directory. */
+/**
+ * The root, as a `file:` URL to the directory (with its trailing slash), when `<root>/scenarios/`
+ * or an app's `apps/<app>/scenarios/` is a directory: the scenarios are the feature files there,
+ * each named by its path from the root (`scenarioFiles`).
+ */
 function scenariosAt(root: string | undefined): URL | undefined {
-  const dir = root === undefined ? undefined : join(root, "scenarios");
-  if (dir === undefined || !statSync(dir, { throwIfNoEntry: false })?.isDirectory()) return undefined;
-  return pathToFileURL(`${dir}/`);
+  if (root === undefined || !kindDirs(root, SCENARIOS_DIR).some(isDirectory)) return undefined;
+  return pathToFileURL(`${root}/`);
 }
 
 /**

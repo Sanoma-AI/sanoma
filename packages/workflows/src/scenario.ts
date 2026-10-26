@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, relative, sep } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import type { ISupportCodeLibrary } from "@cucumber/cucumber/api";
@@ -33,6 +33,7 @@ import { fill, isBug, objectUnder, restOf, seedFrom, shapeOf } from "./fill.ts";
 import type { LedgerRecord } from "./ledger.ts";
 import type { Driver, Op } from "./op.ts";
 import { type OutlineNode, outlineWorkflow } from "./outline.ts";
+import { isDirectory, kindDirs, SCENARIOS_DIR } from "./paths.ts";
 import { isObject } from "./resource.ts";
 import { admit, type DeclaredPeople, readPeople } from "./resources.ts";
 import { memorySecrets } from "./secret.ts";
@@ -1231,6 +1232,15 @@ function featureFiles(dir: string): string[] {
     .toSorted();
 }
 
+/**
+ * A company's scenarios: the `.feature` files under `scenarios/` in `root`, then under each app's
+ * `apps/<app>/scenarios/`, relative to `root`, with `/` between directories.
+ */
+const scenarioFiles = (root: string): string[] =>
+  kindDirs(root, SCENARIOS_DIR).flatMap((dir) =>
+    isDirectory(dir) ? featureFiles(dir).map((file) => `${relative(root, dir).split(sep).join("/")}/${file}`) : [],
+  );
+
 /** What `loadScenarios` returns. */
 export interface LoadedScenarios {
   scenarios: Scenario[];
@@ -1383,8 +1393,8 @@ const loadedByScope = new WeakMap<
 >();
 
 /**
- * Every scenario in the `.feature` files under `scenarios` (a `file:` URL to a directory),
- * compiled by Cucumber, with an error for each file that does not compile and each name used
+ * Every scenario in the `.feature` files under `scenarios/` and each app's `apps/<app>/scenarios/`
+ * in `scenarios` (a `file:` URL to the root), each named by its path from there, compiled by Cucumber, with an error for each file that does not compile and each name used
  * twice. No directory, or none given, is no scenarios. Rejects when an operation's phrase names
  * a field it lacks. The files are compiled again only once one is added, removed or written
  * (its name, `mtimeMs` or size changes), or the people's data files change: until then each
@@ -1396,7 +1406,7 @@ export async function loadScenarios(scope: Scope): Promise<LoadedScenarios> {
   if (!existsSync(dir)) return { scenarios: [], errors: [] };
   // Built first, so a phrase naming a field its input lacks rejects even with no feature files.
   builtFor(scope);
-  const files = featureFiles(dir);
+  const files = scenarioFiles(dir);
   const stamp = JSON.stringify([
     dir,
     files.map((file) => {

@@ -59,10 +59,10 @@ describe("runScenarios", () => {
       failed: [],
     });
     expect(log).toEqual([
-      "passed announce.feature › Launch on time",
-      "passed announce.feature › Publish retried",
-      "passed compose.feature › The newsletter fails to send",
-      "passed rejected.feature › A rejected review publishes nothing",
+      "passed scenarios/announce.feature › Launch on time",
+      "passed scenarios/announce.feature › Publish retried",
+      "passed scenarios/compose.feature › The newsletter fails to send",
+      "passed scenarios/rejected.feature › A rejected review publishes nothing",
     ]);
     // "Publish retried" fails a try on purpose, and the rejected run fails as it should.
     const lines = printed.flatMap((spy) => spy.mock.calls.flat().map(String));
@@ -88,9 +88,9 @@ describe("runScenarios", () => {
       expect(passed).toEqual(["Publish retried", "The newsletter fails to send"]);
       expect(failed).toEqual([
         {
-          scenario: "broken.feature",
+          scenario: "scenarios/broken.feature",
           step: "did not load",
-          message: expect.stringMatching(/^broken\.feature:4: no step matches "the blog is on fire"/),
+          message: expect.stringMatching(/^scenarios\/broken\.feature:4: no step matches "the blog is on fire"/),
         },
         { scenario: "Launch on time", step: "the run fails", message: "the run finished" },
       ]);

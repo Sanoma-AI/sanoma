@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import type { CollectionEntry, ConfigDescription, OpEntry, WorkflowEntry } from "./describe.ts";
 import { isObject } from "./resource.ts";
 import { type CedarSchemaJson, SCHEMA_FILE, schemaText } from "./schema.ts";
-import { apiNameOf, DATA_VENDOR, problemLine } from "./shared.ts";
+import { apiNameOf, DATA_VENDOR, problemLine, writtenName } from "./shared.ts";
 
 // A company's generated SDK, `.sanoma/api.ts`: the types of a site's `api` from `sanoma/site`,
 // written from `describeConfig` (types and JSDoc only: `api` itself is one generic client). It
@@ -24,7 +24,7 @@ type Schema = Record<string, unknown>;
  * `.sanoma/api.ts` for a description: one record type per collection, and `CompanyApi` (not `Api`,
  * which inside `declare module "sanoma/site"` is the module's own), one member per
  * workflow (`apiNameOf`), per vendor of the operations a person may call directly (`OpEntry.direct`,
- * by resource) and `data` for the collections, each with its JSDoc; then `Register`'s
+ * by resource) and `data` for the collections (an app's under its name), each with its JSDoc; then `Register`'s
  * augmentation. Pure: the same description gives the same text. A workflow whose api name another
  * has, `describeConfig`'s problem on its entry, is left out, and its problem is in `problems`.
  */
@@ -46,9 +46,16 @@ export function generateApi(description: ConfigDescription): { source: string; p
     members.push(member(`${title}: the operations a person may call directly.`, vendor, block(resources)));
   }
   if (description.collections.length) {
-    const data = description.collections.map((c) =>
-      member(collectionDoc(c), c.name, `CollectionApi<${recordName(c)}>`),
-    );
+    // The root's by name, then each app's under its name: `api.data.crm.contacts`.
+    const collectionMember = (c: CollectionEntry) =>
+      member(collectionDoc(c), writtenName(c), `CollectionApi<${recordName(c)}>`);
+    const byApp = Map.groupBy(description.collections, (c) => c.app);
+    const data = [
+      ...(byApp.get(undefined) ?? []).map(collectionMember),
+      ...[...byApp]
+        .filter(([app]) => app !== undefined)
+        .map(([app, own]) => member(`The ${app} app's collections.`, app!, block(own.map(collectionMember)))),
+    ];
     members.push(member("The company's collections.", DATA_VENDOR, block(data)));
   }
   const source = [
@@ -127,8 +134,15 @@ const opMember = (op: OpEntry) =>
 const collectionDoc = (c: CollectionEntry) =>
   `${c.title ?? c.name}: the collection \`${c.name}\`, keyed by \`${c.key}\`.`;
 
-/** A collection's record type's name: `outbound` gives `OutboundRecord`, never `CompanyApi` nor an imported type's. */
-const recordName = (c: CollectionEntry) => `${c.name[0]!.toUpperCase()}${c.name.slice(1)}Record`;
+/**
+ * A collection's record type's name: `outbound` gives `OutboundRecord`, an app's `crm.contacts`
+ * `CrmContactsRecord`; never `CompanyApi` nor an imported type's.
+ */
+const recordName = (c: CollectionEntry) =>
+  `${c.name
+    .split(".")
+    .map((part) => `${part[0]!.toUpperCase()}${part.slice(1)}`)
+    .join("")}Record`;
 
 /**
  * A JSON Schema as a TypeScript type, for the kinds a start form draws (`fieldsOf` in the app):

@@ -56,7 +56,7 @@ describe("describeScenarios", () => {
     mkdirSync(join(root, "scenarios"));
     try {
       await expect(describeScenarios({ ...config, root }, { databaseUrl })).rejects.toThrow(
-        `describeScenarios found no scenarios in ${join(root, "scenarios")}/`,
+        `describeScenarios found no scenarios in ${root}/'s scenarios/ or its apps'`,
       );
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -77,7 +77,9 @@ describe("describeScenarios", () => {
       testResults: { assertionResults: { fullName: string; status: string; failureMessages: string[] }[] }[];
     };
     const tests = testResults.flatMap((r) => r.assertionResults);
-    expect(tests.map((t) => [t.fullName, t.status])).toEqual([["broken.feature", "failed"]]);
-    expect(tests[0]!.failureMessages[0]).toMatch(/^Error: broken\.feature:5: no step matches "the blog is on fire"\n/);
+    expect(tests.map((t) => [t.fullName, t.status])).toEqual([["scenarios/broken.feature", "failed"]]);
+    expect(tests[0]!.failureMessages[0]).toMatch(
+      /^Error: scenarios\/broken\.feature:5: no step matches "the blog is on fire"\n/,
+    );
   });
 });

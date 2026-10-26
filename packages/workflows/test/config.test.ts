@@ -208,9 +208,11 @@ describe("a change's operations, built in", () => {
 });
 
 describe("resolveConfig's conventions", () => {
-  it("finds the scenarios in scenarios/ in the root, when it is a directory", () => {
+  it("finds the scenarios in the root when scenarios/, or an app's, is a directory", () => {
     const root = tree("with-scenarios", { "scenarios/a.feature": "Feature: A\n" });
-    expect(resolveConfig(config({ root })).scenarios).toEqual(pathToFileURL(`${join(root, "scenarios")}/`));
+    expect(resolveConfig(config({ root })).scenarios).toEqual(pathToFileURL(`${root}/`));
+    const apps = tree("app-scenarios", { "apps/crm/scenarios/a.feature": "Feature: A\n" });
+    expect(resolveConfig(config({ root: apps })).scenarios).toEqual(pathToFileURL(`${apps}/`));
     expect(resolveConfig(config({ root: tree("without-scenarios") })).scenarios).toBeUndefined();
     expect(resolveConfig(config({ root: tree("scenarios-file", { scenarios: "" }) })).scenarios).toBeUndefined();
     expect(resolveConfig(config()).scenarios).toBeUndefined();

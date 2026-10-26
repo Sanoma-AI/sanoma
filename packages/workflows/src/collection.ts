@@ -12,7 +12,17 @@ import {
   type Op,
   type OpSpec,
 } from "./op.ts";
-import { checkCollection, DATA_VENDOR, type FIELD_TYPES, LIST_LIMIT, type ListQuery, type Saved } from "./shared.ts";
+import { callerFile } from "./define.ts";
+import { appOfFile } from "./paths.ts";
+import {
+  checkCollection,
+  DATA_VENDOR,
+  type FIELD_TYPES,
+  LIST_LIMIT,
+  type ListQuery,
+  qualified,
+  type Saved,
+} from "./shared.ts";
 
 // A company's own records: a collection is declared with plain values (a name, a key and typed
 // fields), and its `get`, `list`, `save` and `delete` are operations of the vendor `data`, under
@@ -62,7 +72,10 @@ export interface Collection<
 > {
   readonly [COLLECTION]: true;
   readonly kind: "collection";
+  /** Its name: as written at the root; in an app's folder, `<app>.<name>` (`app`), though its type says the written one. */
   readonly name: N;
+  /** The app whose folder declared it (`apps/<app>/resources/data.ts`); absent for one at the root. */
+  readonly app?: string;
   readonly key: K;
   readonly fields: F;
   readonly title?: string;
@@ -77,7 +90,9 @@ export interface Collection<
  * `collection({ name: "outbound", key: "company", fields: { company: "text", stage: { enum: ["new", "won"] } } })`.
  * Its operations are `data.<name>.get`, `.list`, `.save` and `.delete`, which a workflow names in
  * `uses` and calls on `ctx.data.<name>`. The name is a lowercase letter then letters and digits;
- * the key is a required text field, each record's own and unique.
+ * the key is a required text field, each record's own and unique. In an app's folder
+ * (`apps/<app>/resources/data.ts`) the runtime names it `<app>.<name>`: `data.<app>.<name>.get`,
+ * called on `ctx.data.<app>.<name>`.
  */
 export function collection<
   const N extends string,
@@ -85,7 +100,10 @@ export function collection<
   const K extends RequiredTextKeys<F>,
 >(declaration: { name: N; key: K; fields: F; title?: string }): Collection<N, F, K> {
   checkCollection(declaration);
-  const { name, key, fields, title } = declaration;
+  const { key, fields, title } = declaration;
+  // Frame 2 of `callerFile` is this function's caller: the data file.
+  const app = appOfFile(callerFile());
+  const name = qualified(app, declaration.name);
   const record = z.strictObject(
     Object.fromEntries(
       Object.entries(fields).map(([field, kind]) => {
@@ -99,6 +117,7 @@ export function collection<
     [COLLECTION]: true,
     kind: "collection",
     name,
+    ...(app && { app }),
     key,
     fields,
     ...(title !== undefined && { title }),

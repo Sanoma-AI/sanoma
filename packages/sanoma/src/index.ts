@@ -5,9 +5,10 @@
 // What a company repo imports, from one package: what the lint lets a workflow import
 // (`allowImportNames` in `@sanoma-ai/workflows`'s `oxlint.json`: the author surface and `z`), and
 // what `sanoma.config.ts` needs besides its connectors (`defineConfig`, the ledger stores, and
-// `defineSteps` for the company's own scenario steps), with the types those use. Everything else (the client, the worker) stays in `@sanoma-ai/workflows`
+// `defineSteps` for the company's own scenario steps), `defineApp` for an app's `app.ts`, with the types those use. Everything else (the client, the worker) stays in `@sanoma-ai/workflows`
 // and the bin.
 export {
+  type AppDefinition,
   type ApprovalRequest,
   type ApprovalResult,
   type ApprovalState,
@@ -15,6 +16,7 @@ export {
   type Builtin,
   type Connector,
   type Ctx,
+  defineApp,
   defineConfig,
   defineSteps,
   defineWorkflow,

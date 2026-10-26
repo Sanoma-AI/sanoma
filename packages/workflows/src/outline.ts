@@ -1,6 +1,6 @@
 import { childrenOf, type Node, readSource, type SourceFile } from "./ast.ts";
 import { opIdsOf, type WorkflowDefinition } from "./define.ts";
-import { childLists, DEFAULT_SLEEP_NAME, fitsOp, flatten } from "./shared.ts";
+import { childLists, DATA_VENDOR, DEFAULT_SLEEP_NAME, fitsOp, flatten, writtenName } from "./shared.ts";
 
 /**
  * What a workflow's `run` calls through `ctx`, in the order it makes the calls, with the loops,
@@ -118,8 +118,10 @@ export function outlineWithSource(
     return { outline: { error: `${file.file} could not be parsed: ${why}` }, found: false };
   }
   const consts = constsOf(file.program);
-  const fn = runIn(file.program, wf.name, consts);
-  if (!fn) return { outline: { error: `${file.file} holds no workflow named "${wf.name}"` }, found: false };
+  // An app's workflow is found by the name its file writes, without the app.
+  const name = writtenName(wf);
+  const fn = runIn(file.program, name, consts);
+  if (!fn) return { outline: { error: `${file.file} holds no workflow named "${name}"` }, found: false };
   const { nodes, problems } = outlineBody(fn, { consts, source: file.source });
   if (problems.length) {
     const lines = problems.map((p) => {
@@ -220,7 +222,7 @@ const DEFAULT_LIKE = (name: string) =>
 const TWICE = (name: string, fix: string) =>
   `two steps of this workflow are named "${name}": a name given is one step's, so a test or the graph can tell them apart; ${fix}`;
 /** A name given that reads as an operation's id: what an unnamed call is called. */
-const OP_ID = /^[\w-]+(\.[\w-]+){2}$/;
+const OP_ID = /^[\w-]+(\.[\w-]+){2,3}$/;
 
 /** Where a function's body starts: its own statement rules, nothing of the caller's. */
 const bodyOf = (fn: Node): Where => ({ fn, inCatch: false });
@@ -424,7 +426,7 @@ export function outlineBody(
             { kind: "sleep", path, span: span(node), name: nameIn(args[1]) ?? DEFAULT_SLEEP_NAME },
           ];
         default:
-          if (members.length === 3) {
+          if (isOpPath(members)) {
             // A computed id's own name is the operation it calls, known only in a run.
             const name = nameIn(args[1]) ?? (id.includes("*") ? undefined : id);
             return [
@@ -563,6 +565,13 @@ function switchArms(node: Node): Node[] {
   const arms: Node[] = node.cases.filter((c: Node) => c.consequent.length > 0);
   return node.cases.some((c: Node) => c.test === null) ? arms : [...arms, null];
 }
+
+/**
+ * Whether a path on `ctx` is an operation's: `<vendor>.<resource>.<op>`, or an app's collection's,
+ * `data.<app>.<collection>.<op>` (a computed vendor may be either).
+ */
+const isOpPath = (members: readonly string[]): boolean =>
+  members.length === 3 || (members.length === 4 && (members[0] === DATA_VENDOR || members[0] === "*"));
 
 /** The member names from `ctx` to the callee, `*` for a computed one, when the callee is on `ctx`. */
 function ctxPath(callee: Node, ctx: string): string[] | undefined {

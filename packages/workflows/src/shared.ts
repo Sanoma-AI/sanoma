@@ -77,6 +77,39 @@ export function previewRequests(
 export const SITE_NAME = /^[a-z][a-z0-9-]*$/;
 
 /**
+ * An app's folder name under `apps/`: a lowercase letter, then lowercase letters and digits. It
+ * prefixes the names of what the folder declares (`qualified`), and is a segment of `ctx.data`,
+ * `api.data` and a site's path, so it is an identifier and a URL segment alike.
+ */
+export const APP_NAME = /^[a-z][a-z0-9]*$/;
+
+/** A name declared under `apps/<app>/` as the runtime has it, `<app>.<name>`; one declared at the root as it is. */
+export const qualified = (app: string | undefined, name: string): string =>
+  app === undefined ? name : `${app}.${name}`;
+
+/** A workflow's or collection's name as its file writes it, `qualified`'s undone: without its app. */
+export const writtenName = ({ name, app }: { name: string; app?: string }): string =>
+  app === undefined ? name : name.slice(app.length + 1);
+
+/**
+ * A site's key: its folder's name at the root, `<app>/<site>` in an app, so its pages are under
+ * `/sites/<key>`. What `readSites` names a site by, and the app's build mounts it at.
+ */
+export const siteKey = (app: string | undefined, site: string): string => (app === undefined ? site : `${app}/${site}`);
+
+/** Whether `key` is a site's key (`siteKey`): a `SITE_NAME`, or an `APP_NAME`, `/` and a `SITE_NAME`. */
+export function isSiteKey(key: string): boolean {
+  const [first = "", site, ...rest] = key.split("/");
+  return site === undefined ? SITE_NAME.test(first) : !rest.length && APP_NAME.test(first) && SITE_NAME.test(site);
+}
+
+/** A site's folder, relative to the root, by its key: `sites/<name>`, or an app's `apps/<app>/sites/<name>`. */
+export function siteDir(key: string): string {
+  const [app, site] = key.split("/");
+  return site === undefined ? `sites/${key}` : `apps/${app}/sites/${site}`;
+}
+
+/**
  * A public site's language, as `defineSite({ locales })` names it: a BCP 47 language tag of a
  * language and subtags (`en`, `fr`, `pt-BR`), which is also its URL segment (`/pt-BR/…`) and a
  * content file's suffix (`<slug>.pt-BR.md`).
@@ -101,7 +134,7 @@ export function domainsOf(text: string): Record<string, string> {
   const domains: Record<string, string> = {};
   for (const pair of text.split(",")) {
     const [site = "", domain = "", ...rest] = pair.trim().split("=");
-    if (!SITE_NAME.test(site) || !DOMAIN_NAME.test(domain) || rest.length || Object.hasOwn(domains, site)) {
+    if (!isSiteKey(site) || !DOMAIN_NAME.test(domain) || rest.length || Object.hasOwn(domains, site)) {
       throw new Error(
         `SANOMA_DOMAINS has "${pair}": write <site>=<hostname>, each site once, such as www=sanoma.example`,
       );
@@ -467,10 +500,11 @@ export const credentialReady = ({ status, optional }: CredentialStatus): boolean
 
 /**
  * A workflow's name in a site's `api`: kebab-case made camelCase, `outbound-next` as
- * `api.outboundNext`. `describeConfig` reports two workflows that come out the same, or one that
+ * `api.outboundNext`, and an app's workflow one name with its app, `crm.follow-up` as
+ * `api.crmFollowUp`. `describeConfig` reports two workflows that come out the same, or one that
  * comes out as a vendor's id or `data`, as a problem on the workflow.
  */
-export const apiNameOf = (name: string): string => name.replace(/-([a-z0-9])/g, (_, c: string) => c.toUpperCase());
+export const apiNameOf = (name: string): string => name.replace(/[-.]([a-z0-9])/g, (_, c: string) => c.toUpperCase());
 
 /**
  * A workflow as a site's `api` has it (`api.<apiNameOf(name)>`), started as the person on the
