@@ -139,12 +139,10 @@ export interface StopRule {
   /**
    * The declared wakeup's binding now, the vendor's id of its instance: what a registration names,
    * and what scopes its idempotency key to this instance. Read at each registration, so one apply
-   * makes or replaces while the worker runs is the one registered with; undefined while apply has
-   * not created it.
+   * makes or replaces while the worker runs is the one registered with; why there is none while
+   * apply has not created it (or the lockfile cannot say).
    */
-  binding: () => string | undefined;
-  /** The wakeup's declaration (`<file>#<export>`), for the message when it is unbound. */
-  declaration: string;
+  binding: () => { id: string } | { unbound: string };
   /** The wakeup type's register operation, and its driver (none when the connector attaches none). */
   register: { op: Op; fn: DriverFn | undefined };
   secrets: Secrets;
@@ -179,9 +177,9 @@ export function stopWhenIdle(rule: StopRule): { close(): void } {
     const at = next?.toISOString() ?? null;
     const db = await rule.db();
     const binding = at === null ? undefined : rule.binding();
-    if (at !== null && binding === undefined) {
+    if (binding && "unbound" in binding) {
       // No generation is taken: nothing can be registered until apply creates the instance.
-      const message = `the wakeup ${rule.declaration} is not bound yet: apply it to create its instance`;
+      const message = binding.unbound;
       const line = `could not register the wakeup at ${at}, so the worker keeps running: ${message}`;
       if (line !== lastProblem) await recordWakeupError(db, rule.owner, undefined, message);
       problem(line);
@@ -196,7 +194,7 @@ export function stopWhenIdle(rule: StopRule): { close(): void } {
     }
     if (at !== null) {
       try {
-        await registerWakeup(rule, { id: binding!, at, generation });
+        await registerWakeup(rule, { id: binding!.id, at, generation });
       } catch (err) {
         const message = errorMessage(err);
         await recordWakeupError(db, rule.owner, generation, message);

@@ -496,13 +496,21 @@ describe("the stop rule, with the wakeup unbound", () => {
     await new Promise((r) => setTimeout(r, 500));
     expect((await app.row()).generation).toBe(failed.generation);
     expect(warn.mock.calls.filter(([line]) => String(line).includes("is not bound yet"))).toHaveLength(1);
-    warn.mockRestore();
     expect(registered).toEqual([]);
     expect(stops).toEqual([]);
 
+    // A lockfile it cannot read, or one binding the export to another type, binds nothing, and says why.
+    const lockfile = join(app.config.root!, "resources", "sanoma.lock.json");
+    writeFileSync(lockfile, "{");
+    await waitFor(async () => (await app.row()).last_error?.startsWith("the lockfile cannot be read") ?? false);
+    writeFileSync(lockfile, JSON.stringify({ "resources/infra.ts#wake": { type: "acme.other", id: "O_1" } }));
+    await waitFor(async () => (await app.row()).last_error?.includes("to acme.other, not acme.wakeup") ?? false);
+    expect(registered).toEqual([]);
+
     // Apply binds it while the worker runs: the next check registers with the binding, and stops.
-    writeFileSync(join(app.config.root!, "resources", "sanoma.lock.json"), BOUND);
+    writeFileSync(lockfile, BOUND);
     await waitFor(() => stops.length === 1);
     expect(registered).toMatchObject([{ input: { id: "W_1", generation: stops[0]!.generation } }]);
+    warn.mockRestore();
   });
 });

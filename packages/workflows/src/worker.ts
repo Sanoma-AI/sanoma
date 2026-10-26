@@ -235,8 +235,16 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
         db: () => secrets.db(),
         owner,
         // The lockfile, read again at each registration: apply may bind the wakeup while this runs.
-        binding: () => readLockfile(root).bindings[wakeup.id]?.id,
-        declaration: wakeup.id,
+        binding: () => {
+          const { bindings, problems } = readLockfile(root);
+          const bound = bindings[wakeup.id];
+          const type = `${wakeup.declared.vendor}.${wakeup.declared.type}`;
+          if (bound?.type === type) return { id: bound.id };
+          if (problems.length)
+            return { unbound: `the lockfile cannot be read: ${problems.map((p) => p.message).join("; ")}` };
+          if (bound) return { unbound: `the lockfile binds ${wakeup.id} to ${bound.type}, not ${type}: apply it` };
+          return { unbound: `the wakeup ${wakeup.id} is not bound yet: apply it to create its instance` };
+        },
         // `resolveConfig` checked the operation is the config's (`checkWakeupOps`).
         register: { op: resolved.ops.get(registerId)!, fn: resolved.drivers.get(registerId) },
         secrets: state.secrets,
