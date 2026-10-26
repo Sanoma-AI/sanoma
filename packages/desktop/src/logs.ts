@@ -1,0 +1,32 @@
+import { appendFileSync, existsSync, mkdirSync, renameSync } from "node:fs";
+import { join } from "node:path";
+
+/** How many lines `tail` keeps: what the start window shows when a company stops. */
+export const TAIL_LINES = 200;
+
+export interface CompanyLog {
+  /** `<dir>/<slug>.log`. */
+  file: string;
+  /** Appends a line, timestamped and marked with where it came from. */
+  write(from: string, line: string): void;
+  /** The last `TAIL_LINES` lines written, as written. */
+  tail(): string[];
+}
+
+/** A company's log for one start: `<dir>/<slug>.log`, the previous one kept as `<slug>.1.log`. */
+export function openLog(dir: string, slug: string): CompanyLog {
+  mkdirSync(dir, { recursive: true });
+  const file = join(dir, `${slug}.log`);
+  if (existsSync(file)) renameSync(file, join(dir, `${slug}.1.log`));
+  const lines: string[] = [];
+  return {
+    file,
+    write(from, line) {
+      const text = `${new Date().toISOString()} ${from} ${line}`;
+      lines.push(text);
+      if (lines.length > TAIL_LINES) lines.shift();
+      appendFileSync(file, `${text}\n`);
+    },
+    tail: () => [...lines],
+  };
+}
