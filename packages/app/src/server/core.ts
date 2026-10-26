@@ -608,6 +608,7 @@ const STATUS: Partial<Record<NonNullable<ErrorResponse["code"]>, number>> = {
   run_not_found: 404,
   no_pending_approval: 404,
   already_decided: 409,
+  approval_withdrawn: 409,
   run_ended: 409,
   run_running: 409,
   approval_pending: 409,

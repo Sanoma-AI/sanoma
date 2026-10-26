@@ -6,6 +6,7 @@ import { CALL_WORKFLOW, errorMessage } from "./shared.ts";
 const CODES = [
   "policy_denied",
   "approval_rejected",
+  "approval_withdrawn",
   "not_approver",
   "no_pending_approval",
   "already_decided",
@@ -129,6 +130,19 @@ export class RejectedError extends SanomaError {
       approvalId,
     });
     this.name = "RejectedError";
+  }
+}
+
+/** Thrown into the run when the approval it waits on is withdrawn. The run fails with it unless it catches it. */
+export class WithdrawnError extends SanomaError {
+  /**
+   * @param title The approval's title.
+   * @param approvalId The approval's id in the run, such as "approval-2".
+   * @param reason Why it was withdrawn.
+   */
+  constructor(title: string, approvalId: string, reason: string) {
+    super("approval_withdrawn", `"${title}" was withdrawn: ${reason}`, { title, approvalId, reason });
+    this.name = "WithdrawnError";
   }
 }
 

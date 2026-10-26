@@ -150,7 +150,8 @@ export const denyAll = (reason: string): Policy => {
 /**
  * True when an approval in the run was approved, covers the operation, and was addressed to
  * `approver`. Check all three: a workflow can request an approval covering any operation from
- * anyone it names, so an approval's `covers` alone does not say the right person approved.
+ * anyone it names, so an approval's `covers` alone does not say the right person approved. A
+ * withdrawn approval is no longer approved, so it lifts nothing.
  */
 export function approvedFor(approvals: readonly ApprovalState[], opId: string, approver: Approver): boolean {
   return approvals.some(

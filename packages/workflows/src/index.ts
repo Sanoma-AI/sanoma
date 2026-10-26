@@ -132,6 +132,7 @@ export {
   PolicyDeniedError,
   RejectedError,
   SanomaError,
+  WithdrawnError,
 } from "./errors.ts";
 export {
   jsonlLedger,
@@ -142,7 +143,7 @@ export {
   type LedgerRecord,
   type LedgerStore,
 } from "./ledger.ts";
-export { ApprovalMessage, APPROVALS_EVENT, decisionEventOf } from "./approvals.ts";
+export { ApprovalMessage, APPROVALS_EVENT, ApprovalWithdrawal, decisionEventOf } from "./approvals.ts";
 export { RUNTIME_VERSION } from "./version.ts";
 export type { RunArgs } from "./run.ts";
 export { startWorker, type Worker, type WorkerOptions } from "./worker.ts";

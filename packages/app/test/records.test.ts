@@ -94,6 +94,14 @@ describe("recordsFor", () => {
     expect(ids(recordsFor(node(nodes, "op:2"), ledger))).toEqual(["r3", "r4"]);
   });
 
+  it("gives an approval withdrawn its request and the withdrawal, and its held call the withdrawn tone", () => {
+    const withdrawn: LedgerBody = { type: "approval.withdrawn", approval: "hold", reason: "a new commit" };
+    const ledger = [record(0, started), record(3, holding("hold", 2)), record(4, withdrawn)];
+    const { nodes } = runGraph(ledger, run([asked("hold", "withdrawn")]), 0);
+    expect(ids(recordsFor(node(nodes, "op:2"), ledger))).toEqual(["r3", "r4"]);
+    expect(node(nodes, "op:2")).toMatchObject({ state: { tone: "off" } });
+  });
+
   it("gives a workflow's approval its request, the messages it ignored and its decision, not another's", () => {
     const ledger = [
       record(0, started),

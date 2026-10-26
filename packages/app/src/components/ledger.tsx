@@ -177,6 +177,10 @@ export const LedgerRow = memo(function LedgerRow({
         </p>
       );
       break;
+    case "approval.withdrawn":
+      kind = "withdrawn";
+      body = <p>{traceLine(record, title)}</p>;
+      break;
     case "approval.refused":
       kind = "ignored";
       body = (
@@ -259,6 +263,8 @@ function traceLine(record: LedgerRecord, title: (approval: string) => string): R
       return `Asked ${approverLabel(record.approver)}: “${record.title}”`;
     case "approval.decided":
       return `${record.by} ${record.decision === "approve" ? "approved" : "rejected"} “${title(record.approval)}”`;
+    case "approval.withdrawn":
+      return `${record.by ?? "The run"} withdrew “${title(record.approval)}”: ${record.reason}`;
     case "approval.refused":
       return `Ignored a message on “${title(record.approval)}”`;
     case "scenario.seeded":

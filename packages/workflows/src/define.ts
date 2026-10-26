@@ -92,12 +92,23 @@ export interface ApprovalState extends Omit<ApprovalRequest, "covers"> {
   input?: unknown;
   /** For a policy request: the policies that held the call, by id, when the policy names them. */
   reasons?: string[];
-  status: "pending" | "approved" | "rejected";
+  /**
+   * `withdrawn`: it no longer stands, as when its change got a new commit. A pending approval is
+   * withdrawn by a message (`SanomaClient.withdraw`), an approved one by its run
+   * (`withdrawApprovals`); either way it lets nothing through and takes no decision.
+   */
+  status: "pending" | "approved" | "rejected" | "withdrawn";
+  /** Why it was withdrawn, once it is. */
+  withdrawnReason?: string;
+  /** When it was withdrawn, once it is. */
+  withdrawnAt?: number;
+  /** Who withdrew it, when someone did rather than its run (`withdrawApprovals`). */
+  withdrawnBy?: string;
   requestedAt: number;
   decidedBy?: string;
   decidedAt?: number;
   note?: string;
-  /** The `id` of the decision message the run decided with, when it had one. */
+  /** The `id` of the decision or withdrawal message the run decided with, when it had one. */
   decidedWith?: string;
   /** Set when the run's own actor decided it: nobody else could (`mayDecide`). */
   alone?: true;
@@ -174,7 +185,7 @@ type CtxOps<O extends Op> = {
 };
 
 interface ApprovalCtx {
-  /** Waits, durably, until the approver (or someone in the approver group) approves. Throws `RejectedError` on a rejection. */
+  /** Waits, durably, until the approver (or someone in the approver group) approves. Throws `RejectedError` on a rejection, `WithdrawnError` on a withdrawal. */
   approval(title: string, request: ApprovalRequest): Promise<ApprovalResult>;
 }
 

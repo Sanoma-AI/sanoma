@@ -55,7 +55,7 @@ const NOT_ALLOWED =
  * copy, which is no instance of them, so a branch on it goes another way than the first time
  * and the run's steps fall out of step. Read the code with `errorCode(err)` instead.
  */
-const ERROR_CLASSES = new Set(["DriverError", "SanomaError", "PolicyDeniedError", "RejectedError"]);
+const ERROR_CLASSES = new Set(["DriverError", "SanomaError", "PolicyDeniedError", "RejectedError", "WithdrawnError"]);
 
 /**
  * Checks a workflow file. Imports allowed: the names in `WORKFLOW_IMPORTS` and any

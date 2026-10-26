@@ -1,13 +1,13 @@
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import { z } from "zod";
 import { type ApprovalRequest, type ApprovalResult, type ApprovalState, Principal } from "./define.ts";
-import { RejectedError } from "./errors.ts";
+import { RejectedError, WithdrawnError } from "./errors.ts";
 import { entry, write } from "./ledger.ts";
 import { warn } from "./log.ts";
 import type { Placed } from "./call.ts";
 import type { Run } from "./run.ts";
 import { readPeople } from "./resources.ts";
-import { approverLabel, OWN_CHANGE, refusalOf } from "./shared.ts";
+import { approverLabel, isVisitor, OWN_CHANGE, refusalOf } from "./shared.ts";
 
 // The wire contract between a run waiting on approvals and whoever decides them. The client
 // imports this file and never the worker's.
@@ -37,7 +37,30 @@ export const ApprovalMessage = z.object({
 });
 export type ApprovalMessage = z.infer<typeof ApprovalMessage>;
 
+/**
+ * A withdrawal of a pending approval, as sent to a run on the approval's topic: `withdraw` says
+ * why, and `by` who withdraws it, which the run checks (`withdrawalRefusal`) and records. `id`
+ * names the message as a decision's does; `SanomaClient.withdraw` sets one.
+ */
+export const ApprovalWithdrawal = z.object({
+  withdraw: z.string().trim().min(1),
+  by: Principal,
+  id: z.string().optional(),
+});
+export type ApprovalWithdrawal = z.infer<typeof ApprovalWithdrawal>;
+
 const statusOf = (decision: ApprovalMessage["decision"]) => (decision === "approve" ? "approved" : "rejected");
+
+/**
+ * Why `by` may not withdraw the approval of a run `starter` started, or undefined when they may:
+ * the starter may withdraw what their own run asks (never a visitor, as every anonymous one shares
+ * an id), anyone else only as one who may decide it.
+ */
+export const withdrawalRefusal = (
+  approval: Pick<ApprovalState, "approver">,
+  by: Principal,
+  starter: string | undefined,
+): string | undefined => (by.id === starter && !isVisitor(by) ? undefined : refusalOf(approval, by, {}, []));
 
 /** The sender's id, from a message that may not be a valid decision. */
 function senderOf(raw: unknown): string | undefined {
@@ -64,7 +87,8 @@ export interface HeldCall {
 
 /**
  * Waits, durably, for a decision from someone who may make it (`mayDecide`: the run's own actor
- * only while nobody else could). Throws `RejectedError` on a rejection. Without `held`, the workflow asked
+ * only while nobody else could). Throws `RejectedError` on a rejection and `WithdrawnError` on a
+ * withdrawal (`ApprovalWithdrawal`). Without `held`, the workflow asked
  * (`ctx.approval`); with it, the policy did, and `place` is the held call's outline node and name
  * (none for a run's start, which is no call in the outline).
  */
@@ -122,6 +146,18 @@ export async function awaitApproval(
     const at = await DBOS.now();
     const parsed = ApprovalMessage.safeParse(raw);
     const msg = parsed.success ? parsed.data : undefined;
+    const withdrawal = msg ? undefined : ApprovalWithdrawal.safeParse(raw).data;
+    if (withdrawal) {
+      const { withdraw: reason, by, id } = withdrawal;
+      const refused = withdrawalRefusal(state, by, run.actor.id);
+      if (refused === undefined) {
+        state.decidedWith = id;
+        await withdrawn(run, [state], reason, at, by.id);
+        throw new WithdrawnError(title, state.id, reason);
+      }
+      await refuse(run, state, { by: by.id, ...(id === undefined ? {} : { id }), at, reason: refused });
+      continue;
+    }
     // The people matter only when the run's own actor decides (`refusalOf`): then they are read as
     // the data files declare them now, in a step, so a replay decides the same. While those files
     // have problems, someone else may be missing from them, so the starter is refused.
@@ -138,22 +174,12 @@ export async function awaitApproval(
         : (refusalOf(state, msg.by, run, []) ?? null);
     if (!msg || refusal !== null) {
       const by = msg?.by.id ?? senderOf(raw);
-      const reason = refusal ?? "not a valid decision message";
-      state.refused.push({
+      await refuse(run, state, {
         ...(by === undefined ? {} : { by }),
         ...(msg?.id === undefined ? {} : { id: msg.id }),
         at,
-        reason,
+        reason: refusal ?? "not a valid decision message",
       });
-      await DBOS.setEvent(APPROVALS_EVENT, all);
-      await write(
-        run,
-        entry(
-          run,
-          { type: "approval.refused", approval: state.id, ...(by === undefined ? {} : { by }), reason },
-          { key: `${state.id}:refused:${state.refused.length}`, at },
-        ),
-      );
       continue;
     }
     // The run's own actor decides only when nobody else could, which the record says.
@@ -194,3 +220,47 @@ const heldOf = ({ seq, reasons }: HeldCall) => ({
   ...(seq !== undefined && { opSeq: seq }),
   ...(reasons !== undefined && { reasons }),
 });
+
+/**
+ * Withdraws every approval of the run that is approved and covers the operation `covering`, so
+ * none lifts a hold on it again (`approvedFor` reads only approved ones): as a change does when it
+ * gets a new commit. Called from the run's own body, never a step: the approvals it finds and the
+ * records it writes depend only on the run's history, so a replay does the same.
+ */
+export async function withdrawApprovals(run: Run, covering: string, reason: string): Promise<void> {
+  const retired = run.approvals.filter((a) => a.status === "approved" && a.covers.includes(covering));
+  if (!retired.length) return;
+  await withdrawn(run, retired, reason, await DBOS.now());
+}
+
+/** Records a message the approval ignored, on the approval and in the ledger. */
+async function refuse(run: Run, state: ApprovalState, refused: ApprovalState["refused"][number]) {
+  state.refused.push(refused);
+  await DBOS.setEvent(APPROVALS_EVENT, run.approvals);
+  const { by, reason, at } = refused;
+  await write(
+    run,
+    entry(
+      run,
+      { type: "approval.refused", approval: state.id, ...(by === undefined ? {} : { by }), reason },
+      { key: `${state.id}:refused:${state.refused.length}`, at },
+    ),
+  );
+}
+
+/**
+ * Withdraws the approvals (by `by`, when someone rather than the run does) and publishes them as a
+ * decision is: the list, then the ledger, then each one's decision event.
+ */
+async function withdrawn(run: Run, approvals: readonly ApprovalState[], reason: string, at: number, by?: string) {
+  const who = by === undefined ? {} : { by };
+  for (const a of approvals) {
+    Object.assign(a, { status: "withdrawn", withdrawnReason: reason, withdrawnAt: at });
+    if (by !== undefined) a.withdrawnBy = by;
+  }
+  await DBOS.setEvent(APPROVALS_EVENT, run.approvals);
+  for (const a of approvals) {
+    await write(run, entry(run, { type: "approval.withdrawn", approval: a.id, ...who, reason }, { key: a.id, at }));
+  }
+  for (const a of approvals) await DBOS.setEvent(decisionEventOf(a.id), a);
+}

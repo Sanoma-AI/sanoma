@@ -48,6 +48,9 @@ export function nodesByRecord(nodes: readonly GraphNode[], ledger: readonly Ledg
 
 /** The approval an approval's record is about. */
 const approvalOf = (record: LedgerRecord) =>
-  record.type === "approval.requested" || record.type === "approval.decided" || record.type === "approval.refused"
+  record.type === "approval.requested" ||
+  record.type === "approval.decided" ||
+  record.type === "approval.withdrawn" ||
+  record.type === "approval.refused"
     ? record.approval
     : undefined;
