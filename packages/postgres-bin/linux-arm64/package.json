@@ -1,7 +1,6 @@
 {
   "name": "@sanoma-ai/postgres-linux-arm64",
   "version": "0.1.0",
-  "private": true,
   "description": "PostgreSQL 18 server binaries for Linux on arm64, from which the sanoma launcher starts a company's own database",
   "keywords": [
     "embedded",
