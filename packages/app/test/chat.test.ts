@@ -142,7 +142,11 @@ const testApp = useTestApp(
 let dir = "";
 const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim();
 let app: App | undefined;
-const start = async () => (app = await startApp(testApp.config, { port: 0, source: localGitSource(dir) }));
+const start = async () =>
+  (app = await startApp(testApp.config, {
+    port: 0,
+    source: localGitSource(dir, { databaseUrl: testApp.config.databaseUrl! }),
+  }));
 
 beforeAll(async () => {
   ensureBuilt();
