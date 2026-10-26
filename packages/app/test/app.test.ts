@@ -45,7 +45,7 @@ import {
 } from "../src/api.ts";
 import type { AppContext, LoginProvider } from "../src/context.ts";
 import { availableConnectors, JSDELIVR, NPM_REGISTRY } from "../src/server/available.ts";
-import { loopbackLogin, placeOf } from "../src/loopback.ts";
+import { databaseHost, loopbackLogin, placeOf } from "../src/loopback.ts";
 import { admitting } from "../src/login/admission.ts";
 import {
   type ActorContext,
@@ -432,7 +432,7 @@ describe("the server functions", () => {
     const body = appConfig(ctx);
     // The test database is on this machine; of its URL, only the host is sent.
     expect(body.place).toBe("this-computer");
-    expect(body.databaseHost).toBe(new URL(ctx.resolved.databaseUrl).hostname.toLowerCase());
+    expect(body.databaseHost).toBe(databaseHost(ctx.resolved.databaseUrl));
     expect(JSON.stringify(body)).not.toContain(ctx.resolved.databaseUrl);
     expect(body.appName).toBe("sanoma");
     expect(body.version).toMatch(/^sanoma@/);

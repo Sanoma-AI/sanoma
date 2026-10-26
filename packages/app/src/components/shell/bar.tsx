@@ -1,3 +1,4 @@
+import type { ConfigDescription } from "@sanoma-ai/workflows/describe";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { ClientOnly, Link } from "@tanstack/react-router";
 import type { Icon as PhosphorIcon } from "@phosphor-icons/react";
@@ -47,12 +48,10 @@ const GROUPS: Section[][] = [
   ],
 ];
 
-/** What the bar reads from the config: whether it has collections and a policy, and where this instance is. */
-const selectBar = (config: AppConfig) => ({
+/** What the bar reads from the config: whether it has collections and a policy. */
+const selectBar = (config: ConfigDescription) => ({
   data: config.collections.length > 0,
   policy: config.policy.defined,
-  place: config.place,
-  databaseHost: config.databaseHost,
 });
 
 /**
@@ -122,7 +121,7 @@ export function Bar({ chat, className }: { chat?: { open: boolean; toggle: () =>
         ))}
       </nav>
       <div className="mt-auto flex flex-col items-center gap-2">
-        <PlaceBadge place={has.place} databaseHost={has.databaseHost} />
+        <PlaceBadge />
         <NavUser />
       </div>
     </div>
@@ -147,6 +146,9 @@ function Rule() {
   return <div aria-hidden="true" className="my-1 h-px w-9 shrink-0 bg-border" />;
 }
 
+/** What the badge reads from the config: where this instance is. */
+const selectPlace = ({ place, databaseHost }: AppConfig) => ({ place, databaseHost });
+
 /** Each place's badge: its words and its tone. */
 const PLACES: Record<Place, { label: string; tone: Tone }> = {
   "this-computer": { label: "This computer", tone: "idle" },
@@ -157,10 +159,11 @@ const PLACES: Record<Place, { label: string; tone: Tone }> = {
  * What the open window is, from what this instance connects to (`placeOf`): This computer or
  * Live, its tip the database's host and nothing more (the default socket's is none).
  */
-function PlaceBadge({ place, databaseHost }: Pick<AppConfig, "place" | "databaseHost">) {
-  const { label, tone } = PLACES[place];
+function PlaceBadge() {
+  const { data } = useSuspenseQuery({ ...configQuery(), select: selectPlace });
+  const { label, tone } = PLACES[data.place];
   return (
-    <Tip tip={`Database on ${databaseHost || "a local socket"}`}>
+    <Tip tip={`Database on ${data.databaseHost || "a local socket"}`}>
       <Badge
         tabIndex={0}
         className={cn(toneBadge({ tone }), "h-auto max-w-full rounded-md text-center text-bar whitespace-normal")}
