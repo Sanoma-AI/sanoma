@@ -103,7 +103,7 @@ To release it, bump `version` in [`packages/desktop/package.json`](packages/desk
 
 ## Develop
 
-Needs Node 26, pnpm, and Docker for the workflow tests. With [mise](https://mise.jdx.dev), `mise install` sets up Node and pnpm from `.mise.toml`.
+Needs Node 26 or later, pnpm, and Docker for the workflow tests. With [mise](https://mise.jdx.dev), `mise install` sets up Node and pnpm from `.mise.toml`.
 
 ```sh
 pnpm install

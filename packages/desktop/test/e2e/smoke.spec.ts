@@ -19,7 +19,12 @@ const { engines } = JSON.parse(
 ) as { engines: { node: string } };
 
 /** The lowest Node major the template's engines (`>=X`) allow. */
-const floor = Number(/^>=(\d+)$/.exec(engines.node)?.[1] ?? Number.NaN);
+const floor = Number(
+  /^>=(\d+)$/.exec(engines.node)?.[1] ??
+    (() => {
+      throw new Error(`an engines range this test does not read: ${engines.node}`);
+    })(),
+);
 
 /** The company windows (`BaseWindow`s, not the start window): whether each shows, where, and its views' pages. */
 const companyWindows = (shell: ElectronApplication) =>
