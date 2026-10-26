@@ -866,7 +866,7 @@ describe("the page", () => {
     expect(column).toContain("Ask the agent: it drafts the change on a branch of its own");
     expect(column).toContain(">New chat<");
     expect(column).toMatch(
-      /<span[^>]*><span[^>]*>Workflows<\/span><\/span><textarea(?![^>]*disabled)[^>]*aria-label="Message the agent"/,
+      /<span[^>]*><span[^>]*>Workflows<\/span><\/span><textarea(?![^>]*disabled="")[^>]*aria-label="Message the agent"/,
     );
     expect(column).toMatch(/<button[^>]*disabled=""[^>]*aria-label="Send"/);
     expect(html).toContain('href="/workflows/announce"');
