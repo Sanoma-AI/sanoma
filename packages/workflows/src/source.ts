@@ -135,3 +135,119 @@ export async function resolveRevision(url: string, ref: string): Promise<string>
   }
   throw new DriverError(`${url} has no branch or tag ${ref}`, { retryable: false, vendorCode: "no_such_ref" });
 }
+
+// A git host's side of a change: the pull request a branch is reviewed in, merged through and
+// closed by, the `sanoma` commit status the review card links from, whether the host refuses a
+// change to `main` that is not a merge, and the host's webhooks. A connector carries it as its
+// remote half (`ConnectorSetup.remote`), the way a login or a model half is carried.
+
+/** A repository on a host: `owner/name`. */
+export interface RepoRef {
+  owner: string;
+  name: string;
+}
+
+/** A pull request (a merge request, on a host that calls it so), as a change follows it. */
+export interface PullRequest {
+  number: number;
+  /** Its page on the host. */
+  url: string;
+  /** The branch it merges. */
+  branch: string;
+  /** The branch's commit it was read at. */
+  head: string;
+  state: "open" | "closed" | "merged";
+  /** The commit its merge made on the base branch, once merged. */
+  mergeSha?: string;
+}
+
+/**
+ * Whether the host refuses a change to a branch that does not follow the rules: `pullRequest`
+ * when a direct push is refused (every change is a merge), `check` when a merge needs the
+ * `sanoma` status to pass. `reason` says why neither can be read or held, such as a plan that
+ * has no rules.
+ */
+export interface HostEnforcement {
+  pullRequest: boolean;
+  check: boolean;
+  reason?: string;
+}
+
+/**
+ * One repository on a host, opened by its remote half with the company's credentials. Every
+ * call reads them when made, so a token stored later is used; a failure is a `DriverError`
+ * (retryable as the host's status says).
+ */
+export interface SourceHost {
+  /**
+   * A token that writes to the repository: the company's app's on the host when it is installed
+   * on the owner, else a person's token (`prefer: "token"` asks for that one first). It is never
+   * logged; a push signs in with it.
+   */
+  token(prefer?: "app" | "token"): Promise<string>;
+  /** The pull request of `branch`: the open one, else the latest; undefined when it has none. */
+  pullRequestFor(branch: string): Promise<PullRequest | undefined>;
+  pullRequest(number: number): Promise<PullRequest>;
+  /** Opens a pull request of `branch` into `base`; the open one when `branch` has one already. */
+  openPullRequest(request: { branch: string; base: string; title: string; body: string }): Promise<PullRequest>;
+  /**
+   * Squash-merges pull request `number` when its branch is still at `sha`, as one commit titled
+   * `title`. A `DriverError` whose `vendorCode` is `head_moved` when the branch moved on, and
+   * `not_mergeable` when the host refuses the merge (a conflict, a rule).
+   */
+  mergePullRequest(number: number, merge: { sha: string; method: "squash"; title?: string }): Promise<{ sha: string }>;
+  closePullRequest(number: number): Promise<void>;
+  /** Deletes `branch`; nothing when it is gone already. */
+  deleteBranch?(branch: string): Promise<void>;
+  /** Sets the `sanoma` status on commit `sha`, linking to `targetUrl`. */
+  setStatus(status: {
+    sha: string;
+    state: "pending" | "success" | "failure";
+    description: string;
+    targetUrl?: string;
+  }): Promise<void>;
+  /** What the host enforces on `base` (see `HostEnforcement`). */
+  enforcement(base: string): Promise<HostEnforcement>;
+  /** Uploads a PNG the pull request's comment shows; its URL. */
+  uploadImage?(png: Uint8Array, name: string): Promise<string>;
+  /** Writes the pull request's comment that carries `marker`, once: a second call edits it. */
+  upsertComment?(number: number, marker: string, body: string): Promise<void>;
+}
+
+/** What a host's webhook says happened: a branch pushed, or a pull request closed (merged or not). */
+export type RemoteEvent =
+  | { kind: "pushed"; repo: RepoRef; branch: string; head: string }
+  | { kind: "closed"; repo: RepoRef; branch: string; number: number; merged: boolean; sha?: string };
+
+/** What a remote half reads the company's credentials with, as a login or a model half reads them. */
+export interface RemoteContext {
+  /** Secrets' values by name: the environment's first, then the stored credentials (`LoginContext.secrets`). */
+  secrets(names: readonly string[]): Promise<Map<string, string>>;
+}
+
+/** A connector's remote half (`ConnectorSetup.remote`): a git host's repositories, made once per resolved config. */
+export interface RemoteHalf {
+  /** The repository a clone URL of this host names, or undefined for another host's. */
+  matches(url: string): RepoRef | undefined;
+  /** The repository `repo`, with the company's credentials. */
+  open(repo: RepoRef, context: RemoteContext): SourceHost;
+  /**
+   * The events a webhook request carries, once its signature is verified: throws for a missing or
+   * bad signature, and answers `[]` for an event the change workflow does not follow.
+   */
+  webhook?(request: Request, context: RemoteContext): Promise<RemoteEvent[]>;
+  /** The accounts the company's app on the host is installed on: where it acts with no person's token. */
+  owners?(context: RemoteContext): Promise<{ login: string; kind: "user" | "organization" }[]>;
+}
+
+/** The remote half among `remotes` (`ResolvedConfig.remotes`) whose host `url` is on, with its vendor and the repository. */
+export function remoteFor(
+  remotes: ReadonlyMap<string, RemoteHalf>,
+  url: string,
+): { vendor: string; remote: RemoteHalf; repo: RepoRef } | undefined {
+  for (const [vendor, remote] of remotes) {
+    const repo = remote.matches(url);
+    if (repo) return { vendor, remote, repo };
+  }
+  return undefined;
+}
