@@ -4,8 +4,17 @@ import type { z } from "zod";
 // a Fly app) declares about itself, so hosts are swappable and one conformance kit decides
 // whether one works. A host is a resource type like any other; this is what sets it apart.
 
-/** How a host keeps the runtime up: `long-lived`, or (later) woken on a schedule. */
-export type HostLifetime = "long-lived" | "wake-on-schedule";
+/**
+ * How a host keeps the runtime up:
+ * - `long-lived`: the process is restarted if it exits, and never stopped for being quiet (Docker).
+ * - `stops-on-exit`: the host stops the instance when its process exits, and starts it again on
+ *   the next request (Fly).
+ * - `stops-when-quiet`: the host stops the instance after a while without inbound requests, and
+ *   starts it again on the next request (a free Render service, Cloudflare Containers).
+ *
+ * A host that stops needs a declared `Wakeup` for what is due at a time while it is stopped.
+ */
+export type HostLifetime = "long-lived" | "stops-on-exit" | "stops-when-quiet";
 
 /** What a host can do, for choosing one. */
 export interface HostCapabilities {
@@ -53,10 +62,10 @@ export interface HostSpec {
   outputs: (state: Record<string, unknown>) => HostOutputs;
 }
 
-const LIFETIMES: readonly HostLifetime[] = ["long-lived", "wake-on-schedule"];
+const LIFETIMES: readonly HostLifetime[] = ["long-lived", "stops-on-exit", "stops-when-quiet"];
 
 /** True when `schema` has a field at the dotted `path`, looking through optional, nullable and default wrappers. */
-function hasPath(schema: z.ZodType, path: string): boolean {
+export function hasPath(schema: z.ZodType, path: string): boolean {
   let at: z.ZodType | undefined = schema;
   for (const key of path.split(".")) {
     at = unwrap(at);

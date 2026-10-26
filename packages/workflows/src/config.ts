@@ -39,6 +39,7 @@ import { APPLY_WORKFLOW, BUILT_IN_WORKFLOWS, CALL_WORKFLOW, DATA_VENDOR } from "
 import { sourceDriver, sourceOps } from "./source.ts";
 import type { Steps } from "./steps.ts";
 import { computeVersion } from "./version.ts";
+import { checkWakeupOps } from "./wakeup.ts";
 
 /**
  * What a worker runs, on which connectors: the argument to `startWorker`.
@@ -92,6 +93,12 @@ export interface SanomaConfig {
    * records in the config's database, and in memory for a sandbox run.
    */
   collections?: readonly Collection[];
+  /**
+   * Run the wakeup service inside this instance (`sanoma serve`), for other instances' wakeups
+   * to register with. An instance that runs it must not stop, so `startWorker` refuses a config
+   * that sets it and declares a wakeup of its own.
+   */
+  wakeup?: true;
 }
 
 /** A config, checked, with everything a worker, client or app derives from it. */
@@ -249,6 +256,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     ...(hosts ? [sourceOps] : []),
     ...(dataStore ? [collectionsConnector(declared)] : []),
   ]);
+  checkWakeupOps(types, ops);
   const driversByVendor = new Map([...makersOf(config.connectors, "driver")].map(([vendor, make]) => [vendor, make()]));
   const drivers = indexDrivers(
     [

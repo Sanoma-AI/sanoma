@@ -414,6 +414,8 @@ Each workflow card on the Workflows page, and a workflow's page, draw the workfl
 
 `GET /healthz` answers `ok` before any login, whatever host it is addressed to: a host's probe that the app is up, and nothing more.
 
+`startApp(config, { ingress: [{ method?, path, handle(request) }] })` adds machine routes, answered right after `/healthz` and ahead of the public sites and the login, whatever host they are addressed to: a request whose path is exactly `path` (and whose method is `method`, when given) gets what `handle` returns. Nothing checks who is asking, so each route checks its own token.
+
 `startApp` takes a `login` provider, which says who may use the app and who is making each change. Without one, the app has no login and listens on this machine only; with one, it may listen on any host. A public site's own host has its front door instead, its visitor login or none ([Public sites](#public-sites)): the login here is for the people who run the company.
 
 ### No login, on this machine

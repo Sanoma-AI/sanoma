@@ -31,7 +31,7 @@ import { companyFakes } from "../../workflows/test/fixtures/company/fakes.ts";
 import { outbound } from "../../workflows/test/fixtures/outbound/resources/data.ts";
 import { marketingFakes } from "../../workflows/test/harness.ts";
 import { z } from "zod";
-import { type App, startApp } from "../src/index.ts";
+import { type App, type IngressRoute, startApp } from "../src/index.ts";
 import {
   ACTOR_HEADER,
   ACTOR_KEY,
@@ -216,7 +216,7 @@ beforeAll(async () => {
   npm.listen({ onUnhandledFrame: "bypass" });
   ensureBuilt(appDir, ["dist/server/server.js"], ["pnpm", "exec", "vite", "build"]);
   worker = await startWorker(config);
-  app = await startApp(config, { port: 0 });
+  app = await startApp(config, { port: 0, ingress: [machineRoute] });
   ctx = await contextOf(config);
 });
 
@@ -229,6 +229,17 @@ afterAll(async () => {
   await worker?.stop();
   rmSync(appRoot, { recursive: true, force: true });
 });
+
+/** A machine route, as the wakeup's `/wake` will be: it answers 204 with the generation it was given. */
+const machineRoute: IngressRoute = {
+  method: "GET",
+  path: "/machine",
+  handle: async (request) =>
+    new Response(null, {
+      status: 204,
+      headers: { "x-generation": new URL(request.url).searchParams.get("generation") ?? "" },
+    }),
+};
 
 /** Who is asking: the `x-sanoma-actor` header the page sends, or other headers, to an app's context. */
 interface As {
@@ -1514,6 +1525,17 @@ describe("the page", () => {
 
   it("refuses requests addressed to a name other than this machine's", async () => {
     expect(await rawStatus(app.url, "/workflows", { host: "attacker.example:80" })).toBe(403);
+  });
+
+  it("answers an ingress route before the login, whatever name it is addressed to, by its exact path and method", async () => {
+    expect(await rawStatus(app.url, "/machine?generation=3", { host: "10.0.0.7:3000" })).toBe(204);
+    const res = await fetch(new URL("/machine?generation=4", app.url));
+    expect([res.status, res.headers.get("x-generation")]).toEqual([204, "4"]);
+    // Another method or path is the login's, which refuses the host.
+    expect(await rawStatus(app.url, "/machine/", { host: "10.0.0.7:3000" })).toBe(403);
+    expect(
+      await fetch(new URL("/machine", app.url), { method: "POST" }).then((r) => r.headers.get("x-generation")),
+    ).toBeNull();
   });
 
   it("answers a host's probe at /healthz before the login, whatever name it is addressed to", async () => {

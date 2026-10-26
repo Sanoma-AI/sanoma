@@ -235,11 +235,18 @@ export function jsonSchemaOf(
   });
 }
 
+/**
+ * How a workflow starts: `manual` (by hand, or from code), or on a schedule, `schedule` a cron
+ * expression of five fields (minute, hour, day of month, month, day of week) read in `timezone`,
+ * an IANA time zone (`Europe/Amsterdam`), UTC without one.
+ */
+export type Trigger = "manual" | { readonly schedule: string; readonly timezone?: string };
+
 export interface WorkflowDefinition<U extends readonly Use[] = readonly Use[], S extends z.ZodType = z.ZodType> {
   readonly kind: "workflow";
   readonly name: string;
   readonly title?: string;
-  readonly trigger: "manual";
+  readonly trigger: Trigger;
   readonly input: S;
   /** Every operation and built-in the workflow may call. `ctx` is built from this list and nothing else. */
   readonly uses: U;
@@ -260,6 +267,7 @@ export function defineWorkflow<const U extends readonly Use[], S extends z.ZodTy
   if (!/^[a-z][a-z0-9-]*$/.test(def.name)) {
     throw new Error(`Workflow name "${def.name}" must be lowercase letters, digits and dashes`);
   }
+  checkTrigger(def.name, def.trigger);
   const file = callerFile();
   if (file === undefined) {
     throw new Error(
@@ -269,6 +277,37 @@ export function defineWorkflow<const U extends readonly Use[], S extends z.ZodTy
   }
   return Object.freeze({ kind: "workflow", ...def, file });
 }
+
+/** Throws what is wrong with a workflow's `trigger`: not `manual` or a schedule, five fields, in a time zone there is. */
+function checkTrigger(name: string, trigger: unknown): void {
+  if (trigger === "manual") return;
+  const { schedule, timezone } = (typeof trigger === "object" && trigger !== null ? trigger : {}) as {
+    schedule?: unknown;
+    timezone?: unknown;
+  };
+  if (typeof schedule !== "string") {
+    throw new Error(`Workflow "${name}": its trigger is "manual" or { schedule, timezone? }`);
+  }
+  if (schedule.trim().split(/\s+/).length !== 5) {
+    throw new Error(
+      `Workflow "${name}": its schedule "${schedule}" is a cron expression of five fields: minute, hour, day of month, month, day of week`,
+    );
+  }
+  if (timezone !== undefined && !isTimeZone(timezone)) {
+    throw new Error(
+      `Workflow "${name}": its timezone "${String(timezone)}" is no IANA time zone, such as "Europe/Amsterdam"`,
+    );
+  }
+}
+
+const isTimeZone = (zone: unknown): boolean => {
+  if (typeof zone !== "string" || zone === "") return false;
+  try {
+    return new Intl.DateTimeFormat("en", { timeZone: zone }).resolvedOptions().timeZone !== "";
+  } catch {
+    return false;
+  }
+};
 
 /**
  * The file of the code that called the function calling this one (`defineWorkflow`'s caller),

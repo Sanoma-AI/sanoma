@@ -65,6 +65,20 @@ export interface AppOptions {
    * public is warned about and not served.
    */
   domains?: Record<string, string>;
+  /**
+   * Machine routes, answered right after `/healthz` and ahead of the public sites and the login,
+   * at any host name: a request whose path is exactly `path` (and whose method is `method`, when
+   * given) is answered by `handle`. Nothing checks who is asking, so each checks its own token.
+   */
+  ingress?: readonly IngressRoute[];
+}
+
+/** One of `AppOptions.ingress`: a machine route, such as the wakeup's `/wake`. */
+export interface IngressRoute {
+  method?: "GET" | "POST" | "PUT" | "DELETE";
+  /** The whole path, from `/`, without a query: matched exactly. */
+  path: string;
+  handle(request: Request): Promise<Response>;
 }
 
 export interface App {
@@ -119,6 +133,10 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   if (warnings.length)
     console.warn(`sanoma app: warnings in the sites (\`sanoma check\` lists them):\n${warnings.join("\n")}`);
   const hosts = publicHosts(description, options.domains ?? {});
+  const ingress = options.ingress ?? [];
+  for (const route of ingress) {
+    if (!route.path.startsWith("/")) throw new Error(`An ingress route's path starts with /, not "${route.path}"`);
+  }
   const server = createServer((req, res) => {
     handle(req, res).catch((err: unknown) => {
       console.error("sanoma app: request failed:", err);
@@ -131,11 +149,15 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   });
 
   async function handle(req: IncomingMessage, res: ServerResponse) {
+    const path = req.url?.split("?")[0];
     // A host's probe, before the login: it says the app answers, and nothing else.
-    if (req.url?.split("?")[0] === "/healthz" && (req.method === "GET" || req.method === "HEAD")) {
+    if (path === "/healthz" && (req.method === "GET" || req.method === "HEAD")) {
       res.writeHead(200, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
       return void res.end(req.method === "HEAD" ? undefined : "ok\n");
     }
+    // A machine route, before the login too: it checks its own token.
+    const route = ingress.find((r) => r.path === path && (r.method === undefined || r.method === req.method));
+    if (route) return sendNodeResponse(res, await route.handle(new NodeRequest({ req, res })));
     // A public site's host, ahead of the staff login, which it never reaches: the site's front door.
     const asked = hostName(req.headers.host ?? "");
     const entry = hosts.get(asked);

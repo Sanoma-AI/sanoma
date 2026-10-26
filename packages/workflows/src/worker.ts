@@ -14,6 +14,7 @@ import { lineStartsOf, readSource } from "./ast.ts";
 import { callsOf, outlineWithSource } from "./outline.ts";
 import { currentRun, type Run, type RunArgs, type WorkerState, type WorkflowOutline } from "./run.ts";
 import type { Source } from "./source.ts";
+import { declaredWakeups } from "./wakeup.ts";
 import { errorMessage, WORKFLOW_ACTION } from "./shared.ts";
 
 export interface Worker {
@@ -63,6 +64,18 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
   // Check everything before touching the state a running worker reads.
   const resolved = resolveConfig(config);
   setLogLevel(options.logLevel);
+  // The wakeup service wakes the instances that stop: one that runs it must not stop with its worker.
+  if (config.wakeup === true && (await declaredWakeups(config)).length) {
+    throw new Error(
+      "The config runs the wakeup service (`wakeup: true`) and declares a wakeup of its own: an instance that runs the service must not stop, so leave out one of them",
+    );
+  }
+  if (!options.quiet) {
+    for (const wf of resolved.workflows.values()) {
+      if (wf.trigger !== "manual")
+        warn(`the workflow ${wf.name} is on a schedule, which the worker does not run yet: start it by hand`);
+    }
+  }
   // The config's own, or a Postgres store made for this worker, which `stop` then closes.
   const ledger = ownedLedger(resolved);
   const secrets = lazyPool(resolved.databaseUrl, "secrets");

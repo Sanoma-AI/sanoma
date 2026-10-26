@@ -3,7 +3,7 @@ import type { z } from "zod";
 import { type LintProblem, readSource, type SourceFile } from "./ast.ts";
 import { type Field, recordSchemaOf } from "./collection.ts";
 import { connectorsOf, resolveConfig, rootOf, type SanomaConfig } from "./config.ts";
-import { type Builtin, jsonSchemaOf, opIdsOf, type Use } from "./define.ts";
+import { type Builtin, jsonSchemaOf, opIdsOf, type Trigger, type Use } from "./define.ts";
 import { isDirect } from "./direct.ts";
 import { lintWorkflow } from "./lint.ts";
 import { type Effect, VENDOR, type VendorInfo } from "./op.ts";
@@ -20,6 +20,7 @@ import {
 import { apiNameProblem } from "./sdk.ts";
 import { apiNameOf, BUILT_IN_WORKFLOWS, DATA_VENDOR, problemLine } from "./shared.ts";
 import { readSites, type SiteEntry } from "./sites.ts";
+import { twoWakeups, wakeupsAmong } from "./wakeup.ts";
 
 // `@sanoma-ai/workflows/describe`: what a UI renders from, apart from the main entry.
 export { outlineWorkflow, type Outline, type OutlineNode, type Span } from "./outline.ts";
@@ -75,7 +76,8 @@ export type { ApplyInput, ApplyPlan, ApplyReport, ApplyResult, PlanAnswer, PlanS
 export interface WorkflowEntry {
   name: string;
   title?: string;
-  trigger: "manual";
+  /** `manual`, or the schedule it starts on (`defineWorkflow`'s `trigger`). */
+  trigger: Trigger;
   /**
    * Set for a workflow the runtime adds itself, `drift`, `apply` or `call`, rather than the config: a label. It
    * starts like any other.
@@ -321,7 +323,11 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     collections,
     resources: dataFiles.resources,
     orphans: dataFiles.orphans,
-    problems: [...dataFiles.problems, ...domainProblems(resolved.root, dataFiles.resources, resources, sites, read)],
+    problems: [
+      ...dataFiles.problems,
+      ...domainProblems(resolved.root, dataFiles.resources, resources, sites, read),
+      ...wakeupProblems(resolved.root, dataFiles.resources, resources, read),
+    ],
     policy: {
       defined: resolved.policy !== allowAll,
       ...(resolved.policy.version === undefined ? {} : { version: resolved.policy.version }),
@@ -365,6 +371,23 @@ function domainProblems(
     for (const message of messages) problems.push({ file: resource.file, ...at, message });
   }
   return problems;
+}
+
+/** A problem at each declared wakeup when there are several: an instance registers with one. */
+function wakeupProblems(
+  root: string | undefined,
+  declared: readonly DeclaredResource[],
+  types: ReadonlyMap<string, Resource>,
+  read: (path: string) => SourceFile | string,
+): ResourceProblem[] {
+  const wakeups = wakeupsAmong(declared, types);
+  if (wakeups.length < 2 || root === undefined) return [];
+  return wakeups.map(({ declared: resource }) => {
+    const file = read(join(root, resource.file));
+    const at = typeof file === "string" ? {} : file.at(resource.span[0]);
+    const others = wakeups.filter((w) => w.declared !== resource).map((w) => w.id);
+    return { file: resource.file, ...at, message: twoWakeups(others) };
+  });
 }
 
 /**

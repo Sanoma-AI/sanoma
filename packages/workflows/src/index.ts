@@ -34,6 +34,7 @@ export {
   type Ctx,
   type SleepRequest,
   type StepOptions,
+  type Trigger,
   type Use,
   type WorkflowDefinition,
 } from "./define.ts";
@@ -147,6 +148,14 @@ export {
   type Source,
 } from "./source.ts";
 export type { HostCapabilities, HostLifetime, HostOutputs, HostSpec } from "./host.ts";
+export {
+  checkWakeup,
+  type DeclaredWakeup,
+  declaredWakeup,
+  type WakeupOutputs,
+  type WakeupRegistration,
+  type WakeupSpec,
+} from "./wakeup.ts";
 export {
   type CallOptions,
   SanomaClient,
