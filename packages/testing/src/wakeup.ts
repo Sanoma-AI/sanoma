@@ -35,8 +35,8 @@ export interface WakeupUnderTest {
   };
   /** A client on the host's database, its config with `hostCheckWorkflows` (`@sanoma-ai/testing/host`). */
   client: SanomaClient;
-  /** Calls the type's register operation (`wakeup.register`) through its driver. */
-  register(registration: WakeupRegistration): Promise<void>;
+  /** Calls the type's register operation (`wakeup.register`) through its driver, with the instance's `id`. */
+  register(registration: Omit<WakeupRegistration, "id">): Promise<void>;
   /**
    * The generation the checks count up from: they register `from + 1` to `from + 4`. Default 0;
    * against a wakeup that keeps the last generation it took, one above it.
@@ -167,7 +167,11 @@ const timerRegister = defineConnector("testwakeup", {
       effect: "write",
       idempotent: true,
       description: "Wake the host at `at` with `generation`, replacing the wake registered before",
-      input: z.object({ at: z.iso.datetime(), generation: z.number().int().nonnegative() }),
+      input: z.object({
+        id: z.string().min(1).describe("The timer's name, its binding"),
+        at: z.iso.datetime(),
+        generation: z.number().int().nonnegative(),
+      }),
       output: z.object({}),
       target: () => "timer",
     },
@@ -189,7 +193,7 @@ const MAX_DELAY_MS = 2 ** 31 - 1;
 
 /**
  * A wakeup in this process: `testwakeup.timer` with a driver whose `register` arms one timer for
- * the one timer it created (apply's `create`), replacing any armed before unless it is of the same or an
+ * the timer its `id` names (one apply's `create` made), replacing any armed before unless it is of the same or an
  * older generation (which changes nothing), which sends
  * `GET {host}/wake?generation=N` at `at`, again every 250 ms until the host answers 2xx. `fire()`
  * sends the armed wake now; `close()` disarms it. `connector` is for a config; `driver` for
@@ -259,17 +263,15 @@ export function fakeWakeup() {
   });
   const registers = defineDriver(timerRegister, {
     timer: {
-      register: async (registration) => {
-        const [only, ...more] = [...timers.values()];
-        if (!only || more.length) {
-          throw new DriverError(`testwakeup: register wakes the one timer apply created, not ${timers.size}`, {
-            retryable: false,
-          });
-        }
+      register: async ({ id, at, generation }) => {
+        const timer = timers.get(id);
+        if (!timer)
+          throw new DriverError(`testwakeup: register names no timer apply created (${id})`, { retryable: false });
+        const registration = { id, at, generation };
         if (registration.generation <= newest) return {};
         newest = registration.generation;
         disarm();
-        const pending = (armed = { registration, url: only.host });
+        const pending = (armed = { registration, url: timer.host });
         void send(pending);
         return {};
       },

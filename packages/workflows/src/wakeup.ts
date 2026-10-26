@@ -16,6 +16,8 @@ export interface WakeupOutputs {
 
 /** What the runtime calls a wakeup's `register` operation with. */
 export interface WakeupRegistration {
+  /** The vendor's id of the wakeup instance, its lockfile binding. */
+  id: string;
   /** When to wake the instance, as an ISO 8601 date-time. */
   at: string;
   /** Counts up with each registration: one with a newer generation replaces the older. */
@@ -97,14 +99,14 @@ export function checkWakeup(
 }
 
 /** A registration every register operation must take: the input `checkWakeupOps` tries. */
-const SAMPLE: WakeupRegistration = { at: new Date(0).toISOString(), generation: 1 };
+const SAMPLE: WakeupRegistration = { id: "wakeup-instance", at: new Date(0).toISOString(), generation: 1 };
 
-/** True when `op`'s input keeps both fields of a registration: one that strips them takes neither. */
+/** True when `op`'s input keeps the three fields of a registration: one that strips them takes none. */
 function takesRegistration(op: Op): boolean {
   try {
     const parsed = op.input.safeParse(SAMPLE);
     const data = parsed.data as Partial<WakeupRegistration> | undefined;
-    return parsed.success && data?.at !== undefined && data.generation !== undefined;
+    return parsed.success && data?.id !== undefined && data.at !== undefined && data.generation !== undefined;
   } catch {
     // An async refinement, which a sync parse cannot run: no input the runtime can check.
     return false;
@@ -126,7 +128,8 @@ export function checkWakeupOps(types: ReadonlyMap<string, Resource>, ops: Readon
     if (notHosts.length) throw new Error(`${id}: its wakeup's host may name ${notHosts.join(", ")}, which is no host`);
     const op = ops.get(type.wakeup.register);
     if (!op) throw new Error(`${id}: its wakeup's register, ${type.wakeup.register}, is no operation of its connector`);
-    if (!takesRegistration(op)) throw new Error(`${id}: its wakeup's register, ${op.id}, must take { at, generation }`);
+    if (!takesRegistration(op))
+      throw new Error(`${id}: its wakeup's register, ${op.id}, must take { id, at, generation }`);
   }
 }
 

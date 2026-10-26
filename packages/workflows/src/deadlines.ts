@@ -136,8 +136,13 @@ export interface StopRule {
   db: () => Promise<Db>;
   /** This worker's id on the row (`owner`), fresh for each worker. */
   owner: string;
-  /** The declared wakeup's binding, else its declaration's id: what scopes a registration's idempotency key to this instance. */
-  wakeup: string;
+  /**
+   * The declared wakeup's binding, the vendor's id of its instance: what a registration names, and
+   * what scopes its idempotency key to this instance. Undefined while apply has not created it.
+   */
+  binding: string | undefined;
+  /** The wakeup's declaration (`<file>#<export>`), for the message when it is unbound. */
+  declaration: string;
   /** The wakeup type's register operation, and its driver (none when the connector attaches none). */
   register: { op: Op; fn: DriverFn | undefined };
   secrets: Secrets;
@@ -221,14 +226,22 @@ export function stopWhenIdle(rule: StopRule): { close(): void } {
 }
 
 /**
- * Calls the wakeup's register operation, as `SanomaClient.call` calls a driver: its input parsed,
- * a `CallContext` of the runtime's, and no ledger record, which is a run's. The idempotency key
- * is the generation's, so a retried registration is one registration.
+ * Calls the wakeup's register operation, as `SanomaClient.call` calls a driver: its input parsed
+ * (the instance's id, its binding, with `at` and `generation`), a `CallContext` of the runtime's,
+ * and no ledger record, which is a run's. The idempotency key is the generation's, so a retried
+ * registration is one registration. Throws, registering nothing, while the wakeup is unbound: a
+ * failed registration, which keeps the worker up.
  */
-async function registerWakeup({ register: { op, fn }, secrets, wakeup }: StopRule, registration: WakeupRegistration) {
+async function registerWakeup(
+  { register: { op, fn }, secrets, binding, declaration }: StopRule,
+  { at, generation }: Omit<WakeupRegistration, "id">,
+) {
+  if (binding === undefined) {
+    throw new Error(`the wakeup ${declaration} is not bound yet: apply it to create its instance`);
+  }
   if (!fn) throw new Error(`${op.id} has no driver: the connector package must attach one`);
   // Every database counts generations from 0, so the key names the wakeup too.
-  const key = `wakeup:${wakeup}:${registration.generation}`;
+  const key = `wakeup:${binding}:${generation}`;
   const context: CallContext = { idempotencyKey: key, runId: key, opId: op.id, attempt: 1, secrets, by: WAKEUP_AGENT };
-  await fn(op.input.parse(registration), context);
+  await fn(op.input.parse({ id: binding, at, generation } satisfies WakeupRegistration), context);
 }

@@ -68,7 +68,7 @@ const wakeupOf = (
     wakeup: { ...wakeup, ...overrides },
   });
 
-const registration = z.object({ at: z.iso.datetime(), generation: z.number().int().nonnegative() });
+const registration = z.object({ id: z.string(), at: z.iso.datetime(), generation: z.number().int().nonnegative() });
 const register = (input: z.ZodType = registration) =>
   defineConnector("acme", {
     wakeup: { register: { effect: "write", idempotent: true, input, output: z.object({}), target: () => "w" } },
@@ -142,16 +142,16 @@ describe("a wakeup type", () => {
     );
   });
 
-  it("is refused by resolveConfig when its connector lacks its register, or that takes no { at, generation }", () => {
+  it("is refused by resolveConfig when its connector lacks its register, or that takes no { id, at, generation }", () => {
     expect(() => resolveConfig({ workflows: [], connectors: [acmeTypes()] })).toThrow(
       "acme.wakeup: its wakeup's register, acme.wakeup.register, is no operation of its connector",
     );
     expect(() =>
       resolveConfig({ workflows: [], connectors: [acmeWith(register(z.object({ when: z.string() })))] }),
-    ).toThrow("acme.wakeup: its wakeup's register, acme.wakeup.register, must take { at, generation }");
+    ).toThrow("acme.wakeup: its wakeup's register, acme.wakeup.register, must take { id, at, generation }");
     // One that strips them takes neither.
     expect(() => resolveConfig({ workflows: [], connectors: [acmeWith(register(z.object({})))] })).toThrow(
-      /must take \{ at, generation \}/,
+      /must take \{ id, at, generation \}/,
     );
     expect(resolveConfig({ workflows: [], connectors: [acmeWith()] }).ops.has("acme.wakeup.register")).toBe(true);
   });

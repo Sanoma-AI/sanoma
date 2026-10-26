@@ -231,7 +231,8 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
         // The row is one more of the runtime's tables: the secrets' pool, on the same database.
         db: () => secrets.db(),
         owner,
-        wakeup: wakeup.binding ?? wakeup.id,
+        binding: wakeup.binding,
+        declaration: wakeup.id,
         // `resolveConfig` checked the operation is the config's (`checkWakeupOps`).
         register: { op: resolved.ops.get(registerId)!, fn: resolved.drivers.get(registerId) },
         secrets: state.secrets,

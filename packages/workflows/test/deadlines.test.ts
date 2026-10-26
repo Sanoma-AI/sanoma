@@ -53,7 +53,7 @@ const ops = defineConnector("acme", {
     register: {
       effect: "write",
       idempotent: true,
-      input: z.object({ at: z.iso.datetime(), generation: z.number().int() }),
+      input: z.object({ id: z.string(), at: z.iso.datetime(), generation: z.number().int() }),
       output: z.object({}),
       target: () => "w",
     },
@@ -127,6 +127,9 @@ const alice = { id: "alice" };
 const WAKEUP_FILE =
   'import { acme } from "@acme/connector/resources";\n' +
   'export const wake = acme.wakeup({ name: "wake", host: "https://app.example.test" });\n';
+
+/** The lockfile that binds the wakeup to its instance, `W_1`. */
+const BOUND = JSON.stringify({ "resources/infra.ts#wake": { type: "acme.wakeup", id: "W_1" } });
 
 /** A worker on its own database, a client and a raw DBOS client of it, and the worker started again on demand. */
 function useWorker(name: string, files: Record<string, string>) {
@@ -355,7 +358,7 @@ describe("a worker's deadlines", () => {
 });
 
 describe("the stop rule", () => {
-  const app = useWorker("deadlines_stop", { "resources/infra.ts": WAKEUP_FILE });
+  const app = useWorker("deadlines_stop", { "resources/infra.ts": WAKEUP_FILE, "resources/sanoma.lock.json": BOUND });
   const fast = { stopCheckMs: 100, idleHorizonMs: 1_000 };
 
   it("registers the next deadline with a new generation and stops; a second start recovers the sleeping run", async () => {
@@ -372,9 +375,9 @@ describe("the stop rule", () => {
     expect(stops).toEqual([{ at, generation }]);
     expect(registered).toEqual([
       {
-        input: { at, generation: generation },
+        input: { id: "W_1", at, generation },
         context: expect.objectContaining({
-          idempotencyKey: `wakeup:resources/infra.ts#wake:${generation}`,
+          idempotencyKey: `wakeup:W_1:${generation}`,
           opId: "acme.wakeup.register",
           attempt: 1,
           by: "wakeup",
@@ -470,5 +473,24 @@ describe("the stop rule", () => {
     await app.start({ stopCheckMs: 60_000 });
     await app.client.decide(runId, { decision: "approve", by: { id: "lead" } });
     expect(await app.client.result(runId)).toBe("asked");
+  });
+});
+
+describe("the stop rule, with the wakeup unbound", () => {
+  const app = useWorker("deadlines_unbound", { "resources/infra.ts": WAKEUP_FILE });
+
+  it("registers nothing and keeps running, recording that apply has not created the instance", async () => {
+    await app.client.start(nap, { seconds: 30 }, { startedBy: alice });
+    const stops: SelfStop[] = [];
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const worker = await app.start({ stopCheckMs: 100, idleHorizonMs: 1_000, onStopped: (s) => stops.push(s) });
+    await waitFor(async () => (await app.row()).last_error !== null);
+    warn.mockRestore();
+    expect((await app.row()).last_error).toBe(
+      "the wakeup resources/infra.ts#wake is not bound yet: apply it to create its instance",
+    );
+    expect(registered).toEqual([]);
+    expect(stops).toEqual([]);
+    expect(await worker.idle()).toBe(true);
   });
 });
