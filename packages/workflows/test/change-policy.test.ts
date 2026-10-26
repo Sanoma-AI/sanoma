@@ -63,7 +63,11 @@ describe("touchesOf", () => {
 describe("runtimeHold", () => {
   it("holds a merge of a change to the rules for admin, and nothing else", () => {
     expect(runtimeHold(CHANGE_MERGE, mergeInput(facts()), [], people)).toEqual(HOLD);
-    expect(runtimeHold(CHANGE_MERGE, mergeInput(facts({ rules: false })), [], people)).toBeUndefined();
+    expect(runtimeHold(CHANGE_MERGE, mergeInput(facts({ rules: false })), [], people)).toEqual(HOLD);
+    const elsewhere = touchesOf(["resources/finance/cards.ts"]);
+    expect(
+      runtimeHold(CHANGE_MERGE, mergeInput(facts({ rules: false, touches: elsewhere })), [], people),
+    ).toBeUndefined();
     expect(runtimeHold(CHANGE_OPEN, { id: "c1", title: "Money" }, [], people)).toBeUndefined();
   });
 
@@ -114,7 +118,8 @@ unless { principal in Sanoma::Group::"finance" };
     const { resolved, run } = runAt(rootWith({ "resources/people.ts": peopleFile }));
     expect(resolved.policy).toBe(allowAll);
     expect(await decide(run, merge, mergeInput(facts()))).toEqual(HOLD);
-    expect(await decide(run, merge, mergeInput(facts({ rules: false })))).toEqual({ kind: "allow" });
+    const other = facts({ rules: false, touches: touchesOf(["resources/finance/cards.ts"]) });
+    expect(await decide(run, merge, mergeInput(other))).toEqual({ kind: "allow" });
     const lifted = runAt(run.state.root!, [approvedBy({ group: "admin" })]).run;
     expect(await decide(lifted, merge, mergeInput(facts()))).toEqual({ kind: "allow" });
   });
