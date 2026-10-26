@@ -7,5 +7,10 @@ contextBridge.exposeInMainWorld("sanoma", {
   choose: () => ipcRenderer.invoke("start:choose"),
   open: (path: string) => ipcRenderer.invoke("start:open", path),
   again: () => ipcRenderer.invoke("start:again"),
+  create: () => ipcRenderer.invoke("start:create"),
+  askClone: () => ipcRenderer.invoke("start:ask-clone"),
+  clone: (url: string) => ipcRenderer.invoke("start:clone", url),
+  identity: (answer: { name: string; email: string }) => ipcRenderer.invoke("start:identity", answer),
+  cancel: () => ipcRenderer.invoke("start:cancel"),
   onState: (listener: (state: unknown) => void) => ipcRenderer.on("start:state", (_event, state) => listener(state)),
 });

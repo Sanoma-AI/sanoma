@@ -1,4 +1,5 @@
-// The start window: the recent companies, Open folder, and the company starting or stopped.
+// The start window: the recent companies, Open folder, New company, Clone (its form), the
+// identity form, and the company starting or stopped.
 // `window.sanoma` is the preload's bridge (src/preload.cts).
 const bridge = window.sanoma;
 const $ = (id) => document.getElementById(id);
@@ -9,7 +10,32 @@ const item = (text) => {
   return li;
 };
 
+/** The form shown last, so a state sent while the person types keeps what they typed. */
+let shownAsk;
+
+/** Shows the form `state.ask` names, filled from it when it first shows, with its problem. */
+function renderAsk(ask) {
+  const kind = ask?.kind;
+  $("clone-form").hidden = kind !== "clone";
+  $("identity-form").hidden = kind !== "identity";
+  if (kind && kind !== shownAsk) {
+    if (kind === "clone") $("clone-url").value = ask.url ?? "";
+    if (kind === "identity") {
+      $("identity-name").value = ask.name;
+      $("identity-email").value = ask.email;
+    }
+    $(kind === "clone" ? "clone-url" : ask.name ? "identity-email" : "identity-name").focus();
+  }
+  shownAsk = kind;
+  for (const form of ["clone", "identity"]) {
+    const problem = $(`${form}-problem`);
+    problem.textContent = kind === form ? (ask.problem ?? "") : "";
+    problem.hidden = !problem.textContent;
+  }
+}
+
 function render(state) {
+  renderAsk(state.ask);
   $("warnings").replaceChildren(
     ...state.warnings.map((text) =>
       Object.assign(document.createElement("p"), { className: "warning", textContent: text }),
@@ -22,7 +48,11 @@ function render(state) {
     $("company-name").textContent = company.name;
     const message = $("company-message");
     message.textContent =
-      state.phase === "failed" ? state.message : state.phase === "starting" ? `Starting ${company.path}` : "Running";
+      state.phase === "failed"
+        ? state.message
+        : state.phase === "starting"
+          ? (state.message ?? `Starting ${company.path}`)
+          : "Running";
     message.className = state.phase === "failed" ? "failed" : "muted";
     $("progress").replaceChildren(...state.progress.map((step) => item(`${step}…`)));
     $("progress").hidden = !state.progress.length || state.phase !== "starting";
@@ -49,12 +79,17 @@ function render(state) {
 
 $("choose").addEventListener("click", () => bridge.choose());
 $("again").addEventListener("click", () => bridge.again());
-for (const button of document.querySelectorAll("[data-later]")) {
-  button.addEventListener("click", () => {
-    const later = $("later");
-    later.textContent = `${button.dataset.later} comes in the next version of Sanoma. For now, open a folder that holds a company.`;
-    later.hidden = false;
-  });
-}
+$("create").addEventListener("click", () => bridge.create());
+$("clone").addEventListener("click", () => bridge.askClone());
+$("clone-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  bridge.clone($("clone-url").value);
+});
+$("identity-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  bridge.identity({ name: $("identity-name").value, email: $("identity-email").value });
+});
+for (const button of document.querySelectorAll("[data-cancel]"))
+  button.addEventListener("click", () => bridge.cancel());
 bridge.onState(render);
 bridge.state().then(render);
