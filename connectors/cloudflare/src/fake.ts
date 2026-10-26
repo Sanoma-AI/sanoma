@@ -1,0 +1,436 @@
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
+import { Readable } from "node:stream";
+import { DriverError, errorMessage, retryableStatus, wakeGeneration } from "@sanoma-ai/workflows";
+import { defineFake, type FakeOptions } from "@sanoma-ai/workflows/fake";
+import { cloudflareOps } from "./connector.ts";
+import { alarmOps, type Application, type CloudflareApi, containerOps, type ReadBinding } from "./ops.ts";
+import { type Instance, loadInstance, OBJECT_CLASS, type ObjectState } from "./worker.ts";
+
+/** A `GET /wake?generation=N` a container answered: the generation it was given, and when. */
+export interface FakeWake {
+  generation: number;
+  at: Date;
+}
+
+/** What `start` runs for a container: a runtime answering at `url`, until `stop`. */
+export interface FakeContainer {
+  url: string;
+  stop(): Promise<void>;
+  /** Each `/wake` it answered, in order, when it records them. */
+  wakes?: readonly FakeWake[];
+}
+
+/** Starts the company's runtime, as the container would: the image, the revision its label names, and the Worker's text bindings as its environment. */
+export type StartContainer = (input: {
+  image: string;
+  revision: string;
+  env: Record<string, string>;
+}) => Promise<FakeContainer>;
+
+export interface FakeCloudflareOptions extends FakeOptions {
+  /** What a container runs. Default: a stub that answers `/healthz` 200 and `/wake` 204. */
+  start?: StartContainer;
+}
+
+export interface FakeCloudflareState extends Record<string, unknown> {
+  seq: number;
+  /** The Workers, by script name: their bindings, a secret's without its text. */
+  scripts: Record<string, { bindings: ReadBinding[]; compatibility_date: string; subdomain: boolean }>;
+  /** The container applications, by id. */
+  applications: Record<string, Application & { name: string; rollouts: number }>;
+}
+
+/** How long the fake waits before it rings an alarm again that threw, and how often: Cloudflare retries six times. */
+const RETRY_MS = 250;
+const RETRIES = 6;
+/** setTimeout's longest delay: a longer one fires at once. */
+const MAX_DELAY_MS = 2 ** 31 - 1;
+/** Headers a proxy does not pass on. */
+const HOP = new Set(["connection", "keep-alive", "transfer-encoding", "upgrade", "content-length", "content-encoding"]);
+
+const fail = (status: number, code: number, message: string) =>
+  new DriverError(`cloudflare: ${message}`, { retryable: retryableStatus(status), status, vendorCode: String(code) });
+
+/** workers.dev's answer for a name with no Worker behind it. */
+const nothingHere = () =>
+  new Response("<!doctype html><title>There is nothing here yet</title>", {
+    status: 404,
+    headers: { "content-type": "text/html" },
+  });
+
+/** A runtime that answers `/healthz` and records each `/wake`: what a container runs unless the fake is given `start`. */
+const stubContainer: StartContainer = async () => {
+  const wakes: FakeWake[] = [];
+  const server = createServer((req, res) => {
+    const url = new URL(req.url ?? "/", "http://container");
+    if (url.pathname === "/healthz") return void res.writeHead(200).end("ok\n");
+    const generation = url.pathname === "/wake" ? wakeGeneration(url) : undefined;
+    if (generation === undefined) return void res.writeHead(404).end();
+    wakes.push({ generation, at: new Date() });
+    res.writeHead(204).end();
+  });
+  await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+  server.unref();
+  return {
+    url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+    wakes,
+    stop: () => new Promise<void>((done) => server.close(() => done())),
+  };
+};
+
+/** A Node request as a Fetch one, for the Worker. */
+function requestOf(req: IncomingMessage, origin: string): Request {
+  const headers = new Headers();
+  for (const [name, value] of Object.entries(req.headers)) {
+    if (value === undefined || HOP.has(name)) continue;
+    for (const v of [value].flat()) headers.append(name, v);
+  }
+  const body = req.method === "GET" || req.method === "HEAD" ? undefined : (Readable.toWeb(req) as ReadableStream);
+  return new Request(new URL(req.url ?? "/", origin), {
+    method: req.method,
+    headers,
+    body,
+    ...(body && { duplex: "half" }),
+  } as RequestInit);
+}
+
+/** Sends a Fetch answer back over Node's. */
+async function respond(res: ServerResponse, answer: Response) {
+  const headers: Record<string, string | string[]> = {};
+  answer.headers.forEach((value, name) => {
+    if (!HOP.has(name) && name !== "set-cookie") headers[name] = value;
+  });
+  const cookies = answer.headers.getSetCookie();
+  if (cookies.length) headers["set-cookie"] = cookies;
+  res.writeHead(answer.status, headers);
+  if (!answer.body) return void res.end();
+  Readable.fromWeb(answer.body as import("node:stream/web").ReadableStream).pipe(res);
+}
+
+/**
+ * One Durable Object of a Worker, in this process: the `ctx` `worker/instance.js` runs over
+ * (`ctx.container` running `start`'s runtime, `ctx.storage` in memory, one alarm on a timer),
+ * kept across uploads as Cloudflare keeps an object's storage and container across a deploy.
+ */
+function fakeObject(start: StartContainer, image: () => string | undefined, started: FakeContainer[]) {
+  const storage = new Map<string, unknown>();
+  let running: { runtime: Promise<FakeContainer>; labels: Record<string, string>; port: number } | undefined;
+  let alarm: { at: number; timer?: NodeJS.Timeout } | undefined;
+  let ringing: Promise<void> | undefined;
+  let inactivityMs: number | undefined;
+  let quiet: NodeJS.Timeout | undefined;
+  let open = 0;
+  let instance: Instance | undefined;
+
+  const destroy = async () => {
+    clearTimeout(quiet);
+    const was = running;
+    running = undefined;
+    await was?.runtime.then(
+      (runtime) => runtime.stop(),
+      () => undefined,
+    );
+  };
+  /** Runs `work` as a request to the object: the container's inactivity counts from the last one's end. */
+  const active = async <T>(work: () => Promise<T>): Promise<T> => {
+    open++;
+    clearTimeout(quiet);
+    try {
+      return await work();
+    } finally {
+      open--;
+      if (open === 0 && running && inactivityMs !== undefined) {
+        quiet = setTimeout(() => void destroy(), inactivityMs).unref();
+      }
+    }
+  };
+  /** Rings the alarm `armed`, while it is the one set, again after a throw, six times at most. */
+  const ring = async (armed: NonNullable<typeof alarm>) => {
+    for (let tries = 0; alarm === armed; tries++) {
+      // Cloudflare clears the alarm as it runs it: one set in `alarm()` is a new one.
+      alarm = undefined;
+      try {
+        await active(() => instance!.alarm());
+        return;
+      } catch (err) {
+        console.warn(`cloudflare fake: an alarm threw: ${errorMessage(err)}`);
+        if (alarm !== undefined || tries >= RETRIES) return;
+        alarm = armed;
+        await new Promise((resolve) => setTimeout(resolve, RETRY_MS));
+      }
+    }
+  };
+  const schedule = (armed: NonNullable<typeof alarm>) => {
+    clearTimeout(armed.timer);
+    const due = armed.at - Date.now();
+    armed.timer = setTimeout(
+      () => {
+        if (alarm !== armed) return;
+        if (armed.at > Date.now()) return schedule(armed);
+        ringing = ring(armed).finally(() => (ringing = undefined));
+      },
+      Math.min(Math.max(0, due), MAX_DELAY_MS),
+    ).unref();
+  };
+  const disarm = () => {
+    clearTimeout(alarm?.timer);
+    alarm = undefined;
+  };
+
+  const ctx: ObjectState = {
+    container: {
+      get running() {
+        return running !== undefined;
+      },
+      start({ env, labels }) {
+        if (running) throw new Error("the container is already running");
+        const at = image();
+        if (at === undefined) throw new Error("no container application runs behind this Durable Object");
+        const runtime = start({ image: at, revision: labels.revision ?? "", env }).then((made) => {
+          started.push(made);
+          return made;
+        });
+        const mine = { runtime, labels: { ...labels }, port: Number(env.PORT) };
+        running = mine;
+        // A runtime that does not start leaves no container, as a failed start does.
+        runtime.catch(() => {
+          if (running === mine) running = undefined;
+        });
+      },
+      inspect: async () => (running ? { image: image() ?? "", labels: { ...running.labels } } : null),
+      destroy,
+      getTcpPort: (port) => ({
+        async fetch(input, init) {
+          if (!running) throw new Error("the container is not running");
+          if (port !== running.port) throw new Error(`nothing listens on port ${port} in the container`);
+          const runtime = await running.runtime;
+          const request = new Request(input, init);
+          const { pathname, search } = new URL(request.url);
+          return fetch(new URL(pathname + search, runtime.url), {
+            method: request.method,
+            headers: request.headers,
+            body: request.body,
+            redirect: "manual",
+            ...(request.body && { duplex: "half" }),
+          } as RequestInit);
+        },
+      }),
+      async setInactivityTimeout(ms) {
+        inactivityMs = ms;
+      },
+    },
+    storage: {
+      get: async <T>(key: string) => structuredClone(storage.get(key)) as T | undefined,
+      put: async (key, value) => void storage.set(key, structuredClone(value)),
+      delete: async (key) => storage.delete(key),
+      async setAlarm(at) {
+        disarm();
+        alarm = { at };
+        schedule(alarm);
+      },
+      deleteAlarm: async () => disarm(),
+    },
+    blockConcurrencyWhile: (fn) => fn(),
+  };
+
+  return {
+    ctx,
+    /** The object made again from the Worker's code, as a deploy restarts it. */
+    restart(made: Instance) {
+      instance = made;
+    },
+    fetch: (request: Request) => active(() => instance!.fetch(request)),
+    /** Stops its container, as Cloudflare does once the object is quiet; its storage and alarm stay. */
+    stop: destroy,
+    /** Rings its alarm now, whatever its time; resolves once it rang. */
+    async fire() {
+      if (alarm) {
+        clearTimeout(alarm.timer);
+        ringing = ring(alarm).finally(() => (ringing = undefined));
+      }
+      await ringing;
+    },
+    /** Everything gone: its container, its alarm and its storage, as a deleted Worker's. */
+    async remove() {
+      disarm();
+      storage.clear();
+      await destroy();
+    },
+  };
+}
+
+type FakeObject = ReturnType<typeof fakeObject>;
+
+/**
+ * An in-memory Cloudflare account for tests, as the API answers: Workers in `state.scripts`,
+ * container applications in `state.applications`, and the account's workers.dev URLs served in
+ * this process, one server on a port of this machine per Worker name (a name with no Worker
+ * answers workers.dev's 404). Each Worker runs the package's own object code
+ * (`worker/instance.js`) over a `ctx` in this process: its container runs `start`'s runtime
+ * (the image and the revision label it was started at, the Worker's text bindings as its
+ * environment), its storage is in memory, and its alarm rings on a timer, again after a throw.
+ * An upload restarts the object over the new bindings, its container, storage and alarm kept; a
+ * rollout stops the container, as Cloudflare replaces it. `stop(name)` stops a company's
+ * container as ten quiet minutes would, `fire()` rings every alarm now, `wakes()` lists the
+ * `/wake`s the containers answered, `close()` (and `reset()`) stops everything.
+ */
+export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
+  const start = options.start ?? stubContainer;
+  const servers = new Map<string, { server: Server; url: string }>();
+  const objects = new Map<string, FakeObject>();
+  /** Each Worker's env: its bindings' text, the secrets' with it, which the state does not keep. */
+  const envs = new Map<string, Record<string, unknown>>();
+  const started: FakeContainer[] = [];
+
+  /** The request to the Worker named `script`, as workers.dev passes it on. */
+  const dispatch = async (state: FakeCloudflareState, script: string, request: Request): Promise<Response> => {
+    const env = envs.get(script);
+    if (!env || !state.scripts[script]?.subdomain) return nothingHere();
+    const { worker } = await loadInstance();
+    return worker.fetch(request, env);
+  };
+  const scriptAt = (url: string) => [...servers].find(([, s]) => s.url === new URL(url).origin)?.[0];
+
+  /** The Worker name's URL: a server of its own, made at the first ask, which outlives the Worker as workers.dev's name does. */
+  const serve = async (state: FakeCloudflareState, script: string) => {
+    const found = servers.get(script);
+    if (found) return found.url;
+    const server = createServer((req, res) => {
+      const url = servers.get(script)!.url;
+      void dispatch(state, script, requestOf(req, url)).then(
+        (answer) => respond(res, answer),
+        (err: unknown) => {
+          if (res.headersSent) return void res.destroy();
+          res.writeHead(500, { "content-type": "text/plain" }).end(`${errorMessage(err)}\n`);
+        },
+      );
+    });
+    await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+    // A fake no one closes, as a sandbox run's, keeps no process up.
+    server.unref();
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    servers.set(script, { server, url });
+    return url;
+  };
+
+  const api = (state: FakeCloudflareState): CloudflareApi => {
+    const appOf = (script: string) => Object.values(state.applications).find((a) => a.name === script);
+    return {
+      workerUrl: (script) => serve(state, script),
+      async bindings(script) {
+        return structuredClone(state.scripts[script]?.bindings);
+      },
+      async upload(script, { modules, main_module, compatibility_date, bindings, migrations }) {
+        if (!modules.some((m) => m.name === main_module)) throw fail(400, 10021, `no module named ${main_module}`);
+        const known = state.scripts[script] !== undefined;
+        if (!known && !migrations?.new_sqlite_classes.includes(OBJECT_CLASS)) {
+          throw fail(400, 10061, `Cannot create binding for class ${OBJECT_CLASS}: it is not a Durable Object yet`);
+        }
+        const { Instance } = await loadInstance();
+        const env: Record<string, unknown> = {};
+        for (const binding of bindings) {
+          if (binding.type === "durable_object_namespace") {
+            env[binding.name] = {
+              getByName: () => ({ fetch: (request: Request) => objects.get(script)!.fetch(request) }),
+            };
+          } else env[binding.name] = binding.text;
+        }
+        envs.set(script, env);
+        state.scripts[script] = {
+          bindings: bindings.map(({ type, name, ...rest }) =>
+            type === "secret_text" ? { type, name } : { type, name, ...("text" in rest && { text: rest.text }) },
+          ),
+          compatibility_date,
+          subdomain: state.scripts[script]?.subdomain ?? false,
+        };
+        const object = objects.get(script) ?? fakeObject(start, () => appOf(script)?.image, started);
+        objects.set(script, object);
+        object.restart(new Instance(object.ctx, env));
+      },
+      async enableSubdomain(script) {
+        const found = state.scripts[script];
+        if (!found) throw fail(404, 10007, `workers/scripts/${script}: This Worker does not exist on your account.`);
+        found.subdomain = true;
+      },
+      async deleteScript(script) {
+        delete state.scripts[script];
+        envs.delete(script);
+        await objects.get(script)?.remove();
+        objects.delete(script);
+      },
+      async application(name) {
+        const found = appOf(name);
+        return found && { id: found.id, image: found.image };
+      },
+      async createApplication(name, image) {
+        if (!state.scripts[name])
+          throw fail(400, 1000, `the Worker ${name} has no Durable Object class ${OBJECT_CLASS}`);
+        if (appOf(name)) throw fail(409, 1001, `an application named ${name} exists`);
+        const id = `00000000-0000-4000-8000-${String(++state.seq).padStart(12, "0")}`;
+        state.applications[id] = { id, name, image, rollouts: 0 };
+        return { id, image };
+      },
+      async rollout(id, image) {
+        const found = state.applications[id];
+        if (!found) throw fail(404, 1002, `no application ${id}`);
+        Object.assign(found, { image, rollouts: found.rollouts + 1 });
+        await objects.get(found.name)?.stop();
+      },
+      async deleteApplication(id) {
+        const found = state.applications[id];
+        delete state.applications[id];
+        if (found) await objects.get(found.name)?.stop();
+      },
+      async send(url, init) {
+        const script = scriptAt(url);
+        if (!script) throw new TypeError(`fetch failed: nothing answers at ${new URL(url).origin}`);
+        return dispatch(state, script, new Request(url, init));
+      },
+    };
+  };
+
+  const fake = defineFake(
+    cloudflareOps,
+    {
+      initial: (): FakeCloudflareState => ({ seq: 0, scripts: {}, applications: {} }),
+      ops: (state) => ({
+        container: containerOps(() => api(state), { startTimeoutMs: 60_000, pollMs: 50 }),
+        alarm: alarmOps(() => api(state)),
+      }),
+    },
+    options,
+  );
+  const named = (name?: string) =>
+    [...objects].filter(([script]) => name === undefined || script === `sanoma-${name}`).map(([, o]) => o);
+  const close = async () => {
+    for (const object of objects.values()) await object.remove();
+    objects.clear();
+    envs.clear();
+    for (const { server } of servers.values()) {
+      server.closeAllConnections();
+      await new Promise<void>((done) => server.close(() => done()));
+    }
+    servers.clear();
+  };
+  const { reset } = fake;
+  return Object.assign(fake, {
+    /** Stops the container of the company `name` (default: every one), as ten quiet minutes would: the next request starts it. */
+    async stop(name?: string) {
+      for (const object of named(name)) await object.stop();
+    },
+    /** Rings every armed alarm now, whatever its time; resolves once each rang. */
+    async fire() {
+      await Promise.all(named().map((object) => object.fire()));
+    },
+    /** Each `/wake` the containers answered, in order of their starts. */
+    wakes: (): FakeWake[] => started.flatMap((c) => c.wakes ?? []),
+    /** Stops every container and alarm, and every Worker's server. */
+    close,
+    /** Empties the state and stops everything. */
+    async reset() {
+      await close();
+      reset();
+    },
+  });
+}
