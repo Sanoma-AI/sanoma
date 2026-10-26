@@ -39,8 +39,20 @@ const pkgDir = realpathSync(fileURLToPath(new URL("..", import.meta.url)));
 // The runtime and what it loads stay outside the server bundle: the server imports them from the
 // consumer's install, so the app and the worker share one copy. (The app imports no connector; a
 // config's connectors reach it only through startApp.) `ai` too: the chat's loop and a connector's
-// model half (`ConnectorSetup.model`) then share one AI SDK.
-const RUNTIME = ["@sanoma-ai/workflows", "@sanoma-ai/bridge", "@dbos-inc/dbos-sdk", "pg", "zod", "ai"];
+// model half (`ConnectorSetup.model`) then share one AI SDK. And `HarnessAgent`'s adapters
+// (`@ai-sdk/harness*`), which read their bridges' files beside their own `dist/`.
+const RUNTIME = [
+  "@sanoma-ai/workflows",
+  "@sanoma-ai/bridge",
+  "@dbos-inc/dbos-sdk",
+  "pg",
+  "zod",
+  "ai",
+  "@ai-sdk/harness",
+  "@ai-sdk/harness-pi",
+  "@ai-sdk/harness-claude-code",
+  "@ai-sdk/harness-codex",
+];
 const isRuntime = (id: string) => RUNTIME.some((name) => id === name || id.startsWith(`${name}/`));
 
 // The browser bundle may import only types from the runtime (DBOS, Postgres), and the values of
@@ -470,8 +482,8 @@ function sharedDeps(repo: string, src: string): Plugin {
 
 /**
  * The server bundle holds everything but the runtime, which it imports by absolute URL from
- * `runtimeFrom`'s resolution (pg and DBOS through `@sanoma-ai/workflows`'), so it needs nothing
- * from the company's install. Build only: dev's server resolves as Node does.
+ * `runtimeFrom`'s resolution (pg and DBOS through `@sanoma-ai/workflows`', the harness adapters
+ * through the app's), so it needs nothing from the company's install. Build only: dev's server resolves as Node does.
  */
 function runtimeExternal(runtimeFrom: string): Plugin {
   return {
@@ -488,7 +500,10 @@ function runtimeExternal(runtimeFrom: string): Plugin {
         const workflows = await this.resolve("@sanoma-ai/workflows", runtimeFrom, opts);
         if (workflows) resolved = await this.resolve(source, workflows.id, opts);
       }
-      if (!resolved) return this.error(`${source} does not resolve from ${runtimeFrom} or its @sanoma-ai/workflows`);
+      // The app's own dependencies (the harness adapters), from its install.
+      resolved ??= await this.resolve(source, defaultRuntimeFrom, opts);
+      if (!resolved)
+        return this.error(`${source} does not resolve from ${runtimeFrom}, its @sanoma-ai/workflows or the app`);
       return { id: pathToFileURL(resolved.id).href, external: "absolute" };
     },
   };

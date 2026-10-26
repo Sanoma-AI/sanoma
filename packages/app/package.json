@@ -61,6 +61,10 @@
     "typecheck:ui": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@ai-sdk/harness": "1.0.158",
+    "@ai-sdk/harness-claude-code": "1.0.162",
+    "@ai-sdk/harness-codex": "1.0.160",
+    "@ai-sdk/harness-pi": "1.0.160",
     "@ai-sdk/provider": "4.0.34",
     "@ai-sdk/react": "4.0.157",
     "@base-ui/react": "^1.9.0",

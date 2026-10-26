@@ -9,3 +9,10 @@ allowBuilds:
   # electron-builder's Windows installer, unused: the shell builds for macOS.
   electron-winstaller: false
   lefthook: false
+  # Pi's model providers (through @ai-sdk/harness-pi): their install scripts are not needed.
+  "@google/genai": false
+  protobufjs: false
+overrides:
+  # One AI SDK: @ai-sdk/harness 1.0.158 pins ai 7.0.147. Its later releases' Claude Code and Codex
+  # adapters ship without their bridges' lockfiles (vercel/ai#23829); drop this once one does.
+  ai: 7.0.153
