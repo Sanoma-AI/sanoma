@@ -367,12 +367,14 @@ describe("the stop rule", () => {
     await waitFor(() => stops.length === 1);
     const until = await untilOf(app.client, runId);
     const at = new Date(until!).toISOString();
-    expect(stops).toEqual([{ at, generation: before + 1 }]);
+    // One generation for the start, one for the stop.
+    const generation = before + 2;
+    expect(stops).toEqual([{ at, generation }]);
     expect(registered).toEqual([
       {
-        input: { at, generation: before + 1 },
+        input: { at, generation: generation },
         context: expect.objectContaining({
-          idempotencyKey: `wakeup:resources/infra.ts#wake:${before + 1}`,
+          idempotencyKey: `wakeup:resources/infra.ts#wake:${generation}`,
           opId: "acme.wakeup.register",
           attempt: 1,
           by: "wakeup",
@@ -380,7 +382,7 @@ describe("the stop rule", () => {
       },
     ]);
     const row = await app.row();
-    expect(row).toMatchObject({ generation: String(before + 1), at: new Date(until!), last_error: null });
+    expect(row).toMatchObject({ generation: String(generation), at: new Date(until!), last_error: null });
     expect(row.owner).toMatch(/^[0-9a-f-]{36}$/);
     expect(row.registered_at).toBeInstanceOf(Date);
     expect(row.stopped_at).toBeInstanceOf(Date);
@@ -388,14 +390,16 @@ describe("the stop rule", () => {
     // Nothing recorded the stop as the run's end.
     expect((await app.client.ledger(runId)).map((r) => r.type)).toEqual(["run.started", "sleep.started"]);
 
-    expect(await shouldWake(app.databaseUrl, before + 1)).toBe(true);
-    expect(await shouldWake(app.databaseUrl, before)).toBe(false);
+    expect(await shouldWake(app.databaseUrl, generation)).toBe(true);
+    expect(await shouldWake(app.databaseUrl, generation - 1)).toBe(false);
     // Registered by a worker that then kept running: no stop is behind that wake.
     await app.pool.query(`UPDATE ${WAKEUP_TABLE} SET registered_at = stopped_at + interval '1 second' WHERE id = 1`);
-    expect(await shouldWake(app.databaseUrl, before + 1)).toBe(false);
+    expect(await shouldWake(app.databaseUrl, generation)).toBe(false);
 
     const again = await app.start({ idleHorizonMs: 60_000, onStopped: () => {} });
     expect((await app.row()).owner).not.toBe(row.owner);
+    // A started worker makes the wake registered before stale.
+    expect(await app.row()).toMatchObject({ generation: String(generation + 1), at: null });
     expect(await app.client.result(runId)).toBe("rested");
     expect(again.deadlines.waitOf(runId)).toBeUndefined();
     expect(await untilOf(app.client, runId)).toBe(until);
@@ -410,7 +414,7 @@ describe("the stop rule", () => {
     const worker = await app.start({ ...fast, onStopped: (s) => stops.push(s) });
     await waitFor(async () => (await app.row()).last_error !== null);
     const failed = await app.row();
-    expect(failed.last_error).toBe("the wakeup service is down");
+    expect(failed).toMatchObject({ last_error: "the wakeup service is down", at: null });
     expect(failed.stopped_at).toEqual(stopped_at);
     expect(stops).toEqual([]);
     expect(await worker.idle()).toBe(true);
@@ -426,22 +430,25 @@ describe("the stop rule", () => {
   });
 
   it("never stops a worker whose caller would not hear it stop", async () => {
-    await app.client.start(nap, { seconds: 30 }, { startedBy: alice });
+    const runId = await app.client.start(nap, { seconds: 30 }, { startedBy: alice });
     const { generation } = await app.row();
     const worker = await app.start(fast);
-    await new Promise((r) => setTimeout(r, 1_000));
+    await waitFor(() => worker.deadlines.waitOf(runId) !== undefined);
+    await new Promise((r) => setTimeout(r, 500));
     expect(await worker.idle()).toBe(true);
     expect(registered).toEqual([]);
     expect((await app.row()).generation).toBe(generation);
   });
 
   it("does nothing while another worker owns the row", async () => {
-    await app.client.start(nap, { seconds: 30 }, { startedBy: alice });
+    const runId = await app.client.start(nap, { seconds: 30 }, { startedBy: alice });
     const stops: SelfStop[] = [];
+    // The run takes a moment to be dequeued, and is no reason to stop until it waits.
     const worker = await app.start({ ...fast, stopCheckMs: 300, onStopped: (s) => stops.push(s) });
     const other = randomUUID();
     await app.pool.query(`UPDATE ${WAKEUP_TABLE} SET owner = $1 WHERE id = 1`, [other]);
     const { generation } = await app.row();
+    await waitFor(() => worker.deadlines.waitOf(runId) !== undefined);
     await new Promise((r) => setTimeout(r, 1_000));
     expect(await app.row()).toMatchObject({ owner: other, generation });
     expect(registered).toEqual([]);

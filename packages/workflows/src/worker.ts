@@ -151,6 +151,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
       return !state.stopped && idle(state.deadlines, resolved, horizonMs);
     },
     stop() {
+      // A stop that failed may be tried again.
       return (stopping ??= (async () => {
         state.stopped = true;
         stopRule?.close();
@@ -165,7 +166,10 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
         ]) {
           await close().catch((error: unknown) => (failed ??= { error }));
         }
-        if (failed) throw failed.error;
+        if (failed) {
+          stopping = undefined;
+          throw failed.error;
+        }
       })());
     },
   };

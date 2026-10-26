@@ -1,12 +1,12 @@
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import { dbosStatusesOf } from "./client.ts";
 import type { Db } from "./db.ts";
-import { nextWakeupGeneration, recordWakeupRegistration, recordWakeupStop } from "./db.ts";
+import { nextWakeupGeneration, recordWakeupError, recordWakeupRegistration, recordWakeupStop } from "./db.ts";
 import type { ResolvedConfig } from "./config.ts";
 import { warn } from "./log.ts";
 import type { CallContext, DriverFn, Op } from "./op.ts";
 import type { Secrets } from "./secret.ts";
-import { errorMessage, RUNTIME_AGENTS } from "./shared.ts";
+import { errorMessage, WAKEUP_AGENT } from "./shared.ts";
 import type { WakeupRegistration } from "./wakeup.ts";
 
 // What a worker knows of its own runs that DBOS cannot tell it: which are executing and which are
@@ -149,10 +149,6 @@ export interface StopRule {
   onStopped?: ((stopped: SelfStop) => void) | undefined;
 }
 
-/** Who the runtime calls a wakeup's register as: one of its own agents. */
-const WAKEUP_AGENT = "wakeup";
-if (!RUNTIME_AGENTS.includes(WAKEUP_AGENT)) throw new Error(`${WAKEUP_AGENT} must be one of RUNTIME_AGENTS`);
-
 /**
  * Checks every `everyMs` whether the worker is `idle`; when it is, counts the wakeup row's
  * generation up, registers the next deadline with the wakeup (none when there is no deadline at
@@ -175,7 +171,7 @@ export function stopWhenIdle(rule: StopRule): { close(): void } {
     const next = rule.deadlines.nextDeadline();
     const at = next?.toISOString() ?? null;
     const db = await rule.db();
-    const generation = await nextWakeupGeneration(db, rule.owner, at);
+    const generation = await nextWakeupGeneration(db, rule.owner);
     if (generation === undefined) {
       // A worker claims the row only when it starts, so this one never gets it back.
       warn("another worker registers this instance's wakeups now, so this one keeps running and stops checking");
@@ -187,11 +183,11 @@ export function stopWhenIdle(rule: StopRule): { close(): void } {
         await registerWakeup(rule, { at, generation });
       } catch (err) {
         const message = errorMessage(err);
-        await recordWakeupRegistration(db, rule.owner, generation, message);
+        await recordWakeupError(db, rule.owner, generation, message);
         problem(`could not register the wakeup at ${at}, so the worker keeps running: ${message}`);
         return false;
       }
-      await recordWakeupRegistration(db, rule.owner, generation);
+      await recordWakeupRegistration(db, rule.owner, generation, at);
     }
     lastProblem = undefined;
     if (closed || !(await rule.idle()) || rule.deadlines.nextDeadline()?.toISOString() !== next?.toISOString())
