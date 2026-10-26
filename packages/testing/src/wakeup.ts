@@ -38,6 +38,11 @@ export interface WakeupUnderTest {
   client: SanomaClient;
   /** Calls the type's register operation (`wakeup.register`) through its driver. */
   register(registration: WakeupRegistration): Promise<void>;
+  /**
+   * The generation the checks count up from: they register `from + 1` to `from + 4`. Default 0;
+   * against a wakeup that keeps the last generation it took, one above it.
+   */
+  from?: number;
   /** How long a check waits for a wake or a run. Default 60 s. */
   timeoutMs?: number;
 }
@@ -51,11 +56,12 @@ const startedBy = { id: "wakeup-check" };
  * Runs the conformance checks against a wakeup, in order, each on its own (one failing goes on
  * to the next): a registered wake arrives at the host after its `at`; a wake registered before
  * the host stops starts it, and a run queued while it was stopped drains; and a registration
- * replaced by a newer generation is never sent. Each registers its own generation (1, 2, then 3
- * and 4) and reads only the wakes the host answered since it began.
+ * replaced by a newer generation is never sent, nor one that arrives again after it (registration
+ * is at least once). Each registers its own generation (`from` + 1, + 2, then + 3 and + 4) and
+ * reads only the wakes the host answered since it began.
  */
 export async function checkWakeup(w: WakeupUnderTest): Promise<WakeupCheck[]> {
-  const { type, host, client, timeoutMs = 60_000 } = w;
+  const { type, host, client, from = 0, timeoutMs = 60_000 } = w;
   if (!type.wakeup) {
     throw new Error(`${type.vendor}.${type.type} does not meet the Wakeup contract: it has no wakeup`);
   }
@@ -68,15 +74,17 @@ export async function checkWakeup(w: WakeupUnderTest): Promise<WakeupCheck[]> {
       results.push({ name, ok: false, error: errorMessage(err) });
     }
   };
-  const register = (generation: number, inMs: number) => {
+  /** Registers generation `from + n` for `inMs` from now; returns its `at`. */
+  const register = async (n: number, inMs: number) => {
     const at = new Date(Date.now() + inMs);
-    return w.register({ at: at.toISOString(), generation }).then(() => at);
+    await w.register({ at: at.toISOString(), generation: from + n });
+    return at;
   };
-  const since = (begun: Date, generation: number) =>
-    host.wakes().filter((wake) => wake.generation === generation && wake.at >= begun);
-  const arrived = async (begun: Date, generation: number) => {
+  const since = (begun: Date, n: number) =>
+    host.wakes().filter((wake) => wake.generation === from + n && wake.at >= begun);
+  const arrived = async (begun: Date, n: number) => {
     const [wake] = await waitFor(
-      () => since(begun, generation),
+      () => since(begun, n),
       (wakes) => wakes.length > 0,
       timeoutMs,
     );
@@ -104,10 +112,15 @@ export async function checkWakeup(w: WakeupUnderTest): Promise<WakeupCheck[]> {
   await check("a replaced generation runs nothing", async (begun) => {
     await register(3, 2_000);
     await register(4, 6_000);
+    // A late retry of the older registration: the newer one still stands.
+    await register(3, 2_000);
     await arrived(begun, 4);
     const replaced = since(begun, 3);
-    if (replaced.length)
-      throw new Error(`generation 3, replaced by 4, woke the host at ${replaced[0]!.at.toISOString()}`);
+    if (replaced.length) {
+      throw new Error(
+        `generation ${from + 3}, replaced by ${from + 4}, woke the host at ${replaced[0]!.at.toISOString()}`,
+      );
+    }
   });
   return results;
 }
@@ -176,10 +189,13 @@ export type FakeWakeupOps = typeof timerTypes & typeof timerRegister;
 
 /** How long the fake waits before it sends a wake again that the host did not answer. */
 const RETRY_MS = 250;
+/** setTimeout's longest delay: a longer one fires at once. */
+const MAX_DELAY_MS = 2 ** 31 - 1;
 
 /**
  * A wakeup in this process: `testwakeup.timer` with a driver whose `register` arms one timer for
- * the one timer it created (apply's `create`), replacing any armed before, which sends
+ * the one timer it created (apply's `create`), replacing any armed before unless it is of an
+ * older generation (which changes nothing), which sends
  * `GET {host}/wake?generation=N` at `at`, again every 250 ms until the host answers 2xx. `fire()`
  * sends the armed wake now; `close()` disarms it. `connector` is for a config; `driver` for
  * calling its operations directly.
@@ -187,22 +203,29 @@ const RETRY_MS = 250;
 export function fakeWakeup() {
   const timers = new Map<string, { state: z.output<typeof timerSchema> }>();
   let armed: { registration: WakeupRegistration; url: string; timeout?: NodeJS.Timeout } | undefined;
+  /** The newest generation registered: an older one, a late retry, changes nothing. */
+  let newest = -1;
   const disarm = () => {
     clearTimeout(armed?.timeout);
     armed = undefined;
+  };
+  /** Sends `pending` again in `ms` (at most setTimeout's longest delay), one timer at a time. */
+  const later = (pending: NonNullable<typeof armed>, ms: number) => {
+    clearTimeout(pending.timeout);
+    pending.timeout = setTimeout(() => void send(pending), Math.min(ms, MAX_DELAY_MS)).unref();
   };
   /** Sends the wake `pending` names, while it is still the one armed, until the host answers. */
   const send = async (pending: NonNullable<typeof armed>) => {
     if (armed !== pending) return;
     const due = Date.parse(pending.registration.at) - Date.now();
-    if (due > 0) return void (pending.timeout = setTimeout(() => void send(pending), due).unref());
+    if (due > 0) return later(pending, due);
     const answered = await fetch(new URL(`/wake?generation=${pending.registration.generation}`, pending.url)).then(
       (res) => res.ok,
       () => false,
     );
     if (answered) {
       if (armed === pending) armed = undefined;
-    } else if (armed === pending) pending.timeout = setTimeout(() => void send(pending), RETRY_MS).unref();
+    } else if (armed === pending) later(pending, RETRY_MS);
   };
   const read = async ({ id }: { id: string }) => {
     const timer = timers.get(id);
@@ -245,6 +268,8 @@ export function fakeWakeup() {
             retryable: false,
           });
         }
+        if (registration.generation < newest) return {};
+        newest = registration.generation;
         disarm();
         const pending = (armed = { registration, url: only.state.host });
         void send(pending);

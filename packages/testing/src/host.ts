@@ -196,30 +196,35 @@ export async function checkHost(host: HostUnderTest): Promise<HostCheck[]> {
   });
   if (spec.capabilities.lifetime !== "long-lived") {
     /** Stops the runtime, its URL kept (after a restart, apply's: the URL may have changed); returns how to wake it. */
-    const suspend = async () => {
+    /**
+     * The host's URL, applied again (the restart check replaced it, which may change it), and how
+     * to wake it: one request, as a wakeup sends it, whose generation 0 is older than any the
+     * worker registers.
+     */
+    const waker = async () => {
       if (!host.suspend) throw new Error(`a host that is ${spec.capabilities.lifetime} needs suspend to be checked`);
       const { url } = spec.outputs(await host.apply());
-      await host.suspend();
-      // One request, as a wakeup sends it: generation 0 is older than any the worker registers.
       return async () => {
         const res = await fetch(new URL("/wake?generation=0", url));
         if (res.status !== 204) throw new Error(`${url}/wake answered ${res.status}`);
       };
     };
     await check("a queued run drains after a stop and a wake", async () => {
-      const wake = await suspend();
+      const wake = await waker();
+      await host.suspend!();
       const runId = await client.start("host-check-drain", {}, { startedBy });
       await wake();
       await finish(runId);
     });
     await check("a sleep that ends while stopped continues after a wake", async () => {
+      const wake = await waker();
       const runId = await client.start("host-check-sleep", { seconds: 3 }, { startedBy });
       const sleep = await waitFor(
         async () => (await client.ledger(runId)).find((r) => r.type === "sleep.started"),
         Boolean,
         timeoutMs,
       );
-      const wake = await suspend();
+      await host.suspend!();
       const until = sleep?.type === "sleep.started" ? sleep.until : Date.now();
       await new Promise((resolve) => setTimeout(resolve, Math.max(0, until - Date.now()) + 500));
       await wake();
@@ -402,14 +407,17 @@ async function proxy(begin: () => Promise<Running>, port: number, quietAfterMs?:
   const past: Wake[] = [];
   let open = 0;
   let quiet: NodeJS.Timeout | undefined;
+  let closed = false;
   const up = () =>
-    (runtime ??= stopping.then(begin).then(
-      (started) => (current = started),
-      (err: unknown) => {
-        runtime = undefined;
-        throw err;
-      },
-    ));
+    (runtime ??= stopping
+      .then(() => (closed ? Promise.reject(new Error("the host is deleted")) : begin()))
+      .then(
+        (started) => (current = started),
+        (err: unknown) => {
+          runtime = undefined;
+          throw err;
+        },
+      ));
   const suspend = async () => {
     clearTimeout(quiet);
     const was = runtime;
@@ -476,6 +484,7 @@ async function proxy(begin: () => Promise<Running>, port: number, quietAfterMs?:
       rest();
     },
     async stop() {
+      closed = true;
       await suspend();
       server.closeAllConnections();
       await new Promise<void>((done) => server.close(() => done()));
@@ -606,8 +615,10 @@ export function inProcessHost(config: SanomaConfig, databaseUrl: string): StartH
       const { pathname, searchParams } = new URL(req.url ?? "/", "http://host");
       if (pathname === "/healthz") return void res.writeHead(200).end("ok\n");
       if (pathname !== "/wake" || req.method !== "GET") return void res.writeHead(404).end();
-      const generation = Number(searchParams.get("generation") || Number.NaN);
-      if (!Number.isSafeInteger(generation) || generation < 0) return void res.writeHead(400).end();
+      // As `sanoma serve` reads it: digits only.
+      const given = searchParams.get("generation") ?? "";
+      const generation = /^\d+$/.test(given) ? Number(given) : Number.NaN;
+      if (!Number.isSafeInteger(generation)) return void res.writeHead(400).end();
       wakes.push({ generation, at: new Date() });
       res.writeHead(204, { "cache-control": "no-store" }).end();
     });
