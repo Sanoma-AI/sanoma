@@ -5,9 +5,9 @@ import { warn } from "./log.ts";
 import { errorMessage } from "./shared.ts";
 
 // The runtime's own tables live in the config's database, beside DBOS's: the credentials, the
-// ledger, the collections' records and the wakeup's row. What they share is here: the one
-// preparation of a database, a pool that opens once it is prepared and survives a dropped
-// connection, and a table creation two processes may race.
+// ledger, the collections' records, the wakeup's row and the operator agent's chats. What they
+// share is here: the one preparation of a database, a pool that opens once it is prepared and
+// survives a dropped connection, and a table creation two processes may race.
 
 /** A connection or a pool: what the queries take. */
 export type Db = Pick<Pool | Client, "query">;
@@ -25,6 +25,10 @@ export const DATA_TABLE = "sanoma_data";
  * the last registration failed.
  */
 export const WAKEUP_TABLE = "sanoma_wakeup";
+/** The operator agent's chats (`chats.ts`): who each is for, its engine and its draft. */
+export const CHATS_TABLE = "sanoma_chats";
+/** Each chat's messages, the AI SDK's UI messages as JSON, in `seq` order. */
+export const CHAT_MESSAGES_TABLE = "sanoma_chat_messages";
 
 /** The runtime's tables, each with the word the messages name it by. */
 const TABLES: readonly [what: string, ddl: string][] = [
@@ -51,6 +55,17 @@ const TABLES: readonly [what: string, ddl: string][] = [
     `CREATE TABLE IF NOT EXISTS ${WAKEUP_TABLE} (id integer PRIMARY KEY CHECK (id = 1), owner uuid, ` +
       "generation bigint NOT NULL DEFAULT 0, at timestamptz, stopped_at timestamptz, registered_at timestamptz, " +
       `last_error text); INSERT INTO ${WAKEUP_TABLE} (id) VALUES (1) ON CONFLICT (id) DO NOTHING`,
+  ],
+  [
+    "chats",
+    `CREATE TABLE IF NOT EXISTS ${CHATS_TABLE} (id text PRIMARY KEY, person text NOT NULL, engine text NOT NULL, ` +
+      "draft_id text, title text NOT NULL, created_at timestamptz NOT NULL DEFAULT now()); " +
+      `CREATE INDEX IF NOT EXISTS ${CHATS_TABLE}_person ON ${CHATS_TABLE} (person, created_at)`,
+  ],
+  [
+    "chat messages",
+    `CREATE TABLE IF NOT EXISTS ${CHAT_MESSAGES_TABLE} (chat_id text NOT NULL REFERENCES ${CHATS_TABLE} (id) ` +
+      "ON DELETE CASCADE, id text NOT NULL, seq integer NOT NULL, message jsonb NOT NULL, PRIMARY KEY (chat_id, id))",
   ],
 ];
 
@@ -155,7 +170,7 @@ const prepared = new Map<string, Promise<void>>();
  * Makes the database at `databaseUrl` ready for the runtime, once per process and URL: the
  * database itself and DBOS's tables when they are not there yet (as a worker's launch makes
  * them; credentials may be set, and a ledger read, before any worker has run), then the
- * credentials, ledger, data and wakeup tables, and its idle-transaction timeout (`guardIdleTransactions`).
+ * credentials, ledger, data, wakeup and chat tables, and its idle-transaction timeout (`guardIdleTransactions`).
  * Two processes preparing one database both succeed: the second waits for the first
  * (`lockPreparation`). A preparation that fails is forgotten, so the next call tries again.
  */
