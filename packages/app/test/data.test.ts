@@ -329,7 +329,7 @@ describe("the Data section", () => {
       await tab.type("#field-company", "Puppet");
       await tab.type("#field-contact", "pat@puppet.test");
       await tab.select("#field-stage", "0");
-      await tab.click('button[type="submit"]');
+      await tab.click('main button[type="submit"]');
       await tab.waitForSelector('a[href="/data/outbound?record=Puppet"]');
       expect(await puppet()).toMatchObject({
         record: { company: "Puppet", contact: "pat@puppet.test", stage: "researched", owner: "ada" },
@@ -342,7 +342,7 @@ describe("the Data section", () => {
       await tab.type("#field-company", "Puppet");
       await tab.type("#field-contact", "other@puppet.test");
       await tab.select("#field-stage", "1");
-      await tab.click('button[type="submit"]');
+      await tab.click('main button[type="submit"]');
       await tab.waitForSelector("::-p-text(A record has this key already)");
       expect((await puppet())?.record.contact).toBe("pat@puppet.test");
 
@@ -350,7 +350,7 @@ describe("the Data section", () => {
       await tab.click('a[href="/data/outbound?record=Puppet"]');
       await tab.waitForSelector("#field-company:disabled");
       await tab.select("#field-stage", "1");
-      await tab.click('button[type="submit"]');
+      await tab.click('main button[type="submit"]');
       await waitFor(
         async () => (await puppet())?.record.stage,
         (stage) => stage === "contacted",
@@ -360,10 +360,10 @@ describe("the Data section", () => {
       await tab.click('a[href="/data/outbound?record=Puppet"]');
       await tab.waitForSelector("#field-company:disabled");
       await tab.select("#field-stage", "5");
-      await tab.click('button[type="submit"]');
+      await tab.click('main button[type="submit"]');
       await tab.waitForSelector('[data-slot="alert"]::-p-text(leads are not lost)');
       await tab.select("#field-stage", "4");
-      await tab.click('button[type="submit"]');
+      await tab.click('main button[type="submit"]');
       const link = await tab.waitForSelector('a[href^="/workflows/call/runs/call"]::-p-text(Open the run)');
       expect(await link!.evaluate((a) => a.closest("[data-sonner-toast]")?.textContent)).toContain("Held for approval");
       expect((await puppet())?.record.stage).toBe("contacted");

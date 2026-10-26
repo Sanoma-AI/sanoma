@@ -5,6 +5,7 @@ import type { Pool } from "pg";
 import { z } from "zod";
 import { APPROVALS_EVENT, ApprovalMessage, decisionEventOf, messageKeyOf, topicOf } from "./approvals.ts";
 import { beforeOf, decideCall, decideStart, recorded, startHoldOf } from "./call.ts";
+import { type Chats, chatStore } from "./chats.ts";
 import { collectionsDriver } from "./collection.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { deleteCredential, storeCredential, storedCredentials, storedSecrets } from "./credentials.ts";
@@ -165,18 +166,21 @@ export class SanomaClient {
   private readonly drivers: ReadonlyMap<string, Driver>;
   /** The config's own ledger store, or a Postgres one made for this client, which `close` then closes. */
   private readonly audit: OwnedLedger;
-  /** On the config's database, for the credentials table: opened on first use. */
-  private readonly credentialsPool: LazyPool;
+  /** On the config's database, for the runtime's tables (the credentials, the chats): opened on first use. */
+  private readonly pool: LazyPool;
   /** What a direct call's driver reads secrets from, as a worker's live driver does. */
   private readonly storedSecrets: Secrets;
+  /** The operator agent's chats: their rows and their transcripts, in the config's database. */
+  readonly chats: Chats;
 
   private constructor(dbos: DBOSClient, config: ResolvedConfig, drivers: ReadonlyMap<string, Driver>) {
     this.dbos = dbos;
     this.config = config;
     this.drivers = drivers;
     this.audit = ownedLedger(config);
-    this.credentialsPool = lazyPool(config.databaseUrl, "credentials");
-    this.storedSecrets = storedSecrets(() => this.credentialsDb(), "sanoma");
+    this.pool = lazyPool(config.databaseUrl, "client");
+    this.storedSecrets = storedSecrets(() => this.db(), "sanoma");
+    this.chats = chatStore(() => this.db());
   }
 
   /**
@@ -704,7 +708,7 @@ export class SanomaClient {
         issues: [{ path: ["value"], message: problem, code: "custom" }],
       });
     }
-    await storeCredential(await this.credentialsDb(), { name, value, setBy });
+    await storeCredential(await this.db(), { name, value, setBy });
   }
 
   /**
@@ -715,7 +719,7 @@ export class SanomaClient {
   async clearCredential(name: string, options: { by: string }): Promise<void> {
     await this.admittedBy(options);
     this.declared(name, () => undefined);
-    await deleteCredential(await this.credentialsDb(), name);
+    await deleteCredential(await this.db(), name);
   }
 
   /**
@@ -734,7 +738,7 @@ export class SanomaClient {
       const path = VARIABLE.test(name) ? "value" : "name";
       throw new SanomaError("invalid_input", problem, { issues: [{ path: [path], message: problem, code: "custom" }] });
     }
-    await storeCredential(await this.credentialsDb(), { name, value, setBy });
+    await storeCredential(await this.db(), { name, value, setBy });
   }
 
   /**
@@ -743,7 +747,7 @@ export class SanomaClient {
    * is left out. For server code: a page is told whether one is set, never its value.
    */
   async secrets(names: readonly string[]): Promise<Map<string, StoredSecret>> {
-    const rows = await storedCredentials(await this.credentialsDb(), names);
+    const rows = await storedCredentials(await this.db(), names);
     const found = new Map<string, StoredSecret>();
     for (const name of names) {
       const env = process.env[name];
@@ -763,7 +767,7 @@ export class SanomaClient {
   async credentials(): Promise<Map<string, CredentialStatus[]>> {
     const names = [...credentialsOf(this.drivers, () => undefined).values()].flat().map((c) => c.name);
     if (!names.length) return new Map();
-    const rows = await storedCredentials(await this.credentialsDb(), names);
+    const rows = await storedCredentials(await this.db(), names);
     const statuses = credentialsOf(this.drivers, (name) => process.env[name] || rows.get(name)?.value);
     const sourced = (c: CredentialStatus): CredentialStatus => {
       const row = rows.get(c.name);
@@ -776,12 +780,7 @@ export class SanomaClient {
   }
 
   async close() {
-    await Promise.all([
-      this.dbos.destroy(),
-      this.credentialsPool.close(),
-      this.audit.close(),
-      this.config.dataStore?.close(),
-    ]);
+    await Promise.all([this.dbos.destroy(), this.pool.close(), this.audit.close(), this.config.dataStore?.close()]);
   }
 
   /**
@@ -804,9 +803,9 @@ export class SanomaClient {
     });
   }
 
-  /** The pool the credentials are read and written with, on the database once it is prepared. */
-  private credentialsDb(): Promise<Pool> {
-    return this.credentialsPool.db();
+  /** The pool the runtime's tables are read and written with, on the database once it is prepared. */
+  private db(): Promise<Pool> {
+    return this.pool.db();
   }
 
   /**

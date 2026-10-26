@@ -307,7 +307,7 @@ describe("a company's app with its sites", () => {
       const site = new URL("/sites/hello/run", app.url).href;
       await page.goto(site, { waitUntil: "networkidle0" });
       await page.type("#field-who", "Ada");
-      await page.click('button[type="submit"]');
+      await page.click('main button[type="submit"]');
       const link = await page.waitForSelector('a[href^="/workflows/hello/runs/"]::-p-text(Open the run)');
       const runId = (await link!.evaluate((a) => a.getAttribute("href")!)).split("/").at(-1)!;
       expect(page.url()).toBe(site);
@@ -316,7 +316,7 @@ describe("a company's app with its sites", () => {
 
       await page.goto(new URL("/workflows/hello?new=true", app.url).href, { waitUntil: "networkidle0" });
       await page.type("#field-who", "Grace");
-      await page.click('button[type="submit"]');
+      await page.click('main button[type="submit"]');
       // A string, run in the page: this file is typed for Node, without the DOM's `location`.
       await page.waitForFunction(String.raw`/^\/workflows\/hello\/runs\/[^/]+$/.test(location.pathname)`);
     } finally {

@@ -1,8 +1,8 @@
 import { createSerializationAdapter } from "@tanstack/react-router";
 import { createCsrfMiddleware, createMiddleware, createStart } from "@tanstack/react-start";
 import { setResponseStatus } from "@tanstack/react-start/server";
-import { loadActor } from "./actor.ts";
-import { ACTOR_HEADER, ApiError } from "./api.ts";
+import { actorHeaders } from "./actor.ts";
+import { ApiError } from "./api.ts";
 import type { RequestContext } from "./context.ts";
 import { publicOnly } from "./middleware.ts";
 import { actorOf, serverFnFailure } from "./server/core.ts";
@@ -24,10 +24,7 @@ const actor = createMiddleware().server(({ request, context, next }) =>
 );
 
 /** The page's half: sends the name this browser keeps, URI-encoded so any name fits in a header. */
-const actorHeader = createMiddleware({ type: "function" }).client(({ next }) => {
-  const name = loadActor();
-  return next(name ? { headers: { [ACTOR_HEADER]: encodeURIComponent(name) } } : {});
-});
+const actorHeader = createMiddleware({ type: "function" }).client(({ next }) => next({ headers: actorHeaders() }));
 
 /**
  * Start sends any other error to the browser as its message alone, so an ApiError gets its own

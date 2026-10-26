@@ -26,6 +26,8 @@ import {
 import {
   getActor,
   getAvailableConnectors,
+  getChat,
+  getChats,
   getConfig,
   getCredentials,
   getDriftReport,
@@ -256,6 +258,15 @@ export const goLiveProgressQuery = () =>
 
 /** The vendor's credential statuses, if its drivers declare any: for `select`. */
 export const credentialsFor = (vendor: string) => (all: CredentialsResponse) => all[vendor];
+
+/** The person's chats, newest first (the chat column's list), under `CHATS_KEY`. */
+export const CHATS_KEY = ["chats"] as const;
+export const chatsQuery = () => queryOptions({ queryKey: CHATS_KEY, queryFn: () => getChats() });
+
+/** A chat with its transcript as stored, read when the chat column opens it. */
+export const chatQuery = (id: string) =>
+  // useChat holds the transcript once open: read again when the chat is opened, not on focus.
+  queryOptions({ queryKey: [...CHATS_KEY, id], queryFn: () => getChat({ data: { id } }), refetchOnWindowFocus: false });
 
 /**
  * Who the server says is asking. A login lasts the page's life; the header name is kept in the

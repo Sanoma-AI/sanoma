@@ -155,6 +155,7 @@ export {
   type Source,
 } from "./source.ts";
 export type { HostCapabilities, HostLifetime, HostOutputs, HostSpec } from "./host.ts";
+export type { Chat, Chats } from "./chats.ts";
 export {
   checkWakeup,
   type DeclaredWakeup,
