@@ -1,0 +1,24 @@
+# The unpacked app (`pnpm --filter @sanoma-ai/desktop dist:dir`); packaging, release and updates come later (#286 D3).
+appId: ai.sanoma.desktop
+productName: Sanoma
+asar: true
+# No native modules: the shell has no runtime dependencies to rebuild.
+npmRebuild: false
+directories:
+  output: release
+files:
+  - dist/**/*
+  - "!dist/**/*.map"
+  - start/**/*
+  - package.json
+extraResources:
+  # stage/ is filled by scripts/stage.ts: the pinned Node for the build's architecture, and pnpm.
+  - from: stage/node-${arch}
+    to: node
+  - from: stage/pnpm
+    to: pnpm
+electronFuses:
+  runAsNode: true
+mac:
+  category: public.app-category.business
+  target: dir
