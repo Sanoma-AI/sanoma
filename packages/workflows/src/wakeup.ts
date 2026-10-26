@@ -141,4 +141,6 @@ export interface DeclaredWakeup {
   declared: DeclaredResource;
   /** The vendor's id of the object the lockfile binds it to; absent when unbound. */
   binding?: string;
+  /** The declared host its `inputs.host` names: its declaration's id and its type, a host's (`checkWakeupOps`). */
+  host?: { id: string; type: Resource };
 }

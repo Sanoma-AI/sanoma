@@ -51,5 +51,10 @@ export interface TestWorkerOptions extends WorkerOptions {
  * in `afterAll`.
  */
 export function startTestWorker(config: SanomaConfig, { databaseUrl, ...options }: TestWorkerOptions): Promise<Worker> {
-  return startWorker({ ...config, databaseUrl, ledger: config.ledger ?? memoryLedger() }, options);
+  return startWorker(testWorkerConfig(config, databaseUrl), options);
+}
+
+/** A test worker's config, as `startTestWorker` gives it: on `databaseUrl`, `ledger` a fresh in-memory one by default. */
+export function testWorkerConfig(config: SanomaConfig, databaseUrl: string): SanomaConfig {
+  return { ...config, databaseUrl, ledger: config.ledger ?? memoryLedger() };
 }

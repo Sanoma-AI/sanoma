@@ -18,6 +18,8 @@ import {
   type SanomaConfig,
   type SelfStop,
   shouldWake,
+  superviseWorker,
+  type Supervisor,
   type WakeupSpec,
   withSetup,
   type Worker,
@@ -470,5 +472,90 @@ describe("the stop rule", () => {
     await app.start({ stopCheckMs: 60_000 });
     await app.client.decide(runId, { decision: "approve", by: { id: "lead" } });
     expect(await app.client.result(runId)).toBe("asked");
+  });
+});
+
+describe("the supervisor", () => {
+  const app = useWorker("deadlines_supervisor", { "resources/infra.ts": WAKEUP_FILE });
+  const fast = { stopCheckMs: 100, idleHorizonMs: 1_000, quiet: true };
+  let supervisor: Supervisor | undefined;
+  afterEach(async () => {
+    await supervisor?.stop();
+    supervisor = undefined;
+  });
+
+  it("starts a fresh worker on a wake of the generation it stopped with, never a stale one", async () => {
+    const stops: SelfStop[] = [];
+    const runId = await app.client.start(nap, { seconds: 2 }, { startedBy: alice });
+    supervisor = await superviseWorker(app.config, { ...fast, onStopped: (s) => stops.push(s) });
+    expect(supervisor.stopped).toBe(false);
+    await waitFor(() => stops.length === 1);
+    expect(supervisor.stopped).toBe(true);
+    await supervisor.wake(stops[0]!.generation - 1);
+    expect(supervisor.stopped).toBe(true);
+    await supervisor.wake(stops[0]!.generation);
+    expect(supervisor.stopped).toBe(false);
+    // A wake while it runs starts nothing more.
+    await supervisor.wake(stops[0]!.generation);
+    expect(await app.client.result(runId)).toBe("rested");
+    // Nothing left: it stops again, with no deadline.
+    await waitFor(() => stops.length === 2);
+    expect(stops[1]!.at).toBeNull();
+    await supervisor.stop();
+    expect(supervisor.stopped).toBe(false);
+    await supervisor.resume();
+    expect(supervisor.stopped).toBe(false);
+  });
+
+  it("starts a fresh worker on a client's write, never its read, and again at once after a write it heard starting", async () => {
+    const stops: SelfStop[] = [];
+    // Whether the supervisor said stopped as it told each stop.
+    const said: boolean[] = [];
+    supervisor = await superviseWorker(app.config, {
+      ...fast,
+      onStopped: (s) => {
+        stops.push(s);
+        said.push(supervisor!.stopped);
+      },
+    });
+    const writes: number[] = [];
+    const client = await SanomaClient.connect(app.config, {
+      onWrite: () => {
+        writes.push(Date.now());
+        void supervisor!.resume();
+      },
+    });
+    try {
+      await waitFor(() => stops.length === 1);
+      await client.runs();
+      expect(writes).toEqual([]);
+      expect(supervisor.stopped).toBe(true);
+
+      // A start resumes it; the run waits for an approval, and the decision is a write too.
+      const runId = await client.start(ask, {}, { startedBy: alice });
+      expect(writes).toHaveLength(1);
+      expect(supervisor.stopped).toBe(false);
+      // A write heard while it starts (the one above started it): once it stops itself, it starts
+      // again at once, and stops again.
+      await supervisor.resume();
+      await waitFor(async () => (await client.approvals(runId)).some((a) => a.status === "pending"));
+      await waitFor(() => stops.length === 2);
+      await waitFor(() => stops.length === 3);
+      // The stop after the heard write was told with a fresh worker already starting.
+      expect(said).toEqual([true, false, true]);
+      await client.decide(runId, { decision: "approve", by: { id: "lead" } });
+      expect(writes).toHaveLength(2);
+      expect(await client.result(runId)).toBe("asked");
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("keeps the worker running, idle past its horizon, with selfStop false", async () => {
+    const stops: SelfStop[] = [];
+    supervisor = await superviseWorker(app.config, { ...fast, selfStop: false, onStopped: (s) => stops.push(s) });
+    await new Promise((r) => setTimeout(r, 2_000));
+    expect(stops).toEqual([]);
+    expect(supervisor.stopped).toBe(false);
   });
 });

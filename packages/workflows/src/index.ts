@@ -136,6 +136,7 @@ export { ApprovalMessage, APPROVALS_EVENT, decisionEventOf } from "./approvals.t
 export { RUNTIME_VERSION } from "./version.ts";
 export type { RunArgs } from "./run.ts";
 export { startWorker, type Worker, type WorkerOptions } from "./worker.ts";
+export { superviseWorker, type Supervisor, type SupervisorOptions } from "./supervisor.ts";
 export type { DeadlineSource, Deadlines, SelfStop, Wait } from "./deadlines.ts";
 // Whether a wake is the one the instance's worker last registered, for the `/wake` route.
 export { shouldWake } from "./db.ts";
@@ -171,6 +172,7 @@ export {
 } from "./wakeup.ts";
 export {
   type CallOptions,
+  type ClientOptions,
   SanomaClient,
   type RunsFilter,
   type RunSummary,

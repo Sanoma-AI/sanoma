@@ -12,8 +12,8 @@ import {
 import { describeConfig } from "@sanoma-ai/workflows/describe";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { testDatabaseUrl, waitFor } from "../src/index.ts";
-import { fakeHost, hostCheck, hostCheckWorkflows, inProcessHost } from "../src/host.ts";
-import { checkWakeup, fakeWakeup, fakeWakeupType } from "../src/wakeup.ts";
+import { fakeHost, hostCheck, inProcessHost } from "../src/host.ts";
+import { checkWakeup, fakeWakeup, fakeWakeupType, wakeupCheckWorkflows } from "../src/wakeup.ts";
 
 // Needs Postgres: `pnpm db:up`. The wakeup kit against the fake wakeup, waking a host in this
 // process behind the proxy of a host that stops: its runtime stops, and the wake starts it.
@@ -29,8 +29,10 @@ const call = (opId: string): CallContext => ({
 
 describe("the wakeup conformance kit", () => {
   const root = mkdtempSync(join(tmpdir(), "sanoma-wakeup-kit-"));
+  // An app of its own each run: its schedule is new, so no tick of an earlier run's is fired.
+  writeFileSync(join(root, "package.json"), JSON.stringify({ name: `wakeup-kit-${Date.now()}` }));
   const config: SanomaConfig = {
-    workflows: [...hostCheckWorkflows],
+    workflows: [...wakeupCheckWorkflows],
     connectors: [hostCheck],
     root,
     ledger: memoryLedger(),
@@ -69,7 +71,7 @@ describe("the wakeup conformance kit", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  it("passes every check against the fake wakeup and a host that stops", { timeout: 180_000 }, async () => {
+  it("passes every check against the fake wakeup and a host that stops", { timeout: 300_000 }, async () => {
     const results = await checkWakeup({
       type: fakeWakeupType,
       host: { url, stop: () => host.stop(), wakes: () => host.wakes() },
@@ -81,6 +83,7 @@ describe("the wakeup conformance kit", () => {
       { name: "a registered wake arrives after `at`", ok: true },
       { name: "a wake registered before a stop drains a queued run after it", ok: true },
       { name: "a replaced generation runs nothing", ok: true },
+      { name: "a wake at a schedule's next fire, while the host is stopped, runs that tick", ok: true },
     ]);
   });
 
@@ -143,10 +146,14 @@ describe("fakeWakeup", () => {
       databaseUrl,
     };
     expect(describeConfig(config).problems).toEqual([]);
-    expect(await declaredWakeup(config)).toMatchObject({
+    const declared = await declaredWakeup(config);
+    expect(declared).toMatchObject({
       id: "resources/infra.ts#wake",
       declared: { vendor: "testwakeup", type: "timer", desired: { name: "wake", host: "company" } },
+      host: { id: "resources/infra.ts#app" },
     });
+    // The host it names, by its type: the lifetime `sanoma serve`'s exit rule reads.
+    expect(declared?.host?.type.host?.capabilities.lifetime).toBe("long-lived");
     rmSync(root, { recursive: true, force: true });
   });
 });

@@ -1,11 +1,14 @@
+import { setTimeout as delay } from "node:timers/promises";
 import {
   defineConnector,
   defineDriver,
   defineResource,
+  defineWorkflow,
   type Driver,
   type PlanAction,
   DriverError,
   errorMessage,
+  nextFire,
   type Resource,
   type SanomaClient,
   type WakeupRegistration,
@@ -13,13 +16,33 @@ import {
 } from "@sanoma-ai/workflows";
 import { z } from "zod";
 import { waitFor } from "./build.ts";
-import type { HostCheck, Wake } from "./host.ts";
+import { type HostCheck, hostCheckWorkflows, type Wake } from "./host.ts";
 
 // The conformance kit for the `Wakeup` contract: whether a wakeup type wakes a stopped host when
 // the runtime asked it to, and only then. `checkWakeup` registers wakes through the type's
 // register operation and watches the `/wake` requests the host answers. `fakeWakeup` is a
 // wakeup in this process, for the kit's own tests and for building against the contract before
 // a real wakeup lands.
+
+/** The schedule of `wakeupCheckWorkflows`' `wakeup-check-tick`: every minute, the most often a cron fires. */
+const TICK = "* * * * *";
+
+/**
+ * The workflows the checks start or wait for, which the host's config registers: the host
+ * checks' (`hostCheckWorkflows`), and `wakeup-check-tick`, on a schedule of every minute. Give
+ * the host's root a `package.json` naming an app of its own for each run of the checks: DBOS
+ * fires every tick an app's schedule missed since it last fired.
+ */
+export const wakeupCheckWorkflows = [
+  ...hostCheckWorkflows,
+  defineWorkflow({
+    name: "wakeup-check-tick",
+    trigger: { schedule: TICK },
+    input: z.object({}),
+    uses: [],
+    run: async () => ({ ticked: true }),
+  }),
+] as const;
 
 /** A declared wakeup under test, the host it wakes, and how to drive it. */
 export interface WakeupUnderTest {
@@ -33,16 +56,16 @@ export interface WakeupUnderTest {
     /** Each `GET /wake?generation=N` the host answered so far, across its stops, in order. */
     wakes(): readonly Wake[];
   };
-  /** A client on the host's database, its config with `hostCheckWorkflows` (`@sanoma-ai/testing/host`). */
+  /** A client on the host's database, its config with `wakeupCheckWorkflows`. */
   client: SanomaClient;
   /** Calls the type's register operation (`wakeup.register`) through its driver. */
   register(registration: WakeupRegistration): Promise<void>;
   /**
-   * The generation the checks count up from: they register `from + 1` to `from + 4`. Default 0;
+   * The generation the checks count up from: they register `from + 1` to `from + 5`. Default 0;
    * against a wakeup that keeps the last generation it took, one above it.
    */
   from?: number;
-  /** How long a check waits for a wake or a run. Default 60 s. */
+  /** How long a check waits for a wake or a run, besides the minute it may wait for a schedule's tick. Default 60 s. */
   timeoutMs?: number;
 }
 
@@ -54,10 +77,11 @@ const startedBy = { id: "wakeup-check" };
 /**
  * Runs the conformance checks against a wakeup, in order, each on its own (one failing goes on
  * to the next): a registered wake arrives at the host after its `at`; a wake registered before
- * the host stops starts it, and a run queued while it was stopped drains; and a registration
+ * the host stops starts it, and a run queued while it was stopped drains; a registration
  * replaced by a newer generation is never sent, nor one that arrives again after it (registration
- * is at least once). Each registers its own generation (`from` + 1, + 2, then + 3 and + 4) and
- * reads only the wakes the host answered since it began.
+ * is at least once); and a wake registered for a schedule's next fire, which falls while the
+ * host is stopped, runs that tick. Each registers its own generation (`from` + 1, + 2, then + 3
+ * and + 4, then + 5) and reads only the wakes the host answered since it began.
  */
 export async function checkWakeup(w: WakeupUnderTest): Promise<WakeupCheck[]> {
   const { type, host, client, from = 0, timeoutMs = 60_000 } = w;
@@ -102,7 +126,6 @@ export async function checkWakeup(w: WakeupUnderTest): Promise<WakeupCheck[]> {
     await arrived(begun, 2);
     // Throws the run's error, or that it has not ended in time.
     await client.result(runId, timeoutMs);
-    // TODO(L1, #311): and fires a due schedule, once the worker runs workflows on a schedule.
   });
   await check("a replaced generation runs nothing", async (begun) => {
     await register(3, 2_000);
@@ -116,6 +139,30 @@ export async function checkWakeup(w: WakeupUnderTest): Promise<WakeupCheck[]> {
         `generation ${from + 3}, replaced by ${from + 4}, woke the host at ${replaced[0]!.at.toISOString()}`,
       );
     }
+  });
+  await check("a wake at a schedule's next fire, while the host is stopped, runs that tick", async (begun) => {
+    // The tick's run, as the ledger records the time it was for; any tick's without `at`.
+    const tickRun = async (at?: Date) => {
+      // The newest first: the tick waited for is among the last few.
+      const runs = await client.runs({ workflow: "wakeup-check-tick", limit: at ? 10 : 1 });
+      if (!at) return runs[0];
+      const starts = await Promise.all(runs.map(async (run) => (await client.ledger(run.runId))[0]));
+      return runs.find((_, i) => {
+        const started = starts[i];
+        return started?.type === "run.started" && started.scheduledFor === at.toISOString();
+      });
+    };
+    // DBOS fires a tick missed while the host was stopped from the schedule's last fire, so one
+    // fires first, while the host runs (once a minute).
+    await waitFor(() => tickRun(), Boolean, 60_000 + timeoutMs);
+    await host.stop();
+    // At least two seconds on, so the host is stopped before it falls.
+    const tick = nextFire(TICK, "UTC", new Date(Date.now() + 2_000));
+    await register(5, tick.getTime() - Date.now());
+    await delay(Math.max(0, tick.getTime() - Date.now()));
+    await arrived(begun, 5);
+    const run = await waitFor(() => tickRun(tick), Boolean, timeoutMs);
+    await client.result(run!.runId, timeoutMs);
   });
   return results;
 }
@@ -192,14 +239,15 @@ const MAX_DELAY_MS = 2 ** 31 - 1;
  * the one timer it created (apply's `create`), replacing any armed before unless it is of the same or an
  * older generation (which changes nothing), which sends
  * `GET {host}/wake?generation=N` at `at`, again every 250 ms until the host answers 2xx. `fire()`
- * sends the armed wake now; `close()` disarms it. `connector` is for a config; `driver` for
- * calling its operations directly.
+ * sends the armed wake now; `registered()` lists the registrations it took; `close()` disarms
+ * it. `connector` is for a config; `driver` for calling its operations directly.
  */
 export function fakeWakeup() {
   const timers = new Map<string, z.output<typeof timerSchema>>();
   let armed: { registration: WakeupRegistration; url: string; timeout?: NodeJS.Timeout; sending?: boolean } | undefined;
   /** The newest generation registered: it again, or an older one (a late retry), changes nothing. */
   let newest = -1;
+  const registrations: WakeupRegistration[] = [];
   const disarm = () => {
     clearTimeout(armed?.timeout);
     armed = undefined;
@@ -268,6 +316,7 @@ export function fakeWakeup() {
         }
         if (registration.generation <= newest) return {};
         newest = registration.generation;
+        registrations.push(registration);
         disarm();
         const pending = (armed = { registration, url: only.host });
         void send(pending);
@@ -288,6 +337,8 @@ export function fakeWakeup() {
       void send(pending);
       await waitFor(() => armed !== pending, Boolean, 60_000);
     },
+    /** Each registration it took, in order: one of a generation it had seen is not. */
+    registered: (): readonly WakeupRegistration[] => registrations,
     /** Disarms the armed wake, if any. */
     close: disarm,
   };

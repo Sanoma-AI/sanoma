@@ -40,6 +40,7 @@ import { sourceDriver, sourceOps } from "./source.ts";
 import type { Steps } from "./steps.ts";
 import { checkSchedule } from "./schedules.ts";
 import { computeVersion } from "./version.ts";
+import type { DeclaredResource } from "./resources.ts";
 import { checkWakeupOps, type DeclaredWakeup } from "./wakeup.ts";
 
 /**
@@ -415,12 +416,19 @@ export async function declaredWakeup(config: SanomaConfig): Promise<DeclaredWake
   if (![...types.values()].some((type) => type.wakeup)) return undefined;
   // Loaded when it is needed, not with the worker: the reader parses with oxc-parser.
   const { readDataFiles } = await import("./resources.ts");
-  for (const declared of readDataFiles(rootOf(config), connectors, types).resources) {
-    const type = types.get(`${declared.vendor}.${declared.type}`)!;
-    if (type.wakeup)
-      return { id: declared.id, type, declared, ...(declared.binding !== undefined && { binding: declared.binding }) };
-  }
-  return undefined;
+  const { resources } = readDataFiles(rootOf(config), connectors, types);
+  const typeOf = (r: DeclaredResource) => types.get(`${r.vendor}.${r.type}`)!;
+  const declared = resources.find((r) => typeOf(r).wakeup);
+  if (!declared) return undefined;
+  const type = typeOf(declared);
+  const host = resources.find((r) => r.id === declared.refs[type.wakeup!.inputs.host]);
+  return {
+    id: declared.id,
+    type,
+    declared,
+    ...(declared.binding !== undefined && { binding: declared.binding }),
+    ...(host && { host: { id: host.id, type: typeOf(host) } }),
+  };
 }
 
 /**

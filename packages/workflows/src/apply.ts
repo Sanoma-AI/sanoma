@@ -178,21 +178,28 @@ function inDependencyOrder<T extends { id: string; refs: Record<string, string> 
 /**
  * What a change operation is given of a declaration: its fields, where it names a resource the
  * vendor may hold by another field (`by`, as a repository's node id), that resource's binding id
- * when it has one, made in this run or before.
+ * when it has one, made in this run or before; a wakeup's `host`, the URL its host answers at
+ * (`urls`, by the host's declared id) once its state says.
  */
 function desiredOf(
   r: Declaration,
   types: ReadonlyMap<string, Resource>,
   bindings: Bindings,
   hosts: ReadonlyMap<string, { source: string; revision: string }>,
+  urls: ReadonlyMap<string, string>,
 ): State {
-  const { fields, host } = types.get(`${r.vendor}.${r.type}`)!;
+  const { fields, host, wakeup } = types.get(`${r.vendor}.${r.type}`)!;
   const { references = {} } = fields;
   const out = structuredClone(r.desired);
   for (const [at, target] of Object.entries(r.refs)) {
     const bound = bindings[target]?.id;
     const place = holderOf(out, at);
     if (references[fieldPathOf(at)]?.by?.length && bound !== undefined && place) place.holder[place.key] = bound;
+  }
+  if (wakeup) {
+    const url = urls.get(r.refs[wakeup.inputs.host] ?? "");
+    const named = holderOf(out, wakeup.inputs.host);
+    if (url && named) named.holder[named.key] = url;
   }
   // A host is given its source's clone URL and the commit its ref names now.
   const run = hosts.get(r.id);
@@ -406,7 +413,8 @@ function messageOf(step: PlanStep, before: Binding | undefined, after: Binding |
  * and right after one that changes a binding, the lockfile written and committed
  * (`steps.write`), so an object made is never left unbound. An update is given the plan's action
  * and replace (`expect`), and refuses (`plan_changed`) when the vendor now plans otherwise; a
- * reference to a resource made in this run is given its new binding. A failed step is reported
+ * reference to a resource made in this run is given its new binding, and a wakeup's `host` the
+ * URL its host's state gives (`outputs(state).url`), found or made in this run. A failed step is reported
  * and the run goes on; a failure that ends the run (`isRunControlError`) ends it.
  */
 export function applyWorkflow(
@@ -467,6 +475,16 @@ export function applyWorkflow(
           }
         }
       }
+      // Where each declared host answers, as its state says, found now or made below: a wakeup is given it.
+      const urls = new Map<string, string>();
+      const answersAt = (r: Declaration, state: State) => {
+        const url = types.get(`${r.vendor}.${r.type}`)?.host?.outputs(state).url;
+        if (url) urls.set(r.id, url);
+      };
+      for (const resource of resources) {
+        const now = found.get(resource.id);
+        if (now && "state" in now) answersAt(resource, now.state);
+      }
       // A host wanted runs the commit its ref names now, resolved before planning: a merge is a change
       // to it. One bound by the input needs none.
       const revisions = new Map<string, Revision>();
@@ -492,7 +510,7 @@ export function applyWorkflow(
         }
       }
       const drift = new Map(compare(types, resources, found, revisions).map((result) => [result.id, result]));
-      const desired = new Map(resources.map((r) => [r.id, desiredOf(r, types, locked, hosts)]));
+      const desired = new Map(resources.map((r) => [r.id, desiredOf(r, types, locked, hosts, urls)]));
 
       const planned: PlanStep[] = [];
       for (const resource of inDependencyOrder(resources).filter((r) => wanted(r.id))) {
@@ -546,7 +564,7 @@ export function applyWorkflow(
         try {
           if (todo === "create") {
             const made = await ctx[step.vendor]![step.type]!.create({
-              desired: desiredOf(declared!, types, bindings, hosts),
+              desired: desiredOf(declared!, types, bindings, hosts, urls),
             });
             bindings[key] = { type, id: made.id };
             state = made.state;
@@ -554,7 +572,7 @@ export function applyWorkflow(
             const expect = { action: step.action, replace: step.replace };
             const changed = await ctx[step.vendor]![step.type]!.update({
               id: binding,
-              desired: desiredOf(declared!, types, bindings, hosts),
+              desired: desiredOf(declared!, types, bindings, hosts, urls),
               expect,
             });
             bindings[key] = { type, id: changed.id };
@@ -564,6 +582,7 @@ export function applyWorkflow(
             delete bindings[key];
           } else if (todo === "bind") bindings[key] = { type, id: binding };
           else if (todo === "forget") delete bindings[key];
+          if (state && declared) answersAt(declared, state);
           const after = bindings[key];
           if (after?.id !== before?.id) {
             const wrote = await steps.write(key, after, messageOf(step, before, after));

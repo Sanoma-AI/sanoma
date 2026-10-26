@@ -160,6 +160,16 @@ export interface CallOptions {
   id?: string;
 }
 
+/** What `SanomaClient.connect` is given besides the config. */
+export interface ClientOptions {
+  /**
+   * Called, never awaited, right before each change a worker must run: a run's start (drift,
+   * apply and a held call are starts) and an approval's decision; never for a read. A process that
+   * runs a worker that stops when idle starts it again with it (`Supervisor.resume`). Must not throw.
+   */
+  onWrite?: () => void;
+}
+
 /** Talks to the runtime from another process (the app, a script), through the shared Postgres. */
 export class SanomaClient {
   private readonly dbos: DBOSClient;
@@ -173,11 +183,18 @@ export class SanomaClient {
   private readonly storedSecrets: Secrets;
   /** The operator agent's chats: their rows and their transcripts, in the config's database. */
   readonly chats: Chats;
+  private readonly options: ClientOptions;
 
-  private constructor(dbos: DBOSClient, config: ResolvedConfig, drivers: ReadonlyMap<string, Driver>) {
+  private constructor(
+    dbos: DBOSClient,
+    config: ResolvedConfig,
+    drivers: ReadonlyMap<string, Driver>,
+    options: ClientOptions,
+  ) {
     this.dbos = dbos;
     this.config = config;
     this.drivers = drivers;
+    this.options = options;
     this.audit = ownedLedger(config);
     this.pool = lazyPool(config.databaseUrl, "client");
     this.storedSecrets = storedSecrets(() => this.db(), "sanoma");
@@ -189,10 +206,10 @@ export class SanomaClient {
    * what the worker would refuse. Reads ledgers from the config's ledger store, or from the
    * Postgres store on its database when it has none.
    */
-  static async connect(config: SanomaConfig): Promise<SanomaClient> {
+  static async connect(config: SanomaConfig, options: ClientOptions = {}): Promise<SanomaClient> {
     const resolved = resolveConfig(config);
     const dbos = await dbosClient(resolved.databaseUrl, resolved.appName);
-    return new SanomaClient(dbos, resolved, resolved.driversByVendor);
+    return new SanomaClient(dbos, resolved, resolved.driversByVendor, options);
   }
 
   /**
@@ -235,6 +252,7 @@ export class SanomaClient {
     const hold = await this.startHold(workflow.name, parsed, startedBy, runId);
     const args: RunArgs = { input, startedBy, ...(sandbox === undefined ? {} : { sandbox }), ...(hold && { hold }) };
     const { onBehalfOf } = startedBy;
+    this.options.onWrite?.();
     // An id DBOS has already returns that run, unless it is another workflow's, which DBOS refuses.
     const handle = await this.dbos
       .enqueue(
@@ -594,6 +612,7 @@ export class SanomaClient {
     // The id names this message, so the run's answer says whether it decided with it, and is
     // in its idempotency key, so a retried send queues it once.
     const id = msg.id ?? randomUUID();
+    this.options.onWrite?.();
     await this.dbos.send(runId, { ...msg, id }, topicOf(target.id), messageKeyOf(target.id, id));
     // DBOSClient does not LISTEN for events: it polls, every 10 s unless told otherwise. A
     // running worker answers within moments, so poll often at first, then once a second.

@@ -1,6 +1,6 @@
 # packages/testing/test
 
-Tests for `@sanoma-ai/testing`. `harness.test.ts`, `scenarios.test.ts`, `host.test.ts` and `wakeup.test.ts` need Postgres (`pnpm db:up`).
+Tests for `@sanoma-ai/testing`. `harness.test.ts`, `scenarios.test.ts`, `host.test.ts`, `wakeup.test.ts` and `stack.test.ts` need Postgres (`pnpm db:up`).
 
 ## Contents
 
@@ -9,6 +9,7 @@ Tests for `@sanoma-ai/testing`. `harness.test.ts`, `scenarios.test.ts`, `host.te
 | [`fakes.test.ts`](fakes.test.ts)         | The connector fakes: idempotent replays, injected faults, `update` and a shared call log                                                                                                                                                                        |
 | [`harness.test.ts`](harness.test.ts)     | `useTestApp`: one config, so the client reads both runs across a restart                                                                                                                                                                                        |
 | [`host.test.ts`](host.test.ts)           | `checkHost` against `fakeHost` over `inProcessHost`, long-lived and `stops-when-quiet` (the two checks of a host that stops); the proxy kept across a stop, started again on the next request, and quiet after `quietAfterMs`                                   |
-| [`wakeup.test.ts`](wakeup.test.ts)       | `checkWakeup` against `fakeWakeup` over a `stops-on-exit` `fakeHost`; `fire()`, a wake sent again until the host answers, and the fake declared in a data file for the host it names                                                                            |
+| [`wakeup.test.ts`](wakeup.test.ts)       | `checkWakeup` against `fakeWakeup` over a `stops-on-exit` `fakeHost`, its schedule's tick among the checks; `fire()`, a wake sent again until the host answers, and the fake declared in a data file for the host it names                                      |
+| [`stack.test.ts`](stack.test.ts)         | Scale to zero on fakes: a `stops-on-exit` `fakeHost` over `inProcessHost`, `fakeWakeup` applied for it, a sleeping run and a schedule; the worker stops idle, the process stops, wakes start it and a fresh worker                                              |
 | [`scenarios.test.ts`](scenarios.test.ts) | `describeScenarios` on a fixture config, a file that does not load (run in a vitest of its own), and `runScenario`                                                                                                                                              |
 | [`fixtures/`](fixtures/)                 | A root with a config of the workflows package's announce workflow on the packages' connectors, a copy of its announce scenarios in `scenarios/`, a root with a broken feature file (`broken/scenarios/`), and the vitest config that runs `broken.scenarios.ts` |
