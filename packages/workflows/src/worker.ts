@@ -1,11 +1,10 @@
 import { DBOS, type ScheduledWorkflowFn } from "@dbos-inc/dbos-sdk";
-import { randomUUID } from "node:crypto";
 import { awaitApproval } from "./approvals.ts";
 import { buildCtx, decideStart, isInfrastructureError, startHoldOf } from "./call.ts";
 import { dbosStatusesOf } from "./client.ts";
 import { declaredWakeup, type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { storedSecrets, watchCredentials } from "./credentials.ts";
-import { claimWakeup, DBOS_DATABASE_OPTIONS, lazyPool, prepareDatabase } from "./db.ts";
+import { DBOS_DATABASE_OPTIONS, lazyPool, prepareDatabase } from "./db.ts";
 import { deadlineRegistry, type Deadlines, idle, onOwnQueue, type SelfStop, stopWhenIdle } from "./deadlines.ts";
 import type { WorkflowDefinition } from "./define.ts";
 import { credentialsOf, unconfigured, unconfiguredSummary } from "./env.ts";
@@ -85,8 +84,8 @@ export interface WorkerOptions {
   /**
    * Given, and with a wakeup declared, the worker stops itself when idle (`stopCheckMs`); without
    * it, nobody would start another, so it never does. Called once the worker has stopped itself, with the deadline it registered with the
-   * wakeup (null for none) and that registration's generation: a supervisor starts a fresh
-   * worker on the next request or wake (`shouldWake`), since a stopped one cannot launch again.
+   * wakeup (null for none): a supervisor starts a fresh worker on the next write or wake, since a
+   * stopped one cannot launch again.
    */
   onStopped?: (stopped: SelfStop) => void;
   /**
@@ -231,13 +230,10 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
       warn(`the policies do not hold, so every call and start is refused:\n  ${resolved.policyProblems.join("\n  ")}`);
     }
     if (wakeup && options.onStopped) {
-      const owner = randomUUID();
-      await claimWakeup(await secrets.db(), owner);
       const registerId = wakeup.type.wakeup!.register;
       stopRule = stopWhenIdle({
         // The row is one more of the runtime's tables: the secrets' pool, on the same database.
         db: () => secrets.db(),
-        owner,
         wakeup: wakeup.binding ?? wakeup.id,
         // `resolveConfig` checked the operation is the config's (`checkWakeupOps`).
         register: { op: resolved.ops.get(registerId)!, fn: resolved.drivers.get(registerId) },

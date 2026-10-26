@@ -53,18 +53,13 @@ export interface WakeupUnderTest {
     url: string;
     /** Stops the company's runtime as the host's lifetime does, the URL kept: the next request starts it. */
     stop(): Promise<void>;
-    /** Each `GET /wake?generation=N` the host answered so far, across its stops, in order. */
+    /** Each `GET /wake` the host answered so far, across its stops, in order. */
     wakes(): readonly Wake[];
   };
   /** A client on the host's database, its config with `wakeupCheckWorkflows`. */
   client: SanomaClient;
   /** Calls the type's register operation (`wakeup.register`) through its driver. */
   register(registration: WakeupRegistration): Promise<void>;
-  /**
-   * The generation the checks count up from: they register `from + 1` to `from + 5`. Default 0;
-   * against a wakeup that keeps the last generation it took, one above it.
-   */
-  from?: number;
   /** How long a check waits for a wake or a run, besides the minute it may wait for a schedule's tick. Default 60 s. */
   timeoutMs?: number;
 }
@@ -74,17 +69,21 @@ export type WakeupCheck = HostCheck;
 
 const startedBy = { id: "wakeup-check" };
 
+/** Throws when `wake` arrived before `at`. */
+const notBefore = (wake: Wake, at: Date, what = "the wake") => {
+  if (wake.at < at) throw new Error(`${what} arrived at ${wake.at.toISOString()}, before ${at.toISOString()}`);
+};
+
 /**
  * Runs the conformance checks against a wakeup, in order, each on its own (one failing goes on
  * to the next): a registered wake arrives at the host after its `at`; a wake registered before
  * the host stops starts it, and a run queued while it was stopped drains; a registration
- * replaced by a newer generation is never sent, nor one that arrives again after it (registration
- * is at least once); and a wake registered for a schedule's next fire, which falls while the
- * host is stopped, runs that tick. Each registers its own generation (`from` + 1, + 2, then + 3
- * and + 4, then + 5) and reads only the wakes the host answered since it began.
+ * replaced before its `at` never wakes the host, the one that replaced it does; and a wake
+ * registered for a schedule's next fire, which falls while the host is stopped, runs that tick.
+ * Each reads only the wakes the host answered since it began, and waits for the first.
  */
 export async function checkWakeup(w: WakeupUnderTest): Promise<WakeupCheck[]> {
-  const { type, host, client, from = 0, timeoutMs = 60_000 } = w;
+  const { type, host, client, timeoutMs = 60_000 } = w;
   if (!type.wakeup) {
     throw new Error(`${type.vendor}.${type.type} does not meet the Wakeup contract: it has no wakeup`);
   }
@@ -97,48 +96,37 @@ export async function checkWakeup(w: WakeupUnderTest): Promise<WakeupCheck[]> {
       results.push({ name, ok: false, error: errorMessage(err) });
     }
   };
-  /** Registers generation `from + n` for `inMs` from now; returns its `at`. */
-  const register = async (n: number, inMs: number) => {
+  /** Registers a wake `inMs` from now; returns its `at`. */
+  const register = async (inMs: number) => {
     const at = new Date(Date.now() + inMs);
-    await w.register({ at: at.toISOString(), generation: from + n });
+    await w.register({ at: at.toISOString() });
     return at;
   };
-  const since = (begun: Date, n: number) =>
-    host.wakes().filter((wake) => wake.generation === from + n && wake.at >= begun);
-  const arrived = async (begun: Date, n: number) => {
+  /** The first wake the host answered since `begun`. */
+  const arrived = async (begun: Date) => {
     const [wake] = await waitFor(
-      () => since(begun, n),
+      () => host.wakes().filter((answered) => answered.at >= begun),
       (wakes) => wakes.length > 0,
       timeoutMs,
     );
     return wake!;
   };
-
   await check("a registered wake arrives after `at`", async (begun) => {
-    const at = await register(1, 2_000);
-    const wake = await arrived(begun, 1);
-    if (wake.at < at) throw new Error(`the wake arrived at ${wake.at.toISOString()}, before ${at.toISOString()}`);
+    const at = await register(2_000);
+    notBefore(await arrived(begun), at);
   });
   await check("a wake registered before a stop drains a queued run after it", async (begun) => {
-    await register(2, 3_000);
+    await register(3_000);
     await host.stop();
     const runId = await client.start("host-check-drain", {}, { startedBy });
-    await arrived(begun, 2);
+    await arrived(begun);
     // Throws the run's error, or that it has not ended in time.
     await client.result(runId, timeoutMs);
   });
-  await check("a replaced generation runs nothing", async (begun) => {
-    await register(3, 2_000);
-    await register(4, 4_000);
-    // A late retry of the older registration: the newer one still stands.
-    await register(3, 2_000);
-    await arrived(begun, 4);
-    const replaced = since(begun, 3);
-    if (replaced.length) {
-      throw new Error(
-        `generation ${from + 3}, replaced by ${from + 4}, woke the host at ${replaced[0]!.at.toISOString()}`,
-      );
-    }
+  await check("a registration replaced before `at` never wakes the host", async (begun) => {
+    const replaced = await register(2_000);
+    const at = await register(5_000);
+    notBefore(await arrived(begun), at, `a wake (the replaced one, at ${replaced.toISOString()}?)`);
   });
   await check("a wake at a schedule's next fire, while the host is stopped, runs that tick", async (begun) => {
     // The tick's run, as the ledger records the time it was for; any tick's without `at`.
@@ -158,9 +146,9 @@ export async function checkWakeup(w: WakeupUnderTest): Promise<WakeupCheck[]> {
     await host.stop();
     // At least two seconds on, so the host is stopped before it falls.
     const tick = nextFire(TICK, "UTC", new Date(Date.now() + 2_000));
-    await register(5, tick.getTime() - Date.now());
+    await register(tick.getTime() - Date.now());
     await delay(Math.max(0, tick.getTime() - Date.now()));
-    await arrived(begun, 5);
+    await arrived(begun);
     const run = await waitFor(() => tickRun(tick), Boolean, timeoutMs);
     await client.result(run!.runId, timeoutMs);
   });
@@ -213,8 +201,8 @@ const timerRegister = defineConnector("testwakeup", {
     register: {
       effect: "write",
       idempotent: true,
-      description: "Wake the host at `at` with `generation`, replacing the wake registered before",
-      input: z.object({ at: z.iso.datetime(), generation: z.number().int().nonnegative() }),
+      description: "Wake the host at `at`, replacing the wake registered before",
+      input: z.object({ at: z.iso.datetime() }),
       output: z.object({}),
       target: () => "timer",
     },
@@ -236,17 +224,14 @@ const MAX_DELAY_MS = 2 ** 31 - 1;
 
 /**
  * A wakeup in this process: `testwakeup.timer` with a driver whose `register` arms one timer for
- * the one timer it created (apply's `create`), replacing any armed before unless it is of the same or an
- * older generation (which changes nothing), which sends
- * `GET {host}/wake?generation=N` at `at`, again every 250 ms until the host answers 2xx. `fire()`
- * sends the armed wake now; `registered()` lists the registrations it took; `close()` disarms
- * it. `connector` is for a config; `driver` for calling its operations directly.
+ * the one timer it created (apply's `create`), replacing any armed before (it keeps the last
+ * registration), which sends `GET {host}/wake` at `at`, again every 250 ms until the host answers
+ * 2xx. `fire()` sends the armed wake now; `registered()` lists the registrations it took;
+ * `close()` disarms it. `connector` is for a config; `driver` for calling its operations directly.
  */
 export function fakeWakeup() {
   const timers = new Map<string, z.output<typeof timerSchema>>();
   let armed: { registration: WakeupRegistration; url: string; timeout?: NodeJS.Timeout; sending?: boolean } | undefined;
-  /** The newest generation registered: it again, or an older one (a late retry), changes nothing. */
-  let newest = -1;
   const registrations: WakeupRegistration[] = [];
   const disarm = () => {
     clearTimeout(armed?.timeout);
@@ -265,7 +250,7 @@ export function fakeWakeup() {
     if (due > 0) return later(pending, due);
     pending.sending = true;
     const answered = await (async () => {
-      const res = await fetch(new URL(`/wake?generation=${pending.registration.generation}`, pending.url));
+      const res = await fetch(new URL("/wake", pending.url));
       return res.ok;
     })().catch(() => false);
     pending.sending = false;
@@ -314,8 +299,6 @@ export function fakeWakeup() {
             retryable: false,
           });
         }
-        if (registration.generation <= newest) return {};
-        newest = registration.generation;
         registrations.push(registration);
         disarm();
         const pending = (armed = { registration, url: only.host });
@@ -337,7 +320,7 @@ export function fakeWakeup() {
       void send(pending);
       await waitFor(() => armed !== pending, Boolean, 60_000);
     },
-    /** Each registration it took, in order: one of a generation it had seen is not. */
+    /** Each registration it took, in order. */
     registered: (): readonly WakeupRegistration[] => registrations,
     /** Disarms the armed wake, if any. */
     close: disarm,

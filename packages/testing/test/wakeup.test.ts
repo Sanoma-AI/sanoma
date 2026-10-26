@@ -47,7 +47,7 @@ describe("the wakeup conformance kit", () => {
       failNext = false;
       throw new Error("not up yet");
     },
-    { lifetime: "stops-on-exit" },
+    { lifetime: "stops-when-quiet" },
   );
   const wakeup = fakeWakeup();
   config.connectors.push(host.connector, wakeup.connector);
@@ -82,21 +82,16 @@ describe("the wakeup conformance kit", () => {
     expect(results).toEqual([
       { name: "a registered wake arrives after `at`", ok: true },
       { name: "a wake registered before a stop drains a queued run after it", ok: true },
-      { name: "a replaced generation runs nothing", ok: true },
+      { name: "a registration replaced before `at` never wakes the host", ok: true },
       { name: "a wake at a schedule's next fire, while the host is stopped, runs that tick", ok: true },
     ]);
   });
 
   it("fires the armed wake now, whatever its at", async () => {
     const before = host.wakes().length;
-    await timer("register")({ at: new Date(Date.now() + 3_600_000).toISOString(), generation: 9 });
+    await timer("register")({ at: new Date(Date.now() + 3_600_000).toISOString() });
     await wakeup.fire();
-    expect(
-      host
-        .wakes()
-        .slice(before)
-        .map((w) => w.generation),
-    ).toEqual([9]);
+    expect(host.wakes().slice(before)).toHaveLength(1);
   });
 
   it("sends a wake again until the host answers it", async () => {
@@ -104,10 +99,10 @@ describe("the wakeup conformance kit", () => {
     const before = host.wakes().length;
     // The runtime's next start fails once: the first wake gets a 502 from the proxy.
     failNext = true;
-    await timer("register")({ at: new Date().toISOString(), generation: 10 });
+    await timer("register")({ at: new Date().toISOString() });
     await waitFor(
       () => host.wakes().slice(before),
-      (wakes) => wakes.some((w) => w.generation === 10),
+      (wakes) => wakes.length > 0,
       30_000,
     );
     expect(failNext).toBe(false);
@@ -118,10 +113,7 @@ describe("fakeWakeup", () => {
   it("refuses to register before apply created its timer", async () => {
     const wakeup = fakeWakeup();
     await expect(
-      wakeup.driver.ops["timer.register"]!(
-        { at: new Date().toISOString(), generation: 1 },
-        call("testwakeup.timer.register"),
-      ),
+      wakeup.driver.ops["timer.register"]!({ at: new Date().toISOString() }, call("testwakeup.timer.register")),
     ).rejects.toThrow("testwakeup: register wakes the one timer apply created, not 0");
   });
 
@@ -152,7 +144,7 @@ describe("fakeWakeup", () => {
       declared: { vendor: "testwakeup", type: "timer", desired: { name: "wake", host: "company" } },
       host: { id: "resources/infra.ts#app" },
     });
-    // The host it names, by its type: the lifetime `sanoma serve`'s exit rule reads.
+    // The host it names, by its type.
     expect(declared?.host?.type.host?.capabilities.lifetime).toBe("long-lived");
     rmSync(root, { recursive: true, force: true });
   });

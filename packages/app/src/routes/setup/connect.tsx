@@ -46,7 +46,7 @@ const SETUP_STORE: CredentialStore = { set: setSetupTokenFn };
 
 /**
  * Going live, step 1: the GitHub App (or a token of your own), and the tokens of each vendor the
- * config declares (Supabase, Neon, Cloudflare, sanoma-ops: `SETUP_VENDORS`), and what is connected.
+ * config declares (Supabase, Neon, Cloudflare, a wakeup service: `SETUP_VENDORS`), and what is connected.
  */
 function ConnectPage() {
   const { github } = Route.useSearch();

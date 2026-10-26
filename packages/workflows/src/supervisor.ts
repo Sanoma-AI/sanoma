@@ -1,5 +1,4 @@
-import { resolveConfig, type SanomaConfig } from "./config.ts";
-import { shouldWake } from "./db.ts";
+import type { SanomaConfig } from "./config.ts";
 import type { SelfStop } from "./deadlines.ts";
 import { warn } from "./log.ts";
 import { errorMessage } from "./shared.ts";
@@ -21,10 +20,11 @@ export interface Supervisor {
    */
   resume(): Promise<void>;
   /**
-   * A wakeup's `GET /wake?generation=N`: `resume` when the worker stopped with `generation`
-   * registered (`shouldWake`); a no-op for any other, and while one starts or runs.
+   * A wakeup's `GET /wake`: `resume` when the worker stopped itself; a no-op while one starts or
+   * runs. A wake that arrives late, twice or for a replaced registration starts a worker that
+   * finds nothing to do and stops again on its own check.
    */
-  wake(generation: number): Promise<void>;
+  wake(): Promise<void>;
   /** Stops the worker running or starting, and starts none again. */
   stop(): Promise<void>;
 }
@@ -53,7 +53,6 @@ export async function superviseWorker(config: SanomaConfig, options: SupervisorO
   let closed = false;
   // A write while the worker starts or runs, since it began starting.
   let heard = false;
-  let databaseUrl: string | undefined;
 
   const launch = async () => {
     heard = false;
@@ -64,7 +63,7 @@ export async function superviseWorker(config: SanomaConfig, options: SupervisorO
   const selfStopped = (stopped: SelfStop) => {
     worker = undefined;
     if (closed) return;
-    // Resumed first, so `stopped` is false when `onStopped` (the exit rule) looks.
+    // Resumed first, so `stopped` is false when `onStopped` looks.
     if (heard) void supervisor.resume();
     onStopped?.(stopped);
   };
@@ -89,11 +88,7 @@ export async function superviseWorker(config: SanomaConfig, options: SupervisorO
           starting = undefined;
         }));
     },
-    async wake(generation) {
-      if (!supervisor.stopped) return;
-      databaseUrl ??= resolveConfig(config).databaseUrl;
-      if (await shouldWake(databaseUrl, generation)) await supervisor.resume();
-    },
+    wake: () => (supervisor.stopped ? supervisor.resume() : Promise.resolve()),
     async stop() {
       closed = true;
       await starting;

@@ -84,22 +84,22 @@ const wake = (method: string, { token = TOKEN, body }: { token?: string; body?: 
   });
 
 describe("the Worker's object", () => {
-  it("holds a wake only with the company's token, and only a newer generation", async () => {
+  it("holds a wake only with the company's token, each registration replacing the one before", async () => {
     const { ctx, storage, alarm, container } = stubCtx();
     const object = new Instance(ctx, ENV);
     expect((await object.fetch(wake("GET", { token: "swi_another" }))).status).toBe(401);
     const unset = await new Instance(ctx, { ...ENV, SANOMA_WAKEUP_TOKEN: undefined }).fetch(wake("GET"));
     expect(unset.status).toBe(404);
     expect(await unset.json()).toEqual({ error: expect.stringContaining("SANOMA_WAKEUP_TOKEN") });
-    expect(await (await object.fetch(wake("GET"))).json()).toEqual({ at: null, generation: 0 });
+    expect(await (await object.fetch(wake("GET"))).json()).toEqual({ at: null });
 
-    expect((await object.fetch(wake("PUT", { body: { at: "2099-01-01T00:00:00Z", generation: 2 } }))).status).toBe(204);
+    expect((await object.fetch(wake("PUT", { body: { at: "2099-01-01T00:00:00Z" } }))).status).toBe(204);
     expect(alarm()).toBe(Date.parse("2099-01-01T00:00:00Z"));
-    // A late retry of an older one changes nothing.
-    await object.fetch(wake("PUT", { body: { at: "2098-01-01T00:00:00Z", generation: 1 } }));
-    expect(await (await object.fetch(wake("GET"))).json()).toEqual({ at: "2099-01-01T00:00:00.000Z", generation: 2 });
-    expect(alarm()).toBe(Date.parse("2099-01-01T00:00:00Z"));
-    expect((await object.fetch(wake("PUT", { body: { at: "soon", generation: 3 } }))).status).toBe(400);
+    // The next replaces it, earlier or later.
+    await object.fetch(wake("PUT", { body: { at: "2098-01-01T00:00:00Z" } }));
+    expect(await (await object.fetch(wake("GET"))).json()).toEqual({ at: "2098-01-01T00:00:00.000Z" });
+    expect(alarm()).toBe(Date.parse("2098-01-01T00:00:00Z"));
+    expect((await object.fetch(wake("PUT", { body: { at: "soon" } }))).status).toBe(400);
 
     expect((await object.fetch(wake("DELETE"))).status).toBe(204);
     expect(storage.size).toBe(0);
@@ -180,19 +180,18 @@ describe("the Worker's object", () => {
     expect(container.start).not.toHaveBeenCalled();
   });
 
-  it("rings its alarm by starting the container and sending /wake with the generation", async () => {
+  it("rings its alarm by starting the container and sending /wake", async () => {
     const { ctx, sent } = stubCtx({
       answer: (r) => new Response(null, { status: new URL(r.url).pathname === "/wake" ? 204 : 200 }),
     });
     const object = new Instance(ctx, ENV);
     await object.alarm();
     expect(sent).toEqual([]);
-    await object.fetch(wake("PUT", { body: { at: "2000-01-01T00:00:00Z", generation: 7 } }));
+    await object.fetch(wake("PUT", { body: { at: "2000-01-01T00:00:00Z" } }));
     await object.alarm();
-    expect(sent.at(-1)!.url).toBe("http://container/wake?generation=7");
+    expect(sent.at(-1)!.url).toBe("http://container/wake");
     expect(await (await object.fetch(wake("GET"))).json()).toEqual({
       at: "2000-01-01T00:00:00.000Z",
-      generation: 7,
       rang: expect.stringMatching(/^\d{4}-/),
     });
   });
@@ -202,7 +201,7 @@ describe("the Worker's object", () => {
       answer: (r) => new Response(null, { status: new URL(r.url).pathname === "/wake" ? 503 : 200 }),
     });
     const object = new Instance(ctx, ENV);
-    await object.fetch(wake("PUT", { body: { at: "2000-01-01T00:00:00Z", generation: 1 } }));
+    await object.fetch(wake("PUT", { body: { at: "2000-01-01T00:00:00Z" } }));
     vi.spyOn(console, "error").mockImplementation(() => {});
     await expect(object.alarm()).rejects.toThrow("the container answered /wake with 503");
   });

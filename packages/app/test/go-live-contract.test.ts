@@ -2,7 +2,6 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { github } from "@sanoma-ai/connector-github";
-import { sanomaOps } from "@sanoma-ai/connector-sanoma-ops";
 import { supabase } from "@sanoma-ai/connector-supabase";
 import {
   type Connector,
@@ -122,7 +121,7 @@ const register = defineConnector("cloudflare", {
     register: {
       effect: "write",
       idempotent: true,
-      input: z.object({ at: z.string(), generation: z.number() }),
+      input: z.object({ at: z.string() }),
       output: z.object({}),
     },
   },
@@ -136,7 +135,7 @@ const docker = defineConnector(
   { container: hostOf("docker", "container", "long-lived", false) },
   { package: "@acme/docker" },
 );
-const fly = defineConnector("fly", { app: hostOf("fly", "app", "stops-on-exit", true) }, { package: "@acme/fly" });
+const fly = defineConnector("fly", { app: hostOf("fly", "app", "stops-when-quiet", true) }, { package: "@acme/fly" });
 
 /** Going live's context for a config, with `stored` the secrets the client says are stored. */
 function contextOf(connectors: Connector<any, any>[], stored: Record<string, string> = {}): AppContext {
@@ -155,7 +154,13 @@ function contextOf(connectors: Connector<any, any>[], stored: Record<string, str
 const choices = { name: "acme-ops", region: "aws-eu-central-1", size: "0.25", port: 8080 };
 /** The choices for a database that takes no size, as the page sends them. */
 const { size: _, ...unsized } = choices;
-const ALL = [github, supabase, neon, cloudflare, docker, sanomaOps];
+// Every config with a host type has the runtime's own wakeup, sanoma.wakeup, too.
+const ALL = [github, supabase, neon, cloudflare, docker];
+/** A wakeup service connected in /setup. */
+const SERVICE = {
+  SANOMA_WAKEUP_URL: "https://wakeup.example.test",
+  SANOMA_WAKEUP_ACCOUNT_TOKEN: `swa_${"a".repeat(43)}`,
+};
 
 describe("going live by contract", () => {
   it("chooses Neon's database over Supabase's, with its regions and a size, and Docker's host before Cloudflare is connected", async () => {
@@ -193,7 +198,7 @@ describe("going live by contract", () => {
     const app = contextOf(ALL, {
       CLOUDFLARE_API_TOKEN: "cf",
       CLOUDFLARE_ACCOUNT_ID: "acct",
-      SANOMA_OPS_TOKEN: `swa_${"a".repeat(43)}`,
+      ...SERVICE,
     });
     expect((await goLiveChoices(app)).host).toEqual({
       type: "cloudflare.container",
@@ -204,11 +209,11 @@ describe("going live by contract", () => {
     expect(text).toContain(
       `export const host = cloudflare.container({\n  name: "acme-ops",\n  image: "docker.io/sanomaai/runtime:9.9.9",\n`,
     );
-    // sanoma-ops wakes a Cloudflare container too: the host's own vendor's wakeup comes first.
+    // A wakeup service wakes a Cloudflare container too: the host's own vendor's wakeup comes first.
     expect(text).toContain(`export const wakeup = cloudflare.alarm({\n  host: host,\n});\n`);
     expect(text).toContain(`    SANOMA_WAKEUP_TOKEN: secret("SANOMA_WAKEUP_TOKEN"),\n  },\n`);
-    expect(text).not.toContain("SANOMA_OPS_URL");
-    expect(text).not.toContain("sanomaOps");
+    expect(text).not.toContain("SANOMA_WAKEUP_URL");
+    expect(text).not.toContain("sanoma.wakeup");
   });
 
   it("stays on Docker with Cloudflare's token but not its account, and refuses a host or a database the page did not show", async () => {
@@ -272,9 +277,9 @@ describe("going live by contract", () => {
   });
 
   it("says why no wakeup is declared when none connected wakes the host", async () => {
-    const app = contextOf([github, neon, fly, sanomaOps], { SANOMA_OPS_TOKEN: `swa_${"a".repeat(43)}` });
+    const app = contextOf([github, neon, fly], SERVICE);
     expect((await goLiveChoices(app)).errors).toEqual([
-      "No connected wakeup wakes a fly.app (Wakeup (sanomaOps.wakeup) wakes cloudflare.container, docker.container, testhost.app): going live declares none, and the host stays up",
+      "No connected wakeup wakes a fly.app (Wakeup (sanoma.wakeup) wakes cloudflare.container, docker.container, testhost.app): going live declares none, and the host stays up",
     ]);
     expect(await renderInfra(app, choices)).not.toContain("wakeup");
   });

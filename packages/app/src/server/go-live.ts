@@ -23,13 +23,12 @@ import {
   type GoLiveProgress,
   type GoLiveRequest,
   type GoLiveRun,
-  connectedBy,
   SETUP_VENDORS,
 } from "../api.ts";
 import type { AppContext } from "../context.ts";
 import { asApplyPlan } from "../lib/apply-plan.ts";
 import { invalid } from "./core.ts";
-import { GITHUB_APP, mintWakeupToken, OPS_URL } from "./setup.ts";
+import { GITHUB_APP, mintWakeupToken, WAKEUP_URL } from "./setup.ts";
 
 // Going live, steps 2 to 6 (step 1 is connect, in setup.ts): choose where the company goes,
 // write `resources/sanoma/infra.ts`, apply the repository and the database, push the local
@@ -103,13 +102,10 @@ const missingTypes = ({ resolved }: AppContext) => {
 
 /**
  * The secrets going live reads: GitHub's and Supabase's tokens (for the lists the page offers),
- * those that say which vendors are connected (`SETUP_VENDORS`' `connectedBy`), and the wakeup
- * service's URL.
+ * and those that say which vendors are connected (`SETUP_VENDORS`' tokens).
  */
 const connections = ({ client }: AppContext) =>
-  client.secrets([
-    ...new Set(["GITHUB_TOKEN", "SUPABASE_ACCESS_TOKEN", ...SETUP_VENDORS.flatMap(connectedBy), OPS_URL]),
-  ]);
+  client.secrets([...new Set(["GITHUB_TOKEN", "SUPABASE_ACCESS_TOKEN", ...SETUP_VENDORS.flatMap((v) => v.tokens)])]);
 type Connections = Awaited<ReturnType<typeof connections>>;
 
 /**
@@ -119,7 +115,7 @@ type Connections = Awaited<ReturnType<typeof connections>>;
  */
 const isConnected = (stored: Connections, vendor: string, strictly = false) => {
   const setup = SETUP_VENDORS.find((v) => v.vendor === vendor);
-  return setup ? connectedBy(setup).every((name) => stored.has(name)) : !strictly;
+  return setup ? setup.tokens.every((name) => stored.has(name)) : !strictly;
 };
 
 /**
@@ -285,7 +281,7 @@ export async function goLiveChoices(app: AppContext): Promise<GoLiveChoices> {
  * the config's wakeup types whose vendor `/setup` connected (`isConnected`, strictly), the one that wakes this
  * host's type (`wakeupHostTypes`), the host's own vendor's first. `type` is it, and `secrets` what
  * the host is given for it: the instance's token, which `goLive` mints first when none is stored,
- * and sanoma-ops's `SANOMA_OPS_URL` when one is. With connected wakeups but none for this host,
+ * and for `sanoma.wakeup` the service's `SANOMA_WAKEUP_URL`, where the worker registers. With connected wakeups but none for this host,
  * `cannot` says why, and none is declared. With none connected: no wakeup, and nothing to say.
  */
 function hostWakeup(
@@ -306,8 +302,11 @@ function hostWakeup(
       cannot: `No connected wakeup wakes a ${id} (${wakes.join("; ")}): going live declares none, and the host stays up`,
     };
   }
-  const opsUrl = type.vendor === "sanomaOps" && stored.has(OPS_URL);
-  return { type, secrets: { [WAKEUP_TOKEN]: secret(WAKEUP_TOKEN), ...(opsUrl && { [OPS_URL]: secret(OPS_URL) }) } };
+  const service = type.vendor === "sanoma";
+  return {
+    type,
+    secrets: { [WAKEUP_TOKEN]: secret(WAKEUP_TOKEN), ...(service && { [WAKEUP_URL]: secret(WAKEUP_URL) }) },
+  };
 }
 
 /**
@@ -355,7 +354,8 @@ export async function renderInfra(
     });
   }
   const constructors = (vendor: string) => {
-    const pkg = vendors[vendor]?.package;
+    // The runtime's own (`sanoma.wakeup`) is in no connector of the config's.
+    const pkg = vendor === "sanoma" ? "sanoma" : vendors[vendor]?.package;
     if (!pkg) throw new ApiError(409, { error: `The ${vendor} connector names no package to import from` });
     return { source: `${pkg}/resources`, imported: vendor, local: vendor };
   };

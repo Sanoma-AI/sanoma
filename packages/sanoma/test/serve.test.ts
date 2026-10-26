@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { UsageError } from "../src/config.ts";
-import { appOptions, parseDomains, quietExit, wakeRoute } from "../src/serve.ts";
+import { appOptions, parseDomains, wakeRoute } from "../src/serve.ts";
 
 /** Sets these variables for the test, and unsets the other launcher variables appOptions reads. */
 function environment(values: Record<string, string>) {
@@ -121,122 +121,38 @@ describe("appOptions", () => {
   });
 });
 
-type OnWake = (generation: number) => void;
+type OnWake = () => void | Promise<void>;
 
 /** `GET /wake<query>`, through `wakeRoute`. */
 const wake = (query: string, onWake?: OnWake, log = vi.fn<(line: string) => void>()) =>
   wakeRoute({ onWake, log }).handle(new Request(`http://127.0.0.1:3000/wake${query}`));
 
 describe("wakeRoute", () => {
-  it("answers GET /wake 204, never cached, and hands the generation to onWake, a stale one too", async () => {
+  it("answers GET /wake 204, never cached, and calls onWake each time, whatever the query", async () => {
     const onWake = vi.fn<OnWake>();
     expect(wakeRoute({ log: vi.fn<(line: string) => void>() })).toMatchObject({ method: "GET", path: "/wake" });
-    for (const generation of [7, 0, 3]) {
-      const res = await wake(`?generation=${generation}`, onWake);
+    for (const query of ["", "?generation=7", "?x"]) {
+      const res = await wake(query, onWake);
       expect(res.status).toBe(204);
       expect(res.headers.get("cache-control")).toBe("no-store");
     }
-    expect(onWake.mock.calls).toEqual([[7], [0], [3]]);
-    expect((await wake("?generation=1")).status).toBe(204);
-  });
-
-  it("answers 400, calling nothing, for a generation that is not a non-negative integer", async () => {
-    const onWake = vi.fn<OnWake>();
-    for (const query of ["", "?generation=", "?generation=-1", "?generation=1.5", "?generation=x", "?generation=1e3"]) {
-      const res = await wake(query, onWake);
-      expect(res.status, query).toBe(400);
-      expect(res.headers.get("cache-control")).toBe("no-store");
-    }
-    expect((await wake(`?generation=${"9".repeat(20)}`, onWake)).status).toBe(400);
-    expect(onWake).not.toHaveBeenCalled();
+    expect(onWake).toHaveBeenCalledTimes(3);
+    expect((await wake("")).status).toBe(204);
   });
 
   it("logs an onWake that throws or rejects, and still answers 204", async () => {
     const log = vi.fn<(line: string) => void>();
     const res = await wake(
-      "?generation=2",
+      "",
       () => {
         throw new Error("no worker");
       },
       log,
     );
     expect(res.status).toBe(204);
-    expect(log).toHaveBeenCalledWith("a wake of generation 2 failed: no worker");
-    const rejected = await wake("?generation=3", () => Promise.reject(new Error("still starting")), log);
+    expect(log).toHaveBeenCalledWith("a wake failed: no worker");
+    const rejected = await wake("", () => Promise.reject(new Error("still starting")), log);
     expect(rejected.status).toBe(204);
-    await vi.waitFor(() => expect(log).toHaveBeenCalledWith("a wake of generation 3 failed: still starting"));
-  });
-});
-
-describe("quietExit", () => {
-  it("exits once the worker has stopped and no request came for the quiet time, counted from the last", () => {
-    vi.useFakeTimers();
-    try {
-      let stopped = false;
-      const exit = vi.fn<() => void>();
-      const rule = quietExit({ quietMs: 10_000, stopped: () => stopped, exit });
-      // Running: the worker's stop is what looks.
-      vi.advanceTimersByTime(20_000);
-      rule.stopped();
-      expect(exit).not.toHaveBeenCalled();
-      stopped = true;
-      vi.advanceTimersByTime(5_000);
-      rule.request()();
-      rule.stopped();
-      vi.advanceTimersByTime(9_000);
-      // A page's poll moves the end of the quiet.
-      rule.request()();
-      vi.advanceTimersByTime(9_000);
-      expect(exit).not.toHaveBeenCalled();
-      vi.advanceTimersByTime(1_000);
-      expect(exit).toHaveBeenCalledTimes(1);
-      rule.stopped();
-      expect(exit).toHaveBeenCalledTimes(1);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("does not exit while a write has started the worker again, nor once closed", () => {
-    vi.useFakeTimers();
-    try {
-      let stopped = true;
-      const exit = vi.fn<() => void>();
-      const rule = quietExit({ quietMs: 10_000, stopped: () => stopped, exit });
-      rule.stopped();
-      stopped = false;
-      vi.advanceTimersByTime(60_000);
-      expect(exit).not.toHaveBeenCalled();
-      stopped = true;
-      rule.request()();
-      rule.stopped();
-      rule.close();
-      vi.advanceTimersByTime(60_000);
-      expect(exit).not.toHaveBeenCalled();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("does not exit while a request is open, and counts the quiet from its end", () => {
-    vi.useFakeTimers();
-    try {
-      const exit = vi.fn<() => void>();
-      const rule = quietExit({ quietMs: 10_000, stopped: () => true, exit });
-      // A stream of the agent's chat, open for a minute.
-      const ended = rule.request();
-      rule.stopped();
-      vi.advanceTimersByTime(60_000);
-      expect(exit).not.toHaveBeenCalled();
-      ended();
-      vi.advanceTimersByTime(9_000);
-      expect(exit).not.toHaveBeenCalled();
-      // Its end told twice counts once.
-      ended();
-      vi.advanceTimersByTime(1_000);
-      expect(exit).toHaveBeenCalledTimes(1);
-    } finally {
-      vi.useRealTimers();
-    }
+    await vi.waitFor(() => expect(log).toHaveBeenCalledWith("a wake failed: still starting"));
   });
 });

@@ -65,15 +65,15 @@ describe("a host type", () => {
     ["secrets that are not write-only", { writeOnly: [] }, /inputs\.secrets must be a write-only field/],
     ["a revision that is write-only", { writeOnly: ["env", "commit"] }, /revision must not be write-only/],
     [
-      "a lifetime it does not know",
-      { capabilities: { ...host.capabilities, lifetime: "forever" as never } },
+      "a lifetime it does not know (stops-on-exit, until a host that stops on exit)",
+      { capabilities: { ...host.capabilities, lifetime: "stops-on-exit" as never } },
       /lifetime/,
     ],
   ])("is refused with %s", (_, overrides, message) => {
     expect(() => hostOf(overrides)).toThrow(message);
   });
 
-  it.each(["long-lived", "stops-on-exit", "stops-when-quiet"] as const)("may be %s", (lifetime) => {
+  it.each(["long-lived", "stops-when-quiet"] as const)("may be %s", (lifetime) => {
     expect(hostOf({ capabilities: { ...host.capabilities, lifetime } }).host?.capabilities.lifetime).toBe(lifetime);
   });
 
@@ -213,7 +213,7 @@ describe("sanoma.source.resolve", () => {
       hosted.workflows
         .get(DRIFT_WORKFLOW)
         ?.uses.map((op: unknown) => (typeof op === "string" ? op : (op as { id: string }).id)),
-    ).toEqual(["testhost.app.import", SOURCE_RESOLVE]);
+    ).toEqual(["sanoma.wakeup.import", "testhost.app.import", SOURCE_RESOLVE]);
     // Not for a config without one.
     const db = defineResource({ vendor: "acme", type: "db", title: "Database", schema, fields });
     const plain = resolveConfig({

@@ -20,7 +20,6 @@ import {
   type GoLiveChoices,
   type GoLiveRequest,
   type GoLiveRun,
-  connectedBy,
   SETUP_VENDORS,
 } from "../../api.ts";
 import { ApplyPlanView } from "../../components/apply-plan.tsx";
@@ -66,11 +65,11 @@ function GoLivePage() {
   const { data: progress } = useSuspenseQuery(goLiveProgressQuery());
   const isSet = (name: string) => status.tokens.some((t) => t.name === name && t.status === "set");
   const github = status.githubApp !== null || isSet("GITHUB_TOKEN");
-  // The vendors the config asks tokens of, each connected once its `connectedBy` are stored.
+  // The vendors the config asks tokens of, each connected once its tokens are stored.
   const asked = new Set(status.tokens.map((t) => t.name));
   const vendors = SETUP_VENDORS.filter((v) => v.tokens.some((name) => asked.has(name))).map((v) => ({
     ...v,
-    connected: connectedBy(v).every(isSet),
+    connected: v.tokens.every(isSet),
   }));
   const { run, bound } = progress;
   const data = bound.repo && bound.store;

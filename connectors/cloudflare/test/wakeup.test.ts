@@ -28,7 +28,7 @@ import { cloudflare } from "../src/index.ts";
 const ALL_PASS = [
   { name: "a registered wake arrives after `at`", ok: true },
   { name: "a wake registered before a stop drains a queued run after it", ok: true },
-  { name: "a replaced generation runs nothing", ok: true },
+  { name: "a registration replaced before `at` never wakes the host", ok: true },
   { name: "a wake at a schedule's next fire, while the host is stopped, runs that tick", ok: true },
 ];
 
@@ -86,7 +86,7 @@ describe("cloudflare.alarm meets the Wakeup contract on the fake", () => {
 
   it("passes every check", { timeout: 300_000 }, async () => {
     const made = (await op("alarm.create")({ desired: { host: url } })) as { id: string };
-    expect(made).toMatchObject({ id: url, state: { host: url, at: null, generation: 0, rang: null, healthy: true } });
+    expect(made).toMatchObject({ id: url, state: { host: url, at: null, rang: null, healthy: true } });
     const results = await checkWakeup({
       type: alarm,
       host: { url, stop: () => fake.stop("company"), wakes: () => fake.wakes() },
@@ -95,9 +95,9 @@ describe("cloudflare.alarm meets the Wakeup contract on the fake", () => {
       timeoutMs: 30_000,
     });
     expect(results).toEqual(ALL_PASS);
-    expect(await op("alarm.read")({ id: url })).toMatchObject({ state: { generation: 5, healthy: true } });
+    expect(await op("alarm.read")({ id: url })).toMatchObject({ state: { at: expect.any(String), healthy: true } });
     await op("alarm.delete")({ id: url });
-    expect(await op("alarm.read")({ id: url })).toMatchObject({ state: { at: null, generation: 0 } });
+    expect(await op("alarm.read")({ id: url })).toMatchObject({ state: { at: null } });
   });
 });
 

@@ -19,10 +19,9 @@ export const LEDGER_TABLE = "sanoma_ledger";
 /** Where the collections keep their records (`collection.ts`): one row per collection and key, the record as JSON. */
 export const DATA_TABLE = "sanoma_data";
 /**
- * The instance's side of its wakeup: one row, made with the table. `owner` is the worker that
- * registers, `generation` counts registrations up, `at` is the deadline registered, `stopped_at`
- * when the worker last stopped, `registered_at` when the wakeup last took one, `last_error` why
- * the last registration failed.
+ * The instance's side of its wakeup: one row, made with the table. `at` is the deadline last
+ * registered, `stopped_at` when the worker last stopped itself (the schedules backfill from it),
+ * `last_error` why the last registration failed.
  */
 export const WAKEUP_TABLE = "sanoma_wakeup";
 /** The operator agent's chats (`chats.ts`): who each is for, its engine and its draft. */
@@ -52,9 +51,8 @@ const TABLES: readonly [what: string, ddl: string][] = [
   ],
   [
     "wakeup",
-    `CREATE TABLE IF NOT EXISTS ${WAKEUP_TABLE} (id integer PRIMARY KEY CHECK (id = 1), owner uuid, ` +
-      "generation bigint NOT NULL DEFAULT 0, at timestamptz, stopped_at timestamptz, registered_at timestamptz, " +
-      `last_error text); INSERT INTO ${WAKEUP_TABLE} (id) VALUES (1) ON CONFLICT (id) DO NOTHING`,
+    `CREATE TABLE IF NOT EXISTS ${WAKEUP_TABLE} (id integer PRIMARY KEY CHECK (id = 1), at timestamptz, ` +
+      `stopped_at timestamptz, last_error text); INSERT INTO ${WAKEUP_TABLE} (id) VALUES (1) ON CONFLICT (id) DO NOTHING`,
   ],
   [
     "chats",
@@ -297,68 +295,20 @@ export async function createTable(db: Db, ddl: string, what: string): Promise<vo
   }
 }
 
-// The wakeup row's reads and writes. Every write after the claim names the owner: a worker
-// another process has replaced since (a second instance on the database) changes nothing.
+// The wakeup row's writes: one worker registers per instance (the supervisor runs one at a time,
+// and a deploy stops the old container before the new one starts), so none names a worker.
 
-// `at` is the deadline registered for the row's generation, null until one is: a new generation
-// (each start and each stop attempt) clears it, so a wake registered earlier is stale.
-
-/** Makes `owner` the worker that registers the instance's wakeups; a running worker needs no wake registered before. */
-export async function claimWakeup(db: Db, owner: string): Promise<void> {
-  await db.query(`UPDATE ${WAKEUP_TABLE} SET owner = $1, generation = generation + 1, at = NULL WHERE id = 1`, [owner]);
+/** Records that the wakeup took `at`. */
+export async function recordWakeupRegistration(db: Db, at: string): Promise<void> {
+  await db.query(`UPDATE ${WAKEUP_TABLE} SET at = $1, last_error = NULL WHERE id = 1`, [at]);
 }
 
-/** Counts the row's generation up while `owner` still owns it: the new generation, or undefined when another worker owns the row now. */
-export async function nextWakeupGeneration(db: Db, owner: string): Promise<number | undefined> {
-  const { rows } = await db.query<{ generation: string }>(
-    `UPDATE ${WAKEUP_TABLE} SET generation = generation + 1, at = NULL WHERE id = 1 AND owner = $1 RETURNING generation`,
-    [owner],
-  );
-  return rows[0] && Number(rows[0].generation);
+/** Records why the last registration failed. */
+export async function recordWakeupError(db: Db, error: string): Promise<void> {
+  await db.query(`UPDATE ${WAKEUP_TABLE} SET last_error = $1 WHERE id = 1`, [error]);
 }
 
-/** Records that the wakeup took `at` for `generation`. */
-export async function recordWakeupRegistration(db: Db, owner: string, generation: number, at: string): Promise<void> {
-  await db.query(
-    `UPDATE ${WAKEUP_TABLE} SET at = $3, registered_at = now(), last_error = NULL WHERE id = 1 AND owner = $1 AND generation = $2`,
-    [owner, generation, at],
-  );
-}
-
-/** Records why registering `generation` failed. */
-export async function recordWakeupError(db: Db, owner: string, generation: number, error: string): Promise<void> {
-  await db.query(`UPDATE ${WAKEUP_TABLE} SET last_error = $3 WHERE id = 1 AND owner = $1 AND generation = $2`, [
-    owner,
-    generation,
-    error,
-  ]);
-}
-
-/** Records that the worker stops now, with `generation` registered. */
-export async function recordWakeupStop(db: Db, owner: string, generation: number): Promise<void> {
-  await db.query(`UPDATE ${WAKEUP_TABLE} SET stopped_at = now() WHERE id = 1 AND owner = $1 AND generation = $2`, [
-    owner,
-    generation,
-  ]);
-}
-
-/**
- * True when `generation` is the wakeup row's and the worker stopped with it: the wake
- * `/wake?generation=N` asks for is the one the worker last registered before it stopped, not
- * one a later stop replaced, nor one registered by a worker that then kept running. For the
- * route's supervisor, which decides on its own what a wake means when no wakeup is declared.
- */
-export async function shouldWake(databaseUrl: string, generation: number): Promise<boolean> {
-  await prepareDatabase(databaseUrl);
-  const conn = await connect(databaseUrl);
-  try {
-    const { rows } = await conn.query<{ current: boolean }>(
-      `SELECT generation = $1 AND at IS NOT NULL AND stopped_at >= registered_at ` +
-        `AS current FROM ${WAKEUP_TABLE} WHERE id = 1`,
-      [generation],
-    );
-    return rows[0]?.current === true;
-  } finally {
-    await conn.end().catch(() => undefined);
-  }
+/** Records that the worker stops itself now. */
+export async function recordWakeupStop(db: Db): Promise<void> {
+  await db.query(`UPDATE ${WAKEUP_TABLE} SET stopped_at = now() WHERE id = 1`);
 }

@@ -7,7 +7,7 @@
 // another is destroyed and started again: a deploy), waits for `/healthz`, and proxies every
 // request to it. It answers `/__sanoma/health` without starting it (with `?start=1`, once it
 // runs), and holds the company's one wake (`/__sanoma/wake`) as an alarm, which starts the
-// container at `at` and calls its `/wake?generation=N`.
+// container at `at` and calls its `/wake`.
 
 /** The object's own route: the wake it holds. */
 export const WAKE_PATH = "/__sanoma/wake";
@@ -51,13 +51,12 @@ function sameToken(given, expected) {
   return differ === 0;
 }
 
-/** A registration, `{ at, generation }`, from a PUT's JSON body; undefined when it is none. */
+/** A registration, `{ at }`, from a PUT's JSON body; undefined when it is none. */
 function parseRegistration(body) {
   if (typeof body !== "object" || body === null) return undefined;
-  const { at, generation } = body;
+  const { at } = body;
   if (typeof at !== "string" || Number.isNaN(Date.parse(at))) return undefined;
-  if (!Number.isSafeInteger(generation) || generation < 1) return undefined;
-  return { at: new Date(at).toISOString(), generation };
+  return { at: new Date(at).toISOString() };
 }
 
 export class Instance {
@@ -171,7 +170,7 @@ export class Instance {
       return problem(401, "the token is not this host's SANOMA_WAKEUP_TOKEN");
     }
     const storage = this.ctx.storage;
-    if (request.method === "GET") return json(200, (await storage.get(WAKE_KEY)) ?? { at: null, generation: 0 });
+    if (request.method === "GET") return json(200, (await storage.get(WAKE_KEY)) ?? { at: null });
     if (request.method === "DELETE") {
       await storage.delete(WAKE_KEY);
       await storage.deleteAlarm();
@@ -179,13 +178,10 @@ export class Instance {
     }
     if (request.method !== "PUT") return problem(405, "GET, PUT or DELETE");
     const wake = parseRegistration(await request.json().catch(() => undefined));
-    if (!wake) return problem(400, "the body must be { at: an ISO 8601 time, generation: an integer from 1 }");
-    const held = await storage.get(WAKE_KEY);
-    // Only a newer generation replaces the wake: registrations arrive at least once, in any order.
-    if (!held || wake.generation > held.generation) {
-      await storage.put(WAKE_KEY, wake);
-      await storage.setAlarm(Date.parse(wake.at));
-    }
+    if (!wake) return problem(400, "the body must be { at: an ISO 8601 time }");
+    // Whatever it held is replaced: a wake that rings for an older one starts a worker with nothing to do.
+    await storage.put(WAKE_KEY, wake);
+    await storage.setAlarm(Date.parse(wake.at));
     return new Response(null, { status: 204 });
   }
 
@@ -194,17 +190,15 @@ export class Instance {
     const wake = await this.ctx.storage.get(WAKE_KEY);
     if (!wake) return;
     await this.ensureRunning();
-    const at = `http://container/wake?generation=${wake.generation}`;
-    const res = await this.ctx.container.getTcpPort(this.port).fetch(at);
+    const res = await this.ctx.container.getTcpPort(this.port).fetch("http://container/wake");
     await res.body?.cancel();
     if (!res.ok) {
-      console.error(`GET /wake?generation=${wake.generation} answered ${res.status}`);
+      console.error(`GET /wake answered ${res.status}`);
       throw new Error(`the container answered /wake with ${res.status}`);
     }
-    // When it rang, which a GET shows: unless a newer wake replaced it meanwhile.
+    // When it rang, which a GET shows: unless another wake replaced it meanwhile.
     const held = await this.ctx.storage.get(WAKE_KEY);
-    if (held?.generation === wake.generation)
-      await this.ctx.storage.put(WAKE_KEY, { ...held, rang: new Date().toISOString() });
+    if (held?.at === wake.at) await this.ctx.storage.put(WAKE_KEY, { ...held, rang: new Date().toISOString() });
   }
 }
 

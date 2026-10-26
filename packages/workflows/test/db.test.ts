@@ -76,15 +76,7 @@ describe("sanoma_wakeup", () => {
   it("is made with its one row, and holds no other", async () => {
     await prepareDatabase(databaseUrl);
     const rows = async () => (await pool.query(`SELECT * FROM ${WAKEUP_TABLE}`)).rows;
-    const one = {
-      id: 1,
-      owner: null,
-      generation: "0",
-      at: null,
-      stopped_at: null,
-      registered_at: null,
-      last_error: null,
-    };
+    const one = { id: 1, at: null, stopped_at: null, last_error: null };
     expect(await rows()).toEqual([one]);
     await expect(pool.query(`INSERT INTO ${WAKEUP_TABLE} (id) VALUES (2)`)).rejects.toMatchObject({ code: "23514" });
   });

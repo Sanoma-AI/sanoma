@@ -12,7 +12,8 @@ import {
 import { type Binding, type Bindings, LOCKFILE, readLockfile } from "./lockfile.ts";
 import { type Connector, VENDOR } from "./op.ts";
 import { filesUnder } from "./paths.ts";
-import { peopleConnector } from "./person.ts";
+import { peopleConnector, sanoma } from "./person.ts";
+import { wakeupOps } from "./wakeup-type.ts";
 import type { Span } from "./outline.ts";
 import { type Declared, type Resource, resourceTypesOf } from "./resource.ts";
 import { Principal } from "./define.ts";
@@ -144,8 +145,9 @@ export function readPeople(root: string | undefined): DeclaredPeople {
   const stamp = filesStamp(root);
   const cached = peopleRead.get(root);
   if (cached?.stamp === stamp) return cached.read;
-  const read = readDataFiles(root, [peopleConnector], undefined, (source) => DECLARES_PEOPLE.test(source));
-  const people = read.resources;
+  // With the wakeup's type, which the same constructors declare: read, and only the people's kept.
+  const read = readDataFiles(root, [peopleConnector, wakeupOps], undefined, (source) => DECLARES_PEOPLE.test(source));
+  const people = read.resources.filter((r) => Object.hasOwn(sanoma, r.type));
   // The people are never bound, so the lockfile's problems are not theirs.
   const own = read.problems.filter((p) => p.file !== LOCKFILE);
   const ids = new Map<string, DeclaredResource>();

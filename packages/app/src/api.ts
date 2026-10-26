@@ -192,14 +192,13 @@ export interface SetupStatus {
 /**
  * The vendors `/setup` connects with pasted tokens, as the pages show them and going live reads
  * them: each one's id, its setup tokens (`SETUP_TOKENS`, asked for only when the config declares
- * a type of the vendor), those that must all be stored for it to be connected (`connectedBy`,
- * default all of them), and what connecting it does.
+ * a type of the vendor), all of which must be stored for it to be connected, and what connecting
+ * it does.
  */
 export const SETUP_VENDORS: readonly {
   vendor: string;
   title: string;
   tokens: readonly string[];
-  connectedBy?: readonly string[];
   about: string;
 }[] = [
   {
@@ -222,17 +221,13 @@ export const SETUP_VENDORS: readonly {
       "An API token and the account, so the company runs on Cloudflare Containers and stops when nothing is due. Connect it before choosing where the company goes.",
   },
   {
-    vendor: "sanomaOps",
-    title: "sanoma-ops",
-    tokens: ["SANOMA_OPS_TOKEN", "SANOMA_OPS_URL"],
-    connectedBy: ["SANOMA_OPS_TOKEN"],
+    vendor: "sanoma",
+    title: "Wakeup service",
+    tokens: ["SANOMA_WAKEUP_URL", "SANOMA_WAKEUP_ACCOUNT_TOKEN"],
     about:
-      "Optional: a wakeup account, so the host stops when nothing is due and starts again in time. Connect it before choosing where the company goes, which declares the wakeup.",
+      "Optional: a wakeup service's URL and an account there, so a host with no clock of its own stops when nothing is due and starts again in time. Connect it before choosing where the company goes, which declares the wakeup.",
   },
 ];
-
-/** The tokens that must all be stored for a `/setup` vendor to be connected. */
-export const connectedBy = (vendor: (typeof SETUP_VENDORS)[number]) => vendor.connectedBy ?? vendor.tokens;
 
 /** The data file going live writes, relative to the config's root. */
 export const INFRA = "resources/sanoma/infra.ts";

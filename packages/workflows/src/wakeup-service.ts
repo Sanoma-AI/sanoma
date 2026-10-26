@@ -8,10 +8,10 @@ import { errorMessage } from "./shared.ts";
  * `@sanoma-ai/workflows/wakeup-service`: the service that wakes stopped instances, server-side
  * only. An account (minted by whoever runs the service) registers an instance by its URL and the
  * instance's own token, which the company mints (`mintInstanceToken`) and keeps; the instance,
- * before it stops, `PUT`s with that token when it wants waking and a
- * generation; the service then calls `GET {url}/wake?generation=N`, retrying until an answer is a
- * 2xx. It makes its two tables itself, in the database it is given (sanoma-ops's own, when it
- * hosts it): never among `db.ts`'s, which every company's database gets.
+ * before it stops, `PUT`s with that token when it wants waking, replacing what it asked before;
+ * the service then calls `GET {url}/wake`, retrying until an answer is a 2xx. It makes its two
+ * tables itself, in the database it is given (sanoma-ops's own, when it hosts it): never among
+ * `db.ts`'s, which every company's database gets.
  */
 
 /** Where the accounts live: one per party that registers instances, its token's hash alone. */
@@ -29,7 +29,7 @@ const TABLES: readonly [what: string, ddl: string][] = [
     "wakeup instances",
     `CREATE TABLE IF NOT EXISTS ${WAKEUP_INSTANCES_TABLE} (id uuid PRIMARY KEY, ` +
       `account_id uuid NOT NULL REFERENCES ${WAKEUP_ACCOUNTS_TABLE} (id), url text NOT NULL, ` +
-      "token_hash text UNIQUE NOT NULL, at timestamptz, generation bigint NOT NULL DEFAULT 0, " +
+      "token_hash text UNIQUE NOT NULL, at timestamptz, " +
       "called_at timestamptz, attempts integer NOT NULL DEFAULT 0, next_attempt_at timestamptz, " +
       "last_error text, created_at timestamptz NOT NULL DEFAULT now())",
   ],
@@ -169,7 +169,7 @@ async function jsonBody(request: Request): Promise<Record<string, unknown> | und
 
 /**
  * An instance's URL as it is stored, without a trailing slash, or why it is refused: `http(s)`, no
- * user or password, no query, no fragment (`/wake?generation=N` is added to it).
+ * user or password, no query, no fragment (`/wake` is added to it).
  */
 export function instanceUrl(value: unknown): { url: string } | { error: string } {
   const refused = { error: "url must be an http(s) URL with no user, password, query or fragment" };
@@ -184,7 +184,6 @@ interface InstanceRow {
   account_id: string;
   url: string;
   at: Date | null;
-  generation: string;
   called_at: Date | null;
   attempts: number;
   last_error: string | null;
@@ -195,7 +194,6 @@ const shownInstance = (row: InstanceRow) => ({
   id: row.id,
   url: row.url,
   at: row.at?.toISOString() ?? null,
-  generation: Number(row.generation),
   calledAt: row.called_at?.toISOString() ?? null,
   attempts: row.attempts,
   lastError: row.last_error,
@@ -249,10 +247,10 @@ export async function mintWakeupAccount(databaseUrl: string, label: string): Pro
  *   token, 200 `{ id }` for one the account registered already, its URL now the given one (a lost
  *   reply, or a host that moved; its registered wake kept only when the URL is the same), 409 for
  *   another account's
- * - `GET /wakeup/instances/{id}`, its account's token → `{ id, url, at, generation, calledAt, attempts, lastError }`
+ * - `GET /wakeup/instances/{id}`, its account's token → `{ id, url, at, calledAt, attempts, lastError }`
  * - `DELETE /wakeup/instances/{id}`, its account's token → 204
- * - `PUT /wakeup/wake { at, generation }`, an instance's own token, which names the instance → 204,
- *   applied only when `generation` is newer than the one it has, and waking the loop
+ * - `PUT /wakeup/wake { at }`, an instance's own token, which names the instance → 204, replacing
+ *   the wake it had, and waking the loop
  *
  * 401 without a token or with an unknown one, 403 for another account's instance, 400 for a bad
  * body, 404 for an unknown id or path.
@@ -303,7 +301,6 @@ export async function startWakeupService({
       `INSERT INTO ${WAKEUP_INSTANCES_TABLE} AS i (id, account_id, url, token_hash) VALUES ($1, $2, $3, $4) ` +
         "ON CONFLICT (token_hash) DO UPDATE SET url = EXCLUDED.url, " +
         "at = CASE WHEN i.url = EXCLUDED.url THEN i.at END, " +
-        "generation = CASE WHEN i.url = EXCLUDED.url THEN i.generation ELSE 0 END, " +
         "called_at = CASE WHEN i.url = EXCLUDED.url THEN i.called_at END, " +
         "attempts = CASE WHEN i.url = EXCLUDED.url THEN i.attempts ELSE 0 END, " +
         "next_attempt_at = CASE WHEN i.url = EXCLUDED.url THEN i.next_attempt_at END, " +
@@ -330,17 +327,13 @@ export async function startWakeupService({
     const given = await jsonBody(request);
     if (given instanceof Response) return given;
     const at = given?.at;
-    const generation = given?.generation;
     if (typeof at !== "string" || !ISO_DATE_TIME.test(at) || Number.isNaN(Date.parse(at)))
       return problem(400, "at must be an ISO 8601 date-time");
-    // A new instance has generation 0, so a registration counts from 1.
-    if (typeof generation !== "number" || !Number.isSafeInteger(generation) || generation < 1)
-      return problem(400, "generation must be an integer, 1 or more");
-    // An older or equal generation changes nothing: callers retry, at least once each.
+    // Whatever it had is replaced: a wake that arrives for an older one starts a worker with nothing to do.
     await pool.query(
-      `UPDATE ${WAKEUP_INSTANCES_TABLE} SET at = $2, generation = $3, called_at = NULL, attempts = 0, ` +
-        "next_attempt_at = NULL, last_error = NULL WHERE id = $1 AND generation < $3",
-      [id, new Date(at), generation],
+      `UPDATE ${WAKEUP_INSTANCES_TABLE} SET at = $2, called_at = NULL, attempts = 0, ` +
+        "next_attempt_at = NULL, last_error = NULL WHERE id = $1",
+      [id, new Date(at)],
     );
     loop.poke();
     return noContent();
@@ -387,7 +380,7 @@ export async function startWakeupService({
 interface Due {
   id: string;
   url: string;
-  generation: string;
+  at: Date;
 }
 
 /**
@@ -412,7 +405,7 @@ function startLoop({
 
   /** Calls `row`'s instance once, and records how it went, unless the registration changed meanwhile. */
   async function call(row: Due) {
-    const target = `${row.url}/wake?generation=${row.generation}`;
+    const target = `${row.url}/wake`;
     let error: string | undefined;
     try {
       const signal = AbortSignal.any([stopping.signal, AbortSignal.timeout(CALL_TIMEOUT_MS)]);
@@ -425,14 +418,14 @@ function startLoop({
     }
     // Stopped mid-call: nothing is known of it, so it is called again once its claim lapses.
     if (stopping.signal.aborted) return;
-    // Recorded only on the registration called: one replaced (a newer generation), or moved to
-    // another URL (its generation counted again from 0), is called again.
-    const same = "WHERE id = $1 AND generation = $2 AND url = $3";
+    // Recorded only on the registration called: one replaced (another `at`), or moved to another
+    // URL, is called again.
+    const same = "WHERE id = $1 AND at = $2 AND url = $3";
     if (error === undefined) {
       await pool.query(
         `UPDATE ${WAKEUP_INSTANCES_TABLE} SET called_at = $4, attempts = 0, next_attempt_at = NULL, ` +
           `last_error = NULL ${same}`,
-        [row.id, row.generation, row.url, now()],
+        [row.id, row.at, row.url, now()],
       );
       log.info(`wakeup: called ${target}`);
     } else {
@@ -440,7 +433,7 @@ function startLoop({
         `UPDATE ${WAKEUP_INSTANCES_TABLE} SET attempts = attempts + 1, last_error = $4, ` +
           `next_attempt_at = $5::timestamptz + least(power(2, attempts), ${MAX_BACKOFF_S}) * interval '1 second' ` +
           same,
-        [row.id, row.generation, row.url, error, now()],
+        [row.id, row.at, row.url, error, now()],
       );
       log.warn(`wakeup: calling ${target} failed (${error}); it is tried again`);
     }
@@ -453,7 +446,7 @@ function startLoop({
       `UPDATE ${WAKEUP_INSTANCES_TABLE} SET next_attempt_at = $1::timestamptz + interval '${CLAIM_S} seconds' ` +
         `WHERE id IN (SELECT i.id FROM ${WAKEUP_INSTANCES_TABLE} i ${LIVE} WHERE ${WAITING} ` +
         "AND i.at <= $1 AND (i.next_attempt_at IS NULL OR i.next_attempt_at <= $1) " +
-        `ORDER BY i.at LIMIT ${ROUND_ROWS} FOR UPDATE OF i SKIP LOCKED) RETURNING id, url, generation`,
+        `ORDER BY i.at LIMIT ${ROUND_ROWS} FOR UPDATE OF i SKIP LOCKED) RETURNING id, url, at`,
       [now()],
     );
     const queue = [...rows];

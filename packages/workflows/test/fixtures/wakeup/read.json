@@ -8,20 +8,13 @@
     }
   },
   {
-    "method": "PUT",
-    "path": "/wakeup/wake",
-    "status": 204,
-    "body": null
-  },
-  {
     "method": "GET",
     "path": "/wakeup/instances/00000000-0000-4000-8000-000000000001",
     "status": 200,
     "body": {
       "id": "00000000-0000-4000-8000-000000000001",
       "url": "https://company.example.test",
-      "at": "2099-01-01T00:00:00.000Z",
-      "generation": 1,
+      "at": null,
       "calledAt": null,
       "attempts": 0,
       "lastError": null
