@@ -62,7 +62,13 @@ describe("startCompany", () => {
 
     expect(installs).toEqual([[dir, "npm"]]);
     expect(log).toEqual([`starting a Sanoma company in ${dir}`, `committed "${FIRST_COMMIT}"; installing with npm`]);
-    for (const file of ["sanoma.config.ts", "workflows/publish-post.ts", "policies/policy.cedar", "AGENTS.md"]) {
+    for (const file of [
+      "sanoma.config.ts",
+      "workflows/publish-post.ts",
+      "policies/policy.cedar",
+      "policies/changes.cedar",
+      "AGENTS.md",
+    ]) {
       expect(read(file)).toBe(readFileSync(new URL(file, TEMPLATE), "utf8"));
     }
     const pkg = JSON.parse(read("package.json")) as { name: string; dependencies: Record<string, string> };
