@@ -3,7 +3,6 @@ import type { Cloudflare } from "cloudflare";
 import { z } from "zod";
 import { cloudflareOps } from "./connector.ts";
 import { alarmOps, type Application, type CloudflareApi, containerOps, type ReadBinding, refused } from "./ops.ts";
-import { OBJECT_CLASS } from "./worker.ts";
 
 /*
  * Cloudflare's driver, over its official SDK (`cloudflare`, Stainless) for the API, and plain
@@ -21,9 +20,7 @@ export interface CloudflareDriverOptions {
 
 /** The environment variables the driver reads, on every call. */
 const env = z.object({
-  CLOUDFLARE_API_TOKEN: z
-    .string()
-    .describe("an API token with Workers Scripts Edit, Workers Containers Edit and Account Settings Read"),
+  CLOUDFLARE_API_TOKEN: z.string().describe("an API token with Workers Scripts Edit and Workers Containers Edit"),
   CLOUDFLARE_ACCOUNT_ID: z
     .string()
     .regex(/^[0-9a-f]{32}$/, "an account id is 32 hexadecimal digits")
@@ -132,7 +129,16 @@ function accountApi(timeoutMs: number, subdomains: Map<string, Promise<string>>)
           ),
         );
         // The SDK sends `application/javascript` over the form: without it, `fetch` names the form's boundary.
-        await cf.workers.scripts.update(script, { account_id, metadata, files }, { headers: { "content-type": null } });
+        // `containers` is Wrangler's, which the SDK's type does not have yet.
+        await cf.workers.scripts.update(
+          script,
+          {
+            account_id,
+            metadata: metadata as Parameters<Cloudflare["workers"]["scripts"]["update"]>[1]["metadata"],
+            files,
+          },
+          { headers: { "content-type": null } },
+        );
       });
     },
     async enableSubdomain(script) {
@@ -151,7 +157,7 @@ function accountApi(timeoutMs: number, subdomains: Map<string, Promise<string>>)
         const app = page.result.find((a) => a.name === name);
         return app && application(app);
       }),
-    createApplication: (name, image) =>
+    createApplication: (name, image, namespace_id) =>
       calling("POST containers/applications", async (cf) =>
         application(
           await cf.containers.applications.create({
@@ -162,7 +168,7 @@ function accountApi(timeoutMs: number, subdomains: Map<string, Promise<string>>)
             instances: 0,
             max_instances: 1,
             configuration: { image, instance_type: "basic" },
-            durable_objects: { script_name: name, class_name: OBJECT_CLASS },
+            durable_objects: { namespace_id },
           }),
         ),
       ),

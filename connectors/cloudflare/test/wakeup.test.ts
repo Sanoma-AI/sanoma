@@ -117,7 +117,7 @@ describe("cloudflare.alarm in a data file", () => {
         '  source: "https://github.com/acme/company.git",',
         '  ref: "main",',
         "  port: 3000,",
-        '  secrets: { SANOMA_WAKEUP_TOKEN: secret("SANOMA_WAKEUP_TOKEN") },',
+        '  secrets: { SANOMA_WAKEUP_TOKEN: secret("SANOMA_WAKEUP_TOKEN", { generate: true }) },',
         "});",
         "export const wakeup = cloudflare.alarm({ host });",
         "",

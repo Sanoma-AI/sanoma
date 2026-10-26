@@ -321,8 +321,11 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
       async bindings(script) {
         return structuredClone(state.scripts[script]?.bindings);
       },
-      async upload(script, { modules, main_module, compatibility_date, bindings, migrations }) {
+      async upload(script, { modules, main_module, compatibility_date, bindings, containers, migrations }) {
         if (!modules.some((m) => m.name === main_module)) throw fail(400, 10021, `no module named ${main_module}`);
+        if (!containers.some((c) => c.class_name === OBJECT_CLASS)) {
+          throw fail(400, 10021, `${OBJECT_CLASS} is no container's: its object would have no ctx.container`);
+        }
         const known = state.scripts[script] !== undefined;
         if (!known && !migrations?.new_sqlite_classes.includes(OBJECT_CLASS)) {
           throw fail(400, 10061, `Cannot create binding for class ${OBJECT_CLASS}: it is not a Durable Object yet`);
@@ -337,9 +340,17 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
           } else env[binding.name] = binding.text;
         }
         envs.set(script, env);
+        // The namespace the first upload made, kept across uploads as Cloudflare keeps it.
+        const namespace_id =
+          state.scripts[script]?.bindings.find((b) => b.namespace_id)?.namespace_id ??
+          `${String(++state.seq).padStart(32, "0")}`;
         state.scripts[script] = {
           bindings: bindings.map(({ type, name, ...rest }) =>
-            type === "secret_text" ? { type, name } : { type, name, ...("text" in rest && { text: rest.text }) },
+            type === "secret_text"
+              ? { type, name }
+              : type === "durable_object_namespace"
+                ? { type, name, namespace_id }
+                : { type, name, ...("text" in rest && { text: rest.text }) },
           ),
           compatibility_date,
           subdomain: state.scripts[script]?.subdomain ?? false,
@@ -363,9 +374,10 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
         const found = appOf(name);
         return found && { id: found.id, image: found.image };
       },
-      async createApplication(name, image) {
-        if (!state.scripts[name])
-          throw fail(400, 1000, `the Worker ${name} has no Durable Object class ${OBJECT_CLASS}`);
+      async createApplication(name, image, namespaceId) {
+        const namespace = state.scripts[name]?.bindings.find((b) => b.namespace_id)?.namespace_id;
+        if (!namespace || namespace !== namespaceId)
+          throw fail(400, 1000, `no Durable Object namespace ${namespaceId}`);
         if (appOf(name)) throw fail(409, 1001, `an application named ${name} exists`);
         const id = `00000000-0000-4000-8000-${String(++state.seq).padStart(12, "0")}`;
         state.applications[id] = { id, name, image, rollouts: 0 };

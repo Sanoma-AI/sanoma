@@ -19,21 +19,26 @@ vi.mock("cloudflare:workers", () => ({
 }));
 
 const code = (name: string) => import(new URL(`../worker/${name}`, import.meta.url).href);
-const { Instance, worker, ...constants } = (await code("instance.js")) as InstanceModule & Record<string, unknown>;
+const { Instance, worker, imageLabel, ...constants } = (await code("instance.js")) as InstanceModule & {
+  imageLabel(image: string): Promise<string>;
+} & Record<string, unknown>;
 
 const TOKEN = "swi_the-company-token";
 const ENV = {
   SANOMA_INSTANCE: { not: "a string" },
   SANOMA_REVISION: "r2",
+  SANOMA_IMAGE: "docker.io/sanomaai/runtime:0.7.0",
   SANOMA_SOURCE: "https://github.com/acme/company.git",
   PORT: "3000",
   SANOMA_WAKEUP_TOKEN: TOKEN,
 };
+/** The image's label, as the object starts a container with it. */
+const IMAGE = await imageLabel(ENV.SANOMA_IMAGE);
 
 /** A `ctx` that records what the object does: its container answers `answer` once started. */
 function stubCtx({
   running = false,
-  labels = { revision: "r2" },
+  labels = { revision: "r2", image: IMAGE },
   answer = () => new Response("ok"),
 }: { running?: boolean; labels?: Record<string, string>; answer?: (request: Request) => Response } = {}) {
   const storage = new Map<string, unknown>();
@@ -132,12 +137,13 @@ describe("the Worker's object", () => {
     expect(options).toEqual({
       env: {
         SANOMA_REVISION: "r2",
+        SANOMA_IMAGE: "docker.io/sanomaai/runtime:0.7.0",
         SANOMA_SOURCE: "https://github.com/acme/company.git",
         PORT: "3000",
         SANOMA_WAKEUP_TOKEN: TOKEN,
       },
       enableInternet: true,
-      labels: { revision: "r2" },
+      labels: { revision: "r2", image: IMAGE },
     });
     const proxied = sent.filter((r) => new URL(r.url).pathname === "/api/x");
     expect(proxied.map((r) => r.url)).toEqual(["http://container/api/x?y=1", "http://container/api/x?y=1"]);
@@ -145,17 +151,27 @@ describe("the Worker's object", () => {
     expect(vi.mocked(ctx.container.getTcpPort).mock.calls.every(([port]) => port === 3000)).toBe(true);
   });
 
-  it("destroys a running container at another revision and starts it at the Worker's: a deploy", async () => {
-    const { ctx, calls } = stubCtx({ running: true, labels: { revision: "r1" } });
+  it.each([
+    ["revision", { revision: "r1", image: IMAGE }],
+    ["image", { revision: "r2", image: "0123456789abcdef" }],
+  ])("destroys a running container at another %s and starts it at the Worker's: a deploy", async (_, labels) => {
+    const { ctx, calls } = stubCtx({ running: true, labels });
     const object = new Instance(ctx, ENV);
     // The object restarted with its container running: the timeout is set again.
     expect(calls).toEqual([`timeout ${10 * 60 * 1000}`]);
-    const health = await object.fetch(new Request("https://sanoma-company.acme.workers.dev/__sanoma/health"));
-    expect(await health.json()).toEqual({ revision: "r2" });
+    const health = await object.fetch(new Request("https://sanoma-company.acme.workers.dev/__sanoma/health?start=1"));
+    expect(await health.json()).toEqual({ revision: "r2", running: true });
     expect(calls).toEqual([`timeout ${10 * 60 * 1000}`, "destroy", "start r2", `timeout ${10 * 60 * 1000}`]);
   });
 
-  it("keeps a running container at the Worker's revision", async () => {
+  it("answers its health without starting the container, unless asked to", async () => {
+    const { ctx, container } = stubCtx();
+    const health = await new Instance(ctx, ENV).fetch(new Request("https://x.workers.dev/__sanoma/health"));
+    expect(await health.json()).toEqual({ revision: "r2", running: false });
+    expect(container.start).not.toHaveBeenCalled();
+  });
+
+  it("keeps a running container at the Worker's revision and image", async () => {
     const { ctx, container } = stubCtx({ running: true });
     expect((await new Instance(ctx, ENV).fetch(new Request("https://x.workers.dev/healthz"))).status).toBe(200);
     expect(container.destroy).not.toHaveBeenCalled();

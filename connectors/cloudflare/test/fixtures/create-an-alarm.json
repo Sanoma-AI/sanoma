@@ -74,6 +74,63 @@
     }
   },
   {
+    "method": "GET",
+    "path": "/client/v4/accounts/0123456789abcdef0123456789abcdef/workers/scripts/sanoma-company/settings",
+    "status": 200,
+    "body": {
+      "success": true,
+      "errors": [],
+      "messages": [],
+      "result": {
+        "bindings": [
+          {
+            "type": "durable_object_namespace",
+            "name": "SANOMA_INSTANCE",
+            "class_name": "SanomaInstance",
+            "namespace_id": "0123456789abcdef0123456789abcde0"
+          },
+          {
+            "type": "plain_text",
+            "name": "SANOMA_SOURCE",
+            "text": "https://github.com/acme/company.git"
+          },
+          {
+            "type": "plain_text",
+            "name": "SANOMA_REF",
+            "text": "main"
+          },
+          {
+            "type": "plain_text",
+            "name": "SANOMA_REVISION",
+            "text": "abc123"
+          },
+          {
+            "type": "plain_text",
+            "name": "SANOMA_IMAGE",
+            "text": "docker.io/sanomaai/runtime:0.7.0"
+          },
+          {
+            "type": "plain_text",
+            "name": "PORT",
+            "text": "3000"
+          },
+          {
+            "type": "plain_text",
+            "name": "SANOMA_HOST_URL",
+            "text": "https://sanoma-company.example.workers.dev"
+          },
+          {
+            "type": "secret_text",
+            "name": "SANOMA_WAKEUP_TOKEN"
+          }
+        ],
+        "compatibility_date": "2026-10-01",
+        "compatibility_flags": [],
+        "usage_model": "standard"
+      }
+    }
+  },
+  {
     "method": "POST",
     "path": "/client/v4/accounts/0123456789abcdef0123456789abcdef/containers/applications",
     "status": 201,
@@ -103,7 +160,7 @@
   },
   {
     "method": "GET",
-    "path": "/__sanoma/health",
+    "path": "/__sanoma/health?start=1",
     "status": 200,
     "body": {
       "revision": "abc123"

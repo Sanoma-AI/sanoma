@@ -39,6 +39,7 @@ const TEXT = {
   source: "SANOMA_SOURCE",
   ref: "SANOMA_REF",
   revision: "SANOMA_REVISION",
+  image: "SANOMA_IMAGE",
   port: "PORT",
   domains: "SANOMA_DOMAINS",
   url: HOST_URL,
@@ -56,13 +57,21 @@ export interface ReadBinding {
   type: string;
   name: string;
   text?: string;
+  /** A Durable Object namespace's id, which the container application is made for. */
+  namespace_id?: string;
 }
+
+/** Whether a Worker's bindings are Sanoma's: its own object's namespace among them. */
+const isOurs = (bindings: ReadBinding[]) =>
+  bindings.some((b) => b.type === "durable_object_namespace" && b.name === NAMESPACE);
 
 /** The upload's metadata and modules (`PUT …/workers/scripts/{name}`). */
 export interface Upload {
   main_module: string;
   compatibility_date: string;
   bindings: Binding[];
+  /** The object classes that run a container: the namespace is container-enabled. */
+  containers: { class_name: string }[];
   /** On the first upload only. */
   migrations?: typeof MIGRATION;
   modules: WorkerModule[];
@@ -89,7 +98,7 @@ export interface CloudflareApi {
   /** The container application of that name, if any (`GET …/containers/applications?name=`). */
   application(name: string): Promise<Application | undefined>;
   /** Makes the application behind the Worker's object: `default` policy, `basic`, one instance at most. */
-  createApplication(name: string, image: string): Promise<Application>;
+  createApplication(name: string, image: string, namespaceId: string): Promise<Application>;
   /** Rolls the application out to a new image (`POST …/applications/{id}/rollouts`). */
   rollout(id: string, image: string): Promise<void>;
   /** Deletes the application; nothing when there is none. */
@@ -140,11 +149,14 @@ const same = (field: (typeof COMPARED)[number], a: unknown, b: unknown) =>
 const unanswered = (where: string, cause: unknown) =>
   new DriverError(`cloudflare: ${where}: no answer (${errorMessage(cause)})`, { retryable: true, cause });
 
-/** `{ revision }` when the Worker's container answers, else why not. */
-const health = async (cf: CloudflareApi, url: string): Promise<{ revision: string } | string> => {
+/**
+ * `{ revision }` when the Worker answers, else why not; with `start`, once its container answers
+ * too, which starts it. A read asks without: a stopped host is healthy, and stays stopped.
+ */
+const health = async (cf: CloudflareApi, url: string, start: boolean): Promise<{ revision: string } | string> => {
   let res: Response;
   try {
-    res = await cf.send(`${url}${HEALTH_PATH}`, { method: "GET" });
+    res = await cf.send(`${url}${HEALTH_PATH}${start ? "?start=1" : ""}`, { method: "GET" });
   } catch (error) {
     return errorMessage(error);
   }
@@ -167,12 +179,12 @@ export interface ContainerOptions {
  * then a wait until the Worker answers at the new revision, which starts the container.
  */
 export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs }: ContainerOptions) {
-  /** The Worker `name` runs, from its bindings and its application; `health` asks it too, which starts the container. */
+  /** The Worker `name` runs, from its bindings and its application; `checkHealth` asks it too. None for a Worker that is not Sanoma's. */
   const inspect = async (name: string, checkHealth: boolean) => {
     const cf = api();
     const script = scriptOf(name);
     const bindings = await cf.bindings(script);
-    if (!bindings) return undefined;
+    if (!bindings || !isOurs(bindings)) return undefined;
     const app = await cf.application(script);
     const url = await cf.workerUrl(script);
     const text = new Map(bindings.filter((b) => b.type === "plain_text").map((b) => [b.name, b.text ?? ""]));
@@ -187,11 +199,10 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
       port: Number(text.get(TEXT.port) ?? 0),
       ...(served && { domains: domainsOf(served) }),
       url,
-      healthy: checkHealth && app !== undefined && typeof (await health(cf, url)) === "object",
+      healthy: checkHealth && app !== undefined && typeof (await health(cf, url, false)) === "object",
     };
     const secrets = bindings.filter((b) => b.type === "secret_text").map((b) => b.name);
-    const ours = bindings.some((b) => b.type === "durable_object_namespace" && b.name === NAMESPACE);
-    return { state, secrets, ours };
+    return { state, secrets };
   };
 
   const read = async ({ id }: { id: string }) => {
@@ -208,8 +219,10 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
     const { state } = found;
     if (planned.name !== state.name) return { action: "replace", planned, unknown, replace: ["name"] };
     const changed =
-      COMPARED.some((field) => field in planned && !same(field, planned[field], state[field])) ||
-      sorted(Object.keys((secrets ?? {}) as object)) !== sorted(found.secrets);
+      // `domains` left out is compared too: removing them is a change.
+      COMPARED.some(
+        (field) => (field in planned || field === "domains") && !same(field, planned[field], state[field]),
+      ) || sorted(Object.keys((secrets ?? {}) as object)) !== sorted(found.secrets);
     if (!changed) return { action: "none", planned: state, ...NONE };
     return { action: "update", planned: { ...state, ...planned }, ...NONE };
   };
@@ -218,7 +231,7 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
   const started = async (cf: CloudflareApi, script: string, url: string, revision: string) => {
     const until = Date.now() + startTimeoutMs;
     for (;;) {
-      const seen = await health(cf, url);
+      const seen = await health(cf, url, true);
       if (typeof seen === "object" && seen.revision === revision) return;
       if (Date.now() >= until) {
         const why = typeof seen === "object" ? `it runs ${seen.revision}` : seen;
@@ -244,7 +257,7 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
     const script = scriptOf(name);
     const url = await cf.workerUrl(script);
     const current = await cf.bindings(script);
-    if (current && !current.some((b) => b.type === "durable_object_namespace" && b.name === NAMESPACE)) {
+    if (current && !isOurs(current)) {
       throw refused(
         `a Worker named ${script} that is not Sanoma's exists: delete it, or name the host otherwise`,
         "exists",
@@ -255,6 +268,7 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
       [TEXT.source]: source,
       [TEXT.ref]: ref,
       [TEXT.revision]: revision,
+      [TEXT.image]: image,
       [TEXT.port]: String(port),
       [TEXT.url]: url,
       ...(served && { [TEXT.domains]: served }),
@@ -272,13 +286,18 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
       main_module: MAIN_MODULE,
       compatibility_date: COMPATIBILITY_DATE,
       bindings,
+      containers: [{ class_name: OBJECT_CLASS }],
       ...(current === undefined && { migrations: MIGRATION }),
       modules: await workerModules(),
     });
     await cf.enableSubdomain(script);
     let app = await cf.application(script);
-    if (!app) app = await cf.createApplication(script, image);
-    else if (app.image !== image) await cf.rollout(app.id, image);
+    if (!app) {
+      // The application is made for the object's namespace, which the first upload made.
+      const namespace = (await cf.bindings(script))?.find((b) => b.name === NAMESPACE)?.namespace_id;
+      if (!namespace) throw refused(`${script}: Cloudflare names no namespace for its ${NAMESPACE} binding`);
+      app = await cf.createApplication(script, image, namespace);
+    } else if (app.image !== image) await cf.rollout(app.id, image);
     await started(cf, script, url, revision);
     const state: ContainerState = {
       id: app.id,
@@ -321,6 +340,10 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
     delete: async ({ id }: { id: string }) => {
       const cf = api();
       const script = scriptOf(id);
+      const bindings = await cf.bindings(script);
+      if (bindings && !isOurs(bindings)) {
+        throw refused(`a Worker named ${script} that is not Sanoma's exists: it is not deleted`, "exists");
+      }
       const app = await cf.application(script);
       if (app) await cf.deleteApplication(app.id);
       await cf.deleteScript(script);
@@ -363,7 +386,7 @@ const tokenOf = async ({ secrets }: CallContext, op: string) => {
   return token;
 };
 
-const NO_TOKEN = `add ${WAKEUP_TOKEN} to the host's secrets (secret("${WAKEUP_TOKEN}")) and apply the host`;
+const NO_TOKEN = `add ${WAKEUP_TOKEN} to the host's secrets (secret("${WAKEUP_TOKEN}", { generate: true })) and apply the host`;
 
 /**
  * `cloudflare.alarm`'s operations and `alarm.register` over `api().send`: the host's own Worker's
@@ -405,7 +428,8 @@ export function alarmOps(api: () => Pick<CloudflareApi, "send">) {
   };
 
   const read = async ({ id }: { id: string }, call: CallContext) => {
-    const { state } = await look(id, await tokenOf(call, "read"));
+    // Without the token, the Worker refuses it: the alarm reads as unhealthy, and a plan to delete it goes on.
+    const { state } = await look(id, (await call.secrets.get(WAKEUP_TOKEN)) ?? "");
     return state ? { id, gone: false, state } : { id, gone: true };
   };
 
@@ -434,13 +458,6 @@ export function alarmOps(api: () => Pick<CloudflareApi, "send">) {
     create: async ({ desired }: { desired: Record<string, unknown> }, { secrets }: CallContext) => {
       const host = hostUrl(desired.host);
       const token = await secrets.ensure(WAKEUP_TOKEN, mintInstanceToken);
-      const stored = await secrets.ensure(HOST_URL, () => host);
-      if (stored !== host) {
-        throw refused(
-          `alarm.create: ${HOST_URL} holds another host's URL (${stored}); delete it to store this one`,
-          "stale",
-        );
-      }
       const { answer, state } = await look(host, token);
       if (!state) throw failed(answer, "no Worker of Sanoma's answers there: apply the host first");
       if (answer.status === 404)
@@ -448,6 +465,8 @@ export function alarmOps(api: () => Pick<CloudflareApi, "send">) {
       if (answer.status === 401) {
         throw refused(`alarm.create: the host's ${WAKEUP_TOKEN} is not the stored one: apply the host again`, "token");
       }
+      // For a register made off the host: on it, the Worker's SANOMA_HOST_URL is in the environment, which comes first.
+      await secrets.ensure(HOST_URL, () => host);
       return { id: host, state };
     },
     update: async ({ id, desired }: { id: string; desired: Record<string, unknown> }, call: CallContext) => {

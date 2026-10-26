@@ -31,7 +31,7 @@ export const host = cloudflare.container({
   secrets: {
     SANOMA_DATABASE_URL: secret("DATABASE_URL"),
     SANOMA_SECRETS_KEY: secret("SECRETS_KEY"),
-    SANOMA_WAKEUP_TOKEN: secret("SANOMA_WAKEUP_TOKEN"),
+    SANOMA_WAKEUP_TOKEN: secret("SANOMA_WAKEUP_TOKEN", { generate: true }), // made at the first apply
   },
 });
 export const wakeup = cloudflare.alarm({ host });
@@ -48,7 +48,7 @@ export const wakeup = cloudflare.alarm({ host });
 | `domains`              | Optional: a public site's domain, by site name, passed as `SANOMA_DOMAINS`; routing a domain to the Worker is not done here yet         |
 | `id`, `url`, `healthy` | Cloudflare's: the application's id, the Worker's workers.dev URL, and whether it answers                                                |
 
-The host's outputs are `{ url, revision, healthy }`. Its capabilities: stops when quiet, a public URL, it runs an image rather than building one, no fixed egress. `healthy` is a request to the Worker's `/__sanoma/health`, which starts the container when it is stopped: a read of a stopped host wakes it.
+The host's outputs are `{ url, revision, healthy }`. Its capabilities: stops when quiet, a public URL, it runs an image rather than building one, no fixed egress. `healthy` is the application existing and the Worker answering `/__sanoma/health`, which does not start a stopped container: a stopped host is healthy, and a read or a drift check leaves it stopped.
 
 The alarm's only field is `host`, the container it wakes (its URL); its state is `{ host, at, generation, healthy }`, the wake it holds and whether the host's Worker took the company's token. `register` takes `{ at, generation }`, an ISO 8601 time and a generation from 1, and the Worker keeps it only when it is newer, so a retry or a late duplicate changes nothing. It names no host: on the host, the worker reads the host's URL from `SANOMA_HOST_URL`, which the Worker gives the container; off it, from the credential `alarm.create` stored.
 
@@ -58,19 +58,19 @@ The logo is Cloudflare's cloud from [Simple Icons](https://simpleicons.org/?q=cl
 
 The package ships the Worker it uploads, `worker/`: `index.js`, which exports the Durable Object class `SanomaInstance` over `DurableObject` from `cloudflare:workers`, and `instance.js`, the object's code with no imports, which the fake runs in Node so both kits check the code Cloudflare runs. Every request to the Worker goes to its one object, which:
 
-- starts the container on a request at the revision the Worker's `SANOMA_REVISION` names, with the Worker's text bindings (plain and secret) as its environment and the revision as a label; a container running at another revision is destroyed and started again (a deploy);
+- starts the container on a request at the revision and image the Worker's `SANOMA_REVISION` and `SANOMA_IMAGE` name, with the Worker's text bindings (plain and secret) as its environment and both as labels (the image's as a digest, since a label holds 64 bytes); a running container that does not carry both is destroyed and started again (a deploy);
 - waits for the container's `/healthz` (up to ten minutes, the clone and install included), sets its inactivity timeout to ten minutes, and proxies the request to its `port`;
-- answers `GET /__sanoma/health` with `{ revision }` once the container answers, which is what a create or update waits for;
+- answers `GET /__sanoma/health` with `{ revision, running }` without starting the container, and with `?start=1` once the container answers, which is what a create or update waits for;
 - holds the company's one wake at `/__sanoma/wake`, with `Authorization: Bearer <SANOMA_WAKEUP_TOKEN>`: `GET` shows `{ at, generation, rang? }`, `PUT { at, generation }` sets the object's alarm when the generation is newer, `DELETE` clears it. Without the token among the host's secrets it answers 404, with another one 401;
 - at the alarm, starts the container and calls its `/wake?generation=N`, then notes when (`rang`); a failure throws, so Cloudflare rings the alarm again.
 
-Cloudflare stops the container after ten quiet minutes; the object, its storage and its alarm stay, and the next request or alarm starts the container again. A create uploads the Worker with the object's migration (`new_sqlite_classes`), turns its workers.dev URL on, and makes the container application behind the object (`basic`, one instance at most, none until a request); an update uploads it again and, for a new image, rolls the application out to it (`rolling`, all at once). Either waits for the Worker to answer at the new revision. A delete deletes the application, then the Worker with its object's storage.
+Cloudflare stops the container after ten quiet minutes; the object, its storage and its alarm stay, and the next request or alarm starts the container again. A create uploads the Worker with the object's migration (`new_sqlite_classes`) and its class as a container's (`containers: [{ class_name }]`, as Wrangler sends it), turns its workers.dev URL on, and makes the container application for the object's namespace (the `namespace_id` the Worker's settings then show; `basic`, one instance at most, none until a request); an update uploads it again and, for a new image, rolls the application out to it (`rolling`, all at once). Either waits for the Worker to answer at the new revision. A delete deletes the application, then the Worker with its object's storage. A Worker of that name that is not Sanoma's (no `SANOMA_INSTANCE` binding) reads as gone, and a create or a delete refuses to touch it.
 
 ## Scale to zero
 
 1. **The connector.** Add `cloudflare` to the connectors in `sanoma.config.ts`: the worker on the host calls `cloudflare.alarm.register` through it.
 2. **Credentials.** On the connector's page, `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` (below).
-3. **Go live.** `infra.ts` declares the host with `SANOMA_WAKEUP_TOKEN: secret("SANOMA_WAKEUP_TOKEN")` among its secrets, and, after it, `export const wakeup = cloudflare.alarm({ host })`. One apply makes the Worker, waits for it, then the alarm, which checks the Worker holds the token.
+3. **Go live.** `infra.ts` declares the host with `SANOMA_WAKEUP_TOKEN: secret("SANOMA_WAKEUP_TOKEN", { generate: true })` among its secrets (apply makes it), and, after it, `export const wakeup = cloudflare.alarm({ host })`. One apply makes the Worker, waits for it, then the alarm, which checks the Worker holds the token.
 4. **A sleeping run.** Start a workflow that sleeps past ten quiet minutes. Before the container stops the worker registers the sleep's end; at `at` the object's alarm starts the container and calls `/wake`, and the run continues.
 
 To stop scaling to zero, delete the `wakeup` line and apply: the alarm is deleted, and the next request still starts the container.
@@ -81,22 +81,22 @@ To stop scaling to zero, delete the `wakeup` line and apply: the alarm is delete
 
 `./driver` (`cloudflareDriver`; `cloudflareDriver({ timeoutMs, startTimeoutMs, pollMs })`: 30 s a request, ten minutes for the Worker to answer at a new revision, two seconds between tries) and `./fake` (`fakeCloudflare`) are internal entries, for tests.
 
-A read is the Worker's settings (its bindings: what it runs is its plain-text bindings, never a secret's value), the application of its name (its image) and the account's subdomain (its URL); a plan compares the declared image, source, ref, revision, port, domains and secret names with them. A Worker of that name without the object's binding is not Sanoma's: a create refuses to overwrite it (`exists`).
+A read is the Worker's settings (its bindings: what it runs is its plain-text bindings, never a secret's value), the application of its name (its image) and the account's subdomain (its URL); a plan compares the declared image, source, ref, revision, port, domains (left out too) and secret names with them. The requests are made one after another, in the order the fixtures hold.
 
 ### Environment
 
 It reads these on every call, never when the config loads:
 
-| Variable                | What it is                                                                                |
-| ----------------------- | ----------------------------------------------------------------------------------------- |
-| `CLOUDFLARE_API_TOKEN`  | An API token with Workers Scripts Edit, Workers Containers Edit and Account Settings Read |
-| `CLOUDFLARE_ACCOUNT_ID` | The account's id, 32 hexadecimal digits, on its dashboard's overview                      |
+| Variable                | What it is                                                                                     |
+| ----------------------- | ---------------------------------------------------------------------------------------------- |
+| `CLOUDFLARE_API_TOKEN`  | An API token with Workers Scripts Edit and Workers Containers Edit (Write, in the API's terms) |
+| `CLOUDFLARE_ACCOUNT_ID` | The account's id, 32 hexadecimal digits, on its dashboard's overview                           |
 
-When either is unset, a call fails, not retryable, naming it. The driver declares both in its `env` ([Credentials](https://www.npmjs.com/package/@sanoma-ai/workflows#credentials)): the worker starts without them, and the app's connector page shows their status and lets you set them. The alarm's operations need neither: they call the Worker with `SANOMA_WAKEUP_TOKEN`, which `alarm.create` mints when none is stored, and store `SANOMA_HOST_URL`.
+When either is unset, a call fails, not retryable, naming it. The driver declares both in its `env` ([Credentials](https://www.npmjs.com/package/@sanoma-ai/workflows#credentials)): the worker starts without them, and the app's connector page shows their status and lets you set them. The alarm's operations need neither: they call the Worker with `SANOMA_WAKEUP_TOKEN` (`alarm.create` mints it when none is stored), and `alarm.create` stores `SANOMA_HOST_URL` once the host answered, for a register made off the host; it keeps the first one stored, which the Worker's own binding overrides on the host. A read without the token reads the alarm as unhealthy, so a plan to delete it still goes on.
 
 ### Errors and retries
 
-A 429, a 5xx, a timeout or no reply is retryable; any other 4xx is not. `status` and `vendorCode` (Cloudflare's first error `code`) are kept. The driver's own refusals are not retryable: `exists` (a Worker of that name that is not Sanoma's), `plan_changed` (an update whose plan changed since it was approved), `no_token` and `token` (a host without the company's `SANOMA_WAKEUP_TOKEN`, or with another one), `stale` (a stored `SANOMA_HOST_URL` for another host), and a Worker that did not answer at its revision in time, which says what it answered.
+A 429, a 5xx, a timeout or no reply is retryable; any other 4xx is not. `status` and `vendorCode` (Cloudflare's first error `code`) are kept. The driver's own refusals are not retryable: `exists` (a Worker of that name that is not Sanoma's, which is neither overwritten nor deleted), `plan_changed` (an update whose plan changed since it was approved), `no_token` and `token` (a host without the company's `SANOMA_WAKEUP_TOKEN`, or with another one), and a Worker that did not answer at its revision in time, which says what it answered.
 
 ### Plan
 
@@ -104,7 +104,7 @@ Containers need the Workers Paid plan. An instance is billed while it runs, by i
 
 ### Testing the driver
 
-`test/driver.test.ts` and the features replay Cloudflare's replies (`test/fixtures`) with [`@sanoma-ai/testing/replay`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/testing/README.md#replaying-a-vendors-api): `pnpm vitest run connectors/cloudflare` needs no account. The fixtures are **written from Cloudflare's API reference, not recorded**: no account was at hand when the connector was written. A recording replaces them (`SANOMA_LIVE=1 SANOMA_RECORD=1` on the features test), losing the account's id and subdomain, ids and tokens; until then, a reply the reference gets wrong is wrong here too. The driver tests only replay.
+`test/driver.test.ts` and the features replay Cloudflare's replies (`test/fixtures`) with [`@sanoma-ai/testing/replay`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/testing/README.md#replaying-a-vendors-api): `pnpm vitest run connectors/cloudflare` needs no account. The fixtures are **written from Cloudflare's API reference, not recorded**: no account was at hand when the connector was written. A recording replaces them (`SANOMA_LIVE=1 SANOMA_RECORD=1` on the features test), losing the account's id and subdomain, ids and tokens; until then, a reply the reference gets wrong is wrong here too. The upload's `containers` field is Wrangler's and not in the reference or the SDK's types: the live run is what checks it. The driver tests only replay.
 
 ### Running it live
 

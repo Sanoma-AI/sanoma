@@ -32,6 +32,11 @@
           },
           {
             "type": "plain_text",
+            "name": "SANOMA_IMAGE",
+            "text": "docker.io/sanomaai/runtime:0.7.0"
+          },
+          {
+            "type": "plain_text",
             "name": "PORT",
             "text": "3000"
           },
@@ -125,6 +130,11 @@
             "type": "plain_text",
             "name": "SANOMA_REVISION",
             "text": "abc123"
+          },
+          {
+            "type": "plain_text",
+            "name": "SANOMA_IMAGE",
+            "text": "docker.io/sanomaai/runtime:0.7.0"
           },
           {
             "type": "plain_text",
@@ -234,7 +244,7 @@
   },
   {
     "method": "GET",
-    "path": "/__sanoma/health",
+    "path": "/__sanoma/health?start=1",
     "status": 200,
     "body": {
       "revision": "abc123"
@@ -242,7 +252,7 @@
   },
   {
     "method": "GET",
-    "path": "/__sanoma/health",
+    "path": "/__sanoma/health?start=1",
     "status": 200,
     "body": {
       "revision": "def456"

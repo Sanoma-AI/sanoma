@@ -85,11 +85,12 @@ describe.skipIf(live)("cloudflareDriver", () => {
         "PUT /workers/scripts/sanoma-company",
         "POST /workers/scripts/sanoma-company/subdomain",
         "GET /containers/applications?name=sanoma-company",
+        "GET /workers/scripts/sanoma-company/settings",
         "POST /containers/applications",
-        "GET /__sanoma/health",
+        "GET /__sanoma/health?start=1",
       ]);
       // Compared, not printed: a failure must not show a live token.
-      expect(sent.slice(0, 6).every((r) => r.headers.get("authorization") === "Bearer test-token")).toBe(true);
+      expect(sent.slice(0, 7).every((r) => r.headers.get("authorization") === "Bearer test-token")).toBe(true);
 
       const upload = sent[2]!;
       expect(upload.headers.get("content-type")).toMatch(/^multipart\/form-data; boundary=/);
@@ -98,11 +99,14 @@ describe.skipIf(live)("cloudflareDriver", () => {
       expect(form.get("metadata[compatibility_date]")).toBe("2026-10-01");
       expect(form.get("metadata[migrations][new_tag]")).toBe("v1");
       expect(form.getAll("metadata[migrations][new_sqlite_classes][]")).toEqual(["SanomaInstance"]);
+      // Its object runs a container: without this, it has no `ctx.container`.
+      expect(form.getAll("metadata[containers][][class_name]")).toEqual(["SanomaInstance"]);
       expect(form.getAll("metadata[bindings][][name]")).toEqual([
         "SANOMA_INSTANCE",
         "SANOMA_SOURCE",
         "SANOMA_REF",
         "SANOMA_REVISION",
+        "SANOMA_IMAGE",
         "PORT",
         "SANOMA_HOST_URL",
         "SANOMA_WAKEUP_TOKEN",
@@ -119,13 +123,14 @@ describe.skipIf(live)("cloudflareDriver", () => {
       expect(await files[0]!.text()).toContain('from "cloudflare:workers"');
 
       expect(sent[3]!.body).toEqual({ enabled: true });
-      expect(sent[5]!.body).toEqual({
+      expect(sent[6]!.body).toEqual({
         name: "sanoma-company",
         scheduling_policy: "default",
         instances: 0,
         max_instances: 1,
         configuration: { image: "docker.io/sanomaai/runtime:0.7.0", instance_type: "basic" },
-        durable_objects: { script_name: "sanoma-company", class_name: "SanomaInstance" },
+        // The namespace the upload made, as the Worker's settings name it.
+        durable_objects: { namespace_id: "0123456789abcdef0123456789abcde0" },
       });
     });
 
@@ -147,7 +152,7 @@ describe.skipIf(live)("cloudflareDriver", () => {
         step_percentage: 100,
         target_configuration: { image: "docker.io/sanomaai/runtime:0.8.0", instance_type: "basic" },
       });
-      expect(sent.filter((r) => r.path === "/__sanoma/health")).toHaveLength(2);
+      expect(sent.filter((r) => r.path === "/__sanoma/health?start=1")).toHaveLength(2);
     });
 
     it("refuses an update whose plan changed since it was approved", async () => {
@@ -167,8 +172,9 @@ describe.skipIf(live)("cloudflareDriver", () => {
     it("reads what the Worker runs from its bindings, and no secret's value", async () => {
       play("read-only", [
         ...only("update-to-a-new-image", (_, i) => i < 3),
-        reply("/__sanoma/health", 200, { revision: "abc123" }),
+        reply("/__sanoma/health", 200, { revision: "abc123", running: false }),
       ]);
+      // Stopped is healthy: the read asks without starting it.
       expect(await op("container.read", { id: "company" })).toEqual({ id: "company", gone: false, state });
     });
 
@@ -194,32 +200,41 @@ describe.skipIf(live)("cloudflareDriver", () => {
     it("deletes the application, then the Worker with its object's storage", async () => {
       play(
         "delete-only",
-        only("delete", (_, i) => i >= 7 && i < 10),
+        only("delete", (_, i) => i >= 8 && i < 12),
       );
       expect(await op("container.delete", { id: "company" })).toEqual({ id: "company", gone: true });
       expect(sent.map((r) => `${r.method} ${r.path.replace(API, "")}`)).toEqual([
+        "GET /workers/scripts/sanoma-company/settings",
         "GET /containers/applications?name=sanoma-company",
         "DELETE /containers/applications/00000000-0000-4000-8000-000000000001",
         "DELETE /workers/scripts/sanoma-company?force=true",
       ]);
     });
 
-    it("refuses to overwrite a Worker of that name that is not Sanoma's", async () => {
-      play("not-ours", [
-        ...only("create", (_, i) => i === 0),
-        reply(apiPath("/workers/scripts/sanoma-company/settings"), 200, {
-          success: true,
-          errors: [],
-          messages: [],
-          result: { bindings: [{ type: "plain_text", name: "GREETING", text: "hello" }] },
-        }),
-      ]);
+    it("leaves a Worker of that name that is not Sanoma's alone: reads it as gone, refuses to overwrite or delete it", async () => {
+      const foreign = reply(apiPath("/workers/scripts/sanoma-company/settings"), 200, {
+        success: true,
+        errors: [],
+        messages: [],
+        result: { bindings: [{ type: "plain_text", name: "GREETING", text: "hello" }] },
+      });
+      play("not-ours", [foreign, ...only("create", (_, i) => i === 0), foreign, foreign]);
+      expect(await op("container.read", { id: "company" })).toEqual({ id: "company", gone: true });
       await expect(op("container.create", { desired })).rejects.toMatchObject({
         name: "DriverError",
         retryable: false,
         vendorCode: "exists",
       });
-      expect(sent.some((r) => r.method === "PUT")).toBe(false);
+      await expect(op("container.delete", { id: "company" })).rejects.toMatchObject({ vendorCode: "exists" });
+      expect(sent.some((r) => r.method === "PUT" || r.method === "DELETE")).toBe(false);
+    });
+
+    it("plans an update when the declaration leaves out the domains the Worker serves", async () => {
+      const [settings, ...rest] = only("update-to-a-new-image", (_, i) => i < 3);
+      const body = structuredClone(settings!.body) as { result: { bindings: object[] } };
+      body.result.bindings.push({ type: "plain_text", name: "SANOMA_DOMAINS", text: "www=acme.example" });
+      play("domains-removed", [{ ...settings!, body }, ...rest]);
+      expect(await op("container.plan", { id: "company", desired })).toMatchObject({ action: "update" });
     });
 
     it("refuses a secret named as one of the Worker's own bindings, without calling Cloudflare", async () => {
@@ -238,7 +253,7 @@ describe.skipIf(live)("cloudflareDriver", () => {
       const slow = cloudflareDriver({ timeoutMs: 200, startTimeoutMs: 30, pollMs: 5 });
       play(
         "stale",
-        only("create", (e) => e.path !== "/__sanoma/health"),
+        only("create", (e) => !e.path.startsWith("/__sanoma/health")),
       );
       server.use(http.get("*/__sanoma/health", () => HttpResponse.json({ revision: "older" })));
       await expect(
@@ -318,21 +333,25 @@ describe.skipIf(live)("cloudflareDriver", () => {
     });
 
     it("refuses an alarm where no Worker of Sanoma's answers", async () => {
+      const call = callWith({ SANOMA_WAKEUP_TOKEN: TOKEN });
       play("no-worker", [wake(404, "There is nothing here yet")]);
-      await expect(op("alarm.create", { desired: { host: URL_OF } })).rejects.toMatchObject({
+      await expect(op("alarm.create", { desired: { host: URL_OF } }, call)).rejects.toMatchObject({
         name: "DriverError",
         retryable: false,
         status: 404,
         message: expect.stringContaining("apply the host first"),
       });
+      // Nothing stored for a host that did not answer.
+      expect(await call.secrets.get("SANOMA_HOST_URL")).toBeUndefined();
     });
 
-    it("refuses an alarm for another host than the one stored", async () => {
-      const call = callWith({ SANOMA_HOST_URL: "https://sanoma-other.example.workers.dev" });
-      await expect(op("alarm.create", { desired: { host: URL_OF } }, call)).rejects.toMatchObject({
-        vendorCode: "stale",
+    it("reads the alarm of a host without the stored token as unhealthy, so a plan to delete it goes on", async () => {
+      play("no-stored-token", [wake(401, { error: "the token is not this host's SANOMA_WAKEUP_TOKEN" })]);
+      expect(await op("alarm.read", { id: URL_OF }, callWith())).toEqual({
+        id: URL_OF,
+        gone: false,
+        state: { host: URL_OF, at: null, generation: 0, healthy: false },
       });
-      expect(sent).toEqual([]);
     });
 
     it("registers a wake at the stored host's wake route, with the token", async () => {

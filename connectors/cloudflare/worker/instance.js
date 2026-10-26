@@ -3,14 +3,15 @@
 // a stubbed `ctx`, so both kits check this code. No imports, so Node loads it as it is.
 //
 // The object runs the company's container (`ctx.container`): it starts it on a request, at the
-// revision the Worker's `SANOMA_REVISION` names (a running one at another revision is destroyed
-// and started again: a deploy), waits for `/healthz`, and proxies every request to it. It also
-// answers `/__sanoma/health` once it runs, and holds the company's one wake (`/__sanoma/wake`)
-// as an alarm, which starts the container at `at` and calls its `/wake?generation=N`.
+// revision and image the Worker's `SANOMA_REVISION` and `SANOMA_IMAGE` name (a running one at
+// another is destroyed and started again: a deploy), waits for `/healthz`, and proxies every
+// request to it. It answers `/__sanoma/health` without starting it (with `?start=1`, once it
+// runs), and holds the company's one wake (`/__sanoma/wake`) as an alarm, which starts the
+// container at `at` and calls its `/wake?generation=N`.
 
 /** The object's own route: the wake it holds. */
 export const WAKE_PATH = "/__sanoma/wake";
-/** The object's route that answers `{ revision }` once the container answers `/healthz`: what a deploy waits for. */
+/** The object's route that answers `{ revision, running }`; with `?start=1`, once the container answers `/healthz`: what a deploy waits for. */
 export const HEALTH_PATH = "/__sanoma/health";
 /** How long the container keeps running after the last request: Cloudflare stops it then. */
 export const INACTIVITY_MS = 10 * 60 * 1000;
@@ -31,6 +32,12 @@ const problem = (status, error) => json(status, { error });
 /** The Worker's text bindings (plain text and secrets): the container's environment. */
 export function containerEnv(env) {
   return Object.fromEntries(Object.entries(env).filter(([, value]) => typeof value === "string"));
+}
+
+/** The label naming an image: a digest of it, as a label holds 64 bytes and a pinned image is longer. */
+export async function imageLabel(image) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(image));
+  return [...new Uint8Array(digest).slice(0, 8)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 /** True when two strings are equal, in a time that does not tell how much of them is. */
@@ -70,12 +77,15 @@ export class Instance {
   async fetch(request) {
     const url = new URL(request.url);
     if (url.pathname === WAKE_PATH) return this.wake(request);
+    const health = url.pathname === HEALTH_PATH;
+    // A read asks without starting the container: a stopped host is a healthy one.
+    if (health && !url.searchParams.has("start")) return this.health();
     try {
       await this.ensureRunning();
     } catch (error) {
       return problem(503, `the company's container did not start: ${error?.message ?? error}`);
     }
-    if (url.pathname === HEALTH_PATH) return json(200, { revision: this.env.SANOMA_REVISION ?? "" });
+    if (health) return this.health();
     const headers = new Headers(request.headers);
     headers.delete("host");
     const body = request.method === "GET" || request.method === "HEAD" ? undefined : request.body;
@@ -89,7 +99,12 @@ export class Instance {
     return this.ctx.container.getTcpPort(this.port).fetch(forwarded);
   }
 
-  /** Starts the container at the Worker's revision unless it runs there and answered; one start at a time. */
+  /** What the Worker runs, and whether its container does. */
+  health() {
+    return json(200, { revision: this.env.SANOMA_REVISION ?? "", running: this.ctx.container.running });
+  }
+
+  /** Starts the container at the Worker's revision and image unless it runs them and answered; one start at a time. */
   ensureRunning() {
     if (this.#ready && this.ctx.container.running) return Promise.resolve();
     this.#starting ??= this.#start().finally(() => (this.#starting = undefined));
@@ -99,17 +114,19 @@ export class Instance {
   async #start() {
     this.#ready = false;
     const container = this.ctx.container;
-    const revision = this.env.SANOMA_REVISION ?? "";
+    const labels = { revision: this.env.SANOMA_REVISION ?? "", image: await imageLabel(this.env.SANOMA_IMAGE ?? "") };
     if (container.running) {
+      // One it cannot say it started at these is not kept either.
       const info = await container.inspect();
-      if (info && info.labels?.revision !== revision) await container.destroy("a new revision");
+      const same = info && info.labels?.revision === labels.revision && (info.labels?.image ?? "") === labels.image;
+      if (!same) await container.destroy("a new revision or image");
     }
     const until = Date.now() + START_TIMEOUT_MS;
     let last;
     while (Date.now() < until) {
       try {
         if (!container.running) {
-          container.start({ env: containerEnv(this.env), enableInternet: true, labels: { revision } });
+          container.start({ env: containerEnv(this.env), enableInternet: true, labels });
         }
         const res = await container.getTcpPort(this.port).fetch("http://container/healthz");
         if (res.ok) {
