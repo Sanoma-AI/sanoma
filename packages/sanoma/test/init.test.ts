@@ -13,10 +13,8 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { parseEnv } from "node:util";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
-import { resolveDatabaseUrl } from "@sanoma-ai/workflows";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
-  DATABASE_URL,
   declareFounder,
   FIRST_COMMIT,
   packageManagerOf,
@@ -73,7 +71,8 @@ describe("startCompany", () => {
     expect(existsSync(join(dir, "gitignore"))).toBe(false);
     // pnpm's alone.
     expect(existsSync(join(dir, "pnpm-workspace.yaml"))).toBe(false);
-    expect(Object.keys(parseEnv(read(".env")))).toEqual(["SANOMA_DATABASE_URL", "SANOMA_SECRETS_KEY"]);
+    // No database URL: `sanoma` runs the company's own Postgres.
+    expect(Object.keys(parseEnv(read(".env")))).toEqual(["SANOMA_SECRETS_KEY"]);
     // Its creator is its first person, so the app admits them.
     expect(read("resources/people.ts")).toContain(
       'export const founder = sanoma.person({ id: "ada", name: "Ada Ortiz", github: "ada-ortiz" });',
@@ -176,10 +175,6 @@ describe("packageManagerOf and packageName", () => {
     fresh("sanoma");
     await startCompany(dir, { creator, install: async () => {} });
     expect(JSON.parse(read("package.json")).name).toBe("sanoma-company");
-  });
-
-  it("writes the runtime's default database", () => {
-    expect(DATABASE_URL).toBe(resolveDatabaseUrl({}, {}));
   });
 });
 
