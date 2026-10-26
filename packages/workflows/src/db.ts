@@ -216,11 +216,7 @@ async function prepare(databaseUrl: string): Promise<void> {
  * cannot see (the lock's holder is this connection, not the migration's).
  */
 async function lockPreparation(databaseUrl: string): Promise<Client> {
-  const conn = await connect(databaseUrl).catch(async (err: unknown) => {
-    if (pgCode(err) !== NO_DATABASE) throw err;
-    await createDatabase(databaseUrl);
-    return connect(databaseUrl);
-  });
+  const conn = await connectMaking(databaseUrl);
   try {
     const ask = "SELECT pg_try_advisory_lock(hashtext('sanoma.prepareDatabase')) AS locked";
     while (!(await conn.query<{ locked: boolean }>(ask)).rows[0]!.locked) await delay(50);
@@ -229,6 +225,15 @@ async function lockPreparation(databaseUrl: string): Promise<Client> {
     await conn.end().catch(() => undefined);
     throw err;
   }
+}
+
+/** A connection to the database at `databaseUrl`, made first when it is not there (`createDatabase`). */
+export async function connectMaking(databaseUrl: string): Promise<Client> {
+  return connect(databaseUrl).catch(async (err: unknown) => {
+    if (pgCode(err) !== NO_DATABASE) throw err;
+    await createDatabase(databaseUrl);
+    return connect(databaseUrl);
+  });
 }
 
 async function connect(databaseUrl: string): Promise<Client> {

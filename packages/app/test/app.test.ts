@@ -216,7 +216,7 @@ beforeAll(async () => {
   npm.listen({ onUnhandledFrame: "bypass" });
   ensureBuilt(appDir, ["dist/server/server.js"], ["pnpm", "exec", "vite", "build"]);
   worker = await startWorker(config);
-  app = await startApp(config, { port: 0, ingress: [machineRoute] });
+  app = await startApp(config, { port: 0, ingress: [machineRoute, machinesRoute] });
   ctx = await contextOf(config);
 });
 
@@ -239,6 +239,13 @@ const machineRoute: IngressRoute = {
       status: 204,
       headers: { "x-generation": new URL(request.url).searchParams.get("generation") ?? "" },
     }),
+};
+
+/** A prefix route, as the wakeup service's `/wakeup`: it answers 200 with the path it was given. */
+const machinesRoute: IngressRoute = {
+  path: "/machines",
+  prefix: true,
+  handle: async (request) => new Response(new URL(request.url).pathname, { status: 200 }),
 };
 
 /** Starts the app with `machineRoute` at each of `paths`. */
@@ -1542,6 +1549,15 @@ describe("the page", () => {
     expect(await rawStatus(app.url, "/machine/", { host: "10.0.0.7:3000" })).toBe(403);
   });
 
+  it("answers a prefix ingress route at its path and every path under it, and no path that merely starts like it", async () => {
+    for (const path of ["/machines", "/machines/a/b"]) {
+      const res = await fetch(new URL(`${path}?x=1`, app.url), { method: "PUT" });
+      expect([res.status, await res.text()]).toEqual([200, path]);
+    }
+    expect(await rawStatus(app.url, "/machines/a", { host: "10.0.0.7:3000" })).toBe(200);
+    expect(await rawStatus(app.url, "/machinesx", { host: "10.0.0.7:3000" })).toBe(403);
+  });
+
   it("answers a host's probe at /healthz before the login, whatever name it is addressed to", async () => {
     expect(await rawStatus(app.url, "/healthz", { host: "10.0.0.7:3000" })).toBe(200);
     const res = await fetch(new URL("/healthz?from=docker", app.url));
@@ -2275,6 +2291,9 @@ describe("startApp", () => {
     );
     await expect(ingressAt("/healthz")).rejects.toThrow(/is not \/healthz, unlike "\/healthz"/);
     await expect(ingressAt("/wake", "/wake")).rejects.toThrow("Two ingress routes have the path /wake");
+    await expect(startApp(config, { ingress: [{ ...machinesRoute, path: "/machines/" }] })).rejects.toThrow(
+      'A prefix ingress route\'s path does not end with /, unlike "/machines/"',
+    );
   });
 
   it("says to build the app when it is not built", async () => {

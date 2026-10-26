@@ -77,8 +77,13 @@ export interface AppOptions {
 /** One of `AppOptions.ingress`: a machine route, such as the wakeup's `/wake`. */
 export interface IngressRoute {
   method?: "GET" | "POST" | "PUT" | "DELETE";
-  /** The whole path, from `/`, without a query: matched exactly. */
+  /** The whole path, from `/`, without a query: matched exactly, unless `prefix`. */
   path: string;
+  /**
+   * Also every path under `path` (`/wakeup` answers `/wakeup/instances/…`), for a route that
+   * matches what follows itself. A route at the exact path comes first, then the longest prefix.
+   */
+  prefix?: boolean;
   handle(request: Request): Promise<Response>;
 }
 
@@ -140,10 +145,15 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
       throw new Error(
         `An ingress route's path starts with /, has no query and is not /healthz, unlike "${route.path}"`,
       );
+    if (route.prefix && route.path.endsWith("/"))
+      throw new Error(`A prefix ingress route's path does not end with /, unlike "${route.path}"`);
     if (ingress.has(route.path))
       throw new Error(`Two ingress routes have the path ${route.path}: give each path one route`);
     ingress.set(route.path, route);
   }
+  // Longest first, so the first under which a path falls is the most specific.
+  const prefixed = [...ingress.values()].filter((r) => r.prefix).toSorted((a, b) => b.path.length - a.path.length);
+  const ingressAt = (path: string) => ingress.get(path) ?? prefixed.find((route) => path.startsWith(`${route.path}/`));
   const server = createServer((req, res) => {
     handle(req, res).catch((err: unknown) => {
       console.error("sanoma app: request failed:", err);
@@ -163,7 +173,7 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
       return void res.end(req.method === "HEAD" ? undefined : "ok\n");
     }
     // A machine route, before the login too: it checks its own token.
-    const route = path === undefined ? undefined : ingress.get(path);
+    const route = path === undefined ? undefined : ingressAt(path);
     if (route?.method !== undefined && route.method !== req.method) {
       res.writeHead(405, {
         allow: route.method,
