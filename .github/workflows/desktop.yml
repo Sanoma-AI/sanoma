@@ -1,0 +1,31 @@
+name: Desktop
+# The desktop shell's smoke test (packages/desktop/test/e2e), on Linux under xvfb; ci.yml runs its unit tests.
+on:
+  push:
+    branches: [main]
+    paths: &paths
+      - packages/desktop/**
+      # Its `engines`, which the shipped Node must satisfy.
+      - packages/sanoma/template/package.json
+      # `packageManager`: the pnpm the shell stages and installs companies with.
+      - package.json
+      - .github/workflows/desktop.yml
+  pull_request:
+    paths: *paths
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Ubuntu 24.04's AppArmor refuses Chromium's sandbox the user namespaces it needs; the shell keeps its sandbox on.
+      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      # Downloads Electron (skipped by `allowBuilds`), builds, stages the pinned Node and this pnpm, then runs Playwright.
+      - run: xvfb-run -a pnpm --filter @sanoma-ai/desktop run test:e2e

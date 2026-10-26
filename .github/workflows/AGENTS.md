@@ -7,4 +7,5 @@ GitHub Actions workflows for the repo.
 | Path                         | What it is                                                                                                                                                                           |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | [`ci.yml`](ci.yml)           | CI on pushes to `main` and pull requests: starts Postgres, then runs format check, lint, typecheck, build and tests, and checks `@sanoma-ai/bridge`'s generated client is up to date |
+| [`desktop.yml`](desktop.yml) | The desktop shell's smoke test on changes to `packages/desktop`: Electron under xvfb opens a fixture company with a fake launcher (Playwright)                                       |
 | [`release.yml`](release.yml) | Run by hand on `main`: publishes each public package whose version is not yet on npm; see [Release](../../README.md#release)                                                         |

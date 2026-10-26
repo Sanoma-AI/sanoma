@@ -1,0 +1,9 @@
+{
+  "name": "sanoma",
+  "version": "0.0.0",
+  "private": true,
+  "bin": {
+    "sanoma": "bin.mjs"
+  },
+  "type": "module"
+}
