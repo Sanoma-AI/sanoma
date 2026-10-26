@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import type { Company } from "./companies.ts";
 import { gitEnv, gitFailure } from "./git.ts";
 import { launch, launcherEnv, spawnGroup, type Stream } from "./launcher.ts";
+import { isCompanyFolder } from "./places.ts";
 import { type Session, type SessionOptions, startSession } from "./session.ts";
 import { writeShims } from "./shims.ts";
 
@@ -117,21 +118,30 @@ export function cloneCompany(
   return { done, stop: group.stop };
 }
 
+/** Why a cloned folder cannot be opened: it holds no company. */
+const notACompany = (dir: string) =>
+  new Error(`${dir} holds no company (no sanoma.config.ts): remove it, then clone a company's repository.`);
+
 /**
  * The session of a company cloned from `url`: `git clone` into its folder (`cloneCompany`, with
  * `gitEnv`), then the company opened there (`startSession`), or opened at once when the folder is
- * there already (a clone that finished, retried). A failed clone ends it with git's one line.
+ * a company already (a clone that finished, retried). A failed clone ends it with git's one line,
+ * and a folder that holds no company with that.
  */
 export const cloneSession =
   (url: string) =>
   (options: SessionOptions): Session => {
-    if (existsSync(options.repo)) return startSession(options);
-    options.onProgress("Cloning");
-    const cloning = cloneCompany(url, options.repo, { env: gitEnv(options.env), onLine: options.onLine });
+    if (isCompanyFolder(options.repo)) return startSession(options);
     let opened: Session | undefined;
     let stopped = false;
-    const started = cloning.done.then((failed) => {
+    let cloning: Cloning | undefined;
+    if (!existsSync(options.repo)) {
+      options.onProgress("Cloning");
+      cloning = cloneCompany(url, options.repo, { env: gitEnv(options.env), onLine: options.onLine });
+    }
+    const started = (cloning?.done ?? Promise.resolve(undefined)).then((failed) => {
       if (failed) throw new Error(failed);
+      if (!isCompanyFolder(options.repo)) throw notACompany(options.repo);
       if (!stopped) opened = startSession(options);
       return opened;
     });
@@ -146,7 +156,7 @@ export const cloneSession =
       ended,
       async stop() {
         stopped = true;
-        await cloning.stop();
+        await cloning?.stop();
         await opened?.stop();
         await ended;
       },

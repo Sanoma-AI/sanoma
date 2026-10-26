@@ -12,22 +12,18 @@ export interface RunOptions {
 /** `Run` with `execFile`: the error's message is the command's stderr, trimmed, when it printed any. */
 export const run: Run = (command, args, { cwd, env } = {}) =>
   new Promise((resolve, reject) =>
-    execFile(command, args, { cwd, env, timeout: 120_000 }, (err, stdout, stderr) => {
+    execFile(command, args, { cwd, env, timeout: 600_000, maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (!err) return resolve(stdout.trim());
       reject(Object.assign(new Error(stderr.trim() || err.message), { code: err.code }));
     }),
   );
 
 /**
- * The environment the shell runs git in: this process's, and nothing that waits for a person: no
- * password prompt (`GIT_TERMINAL_PROMPT=0`; the OS credential helper still answers) and ssh in
- * batch mode, unless the person set their own ssh command.
+ * The environment the shell runs git in: this process's, with no password prompt
+ * (`GIT_TERMINAL_PROMPT=0`; the OS credential helper still answers). The person's own ssh
+ * settings stay as they are.
  */
-export const gitEnv = (base: NodeJS.ProcessEnv): NodeJS.ProcessEnv => ({
-  ...base,
-  GIT_TERMINAL_PROMPT: "0",
-  GIT_SSH_COMMAND: base.GIT_SSH_COMMAND ?? "ssh -o BatchMode=yes",
-});
+export const gitEnv = (base: NodeJS.ProcessEnv): NodeJS.ProcessEnv => ({ ...base, GIT_TERMINAL_PROMPT: "0" });
 
 /**
  * Whether this computer lacks Apple's command line tools, which git on macOS is part of: there,
@@ -88,10 +84,11 @@ export const AUTH_MESSAGE =
 
 /**
  * A failed git command's one line: `AUTH_MESSAGE` for a sign-in it did not get, else `what` and
- * the last line git printed, without its `fatal: ` and without any password in a URL.
+ * the first thing git said that is not its "Cloning into" (the cause, before git's own advice),
+ * without its `fatal: ` and without any password in a URL.
  */
 export function gitFailure(stderr: string, what: string): string {
   if (isAuthFailure(stderr)) return AUTH_MESSAGE;
-  const last = stderr.split("\n").findLast((line) => line.trim()) ?? "";
-  return hidePasswords(`${what}: ${last.replace(/^fatal: /, "")}`);
+  const cause = stderr.split("\n").find((line) => line.trim() && !line.startsWith("Cloning into")) ?? "";
+  return hidePasswords(`${what}: ${cause.replace(/^(fatal|error): /, "")}`);
 }

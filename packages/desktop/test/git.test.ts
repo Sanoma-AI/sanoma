@@ -126,11 +126,7 @@ describe("git's prerequisites", () => {
   });
 
   test("git never prompts", () => {
-    expect(gitEnv({ PATH: "/usr/bin:/bin" })).toEqual({
-      PATH: "/usr/bin:/bin",
-      GIT_TERMINAL_PROMPT: "0",
-      GIT_SSH_COMMAND: "ssh -o BatchMode=yes",
-    });
+    expect(gitEnv({ PATH: "/usr/bin:/bin" })).toEqual({ PATH: "/usr/bin:/bin", GIT_TERMINAL_PROMPT: "0" });
     expect(gitEnv({ GIT_SSH_COMMAND: "ssh -i key" }).GIT_SSH_COMMAND).toBe("ssh -i key");
   });
 
@@ -152,6 +148,12 @@ describe("git's prerequisites", () => {
         "git could not clone x",
       ),
     ).toBe("git could not clone x: unable to access 'https://***@example.com/x/': Could not resolve host");
+    expect(
+      gitFailure(
+        "Host key verification failed.\nfatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists.",
+        "git could not clone x",
+      ),
+    ).toBe("git could not clone x: Host key verification failed.");
   });
 });
 
@@ -281,6 +283,10 @@ describe("a clone", () => {
     const failed = cloneSession(`${url}-missing`)(options(join(temp(), "x"), await freePort(), {}));
     await expect(failed.ready).rejects.toThrow(/^git could not clone /);
     await expect(failed.ended).resolves.toMatchObject({ error: expect.stringMatching(/^git could not clone /) });
+
+    // A folder there already that holds no company (a clone stopped halfway): it says so, and installs nothing.
+    const partial = cloneSession(url)(options(temp(), await freePort(), {}));
+    await expect(partial.ended).resolves.toMatchObject({ error: expect.stringMatching(/holds no company/) });
   });
 
   test("a failed sign-in says so in one line", async () => {

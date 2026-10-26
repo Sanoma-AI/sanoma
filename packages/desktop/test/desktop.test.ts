@@ -338,7 +338,7 @@ describe("logs", () => {
     expect(hidePasswords(database)).toBe(
       '{"sanoma":1,"event":"database","how":"started","url":"postgresql://***@127.0.0.1:54321/sanoma","place":"this-computer"}',
     );
-    expect(hidePasswords("connect failed for postgresql://u:pa/ss@host/db")).toBe(
+    expect(hidePasswords("connect failed for postgresql://u:p%2Fss@host/db")).toBe(
       "connect failed for postgresql://***@host/db",
     );
     expect(hidePasswords("git clone https://ghp_token@github.com/acme/co")).toBe(
@@ -348,6 +348,7 @@ describe("logs", () => {
       '{"sanoma":1,"event":"ready","url":"http://127.0.0.1:3100","sites":{}}',
       "GET https://registry.npmjs.org/@sanoma%2Fconnector-resend: Not Found - 404",
       "git@github.com:acme/co.git",
+      "GET http://localhost:5173/@fs/Users/me/acme/src/x.ts 500",
     ]) {
       expect(hidePasswords(kept)).toBe(kept);
     }

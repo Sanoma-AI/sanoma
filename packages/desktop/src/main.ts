@@ -34,6 +34,7 @@ import {
 } from "./create.ts";
 import {
   gitEnv,
+  gitFailure,
   type Identity,
   identityOf,
   identityProblem,
@@ -43,7 +44,7 @@ import {
 } from "./git.ts";
 import { USAGE_EXIT } from "./launcher.ts";
 import { linkTarget } from "./links.ts";
-import { type CompanyLog, openLog } from "./logs.ts";
+import { type CompanyLog, hidePasswords, openLog } from "./logs.ts";
 import { folderArgument, isCompanyFolder, syncedFolderWarning } from "./places.ts";
 import { runtimeOf } from "./runtime.ts";
 import { type Session, type SessionOptions, startSession } from "./session.ts";
@@ -165,7 +166,7 @@ async function begin(path: string, how?: Begin) {
   const started = start(path, beginnings.get(path) ?? startSession).catch((err: unknown) => {
     // Before its session (no Node staged, an unreadable folder): the start window says why.
     shownLog = undefined;
-    const message = `The company could not start: ${messageOf(err)}`;
+    const message = hidePasswords(`The company could not start: ${messageOf(err)}`);
     setState({ company: { path, name: companyName(path) }, phase: "failed", message, progress: [], log: [] });
     showStart();
   });
@@ -252,7 +253,7 @@ async function start(path: string, how: Begin) {
     log.write("shell", why);
     log.close();
     windows.get(path)?.window.close();
-    show({ phase: "failed", message: why, progress: [], warnings });
+    show({ phase: "failed", message: hidePasswords(why), progress: [], warnings });
   });
 }
 
@@ -369,8 +370,9 @@ const isIdentity = (value: unknown): value is Identity =>
 async function identityReady(cwd: string): Promise<boolean> {
   const env = gitEnv(process.env);
   let typed = await identityOf(cwd, env);
+  if (typed.name && typed.email) return true;
   let problem: string | undefined;
-  while (!typed.name || !typed.email || problem) {
+  for (;;) {
     const value = await ask({ kind: "identity", ...typed, problem });
     if (!isIdentity(value)) return false;
     typed = value;
@@ -382,7 +384,6 @@ async function identityReady(cwd: string): Promise<boolean> {
       ));
     if (!problem) return true;
   }
-  return true;
 }
 
 /**
@@ -480,12 +481,14 @@ async function getUpdates(path: string): Promise<void> {
     if ("refused" in plan) return say(plan.refused);
     if (!plan.behind) return say("This company is up to date with GitHub");
     await stop(path);
-    const failed = await fastForward(path, env).then(() => undefined, messageOf);
+    const failed = await fastForward(path, env).then(
+      () => undefined,
+      (err: unknown) => gitFailure(messageOf(err), "The update did not apply"),
+    );
     await begin(path);
     say(
-      failed
-        ? `The update did not apply: ${failed}`
-        : `Got ${plan.behind} new ${plan.behind === 1 ? "change" : "changes"} from GitHub; the company is starting again`,
+      failed ??
+        `Got ${plan.behind} new ${plan.behind === 1 ? "change" : "changes"} from GitHub; the company is starting again`,
     );
   } catch (err) {
     say("Sanoma could not get updates", messageOf(err));

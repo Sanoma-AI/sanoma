@@ -2,10 +2,10 @@ import { appendFileSync, existsSync, mkdirSync, renameSync } from "node:fs";
 import { join } from "node:path";
 
 /**
- * The userinfo of a URL with a password (`scheme://user:password@`), or of one with a token alone
- * (`scheme://token@host`): the password may hold a `/`, the user and the token may not.
+ * The userinfo of a URL, `scheme://user:password@` or `scheme://token@`: up to the first `/`, as
+ * a URL's userinfo has no `/` unencoded (so `http://localhost:5173/@fs/…` keeps its host).
  */
-const USERINFO = /([a-z][a-z0-9+.-]*:\/\/)(?:[^\s"'@/:]*:[^\s"'@]*|[^\s"'@/:]+)@/gi;
+const USERINFO = /([a-z][a-z0-9+.-]*:\/\/)[^\s"'@/]+@/gi;
 
 /**
  * `text` with the user and password of each URL in it replaced by `***`: the launcher's
