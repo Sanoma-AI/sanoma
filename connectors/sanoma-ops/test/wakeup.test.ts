@@ -81,7 +81,7 @@ describe("sanomaOps.wakeup meets the Wakeup contract", () => {
       type: wakeup,
       host: { url, stop: () => host.stop(), wakes: () => host.wakes() },
       client,
-      register: async (registration) => void (await op("register")({ id, ...registration })),
+      register: async (registration) => void (await op("register")(registration)),
       timeoutMs: 30_000,
     });
     await op("delete")({ id });

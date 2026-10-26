@@ -3,12 +3,11 @@ import { randomUUID } from "node:crypto";
 import { awaitApproval } from "./approvals.ts";
 import { buildCtx, decideStart, isInfrastructureError, startHoldOf } from "./call.ts";
 import { dbosStatusesOf } from "./client.ts";
-import { declaredWakeup, type ResolvedConfig, resolveConfig, rootOf, type SanomaConfig } from "./config.ts";
+import { declaredWakeup, type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { storedSecrets, watchCredentials } from "./credentials.ts";
 import { claimWakeup, DBOS_DATABASE_OPTIONS, lazyPool, prepareDatabase } from "./db.ts";
 import { deadlineRegistry, type Deadlines, idle, onOwnQueue, type SelfStop, stopWhenIdle } from "./deadlines.ts";
 import type { WorkflowDefinition } from "./define.ts";
-import { readLockfile } from "./lockfile.ts";
 import { credentialsOf, unconfigured, unconfiguredSummary } from "./env.ts";
 import { errorInfo, parseOrThrow, PolicyDeniedError } from "./errors.ts";
 import { entry, ownedLedger, skipped, write, writeFailure } from "./ledger.ts";
@@ -228,23 +227,11 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
       const owner = randomUUID();
       await claimWakeup(await secrets.db(), owner);
       const registerId = wakeup.type.wakeup!.register;
-      // A declared wakeup is in a data file, so there is a root.
-      const root = rootOf(config)!;
       stopRule = stopWhenIdle({
         // The row is one more of the runtime's tables: the secrets' pool, on the same database.
         db: () => secrets.db(),
         owner,
-        // The lockfile, read again at each registration: apply may bind the wakeup while this runs.
-        binding: () => {
-          const { bindings, problems } = readLockfile(root);
-          const bound = bindings[wakeup.id];
-          const type = `${wakeup.declared.vendor}.${wakeup.declared.type}`;
-          if (bound?.type === type) return { id: bound.id };
-          if (problems.length)
-            return { unbound: `the lockfile cannot be read: ${problems.map((p) => p.message).join("; ")}` };
-          if (bound) return { unbound: `the lockfile binds ${wakeup.id} to ${bound.type}, not ${type}: apply it` };
-          return { unbound: `the wakeup ${wakeup.id} is not bound yet: apply it to create its instance` };
-        },
+        wakeup: wakeup.binding ?? wakeup.id,
         // `resolveConfig` checked the operation is the config's (`checkWakeupOps`).
         register: { op: resolved.ops.get(registerId)!, fn: resolved.drivers.get(registerId) },
         secrets: state.secrets,

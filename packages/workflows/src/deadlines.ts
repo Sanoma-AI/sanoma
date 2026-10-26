@@ -136,13 +136,8 @@ export interface StopRule {
   db: () => Promise<Db>;
   /** This worker's id on the row (`owner`), fresh for each worker. */
   owner: string;
-  /**
-   * The declared wakeup's binding now, the vendor's id of its instance: what a registration names,
-   * and what scopes its idempotency key to this instance. Read at each registration, so one apply
-   * makes or replaces while the worker runs is the one registered with; why there is none while
-   * apply has not created it (or the lockfile cannot say).
-   */
-  binding: () => { id: string } | { unbound: string };
+  /** The declared wakeup's binding, else its declaration's id: what scopes a registration's idempotency key to this instance. */
+  wakeup: string;
   /** The wakeup type's register operation, and its driver (none when the connector attaches none). */
   register: { op: Op; fn: DriverFn | undefined };
   secrets: Secrets;
@@ -176,15 +171,6 @@ export function stopWhenIdle(rule: StopRule): { close(): void } {
     const next = rule.deadlines.nextDeadline();
     const at = next?.toISOString() ?? null;
     const db = await rule.db();
-    const binding = at === null ? undefined : rule.binding();
-    if (binding && "unbound" in binding) {
-      // No generation is taken: nothing can be registered until apply creates the instance.
-      const message = binding.unbound;
-      const line = `could not register the wakeup at ${at}, so the worker keeps running: ${message}`;
-      if (line !== lastProblem) await recordWakeupError(db, rule.owner, undefined, message);
-      problem(line);
-      return false;
-    }
     const generation = await nextWakeupGeneration(db, rule.owner);
     if (generation === undefined) {
       // A worker claims the row only when it starts, so this one never gets it back.
@@ -194,7 +180,7 @@ export function stopWhenIdle(rule: StopRule): { close(): void } {
     }
     if (at !== null) {
       try {
-        await registerWakeup(rule, { id: binding!.id, at, generation });
+        await registerWakeup(rule, { at, generation });
       } catch (err) {
         const message = errorMessage(err);
         await recordWakeupError(db, rule.owner, generation, message);
@@ -235,15 +221,14 @@ export function stopWhenIdle(rule: StopRule): { close(): void } {
 }
 
 /**
- * Calls the wakeup's register operation, as `SanomaClient.call` calls a driver: its input parsed
- * (the instance's id, its binding, with `at` and `generation`), a `CallContext` of the runtime's,
- * and no ledger record, which is a run's. The idempotency key is the generation's, so a retried
- * registration is one registration.
+ * Calls the wakeup's register operation, as `SanomaClient.call` calls a driver: its input parsed,
+ * a `CallContext` of the runtime's, and no ledger record, which is a run's. The idempotency key
+ * is the generation's, so a retried registration is one registration.
  */
-async function registerWakeup({ register: { op, fn }, secrets }: StopRule, registration: WakeupRegistration) {
+async function registerWakeup({ register: { op, fn }, secrets, wakeup }: StopRule, registration: WakeupRegistration) {
   if (!fn) throw new Error(`${op.id} has no driver: the connector package must attach one`);
   // Every database counts generations from 0, so the key names the wakeup too.
-  const key = `wakeup:${registration.id}:${registration.generation}`;
+  const key = `wakeup:${wakeup}:${registration.generation}`;
   const context: CallContext = { idempotencyKey: key, runId: key, opId: op.id, attempt: 1, secrets, by: WAKEUP_AGENT };
   await fn(op.input.parse(registration), context);
 }

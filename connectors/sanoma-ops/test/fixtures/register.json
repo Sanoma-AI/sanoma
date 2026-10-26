@@ -10,7 +10,7 @@
   },
   {
     "method": "PUT",
-    "path": "/wakeup/instances/00000000-0000-4000-8000-000000000001/wake",
+    "path": "/wakeup/wake",
     "status": 204,
     "body": null
   },

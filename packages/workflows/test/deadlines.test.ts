@@ -1,5 +1,3 @@
-import { writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { DBOS, type DBOSClient, type WorkflowStatus } from "@dbos-inc/dbos-sdk";
 import { startTestWorker, testDatabaseUrl } from "@sanoma-ai/testing";
@@ -55,7 +53,7 @@ const ops = defineConnector("acme", {
     register: {
       effect: "write",
       idempotent: true,
-      input: z.object({ id: z.string(), at: z.iso.datetime(), generation: z.number().int() }),
+      input: z.object({ at: z.iso.datetime(), generation: z.number().int() }),
       output: z.object({}),
       target: () => "w",
     },
@@ -129,9 +127,6 @@ const alice = { id: "alice" };
 const WAKEUP_FILE =
   'import { acme } from "@acme/connector/resources";\n' +
   'export const wake = acme.wakeup({ name: "wake", host: "https://app.example.test" });\n';
-
-/** The lockfile that binds the wakeup to its instance, `W_1`. */
-const BOUND = JSON.stringify({ "resources/infra.ts#wake": { type: "acme.wakeup", id: "W_1" } });
 
 /** A worker on its own database, a client and a raw DBOS client of it, and the worker started again on demand. */
 function useWorker(name: string, files: Record<string, string>) {
@@ -360,7 +355,7 @@ describe("a worker's deadlines", () => {
 });
 
 describe("the stop rule", () => {
-  const app = useWorker("deadlines_stop", { "resources/infra.ts": WAKEUP_FILE, "resources/sanoma.lock.json": BOUND });
+  const app = useWorker("deadlines_stop", { "resources/infra.ts": WAKEUP_FILE });
   const fast = { stopCheckMs: 100, idleHorizonMs: 1_000 };
 
   it("registers the next deadline with a new generation and stops; a second start recovers the sleeping run", async () => {
@@ -377,9 +372,9 @@ describe("the stop rule", () => {
     expect(stops).toEqual([{ at, generation }]);
     expect(registered).toEqual([
       {
-        input: { id: "W_1", at, generation },
+        input: { at, generation: generation },
         context: expect.objectContaining({
-          idempotencyKey: `wakeup:W_1:${generation}`,
+          idempotencyKey: `wakeup:resources/infra.ts#wake:${generation}`,
           opId: "acme.wakeup.register",
           attempt: 1,
           by: "wakeup",
@@ -475,42 +470,5 @@ describe("the stop rule", () => {
     await app.start({ stopCheckMs: 60_000 });
     await app.client.decide(runId, { decision: "approve", by: { id: "lead" } });
     expect(await app.client.result(runId)).toBe("asked");
-  });
-});
-
-describe("the stop rule, with the wakeup unbound", () => {
-  const app = useWorker("deadlines_unbound", { "resources/infra.ts": WAKEUP_FILE });
-
-  it("registers nothing and takes no generation until apply binds the wakeup, then registers with its binding", async () => {
-    // A run of this test before left its error on the row.
-    await app.pool.query(`UPDATE ${WAKEUP_TABLE} SET last_error = NULL WHERE id = 1`);
-    await app.client.start(nap, { seconds: 30 }, { startedBy: alice });
-    const stops: SelfStop[] = [];
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    await app.start({ stopCheckMs: 100, idleHorizonMs: 1_000, onStopped: (s) => stops.push(s) });
-    await waitFor(async () => (await app.row()).last_error !== null);
-    const failed = await app.row();
-    expect(failed.last_error).toBe(
-      "the wakeup resources/infra.ts#wake is not bound yet: apply it to create its instance",
-    );
-    await new Promise((r) => setTimeout(r, 500));
-    expect((await app.row()).generation).toBe(failed.generation);
-    expect(warn.mock.calls.filter(([line]) => String(line).includes("is not bound yet"))).toHaveLength(1);
-    expect(registered).toEqual([]);
-    expect(stops).toEqual([]);
-
-    // A lockfile it cannot read, or one binding the export to another type, binds nothing, and says why.
-    const lockfile = join(app.config.root!, "resources", "sanoma.lock.json");
-    writeFileSync(lockfile, "{");
-    await waitFor(async () => (await app.row()).last_error?.startsWith("the lockfile cannot be read") ?? false);
-    writeFileSync(lockfile, JSON.stringify({ "resources/infra.ts#wake": { type: "acme.other", id: "O_1" } }));
-    await waitFor(async () => (await app.row()).last_error?.includes("to acme.other, not acme.wakeup") ?? false);
-    expect(registered).toEqual([]);
-
-    // Apply binds it while the worker runs: the next check registers with the binding, and stops.
-    writeFileSync(lockfile, BOUND);
-    await waitFor(() => stops.length === 1);
-    expect(registered).toMatchObject([{ input: { id: "W_1", generation: stops[0]!.generation } }]);
-    warn.mockRestore();
   });
 });

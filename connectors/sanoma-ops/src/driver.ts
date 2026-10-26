@@ -118,8 +118,8 @@ function serviceApi(timeoutMs: number): WakeupApi {
     async remove(id) {
       await send("DELETE", instance(id), accountToken(), { absent: true });
     },
-    async wake({ id, at, generation }, token) {
-      await send("PUT", `${instance(id)}/wake`, token, { body: { at, generation } });
+    async wake({ at, generation }, token) {
+      await send("PUT", "/wakeup/wake", token, { body: { at, generation } });
     },
   };
 }

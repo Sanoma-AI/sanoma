@@ -74,7 +74,7 @@ describe("the wakeup conformance kit", () => {
       type: fakeWakeupType,
       host: { url, stop: () => host.stop(), wakes: () => host.wakes() },
       client,
-      register: async (registration) => void (await timer("register")({ id: "wake", ...registration })),
+      register: async (registration) => void (await timer("register")(registration)),
       timeoutMs: 30_000,
     });
     expect(results).toEqual([
@@ -86,7 +86,7 @@ describe("the wakeup conformance kit", () => {
 
   it("fires the armed wake now, whatever its at", async () => {
     const before = host.wakes().length;
-    await timer("register")({ id: "wake", at: new Date(Date.now() + 3_600_000).toISOString(), generation: 9 });
+    await timer("register")({ at: new Date(Date.now() + 3_600_000).toISOString(), generation: 9 });
     await wakeup.fire();
     expect(
       host
@@ -101,7 +101,7 @@ describe("the wakeup conformance kit", () => {
     const before = host.wakes().length;
     // The runtime's next start fails once: the first wake gets a 502 from the proxy.
     failNext = true;
-    await timer("register")({ id: "wake", at: new Date().toISOString(), generation: 10 });
+    await timer("register")({ at: new Date().toISOString(), generation: 10 });
     await waitFor(
       () => host.wakes().slice(before),
       (wakes) => wakes.some((w) => w.generation === 10),
@@ -112,14 +112,14 @@ describe("the wakeup conformance kit", () => {
 });
 
 describe("fakeWakeup", () => {
-  it("refuses to register a timer apply did not create", async () => {
+  it("refuses to register before apply created its timer", async () => {
     const wakeup = fakeWakeup();
     await expect(
       wakeup.driver.ops["timer.register"]!(
-        { id: "wake", at: new Date().toISOString(), generation: 1 },
+        { at: new Date().toISOString(), generation: 1 },
         call("testwakeup.timer.register"),
       ),
-    ).rejects.toThrow("testwakeup: register names no timer apply created (wake)");
+    ).rejects.toThrow("testwakeup: register wakes the one timer apply created, not 0");
   });
 
   it("meets the Wakeup contract: a data file declares it for a host it names", async () => {

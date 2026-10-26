@@ -24,7 +24,7 @@ export interface WakeupApi {
   get(id: string): Promise<Instance | undefined>;
   /** `DELETE /wakeup/instances/{id}` with the account's token; nothing when there is none. */
   remove(id: string): Promise<void>;
-  /** `PUT /wakeup/instances/{id}/wake { at, generation }` with the instance's token. */
+  /** `PUT /wakeup/wake { at, generation }` with the instance's token, which names the instance. */
   wake(registration: WakeupRegistration, token: string): Promise<void>;
 }
 

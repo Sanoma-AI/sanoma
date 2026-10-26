@@ -69,12 +69,10 @@ const registerSpec = {
     description:
       "Ask the wakeup service to call the host's /wake at `at` with `generation`, replacing the wake registered before",
     input: z.object({
-      id: z.string().min(1).describe("The instance's id at the service, its binding"),
       at: z.iso.datetime({ offset: true }).describe("When to wake the host, ISO 8601"),
       generation: z.number().int().min(1).describe("Counts up from 1: only a newer one replaces the wake"),
     }),
     output: z.object({}),
-    target: ({ id }: { id: string }) => id,
   },
 } satisfies Record<string, OpSpec>;
 

@@ -325,17 +325,13 @@ export async function recordWakeupRegistration(db: Db, owner: string, generation
   );
 }
 
-/** Records why registering `generation` failed; with none, why nothing can be registered, at the row's generation. */
-export async function recordWakeupError(
-  db: Db,
-  owner: string,
-  generation: number | undefined,
-  error: string,
-): Promise<void> {
-  await db.query(
-    `UPDATE ${WAKEUP_TABLE} SET last_error = $3 WHERE id = 1 AND owner = $1 AND ($2::bigint IS NULL OR generation = $2)`,
-    [owner, generation ?? null, error],
-  );
+/** Records why registering `generation` failed. */
+export async function recordWakeupError(db: Db, owner: string, generation: number, error: string): Promise<void> {
+  await db.query(`UPDATE ${WAKEUP_TABLE} SET last_error = $3 WHERE id = 1 AND owner = $1 AND generation = $2`, [
+    owner,
+    generation,
+    error,
+  ]);
 }
 
 /** Records that the worker stops now, with `generation` registered. */

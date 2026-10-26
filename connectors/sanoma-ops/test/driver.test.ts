@@ -45,10 +45,10 @@ describe.skipIf(live)("sanomaOpsDriver", () => {
     play("register");
     const call = callWith();
     const { id } = (await op("create", { desired: { host: HOST } }, call)) as { id: string };
-    await op("register", { id, at: "2099-01-01T00:00:00Z", generation: 1 }, call);
+    await op("register", { at: "2099-01-01T00:00:00Z", generation: 1 }, call);
     expect(sent[1]).toMatchObject({
       method: "PUT",
-      path: `/wakeup/instances/${id}/wake`,
+      path: "/wakeup/wake",
       body: { at: "2099-01-01T00:00:00Z", generation: 1 },
     });
     expect(sent[1]!.headers.get("authorization")).toBe("Bearer swi_recorded0001");
@@ -121,7 +121,7 @@ describe.skipIf(live)("sanomaOpsDriver", () => {
       retryable: false,
       message: expect.stringContaining("SANOMA_OPS_TOKEN is not set"),
     });
-    await expect(op("register", { id: ID, at: "2099-01-01T00:00:00Z", generation: 1 })).rejects.toMatchObject({
+    await expect(op("register", { at: "2099-01-01T00:00:00Z", generation: 1 })).rejects.toMatchObject({
       retryable: false,
       message: expect.stringContaining("SANOMA_WAKEUP_TOKEN is not set"),
     });

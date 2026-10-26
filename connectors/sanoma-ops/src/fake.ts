@@ -85,10 +85,11 @@ export function fakeSanomaOps(options: FakeOptions = {}) {
       delete state.instances[id];
       disarm(id);
     },
-    async wake({ id, at, generation }: WakeupRegistration, token) {
+    async wake({ at, generation }: WakeupRegistration, token) {
+      // The token names the instance.
       const mine = Object.values(state.instances).find((i) => i.token === token);
       if (!mine) throw fail(401, "the token is no instance's");
-      if (mine.id !== id) throw fail(403, "the token is another instance's");
+      const { id } = mine;
       // An older or equal generation changes nothing: callers retry, at least once each.
       if (generation <= mine.generation) return;
       Object.assign(mine, { at: new Date(at).toISOString(), generation, lastError: null });

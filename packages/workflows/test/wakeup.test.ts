@@ -68,7 +68,7 @@ const wakeupOf = (
     wakeup: { ...wakeup, ...overrides },
   });
 
-const registration = z.object({ id: z.string(), at: z.iso.datetime(), generation: z.number().int().nonnegative() });
+const registration = z.object({ at: z.iso.datetime(), generation: z.number().int().nonnegative() });
 const register = (input: z.ZodType = registration) =>
   defineConnector("acme", {
     wakeup: { register: { effect: "write", idempotent: true, input, output: z.object({}), target: () => "w" } },
@@ -142,29 +142,31 @@ describe("a wakeup type", () => {
     );
   });
 
-  it("is refused by resolveConfig when its connector lacks its register, or that takes no { id, at, generation }", () => {
+  it("is refused by resolveConfig when its connector lacks its register, or that takes no { at, generation }", () => {
     expect(() => resolveConfig({ workflows: [], connectors: [acmeTypes()] })).toThrow(
       "acme.wakeup: its wakeup's register, acme.wakeup.register, is no operation of its connector",
     );
     expect(() =>
       resolveConfig({ workflows: [], connectors: [acmeWith(register(z.object({ when: z.string() })))] }),
-    ).toThrow("acme.wakeup: its wakeup's register, acme.wakeup.register, must take { id, at, generation }");
+    ).toThrow("acme.wakeup: its wakeup's register, acme.wakeup.register, must take { at, generation }");
     // One that strips them takes neither.
     expect(() => resolveConfig({ workflows: [], connectors: [acmeWith(register(z.object({})))] })).toThrow(
-      /must take \{ id, at, generation \}/,
+      /must take \{ at, generation \}/,
     );
     expect(resolveConfig({ workflows: [], connectors: [acmeWith()] }).ops.has("acme.wakeup.register")).toBe(true);
   });
 });
 
 describe("declaredWakeup", () => {
-  it("is the one wakeup the data files declare", async () => {
+  it("is the one wakeup the data files declare, with its binding from the lockfile", async () => {
     const root = rootWith({
       "resources/infra.ts": `${IMPORT}${SERVICE}export const wake = acme.wakeup({ name: "wake", host: app });\n`,
+      "resources/sanoma.lock.json": JSON.stringify({ "resources/infra.ts#wake": { type: "acme.wakeup", id: "W_1" } }),
     });
     const found = await declaredWakeup(configAt(root));
     expect(found).toMatchObject({
       id: "resources/infra.ts#wake",
+      binding: "W_1",
       declared: { vendor: "acme", type: "wakeup", desired: { name: "wake", host: "app" } },
     });
     expect(found?.type.wakeup?.register).toBe("acme.wakeup.register");

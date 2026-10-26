@@ -17,16 +17,13 @@ const renumber = (make: (n: number) => string) => {
   };
 };
 
-/**
- * Numbers the instances' ids and tokens in order of appearance, so no recorded token stays. An id
- * a scenario made up (`00000000-0000-4000-8000-…`) is kept, since its request names it.
- */
+/** Numbers the instances' ids and tokens in order of appearance, so no recorded token stays. */
 function scrub(exchanges: Exchange[]): Exchange[] {
   const token = renumber((n) => `swi_recorded${String(n).padStart(4, "0")}`);
   return JSON.parse(
     JSON.stringify(exchanges)
       .replace(
-        /(?!00000000-0000-4000-8000-)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g,
+        /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g,
         renumber((n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`),
       )
       .replace(/\bsw[ai]_[A-Za-z0-9_-]+/g, token),

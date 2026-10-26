@@ -28,7 +28,7 @@ export const wakeup = sanomaOps.wakeup({ host });
 | `sanomaOps.wakeup.delete`   | `write` | Delete the instance; done already when it is gone. Only apply calls it.                                     |
 | `sanomaOps.wakeup.register` | `write` | Ask the service to call the host's `/wake` at `at` with `generation`, replacing the wake registered before. |
 
-`register` takes `{ id, at, generation }`: the instance's id (the wakeup's binding), an ISO 8601 time and a generation from 1. The worker calls it before it stops, with each new generation; the service applies one only when it is newer, so a retry, or a late duplicate, changes nothing. No workflow calls these operations: apply calls the resource's, and the worker calls `register`.
+`register` takes `{ at, generation }`: an ISO 8601 time and a generation from 1; the stored instance token says which instance it is for. The worker calls it before it stops, with each new generation; the service applies one only when it is newer, so a retry, or a late duplicate, changes nothing. No workflow calls these operations: apply calls the resource's, and the worker calls `register`.
 
 The wakeup has no identity: the service names each instance, and the lockfile binds the declaration to its id. Its `host` holds the URL the service calls; a new one is a new instance. Its state is `{ id, host, at, generation, lastError }`, and it is `healthy` while it exists and the last call to the host's `/wake` did not fail.
 
@@ -46,7 +46,7 @@ export default defineConfig({ workflows, connectors: [sanomaOps /* , the host's 
 
 `./driver` (`sanomaOpsDriver`; `sanomaOpsDriver({ timeoutMs })`, 10 s by default) and `./fake` (`fakeSanomaOps`) are internal entries, for tests.
 
-The service has no SDK or OpenAPI spec, so the driver is plain `fetch` over its routes: `POST /wakeup/instances { url }` (201 `{ id, token }`), `GET` and `DELETE /wakeup/instances/{id}`, each with the account's token, and `PUT /wakeup/instances/{id}/wake { at, generation }` with the instance's own. A redirect is refused, so a token never follows one.
+The service has no SDK or OpenAPI spec, so the driver is plain `fetch` over its routes: `POST /wakeup/instances { url }` (201 `{ id, token }`), `GET` and `DELETE /wakeup/instances/{id}`, each with the account's token, and `PUT /wakeup/wake { at, generation }` with the instance's own, which names the instance. A redirect is refused, so a token never follows one.
 
 ### Environment
 
@@ -62,7 +62,7 @@ The service shows an instance's token once, so `create` stores it in the company
 
 ### Errors and retries
 
-A 408, a 429, a 5xx, a timeout (10 s; `timeoutMs` changes it) or no reply is retryable; any other 4xx is not (a 401 for a token the service does not know, a 403 for another account's or instance's, a 400 for a bad URL or registration). `status` is kept, and the message is the service's `error`. A 404 is an instance that is gone only when it is the service's own (its JSON `{ error }`); another server's 404 at `SANOMA_OPS_URL` is a failure. The service has no error codes, so `vendorCode` is set only for the driver's own refusals: `stale` and `plan_changed` (an `update` whose fresh plan differs from the one apply approved).
+A 408, a 429, a 5xx, a timeout (10 s; `timeoutMs` changes it) or no reply is retryable; any other 4xx is not (a 401 for a token the service does not know, a 403 for another account's instance, a 400 for a bad URL or registration). `status` is kept, and the message is the service's `error`. A 404 is an instance that is gone only when it is the service's own (its JSON `{ error }`); another server's 404 at `SANOMA_OPS_URL` is a failure. The service has no error codes, so `vendorCode` is set only for the driver's own refusals: `stale` and `plan_changed` (an `update` whose fresh plan differs from the one apply approved).
 
 ### Testing the driver
 

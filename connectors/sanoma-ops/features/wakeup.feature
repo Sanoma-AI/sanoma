@@ -36,7 +36,6 @@ Feature: sanoma-ops wakeups
   Scenario: Register
     Given a sanoma-ops wakeup for "https://company.example.test"
     When sanomaOps.wakeup.register is called with
-      | id         | $wakeup.id           |
       | at         | 2099-01-01T00:00:00Z |
       | generation | 1                    |
     And sanomaOps.wakeup.read is called with
@@ -50,11 +49,9 @@ Feature: sanoma-ops wakeups
   Scenario: Register an older generation
     Given a sanoma-ops wakeup for "https://company.example.test"
     When sanomaOps.wakeup.register is called with
-      | id         | $wakeup.id           |
       | at         | 2099-01-01T00:00:00Z |
       | generation | 2                    |
     And sanomaOps.wakeup.register is called with
-      | id         | $wakeup.id           |
       | at         | 2098-01-01T00:00:00Z |
       | generation | 1                    |
     And sanomaOps.wakeup.read is called with
@@ -63,14 +60,6 @@ Feature: sanoma-ops wakeups
       """
       { "state": { "at": "2099-01-01T00:00:00.000Z", "generation": 2 } }
       """
-
-  Scenario: Register another instance
-    Given a sanoma-ops wakeup for "https://company.example.test"
-    When sanomaOps.wakeup.register is called with
-      | id         | 00000000-0000-4000-8000-0000000000ff |
-      | at         | 2099-01-01T00:00:00Z                 |
-      | generation | 1                                    |
-    Then it fails with status 403
 
   Scenario: Delete
     Given a sanoma-ops wakeup for "https://company.example.test"
