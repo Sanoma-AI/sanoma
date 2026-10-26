@@ -277,6 +277,14 @@ describe("the chat on a person's own agent", () => {
     try {
       const reply = await send(`die-${RUN}`, "acp-opencode", "Hi");
       expect(textOfReply(reply)).toBe("OpenCode could not answer: it stopped (exit code 3): the fake agent fell over");
+      // The step it was in ends as stopped, so the turn does not look cut short.
+      expect(reply?.parts.filter(isToolUIPart)).toEqual([
+        expect.objectContaining({
+          toolCallId: "cut",
+          state: "output-error",
+          errorText: "It stopped before it finished",
+        }),
+      ]);
     } finally {
       configure("opencode", { signIn: "none", mode: "work" });
     }

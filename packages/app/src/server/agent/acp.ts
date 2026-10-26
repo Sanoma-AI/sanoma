@@ -196,7 +196,7 @@ async function runTurn(name: OwnAgentName, engineTurn: EngineTurn, writer: UIMes
   } finally {
     await turn?.stop();
   }
-  relay.end();
+  relay.finish();
   await commitTurn(engineTurn, draft, agent.title, writer);
   writer.write({ type: "finish" });
 }
@@ -249,9 +249,10 @@ class AcpTurn {
     void child.exited.then((exit) => connection.close(died(exit)));
     const { agent } = connection;
     let sessionId: string | undefined;
+    let grace: NodeJS.Timeout | undefined;
     const cancel = () => {
       if (sessionId !== undefined) void agent.notify("session/cancel", { sessionId }).catch(() => {});
-      setTimeout(() => child.kill(), CANCEL_GRACE).unref();
+      grace = setTimeout(() => child.kill(), CANCEL_GRACE);
     };
     this.signal.addEventListener("abort", cancel, { once: true });
     try {
@@ -273,6 +274,7 @@ class AcpTurn {
         await this.#signIn(agent, [...(init.authMethods ?? []), ...(data?.authMethods ?? [])]);
       }
     } finally {
+      clearTimeout(grace);
       this.signal.removeEventListener("abort", cancel);
     }
   }
@@ -356,8 +358,8 @@ class AcpTurn {
   }
 
   /**
-   * The checkout rule's answer to a permission request: an edit (a change, deletion or move) of
-   * paths the rule allows in the draft gets the `allow_once` the agent offered; anything else, a
+   * The checkout rule's answer to a permission request: a read or an edit (a change, deletion or
+   * move) of paths the rule allows in the draft gets the `allow_once` the agent offered; anything else, a
    * path outside, a command, a fetch, gets its `reject_once`, with the reason, which the step shows.
    * `allow_always` is never chosen, and only an option the agent offered is returned.
    */
@@ -372,12 +374,12 @@ class AcpTurn {
     };
     const kind = toolCall.kind ?? this.relay.kindOf(toolCall.toolCallId);
     if (kind === "execute") return refuse(NO_SHELL);
-    if (kind !== "edit" && kind !== "delete" && kind !== "move") {
+    if (kind !== "edit" && kind !== "delete" && kind !== "move" && kind !== "read") {
       return refuse(`${toolCall.title ?? "This tool"} is not available in this chat: edit the files in your checkout`);
     }
     const paths = [...(toolCall.locations ?? []).map((location) => location.path), pathOf(toolCall.rawInput)];
     const named = [...new Set(paths.filter((path): path is string => typeof path === "string"))];
-    if (!named.length) return refuse("An edit names its file: say which file in your checkout");
+    if (!named.length) return refuse("A read or an edit names its file: say which file in your checkout");
     for (const path of named) {
       if ((await allowedPath(this.root, path)) === undefined) {
         return refuse(outsideCheckout(path));
@@ -532,6 +534,21 @@ class Relay {
     this.end();
   }
 
+  /** Ends the reply: its text or reasoning, and each step the agent left unfinished, as stopped. */
+  finish() {
+    this.end();
+    for (const [toolCallId, step] of this.#steps) {
+      if (step.ended) continue;
+      step.ended = true;
+      this.writer.write({
+        type: "tool-output-error",
+        toolCallId,
+        errorText: "It stopped before it finished",
+        dynamic: true,
+      });
+    }
+  }
+
   /** Ends the text or reasoning under way. */
   end() {
     if (!this.#open) return;
@@ -606,8 +623,12 @@ const tail = (output: string) => {
   return last ? `: ${last}` : "";
 };
 
-/** A person's id as a directory name: never `.`, `..` or a path. */
-const personDir = (id: string) => encodeURIComponent(id).replaceAll(".", "%2E");
+/**
+ * A person's id as a directory name: never `.`, `..` or a path, and capitals escaped, so ids that
+ * differ only in case never share a HOME on a case-insensitive file system (macOS's default).
+ */
+const personDir = (id: string) =>
+  encodeURIComponent(id).replaceAll(/[.A-Z]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
 
 const quote = (word: string) => (/^[\w./=:-]+$/.test(word) ? word : `'${word.replaceAll("'", `'\\''`)}'`);
 
@@ -646,14 +667,19 @@ async function install(agent: OwnAgent, dir: string, home: string): Promise<void
 /** `promise`, or a failure when the turn stops (or `timeout` passes) first; `promise` goes on. */
 function untilAborted<T>(promise: Promise<T>, signal: AbortSignal, timeout?: { ms: number; text: string }): Promise<T> {
   return new Promise<T>((done, fail) => {
-    const stop = () => fail(new Error(STOPPED));
-    if (signal.aborted) return stop();
-    const timer = timeout && setTimeout(() => fail(new Error(timeout.text)), timeout.ms);
-    signal.addEventListener("abort", stop, { once: true });
-    promise.then(done, fail).finally(() => {
+    if (signal.aborted) return fail(new Error(STOPPED));
+    const end = (settle: () => void) => {
       clearTimeout(timer);
       signal.removeEventListener("abort", stop);
-    });
+      settle();
+    };
+    const stop = () => end(() => fail(new Error(STOPPED)));
+    const timer = timeout && setTimeout(() => end(() => fail(new Error(timeout.text))), timeout.ms);
+    signal.addEventListener("abort", stop, { once: true });
+    promise.then(
+      (value) => end(() => done(value)),
+      (err: unknown) => end(() => fail(err)),
+    );
   });
 }
 

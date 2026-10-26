@@ -209,6 +209,16 @@ function DraftCardView({ draft }: { draft: DraftCard }) {
   );
 }
 
+/** `url` when it is an https link that parses (the vendor wrote it), else undefined. */
+function httpsLink(url: string | undefined): URL | undefined {
+  try {
+    const link = new URL(url ?? "");
+    return link.protocol === "https:" ? link : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * A person's own agent's sign-in: the vendor's link and what it printed (its code among it), a
  * field for a code the vendor asks to have pasted back (written to its sign-in, `POST
@@ -231,8 +241,7 @@ function SignInCardView({ card, chat, live }: { card: SignInCard; chat: string; 
     setSent(response?.ok ? `Sent to ${agent}'s sign-in.` : `${agent}'s sign-in is not waiting for a code any more.`);
   };
   // An https link only, and one that parses: the vendor wrote it.
-  const parsed = card.url ? URL.parse(card.url) : null;
-  const link = parsed?.protocol === "https:" ? parsed : undefined;
+  const link = httpsLink(card.url);
   return (
     <Card size="sm" role="region" aria-label={`Sign in to ${agent}`}>
       <CardHeader>

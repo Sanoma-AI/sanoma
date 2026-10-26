@@ -192,6 +192,14 @@ const app = acp
     const text = params.prompt.map((block) => block.text ?? "").join("");
     log({ prompt: text });
     if (config.mode === "die") {
+      // Mid-step: the step it started never ends.
+      await update(client, params.sessionId, {
+        sessionUpdate: "tool_call",
+        toolCallId: "cut",
+        title: "Read workflows/offboarding.ts",
+        kind: "read",
+        status: "in_progress",
+      });
       process.stderr.write("the fake agent fell over\n");
       process.exit(3);
     }

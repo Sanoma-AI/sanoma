@@ -312,9 +312,10 @@ export class Command {
     this.#write?.write(text);
   }
 
-  /** Kills its process group: what it started too. */
+  /** Kills its process group: what it started too. Once it has exited, only while that group is left, so a reused pid is never hit. */
   kill() {
-    if (this.#group !== undefined) killGroup(this.#group);
+    if (this.#group === undefined) return;
+    if (this.status === undefined || groupAlive(this.#group)) killGroup(this.#group);
   }
 
   /** Resolves when it exits 0; an error with the end of what it printed otherwise. */
