@@ -102,7 +102,7 @@ To release it, bump `version` in [`packages/desktop/package.json`](packages/desk
 
 ## Develop
 
-Needs Node 24, or 26 and later (Cucumber, which runs the scenarios, does not support 25), pnpm, and Docker for the workflow tests.
+Needs Node 24, or 26 and later (Cucumber, which runs the scenarios, does not support 25), pnpm, and Docker for the workflow tests. With [mise](https://mise.jdx.dev), `mise install` sets up Node and pnpm from `.mise.toml`.
 
 ```sh
 pnpm install
