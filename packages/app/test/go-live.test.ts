@@ -131,6 +131,7 @@ beforeAll(async () => {
     resolved: resolveConfig(app.config),
     description: describeConfig(app.config),
     client: app.client,
+    place: "this-computer",
     login: admitting(loopbackLogin(), () => ({ people: [], problems: [] })),
     source,
   };

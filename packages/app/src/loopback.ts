@@ -1,7 +1,7 @@
 import type { Principal } from "@sanoma-ai/workflows";
 import { parse } from "cookie-es";
 import { isLoopback } from "@sanoma-ai/workflows/shared";
-import { ACTOR_COOKIE, ACTOR_HEADER } from "./api.ts";
+import { ACTOR_COOKIE, ACTOR_HEADER, type Place } from "./api.ts";
 import type { LoginProvider } from "./context.ts";
 
 // The loopback login, and the Host names a loopback-only app answers to. Which addresses count
@@ -60,6 +60,15 @@ export function hostName(header: string): string {
   const name = header.startsWith("[") ? header.slice(1, header.indexOf("]")) : header.replace(/:\d*$/, "");
   return name.toLowerCase();
 }
+
+/**
+ * Where an instance on the database at `databaseUrl` is: this computer when the database's host is
+ * a loopback name or none (a Unix socket), else live.
+ */
+export const placeOf = (databaseUrl: string): Place => {
+  const host = new URL(databaseUrl).hostname;
+  return host === "" || isLoopback(host) ? "this-computer" : "live";
+};
 
 /** The 403 for a request that reached a loopback-only app under some other name (DNS rebinding). */
 export function refuseHost(host: string): Response {

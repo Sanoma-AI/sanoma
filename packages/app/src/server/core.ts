@@ -38,6 +38,7 @@ import {
   type AdoptRequest,
   type AdoptResponse,
   ApiError,
+  type AppConfig,
   type CallRequest,
   type ClearCredentialRequest,
   type CredentialsResponse,
@@ -122,6 +123,13 @@ export const validate =
  */
 export const readStartRun = (data: StartRunRequest): StartRunRequest =>
   parse(startRunSchema(data), data, "The request");
+
+/** What `getConfig` answers (`AppConfig`): the description `withoutSources`, and where this instance is. */
+export const appConfig = (app: AppContext): AppConfig => ({
+  ...withoutSources(app.description),
+  place: app.place,
+  databaseHost: new URL(app.resolved.databaseUrl).hostname,
+});
 
 /**
  * The description as the page gets it (`getConfig`): without the source of a workflow

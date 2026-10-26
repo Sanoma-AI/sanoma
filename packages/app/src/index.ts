@@ -25,7 +25,7 @@ import type { AppContext, LoginProvider, RequestContext, ServerEntry } from "./c
 import { admitting } from "./login/admission.ts";
 import { loginKey } from "./login/keys.ts";
 import { publicFront } from "./login/public.ts";
-import { hostName, loopbackLogin } from "./loopback.ts";
+import { hostName, loopbackLogin, placeOf } from "./loopback.ts";
 import { type Published, PUBLISHED_FILE, publishedOf } from "./content-files.ts";
 import { seoFile } from "./seo.ts";
 
@@ -207,7 +207,15 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   }
   const responder = loaded.value;
   const client = connected.value;
-  const app: AppContext = { resolved, description, policyFiles, client, login, source: options.source };
+  const app: AppContext = {
+    resolved,
+    description,
+    policyFiles,
+    place: placeOf(resolved.databaseUrl),
+    client,
+    login,
+    source: options.source,
+  };
   // Each public site served, by name, with its own context, whose login is its front door: its
   // login half, if it has one, made once the app listens (`openLogins`). A public site whose
   // site.ts has a problem is not served, as its login could be one not read.

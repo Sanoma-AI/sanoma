@@ -73,6 +73,7 @@ beforeAll(async () => {
     resolved: resolveConfig(config),
     description: describeConfig(config),
     client,
+    place: "this-computer",
     login: admitting(loopbackLogin(), () => ({ people: [], problems: [] })),
   };
   // The table outlives a run of the tests. (Reading prepares the database; rows stored under

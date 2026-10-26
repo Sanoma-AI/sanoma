@@ -1,4 +1,3 @@
-import type { ConfigDescription } from "@sanoma-ai/workflows/describe";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { ClientOnly, Link } from "@tanstack/react-router";
 import type { Icon as PhosphorIcon } from "@phosphor-icons/react";
@@ -17,9 +16,11 @@ import { Badge } from "#/components/ui/badge.tsx";
 import { Button } from "#/components/ui/button.tsx";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "#/components/ui/sheet.tsx";
 import { useSites } from "#/lib/sites.ts";
+import type { Tone } from "#/lib/tone.ts";
 import { cn } from "#/lib/utils.ts";
+import type { AppConfig, Place } from "../../api.ts";
 import { configQuery, pendingOf, waitingRunsQuery } from "../../queries.ts";
-import { toneBadge } from "../kit.tsx";
+import { Tip, toneBadge } from "../kit.tsx";
 import { NavUser } from "./nav-user.tsx";
 
 // The bar: Chat, then the app's sections in groups, then who you are. A section is a page; there
@@ -46,10 +47,12 @@ const GROUPS: Section[][] = [
   ],
 ];
 
-/** What the bar reads from the config: whether it has collections and a policy. */
-const selectBar = (config: ConfigDescription) => ({
+/** What the bar reads from the config: whether it has collections and a policy, and where this instance is. */
+const selectBar = (config: AppConfig) => ({
   data: config.collections.length > 0,
   policy: config.policy.defined,
+  place: config.place,
+  databaseHost: config.databaseHost,
 });
 
 /**
@@ -67,7 +70,8 @@ const ACTIVE = { "data-active": true } as const;
 /**
  * The bar, on the `sidebar` surface: Chat, which folds and unfolds the chat column (`chat`; left
  * out in the phone's sheet, which has no column), the sections (Sites, Data and Permissions only
- * when there are sites, collections or policies), and the user menu at its foot.
+ * when there are sites, collections or policies), and at its foot what the open window is
+ * (`PlaceBadge`) above the user menu.
  */
 export function Bar({ chat, className }: { chat?: { open: boolean; toggle: () => void }; className?: string }) {
   const { data: has } = useSuspenseQuery({ ...configQuery(), select: selectBar });
@@ -117,7 +121,8 @@ export function Bar({ chat, className }: { chat?: { open: boolean; toggle: () =>
           </Fragment>
         ))}
       </nav>
-      <div className="mt-auto">
+      <div className="mt-auto flex flex-col items-center gap-2">
+        <PlaceBadge place={has.place} databaseHost={has.databaseHost} />
         <NavUser />
       </div>
     </div>
@@ -140,6 +145,30 @@ function Item({ section: { icon: Icon, label }, children }: { section: Section; 
 /** The short rule between the bar's groups. */
 function Rule() {
   return <div aria-hidden="true" className="my-1 h-px w-9 shrink-0 bg-border" />;
+}
+
+/** Each place's badge: its words and its tone. */
+const PLACES: Record<Place, { label: string; tone: Tone }> = {
+  "this-computer": { label: "This computer", tone: "idle" },
+  live: { label: "Live", tone: "ok" },
+};
+
+/**
+ * What the open window is, from what this instance connects to (`placeOf`): This computer or
+ * Live, its tip the database's host and nothing more (a Unix socket's is none).
+ */
+function PlaceBadge({ place, databaseHost }: Pick<AppConfig, "place" | "databaseHost">) {
+  const { label, tone } = PLACES[place];
+  return (
+    <Tip tip={`Database on ${databaseHost || "a local socket"}`}>
+      <Badge
+        tabIndex={0}
+        className={cn(toneBadge({ tone }), "h-auto max-w-full rounded-md text-center text-bar whitespace-normal")}
+      >
+        {label}
+      </Badge>
+    </Tip>
+  );
 }
 
 /**

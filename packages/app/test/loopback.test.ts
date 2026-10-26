@@ -3,7 +3,7 @@ import { isLoopback } from "@sanoma-ai/workflows/shared";
 import { ACTOR_COOKIE, ACTOR_HEADER } from "../src/api.ts";
 import { sanoma } from "@sanoma-ai/workflows/resources";
 import { admitting } from "../src/login/admission.ts";
-import { actorFromCookie, hostName, loopbackLogin } from "../src/loopback.ts";
+import { actorFromCookie, hostName, loopbackLogin, placeOf } from "../src/loopback.ts";
 
 // The Host names a loopback-only app answers to, and whom it takes a request to be from. No
 // database, no build.
@@ -42,6 +42,30 @@ describe("the loopback login's hosts", () => {
     }
     for (const host of ["attacker.example", "localhost.attacker.example", "wwwlocalhost", ""]) {
       expect(handled(host)?.status, host).toBe(403);
+    }
+  });
+});
+
+describe("what the open window is (placeOf)", () => {
+  it("is this computer when the database's host is a loopback name or none (a Unix socket)", () => {
+    for (const url of [
+      "postgresql://postgres:dbos@localhost:5433/sanoma",
+      "postgres://u:p@127.0.0.1/db",
+      "postgresql://u:p@[::1]:5432/db",
+      "postgresql:///db?host=/var/run/postgresql",
+    ]) {
+      expect(placeOf(url), url).toBe("this-computer");
+    }
+  });
+
+  it("is live for any other host, one that starts like a loopback name too", () => {
+    for (const url of [
+      "postgresql://u:p@ep-cool-name.eu-central-1.aws.neon.tech/neondb?sslmode=require",
+      "postgres://u:p@db.example.com:5432/x",
+      "postgresql://u:p@localhost.example.com/db",
+      "postgresql://u:p@10.0.0.5/db",
+    ]) {
+      expect(placeOf(url), url).toBe("live");
     }
   });
 });
