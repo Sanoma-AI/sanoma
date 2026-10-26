@@ -21,6 +21,7 @@ import {
   type GoLiveProgress,
   type GoLiveRequest,
   type GoLiveRun,
+  connectedBy,
   SETUP_VENDORS,
 } from "../api.ts";
 import type { AppContext } from "../context.ts";
@@ -47,6 +48,8 @@ const REPOSITORY = "github.repository";
 
 /** The database type going live prefers when the config has it: Neon's, which pauses. */
 const NEON = "neon.project";
+/** Supabase's project, the database type that takes an organization (`DATABASE_EXTRAS`). */
+const SUPABASE = "supabase.project";
 /** The host type going live prefers once Cloudflare is connected, then a container on this machine. */
 const CLOUDFLARE = "cloudflare.container";
 const DOCKER = "docker.container";
@@ -54,7 +57,7 @@ const DOCKER = "docker.container";
 /** The runtime image a container on this machine runs: `docker build -t sanoma-runtime packages/sanoma/runtime`. */
 export const RUNTIME_IMAGE = "sanoma-runtime";
 /** The runtime image every other host runs, tagged with the version of `sanoma` the company installs. */
-export const PUBLISHED_IMAGE = "docker.io/sanomaai/runtime";
+const PUBLISHED_IMAGE = "docker.io/sanomaai/runtime";
 
 /** The secret the database's URL is stored in: its `storeUrl` for the export `store`. */
 const DATABASE_URL = "SANOMA_DATABASE_URL_STORE";
@@ -66,7 +69,7 @@ const SECRETS_KEY = "SANOMA_SECRETS_KEY";
  * reads). A per-type extra rather than a rule on field names, until a second type needs one.
  */
 const DATABASE_EXTRAS: Record<string, (choices: { organization?: string }) => Record<string, DataValue>> = {
-  "supabase.project": ({ organization }) => {
+  [SUPABASE]: ({ organization }) => {
     if (!organization) {
       const error = "Choose a Supabase organization";
       throw new ApiError(400, {
@@ -109,14 +112,13 @@ function databaseType({ resolved }: AppContext): Resource | undefined {
 }
 
 /** The secrets that say which vendors are connected (`SETUP_VENDORS`' `connectedBy`), and the wakeup service's URL. */
-const connections = ({ client }: AppContext) =>
-  client.secrets([...SETUP_VENDORS.flatMap((v) => v.connectedBy), OPS_URL]);
+const connections = ({ client }: AppContext) => client.secrets([...SETUP_VENDORS.flatMap(connectedBy), OPS_URL]);
 type Connections = Awaited<ReturnType<typeof connections>>;
 
 /** True when every token that connects `vendor` is stored; false for a vendor `/setup` does not connect. */
 const isConnected = (stored: Connections, vendor: string) => {
-  const tokens = SETUP_VENDORS.find((v) => v.vendor === vendor)?.connectedBy ?? [];
-  return tokens.length > 0 && tokens.every((name) => stored.has(name));
+  const setup = SETUP_VENDORS.find((v) => v.vendor === vendor);
+  return setup !== undefined && connectedBy(setup).every((name) => stored.has(name));
 };
 
 /** What going live chooses now: the database, the host and its wakeup, from what is connected. */
@@ -127,13 +129,14 @@ async function choose(app: AppContext) {
   return { stored, database, host, wakeup: host ? hostWakeup(app, host, stored) : {} };
 }
 
-/** `value` at the dotted `path` of `into`, the objects on the way made. */
-function setPath(into: Record<string, DataValue>, path: string, value: DataValue): void {
+/** `into`, with `value` at its dotted `path`, the objects on the way made. */
+function setPath(into: Record<string, DataValue>, path: string, value: DataValue): Record<string, DataValue> {
   const keys = path.split(".");
   const last = keys.pop()!;
   let at = into;
   for (const key of keys) at = (at[key] ??= {}) as Record<string, DataValue>;
   at[last] = value;
+  return into;
 }
 
 /** The config's host type: Cloudflare's once it is connected, else Docker's, else the first. */
@@ -192,7 +195,10 @@ async function installations({ client }: AppContext): Promise<Installation[]> {
  */
 export async function goLiveChoices(app: AppContext): Promise<GoLiveChoices> {
   const errors: string[] = [];
-  const tokens = await app.client.secrets(["GITHUB_TOKEN", "SUPABASE_ACCESS_TOKEN"]);
+  const [tokens, { database, host, wakeup }] = await Promise.all([
+    app.client.secrets(["GITHUB_TOKEN", "SUPABASE_ACCESS_TOKEN"]),
+    choose(app),
+  ]);
   const listed = async <T>(what: string, list: () => Promise<T[]>): Promise<T[]> => {
     try {
       return await list();
@@ -202,9 +208,8 @@ export async function goLiveChoices(app: AppContext): Promise<GoLiveChoices> {
     }
   };
   const github = tokens.get("GITHUB_TOKEN")?.value;
-  const database = databaseType(app);
   // Supabase's organizations, for a Supabase project's `organization_id` (`DATABASE_EXTRAS`).
-  const organized = database !== undefined && idOf(database) === "supabase.project";
+  const organized = database !== undefined && idOf(database) === SUPABASE;
   const supabase = organized ? tokens.get("SUPABASE_ACCESS_TOKEN")?.value : undefined;
   const [user, orgs, installed, organizations] = await Promise.all([
     github
@@ -239,7 +244,6 @@ export async function goLiveChoices(app: AppContext): Promise<GoLiveChoices> {
       });
     }
   }
-  const { host, wakeup } = await choose(app);
   if (wakeup.cannot) errors.push(wakeup.cannot);
   return {
     owners,
@@ -266,7 +270,7 @@ export async function goLiveChoices(app: AppContext): Promise<GoLiveChoices> {
 
 /**
  * Whether going live declares a wakeup, the one rule the choices and `renderInfra` share: among
- * the config's wakeup types whose vendor is connected (`CONNECTED_BY`), the one that wakes this
+ * the config's wakeup types whose vendor is connected (`isConnected`), the one that wakes this
  * host's type (`wakeupHostTypes`), the host's own vendor's first. `type` is it, and `secrets` what
  * the host is given for it: the instance's token, which `goLive` mints first when none is stored,
  * and sanoma-ops's `SANOMA_OPS_URL` when one is. With connected wakeups but none for this host,
@@ -369,11 +373,7 @@ export async function renderInfra(
                 name: "wakeup",
                 vendor: woken.vendor,
                 type: woken.type,
-                desired: (() => {
-                  const desired: Record<string, DataValue> = {};
-                  setPath(desired, woken.wakeup!.inputs.host, new Reference("host"));
-                  return desired;
-                })(),
+                desired: setPath({}, woken.wakeup!.inputs.host, new Reference("host")),
               },
             ]
           : []),
@@ -408,12 +408,9 @@ export async function goLive(app: AppContext, actor: Principal, choices: GoLiveR
   }
   const chosen = await choose(app);
   // The database's vendor connected: its token is what apply makes the database with.
-  if (
-    chosen.database &&
-    !isConnected(chosen.stored, chosen.database.vendor) &&
-    SETUP_VENDORS.some((v) => v.vendor === chosen.database!.vendor)
-  ) {
-    throw new ApiError(409, { error: `Connect ${chosen.database.title}'s vendor, ${chosen.database.vendor}, first` });
+  const vendor = chosen.database?.vendor;
+  if (vendor && SETUP_VENDORS.some((v) => v.vendor === vendor) && !isConnected(chosen.stored, vendor)) {
+    throw new ApiError(409, { error: `Connect ${vendor} first: it makes the database` });
   }
   const text = await renderInfra(app, choices, chosen);
   // Once the request is good: a wakeup's token may be the environment's or its connector page's, which mint nothing.

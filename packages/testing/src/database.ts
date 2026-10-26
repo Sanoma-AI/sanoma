@@ -6,7 +6,6 @@ import {
   defineResource,
   type Driver,
   errorMessage,
-  isEnded,
   type PlanAction,
   type Resource,
   type SanomaClient,
@@ -17,8 +16,14 @@ import {
 } from "@sanoma-ai/workflows";
 import { Client, escapeIdentifier } from "pg";
 import { z } from "zod";
-import { waitFor } from "./build.ts";
-import { credentialDigest, HOST_CHECK_CREDENTIAL, type HostCheck, hostCheck, hostCheckWorkflows } from "./host.ts";
+import {
+  credentialHeard,
+  HOST_CHECK_CREDENTIAL,
+  type HostCheck,
+  hostCheck,
+  hostCheckWorkflows,
+  runEnded,
+} from "./host.ts";
 import { testDatabaseUrl } from "./index.ts";
 
 // The conformance kit for the `Database` contract: whether a database holds the company as the
@@ -87,15 +92,9 @@ export async function checkDatabase(db: DatabaseUnderTest): Promise<DatabaseChec
       results.push({ name, ok: false, error: errorMessage(err) });
     }
   };
-  const ended = (runId: string) =>
-    waitFor(
-      () => client.run(runId),
-      (r) => r !== undefined && isEnded(r.status),
-      timeoutMs,
-    );
   const drains = async () => {
     const runId = await client.start("host-check-drain", {}, { startedBy });
-    const run = await ended(runId);
+    const run = await runEnded(client, runId, timeoutMs);
     if (run?.status !== "finished") throw new Error(`run ${runId} ended ${run?.status}: ${run?.error}`);
   };
 
@@ -108,19 +107,7 @@ export async function checkDatabase(db: DatabaseUnderTest): Promise<DatabaseChec
       // A value an earlier check left, under another key, would fail the probe.
       await client.clearCredential(HOST_CHECK_CREDENTIAL, { by: startedBy.id });
     });
-    await check("LISTEN hears a credential change", async () => {
-      await client.setCredential(HOST_CHECK_CREDENTIAL, credential, { by: startedBy.id });
-      // The worker loads the value when it hears the change: until then a probe fails, or reads the old one.
-      await waitFor(
-        async () => {
-          const runId = await client.start("host-check-credential", {}, { startedBy });
-          const run = await ended(runId);
-          return run?.status === "finished" ? ((await client.result(runId)) as { digest: string }).digest : undefined;
-        },
-        (seen) => seen === credentialDigest(credential),
-        timeoutMs,
-      );
-    });
+    await check("LISTEN hears a credential change", () => credentialHeard(client, credential, startedBy, timeoutMs));
     await check("a queued run drains", drains);
     if (spec.capabilities.pauses) {
       await check("a queued run drains after a suspend and a wake", async () => {
@@ -207,8 +194,8 @@ async function admin<T>(sql: (db: Client) => Promise<T>): Promise<T> {
 /** The name of `testDatabaseUrl(name)`'s database on the server. */
 const databaseName = (name: string) => decodeURIComponent(new URL(testDatabaseUrl(name)).pathname.slice(1));
 
-/** Postgres's code for a database made already. */
-const DUPLICATE_DATABASE = "42P04";
+/** Postgres's codes for a database made already: 42P04, or 23505 when two creates race. */
+const MADE_ALREADY = new Set(["42P04", "23505"]);
 
 const readDatabase = async ({ id }: { id: string }) => {
   const { rowCount } = await admin((db) =>
@@ -236,7 +223,7 @@ const typeDriver = defineDriver(types, {
       const declared = fakeSchema.parse(desired);
       await admin((db) => db.query(`CREATE DATABASE ${escapeIdentifier(databaseName(declared.name))}`)).catch(
         (err: unknown) => {
-          if ((err as { code?: string }).code !== DUPLICATE_DATABASE) throw err;
+          if (!MADE_ALREADY.has((err as { code?: string }).code ?? "")) throw err;
         },
       );
       return { id: declared.name, state: declared };
@@ -258,7 +245,7 @@ const storeDriver = defineDriver(store, {
   },
 });
 /** The fake database's driver: its type's operations, and `database.storeUrl`. */
-const fakeDatabaseDriver: Driver = Object.freeze({
+const driver: Driver = Object.freeze({
   ...typeDriver,
   ops: Object.freeze({ ...typeDriver.ops, ...storeDriver.ops }),
 });
@@ -272,7 +259,6 @@ const fakeDatabaseDriver: Driver = Object.freeze({
  * config, `driver` for calling its operations directly.
  */
 export function fakeDatabase(name = "database_kit") {
-  const driver = fakeDatabaseDriver;
   return {
     type: fakeDatabaseType,
     connector: withSetup(fakeDatabaseOps, { driver: () => driver }),

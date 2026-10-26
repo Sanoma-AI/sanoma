@@ -20,6 +20,7 @@ import {
   type GoLiveChoices,
   type GoLiveRequest,
   type GoLiveRun,
+  connectedBy,
   SETUP_VENDORS,
 } from "../../api.ts";
 import { ApplyPlanView } from "../../components/apply-plan.tsx";
@@ -66,11 +67,11 @@ function GoLivePage() {
   const isSet = (name: string) => status.tokens.some((t) => t.name === name && t.status === "set");
   const github = status.githubApp !== null || isSet("GITHUB_TOKEN");
   // The vendors the config asks tokens of, each connected once its `connectedBy` are stored.
-  const vendors = SETUP_VENDORS.flatMap(({ title, connectedBy, about }) => {
-    const rows = connectedBy.map((name) => status.tokens.find((t) => t.name === name));
-    if (rows.some((row) => row === undefined)) return [];
-    return [{ title, about, optional: rows[0]!.optional, connected: rows.every((row) => row!.status === "set") }];
-  });
+  const asked = new Set(status.tokens.map((t) => t.name));
+  const vendors = SETUP_VENDORS.filter((v) => v.tokens.some((name) => asked.has(name))).map((v) => ({
+    ...v,
+    connected: connectedBy(v).every(isSet),
+  }));
   const connected = github && vendors.every((v) => v.optional || v.connected);
   const { run, bound } = progress;
   const data = bound.repo && bound.store;

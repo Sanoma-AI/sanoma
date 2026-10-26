@@ -2,7 +2,7 @@ import type { z } from "zod";
 import { hasPath } from "./host.ts";
 import type { Op } from "./op.ts";
 import type { AfterCreate, Resource } from "./resource.ts";
-import { RESOURCE_OPS } from "./wakeup.ts";
+import { keepsInput, RESOURCE_OPS } from "./wakeup.ts";
 
 // The `Database` contract: what a resource type that holds the company's database (a Neon
 // project, a Supabase project) declares about itself, beside `Host` and `Wakeup`, so databases
@@ -77,11 +77,9 @@ export function checkDatabase(
   for (const name of ["pauses", "branch"] as const) {
     if (typeof capabilities[name] !== "boolean") problems.push(`capabilities.${name} must be true or false`);
   }
-  for (const [input, path] of Object.entries(database.inputs ?? {})) {
-    if (input === "size" && path === undefined) continue;
-    if (typeof path !== "string" || !hasPath(type.schema, path)) problems.push(`${input} names no field (${path})`);
-  }
-  if (typeof database.inputs?.region !== "string") problems.push("inputs.region is required");
+  const { region, size } = database.inputs ?? {};
+  if (typeof region !== "string" || !hasPath(type.schema, region)) problems.push(`region names no field (${region})`);
+  if (size !== undefined && !hasPath(type.schema, size)) problems.push(`size names no field (${size})`);
   const storeUrl: unknown = database.storeUrl;
   const [vendor, group, name, ...more] = typeof storeUrl === "string" ? storeUrl.split(".") : [];
   if (vendor !== type.vendor || !/^\w+$/.test(group ?? "") || !/^\w+$/.test(name ?? "") || more.length) {
@@ -101,20 +99,6 @@ export function checkDatabase(
   if (problems.length) throw new Error(`${what}: its database: ${problems.join("; ")}`);
 }
 
-/** True when `op`'s input keeps a binding id (as `ref` or `id`) and an export: one that strips them takes neither. */
-function takesExport(op: Op): boolean {
-  return ["ref", "id"].some((key) => {
-    try {
-      const parsed = op.input.safeParse({ [key]: "binding", export: "STORE" });
-      const data = parsed.data as Record<string, unknown> | undefined;
-      return parsed.success && data?.[key] !== undefined && data.export !== undefined;
-    } catch {
-      // An async refinement, which a sync parse cannot run: no input the runtime can check.
-      return false;
-    }
-  });
-}
-
 /**
  * Throws when a database type's `storeUrl` is not among the config's operations, is one of a
  * resource type's own, or does not take `{ ref | id, export }`. Here rather than in
@@ -130,6 +114,7 @@ export function checkDatabaseOps(types: ReadonlyMap<string, Resource>, ops: Read
     if (types.has(`${op.vendor}.${op.resource}`) && RESOURCE_OPS.has(op.name)) {
       throw new Error(`${id}: its database's storeUrl, ${op.id}, is a resource type's own operation`);
     }
-    if (!takesExport(op)) throw new Error(`${id}: its database's storeUrl, ${op.id}, must take { ref or id, export }`);
+    if (!["ref", "id"].some((key) => keepsInput(op, { [key]: "binding", export: "STORE" })))
+      throw new Error(`${id}: its database's storeUrl, ${op.id}, must take { ref or id, export }`);
   }
 }

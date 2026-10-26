@@ -192,35 +192,34 @@ export interface SetupStatus {
 /**
  * The vendors `/setup` connects with pasted tokens, as the pages show them and going live reads
  * them: each one's id, its setup tokens (`SETUP_TOKENS`, asked for only when the config declares
- * a type of the vendor), those that must all be stored for it to be connected (`connectedBy`),
- * and what connecting it does.
+ * a type of the vendor), those that must all be stored for it to be connected (`connectedBy`,
+ * default all of them), whether going live can do without it, and what connecting it does.
  */
 export const SETUP_VENDORS: readonly {
   vendor: string;
   title: string;
   tokens: readonly string[];
-  connectedBy: readonly string[];
+  connectedBy?: readonly string[];
+  optional?: true;
   about: string;
 }[] = [
   {
     vendor: "supabase",
     title: "Supabase",
     tokens: ["SUPABASE_ACCESS_TOKEN"],
-    connectedBy: ["SUPABASE_ACCESS_TOKEN"],
     about: "An access token, which lists and creates projects.",
   },
   {
     vendor: "neon",
     title: "Neon",
     tokens: ["NEON_API_KEY"],
-    connectedBy: ["NEON_API_KEY"],
     about: "An organization API key, which creates projects.",
   },
   {
     vendor: "cloudflare",
     title: "Cloudflare",
     tokens: ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"],
-    connectedBy: ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"],
+    optional: true,
     about:
       "Optional: an API token and the account, so the company runs on Cloudflare Containers and stops when nothing is due. Connect it before choosing where the company goes.",
   },
@@ -229,10 +228,14 @@ export const SETUP_VENDORS: readonly {
     title: "sanoma-ops",
     tokens: ["SANOMA_OPS_TOKEN", "SANOMA_OPS_URL"],
     connectedBy: ["SANOMA_OPS_TOKEN"],
+    optional: true,
     about:
       "Optional: a wakeup account, so the host stops when nothing is due and starts again in time. Connect it before choosing where the company goes, which declares the wakeup.",
   },
 ];
+
+/** The tokens that must all be stored for a `/setup` vendor to be connected. */
+export const connectedBy = (vendor: (typeof SETUP_VENDORS)[number]) => vendor.connectedBy ?? vendor.tokens;
 
 /** The data file going live writes, relative to the config's root. */
 export const INFRA = "resources/sanoma/infra.ts";
