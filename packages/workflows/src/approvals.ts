@@ -1,7 +1,7 @@
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import { z } from "zod";
 import { type ApprovalRequest, type ApprovalResult, type ApprovalState, Principal } from "./define.ts";
-import { RejectedError } from "./errors.ts";
+import { RejectedError, WithdrawnError } from "./errors.ts";
 import { entry, write } from "./ledger.ts";
 import { warn } from "./log.ts";
 import type { Placed } from "./call.ts";
@@ -37,6 +37,13 @@ export const ApprovalMessage = z.object({
 });
 export type ApprovalMessage = z.infer<typeof ApprovalMessage>;
 
+/**
+ * A withdrawal of a pending approval, as sent to a run on the approval's topic: `withdraw` says
+ * why. `id` names the message as a decision's does; `SanomaClient.withdraw` sets one.
+ */
+export const ApprovalWithdrawal = z.object({ withdraw: z.string().min(1), id: z.string().optional() });
+export type ApprovalWithdrawal = z.infer<typeof ApprovalWithdrawal>;
+
 const statusOf = (decision: ApprovalMessage["decision"]) => (decision === "approve" ? "approved" : "rejected");
 
 /** The sender's id, from a message that may not be a valid decision. */
@@ -64,7 +71,8 @@ export interface HeldCall {
 
 /**
  * Waits, durably, for a decision from someone who may make it (`mayDecide`: the run's own actor
- * only while nobody else could). Throws `RejectedError` on a rejection. Without `held`, the workflow asked
+ * only while nobody else could). Throws `RejectedError` on a rejection and `WithdrawnError` on a
+ * withdrawal (`ApprovalWithdrawal`). Without `held`, the workflow asked
  * (`ctx.approval`); with it, the policy did, and `place` is the held call's outline node and name
  * (none for a run's start, which is no call in the outline).
  */
@@ -122,6 +130,13 @@ export async function awaitApproval(
     const at = await DBOS.now();
     const parsed = ApprovalMessage.safeParse(raw);
     const msg = parsed.success ? parsed.data : undefined;
+    const withdrawal = msg ? undefined : ApprovalWithdrawal.safeParse(raw).data;
+    if (withdrawal) {
+      const reason = withdrawal.withdraw;
+      Object.assign(state, { status: "withdrawn", withdrawnReason: reason, decidedAt: at, decidedWith: withdrawal.id });
+      await recordWithdrawn(run, [state], reason, at);
+      throw new WithdrawnError(title, state.id, reason);
+    }
     // The people matter only when the run's own actor decides (`refusalOf`): then they are read as
     // the data files declare them now, in a step, so a replay decides the same. While those files
     // have problems, someone else may be missing from them, so the starter is refused.
@@ -194,3 +209,25 @@ const heldOf = ({ seq, reasons }: HeldCall) => ({
   ...(seq !== undefined && { opSeq: seq }),
   ...(reasons !== undefined && { reasons }),
 });
+
+/**
+ * Withdraws every approval of the run that is approved and covers the operation `covering`, so
+ * none lifts a hold on it again (`approvedFor` reads only approved ones): as a change does when it
+ * gets a new commit. Called from the run's own body, never a step: the approvals it finds and the
+ * records it writes depend only on the run's history, so a replay does the same.
+ */
+export async function withdrawApprovals(run: Run, covering: string, reason: string): Promise<void> {
+  const retired = run.approvals.filter((a) => a.status === "approved" && a.covers.includes(covering));
+  if (!retired.length) return;
+  for (const a of retired) Object.assign(a, { status: "withdrawn", withdrawnReason: reason });
+  await recordWithdrawn(run, retired, reason, await DBOS.now());
+}
+
+/** Publishes approvals just withdrawn as a decision is: the list, then the ledger, then each one's decision event. */
+async function recordWithdrawn(run: Run, withdrawn: readonly ApprovalState[], reason: string, at: number) {
+  await DBOS.setEvent(APPROVALS_EVENT, run.approvals);
+  for (const a of withdrawn) {
+    await write(run, entry(run, { type: "approval.withdrawn", approval: a.id, reason }, { key: a.id, at }));
+  }
+  for (const a of withdrawn) await DBOS.setEvent(decisionEventOf(a.id), a);
+}

@@ -461,7 +461,9 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed) {
         reasons: decision.reasons,
       });
     } catch (err) {
-      if (errorCode(err) === "approval_rejected") {
+      // A rejection or a withdrawal stops the call: it is recorded as failed, naming the approval.
+      const code = errorCode(err);
+      if (code === "approval_rejected" || code === "approval_withdrawn") {
         const approval = (err as SanomaError).data.approvalId as string;
         const record = entry(run, { ...call, approval, error: errorInfo(err), durationMs: 0 }, { seq });
         await writeFailure(run, record, err);

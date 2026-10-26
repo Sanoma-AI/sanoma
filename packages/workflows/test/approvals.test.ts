@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { bluesky } from "@sanoma-ai/connector-bluesky";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { messageKeyOf, topicOf } from "../src/approvals.ts";
+import { messageKeyOf, topicOf, withdrawApprovals } from "../src/approvals.ts";
 import {
   approvedFor,
   type ApprovalState,
@@ -15,6 +15,7 @@ import {
   mayDecide,
 } from "../src/index.ts";
 import { sanoma } from "../src/constructors.ts";
+import { currentRun } from "../src/run.ts";
 import { OWN_CHANGE, type PeopleResource, refusalOf } from "../src/shared.ts";
 import announce from "./fixtures/announce.ts";
 import { inSeconds, pending, rootWith, useApp, waitFor } from "./harness.ts";
@@ -56,6 +57,22 @@ const launder = defineWorkflow({
   },
 });
 
+/**
+ * A post signed off by marketing-lead, whose sign-off the run then withdraws, as a change does on
+ * a new commit: the post is held again rather than let through by the old approval.
+ */
+const resign = defineWorkflow({
+  name: "resign",
+  trigger: "manual",
+  input: z.object({ text: z.string() }),
+  uses: [bluesky.post.create, "approval"],
+  run: async (ctx, { text }) => {
+    await ctx.approval("Sign off", { approver: "marketing-lead", covers: [bluesky.post.create] });
+    await withdrawApprovals(currentRun.getStore()!, "bluesky.post.create", "a new commit");
+    return ctx.bluesky.post.create({ text });
+  },
+});
+
 /** One post, which the "group" policy holds for the marketing group. */
 const shout = defineWorkflow({
   name: "shout",
@@ -92,6 +109,7 @@ describe("approvedFor", () => {
     expect(approvedFor([], refund, "lead")).toBe(false);
     expect(approvedFor([state({ status: "pending" })], refund, "lead")).toBe(false);
     expect(approvedFor([state({ status: "rejected" })], refund, "lead")).toBe(false);
+    expect(approvedFor([state({ status: "withdrawn", withdrawnReason: "a new commit" })], refund, "lead")).toBe(false);
     expect(approvedFor([state({ covers: [] })], refund, "lead")).toBe(false);
     expect(approvedFor([state({ covers: ["shop.order.get"] })], refund, "lead")).toBe(false);
     expect(approvedFor([state({ approver: "intern" })], refund, "lead")).toBe(false);
@@ -327,6 +345,70 @@ describe("approvals a workflow asks for", () => {
     expect((await c().approvals(cancelled))[0]?.status).toBe("pending");
   });
 
+  it("withdraws a pending approval: the run fails with approval_withdrawn, records it, and takes no decision after", async () => {
+    const runId = await c().start(announce, input("Withdrawn"), { startedBy: alice });
+    await waitFor(pending(c, runId));
+
+    const withdrawn = await c().withdraw(runId, "approval-1", "a new commit", { by: alice });
+    expect(withdrawn).toMatchObject({
+      id: "approval-1",
+      status: "withdrawn",
+      withdrawnReason: "a new commit",
+      decidedAt: expect.any(Number),
+      decidedWith: expect.any(String),
+    });
+    expect(withdrawn).not.toHaveProperty("decidedBy");
+    // The list, then the decision event: both say so.
+    expect((await c().approvals(runId))[0]).toEqual(withdrawn);
+    expect(await app.raw.getEvent<ApprovalState>(runId, decisionEventOf("approval-1"), 0)).toEqual(withdrawn);
+    expect(approvedFor(await c().approvals(runId), "ghost.post.publish", "marketing-lead")).toBe(false);
+
+    const err = await caught(c().result(runId));
+    expect(errorCode(err)).toBe("approval_withdrawn");
+    expect(err).toMatchObject({ data: { approvalId: "approval-1", reason: "a new commit" } });
+    const records = await c().ledger(runId);
+    expect(ofType(records, "approval.withdrawn")).toEqual([
+      expect.objectContaining({
+        id: `${runId}:approval.withdrawn:approval-1`,
+        approval: "approval-1",
+        reason: "a new commit",
+      }),
+    ]);
+    expect(ofType(records, "approval.decided")).toEqual([]);
+
+    const late = await caught(c().decide(runId, { decision: "approve", by: lead }, "approval-1"));
+    expect(errorCode(late)).toBe("already_decided");
+    expect(late).toMatchObject({
+      message: `approval-1 on run ${runId} was already withdrawn: a new commit`,
+      data: { status: "withdrawn", withdrawnReason: "a new commit" },
+    });
+    const again = await caught(c().withdraw(runId, "approval-1", "another commit", { by: alice }));
+    expect(errorCode(again)).toBe("already_decided");
+  });
+
+  it("lets the starter or the approver withdraw, and refuses anyone else as not_approver", async () => {
+    const runId = await c().start(announce, input("Withdrawn by whom"), { startedBy: alice });
+    await waitFor(pending(c, runId));
+
+    const stranger = await caught(c().withdraw(runId, "approval-1", "mine now", { by: "intern" }));
+    expect(errorCode(stranger)).toBe("not_approver");
+    expect(stranger).toMatchObject({
+      message: "intern is not the approver; marketing-lead is (approval-1)",
+      data: { runId, approvalId: "approval-1", approver: "marketing-lead" },
+    });
+    const visitor = await caught(c().withdraw(runId, "approval-1", "no", { by: "anonymous" }));
+    expect(errorCode(visitor)).toBe("not_approver");
+    const blank = await caught(c().withdraw(runId, "approval-1", "", { by: alice }));
+    expect(errorCode(blank)).toBe("invalid_input");
+    expect((await c().approvals(runId))[0]).toMatchObject({ status: "pending", refused: [] });
+
+    expect(await c().withdraw(runId, "approval-1", "not needed", { by: lead })).toMatchObject({
+      status: "withdrawn",
+      withdrawnReason: "not needed",
+    });
+    expect(errorCode(await caught(c().result(runId)))).toBe("approval_withdrawn");
+  });
+
   it("says run_not_found for a decision on a run that does not exist", async () => {
     const missing = randomUUID();
     const err = await caught(c().decide(missing, { decision: "approve", by: lead }, "approval-1"));
@@ -365,7 +447,7 @@ forbid (principal == Sanoma::Principal::"group", action == Sanoma::Action::"blue
 forbid (principal == Sanoma::Principal::"solo", action == Sanoma::Action::"bluesky.post.create", resource);
 `,
   });
-  const app = useApp("approvals-policy", () => ({ workflows: [announce, shout, launder], root }));
+  const app = useApp("approvals-policy", () => ({ workflows: [announce, shout, launder, resign], root }));
   const c = () => app.client;
 
   it("covers only the held operation by default, so a later publish of another one is held again", async () => {
@@ -440,6 +522,44 @@ forbid (principal == Sanoma::Principal::"solo", action == Sanoma::Action::"blues
     await c().decide(runId, { decision: "approve", by: lead });
     await c().result(runId);
     expect(app.ops()).toEqual(["bluesky.post.create"]);
+  });
+
+  it("retires an approval the run withdraws, so it lifts no hold, and records a held call's withdrawal as its failure", async () => {
+    const runId = await c().start(resign, { text: "v2" }, { startedBy: { id: "each" } });
+    await waitFor(pending(c, runId));
+    await c().decide(runId, { decision: "approve", by: lead });
+
+    // The sign-off covered the post and was addressed to marketing-lead, but no longer stands.
+    await waitFor(pending(c, runId, 2));
+    const [signOff, hold] = await c().approvals(runId);
+    expect(signOff).toMatchObject({
+      status: "withdrawn",
+      withdrawnReason: "a new commit",
+      decidedBy: "marketing-lead",
+    });
+    expect(hold).toMatchObject({ requestedBy: "policy", op: "bluesky.post.create", status: "pending" });
+    expect(approvedFor([signOff!], "bluesky.post.create", "marketing-lead")).toBe(false);
+    expect(await app.raw.getEvent<ApprovalState>(runId, decisionEventOf("approval-1"), 0)).toEqual(signOff);
+    expect(app.ops()).toEqual([]);
+
+    // A replay withdraws it again in step, writing nothing twice.
+    await app.restart();
+    await c().withdraw(runId, "approval-2", "another commit", { by: { id: "each" } });
+    expect(errorCode(await caught(c().result(runId)))).toBe("approval_withdrawn");
+    expect(app.ops()).toEqual([]);
+
+    const records = await c().ledger(runId);
+    expect(ofType(records, "approval.withdrawn")).toEqual([
+      expect.objectContaining({ approval: "approval-1", reason: "a new commit" }),
+      expect.objectContaining({ approval: "approval-2", reason: "another commit" }),
+    ]);
+    expect(ofType(records, "op.called")).toEqual([
+      expect.objectContaining({
+        op: "bluesky.post.create",
+        approval: "approval-2",
+        error: expect.objectContaining({ code: "approval_withdrawn" }),
+      }),
+    ]);
   });
 
   it("lets anyone in an approver group decide, and refuses anyone outside it", async () => {

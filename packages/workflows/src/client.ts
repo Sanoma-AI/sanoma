@@ -3,7 +3,14 @@ import { isDeepStrictEqual } from "node:util";
 import { type DBOSClient, Error as DBOSErrors, type WorkflowStatusString } from "@dbos-inc/dbos-sdk";
 import type { Pool } from "pg";
 import { z } from "zod";
-import { APPROVALS_EVENT, ApprovalMessage, decisionEventOf, messageKeyOf, topicOf } from "./approvals.ts";
+import {
+  APPROVALS_EVENT,
+  ApprovalMessage,
+  ApprovalWithdrawal,
+  decisionEventOf,
+  messageKeyOf,
+  topicOf,
+} from "./approvals.ts";
 import { beforeOf, decideCall, decideStart, recorded, startHoldOf } from "./call.ts";
 import { type Chats, chatStore } from "./chats.ts";
 import { collectionsDriver } from "./collection.ts";
@@ -581,6 +588,60 @@ export class SanomaClient {
     const given = parseOrThrow(ApprovalMessage, message, "Not a decision");
     const declared = readPeople(this.config.root);
     const msg = { ...given, by: admit(given.by, declared) };
+    const { target, row } = await this.pendingApproval(runId, approvalId);
+    const reason = refusalOf(
+      target,
+      msg.by,
+      { actor: row.authenticatedUser ? { id: row.authenticatedUser } : undefined },
+      declared.people,
+    );
+    if (reason !== undefined) throw notApprover(runId, target, reason);
+    // The id names this message, so the run's answer says whether it decided with it, and is
+    // in its idempotency key, so a retried send queues it once.
+    const id = msg.id ?? randomUUID();
+    const now = await this.sendToApproval(runId, target, { ...msg, id }, options.timeoutSeconds);
+    // Read, but refused: the run checks the sender again, and said no.
+    const refused = now.refused.find((r) => r.id === id);
+    if (refused) throw notApprover(runId, target, refused.reason);
+    if (now.status !== "pending" && now.decidedWith !== id) throw alreadyDecided(runId, now);
+    return now;
+  }
+
+  /**
+   * Withdraws the run's pending approval `approvalId`, saying `reason`, as `options.by`: the run's
+   * starter, or someone who may decide it (`not_approver` otherwise). The run reads the
+   * withdrawal as a decision, and the step that waits on it throws `approval_withdrawn`. Returns
+   * the approval as withdrawn, and refuses as `decide` does: `already_decided` when it is not
+   * pending (or another decision reached the run first), `run_ended`, `no_pending_approval`,
+   * `run_not_found`; and returns it still `pending` when the run does not read the withdrawal
+   * within `timeoutSeconds` (30 by default).
+   */
+  async withdraw(
+    runId: string,
+    approvalId: string,
+    reason: string,
+    options: { by: Principal | string; timeoutSeconds?: number },
+  ): Promise<ApprovalState> {
+    const { withdraw } = parseOrThrow(ApprovalWithdrawal, { withdraw: reason }, "A withdrawal needs a reason");
+    const by = await this.admitted(
+      parseOrThrow(PrincipalOrId, options?.by, '`by` must be a principal, such as "alice" or { id: "alice" }'),
+    );
+    const { target, row } = await this.pendingApproval(runId, approvalId);
+    // The starter may withdraw what their own run asks; anyone else only as one who may decide it.
+    const refusal = by.id === row.authenticatedUser && !isVisitor(by) ? undefined : refusalOf(target, by, {}, []);
+    if (refusal !== undefined) throw notApprover(runId, target, refusal);
+    const id = randomUUID();
+    const now = await this.sendToApproval(runId, target, { withdraw, id }, options.timeoutSeconds);
+    if (now.status !== "pending" && now.decidedWith !== id) throw alreadyDecided(runId, now);
+    return now;
+  }
+
+  /**
+   * The run's approval `approvalId` (else its first pending one) and the run's row, when the
+   * approval is pending on a run that has not ended: `already_decided`, `run_ended`,
+   * `no_pending_approval` or `run_not_found` otherwise.
+   */
+  private async pendingApproval(runId: string, approvalId: string | undefined) {
     // A run that does not exist has no approvals, so run_not_found never hides already_decided.
     const [all, row] = await Promise.all([this.approvals(runId), this.mustExist(runId)]);
     const target = approvalId ? all.find((a) => a.id === approvalId) : all.find((a) => a.status === "pending");
@@ -601,29 +662,24 @@ export class SanomaClient {
         { runId, ...(approvalId ? { approvalId } : {}) },
       );
     }
-    const reason = refusalOf(
-      target,
-      msg.by,
-      { actor: row.authenticatedUser ? { id: row.authenticatedUser } : undefined },
-      declared.people,
-    );
-    if (reason !== undefined) {
-      throw new SanomaError("not_approver", `${reason} (${target.id})`, {
-        runId,
-        approvalId: target.id,
-        approver: target.approver,
-        reason,
-      });
-    }
-    // The id names this message, so the run's answer says whether it decided with it, and is
-    // in its idempotency key, so a retried send queues it once.
-    const id = msg.id ?? randomUUID();
+    return { target, row };
+  }
+
+  /**
+   * Sends a message with an `id` to the approval and waits up to `timeoutSeconds` (30 by
+   * default) for the run to read it: the approval as the run then has it.
+   */
+  private async sendToApproval(
+    runId: string,
+    target: ApprovalState,
+    message: (ApprovalMessage | ApprovalWithdrawal) & { id: string },
+    timeoutSeconds = 30,
+  ): Promise<ApprovalState> {
     this.options.onWrite?.();
-    await this.dbos.send(runId, { ...msg, id }, topicOf(target.id), messageKeyOf(target.id, id));
+    await this.dbos.send(runId, message, topicOf(target.id), messageKeyOf(target.id, message.id));
     // DBOSClient does not LISTEN for events: it polls, every 10 s unless told otherwise. A
     // running worker answers within moments, so poll often at first, then once a second.
     const event = decisionEventOf(target.id);
-    const timeoutSeconds = options.timeoutSeconds ?? 30;
     const soon = Math.min(2, timeoutSeconds);
     const decided =
       (await this.dbos.getEvent<ApprovalState>(runId, event, { timeoutSeconds: soon, pollingIntervalMs: 100 })) ??
@@ -633,19 +689,7 @@ export class SanomaClient {
             pollingIntervalMs: 1000,
           })
         : null);
-    const now = decided ?? (await this.approvals(runId)).find((a) => a.id === target.id) ?? target;
-    // Read, but refused: the run checks the sender again, and said no.
-    const refused = now.refused.find((r) => r.id === id);
-    if (refused) {
-      throw new SanomaError("not_approver", `${refused.reason} (${target.id})`, {
-        runId,
-        approvalId: target.id,
-        approver: target.approver,
-        reason: refused.reason,
-      });
-    }
-    if (now.status !== "pending" && now.decidedWith !== id) throw alreadyDecided(runId, now);
-    return now;
+    return decided ?? (await this.approvals(runId)).find((a) => a.id === target.id) ?? target;
   }
 
   /**
@@ -974,9 +1018,19 @@ export interface StoredSecret {
 const VARIABLE = /^[A-Z_][A-Z0-9_]*$/;
 
 const alreadyDecided = (runId: string, a: ApprovalState) =>
-  new SanomaError("already_decided", `${a.id} on run ${runId} was already ${a.status} by ${a.decidedBy}`, {
-    runId,
-    approvalId: a.id,
-    status: a.status,
-    decidedBy: a.decidedBy,
-  });
+  new SanomaError(
+    "already_decided",
+    a.status === "withdrawn"
+      ? `${a.id} on run ${runId} was already withdrawn: ${a.withdrawnReason}`
+      : `${a.id} on run ${runId} was already ${a.status} by ${a.decidedBy}`,
+    {
+      runId,
+      approvalId: a.id,
+      status: a.status,
+      ...(a.decidedBy === undefined ? {} : { decidedBy: a.decidedBy }),
+      ...(a.withdrawnReason === undefined ? {} : { withdrawnReason: a.withdrawnReason }),
+    },
+  );
+
+const notApprover = (runId: string, a: ApprovalState, reason: string) =>
+  new SanomaError("not_approver", `${reason} (${a.id})`, { runId, approvalId: a.id, approver: a.approver, reason });

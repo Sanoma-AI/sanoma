@@ -17,7 +17,7 @@ import { errorMessage } from "./shared.ts";
  * decision, every approval, and how it ended. Records are append-only.
  *
  * `id` is deterministic (`<runId>:<type>:<seq>`, `<runId>:<type>:<approvalId>` for an
- * approval requested or decided, `<runId>:approval.refused:<approvalId>:refused:<n>` for
+ * approval requested, decided or withdrawn, `<runId>:approval.refused:<approvalId>:refused:<n>` for
  * the nth message an approval ignored) so that when DBOS replays a run after a restart,
  * the records it writes again have the same ids and the store skips them. `seq` orders a
  * run's records. `v` is the record format's version; `app` is the config's `appName`.
@@ -66,7 +66,7 @@ export type LedgerRecord = {
       durationMs: number;
       /** Which try produced the output or the final error, from 1. Idempotent operations are retried. */
       attempt?: number;
-      /** The approval that held the call, when its rejection stopped it. */
+      /** The approval that held the call, when its rejection or withdrawal stopped it. */
       approval?: string;
     }
   | {
@@ -99,6 +99,8 @@ export type LedgerRecord = {
       /** Set when `by` started the run: nobody else could decide (`mayDecide`). */
       alone?: true;
     }
+  /** The approval no longer stands: withdrawn while pending, or retired by its run once approved. */
+  | { type: "approval.withdrawn"; approval: string; reason: string }
   /**
    * A `ctx.sleep` began; `until` is when it ends, in ms since the epoch: the time asked for, or
    * for a duration the record's `at` plus the duration, as the runtime saw it. Written
