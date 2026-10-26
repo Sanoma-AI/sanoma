@@ -377,7 +377,7 @@ describe("the stop rule", () => {
       {
         input: { at, generation: before + 1 },
         context: expect.objectContaining({
-          idempotencyKey: `wakeup:${before + 1}`,
+          idempotencyKey: `wakeup:resources/infra.ts#wake:${before + 1}`,
           opId: "acme.wakeup.register",
           attempt: 1,
           by: "sanoma",
@@ -395,8 +395,11 @@ describe("the stop rule", () => {
 
     expect(await shouldWake(app.databaseUrl, before + 1)).toBe(true);
     expect(await shouldWake(app.databaseUrl, before)).toBe(false);
+    // Registered by a worker that then kept running: no stop is behind that wake.
+    await app.pool.query(`UPDATE ${WAKEUP_TABLE} SET registered_at = stopped_at + interval '1 second' WHERE id = 1`);
+    expect(await shouldWake(app.databaseUrl, before + 1)).toBe(false);
 
-    const again = await app.start({ idleHorizonMs: 60_000 });
+    const again = await app.start({ idleHorizonMs: 60_000, onStopped: () => {} });
     expect((await app.row()).owner).not.toBe(row.owner);
     expect(await app.client.result(runId)).toBe("rested");
     expect(again.deadlines.waitOf(runId)).toBeUndefined();
@@ -425,6 +428,16 @@ describe("the stop rule", () => {
     await waitFor(() => stops.length === 1);
     expect(stops[0]!.generation).toBeGreaterThan(Number(failed.generation));
     expect(await app.row()).toMatchObject({ last_error: null, generation: String(stops[0]!.generation) });
+  });
+
+  it("never stops a worker whose caller would not hear it stop", async () => {
+    await app.client.start(nap, { seconds: 30 }, { startedBy: alice });
+    const { generation } = await app.row();
+    const worker = await app.start(fast);
+    await new Promise((r) => setTimeout(r, 1_000));
+    expect(await worker.idle()).toBe(true);
+    expect(registered).toEqual([]);
+    expect((await app.row()).generation).toBe(generation);
   });
 
   it("does nothing while another worker owns the row", async () => {

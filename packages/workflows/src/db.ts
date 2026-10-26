@@ -336,16 +336,21 @@ export async function recordWakeupStop(db: Db, owner: string, generation: number
 }
 
 /**
- * True when `generation` is the wakeup row's: the wake `/wake?generation=N` asks for is the one
- * the worker last registered, not one a later stop replaced. For the route's supervisor, which
- * decides on its own what a wake means when no wakeup is declared.
+ * True when `generation` is the wakeup row's and the worker stopped with it: the wake
+ * `/wake?generation=N` asks for is the one the worker last registered before it stopped, not
+ * one a later stop replaced, nor one registered by a worker that then kept running. For the
+ * route's supervisor, which decides on its own what a wake means when no wakeup is declared.
  */
 export async function shouldWake(databaseUrl: string, generation: number): Promise<boolean> {
   await prepareDatabase(databaseUrl);
   const conn = await connect(databaseUrl);
   try {
-    const { rows } = await conn.query<{ generation: string }>(`SELECT generation FROM ${WAKEUP_TABLE} WHERE id = 1`);
-    return rows[0] !== undefined && Number(rows[0].generation) === generation;
+    const { rows } = await conn.query<{ current: boolean }>(
+      `SELECT generation = $1 AND stopped_at IS NOT NULL AND (registered_at IS NULL OR stopped_at >= registered_at) ` +
+        `AS current FROM ${WAKEUP_TABLE} WHERE id = 1`,
+      [generation],
+    );
+    return rows[0]?.current === true;
   } finally {
     await conn.end().catch(() => undefined);
   }

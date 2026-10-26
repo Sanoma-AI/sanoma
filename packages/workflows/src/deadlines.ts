@@ -1,4 +1,5 @@
-import { DBOS, type WorkflowStatusString } from "@dbos-inc/dbos-sdk";
+import { DBOS } from "@dbos-inc/dbos-sdk";
+import { dbosStatusesOf } from "./client.ts";
 import type { Db } from "./db.ts";
 import { nextWakeupGeneration, recordWakeupRegistration, recordWakeupStop } from "./db.ts";
 import { warn } from "./log.ts";
@@ -81,9 +82,6 @@ export function deadlineRegistry(): DeadlineRegistry {
   };
 }
 
-/** The DBOS statuses of a run that has not ended. */
-const UNFINISHED: WorkflowStatusString[] = ["PENDING", "ENQUEUED", "DELAYED"];
-
 /** The worker `idle` asks about: the app, the version it runs, and its queue. */
 export interface IdleScope {
   appName: string;
@@ -104,7 +102,7 @@ export async function idle(deadlines: Deadlines, scope: IdleScope, horizonMs: nu
   if (next && next.getTime() <= Date.now() + horizonMs) return false;
   const runs = await DBOS.listWorkflows({
     applicationName: scope.appName,
-    status: UNFINISHED,
+    status: dbosStatusesOf("queued", "running"),
     loadInput: false,
     loadOutput: false,
   });
@@ -134,6 +132,8 @@ export interface StopRule {
   db: () => Promise<Db>;
   /** This worker's id on the row (`owner`), fresh for each worker. */
   owner: string;
+  /** The declared wakeup's binding, else its declaration's id: what scopes a registration's idempotency key to this instance. */
+  wakeup: string;
   /** The wakeup type's register operation, and its driver (none when the connector attaches none). */
   register: { op: Op; fn: DriverFn | undefined };
   secrets: Secrets;
@@ -223,9 +223,10 @@ export function stopWhenIdle(rule: StopRule): { close(): void } {
  * a `CallContext` of the runtime's, and no ledger record, which is a run's. The idempotency key
  * is the generation's, so a retried registration is one registration.
  */
-async function registerWakeup({ register: { op, fn }, secrets }: StopRule, registration: WakeupRegistration) {
+async function registerWakeup({ register: { op, fn }, secrets, wakeup }: StopRule, registration: WakeupRegistration) {
   if (!fn) throw new Error(`${op.id} has no driver: the connector package must attach one`);
-  const key = `wakeup:${registration.generation}`;
+  // Every database counts generations from 0, so the key names the wakeup too.
+  const key = `wakeup:${wakeup}:${registration.generation}`;
   const context: CallContext = { idempotencyKey: key, runId: key, opId: op.id, attempt: 1, secrets, by: RUNTIME_ACTOR };
   await fn(op.input.parse(registration), context);
 }

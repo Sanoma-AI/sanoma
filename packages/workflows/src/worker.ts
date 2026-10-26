@@ -82,7 +82,8 @@ export interface WorkerOptions {
   /** How often a worker whose data files declare a wakeup checks whether it may stop: every 15 s by default. */
   stopCheckMs?: number;
   /**
-   * Called once the worker has stopped itself, idle, with the deadline it registered with the
+   * Given, and with a wakeup declared, the worker stops itself when idle (`stopCheckMs`); without
+   * it, nobody would start another, so it never does. Called once the worker has stopped itself, with the deadline it registered with the
    * wakeup (null for none) and that registration's generation: a supervisor starts a fresh
    * worker on the next request or wake (`shouldWake`), since a stopped one cannot launch again.
    */
@@ -117,7 +118,8 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
   // The config's own, or a Postgres store made for this worker, which `stop` then closes.
   const ledger = ownedLedger(resolved);
   const secrets = lazyPool(resolved.databaseUrl, "secrets");
-  const wakeupRow = wakeup && lazyPool(resolved.databaseUrl, "wakeup");
+  // Only a worker someone restarts stops itself: one whose caller hears it stop.
+  const wakeupRow = wakeup && options.onStopped && lazyPool(resolved.databaseUrl, "wakeup");
   let stopRule: { close(): void } | undefined;
   let stopping: Promise<void> | undefined;
   const horizonMs = options.idleHorizonMs ?? 60_000;
@@ -222,6 +224,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
       stopRule = stopWhenIdle({
         db: () => wakeupRow.db(),
         owner,
+        wakeup: wakeup.binding ?? wakeup.id,
         // `resolveConfig` checked the operation is the config's (`checkWakeupOps`).
         register: { op: resolved.ops.get(registerId)!, fn: resolved.drivers.get(registerId) },
         secrets: state.secrets,
