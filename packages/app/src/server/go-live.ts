@@ -6,6 +6,7 @@ import { findPackageJSON } from "node:module";
 import { dirname, join } from "node:path";
 import {
   APPLY_WORKFLOW,
+  databaseUrlSecret,
   errorMessage,
   isEnded,
   type Principal,
@@ -62,7 +63,7 @@ export const RUNTIME_IMAGE = "sanoma-runtime";
 const PUBLISHED_IMAGE = "docker.io/sanomaai/runtime";
 
 /** The secret the database's URL is stored in: its `storeUrl` for the export `store`. */
-const DATABASE_URL = "SANOMA_DATABASE_URL_STORE";
+const DATABASE_URL = databaseUrlSecret("store");
 const SECRETS_KEY = "SANOMA_SECRETS_KEY";
 
 /**

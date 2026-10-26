@@ -186,6 +186,25 @@ importers:
         specifier: ^4.6.5
         version: 4.6.5
 
+  connectors/neon:
+    dependencies:
+      '@neondatabase/api-client':
+        specifier: 2.7.3
+        version: 2.7.3(debug@4.4.3(supports-color@11.0.0))(supports-color@11.0.0)
+    devDependencies:
+      '@sanoma-ai/testing':
+        specifier: workspace:*
+        version: link:../../packages/testing
+      '@sanoma-ai/workflows':
+        specifier: workspace:*
+        version: link:../../packages/workflows
+      msw:
+        specifier: ^3.0.2
+        version: 3.0.2(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.3(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1))
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+
   connectors/resend:
     devDependencies:
       '@sanoma-ai/workflows':
@@ -1392,6 +1411,9 @@ packages:
     resolution: {integrity: sha512-PPZQBiojRuy1jJQoUqbrJhoac47GC1GwRazDrYwwbE70zfqMkOY/5a+Du4hp3vlPUXLt/um4TMcmRabmooAkxw==}
     engines: {node: '>=22'}
 
+  '@neondatabase/api-client@2.7.3':
+    resolution: {integrity: sha512-hqJmcd8qeCNjcsSNlz77peGIwB9SLj8NC6kK6AjPRyb4bUvXB+TCmffx5893/0oRHYjqpua0nBLa5ql8z6acmw==}
+
   '@noble/ciphers@2.4.0':
     resolution: {integrity: sha512-AnjFn0Jv92laAkvMrghlFZq4qQCIN/4DxFV/eooqtC2YTjB7kBeLMS2T9KJX4Dn+ZVXLOwK0lSgqDtx9gvxtiw==}
     engines: {node: '>= 20.19.0'}
@@ -2570,6 +2592,10 @@ packages:
     resolution: {integrity: sha512-5cvg6CtKwfgdmVqY1WIiXKc3Q1bkRqGLi+2W/6ao+6Y7gu/RCwRuAhGEzh5B4KlszSuTLgZYuqFqo5bImjNKng==}
     engines: {node: '>= 0.6'}
 
+  agent-base@6.0.2:
+    resolution: {integrity: sha512-RZNwNclF7+MS/8bDg70amg32dyeZGZxiDuQmZxKLAlQjr3jGyLx+4Kkk58UO7D2QdgFIQCovuSuZESne6RG6XQ==}
+    engines: {node: '>= 6.0.0'}
+
   agent-base@7.1.4:
     resolution: {integrity: sha512-MnA+YT8fwfJPgBx3m60MNqakm30XOkyIoH1y6huTQvC0PwZG7ki8NacLBcrPbNoo8vEZy7Jpuk7+jMO+CUovTQ==}
     engines: {node: '>= 14'}
@@ -2665,6 +2691,9 @@ packages:
 
   aws4@1.13.2:
     resolution: {integrity: sha512-lHe62zvbTB5eEABUVi/AwVh0ZKY9rMMDhmm+eeyuuUQbQ3+J+fONVQOZyj+DdrvD4BY33uYniyRJ4UJIaSKAfw==}
+
+  axios@1.20.0:
+    resolution: {integrity: sha512-r8aOh8j9cGKpgQAqpzrUHnSIc6a59Y3Xf/cv8sy1DrHCkZHzQGEuoq1tARk6qSyDdtQGSDgpb9kFlruzPvrgwg==}
 
   babel-dead-code-elimination@1.0.12:
     resolution: {integrity: sha512-GERT7L2TiYcYDtYk1IpD+ASAYXjKbLTDPhBtYj7X1NuRMDTMtAx9kyBenub1Ev41lo91OHCKdmP+egTDmfQ7Ig==}
@@ -3420,6 +3449,15 @@ packages:
     resolution: {integrity: sha512-1yD6RmLI1XBfxugvORwlck6f75tYL+iR0jqwsOrOxMZyGYqUuDhJ0l4AXdO1iX/FTs9cBAMEk1gWSEx1kSbylg==}
     engines: {node: '>=6'}
 
+  follow-redirects@1.16.1:
+    resolution: {integrity: sha512-FNvFGzoMLWmE6Yj9spb/zjd7yiNCHiAW9/Tg9CXrQ8wuu32HtlJOwWO11OJafl5FfY3DxTdQ0vj42zU1kvv5jg==}
+    engines: {node: '>=4.0'}
+    peerDependencies:
+      debug: '*'
+    peerDependenciesMeta:
+      debug:
+        optional: true
+
   form-data@4.0.6:
     resolution: {integrity: sha512-vKatAh4SlVfgbv+YtmhiRjhEMJsYpsG1Y2rMQtR+SVSbytsSD1YGzDIcrAJmdFec88u/+VoGmxnl+80gL1tRCQ==}
     engines: {node: '>= 6'}
@@ -3634,6 +3672,10 @@ packages:
   http2-wrapper@1.0.3:
     resolution: {integrity: sha512-V+23sDMr12Wnz7iTcDeJr3O6AIxlnvT/bmaAAAP/Xda35C90p9599p0F1eHR/N1KILWSoWVAiOMFjBBXaXSMxg==}
     engines: {node: '>=10.19.0'}
+
+  https-proxy-agent@5.0.1:
+    resolution: {integrity: sha512-dFcAjpTQFgoLMzC2VwU+C/CbS7uRL0lWmxDITmqm7C+7F0Odmj6s9l6alZc6AELXhrnggM2CeWSXHGOdX2YtwA==}
+    engines: {node: '>= 6'}
 
   https-proxy-agent@7.0.6:
     resolution: {integrity: sha512-vK9P5/iUfdl95AI+JVyUuIcVtd4ofvtrOr3HNtM2yxC9bnMbEdp3x01OhQNnjb8IJYi38VlTE3mBXwcfvywuSw==}
@@ -4724,6 +4766,10 @@ packages:
     peerDependenciesMeta:
       kerberos:
         optional: true
+
+  proxy-from-env@2.1.0:
+    resolution: {integrity: sha512-cJ+oHTW1VAEa8cJslgmUZrc+sjRKgAKl3Zyse6+PV38hZe/V6Z14TbCuXcan9F9ghlz4QrFr2c92TNF82UkYHA==}
+    engines: {node: '>=10'}
 
   pump@3.0.4:
     resolution: {integrity: sha512-VS7sjc6KR7e1ukRFhQSY5LM2uBWAUPiOPa/A3mkKmiMwSmRFUITt0xuj+/lesgnCv+dPIEYlkzrcyXgquIHMcA==}
@@ -6843,6 +6889,13 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  '@neondatabase/api-client@2.7.3(debug@4.4.3(supports-color@11.0.0))(supports-color@11.0.0)':
+    dependencies:
+      axios: 1.20.0(debug@4.4.3(supports-color@11.0.0))(supports-color@11.0.0)
+    transitivePeerDependencies:
+      - debug
+      - supports-color
+
   '@noble/ciphers@2.4.0': {}
 
   '@noble/hashes@1.8.0': {}
@@ -7776,6 +7829,12 @@ snapshots:
       mime-types: 3.0.2
       negotiator: 1.1.0
 
+  agent-base@6.0.2(supports-color@11.0.0):
+    dependencies:
+      debug: 4.4.3(supports-color@11.0.0)
+    transitivePeerDependencies:
+      - supports-color
+
   agent-base@7.1.4: {}
 
   agent-base@9.0.0: {}
@@ -7897,6 +7956,16 @@ snapshots:
   await-lock@3.0.0: {}
 
   aws4@1.13.2: {}
+
+  axios@1.20.0(debug@4.4.3(supports-color@11.0.0))(supports-color@11.0.0):
+    dependencies:
+      follow-redirects: 1.16.1(debug@4.4.3(supports-color@11.0.0))
+      form-data: 4.0.6
+      https-proxy-agent: 5.0.1(supports-color@11.0.0)
+      proxy-from-env: 2.1.0
+    transitivePeerDependencies:
+      - debug
+      - supports-color
 
   babel-dead-code-elimination@1.0.12(supports-color@11.0.0):
     dependencies:
@@ -8663,6 +8732,10 @@ snapshots:
     dependencies:
       locate-path: 3.0.0
 
+  follow-redirects@1.16.1(debug@4.4.3(supports-color@11.0.0)):
+    optionalDependencies:
+      debug: 4.4.3(supports-color@11.0.0)
+
   form-data@4.0.6:
     dependencies:
       asynckit: 0.4.0
@@ -8919,6 +8992,13 @@ snapshots:
     dependencies:
       quick-lru: 5.1.1
       resolve-alpn: 1.2.1
+
+  https-proxy-agent@5.0.1(supports-color@11.0.0):
+    dependencies:
+      agent-base: 6.0.2(supports-color@11.0.0)
+      debug: 4.4.3(supports-color@11.0.0)
+    transitivePeerDependencies:
+      - supports-color
 
   https-proxy-agent@7.0.6(supports-color@11.0.0):
     dependencies:
@@ -9824,6 +9904,8 @@ snapshots:
       ipaddr.js: 1.9.1
 
   proxy-agent-negotiate@1.1.0: {}
+
+  proxy-from-env@2.1.0: {}
 
   pump@3.0.4:
     dependencies:

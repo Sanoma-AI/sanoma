@@ -1,0 +1,12 @@
+[
+  {
+    "method": "POST",
+    "path": "/api/v2/projects",
+    "status": 400,
+    "body": {
+      "code": "",
+      "message": "region aws-mars-1 is not supported",
+      "request_id": "00000000-0000-4000-8000-000000000001"
+    }
+  }
+]

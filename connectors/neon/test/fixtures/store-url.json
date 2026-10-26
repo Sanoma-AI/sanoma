@@ -1,0 +1,18 @@
+[
+  {
+    "method": "GET",
+    "path": "/api/v2/projects/spring-example-302709/connection_uri?database_name=neondb&role_name=neondb_owner&pooled=false",
+    "status": 200,
+    "body": {
+      "uri": "postgresql://neondb_owner:npg_recordedpassword@ep-silent-smoke-806639.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/v2/projects/spring-example-302709/connection_uri?database_name=neondb&role_name=neondb_owner&pooled=false",
+    "status": 200,
+    "body": {
+      "uri": "postgresql://neondb_owner:npg_recordedpassword@ep-silent-smoke-806639.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+    }
+  }
+]

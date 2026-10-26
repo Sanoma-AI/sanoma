@@ -11,6 +11,7 @@ import {
   type SanomaClient,
   type SanomaConfig,
   startWorker,
+  storeDatabaseUrl,
   withSetup,
   type Worker,
 } from "@sanoma-ai/workflows";
@@ -237,11 +238,11 @@ const typeDriver = defineDriver(types, {
 });
 const storeDriver = defineDriver(store, {
   database: {
-    storeUrl: async ({ id, export: name }, { secrets }: CallContext) => {
-      const secret = `SANOMA_DATABASE_URL_${name.toUpperCase()}`;
-      await secrets.ensure(secret, () => testDatabaseUrl(id));
-      return { secret };
-    },
+    storeUrl: async ({ id, export: name }, { secrets }: CallContext) =>
+      storeDatabaseUrl(secrets, name, testDatabaseUrl(id), {
+        where: "testdb: database.storeUrl",
+        others: "another database",
+      }),
   },
 });
 /** The fake database's driver: its type's operations, and `database.storeUrl`. */

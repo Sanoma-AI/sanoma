@@ -1,0 +1,12 @@
+[
+  {
+    "method": "GET",
+    "path": "/api/v2/projects/spring-example-302709",
+    "status": 404,
+    "body": {
+      "code": "",
+      "message": "project not found",
+      "request_id": "00000000-0000-4000-8000-000000000001"
+    }
+  }
+]
