@@ -34,7 +34,12 @@ export type LedgerRecord = {
   /** Set on every record written while a `ctx.all` member runs; absent outside one. */
   group?: LedgerGroup;
 } & (
-  | { type: "run.started"; input: unknown }
+  | {
+      type: "run.started";
+      input: unknown;
+      /** For a run its schedule started (`trigger: { schedule }`): the tick's time, ISO 8601, which may be before `at`. */
+      scheduledFor?: string;
+    }
   | {
       type: "op.called";
       op: string;

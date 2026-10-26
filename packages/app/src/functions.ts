@@ -24,6 +24,7 @@ import {
   fileSource,
   lastRuns,
   listRuns,
+  nextFires,
   permissions,
   preview,
   readStartRun,
@@ -81,6 +82,9 @@ export const getScenarios = createServerFn(READ).handler(({ context }) => scenar
 export const getRuns = createServerFn(READ)
   .validator(validate(RunsQuery))
   .handler(({ data, context }) => listRuns(context.app, data));
+
+/** When each workflow on a schedule fires next, ISO 8601 by name. */
+export const getNextFires = createServerFn(READ).handler(({ context }) => nextFires(context.app));
 
 /** Each workflow's latest run, by name. */
 export const getLastRuns = createServerFn(READ).handler(({ context }) => lastRuns(context.app));

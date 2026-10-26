@@ -329,6 +329,12 @@ export function When({ at }: { at: number }) {
   );
 }
 
+/** A time as UTC text, past or to come (a sleep's end, a schedule's next fire): the same on the server and in the browser. */
+export function UtcTime({ at }: { at: number | string }) {
+  const ms = typeof at === "string" ? Date.parse(at) : at;
+  return <time dateTime={new Date(ms).toISOString()}>{utcText(ms)}</time>;
+}
+
 /** An item's time, at the end of its row, level with its title. */
 export function ItemTime({ at }: { at: number }) {
   return (

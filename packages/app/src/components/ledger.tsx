@@ -20,6 +20,7 @@ import {
   RequestedBy,
   StatusDot,
   TipButton,
+  UtcTime,
   When,
 } from "./common.tsx";
 
@@ -126,7 +127,14 @@ export const LedgerRow = memo(function LedgerRow({
       kind = "started";
       body = (
         <>
-          <p>Started by {record.actor.id}</p>
+          <p>
+            Started by {record.actor.id}
+            {record.scheduledFor && (
+              <>
+                , on its schedule for <UtcTime at={record.scheduledFor} />
+              </>
+            )}
+          </p>
           <Expandable label="Input" value={record.input} />
         </>
       );
@@ -193,7 +201,7 @@ export const LedgerRow = memo(function LedgerRow({
       kind = "sleeping";
       body = (
         <p>
-          Until <time dateTime={new Date(record.until).toISOString()}>{utcText(record.until)}</time>
+          Until <UtcTime at={record.until} />
         </p>
       );
       break;

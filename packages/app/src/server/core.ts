@@ -13,6 +13,7 @@ import {
   isEnded,
   type LedgerRecord,
   loadPolicies,
+  nextFire,
   PolicyDeniedError,
   type PreviewAnswer,
   Principal,
@@ -130,6 +131,19 @@ export const appConfig = (app: AppContext): AppConfig => ({
   place: app.place,
   databaseHost: databaseHost(app.resolved.databaseUrl),
 });
+
+/**
+ * When each workflow on a schedule fires next, ISO 8601 by name (`nextFire`, as the worker's
+ * scheduler finds it): computed here, never in the browser from the cron. `resolveConfig` has
+ * refused a schedule that never fires, or one DBOS cannot read.
+ */
+export function nextFires({ description }: Pick<AppContext, "description">, now = new Date()): Record<string, string> {
+  const fires: Record<string, string> = {};
+  for (const { name, trigger } of description.workflows) {
+    if (trigger !== "manual") fires[name] = nextFire(trigger.schedule, trigger.timezone, now).toISOString();
+  }
+  return fires;
+}
 
 /**
  * The description as the page gets it (`getConfig`): without the source of a workflow

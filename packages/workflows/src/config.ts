@@ -38,6 +38,7 @@ import { isChangeOp, type Resource, resourceTypesOf, withoutWriteOnly } from "./
 import { APPLY_WORKFLOW, BUILT_IN_WORKFLOWS, CALL_WORKFLOW, DATA_VENDOR } from "./shared.ts";
 import { sourceDriver, sourceOps } from "./source.ts";
 import type { Steps } from "./steps.ts";
+import { checkSchedule } from "./schedules.ts";
 import { computeVersion } from "./version.ts";
 import { checkWakeupOps, type DeclaredWakeup } from "./wakeup.ts";
 
@@ -274,6 +275,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
       throw new Error(`A workflow is named "${wf.name}", the name of a built-in workflow; name it otherwise`);
     }
     checkUses(wf, ops, drivers, types);
+    checkSchedule(wf);
     const other = names.get(wf.name);
     if (other && other !== wf) {
       throw new Error(

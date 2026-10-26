@@ -279,8 +279,10 @@ export const ANONYMOUS_PRINCIPAL: Principal = Object.freeze({ id: ANONYMOUS, gro
 
 /** The runtime's agent that registers the instance's wakeup (`register`'s `CallContext.by`). */
 export const WAKEUP_AGENT = "wakeup";
+/** The runtime's agent a scheduled run is started by (`trigger: { schedule }`): the policy decides its starts. */
+export const SCHEDULE_AGENT = "schedule";
 /** The runtime's own agents (scenarios, the host check, scheduled runs, the wakeup's registration), declared whether a data file names them or not. */
-export const RUNTIME_AGENTS: readonly string[] = ["scenarios", "host-check", "schedule", WAKEUP_AGENT];
+export const RUNTIME_AGENTS: readonly string[] = ["scenarios", "host-check", SCHEDULE_AGENT, WAKEUP_AGENT];
 
 /** The declared resources of one of the runtime's people types, by `desired`. */
 const peopleOfType = <T>(resources: readonly PeopleResource[], type: "person" | "agent" | "group") =>

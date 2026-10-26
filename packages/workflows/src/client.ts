@@ -40,6 +40,7 @@ import {
   isVisitor,
   refusalOf,
   type RunStatus,
+  SCHEDULE_AGENT,
   WORKFLOW_ACTION,
 } from "./shared.ts";
 
@@ -882,6 +883,7 @@ export class SanomaClient {
     authenticatedRoles?: string[];
     error?: unknown;
     attributes?: Record<string, unknown>;
+    scheduleName?: string;
   }): Promise<RunSummary> {
     const approvals = await this.approvals(r.workflowID);
     const groups = r.authenticatedRoles ?? [];
@@ -896,7 +898,10 @@ export class SanomaClient {
             ...(groups.length ? { groups } : {}),
             ...(typeof onBehalfOf === "string" && { onBehalfOf }),
           }
-        : undefined,
+        : // DBOS enqueues a schedule's tick as nobody; the run starts as the schedule's agent.
+          r.scheduleName
+          ? { id: SCHEDULE_AGENT }
+          : undefined,
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,
       approvals,

@@ -1,13 +1,13 @@
 import type { ConfigDescription, WorkflowEntry } from "@sanoma-ai/workflows/describe";
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { memo, useCallback, useMemo } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Item, ItemContent, ItemDescription, ItemGroup } from "#/components/ui/item.tsx";
 import { Separator } from "#/components/ui/separator.tsx";
 import { type Field, fieldsOf } from "../form/schema.ts";
-import { configQuery, opsById, siteCallers } from "../queries.ts";
-import { BUILTIN_ICON, ItemHeading, Json, None, Notice, OpItem, Section, UsedByList } from "./common.tsx";
+import { configQuery, nextFiresQuery, opsById, siteCallers } from "../queries.ts";
+import { BUILTIN_ICON, ItemHeading, Json, None, Notice, OpItem, Section, UsedByList, UtcTime } from "./common.tsx";
 
 // A workflow's pieces, as a workflow's own page shows them.
 
@@ -24,7 +24,32 @@ export function Retired({ name }: { name: string }) {
   );
 }
 
-/** What a workflow may call, the built-ins it uses, its input and the sites' pages that call it, one section each. */
+/** How a workflow starts, in a line: by hand, or the cron it runs on and the zone it is read in. */
+export const startsOf = (trigger: WorkflowEntry["trigger"]): string =>
+  trigger === "manual" ? "By hand" : `Runs ${trigger.schedule} (${trigger.timezone ?? "UTC"})`;
+
+/** How the workflow starts, and for one on a schedule when it fires next, as the server computes it. */
+function Starts({ workflow }: { workflow: WorkflowEntry }) {
+  const { data: next } = useQuery({
+    ...nextFiresQuery(),
+    select: (fires) => fires[workflow.name],
+    enabled: workflow.trigger !== "manual",
+  });
+  return (
+    <Section title="Starts">
+      <p>
+        {startsOf(workflow.trigger)}
+        {next && (
+          <>
+            , next <UtcTime at={next} />
+          </>
+        )}
+      </p>
+    </Section>
+  );
+}
+
+/** How a workflow starts, what it may call, the built-ins it uses, its input and the sites' pages that call it, one section each. */
 export const WorkflowSections = memo(function WorkflowSections({ workflow }: { workflow: WorkflowEntry }) {
   const select = useCallback(
     (config: ConfigDescription) => ({ ops: opsById(config), sites: siteCallers(config, "workflow", workflow.name) }),
@@ -36,6 +61,8 @@ export const WorkflowSections = memo(function WorkflowSections({ workflow }: { w
   const fields = useMemo(() => fieldsOf(workflow.input), [workflow.input]);
   return (
     <>
+      <Starts workflow={workflow} />
+      <Separator />
       <Section title="Operations it may call">
         {workflow.ops.length === 0 ? (
           <None />

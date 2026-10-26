@@ -1,10 +1,14 @@
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { defineWorkflow } from "../src/index.ts";
 import announce from "./fixtures/announce.ts";
 
-/** Defines a workflow on `trigger`, when called. */
-const at = (trigger: unknown) => () => defineWorkflow({ ...announce, name: "timed", trigger: trigger as never });
+/** Defines a workflow on `trigger` whose input is `input` (none by default), when called. */
+const at =
+  (trigger: unknown, input: z.ZodType = z.object({})) =>
+  () =>
+    defineWorkflow({ ...announce, name: "timed", trigger: trigger as never, input: input as never });
 
 describe("defineWorkflow", () => {
   it("records the file that called it", () => {
@@ -37,5 +41,14 @@ describe("defineWorkflow", () => {
     expect(at({ schedule: "0 9 * * *", timezone: "Mars/Olympus" })).toThrow(
       'Workflow "timed": its timezone "Mars/Olympus" is no IANA time zone, such as "Europe/Amsterdam"',
     );
+  });
+
+  it("refuses a schedule for a workflow whose input refuses {}, what a scheduled run starts with", () => {
+    const daily = { schedule: "0 9 * * *" };
+    expect(at(daily, z.object({ to: z.string().default("all"), note: z.string().optional() }))).not.toThrow();
+    expect(at(daily, z.object({ to: z.string() }))).toThrow(
+      'Workflow "timed": a scheduled run starts with the input {}, which its input schema refuses: make each field optional or give it a default',
+    );
+    expect(at("manual", z.object({ to: z.string() }))).not.toThrow();
   });
 });
