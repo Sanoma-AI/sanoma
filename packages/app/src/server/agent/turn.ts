@@ -57,8 +57,10 @@ export async function postChat(request: Request, context: ActorContext & { site?
     let chat = await chats.get(body.id);
     if (chat && chat.person !== principal.id) throw new ApiError(404, { error: `No chat ${body.id}` });
     const named = chat?.engine ?? body.engine;
-    const engine = Object.hasOwn(ENGINES, named) ? ENGINES[named as EngineName] : undefined;
-    if (!engine) throw invalid(`No engine ${named}: the engines are ${Object.keys(ENGINES).join(", ")}`);
+    if (!Object.hasOwn(ENGINES, named)) {
+      throw invalid(`No engine ${named}: the engines are ${Object.keys(ENGINES).join(", ")}`);
+    }
+    const engine = ENGINES[named as EngineName];
     // The new message is checked before a turn under way is stopped for it: a new one, by the
     // person. The transcript, written by this app, is not validated again.
     const checked = await safeValidateUIMessages<ChatMessage>({ messages: [body.message] });

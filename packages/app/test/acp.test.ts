@@ -132,6 +132,7 @@ export default defineWorkflow({
   plant("copilot", { signIn: "terminal", mode: "hello" });
   plant("pi", { signIn: "once", mode: "hello" });
   plant("codex", { signIn: "url", mode: "hello" });
+  plant("claude-code", { signIn: "none", mode: "hello" });
   app = await startApp(testApp.config, { port: 0, source: localGitSource(dir) });
 }, 600_000);
 
@@ -367,6 +368,10 @@ describe("the chat on a person's own agent", () => {
     expect(logged("codex")).toEqual(
       expect.arrayContaining([{ authenticate: "chat-gpt-device-code" }, { elicitation: "accept" }]),
     );
+  }, 60_000);
+
+  it("answers on Claude Code's own", async () => {
+    expect(textOfReply(await send(`claude-${RUN}`, "acp-claude-code", "Hi"))).toBe("Hello.");
   }, 60_000);
 
   it("is never reached by an agent, which no login admits (the engine refuses one too)", async () => {
