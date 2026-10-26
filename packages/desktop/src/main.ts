@@ -49,17 +49,8 @@ import { type CompanyLog, hidePasswords, openLog } from "./logs.ts";
 import { folderArgument, isCompanyFolder, syncedFolderWarning } from "./places.ts";
 import { runtimeOf } from "./runtime.ts";
 import { type Session, type SessionOptions, startSession } from "./session.ts";
+import { readSettings, runCheck, savedNewer } from "./update-check.ts";
 import { fastForward, prepareUpdate } from "./update-company.ts";
-import {
-  checkDue,
-  fetchReleases,
-  type Newer,
-  newerRelease,
-  readSettings,
-  savedNewer,
-  shouldNotify,
-  writeSettings,
-} from "./update-check.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const companiesFile = () => join(app.getPath("userData"), "companies.json");
@@ -516,8 +507,6 @@ const forFocused = (act: (path: string) => unknown) => () => {
   if (path) void act(path);
 };
 
-/** A newer Sanoma the update check found: the Help menu links to its page. */
-let newer: Newer | undefined;
 /** Its notification, held so that a click on it still reaches the shell once it is shown. */
 let notification: Notification | undefined;
 
@@ -528,16 +517,14 @@ const checkForUpdate = (asked: boolean) => {
 };
 
 /**
- * The update check (`update-check.ts`), when a day has passed since the last, or when asked from
- * the Help menu, which then says what it found. A newer release gets one notification per version.
+ * The update check (`runCheck`), when a day has passed since the last, or when asked from the Help
+ * menu, which then says what it found.
  */
 async function check(asked: boolean) {
   const current = app.getVersion();
-  const saved = readSettings(settingsFile());
-  if (!asked && !checkDue(saved, Date.now())) return;
-  let found: Newer | undefined;
+  let result: Awaited<ReturnType<typeof runCheck>>;
   try {
-    found = newerRelease(current, await fetchReleases(current));
+    result = await runCheck({ file: settingsFile(), current, asked });
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     if (asked)
@@ -545,12 +532,8 @@ async function check(asked: boolean) {
     else console.error(`update check: ${detail}`);
     return;
   }
-  try {
-    writeSettings(settingsFile(), { updateCheckedAt: new Date().toISOString(), newer: found });
-  } catch (err) {
-    console.error("update check: could not save settings.json:", err);
-  }
-  newer = found;
+  if (!result) return;
+  const { found, notify } = result;
   buildMenu();
   if (asked) {
     const { response } = await dialog.showMessageBox(
@@ -563,7 +546,7 @@ async function check(asked: boolean) {
         : { message: `Sanoma ${current} is the newest version` },
     );
     if (found && response === 0) void shell.openExternal(found.url);
-  } else if (shouldNotify(saved, found) && Notification.isSupported()) {
+  } else if (found && notify && Notification.isSupported()) {
     notification = new Notification({
       title: `Sanoma ${found.version} is available`,
       body: "Click to open its release page.",
@@ -573,9 +556,9 @@ async function check(asked: boolean) {
   }
 }
 
-/** The Help menu's update items: the newer release, when one is known, and the check. */
+/** The Help menu's update items: the release the last check found, while newer, and the check. */
 function updateItems(): MenuItemConstructorOptions[] {
-  const known = newer;
+  const known = savedNewer(readSettings(settingsFile()), app.getVersion());
   return [
     ...(known ? [{ label: `Download Sanoma ${known.version}…`, click: () => void shell.openExternal(known.url) }] : []),
     { label: "Check for a Newer Sanoma", click: () => checkForUpdate(true) },
@@ -694,8 +677,6 @@ if (!app.requestSingleInstanceLock()) {
 
   void app.whenReady().then(() => {
     app.setAboutPanelOptions({ applicationName: "Sanoma", applicationVersion: app.getVersion() });
-    // What the last check found, until the next one: unless this is that version or later.
-    newer = savedNewer(readSettings(settingsFile()), app.getVersion());
     buildMenu();
     checkForUpdate(false);
     // Hourly against the saved time, not a day-long timer, which would not count the hours asleep.

@@ -1,7 +1,7 @@
 // The update check: the shell is unsigned, so it cannot update itself (Squirrel.Mac and
 // electron-updater refuse an unsigned app). It asks GitHub Releases for a newer `desktop-v*` and
 // links to its page; the person downloads and replaces the app.
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
 /** The repository's latest releases: desktop releases share it with nothing else, but keep to the tag prefix. */
@@ -30,16 +30,12 @@ const parse = (version: string) => {
   return match ? match.slice(1).map(Number) : undefined;
 };
 
-/** Whether `a` is a later `x.y.z` than `b`, comparing each part as a number (0.10.0 after 0.9.0). */
-function later(a: number[], b: number[]): boolean {
-  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i]! > b[i]!;
-  return false;
-}
-
-/** Whether version `a` is later than `b`; false when either is not `x.y.z`. */
+/** Whether `a` is a later `x.y.z` than `b`, part by part as numbers (0.10.0 after 0.9.0); false when either is not one. */
 function isLater(a: string, b: string): boolean {
   const [pa, pb] = [parse(a), parse(b)];
-  return !!pa && !!pb && later(pa, pb);
+  if (!pa || !pb) return false;
+  const i = pa.findIndex((part, n) => part !== pb[n]);
+  return i >= 0 && pa[i]! > pb[i]!;
 }
 
 /**
@@ -47,19 +43,13 @@ function isLater(a: string, b: string): boolean {
  * are neither drafts nor prereleases.
  */
 export function newerRelease(current: string, releases: readonly GitHubRelease[]): Newer | undefined {
-  let best = parse(current);
-  if (!best) return undefined;
   let found: Newer | undefined;
   for (const release of releases) {
     if (release.draft || release.prerelease || !release.tag_name.startsWith(TAG_PREFIX)) continue;
     // The page the shell opens in the browser: GitHub's, nothing else.
     if (!release.html_url.startsWith("https://github.com/")) continue;
     const version = release.tag_name.slice(TAG_PREFIX.length);
-    const parts = parse(version);
-    if (parts && later(parts, best)) {
-      best = parts;
-      found = { version, url: release.html_url };
-    }
+    if (isLater(version, found?.version ?? current)) found = { version, url: release.html_url };
   }
   return found;
 }
@@ -82,8 +72,8 @@ export interface Settings {
   newer?: Newer;
 }
 
+/** The settings, or none when the file is missing or is not a JSON object. */
 export function readSettings(file: string): Settings {
-  if (!existsSync(file)) return {};
   try {
     const settings: unknown = JSON.parse(readFileSync(file, "utf8"));
     return typeof settings === "object" && settings !== null && !Array.isArray(settings) ? (settings as Settings) : {};
@@ -114,4 +104,28 @@ export function shouldNotify(settings: Settings, found: Newer | undefined): foun
 export function checkDue(settings: Settings, now: number): boolean {
   const last = settings.updateCheckedAt ? Date.parse(settings.updateCheckedAt) : Number.NaN;
   return Number.isNaN(last) || now < last || now - last >= CHECK_EVERY_MS;
+}
+
+/**
+ * One check against the settings in `file`: skipped (undefined) unless `asked` or due, else what
+ * GitHub has, saved with the time, and whether it gets a notification (once per version). Throws
+ * when GitHub does not answer; a settings file that cannot be written only loses the time.
+ */
+export async function runCheck(options: {
+  file: string;
+  current: string;
+  asked: boolean;
+  now?: number;
+  fetchImpl?: typeof fetch;
+}): Promise<{ found?: Newer; notify: boolean } | undefined> {
+  const { file, current, asked, now = Date.now(), fetchImpl } = options;
+  const saved = readSettings(file);
+  if (!asked && !checkDue(saved, now)) return undefined;
+  const found = newerRelease(current, await fetchReleases(current, fetchImpl));
+  try {
+    writeSettings(file, { updateCheckedAt: new Date(now).toISOString(), newer: found });
+  } catch (err) {
+    console.error("update check: could not save the settings:", err);
+  }
+  return { found, notify: !asked && shouldNotify(saved, found) };
 }

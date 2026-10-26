@@ -2,8 +2,7 @@
 // the shell runs from the checkout: `stage/node-<arch>` (the pinned Node, `download-node.ts`) for
 // each architecture asked for (this one by default), and `stage/pnpm`, a copy of the pnpm that runs
 // this script (its package, by real path), so the shell installs a company with the pnpm the
-// workspace pins and needs no pnpm on the computer. pnpm is JavaScript, with its native
-// helpers prebuilt for every architecture, so one copy serves both builds.
+// workspace pins and needs no pnpm on the computer (one copy serves every architecture).
 //
 //   pnpm --filter @sanoma-ai/desktop run stage:resources [--arch arm64 --arch x64]
 import { cpSync, existsSync, readFileSync, realpathSync, rmSync } from "node:fs";
@@ -15,9 +14,11 @@ import { downloadNode } from "./download-node.ts";
 const stage = fileURLToPath(new URL("../stage/", import.meta.url));
 const { values } = parseArgs({ options: { arch: { type: "string", multiple: true } } });
 
-for (const arch of values.arch ?? [process.arch]) {
-  await downloadNode(`${process.platform}-${arch}`, join(stage, `node-${arch}`));
-}
+await Promise.all(
+  (values.arch ?? [process.arch]).map((arch) =>
+    downloadNode(`${process.platform}-${arch}`, join(stage, `node-${arch}`)),
+  ),
+);
 
 /** The pnpm package `pnpm run` was started from: `npm_execpath` is its bin script. */
 function pnpmPackage(): string {

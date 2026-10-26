@@ -10,6 +10,7 @@ import {
   newerRelease,
   readSettings,
   RELEASES_URL,
+  runCheck,
   savedNewer,
   shouldNotify,
   writeSettings,
@@ -113,4 +114,38 @@ test("fetchReleases asks GitHub's API and fails on an error status", async () =>
   expect(asked[0]![0]).toBe(RELEASES_URL);
   expect(asked[0]![1]?.headers).toMatchObject({ "User-Agent": "Sanoma/0.1.0" });
   await expect(fetchReleases("0.1.0", answer(403, { message: "rate limited" }))).rejects.toThrow(/403/);
+});
+
+const github = (releases: GitHubRelease[]) => (async () => Response.json(releases)) as unknown as typeof fetch;
+const setup = () => join(mkdtempSync(join(tmpdir(), "sanoma-check-")), "settings.json");
+
+describe("runCheck", () => {
+  const now = Date.parse("2026-10-25T12:00:00Z");
+
+  test("saves the time and the find, notifies once, then waits a day unless asked", async () => {
+    const file = setup();
+    const fetchImpl = github([release("desktop-v0.2.0")]);
+    const first = await runCheck({ file, current: "0.1.0", asked: false, now, fetchImpl });
+    expect(first).toEqual({ found: { version: "0.2.0", url: release("desktop-v0.2.0").html_url }, notify: true });
+    expect(readSettings(file)).toEqual({ updateCheckedAt: new Date(now).toISOString(), newer: first!.found });
+    expect(await runCheck({ file, current: "0.1.0", asked: false, now: now + 60_000, fetchImpl })).toBeUndefined();
+    expect(await runCheck({ file, current: "0.1.0", asked: true, now: now + 60_000, fetchImpl })).toMatchObject({
+      notify: false,
+    });
+    const later = await runCheck({
+      file,
+      current: "0.1.0",
+      asked: false,
+      now: now + CHECK_EVERY_MS + 60_000,
+      fetchImpl,
+    });
+    expect(later).toMatchObject({ found: { version: "0.2.0" }, notify: false });
+  });
+
+  test("a failed answer throws and saves nothing, so the next start checks again", async () => {
+    const file = setup();
+    const fetchImpl = (async () => new Response("", { status: 500 })) as unknown as typeof fetch;
+    await expect(runCheck({ file, current: "0.1.0", asked: false, now, fetchImpl })).rejects.toThrow(/500/);
+    expect(readSettings(file)).toEqual({});
+  });
 });

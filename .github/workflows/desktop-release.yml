@@ -1,7 +1,6 @@
 name: Desktop release
-# Run by hand on main (README "Desktop (preview)"): builds the unsigned macOS app, arm64 and x64, a
-# dmg and a zip each, and uploads them to a DRAFT GitHub Release `desktop-v<version>`, which a
-# maintainer publishes after trying the download. The version is packages/desktop/package.json's.
+# Run by hand on main: uploads the unsigned macOS app to a DRAFT GitHub Release `desktop-v<version>`
+# (README "Desktop (preview)").
 on:
   workflow_dispatch:
 
@@ -65,12 +64,12 @@ jobs:
           done
           ls -l ./*.dmg ./*.zip
       - name: Draft release
+        working-directory: packages/desktop/release
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          cd packages/desktop/release
           gh release create "desktop-v$VERSION" --repo "$GITHUB_REPOSITORY" --draft --target "$GITHUB_SHA" \
             --title "Sanoma desktop $VERSION (unsigned preview)" --notes-file ../RELEASE_NOTES.md \
-            "Sanoma-$VERSION-arm64.dmg" "Sanoma-$VERSION-arm64.zip" "Sanoma-$VERSION-x64.dmg" "Sanoma-$VERSION-x64.zip"
+            "Sanoma-$VERSION"-*.dmg "Sanoma-$VERSION"-*.zip
           echo "Draft release desktop-v$VERSION from $GITHUB_SHA: publish it on GitHub after trying the download." >> "$GITHUB_STEP_SUMMARY"
