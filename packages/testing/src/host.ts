@@ -16,17 +16,19 @@ import {
   errorMessage,
   type HostLifetime,
   isEnded,
+  memoryLedger,
   type PlanAction,
   type Resource,
   resolveSecrets,
   wakeGeneration,
   type SanomaClient,
   type SanomaConfig,
+  superviseWorker,
+  type SupervisorOptions,
   withSetup,
 } from "@sanoma-ai/workflows";
 import { z } from "zod";
 import { waitFor } from "./build.ts";
-import { startTestWorker } from "./index.ts";
 
 // The conformance kit for the `Host` contract: whether a host runs the company as the runtime
 // needs. `checkHost` drives a declared host through callbacks (apply it, stop it, commit to its
@@ -605,13 +607,18 @@ export function fakeHost(start: StartHost, { lifetime = "long-lived", quietAfter
 }
 
 /**
- * A `StartHost` for `fakeHost` that runs `config` in this process: a worker on `databaseUrl` and
- * a server that answers `/healthz`, and `GET /wake?generation=N` with 204, each one recorded as
- * the running host's `wakes` (the app itself needs its build, which this package does not).
+ * A `StartHost` for `fakeHost` that runs `config` in this process, as `sanoma serve` does: a
+ * worker on `databaseUrl` under a supervisor (`superviseWorker`, given `options`), which stops
+ * itself when idle with a wakeup declared, and a server that answers `/healthz`, and
+ * `GET /wake?generation=N` with 204, each one recorded as the running host's `wakes` and handed to
+ * the supervisor (the app itself needs its build, which this package does not).
  */
-export function inProcessHost(config: SanomaConfig, databaseUrl: string): StartHost {
+export function inProcessHost(config: SanomaConfig, databaseUrl: string, options: SupervisorOptions = {}): StartHost {
   return async ({ port }) => {
-    const worker = await startTestWorker(config, { databaseUrl, quiet: true });
+    const worker = await superviseWorker(
+      { ...config, databaseUrl, ledger: config.ledger ?? memoryLedger() },
+      { quiet: true, ...options },
+    );
     const wakes: Wake[] = [];
     const server = createServer((req, res) => {
       const url = new URL(req.url ?? "/", "http://host");
@@ -620,6 +627,9 @@ export function inProcessHost(config: SanomaConfig, databaseUrl: string): StartH
       const generation = wakeGeneration(url);
       if (generation === undefined) return void res.writeHead(400).end();
       wakes.push({ generation, at: new Date() });
+      worker
+        .wake(generation)
+        .catch((err: unknown) => console.warn(`a wake of generation ${generation} failed: ${errorMessage(err)}`));
       res.writeHead(204, { "cache-control": "no-store" }).end();
     });
     const url = await listen(server, port).catch(async (err: unknown) => {
