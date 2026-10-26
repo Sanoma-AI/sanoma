@@ -37,7 +37,7 @@ function later(a: number[], b: number[]): boolean {
 }
 
 /** Whether version `a` is later than `b`; false when either is not `x.y.z`. */
-export function isLater(a: string, b: string): boolean {
+function isLater(a: string, b: string): boolean {
   const [pa, pb] = [parse(a), parse(b)];
   return !!pa && !!pb && later(pa, pb);
 }
@@ -85,7 +85,8 @@ export interface Settings {
 export function readSettings(file: string): Settings {
   if (!existsSync(file)) return {};
   try {
-    return JSON.parse(readFileSync(file, "utf8")) as Settings;
+    const settings: unknown = JSON.parse(readFileSync(file, "utf8"));
+    return typeof settings === "object" && settings !== null && !Array.isArray(settings) ? (settings as Settings) : {};
   } catch {
     return {};
   }
@@ -96,6 +97,17 @@ export function writeSettings(file: string, next: Settings): void {
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(`${file}.tmp`, `${JSON.stringify({ ...readSettings(file), ...next }, null, 2)}\n`);
   renameSync(`${file}.tmp`, file);
+}
+
+/** The release the last check found, while it is still later than the app (`current`). */
+export function savedNewer(settings: Settings, current: string): Newer | undefined {
+  const saved = settings.newer;
+  return saved && typeof saved.version === "string" && isLater(saved.version, current) ? saved : undefined;
+}
+
+/** Whether a check's find gets a notification: once per version, so not the one the last check found. */
+export function shouldNotify(settings: Settings, found: Newer | undefined): found is Newer {
+  return !!found && found.version !== settings.newer?.version;
 }
 
 /** Whether a day has passed since the last check (or there was none, or the clock went back). */

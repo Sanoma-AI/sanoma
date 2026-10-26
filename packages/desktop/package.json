@@ -12,7 +12,7 @@
     "stage:resources": "node scripts/stage.ts",
     "test:e2e": "node scripts/electron.ts && pnpm run build && pnpm run stage:resources && playwright test",
     "start": "node scripts/electron.ts && pnpm run build && pnpm run stage:resources && electron .",
-    "dist": "pnpm run build && pnpm run stage:resources --arch arm64 --arch x64 && electron-builder --mac --publish never",
+    "dist": "pnpm run build && pnpm run stage:resources --arch arm64 --arch x64 && electron-builder --mac",
     "dist:dir": "pnpm run build && pnpm run stage:resources && electron-builder --dir",
     "watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput"
   },

@@ -53,10 +53,11 @@ import { fastForward, prepareUpdate } from "./update-company.ts";
 import {
   checkDue,
   fetchReleases,
-  isLater,
   type Newer,
   newerRelease,
   readSettings,
+  savedNewer,
+  shouldNotify,
   writeSettings,
 } from "./update-check.ts";
 
@@ -520,24 +521,34 @@ let newer: Newer | undefined;
 /** Its notification, held so that a click on it still reaches the shell once it is shown. */
 let notification: Notification | undefined;
 
+/** Checks one at a time, so two never both notify for the same version. */
+let checking: Promise<void> = Promise.resolve();
+const checkForUpdate = (asked: boolean) => {
+  checking = checking.then(() => check(asked)).catch((err: unknown) => console.error("update check:", err));
+};
+
 /**
  * The update check (`update-check.ts`), when a day has passed since the last, or when asked from
  * the Help menu, which then says what it found. A newer release gets one notification per version.
  */
-async function checkForUpdate(asked: boolean) {
+async function check(asked: boolean) {
   const current = app.getVersion();
   const saved = readSettings(settingsFile());
   if (!asked && !checkDue(saved, Date.now())) return;
   let found: Newer | undefined;
   try {
     found = newerRelease(current, await fetchReleases(current));
-    writeSettings(settingsFile(), { updateCheckedAt: new Date().toISOString(), newer: found });
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     if (asked)
       void dialog.showMessageBox({ type: "warning", message: "Sanoma could not check for a newer version", detail });
     else console.error(`update check: ${detail}`);
     return;
+  }
+  try {
+    writeSettings(settingsFile(), { updateCheckedAt: new Date().toISOString(), newer: found });
+  } catch (err) {
+    console.error("update check: could not save settings.json:", err);
   }
   newer = found;
   buildMenu();
@@ -552,7 +563,7 @@ async function checkForUpdate(asked: boolean) {
         : { message: `Sanoma ${current} is the newest version` },
     );
     if (found && response === 0) void shell.openExternal(found.url);
-  } else if (found && found.version !== saved.newer?.version && Notification.isSupported()) {
+  } else if (shouldNotify(saved, found) && Notification.isSupported()) {
     notification = new Notification({
       title: `Sanoma ${found.version} is available`,
       body: "Click to open its release page.",
@@ -567,7 +578,7 @@ function updateItems(): MenuItemConstructorOptions[] {
   const known = newer;
   return [
     ...(known ? [{ label: `Download Sanoma ${known.version}…`, click: () => void shell.openExternal(known.url) }] : []),
-    { label: "Check for a Newer Sanoma", click: () => void checkForUpdate(true) },
+    { label: "Check for a Newer Sanoma", click: () => checkForUpdate(true) },
     { type: "separator" },
   ];
 }
@@ -684,12 +695,11 @@ if (!app.requestSingleInstanceLock()) {
   void app.whenReady().then(() => {
     app.setAboutPanelOptions({ applicationName: "Sanoma", applicationVersion: app.getVersion() });
     // What the last check found, until the next one: unless this is that version or later.
-    const saved = readSettings(settingsFile()).newer;
-    if (saved && isLater(saved.version, app.getVersion())) newer = saved;
+    newer = savedNewer(readSettings(settingsFile()), app.getVersion());
     buildMenu();
-    void checkForUpdate(false);
-    // Hourly, so a shell left open checks once a day too.
-    setInterval(() => void checkForUpdate(false), 60 * 60 * 1000);
+    checkForUpdate(false);
+    // Hourly against the saved time, not a day-long timer, which would not count the hours asleep.
+    setInterval(() => checkForUpdate(false), 60 * 60 * 1000);
     const folder = folderArgument(argsOf(process.argv), process.cwd()) ?? dropped.at(-1);
     if (folder) void openCompany(folder);
     else showStart();

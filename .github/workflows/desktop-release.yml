@@ -60,7 +60,8 @@ jobs:
           for pair in mac-arm64:arm64 mac:x86_64; do
             app="${pair%%:*}/Sanoma.app"
             codesign --verify --deep --strict --verbose=2 "$app"
-            file "$app/Contents/Resources/node/node" | grep -q "${pair##*:}" || { echo "::error::$app carries the wrong Node"; exit 1; }
+            node_arch=$(lipo -archs "$app/Contents/Resources/node/node")
+            [ "$node_arch" = "${pair##*:}" ] || { echo "::error::$app carries a $node_arch Node"; exit 1; }
           done
           ls -l ./*.dmg ./*.zip
       - name: Draft release

@@ -26,6 +26,8 @@ electronFuses:
   runAsNode: false
 mac:
   category: public.app-category.business
+  # The Node it ships (24) needs macOS 13.5; Electron 45 alone would open on 13.0.
+  minimumSystemVersion: "13.5"
   target:
     - target: dmg
       arch: [arm64, x64]

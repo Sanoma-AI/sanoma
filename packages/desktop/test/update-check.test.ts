@@ -7,10 +7,11 @@ import {
   checkDue,
   fetchReleases,
   type GitHubRelease,
-  isLater,
   newerRelease,
   readSettings,
   RELEASES_URL,
+  savedNewer,
+  shouldNotify,
   writeSettings,
 } from "../src/update-check.ts";
 
@@ -60,11 +61,21 @@ describe("newerRelease", () => {
   });
 });
 
-test("isLater", () => {
-  expect(isLater("0.2.0", "0.1.0")).toBe(true);
-  expect(isLater("0.1.0", "0.1.0")).toBe(false);
-  expect(isLater("0.1.0", "0.2.0")).toBe(false);
-  expect(isLater("0.2.0-beta", "0.1.0")).toBe(false);
+test("savedNewer: the last check's release while it is later than the app", () => {
+  const newer = { version: "0.2.0", url: "https://github.com/Sanoma-AI/sanoma/releases/tag/desktop-v0.2.0" };
+  expect(savedNewer({ newer }, "0.1.0")).toEqual(newer);
+  expect(savedNewer({ newer }, "0.2.0")).toBeUndefined();
+  expect(savedNewer({ newer }, "0.3.0")).toBeUndefined();
+  expect(savedNewer({}, "0.1.0")).toBeUndefined();
+  expect(savedNewer({ newer: { version: 2 } } as never, "0.1.0")).toBeUndefined();
+});
+
+test("shouldNotify: once per version", () => {
+  const found = { version: "0.2.0", url: "u" };
+  expect(shouldNotify({}, found)).toBe(true);
+  expect(shouldNotify({ newer: found }, found)).toBe(false);
+  expect(shouldNotify({ newer: { version: "0.1.5", url: "u" } }, found)).toBe(true);
+  expect(shouldNotify({ newer: found }, undefined)).toBe(false);
 });
 
 const at = (ms: number) => ({ updateCheckedAt: new Date(ms).toISOString() });
@@ -78,11 +89,13 @@ test("checkDue: once a day, and again when the clock went back", () => {
   expect(checkDue(at(now + 60_000), now)).toBe(true);
 });
 
-test("settings: missing or broken reads as empty, a write merges", () => {
+test("settings: missing, broken or not an object reads as empty, a write merges", () => {
   const file = join(mkdtempSync(join(tmpdir(), "sanoma-settings-")), "settings.json");
   expect(readSettings(file)).toEqual({});
-  writeFileSync(file, "{ not json");
-  expect(readSettings(file)).toEqual({});
+  for (const text of ["{ not json", "null", "[]", "3"]) {
+    writeFileSync(file, text);
+    expect(readSettings(file)).toEqual({});
+  }
   writeFileSync(file, JSON.stringify({ other: 1 }));
   writeSettings(file, { updateCheckedAt: "2026-10-25T12:00:00.000Z", newer: { version: "0.2.0", url: "u" } });
   writeSettings(file, { newer: undefined });
