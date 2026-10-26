@@ -9,7 +9,7 @@ import { promisify } from "node:util";
 import { type CredentialStatus, errorMessage, memorySecrets, type Principal } from "@sanoma-ai/workflows";
 import { type DataValue, formatOptions, renderDataFile } from "@sanoma-ai/workflows/describe";
 import { secret as secretOf } from "@sanoma-ai/workflows/resources";
-import { mintInstanceToken } from "@sanoma-ai/workflows/wakeup-service";
+import { mintInstanceToken, WAKEUP_TOKEN } from "@sanoma-ai/workflows/wakeup-service";
 import {
   ApiError,
   type ConnectExistingRequest,
@@ -58,8 +58,6 @@ const SANOMA_OPS = new Set(["SANOMA_OPS_TOKEN", "SANOMA_OPS_URL"]);
 const OPTIONAL = new Set(["SANOMA_OPS_URL"]);
 /** The resource type whose connector "Connect sanoma-ops" is for. */
 export const SANOMA_OPS_WAKEUP = "sanomaOps.wakeup";
-/** The instance's own token at the wakeup service, minted here beside the account's: never shown. */
-export const WAKEUP_TOKEN = "SANOMA_WAKEUP_TOKEN";
 
 /** The setup tokens this config asks for: sanoma-ops's only when it declares the connector. */
 const setupTokens = ({ resolved }: AppContext) =>

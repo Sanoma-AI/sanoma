@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 import { APPLY_WORKFLOW, errorMessage, isEnded, type Principal, type Resource } from "@sanoma-ai/workflows";
 import { type DataValue, formatOptions, readLockfile, Reference, renderDataFile } from "@sanoma-ai/workflows/describe";
 import { secret } from "@sanoma-ai/workflows/resources";
+import { WAKEUP_TOKEN } from "@sanoma-ai/workflows/wakeup-service";
 import {
   ApiError,
   INFRA,
@@ -16,7 +17,7 @@ import {
 } from "../api.ts";
 import type { AppContext } from "../context.ts";
 import { asApplyPlan } from "../lib/apply-plan.ts";
-import { GITHUB_APP, SANOMA_OPS_WAKEUP, WAKEUP_TOKEN } from "./setup.ts";
+import { GITHUB_APP, SANOMA_OPS_WAKEUP } from "./setup.ts";
 
 // Going live, steps 2 to 6 (step 1 is connect, in setup.ts): choose where the company goes,
 // write `resources/sanoma/infra.ts`, apply the repository and the database, push the local
@@ -133,7 +134,7 @@ async function installations({ client }: AppContext): Promise<Installation[]> {
  */
 export async function goLiveChoices(app: AppContext): Promise<GoLiveChoices> {
   const errors: string[] = [];
-  const tokens = await app.client.secrets(["GITHUB_TOKEN", "SUPABASE_ACCESS_TOKEN"]);
+  const tokens = await app.client.secrets(["GITHUB_TOKEN", "SUPABASE_ACCESS_TOKEN", "SANOMA_OPS_TOKEN"]);
   const listed = async <T>(what: string, list: () => Promise<T[]>): Promise<T[]> => {
     try {
       return await list();
@@ -178,6 +179,8 @@ export async function goLiveChoices(app: AppContext): Promise<GoLiveChoices> {
     }
   }
   const host = hostType(app);
+  const cannot = host && tokens.has("SANOMA_OPS_TOKEN") ? unwakeable(app, host) : undefined;
+  if (cannot) errors.push(cannot);
   return {
     owners,
     organizations: organizations.map(({ id, name }) => ({ id, name })),
@@ -195,22 +198,29 @@ export async function goLiveChoices(app: AppContext): Promise<GoLiveChoices> {
 }
 
 /**
- * The secrets the host is given for its wakeup, when going live declares one: the config has
- * sanoma-ops's wakeup type, and "Connect sanoma-ops" stored the account's token and minted the
- * instance's, which the worker on the host registers with, at `SANOMA_OPS_URL` when one is
- * stored. Undefined for no wakeup; a 409 when it cannot wake the host type.
+ * Why the config's sanoma-ops wakeup cannot wake its host type, or undefined when it can or the
+ * config declares none: going live then declares no wakeup, and the choices say why.
  */
-async function wakeupSecrets({ client, resolved }: AppContext, host: Resource) {
+function unwakeable({ resolved }: AppContext, host: Resource): string | undefined {
   const type = resolved.types.get(SANOMA_OPS_WAKEUP);
   if (!type?.wakeup) return undefined;
-  const stored = await client.secrets(["SANOMA_OPS_TOKEN", WAKEUP_TOKEN, OPS_URL]);
-  if (!stored.has("SANOMA_OPS_TOKEN") || !stored.has(WAKEUP_TOKEN)) return undefined;
   const hosts = [type.fields.references?.[type.wakeup.inputs.host]?.type ?? []].flat();
-  if (!hosts.includes(`${host.vendor}.${host.type}`)) {
-    throw new ApiError(409, {
-      error: `The sanoma-ops wakeup cannot wake a ${host.vendor}.${host.type}: it wakes ${hosts.join(", ")}`,
-    });
-  }
+  const id = `${host.vendor}.${host.type}`;
+  return hosts.includes(id)
+    ? undefined
+    : `sanoma-ops's wakeup cannot wake a ${id} (it wakes ${hosts.join(", ")}): going live declares none, and the host stays up`;
+}
+
+/**
+ * The secrets the host is given for its wakeup, when going live declares one: the config has
+ * sanoma-ops's wakeup type, for this host type, and "Connect sanoma-ops" stored the account's
+ * token and minted the instance's, which the worker on the host registers with, at
+ * `SANOMA_OPS_URL` when one is stored. Undefined for no wakeup.
+ */
+async function wakeupSecrets(app: AppContext, host: Resource) {
+  if (!app.resolved.types.has(SANOMA_OPS_WAKEUP) || unwakeable(app, host)) return undefined;
+  const stored = await app.client.secrets(["SANOMA_OPS_TOKEN", WAKEUP_TOKEN, OPS_URL]);
+  if (!stored.has("SANOMA_OPS_TOKEN") || !stored.has(WAKEUP_TOKEN)) return undefined;
   return Object.fromEntries([WAKEUP_TOKEN, ...(stored.has(OPS_URL) ? [OPS_URL] : [])].map((n) => [n, secret(n)]));
 }
 

@@ -104,6 +104,9 @@ const newToken = (prefix: "swa_" | "swi_") => `${prefix}${generateSecret()}`;
  */
 export const mintInstanceToken = () => newToken("swi_");
 
+/** The secret a company keeps its instance token in: what its host's `secrets` name and its wakeup's driver reads. */
+export const WAKEUP_TOKEN = "SANOMA_WAKEUP_TOKEN";
+
 /** An instance token the service takes: `swi_`, then at least as many base64url characters as a minted one has. */
 export const INSTANCE_TOKEN = /^swi_[\w-]{43,256}$/;
 
@@ -309,7 +312,12 @@ export async function startWakeupService({
       [randomUUID(), accountId, checked.url, hashOf(token)],
     );
     const row = rows[0];
-    if (!row) return problem(409, "the token is another account's instance's");
+    if (!row) {
+      return problem(
+        409,
+        "the token is another account's instance's: a new account needs a new instance token (clear SANOMA_WAKEUP_TOKEN, then store the account's token again in /setup, which mints one)",
+      );
+    }
     return json(row.made ? 201 : 200, { id: row.id });
   }
 

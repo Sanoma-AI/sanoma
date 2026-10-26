@@ -258,7 +258,7 @@ describe("startWakeupService", () => {
     const other = await service!.mintAccount("other");
     expect(await register({ url: "https://theirs.test", token }, other.token)).toMatchObject({
       status: 409,
-      json: { error: "the token is another account's instance's" },
+      json: { error: expect.stringMatching(/^the token is another account's instance's: a new account needs/) },
     });
     expect(await shown()).toMatchObject({ url: "https://moved.test" });
     const { rows } = await pool.query(`SELECT count(*)::int AS n FROM ${WAKEUP_INSTANCES_TABLE}`);

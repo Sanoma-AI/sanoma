@@ -1,5 +1,5 @@
 import { type CallContext, DriverError, type PlanAction, type WakeupRegistration } from "@sanoma-ai/workflows";
-import { instanceUrl, mintInstanceToken } from "@sanoma-ai/workflows/wakeup-service";
+import { instanceUrl, mintInstanceToken, WAKEUP_TOKEN } from "@sanoma-ai/workflows/wakeup-service";
 import { z } from "zod";
 
 // The wakeup type's operations over the wakeup service (`WakeupApi`): the driver's calls it over
@@ -32,11 +32,11 @@ export interface WakeupApi {
 }
 
 /**
- * The secret the instance's token is kept in: minted by the company (`/setup` does, with
- * `mintInstanceToken`) before anything is applied, so a host's `secrets` can name it from the
- * first apply; `create` registers it, and `register` sends it.
+ * The secret the instance's token is kept in (the service module's): minted by the company
+ * (`/setup` does, with `mintInstanceToken`) before anything is applied, so a host's `secrets` can
+ * name it from the first apply; `create` registers it, and `register` sends it.
  */
-export const WAKEUP_TOKEN = "SANOMA_WAKEUP_TOKEN";
+export { WAKEUP_TOKEN };
 
 /** The driver's own refusal, before or instead of a call: never retried. */
 export const refused = (message: string, vendorCode?: string) =>
@@ -90,7 +90,13 @@ export function wakeupOps(api: () => WakeupApi) {
     const planned = { host: normalUrl(desired.host) };
     if (!state) return { action: "create", planned, unknown: ["id"], replace: [] };
     if (planned.host === state.host) return { action: "none", planned: state, state, ...none };
-    return { action: "update", planned: { ...state, ...planned }, state, ...none };
+    // A move forgets the wake registered at the old URL, as the service does.
+    return {
+      action: "update",
+      planned: { ...state, ...planned, at: null, generation: 0, lastError: null },
+      state,
+      ...none,
+    };
   };
   return {
     import: read,

@@ -82,7 +82,11 @@ describe.skipIf(live)("sanomaOpsDriver", () => {
     ]);
     const desired = { host: "https://elsewhere.example.test" };
     const plan = await op("plan", { id: ID, desired });
-    expect(plan).toMatchObject({ action: "update", replace: [], planned: { host: desired.host } });
+    expect(plan).toMatchObject({
+      action: "update",
+      replace: [],
+      planned: { host: desired.host, at: null, generation: 0, lastError: null },
+    });
     const token = newToken();
     const call = callWith(memorySecrets({ SANOMA_WAKEUP_TOKEN: token }));
     const moved = await op("update", { id: ID, desired, expect: { action: "update", replace: [] } }, call);

@@ -101,7 +101,8 @@ function GoLivePage() {
                   </ToneBadge>
                 </ItemHeading>
                 <ItemDescription>
-                  Optional: a wakeup account, so the host stops when nothing is due and starts again in time.
+                  Optional: a wakeup account, so the host stops when nothing is due and starts again in time. Connect it
+                  before choosing where the company goes, which declares the wakeup.
                 </ItemDescription>
               </ItemContent>
             </Item>
