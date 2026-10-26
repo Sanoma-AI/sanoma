@@ -73,6 +73,19 @@ describe("sanoma wakeup", () => {
     ]);
     // Nothing of the app.
     expect((await fetch(`${url}/workflows`)).status).toBe(404);
+    // An account minted beside it registers an instance.
+    const minted = await runCli(dir, ["wakeup", "account", "acme"], unconfigured);
+    expect(minted.code, minted.stderr).toBe(0);
+    const { token } = JSON.parse(minted.stdout) as { token: string };
+    const made = await fetch(`${url}/wakeup/instances`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}` },
+      body: JSON.stringify({ url: "http://x.test" }),
+    });
+    expect([made.status, Object.keys((await made.json()) as object)]).toEqual([201, ["id", "token"]]);
+    const huge = await fetch(`${url}/wakeup/instances`, { method: "POST", body: "x".repeat(100_000) });
+    expect(huge.status).toBe(413);
+    expect((await runCli(dir, ["wakeup", "account"], unconfigured)).code).toBe(2);
     await stop();
   }, 60_000);
 

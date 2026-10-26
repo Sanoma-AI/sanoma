@@ -14,7 +14,12 @@ export interface WakeupServed extends Stoppable {
 const routeAt = (routes: readonly WakeupRoute[], path: string) =>
   routes.find((route) => path === route.path || path.startsWith(`${route.path}/`));
 
-/** `req` as a fetch `Request`, its body read whole. */
+/** The most a request's body may hold: a registration is a few hundred bytes. */
+const MAX_BODY = 64 * 1024;
+
+class TooLarge extends Error {}
+
+/** `req` as a fetch `Request`, its body read whole, up to `MAX_BODY` (else `TooLarge`). */
 async function requestOf(req: IncomingMessage, origin: string): Promise<Request> {
   const headers = new Headers();
   for (const [name, value] of Object.entries(req.headers)) {
@@ -23,7 +28,12 @@ async function requestOf(req: IncomingMessage, origin: string): Promise<Request>
   const method = req.method ?? "GET";
   if (method === "GET" || method === "HEAD") return new Request(new URL(req.url ?? "/", origin), { method, headers });
   const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(chunk as Buffer);
+  let size = 0;
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size > MAX_BODY) throw new TooLarge();
+    chunks.push(chunk as Buffer);
+  }
   return new Request(new URL(req.url ?? "/", origin), { method, headers, body: Buffer.concat(chunks) });
 }
 
@@ -55,6 +65,7 @@ export async function runWakeup(
       .then((request) => route.handle(request))
       .then((response) => send(res, response))
       .catch((err: unknown) => {
+        if (err instanceof TooLarge) return text(res, 413, "the body is too large\n");
         log(`sanoma wakeup: a request failed: ${err instanceof Error ? err.message : String(err)}`);
         if (res.headersSent) res.destroy();
         else text(res, 500, "internal error\n");

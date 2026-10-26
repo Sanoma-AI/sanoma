@@ -2,6 +2,7 @@ import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { Client, escapeIdentifier, Pool } from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
+  mintWakeupAccount,
   startWakeupService,
   WAKEUP_ACCOUNTS_TABLE,
   WAKEUP_INSTANCES_TABLE,
@@ -235,6 +236,7 @@ describe("startWakeupService", () => {
     for (const body of [
       { at: "soon", generation: 3 },
       { generation: 3 },
+      { at: first.toISOString(), generation: 0 },
       { at: first.toISOString(), generation: -1 },
       { at: first.toISOString(), generation: 1.5 },
       { at: first.toISOString(), generation: "3" },
@@ -353,6 +355,33 @@ describe("startWakeupService", () => {
     );
   });
 
+  it("mints an account without the service running, and two services on one database call a due row once", async () => {
+    const minted = await mintWakeupAccount(databaseUrl, "outside");
+    expect(minted.token).toMatch(/^swa_/);
+    await start();
+    const second = await startWakeupService({ databaseUrl, fetch });
+    try {
+      const made = await send("POST", "/wakeup/instances", { token: minted.token, body: { url: "http://one.test" } });
+      const { id, token } = made.json as { id: string; token: string };
+      // Due, unknown to either sleeping loop, then both woken at once.
+      await pool.query(`UPDATE ${WAKEUP_INSTANCES_TABLE} SET at = $2, generation = 1 WHERE id = $1`, [id, ago(1_000)]);
+      const put = (route: (typeof second.routes)[number]) =>
+        route.handle(
+          new Request(`http://wakeup.test/wakeup/instances/${id}/wake`, {
+            method: "PUT",
+            headers: { authorization: `Bearer ${token}` },
+            body: JSON.stringify({ at: ago(1_000).toISOString(), generation: 1 }),
+          }),
+        );
+      await Promise.all([put(service!.routes[0]!), put(second.routes[0]!)]);
+      await vi.waitFor(() => expect(calls).toHaveLength(1));
+      await pause(300);
+      expect(calls).toEqual(["http://one.test/wake?generation=1"]);
+    } finally {
+      await second.stop();
+    }
+  });
+
   it("calls at most eight instances at once", async () => {
     await start();
     let inFlight = 0;
@@ -380,7 +409,7 @@ describe("startWakeupService", () => {
     expect(most).toBe(8);
   });
 
-  it("stops at once, abandoning a call in flight, which stays due", async () => {
+  it("stops at once, abandoning a call in flight, which is called again once its claim lapses", async () => {
     await start();
     const { id, token } = await instance();
     answer = (_url, signal) =>
@@ -390,8 +419,10 @@ describe("startWakeupService", () => {
     const started = Date.now();
     await service!.stop();
     expect(Date.now() - started).toBeLessThan(1_000);
-    const { rows } = await pool.query(`SELECT called_at, attempts, last_error FROM ${WAKEUP_INSTANCES_TABLE}`);
-    expect(rows).toEqual([{ called_at: null, attempts: 0, last_error: null }]);
+    const { rows } = await pool.query(
+      `SELECT called_at, attempts, last_error, next_attempt_at - at > interval '25 seconds' AS claimed FROM ${WAKEUP_INSTANCES_TABLE}`,
+    );
+    expect(rows).toEqual([{ called_at: null, attempts: 0, last_error: null, claimed: true }]);
     await expect(service!.mintAccount("late")).rejects.toThrow("Cannot use a pool after calling end on the pool");
     service = undefined;
   });

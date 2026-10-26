@@ -27,6 +27,7 @@ Runs the repo in the working directory, from its sanoma.config.ts (after its .en
   sanoma app                          the app alone (built with the sites), for a deployment
   sanoma wakeup                       the wakeup service alone, on the config's database: it calls each instance
                                       registered with it at the time the instance asked (port 3100 by default)
+  sanoma wakeup account <label>       mints an account of that service, printing {"id","token"} on stdout
   sanoma check                        typecheck, lint, read the config, build and typecheck the sites, run every
                                       scenario on a database of its own; exit 1 on a problem
   sanoma env [--check]                write .env.example from the drivers' variables; --check exits 1 when it is out of date
@@ -100,8 +101,13 @@ export async function main(argv: string[]): Promise<number> {
         runApp(config, { port: port(), log, resolved }),
       );
     }
-    case "wakeup":
-      return wakeupCommand();
+    case "wakeup": {
+      const [sub, label, ...extra] = rest;
+      if (sub === undefined) return wakeupCommand();
+      if (sub !== "account" || !label?.trim() || extra.length)
+        throw new UsageError("usage: sanoma wakeup [account <label>]");
+      return wakeupAccount(label);
+    }
     case "check":
       return runCheck();
     case "api":
@@ -375,7 +381,7 @@ async function wakeupCommand(): Promise<never> {
   try {
     const { runWakeup } = await import("./wakeup.ts");
     const host = process.env.SANOMA_APP_HOST || "127.0.0.1";
-    served = await runWakeup(postgres.databaseUrl, { host, port: Number(process.env.SANOMA_APP_PORT ?? 3100), log });
+    served = await runWakeup(postgres.databaseUrl, { host, port: Number(process.env.SANOMA_APP_PORT || 3100), log });
   } catch (err) {
     await postgres.stop().catch(() => {});
     throw err;
@@ -384,6 +390,22 @@ async function wakeupCommand(): Promise<never> {
   emit({ event: "ready", url: served.url, sites: {} });
   onSignal(() => served.stop().finally(() => postgres.stop()));
   return new Promise(() => {});
+}
+
+/**
+ * `sanoma wakeup account <label>`: an account of the wakeup service on the config's database (found
+ * as `sanoma wakeup` finds it), its token shown this once, as the one JSON line on stdout.
+ */
+async function wakeupAccount(label: string): Promise<number> {
+  const loaded = await loadConfig();
+  const postgres = await withPostgres(namedDatabaseUrl(loaded.config), loaded.root, false, { announce: false });
+  try {
+    const { mintWakeupAccount } = await import("@sanoma-ai/workflows/wakeup-service");
+    console.log(JSON.stringify(await mintWakeupAccount(postgres.databaseUrl, label)));
+    return 0;
+  } finally {
+    await postgres.stop();
+  }
 }
 
 /**

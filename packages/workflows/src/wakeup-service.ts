@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { connectMaking, createTable, openPool } from "./db.ts";
+import { connectMaking, createTable, type Db, openPool } from "./db.ts";
 import { info, warn } from "./log.ts";
 import { errorMessage } from "./shared.ts";
 
@@ -8,7 +8,8 @@ import { errorMessage } from "./shared.ts";
  * only. An account (minted by whoever runs the service) registers an instance by its URL and gets
  * the instance's token; the instance, before it stops, `PUT`s when it wants waking and a
  * generation; the service then calls `GET {url}/wake?generation=N`, retrying until an answer is a
- * 2xx. Its two tables live in the service's own database, never in a company's (`db.ts`'s).
+ * 2xx. It makes its two tables itself, in the database it is given (sanoma-ops's own, when it
+ * hosts it): never among `db.ts`'s, which every company's database gets.
  */
 
 /** Where the accounts live: one per party that registers instances, its token's hash alone. */
@@ -40,6 +41,12 @@ const MAX_SLEEP_MS = 60_000;
 const CONCURRENCY = 8;
 /** The longest wait between two tries of a failing instance, in seconds. */
 const MAX_BACKOFF_S = 300;
+/**
+ * How long a row taken for a call is the taker's: longer than a call may take. Two services on one
+ * database never call one row at once, and a call no outcome was recorded for (the process
+ * stopped, or the write failed) is tried again once it lapses.
+ */
+const CLAIM_S = 30;
 
 /** The shape of `@sanoma-ai/app`'s `IngressRoute`, which `startApp`'s `ingress` takes. */
 export interface WakeupRoute {
@@ -68,7 +75,7 @@ export interface WakeupService {
   mintAccount(label: string): Promise<{ id: string; token: string }>;
   /** Refuses the account's token and its instances' from now on, and wakes its instances no more. */
   revokeAccount(id: string): Promise<void>;
-  /** Ends the loop, abandoning the calls in flight, and closes the pool. */
+  /** Ends the loop, abandoning the calls in flight (called again once their claim lapses), and closes the pool. */
   stop(): Promise<void>;
 }
 
@@ -146,6 +153,42 @@ const WAITING = "i.at IS NOT NULL AND (i.called_at IS NULL OR i.called_at < i.at
 /** Of an account not revoked. */
 const LIVE = `JOIN ${WAKEUP_ACCOUNTS_TABLE} a ON a.id = i.account_id AND a.revoked_at IS NULL`;
 
+/** The service's two tables, made in the database at `databaseUrl` (the database too) when missing. */
+async function makeTables(databaseUrl: string): Promise<void> {
+  const conn = await connectMaking(databaseUrl);
+  try {
+    for (const [what, ddl] of TABLES) await createTable(conn, ddl, what);
+  } finally {
+    await conn.end().catch(() => undefined);
+  }
+}
+
+async function insertAccount(db: Db, label: string): Promise<{ id: string; token: string }> {
+  if (!label.trim()) throw new Error("An account's label must not be empty");
+  const id = randomUUID();
+  const token = newToken("swa_");
+  await db.query(`INSERT INTO ${WAKEUP_ACCOUNTS_TABLE} (id, token_hash, label) VALUES ($1, $2, $3)`, [
+    id,
+    hashOf(token),
+    label,
+  ]);
+  return { id, token };
+}
+
+/**
+ * An account of the wakeup service on `databaseUrl`, minted without starting the service (its
+ * tables made when missing): what `sanoma wakeup account <label>` prints.
+ */
+export async function mintWakeupAccount(databaseUrl: string, label: string): Promise<{ id: string; token: string }> {
+  await makeTables(databaseUrl);
+  const conn = await connectMaking(databaseUrl);
+  try {
+    return await insertAccount(conn, label);
+  } finally {
+    await conn.end().catch(() => undefined);
+  }
+}
+
 /**
  * Starts the wakeup service on its own database: its two tables made when missing, its one loop
  * running, and `routes` for whoever serves it (`sanoma wakeup`, or `sanoma serve` with
@@ -166,12 +209,7 @@ export async function startWakeupService({
   fetch = globalThis.fetch,
   log = { info, warn },
 }: WakeupServiceOptions): Promise<WakeupService> {
-  const conn = await connectMaking(databaseUrl);
-  try {
-    for (const [what, ddl] of TABLES) await createTable(conn, ddl, what);
-  } finally {
-    await conn.end().catch(() => undefined);
-  }
+  await makeTables(databaseUrl);
   const pool = openPool(databaseUrl, "wakeup service");
   const loop = startLoop({ pool, now, fetch, log });
 
@@ -221,8 +259,9 @@ export async function startWakeupService({
     const at = given?.at;
     const generation = given?.generation;
     if (typeof at !== "string" || Number.isNaN(Date.parse(at))) return problem(400, "at must be an ISO 8601 date-time");
-    if (typeof generation !== "number" || !Number.isSafeInteger(generation) || generation < 0)
-      return problem(400, "generation must be an integer, 0 or more");
+    // A new instance has generation 0, so a registration counts from 1.
+    if (typeof generation !== "number" || !Number.isSafeInteger(generation) || generation < 1)
+      return problem(400, "generation must be an integer, 1 or more");
     // An older or equal generation changes nothing: callers retry, at least once each.
     await pool.query(
       `UPDATE ${WAKEUP_INSTANCES_TABLE} SET at = $2, generation = $3, called_at = NULL, attempts = 0, ` +
@@ -259,17 +298,7 @@ export async function startWakeupService({
 
   return {
     routes: [{ path: "/wakeup", prefix: true, handle }],
-    async mintAccount(label) {
-      if (!label.trim()) throw new Error("An account's label must not be empty");
-      const id = randomUUID();
-      const token = newToken("swa_");
-      await pool.query(`INSERT INTO ${WAKEUP_ACCOUNTS_TABLE} (id, token_hash, label) VALUES ($1, $2, $3)`, [
-        id,
-        hashOf(token),
-        label,
-      ]);
-      return { id, token };
-    },
+    mintAccount: (label) => insertAccount(pool, label),
     async revokeAccount(id) {
       if (!UUID.test(id)) return;
       await pool.query(`UPDATE ${WAKEUP_ACCOUNTS_TABLE} SET revoked_at = $2 WHERE id = $1 AND revoked_at IS NULL`, [
@@ -329,7 +358,7 @@ function startLoop({
     } catch (err) {
       error = errorMessage(err);
     }
-    // Stopped mid-call: nothing is known of it, so it stays due for the next start.
+    // Stopped mid-call: nothing is known of it, so it is called again once its claim lapses.
     if (stopping.signal.aborted) return;
     if (error === undefined) {
       await pool.query(
@@ -351,9 +380,12 @@ function startLoop({
 
   /** Calls every due row; returns when the next one is due, or undefined with none waiting. */
   async function round(): Promise<Date | undefined> {
+    // Taken for `CLAIM_S`, rows another service holds skipped: each due row is called by one service.
     const { rows } = await pool.query<Due>(
-      `SELECT i.id, i.url, i.generation FROM ${WAKEUP_INSTANCES_TABLE} i ${LIVE} WHERE ${WAITING} ` +
-        "AND i.at <= $1 AND (i.next_attempt_at IS NULL OR i.next_attempt_at <= $1)",
+      `UPDATE ${WAKEUP_INSTANCES_TABLE} SET next_attempt_at = $1::timestamptz + interval '${CLAIM_S} seconds' ` +
+        `WHERE id IN (SELECT i.id FROM ${WAKEUP_INSTANCES_TABLE} i ${LIVE} WHERE ${WAITING} ` +
+        "AND i.at <= $1 AND (i.next_attempt_at IS NULL OR i.next_attempt_at <= $1) FOR UPDATE OF i SKIP LOCKED) " +
+        "RETURNING id, url, generation",
       [now()],
     );
     const queue = [...rows];
