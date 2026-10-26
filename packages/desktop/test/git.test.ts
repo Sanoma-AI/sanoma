@@ -29,7 +29,7 @@ import {
   setIdentity,
 } from "../src/git.ts";
 import type { SessionOptions } from "../src/session.ts";
-import { fastForward, LOCAL_CHANGES, prepareUpdate } from "../src/update-company.ts";
+import { fastForward, LOCAL_CHANGES, ownChanges, prepareUpdate } from "../src/update-company.ts";
 
 const fixture = (name: string) => fileURLToPath(new URL(`./fixtures/${name}`, import.meta.url));
 const temp = () => realpathSync(mkdtempSync(join(tmpdir(), "sanoma-desktop-git-")));
@@ -314,6 +314,9 @@ describe("a clone", () => {
   });
 });
 
+/** A changed file's line in `git status --porcelain=v2`. */
+const statusLine = (xy: string, path: string) => `1 ${xy} N... 100644 100644 100644 abc abc ${path}`;
+
 describe("Get Updates", () => {
   test("fast-forwards a clean main that is behind GitHub", async () => {
     const { bare, seed } = origin();
@@ -345,6 +348,35 @@ describe("Get Updates", () => {
     // Diverged: a commit here, and one on GitHub.
     expect(await prepareUpdate(dir, env)).toEqual({ refused: LOCAL_CHANGES });
     expect(git(dir, "rev-parse", "HEAD~1")).toBe(head);
+  });
+
+  test("takes a lockfile the shell's own install rewrote as clean, and GitHub's lockfile over it", async () => {
+    const { bare, seed } = origin();
+    commit(seed, "pnpm-lock.yaml", "lockfileVersion: '9.0'\n");
+    git(seed, "push", "--quiet", "origin", "main");
+    const dir = local(bare);
+    writeFileSync(join(dir, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n# rewritten by the shell's install\n");
+    expect(await prepareUpdate(dir, env)).toEqual({ behind: 0 });
+    commit(seed, "pnpm-lock.yaml", "lockfileVersion: '9.0'\n# from GitHub\n");
+    git(seed, "push", "--quiet", "origin", "main");
+    expect(await prepareUpdate(dir, env)).toEqual({ behind: 1 });
+    await fastForward(dir, env);
+    expect(readFileSync(join(dir, "pnpm-lock.yaml"), "utf8")).toMatch(/from GitHub/);
+    expect(git(dir, "status", "--porcelain")).toBe("");
+
+    // Staged, or with any other change, it is the person's.
+    writeFileSync(join(dir, "pnpm-lock.yaml"), "staged\n");
+    git(dir, "add", "pnpm-lock.yaml");
+    expect(await prepareUpdate(dir, env)).toEqual({ refused: LOCAL_CHANGES });
+    git(dir, "reset", "--quiet");
+    writeFileSync(join(dir, "package.json"), "{}\n");
+    expect(await prepareUpdate(dir, env)).toEqual({ refused: LOCAL_CHANGES });
+  });
+
+  test("only the root lockfile changed in the tree is the shell's", () => {
+    expect(ownChanges(statusLine(".M", "pnpm-lock.yaml"))).toEqual([]);
+    const theirs = [statusLine("M.", "pnpm-lock.yaml"), statusLine(".M", "sub/pnpm-lock.yaml"), "? new.ts"];
+    expect(ownChanges(theirs.join("\n"))).toEqual(theirs);
   });
 
   test("refuses off main, and without an origin", async () => {

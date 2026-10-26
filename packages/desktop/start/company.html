@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'" />
+    <title>Sanoma</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <h1 id="company-name"></h1>
+    <p id="company-message"></p>
+    <div id="warnings"></div>
+    <ul id="progress" class="muted"></ul>
+    <div class="actions" id="again-actions" hidden><button class="primary" id="again">Start again</button></div>
+    <p class="muted" id="reopens" hidden>
+      Sanoma opens it again when it starts next.
+      <button id="skip">Don't open it at launch</button>
+    </p>
+    <pre id="log" hidden></pre>
+    <script src="company.js"></script>
+  </body>
+</html>

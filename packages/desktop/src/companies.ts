@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { basename, dirname, join } from "node:path";
+import { isCompanyFolder } from "./places.ts";
+import { type Rect, isRect } from "./window-state.ts";
 
 /** A company this shell has opened, as `companies.json` remembers it. */
 export interface Company {
@@ -12,6 +14,13 @@ export interface Company {
   port: number;
   /** ISO time of the last open. */
   lastOpened: string;
+  /**
+   * Whether it is open: set when it starts, cleared when the person stops it or closes its window
+   * while it does not run, and kept through Quit, so the next launch opens it again (`toReopen`).
+   */
+  open?: boolean;
+  /** Its window's bounds, as last moved or resized (`windowBounds`). */
+  bounds?: Rect;
 }
 
 /** The first port tried for a new company: clear of the launcher's own default, 3000. */
@@ -29,12 +38,19 @@ const isCompany = (value: unknown): value is Company => {
   );
 };
 
+/** A company as read: what is not one of its fields' kind is dropped, not the company. */
+const cleaned = ({ open, bounds, ...company }: Company): Company => ({
+  ...company,
+  ...(open === true && { open }),
+  ...(isRect(bounds) && { bounds }),
+});
+
 /** The companies `file` remembers, most recently opened first; none when it is missing or unreadable. */
 export function readCompanies(file: string): Company[] {
   if (!existsSync(file)) return [];
   try {
     const parsed: unknown = JSON.parse(readFileSync(file, "utf8"));
-    return Array.isArray(parsed) ? byRecent(parsed.filter(isCompany)) : [];
+    return Array.isArray(parsed) ? byRecent(parsed.filter(isCompany).map(cleaned)) : [];
   } catch {
     return [];
   }
@@ -54,6 +70,33 @@ const byRecent = (companies: Company[]) => companies.toSorted((a, b) => b.lastOp
 export function remember(companies: readonly Company[], company: Company): Company[] {
   return byRecent([company, ...companies.filter((c) => c.path !== company.path)]);
 }
+
+/** The list with the entry for `path` changed by `patch`, in its place; unchanged without one. */
+export const updated = (companies: readonly Company[], path: string, patch: Partial<Company>): Company[] =>
+  companies.map((c) => (c.path === path ? { ...c, ...patch } : c));
+
+/**
+ * The list after a start at `path` failed: without it when its folder holds no company (a clone or
+ * a new company's init that failed), so Recent never lists what cannot be opened.
+ */
+export const afterFailure = (
+  companies: readonly Company[],
+  path: string,
+  holdsCompany: (dir: string) => boolean = isCompanyFolder,
+): Company[] => (holdsCompany(path) ? [...companies] : companies.filter((c) => c.path !== path));
+
+/** The folders to open at launch: the companies open when the shell last stopped, whose folders still hold one. */
+export const toReopen = (
+  companies: readonly Company[],
+  holdsCompany: (dir: string) => boolean = isCompanyFolder,
+): string[] => companies.filter((c) => c.open && holdsCompany(c.path)).map((c) => c.path);
+
+/** A row of the start window's Recent list: the company, marked when it runs (or is starting) now. */
+export type RecentCompany = Company & { running: boolean };
+
+/** The Recent list, each company marked when it is among `running` (real paths). */
+export const recentOf = (companies: readonly Company[], running: ReadonlySet<string>): RecentCompany[] =>
+  companies.map((c) => ({ ...c, running: running.has(c.path) }));
 
 /** Whether nothing listens on `port` on this machine's loopback address. */
 export function isPortFree(port: number): Promise<boolean> {
