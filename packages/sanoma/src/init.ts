@@ -16,15 +16,12 @@ import { promisify } from "node:util";
 import { RUNTIME_AGENTS } from "@sanoma-ai/workflows";
 import { readPeople } from "@sanoma-ai/workflows/describe";
 import { groupNamesOf, isVisitor, principalIdsOf } from "@sanoma-ai/workflows/shared";
-import { addToEnv, writeSecretsKey } from "./key.ts";
+import { writeSecretsKey } from "./key.ts";
 
 const run = promisify(execFile);
 
 /** The company template this package ships (`files`): `template/` beside `src/` and `dist/`. */
 export const TEMPLATE = new URL("../template/", import.meta.url);
-
-/** The runtime's default database (`resolveDatabaseUrl`), which this module does not load `@sanoma-ai/workflows` for; a test holds them equal. */
-export const DATABASE_URL = "postgresql://postgres:dbos@localhost:5433/sanoma";
 
 export const FIRST_COMMIT = "Start a Sanoma company";
 
@@ -50,8 +47,9 @@ export interface StartOptions {
  * `sanoma` where there is no `sanoma.config.ts`: in an empty directory (dotfiles aside) it starts
  * a company there and says so; anywhere else it does nothing and says it did not. Starting copies
  * the template, names the package after the directory, declares whoever starts it as the first
- * person in `resources/people.ts` (so the app admits them), writes `.env` (the default database and a
- * new `SANOMA_SECRETS_KEY`, keeping what it already holds), commits what it wrote as the first
+ * person in `resources/people.ts` (so the app admits them), writes `.env` (a new
+ * `SANOMA_SECRETS_KEY`, keeping what it already holds; no database URL, so `sanoma` runs the
+ * company's own Postgres), commits what it wrote as the first
  * commit of a git repository, as the machine's git user, then installs with the package manager
  * that ran this (`npm_config_user_agent`, else pnpm) and adds the lockfile to that commit. Throws
  * before writing anything when git is missing or has no user to commit as.
@@ -91,7 +89,6 @@ export async function startCompany(
   const people = join(cwd, "resources", "people.ts");
   writeFileSync(people, declareFounder(readFileSync(people, "utf8"), await creator()));
 
-  addToEnv(join(cwd, ".env"), { SANOMA_DATABASE_URL: DATABASE_URL });
   writeSecretsKey(join(cwd, ".env"));
 
   const packageManager = packageManagerOf(process.env.npm_config_user_agent);

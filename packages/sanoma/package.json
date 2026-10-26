@@ -83,6 +83,13 @@
     "@sanoma-ai/testing": "workspace:*",
     "@types/pg": "^8.23.1"
   },
+  "optionalDependencies": {
+    "@sanoma-ai/postgres-darwin-arm64": "workspace:*",
+    "@sanoma-ai/postgres-darwin-x64": "workspace:*",
+    "@sanoma-ai/postgres-linux-arm64": "workspace:*",
+    "@sanoma-ai/postgres-linux-x64": "workspace:*",
+    "@sanoma-ai/postgres-win32-x64": "workspace:*"
+  },
   "engines": {
     "node": "^24.2 || >=26"
   }

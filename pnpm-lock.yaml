@@ -454,6 +454,22 @@ importers:
       '@types/pg':
         specifier: ^8.23.1
         version: 8.23.1
+    optionalDependencies:
+      '@sanoma-ai/postgres-darwin-arm64':
+        specifier: workspace:*
+        version: link:../postgres-bin/darwin-arm64
+      '@sanoma-ai/postgres-darwin-x64':
+        specifier: workspace:*
+        version: link:../postgres-bin/darwin-x64
+      '@sanoma-ai/postgres-linux-arm64':
+        specifier: workspace:*
+        version: link:../postgres-bin/linux-arm64
+      '@sanoma-ai/postgres-linux-x64':
+        specifier: workspace:*
+        version: link:../postgres-bin/linux-x64
+      '@sanoma-ai/postgres-win32-x64':
+        specifier: workspace:*
+        version: link:../postgres-bin/win32-x64
 
   packages/testing:
     dependencies:

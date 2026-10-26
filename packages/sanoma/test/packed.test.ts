@@ -35,13 +35,18 @@ const files: Record<string, string> = {
     packageManager: JSON.parse(readFileSync(join(checkout, "package.json"), "utf8")).packageManager,
   }),
   // sanoma's dependencies on the others are by version: these tarballs instead of npm's. The
-  // bridge's binaries stay out (the dev server does not start it).
+  // bridge's binaries and PostgreSQL's stay out (the dev server does not start the bridge, and
+  // SANOMA_DATABASE_URL names the test database).
   "pnpm-workspace.yaml": JSON.stringify({
     // The plugin's peer is the company's to install, as by default: none here.
     autoInstallPeers: false,
     overrides: {
       ...Object.fromEntries(workspace.map((dir) => [`@sanoma-ai/${dir}`, `file:vendor/${dir}.tgz`])),
-      ...Object.fromEntries(Object.keys(manifest("bridge").optionalDependencies).map((name) => [name, "-"])),
+      ...Object.fromEntries(
+        [manifest("bridge"), manifest("sanoma")].flatMap((m) =>
+          Object.keys(m.optionalDependencies).map((name) => [name, "-"]),
+        ),
+      ),
     },
   }),
   // The site's stylesheet with a plugin, as the README's recipe has it.

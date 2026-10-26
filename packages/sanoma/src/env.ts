@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { credentialsOf, resolveDatabaseUrl } from "@sanoma-ai/workflows";
+import { credentialsOf } from "@sanoma-ai/workflows";
 import type { Loaded } from "./config.ts";
 
 const HEADER = `# Copy to .env (ignored by git; \`sanoma\` loads it before reading the config). Never commit values.
@@ -20,8 +20,10 @@ const HEADER = `# Copy to .env (ignored by git; \`sanoma\` loads it before readi
 export function renderEnvExample({ config, resolved }: Pick<Loaded, "config" | "resolved">): string {
   const lines = [
     HEADER,
-    // The default: the config's own, else sanoma's, never this environment's.
-    `# Optional. Postgres for the worker and the app; default ${resolveDatabaseUrl(config, {})}.`,
+    // The default: the config's own, else the company's own Postgres, never this environment's.
+    config.databaseUrl === undefined
+      ? "# Optional. Postgres for the worker and the app; default the company's own in .sanoma/postgres."
+      : `# Optional. Postgres for the worker and the app; default ${config.databaseUrl}.`,
     "# SANOMA_DATABASE_URL=",
     "# Optional. Encrypts the stored credentials, and signs GitHub sign-in's cookie: 32 random bytes,",
     "# base64. `sanoma` writes one here when none is set; keep it with the database.",

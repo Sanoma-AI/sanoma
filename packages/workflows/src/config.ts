@@ -65,7 +65,7 @@ export interface SanomaConfig {
    * only, for tests.
    */
   ledger?: LedgerStore;
-  /** Postgres for the runtime. Defaults to `SANOMA_DATABASE_URL`, then the local docker compose database. */
+  /** Postgres for the runtime. Defaults to `SANOMA_DATABASE_URL`, then `DEFAULT_DATABASE_URL`. */
   databaseUrl?: string;
   /** The file that defined the config, absolute, when known. Set by `defineConfig` from its call site. */
   file?: string;
@@ -160,6 +160,11 @@ export interface ResolvedConfig {
   root?: string;
 }
 
+/**
+ * The database when neither the config nor `SANOMA_DATABASE_URL` names one: the dev Postgres
+ * `pnpm db:up` starts in this checkout. The `sanoma` launcher never falls back to it: with no
+ * URL named it starts the company's own Postgres and sets `SANOMA_DATABASE_URL` to it.
+ */
 export const DEFAULT_DATABASE_URL = "postgresql://postgres:dbos@localhost:5433/sanoma";
 
 /** Returns the config, with the file it is called from as its `file`: its directory is the config's `root`. */
