@@ -111,6 +111,10 @@ function takesRegistration(op: Op): boolean {
   }
 }
 
+/** The host types a wakeup type may name: its `inputs.host` reference's. */
+export const wakeupHostTypes = (type: Pick<Resource, "fields" | "wakeup">): string[] =>
+  type.wakeup ? [type.fields.references?.[type.wakeup.inputs.host]?.type ?? []].flat() : [];
+
 /**
  * Throws when a wakeup type's host reference names a type of the config that is no host, or its
  * `register` is not among the config's operations, or does not take
@@ -121,8 +125,7 @@ export function checkWakeupOps(types: ReadonlyMap<string, Resource>, ops: Readon
   for (const [id, type] of types) {
     if (!type.wakeup) continue;
     // The types it may name that the config has, each a host; one it lacks no data file can declare.
-    const named = [type.fields.references?.[type.wakeup.inputs.host]?.type ?? []].flat();
-    const notHosts = named.filter((t) => types.has(t) && !types.get(t)!.host);
+    const notHosts = wakeupHostTypes(type).filter((t) => types.has(t) && !types.get(t)!.host);
     if (notHosts.length) throw new Error(`${id}: its wakeup's host may name ${notHosts.join(", ")}, which is no host`);
     const op = ops.get(type.wakeup.register);
     if (!op) throw new Error(`${id}: its wakeup's register, ${type.wakeup.register}, is no operation of its connector`);

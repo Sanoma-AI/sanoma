@@ -1,7 +1,8 @@
 import { defineDriver, DriverError, retryableStatus } from "@sanoma-ai/workflows";
+import { WAKEUP_TOKEN } from "@sanoma-ai/workflows/wakeup-service";
 import { z } from "zod";
 import { sanomaOpsOps } from "./connector.ts";
-import { type Instance, instanceSchema, refused, WAKEUP_TOKEN, type WakeupApi, wakeupOps } from "./wakeup.ts";
+import { type Instance, instanceSchema, refused, type WakeupApi, wakeupOps } from "./wakeup.ts";
 
 /*
  * The wakeup service's driver, over its routes (`@sanoma-ai/workflows/wakeup-service`). The

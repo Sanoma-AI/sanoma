@@ -61,6 +61,7 @@ function GoLivePage() {
   const supabase = isSet("SUPABASE_ACCESS_TOKEN");
   // Only when the config declares the sanoma-ops connector, whose step is optional.
   const sanomaOps = status.tokens.some((t) => t.name === "SANOMA_OPS_TOKEN");
+  const opsConnected = isSet("SANOMA_OPS_TOKEN");
   const { run, bound } = progress;
   const data = bound.repo && bound.store;
   // The latest run is the host's once it is past the repository and database, or still going.
@@ -96,8 +97,8 @@ function GoLivePage() {
               <ItemContent>
                 <ItemHeading>
                   sanoma-ops
-                  <ToneBadge tone={isSet("SANOMA_OPS_TOKEN") ? "ok" : "off"}>
-                    {isSet("SANOMA_OPS_TOKEN") ? "connected" : "not connected"}
+                  <ToneBadge tone={opsConnected ? "ok" : "off"}>
+                    {opsConnected ? "connected" : "not connected"}
                   </ToneBadge>
                 </ItemHeading>
                 <ItemDescription>

@@ -41,27 +41,42 @@ export const GITHUB_APP = {
   pem: "SANOMA_GITHUB_APP_PEM",
 } as const;
 
-/** The tokens the page takes, pasted: the connectors' own variables, so their pages show the same rows. */
-export const SETUP_TOKENS: Record<string, string> = {
-  GITHUB_TOKEN:
-    "A GitHub token of your own, for a personal account: an installation token cannot create a repository there. Needs the repo scope.",
-  SUPABASE_ACCESS_TOKEN: "A Supabase access token (supabase.com/dashboard/account/tokens).",
-  SANOMA_OPS_TOKEN:
-    "A wakeup account's token (swa_…), from Sanoma, or from `sanoma wakeup account <label>` on a wakeup service of your own: the wakeup starts the company again when something is due after it stopped.",
-  SANOMA_OPS_URL:
-    "Optional: the wakeup service's URL, such as your own `sanoma wakeup`. Unset, the connector's default, Sanoma's hosted service.",
-};
-
-/** The setup tokens that are sanoma-ops's: asked for only when the config declares its wakeup type. */
-const SANOMA_OPS = new Set(["SANOMA_OPS_TOKEN", "SANOMA_OPS_URL"]);
-/** The token that may be left unset, for its connector's default. */
-const OPTIONAL = new Set(["SANOMA_OPS_URL"]);
 /** The resource type whose connector "Connect sanoma-ops" is for. */
 export const SANOMA_OPS_WAKEUP = "sanomaOps.wakeup";
+/** sanoma-ops's account token, which "Connect sanoma-ops" stores. */
+export const OPS_TOKEN = "SANOMA_OPS_TOKEN";
+/** The wakeup service's URL, when one is stored: the worker on the host registers there. */
+export const OPS_URL = "SANOMA_OPS_URL";
 
-/** The setup tokens this config asks for: sanoma-ops's only when it declares the connector. */
+/**
+ * The tokens the page takes, pasted: the connectors' own variables, so their pages show the same
+ * rows. One with `needs` is asked for only when the config declares that resource type.
+ */
+export const SETUP_TOKENS: Record<string, { description: string; optional?: true; needs?: string }> = {
+  GITHUB_TOKEN: {
+    description:
+      "A GitHub token of your own, for a personal account: an installation token cannot create a repository there. Needs the repo scope.",
+  },
+  SUPABASE_ACCESS_TOKEN: { description: "A Supabase access token (supabase.com/dashboard/account/tokens)." },
+  [OPS_TOKEN]: {
+    description:
+      "A wakeup account's token (swa_…), from Sanoma, or from `sanoma wakeup account <label>` on a wakeup service of your own: the wakeup starts the company again when something is due after it stopped.",
+    needs: SANOMA_OPS_WAKEUP,
+  },
+  [OPS_URL]: {
+    description:
+      "Optional: the wakeup service's URL, such as your own `sanoma wakeup`. Unset, the connector's default, Sanoma's hosted service.",
+    optional: true,
+    needs: SANOMA_OPS_WAKEUP,
+  },
+};
+
+/** The setup tokens this config asks for. */
 const setupTokens = ({ resolved }: AppContext) =>
-  Object.keys(SETUP_TOKENS).filter((name) => !SANOMA_OPS.has(name) || resolved.types.has(SANOMA_OPS_WAKEUP));
+  Object.keys(SETUP_TOKENS).filter((name) => {
+    const { needs } = SETUP_TOKENS[name]!;
+    return needs === undefined || resolved.types.has(needs);
+  });
 
 const CALLBACK = "/setup/github/callback";
 const CONNECT = "/setup/connect";
@@ -76,8 +91,7 @@ export async function setupStatus(app: AppContext): Promise<SetupStatus> {
   const found = await app.client.secrets([GITHUB_APP.slug, ...names]);
   const slug = found.get(GITHUB_APP.slug);
   const tokens = names.map((name): CredentialStatus => {
-    const description = SETUP_TOKENS[name];
-    const optional = OPTIONAL.has(name);
+    const { description, optional = false } = SETUP_TOKENS[name]!;
     const secret = found.get(name);
     if (!secret) return { name, description, optional, status: "missing" };
     const { source, setBy, setAt } = secret;
@@ -103,7 +117,7 @@ export async function setSetupToken(app: AppContext, actor: Principal, { name, v
   }
   const { client } = app;
   await client.setSecret(name, value, { by: actor.id });
-  if (name === "SANOMA_OPS_TOKEN" && !(await client.secrets([WAKEUP_TOKEN])).has(WAKEUP_TOKEN)) {
+  if (name === OPS_TOKEN && !(await client.secrets([WAKEUP_TOKEN])).has(WAKEUP_TOKEN)) {
     await client.setSecret(WAKEUP_TOKEN, mintInstanceToken(), { by: actor.id });
   }
 }

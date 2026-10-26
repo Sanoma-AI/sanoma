@@ -2,7 +2,7 @@ import { DriverError, retryableStatus, type WakeupRegistration } from "@sanoma-a
 import { INSTANCE_TOKEN, instanceUrl } from "@sanoma-ai/workflows/wakeup-service";
 import { defineFake, type FakeOptions } from "@sanoma-ai/workflows/fake";
 import { sanomaOpsOps } from "./connector.ts";
-import { type Instance, type WakeupApi, wakeupOps } from "./wakeup.ts";
+import { type Instance, UNREGISTERED, type WakeupApi, wakeupOps } from "./wakeup.ts";
 
 /** An instance of the fake wakeup service, as it keeps one. */
 export interface FakeWakeupInstance extends Instance {
@@ -75,13 +75,13 @@ export function fakeSanomaOps(options: FakeOptions = {}) {
       if (mine) {
         // The same instance, moved: its wake there forgotten.
         if (mine.url !== checked) {
-          Object.assign(mine, { url: checked, at: null, generation: 0, lastError: null });
+          Object.assign(mine, { url: checked, ...UNREGISTERED });
           disarm(mine.id);
         }
         return { id: mine.id };
       }
       const id = `00000000-0000-4000-8000-${String(++state.seq).padStart(12, "0")}`;
-      state.instances[id] = { id, url: checked, at: null, generation: 0, lastError: null, token };
+      state.instances[id] = { id, url: checked, ...UNREGISTERED, token };
       return { id };
     },
     async get(id) {

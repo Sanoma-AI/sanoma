@@ -3,7 +3,14 @@ import "@tanstack/react-start/server-only";
 import { createSign } from "node:crypto";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { APPLY_WORKFLOW, errorMessage, isEnded, type Principal, type Resource } from "@sanoma-ai/workflows";
+import {
+  APPLY_WORKFLOW,
+  errorMessage,
+  isEnded,
+  type Principal,
+  type Resource,
+  wakeupHostTypes,
+} from "@sanoma-ai/workflows";
 import { type DataValue, formatOptions, readLockfile, Reference, renderDataFile } from "@sanoma-ai/workflows/describe";
 import { secret } from "@sanoma-ai/workflows/resources";
 import { WAKEUP_TOKEN } from "@sanoma-ai/workflows/wakeup-service";
@@ -17,7 +24,7 @@ import {
 } from "../api.ts";
 import type { AppContext } from "../context.ts";
 import { asApplyPlan } from "../lib/apply-plan.ts";
-import { GITHUB_APP, SANOMA_OPS_WAKEUP } from "./setup.ts";
+import { GITHUB_APP, OPS_TOKEN, OPS_URL, SANOMA_OPS_WAKEUP } from "./setup.ts";
 
 // Going live, steps 2 to 6 (step 1 is connect, in setup.ts): choose where the company goes,
 // write `resources/sanoma/infra.ts`, apply the repository and the database, push the local
@@ -46,8 +53,6 @@ export const RUNTIME_IMAGE = "sanoma-runtime";
 /** The secret the Supabase project's database URL is stored in (`supabase.database.storeUrl` for the export `store`). */
 const DATABASE_URL = "SANOMA_DATABASE_URL_STORE";
 const SECRETS_KEY = "SANOMA_SECRETS_KEY";
-/** The wakeup service's URL, when "Connect sanoma-ops" stored one: the worker on the host registers there. */
-const OPS_URL = "SANOMA_OPS_URL";
 
 /** Supabase's regions, as a project's `region` takes them. */
 export const SUPABASE_REGIONS = [
@@ -134,7 +139,7 @@ async function installations({ client }: AppContext): Promise<Installation[]> {
  */
 export async function goLiveChoices(app: AppContext): Promise<GoLiveChoices> {
   const errors: string[] = [];
-  const tokens = await app.client.secrets(["GITHUB_TOKEN", "SUPABASE_ACCESS_TOKEN", "SANOMA_OPS_TOKEN"]);
+  const tokens = await app.client.secrets(["GITHUB_TOKEN", "SUPABASE_ACCESS_TOKEN", OPS_TOKEN]);
   const listed = async <T>(what: string, list: () => Promise<T[]>): Promise<T[]> => {
     try {
       return await list();
@@ -179,7 +184,7 @@ export async function goLiveChoices(app: AppContext): Promise<GoLiveChoices> {
     }
   }
   const host = hostType(app);
-  const cannot = host && tokens.has("SANOMA_OPS_TOKEN") ? unwakeable(app, host) : undefined;
+  const cannot = host && tokens.has(OPS_TOKEN) ? unwakeable(app, host) : undefined;
   if (cannot) errors.push(cannot);
   return {
     owners,
@@ -204,7 +209,7 @@ export async function goLiveChoices(app: AppContext): Promise<GoLiveChoices> {
 function unwakeable({ resolved }: AppContext, host: Resource): string | undefined {
   const type = resolved.types.get(SANOMA_OPS_WAKEUP);
   if (!type?.wakeup) return undefined;
-  const hosts = [type.fields.references?.[type.wakeup.inputs.host]?.type ?? []].flat();
+  const hosts = wakeupHostTypes(type);
   const id = `${host.vendor}.${host.type}`;
   return hosts.includes(id)
     ? undefined
@@ -219,9 +224,9 @@ function unwakeable({ resolved }: AppContext, host: Resource): string | undefine
  */
 async function wakeupSecrets(app: AppContext, host: Resource) {
   if (!app.resolved.types.has(SANOMA_OPS_WAKEUP) || unwakeable(app, host)) return undefined;
-  const stored = await app.client.secrets(["SANOMA_OPS_TOKEN", WAKEUP_TOKEN, OPS_URL]);
-  if (!stored.has("SANOMA_OPS_TOKEN") || !stored.has(WAKEUP_TOKEN)) return undefined;
-  return Object.fromEntries([WAKEUP_TOKEN, ...(stored.has(OPS_URL) ? [OPS_URL] : [])].map((n) => [n, secret(n)]));
+  const stored = await app.client.secrets([OPS_TOKEN, WAKEUP_TOKEN, OPS_URL]);
+  if (!stored.has(OPS_TOKEN) || !stored.has(WAKEUP_TOKEN)) return undefined;
+  return { [WAKEUP_TOKEN]: secret(WAKEUP_TOKEN), ...(stored.has(OPS_URL) && { [OPS_URL]: secret(OPS_URL) }) };
 }
 
 /**

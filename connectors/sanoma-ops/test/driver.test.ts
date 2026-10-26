@@ -12,8 +12,6 @@ const { server, play, sent } = replay(replayOptions);
 
 const ID = "00000000-0000-4000-8000-000000000001";
 const HOST = "https://company.example.test";
-/** An instance token as /setup mints one: a new one per test, so a live recording makes a new instance for each. */
-const newToken = mintInstanceToken;
 /** An instance as `GET /wakeup/instances/{id}` shows it. */
 const shown = { id: ID, url: HOST, at: null, generation: 0, calledAt: null, attempts: 0, lastError: null };
 const callWith = (secrets: Secrets = memorySecrets()): CallContext => ({
@@ -35,7 +33,8 @@ const failure = (promise: Promise<unknown>) =>
 describe.skipIf(live)("sanomaOpsDriver", () => {
   it("creates an instance with the account's token and the stored instance token, which it never returns", async () => {
     play("create");
-    const token = newToken();
+    // A new one per test, as /setup mints one, so a live recording makes a new instance for each.
+    const token = mintInstanceToken();
     const secrets = memorySecrets({ SANOMA_WAKEUP_TOKEN: token });
     const made = await op("create", { desired: { host: `${HOST}/` } }, callWith(secrets));
     expect(made).toEqual({ id: ID, state: { id: ID, host: HOST, at: null, generation: 0, lastError: null } });
@@ -55,7 +54,7 @@ describe.skipIf(live)("sanomaOpsDriver", () => {
 
   it("registers a wake with the instance's own token", async () => {
     play("register");
-    const token = newToken();
+    const token = mintInstanceToken();
     const call = callWith(memorySecrets({ SANOMA_WAKEUP_TOKEN: token }));
     const { id } = (await op("create", { desired: { host: HOST } }, call)) as { id: string };
     await op("register", { at: "2099-01-01T00:00:00Z", generation: 1 }, call);
@@ -87,7 +86,7 @@ describe.skipIf(live)("sanomaOpsDriver", () => {
       replace: [],
       planned: { host: desired.host, at: null, generation: 0, lastError: null },
     });
-    const token = newToken();
+    const token = mintInstanceToken();
     const call = callWith(memorySecrets({ SANOMA_WAKEUP_TOKEN: token }));
     const moved = await op("update", { id: ID, desired, expect: { action: "update", replace: [] } }, call);
     expect(moved).toMatchObject({ id: ID, state: { host: desired.host } });

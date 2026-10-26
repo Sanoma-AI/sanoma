@@ -31,12 +31,8 @@ export interface WakeupApi {
   wake(registration: WakeupRegistration, token: string): Promise<void>;
 }
 
-/**
- * The secret the instance's token is kept in (the service module's): minted by the company
- * (`/setup` does, with `mintInstanceToken`) before anything is applied, so a host's `secrets` can
- * name it from the first apply; `create` registers it, and `register` sends it.
- */
-export { WAKEUP_TOKEN };
+/** What the service holds of an instance that registered no wake: a new one's, and one moved to a new URL. */
+export const UNREGISTERED = { at: null, generation: 0, lastError: null } as const;
 
 /** The driver's own refusal, before or instead of a call: never retried. */
 export const refused = (message: string, vendorCode?: string) =>
@@ -80,7 +76,7 @@ export function wakeupOps(api: () => WakeupApi) {
     const host = normalUrl(desired.host);
     const token = await secrets.ensure(WAKEUP_TOKEN, mintInstanceToken);
     const { id } = await api().put(host, token);
-    const state: State = { id, host, at: null, generation: 0, lastError: null };
+    const state: State = { id, host, ...UNREGISTERED };
     return { id, state };
   };
   const plan = async ({ id, desired }: { id?: string; desired?: Record<string, unknown> }): Promise<Planned> => {
@@ -93,7 +89,7 @@ export function wakeupOps(api: () => WakeupApi) {
     // A move forgets the wake registered at the old URL, as the service does.
     return {
       action: "update",
-      planned: { ...state, ...planned, at: null, generation: 0, lastError: null },
+      planned: { ...state, ...planned, ...UNREGISTERED },
       state,
       ...none,
     };
