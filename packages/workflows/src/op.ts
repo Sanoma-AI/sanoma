@@ -1,3 +1,4 @@
+import type { ProviderV4 } from "@ai-sdk/provider";
 import type { z } from "zod";
 import type { Fake } from "./fake.ts";
 import type { Secrets } from "./secret.ts";
@@ -306,8 +307,8 @@ export interface Driver {
  * What a connector package attaches to its connector (`withSetup`), for the config's resolver
  * to call: the config then names the connector alone, and never a driver, a fake, steps or a
  * login. Any may be missing: a workflow using an operation of a connector with no driver is
- * refused, a connector with no fake has none for sandbox runs, and one with no login half signs
- * no visitor in.
+ * refused, a connector with no fake has none for sandbox runs, one with no login half signs no
+ * visitor in, and one with no model half gives the app no models.
  */
 export interface ConnectorSetup {
   /** Makes the live driver, which reads its credentials from the environment when called: once per resolved config. */
@@ -321,7 +322,19 @@ export interface ConnectorSetup {
    * starts; a login that needs tables migrates them here (serialized, idempotent).
    */
   login?: (context: LoginContext) => LoginHalf | Promise<LoginHalf>;
+  /**
+   * Makes the connector's AI SDK provider, the vendor's adapter as the transport: by the app,
+   * once per resolved config and client (again after one that throws), whose registry names its
+   * models `<vendor>/<model-id>`. It answers `languageModel("default")` with the connector's own
+   * default model, and reads its credentials through `context.secrets` when a model is called, so
+   * a key set on the connector page later is used (unless the environment sets one, which wins),
+   * and a missing one fails that call.
+   */
+  model?: (context: ModelContext) => ProviderV4 | Promise<ProviderV4>;
 }
+
+/** What the app gives a connector's model half (`ConnectorSetup.model`): the secrets, as a login half reads them. */
+export type ModelContext = Pick<LoginContext, "secrets">;
 
 /** What the app gives a connector's login half (`ConnectorSetup.login`) when it makes it for a public site. */
 export interface LoginContext {

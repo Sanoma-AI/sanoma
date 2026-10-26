@@ -6,6 +6,7 @@ import { fakeGhost } from "@sanoma-ai/connector-ghost/fake";
 import { github } from "@sanoma-ai/connector-github";
 import { resend } from "@sanoma-ai/connector-resend";
 import { stripe } from "@sanoma-ai/connector-stripe";
+import { customProvider } from "ai";
 import { describe, expect, it, vi } from "vitest";
 import {
   type Connector,
@@ -31,6 +32,7 @@ const config = (options: Partial<SanomaConfig> = {}): SanomaConfig => ({
 const driver = () => ({ vendor: "ghost", ops: {} });
 /** A login half's maker, which signs no one in. */
 const login = () => ({ verify: async () => null, handle: async () => undefined });
+const model = () => customProvider({});
 
 describe("each connector package's root", () => {
   it.each([
@@ -127,6 +129,17 @@ describe("resolveConfig on the connectors' setups", () => {
     expect(() =>
       resolveConfig(config({ connectors: [ghost, signsIn, withSetup(resend, { login: () => login() }), bluesky] })),
     ).toThrow('Two connectors in `connectors` attach a login for "resend"; keep one per vendor');
+  });
+
+  it("keeps the makers of the model halves by vendor, as it keeps the login halves", () => {
+    const answers = withSetup(resend, { model });
+    expect([...resolveConfig(config({ connectors: [ghost, answers, { ...answers }, bluesky] })).models]).toEqual([
+      ["resend", model],
+    ]);
+    expect(resolveConfig(config()).models.size).toBe(0);
+    expect(() =>
+      resolveConfig(config({ connectors: [ghost, answers, withSetup(resend, { model: () => model() }), bluesky] })),
+    ).toThrow('Two connectors in `connectors` attach a model for "resend"; keep one per vendor');
   });
 
   it("refuses a workflow using an operation whose connector attaches no driver", () => {

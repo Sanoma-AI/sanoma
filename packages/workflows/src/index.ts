@@ -14,6 +14,7 @@ export {
   isSvgElement,
   type LoginContext,
   type LoginHalf,
+  type ModelContext,
   type Op,
   type OpSpec,
   type ResourceGroup,

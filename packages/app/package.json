@@ -104,6 +104,7 @@
   },
   "devDependencies": {
     "@sanoma-ai/bridge": "workspace:*",
+    "@sanoma-ai/connector-anthropic": "workspace:*",
     "@sanoma-ai/connector-bluesky": "workspace:*",
     "@sanoma-ai/connector-ghost": "workspace:*",
     "@sanoma-ai/connector-github": "workspace:*",

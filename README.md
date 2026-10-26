@@ -70,6 +70,7 @@ A finished run: the graph shows how each step went, and the ledger records each 
 | [`@sanoma-ai/connector-stripe`](connectors/stripe/README.md)           | Stripe resources read through its OpenTofu provider, and a replay fake                       |
 | [`@sanoma-ai/connector-supabase`](connectors/supabase/README.md)       | Supabase projects read through its OpenTofu provider, and a replay fake                      |
 | [`@sanoma-ai/connector-better-auth`](connectors/better-auth/README.md) | Better Auth, a visitor login for public sites, on the company's database                     |
+| [`@sanoma-ai/connector-anthropic`](connectors/anthropic/README.md)     | Anthropic's Claude models for the app's agent, through the AI SDK                            |
 | [`modules/`](modules/AGENTS.md)                                        | Placeholder for parts not written yet                                                        |
 | [`types/`](types/AGENTS.md)                                            | Ambient type declarations shared by the packages                                             |
 | [`.github/`](.github/AGENTS.md)                                        | GitHub Actions CI and the README's images                                                    |

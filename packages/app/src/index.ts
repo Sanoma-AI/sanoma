@@ -28,6 +28,7 @@ import { publicFront } from "./login/public.ts";
 import { hostName, loopbackLogin, placeOf } from "./loopback.ts";
 import { type Published, PUBLISHED_FILE, publishedOf } from "./content-files.ts";
 import { seoFile } from "./seo.ts";
+import { secretValues } from "./server/secrets.ts";
 
 export { ACTOR_HEADER } from "./api.ts";
 export type { LoginProvider, ResolveActor } from "./context.ts";
@@ -334,8 +335,7 @@ async function openLogins(
   client: SanomaClient,
   halves: ReadonlyMap<SiteEntry, PromiseWithResolvers<LoginHalf>>,
 ): Promise<Map<string, LoginHalf>> {
-  const secrets = async (names: readonly string[]) =>
-    new Map([...(await client.secrets(names))].map(([name, { value }]) => [name, value]));
+  const secrets = secretValues(client);
   const opened = new Map<string, LoginHalf>();
   await Promise.all(
     [...halves].map(async ([{ name, login, domain }, half]) => {

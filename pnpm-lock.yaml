@@ -48,6 +48,9 @@ importers:
         specifier: 7.0.153
         version: 7.0.153(zod@4.6.5)
     devDependencies:
+      '@sanoma-ai/workflows':
+        specifier: workspace:*
+        version: link:../../packages/workflows
       zod:
         specifier: ^4.6.5
         version: 4.6.5
@@ -323,6 +326,9 @@ importers:
       '@sanoma-ai/bridge':
         specifier: workspace:*
         version: link:../bridge
+      '@sanoma-ai/connector-anthropic':
+        specifier: workspace:*
+        version: link:../../connectors/anthropic
       '@sanoma-ai/connector-bluesky':
         specifier: workspace:*
         version: link:../../connectors/bluesky
