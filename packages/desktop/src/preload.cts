@@ -1,5 +1,6 @@
-// The start window's bridge (CommonJS: a sandboxed preload cannot be a module). The company's
-// windows have no preload: the app does not know it runs in the shell.
+// The bridge of the shell's own pages, the start window and a company window's progress page
+// (CommonJS: a sandboxed preload cannot be a module). The app's view in a company window has no
+// preload: the app does not know it runs in the shell.
 const { contextBridge, ipcRenderer } = require("electron") as typeof import("electron");
 
 contextBridge.exposeInMainWorld("sanoma", {
@@ -7,6 +8,7 @@ contextBridge.exposeInMainWorld("sanoma", {
   choose: () => ipcRenderer.invoke("start:choose"),
   open: (path: string) => ipcRenderer.invoke("start:open", path),
   again: () => ipcRenderer.invoke("start:again"),
+  skip: () => ipcRenderer.invoke("start:skip"),
   create: () => ipcRenderer.invoke("start:create"),
   clone: () => ipcRenderer.invoke("start:clone"),
   answer: (value: unknown) => ipcRenderer.invoke("start:answer", value),
