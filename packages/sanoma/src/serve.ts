@@ -279,17 +279,21 @@ export async function appOptions(readSecrets?: ReadSecrets): Promise<Pick<AppOpt
   }
 }
 
-/** What `quietExit` is told of the process: when a request arrives, and when the worker stopped itself; `close` ends it. */
+/**
+ * What `quietExit` is told of the process: when a request arrives (the function it returns, when
+ * its response closes), and when the worker stopped itself; `close` ends it.
+ */
 export interface QuietExit {
-  request(): void;
+  request(): () => void;
   stopped(): void;
   close(): void;
 }
 
 /**
- * Calls `exit` once, when `stopped()` says the worker stopped itself and no request has arrived
- * for `quietMs`: looked at when the worker stops (`QuietExit.stopped`), then again when the
- * quiet would end. Its one timer never holds the process up.
+ * Calls `exit` once, when `stopped()` says the worker stopped itself, no request is open, and
+ * none has arrived or ended for `quietMs`: looked at when the worker stops (`QuietExit.stopped`)
+ * or the last open request ends, then again when the quiet would end. Its one timer never holds
+ * the process up.
  */
 export function quietExit({
   quietMs,
@@ -301,12 +305,14 @@ export function quietExit({
   exit: () => void;
 }): QuietExit {
   let last = Date.now();
+  // Requests whose responses have not closed: a stream of the agent's chat among them.
+  let open = 0;
   let timer: NodeJS.Timeout | undefined;
   let done = false;
   const look = () => {
     clearTimeout(timer);
     timer = undefined;
-    if (done || !stopped()) return;
+    if (done || open > 0 || !stopped()) return;
     const left = last + quietMs - Date.now();
     if (left > 0) timer = setTimeout(look, left).unref();
     else {
@@ -315,7 +321,18 @@ export function quietExit({
     }
   };
   return {
-    request: () => void (last = Date.now()),
+    request() {
+      last = Date.now();
+      open++;
+      let ended = false;
+      return () => {
+        if (ended) return;
+        ended = true;
+        open--;
+        last = Date.now();
+        look();
+      };
+    },
     stopped: look,
     close() {
       done = true;
@@ -328,17 +345,15 @@ export function quietExit({
  * The exit rule, when the host the declared wakeup names stops the instance when its process
  * exits (`stops-on-exit`): `quietExit`, for `quietExitMs` (10 minutes by default), ending the
  * process through `exit`, so the host stops the instance and its next request starts it again.
- * None without `exit`, on any other host (one that stops when quiet stops the instance itself, a
- * long-lived one never does), or on an app on this machine alone (a loopback `host`), which is
- * not the instance the host runs.
+ * None without `exit`, or on any other host (one that stops when quiet stops the instance itself,
+ * a long-lived one never does).
  */
 async function exitRule(
   config: SanomaConfig,
-  host: string | undefined,
   stopped: () => boolean,
   { exit, quietExitMs = 600_000 }: ServeOptions,
 ): Promise<QuietExit | undefined> {
-  if (!exit || isLoopback(host ?? "127.0.0.1")) return undefined;
+  if (!exit) return undefined;
   const lifetime = (await declaredWakeup(config))?.host?.type.host?.capabilities.lifetime;
   return lifetime === "stops-on-exit" ? quietExit({ quietMs: quietExitMs, stopped, exit }) : undefined;
 }
@@ -355,10 +370,14 @@ export async function serve(config: SanomaConfig, serveOptions: ServeOptions): P
   // Read and built before the worker starts, so a mistake in the variables or a site starts nothing.
   const options = await appStart(config, serveOptions);
   const { log } = serveOptions;
+  // An app on this machine alone is not the instance the host runs: its worker never stops
+  // itself (its wakeup would wake that instance), and it never exits when quiet.
+  const here = isLoopback(options.host ?? "127.0.0.1");
   let worker: Supervisor | undefined;
-  const rule = await exitRule(config, options.host, () => worker?.stopped === true, serveOptions);
+  const rule = here ? undefined : await exitRule(config, () => worker?.stopped === true, serveOptions);
   const supervised = (worker = await superviseWorker(config, {
     ...workerOptions(config),
+    selfStop: !here,
     ...(rule && { onStopped: rule.stopped }),
   }));
   let wakeup: WakeupService | undefined;

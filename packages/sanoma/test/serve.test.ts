@@ -181,11 +181,11 @@ describe("quietExit", () => {
       expect(exit).not.toHaveBeenCalled();
       stopped = true;
       vi.advanceTimersByTime(5_000);
-      rule.request();
+      rule.request()();
       rule.stopped();
       vi.advanceTimersByTime(9_000);
       // A page's poll moves the end of the quiet.
-      rule.request();
+      rule.request()();
       vi.advanceTimersByTime(9_000);
       expect(exit).not.toHaveBeenCalled();
       vi.advanceTimersByTime(1_000);
@@ -208,11 +208,33 @@ describe("quietExit", () => {
       vi.advanceTimersByTime(60_000);
       expect(exit).not.toHaveBeenCalled();
       stopped = true;
-      rule.request();
+      rule.request()();
       rule.stopped();
       rule.close();
       vi.advanceTimersByTime(60_000);
       expect(exit).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not exit while a request is open, and counts the quiet from its end", () => {
+    vi.useFakeTimers();
+    try {
+      const exit = vi.fn<() => void>();
+      const rule = quietExit({ quietMs: 10_000, stopped: () => true, exit });
+      // A stream of the agent's chat, open for a minute.
+      const ended = rule.request();
+      rule.stopped();
+      vi.advanceTimersByTime(60_000);
+      expect(exit).not.toHaveBeenCalled();
+      ended();
+      vi.advanceTimersByTime(9_000);
+      expect(exit).not.toHaveBeenCalled();
+      // Its end told twice counts once.
+      ended();
+      vi.advanceTimersByTime(1_000);
+      expect(exit).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
     }

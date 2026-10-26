@@ -81,9 +81,10 @@ export interface AppOptions {
   onWrite?: () => void;
   /**
    * Called as each request arrives, but a host's probe (`/healthz`): a machine route's too, and
-   * a page's polls. `sanoma serve` counts the app quiet from the last one. Must not throw.
+   * a page's polls; the function it returns, once the response closes. `sanoma serve` counts
+   * the app quiet from the last one, while none is open. Must not throw.
    */
-  onRequest?: () => void;
+  onRequest?: () => (() => void) | void;
 }
 
 /** One of `AppOptions.ingress`: a machine route, such as the wakeup's `/wake`. */
@@ -184,7 +185,8 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
       res.writeHead(200, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
       return void res.end(req.method === "HEAD" ? undefined : "ok\n");
     }
-    options.onRequest?.();
+    const ended = options.onRequest?.();
+    if (ended) res.once("close", ended);
     // A machine route, before the login too: it checks its own token.
     const route = path === undefined ? undefined : ingressAt(path);
     if (route?.method !== undefined && route.method !== req.method) {

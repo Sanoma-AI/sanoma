@@ -143,7 +143,8 @@ export async function checkWakeup(w: WakeupUnderTest): Promise<WakeupCheck[]> {
   await check("a wake at a schedule's next fire, while the host is stopped, runs that tick", async (begun) => {
     // The tick's run, as the ledger records the time it was for; any tick's without `at`.
     const tickRun = async (at?: Date) => {
-      for (const run of await client.runs({ workflow: "wakeup-check-tick", limit: 100 })) {
+      // The newest first: the tick waited for is among the last few.
+      for (const run of await client.runs({ workflow: "wakeup-check-tick", limit: 10 })) {
         const [started] = await client.ledger(run.runId);
         if (at === undefined || (started?.type === "run.started" && started.scheduledFor === at.toISOString()))
           return run;

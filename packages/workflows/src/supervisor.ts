@@ -30,7 +30,12 @@ export interface Supervisor {
 }
 
 export interface SupervisorOptions extends Omit<WorkerOptions, "onStopped"> {
-  /** Told each time the worker stops itself, once `stopped` is true. */
+  /**
+   * False: the worker never stops itself, as on an app on this machine alone, whose wakeup
+   * would wake the instance the host runs. Default true.
+   */
+  selfStop?: boolean;
+  /** Told each time the worker stops itself, once a fresh one is starting for a write it heard, or `stopped` is true. */
   onStopped?: (stopped: SelfStop) => void;
 }
 
@@ -42,7 +47,7 @@ export interface SupervisorOptions extends Omit<WorkerOptions, "onStopped"> {
  * again on its own when nothing came of it.
  */
 export async function superviseWorker(config: SanomaConfig, options: SupervisorOptions = {}): Promise<Supervisor> {
-  const { onStopped, ...workerOptions } = options;
+  const { onStopped, selfStop = true, ...workerOptions } = options;
   let worker: Worker | undefined;
   let starting: Promise<void> | undefined;
   let closed = false;
@@ -52,15 +57,16 @@ export async function superviseWorker(config: SanomaConfig, options: SupervisorO
 
   const launch = async () => {
     heard = false;
-    const started = await startWorker(config, { ...workerOptions, onStopped: selfStopped });
+    const started = await startWorker(config, { ...workerOptions, ...(selfStop && { onStopped: selfStopped }) });
     if (closed) await started.stop();
     else worker = started;
   };
   const selfStopped = (stopped: SelfStop) => {
     worker = undefined;
     if (closed) return;
-    onStopped?.(stopped);
+    // Resumed first, so `stopped` is false when `onStopped` (the exit rule) looks.
     if (heard) void supervisor.resume();
+    onStopped?.(stopped);
   };
 
   const supervisor: Supervisor = {

@@ -509,7 +509,15 @@ describe("the supervisor", () => {
 
   it("starts a fresh worker on a client's write, never its read, and again at once after a write it heard running", async () => {
     const stops: SelfStop[] = [];
-    supervisor = await superviseWorker(app.config, { ...fast, onStopped: (s) => stops.push(s) });
+    // Whether the supervisor said stopped as it told each stop.
+    const said: boolean[] = [];
+    supervisor = await superviseWorker(app.config, {
+      ...fast,
+      onStopped: (s) => {
+        stops.push(s);
+        said.push(supervisor!.stopped);
+      },
+    });
     const writes: number[] = [];
     const client = await SanomaClient.connect(app.config, {
       onWrite: () => {
@@ -532,11 +540,21 @@ describe("the supervisor", () => {
       await supervisor.resume();
       await waitFor(() => stops.length === 2);
       await waitFor(() => stops.length === 3);
+      // The stop after the heard write was told with a fresh worker already starting.
+      expect(said).toEqual([true, false, true]);
       await client.decide(runId, { decision: "approve", by: { id: "lead" } });
       expect(writes).toHaveLength(2);
       expect(await client.result(runId)).toBe("asked");
     } finally {
       await client.close();
     }
+  });
+
+  it("keeps the worker running, idle past its horizon, with selfStop false", async () => {
+    const stops: SelfStop[] = [];
+    supervisor = await superviseWorker(app.config, { ...fast, selfStop: false, onStopped: (s) => stops.push(s) });
+    await new Promise((r) => setTimeout(r, 2_000));
+    expect(stops).toEqual([]);
+    expect(supervisor.stopped).toBe(false);
   });
 });

@@ -1579,15 +1579,17 @@ describe("the page", () => {
     expect(await rawStatus(app.url, "/machinesx", { host: "10.0.0.7:3000" })).toBe(403);
   });
 
-  it("tells onRequest of each request as it arrives, a machine route's and a page's, but a host's probe", async () => {
-    const onRequest = vi.fn<() => void>();
+  it("tells onRequest of each request as it arrives and as its response closes, a machine route's and a page's, but a host's probe", async () => {
+    const ended = vi.fn<() => void>();
+    const onRequest = vi.fn<() => () => void>(() => ended);
     const counted = await startApp(config, { ingress: [machineRoute], onRequest });
     try {
-      await fetch(new URL("/healthz", counted.url));
+      await (await fetch(new URL("/healthz", counted.url))).text();
       expect(onRequest).not.toHaveBeenCalled();
-      await fetch(new URL("/machine?generation=1", counted.url));
-      await fetch(new URL("/workflows", counted.url));
+      await (await fetch(new URL("/machine?generation=1", counted.url))).text();
+      await (await fetch(new URL("/workflows", counted.url))).text();
       expect(onRequest).toHaveBeenCalledTimes(2);
+      await vi.waitFor(() => expect(ended).toHaveBeenCalledTimes(2));
     } finally {
       await counted.close();
     }
