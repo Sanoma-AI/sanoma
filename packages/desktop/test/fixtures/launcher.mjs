@@ -1,6 +1,6 @@
 // A fake `sanoma` launcher for the process manager's tests. FAKE_MODE says how it reports ready:
 // "event" (the JSON line), "line" (0.6.0's human line), "silent" (only /healthz answers), "fail"
-// (an error event, then exit 2), "stubborn" (as "silent", but ignores SIGTERM), "crash" (exits 1,
+// (an error event, then exit 2), "stubborn" (as "event", but ignores SIGTERM), "crash" (exits 1,
 // leaving a process in its group).
 import { spawn } from "node:child_process";
 import { appendFileSync, existsSync } from "node:fs";
@@ -8,7 +8,8 @@ import { createServer } from "node:http";
 
 const mode = process.env.FAKE_MODE ?? "event";
 const port = Number(process.env.SANOMA_APP_PORT);
-const url = `http://127.0.0.1:${port}`;
+// Its own name for the app, unlike the shell's /healthz poll (127.0.0.1), so a test sees which way it got ready.
+const url = `http://localhost:${port}`;
 
 if (existsSync(".env")) process.loadEnvFile(".env");
 console.log(`env ${process.env.SANOMA_APP_PORT} ${process.env.SANOMA_EVENTS} ${process.env.PATH?.split(":")[0]}`);

@@ -1,7 +1,7 @@
-import { type ChildProcess, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { delimiter, join, resolve } from "node:path";
-import { eachLine, eventOf, listeningUrlOf, type Ready } from "./events.ts";
+import { eachLine, eventOf, listeningUrlOf } from "./events.ts";
 
 /** Where a line came from: one of the child's streams. */
 export type Stream = "stdout" | "stderr";
@@ -16,10 +16,9 @@ export interface Exit {
 export const USAGE_EXIT = 2;
 
 /** How long `stop` waits after SIGTERM before SIGKILL. */
-export const KILL_AFTER_MS = 10_000;
+const KILL_AFTER_MS = 10_000;
 
 export interface Group {
-  child: ChildProcess;
   /** Resolves once the child exited, or could not start (code null, no signal). */
   exited: Promise<Exit>;
   /**
@@ -76,7 +75,7 @@ export function spawnGroup(
     child.once("exit", async (code, exitSignal) => {
       killAt ??= Date.now() + killAfterMs;
       signal("SIGTERM");
-      while (signal(0) && Date.now() < killAt) await sleep(100);
+      while (signal(0) && Date.now() < killAt) await sleep(25);
       signal("SIGKILL");
       await Promise.race([drained, sleep(DRAIN_MS)]);
       done({ code, signal: exitSignal });
@@ -99,7 +98,7 @@ export function spawnGroup(
     })();
     return stopping;
   };
-  return { child, exited, stop };
+  return { exited, stop };
 }
 
 /**
@@ -108,11 +107,19 @@ export function spawnGroup(
  */
 export function launcherOf(repo: string): string {
   const dir = join(repo, "node_modules", "sanoma");
-  const manifest = join(dir, "package.json");
-  if (!existsSync(manifest)) throw new Error(`${repo} has no node_modules/sanoma: its install did not finish`);
-  const { bin } = JSON.parse(readFileSync(manifest, "utf8")) as { bin?: string | Record<string, string> };
-  const script = typeof bin === "string" ? bin : bin?.sanoma;
-  if (!script) throw new Error(`${manifest} names no sanoma bin`);
+  if (!existsSync(join(dir, "package.json"))) {
+    throw new Error(`${repo} has no node_modules/sanoma: its install did not finish`);
+  }
+  return binOf(dir, "sanoma");
+}
+
+/** The script a package's `bin` names `name` (or its only one, a string), resolved in the package. */
+export function binOf(dir: string, name: string): string {
+  const { bin } = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as {
+    bin?: string | Record<string, string>;
+  };
+  const script = typeof bin === "string" ? bin : bin?.[name];
+  if (!script) throw new Error(`${dir}/package.json names no ${name} bin`);
   return resolve(dir, script);
 }
 
@@ -147,21 +154,18 @@ export interface Launched extends Group {
    * else the first answer from `/healthz` on the port. Rejects when the launcher exits first, with
    * the last `error` event's message when there was one.
    */
-  ready: Promise<Ready>;
+  ready: Promise<string>;
 }
 
 /** Starts the company's launcher in `cwd` with `node`, in a group of its own (`spawnGroup`). */
 export function launch({ node, cli, port, pollMs = 500, ...options }: LaunchOptions): Launched {
   let lastError: string | undefined;
-  const settle = Promise.withResolvers<Ready>();
-  const ready = settle.promise;
-  ready.catch(() => {});
-  let isReady = false;
-  const done = (value: Ready) => {
-    if (isReady) return;
-    isReady = true;
+  // Only the first settles it: an event, a line or /healthz, else the exit.
+  const settle = Promise.withResolvers<string>();
+  settle.promise.catch(() => {});
+  const done = (url: string) => {
     clearInterval(poll);
-    settle.resolve(value);
+    settle.resolve(url);
   };
   const group = spawnGroup(node, [cli], {
     ...options,
@@ -169,30 +173,26 @@ export function launch({ node, cli, port, pollMs = 500, ...options }: LaunchOpti
       options.onLine(stream, line);
       if (stream !== "stdout") return;
       const event = eventOf(line);
-      if (event?.event === "ready") done({ url: event.url, sites: event.sites });
-      else if (event?.event === "error") lastError = event.message;
-      else {
-        const url = listeningUrlOf(line);
-        if (url) done({ url, sites: {} });
-      }
+      if (event?.event === "error") lastError = event.message;
+      const url = event?.event === "ready" ? event.url : listeningUrlOf(line);
+      if (url) done(url);
     },
   });
-  const healthz = `http://127.0.0.1:${port}/healthz`;
+  const app = `http://127.0.0.1:${port}`;
   let asking = false;
   const poll = setInterval(() => {
     if (asking) return;
     asking = true;
-    fetch(healthz, { signal: AbortSignal.timeout(2_000) })
-      // The event or the line, which say more (the sites, the host), follow at once: they win for a second.
-      .then((res) => res.ok && setTimeout(() => done({ url: `http://127.0.0.1:${port}`, sites: {} }), 1_000))
+    fetch(`${app}/healthz`, { signal: AbortSignal.timeout(2_000) })
+      // The event or the line, which name the app's own host, follow at once: they win for a second.
+      .then((res) => res.ok && setTimeout(() => done(app), 1_000))
       .catch(() => {})
       .finally(() => (asking = false));
   }, pollMs);
   void group.exited.then(({ code, signal }) => {
     clearInterval(poll);
-    if (isReady) return;
     const how = signal ? `was stopped (${signal})` : `exited with code ${code}`;
     settle.reject(new Error(lastError ?? `the launcher ${how} before the app answered`));
   });
-  return { ...group, ready };
+  return { ...group, ready: settle.promise };
 }

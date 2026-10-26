@@ -78,24 +78,16 @@ function fakeLaunch(mode: string, port: number, extra: { killAfterMs?: number; s
 }
 
 describe("launcher events", () => {
-  test("reads ready, error and other events, and nothing else", () => {
-    expect(
-      eventOf(
-        '{"sanoma":1,"event":"ready","url":"http://127.0.0.1:3100","sites":{"www":"http://www.localhost:3100","x":1}}',
-      ),
-    ).toEqual({
+  test("reads the ready and error events, and nothing else", () => {
+    expect(eventOf('{"sanoma":1,"event":"ready","url":"http://127.0.0.1:3100","sites":{}}')).toEqual({
       event: "ready",
       url: "http://127.0.0.1:3100",
-      sites: { www: "http://www.localhost:3100" },
     });
     expect(eventOf('{"sanoma":1,"event":"error","message":"no config"}')).toEqual({
       event: "error",
       message: "no config",
     });
-    expect(eventOf('{"sanoma":1,"event":"database","url":"postgresql://…"}')).toEqual({
-      event: "other",
-      name: "database",
-    });
+    expect(eventOf('{"sanoma":1,"event":"database","url":"postgresql://…"}')).toBeUndefined();
     expect(eventOf('{"sanoma":1,"event":"ready"}')).toBeUndefined();
     expect(eventOf('{"event":"ready","url":"http://x"}')).toBeUndefined();
     expect(eventOf("{not json")).toBeUndefined();
@@ -110,27 +102,24 @@ describe("launcher events", () => {
 });
 
 describe("the process manager", () => {
-  test("is ready on the ready event, with the sites", async () => {
+  test("is ready on the ready event", async () => {
     const port = await freePort();
     const { launched } = fakeLaunch("event", port);
-    await expect(launched.ready).resolves.toEqual({
-      url: `http://127.0.0.1:${port}`,
-      sites: { www: "http://www.localhost" },
-    });
+    await expect(launched.ready).resolves.toBe(`http://localhost:${port}`);
     await launched.stop();
   });
 
   test("is ready on the launcher's human line", async () => {
     const port = await freePort();
     const { launched } = fakeLaunch("line", port);
-    await expect(launched.ready).resolves.toEqual({ url: `http://127.0.0.1:${port}`, sites: {} });
+    await expect(launched.ready).resolves.toBe(`http://localhost:${port}`);
     await launched.stop();
   });
 
   test("falls back to polling /healthz on the port", async () => {
     const port = await freePort();
     const { launched, lines } = fakeLaunch("silent", port);
-    await expect(launched.ready).resolves.toEqual({ url: `http://127.0.0.1:${port}`, sites: {} });
+    await expect(launched.ready).resolves.toBe(`http://127.0.0.1:${port}`);
     expect(lines).toContainEqual(["stderr", "listening"]);
     await launched.stop();
   });

@@ -1,6 +1,5 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import type { Ready } from "./events.ts";
 import { type Exit, type Group, launch, launcherEnv, launcherOf, spawnGroup, type Stream } from "./launcher.ts";
 import { writeShims } from "./shims.ts";
 
@@ -25,7 +24,7 @@ export interface SessionOptions {
 
 export interface Session {
   /** Where the app is, once it answers; rejects when the session ends first. */
-  ready: Promise<Ready>;
+  ready: Promise<string>;
   /** Resolves when the session ends: the launcher exited, it failed to start, or `stop`. */
   ended: Promise<Exit & { error?: string }>;
   /** Stops whatever runs (the install or the launcher) and starts nothing more. */
@@ -43,7 +42,7 @@ export function startSession(options: SessionOptions): Session {
   const env = launcherEnv(options.env, bin, port);
   const group = { cwd: repo, env, onLine, killAfterMs };
 
-  const run = async (): Promise<{ ready: Promise<Ready>; exited: Promise<Exit> } | undefined> => {
+  const run = async (): Promise<{ ready: Promise<string>; exited: Promise<Exit> } | undefined> => {
     writeShims(bin, node, pnpm);
     onProgress("Installing packages");
     current = spawnGroup(join(bin, "pnpm"), ["install", "--prefer-offline"], group);

@@ -55,9 +55,8 @@ interface Running {
 
 /** One session per company folder (by real path), and its window once the app answers. */
 const running = new Map<string, Running>();
-const windows = new Map<string, BrowserWindow>();
-/** Where each company's app answers now: its window's link rule reads it, as Restart may move the port. */
-const appUrls = new Map<string, string>();
+/** Each company's window, and where its app answers now: the link rule reads it, as Restart may move the port. */
+const windows = new Map<string, { window: BrowserWindow; url: string }>();
 /** Folders being opened: between the click and the session, a second click must not start another, and Quit waits. */
 const opening = new Map<string, Promise<void>>();
 /** Port choices, one at a time: two companies opened at once must not both take the same free port. */
@@ -66,7 +65,7 @@ let quitting = false;
 
 let startWindow: BrowserWindow | undefined;
 let state: StartState = { recent: [], phase: "idle", progress: [], log: [], warnings: [] };
-/** The log of the company the start window shows, its tail read when the state is sent. */
+/** The start of a company the start window shows: its tail is read when the state is sent. */
 let shownLog: CompanyLog | undefined;
 
 const archWarning = () =>
@@ -82,7 +81,8 @@ function setState(next: Partial<StartState>) {
   sendTimer ??= setTimeout(() => {
     sendTimer = undefined;
     if (shownLog) state = { ...state, log: shownLog.tail() };
-    startWindow?.webContents.send("start:state", state);
+    // A hidden start window gets the state when shown again (`showStart`).
+    if (startWindow?.isVisible()) startWindow.webContents.send("start:state", state);
   }, 100);
 }
 
@@ -116,8 +116,8 @@ async function openCompany(dir: string) {
     return;
   }
   const path = realpathSync(dir);
-  const window = windows.get(path);
-  if (window) return window.focus();
+  const shown = windows.get(path);
+  if (shown) return shown.window.focus();
   if (running.has(path) || opening.has(path)) return showStart();
   await begin(path);
 }
@@ -139,6 +139,7 @@ async function claimPort(path: string) {
   const { port, moved } = await portFor(companies, path);
   const company: Company = { path, name: companyName(path), port, lastOpened: new Date().toISOString() };
   writeCompanies(companiesFile(), remember(companies, company));
+  buildMenu();
   return { company, moved };
 }
 
@@ -148,15 +149,18 @@ async function start(path: string) {
   const { company, moved } = await claimed;
   const { port } = company;
   if (quitting) return;
-  buildMenu();
   const log = openLog(app.getPath("logs"), slugOf(path));
   const warnings = [...archWarning(), syncedFolderWarning(path, homedir()) ?? []].flat();
   for (const warning of warnings) log.write("shell", `warning: ${warning}`);
   if (moved) log.write("shell", `the remembered port is taken: the app moves to ${port}, and asks who you are again`);
-  const shown = () => state.company?.path === path;
-  if (!windows.has(path)) shownLog = log;
-  setState({ company: { path, name: company.name }, phase: "starting", progress: [], warnings, message: undefined });
-  if (!windows.has(path)) showStart();
+  /** Whether the start window shows this start: not a Restart's, which keeps the company's window. */
+  const shown = () => shownLog === log;
+  const show = (next: Partial<StartState>) => {
+    shownLog = log;
+    setState({ company: { path, name: company.name }, ...next });
+    showStart();
+  };
+  if (!windows.has(path)) show({ phase: "starting", progress: [], warnings, message: undefined });
 
   const session = startSession({
     repo: path,
@@ -176,7 +180,7 @@ async function start(path: string) {
   const entry: Running = { session, log, stopping: false };
   running.set(path, entry);
   session.ready.then(
-    ({ url }) => {
+    (url) => {
       if (entry.stopping) return;
       log.write("shell", `ready at ${url}`);
       showCompany(path, company.name, url);
@@ -194,10 +198,8 @@ async function start(path: string) {
         ? "The company's configuration has a problem: the log below says what. Fix it, then start again."
         : `The company stopped (${exit.signal ?? `exit code ${exit.code}`}).`);
     log.write("shell", why);
-    windows.get(path)?.close();
-    shownLog = log;
-    setState({ company: { path, name: company.name }, phase: "failed", message: why });
-    showStart();
+    windows.get(path)?.window.close();
+    show({ phase: "failed", message: why });
   });
 }
 
@@ -217,11 +219,11 @@ async function restart(path: string) {
 
 /** The company's window: the app, in the company's own storage, with no preload and no Node. */
 function showCompany(path: string, name: string, url: string) {
-  appUrls.set(path, url);
   const existing = windows.get(path);
   if (existing) {
-    void existing.loadURL(url);
-    return existing.focus();
+    existing.url = url;
+    void existing.window.loadURL(url);
+    return existing.window.focus();
   }
   const webPreferences = {
     partition: partitionOf(path),
@@ -230,16 +232,13 @@ function showCompany(path: string, name: string, url: string) {
     nodeIntegration: false,
   };
   const window = new BrowserWindow({ width: 1280, height: 840, title: name, webPreferences });
-  windows.set(path, window);
+  windows.set(path, { window, url });
   guard(window.webContents, path, webPreferences);
   window.on("closed", () => {
     windows.delete(path);
-    appUrls.delete(path);
     void stop(path);
-    buildMenu();
   });
   void window.loadURL(url);
-  buildMenu();
 }
 
 /**
@@ -248,7 +247,7 @@ function showCompany(path: string, name: string, url: string) {
  * browser gets other web links, and anything else is refused.
  */
 function guard(contents: WebContents, path: string, webPreferences: Electron.WebPreferences) {
-  const target = (url: string) => linkTarget(url, appUrls.get(path) ?? "");
+  const target = (url: string) => linkTarget(url, windows.get(path)?.url ?? "");
   const outside = (url: string) => {
     if (target(url) === "browser") void shell.openExternal(url);
   };
@@ -282,14 +281,10 @@ const nextLane = (what: string) => () =>
     detail: "For now, open a folder that holds a company.",
   });
 
-/** The company of the focused window, if it is one. */
-const focusedCompany = () => {
-  const focused = BrowserWindow.getFocusedWindow();
-  return [...windows].find(([, window]) => window === focused)?.[0];
-};
-
+/** A menu action on the company of the focused window, when it is a company's. */
 const forFocused = (act: (path: string) => unknown) => () => {
-  const path = focusedCompany();
+  const focused = BrowserWindow.getFocusedWindow();
+  const path = [...windows].find(([, shown]) => shown.window === focused)?.[0];
   if (path) void act(path);
 };
 
@@ -357,7 +352,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on("second-instance", (_event, argv, cwd) => {
     const folder = folderArgument(argsOf(argv), cwd);
     if (folder) void openCompany(folder);
-    else if (windows.size) [...windows.values()].at(-1)!.focus();
+    else if (windows.size) [...windows.values()].at(-1)!.window.focus();
     else showStart();
   });
   // A folder dropped on the Dock icon, or opened with the app.

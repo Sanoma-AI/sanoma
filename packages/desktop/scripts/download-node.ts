@@ -6,7 +6,16 @@
 //   node scripts/download-node.ts --platform darwin-x64 --out /tmp/node-x64
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,7 +46,7 @@ export async function downloadNode(platform: string, out: string): Promise<void>
   const name = `node-v${NODE.version}-${platform}`;
   const url = `https://nodejs.org/dist/v${NODE.version}/${name}.tar.gz`;
   console.error(`downloading ${url}`);
-  const res = await fetch(url);
+  const res = await fetch(url, { signal: AbortSignal.timeout(300_000) });
   if (!res.ok) throw new Error(`${url}: ${res.status} ${res.statusText}`);
   const archive = Buffer.from(await res.arrayBuffer());
   const got = createHash("sha256").update(archive).digest("hex");
@@ -51,7 +60,9 @@ export async function downloadNode(platform: string, out: string): Promise<void>
     });
     if (tar.status !== 0) throw new Error(`could not extract ${name}`);
     mkdirSync(out, { recursive: true });
-    copyFileSync(join(work, name, "bin", "node"), join(out, "node"));
+    // Beside it, then over it: a shell running from stage/ never sees half a binary.
+    copyFileSync(join(work, name, "bin", "node"), join(out, "node.tmp"));
+    renameSync(join(out, "node.tmp"), join(out, "node"));
     copyFileSync(join(work, name, "LICENSE"), join(out, "LICENSE"));
     writeFileSync(version, `${NODE.version}\n`);
   } finally {
