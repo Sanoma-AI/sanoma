@@ -47,17 +47,22 @@ const SETUP: Section[] = [
   { to: "/setup", label: "Go live", icon: RocketIcon },
 ];
 
-/** What the bar reads from the config: whether it has collections and a policy. */
+/** What the bar reads from the config: whether it has collections and a policy, and which sites are public. */
 const selectBar = (config: ConfigDescription) => ({
   data: config.collections.length > 0,
   policy: config.policy.defined,
+  public: new Set(config.sites.filter((site) => site.public).map((site) => site.name)),
 });
 
 /** A section's tile. */
 const section = ({ icon: Icon, ...rest }: Section) => ({ ...rest, icon: <Icon aria-hidden="true" /> });
 
 /** A site's tile: to its first page (its home, when it has one), lit there and on the pages under it. */
-const siteTile = (site: Site) => ({ to: site.pages[0]!.to, label: site.title, icon: <SiteIcon site={site} /> });
+const siteTile = ({ title, icon, pages }: Site, isPublic: boolean) => ({
+  to: pages[0]!.to,
+  label: title,
+  icon: <SiteIcon icon={icon} public={isPublic} />,
+});
 
 /**
  * The bar's groups, split by a short rule: Inbox and Workflows; the company's sites, a group for
@@ -67,13 +72,18 @@ const siteTile = (site: Site) => ({ to: site.pages[0]!.to, label: site.title, ic
  */
 function useGroups(): { to: string; label: string; icon: ReactNode }[][] {
   const { data: has } = useSuspenseQuery({ ...configQuery(), select: selectBar });
-  const sites = useSites().filter((site) => site.pages.length > 0);
+  const sites = useSites();
   const shown = { data: has.data || sites.length > 0, policy: has.policy };
   // By code unit, the same on the server and in any browser: the root's ("") first.
-  const byApp = Map.groupBy(sites, (site) => site.app ?? "");
+  const byApp = Map.groupBy(
+    sites.filter((site) => site.pages.length > 0),
+    (site) => site.app ?? "",
+  );
   return [
     WORK.map(section),
-    ...[...byApp.keys()].toSorted().map((app) => byApp.get(app)!.map(siteTile)),
+    ...[...byApp.keys()]
+      .toSorted()
+      .map((app) => byApp.get(app)!.map((site) => siteTile(site, has.public.has(site.name)))),
     SETUP.filter((item) => !item.when || shown[item.when]).map(section),
   ];
 }

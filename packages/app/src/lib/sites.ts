@@ -24,9 +24,7 @@ export interface Site {
   name: string;
   title: string;
   icon: SiteDefinition["icon"];
-  /** `defineSite({ public: true })`: its default icon is a globe, not a window. */
-  public: boolean;
-  /** The app folder it is under (`apps/<app>/sites/`); left out for the root's own sites. */
+  /** The app whose folder it comes from, which the bar groups it by: none while the build mounts only the root's `sites/`. */
   app?: string;
   pages: { to: string; label: string }[];
 }
@@ -52,7 +50,6 @@ export function useSites(): Site[] {
         name,
         title: DEFINED[name]?.title ?? name,
         icon: DEFINED[name]?.icon,
-        public: DEFINED[name]?.public === true,
         pages: [],
       };
       sites.set(name, site);
