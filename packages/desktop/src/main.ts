@@ -352,9 +352,8 @@ async function begin(path: string, how?: Begin) {
   showWindow(path);
   const started = start(path, shown, beginnings.get(path) ?? startSession).catch((err: unknown) => {
     // Before its session (no Node staged, an unreadable folder): its window says why.
-    forgetIfEmpty(path);
     const message = hidePasswords(`The company could not start: ${messageOf(err)}`);
-    setCompanyState(shown, { phase: "failed", message, progress: [], log: [] });
+    setCompanyState(shown, { phase: "failed", message, progress: [], log: [], reopens: forgetIfEmpty(path) });
   });
   opening.set(path, started);
   runningChanged();
@@ -363,11 +362,16 @@ async function begin(path: string, how?: Begin) {
   runningChanged();
 }
 
-/** After a failed start: a folder that holds no company (a failed clone or init) leaves Recent (`afterFailure`). */
-function forgetIfEmpty(path: string) {
-  writeCompanies(companiesFile(), afterFailure(readCompanies(companiesFile()), path));
+/**
+ * After a failed start: a folder that holds no company (a failed clone or init) leaves Recent
+ * (`afterFailure`). Whether the next launch still opens it.
+ */
+function forgetIfEmpty(path: string): boolean {
+  const companies = afterFailure(readCompanies(companiesFile()), path);
+  writeCompanies(companiesFile(), companies);
   buildMenu();
   sendStart();
+  return companies.some((c) => c.path === path && c.open);
 }
 
 /** The company's port (`portFor`), remembered in companies.json with the company, marked open. */
@@ -447,9 +451,9 @@ async function start(path: string, shown: CompanyWindow, how: Begin) {
         : (exit.error ?? `The company stopped (${exit.signal ?? `exit code ${exit.code}`}).`);
     log.write("shell", why);
     log.close();
-    forgetIfEmpty(path);
+    const reopens = forgetIfEmpty(path);
     if (!current()) return;
-    setCompanyState(shown, { phase: "failed", message: hidePasswords(why), progress: [] });
+    setCompanyState(shown, { phase: "failed", message: hidePasswords(why), progress: [], reopens });
     // A company that stops on its own while its window is closed says so.
     if (!shown.window.isDestroyed()) showWindow(path);
   });
