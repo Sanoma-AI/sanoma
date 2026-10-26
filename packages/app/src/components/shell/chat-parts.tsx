@@ -142,9 +142,11 @@ function DraftCardView({ draft }: { draft: DraftCard }) {
   return (
     <Card size="sm" role="region" aria-label="Draft">
       <CardHeader>
-        <CardHeading className="flex items-center gap-1.5">
-          <GitBranchIcon aria-hidden="true" />
-          <code>{draft.branch}</code>
+        <CardHeading>
+          <span className="flex items-center gap-1.5">
+            <GitBranchIcon aria-hidden="true" className="shrink-0" />
+            <code className="truncate">{draft.branch}</code>
+          </span>
         </CardHeading>
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
