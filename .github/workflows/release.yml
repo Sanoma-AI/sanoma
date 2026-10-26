@@ -80,7 +80,7 @@ jobs:
           if [ -n "$DOCKERHUB_USERNAME" ] && [ -n "$DOCKERHUB_TOKEN" ]; then
             echo "set=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::notice title=Runtime image skipped::The secrets DOCKERHUB_USERNAME and DOCKERHUB_TOKEN are not set."
+            echo "::notice title=Runtime image skipped::The secrets DOCKERHUB_USERNAME and DOCKERHUB_TOKEN are not both set."
           fi
       - if: steps.hub.outputs.set
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
