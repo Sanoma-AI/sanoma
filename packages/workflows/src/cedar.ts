@@ -1,14 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
-import type {
-  CedarValueJson,
-  DetailedError,
-  EntityJson,
-  Expr,
-  PolicyJson,
-  RecordType,
-} from "@cedar-policy/cedar-wasm/nodejs";
+import type { CedarValueJson, DetailedError, EntityJson, Expr, PolicyJson } from "@cedar-policy/cedar-wasm/nodejs";
 import { locator } from "./ast.ts";
 import type { ResolvedConfig } from "./config.ts";
 import type { ApprovalState, Approver, Principal } from "./define.ts";
@@ -28,7 +21,7 @@ import {
   VISITOR_DENIED,
 } from "./policy.ts";
 import { admit, readPeople } from "./resources.ts";
-import { CHANGE, cedarValue, cedarWasm, contextTypeOf, messageOf, NAMESPACE, schemaOf } from "./schema.ts";
+import { cedarValue, cedarWasm, contextTypeOf, messageOf, NAMESPACE, schemaOf, shapeOf } from "./schema.ts";
 import {
   ANONYMOUS,
   approverLabel,
@@ -297,13 +290,9 @@ export function cedarPolicy(
   /** The entity type `action` acts on, as the schema has it. */
   const appliesTo = (action: string) => schema[NAMESPACE]?.actions[action]?.appliesTo?.resourceTypes?.[0];
 
-  /** The attributes of a `Change`, as the schema has them. */
-  const changeShape = (schema[NAMESPACE]!.entityTypes[CHANGE] as { shape: RecordType<string> & { type: "Record" } })
-    .shape;
-
   /**
    * What `request` is about: a workflow start on its `Workflow`; an operation on its target, in its
-   * collection for `data`; a merge on its `Change`, with the attributes `entity` gives.
+   * collection for `data`; one on an entity type with attributes (a merge's `Change`) with those `entity` gives.
    */
   const requestOf = (
     principal: Principal,
@@ -313,12 +302,14 @@ export function cedarPolicy(
     entity: (names: string[]) => Record<string, unknown>,
   ) => {
     const entities = directory.entities(principal);
+    const on = appliesTo(action);
+    const shape = on === undefined ? undefined : shapeOf(schema, on);
     let resource;
     if (action.startsWith(WORKFLOW_ACTION)) {
       resource = uid("Workflow", action.slice(WORKFLOW_ACTION.length));
-    } else if (appliesTo(action) === CHANGE) {
-      resource = uid(CHANGE, target ?? action);
-      const attrs = cedarValue(entity(Object.keys(changeShape.attributes)), changeShape) ?? {};
+    } else if (shape) {
+      resource = uid(on!, target ?? action);
+      const attrs = cedarValue(entity(Object.keys(shape.attributes)), shape) ?? {};
       entities.push({ uid: resource, attrs: attrs as Record<string, CedarValueJson>, parents: [] });
     } else {
       resource = uid("Target", target ?? action);

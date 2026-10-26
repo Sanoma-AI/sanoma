@@ -230,6 +230,10 @@ const allowsNull = (schema: unknown): boolean =>
 /** Cedar's message, with its help when it has one. */
 export const messageOf = (e: DetailedError) => (e.help ? `${e.message} (${e.help})` : e.message);
 
+/** The attributes of an entity type in the schema, when it has any (`Change`'s). */
+export const shapeOf = (schema: CedarSchemaJson, type: string) =>
+  (schema[NAMESPACE]?.entityTypes[type] as { shape?: RecordType<string> & { type: "Record" } } | undefined)?.shape;
+
 /** An action's context type in the schema: a record, when the action is there. */
 export const contextTypeOf = (schema: CedarSchemaJson, action: string) =>
   schema[NAMESPACE]?.actions[action]?.appliesTo?.context as (RecordType<string> & { type: "Record" }) | undefined;
