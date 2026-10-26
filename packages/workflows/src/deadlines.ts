@@ -1,13 +1,7 @@
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import { dbosStatusesOf } from "./client.ts";
 import type { Db } from "./db.ts";
-import {
-  nextWakeupGeneration,
-  recordWakeupError,
-  recordWakeupProblem,
-  recordWakeupRegistration,
-  recordWakeupStop,
-} from "./db.ts";
+import { nextWakeupGeneration, recordWakeupError, recordWakeupRegistration, recordWakeupStop } from "./db.ts";
 import type { ResolvedConfig } from "./config.ts";
 import { warn } from "./log.ts";
 import type { CallContext, DriverFn, Op } from "./op.ts";
@@ -189,7 +183,7 @@ export function stopWhenIdle(rule: StopRule): { close(): void } {
       // No generation is taken: nothing can be registered until apply creates the instance.
       const message = `the wakeup ${rule.declaration} is not bound yet: apply it to create its instance`;
       const line = `could not register the wakeup at ${at}, so the worker keeps running: ${message}`;
-      if (line !== lastProblem) await recordWakeupProblem(db, rule.owner, message);
+      if (line !== lastProblem) await recordWakeupError(db, rule.owner, undefined, message);
       problem(line);
       return false;
     }

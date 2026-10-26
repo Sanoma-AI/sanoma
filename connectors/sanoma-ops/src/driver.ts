@@ -1,7 +1,7 @@
 import { defineDriver, DriverError, retryableStatus } from "@sanoma-ai/workflows";
 import { z } from "zod";
 import { sanomaOpsOps } from "./connector.ts";
-import { type Instance, WAKEUP_TOKEN, type WakeupApi, wakeupOps } from "./wakeup.ts";
+import { type Instance, instanceSchema, refused, WAKEUP_TOKEN, type WakeupApi, wakeupOps } from "./wakeup.ts";
 
 /*
  * The wakeup service's driver, over its routes (`@sanoma-ai/workflows/wakeup-service`). The
@@ -37,18 +37,9 @@ const env = z.object({
     .describe("this instance's token at the wakeup service (swi_…), which apply stores when it creates the wakeup"),
 });
 
-const Shown = z.object({
-  id: z.string(),
-  url: z.string(),
-  at: z.string().nullable(),
-  generation: z.number(),
-  lastError: z.string().nullable(),
-});
 const Created = z.object({ id: z.string(), token: z.string() });
 /** The service's error body. */
 const Problem = z.object({ error: z.string() });
-
-const refused = (message: string) => new DriverError(`sanomaOps: ${message}`, { retryable: false });
 
 const instance = (id: string) => `/wakeup/instances/${encodeURIComponent(id)}`;
 
@@ -123,7 +114,7 @@ function serviceApi(timeoutMs: number): WakeupApi {
     create: async (url) =>
       (await send("POST", "/wakeup/instances", accountToken(), { reply: Created, body: { url } }))!,
     get: (id): Promise<Instance | undefined> =>
-      send("GET", instance(id), accountToken(), { reply: Shown, absent: true }),
+      send("GET", instance(id), accountToken(), { reply: instanceSchema, absent: true }),
     async remove(id) {
       await send("DELETE", instance(id), accountToken(), { absent: true });
     },

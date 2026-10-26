@@ -417,8 +417,7 @@ export async function declaredWakeup(config: SanomaConfig): Promise<DeclaredWake
   const { readDataFiles } = await import("./resources.ts");
   for (const declared of readDataFiles(rootOf(config), connectors, types).resources) {
     const type = types.get(`${declared.vendor}.${declared.type}`)!;
-    if (type.wakeup)
-      return { id: declared.id, type, declared, ...(declared.binding !== undefined && { binding: declared.binding }) };
+    if (type.wakeup) return { id: declared.id, type, declared };
   }
   return undefined;
 }

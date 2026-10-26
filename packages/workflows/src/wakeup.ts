@@ -133,12 +133,10 @@ export function checkWakeupOps(types: ReadonlyMap<string, Resource>, ops: Readon
   }
 }
 
-/** The one wakeup the data files declare: its declaration, its type, and its binding when it is bound. */
+/** The one wakeup the data files declare: its declaration and its type. */
 export interface DeclaredWakeup {
   /** `<file>#<export>`, as `DeclaredResource.id`. */
   id: string;
   type: Resource;
   declared: DeclaredResource;
-  /** The vendor's id of the object the lockfile binds it to; absent when unbound. */
-  binding?: string;
 }

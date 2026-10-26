@@ -263,11 +263,12 @@ export function fakeWakeup() {
   });
   const registers = defineDriver(timerRegister, {
     timer: {
-      register: async ({ id, at, generation }) => {
-        const timer = timers.get(id);
+      register: async (registration) => {
+        const timer = timers.get(registration.id);
         if (!timer)
-          throw new DriverError(`testwakeup: register names no timer apply created (${id})`, { retryable: false });
-        const registration = { id, at, generation };
+          throw new DriverError(`testwakeup: register names no timer apply created (${registration.id})`, {
+            retryable: false,
+          });
         if (registration.generation <= newest) return {};
         newest = registration.generation;
         disarm();

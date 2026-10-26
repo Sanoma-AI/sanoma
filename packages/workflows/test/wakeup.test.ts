@@ -158,15 +158,13 @@ describe("a wakeup type", () => {
 });
 
 describe("declaredWakeup", () => {
-  it("is the one wakeup the data files declare, with its binding from the lockfile", async () => {
+  it("is the one wakeup the data files declare", async () => {
     const root = rootWith({
       "resources/infra.ts": `${IMPORT}${SERVICE}export const wake = acme.wakeup({ name: "wake", host: app });\n`,
-      "resources/sanoma.lock.json": JSON.stringify({ "resources/infra.ts#wake": { type: "acme.wakeup", id: "W_1" } }),
     });
     const found = await declaredWakeup(configAt(root));
     expect(found).toMatchObject({
       id: "resources/infra.ts#wake",
-      binding: "W_1",
       declared: { vendor: "acme", type: "wakeup", desired: { name: "wake", host: "app" } },
     });
     expect(found?.type.wakeup?.register).toBe("acme.wakeup.register");

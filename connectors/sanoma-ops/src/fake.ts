@@ -39,23 +39,29 @@ function checkedUrl(value: string): string {
  */
 export function fakeSanomaOps(options: FakeOptions = {}) {
   /** The wake each instance waits to send, by its id. */
-  const armed = new Map<string, { generation: number; at: number; url: string; timeout?: NodeJS.Timeout }>();
+  const armed = new Map<
+    string,
+    { generation: number; at: number; url: string; timeout?: NodeJS.Timeout; sending?: boolean }
+  >();
   const disarm = (id: string) => {
     clearTimeout(armed.get(id)?.timeout);
     armed.delete(id);
   };
   /** Sends `id`'s armed wake once it is due, while it is still the one armed, until the host answers. */
   const send = async (id: string, pending = armed.get(id)) => {
-    if (!pending || armed.get(id) !== pending) return;
+    // One request at a time: the one in flight sends again if it is not answered.
+    if (!pending || armed.get(id) !== pending || pending.sending) return;
     const due = pending.at - Date.now();
     if (due > 0) {
       pending.timeout = setTimeout(() => void send(id, pending), Math.min(due, MAX_DELAY_MS)).unref();
       return;
     }
+    pending.sending = true;
     const answered = await fetch(`${pending.url}/wake?generation=${pending.generation}`).then(
       (res) => res.ok,
       () => false,
     );
+    pending.sending = false;
     if (armed.get(id) !== pending) return;
     if (answered) armed.delete(id);
     else pending.timeout = setTimeout(() => void send(id, pending), RETRY_MS).unref();
@@ -101,8 +107,7 @@ export function fakeSanomaOps(options: FakeOptions = {}) {
     options,
   );
   const close = () => {
-    for (const pending of armed.values()) clearTimeout(pending.timeout);
-    armed.clear();
+    for (const id of armed.keys()) disarm(id);
   };
   const { reset } = fake;
   return Object.assign(fake, {
