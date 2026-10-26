@@ -35,6 +35,6 @@
     "watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput"
   },
   "engines": {
-    "node": "^24.2 || >=26"
+    "node": ">=26"
   }
 }

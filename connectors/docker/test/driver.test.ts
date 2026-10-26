@@ -155,7 +155,7 @@ describe.skipIf(live && !dockerAvailable())("dockerDriver over recorded replies"
 
   beforeAll(() => {
     if (!live) return;
-    const dockerfile = `FROM node:24-bookworm-slim\nCMD ["node", "-e", "require('http').createServer((q, s) => s.end('ok')).listen(3000)"]\n`;
+    const dockerfile = `FROM node:26-bookworm-slim\nCMD ["node", "-e", "require('http').createServer((q, s) => s.end('ok')).listen(3000)"]\n`;
     execFileSync("docker", ["build", "-q", "-t", IMAGE, "-"], {
       input: dockerfile,
       stdio: ["pipe", "ignore", "inherit"],

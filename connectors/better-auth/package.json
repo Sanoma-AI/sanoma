@@ -59,7 +59,7 @@
     "@sanoma-ai/workflows": "workspace:^"
   },
   "engines": {
-    "node": ">=24"
+    "node": ">=26"
   },
   "sanoma": {
     "title": "Better Auth",

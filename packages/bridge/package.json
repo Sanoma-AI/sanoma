@@ -83,6 +83,6 @@
     "@sanoma-ai/bridge-linux-x64": "workspace:*"
   },
   "engines": {
-    "node": ">=24"
+    "node": ">=26"
   }
 }

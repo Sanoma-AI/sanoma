@@ -92,6 +92,6 @@
     "@sanoma-ai/postgres-win32-x64": "workspace:*"
   },
   "engines": {
-    "node": "^24.2 || >=26"
+    "node": ">=26"
   }
 }
