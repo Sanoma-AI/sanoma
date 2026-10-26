@@ -4,7 +4,6 @@
  */
 
 import type { CheckResult } from "@sanoma-ai/workflows";
-import type { PermissionsGrid } from "@sanoma-ai/workflows/describe";
 
 /** What the launcher tells a parent process. */
 export type SanomaEvent =
@@ -14,8 +13,8 @@ export type SanomaEvent =
   | { event: "error"; message: string }
   /** The database: one that answered, started or created on this computer. */
   | { event: "database"; how: "answered" | "started" | "created"; url: string; place: "this-computer" }
-  /** `sanoma check`'s result, after the lines it printed, before its exit (1 when not `ok`), with the repo's Permissions grid. */
-  | ({ event: "checked" } & CheckResult & { grid: PermissionsGrid });
+  /** `sanoma check`'s result, after the lines it printed, before its exit (1 when not `ok`), with the repo's Permissions grid (`grid`) unless its policies do not hold. */
+  | ({ event: "checked" } & CheckResult);
 
 /** Whether a parent process asked for events (`SANOMA_EVENTS=1`). */
 export const eventsOn = () => process.env.SANOMA_EVENTS === "1";

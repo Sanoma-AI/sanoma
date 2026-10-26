@@ -128,7 +128,9 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
         await git(["fetch", "--quiet", "--no-tags", "--", url, `refs/heads/${ref}`], signedIn(token)).catch(
           withoutToken(`git fetch from ${url}`, token),
         );
-        const behind = await git(["merge-base", "--is-ancestor", "HEAD", "FETCH_HEAD"]).then(
+        // The commit fetched, pinned: anything else may rewrite FETCH_HEAD before the merge.
+        const fetched = await git(["rev-parse", "--verify", "FETCH_HEAD^{commit}"]);
+        const behind = await git(["merge-base", "--is-ancestor", "HEAD", fetched]).then(
           () => true,
           (err: { code?: unknown }) => {
             if (err.code === 1) return false;
@@ -136,7 +138,7 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
           },
         );
         if (!behind) return { skipped: `${ref} has commits ${url} does not` };
-        await git(["merge", "--quiet", "--ff-only", "FETCH_HEAD"]);
+        await git(["merge", "--quiet", "--ff-only", fetched]);
         return { revision: await git(["rev-parse", "HEAD"]) };
       }),
     async draft(id): Promise<Draft> {
@@ -168,15 +170,18 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
       });
       return { branch, root: at, commit: commitIn(at) };
     },
-    closeDraft: (id) =>
-      serial(async () => {
+    closeDraft: async (id) => {
+      // Not under a check still running in it.
+      await checking;
+      return serial(async () => {
         const branch = branchOf(id);
         // Forced: whatever it holds uncommitted goes with it, and one whose directory is gone too.
         if ((await listed()).has(id)) await git(["worktree", "remove", "--force", draftAt(id)]);
         if (await git(["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]).catch(() => "")) {
           await git(["branch", "--quiet", "-D", branch]);
         }
-      }),
+      });
+    },
     check: async (id) => checks(draftAt(id), databaseUrl),
     drafts: async () => [...(await listed())].flatMap(([id, here]) => (here ? [id] : [])).toSorted(),
     async diff(id) {

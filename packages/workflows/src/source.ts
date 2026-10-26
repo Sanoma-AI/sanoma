@@ -78,7 +78,7 @@ export interface CheckResult {
   problems: string[];
   /** What is worth fixing but not wrong, one line each, `<file>:<line>:<col>: warning: <message>`: the sites' `warnings`. */
   warnings: string[];
-  /** The repo's Permissions grid (`permissionsGrid`), when its config loaded: what a change is reviewed by. */
+  /** The repo's Permissions grid (`permissionsGrid`), when its config loaded and its policies hold: what a change is reviewed by. */
   grid?: PermissionsGrid;
 }
 

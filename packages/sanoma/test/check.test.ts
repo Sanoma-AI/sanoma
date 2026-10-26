@@ -30,6 +30,7 @@ describe("check", () => {
       ok: true,
       problems: [],
       warnings: [],
+      grid: expect.objectContaining({ groups: [null, "agents"] }),
     });
     // The generated SDK first, before tsc: the sites' tsc reads it.
     expect(log.slice(0, 7)).toEqual([
@@ -122,7 +123,7 @@ export default defineWorkflow({
         { ...loaded, resolved: resolveConfig(loaded.config) },
         { databaseUrl, log: (l) => log.push(l) },
       );
-      expect(result).toEqual({ ok: true, problems: [], warnings: [] });
+      expect(result).toEqual({ ok: true, problems: [], warnings: [], grid: expect.any(Object) });
       expect(log).toContain("oxlint workflows resources");
     } finally {
       rmSync(own, { recursive: true, force: true });
@@ -148,11 +149,19 @@ export default defineWorkflow({
         ),
       ]);
       expect(log).toContain("no scenarios: the policies do not hold");
+      // No grid: every cell would be the refusing policy's deny.
+      expect(bad).not.toHaveProperty("grid");
 
       // Valid: the scenario runs under it, and publishes.
       writeFileSync(cedar, readFileSync(cedar, "utf8").replace("input.idd", "input.id"));
       const loaded = await loadIn(own);
-      expect(await check(loaded, { databaseUrl, log: () => {} })).toEqual({ ok: true, problems: [], warnings: [] });
+      const good = await check(loaded, { databaseUrl, log: () => {} });
+      expect(good).toEqual({ ok: true, problems: [], warnings: [], grid: expect.any(Object) });
+      // The grid under it: the publish, in the run, depends on the input.
+      expect(good.grid!.workflows[0]!.ops.find((op) => op.id === "ghost.post.publish")!.cells).toEqual([
+        expect.objectContaining({ answer: "depends" }),
+        expect.objectContaining({ answer: "depends" }),
+      ]);
       expect(loaded.resolved.policyProblems).toEqual([]);
     } finally {
       rmSync(own, { recursive: true, force: true });
@@ -180,6 +189,7 @@ export default defineWorkflow({
         ok: true,
         problems: [],
         warnings: [],
+        grid: expect.objectContaining({ groups: [null, "agents", "finance"] }),
       });
     } finally {
       rmSync(own, { recursive: true, force: true });
