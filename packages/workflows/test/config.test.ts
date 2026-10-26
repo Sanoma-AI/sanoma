@@ -137,9 +137,9 @@ describe("resolveConfig on the connectors' setups", () => {
       ["resend", model],
     ]);
     expect(resolveConfig(config()).models.size).toBe(0);
-    expect(() => resolveConfig(config({ connectors: [answers, withSetup(resend, { model: () => model() })] }))).toThrow(
-      'Two connectors in `connectors` attach a model for "resend"; keep one per vendor',
-    );
+    expect(() =>
+      resolveConfig(config({ connectors: [ghost, answers, withSetup(resend, { model: () => model() }), bluesky] })),
+    ).toThrow('Two connectors in `connectors` attach a model for "resend"; keep one per vendor');
   });
 
   it("refuses a workflow using an operation whose connector attaches no driver", () => {
