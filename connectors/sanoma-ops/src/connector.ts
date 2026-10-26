@@ -34,8 +34,8 @@ const wakeupSchema = z.object({
  * `sanomaOps.wakeup({ host })`: an instance of sanoma-ops's wakeup service for the host a data
  * file names, which it calls at the time the worker registers (`wakeup.register`). The service
  * names it, so a declaration has no identity: its binding is its id. Apply creates it with the
- * account's token (`SANOMA_OPS_TOKEN`) and stores the instance's own token, shown once, as
- * `SANOMA_WAKEUP_TOKEN`; a new host is a new instance.
+ * account's token (`SANOMA_OPS_TOKEN`) and the instance's own, `SANOMA_WAKEUP_TOKEN`, which the
+ * company minted (`/setup`) and which names the instance: a new host is the same instance moved.
  */
 export const wakeup = defineResource({
   vendor: "sanomaOps",
@@ -43,13 +43,13 @@ export const wakeup = defineResource({
   title: "Wakeup",
   schema: wakeupSchema,
   fields: {
-    immutable: ["host"],
+    immutable: [],
     vendorOwned: ["id", "at", "generation", "lastError"],
     writeOnly: [],
     references: { host: { type: HOSTS, by: ["url"] } },
   },
   writable: true,
-  // One made again has a new token, which cannot replace the one stored: apply asks first.
+  // The service holds its registered wake: apply asks before it deletes one.
   stateless: false,
   wakeup: {
     inputs: { host: "host" },

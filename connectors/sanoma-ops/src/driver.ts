@@ -34,10 +34,12 @@ const env = z.object({
     .string()
     .startsWith("swi_", "an instance's token starts swi_")
     .optional()
-    .describe("this instance's token at the wakeup service (swi_…), which apply stores when it creates the wakeup"),
+    .describe(
+      "this instance's token at the wakeup service (swi_…), which /setup mints and the wakeup's create registers",
+    ),
 });
 
-const Created = z.object({ id: z.string(), token: z.string() });
+const Posted = z.object({ id: z.string() });
 /** The service's error body. */
 const Problem = z.object({ error: z.string() });
 
@@ -111,8 +113,8 @@ function serviceApi(timeoutMs: number): WakeupApi {
     return parsed.data;
   };
   return {
-    create: async (url) =>
-      (await send("POST", "/wakeup/instances", accountToken(), { reply: Created, body: { url } }))!,
+    put: async (url, token) =>
+      (await send("POST", "/wakeup/instances", accountToken(), { reply: Posted, body: { url, token } }))!,
     get: (id): Promise<Instance | undefined> =>
       send("GET", instance(id), accountToken(), { reply: instanceSchema, absent: true }),
     async remove(id) {
@@ -126,8 +128,8 @@ function serviceApi(timeoutMs: number): WakeupApi {
 
 /**
  * The real wakeup service at `SANOMA_OPS_URL` (Sanoma's hosted one by default): instances
- * created, read and deleted with `SANOMA_OPS_TOKEN`, wakes registered with `SANOMA_WAKEUP_TOKEN`,
- * which `create` stores. See the README.
+ * created, read and deleted with `SANOMA_OPS_TOKEN`, each named by its `SANOMA_WAKEUP_TOKEN`
+ * (which `create` and `register` send). See the README.
  */
 export function sanomaOpsDriver(options: SanomaOpsDriverOptions = {}) {
   const timeoutMs = options.timeoutMs ?? 10_000;

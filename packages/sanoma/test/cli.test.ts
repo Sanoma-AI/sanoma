@@ -80,9 +80,9 @@ describe("sanoma wakeup", () => {
     const made = await fetch(`${url}/wakeup/instances`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}` },
-      body: JSON.stringify({ url: "http://x.test" }),
+      body: JSON.stringify({ url: "http://x.test", token: `swi_${"a".repeat(43)}` }),
     });
-    expect([made.status, Object.keys((await made.json()) as object)]).toEqual([201, ["id", "token"]]);
+    expect([made.status, Object.keys((await made.json()) as object)]).toEqual([201, ["id"]]);
     // The body is read once the token is known, and only so far.
     const huge = await fetch(`${url}/wakeup/instances`, {
       method: "POST",

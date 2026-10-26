@@ -1,5 +1,5 @@
 import { DriverError, retryableStatus, type WakeupRegistration } from "@sanoma-ai/workflows";
-import { instanceUrl } from "@sanoma-ai/workflows/wakeup-service";
+import { INSTANCE_TOKEN, instanceUrl } from "@sanoma-ai/workflows/wakeup-service";
 import { defineFake, type FakeOptions } from "@sanoma-ai/workflows/fake";
 import { sanomaOpsOps } from "./connector.ts";
 import { type Instance, type WakeupApi, wakeupOps } from "./wakeup.ts";
@@ -31,8 +31,8 @@ function checkedUrl(value: string): string {
 
 /**
  * An in-memory wakeup service for tests, as `sanoma wakeup` answers: instances in
- * `state.instances`, ids made in order (UUID-shaped), each with its token (`swi_…`), which
- * `create` stores as the call's `SANOMA_WAKEUP_TOKEN`. `register` takes only the instance's own
+ * `state.instances`, ids made in order (UUID-shaped), each named by the token it was posted with
+ * (the call's `SANOMA_WAKEUP_TOKEN`), so posting it again moves it. `register` takes only the instance's own
  * token, and only a newer generation; it then sends `GET {host}/wake?generation=N` at `at`, again
  * every 250 ms until the host answers 2xx. `fire()` sends every armed wake now; `close()` (and
  * `reset()`) disarms them.
@@ -68,12 +68,21 @@ export function fakeSanomaOps(options: FakeOptions = {}) {
   };
 
   const api = (state: FakeSanomaOpsState): WakeupApi => ({
-    async create(url) {
-      const n = ++state.seq;
-      const id = `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
-      const token = `swi_fake${String(n).padStart(4, "0")}`;
-      state.instances[id] = { id, url: checkedUrl(url), at: null, generation: 0, lastError: null, token };
-      return { id, token };
+    async put(url, token) {
+      const checked = checkedUrl(url);
+      if (!INSTANCE_TOKEN.test(token)) throw fail(400, "token must be an instance's token");
+      const mine = Object.values(state.instances).find((i) => i.token === token);
+      if (mine) {
+        // The same instance, moved: its wake there forgotten.
+        if (mine.url !== checked) {
+          Object.assign(mine, { url: checked, at: null, generation: 0, lastError: null });
+          disarm(mine.id);
+        }
+        return { id: mine.id };
+      }
+      const id = `00000000-0000-4000-8000-${String(++state.seq).padStart(12, "0")}`;
+      state.instances[id] = { id, url: checked, at: null, generation: 0, lastError: null, token };
+      return { id };
     },
     async get(id) {
       const found = state.instances[id];

@@ -7,7 +7,7 @@ Source of `@sanoma-ai/connector-sanoma-ops`: the wakeup resource type, its regis
 | Path                           | What it is                                                                                                                          |
 | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
 | [`connector.ts`](connector.ts) | `wakeup` (the resource type, which meets the `Wakeup` contract) and `sanomaOpsOps`, its operations with `wakeup.register` merged in |
-| [`wakeup.ts`](wakeup.ts)       | `wakeupOps`: the operations over a `WakeupApi` (plan, the stored token, the refusals), shared by the driver and the fake            |
+| [`wakeup.ts`](wakeup.ts)       | `wakeupOps`: the operations over a `WakeupApi` (plan, the company's token posted, the refusals), shared by the driver and the fake  |
 | [`driver.ts`](driver.ts)       | `sanomaOpsDriver`: the `WakeupApi` over the service's routes with `fetch`, its `env`, and `HOSTED_URL`                              |
 | [`fake.ts`](fake.ts)           | `fakeSanomaOps`: an in-memory service that sends the host's `/wake` at `at`, with `fire()` and `close()`                            |
 | [`resources.ts`](resources.ts) | The `./resources` entry: `sanomaOps.wakeup`, the constructor a data file declares the wakeup with                                   |

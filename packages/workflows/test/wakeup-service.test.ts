@@ -2,6 +2,7 @@ import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { Client, escapeIdentifier, Pool } from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
+  mintInstanceToken,
   mintWakeupAccount,
   startWakeupService,
   WAKEUP_ACCOUNTS_TABLE,
@@ -79,12 +80,14 @@ async function send(
   return { status: res.status, json: text ? JSON.parse(text) : undefined, headers: res.headers };
 }
 
-/** An account and one instance of it at `url`. */
+/** An account and one instance of it at `url`, with a token minted as a company mints it. */
 async function instance(url = "http://instance.test/base/") {
   const account = await service!.mintAccount("acme");
-  const made = await send("POST", "/wakeup/instances", { token: account.token, body: { url } });
-  expect(made.status).toBe(201);
-  const { id, token } = made.json as { id: string; token: string };
+  const token = mintInstanceToken();
+  const made = await send("POST", "/wakeup/instances", { token: account.token, body: { url, token } });
+  expect(made).toMatchObject({ status: 201, json: { id: expect.any(String) } });
+  expect(Object.keys(made.json as object)).toEqual(["id"]);
+  const { id } = made.json as { id: string };
   return { account, id, token };
 }
 
@@ -120,7 +123,7 @@ describe("startWakeupService", () => {
     await start();
   });
 
-  it("mints accounts and instances, keeping only their tokens' hashes, and shows an instance to its account", async () => {
+  it("mints accounts, takes instances' tokens, keeping only their hashes, and shows an instance to its account", async () => {
     await start();
     const { account, id, token } = await instance();
     expect(account.token).toMatch(/^swa_[A-Za-z0-9_-]{43}$/);
@@ -161,7 +164,7 @@ describe("startWakeupService", () => {
     const mine = await instance();
     const theirs = await instance("https://other.test");
     const unknown = "00000000-0000-4000-8000-000000000000";
-    const url = { url: "http://x.test" };
+    const url = { url: "http://x.test", token: mintInstanceToken() };
     expect(await status("POST", "/wakeup/instances", { body: url })).toBe(401);
     expect(await status("POST", "/wakeup/instances", { token: "swa_nope", body: url })).toBe(401);
     expect(await status("POST", "/wakeup/instances", { token: mine.token, body: url })).toBe(401);
@@ -192,7 +195,8 @@ describe("startWakeupService", () => {
   it("takes an http(s) URL with no user, query or fragment, kept without its trailing slash", async () => {
     await start();
     const { token } = await service!.mintAccount("acme");
-    const register = (url: unknown) => send("POST", "/wakeup/instances", { token, body: { url } });
+    const register = (url: unknown) =>
+      send("POST", "/wakeup/instances", { token, body: { url, token: mintInstanceToken() } });
     for (const bad of [
       "ftp://x.test",
       "http://user:pass@x.test",
@@ -222,6 +226,43 @@ describe("startWakeupService", () => {
       ]);
       expect(rows).toEqual([{ url: kept }]);
     }
+  });
+
+  it("takes an instance's token only as a minted one is, and names the instance by it: again, moved, or another's", async () => {
+    await start();
+    const { account, id, token } = await instance();
+    const register = (body: unknown, as = account.token) => send("POST", "/wakeup/instances", { token: as, body });
+    for (const bad of [
+      undefined,
+      "",
+      42,
+      "swa_" + "a".repeat(43),
+      "swi_short",
+      `swi_${"a".repeat(42)}`,
+      `swi_${"!".repeat(43)}`,
+    ]) {
+      expect(await register({ url: "http://x.test", token: bad }), String(bad)).toMatchObject({
+        status: 400,
+        json: { error: "token must be an instance's token: swi_, then 43 or more base64url characters" },
+      });
+    }
+    // Again, as after a lost reply: the same instance, its registered wake kept.
+    expect((await wake(token, later(60_000), 3)).status).toBe(204);
+    expect(await register({ url: "http://instance.test/base", token })).toMatchObject({ status: 200, json: { id } });
+    const shown = async () => (await send("GET", `/wakeup/instances/${id}`, { token: account.token })).json;
+    expect(await shown()).toMatchObject({ url: "http://instance.test/base", generation: 3, at: expect.any(String) });
+    // Moved to another URL: the same instance, its wake there forgotten, so any generation is newer.
+    expect(await register({ url: "https://moved.test", token })).toMatchObject({ status: 200, json: { id } });
+    expect(await shown()).toMatchObject({ url: "https://moved.test", generation: 0, at: null, attempts: 0 });
+    // Another account's: refused, and the instance is unchanged.
+    const other = await service!.mintAccount("other");
+    expect(await register({ url: "https://theirs.test", token }, other.token)).toMatchObject({
+      status: 409,
+      json: { error: "the token is another account's instance's" },
+    });
+    expect(await shown()).toMatchObject({ url: "https://moved.test" });
+    const { rows } = await pool.query(`SELECT count(*)::int AS n FROM ${WAKEUP_INSTANCES_TABLE}`);
+    expect(rows).toEqual([{ n: 1 }]);
   });
 
   it("takes a registration only with a newer generation, answering 204 either way, and refuses a bad one", async () => {
@@ -364,8 +405,12 @@ describe("startWakeupService", () => {
     await start();
     const second = await startWakeupService({ databaseUrl, fetch });
     try {
-      const made = await send("POST", "/wakeup/instances", { token: minted.token, body: { url: "http://one.test" } });
-      const { id, token } = made.json as { id: string; token: string };
+      const token = mintInstanceToken();
+      const made = await send("POST", "/wakeup/instances", {
+        token: minted.token,
+        body: { url: "http://one.test", token },
+      });
+      const { id } = made.json as { id: string };
       // Due, unknown to either sleeping loop, then both woken at once.
       await pool.query(`UPDATE ${WAKEUP_INSTANCES_TABLE} SET at = $2, generation = 1 WHERE id = $1`, [id, ago(1_000)]);
       const put = (route: (typeof second.routes)[number]) =>
@@ -399,7 +444,7 @@ describe("startWakeupService", () => {
     for (let n = 0; n < 12; n++) {
       const made = await send("POST", "/wakeup/instances", {
         token: account.token,
-        body: { url: `http://i${n}.test` },
+        body: { url: `http://i${n}.test`, token: mintInstanceToken() },
       });
       const { id } = made.json as { id: string };
       // Due, unknown to the sleeping loop.
