@@ -47,15 +47,9 @@ interface OwnAgent {
   bin: string;
   args: readonly string[];
   signIn: SignIn;
-  /** Offered only with `SANOMA_OWN_AGENTS_UNSETTLED=1`: its vendor's terms for a hosted instance are not settled. */
-  unsettled?: true;
 }
 
-/**
- * The agents, by the name their engine takes (`acp-<name>`), with the versions spike S3 ran
- * (2026-10-25). Claude Code and Codex wait on their vendors' terms for a hosted instance
- * (`unsettled`).
- */
+/** The agents, by the name their engine takes (`acp-<name>`), with the versions spike S3 ran (2026-10-25). */
 export const OWN_AGENTS = {
   copilot: {
     title: "Copilot",
@@ -88,7 +82,6 @@ export const OWN_AGENTS = {
     bin: "claude-agent-acp",
     args: [],
     signIn: { method: "claude-ai-login" },
-    unsettled: true,
   },
   codex: {
     title: "Codex",
@@ -96,22 +89,11 @@ export const OWN_AGENTS = {
     bin: "codex-acp",
     args: [],
     signIn: { authenticate: "chat-gpt-device-code" },
-    unsettled: true,
   },
 } satisfies Record<string, OwnAgent>;
 
 /** An agent's name, its engine's being `acp-<name>`. */
 export type OwnAgentName = keyof typeof OWN_AGENTS;
-
-/** The engines of the agents this instance offers (`acp-<name>`): the `unsettled` ones only while `SANOMA_OWN_AGENTS_UNSETTLED=1`. Read at each request. */
-export function ownEngines(): Partial<Record<`acp-${OwnAgentName}`, Engine>> {
-  const all = process.env.SANOMA_OWN_AGENTS_UNSETTLED === "1";
-  return Object.fromEntries(
-    Object.entries(OWN_AGENTS as Record<OwnAgentName, OwnAgent>)
-      .filter(([, agent]) => all || !agent.unsettled)
-      .map(([name]) => [`acp-${name}`, acpEngine(name as OwnAgentName)]),
-  );
-}
 
 /** What this client says it can do: files and terminals (ours, by the checkout rule), terminal sign-in methods, and links to show. */
 const CAPABILITIES: acp.ClientCapabilities = {
@@ -146,8 +128,8 @@ const installs = new Map<string, Promise<void>>();
 /** The sign-ins waiting for a code their person pastes back, by chat id. */
 const pasting = new Map<string, { person: string; paste: (code: string) => void }>();
 
-/** The engine for `name`: a turn of a chat through that person's own agent, its transcript written as it goes. */
-const acpEngine =
+/** The engine for `name` (`acp-<name>`): a turn of a chat through that person's own agent, its transcript written as it goes. */
+export const acpEngine =
   (name: OwnAgentName): Engine =>
   async (turn) => {
     const stream = createUIMessageStream<ChatMessage>({
