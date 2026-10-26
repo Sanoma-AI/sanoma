@@ -161,13 +161,18 @@ const namedDatabaseUrl = (config: LoadedConfig["config"]) =>
 /**
  * Makes the database `named` answer, or with none the company's own in `root` (`ensurePostgres`),
  * and names it in this process's `SANOMA_DATABASE_URL`, which the runtime reads and every child
- * inherits; never in `.env`. The company's own is a `database` event.
+ * inherits; never in `.env`. The company's own is a `database` event, unless `announce` is false.
  */
-async function withPostgres(named: string | undefined, root: string, start: boolean): Promise<EnsuredPostgres> {
+async function withPostgres(
+  named: string | undefined,
+  root: string,
+  start: boolean,
+  { announce = true } = {},
+): Promise<EnsuredPostgres> {
   const { ensurePostgres } = await import("./postgres.ts");
   const postgres = await ensurePostgres(named, { root, log, start });
   process.env.SANOMA_DATABASE_URL = postgres.databaseUrl;
-  if (named === undefined) {
+  if (named === undefined && announce) {
     emit({ event: "database", how: postgres.how, url: postgres.databaseUrl, place: "this-computer" });
   }
   return postgres;
@@ -279,9 +284,12 @@ async function dev(repo: string, packages: readonly LinkedPackage[]): Promise<ne
   });
   const shutdown = onSignal(async () => {
     unwatch();
-    await child.stop();
-    await watchers.stop();
-    await postgres?.stop();
+    try {
+      await child.stop();
+      await watchers.stop();
+    } finally {
+      await postgres?.stop();
+    }
   });
   // Once the repo is unlinked (`sanoma-dev unlink`, an install), the checkout's server must not
   // keep running in it, nor start again on the checkout's next build: it would write its own
@@ -332,7 +340,8 @@ async function env(checkOnly: boolean): Promise<number> {
 
 async function ledgerExport(runId: string, out: string | undefined): Promise<number> {
   const loaded = await loadConfig();
-  const postgres = await withPostgres(namedDatabaseUrl(loaded.config), loaded.root, true);
+  // Its stdout is the records alone: no event.
+  const postgres = await withPostgres(namedDatabaseUrl(loaded.config), loaded.root, true, { announce: false });
   try {
     const { exportLedger } = await import("./ledger.ts");
     const text = await exportLedger(loaded.config, runId);

@@ -251,8 +251,11 @@ async function locked<T>(cluster: Cluster, fn: () => Promise<T>): Promise<T> {
     let fresh: boolean;
     try {
       holder = readFileSync(cluster.lock, "utf8");
-      // Being written: its maker is between making it and writing its pid.
-      fresh = !holder && Date.now() - statSync(cluster.lock).mtimeMs < 5000;
+      const age = Date.now() - statSync(cluster.lock).mtimeMs;
+      // Being written: its maker is between making it and writing its pid. Older than any start
+      // takes: left by a crash, its pid perhaps another process's since.
+      fresh = !holder && age < 5000;
+      if (age > LOCK_WAIT_MS) holder = "";
     } catch {
       continue; // Removed meanwhile.
     }
@@ -344,10 +347,18 @@ async function stopAlone(bin: string, cluster: Cluster, databaseUrl: string, log
   let others: number;
   try {
     await client.connect();
-    const { rows } = await client.query<{ others: number }>(
-      "SELECT count(*)::int AS others FROM pg_stat_activity WHERE backend_type = 'client backend' AND pid <> pg_backend_pid()",
-    );
-    others = rows[0]!.others;
+    const count = async () =>
+      (
+        await client.query<{ others: number }>(
+          "SELECT count(*)::int AS others FROM pg_stat_activity WHERE backend_type = 'client backend' AND pid <> pg_backend_pid()",
+        )
+      ).rows[0]!.others;
+    // The worker's and the app's backends end a moment after their pools close: a second for them.
+    others = await count();
+    for (let i = 0; others > 0 && i < 5; i++) {
+      await delay(200);
+      others = await count();
+    }
   } catch (err) {
     if (isSilent(err)) return;
     throw err;

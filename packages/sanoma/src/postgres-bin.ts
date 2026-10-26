@@ -69,6 +69,8 @@ export function postgresBin({
     tar(["--no-same-owner", "-xzf", archive], temp);
     if (platform.startsWith("darwin-")) spawnSync("xattr", ["-dr", "com.apple.quarantine", temp], { stdio: "ignore" });
     try {
+      // One without its server (a cleanup cut short): replaced.
+      if (existsSync(dir) && !existsSync(exe(dir))) rmSync(dir, { recursive: true, force: true });
       renameSync(temp, dir);
     } catch (err) {
       // Another launcher extracted it first.
