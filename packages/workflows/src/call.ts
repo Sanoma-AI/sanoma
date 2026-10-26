@@ -31,11 +31,12 @@ import { type CallContext, isOp, type Op } from "./op.ts";
 import { callAt, callName, type CallNode } from "./outline.ts";
 import { allowAll, type Decision, type Policy, type PolicyCall, policyOpOf, type RecordedDecision } from "./policy.ts";
 import type { Run, StartHold, WorkerState } from "./run.ts";
-import { isChangeOp } from "./resource.ts";
+import { reservedFor, runtimeHold } from "./change.ts";
+import { readPeople } from "./resources.ts";
 import {
-  APPLY_WORKFLOW,
   approverLabel,
   CALL_WORKFLOW,
+  CHANGE_MERGE,
   DATA_VENDOR,
   errorMessage,
   fitsOp,
@@ -276,11 +277,16 @@ function targetOf(op: Op, input: unknown): { target?: string } {
 
 /**
  * Asks the policy about one call, with the record a collection's `save` or
- * `delete` replaces as `before` (`beforeOf`). Runs inside a step, so it must have no side effects
- * of its own.
+ * `delete` replaces as `before` (`beforeOf`). The runtime's own rule first (`runtimeHold`, over
+ * the running instance's people): while it holds or denies, the company's policy is not asked.
+ * Runs inside a step, so it must have no side effects of its own.
  */
 export async function decide(run: Run, op: Op, input: unknown): Promise<RecordedDecision> {
   const seen = { id: run.id, workflow: run.workflow, approvals: structuredClone(run.approvals) };
+  // Only a merge is the rule's: no other call reads the people's files.
+  const held =
+    op.id === CHANGE_MERGE ? runtimeHold(op.id, input, seen.approvals, readPeople(run.state.root).people) : undefined;
+  if (held) return held;
   const { policy } = run.state;
   // Keyed by the call (`seq` was taken for it), so a fake answers each read afresh.
   const before = await beforeOf(policy, op, input, run.state.collections, (get, key) =>
@@ -299,7 +305,7 @@ const driverOf = (run: Run, id: string) => (run.sandbox === undefined ? run.stat
 /** The secrets a run's calls read: its own in a sandbox run, else the stored ones. */
 const secretsOf = (run: Run) => (run.sandbox === undefined ? run.state.secrets : run.fakeSecrets!);
 
-/** One call of `op` as `actor` in `run`, as a policy sees it. */
+/** One call of `op` as `actor` in `run`, as a policy sees it: a merge's `entity`, the change's facts. */
 const callOf = (op: Op, input: unknown, actor: Principal, run: PolicyCall["run"]): PolicyCall => ({
   op: policyOpOf(op),
   effect: op.effect,
@@ -307,6 +313,7 @@ const callOf = (op: Op, input: unknown, actor: Principal, run: PolicyCall["run"]
   input,
   actor,
   run,
+  ...(op.id === CHANGE_MERGE && { entity: (input as { facts: Record<string, unknown> }).facts }),
 });
 
 /**
@@ -413,9 +420,11 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed) {
         : `No connector or fake for ${id} in this worker: no fake its connectors attach implements it`,
     );
   }
-  // Only apply changes a declared resource; `resolveConfig` refuses any other workflow that uses such an operation.
-  if (isChangeOp(op, run.state.types) && run.workflow !== APPLY_WORKFLOW) {
-    throw new SanomaError("invalid_input", `${op.id} changes a declared resource, which only ${APPLY_WORKFLOW} does`, {
+  // Only apply changes a declared resource, and only change takes a change's steps; `resolveConfig`
+  // refuses any other workflow that uses such an operation.
+  const reserved = reservedFor(op, run.state.types);
+  if (reserved && run.workflow !== reserved.workflow) {
+    throw new SanomaError("invalid_input", `${op.id} ${reserved.does}, which only ${reserved.workflow} does`, {
       op: op.id,
       workflow: run.workflow,
     });

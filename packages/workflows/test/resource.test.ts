@@ -438,7 +438,10 @@ describe("describeConfig with resources", () => {
       },
     ]);
     expect(resourceTypes[0]?.schema).toMatchObject({ properties: { name: { type: "string" } } });
-    expect(ops.map((op) => op.id)).toEqual(["acme.repo.import", "acme.repo.read"]);
+    expect(ops.filter((op) => op.vendor !== "sanoma").map((op) => op.id)).toEqual([
+      "acme.repo.import",
+      "acme.repo.read",
+    ]);
     // The operations refer to the state's schema rather than repeating it.
     const read = ops.find((op) => op.id === "acme.repo.read");
     expect(read?.output).toMatchObject({ properties: { state: { $ref: "sanoma:resource-type/acme.repo" } } });

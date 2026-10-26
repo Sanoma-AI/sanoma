@@ -54,7 +54,13 @@ describe("the people types", () => {
     ]);
     const resolved = resolveConfig({ workflows: [], connectors: [] });
     expect(resolved.types.size).toBe(0);
-    expect([...resolved.ops.keys()].filter((id) => id.startsWith("sanoma."))).toEqual([]);
+    // The vendor's only operations are a change's, built in.
+    expect([...resolved.ops.keys()].filter((id) => id.startsWith("sanoma."))).toEqual([
+      "sanoma.change.open",
+      "sanoma.change.review",
+      "sanoma.change.merge",
+      "sanoma.change.close",
+    ]);
     expect([...resolved.workflows.keys()]).toEqual([]);
   });
 });

@@ -218,6 +218,11 @@ describe("a config's collections", () => {
     expect([...resolved.collections]).toEqual([["outbound", outbound]]);
     expect(resolved.ops.get("data.outbound.save")).toBe(outbound.save);
     expect([...resolved.drivers.keys()]).toEqual([
+      // The built-in placeholder for a change's operations, in every config.
+      "sanoma.change.open",
+      "sanoma.change.review",
+      "sanoma.change.merge",
+      "sanoma.change.close",
       "data.outbound.get",
       "data.outbound.list",
       "data.outbound.save",
@@ -228,7 +233,7 @@ describe("a config's collections", () => {
     // Not a vendor with credentials to set.
     expect(resolved.driversByVendor.size).toBe(0);
     const none = resolveConfig(base);
-    expect([none.collections.size, none.ops.size, none.dataStore]).toEqual([0, 0, undefined]);
+    expect([none.collections.size, none.ops.has("data.outbound.get"), none.dataStore]).toEqual([0, false, undefined]);
   });
 
   it("refuses a workflow using a collection the config does not declare", () => {

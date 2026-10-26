@@ -124,6 +124,10 @@ describe("startWorker, resolveConfig and describeConfig", () => {
       "resend.broadcast.create",
       "resend.broadcast.send",
       "resend.emails.send",
+      "sanoma.change.close",
+      "sanoma.change.merge",
+      "sanoma.change.open",
+      "sanoma.change.review",
     ]);
     expect([...resolved.drivers.keys()].toSorted()).toEqual([...resolved.ops.keys()].toSorted());
     expect(resolved.ledger).toBe(ledger);

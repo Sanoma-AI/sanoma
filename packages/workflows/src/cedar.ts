@@ -1,7 +1,14 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
-import type { CedarValueJson, DetailedError, EntityJson, Expr, PolicyJson } from "@cedar-policy/cedar-wasm/nodejs";
+import type {
+  CedarValueJson,
+  DetailedError,
+  EntityJson,
+  Expr,
+  PolicyJson,
+  RecordType,
+} from "@cedar-policy/cedar-wasm/nodejs";
 import { locator } from "./ast.ts";
 import type { ResolvedConfig } from "./config.ts";
 import type { ApprovalState, Approver, Principal } from "./define.ts";
@@ -21,7 +28,7 @@ import {
   VISITOR_DENIED,
 } from "./policy.ts";
 import { admit, readPeople } from "./resources.ts";
-import { cedarValue, cedarWasm, contextTypeOf, messageOf, NAMESPACE, schemaOf } from "./schema.ts";
+import { CHANGE, cedarValue, cedarWasm, contextTypeOf, messageOf, NAMESPACE, schemaOf } from "./schema.ts";
 import {
   ANONYMOUS,
   approverLabel,
@@ -287,17 +294,32 @@ export function cedarPolicy(
     return { refusing: refusing?.p, holds };
   };
 
-  /** What `request` is about: a workflow start on its `Workflow`, an operation on its target, in its collection for `data`. */
+  /** The entity type `action` acts on, as the schema has it. */
+  const appliesTo = (action: string) => schema[NAMESPACE]?.actions[action]?.appliesTo?.resourceTypes?.[0];
+
+  /** The attributes of a `Change`, as the schema has them. */
+  const changeShape = (schema[NAMESPACE]!.entityTypes[CHANGE] as { shape: RecordType<string> & { type: "Record" } })
+    .shape;
+
+  /**
+   * What `request` is about: a workflow start on its `Workflow`; an operation on its target, in its
+   * collection for `data`; a merge on its `Change`, with the attributes `entity` gives.
+   */
   const requestOf = (
     principal: Principal,
     action: string,
     target: string | undefined,
     context: (names: string[]) => Record<string, unknown>,
+    entity: (names: string[]) => Record<string, unknown>,
   ) => {
     const entities = directory.entities(principal);
     let resource;
     if (action.startsWith(WORKFLOW_ACTION)) {
       resource = uid("Workflow", action.slice(WORKFLOW_ACTION.length));
+    } else if (appliesTo(action) === CHANGE) {
+      resource = uid(CHANGE, target ?? action);
+      const attrs = cedarValue(entity(Object.keys(changeShape.attributes)), changeShape) ?? {};
+      entities.push({ uid: resource, attrs: attrs as Record<string, CedarValueJson>, parents: [] });
     } else {
       resource = uid("Target", target ?? action);
       const op = resolved.ops.get(action);
@@ -316,7 +338,8 @@ export function cedarPolicy(
 
   /**
    * May `actor` take `action` on `target` with `context`, given the run's `approvals` so far; at a
-   * start or a direct call (`atStart`), a visitor only where a company permit lets it in.
+   * start or a direct call (`atStart`), a visitor only where a company permit lets it in. `entity`,
+   * the attributes of what it acts on, when that has any (a `Change`).
    */
   const authorize = (
     actor: Principal,
@@ -325,13 +348,15 @@ export function cedarPolicy(
     context: Record<string, unknown>,
     approvals: PolicyCall["run"]["approvals"],
     atStart: boolean,
+    entity: Record<string, unknown> = {},
   ): Decision => {
     const principal = directory.principal(actor);
+    const attrs = () => entity;
     /** The answer of the policy set `id`. */
     const ask = (id: string) => {
       const check = (asked: Record<string, unknown>) =>
         cedar.statefulIsAuthorized({
-          ...requestOf(principal, action, target, () => asked),
+          ...requestOf(principal, action, target, () => asked, attrs),
           preparsedSchemaName: set,
           validateRequest: true,
           preparsedPolicySetId: id,
@@ -342,7 +367,7 @@ export function cedarPolicy(
       // action's groups given as entities: a policy reading a field the record lacks fails, so denies.
       const { before, ...rest } = context;
       if (answer.type === "success" || before === undefined || check(rest).type === "failure") return answer;
-      const request = requestOf(principal, action, target, () => context);
+      const request = requestOf(principal, action, target, () => context, attrs);
       const groups = schema[NAMESPACE]?.actions[action]?.memberOf ?? [];
       request.entities.push({ uid: request.action, attrs: {}, parents: groups.map((g) => uid("Action", g.id)) });
       return cedar.statefulIsAuthorized({ ...request, preparsedPolicySetId: id });
@@ -388,6 +413,7 @@ export function cedarPolicy(
       { input: call.input, ...(call.before !== undefined && { before: call.before }) },
       call.run.approvals,
       call.run.workflow === CALL_WORKFLOW,
+      call.entity,
     );
 
   const start = (actor: Principal, workflow: string, input: unknown, approvals: readonly ApprovalState[] = []) =>
@@ -398,7 +424,8 @@ export function cedarPolicy(
       const principal = directory.principal(actor);
       const partial = (asked: Record<string, string>) => {
         const answer = cedar.isAuthorizedPartial({
-          ...requestOf(principal, action.id, resource, unknown),
+          // A change's facts unknown too: a rule on them depends, one on any change holds.
+          ...requestOf(principal, action.id, resource, unknown, unknown),
           schema,
           validateRequest: false,
           policies: { staticPolicies: asked },

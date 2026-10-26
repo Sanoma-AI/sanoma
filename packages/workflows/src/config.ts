@@ -5,6 +5,7 @@ import { DBOS } from "@dbos-inc/dbos-sdk";
 import { type ApplyDeclared, applyWorkflow } from "./apply.ts";
 import { applySteps } from "./apply-steps.ts";
 import { callWorkflow } from "./call-workflow.ts";
+import { changeDriver, changeOps, reservedFor } from "./change.ts";
 import {
   type Collection,
   collectionsConnector,
@@ -34,7 +35,7 @@ import {
 } from "./op.ts";
 import { type CedarPolicySource, policyAt } from "./cedar.ts";
 import type { Policy } from "./policy.ts";
-import { isChangeOp, type Resource, resourceTypesOf, withoutWriteOnly } from "./resource.ts";
+import { type Resource, resourceTypesOf, withoutWriteOnly } from "./resource.ts";
 import { APPLY_WORKFLOW, BUILT_IN_WORKFLOWS, CALL_WORKFLOW, DATA_VENDOR } from "./shared.ts";
 import { sourceDriver, sourceOps } from "./source.ts";
 import type { Steps } from "./steps.ts";
@@ -117,8 +118,9 @@ export interface ResolvedConfig {
   /** The DBOS queue runs are started on: `sanoma:<appName>`. */
   queueName: string;
   /**
-   * The operations the connectors declare, by id, the built-in `sanoma.source.resolve` when one
-   * declares a host type, and the collections' (`data.<name>.<op>`).
+   * The operations the connectors declare, by id, the built-in `sanoma.change.*` (`changeOps`, in
+   * every config), `sanoma.source.resolve` when one declares a host type, and the collections'
+   * (`data.<name>.<op>`).
    */
   ops: Map<string, Op>;
   /** The drivers' functions, by operation id, each guarded by its driver's `env` (`indexDrivers`). */
@@ -275,8 +277,10 @@ export function resolveConfig(config: SanomaConfig, options: ResolveOptions = {}
   const databaseUrl = resolveDatabaseUrl(config);
   const declared = [...collections.values()];
   const dataStore = declared.length ? lazyPool(databaseUrl, "data") : undefined;
+  // Built-in, in every config: a change's operations, which the template's policy names (`sanoma.change.merge`).
   const ops = indexConnectors([
     ...config.connectors,
+    changeOps,
     ...(hosts ? [sourceOps] : []),
     ...(dataStore ? [collectionsConnector(declared)] : []),
   ]);
@@ -290,6 +294,7 @@ export function resolveConfig(config: SanomaConfig, options: ResolveOptions = {}
   const drivers = indexDrivers(
     [
       ...driversByVendor.values(),
+      changeDriver(),
       ...(hosts ? [sourceDriver] : []),
       ...(dataStore ? [collectionsDriver(declared, dataStore)] : []),
     ],
@@ -570,7 +575,8 @@ function guarded(vendor: string, env: DriverEnv, fn: DriverFn): DriverFn {
  * Every operation a workflow uses must be one the config's connectors declare, with a driver.
  * The workflow normally imports the same connector object; a copy is accepted only if it
  * declares the same effect and retry setting, and the worker's declaration is used either way.
- * None may change a declared resource (`isChangeOp`): only the built-in apply workflow does.
+ * None may use an operation a built-in workflow alone calls (`reservedFor`): a declared resource's
+ * change, which only apply makes, or a change's step, which only the change workflow takes.
  */
 function checkUses(
   wf: WorkflowDefinition<any, any>,
@@ -581,11 +587,10 @@ function checkUses(
   const problems: string[] = [];
   for (const op of (wf.uses as readonly Use[]).filter(isOp)) {
     const known = ops.get(op.id);
+    const reserved = known && reservedFor(known, types);
     if (!known) problems.push(`${op.id} is not declared by any connector in \`connectors\``);
-    else if (isChangeOp(known, types)) {
-      problems.push(
-        `${op.id} changes a declared resource, which only ${APPLY_WORKFLOW} does: change the data file instead`,
-      );
+    else if (reserved) {
+      problems.push(`${op.id} ${reserved.does}, which only ${reserved.workflow} does: ${reserved.instead} instead`);
     } else if (known !== op && (known.effect !== op.effect || known.idempotent !== op.idempotent)) {
       problems.push(
         `${op.id} is declared with effect "${op.effect}"${op.idempotent ? " (idempotent)" : ""}, ` +

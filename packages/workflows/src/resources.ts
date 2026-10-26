@@ -112,7 +112,7 @@ export interface DeclaredPeople {
 }
 
 /** A file that imports the runtime's constructors, `sanoma` (by any local name): the files `readPeople` reads. */
-const DECLARES_PEOPLE = /\{[^}]*\bsanoma\b[^}]*\}\s*from\s*["'](?:sanoma|@sanoma-ai\/workflows)\/resources["']/;
+export const DECLARES_PEOPLE = /\{[^}]*\bsanoma\b[^}]*\}\s*from\s*["'](?:sanoma|@sanoma-ai\/workflows)\/resources["']/;
 /** The last read of the people under each root, by what its data files were then (`filesStamp`). */
 const peopleRead = new Map<string, { stamp: string; read: DeclaredPeople }>();
 

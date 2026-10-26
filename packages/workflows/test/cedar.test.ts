@@ -7,6 +7,7 @@ import { useTestApp } from "@sanoma-ai/testing/harness";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { decideCall } from "../src/call.ts";
+import { type ChangeFacts, changeOps, touchesOf } from "../src/change.ts";
 import { sanoma } from "../src/constructors.ts";
 import { collection } from "../src/data.ts";
 import type { ApprovalState, Principal } from "../src/define.ts";
@@ -833,5 +834,126 @@ when { context.input.amont > 5 };
     } finally {
       warn.mockRestore();
     }
+  });
+});
+
+const facts = (over: Partial<ChangeFacts> = {}): ChangeFacts => ({
+  touches: touchesOf(["resources/finance/cards.ts"]),
+  strandedRuns: 0,
+  stranded: [],
+  checksOk: true,
+  rules: false,
+  ...over,
+});
+const approvedMerge = (approver: ApprovalState["approver"], by: string): ApprovalState => ({
+  ...approved(approver, by),
+  covers: ["sanoma.change.merge"],
+});
+
+describe("a change's merge, on its Sanoma::Change", () => {
+  // The design's ownership rule, a rule on stranded runs, and the template's: every change waits for admin.
+  const files = [
+    {
+      file: "policies/ownership.cedar",
+      text: `@hold("finance")
+@title("Finance reviews changes to its resources")
+forbid (principal, action == Sanoma::Action::"sanoma.change.merge", resource is Sanoma::Change)
+when { resource.touches.contains("resources/finance/") }
+unless { principal in Sanoma::Group::"finance" };
+
+@id("stranded")
+@hold("sales")
+forbid (principal, action == Sanoma::Action::"sanoma.change.merge", resource is Sanoma::Change)
+when { resource.strandedRuns > 0 };
+`,
+    },
+  ];
+  const template = {
+    file: "policies/changes.cedar",
+    text: readFileSync(join(import.meta.dirname, "../../sanoma/template/policies/changes.cedar"), "utf8"),
+  };
+  const withAdmin = [...people, sanoma.group({ name: "admin", members: [cy!] })];
+  const { policies, problems } = loadPolicies(files);
+  const changes = cedarPolicy(resolved, policies, withAdmin);
+  const merge = (actor: string, f: ChangeFacts, approvals: ApprovalState[] = [], on = changes) =>
+    decideCall(
+      on,
+      changeOps.change.merge,
+      { id: "c1", number: 1, head: "abc", title: "Cards", facts: f },
+      { id: actor },
+      { id: "r1", workflow: "change", approvals },
+    );
+
+  it("is an entity of the schema with the facts as its attributes, which the merge acts on", () => {
+    expect(text).toContain(
+      "entity Change = {\n    checksOk: Bool,\n    rules: Bool,\n    stranded: Set<String>,\n    strandedRuns: Long,\n    touches: Set<String>\n  };",
+    );
+    expect(text).toMatch(
+      /action "sanoma\.change\.merge" in \[Action::"effect:write"\] appliesTo \{\n\s+principal: \[Principal\],\n\s+resource: \[Change\]/,
+    );
+    expect(text).toMatch(
+      /action "sanoma\.change\.open" in \[Action::"effect:write"\] appliesTo \{\n\s+principal: \[Principal\],\n\s+resource: \[Target\]/,
+    );
+    expect([
+      problems,
+      validatePolicies(resolved, [...policies, ...loadPolicies([template]).policies], withAdmin),
+    ]).toEqual([[], []]);
+  });
+
+  it("holds a merge touching resources/finance/ for finance, but not finance's own, and lifts it once finance approves", () => {
+    expect(merge("bo", facts())).toEqual({
+      kind: "approve",
+      approver: { group: "finance" },
+      title: "Finance reviews changes to its resources",
+      reasons: ["policies/ownership.cedar#1"],
+      policyVersion: changes.version,
+    });
+    expect(merge("ada", facts())).toMatchObject({ kind: "allow" });
+    expect(merge("bo", facts(), [approvedMerge({ group: "finance" }, "ada")])).toMatchObject({ kind: "allow" });
+    // An approval of another operation lifts nothing.
+    expect(merge("bo", facts(), [approved({ group: "finance" }, "ada")])).toMatchObject({ kind: "approve" });
+    expect(merge("bo", facts({ touches: touchesOf(["resources/marketing/site.ts"]) }))).toMatchObject({
+      kind: "allow",
+    });
+  });
+
+  it("holds a merge that strands a waiting run", () => {
+    expect(merge("ada", facts({ strandedRuns: 1, stranded: ["run-1"] }))).toMatchObject({
+      kind: "approve",
+      approver: { group: "sales" },
+      reasons: ["stranded"],
+    });
+  });
+
+  it("previews the template's rule as a hold for admin, and a rule on the facts as depending on them", () => {
+    // Finance's own merge is not finance's rule: only the stranded runs' is left.
+    expect(changes.preview([ask("bo", "sanoma.change.merge"), ask("ada", "sanoma.change.merge")])).toEqual([
+      {
+        answer: "depends",
+        rule: {
+          id: "policies/ownership.cedar#1",
+          file: "policies/ownership.cedar",
+          title: "Finance reviews changes to its resources",
+        },
+      },
+      {
+        answer: "depends",
+        rule: { id: "stranded", file: "policies/ownership.cedar" },
+      },
+    ]);
+    const held = cedarPolicy(resolved, loadPolicies([template]).policies, withAdmin);
+    expect(held.preview([ask("bo", "sanoma.change.merge"), ask("bo", "sanoma.change.open")])).toEqual([
+      {
+        answer: "hold",
+        rule: { id: "changes-wait-for-admin", file: "policies/changes.cedar", title: "Every change waits for admin" },
+        approver: { group: "admin" },
+      },
+      { answer: "allow" },
+    ]);
+    expect(merge("bo", facts({ touches: [] }), [], held)).toMatchObject({
+      kind: "approve",
+      approver: { group: "admin" },
+      reasons: ["changes-wait-for-admin"],
+    });
   });
 });
