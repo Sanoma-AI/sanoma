@@ -1,7 +1,6 @@
 import { BrowserIcon } from "@phosphor-icons/react/dist/csr/Browser";
 import { GlobeIcon } from "@phosphor-icons/react/dist/csr/Globe";
-import { DynamicIcon } from "lucide-react/dynamic";
-import type { IconName } from "lucide-react/dynamic";
+import { DynamicIcon, type IconName } from "lucide-react/dynamic";
 
 /** A site's default icon by its kind: a globe for a public site, a window for one in the app. */
 const PublicIcon = () => <GlobeIcon aria-hidden="true" />;

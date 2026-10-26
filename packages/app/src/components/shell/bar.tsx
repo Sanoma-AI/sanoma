@@ -54,11 +54,14 @@ const selectBar = (config: ConfigDescription) => ({
   public: new Set(config.sites.filter((site) => site.public).map((site) => site.name)),
 });
 
+/** A tile of the bar: its link, label and icon. */
+type Tile = { to: string; label: string; icon: ReactNode };
+
 /** A section's tile. */
-const section = ({ icon: Icon, ...rest }: Section) => ({ ...rest, icon: <Icon aria-hidden="true" /> });
+const section = ({ icon: Icon, ...rest }: Section): Tile => ({ ...rest, icon: <Icon aria-hidden="true" /> });
 
 /** A site's tile: to its first page (its home, when it has one), lit there and on the pages under it. */
-const siteTile = ({ title, icon, pages }: Site, isPublic: boolean) => ({
+const siteTile = ({ title, icon, pages }: Site, isPublic: boolean): Tile => ({
   to: pages[0]!.to,
   label: title,
   icon: <SiteIcon icon={icon} public={isPublic} />,
@@ -70,7 +73,7 @@ const siteTile = ({ title, icon, pages }: Site, isPublic: boolean) => ({
  * left out); then Setup. Data shows with collections, or with sites, its page leading to theirs;
  * Permissions with a policy.
  */
-function useGroups(): { to: string; label: string; icon: ReactNode }[][] {
+function useGroups(): Tile[][] {
   const { data: has } = useSuspenseQuery({ ...configQuery(), select: selectBar });
   const sites = useSites();
   const shown = { data: has.data || sites.length > 0, policy: has.policy };

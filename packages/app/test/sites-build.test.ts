@@ -152,19 +152,19 @@ function linkTag(html: string, text: string) {
   return start < 0 ? undefined : html.slice(start, html.indexOf(">", start) + 1);
 }
 
+/** The bar's sections: its `<nav>`'s contents. */
+const barOf = (html: string) => html.match(/<nav aria-label="Sections"[^>]*>([\s\S]*?)<\/nav>/)?.[1] ?? "";
+
 /** The bar's items, in its groups: each group's links, `[href, label]`, in order. */
 const barGroups = (html: string) =>
-  (html.match(/<nav aria-label="Sections"[^>]*>([\s\S]*?)<\/nav>/)?.[1] ?? "")
+  barOf(html)
     .split("</ul>")
     .map((group) => [...group.matchAll(/<a [^>]*href="([^"]+)"[^>]*>(?:(?!<\/a>)[\s\S])*>([^<>]+)<\/a>/g)])
     .map((links) => links.map(([, href, label]) => [href, label]))
     .filter((links) => links.length > 0);
 
 /** The opening tag of the bar's link to `to`. */
-const tile = (html: string, to: string) =>
-  html
-    .match(/<nav aria-label="Sections"[^>]*>([\s\S]*?)<\/nav>/)?.[1]
-    ?.match(new RegExp(`<a [^>]*href="${to}"[^>]*>`))?.[0];
+const tile = (html: string, to: string) => barOf(html).match(new RegExp(`<a [^>]*href="${to}"[^>]*>`))?.[0];
 
 /** The page's canonical URL. */
 const canonical = (html: string) => /<link rel="canonical" href="([^"]+)"/.exec(html)?.[1];
@@ -421,7 +421,7 @@ describe("a company's app with its sites", () => {
     );
     expect(hello).toMatch(/<td[^>]*><span[^>]*>One<\/span><\/td>/);
     // No tile in the bar for this page: Data's header leads here.
-    expect(html).not.toMatch(/<nav aria-label="Sections"(?:(?!<\/nav>)[\s\S])*href="\/sites"/);
+    expect(tile(html, "/sites")).toBeUndefined();
     const data = (await (await fetch(new URL("/data", app.url))).text()).replaceAll("<!-- -->", "");
     expect(linkTag(data, ">Sites</a>")).toContain('href="/sites"');
   });
