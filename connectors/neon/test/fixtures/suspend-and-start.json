@@ -1,0 +1,88 @@
+[
+  {
+    "method": "POST",
+    "path": "/api/v2/projects/spring-example-302709/endpoints/ep-silent-smoke-806639/suspend",
+    "status": 200,
+    "body": {
+      "endpoint": {
+        "host": "ep-silent-smoke-806639.us-east-1.aws.neon.tech",
+        "id": "ep-silent-smoke-806639",
+        "project_id": "spring-example-302709",
+        "branch_id": "br-wispy-meadow-118737",
+        "autoscaling_limit_min_cu": 0.25,
+        "autoscaling_limit_max_cu": 0.25,
+        "region_id": "aws-us-east-1",
+        "type": "read_write",
+        "current_state": "active",
+        "settings": {},
+        "pooler_enabled": false,
+        "pooler_mode": "transaction",
+        "disabled": false,
+        "passwordless_access": true,
+        "creation_source": "console",
+        "created_at": "2026-10-26T12:00:00Z",
+        "updated_at": "2026-10-26T12:00:00Z",
+        "proxy_host": "us-east-1.aws.neon.tech",
+        "suspend_timeout_seconds": 0,
+        "provisioner": "k8s-neonvm",
+        "pending_state": "idle"
+      },
+      "operations": [
+        {
+          "id": "a07f8772-1877-4da9-a939-3a3ae62d1d8d",
+          "project_id": "spring-example-302709",
+          "action": "suspend_compute",
+          "status": "running",
+          "failures_count": 0,
+          "created_at": "2026-10-26T12:00:00Z",
+          "updated_at": "2026-10-26T12:00:00Z",
+          "total_duration_ms": 0,
+          "endpoint_id": "ep-silent-smoke-806639"
+        }
+      ]
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/api/v2/projects/spring-example-302709/endpoints/ep-silent-smoke-806639/start",
+    "status": 200,
+    "body": {
+      "endpoint": {
+        "host": "ep-silent-smoke-806639.us-east-1.aws.neon.tech",
+        "id": "ep-silent-smoke-806639",
+        "project_id": "spring-example-302709",
+        "branch_id": "br-wispy-meadow-118737",
+        "autoscaling_limit_min_cu": 0.25,
+        "autoscaling_limit_max_cu": 0.25,
+        "region_id": "aws-us-east-1",
+        "type": "read_write",
+        "current_state": "idle",
+        "settings": {},
+        "pooler_enabled": false,
+        "pooler_mode": "transaction",
+        "disabled": false,
+        "passwordless_access": true,
+        "creation_source": "console",
+        "created_at": "2026-10-26T12:00:00Z",
+        "updated_at": "2026-10-26T12:00:00Z",
+        "proxy_host": "us-east-1.aws.neon.tech",
+        "suspend_timeout_seconds": 0,
+        "provisioner": "k8s-neonvm",
+        "pending_state": "active"
+      },
+      "operations": [
+        {
+          "id": "a07f8772-1877-4da9-a939-3a3ae62d1d8d",
+          "project_id": "spring-example-302709",
+          "action": "start_compute",
+          "status": "running",
+          "failures_count": 0,
+          "created_at": "2026-10-26T12:00:00Z",
+          "updated_at": "2026-10-26T12:00:00Z",
+          "total_duration_ms": 0,
+          "endpoint_id": "ep-silent-smoke-806639"
+        }
+      ]
+    }
+  }
+]

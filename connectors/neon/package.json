@@ -1,0 +1,83 @@
+{
+  "name": "@sanoma-ai/connector-neon",
+  "version": "0.1.0",
+  "description": "Neon serverless Postgres for Sanoma: a project as the company's database, which pauses and branches",
+  "keywords": [
+    "connector",
+    "database",
+    "neon",
+    "postgres",
+    "resources",
+    "sanoma",
+    "sanoma-connector",
+    "scale-to-zero"
+  ],
+  "homepage": "https://github.com/Sanoma-AI/sanoma/tree/main/connectors/neon#readme",
+  "bugs": "https://github.com/Sanoma-AI/sanoma/issues",
+  "license": "FSL-1.1-ALv2",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Sanoma-AI/sanoma.git",
+    "directory": "connectors/neon"
+  },
+  "files": [
+    "dist",
+    "features",
+    "logo.svg",
+    "logo-dark.svg",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./resources": {
+      "types": "./dist/resources.d.ts",
+      "default": "./dist/resources.js"
+    },
+    "./driver": {
+      "types": "./dist/driver.d.ts",
+      "default": "./dist/driver.js"
+    },
+    "./fake": {
+      "types": "./dist/fake.d.ts",
+      "default": "./dist/fake.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist",
+    "prepack": "pnpm run clean && pnpm run build",
+    "watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput"
+  },
+  "dependencies": {
+    "@neondatabase/api-client": "2.7.3"
+  },
+  "devDependencies": {
+    "@sanoma-ai/testing": "workspace:*",
+    "@sanoma-ai/workflows": "workspace:*",
+    "msw": "^3.0.2",
+    "zod": "^4.6.5"
+  },
+  "peerDependencies": {
+    "@sanoma-ai/workflows": "workspace:^",
+    "zod": "^4"
+  },
+  "engines": {
+    "node": ">=26"
+  },
+  "sanoma": {
+    "title": "Neon",
+    "logo": "logo.svg",
+    "logoDark": "logo-dark.svg"
+  }
+}
