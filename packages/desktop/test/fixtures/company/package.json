@@ -1,0 +1,8 @@
+{
+  "name": "fixture-company",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "sanoma": "link:./fake-sanoma"
+  }
+}
