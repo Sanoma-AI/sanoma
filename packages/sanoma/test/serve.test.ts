@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { UsageError } from "../src/config.ts";
-import { appOptions, parseDomains } from "../src/serve.ts";
+import { appOptions, parseDomains, wakeRoute } from "../src/serve.ts";
 
 /** Sets these variables for the test, and unsets the other launcher variables appOptions reads. */
 function environment(values: Record<string, string>) {
@@ -118,5 +118,49 @@ describe("appOptions", () => {
     environment({});
     expect(await appOptions(stored)).toEqual({ host: undefined });
     expect(asked).toHaveLength(2);
+  });
+});
+
+type OnWake = (generation: number) => void;
+
+/** `GET /wake<query>`, through `wakeRoute`. */
+const wake = (query: string, onWake?: OnWake, log = vi.fn<(line: string) => void>()) =>
+  wakeRoute({ onWake, log }).handle(new Request(`http://127.0.0.1:3000/wake${query}`));
+
+describe("wakeRoute", () => {
+  it("answers GET /wake 204, never cached, and hands the generation to onWake, a stale one too", async () => {
+    const onWake = vi.fn<OnWake>();
+    expect(wakeRoute({ log: vi.fn<(line: string) => void>() })).toMatchObject({ method: "GET", path: "/wake" });
+    for (const generation of [7, 0, 3]) {
+      const res = await wake(`?generation=${generation}`, onWake);
+      expect(res.status).toBe(204);
+      expect(res.headers.get("cache-control")).toBe("no-store");
+    }
+    expect(onWake.mock.calls).toEqual([[7], [0], [3]]);
+    expect((await wake("?generation=1")).status).toBe(204);
+  });
+
+  it("answers 400, calling nothing, for a generation that is not a non-negative integer", async () => {
+    const onWake = vi.fn<OnWake>();
+    for (const query of ["", "?generation=", "?generation=-1", "?generation=1.5", "?generation=x", "?generation=1e3"]) {
+      const res = await wake(query, onWake);
+      expect(res.status, query).toBe(400);
+      expect(res.headers.get("cache-control")).toBe("no-store");
+    }
+    expect((await wake(`?generation=${"9".repeat(20)}`, onWake)).status).toBe(400);
+    expect(onWake).not.toHaveBeenCalled();
+  });
+
+  it("logs an onWake that throws, and still answers 204", async () => {
+    const log = vi.fn<(line: string) => void>();
+    const res = await wake(
+      "?generation=2",
+      () => {
+        throw new Error("no worker");
+      },
+      log,
+    );
+    expect(res.status).toBe(204);
+    expect(log).toHaveBeenCalledWith("a wake of generation 2 failed: no worker");
   });
 });

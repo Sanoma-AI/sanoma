@@ -50,6 +50,10 @@
     "./scenarios": {
       "types": "./dist/scenarios.d.ts",
       "default": "./dist/scenarios.js"
+    },
+    "./wakeup": {
+      "types": "./dist/wakeup.d.ts",
+      "default": "./dist/wakeup.js"
     }
   },
   "scripts": {

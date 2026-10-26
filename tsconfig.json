@@ -25,6 +25,7 @@
       "@sanoma-ai/testing/host": ["./packages/testing/src/host.ts"],
       "@sanoma-ai/testing/replay": ["./packages/testing/src/replay.ts"],
       "@sanoma-ai/testing/scenarios": ["./packages/testing/src/scenarios.ts"],
+      "@sanoma-ai/testing/wakeup": ["./packages/testing/src/wakeup.ts"],
       "@sanoma-ai/app": ["./packages/app/src/index.ts"],
       "@sanoma-ai/app/build": ["./packages/app/src/build.ts"],
       "@sanoma-ai/bridge": ["./packages/bridge/src/index.ts"],
