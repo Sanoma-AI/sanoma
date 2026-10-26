@@ -347,6 +347,10 @@ describe("the chat", () => {
       { [ACTOR_HEADER]: "ada" },
     );
     expect(again.status).toBe(400);
+    // A person's message is text: no file to fetch, no tool's result made up.
+    const file = { type: "file", mediaType: "image/png", url: "http://169.254.169.254/latest" };
+    const fetching = await post({ id, message: { ...userMessage("Look"), parts: [file] } }, { [ACTOR_HEADER]: "ada" });
+    expect(fetching.status).toBe(400);
     expect(await testApp.client.chats.load(id)).toEqual(stored);
     const nobody = await post({ id: `other-${RUN}`, message: userMessage("Hi") });
     expect(nobody.status).toBe(400);

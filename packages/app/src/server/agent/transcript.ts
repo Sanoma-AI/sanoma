@@ -9,7 +9,7 @@ import {
   type UIMessageChunk,
 } from "ai";
 import type { AppContext } from "../../context.ts";
-import { type ChatMessage, heldRunOf } from "../../lib/chat.ts";
+import { type ChatMessage, heldRunOf, unfinished } from "../../lib/chat.ts";
 
 // What every engine shares of a turn: what it is given, and its reply's stream answered to the
 // browser and written to the chat's transcript as it goes (`chatResponse`); and what a turn a
@@ -77,44 +77,49 @@ const shapeOf = (message: UIMessage): string =>
   );
 
 /**
- * The transcript with what a turn left unfinished settled, as its last message has it after a
- * restart cut the turn short: a held lookup's result once its run has ended (still held while it
- * waits), a tool call with no result failed as interrupted, text and reasoning done.
+ * The transcript with what a turn left unfinished settled: in any reply, a held lookup's result
+ * once its run has ended (still held while it waits); in the last, as a restart cut it short, a
+ * tool call with no result failed as interrupted, and text and reasoning done. A message it leaves
+ * as it was is the same object, so the caller writes back only those it changed.
  */
 export async function settle(app: AppContext, messages: UIMessage[]): Promise<UIMessage[]> {
-  const last = messages.at(-1);
-  if (last?.role !== "assistant") return messages;
-  const parts = await Promise.all(
-    last.parts.map(async (part): Promise<UIMessage["parts"][number]> => {
-      if (part.type === "text" || part.type === "reasoning") return { ...part, state: "done" };
-      if (!isToolUIPart(part)) return part;
-      if (part.state === "output-available" && part.preliminary) {
-        const runId = heldRunOf(part.output);
-        const run = runId === undefined ? undefined : await app.client.run(runId);
-        // Still waiting: held as it was, for the next turn to settle once the run has ended.
-        if (run && !isEnded(run.status)) return part;
-        if (!run) return { ...part, preliminary: false };
-        try {
-          return { ...part, preliminary: false, output: { output: await app.client.result(run.runId) } };
-        } catch (err) {
-          return {
-            ...part,
-            state: "output-error",
-            errorText: String((err as Error).message ?? err),
-            output: undefined,
-          };
-        }
-      }
-      if (part.state === "input-streaming" || part.state === "input-available") {
-        return {
-          ...part,
-          state: "output-error",
-          input: part.input ?? {},
-          errorText: `${getToolName(part)} was interrupted: the server restarted before it finished`,
-        };
-      }
-      return part;
+  return Promise.all(
+    messages.map(async (message, i) => {
+      if (message.role !== "assistant" || !message.parts.some(unfinished)) return message;
+      const last = i === messages.length - 1;
+      const parts = await Promise.all(message.parts.map((part) => settlePart(app, part, last)));
+      return parts.every((part, j) => part === message.parts[j]) ? message : { ...message, parts };
     }),
   );
-  return [...messages.slice(0, -1), { ...last, parts }];
+}
+
+async function settlePart(
+  app: AppContext,
+  part: UIMessage["parts"][number],
+  last: boolean,
+): Promise<UIMessage["parts"][number]> {
+  if (!unfinished(part)) return part;
+  if (isToolUIPart(part) && part.state === "output-available") {
+    const runId = heldRunOf(part.output);
+    const run = runId === undefined ? undefined : await app.client.run(runId);
+    // Still waiting: held as it was, for a later turn to settle once the run has ended.
+    if (run && !isEnded(run.status)) return part;
+    if (!run) return { ...part, preliminary: false };
+    try {
+      return { ...part, preliminary: false, output: { output: await app.client.result(run.runId) } };
+    } catch (err) {
+      const { preliminary: _, ...rest } = part;
+      return { ...rest, state: "output-error", errorText: String((err as Error).message ?? err), output: undefined };
+    }
+  }
+  // Only the last reply can have been cut short; an earlier one's own turn settled it.
+  if (!last) return part;
+  if (!isToolUIPart(part)) return { ...part, state: "done" } as typeof part;
+  if (part.state !== "input-streaming" && part.state !== "input-available") return part;
+  return {
+    ...part,
+    state: "output-error",
+    input: part.input ?? {},
+    errorText: `${getToolName(part)} was interrupted: the server restarted before it finished`,
+  };
 }

@@ -42,21 +42,24 @@ export async function postChat(request: Request, context: ActorContext & { site?
     const { chats } = app.client;
     let chat = await chats.get(body.id);
     if (chat && chat.person !== principal.id) throw new ApiError(404, { error: `No chat ${body.id}` });
-    const engine = ENGINES[chat?.engine ?? body.engine];
-    if (!engine) throw invalid(`No engine ${body.engine}: the engines are ${Object.keys(ENGINES).join(", ")}`);
+    const named = chat?.engine ?? body.engine;
+    const engine = ENGINES[named];
+    if (!engine) throw invalid(`No engine ${named}: the engines are ${Object.keys(ENGINES).join(", ")}`);
     // The new message is checked before a turn under way is stopped for it: a new one, by the
     // person. The transcript, written by this app, is not validated again.
     const checked = await safeValidateUIMessages<ChatMessage>({ messages: [body.message] });
     if (!checked.success) throw invalid(`Not a chat message: ${checked.error.message}`);
     const message = checked.data[0]!;
-    if (message.role !== "user") throw invalid("A chat takes the person's messages only");
-    const stored = chat ? await chats.load(chat.id) : [];
-    if (stored.some((m) => m.id === message.id)) throw invalid(`The chat has a message ${message.id} already`);
+    if (message.role !== "user" || !message.parts.every((part) => part.type === "text")) {
+      throw invalid("A chat takes the person's messages, as text");
+    }
+    const load = async () => (chat ? await chats.load(chat.id) : []);
+    if ((await load()).some((m) => m.id === message.id)) throw invalid(`The chat has a message ${message.id} already`);
     stops.get(body.id)?.abort();
-    // A turn still writing its reply: read the transcript again once it has.
-    const writing = written(body.id);
-    if (writing) await writing;
-    const history = (await settle(app, writing ? await chats.load(body.id) : stored)) as ChatMessage[];
+    await written(body.id);
+    // Read once the turn stopped has written its reply.
+    const stored = await load();
+    const history = (await settle(app, stored)) as ChatMessage[];
     const messages = [...history, message];
     if (!chat) {
       const title = textOf(message, " ").trim().slice(0, 80) || "A chat";
@@ -64,8 +67,8 @@ export async function postChat(request: Request, context: ActorContext & { site?
       await chats.open(opened);
       chat = { ...opened, createdAt: Date.now() };
     }
-    // The last message as settled, and the new one.
-    await chats.upsert(chat.id, [...history.slice(-1), message]);
+    // The messages settle changed, and the new one.
+    await chats.upsert(chat.id, [...history.filter((m, i) => m !== stored[i]), message]);
     const stop = new AbortController();
     stops.set(chat.id, stop);
     const response = await engine({ chat, messages, principal, app, signal: stop.signal });

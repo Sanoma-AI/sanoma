@@ -67,8 +67,19 @@ export function loopTools(turn: ToolsTurn) {
       opening = undefined;
       throw err;
     }));
-  /** Where reads look: the draft once the chat has one, else the live checkout, at its commit either way. */
-  const readRoot = async () => (chat.draftId ? (await draft()).root : source().root);
+  /** Whether the chat's draft is open: one this turn opened, or one still there from an earlier turn. */
+  let drafted: Promise<boolean> | undefined;
+  const hasDraft = () =>
+    opening
+      ? Promise.resolve(true)
+      : (drafted ??= chat.draftId
+          ? (source().drafts?.() ?? Promise.resolve([])).then((ids) => ids.includes(chat.id))
+          : Promise.resolve(false));
+  /**
+   * Where reads look: the chat's open draft, else the live checkout (a merged and deleted draft is
+   * not opened again by a read), at its commit either way.
+   */
+  const readRoot = async () => ((await hasDraft()) ? (await draft()).root : source().root);
   const showCard = async () => {
     const { branch } = await draft();
     turn.showDraft({ branch, ...(await source().diff(chat.id)), ...(checked && { checks: checked }) });
@@ -170,7 +181,7 @@ export function loopTools(turn: ToolsTurn) {
         "Run `sanoma check` on your draft: types, the workflow lint, the data files and the scenarios. Run it after your edits and fix what it finds.",
       inputSchema: z.object({}),
       execute: async () => {
-        if (!chat.draftId) throw new Error("Nothing is drafted yet: edit a file first");
+        if (!(await hasDraft())) throw new Error("Nothing is drafted yet: edit a file first");
         checked = await checks((await draft()).root, app.resolved.databaseUrl);
         await showCard();
         return checked;
@@ -190,7 +201,7 @@ export function loopTools(turn: ToolsTurn) {
         }
         let output: unknown;
         try {
-          // The chat's and the tool call's ids are the call's, so asking again finds the same held run.
+          // One run per tool call: the chat's and the call's ids, so the run is the chat's alone.
           output = await app.client.call(op, input, { actor: principal, id: `${chat.id}:${toolCallId}` });
         } catch (err) {
           const runId = heldRun(err);

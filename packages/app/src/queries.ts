@@ -265,7 +265,8 @@ export const chatsQuery = () => queryOptions({ queryKey: CHATS_KEY, queryFn: () 
 
 /** A chat with its transcript as stored, read when the chat column opens it. */
 export const chatQuery = (id: string) =>
-  queryOptions({ queryKey: [...CHATS_KEY, id], queryFn: () => getChat({ data: { id } }) });
+  // useChat holds the transcript once open: read again when the chat is opened, not on focus.
+  queryOptions({ queryKey: [...CHATS_KEY, id], queryFn: () => getChat({ data: { id } }), refetchOnWindowFocus: false });
 
 /**
  * Who the server says is asking. A login lasts the page's life; the header name is kept in the
