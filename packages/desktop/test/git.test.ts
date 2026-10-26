@@ -7,7 +7,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, test } from "vitest";
 import type { Company } from "../src/companies.ts";
 import {
+  addressProblem,
   cloneCompany,
+  cloneSession,
   cloneTarget,
   createSession,
   defaultParent,
@@ -18,6 +20,7 @@ import {
 import {
   AUTH_MESSAGE,
   gitEnv,
+  gitFailure,
   identityOf,
   identityProblem,
   isAuthFailure,
@@ -25,6 +28,7 @@ import {
   type Run,
   setIdentity,
 } from "../src/git.ts";
+import type { SessionOptions } from "../src/session.ts";
 import { fastForward, LOCAL_CHANGES, prepareUpdate } from "../src/update-company.ts";
 
 const fixture = (name: string) => fileURLToPath(new URL(`./fixtures/${name}`, import.meta.url));
@@ -121,10 +125,12 @@ describe("git's prerequisites", () => {
     expect(readFileSync(own.GIT_CONFIG_GLOBAL!, "utf8")).toContain("name = Ada Lovelace");
   });
 
-  test("git never prompts, and finds Homebrew's git from the Finder's short PATH", () => {
-    const finder = gitEnv({ PATH: "/usr/bin:/bin" });
-    expect(finder).toMatchObject({ GIT_TERMINAL_PROMPT: "0", GIT_SSH_COMMAND: "ssh -o BatchMode=yes" });
-    expect(finder.PATH).toBe("/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin");
+  test("git never prompts", () => {
+    expect(gitEnv({ PATH: "/usr/bin:/bin" })).toEqual({
+      PATH: "/usr/bin:/bin",
+      GIT_TERMINAL_PROMPT: "0",
+      GIT_SSH_COMMAND: "ssh -o BatchMode=yes",
+    });
     expect(gitEnv({ GIT_SSH_COMMAND: "ssh -i key" }).GIT_SSH_COMMAND).toBe("ssh -i key");
   });
 
@@ -136,6 +142,16 @@ describe("git's prerequisites", () => {
     ["fatal: unable to access 'https://github.com/a/b/': Could not resolve host: github.com", false],
   ])("%s: a failed sign-in %s", (stderr, auth) => {
     expect(isAuthFailure(stderr)).toBe(auth);
+  });
+
+  test("a failure is one line: the sign-in's, or git's last, without a password", () => {
+    expect(gitFailure("remote: Repository not found.", "git could not clone x")).toBe(AUTH_MESSAGE);
+    expect(
+      gitFailure(
+        "Cloning into 'x'...\nfatal: unable to access 'https://u:tok@example.com/x/': Could not resolve host",
+        "git could not clone x",
+      ),
+    ).toBe("git could not clone x: unable to access 'https://***@example.com/x/': Could not resolve host");
   });
 });
 
@@ -181,7 +197,31 @@ describe("a new company", () => {
     await session.stop();
     await expect(session.ended).resolves.toMatchObject({ code: 143 });
   });
+
+  test("opens a folder that holds files as any other, as Start again after an init that got that far does", async () => {
+    const repo = temp();
+    writeFileSync(join(repo, "package.json"), "{}");
+    const progress: string[] = [];
+    const session = createSession(options(repo, await freePort(), { FAKE_PNPM_EXIT: "1" }, progress));
+    await expect(session.ended).resolves.toMatchObject({ error: expect.stringContaining("pnpm install failed") });
+    expect(progress).toEqual(["Installing packages"]);
+  });
 });
+
+/** A session's options for `repo`, on the fake pnpm and Node, with `extra` in its environment. */
+function options(repo: string, port: number, extra: NodeJS.ProcessEnv, progress: string[] = []): SessionOptions {
+  return {
+    repo,
+    port,
+    node: process.execPath,
+    pnpm: fixture("pnpm.mjs"),
+    bin: join(temp(), "bin"),
+    env: { ...env, FAKE_MODE: "event", ...extra },
+    pollMs: 50,
+    onLine: () => {},
+    onProgress: (step) => progress.push(step),
+  };
+}
 
 describe("a clone", () => {
   test.each([
@@ -198,7 +238,9 @@ describe("a clone", () => {
     const parent = temp();
     expect(isCloneUrl("acme/company")).toBe(false);
     expect(isCloneUrl("--upload-pack=touch /tmp/x")).toBe(false);
-    expect(cloneTarget("acme", parent)).toMatchObject({ problem: expect.stringMatching(/not a repository's address/) });
+    expect(addressProblem("acme")).toMatch(/not a repository's address/);
+    expect(addressProblem("https://github.com/acme/..")).toMatch(/cannot tell what to name/);
+    expect(addressProblem("https://github.com/acme/company")).toBeUndefined();
     expect(cloneTarget("https://github.com/acme/company", parent)).toEqual({ dir: join(parent, "company") });
     mkdirSync(join(parent, "company"));
     expect(cloneTarget("https://github.com/acme/company", parent)).toMatchObject({
@@ -216,6 +258,29 @@ describe("a clone", () => {
 
     const missing = cloneCompany(`${url}-missing`, join(temp(), "x"), { env, onLine: () => {} });
     await expect(missing.done).resolves.toMatch(/^git could not clone .*acme\.git-missing: /);
+  });
+
+  test("as a session: clones, then installs and starts the company; a failed clone ends it with git's line", async () => {
+    // A company whose installed sanoma, committed for the test, is the fake launcher.
+    const { bare, seed } = origin();
+    mkdirSync(join(seed, "node_modules", "sanoma"), { recursive: true });
+    writeFileSync(join(seed, "node_modules", "sanoma", "cli.mjs"), readFileSync(fixture("launcher.mjs")));
+    writeFileSync(join(seed, "node_modules", "sanoma", "package.json"), JSON.stringify({ bin: { sanoma: "cli.mjs" } }));
+    git(seed, "add", "--force", "node_modules");
+    git(seed, "commit", "--quiet", "-m", "the fake launcher");
+    git(seed, "push", "--quiet", "origin", "main");
+    const url = pathToFileURL(bare).href;
+    const progress: string[] = [];
+    const repo = join(temp(), "acme");
+    const port = await freePort();
+    const session = cloneSession(url)(options(repo, port, {}, progress));
+    await expect(session.ready).resolves.toBe(`http://localhost:${port}`);
+    expect(progress).toEqual(["Cloning", "Installing packages", "Starting the company"]);
+    await session.stop();
+
+    const failed = cloneSession(`${url}-missing`)(options(join(temp(), "x"), await freePort(), {}));
+    await expect(failed.ready).rejects.toThrow(/^git could not clone /);
+    await expect(failed.ended).resolves.toMatchObject({ error: expect.stringMatching(/^git could not clone /) });
   });
 
   test("a failed sign-in says so in one line", async () => {

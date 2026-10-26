@@ -26,8 +26,7 @@ import {
 } from "./companies.ts";
 import {
   addressProblem,
-  type Cloning,
-  cloneCompany,
+  cloneSession,
   cloneTarget,
   createSession,
   defaultParent,
@@ -44,10 +43,10 @@ import {
 } from "./git.ts";
 import { USAGE_EXIT } from "./launcher.ts";
 import { linkTarget } from "./links.ts";
-import { type CompanyLog, hidePasswords, openLog } from "./logs.ts";
+import { type CompanyLog, openLog } from "./logs.ts";
 import { folderArgument, isCompanyFolder, syncedFolderWarning } from "./places.ts";
 import { runtimeOf } from "./runtime.ts";
-import { type Session, startSession } from "./session.ts";
+import { type Session, type SessionOptions, startSession } from "./session.ts";
 import { fastForward, prepareUpdate } from "./update-company.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -125,7 +124,7 @@ function showStart() {
   startWindow.on("closed", () => {
     startWindow = undefined;
     // Its form goes with it: New Company or Clone, waiting on it, stops.
-    answerIdentity?.(undefined);
+    answer?.(undefined);
   });
   void startWindow.loadFile(join(here, "..", "start", "index.html"));
 }
@@ -147,13 +146,26 @@ async function openCompany(dir: string) {
   await begin(path);
 }
 
-/** Starts the company unless it runs or is starting; a failure to start says why in a dialog. */
-async function begin(path: string) {
+/** How a session begins (`startSession`, `createSession`, `cloneSession`). */
+type Begin = (options: SessionOptions) => Session;
+
+/**
+ * How each company's next start begins while it is not the usual one: a new company's init or a
+ * clone, until it is ready, so Start again after a failure tries that again.
+ */
+const beginnings = new Map<string, Begin>();
+
+/**
+ * Starts the company unless it runs or is starting, with `how` (else as it began last, until that
+ * was ready, else `startSession`); a failure to start says why in the start window.
+ */
+async function begin(path: string, how?: Begin) {
   if (running.has(path) || opening.has(path) || quitting) return;
-  const started = start(path).catch((err: unknown) => {
+  if (how) beginnings.set(path, how);
+  const started = start(path, beginnings.get(path) ?? startSession).catch((err: unknown) => {
     // Before its session (no Node staged, an unreadable folder): the start window says why.
     shownLog = undefined;
-    const message = `The company could not start: ${err instanceof Error ? err.message : String(err)}`;
+    const message = `The company could not start: ${messageOf(err)}`;
     setState({ company: { path, name: companyName(path) }, phase: "failed", message, progress: [], log: [] });
     showStart();
   });
@@ -172,7 +184,7 @@ async function claimPort(path: string) {
   return { company, moved };
 }
 
-async function start(path: string) {
+async function start(path: string, how: Begin) {
   /** A Restart, whose window stays: closing it meanwhile cancels the start. */
   const restarting = windows.has(path);
   const claimed = claiming.then(() => claimPort(path));
@@ -193,9 +205,7 @@ async function start(path: string) {
   };
   if (!windows.has(path)) show({ phase: "starting", progress: [], warnings, message: undefined });
 
-  // An empty folder is a new company (`newCompany`): the launcher's init starts it, then serves it.
-  const empty = !isCompanyFolder(path) && !newCompanyProblem(path);
-  const session = (empty ? createSession : startSession)({
+  const session = how({
     repo: path,
     port,
     ...runtimeOf({ packaged: app.isPackaged, appPath: app.getAppPath(), resourcesPath: process.resourcesPath }),
@@ -215,6 +225,7 @@ async function start(path: string) {
   session.ready.then(
     (url) => {
       if (entry.stopping) return;
+      beginnings.delete(path);
       log.write("shell", `ready at ${url}`);
       showCompany(path, company.name, url);
       if (shown()) setState({ phase: "idle" });
@@ -325,50 +336,60 @@ async function chooseFolder() {
 
 const say = (message: string, detail?: string) => void dialog.showMessageBox({ type: "info", message, detail });
 
+const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
 /** Where the folder dialogs of New Company and Clone Company start. */
 const parentFolder = () => defaultParent(readCompanies(companiesFile()), homedir());
 
-/** Answers the identity form the start window shows (`askIdentity`), once. */
-let answerIdentity: ((identity: Identity | undefined) => void) | undefined;
+/** Answers the form the start window shows (`ask`), once: with what was typed, or undefined (Cancel, closed). */
+let answer: ((value: unknown) => void) | undefined;
 
-/** Asks the start window who commits; undefined when the person cancels. */
-function askIdentity(known: Identity): Promise<Identity | undefined> {
-  answerIdentity?.(undefined);
+/** Shows `form` in the start window; resolves with the answer, or undefined when the person cancels. */
+function ask(form: NonNullable<StartState["ask"]>): Promise<unknown> {
+  answer?.(undefined);
   return new Promise((resolve) => {
-    answerIdentity = (identity) => {
-      answerIdentity = undefined;
+    answer = (value) => {
+      answer = undefined;
       setState({ ask: undefined });
-      resolve(identity);
+      resolve(value);
     };
-    setState({ ask: { kind: "identity", ...known } });
+    setState({ ask: form });
     showStart();
   });
 }
 
-/** The identity form's answer: checked, then set globally (the form says so), or the form again with why not. */
-async function answered(answer: Identity | undefined) {
-  if (!answerIdentity || state.ask?.kind !== "identity") return;
-  if (!answer) return answerIdentity(undefined);
-  const problem = identityProblem(answer);
-  if (problem) return setState({ ask: { ...state.ask, ...answer, problem } });
-  // A second Save, or Cancel, while git saves it: only this answer's flow goes on, once.
-  const done = answerIdentity;
-  answerIdentity = undefined;
-  try {
-    await setIdentity(answer, gitEnv(process.env));
-    done(answer);
-  } catch (err) {
-    answerIdentity = done;
-    setState({ ask: { ...state.ask, ...answer, problem: `git could not save it: ${(err as Error).message}` } });
+const isIdentity = (value: unknown): value is Identity =>
+  typeof (value as Identity)?.name === "string" && typeof (value as Identity)?.email === "string";
+
+/**
+ * Whether git has someone to commit as from `cwd`: `user.name` and `user.email`, asked for once in
+ * the start window when either is missing and set globally (the form says so), as a new company's
+ * first commit, and the app's later ones, need them.
+ */
+async function identityReady(cwd: string): Promise<boolean> {
+  const env = gitEnv(process.env);
+  let typed = await identityOf(cwd, env);
+  let problem: string | undefined;
+  while (!typed.name || !typed.email || problem) {
+    const value = await ask({ kind: "identity", ...typed, problem });
+    if (!isIdentity(value)) return false;
+    typed = value;
+    problem =
+      identityProblem(value) ??
+      (await setIdentity(value, env).then(
+        () => undefined,
+        (err: unknown) => `git could not save it: ${messageOf(err)}`,
+      ));
+    if (!problem) return true;
   }
+  return true;
 }
 
 /**
- * Whether git can run: on macOS, Apple's command line tools must be there (a dialog offers their
- * installer and to check again); with `identity`, git's user name and email too (asked for once,
- * in the start window, when either is missing), as a new company's first commit needs them.
+ * Whether git can run: on macOS, Apple's command line tools must be there; when they are not, a
+ * dialog offers their installer and to check again.
  */
-async function gitReady(cwd: string, { identity }: { identity: boolean }): Promise<boolean> {
+async function gitReady(): Promise<boolean> {
   while (await needsCommandLineTools()) {
     const { response } = await dialog.showMessageBox({
       type: "info",
@@ -381,9 +402,7 @@ async function gitReady(cwd: string, { identity }: { identity: boolean }): Promi
     if (response === 2) return false;
     if (response === 0) await installCommandLineTools();
   }
-  if (!identity) return true;
-  const known = await identityOf(cwd, gitEnv(process.env));
-  return Boolean((known.name && known.email) || (await askIdentity(known)));
+  return true;
 }
 
 /** File → New Company…: an empty folder (made in the dialog, or chosen), then the launcher's init there. */
@@ -410,26 +429,25 @@ async function newCompany(): Promise<void> {
     });
     if (response === 0) return newCompany();
   }
-  if (!(await gitReady(dir, { identity: true }))) return;
-  await begin(realpathSync(dir));
+  if (!(await gitReady()) || !(await identityReady(dir))) return;
+  await begin(realpathSync(dir), createSession);
 }
 
-/** File → Clone Company…: the start window asks for the repository's address (`clone` takes it). */
-function askClone() {
-  answerIdentity?.(undefined);
-  setState({ ask: { kind: "clone" } });
-  showStart();
-}
-
-/** The clones running: Quit stops them. */
-const clones = new Set<Cloning>();
-
-/** Clones `url` into a folder the person chooses, with the system git, then opens it. */
-async function clone(url: string): Promise<void> {
-  url = url.trim();
-  const problem = addressProblem(url);
-  if (problem) return setState({ ask: { kind: "clone", url, problem } });
-  setState({ ask: undefined });
+/**
+ * File → Clone Company…: the repository's address (the start window asks), the folder to clone
+ * into (a dialog), then the clone, as the company's session (`cloneSession`), so the start window
+ * shows it and a failure, and Start again clones again.
+ */
+async function cloneCompanyFlow(): Promise<void> {
+  let url = "";
+  let problem: string | undefined;
+  do {
+    const value = await ask({ kind: "clone", url, problem });
+    if (typeof value !== "string") return;
+    url = value.trim();
+    problem = addressProblem(url);
+  } while (problem);
+  if (!(await gitReady())) return;
   const { canceled, filePaths } = await dialog.showOpenDialog({
     title: "Choose the folder to clone the company into",
     buttonLabel: "Clone Here",
@@ -440,50 +458,11 @@ async function clone(url: string): Promise<void> {
   const parent = realpathSync(filePaths[0]);
   const target = cloneTarget(url, parent);
   if ("problem" in target) return say("Sanoma cannot clone it there", target.problem);
-  if (!(await gitReady(parent, { identity: true }))) return;
-  const { dir } = target;
-  if (opening.has(dir) || quitting) return;
-
-  const log = openLog(app.getPath("logs"), slugOf(dir));
-  shownLog = log;
-  const warnings = [syncedFolderWarning(dir, homedir()) ?? []].flat();
-  setState({
-    company: { path: dir, name: companyName(dir) },
-    phase: "starting",
-    message: hidePasswords(`Cloning ${url} into ${dir}`),
-    progress: ["Cloning"],
-    warnings,
-  });
-  showStart();
-  log.write("shell", `git clone ${url} ${dir}`);
-  const cloning = cloneCompany(url, dir, {
-    env: gitEnv(process.env),
-    onLine(stream, line) {
-      log.write(stream, line);
-      setState({});
-    },
-  });
-  // Quit stops it and waits for it; a second Clone of the same folder does nothing meanwhile.
-  clones.add(cloning);
-  opening.set(
-    dir,
-    cloning.done.then(() => {}),
-  );
-  const failed = await cloning.done;
-  clones.delete(cloning);
-  opening.delete(dir);
-  log.write("shell", failed ?? "cloned");
-  log.close();
-  if (shownLog === log) {
-    shownLog = undefined;
-    setState({ company: undefined, phase: "idle", progress: [], log: [], message: undefined, warnings: [] });
-  }
-  if (quitting) return;
-  if (failed) return say("The company could not be cloned", failed);
-  await openCompany(dir);
+  if (!(await identityReady(parent))) return;
+  await begin(target.dir, cloneSession(url));
 }
 
-/** The companies Get Updates runs for now: a second click waits for nothing, it does nothing. */
+/** The companies Get Updates runs for now: a second click meanwhile does nothing. */
 const updating = new Set<string>();
 
 /**
@@ -495,16 +474,13 @@ async function getUpdates(path: string): Promise<void> {
   if (updating.has(path)) return;
   updating.add(path);
   try {
-    if (!(await gitReady(path, { identity: false }))) return;
+    if (!(await gitReady())) return;
     const env = gitEnv(process.env);
     const plan = await prepareUpdate(path, env);
     if ("refused" in plan) return say(plan.refused);
     if (!plan.behind) return say("This company is up to date with GitHub");
     await stop(path);
-    const failed = await fastForward(path, env).then(
-      () => undefined,
-      (err: unknown) => (err as Error).message,
-    );
+    const failed = await fastForward(path, env).then(() => undefined, messageOf);
     await begin(path);
     say(
       failed
@@ -512,7 +488,7 @@ async function getUpdates(path: string): Promise<void> {
         : `Got ${plan.behind} new ${plan.behind === 1 ? "change" : "changes"} from GitHub; the company is starting again`,
     );
   } catch (err) {
-    say("Sanoma could not get updates", (err as Error).message);
+    say("Sanoma could not get updates", messageOf(err));
   } finally {
     updating.delete(path);
   }
@@ -534,7 +510,7 @@ function buildMenu() {
       submenu: [
         { label: "New Company…", accelerator: "CmdOrCtrl+N", click: () => void newCompany() },
         { label: "Open Company…", accelerator: "CmdOrCtrl+O", click: () => void chooseFolder() },
-        { label: "Clone Company…", click: askClone },
+        { label: "Clone Company…", click: () => void cloneCompanyFlow() },
         {
           label: "Open Recent",
           submenu: recent.length
@@ -606,13 +582,9 @@ if (!app.requestSingleInstanceLock()) {
   ipcMain.handle("start:open", (_event, path: unknown) => typeof path === "string" && openCompany(path));
   ipcMain.handle("start:again", () => state.company && begin(state.company.path));
   ipcMain.handle("start:create", () => newCompany());
-  ipcMain.handle("start:ask-clone", () => askClone());
-  ipcMain.handle("start:clone", (_event, url: unknown) => typeof url === "string" && clone(url));
-  ipcMain.handle("start:identity", (_event, answer: unknown) => {
-    const { name, email } = (answer ?? {}) as Partial<Identity>;
-    return answered(typeof name === "string" && typeof email === "string" ? { name, email } : undefined);
-  });
-  ipcMain.handle("start:cancel", () => (answerIdentity ? answerIdentity(undefined) : setState({ ask: undefined })));
+  ipcMain.handle("start:clone", () => cloneCompanyFlow());
+  ipcMain.handle("start:answer", (_event, value: unknown) => answer?.(value));
+  ipcMain.handle("start:cancel", () => answer?.(undefined));
 
   // Quit waits for each company: those still opening, then every session, stopped.
   let stopped = false;
@@ -621,7 +593,6 @@ if (!app.requestSingleInstanceLock()) {
     event.preventDefault();
     if (quitting) return;
     quitting = true;
-    for (const cloning of clones) void cloning.stop();
     void Promise.all(opening.values())
       .then(() => Promise.all([...running.keys()].map(stop)))
       .finally(() => {

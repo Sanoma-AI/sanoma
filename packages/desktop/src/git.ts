@@ -1,6 +1,5 @@
 import { execFile } from "node:child_process";
-import { delimiter } from "node:path";
-import { EXTRA_PATH } from "./launcher.ts";
+import { hidePasswords } from "./logs.ts";
 
 /** Runs a command in `cwd`; resolves its stdout, trimmed, and rejects with what it printed on stderr. */
 export type Run = (command: string, args: readonly string[], options?: RunOptions) => Promise<string>;
@@ -20,20 +19,15 @@ export const run: Run = (command, args, { cwd, env } = {}) =>
   );
 
 /**
- * The environment the shell runs git in: this process's, with Homebrew's folders after the
- * system's PATH (an app started from the Finder gets a short one), and nothing that waits for a
- * person: no password prompt (`GIT_TERMINAL_PROMPT=0`; the OS credential helper still answers)
- * and ssh in batch mode, unless the person set their own ssh command.
+ * The environment the shell runs git in: this process's, and nothing that waits for a person: no
+ * password prompt (`GIT_TERMINAL_PROMPT=0`; the OS credential helper still answers) and ssh in
+ * batch mode, unless the person set their own ssh command.
  */
-export function gitEnv(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const path = [...(base.PATH ?? "").split(delimiter), ...EXTRA_PATH].filter(Boolean);
-  return {
-    ...base,
-    PATH: [...new Set(path)].join(delimiter),
-    GIT_TERMINAL_PROMPT: "0",
-    GIT_SSH_COMMAND: base.GIT_SSH_COMMAND ?? "ssh -o BatchMode=yes",
-  };
-}
+export const gitEnv = (base: NodeJS.ProcessEnv): NodeJS.ProcessEnv => ({
+  ...base,
+  GIT_TERMINAL_PROMPT: "0",
+  GIT_SSH_COMMAND: base.GIT_SSH_COMMAND ?? "ssh -o BatchMode=yes",
+});
 
 /**
  * Whether this computer lacks Apple's command line tools, which git on macOS is part of: there,
@@ -91,3 +85,13 @@ export const isAuthFailure = (stderr: string) => AUTH_FAILED.test(stderr);
 /** The one line a failed sign-in gets: it points at GitHub sign-in (#286 D6). */
 export const AUTH_MESSAGE =
   "GitHub did not let this computer in (a private repository, or a wrong address): Sign in with GitHub comes in a later version of Sanoma.";
+
+/**
+ * A failed git command's one line: `AUTH_MESSAGE` for a sign-in it did not get, else `what` and
+ * the last line git printed, without its `fatal: ` and without any password in a URL.
+ */
+export function gitFailure(stderr: string, what: string): string {
+  if (isAuthFailure(stderr)) return AUTH_MESSAGE;
+  const last = stderr.split("\n").findLast((line) => line.trim()) ?? "";
+  return hidePasswords(`${what}: ${last.replace(/^fatal: /, "")}`);
+}

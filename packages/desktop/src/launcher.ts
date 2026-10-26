@@ -126,7 +126,7 @@ export function binOf(dir: string, name: string): string {
 }
 
 /** Where a computer keeps what the shell may need beyond its own shims: git, gh, Docker. */
-export const EXTRA_PATH = ["/opt/homebrew/bin", "/usr/local/bin"];
+const EXTRA_PATH = ["/opt/homebrew/bin", "/usr/local/bin"];
 
 /**
  * The launcher's environment: this process's, with `SANOMA_EVENTS=1` (JSON event lines), the

@@ -1,4 +1,4 @@
-import { AUTH_MESSAGE, isAuthFailure, type Run, run } from "./git.ts";
+import { gitFailure, type Run, run } from "./git.ts";
 
 /** The one line for local work Get Updates would put at risk: changes not committed, or commits not pushed. */
 export const LOCAL_CHANGES = "This computer has changes that are not on GitHub yet; nothing was changed";
@@ -29,11 +29,10 @@ export async function prepareUpdate(repo: string, env: NodeJS.ProcessEnv, exec: 
     await git("fetch", "--quiet", "--no-tags", "origin", "+refs/heads/main:refs/remotes/origin/main");
   } catch (err) {
     const said = err instanceof Error ? err.message : String(err);
-    if (isAuthFailure(said)) return { refused: AUTH_MESSAGE };
     if (/couldn't find remote ref/i.test(said)) {
       return { refused: "The company's repository on GitHub has no main branch; nothing was changed" };
     }
-    return { refused: `Sanoma could not get updates: ${said.split("\n")[0]!.replace(/^fatal: /, "")}` };
+    return { refused: gitFailure(said, "Sanoma could not get updates") };
   }
   const [ahead, behind] = (await git("rev-list", "--left-right", "--count", "HEAD...origin/main"))
     .split(/\s+/)

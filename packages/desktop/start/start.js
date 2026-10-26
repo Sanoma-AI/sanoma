@@ -48,11 +48,7 @@ function render(state) {
     $("company-name").textContent = company.name;
     const message = $("company-message");
     message.textContent =
-      state.phase === "failed"
-        ? state.message
-        : state.phase === "starting"
-          ? (state.message ?? `Starting ${company.path}`)
-          : "Running";
+      state.phase === "failed" ? state.message : state.phase === "starting" ? `Starting ${company.path}` : "Running";
     message.className = state.phase === "failed" ? "failed" : "muted";
     $("progress").replaceChildren(...state.progress.map((step) => item(`${step}…`)));
     $("progress").hidden = !state.progress.length || state.phase !== "starting";
@@ -80,14 +76,14 @@ function render(state) {
 $("choose").addEventListener("click", () => bridge.choose());
 $("again").addEventListener("click", () => bridge.again());
 $("create").addEventListener("click", () => bridge.create());
-$("clone").addEventListener("click", () => bridge.askClone());
+$("clone").addEventListener("click", () => bridge.clone());
 $("clone-form").addEventListener("submit", (event) => {
   event.preventDefault();
-  bridge.clone($("clone-url").value);
+  bridge.answer($("clone-url").value);
 });
 $("identity-form").addEventListener("submit", (event) => {
   event.preventDefault();
-  bridge.identity({ name: $("identity-name").value, email: $("identity-email").value });
+  bridge.answer({ name: $("identity-name").value, email: $("identity-email").value });
 });
 for (const button of document.querySelectorAll("[data-cancel]"))
   button.addEventListener("click", () => bridge.cancel());
