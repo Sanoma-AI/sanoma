@@ -77,23 +77,25 @@ describe("scale to zero, the stack on fakes", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  /** The run of the schedule's first tick after `after`, once it finished, and the time it was for. */
-  const tickAfter = async (after: Date) => {
+  /** Whether the schedule's tick for `at` ran and finished. */
+  const tickRan = async (at: string) => {
     for (const run of await client.runs({ workflow: "wakeup-check-tick", limit: 10 })) {
       const records = await client.ledger(run.runId);
       const [started] = records;
-      const at = started?.type === "run.started" ? started.scheduledFor : undefined;
-      if (at && Date.parse(at) > after.getTime() && records.some((r) => r.type === "run.finished"))
-        return { runId: run.runId, at: new Date(at) };
+      if (
+        started?.type === "run.started" &&
+        started.scheduledFor === at &&
+        records.some((r) => r.type === "run.finished")
+      )
+        return true;
     }
-    return undefined;
+    return false;
   };
 
   it(
     "stops the worker idle and the process, and the wakes continue the sleep and run the tick",
     { timeout: 240_000 },
     async () => {
-      const begun = new Date();
       // Asleep first, so the worker has a deadline once apply has made the wakeup.
       const sleeping = await client.start("host-check-sleep", { seconds: 5 }, { startedBy: { id: "stack" } });
       await waitFor(async () => (await client.ledger(sleeping)).some((r) => r.type === "sleep.started"));
@@ -122,7 +124,20 @@ describe("scale to zero, the stack on fakes", () => {
       // The wake starts the process; the sleep ends; the worker stops again; a wake starts a fresh
       // one in the process; the tick that fell while it was stopped runs. In either order.
       expect(await client.result(sleeping, 120_000)).toEqual({ slept: 5 });
-      const tick = (await waitFor(() => tickAfter(begun), Boolean, 150_000))!;
+      // A registration for a tick, made as the worker stopped after the process stopped, whose
+      // wake arrived, and the tick it was for ran.
+      const tick = (await waitFor(
+        async () => {
+          for (const r of wakeup.registered()) {
+            if (r.generation <= registered!.generation || !host.wakes().some((w) => w.generation === r.generation))
+              continue;
+            if (await tickRan(r.at)) return r;
+          }
+          return undefined;
+        },
+        Boolean,
+        150_000,
+      ))!;
       expect((await client.ledger(sleeping)).map((r) => r.type)).toEqual(
         expect.arrayContaining(["sleep.started", "run.finished"]),
       );
@@ -132,8 +147,10 @@ describe("scale to zero, the stack on fakes", () => {
       expect(wakes.find((w) => w.generation === registered!.generation)?.at.getTime()).toBeGreaterThanOrEqual(
         stopped.getTime(),
       );
-      // One came at the tick's time, or after, and the tick ran on a worker it started.
-      expect(wakes.some((w) => w.at >= tick.at)).toBe(true);
+      // The tick's wake came at its time, or after.
+      expect(wakes.find((w) => w.generation === tick.generation)!.at.getTime()).toBeGreaterThanOrEqual(
+        Date.parse(tick.at),
+      );
       expect(wakes.length).toBeGreaterThanOrEqual(2);
       expect(wakeup.registered().length).toBeGreaterThanOrEqual(2);
     },

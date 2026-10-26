@@ -16,7 +16,7 @@ export interface Supervisor {
   readonly stopped: boolean;
   /**
    * Starts a fresh worker when the last one stopped itself, for a write that needs one (a run's
-   * start, an approval's decision); a no-op while one starts or runs. Resolves once it runs, or
+   * start, an approval's decision); while one starts or runs, it is heard (below). Resolves once it runs, or
    * once its failure to start is logged: the next call tries again. Never rejects.
    */
   resume(): Promise<void>;
@@ -42,7 +42,7 @@ export interface SupervisorOptions extends Omit<WorkerOptions, "onStopped"> {
 /**
  * Starts a worker on `config` that stops itself when idle with a wakeup declared (`onStopped`
  * in `WorkerOptions`), and a fresh one each time `resume` or `wake` asks after it did. Throws
- * when the first does not start. A write heard while a worker runs may land after its last check
+ * when the first does not start. A write heard while a worker starts or runs may land after its last check
  * for being idle, so a worker that stops itself after one is started again at once: it stops
  * again on its own when nothing came of it.
  */
@@ -51,7 +51,7 @@ export async function superviseWorker(config: SanomaConfig, options: SupervisorO
   let worker: Worker | undefined;
   let starting: Promise<void> | undefined;
   let closed = false;
-  // A write while the worker runs, since it started.
+  // A write while the worker starts or runs, since it began starting.
   let heard = false;
   let databaseUrl: string | undefined;
 
@@ -79,7 +79,11 @@ export async function superviseWorker(config: SanomaConfig, options: SupervisorO
         heard = true;
         return Promise.resolve();
       }
-      return (starting ??= launch()
+      if (starting) {
+        heard = true;
+        return starting;
+      }
+      return (starting = launch()
         .catch((err: unknown) => warn(`the worker could not start again: ${errorMessage(err)}`))
         .finally(() => {
           starting = undefined;

@@ -205,10 +205,11 @@ async function keep(
   ) => Promise<{ stop(): Promise<void>; url?: string; sites?: Record<string, string> }>,
 ): Promise<never> {
   let started: Awaited<ReturnType<typeof start>>;
-  // The signal path, once it is set up below.
+  // The signal path, once it is set up below; an exit asked before then is taken then.
   let exit: (() => void) | undefined;
+  let asked = false;
   try {
-    started = await start(config, resolved, () => exit?.());
+    started = await start(config, resolved, () => (exit ? exit() : void (asked = true)));
   } catch (err) {
     await postgres?.stop().catch(() => {});
     throw err;
@@ -225,6 +226,7 @@ async function keep(
   }
   // Postgres last, once the worker and the app have closed their connections.
   exit = onSignal(() => started.stop().finally(() => postgres?.stop()));
+  if (asked) exit();
   return new Promise(() => {});
 }
 
