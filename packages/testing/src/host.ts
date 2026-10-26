@@ -1,10 +1,11 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { createServer, request as forwardRequest, type ServerResponse } from "node:http";
+import { createServer, request as forwardRequest, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 import {
   defineConnector,
@@ -18,6 +19,7 @@ import {
   type PlanAction,
   type Resource,
   resolveSecrets,
+  wakeGeneration,
   type SanomaClient,
   type SanomaConfig,
   withSetup,
@@ -142,6 +144,9 @@ export async function checkHost(host: HostUnderTest): Promise<HostCheck[]> {
   if (!spec) throw new Error(`${type.vendor}.${type.type} does not meet the Host contract: it has no host`);
   const credential = randomBytes(18).toString("base64url");
   const results: HostCheck[] = [];
+  // The state the last apply returned: its URL is where the host answers now.
+  let applied: State = {};
+  const apply = async () => (applied = await host.apply());
   const check = async (name: string, run: () => Promise<void>) => {
     // A host that never answered fails the rest at once, rather than each after its timeout.
     if (results[0]?.ok === false) return void results.push({ name, ok: false, error: "the host did not answer" });
@@ -166,7 +171,7 @@ export async function checkHost(host: HostUnderTest): Promise<HostCheck[]> {
   // A value an earlier check left, under another key, would stop the host's worker from starting.
   await client.clearCredential(HOST_CHECK_CREDENTIAL, { by: startedBy.id });
   await check("the app answers on its port", async () => {
-    const outputs = spec.outputs(await host.apply());
+    const outputs = spec.outputs(await apply());
     if (!outputs.healthy) throw new Error("its state says it is not healthy");
     const res = await fetch(new URL("/healthz", outputs.url));
     if (!res.ok) throw new Error(`${outputs.url}/healthz answered ${res.status}`);
@@ -191,42 +196,36 @@ export async function checkHost(host: HostUnderTest): Promise<HostCheck[]> {
     const runId = await client.start("host-check-sleep", { seconds: 2 }, { startedBy });
     await waitFor(async () => (await client.ledger(runId)).some((r) => r.type === "sleep.started"), Boolean, timeoutMs);
     await host.stop();
-    await host.apply();
+    await apply();
     await finish(runId);
   });
   if (spec.capabilities.lifetime !== "long-lived") {
-    /** Stops the runtime, its URL kept (after a restart, apply's: the URL may have changed); returns how to wake it. */
-    /**
-     * The host's URL, applied again (the restart check replaced it, which may change it), and how
-     * to wake it: one request, as a wakeup sends it, whose generation 0 is older than any the
-     * worker registers.
-     */
-    const waker = async () => {
+    const suspend = async () => {
       if (!host.suspend) throw new Error(`a host that is ${spec.capabilities.lifetime} needs suspend to be checked`);
-      const { url } = spec.outputs(await host.apply());
-      return async () => {
-        const res = await fetch(new URL("/wake?generation=0", url));
-        if (res.status !== 204) throw new Error(`${url}/wake answered ${res.status}`);
-      };
+      await host.suspend();
+    };
+    // One request, as a wakeup sends it: generation 0 is older than any the worker registers.
+    const wake = async () => {
+      const { url } = spec.outputs(applied);
+      const res = await fetch(new URL("/wake?generation=0", url));
+      if (res.status !== 204) throw new Error(`${url}/wake answered ${res.status}`);
     };
     await check("a queued run drains after a stop and a wake", async () => {
-      const wake = await waker();
-      await host.suspend!();
+      await suspend();
       const runId = await client.start("host-check-drain", {}, { startedBy });
       await wake();
       await finish(runId);
     });
     await check("a sleep that ends while stopped continues after a wake", async () => {
-      const wake = await waker();
       const runId = await client.start("host-check-sleep", { seconds: 3 }, { startedBy });
       const sleep = await waitFor(
         async () => (await client.ledger(runId)).find((r) => r.type === "sleep.started"),
         Boolean,
         timeoutMs,
       );
-      await host.suspend!();
+      await suspend();
       const until = sleep?.type === "sleep.started" ? sleep.until : Date.now();
-      await new Promise((resolve) => setTimeout(resolve, Math.max(0, until - Date.now()) + 500));
+      await delay(Math.max(0, until - Date.now()) + 500);
       await wake();
       await finish(runId);
     });
@@ -238,7 +237,7 @@ export async function checkHost(host: HostUnderTest): Promise<HostCheck[]> {
     if (drifted.status !== "drifted" || field?.desired !== revision) {
       throw new Error(`after a commit, drift says ${drifted.status} ${JSON.stringify(drifted.fields)}`);
     }
-    await host.apply();
+    await apply();
     const cleared = await host.drift();
     if (cleared.status !== "clean")
       throw new Error(`after apply, drift says ${cleared.status} ${JSON.stringify(cleared.fields)}`);
@@ -395,6 +394,12 @@ const unreachable = (res: ServerResponse, err: unknown) => {
   res.writeHead(502, { "content-type": "text/plain; charset=utf-8" }).end(`${errorMessage(err)}\n`);
 };
 
+/** Listens on `port` (0: any free one) on this machine; returns its URL. */
+async function listen(server: Server, port: number): Promise<string> {
+  await new Promise<void>((done, fail) => server.once("error", fail).listen(port, "127.0.0.1", done));
+  return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+}
+
 /**
  * A proxy on `port` (0: any free one) in front of the runtime `begin` starts, started now: each
  * request starts it again when it is stopped (one start at a time) and is forwarded to it, and
@@ -403,16 +408,18 @@ const unreachable = (res: ServerResponse, err: unknown) => {
 async function proxy(begin: () => Promise<Running>, port: number, quietAfterMs?: number): Promise<Proxy> {
   let runtime: Promise<Running> | undefined;
   let stopping: Promise<void> = Promise.resolve();
-  let current: Running | undefined;
-  const past: Wake[] = [];
+  // Every runtime it started, for the wakes each answered.
+  const runs: Running[] = [];
   let open = 0;
   let quiet: NodeJS.Timeout | undefined;
-  let closed = false;
   const up = () =>
     (runtime ??= stopping
-      .then(() => (closed ? Promise.reject(new Error("the host is deleted")) : begin()))
+      .then(() => begin())
       .then(
-        (started) => (current = started),
+        (started) => {
+          runs.push(started);
+          return started;
+        },
         (err: unknown) => {
           runtime = undefined;
           throw err;
@@ -424,11 +431,7 @@ async function proxy(begin: () => Promise<Running>, port: number, quietAfterMs?:
     runtime = undefined;
     if (was) {
       stopping = was.then(
-        async (started) => {
-          past.push(...(started.wakes ?? []));
-          current = undefined;
-          await started.stop();
-        },
+        (started) => started.stop(),
         () => undefined,
       );
     }
@@ -462,7 +465,7 @@ async function proxy(begin: () => Promise<Running>, port: number, quietAfterMs?:
       (err: unknown) => unreachable(res, err),
     );
   });
-  await new Promise<void>((done, fail) => server.once("error", fail).listen(port, "127.0.0.1", done));
+  const url = await listen(server, port);
   try {
     await up();
   } catch (err) {
@@ -470,11 +473,10 @@ async function proxy(begin: () => Promise<Running>, port: number, quietAfterMs?:
     throw err;
   }
   rest();
-  const { port: bound } = server.address() as AddressInfo;
   return {
-    url: `http://127.0.0.1:${bound}`,
+    url,
     get wakes() {
-      return [...past, ...(current?.wakes ?? [])];
+      return runs.flatMap((started) => started.wakes ?? []);
     },
     suspend,
     async replace(next) {
@@ -484,7 +486,7 @@ async function proxy(begin: () => Promise<Running>, port: number, quietAfterMs?:
       rest();
     },
     async stop() {
-      closed = true;
+      begin = () => Promise.reject(new Error("the host is deleted"));
       await suspend();
       server.closeAllConnections();
       await new Promise<void>((done) => server.close(() => done()));
@@ -517,10 +519,7 @@ export function fakeHost(start: StartHost, { lifetime = "long-lived", quietAfter
       package: "@sanoma-ai/testing-host",
     },
   );
-  const hosts = new Map<
-    string,
-    { state: Omit<z.output<typeof fakeSchema>, "secrets">; running: Running; proxy?: Proxy }
-  >();
+  const hosts = new Map<string, { state: Omit<z.output<typeof fakeSchema>, "secrets">; running: Running | Proxy }>();
   const stateOf = (id: string) => hosts.get(id)?.state;
   const read = async ({ id }: { id: string }) => {
     const state = stateOf(id);
@@ -538,20 +537,18 @@ export function fakeHost(start: StartHost, { lifetime = "long-lived", quietAfter
       start({ port: lifetime === "long-lived" ? declared.port : 0, revision, secrets: declared.secrets ?? {} });
     const { secrets: _, ...kept } = declared;
     const was = hosts.get(declared.name);
-    let running: Running;
-    let behind: Proxy | undefined;
-    if (lifetime === "long-lived") {
-      await remove(declared.name);
-      running = await begin();
-    } else if (was?.proxy && was.state.port === declared.port) {
-      await was.proxy.replace(begin);
-      running = behind = was.proxy;
+    // A host that stops keeps its proxy, and so its URL, across a replace on the same port.
+    const reused = was && "replace" in was.running && was.state.port === declared.port ? was.running : undefined;
+    let running: Running | Proxy;
+    if (reused) {
+      running = reused;
+      await reused.replace(begin);
     } else {
       await remove(declared.name);
-      running = behind = await proxy(begin, declared.port, quietAfterMs);
+      running = lifetime === "long-lived" ? await begin() : await proxy(begin, declared.port, quietAfterMs);
     }
     const state = { ...kept, revision, url: running.url, running: true };
-    hosts.set(declared.name, { state, running, ...(behind && { proxy: behind }) });
+    hosts.set(declared.name, { state, running });
     return { id: declared.name, state };
   };
   const driver = defineDriver(ops, {
@@ -589,11 +586,11 @@ export function fakeHost(start: StartHost, { lifetime = "long-lived", quietAfter
      */
     async stop(name?: string) {
       if (lifetime === "long-lived") throw new Error("fakeHost: a long-lived host does not stop; delete it");
-      for (const host of named(name)) await host.proxy?.suspend();
+      for (const { running } of named(name)) if ("suspend" in running) await running.suspend();
     },
     /** Each `/wake` the runtimes of the host `name` (default: every one) answered, across its stops, in order. */
     wakes(name?: string): Wake[] {
-      return named(name).flatMap((host) => [...(host.running.wakes ?? [])]);
+      return named(name).flatMap(({ running }) => running.wakes ?? []);
     },
     /** Stops every host it started. */
     async close() {
@@ -612,25 +609,20 @@ export function inProcessHost(config: SanomaConfig, databaseUrl: string): StartH
     const worker = await startTestWorker(config, { databaseUrl, quiet: true });
     const wakes: Wake[] = [];
     const server = createServer((req, res) => {
-      const { pathname, searchParams } = new URL(req.url ?? "/", "http://host");
-      if (pathname === "/healthz") return void res.writeHead(200).end("ok\n");
-      if (pathname !== "/wake" || req.method !== "GET") return void res.writeHead(404).end();
-      // As `sanoma serve` reads it: digits only.
-      const given = searchParams.get("generation") ?? "";
-      const generation = /^\d+$/.test(given) ? Number(given) : Number.NaN;
-      if (!Number.isSafeInteger(generation)) return void res.writeHead(400).end();
+      const url = new URL(req.url ?? "/", "http://host");
+      if (url.pathname === "/healthz") return void res.writeHead(200).end("ok\n");
+      if (url.pathname !== "/wake" || req.method !== "GET") return void res.writeHead(404).end();
+      const generation = wakeGeneration(url);
+      if (generation === undefined) return void res.writeHead(400).end();
       wakes.push({ generation, at: new Date() });
       res.writeHead(204, { "cache-control": "no-store" }).end();
     });
-    await new Promise<void>((done, fail) => server.once("error", fail).listen(port, "127.0.0.1", done)).catch(
-      async (err: unknown) => {
-        await worker.stop();
-        throw err;
-      },
-    );
-    const { port: bound } = server.address() as AddressInfo;
+    const url = await listen(server, port).catch(async (err: unknown) => {
+      await worker.stop();
+      throw err;
+    });
     return {
-      url: `http://127.0.0.1:${bound}`,
+      url,
       wakes,
       async stop() {
         await new Promise<void>((done) => server.close(() => done()));

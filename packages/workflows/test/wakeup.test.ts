@@ -12,6 +12,7 @@ import {
   type SanomaConfig,
   startWorker,
   type WakeupSpec,
+  wakeGeneration,
 } from "../src/index.ts";
 import { rootWith } from "./harness.ts";
 
@@ -232,5 +233,23 @@ describe("startWorker", () => {
     expect(warn.mock.calls.filter(([line]) => String(line).includes("on a schedule"))).toEqual([
       ["sanoma: the workflow nightly is on a schedule, which the worker does not run yet: start it by hand"],
     ]);
+  });
+});
+
+describe("wakeGeneration", () => {
+  it("reads a /wake request's generation in digits alone, and nothing else", () => {
+    expect(wakeGeneration("http://h/wake?generation=0")).toBe(0);
+    expect(wakeGeneration(new URL("http://h/wake?generation=42"))).toBe(42);
+    for (const query of [
+      "",
+      "?generation=",
+      "?generation=-1",
+      "?generation=1.0",
+      "?generation=0x10",
+      "?generation=1e3",
+    ]) {
+      expect(wakeGeneration(`http://h/wake${query}`), query).toBeUndefined();
+    }
+    expect(wakeGeneration(`http://h/wake?generation=${"9".repeat(20)}`)).toBeUndefined();
   });
 });

@@ -11,6 +11,7 @@ import {
   SanomaClient,
   type SanomaConfig,
   startWorker,
+  wakeGeneration,
 } from "@sanoma-ai/workflows";
 import { describeConfig, readPeople, schemaOf, writeGenerated } from "@sanoma-ai/workflows/describe";
 import { domainsOf } from "@sanoma-ai/workflows/shared";
@@ -70,9 +71,8 @@ export function wakeRoute({ onWake, log }: Pick<ServeOptions, "onWake" | "log">)
     method: "GET",
     path: "/wake",
     async handle(request) {
-      const given = new URL(request.url).searchParams.get("generation") ?? "";
-      const generation = /^\d+$/.test(given) ? Number(given) : Number.NaN;
-      if (!Number.isSafeInteger(generation)) {
+      const generation = wakeGeneration(request.url);
+      if (generation === undefined) {
         return new Response("generation must be a non-negative integer\n", {
           status: 400,
           headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" },

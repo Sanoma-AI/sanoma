@@ -6,7 +6,6 @@ import {
   type PlanAction,
   DriverError,
   errorMessage,
-  isEnded,
   type Resource,
   type SanomaClient,
   type WakeupRegistration,
@@ -101,17 +100,13 @@ export async function checkWakeup(w: WakeupUnderTest): Promise<WakeupCheck[]> {
     await host.stop();
     const runId = await client.start("host-check-drain", {}, { startedBy });
     await arrived(begun, 2);
-    const run = await waitFor(
-      () => client.run(runId),
-      (r) => r !== undefined && isEnded(r.status),
-      timeoutMs,
-    );
-    if (run?.status !== "finished") throw new Error(`run ${runId} ended ${run?.status}: ${run?.error}`);
+    // Throws the run's error, or that it has not ended in time.
+    await client.result(runId, timeoutMs);
     // TODO(L1, #311): and fires a due schedule, once the worker runs workflows on a schedule.
   });
   await check("a replaced generation runs nothing", async (begun) => {
     await register(3, 2_000);
-    await register(4, 6_000);
+    await register(4, 4_000);
     // A late retry of the older registration: the newer one still stands.
     await register(3, 2_000);
     await arrived(begun, 4);
@@ -201,7 +196,7 @@ const MAX_DELAY_MS = 2 ** 31 - 1;
  * calling its operations directly.
  */
 export function fakeWakeup() {
-  const timers = new Map<string, { state: z.output<typeof timerSchema> }>();
+  const timers = new Map<string, z.output<typeof timerSchema>>();
   let armed: { registration: WakeupRegistration; url: string; timeout?: NodeJS.Timeout } | undefined;
   /** The newest generation registered: an older one, a late retry, changes nothing. */
   let newest = -1;
@@ -223,17 +218,17 @@ export function fakeWakeup() {
       (res) => res.ok,
       () => false,
     );
-    if (answered) {
-      if (armed === pending) armed = undefined;
-    } else if (armed === pending) later(pending, RETRY_MS);
+    if (armed !== pending) return;
+    if (answered) armed = undefined;
+    else later(pending, RETRY_MS);
   };
   const read = async ({ id }: { id: string }) => {
-    const timer = timers.get(id);
-    return timer ? { id, gone: false, state: timer.state } : { id, gone: true };
+    const state = timers.get(id);
+    return state ? { id, gone: false, state } : { id, gone: true };
   };
   const put = async ({ desired }: { desired: Record<string, unknown> }) => {
     const state = timerSchema.parse(desired);
-    timers.set(state.name, { state });
+    timers.set(state.name, state);
     return { id: state.name, state };
   };
   const types = defineDriver(timerTypes, {
@@ -244,7 +239,7 @@ export function fakeWakeup() {
         id,
         desired,
       }): Promise<{ action: PlanAction; planned?: Record<string, unknown>; unknown: string[]; replace: string[] }> => {
-        const state = id === undefined ? undefined : timers.get(id)?.state;
+        const state = id === undefined ? undefined : timers.get(id);
         if (!desired) return { action: state ? "delete" : "none", unknown: [], replace: [] };
         if (!state) return { action: "create", planned: desired, unknown: [], replace: [] };
         const action = desired.host === state.host ? "none" : "update";
@@ -271,7 +266,7 @@ export function fakeWakeup() {
         if (registration.generation < newest) return {};
         newest = registration.generation;
         disarm();
-        const pending = (armed = { registration, url: only.state.host });
+        const pending = (armed = { registration, url: only.host });
         void send(pending);
         return {};
       },
