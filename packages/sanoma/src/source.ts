@@ -182,11 +182,7 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
         if (await branched(branch)) await git(["branch", "--quiet", "-D", branch]);
       });
     },
-    async check(id) {
-      const at = draftAt(id);
-      if (!(await listed()).get(id)) return failed(`the draft ${id} is not open`);
-      return checks(at, databaseUrl);
-    },
+    check: async (id) => checks(draftAt(id), databaseUrl, async () => (await listed()).get(id) === true),
     drafts: async () => [...(await listed())].flatMap(([id, here]) => (here ? [id] : [])).toSorted(),
     async diff(id) {
       // Three dots: from where the branch left the checked-out one, so what was merged since is not shown.
@@ -210,11 +206,14 @@ const CHECK_TIMEOUT_MS = 15 * 60_000;
  * (no credential of this process, no `.env`: a draft has none), and `SANOMA_EVENTS=1` for its
  * result. One at a time in the process, whichever the draft and whichever source asks (the app's
  * and the worker's): every check runs its scenarios on the one `<database>_check`. A check that
- * gives no result (a config that does not load, no install, the timeout) is a result of one
- * problem, saying why.
+ * gives no result (a draft not open when its turn comes, a config that does not load, no install,
+ * the timeout) is a result of one problem, saying why.
  */
-function checks(root: string, databaseUrl: string | undefined): Promise<CheckResult> {
-  const done = checking.then(() => checkNow(root, databaseUrl).catch((err: unknown) => failed(errorMessage(err))));
+function checks(root: string, databaseUrl: string | undefined, open: () => Promise<boolean>): Promise<CheckResult> {
+  const done = checking.then(async () => {
+    if (!(await open())) return failed(`the draft at ${root} is not open`);
+    return checkNow(root, databaseUrl).catch((err: unknown) => failed(errorMessage(err)));
+  });
   checking = done;
   checkingAt.set(root, done);
   void done.then(() => checkingAt.get(root) === done && checkingAt.delete(root));
@@ -261,7 +260,12 @@ async function checkNow(root: string, databaseUrl: string | undefined): Promise<
   let error: string | undefined;
   for (const line of ran.stdout.split("\n")) {
     if (!line.startsWith('{"sanoma":1,')) continue;
-    const event = JSON.parse(line) as SanomaEvent & { sanoma: 1 };
+    let event: SanomaEvent & { sanoma: 1 };
+    try {
+      event = JSON.parse(line) as typeof event;
+    } catch {
+      continue; // Not the launcher's: printed by the draft's own code.
+    }
     if (event.event === "checked") {
       // Every field of the result, the grid among them.
       const { sanoma: _, event: __, ...fields } = event;

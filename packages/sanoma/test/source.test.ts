@@ -384,7 +384,7 @@ describe("localGitSource's check", () => {
     await expect(source.check!("../escape")).rejects.toThrow(/A draft's id/);
     expect(await source.check!("never")).toEqual({
       ok: false,
-      problems: ["sanoma check: the draft never is not open"],
+      problems: [`sanoma check: the draft at ${join(dir, ".sanoma", "drafts", "never")} is not open`],
       warnings: [],
     });
 
