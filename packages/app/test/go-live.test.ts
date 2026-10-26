@@ -382,12 +382,10 @@ describe("going live", () => {
         token: "swi_bound",
       };
     });
-    await app.client.apply({ only: [key], bind: { [key]: id } }, { startedBy: alice });
-    await waitFor(
-      () => readLockfile(root).bindings[key]?.id,
-      (bound) => bound === id,
-      60_000,
-    );
+    // Waits for the run to end, not just the binding: its commit of the lockfile follows.
+    const binding = await app.client.apply({ only: [key], bind: { [key]: id } }, { startedBy: alice });
+    await app.client.result(binding, 60_000);
+    expect(readLockfile(root).bindings[key]?.id).toBe(id);
     // The line removed (the import and the default export's entry with it), as a person would.
     const path = join(root, INFRA);
     writeFileSync(
