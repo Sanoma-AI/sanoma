@@ -68,8 +68,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    env:
-      IMAGE: docker.io/sanomaai/runtime
     # Actions pinned to commits, as in the publish job: this job holds the Docker Hub token.
     steps:
       # Secrets cannot be read in `if:`, so this step reads them and says whether to go on.
@@ -83,7 +81,6 @@ jobs:
             echo "set=true" >> "$GITHUB_OUTPUT"
           else
             echo "::notice title=Runtime image skipped::The secrets DOCKERHUB_USERNAME and DOCKERHUB_TOKEN are not set."
-            echo "Runtime image skipped: the secrets DOCKERHUB_USERNAME and DOCKERHUB_TOKEN are not set." >> "$GITHUB_STEP_SUMMARY"
           fi
       - if: steps.hub.outputs.set
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -102,10 +99,9 @@ jobs:
         id: image
         if: steps.hub.outputs.set
         run: |
-          tag="$IMAGE:$(jq -r .version packages/sanoma/package.json)"
+          tag="docker.io/sanomaai/runtime:$(jq -r .version packages/sanoma/package.json)"
           if docker buildx imagetools inspect "$tag" > /dev/null 2> "$RUNNER_TEMP/inspect.err"; then
             echo "::notice title=Runtime image skipped::$tag is already on Docker Hub."
-            echo "Runtime image skipped: \`$tag\` is already on Docker Hub." >> "$GITHUB_STEP_SUMMARY"
           # Only a missing tag (or, before the first push, a missing repository) is a push; any other
           # error stops here, as pushing then could replace a tag that is there.
           elif grep -qE ': not found|repository does not exist' "$RUNNER_TEMP/inspect.err"; then
@@ -114,7 +110,7 @@ jobs:
             cat "$RUNNER_TEMP/inspect.err" >&2
             exit 1
           fi
-      # No layer cache, as in the publish job: a release never restores another run's cache.
+      # The README's hand command, with the same flags. No layer cache, as in the publish job.
       - if: steps.image.outputs.tag
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
@@ -124,7 +120,3 @@ jobs:
           provenance: false
           push: true
           tags: ${{ steps.image.outputs.tag }}
-      - if: steps.image.outputs.tag
-        env:
-          TAG: ${{ steps.image.outputs.tag }}
-        run: echo "Pushed \`$TAG\`." >> "$GITHUB_STEP_SUMMARY"
