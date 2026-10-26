@@ -36,10 +36,10 @@ or SANOMA_DEV_REPO set, \`sanoma\` also runs the watch build of each package it 
 restarts on a new build.
 
 For a parent process: SANOMA_EVENTS=1 adds a JSON line on stdout per event, {"sanoma":1,"event":…}: "ready" with the
-app's "url" (the port SANOMA_APP_PORT names) and its "sites" each time it listens, "error" with the "message" when it
-cannot start or stop, and "database" (not printed yet); the end of stdin then stops it as SIGTERM does. sanoma never prompts,
-reads stdin only then, and opens no browser; SIGTERM stops everything it started but a Postgres container; exit 2 is
-a mistake in the call or the config, 1 a failure.
+app's "url" (where it listens, on the port SANOMA_APP_PORT names) and its "sites" each time it listens, "error" with the
+"message" when it cannot start or stop, and "database" (not printed yet); the end of stdin then stops it as SIGTERM
+does. sanoma never prompts, reads stdin only then, and opens no browser; SIGTERM stops everything it started but a
+Postgres container; exit 2 is a mistake in the call or the config, 1 a failure.
 `;
 
 /** Exit codes: 2 for how the bin was called or what it found, 1 for failed checks and failures while running. */
@@ -315,7 +315,7 @@ function onSignal(stop: () => Promise<void>): () => void {
   const handle = () => (stopping ? process.exit(130) : stopOnce());
   process.once("SIGINT", handle);
   process.once("SIGTERM", handle);
-  if (eventsOn()) process.stdin.once("end", stopOnce).resume();
+  if (eventsOn()) process.stdin.once("end", stopOnce).once("error", stopOnce).resume();
   return stopOnce;
 }
 

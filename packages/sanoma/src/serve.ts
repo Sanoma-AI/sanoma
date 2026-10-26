@@ -140,7 +140,8 @@ function apiWriter(config: SanomaConfig, log: (line: string) => void): (file: st
   const run = () => {
     running = true;
     again = false;
-    spawn(process.execPath, [cli, "api"], { cwd, stdio: "inherit" })
+    // Not a launcher: its failure is no `error` event for a parent process (SANOMA_EVENTS).
+    spawn(process.execPath, [cli, "api"], { cwd, stdio: "inherit", env: { ...process.env, SANOMA_EVENTS: undefined } })
       .once("error", (err) => log(`could not write .sanoma/: ${err.message}`))
       .once("close", () => {
         running = false;
