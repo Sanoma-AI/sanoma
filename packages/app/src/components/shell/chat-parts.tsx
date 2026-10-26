@@ -82,7 +82,7 @@ function ReplyPart({ part }: { part: Part }) {
   return null;
 }
 
-/** The steps as a quiet checked list: each done, failed (with why) or under way. */
+/** The steps as a quiet checked list: each done, failed or refused (with why), or under way. */
 function Steps({ steps, live }: { steps: ToolPart[]; live: boolean }) {
   return (
     <ul aria-label="Steps" className="flex flex-col gap-1 text-xs text-muted-foreground">
@@ -92,6 +92,7 @@ function Steps({ steps, live }: { steps: ToolPart[]; live: boolean }) {
           <span className="min-w-0">
             <span className="break-words">{stepLabel(step)}</span>
             {step.state === "output-error" && <span className="block text-destructive">{step.errorText}</span>}
+            {refused(step) && step.approval?.reason && <span className="block">{step.approval.reason}</span>}
           </span>
         </li>
       ))}
@@ -102,12 +103,16 @@ function Steps({ steps, live }: { steps: ToolPart[]; live: boolean }) {
 function StepIcon({ step, live }: { step: ToolPart; live: boolean }) {
   const icon = "mt-0.5 size-3.5 shrink-0";
   if (step.state === "output-error") return <XIcon aria-label="Failed" className={`${icon} text-destructive`} />;
+  if (refused(step)) return <XIcon aria-label="Refused" className={icon} />;
   if (step.state === "output-available" && !step.preliminary) return <CheckIcon aria-label="Done" className={icon} />;
   // A step that was under way when the turn stopped is neither: it stopped there.
   return live ? <Spinner aria-label="Under way" className={icon} /> : <XIcon aria-label="Stopped" className={icon} />;
 }
 
-/** A step in words: what the tool did, from its input. */
+/** A coding agent's step its checkout rule refused (`HarnessAgent`'s built-in tool, answered no). */
+const refused = (step: ToolPart) => step.approval?.approved === false;
+
+/** A step in words: what the tool did, from its input; a coding agent's by its tool's name and the file it names. */
 function stepLabel(step: ToolPart): string {
   const input = (step.input ?? {}) as Record<string, unknown>;
   const path = typeof input.path === "string" ? input.path : "";
@@ -132,8 +137,10 @@ function stepLabel(step: ToolPart): string {
     }
     case "lookup":
       return `Looked up ${String(input.op ?? "")}`;
-    default:
-      return getToolName(step);
+    default: {
+      const file = input.file_path ?? input.path;
+      return typeof file === "string" ? `${getToolName(step)} ${file}` : getToolName(step);
+    }
   }
 }
 
