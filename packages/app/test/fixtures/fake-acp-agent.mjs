@@ -117,7 +117,8 @@ async function work(client, sessionId, cwd) {
   });
   const { terminalId } = await client.request("terminal/create", {
     sessionId,
-    command: 'echo "home=$HOME token=${GH_TOKEN:-none}"; pwd',
+    // What it leaves running holds the output's pipes: its exit is still seen.
+    command: 'echo "home=$HOME token=${GH_TOKEN:-none}"; pwd; sleep 300 &',
   });
   const exit = await client.request("terminal/wait_for_exit", { sessionId, terminalId });
   const { output } = await client.request("terminal/output", { sessionId, terminalId });

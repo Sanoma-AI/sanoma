@@ -308,12 +308,16 @@ describe("the chat on a person's own agent", () => {
       const card = cardOf(snapshot);
       if (!card?.asks || pasted) return;
       asked = card;
-      // Someone else's paste first, then the person's.
-      pasted = (async () => [(await paste(id, CODE, "lead")).status, (await paste(id, CODE)).status])();
+      // Someone else's paste first, then more than one line, then the person's.
+      pasted = (async () => [
+        (await paste(id, CODE, "lead")).status,
+        (await paste(id, `${CODE}\ny`)).status,
+        (await paste(id, CODE)).status,
+      ])();
     });
     expect(asked).toMatchObject({ agent: "Copilot", state: "waiting", url: "https://example.test/login/device" });
     expect(asked!.text).toContain("enter code FAKE-0001");
-    expect(await pasted).toEqual([404, 204]);
+    expect(await pasted).toEqual([404, 400, 204]);
     // The sign-in ran our terminal: Copilot's device flow, as the person's own HOME.
     expect(logged("copilot").find((entry) => "login" in entry)).toEqual({ login: ["login", "--device-code"] });
     expect(existsSync(join(home(), "people/ada/.signed-in-copilot"))).toBe(true);

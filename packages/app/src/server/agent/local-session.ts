@@ -206,6 +206,8 @@ export interface Exit {
 
 /** The most of a command's output a `Command` keeps when it is given no limit, in bytes. */
 const OUTPUT_KEPT = 1 << 20;
+/** How long a command's last output may take to arrive after it exits, in ms. */
+const PIPES_WAIT = 200;
 
 /**
  * A command run on this machine in a process group of its own (killed whole by `kill`), with the
@@ -228,7 +230,8 @@ export class Command {
   onOutput?: () => void;
   readonly #write?: Writable;
   readonly #group?: number;
-  #output = Buffer.alloc(0);
+  readonly #chunks: Buffer[] = [];
+  #kept = 0;
 
   constructor(
     command: string,
@@ -256,23 +259,38 @@ export class Command {
         this.#print(Buffer.from(`${err.message}\n`));
         done((this.status = { exitCode: 127, signal: null }));
       });
-      child.on("close", (exitCode, signal) => done((this.status ??= { exitCode, signal })));
+      // Exited when it exits, not when its pipes close: something it left running may hold them.
+      // What it printed last still arrives, so the end waits a moment for that.
+      child.on("exit", (exitCode, signal) => {
+        this.status ??= { exitCode, signal };
+        const end = () => done(this.status!);
+        child.on("close", end);
+        setTimeout(end, PIPES_WAIT).unref();
+      });
     });
   }
 
   #print = (chunk: Buffer) => {
-    const kept = Buffer.concat([this.#output, chunk]);
+    this.#chunks.push(chunk);
+    this.#kept += chunk.length;
+    // Whole chunks past the limit go now; `output` cuts the rest to it.
     const limit = this.limit ?? OUTPUT_KEPT;
-    let start = Math.max(0, kept.length - limit);
-    // Not from the middle of a character: past its continuation bytes.
-    while (start < kept.length && start > 0 && (kept[start]! & 0xc0) === 0x80) start++;
-    if (start > 0) this.truncated = true;
-    this.#output = kept.subarray(start);
+    while (this.#chunks.length > 1 && this.#kept - this.#chunks[0]!.length >= limit) {
+      this.#kept -= this.#chunks.shift()!.length;
+      this.truncated = true;
+    }
     this.onOutput?.();
   };
 
   /** What it printed and was kept, as text. */
-  output = () => this.#output.toString("utf8");
+  output = () => {
+    const kept = Buffer.concat(this.#chunks);
+    let start = Math.max(0, kept.length - (this.limit ?? OUTPUT_KEPT));
+    // Not from the middle of a character: past its continuation bytes.
+    while (start < kept.length && start > 0 && (kept[start]! & 0xc0) === 0x80) start++;
+    if (start > 0) this.truncated = true;
+    return kept.subarray(start).toString("utf8");
+  };
 
   /** Writes `text` to its stdin, when it was given one. */
   write(text: string) {

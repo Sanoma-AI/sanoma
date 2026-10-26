@@ -19,7 +19,8 @@ import { chatResponse, type Engine, type EngineTurn } from "./transcript.ts";
 // this client of ours, in the chat's draft, on that person's own subscription. The agent is a child
 // of the app (its ACP entry, installed on first use under `.sanoma/agent-home/acp/<agent>`), with
 // an explicit environment whose HOME is the person's own (`.sanoma/agent-home/people/<id>`), so a
-// sign-in lives there for that person alone and nothing of ours reads it. One child per turn:
+// sign-in lives there, never the company's, and nothing of ours reads it (every person's agent runs
+// as this machine's user: what an agent runs itself can reach other people's). One child per turn:
 // started, told the chat's earlier messages as text, prompted, killed. Its permission requests,
 // file reads and writes are answered by the checkout rule; the commands it runs through our
 // terminal are its own. A sign-in it asks for is shown in the chat as the vendor's own flow.
@@ -165,7 +166,8 @@ async function runTurn(
   const turn = new AcpTurn(agent, { chatId: chat.id, person: principal.id, root: draft.root }, writer, signal);
   try {
     const dir = join(home, "acp", name);
-    await install(agent, dir, home);
+    // A new message does not wait for a first install: it goes on, for the next turn.
+    await untilAborted(install(agent, dir, home), signal);
     const personal = join(home, "people", personDir(principal.id));
     await mkdir(personal, { recursive: true });
     const env = sessionEnv(personal);
@@ -177,7 +179,7 @@ async function runTurn(
     // A dead or missing agent is said in the reply; a stopped turn says nothing.
     if (!signal.aborted) turn.relay.say(`${agent.title} could not answer: ${errorMessage(err)}`);
   } finally {
-    turn.stop();
+    await turn.stop();
   }
   turn.relay.end();
   await commitTurn(
@@ -269,11 +271,12 @@ class AcpTurn {
     }
   }
 
-  /** Kills every process the turn started, and forgets its sign-in. */
-  stop() {
-    for (const command of this.#commands) command.kill();
+  /** Kills every process the turn started, and waits (a moment at most) for them to go, so nothing writes after the commit. */
+  async stop() {
+    const commands = [...this.#commands];
     this.#commands.clear();
-    if (pasting.get(this.chatId)?.person === this.person) pasting.delete(this.chatId);
+    for (const command of commands) command.kill();
+    await Promise.race([Promise.all(commands.map((command) => command.exited)), delay(EXIT_WAIT)]);
   }
 
   /** `args` run as `command` (in the draft unless `cwd` says), with the turn's environment and `env`, in a process group of its own. */
@@ -300,7 +303,7 @@ class AcpTurn {
       .onRequest("fs/read_text_file", async ({ params }) => {
         const text = await readFile(await this.#allowed(params.path), "utf8");
         if (params.line == null && params.limit == null) return { content: text };
-        const from = (params.line ?? 1) - 1;
+        const from = Math.max(0, (params.line ?? 1) - 1);
         const lines = text.split("\n");
         return { content: lines.slice(from, params.limit == null ? undefined : from + params.limit).join("\n") };
       })
@@ -453,12 +456,14 @@ class AcpTurn {
       this.#card({ state: "waiting", text, ...(url && { url }), ...(/paste .*code/i.test(text) && { asks: true }) });
     };
     login.onOutput = show;
-    pasting.set(this.chatId, { person: this.person, paste: (code) => login.write(`${code}\n`) });
+    const waiting = { person: this.person, paste: (code: string) => login.write(`${code}\n`) };
+    pasting.set(this.chatId, waiting);
     try {
       const { exitCode, signal } = await this.#waiting(login.exited);
       if (exitCode !== 0) throw new Error(`it stopped (${signal ?? `exit code ${exitCode}`})`);
     } finally {
-      pasting.delete(this.chatId);
+      // Its own entry only: a later turn of the chat may be waiting for a code by now.
+      if (pasting.get(this.chatId) === waiting) pasting.delete(this.chatId);
       login.kill();
     }
   }
@@ -634,6 +639,16 @@ async function install(agent: OwnAgent, dir: string, home: string): Promise<void
   await running;
 }
 
+/** `promise`, or the turn's stop when it comes first (`promise` goes on). */
+function untilAborted<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise<T>((done, fail) => {
+    const stop = () => fail(new Error("a new message stopped it"));
+    if (signal.aborted) return stop();
+    signal.addEventListener("abort", stop, { once: true });
+    promise.then(done, fail).finally(() => signal.removeEventListener("abort", stop));
+  });
+}
+
 /** The shims' directory, first on the agent's PATH: each of `SHIMS` refuses, so nothing of this machine's user signs the agent in. */
 async function shims(home: string): Promise<string> {
   const dir = join(home, "acp", "shims");
@@ -653,7 +668,16 @@ async function shims(home: string): Promise<string> {
 }
 
 /** What `POST /api/sign-in` takes: the chat, and the code its person pastes back to the vendor's sign-in. */
-const SignInCode = z.object({ chat: z.string().min(1), code: z.string().min(1).max(512) });
+const SignInCode = z.object({
+  chat: z.string().min(1),
+  // One line: the vendor's sign-in reads it as one answer.
+  code: z
+    .string()
+    .trim()
+    .min(1)
+    .max(512)
+    .regex(/^[^\r\n]+$/, "one line"),
+});
 
 /**
  * `POST /api/sign-in`: the code the person pastes on their sign-in card, written to the vendor's
@@ -667,7 +691,7 @@ export async function postSignInCode(request: Request, context: ActorContext): P
     const waiting = pasting.get(chat);
     if (waiting?.person !== principal.id)
       throw new ApiError(404, { error: `No sign-in waits for a code in chat ${chat}` });
-    waiting.paste(code.trim());
+    waiting.paste(code);
     return new Response(null, { status: 204 });
   } catch (err) {
     const { status, body } = toApiError(err, "a sign-in code");

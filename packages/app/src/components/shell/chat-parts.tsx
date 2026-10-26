@@ -230,7 +230,9 @@ function SignInCardView({ card, chat, live }: { card: SignInCard; chat: string; 
     setCode("");
     setSent(response?.ok ? `Sent to ${agent}'s sign-in.` : `${agent}'s sign-in is not waiting for a code any more.`);
   };
-  const link = card.url?.startsWith("https://") ? card.url : undefined;
+  // An https link only, and one that parses: the vendor wrote it.
+  const parsed = card.url ? URL.parse(card.url) : null;
+  const link = parsed?.protocol === "https:" ? parsed : undefined;
   return (
     <Card size="sm" role="region" aria-label={`Sign in to ${agent}`}>
       <CardHeader>
@@ -255,8 +257,8 @@ function SignInCardView({ card, chat, live }: { card: SignInCard; chat: string; 
               </p>
             )}
             {link && (
-              <a href={link} target="_blank" rel="noopener noreferrer" className="underline underline-offset-4">
-                Open {new URL(link).host} to sign in
+              <a href={link.href} target="_blank" rel="noopener noreferrer" className="underline underline-offset-4">
+                Open {link.host} to sign in
               </a>
             )}
             {card.asks && (

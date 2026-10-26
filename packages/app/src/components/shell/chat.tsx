@@ -200,6 +200,9 @@ function TurnError({ message }: { message: string }) {
   );
 }
 
+/** The engines every server offers: the composer's choices until it hears which ones this one does. */
+const ALWAYS = (Object.keys(ENGINE_NAMES) as EngineName[]).filter((name) => !ownPlan(name));
+
 /** An engine as the composer's choice. */
 const engineOption = (name: EngineName) => (
   <NativeSelectOption key={name} value={name}>
@@ -239,7 +242,7 @@ function Composer({
 }) {
   const page = useCrumbs().at(-1)?.label;
   const [text, setText] = useState("");
-  const { data: offered = ["loop"] } = useQuery({ ...enginesQuery(), enabled: engine !== undefined });
+  const { data: offered = ALWAYS } = useQuery({ ...enginesQuery(), enabled: engine !== undefined });
   const names = offered.filter((name): name is EngineName => Object.hasOwn(ENGINE_NAMES, name));
 
   const submit = (e?: FormEvent) => {
