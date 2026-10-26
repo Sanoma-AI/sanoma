@@ -146,11 +146,14 @@ describe("fakeWakeup", () => {
       databaseUrl,
     };
     expect(describeConfig(config).problems).toEqual([]);
-    expect(await declaredWakeup(config)).toMatchObject({
+    const declared = await declaredWakeup(config);
+    expect(declared).toMatchObject({
       id: "resources/infra.ts#wake",
       declared: { vendor: "testwakeup", type: "timer", desired: { name: "wake", host: "company" } },
-      host: { id: "resources/infra.ts#app", type: { vendor: "testhost", type: "app" } },
+      host: { id: "resources/infra.ts#app" },
     });
+    // The host it names, by its type: the lifetime `sanoma serve`'s exit rule reads.
+    expect(declared?.host?.type.host?.capabilities.lifetime).toBe("long-lived");
     rmSync(root, { recursive: true, force: true });
   });
 });
