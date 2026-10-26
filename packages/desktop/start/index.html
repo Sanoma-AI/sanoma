@@ -121,6 +121,30 @@
         white-space: pre-wrap;
         word-break: break-all;
       }
+      form {
+        margin-top: 20px;
+        padding: 14px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--card);
+      }
+      label {
+        display: block;
+        margin: 8px 0 2px;
+      }
+      input {
+        font: inherit;
+        box-sizing: border-box;
+        width: 100%;
+        padding: 6px 8px;
+        border-radius: 6px;
+        border: 1px solid var(--line);
+        background: var(--bg);
+        color: var(--fg);
+      }
+      form .actions {
+        margin-top: 12px;
+      }
       [hidden] {
         display: none !important;
       }
@@ -129,14 +153,39 @@
   <body>
     <h1>Sanoma</h1>
     <p class="muted">
-      Open the folder a company lives in. Sanoma installs its packages and starts it on this computer.
+      Open the folder a company lives in, start a new one in an empty folder, or clone one from GitHub. Sanoma installs
+      its packages and starts it on this computer.
     </p>
     <div class="actions">
       <button class="primary" id="choose">Open folder…</button>
-      <button data-later="New company">New company…</button>
-      <button data-later="Cloning a company">Clone…</button>
+      <button id="create">New company…</button>
+      <button id="clone">Clone…</button>
     </div>
-    <p class="muted" id="later" hidden></p>
+
+    <form id="clone-form" hidden>
+      <label for="clone-url">The company's repository</label>
+      <input id="clone-url" type="text" placeholder="https://github.com/acme/company" spellcheck="false" />
+      <p class="muted">A public repository, or one this Mac's keychain can sign in to. Next, choose where it goes.</p>
+      <p class="failed" id="clone-problem" hidden></p>
+      <div class="actions">
+        <button class="primary" type="submit">Clone…</button>
+        <button type="button" data-cancel>Cancel</button>
+      </div>
+    </form>
+
+    <form id="identity-form" hidden>
+      <p>Who makes the changes? git signs each change with a name and an email address.</p>
+      <label for="identity-name">Name</label>
+      <input id="identity-name" type="text" autocomplete="name" />
+      <label for="identity-email">Email</label>
+      <input id="identity-email" type="email" autocomplete="email" />
+      <p class="muted">Saving sets them for every git repository on this computer (git config --global).</p>
+      <p class="failed" id="identity-problem" hidden></p>
+      <div class="actions">
+        <button class="primary" type="submit">Save and continue</button>
+        <button type="button" data-cancel>Cancel</button>
+      </div>
+    </form>
     <div id="warnings"></div>
 
     <section id="company" hidden>

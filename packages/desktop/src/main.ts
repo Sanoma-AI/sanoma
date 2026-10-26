@@ -24,12 +24,31 @@ import {
   slugOf,
   writeCompanies,
 } from "./companies.ts";
+import {
+  addressProblem,
+  cloneSession,
+  cloneTarget,
+  createSession,
+  defaultParent,
+  newCompanyProblem,
+} from "./create.ts";
+import {
+  gitEnv,
+  gitFailure,
+  type Identity,
+  identityOf,
+  identityProblem,
+  installCommandLineTools,
+  needsCommandLineTools,
+  setIdentity,
+} from "./git.ts";
 import { USAGE_EXIT } from "./launcher.ts";
 import { linkTarget } from "./links.ts";
-import { type CompanyLog, openLog } from "./logs.ts";
+import { type CompanyLog, hidePasswords, openLog } from "./logs.ts";
 import { folderArgument, isCompanyFolder, syncedFolderWarning } from "./places.ts";
 import { runtimeOf } from "./runtime.ts";
-import { type Session, startSession } from "./session.ts";
+import { type Session, type SessionOptions, startSession } from "./session.ts";
+import { fastForward, prepareUpdate } from "./update-company.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const companiesFile = () => join(app.getPath("userData"), "companies.json");
@@ -44,6 +63,8 @@ export interface StartState {
   log: string[];
   message?: string;
   warnings: string[];
+  /** A form the start window shows: a repository's address to clone, or who commits. */
+  ask?: { kind: "clone"; url?: string; problem?: string } | ({ kind: "identity"; problem?: string } & Identity);
 }
 
 interface Running {
@@ -101,7 +122,11 @@ function showStart() {
   });
   startWindow.webContents.on("will-navigate", (event) => event.preventDefault());
   startWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-  startWindow.on("closed", () => (startWindow = undefined));
+  startWindow.on("closed", () => {
+    startWindow = undefined;
+    // Its form goes with it: New Company or Clone, waiting on it, stops.
+    answer?.(undefined);
+  });
   void startWindow.loadFile(join(here, "..", "start", "index.html"));
 }
 
@@ -122,13 +147,26 @@ async function openCompany(dir: string) {
   await begin(path);
 }
 
-/** Starts the company unless it runs or is starting; a failure to start says why in a dialog. */
-async function begin(path: string) {
+/** How a session begins (`startSession`, `createSession`, `cloneSession`). */
+type Begin = (options: SessionOptions) => Session;
+
+/**
+ * How each company's next start begins while it is not the usual one: a new company's init or a
+ * clone, until it is ready, so Start again after a failure tries that again.
+ */
+const beginnings = new Map<string, Begin>();
+
+/**
+ * Starts the company unless it runs or is starting, with `how` (else as it began last, until that
+ * was ready, else `startSession`); a failure to start says why in the start window.
+ */
+async function begin(path: string, how?: Begin) {
   if (running.has(path) || opening.has(path) || quitting) return;
-  const started = start(path).catch((err: unknown) => {
+  if (how) beginnings.set(path, how);
+  const started = start(path, beginnings.get(path) ?? startSession).catch((err: unknown) => {
     // Before its session (no Node staged, an unreadable folder): the start window says why.
     shownLog = undefined;
-    const message = `The company could not start: ${err instanceof Error ? err.message : String(err)}`;
+    const message = hidePasswords(`The company could not start: ${messageOf(err)}`);
     setState({ company: { path, name: companyName(path) }, phase: "failed", message, progress: [], log: [] });
     showStart();
   });
@@ -147,7 +185,7 @@ async function claimPort(path: string) {
   return { company, moved };
 }
 
-async function start(path: string) {
+async function start(path: string, how: Begin) {
   /** A Restart, whose window stays: closing it meanwhile cancels the start. */
   const restarting = windows.has(path);
   const claimed = claiming.then(() => claimPort(path));
@@ -168,7 +206,7 @@ async function start(path: string) {
   };
   if (!windows.has(path)) show({ phase: "starting", progress: [], warnings, message: undefined });
 
-  const session = startSession({
+  const session = how({
     repo: path,
     port,
     ...runtimeOf({ packaged: app.isPackaged, appPath: app.getAppPath(), resourcesPath: process.resourcesPath }),
@@ -188,6 +226,7 @@ async function start(path: string) {
   session.ready.then(
     (url) => {
       if (entry.stopping) return;
+      beginnings.delete(path);
       log.write("shell", `ready at ${url}`);
       showCompany(path, company.name, url);
       if (shown()) setState({ phase: "idle" });
@@ -214,7 +253,7 @@ async function start(path: string) {
     log.write("shell", why);
     log.close();
     windows.get(path)?.window.close();
-    show({ phase: "failed", message: why, progress: [], warnings });
+    show({ phase: "failed", message: hidePasswords(why), progress: [], warnings });
   });
 }
 
@@ -296,11 +335,167 @@ async function chooseFolder() {
   if (!canceled && filePaths[0]) await openCompany(filePaths[0]);
 }
 
-const nextLane = (what: string) => () =>
-  void dialog.showMessageBox({
-    message: `${what} comes in the next version of Sanoma`,
-    detail: "For now, open a folder that holds a company.",
+const say = (message: string, detail?: string) => void dialog.showMessageBox({ type: "info", message, detail });
+
+const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+/** Where the folder dialogs of New Company and Clone Company start. */
+const parentFolder = () => defaultParent(readCompanies(companiesFile()), homedir());
+
+/** Answers the form the start window shows (`ask`), once: with what was typed, or undefined (Cancel, closed). */
+let answer: ((value: unknown) => void) | undefined;
+
+/** Shows `form` in the start window; resolves with the answer, or undefined when the person cancels. */
+function ask(form: NonNullable<StartState["ask"]>): Promise<unknown> {
+  answer?.(undefined);
+  return new Promise((resolve) => {
+    answer = (value) => {
+      answer = undefined;
+      setState({ ask: undefined });
+      resolve(value);
+    };
+    setState({ ask: form });
+    showStart();
   });
+}
+
+const isIdentity = (value: unknown): value is Identity =>
+  typeof (value as Identity)?.name === "string" && typeof (value as Identity)?.email === "string";
+
+/**
+ * Whether git has someone to commit as from `cwd`: `user.name` and `user.email`, asked for once in
+ * the start window when either is missing and set globally (the form says so), as a new company's
+ * first commit, and the app's later ones, need them.
+ */
+async function identityReady(cwd: string): Promise<boolean> {
+  const env = gitEnv(process.env);
+  let typed = await identityOf(cwd, env);
+  if (typed.name && typed.email) return true;
+  let problem: string | undefined;
+  for (;;) {
+    const value = await ask({ kind: "identity", ...typed, problem });
+    if (!isIdentity(value)) return false;
+    typed = value;
+    problem =
+      identityProblem(value) ??
+      (await setIdentity(value, env).then(
+        () => undefined,
+        (err: unknown) => `git could not save it: ${messageOf(err)}`,
+      ));
+    if (!problem) return true;
+  }
+}
+
+/**
+ * Whether git can run: on macOS, Apple's command line tools must be there; when they are not, a
+ * dialog offers their installer and to check again.
+ */
+async function gitReady(): Promise<boolean> {
+  while (await needsCommandLineTools()) {
+    const { response } = await dialog.showMessageBox({
+      type: "info",
+      message: "Sanoma needs Apple's command line tools for git",
+      detail: "Install opens Apple's installer. Once it has finished, choose Check Again.",
+      buttons: ["Install", "Check Again", "Cancel"],
+      defaultId: 0,
+      cancelId: 2,
+    });
+    if (response === 2) return false;
+    if (response === 0) await installCommandLineTools();
+  }
+  return true;
+}
+
+/** File → New Company…: an empty folder (made in the dialog, or chosen), then the launcher's init there. */
+async function newCompany(): Promise<void> {
+  const { canceled, filePaths } = await dialog.showOpenDialog({
+    title: "Choose or make an empty folder for the new company",
+    buttonLabel: "Start Company Here",
+    defaultPath: parentFolder(),
+    properties: ["openDirectory", "createDirectory"],
+  });
+  const dir = filePaths[0];
+  if (canceled || !dir) return;
+  const problem = isCompanyFolder(dir) ? `${dir} holds a company already: open it instead.` : newCompanyProblem(dir);
+  if (problem) return say("Choose an empty folder", problem);
+  const warning = syncedFolderWarning(dir, homedir());
+  if (warning) {
+    const { response } = await dialog.showMessageBox({
+      type: "warning",
+      message: "This folder is in iCloud",
+      detail: warning,
+      buttons: ["Choose Another Folder", "Use This Folder"],
+      defaultId: 0,
+      cancelId: 0,
+    });
+    if (response === 0) return newCompany();
+  }
+  if (!(await gitReady()) || !(await identityReady(dir))) return;
+  await begin(realpathSync(dir), createSession);
+}
+
+/**
+ * File → Clone Company…: the repository's address (the start window asks), the folder to clone
+ * into (a dialog), then the clone, as the company's session (`cloneSession`), so the start window
+ * shows it and a failure, and Start again clones again.
+ */
+async function cloneCompanyFlow(): Promise<void> {
+  let url = "";
+  let problem: string | undefined;
+  do {
+    const value = await ask({ kind: "clone", url, problem });
+    if (typeof value !== "string") return;
+    url = value.trim();
+    problem = addressProblem(url);
+  } while (problem);
+  if (!(await gitReady())) return;
+  const { canceled, filePaths } = await dialog.showOpenDialog({
+    title: "Choose the folder to clone the company into",
+    buttonLabel: "Clone Here",
+    defaultPath: parentFolder(),
+    properties: ["openDirectory", "createDirectory"],
+  });
+  if (canceled || !filePaths[0]) return;
+  const parent = realpathSync(filePaths[0]);
+  const target = cloneTarget(url, parent);
+  if ("problem" in target) return say("Sanoma cannot clone it there", target.problem);
+  if (!(await identityReady(parent))) return;
+  await begin(target.dir, cloneSession(url));
+}
+
+/** The companies Get Updates runs for now: a second click meanwhile does nothing. */
+const updating = new Set<string>();
+
+/**
+ * Company → Get Updates: GitHub's `main`, fast-forward only, when this computer has nothing of
+ * its own (`prepareUpdate` refuses in one line otherwise); then the company starts again, which
+ * installs its packages (`startSession`), its window kept.
+ */
+async function getUpdates(path: string): Promise<void> {
+  if (updating.has(path)) return;
+  updating.add(path);
+  try {
+    if (!(await gitReady())) return;
+    const env = gitEnv(process.env);
+    const plan = await prepareUpdate(path, env);
+    if ("refused" in plan) return say(plan.refused);
+    if (!plan.behind) return say("This company is up to date with GitHub");
+    await stop(path);
+    const failed = await fastForward(path, env).then(
+      () => undefined,
+      (err: unknown) => gitFailure(messageOf(err), "The update did not apply"),
+    );
+    await begin(path);
+    say(
+      failed ??
+        `Got ${plan.behind} new ${plan.behind === 1 ? "change" : "changes"} from GitHub; the company is starting again`,
+    );
+  } catch (err) {
+    say("Sanoma could not get updates", messageOf(err));
+  } finally {
+    updating.delete(path);
+  }
+}
 
 /** A menu action on the company of the focused window, when it is a company's. */
 const forFocused = (act: (path: string) => unknown) => () => {
@@ -316,9 +511,9 @@ function buildMenu() {
     {
       label: "File",
       submenu: [
-        { label: "New Company…", click: nextLane("New company") },
+        { label: "New Company…", accelerator: "CmdOrCtrl+N", click: () => void newCompany() },
         { label: "Open Company…", accelerator: "CmdOrCtrl+O", click: () => void chooseFolder() },
-        { label: "Clone Company…", click: nextLane("Cloning a company") },
+        { label: "Clone Company…", click: () => void cloneCompanyFlow() },
         {
           label: "Open Recent",
           submenu: recent.length
@@ -335,6 +530,7 @@ function buildMenu() {
       label: "Company",
       submenu: [
         { label: "Restart", accelerator: "CmdOrCtrl+Shift+R", click: forFocused(restart) },
+        { label: "Get Updates", click: forFocused(getUpdates) },
         { label: "Show in Finder", click: forFocused((path) => shell.openPath(path)) },
         { label: "Show Log", click: forFocused((path) => shell.openPath(logFile(path))) },
       ],
@@ -388,6 +584,10 @@ if (!app.requestSingleInstanceLock()) {
   ipcMain.handle("start:choose", () => chooseFolder());
   ipcMain.handle("start:open", (_event, path: unknown) => typeof path === "string" && openCompany(path));
   ipcMain.handle("start:again", () => state.company && begin(state.company.path));
+  ipcMain.handle("start:create", () => newCompany());
+  ipcMain.handle("start:clone", () => cloneCompanyFlow());
+  ipcMain.handle("start:answer", (_event, value: unknown) => answer?.(value));
+  ipcMain.handle("start:cancel", () => answer?.(undefined));
 
   // Quit waits for each company: those still opening, then every session, stopped.
   let stopped = false;

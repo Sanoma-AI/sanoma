@@ -144,6 +144,8 @@ export interface LaunchOptions extends GroupOptions {
   node: string;
   /** The launcher's script (`launcherOf`). */
   cli: string;
+  /** What follows the script on its command line; none by default. */
+  args?: readonly string[];
   /** The port the app is to listen on, polled at `/healthz` for a launcher without events. */
   port: number;
   /** How often to poll; default 500 ms. */
@@ -160,7 +162,7 @@ export interface Launched extends Group {
 }
 
 /** Starts the company's launcher in `cwd` with `node`, in a group of its own (`spawnGroup`). */
-export function launch({ node, cli, port, pollMs = 500, ...options }: LaunchOptions): Launched {
+export function launch({ node, cli, args = [], port, pollMs = 500, ...options }: LaunchOptions): Launched {
   let lastError: string | undefined;
   // Only the first settles it: an event, a line or /healthz, else the exit.
   const settle = Promise.withResolvers<string>();
@@ -169,7 +171,7 @@ export function launch({ node, cli, port, pollMs = 500, ...options }: LaunchOpti
     clearInterval(poll);
     settle.resolve(url);
   };
-  const group = spawnGroup(node, [cli], {
+  const group = spawnGroup(node, [cli, ...args], {
     ...options,
     onLine(stream, line) {
       options.onLine(stream, line);

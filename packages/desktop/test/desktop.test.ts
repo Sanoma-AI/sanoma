@@ -18,7 +18,7 @@ import {
 import { eventOf, listeningUrlOf } from "../src/events.ts";
 import { launch, launcherEnv, launcherOf, type Stream, USAGE_EXIT } from "../src/launcher.ts";
 import { linkTarget } from "../src/links.ts";
-import { openLog, TAIL_LINES } from "../src/logs.ts";
+import { hidePasswords, openLog, TAIL_LINES } from "../src/logs.ts";
 import { folderArgument, syncedFolderWarning } from "../src/places.ts";
 import { startSession } from "../src/session.ts";
 import { shims, writeShims } from "../src/shims.ts";
@@ -332,6 +332,32 @@ describe("the link rule", () => {
 });
 
 describe("logs", () => {
+  test("hide the password in any URL before a line is logged", () => {
+    const database =
+      '{"sanoma":1,"event":"database","how":"started","url":"postgresql://postgres:s3cret@127.0.0.1:54321/sanoma","place":"this-computer"}';
+    expect(hidePasswords(database)).toBe(
+      '{"sanoma":1,"event":"database","how":"started","url":"postgresql://***@127.0.0.1:54321/sanoma","place":"this-computer"}',
+    );
+    expect(hidePasswords("connect failed for postgresql://u:p%2Fss@host/db")).toBe(
+      "connect failed for postgresql://***@host/db",
+    );
+    expect(hidePasswords("git clone https://ghp_token@github.com/acme/co")).toBe(
+      "git clone https://***@github.com/acme/co",
+    );
+    for (const kept of [
+      '{"sanoma":1,"event":"ready","url":"http://127.0.0.1:3100","sites":{}}',
+      "GET https://registry.npmjs.org/@sanoma%2Fconnector-resend: Not Found - 404",
+      "git@github.com:acme/co.git",
+      "GET http://localhost:5173/@fs/Users/me/acme/src/x.ts 500",
+    ]) {
+      expect(hidePasswords(kept)).toBe(kept);
+    }
+    const log = openLog(temp(), "acme");
+    log.write("stdout", database);
+    expect(readFileSync(log.file, "utf8")).not.toContain("s3cret");
+    expect(log.tail().join("\n")).not.toContain("s3cret");
+  });
+
   test("timestamps each line, keeps the previous start's log as .1.log, and the last lines", () => {
     const dir = temp();
     const first = openLog(dir, "acme");

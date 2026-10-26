@@ -1,13 +1,26 @@
 import { appendFileSync, existsSync, mkdirSync, renameSync } from "node:fs";
 import { join } from "node:path";
 
+/**
+ * The userinfo of a URL, `scheme://user:password@` or `scheme://token@`: up to the first `/`, as
+ * a URL's userinfo has no `/` unencoded (so `http://localhost:5173/@fs/…` keeps its host).
+ */
+const USERINFO = /([a-z][a-z0-9+.-]*:\/\/)[^\s"'@/]+@/gi;
+
+/**
+ * `text` with the user and password of each URL in it replaced by `***`: the launcher's
+ * `database` event carries the cluster's URL with its password, and a pasted clone URL or an
+ * error may carry a token.
+ */
+export const hidePasswords = (text: string) => text.replace(USERINFO, "$1***@");
+
 /** How many lines `tail` keeps: what the start window shows when a company stops. */
 export const TAIL_LINES = 200;
 
 export interface CompanyLog {
   /** `<dir>/<slug>.log`. */
   file: string;
-  /** Appends a line, timestamped and marked with where it came from. */
+  /** Appends a line, timestamped and marked with where it came from, its URLs without passwords (`hidePasswords`). */
   write(from: string, line: string): void;
   /** The last `TAIL_LINES` lines written, as written. */
   tail(): string[];
@@ -26,7 +39,8 @@ export function openLog(dir: string, slug: string): CompanyLog {
     file,
     write(from, line) {
       if (closed) return;
-      const text = `${new Date().toISOString()} ${from} ${line}`;
+      // No password reaches the file or the start window: the `database` event's URL carries one.
+      const text = `${new Date().toISOString()} ${from} ${hidePasswords(line)}`;
       lines.push(text);
       if (lines.length > TAIL_LINES) lines.shift();
       appendFileSync(file, `${text}\n`);

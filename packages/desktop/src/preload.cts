@@ -7,5 +7,9 @@ contextBridge.exposeInMainWorld("sanoma", {
   choose: () => ipcRenderer.invoke("start:choose"),
   open: (path: string) => ipcRenderer.invoke("start:open", path),
   again: () => ipcRenderer.invoke("start:again"),
+  create: () => ipcRenderer.invoke("start:create"),
+  clone: () => ipcRenderer.invoke("start:clone"),
+  answer: (value: unknown) => ipcRenderer.invoke("start:answer", value),
+  cancel: () => ipcRenderer.invoke("start:cancel"),
   onState: (listener: (state: unknown) => void) => ipcRenderer.on("start:state", (_event, state) => listener(state)),
 });
