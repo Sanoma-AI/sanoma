@@ -2,7 +2,7 @@ import { DBOS } from "@dbos-inc/dbos-sdk";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { Pool } from "pg";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { createTable, lazyPool, pgCode, prepareDatabase } from "../src/db.ts";
+import { createTable, lazyPool, pgCode, prepareDatabase, WAKEUP_TABLE } from "../src/db.ts";
 
 const databaseUrl = testDatabaseUrl("db");
 const pool = new Pool({ connectionString: databaseUrl });
@@ -69,5 +69,23 @@ describe("prepareDatabase", () => {
     } finally {
       await conn.end();
     }
+  });
+});
+
+describe("sanoma_wakeup", () => {
+  it("is made with its one row, and holds no other", async () => {
+    await prepareDatabase(databaseUrl);
+    const rows = async () => (await pool.query(`SELECT * FROM ${WAKEUP_TABLE}`)).rows;
+    const one = {
+      id: 1,
+      owner: null,
+      generation: "0",
+      at: null,
+      stopped_at: null,
+      registered_at: null,
+      last_error: null,
+    };
+    expect(await rows()).toEqual([one]);
+    await expect(pool.query(`INSERT INTO ${WAKEUP_TABLE} (id) VALUES (2)`)).rejects.toMatchObject({ code: "23514" });
   });
 });

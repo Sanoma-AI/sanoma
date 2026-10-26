@@ -3,7 +3,7 @@ import type { z } from "zod";
 import { type LintProblem, readSource, type SourceFile } from "./ast.ts";
 import { type Field, recordSchemaOf } from "./collection.ts";
 import { connectorsOf, resolveConfig, rootOf, type SanomaConfig } from "./config.ts";
-import { type Builtin, jsonSchemaOf, opIdsOf, type Use } from "./define.ts";
+import { type Builtin, jsonSchemaOf, opIdsOf, type Trigger, type Use } from "./define.ts";
 import { isDirect } from "./direct.ts";
 import { lintWorkflow } from "./lint.ts";
 import { type Effect, VENDOR, type VendorInfo } from "./op.ts";
@@ -75,7 +75,8 @@ export type { ApplyInput, ApplyPlan, ApplyReport, ApplyResult, PlanAnswer, PlanS
 export interface WorkflowEntry {
   name: string;
   title?: string;
-  trigger: "manual";
+  /** `manual`, or the schedule it starts on (`defineWorkflow`'s `trigger`). */
+  trigger: Trigger;
   /**
    * Set for a workflow the runtime adds itself, `drift`, `apply` or `call`, rather than the config: a label. It
    * starts like any other.
@@ -359,12 +360,20 @@ function domainProblems(
       const others = `${names.length === 2 ? "both " : ""}${names.slice(0, -1).join(", ")}`;
       messages.push(`${domain} is the domain of ${others} and ${names.at(-1)}`);
     }
-    if (!messages.length || root === undefined) continue;
-    const file = read(join(root, resource.file));
-    const at = typeof file === "string" ? {} : file.at(resource.span[0]);
-    for (const message of messages) problems.push({ file: resource.file, ...at, message });
+    if (root !== undefined) problems.push(...messages.map((message) => problemAt(root, resource, read, message)));
   }
   return problems;
+}
+
+/** `message` at a declaration's `export const`. */
+function problemAt(
+  root: string,
+  resource: DeclaredResource,
+  read: (path: string) => SourceFile | string,
+  message: string,
+): ResourceProblem {
+  const file = read(join(root, resource.file));
+  return { file: resource.file, ...(typeof file === "string" ? {} : file.at(resource.span[0])), message };
 }
 
 /**

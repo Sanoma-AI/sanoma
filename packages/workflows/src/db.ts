@@ -5,9 +5,9 @@ import { warn } from "./log.ts";
 import { errorMessage } from "./shared.ts";
 
 // The runtime's own tables live in the config's database, beside DBOS's: the credentials, the
-// ledger and the collections' records. What they share is here: the one preparation of a
-// database, a pool that opens once it is prepared and survives a dropped connection, and a table
-// creation two processes may race.
+// ledger, the collections' records and the wakeup's row. What they share is here: the one
+// preparation of a database, a pool that opens once it is prepared and survives a dropped
+// connection, and a table creation two processes may race.
 
 /** A connection or a pool: what the queries take. */
 export type Db = Pick<Pool | Client, "query">;
@@ -18,6 +18,13 @@ export const CREDENTIALS_TABLE = "sanoma_credentials";
 export const LEDGER_TABLE = "sanoma_ledger";
 /** Where the collections keep their records (`collection.ts`): one row per collection and key, the record as JSON. */
 export const DATA_TABLE = "sanoma_data";
+/**
+ * The instance's side of its wakeup: one row, made with the table. `owner` is the worker that
+ * registers, `generation` counts registrations up, `at` is the deadline registered, `stopped_at`
+ * when the worker last stopped, `registered_at` when the wakeup last took one, `last_error` why
+ * the last registration failed.
+ */
+export const WAKEUP_TABLE = "sanoma_wakeup";
 
 /** The runtime's tables, each with the word the messages name it by. */
 const TABLES: readonly [what: string, ddl: string][] = [
@@ -38,6 +45,12 @@ const TABLES: readonly [what: string, ddl: string][] = [
     "data",
     `CREATE TABLE IF NOT EXISTS ${DATA_TABLE} (collection text NOT NULL, key text NOT NULL, record jsonb NOT NULL, ` +
       "updated_at timestamptz NOT NULL DEFAULT now(), updated_by text NOT NULL, PRIMARY KEY (collection, key))",
+  ],
+  [
+    "wakeup",
+    `CREATE TABLE IF NOT EXISTS ${WAKEUP_TABLE} (id integer PRIMARY KEY CHECK (id = 1), owner uuid, ` +
+      "generation bigint NOT NULL DEFAULT 0, at timestamptz, stopped_at timestamptz, registered_at timestamptz, " +
+      `last_error text); INSERT INTO ${WAKEUP_TABLE} (id) VALUES (1) ON CONFLICT (id) DO NOTHING`,
   ],
 ];
 
@@ -142,7 +155,7 @@ const prepared = new Map<string, Promise<void>>();
  * Makes the database at `databaseUrl` ready for the runtime, once per process and URL: the
  * database itself and DBOS's tables when they are not there yet (as a worker's launch makes
  * them; credentials may be set, and a ledger read, before any worker has run), then the
- * credentials, ledger and data tables, and its idle-transaction timeout (`guardIdleTransactions`).
+ * credentials, ledger, data and wakeup tables, and its idle-transaction timeout (`guardIdleTransactions`).
  * Two processes preparing one database both succeed: the second waits for the first
  * (`lockPreparation`). A preparation that fails is forgotten, so the next call tries again.
  */

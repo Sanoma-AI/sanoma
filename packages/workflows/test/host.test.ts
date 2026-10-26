@@ -73,6 +73,10 @@ describe("a host type", () => {
     expect(() => hostOf(overrides)).toThrow(message);
   });
 
+  it.each(["long-lived", "stops-on-exit", "stops-when-quiet"] as const)("may be %s", (lifetime) => {
+    expect(hostOf({ capabilities: { ...host.capabilities, lifetime } }).host?.capabilities.lifetime).toBe(lifetime);
+  });
+
   it("may take a public site's domains in a field of its own", () => {
     expect(hostOf({ inputs: { ...host.inputs, domains: "sites" } }).host?.inputs.domains).toBe("sites");
   });

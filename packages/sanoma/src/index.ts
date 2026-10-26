@@ -35,6 +35,7 @@ export {
   type SleepRequest,
   type StepOptions,
   type Steps,
+  type Trigger,
   type Use,
   type WorkflowDefinition,
 } from "@sanoma-ai/workflows";

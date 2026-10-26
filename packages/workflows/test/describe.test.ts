@@ -48,6 +48,21 @@ describe("describeConfig", () => {
     expect(wf.source).toContain("defineWorkflow");
   });
 
+  it("carries each workflow's trigger: manual, or its schedule", () => {
+    const nightly = defineWorkflow({
+      name: "nightly",
+      trigger: { schedule: "0 3 * * *", timezone: "UTC" },
+      input: z.object({}),
+      uses: [],
+      run: async () => 1,
+    });
+    const { workflows } = describeConfig({ ...base, workflows: [announce, nightly] });
+    expect(workflows.filter((wf) => !wf.builtin).map(({ name, trigger }) => ({ name, trigger }))).toEqual([
+      { name: "announce", trigger: "manual" },
+      { name: "nightly", trigger: { schedule: "0 3 * * *", timezone: "UTC" } },
+    ]);
+  });
+
   it("lists ctx.all among a workflow's built-ins", () => {
     const fan = defineWorkflow({
       name: "fan",

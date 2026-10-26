@@ -39,6 +39,7 @@ import { APPLY_WORKFLOW, BUILT_IN_WORKFLOWS, CALL_WORKFLOW, DATA_VENDOR } from "
 import { sourceDriver, sourceOps } from "./source.ts";
 import type { Steps } from "./steps.ts";
 import { computeVersion } from "./version.ts";
+import { checkWakeupOps, type DeclaredWakeup } from "./wakeup.ts";
 
 /**
  * What a worker runs, on which connectors: the argument to `startWorker`.
@@ -92,6 +93,12 @@ export interface SanomaConfig {
    * records in the config's database, and in memory for a sandbox run.
    */
   collections?: readonly Collection[];
+  /**
+   * Run the wakeup service inside this instance (`sanoma serve`), for other instances' wakeups
+   * to register with. An instance that runs it must not stop, so `startWorker` refuses a config
+   * that sets it and declares a wakeup of its own.
+   */
+  wakeup?: true;
 }
 
 /** A config, checked, with everything a worker, client or app derives from it. */
@@ -249,6 +256,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     ...(hosts ? [sourceOps] : []),
     ...(dataStore ? [collectionsConnector(declared)] : []),
   ]);
+  checkWakeupOps(types, ops);
   const driversByVendor = new Map([...makersOf(config.connectors, "driver")].map(([vendor, make]) => [vendor, make()]));
   const drivers = indexDrivers(
     [
@@ -391,6 +399,26 @@ function scenariosAt(root: string | undefined): URL | undefined {
   const dir = root === undefined ? undefined : join(root, "scenarios");
   if (dir === undefined || !statSync(dir, { throwIfNoEntry: false })?.isDirectory()) return undefined;
   return pathToFileURL(`${dir}/`);
+}
+
+/**
+ * The one wakeup the config's data files declare, or undefined: with none, and with one the reader
+ * leaves out for a problem (its declaration's or its host's; several wakeups are each one).
+ * Undefined means the instance has no wakeup, so it must not stop. Server-side: it reads the data
+ * files and the lockfile, only when a connector declares a wakeup type.
+ */
+export async function declaredWakeup(config: SanomaConfig): Promise<DeclaredWakeup | undefined> {
+  const connectors = connectorsOf(config);
+  const types = resourceTypesOf(connectors);
+  if (![...types.values()].some((type) => type.wakeup)) return undefined;
+  // Loaded when it is needed, not with the worker: the reader parses with oxc-parser.
+  const { readDataFiles } = await import("./resources.ts");
+  for (const declared of readDataFiles(rootOf(config), connectors, types).resources) {
+    const type = types.get(`${declared.vendor}.${declared.type}`)!;
+    if (type.wakeup)
+      return { id: declared.id, type, declared, ...(declared.binding !== undefined && { binding: declared.binding }) };
+  }
+  return undefined;
 }
 
 /**

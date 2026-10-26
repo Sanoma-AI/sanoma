@@ -424,6 +424,17 @@ export function readDataFiles(
       done.set(id, undefined);
     }
   }
+  // An instance registers with one wakeup: several are each a problem, and left out, as is any that names one.
+  const wakeups = [...declarations].filter(
+    ([, { file, exp }]) => types.get(`${vendors.get(file)!.get(exp.vendor)}.${exp.type}`)?.wakeup,
+  );
+  if (wakeups.length > 1) {
+    for (const [id, { file, exp }] of wakeups) {
+      const others = wakeups.filter(([other]) => other !== id).map(([other]) => other);
+      file.problem(exp.start, `an instance has one wakeup: leave out this one or ${others.join(", ")}`);
+      done.set(id, undefined);
+    }
+  }
   const keys = new Set([...files.values()].flatMap((f) => f.data.declared.map((name) => `${f.rel}#${name}`)));
   const orphans = Object.entries(lock.bindings)
     .filter(([key]) => !keys.has(key))

@@ -256,8 +256,11 @@ function Overview({
 
 const NO_VENDORS: CalledVendor[] = [];
 
-/** How a workflow starts. Every one starts by hand for now. */
-const STARTS: Record<WorkflowEntry["trigger"], string> = { manual: "By hand" };
+/** How a workflow starts: by hand, or on its schedule, which the worker does not run yet. */
+const startsOf = (trigger: WorkflowEntry["trigger"]): string =>
+  trigger === "manual"
+    ? "By hand"
+    : `On a schedule: ${trigger.schedule}${trigger.timezone ? ` (${trigger.timezone})` : ""}`;
 
 /**
  * A workflow's row, opening its page: `waiting` approvals its runs wait on, `yours` of them for
@@ -294,7 +297,7 @@ const WorkflowRow = memo(function WorkflowRow({
           )}
         </div>
       </TableCell>
-      <TableCell className="text-muted-foreground">{STARTS[workflow.trigger]}</TableCell>
+      <TableCell className="text-muted-foreground">{startsOf(workflow.trigger)}</TableCell>
       <TableCell>
         <div className="flex flex-wrap gap-1">
           {vendors.map((vendor) => (

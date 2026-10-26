@@ -31,7 +31,7 @@ import { companyFakes } from "../../workflows/test/fixtures/company/fakes.ts";
 import { outbound } from "../../workflows/test/fixtures/outbound/resources/data.ts";
 import { marketingFakes } from "../../workflows/test/harness.ts";
 import { z } from "zod";
-import { type App, startApp } from "../src/index.ts";
+import { type App, type IngressRoute, startApp } from "../src/index.ts";
 import {
   ACTOR_HEADER,
   ACTOR_KEY,
@@ -216,7 +216,7 @@ beforeAll(async () => {
   npm.listen({ onUnhandledFrame: "bypass" });
   ensureBuilt(appDir, ["dist/server/server.js"], ["pnpm", "exec", "vite", "build"]);
   worker = await startWorker(config);
-  app = await startApp(config, { port: 0 });
+  app = await startApp(config, { port: 0, ingress: [machineRoute] });
   ctx = await contextOf(config);
 });
 
@@ -229,6 +229,21 @@ afterAll(async () => {
   await worker?.stop();
   rmSync(appRoot, { recursive: true, force: true });
 });
+
+/** A machine route, as the wakeup's `/wake` will be: it answers 204 with the generation it was given. */
+const machineRoute: IngressRoute = {
+  method: "GET",
+  path: "/machine",
+  handle: async (request) =>
+    new Response(null, {
+      status: 204,
+      headers: { "x-generation": new URL(request.url).searchParams.get("generation") ?? "" },
+    }),
+};
+
+/** Starts the app with `machineRoute` at each of `paths`. */
+const ingressAt = (...paths: string[]) =>
+  startApp(config, { ingress: paths.map((path) => ({ ...machineRoute, path })) });
 
 /** Who is asking: the `x-sanoma-actor` header the page sends, or other headers, to an app's context. */
 interface As {
@@ -1516,6 +1531,16 @@ describe("the page", () => {
     expect(await rawStatus(app.url, "/workflows", { host: "attacker.example:80" })).toBe(403);
   });
 
+  it("answers an ingress route before the login, whatever name it is addressed to, by its exact path, and 405 for another method", async () => {
+    expect(await rawStatus(app.url, "/machine?generation=3", { host: "10.0.0.7:3000" })).toBe(204);
+    const res = await fetch(new URL("/machine?generation=4", app.url));
+    expect([res.status, res.headers.get("x-generation")]).toEqual([204, "4"]);
+    // Another method is refused; another path is the login's, which refuses the host.
+    const post = await fetch(new URL("/machine", app.url), { method: "POST" });
+    expect([post.status, post.headers.get("allow")]).toEqual([405, "GET"]);
+    expect(await rawStatus(app.url, "/machine/", { host: "10.0.0.7:3000" })).toBe(403);
+  });
+
   it("answers a host's probe at /healthz before the login, whatever name it is addressed to", async () => {
     expect(await rawStatus(app.url, "/healthz", { host: "10.0.0.7:3000" })).toBe(200);
     const res = await fetch(new URL("/healthz?from=docker", app.url));
@@ -2240,6 +2265,15 @@ describe("startApp", () => {
       /^The app has no login, so it listens on this machine only, not 0\.0\.0\.0/,
     );
     expect(() => loopbackLogin().check("::1")).not.toThrow();
+  });
+
+  it("refuses an ingress route at no path, at /healthz, or at a path another has", async () => {
+    await expect(ingressAt("/wake?x")).rejects.toThrow(/has no query and is not \/healthz, unlike "\/wake\?x"/);
+    await expect(ingressAt("wake")).rejects.toThrow(
+      'An ingress route\'s path starts with /, has no query and is not /healthz, unlike "wake"',
+    );
+    await expect(ingressAt("/healthz")).rejects.toThrow(/is not \/healthz, unlike "\/healthz"/);
+    await expect(ingressAt("/wake", "/wake")).rejects.toThrow("Two ingress routes have the path /wake");
   });
 
   it("says to build the app when it is not built", async () => {
