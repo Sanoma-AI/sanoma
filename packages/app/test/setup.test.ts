@@ -4,20 +4,22 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { sanomaOps } from "@sanoma-ai/connector-sanoma-ops";
+import { supabase } from "@sanoma-ai/connector-supabase";
 import { ensureBuilt, testDatabaseUrl } from "@sanoma-ai/testing";
-import { defineConfig, resolveConfig, SanomaClient } from "@sanoma-ai/workflows";
+import { defineConfig, defineConnector, defineResource, resolveConfig, SanomaClient } from "@sanoma-ai/workflows";
 import { describeConfig } from "@sanoma-ai/workflows/describe";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { type App, startApp } from "../src/index.ts";
 import type { AppContext } from "../src/context.ts";
 import { loopbackLogin } from "../src/loopback.ts";
 import { admitting } from "../src/login/admission.ts";
 import { GITHUB_APP, githubManifest, mintWakeupToken, setSetupToken, setupStatus } from "../src/server/setup.ts";
 
-// Connecting GitHub and Supabase (/setup/connect): the GitHub App's manifest page, its callback
+// Connecting GitHub and the vendors (/setup/connect): the GitHub App's manifest page, its callback
 // against a GitHub of msw handlers, the keys stored encrypted, and the status the page shows.
 // Needs Postgres and the built app, as app.test.ts does.
 
@@ -31,7 +33,7 @@ writeFileSync(
 );
 const config = defineConfig({
   workflows: [],
-  connectors: [],
+  connectors: [supabase],
   databaseUrl: testDatabaseUrl("setup"),
   root,
 });
@@ -62,6 +64,9 @@ const NAMES = [
   ...Object.values(GITHUB_APP),
   "GITHUB_TOKEN",
   "SUPABASE_ACCESS_TOKEN",
+  "NEON_API_KEY",
+  "CLOUDFLARE_API_TOKEN",
+  "CLOUDFLARE_ACCOUNT_ID",
   "SANOMA_OPS_TOKEN",
   "SANOMA_OPS_URL",
   "SANOMA_WAKEUP_TOKEN",
@@ -239,12 +244,11 @@ describe("the connect page", () => {
   });
 });
 
+/** The instance's wakeup token, as stored (every client here is on the one database). */
+const instanceToken = async () => (await client.secrets(["SANOMA_WAKEUP_TOKEN"])).get("SANOMA_WAKEUP_TOKEN")?.value;
+
 describe("Connect sanoma-ops", () => {
-  it("mints the instance's token for an account token from the environment, as going live does", async () => {
-    const instanceToken = async () => (await client.secrets(["SANOMA_WAKEUP_TOKEN"])).get("SANOMA_WAKEUP_TOKEN")?.value;
-    await mintWakeupToken(client, { id: "alice" });
-    expect(await instanceToken()).toBeUndefined();
-    vi.stubEnv("SANOMA_OPS_TOKEN", `swa_${"c".repeat(43)}`);
+  it("mints the instance's token once, as going live does when it declares a wakeup, and again when fresh", async () => {
     const db = new Client({ connectionString: config.databaseUrl });
     try {
       await mintWakeupToken(client, { id: "alice" });
@@ -252,8 +256,9 @@ describe("Connect sanoma-ops", () => {
       expect(minted).toMatch(/^swi_[\w-]{43}$/);
       await mintWakeupToken(client, { id: "alice" });
       expect(await instanceToken()).toBe(minted);
+      await mintWakeupToken(client, { id: "alice" }, true);
+      expect(await instanceToken()).not.toBe(minted);
     } finally {
-      vi.stubEnv("SANOMA_OPS_TOKEN", "");
       await db.connect();
       await db.query("DELETE FROM sanoma_credentials WHERE name = 'SANOMA_WAKEUP_TOKEN'");
       await db.end();
@@ -267,7 +272,7 @@ describe("Connect sanoma-ops", () => {
       setSetupToken(ctx, { id: "alice" }, { name: "SANOMA_OPS_TOKEN", value: `swa_${"a".repeat(43)}` }),
     ).rejects.toThrow(/not a setup token/);
 
-    const declared = defineConfig({ ...config, connectors: [sanomaOps] });
+    const declared = defineConfig({ ...config, connectors: [supabase, sanomaOps] });
     const opsClient = await SanomaClient.connect(declared);
     try {
       const ops: AppContext = { ...ctx, resolved: resolveConfig(declared), client: opsClient };
@@ -287,8 +292,6 @@ describe("Connect sanoma-ops", () => {
       await setSetupToken(ops, { id: "alice" }, { name: "SANOMA_OPS_TOKEN", value: account });
       const minted = (await opsClient.secrets(["SANOMA_WAKEUP_TOKEN"])).get("SANOMA_WAKEUP_TOKEN");
       expect(minted).toMatchObject({ value: expect.stringMatching(/^swi_[\w-]{43}$/), setBy: "alice" });
-      const instanceToken = async () =>
-        (await opsClient.secrets(["SANOMA_WAKEUP_TOKEN"])).get("SANOMA_WAKEUP_TOKEN")?.value;
       // Stored again, the same account's: the instance keeps its token.
       await setSetupToken(ops, { id: "alice" }, { name: "SANOMA_OPS_TOKEN", value: account });
       expect(await instanceToken()).toBe(minted!.value);
@@ -307,5 +310,40 @@ describe("Connect sanoma-ops", () => {
     } finally {
       await opsClient.close();
     }
+  });
+});
+
+/** A connector of one read-only type `vendor.type`, for a config that declares the vendor. */
+const typeOf = (vendor: string, type: string) =>
+  defineConnector(
+    vendor,
+    {
+      [type]: defineResource({
+        vendor,
+        type,
+        title: type,
+        schema: z.object({ name: z.string() }),
+        fields: { immutable: [], vendorOwned: [], writeOnly: [] },
+      }),
+    },
+    { package: `@acme/${vendor}` },
+  );
+
+describe("Connect Cloudflare and Neon", () => {
+  it("asks for their tokens only when the config declares a type of the vendor", async () => {
+    const declared = defineConfig({
+      ...config,
+      connectors: [typeOf("neon", "project"), typeOf("cloudflare", "container")],
+    });
+    const hosted: AppContext = { ...ctx, resolved: resolveConfig(declared) };
+    expect((await setupStatus(hosted)).tokens).toEqual([
+      expect.objectContaining({ name: "GITHUB_TOKEN" }),
+      expect.objectContaining({ name: "NEON_API_KEY", optional: false, status: "missing" }),
+      expect.objectContaining({ name: "CLOUDFLARE_API_TOKEN", optional: true, status: "missing" }),
+      expect.objectContaining({ name: "CLOUDFLARE_ACCOUNT_ID", optional: true, status: "missing" }),
+    ]);
+    await expect(setSetupToken(ctx, { id: "alice" }, { name: "NEON_API_KEY", value: "napi_madeup" })).rejects.toThrow(
+      /not a setup token/,
+    );
   });
 });

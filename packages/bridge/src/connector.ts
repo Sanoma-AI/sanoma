@@ -1,6 +1,7 @@
 import {
   type CallContext,
   type Connector,
+  type DatabaseSpec,
   defineConnector,
   defineDriver,
   defineResource,
@@ -90,6 +91,8 @@ export interface TfTypeSpec<S extends z.ZodObject = z.ZodObject> {
   writeOnly?: readonly string[];
   /** Set when the type meets the `Host` contract (`ResourceSpec.host`). */
   host?: HostSpec;
+  /** Set when the type meets the `Database` contract (`ResourceSpec.database`). */
+  database?: DatabaseSpec;
 }
 
 /** Per resource type, its `fields.references`: `{ branch_protection: { repository_id: { type: "github.repository" } } }`. */
@@ -263,8 +266,20 @@ export function tfConnector<
   ];
   const resources: Record<string, Resource> = Object.fromEntries(
     Object.entries(types).map(([type, typeSpec]) => {
-      const { tf, title, identity, find, bindingId, normalize, writable, stateless, writeOnly, host, afterCreate } =
-        typeSpec;
+      const {
+        tf,
+        title,
+        identity,
+        find,
+        bindingId,
+        normalize,
+        writable,
+        stateless,
+        writeOnly,
+        host,
+        database,
+        afterCreate,
+      } = typeSpec;
       return [
         type,
         defineResource({
@@ -284,6 +299,7 @@ export function tfConnector<
           ...(writable && { writable }),
           ...(stateless && { stateless }),
           ...(host && { host }),
+          ...(database && { database }),
           ...(afterCreate && { afterCreate }),
         }),
       ];

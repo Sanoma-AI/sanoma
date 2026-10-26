@@ -189,18 +189,44 @@ export interface SetupStatus {
   tokens: CredentialStatus[];
 }
 
+/**
+ * The vendors `/setup` connects with pasted tokens, as its pages show them: each one's setup
+ * tokens (`SETUP_TOKENS`), the first of which says it is connected, and what connecting it does.
+ * A vendor whose tokens the config does not ask for is not shown.
+ */
+export const SETUP_VENDORS: readonly { title: string; tokens: readonly string[]; about: string }[] = [
+  { title: "Supabase", tokens: ["SUPABASE_ACCESS_TOKEN"], about: "An access token, which lists and creates projects." },
+  { title: "Neon", tokens: ["NEON_API_KEY"], about: "An organization API key, which creates projects." },
+  {
+    title: "Cloudflare",
+    tokens: ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"],
+    about:
+      "Optional: an API token and the account, so the company runs on Cloudflare Containers and stops when nothing is due. Connect it before choosing where the company goes.",
+  },
+  {
+    title: "sanoma-ops",
+    tokens: ["SANOMA_OPS_TOKEN", "SANOMA_OPS_URL"],
+    about:
+      "Optional: a wakeup account, so the host stops when nothing is due and starts again in time. Connect it before choosing where the company goes, which declares the wakeup.",
+  },
+];
+
 /** The data file going live writes, relative to the config's root. */
 export const INFRA = "resources/sanoma/infra.ts";
 
-/** What going live chooses (`goLiveFn`): who holds the repository, Supabase's organization and region, the host's port. */
+/**
+ * What going live chooses (`goLiveFn`): who holds the repository, the database's region (and
+ * size, when it takes one), Supabase's organization for a Supabase project, the host's port.
+ */
 export const GoLiveRequest = z.object({
   owner: z.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/, "Choose a GitHub account or organization"),
-  /** The repository's name, and the Supabase project's and the host's. */
+  /** The repository's name, and the database's and the host's. */
   name: z
     .string()
     .regex(/^[a-z0-9][a-z0-9-]{0,62}$/, "Lower case letters, digits and hyphens, starting with a letter or digit"),
-  organization: z.string().min(1, "Choose a Supabase organization"),
+  organization: z.string().min(1, "Choose a Supabase organization").optional(),
   region: z.string().min(1, "Choose a region"),
+  size: z.string().min(1).optional(),
   port: z.number().int().min(1024, "A port from 1024").max(65535, "A port up to 65535"),
 });
 export type GoLiveRequest = z.infer<typeof GoLiveRequest>;
@@ -238,11 +264,15 @@ export interface AvailableConnectors {
 export interface GoLiveChoices {
   /** The GitHub accounts a repository can be made in: the token's user and organizations, and the App's installations. */
   owners: { login: string; kind: "user" | "organization"; via: "token" | "app" }[];
-  /** The Supabase organizations the stored token sees. */
-  organizations: { id: string; name: string }[];
-  regions: readonly string[];
-  /** The host type the company runs on, `<vendor>.<type>`, and its title; null when the config has none. */
-  host: { type: string; title: string } | null;
+  /** The Supabase organizations the stored token sees, for a Supabase project; null for a database that takes none. */
+  organizations: { id: string; name: string }[] | null;
+  /**
+   * The database type the company's records go in, `<vendor>.<type>`, its title, the regions it
+   * takes (null when it lists none) and whether it takes a size; null when the config has none.
+   */
+  database: { type: string; title: string; regions: readonly string[] | null; size: boolean } | null;
+  /** The host type the company runs on, `<vendor>.<type>`, its title and whether its URL is public; null when the config has none. */
+  host: { type: string; title: string; publicUrl: boolean } | null;
   /** The resource types going live needs that the config's connectors do not declare. */
   missing: string[];
   /** A name to suggest: the app's. */

@@ -43,7 +43,8 @@ type State = Record<string, unknown>;
 /** The variable the credential check sets: the host's worker must hear the change over `LISTEN`. */
 export const HOST_CHECK_CREDENTIAL = "HOST_CHECK_TOKEN";
 
-const digest = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 16);
+/** A digest of a credential's value, which the probe reports instead of the value. */
+export const credentialDigest = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 16);
 
 const hostCheckOps = defineConnector("hostcheck", {
   probe: {
@@ -58,7 +59,7 @@ const hostCheckOps = defineConnector("hostcheck", {
 });
 const hostCheckDriver = defineDriver(
   hostCheckOps,
-  { probe: { digest: async () => ({ digest: digest(process.env[HOST_CHECK_CREDENTIAL] ?? "") }) } },
+  { probe: { digest: async () => ({ digest: credentialDigest(process.env[HOST_CHECK_CREDENTIAL] ?? "") }) } },
   { env: z.object({ [HOST_CHECK_CREDENTIAL]: z.string().describe("Any value: the host check sets it") }) },
 );
 
@@ -190,7 +191,7 @@ export async function checkHost(host: HostUnderTest): Promise<HostCheck[]> {
         const run = await ended(runId);
         return run?.status === "finished" ? ((await client.result(runId)) as { digest: string }).digest : undefined;
       },
-      (seen) => seen === digest(credential),
+      (seen) => seen === credentialDigest(credential),
       timeoutMs,
     );
   });

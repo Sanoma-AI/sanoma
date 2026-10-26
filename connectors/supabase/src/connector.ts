@@ -3,6 +3,27 @@ import { defineConnector, vendorInfo } from "@sanoma-ai/workflows";
 import { z } from "zod";
 import { provider, supabase_project } from "./resources.gen.ts";
 
+/** Supabase's regions, as a project's `region` takes them. */
+const REGIONS = [
+  "us-east-1",
+  "us-east-2",
+  "us-west-1",
+  "us-west-2",
+  "ca-central-1",
+  "sa-east-1",
+  "eu-west-1",
+  "eu-west-2",
+  "eu-west-3",
+  "eu-central-1",
+  "eu-central-2",
+  "eu-north-1",
+  "ap-south-1",
+  "ap-southeast-1",
+  "ap-southeast-2",
+  "ap-northeast-1",
+  "ap-northeast-2",
+] as const;
+
 /**
  * Supabase, through the `supabase/supabase` OpenTofu provider: the generated resource types, and
  * who Supabase is. Supabase names its projects (a project's ref), so a declaration has no
@@ -21,6 +42,14 @@ export const supabaseTf = tfConnector({
       title: "Project",
       exists: (state) => state.name != null,
       writable: true,
+      // The company's database: paid projects never pause, and a branch starts empty.
+      database: {
+        capabilities: { pauses: false, branch: false },
+        inputs: { region: "region" },
+        storeUrl: "supabase.database.storeUrl",
+        regions: REGIONS,
+        outputs: (state) => ({ healthy: state.name != null }),
+      },
       // Once apply makes a project: its database and pooler healthy, then the URL a worker
       // connects with stored as SANOMA_DATABASE_URL_<EXPORT>, which a host's secrets name.
       afterCreate: [

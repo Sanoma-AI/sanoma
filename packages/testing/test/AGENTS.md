@@ -1,11 +1,12 @@
 # packages/testing/test
 
-Tests for `@sanoma-ai/testing`. `harness.test.ts`, `scenarios.test.ts`, `host.test.ts`, `wakeup.test.ts` and `stack.test.ts` need Postgres (`pnpm db:up`).
+Tests for `@sanoma-ai/testing`. `harness.test.ts`, `scenarios.test.ts`, `host.test.ts`, `wakeup.test.ts`, `database.test.ts` and `stack.test.ts` need Postgres (`pnpm db:up`).
 
 ## Contents
 
 | Path                                     | What it is                                                                                                                                                                                                                                                      |
 | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`database.test.ts`](database.test.ts)   | `checkDatabase` against `fakeDatabase` (the fourth check after a suspend that drops the worker's and the client's connections), the rest failed at once when none starts; the fake in a config, its `storeUrl`, apply and removal                               |
 | [`fakes.test.ts`](fakes.test.ts)         | The connector fakes: idempotent replays, injected faults, `update` and a shared call log                                                                                                                                                                        |
 | [`harness.test.ts`](harness.test.ts)     | `useTestApp`: one config, so the client reads both runs across a restart                                                                                                                                                                                        |
 | [`host.test.ts`](host.test.ts)           | `checkHost` against `fakeHost` over `inProcessHost`, long-lived and `stops-when-quiet` (the two checks of a host that stops); the proxy kept across a stop, started again on the next request, and quiet after `quietAfterMs`                                   |

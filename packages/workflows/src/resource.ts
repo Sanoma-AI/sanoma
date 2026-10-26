@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { checkDatabase, type DatabaseSpec } from "./database.ts";
 import { checkHost, type HostSpec } from "./host.ts";
 import { type Connector, type OpSpec, RESOURCE, VENDOR } from "./op.ts";
 import { isSanomaSecret, isSecret, type Secret } from "./secret.ts";
@@ -85,6 +86,11 @@ export interface ResourceSpec<S extends z.ZodObject = z.ZodObject> {
    * type is `writable`, and its connector has the operation `register` names.
    */
   wakeup?: WakeupSpec;
+  /**
+   * Set when the type meets the `Database` contract: it holds the company's database. Such a type
+   * is `writable`, not `stateless`, and its `afterCreate` calls the operation `storeUrl` names.
+   */
+  database?: DatabaseSpec;
   /**
    * True when its objects hold no data, so one gone at the vendor is created again by apply
    * without asking (a host running the company's code); otherwise apply asks first, as a
@@ -277,11 +283,11 @@ export interface Resource<
       Required<
         Omit<
           ResourceSpec<S>,
-          "identity" | "find" | "writable" | "host" | "wakeup" | "stateless" | "afterCreate" | "vendorless"
+          "identity" | "find" | "writable" | "host" | "wakeup" | "database" | "stateless" | "afterCreate" | "vendorless"
         >
       >
     >,
-    Readonly<Pick<ResourceSpec<S>, "identity" | "find" | "host" | "wakeup" | "afterCreate">> {
+    Readonly<Pick<ResourceSpec<S>, "identity" | "find" | "host" | "wakeup" | "database" | "afterCreate">> {
   (desired: Declaring<z.input<S>, R>): Declared<Id, z.input<S>>;
   /** `read` and `import`, each effect `read`, idempotent, with the id as `target`; for a writable type, the change operations too. */
   readonly ops: ResourceOps<S, W>;
@@ -545,11 +551,12 @@ export function defineResource<
 >(
   spec: ResourceSpec<S> & { vendor: V; type: T; fields: { references?: R }; writable?: W },
 ): Resource<S, `${V}.${T}`, R, W> {
-  const { vendor, type, schema, fields, find, identity, host, wakeup } = spec;
+  const { vendor, type, schema, fields, find, identity, host, wakeup, database } = spec;
   const writable = (spec.writable ?? false) as W;
   const what: `${V}.${T}` = `${vendor}.${type}`;
   if (host) checkHost(what, host, spec);
   if (wakeup) checkWakeup(what, wakeup, spec);
+  if (database) checkDatabase(what, database, spec);
   if (spec.vendorless && (writable || host))
     throw new Error(`${what}: a vendorless type has no object to change or host`);
   const title = spec.title.toLowerCase();
@@ -688,6 +695,7 @@ export function defineResource<
     writable,
     ...(host && { host }),
     ...(wakeup && { wakeup }),
+    ...(database && { database }),
     stateless: spec.stateless ?? host !== undefined,
     vendorless: spec.vendorless ?? false,
     ...(spec.afterCreate && { afterCreate: spec.afterCreate }),

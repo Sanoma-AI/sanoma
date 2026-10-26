@@ -30,6 +30,8 @@ Three more operations call the Management API, each with the project's ref as `t
 
 Apply calls two of them after it creates a project (the type's `afterCreate`): `project.health` until the database and pooler are healthy, then `database.storeUrl` with the data file's export, so a host can name the URL as `secret("SANOMA_DATABASE_URL_STORE")`.
 
+The project type meets the [`Database` contract](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#databases) (`database`): it neither pauses nor branches (a paid project never pauses, and a branch starts empty), takes `region` from Supabase's regions (`database.regions`), and stores its URL with `database.storeUrl`. Going live chooses it when the config has no Neon project type.
+
 A data file declares a project with the constructor in `@sanoma-ai/connector-supabase/resources`, without its ref, which Supabase sets: which project a declaration means is its binding, in the [lockfile](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#bindings), by its ref. A declaration with no binding is `absent` to a drift check.
 
 ```ts

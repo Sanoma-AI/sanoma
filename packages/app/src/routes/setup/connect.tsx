@@ -17,13 +17,14 @@ import {
   When,
 } from "../../components/common.tsx";
 import { CredentialRow, type CredentialStore } from "../../components/credentials.tsx";
+import { SETUP_VENDORS } from "../../api.ts";
 import { setSetupTokenFn } from "../../functions.ts";
 import { setupStatusQuery } from "../../queries.ts";
 
 export const Route = createFileRoute("/setup/connect")({
   // `github` says how creating the App went, as its callback comes back here.
   validateSearch: z.object({ github: z.enum(["connected", "expired", "failed", "bad-org", "nobody"]).optional() }),
-  staticData: { crumb: "Connect GitHub and Supabase" },
+  staticData: { crumb: "Connect" },
   head: ({ match }) => pageTitle(match.staticData.crumb),
   loader: ({ context: { queryClient } }) => queryClient.query({ ...setupStatusQuery(), staleTime: "static" }),
   component: ConnectPage,
@@ -44,17 +45,18 @@ const OUTCOME = {
 const SETUP_STORE: CredentialStore = { set: setSetupTokenFn };
 
 /**
- * Going live, step 1: the GitHub App (or a token of your own), a Supabase token and, when the
- * config declares its connector, sanoma-ops's account token and URL, and what is connected.
+ * Going live, step 1: the GitHub App (or a token of your own), and the tokens of each vendor the
+ * config declares (Supabase, Neon, Cloudflare, sanoma-ops: `SETUP_VENDORS`), and what is connected.
  */
 function ConnectPage() {
   const { github } = Route.useSearch();
   const { data: status } = useSuspenseQuery(setupStatusQuery());
   const token = (name: string) => status.tokens.find((t) => t.name === name);
   const githubToken = token("GITHUB_TOKEN");
-  const supabaseToken = token("SUPABASE_ACCESS_TOKEN");
-  // Only when the config declares the sanoma-ops connector.
-  const opsRows = [token("SANOMA_OPS_TOKEN"), token("SANOMA_OPS_URL")].filter((t) => t !== undefined);
+  // Only the vendors the config declares.
+  const vendors = SETUP_VENDORS.map((v) => ({ ...v, rows: v.tokens.map(token).filter((t) => t !== undefined) })).filter(
+    (v) => v.rows.length > 0,
+  );
   return (
     <>
       <CrumbHeader />
@@ -65,21 +67,16 @@ function ConnectPage() {
           {githubToken && <CredentialRow credential={githubToken} store={SETUP_STORE} />}
         </ItemGroup>
       </Region>
-      <Region title="Supabase">
-        <ItemGroup>{supabaseToken && <CredentialRow credential={supabaseToken} store={SETUP_STORE} />}</ItemGroup>
-      </Region>
-      {opsRows.length > 0 && (
-        <Region title="sanoma-ops">
-          <p className="text-sm text-muted-foreground">
-            Scale to zero: the host stops when nothing is due, and the wakeup starts it again in time.
-          </p>
+      {vendors.map((v) => (
+        <Region key={v.title} title={v.title}>
+          <p className="text-sm text-muted-foreground">{v.about}</p>
           <ItemGroup>
-            {opsRows.map((row) => (
+            {v.rows.map((row) => (
               <CredentialRow key={row.name} credential={row} store={SETUP_STORE} />
             ))}
           </ItemGroup>
         </Region>
-      )}
+      ))}
       <p className="text-sm text-muted-foreground">
         Have a repository or a database already?{" "}
         <Link to="/setup/existing" className="underline underline-offset-4">

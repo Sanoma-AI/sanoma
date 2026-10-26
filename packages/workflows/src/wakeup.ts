@@ -54,8 +54,8 @@ export interface WakeupSpec {
   outputs: (state: Record<string, unknown>) => WakeupOutputs;
 }
 
-/** The operations `defineResource` gives a type itself: never its register. */
-const RESOURCE_OPS = new Set(["read", "import", "plan", "create", "update", "delete"]);
+/** The operations `defineResource` gives a type itself: never its register, or a database's `storeUrl`. */
+export const RESOURCE_OPS = new Set(["read", "import", "plan", "create", "update", "delete"]);
 
 /**
  * Throws what is wrong with a resource type's `wakeup`: a type apply cannot change (not
