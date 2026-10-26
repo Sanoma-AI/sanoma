@@ -178,7 +178,7 @@ export class SanomaClient {
     this.config = config;
     this.drivers = drivers;
     this.audit = ownedLedger(config);
-    this.pool = lazyPool(config.databaseUrl, "credentials");
+    this.pool = lazyPool(config.databaseUrl, "client");
     this.storedSecrets = storedSecrets(() => this.db(), "sanoma");
     this.chats = chatStore(() => this.db());
   }

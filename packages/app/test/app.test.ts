@@ -858,14 +858,15 @@ describe("the page", () => {
     expect(html).toMatch(/>This computer<\/span><span [^>]*hidden="">Database on [^<@]+<\/span>/);
     // The config has a policy: Permissions says what it does, so the overview says nothing of it.
     expect(html).not.toContain("No policy");
-    // The chat column, open with no cookie: its empty state, and a composer that cannot send yet,
-    // carrying the page as a chip.
+    // The chat column, open with no cookie: a new chat's empty state, and the composer carrying the
+    // page as a chip, with Send waiting for a message (chat.test.ts drives the agent).
     expect(chatOpen(html)).toBe(true);
     const column = html.match(/<aside id="chat" aria-label="Chat"[^>]*>([\s\S]*?)<\/aside>/)?.[1];
     expect(column).toContain(">What should change?<");
-    expect(column).toContain("The agent is coming");
+    expect(column).toContain("Ask the agent: it drafts the change on a branch of its own");
+    expect(column).toContain(">New chat<");
     expect(column).toMatch(
-      /<span[^>]*><span[^>]*>Workflows<\/span><\/span><textarea[^>]*disabled=""[^>]*aria-label="Message the agent"/,
+      /<span[^>]*><span[^>]*>Workflows<\/span><\/span><textarea(?![^>]*disabled)[^>]*aria-label="Message the agent"/,
     );
     expect(column).toMatch(/<button[^>]*disabled=""[^>]*aria-label="Send"/);
     expect(html).toContain('href="/workflows/announce"');
