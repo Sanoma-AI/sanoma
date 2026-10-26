@@ -158,10 +158,10 @@ export interface RunCheck extends Check {
 }
 
 /**
- * A scenario as the page lists it: what it says and the input its run starts with, not how the
- * worker seeds and checks it.
+ * A scenario as the page lists it: what it says, the workflow it runs and the input its run
+ * starts with, not how the worker seeds and checks it. Never a world, which runs nothing.
  */
-export type ScenarioEntry = Pick<Scenario, "name" | "workflow" | "file" | "text" | "steps" | "input">;
+export type ScenarioEntry = Pick<Scenario, "name" | "file" | "text" | "steps" | "input"> & { workflow: string };
 
 /** Every scenario, and why each feature file that could not be read could not. */
 export interface ScenariosResponse {

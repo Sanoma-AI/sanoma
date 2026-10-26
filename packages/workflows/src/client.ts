@@ -168,6 +168,12 @@ export interface ClientOptions {
    * runs a worker that stops when idle starts it again with it (`Supervisor.resume`). Must not throw.
    */
   onWrite?: () => void;
+  /**
+   * The config as the caller resolved it (`resolveConfig(config, options)`), for a client that
+   * shares its drivers with the caller, as `startWorker`'s `resolved` does. The caller closes its
+   * `dataStore`.
+   */
+  resolved?: ResolvedConfig;
 }
 
 /** Talks to the runtime from another process (the app, a script), through the shared Postgres. */
@@ -207,7 +213,7 @@ export class SanomaClient {
    * Postgres store on its database when it has none.
    */
   static async connect(config: SanomaConfig, options: ClientOptions = {}): Promise<SanomaClient> {
-    const resolved = resolveConfig(config);
+    const resolved = options.resolved ?? resolveConfig(config);
     const dbos = await dbosClient(resolved.databaseUrl, resolved.appName);
     return new SanomaClient(dbos, resolved, resolved.driversByVendor, options);
   }
@@ -800,7 +806,12 @@ export class SanomaClient {
   }
 
   async close() {
-    await Promise.all([this.dbos.destroy(), this.pool.close(), this.audit.close(), this.config.dataStore?.close()]);
+    await Promise.all([
+      this.dbos.destroy(),
+      this.pool.close(),
+      this.audit.close(),
+      this.options.resolved ? undefined : this.config.dataStore?.close(),
+    ]);
   }
 
   /**

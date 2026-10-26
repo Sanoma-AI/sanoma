@@ -258,14 +258,10 @@ export async function scenarios({ resolved }: Pick<AppContext, "resolved">): Pro
   try {
     const loaded = await loadScenarios(resolved);
     return {
-      scenarios: loaded.scenarios.map(({ name, workflow, file, text, steps, input }) => ({
-        name,
-        workflow,
-        file,
-        text,
-        steps,
-        input,
-      })),
+      // A world runs nothing, so the page has nothing to start or check of it.
+      scenarios: loaded.scenarios.flatMap(({ name, workflow, file, text, steps, input }) =>
+        workflow === undefined ? [] : [{ name, workflow, file, text, steps, input }],
+      ),
       errors: loaded.errors,
     };
   } catch (err) {
@@ -300,7 +296,9 @@ export async function startRun(
   body: StartRunRequest,
 ): Promise<StartRunResponse> {
   if ("scenario" in body) {
-    const { scenarios: all, errors } = await loadScenarios(resolved);
+    const { scenarios: loaded, errors } = await loadScenarios(resolved);
+    // A world runs nothing, so it is not one to start.
+    const all = loaded.filter((s): s is typeof s & { workflow: string } => s.workflow !== undefined);
     const scenario = all.find((s) => s.name === body.scenario);
     const workflow = scenario && resolved.workflows.get(scenario.workflow);
     if (!scenario || !workflow) {
@@ -309,7 +307,7 @@ export async function startRun(
     }
     return {
       runId: await client.start(workflow, scenario.input, { startedBy: actor, sandbox: scenario.name }),
-      workflow: scenario.workflow,
+      workflow: workflow.name,
     };
   }
   const workflow = resolved.workflows.get(body.workflow);
