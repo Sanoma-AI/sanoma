@@ -200,8 +200,10 @@ function TurnError({ message }: { message: string }) {
   );
 }
 
-/** The engines, the composer's choices. */
+/** The engines, the composer's choices: ours on the company's key, then a person's own (`ownPlan`). */
 const NAMES = Object.keys(ENGINE_NAMES) as EngineName[];
+const OURS = NAMES.filter((name) => !ownPlan(name));
+const OWN = NAMES.filter(ownPlan);
 
 /** An engine as the composer's choice. */
 const engineOption = (name: EngineName) => (
@@ -278,8 +280,8 @@ function Composer({
             value={engine.value}
             onChange={(e) => engine.set(e.target.value as EngineName)}
           >
-            {NAMES.filter((name) => !ownPlan(name)).map(engineOption)}
-            <NativeSelectOptGroup label="Your own plan">{NAMES.filter(ownPlan).map(engineOption)}</NativeSelectOptGroup>
+            {OURS.map(engineOption)}
+            <NativeSelectOptGroup label="Your own plan">{OWN.map(engineOption)}</NativeSelectOptGroup>
           </NativeSelect>
         )}
         <Button type="submit" size="icon-sm" variant="secondary" disabled={busy || !text.trim()} aria-label="Send">

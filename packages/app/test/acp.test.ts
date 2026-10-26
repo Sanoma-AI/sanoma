@@ -383,7 +383,7 @@ describe("the chat on a person's own agent", () => {
 });
 
 /** Opens the chat `id` on `engine` as `actor`, with fetch: the response as it came. */
-const post = (id: string, engine: string, actor = "ada") =>
+const post = (id: string, engine: string, actor: string) =>
   fetch(new URL("/api/chat", app!.url), {
     method: "POST",
     headers: { "content-type": "application/json", ...headers(actor) },
