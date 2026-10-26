@@ -8,9 +8,12 @@ import { resend } from "@sanoma-ai/connector-resend";
 import { stripe } from "@sanoma-ai/connector-stripe";
 import { customProvider } from "ai";
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import {
+  changeOps,
   type Connector,
   defineSteps,
+  defineWorkflow,
   memoryLedger,
   resolveConfig,
   type SanomaConfig,
@@ -146,6 +149,42 @@ describe("resolveConfig on the connectors' setups", () => {
     const bare = { ...ghost, [VENDOR]: { ...ghost[VENDOR], setup: { fake: fakeGhost } } };
     expect(() => resolveConfig(config({ connectors: [bare, resend, bluesky] }))).toThrow(
       "`ghost.post.create` has no driver: the connector package must attach one",
+    );
+  });
+});
+
+describe("a change's operations, built in", () => {
+  it("are in every config, with no connector, each with the placeholder driver", async () => {
+    const resolved = resolveConfig({ workflows: [], connectors: [] });
+    const ids = ["sanoma.change.open", "sanoma.change.review", "sanoma.change.merge", "sanoma.change.close"];
+    expect([...resolved.ops.keys()]).toEqual(ids);
+    expect(ids.map((id) => resolved.ops.get(id)!.effect)).toEqual(["write", "write", "write", "write"]);
+    expect(resolved.ops.get("sanoma.change.merge")!.target!({ id: "c1" })).toBe("change:c1");
+    await expect(resolved.drivers.get("sanoma.change.merge")!({}, {} as never)).rejects.toThrow("not built");
+    // Not a vendor with credentials to set.
+    expect(resolved.driversByVendor.size).toBe(0);
+  });
+
+  it("refuses a company workflow that calls one, and one named change", () => {
+    const merging = defineWorkflow({
+      name: "merging",
+      trigger: "manual",
+      input: z.object({}),
+      uses: [changeOps.change.merge],
+      run: async () => 1,
+    });
+    expect(() => resolveConfig(config({ workflows: [merging] }))).toThrow(
+      'Workflow "merging": sanoma.change.merge changes the company\'s repository, which only change does: send a draft for review instead',
+    );
+    const named = defineWorkflow({
+      name: "change",
+      trigger: "manual",
+      input: z.object({}),
+      uses: [],
+      run: async () => 1,
+    });
+    expect(() => resolveConfig(config({ workflows: [named] }))).toThrow(
+      'A workflow is named "change", the name of a built-in workflow',
     );
   });
 });

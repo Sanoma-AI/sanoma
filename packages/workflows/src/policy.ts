@@ -32,6 +32,11 @@ export interface PolicyCall {
   run: { id: string; workflow: string; approvals: readonly ApprovalState[] };
   /** For a collection's `save` or `delete`: the record as it was, when there was one. */
   before?: unknown;
+  /**
+   * The attributes of the entity the call acts on, when its action is on one with attributes: a
+   * `sanoma.change.merge`'s `Sanoma::Change`, the change's facts (`ChangeFacts`).
+   */
+  entity?: Record<string, unknown>;
 }
 
 /**

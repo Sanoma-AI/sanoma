@@ -20,6 +20,7 @@ export type { DeclaredResource, ResourceProblem } from "./resources.ts";
 export type { DriftField, DriftReport, DriftResult, DriftStatus } from "./drift.ts";
 export type { ApplyPlan, ApplyReport, ApplyResult, PlanAnswer, PlanStep } from "./apply.ts";
 export type { CredentialStatus } from "./env.ts";
+export type { ChangeEvent, ChangeFacts, ChangeReport, ChangeState } from "./change.ts";
 
 // What a UI in the browser may use from the runtime, besides types: `@sanoma-ai/workflows/shared`.
 // Nothing here imports DBOS, Node or zod, so a browser bundle can carry it; the runtime uses the
@@ -184,8 +185,30 @@ function checkField(where: string, field: string, kind: unknown): void {
  */
 export const CALL_WORKFLOW = "call";
 
-/** The workflows the runtime adds itself, which a config's own may not be named: drift, apply and call. */
-export const BUILT_IN_WORKFLOWS: ReadonlySet<string> = new Set([DRIFT_WORKFLOW, APPLY_WORKFLOW, CALL_WORKFLOW]);
+/**
+ * The built-in change workflow's name: the life of a change to the company's repository, from its
+ * pull request to its merge. The only workflow that may call `sanoma.change.*`.
+ */
+export const CHANGE_WORKFLOW = "change";
+
+/** Opens a change: its draft's branch pushed and a pull request opened for it. */
+export const CHANGE_OPEN = "sanoma.change.open";
+/** Reports Sanoma's review of a change to its host (the `sanoma` commit status). */
+export const CHANGE_REVIEW = "sanoma.change.review";
+/** Merges a change; its resource is the `Sanoma::Change`, whose attributes are its facts (`ChangeFacts`). */
+export const CHANGE_MERGE = "sanoma.change.merge";
+/** Closes a change without merging it. */
+export const CHANGE_CLOSE = "sanoma.change.close";
+/** The DBOS event a change run publishes its `ChangeState` on. */
+export const CHANGE_EVENT = "change";
+
+/** The workflows the runtime adds itself, which a config's own may not be named: drift, apply, call and change. */
+export const BUILT_IN_WORKFLOWS: ReadonlySet<string> = new Set([
+  DRIFT_WORKFLOW,
+  APPLY_WORKFLOW,
+  CALL_WORKFLOW,
+  CHANGE_WORKFLOW,
+]);
 
 /**
  * Every run status, in the order a run may pass through them: waiting on the queue, running,

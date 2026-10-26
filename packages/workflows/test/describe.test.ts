@@ -84,6 +84,10 @@ describe("describeConfig", () => {
       "resend.broadcast.create",
       "resend.broadcast.send",
       "resend.emails.send",
+      "sanoma.change.close",
+      "sanoma.change.merge",
+      "sanoma.change.open",
+      "sanoma.change.review",
     ]);
     const publish = ops.find((o) => o.id === "ghost.post.publish")!;
     expect(publish).toMatchObject({

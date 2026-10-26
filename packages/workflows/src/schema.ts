@@ -8,11 +8,12 @@ import type {
   Type,
   TypeOfAttribute,
 } from "@cedar-policy/cedar-wasm/nodejs";
+import { ChangeFacts } from "./change.ts";
 import { recordSchemaOf } from "./collection.ts";
 import type { ResolvedConfig } from "./config.ts";
 import { jsonSchemaOf } from "./define.ts";
 import { isObject } from "./resource.ts";
-import { DATA_VENDOR, EFFECTS, groupNamesOf, type PeopleResource, WORKFLOW_ACTION } from "./shared.ts";
+import { CHANGE_MERGE, DATA_VENDOR, EFFECTS, groupNamesOf, type PeopleResource, WORKFLOW_ACTION } from "./shared.ts";
 
 // The Cedar schema a company's policies are validated and decided against: made from the
 // resolved config and the people, in memory for the evaluator, and written as text to
@@ -35,6 +36,9 @@ export const NAMESPACE = "Sanoma";
 
 /** The action group every workflow start (`workflow:<name>`) is in. */
 export const START = "start";
+
+/** The entity type a change's merge acts on (`Sanoma::Change`), its attributes the change's facts. */
+export const CHANGE = "Change";
 
 const STRING = { type: "EntityOrCommon", name: "String" } as const;
 const LONG = { type: "EntityOrCommon", name: "Long" } as const;
@@ -72,7 +76,8 @@ const WRITES = new Set(["save", "delete"]);
  *   `Target in [Collection]`; `Workflow`;
  * - an action per operation id, in its effect's group (`effect:money`), on a `Target`, with
  *   `context` `{ input, before? }`: `input` from the operation's input schema, `before` the record
- *   as it was for a collection's `save` and `delete`;
+ *   as it was for a collection's `save` and `delete`; `sanoma.change.merge` on a `Change`, whose
+ *   attributes are a change's facts (`ChangeFacts`), so a rule reads `resource.touches`;
  * - `workflow:<name>` per workflow, in the group `start`, on a `Workflow`, with its `input`.
  *
  * Zod to Cedar, through the JSON Schema of the parsed value: string and enum `String`, integer `Long`, boolean `Bool`,
@@ -97,7 +102,10 @@ function buildSchema(
     const before = collection && typeOf(recordSchemaOf(collection));
     actions[op.id] = {
       memberOf: [{ id: `effect:${op.effect}` }],
-      appliesTo: applies("Target", { ...input(op.input), ...(before && { before: optional(before) }) }),
+      appliesTo: applies(op.id === CHANGE_MERGE ? CHANGE : "Target", {
+        ...input(op.input),
+        ...(before && { before: optional(before) }),
+      }),
     };
   }
   for (const name of [...resolved.workflows.keys()].toSorted()) {
@@ -112,6 +120,7 @@ function buildSchema(
     Collection: {},
     Target: { memberOfTypes: ["Collection"] },
     Workflow: {},
+    [CHANGE]: { shape: typeOf(ChangeFacts) as RecordType<string> & { type: "Record" } },
   };
   return { [NAMESPACE]: { entityTypes, actions } };
 }
@@ -220,6 +229,10 @@ const allowsNull = (schema: unknown): boolean =>
 
 /** Cedar's message, with its help when it has one. */
 export const messageOf = (e: DetailedError) => (e.help ? `${e.message} (${e.help})` : e.message);
+
+/** The attributes of an entity type in the schema, when it has any (`Change`'s). */
+export const shapeOf = (schema: CedarSchemaJson, type: string) =>
+  (schema[NAMESPACE]?.entityTypes[type] as { shape?: RecordType<string> & { type: "Record" } } | undefined)?.shape;
 
 /** An action's context type in the schema: a record, when the action is there. */
 export const contextTypeOf = (schema: CedarSchemaJson, action: string) =>

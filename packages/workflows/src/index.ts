@@ -75,6 +75,16 @@ export {
   type PlanStep,
 } from "./apply.ts";
 export { CALL_WORKFLOW, CallInput } from "./call-workflow.ts";
+export {
+  type ChangeEvent,
+  ChangeFacts,
+  ChangeInput,
+  changeOps,
+  type ChangeReport,
+  type ChangeState,
+  runtimeHold,
+  touchesOf,
+} from "./change.ts";
 export { isDirect } from "./direct.ts";
 export {
   DRIFT_WORKFLOW,
@@ -196,6 +206,12 @@ export {
   ANONYMOUS_PRINCIPAL,
   approverLabel,
   approverOf,
+  CHANGE_CLOSE,
+  CHANGE_EVENT,
+  CHANGE_MERGE,
+  CHANGE_OPEN,
+  CHANGE_REVIEW,
+  CHANGE_WORKFLOW,
   declaresPeople,
   type PeopleResource,
   personOf,
