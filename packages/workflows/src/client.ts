@@ -172,7 +172,7 @@ export interface CallOptions {
 export interface ClientOptions {
   /**
    * Called, never awaited, right before each change a worker must run: a run's start (drift,
-   * apply and a held call are starts) and an approval's decision; never for a read. A process that
+   * apply and a held call are starts) and an approval's decision or withdrawal; never for a read. A process that
    * runs a worker that stops when idle starts it again with it (`Supervisor.resume`). Must not throw.
    */
   onWrite?: () => void;
@@ -619,7 +619,7 @@ export class SanomaClient {
     reason: string,
     options: { by: Principal | string; timeoutSeconds?: number },
   ): Promise<ApprovalState> {
-    const { withdraw } = parseOrThrow(ApprovalWithdrawal, { withdraw: reason }, "A withdrawal needs a reason");
+    const withdraw = parseOrThrow(ApprovalWithdrawal.shape.withdraw, reason, "A withdrawal needs a reason");
     const by = await this.admitted(
       parseOrThrow(PrincipalOrId, options?.by, '`by` must be a principal, such as "alice" or { id: "alice" }'),
     );

@@ -39,12 +39,12 @@ export type ApprovalMessage = z.infer<typeof ApprovalMessage>;
 
 /**
  * A withdrawal of a pending approval, as sent to a run on the approval's topic: `withdraw` says
- * why, and `by`, when given, who withdraws it, which the run checks (`withdrawalRefusal`) and
- * records. `id` names the message as a decision's does. `SanomaClient.withdraw` sets both.
+ * why, and `by` who withdraws it, which the run checks (`withdrawalRefusal`) and records. `id`
+ * names the message as a decision's does; `SanomaClient.withdraw` sets one.
  */
 export const ApprovalWithdrawal = z.object({
-  withdraw: z.string().min(1),
-  by: Principal.optional(),
+  withdraw: z.string().trim().min(1),
+  by: Principal,
   id: z.string().optional(),
 });
 export type ApprovalWithdrawal = z.infer<typeof ApprovalWithdrawal>;
@@ -149,13 +149,13 @@ export async function awaitApproval(
     const withdrawal = msg ? undefined : ApprovalWithdrawal.safeParse(raw).data;
     if (withdrawal) {
       const { withdraw: reason, by, id } = withdrawal;
-      const refused = by && withdrawalRefusal(state, by, run.actor.id);
+      const refused = withdrawalRefusal(state, by, run.actor.id);
       if (refused === undefined) {
         state.decidedWith = id;
-        await withdrawn(run, [state], reason, at, by?.id);
+        await withdrawn(run, [state], reason, at, by.id);
         throw new WithdrawnError(title, state.id, reason);
       }
-      await refuse(run, state, { by: by!.id, ...(id === undefined ? {} : { id }), at, reason: refused });
+      await refuse(run, state, { by: by.id, ...(id === undefined ? {} : { id }), at, reason: refused });
       continue;
     }
     // The people matter only when the run's own actor decides (`refusalOf`): then they are read as
@@ -255,7 +255,8 @@ async function refuse(run: Run, state: ApprovalState, refused: ApprovalState["re
 async function withdrawn(run: Run, approvals: readonly ApprovalState[], reason: string, at: number, by?: string) {
   const who = by === undefined ? {} : { by };
   for (const a of approvals) {
-    Object.assign(a, { status: "withdrawn", withdrawnReason: reason, withdrawnAt: at }, by && { withdrawnBy: by });
+    Object.assign(a, { status: "withdrawn", withdrawnReason: reason, withdrawnAt: at });
+    if (by !== undefined) a.withdrawnBy = by;
   }
   await DBOS.setEvent(APPROVALS_EVENT, run.approvals);
   for (const a of approvals) {

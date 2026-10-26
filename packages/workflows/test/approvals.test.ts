@@ -401,18 +401,23 @@ describe("approvals a workflow asks for", () => {
     });
     const visitor = await caught(c().withdraw(runId, "approval-1", "no", { by: "anonymous" }));
     expect(errorCode(visitor)).toBe("not_approver");
-    const blank = await caught(c().withdraw(runId, "approval-1", "", { by: alice }));
+    const blank = await caught(c().withdraw(runId, "approval-1", "  ", { by: alice }));
     expect(errorCode(blank)).toBe("invalid_input");
     expect((await c().approvals(runId))[0]).toMatchObject({ status: "pending", refused: [] });
 
+    // A withdrawal that names nobody is no valid message.
+    await app.raw.send(runId, { withdraw: "anonymous" }, topicOf("approval-1"));
+    await waitFor(async () => (await c().approvals(runId))[0]?.refused.length === 1);
+    expect((await c().approvals(runId))[0]?.refused[0]).toMatchObject({ reason: "not a valid decision message" });
     // Sent around the client's check: the run checks who withdraws too, and records the refusal.
     await app.raw.send(runId, { withdraw: "mine now", by: { id: "intern" }, id: "w-1" }, topicOf("approval-1"));
-    await waitFor(async () => (await c().approvals(runId))[0]?.refused.length === 1);
+    await waitFor(async () => (await c().approvals(runId))[0]?.refused.length === 2);
     expect((await c().approvals(runId))[0]).toMatchObject({
       status: "pending",
-      refused: [{ by: "intern", id: "w-1", reason: "intern is not the approver; marketing-lead is" }],
+      refused: [{}, { by: "intern", id: "w-1", reason: "intern is not the approver; marketing-lead is" }],
     });
     expect(ofType(await c().ledger(runId), "approval.refused")).toEqual([
+      expect.objectContaining({ reason: "not a valid decision message" }),
       expect.objectContaining({ by: "intern", reason: "intern is not the approver; marketing-lead is" }),
     ]);
 
