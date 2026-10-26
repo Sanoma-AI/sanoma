@@ -34,6 +34,18 @@ The wakeup has no identity: the service names each instance, and the lockfile bi
 
 The logo the app shows beside these operations is Sanoma's own mark, the shield of [Phosphor Icons](https://phosphoricons.com) (MIT) that the app uses as its icon.
 
+## Scale to zero
+
+From a company on this machine to one on Docker that stops when nothing is due and continues a sleeping run after it stopped:
+
+1. **A wakeup service.** Sanoma's hosted one, or your own on any machine that stays up: in a company repository, `sanoma wakeup` serves it over that repository's database (a local one, `SANOMA_DATABASE_URL=postgresql://…/wakeup`, does), on port 3100, and `sanoma wakeup account acme` prints an account, `{"id","token"}`. A container must reach it too, so listen beyond loopback: `SANOMA_APP_HOST=0.0.0.0 sanoma wakeup`.
+2. **The connector.** Add `sanomaOps` to the connectors in `sanoma.config.ts`, beside the host's (Docker's).
+3. **Connect sanoma-ops.** On **Go live**, **Connect…**: paste the account's token (`swa_…`) as `SANOMA_OPS_TOKEN` and, for a service of your own, its URL as `SANOMA_OPS_URL`, an address both this machine and the container reach (the machine's LAN address, `http://192.168.1.20:3100`, not `127.0.0.1`, which in a container is the container). Storing the token mints the instance's own, `SANOMA_WAKEUP_TOKEN`; no page shows it.
+4. **Go live on Docker.** As without a wakeup: `infra.ts` declares the repository, the database, the host and, after the host, `export const wakeup = sanomaOps.wakeup({ host })`, and the host's `secrets` carry `SANOMA_WAKEUP_TOKEN` and `SANOMA_OPS_URL`. One apply makes the container, then the wakeup's instance for its URL, registered with the instance's token.
+5. **A sleeping run.** Start a workflow that sleeps past the worker's stop (`await ctx.sleep({ minutes: 5 })`) on the host's app. With nothing else to run, the worker registers the sleep's end (`PUT /wakeup/wake { at, generation }`) and stops; at `at` the service calls the container's `/wake?generation=N`, a new worker starts, and the run continues. `GET /wakeup/instances/{id}` with the account's token shows the registered `at` and `generation`, and `calledAt` once it called.
+
+To stop scaling to zero, delete the `wakeup` line, push `main`, and apply from Resources, answering its orphaned binding **delete**: apply deletes the instance (`sanomaOps.wakeup.delete`) and moves the host to the new revision, whose worker, with no wakeup declared, stays up and fires its own deadlines.
+
 ## Driver
 
 `@sanoma-ai/connector-sanoma-ops/driver` calls the wakeup service. The `sanomaOps` connector the package root exports carries it, made once per resolved config, its fake and its steps (`withSetup` from `@sanoma-ai/workflows`), so a config names the connector alone:

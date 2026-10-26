@@ -8,6 +8,8 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { fakeGithub } from "@sanoma-ai/connector-github/fake";
 import { github } from "@sanoma-ai/connector-github";
+import { sanomaOps } from "@sanoma-ai/connector-sanoma-ops";
+import { fakeSanomaOps } from "@sanoma-ai/connector-sanoma-ops/fake";
 import { supabase } from "@sanoma-ai/connector-supabase";
 import { fakeSupabase } from "@sanoma-ai/connector-supabase/fake";
 import { testDatabaseUrl, waitFor, withFake } from "@sanoma-ai/testing";
@@ -25,12 +27,14 @@ import type { AppContext } from "../src/context.ts";
 import { loopbackLogin } from "../src/loopback.ts";
 import { admitting } from "../src/login/admission.ts";
 import { goLive, goLiveChoices, goLiveHost, goLiveProgress, renderInfra } from "../src/server/go-live.ts";
+import { setSetupToken } from "../src/server/setup.ts";
 
 // Going live end to end, on fakes, from a company with nothing but a first commit: the choices
 // (GitHub and Supabase answered by msw), infra.ts written and committed, apply on the repository
 // and the database (GitHub's and Supabase's fakes) held for a person, the database URL stored
 // after the project is made, the push to a bare repository standing in for GitHub's, and apply on
-// a host in this process, which ends answering at its URL. Needs Postgres.
+// a host in this process, which ends answering at its URL, with sanoma-ops connected: the wakeup
+// declared after the host, which is given the instance's token from its first apply. Needs Postgres.
 
 const databaseUrl = testDatabaseUrl("go_live");
 const dir = mkdtempSync(join(tmpdir(), "sanoma-go-live-"));
@@ -93,9 +97,15 @@ beforeAll(async () => {
 });
 
 const githubFake = fakeGithub();
+const opsFake = fakeSanomaOps();
 const config: SanomaConfig = {
   workflows: [],
-  connectors: [withFake(github, githubFake), withFake(supabase, fakeSupabase()), host.connector],
+  connectors: [
+    withFake(github, githubFake),
+    withFake(supabase, fakeSupabase()),
+    host.connector,
+    withFake(sanomaOps, opsFake),
+  ],
   ledger: memoryLedger(),
   root,
 };
@@ -117,6 +127,9 @@ const NAMES = [
   "SANOMA_DATABASE_URL_STORE",
   "SANOMA_GITHUB_APP_ID",
   "SANOMA_GITHUB_APP_PEM",
+  "SANOMA_OPS_TOKEN",
+  "SANOMA_OPS_URL",
+  "SANOMA_WAKEUP_TOKEN",
 ];
 const alice = { id: "alice" };
 let ctx: AppContext;
@@ -144,6 +157,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   api.close();
+  opsFake.close();
   await host.close();
   vi.unstubAllEnvs();
   rmSync(dir, { recursive: true, force: true });
@@ -167,6 +181,8 @@ async function approveRun(progress: GoLiveProgress) {
   );
 }
 
+/** Where sanoma-ops's wakeup service is, as "Connect sanoma-ops" stores it. */
+const OPS_URL = "http://127.0.0.1:3100";
 const choices = () => ({ owner: "acme", name: "acme-ops", organization: "acme-org", region: "eu-west-1", port });
 
 describe("going live", () => {
@@ -244,6 +260,34 @@ describe("going live", () => {
     }
   });
 
+  it("declares the wakeup after the host once sanoma-ops is connected, the host given the instance's token", async () => {
+    await setSetupToken(ctx, alice, { name: "SANOMA_OPS_TOKEN", value: `swa_${"a".repeat(43)}` });
+    await setSetupToken(ctx, alice, { name: "SANOMA_OPS_URL", value: OPS_URL });
+    const text = await renderInfra(ctx, choices());
+    expect(text).toContain(`import { sanomaOps } from "@sanoma-ai/connector-sanoma-ops/resources";`);
+    // The worker on the host registers with the instance's token, at the service's URL.
+    expect(text).toContain(
+      `    SANOMA_WAKEUP_TOKEN: secret("SANOMA_WAKEUP_TOKEN"),\n    SANOMA_OPS_URL: secret("SANOMA_OPS_URL"),\n`,
+    );
+    expect(text).toContain(`export const wakeup = sanomaOps.wakeup({\n  host: host,\n});\n`);
+    expect(text).toContain(`export default [repo, store, host, wakeup];`);
+    const other = mkdtempSync(join(tmpdir(), "sanoma-go-live-read-"));
+    try {
+      mkdirSync(join(other, "resources", "sanoma"), { recursive: true });
+      writeFileSync(join(other, INFRA), text);
+      const read = readDataFiles(other, config.connectors);
+      expect(read.problems).toEqual([]);
+      expect(read.resources.map((r) => [r.id, `${r.vendor}.${r.type}`, r.refs])).toEqual([
+        [`${INFRA}#repo`, "github.repository", {}],
+        [`${INFRA}#store`, "supabase.project", {}],
+        [`${INFRA}#host`, "testhost.app", { source: `${INFRA}#repo` }],
+        [`${INFRA}#wakeup`, "sanomaOps.wakeup", { host: `${INFRA}#host` }],
+      ]);
+    } finally {
+      rmSync(other, { recursive: true, force: true });
+    }
+  });
+
   it("refuses a push before the repository and the database are made", async () => {
     await expect(goLiveHost(ctx, alice)).rejects.toMatchObject({ status: 409 });
   });
@@ -290,23 +334,78 @@ describe("going live", () => {
     const head = git("rev-parse", "main");
     expect(execFileSync("git", ["rev-parse", "main"], { cwd: remote, encoding: "utf8" }).trim()).toBe(head);
     progress = await settled();
-    expect(progress.run!.pending!.plan!.steps.map((s) => [s.id, s.action])).toEqual([[`${INFRA}#host`, "create"]]);
+    // One apply, the wakeup after the host it names.
+    expect(progress.run!.pending!.plan!.steps.map((s) => [s.id, s.action])).toEqual([
+      [`${INFRA}#host`, "create"],
+      [`${INFRA}#wakeup`, "create"],
+    ]);
     progress = await approveRun(progress);
-    expect(progress.run!.results).toMatchObject([{ id: `${INFRA}#host`, status: "done" }]);
+    // The wakeup's create needs the host's URL in its `host`, which apply fills from the host's
+    // state once #337 lands; until then it is given the host's binding, which the service refuses.
+    expect(progress.run!.results![0]).toMatchObject({ id: `${INFRA}#host`, status: "done" });
     expect(progress.bound.host).toBe(true);
     expect(progress.host).toEqual({ url: `http://127.0.0.1:${port}`, healthy: true });
-    // The host runs main as pushed, given the database URL and the key, which no ledger record holds.
+    // The host runs main as pushed, given the database URL, the key and the wakeup's instance
+    // token, minted when sanoma-ops was connected, none of which any ledger record holds.
+    const token = (await app.client.secrets(["SANOMA_WAKEUP_TOKEN"])).get("SANOMA_WAKEUP_TOKEN")!.value;
+    expect(token).toMatch(/^swi_/);
     expect(started).toEqual([
       {
         port,
         revision: head,
-        secrets: { SANOMA_DATABASE_URL: url, SANOMA_SECRETS_KEY: process.env.SANOMA_SECRETS_KEY },
+        secrets: {
+          SANOMA_DATABASE_URL: url,
+          SANOMA_SECRETS_KEY: process.env.SANOMA_SECRETS_KEY,
+          SANOMA_WAKEUP_TOKEN: token,
+          SANOMA_OPS_URL: OPS_URL,
+        },
       },
     ]);
     const runs = await app.client.runs({ limit: 10 });
     const ledgers = JSON.stringify(await Promise.all(runs.map((r) => app.client.ledger(r.runId))));
     expect(ledgers).not.toContain(url);
     expect(ledgers).not.toContain(process.env.SANOMA_SECRETS_KEY);
+    expect(ledgers).not.toContain(token);
+  });
+
+  it("deletes the wakeup's instance through the connector once its line is removed and the orphan answered delete", async () => {
+    const key = `${INFRA}#wakeup`;
+    // An instance at the service for the host, bound to the declaration (as its create binds it).
+    const id = "00000000-0000-4000-8000-0000000000aa";
+    opsFake.update((state) => {
+      state.instances[id] = {
+        id,
+        url: `http://127.0.0.1:${port}`,
+        at: null,
+        generation: 0,
+        lastError: null,
+        token: "swi_bound",
+      };
+    });
+    await app.client.apply({ only: [key], bind: { [key]: id } }, { startedBy: alice });
+    await waitFor(
+      () => readLockfile(root).bindings[key]?.id,
+      (bound) => bound === id,
+      60_000,
+    );
+    // The line removed (the import and the default export's entry with it), as a person would.
+    const path = join(root, INFRA);
+    writeFileSync(
+      path,
+      readFileSync(path, "utf8")
+        .replace(`import { sanomaOps } from "@sanoma-ai/connector-sanoma-ops/resources";\n`, "")
+        .replace(`export const wakeup = sanomaOps.wakeup({\n  host: host,\n});\n\n`, "")
+        .replace("[repo, store, host, wakeup]", "[repo, store, host]"),
+    );
+    git("commit", "--quiet", "-am", "Remove the wakeup");
+    await app.client.apply({ only: [key], answers: { [key]: "delete" } }, { startedBy: alice });
+    let progress = await settled();
+    expect(progress.run!.pending!.plan!.steps).toMatchObject([{ id: key, action: "orphan", answer: "delete" }]);
+    progress = await approveRun(progress);
+    expect(progress.run!.results).toMatchObject([{ id: key, status: "done" }]);
+    expect(opsFake.state.instances[id]).toBeUndefined();
+    expect(opsFake.calls.map((c) => c.op)).toContain("sanomaOps.wakeup.delete");
+    expect(readLockfile(root).bindings[key]).toBeUndefined();
   });
 
   it("lists the App's installations, signed as the App, and says which list it could not read", async () => {
