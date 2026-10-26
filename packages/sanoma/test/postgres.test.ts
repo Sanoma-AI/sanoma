@@ -272,7 +272,7 @@ describe("ensurePostgres with none named: the company's own", () => {
     writeFileSync(lock, String(process.pid));
     stubPostgres({ up: [54321] });
     const ensuring = ensurePostgres(undefined, { root, bin: fakeBin() });
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise((resolve) => setTimeout(resolve, 250));
     expect(existsSync(lock)).toBe(true);
     // The other launcher's cluster answers, and it lets go.
     postmasterPid(root, process.pid, 54321);

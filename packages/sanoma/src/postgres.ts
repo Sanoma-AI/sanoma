@@ -17,6 +17,7 @@ import {
 import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 import { Client } from "pg";
 import { UsageError } from "./config.ts";
@@ -51,9 +52,12 @@ export interface EnsurePostgresOptions {
  */
 export const OLD_DEFAULT_URL = "postgresql://postgres:dbos@localhost:5433/sanoma";
 
+/** The `stop` of a database this call did not start. */
+const noStop = async () => {};
+
 /** How long one probe waits for a connection. */
 const PROBE_TIMEOUT_MS = 2000;
-/** How long Postgres has to answer once started, and another launcher to finish starting it. */
+/** How long `pg_ctl` waits for Postgres to accept connections once started. */
 const WAIT_MS = 60_000;
 /** How long a launcher waits for another to make and start the cluster: an extraction, `initdb` and a start. */
 const LOCK_WAIT_MS = 5 * 60_000;
@@ -82,10 +86,10 @@ export async function ensurePostgres(
 ): Promise<EnsuredPostgres> {
   if (databaseUrl !== undefined) {
     // A deployment's worker or app: its database's own to answer, as the runtime retries.
-    if (!start) return { how: "answered", databaseUrl, stop: async () => {} };
-    if (await answers(new URL(databaseUrl), PROBE_TIMEOUT_MS)) {
+    if (!start) return { how: "answered", databaseUrl, stop: noStop };
+    if (await answers(databaseUrl)) {
       log(`Postgres answers at ${masked(databaseUrl)}`);
-      return { how: "answered", databaseUrl, stop: async () => {} };
+      return { how: "answered", databaseUrl, stop: noStop };
     }
     throw new Error(
       `nothing answers at ${masked(databaseUrl)}; ${
@@ -130,11 +134,8 @@ export async function ensurePostgres(
     const url = urlOf(cluster, port);
     log(`starting Postgres in ${cluster.dir} on port ${port}`);
     await pgCtl(pg, cluster, ["start", "-D", cluster.data, "-l", cluster.log, "-w", "-t", String(WAIT_MS / 1000)]);
-    const deadline = Date.now() + WAIT_MS;
-    while (!(await answers(new URL(url), PROBE_TIMEOUT_MS))) {
-      if (Date.now() >= deadline) throw new Error(`Postgres in ${cluster.dir} did not answer; see ${cluster.log}`);
-      await delay(250);
-    }
+    // `pg_ctl -w` waited for it to accept connections.
+    if (!(await answers(url))) throw new Error(`Postgres in ${cluster.dir} did not answer; see ${cluster.log}`);
     if (how === "created") {
       log(`created Postgres in ${cluster.dir}: the company's records live there, and deleting it deletes them`);
     }
@@ -166,12 +167,14 @@ const paths = (dir: string): Cluster => ({
  */
 export async function clusterDir(root: string): Promise<string> {
   const real = realpathSync(root);
-  const git = (arg: string) =>
-    promisify(execFile)("git", ["rev-parse", "--path-format=absolute", arg], { cwd: real }).then(
-      ({ stdout }) => stdout.trim(),
-      () => undefined,
-    );
-  const [common, top] = await Promise.all([git("--git-common-dir"), git("--show-toplevel")]);
+  const [common, top] = await promisify(execFile)(
+    "git",
+    ["rev-parse", "--path-format=absolute", "--git-common-dir", "--show-toplevel"],
+    { cwd: real },
+  ).then(
+    ({ stdout }) => stdout.trim().split("\n"),
+    () => [],
+  );
   const main = common && top && basename(common) === ".git" ? join(dirname(common), relative(top, real)) : real;
   return join(main, ".sanoma", "postgres");
 }
@@ -181,7 +184,7 @@ const urlOf = ({ password }: Cluster, port: number) =>
 
 function answered(cluster: Cluster, url: string, log: (line: string) => void): EnsuredPostgres {
   log(`Postgres answers in ${cluster.dir}, started by another launcher`);
-  return { how: "answered", databaseUrl: url, stop: async () => {} };
+  return { how: "answered", databaseUrl: url, stop: noStop };
 }
 
 /** `data/postmaster.pid`'s process (its first line) and port (its fourth), when there is one. */
@@ -197,7 +200,7 @@ async function running(cluster: Cluster): Promise<string | undefined> {
   const pm = postmaster(cluster);
   if (!pm || !alive(pm.pid) || !pm.port || !existsSync(cluster.password)) return undefined;
   const url = urlOf(cluster, pm.port);
-  return (await answers(new URL(url), PROBE_TIMEOUT_MS)) ? url : undefined;
+  return (await answers(url)) ? url : undefined;
 }
 
 /**
@@ -245,14 +248,15 @@ async function locked<T>(cluster: Cluster, fn: () => Promise<T>): Promise<T> {
       if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
     }
     let holder: string;
+    let fresh: boolean;
     try {
       holder = readFileSync(cluster.lock, "utf8");
       // Being written: its maker is between making it and writing its pid.
-      if (!holder && Date.now() - statSync(cluster.lock).mtimeMs < 5000) holder = "starting";
+      fresh = !holder && Date.now() - statSync(cluster.lock).mtimeMs < 5000;
     } catch {
       continue; // Removed meanwhile.
     }
-    if (holder !== "starting" && !alive(Number(holder))) {
+    if (!fresh && !alive(Number(holder))) {
       rmSync(cluster.lock, { force: true });
       continue;
     }
@@ -381,21 +385,20 @@ async function runPg(bin: string, program: string, cluster: Cluster, args: strin
   }
 }
 
-const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
 /**
  * Whether a Postgres server answers at the URL's host and port, as its user: `SELECT 1` on the
  * `postgres` database. False when the connection is refused, unreachable or not answered within
- * `timeoutMs`; any other failure (a refused password, a user that does not exist) is thrown.
+ * `PROBE_TIMEOUT_MS`; any other failure (a refused password, a user that does not exist) is thrown.
  */
-export async function answers(url: URL, timeoutMs: number): Promise<boolean> {
+async function answers(databaseUrl: string): Promise<boolean> {
+  const url = new URL(databaseUrl);
   const client = new Client({
     host: url.hostname.replace(/^\[(.*)\]$/, "$1"),
     port: Number(url.port || "5432"),
     user: decodeURIComponent(url.username || "postgres"),
     password: decodeURIComponent(url.password),
     database: "postgres",
-    connectionTimeoutMillis: timeoutMs,
+    connectionTimeoutMillis: PROBE_TIMEOUT_MS,
   });
   try {
     await client.connect();

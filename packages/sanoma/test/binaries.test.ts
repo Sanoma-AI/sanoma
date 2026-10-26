@@ -2,7 +2,8 @@ import { lstatSync, mkdtempSync, readFileSync, readlinkSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { CPU_ARM64, CPU_X86_64, linkDuplicates, thinSlice } from "../scripts/download-postgres.ts";
+import { CPU_ARM64, CPU_X86_64, linkDuplicates, RELEASE, thinSlice } from "../scripts/download-postgres.ts";
+import { POSTGRES_PLATFORMS } from "../src/postgres-bin.ts";
 
 /** A universal Mach-O file (32-bit fat header) holding `slices`, each at its own offset. */
 function fat(slices: [cpu: number, bytes: string][]): Buffer {
@@ -18,6 +19,16 @@ function fat(slices: [cpu: number, bytes: string][]): Buffer {
   });
   return Buffer.concat([header, ...slices.map(([, bytes]) => Buffer.from(bytes))]);
 }
+
+describe("RELEASE", () => {
+  it("pins a jar for each platform the launcher looks up, and each is an optional dependency of sanoma", () => {
+    expect(Object.keys(RELEASE.jars).toSorted()).toEqual(POSTGRES_PLATFORMS.toSorted());
+    const { optionalDependencies } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+    expect(Object.keys(optionalDependencies).toSorted()).toEqual(
+      POSTGRES_PLATFORMS.map((platform) => `@sanoma-ai/postgres-${platform}`).toSorted(),
+    );
+  });
+});
 
 describe("thinSlice", () => {
   it("returns the slice for the CPU, and nothing for a file that is not universal", () => {

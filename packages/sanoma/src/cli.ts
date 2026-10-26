@@ -32,8 +32,8 @@ Runs the repo in the working directory, from its sanoma.config.ts (after its .en
 
 SANOMA_DATABASE_URL names Postgres, used as it is. Without it, sanoma, check and ledger export start the company's
 own PostgreSQL 18 in .sanoma/postgres (its records: deleting it deletes them), or use the one another sanoma runs
-there; worker and app only use one that runs. SANOMA_APP_PORT the app's port (default 3000; 0 for any free port); SANOMA_APP_HOST its address (default 127.0.0.1; any other needs
-GitHub sign-in, see .env.example). With sanoma or a @sanoma-ai package linked from a sanoma checkout,
+there; worker and app only use one that runs. SANOMA_APP_PORT the app's port (default 3000; 0 for any free port);
+SANOMA_APP_HOST its address (default 127.0.0.1; any other needs GitHub sign-in, see .env.example). With sanoma or a @sanoma-ai package linked from a sanoma checkout,
 or SANOMA_DEV_REPO set, \`sanoma\` also runs the watch build of each package it reaches in the checkout and
 restarts on a new build.
 
@@ -129,11 +129,6 @@ const parse = (argv: string[]) =>
 
 const port = () => Number(process.env.SANOMA_APP_PORT ?? 3000);
 
-/** A config loaded with its database made to answer (`withPostgres`). */
-interface Running extends Loaded {
-  postgres: EnsuredPostgres;
-}
-
 /**
  * The config, loaded and resolved, with its policy from `policies/**\/*.cedar` (`policyAt`): a
  * problem with them is a `UsageError`, so nothing starts on policies that do not hold. Without
@@ -141,10 +136,8 @@ interface Running extends Loaded {
  * answers first (`withPostgres`: "start" starts the company's own, "find" only finds it running),
  * so the config resolves on it.
  */
-async function load(options: { policies?: boolean; postgres: "start" | "find" }): Promise<Running>;
-async function load(options?: { policies?: boolean }): Promise<Loaded>;
 async function load({ policies = true, postgres }: { policies?: boolean; postgres?: "start" | "find" } = {}): Promise<
-  Loaded | Running
+  Loaded & { postgres?: EnsuredPostgres }
 > {
   const loaded = await loadConfig();
   const ensured = postgres && (await withPostgres(namedDatabaseUrl(loaded.config), loaded.root, postgres === "start"));
@@ -154,7 +147,7 @@ async function load({ policies = true, postgres }: { policies?: boolean; postgre
     if (policies && resolved.policyProblems.length) {
       throw new UsageError(`The policies do not hold:\n${resolved.policyProblems.join("\n")}`);
     }
-    return { ...loaded, resolved, ...(ensured && { postgres: ensured }) };
+    return { ...loaded, resolved, postgres: ensured };
   } catch (err) {
     await ensured?.stop().catch(() => {});
     throw err;
@@ -186,7 +179,7 @@ async function withPostgres(named: string | undefined, root: string, start: bool
  * configured yet itself, in one line.
  */
 async function keep(
-  { config, resolved, postgres }: Running,
+  { config, resolved, postgres }: Loaded & { postgres?: EnsuredPostgres },
   start: (
     config: SanomaConfig,
     resolved: Loaded["resolved"],
@@ -196,7 +189,7 @@ async function keep(
   try {
     started = await start(config, resolved);
   } catch (err) {
-    await postgres.stop().catch(() => {});
+    await postgres?.stop().catch(() => {});
     throw err;
   }
   const running = `${resolved.appName} running ${[...resolved.workflows.keys()].join(", ")}`;
@@ -210,7 +203,7 @@ async function keep(
     emit({ event: "ready", url: started.url, sites: started.sites ?? {} });
   }
   // Postgres last, once the worker and the app have closed their connections.
-  onSignal(() => started.stop().finally(() => postgres.stop()));
+  onSignal(() => started.stop().finally(() => postgres?.stop()));
   return new Promise(() => {});
 }
 
@@ -314,14 +307,14 @@ async function runCheck(): Promise<number> {
   const loaded = await load({ policies: false, postgres: "start" });
   try {
     const { check } = await import("./check.ts");
-    const own = new URL(loaded.postgres.databaseUrl);
+    const own = new URL(loaded.resolved.databaseUrl);
     own.pathname = `${own.pathname}_check`;
     const { ok, problems, warnings } = await check(loaded, { databaseUrl: own.toString(), log });
     for (const line of [...warnings, ...problems]) console.log(line);
     log(ok ? "ok" : `${problems.length} problem${problems.length === 1 ? "" : "s"}`);
     return ok ? 0 : 1;
   } finally {
-    await loaded.postgres.stop();
+    await loaded.postgres?.stop();
   }
 }
 
