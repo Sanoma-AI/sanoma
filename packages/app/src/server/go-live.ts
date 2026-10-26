@@ -101,20 +101,24 @@ const missingTypes = ({ resolved }: AppContext) => {
 };
 
 /**
- * The secrets going live reads: GitHub's token, those that say which vendors are connected
- * (`SETUP_VENDORS`' `connectedBy`, Supabase's token among them), and the wakeup service's URL.
+ * The secrets going live reads: GitHub's and Supabase's tokens (for the lists the page offers),
+ * those that say which vendors are connected (`SETUP_VENDORS`' `connectedBy`), and the wakeup
+ * service's URL.
  */
 const connections = ({ client }: AppContext) =>
-  client.secrets(["GITHUB_TOKEN", ...SETUP_VENDORS.flatMap(connectedBy), OPS_URL]);
+  client.secrets([
+    ...new Set(["GITHUB_TOKEN", "SUPABASE_ACCESS_TOKEN", ...SETUP_VENDORS.flatMap(connectedBy), OPS_URL]),
+  ]);
 type Connections = Awaited<ReturnType<typeof connections>>;
 
 /**
  * True when every token that connects `vendor` is stored; true for a vendor `/setup` does not
- * connect (Docker's, or one whose credentials its connector page holds), which it cannot tell.
+ * connect (Docker's, or one whose credentials its connector page holds), which it cannot tell,
+ * unless `strictly`: then only a `/setup` vendor can be, for what going live may leave out (a wakeup).
  */
-const isConnected = (stored: Connections, vendor: string) => {
+const isConnected = (stored: Connections, vendor: string, strictly = false) => {
   const setup = SETUP_VENDORS.find((v) => v.vendor === vendor);
-  return setup === undefined || connectedBy(setup).every((name) => stored.has(name));
+  return setup ? connectedBy(setup).every((name) => stored.has(name)) : !strictly;
 };
 
 /**
@@ -277,7 +281,7 @@ export async function goLiveChoices(app: AppContext): Promise<GoLiveChoices> {
 
 /**
  * Whether going live declares a wakeup, the one rule the choices and `renderInfra` share: among
- * the config's wakeup types whose vendor is connected (`isConnected`), the one that wakes this
+ * the config's wakeup types whose vendor `/setup` connected (`isConnected`, strictly), the one that wakes this
  * host's type (`wakeupHostTypes`), the host's own vendor's first. `type` is it, and `secrets` what
  * the host is given for it: the instance's token, which `goLive` mints first when none is stored,
  * and sanoma-ops's `SANOMA_OPS_URL` when one is. With connected wakeups but none for this host,
@@ -288,7 +292,9 @@ function hostWakeup(
   host: Resource,
   stored: Connections,
 ): { type?: Resource; secrets?: Record<string, DataValue>; cannot?: string } {
-  const connected = [...resolved.types.values()].filter((type) => type.wakeup && isConnected(stored, type.vendor));
+  const connected = [...resolved.types.values()].filter(
+    (type) => type.wakeup && isConnected(stored, type.vendor, true),
+  );
   if (!connected.length) return {};
   const id = idOf(host);
   const own = (type: Resource) => (type.vendor === host.vendor ? 0 : 1);
@@ -308,10 +314,10 @@ function hostWakeup(
  * hoisted install counts), which the host's runtime image is tagged with.
  */
 async function sanomaVersion(root: string): Promise<string> {
-  const read = await Promise.resolve()
+  const version = await Promise.resolve()
     .then(() => readFile(findPackageJSON("sanoma", join(root, "package.json"))!, "utf8"))
+    .then((read) => (JSON.parse(read) as { version?: unknown }).version)
     .catch(() => undefined);
-  const version = read && (JSON.parse(read) as { version?: unknown }).version;
   if (typeof version !== "string") {
     throw new ApiError(409, { error: `sanoma is not installed in the company's repository (${root}): install it` });
   }
@@ -325,7 +331,7 @@ async function sanomaVersion(root: string): Promise<string> {
  */
 export async function renderInfra(
   app: AppContext,
-  { name, organization, region, size, host: shown, port }: Omit<GoLiveRequest, "owner">,
+  { name, organization, region, size, database: shownDatabase, host: shown, port }: Omit<GoLiveRequest, "owner">,
   chosen?: Awaited<ReturnType<typeof choose>>,
 ) {
   const { database, host, wakeup } = chosen ?? (await choose(app));
@@ -336,10 +342,15 @@ export async function renderInfra(
       error: `The config's connectors declare no ${missing.join(", ")}: add them to sanoma.config.ts`,
     });
   }
-  // What is connected changed since the page chose (Cloudflare connected meanwhile, say).
+  // What is connected changed since the page chose (Cloudflare or Supabase connected meanwhile, say).
   if (shown !== undefined && shown !== idOf(host)) {
     throw new ApiError(409, {
       error: `Going live now runs the company on ${idOf(host)}, not ${shown}: reload the page`,
+    });
+  }
+  if (shownDatabase !== undefined && shownDatabase !== idOf(database)) {
+    throw new ApiError(409, {
+      error: `Going live now keeps the company's records in ${idOf(database)}, not ${shownDatabase}: reload the page`,
     });
   }
   const constructors = (vendor: string) => {

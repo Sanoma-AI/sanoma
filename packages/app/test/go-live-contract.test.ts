@@ -211,13 +211,18 @@ describe("going live by contract", () => {
     expect(text).not.toContain("sanomaOps");
   });
 
-  it("stays on Docker with Cloudflare's token but not its account, and refuses a host the page did not show", async () => {
+  it("stays on Docker with Cloudflare's token but not its account, and refuses a host or a database the page did not show", async () => {
     const half = contextOf(ALL, { CLOUDFLARE_API_TOKEN: "cf" });
     expect((await goLiveChoices(half)).host?.type).toBe("docker.container");
     const connected = contextOf(ALL, { CLOUDFLARE_API_TOKEN: "cf", CLOUDFLARE_ACCOUNT_ID: "acct" });
     await expect(renderInfra(connected, { ...choices, host: "docker.container" })).rejects.toMatchObject({
       status: 409,
       message: "Going live now runs the company on cloudflare.container, not docker.container: reload the page",
+    });
+    const supabaseConnected = contextOf(ALL, { SUPABASE_ACCESS_TOKEN: "sb" });
+    await expect(renderInfra(supabaseConnected, { ...choices, database: "neon.project" })).rejects.toMatchObject({
+      status: 409,
+      message: "Going live now keeps the company's records in supabase.project, not neon.project: reload the page",
     });
   });
 

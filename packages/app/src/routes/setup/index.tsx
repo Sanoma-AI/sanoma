@@ -170,6 +170,7 @@ function ChooseFields({ choices }: { choices: GoLiveChoices }) {
     name: choices.name,
     ...(organizations?.[0] && { organization: organizations[0].id }),
     region: regions?.includes("us-east-1") ? "us-east-1" : (regions?.[0] ?? ""),
+    ...(database && { database: database.type }),
     ...(host && { host: host.type }),
     port: 8080,
   });
@@ -206,8 +207,8 @@ function ChooseFields({ choices }: { choices: GoLiveChoices }) {
       )}
       {choices.connect.length > 0 && (
         <Notice variant="destructive">
-          Going live makes the database and the host with {choices.connect.join(" and ")}: connect{" "}
-          {choices.connect.length > 1 ? "them" : "it"} first.
+          Connect {choices.connect.join(" and ")} first: going live makes what this page shows with{" "}
+          {choices.connect.length > 1 ? "them" : "it"}.
         </Notice>
       )}
       {choices.errors.map((e) => (

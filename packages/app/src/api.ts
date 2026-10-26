@@ -219,7 +219,7 @@ export const SETUP_VENDORS: readonly {
     title: "Cloudflare",
     tokens: ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"],
     about:
-      "Optional: an API token and the account, so the company runs on Cloudflare Containers and stops when nothing is due. Connect it before choosing where the company goes.",
+      "An API token and the account, so the company runs on Cloudflare Containers and stops when nothing is due. Connect it before choosing where the company goes.",
   },
   {
     vendor: "sanomaOps",
@@ -250,6 +250,8 @@ export const GoLiveRequest = z.object({
   organization: z.string().min(1, "Choose a Supabase organization").optional(),
   region: z.string().min(1, "Choose a region"),
   size: z.string().min(1).optional(),
+  /** The database type the page showed (`GoLiveChoices.database`): refused when going live would now choose another. */
+  database: z.string().min(1).optional(),
   /** The host type the page showed (`GoLiveChoices.host`): refused when going live would now choose another. */
   host: z.string().min(1).optional(),
   port: z.number().int().min(1024, "A port from 1024").max(65535, "A port up to 65535"),
