@@ -8,11 +8,12 @@ import type { ModelContext, SanomaClient } from "@sanoma-ai/workflows";
 export function secretValues(client: SanomaClient): ModelContext["secrets"] {
   return async (names) => {
     const found = new Map<string, string>();
+    const rest: string[] = [];
     for (const name of names) {
       const value = process.env[name];
       if (value) found.set(name, value);
+      else rest.push(name);
     }
-    const rest = names.filter((name) => !found.has(name));
     if (rest.length) for (const [name, { value }] of await client.secrets(rest)) found.set(name, value);
     return found;
   };
