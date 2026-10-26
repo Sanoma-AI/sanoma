@@ -507,7 +507,7 @@ describe("the supervisor", () => {
     expect(supervisor.stopped).toBe(false);
   });
 
-  it("starts a fresh worker on a client's write, never its read, and again at once after a write it heard running", async () => {
+  it("starts a fresh worker on a client's write, never its read, and again at once after a write it heard starting", async () => {
     const stops: SelfStop[] = [];
     // Whether the supervisor said stopped as it told each stop.
     const said: boolean[] = [];
@@ -535,9 +535,10 @@ describe("the supervisor", () => {
       const runId = await client.start(ask, {}, { startedBy: alice });
       expect(writes).toHaveLength(1);
       expect(supervisor.stopped).toBe(false);
-      await waitFor(async () => (await client.approvals(runId)).some((a) => a.status === "pending"));
-      // A write heard while it runs: once it stops itself, it starts again at once, and stops again.
+      // A write heard while it starts (the one above started it): once it stops itself, it starts
+      // again at once, and stops again.
       await supervisor.resume();
+      await waitFor(async () => (await client.approvals(runId)).some((a) => a.status === "pending"));
       await waitFor(() => stops.length === 2);
       await waitFor(() => stops.length === 3);
       // The stop after the heard write was told with a fresh worker already starting.
