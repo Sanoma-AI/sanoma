@@ -84,7 +84,7 @@ export async function checkDatabase(db: DatabaseUnderTest): Promise<DatabaseChec
   const results: DatabaseCheck[] = [];
   let worker: Worker | undefined;
   const check = async (name: string, run: () => Promise<void>) => {
-    if (results[0]?.ok === false) return void results.push({ name, ok: false, error: "no worker started" });
+    if (results.length && !worker) return void results.push({ name, ok: false, error: "no worker started" });
     try {
       await run();
       results.push({ name, ok: true });

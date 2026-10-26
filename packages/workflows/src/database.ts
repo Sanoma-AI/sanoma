@@ -2,7 +2,7 @@ import type { z } from "zod";
 import { hasPath } from "./host.ts";
 import type { Op } from "./op.ts";
 import type { AfterCreate, Resource } from "./resource.ts";
-import { keepsInput, RESOURCE_OPS } from "./wakeup.ts";
+import { RESOURCE_OPS } from "./wakeup.ts";
 
 // The `Database` contract: what a resource type that holds the company's database (a Neon
 // project, a Supabase project) declares about itself, beside `Host` and `Wakeup`, so databases
@@ -114,7 +114,9 @@ export function checkDatabaseOps(types: ReadonlyMap<string, Resource>, ops: Read
     if (types.has(`${op.vendor}.${op.resource}`) && RESOURCE_OPS.has(op.name)) {
       throw new Error(`${id}: its database's storeUrl, ${op.id}, is a resource type's own operation`);
     }
-    if (!["ref", "id"].some((key) => keepsInput(op, { [key]: "binding", export: "STORE" })))
+    // By its fields, not a sample's parse: an id or export with a format of its own is still one.
+    const shape = (op.input as { shape?: Record<string, unknown> }).shape ?? {};
+    if (!("export" in shape && ("ref" in shape || "id" in shape)))
       throw new Error(`${id}: its database's storeUrl, ${op.id}, must take { ref or id, export }`);
   }
 }

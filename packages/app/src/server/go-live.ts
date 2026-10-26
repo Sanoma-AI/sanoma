@@ -2,7 +2,9 @@
 import "@tanstack/react-start/server-only";
 import { createSign } from "node:crypto";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { findPackageJSON } from "node:module";
 import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   APPLY_WORKFLOW,
   errorMessage,
@@ -70,20 +72,22 @@ const SECRETS_KEY = "SANOMA_SECRETS_KEY";
  */
 const DATABASE_EXTRAS: Record<string, (choices: { organization?: string }) => Record<string, DataValue>> = {
   [SUPABASE]: ({ organization }) => {
-    if (!organization) {
-      const error = "Choose a Supabase organization";
-      throw new ApiError(400, {
-        error,
-        code: "invalid_input",
-        issues: [{ path: ["organization"], message: error, code: "custom" }],
-      });
-    }
+    if (!organization) invalid("organization", "Choose a Supabase organization");
     return {
       organization_id: organization,
       database_password: secret("SUPABASE_DB_PASSWORD", { generate: true }),
     };
   },
 };
+
+/** Refuses the request for its `field`, as the form shows it beside the field. */
+function invalid(field: string, error: string): never {
+  throw new ApiError(400, {
+    error,
+    code: "invalid_input",
+    issues: [{ path: [field], message: error, code: "custom" }],
+  });
+}
 
 const GITHUB_API = "https://api.github.com";
 /** The wakeup's declaration in `infra.ts`, as `renderInfra` writes it. */
@@ -105,27 +109,42 @@ const missingTypes = ({ resolved }: AppContext) => {
   ];
 };
 
-/** The config's database type: Neon's when it has it, else the first that meets the contract. */
-function databaseType({ resolved }: AppContext): Resource | undefined {
-  const neon = resolved.types.get(NEON);
-  return neon?.database ? neon : [...resolved.types.values()].find((type) => type.database);
-}
-
-/** The secrets that say which vendors are connected (`SETUP_VENDORS`' `connectedBy`), and the wakeup service's URL. */
-const connections = ({ client }: AppContext) => client.secrets([...SETUP_VENDORS.flatMap(connectedBy), OPS_URL]);
+/**
+ * The secrets going live reads: GitHub's token, those that say which vendors are connected
+ * (`SETUP_VENDORS`' `connectedBy`, Supabase's token among them), and the wakeup service's URL.
+ */
+const connections = ({ client }: AppContext) =>
+  client.secrets(["GITHUB_TOKEN", ...SETUP_VENDORS.flatMap(connectedBy), OPS_URL]);
 type Connections = Awaited<ReturnType<typeof connections>>;
 
-/** True when every token that connects `vendor` is stored; false for a vendor `/setup` does not connect. */
+/**
+ * True when every token that connects `vendor` is stored; true for a vendor `/setup` does not
+ * connect (Docker's, or one whose credentials its connector page holds), which it cannot tell.
+ */
 const isConnected = (stored: Connections, vendor: string) => {
   const setup = SETUP_VENDORS.find((v) => v.vendor === vendor);
-  return setup !== undefined && connectedBy(setup).every((name) => stored.has(name));
+  return setup === undefined || connectedBy(setup).every((name) => stored.has(name));
 };
 
-/** What going live chooses now: the database, the host and its wakeup, from what is connected. */
+/**
+ * Of the config's types that meet a contract, the first of `preferred` whose vendor is
+ * connected, else the first connected; when none is, the same over all (the page asks to connect).
+ */
+function pick(app: AppContext, stored: Connections, meets: (type: Resource) => unknown, preferred: string[]) {
+  const all = [...app.resolved.types.values()].filter(meets);
+  const connected = all.filter((type) => isConnected(stored, type.vendor));
+  const among = connected.length ? connected : all;
+  return preferred.map((id) => among.find((type) => idOf(type) === id)).find(Boolean) ?? among[0];
+}
+
+/**
+ * What going live chooses now, from what is connected: the database (Neon's first), the host
+ * (Cloudflare's first, then Docker's) and its wakeup.
+ */
 async function choose(app: AppContext) {
   const stored = await connections(app);
-  const database = databaseType(app);
-  const host = hostType(app, stored);
+  const database = pick(app, stored, (type) => type.database, [NEON]);
+  const host = pick(app, stored, (type) => type.host, [CLOUDFLARE, DOCKER]);
   return { stored, database, host, wakeup: host ? hostWakeup(app, host, stored) : {} };
 }
 
@@ -137,14 +156,6 @@ function setPath(into: Record<string, DataValue>, path: string, value: DataValue
   for (const key of keys) at = (at[key] ??= {}) as Record<string, DataValue>;
   at[last] = value;
   return into;
-}
-
-/** The config's host type: Cloudflare's once it is connected, else Docker's, else the first. */
-function hostType({ resolved }: AppContext, stored: Connections): Resource | undefined {
-  const hosts = [...resolved.types.values()].filter((type) => type.host);
-  const named = (id: string) => hosts.find((type) => idOf(type) === id);
-  const cloudflare = named(CLOUDFLARE);
-  return (cloudflare && isConnected(stored, cloudflare.vendor) ? cloudflare : undefined) ?? named(DOCKER) ?? hosts[0];
 }
 
 const exists = (path: string) =>
@@ -195,10 +206,7 @@ async function installations({ client }: AppContext): Promise<Installation[]> {
  */
 export async function goLiveChoices(app: AppContext): Promise<GoLiveChoices> {
   const errors: string[] = [];
-  const [tokens, { database, host, wakeup }] = await Promise.all([
-    app.client.secrets(["GITHUB_TOKEN", "SUPABASE_ACCESS_TOKEN"]),
-    choose(app),
-  ]);
+  const { stored: tokens, database, host, wakeup } = await choose(app);
   const listed = async <T>(what: string, list: () => Promise<T[]>): Promise<T[]> => {
     try {
       return await list();
@@ -296,13 +304,22 @@ function hostWakeup(
   return { type, secrets: { [WAKEUP_TOKEN]: secret(WAKEUP_TOKEN), ...(opsUrl && { [OPS_URL]: secret(OPS_URL) }) } };
 }
 
-/** The version of `sanoma` the company's repository installs, which the host's runtime image is tagged with. */
+/**
+ * The version of `sanoma` the company's repository installs (resolved from its root, so a
+ * hoisted install counts), which the host's runtime image is tagged with.
+ */
 async function sanomaVersion(root: string): Promise<string> {
-  const manifest = join(root, "node_modules", "sanoma", "package.json");
-  const read = await readFile(manifest, "utf8").catch(() => undefined);
+  const manifest = (() => {
+    try {
+      return findPackageJSON("sanoma", pathToFileURL(join(root, "package.json")));
+    } catch {
+      return undefined;
+    }
+  })();
+  const read = manifest && (await readFile(manifest, "utf8").catch(() => undefined));
   const version = read && (JSON.parse(read) as { version?: unknown }).version;
   if (typeof version !== "string") {
-    throw new ApiError(409, { error: `sanoma is not installed in the company's repository (${manifest}): install it` });
+    throw new ApiError(409, { error: `sanoma is not installed in the company's repository (${root}): install it` });
   }
   return version;
 }
@@ -337,7 +354,9 @@ export async function renderInfra(
     return { source: `${pkg}/resources`, imported: vendor, local: vendor };
   };
 
-  const dbInputs = database.database!.inputs;
+  const { inputs: dbInputs, regions } = database.database!;
+  if (regions && !regions.includes(region)) invalid("region", `${database.title} has no region ${region}`);
+  if (size && !dbInputs.size) invalid("size", `${database.title} takes no size: reload the page`);
   const store: Record<string, DataValue> = { ...(hasField(database, "name") && { name }) };
   setPath(store, dbInputs.region, region);
   if (dbInputs.size && size) setPath(store, dbInputs.size, size);
@@ -401,16 +420,18 @@ export async function goLive(app: AppContext, actor: Principal, choices: GoLiveR
   if (!process.env[SECRETS_KEY]) throw new ApiError(409, { error: `${SECRETS_KEY} is not set` });
   // The GitHub connector makes the repository with a token of the person's own: an App's
   // installation alone cannot yet.
-  if (!(await client.secrets(["GITHUB_TOKEN"])).has("GITHUB_TOKEN")) {
+  const chosen = await choose(app);
+  if (!chosen.stored.has("GITHUB_TOKEN")) {
     throw new ApiError(409, {
       error: "The GitHub connector creates the repository with GITHUB_TOKEN: connect a token",
     });
   }
-  const chosen = await choose(app);
-  // The database's vendor connected: its token is what apply makes the database with.
-  const vendor = chosen.database?.vendor;
-  if (vendor && SETUP_VENDORS.some((v) => v.vendor === vendor) && !isConnected(chosen.stored, vendor)) {
-    throw new ApiError(409, { error: `Connect ${vendor} first: it makes the database` });
+  // The database's and the host's vendors connected: their tokens are what apply makes them with.
+  for (const type of [chosen.database, chosen.host]) {
+    if (type && !isConnected(chosen.stored, type.vendor)) {
+      const title = SETUP_VENDORS.find((v) => v.vendor === type.vendor)?.title;
+      throw new ApiError(409, { error: `Connect ${title} first: it makes the ${type.title.toLowerCase()}` });
+    }
   }
   const text = await renderInfra(app, choices, chosen);
   // Once the request is good: a wakeup's token may be the environment's or its connector page's, which mint nothing.

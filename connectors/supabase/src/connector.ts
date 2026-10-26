@@ -49,6 +49,7 @@ export const supabaseTf = tfConnector({
         inputs: { region: "region" },
         storeUrl: "supabase.database.storeUrl",
         regions: REGIONS,
+        // Healthy once it exists: the provider's state carries no health, which afterCreate waits on.
         outputs: (state) => ({ healthy: state.name != null }),
       },
       // Once apply makes a project: its database and pooler healthy, then the URL a worker

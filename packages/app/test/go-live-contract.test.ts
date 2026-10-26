@@ -19,8 +19,8 @@ import type { AppContext } from "../src/context.ts";
 import { goLiveChoices, renderInfra } from "../src/server/go-live.ts";
 
 // Going live chooses the database, the host and the wakeup by their contracts, among the config's
-// types: Neon's database first, Cloudflare's host once it is connected, else Docker's, and the
-// wakeup of the host's own vendor first. Over types of this file (the Neon and Cloudflare
+// types: among those whose vendor is connected, Neon's database first, Cloudflare's host first,
+// then Docker's, and the wakeup of the host's own vendor first. Over types of this file (the Neon and Cloudflare
 // connectors are built elsewhere) and a client that answers only which secrets are stored.
 
 const root = mkdtempSync(join(tmpdir(), "sanoma-go-live-contract-"));
@@ -153,6 +153,8 @@ function contextOf(connectors: Connector<any, any>[], stored: Record<string, str
 }
 
 const choices = { name: "acme-ops", region: "aws-eu-central-1", size: "0.25", port: 8080 };
+/** The choices for a database that takes no size, as the page sends them. */
+const { size: _, ...unsized } = choices;
 const ALL = [github, supabase, neon, cloudflare, docker, sanomaOps];
 
 describe("going live by contract", () => {
@@ -180,7 +182,6 @@ describe("going live by contract", () => {
   });
 
   it("leaves out the size when none is chosen", async () => {
-    const { size: _, ...unsized } = choices;
     expect(await renderInfra(contextOf(ALL), unsized)).toContain(
       `export const store = neon.project({\n  name: "acme-ops",\n  region: "aws-eu-central-1",\n});\n`,
     );
@@ -218,6 +219,24 @@ describe("going live by contract", () => {
     });
   });
 
+  it("chooses among connected vendors: Supabase's database without Neon's key, Fly's host without Cloudflare's", async () => {
+    const app = contextOf([github, supabase, neon, cloudflare, fly], { SUPABASE_ACCESS_TOKEN: "sb" });
+    const text = await renderInfra(app, { ...unsized, region: "eu-west-1", organization: "org" });
+    expect(text).toContain("export const store = supabase.project({");
+    expect(text).toContain("export const host = fly.app({");
+  });
+
+  it("refuses a region the database does not list, and a size it does not take", async () => {
+    await expect(renderInfra(contextOf(ALL), { ...choices, region: "mars" })).rejects.toMatchObject({
+      status: 400,
+      body: { issues: [{ path: ["region"] }] },
+    });
+    const supabaseOnly = contextOf([github, supabase, docker]);
+    await expect(
+      renderInfra(supabaseOnly, { ...choices, region: "eu-west-1", organization: "org" }),
+    ).rejects.toMatchObject({ status: 400, body: { issues: [{ path: ["size"] }] } });
+  });
+
   it("writes an input at a dotted path as nested fields", async () => {
     const nested = defineResource({
       vendor: "nested",
@@ -239,7 +258,7 @@ describe("going live by contract", () => {
       any,
       any
     >;
-    const text = await renderInfra(contextOf([github, connector, docker]), choices);
+    const text = await renderInfra(contextOf([github, connector, docker]), unsized);
     expect(text).toContain(
       `export const store = nested.db({\n  name: "acme-ops",\n  settings: { region: "aws-eu-central-1" },\n});\n`,
     );
@@ -255,9 +274,9 @@ describe("going live by contract", () => {
 
   it("reports a missing database type, and a Supabase project without an organization", async () => {
     expect((await goLiveChoices(contextOf([github, docker]))).missing).toEqual(["a database type"]);
-    await expect(renderInfra(contextOf([github, docker]), choices)).rejects.toMatchObject({ status: 409 });
+    await expect(renderInfra(contextOf([github, docker]), unsized)).rejects.toMatchObject({ status: 409 });
     await expect(
-      renderInfra(contextOf([github, supabase, docker]), { ...choices, region: "eu-west-1" }),
+      renderInfra(contextOf([github, supabase, docker]), { ...unsized, region: "eu-west-1" }),
     ).rejects.toMatchObject({ status: 400, body: { issues: [{ path: ["organization"] }] } });
   });
 });

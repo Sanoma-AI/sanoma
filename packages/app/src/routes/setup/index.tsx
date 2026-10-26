@@ -72,7 +72,14 @@ function GoLivePage() {
     ...v,
     connected: connectedBy(v).every(isSet),
   }));
-  const connected = github && vendors.every((v) => v.optional || v.connected);
+  // Going live needs GitHub and one of the vendors that make a database (the others are optional):
+  // it chooses among those connected.
+  const required = vendors.filter((v) => !v.optional);
+  const missing = [
+    ...(github ? [] : ["GitHub"]),
+    ...(required.length && !required.some((v) => v.connected) ? [required.map((v) => v.title).join(" or ")] : []),
+  ];
+  const connected = missing.length === 0;
   const { run, bound } = progress;
   const data = bound.repo && bound.store;
   // The latest run is the host's once it is past the repository and database, or still going.
@@ -123,14 +130,7 @@ function GoLivePage() {
         ) : connected ? (
           <ChooseForm />
         ) : (
-          <p className="text-muted-foreground">
-            Connect GitHub and{" "}
-            {vendors
-              .filter((v) => !v.optional)
-              .map((v) => v.title)
-              .join(" and ") || "the rest"}{" "}
-            first.
-          </p>
+          <p className="text-muted-foreground">Connect {missing.join(" and ")} first.</p>
         )}
       </Region>
       <Region title="3. Create the repository and the database">

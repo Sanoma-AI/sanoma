@@ -100,6 +100,11 @@ describe("a database type", () => {
     expect(() => resolveConfig({ workflows: [], connectors: [acmeWith()] })).not.toThrow();
     const byId = storeUrl(z.object({ id: z.string(), export: z.string() }));
     expect(() => resolveConfig({ workflows: [], connectors: [acmeWith(byId)] })).not.toThrow();
+    // Fields with formats of their own: a Neon project id, an export in lower case.
+    const formatted = storeUrl(
+      z.object({ id: z.string().regex(/^[a-z]+-[a-z]+-\d+$/), export: z.string().regex(/^[a-z]\w*$/) }),
+    );
+    expect(() => resolveConfig({ workflows: [], connectors: [acmeWith(formatted)] })).not.toThrow();
   });
 
   it("is refused by resolveConfig when storeUrl is no operation of its connector", () => {

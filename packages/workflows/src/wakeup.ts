@@ -104,7 +104,7 @@ const SAMPLE: WakeupRegistration = { at: new Date(0).toISOString(), generation: 
  * takes none of it. A contract's operation (a wakeup's `register`, a database's `storeUrl`) is
  * checked with it.
  */
-export function keepsInput(op: Op, sample: Record<string, unknown>): boolean {
+function keepsInput(op: Op, sample: Record<string, unknown>): boolean {
   try {
     const parsed = op.input.safeParse(sample);
     const data = parsed.data as Record<string, unknown> | undefined;
