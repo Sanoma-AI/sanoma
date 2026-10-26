@@ -6,7 +6,8 @@ import { defineConnector, defineDriver, DriverError } from "./op.ts";
 // Where a company's files live, and how a change to them is recorded: a git repository on this
 // machine, or one a host cloned. The runtime's writers (the app's Adopt, apply's lockfile) change
 // files under `root`, then commit them through it. The launcher makes one; a config without one
-// writes the files and commits nothing.
+// writes the files and commits nothing. A writer that must leave the live checkout alone writes
+// in a draft instead: a checkout of its own, on a branch of its own.
 
 /** A company's repository, as the runtime writes to it. */
 export interface Source {
@@ -21,10 +22,45 @@ export interface Source {
     message: string;
     author: string;
   }): { revision: string } | undefined | Promise<{ revision: string } | undefined>;
-  /** The revision `ref` names, the checked-out one by default. */
+  /** The revision `ref` names, the checked-out one by default (a draft's by its `branch`). */
   head(ref?: string): string | Promise<string>;
-  /** Pushes `ref` to the repository at `url`, signed in with `token`. */
+  /** Pushes `ref` to the repository at `url`, signed in with `token` (a draft by its `branch`). */
   push?(target: { url: string; token: string; ref: string }): void | Promise<void>;
+  /**
+   * The draft `id` (letters, digits, `_` and `-`), opened: made from the checked-out revision the
+   * first time, then the same one, edits and all, until its branch is deleted.
+   */
+  draft?(id: string): Promise<Draft>;
+  /** The open drafts' ids, sorted. */
+  drafts?(): Promise<string[]>;
+  /** What the draft `id` has committed since its branch left the checked-out one (read from the branch alone). */
+  diff?(id: string): Promise<DraftDiff>;
+}
+
+/**
+ * A draft: a checkout of its own, at `root`, on `branch`, which `commit` records in as
+ * `Source.commit` does in its root. Its `node_modules` may be the root's own install, linked in:
+ * a writer never writes under it.
+ */
+export interface Draft {
+  branch: string;
+  root: string;
+  commit: Source["commit"];
+}
+
+/** A draft's change: the files it touches, relative to the root, and git's `--stat` of it. */
+export interface DraftDiff {
+  files: string[];
+  summary: string;
+}
+
+/** What `sanoma check` finds in a repo (a draft's too). */
+export interface CheckResult {
+  ok: boolean;
+  /** One printable line each: `<file>:<line>:<col>: <message>`, or `<scenario> › <step>: <message>`. */
+  problems: string[];
+  /** What is worth fixing but not wrong, one line each, `<file>:<line>:<col>: warning: <message>`: the sites' `warnings`. */
+  warnings: string[];
 }
 
 /**

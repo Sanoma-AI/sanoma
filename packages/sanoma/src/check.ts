@@ -3,7 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { errorMessage } from "@sanoma-ai/workflows";
+import { type CheckResult, errorMessage } from "@sanoma-ai/workflows";
 import {
   type ConfigDescription,
   describeConfig,
@@ -15,14 +15,6 @@ import { problemLine, warningLine } from "@sanoma-ai/workflows/shared";
 import { runScenarios } from "@sanoma-ai/workflows/scenarios";
 import type { Loaded } from "./config.ts";
 import { runtimeFrom, siteBuild } from "./sites.ts";
-
-export interface CheckResult {
-  ok: boolean;
-  /** One printable line each: `<file>:<line>:<col>: <message>`, or `<scenario> › <step>: <message>`. */
-  problems: string[];
-  /** What is worth fixing but not wrong, one line each, `<file>:<line>:<col>: warning: <message>`: the sites' `warnings`. */
-  warnings: string[];
-}
 
 export interface CheckOptions {
   /** The Postgres the scenarios' worker runs on, answering already: a database of its own, never the config's. */

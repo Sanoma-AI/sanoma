@@ -138,7 +138,14 @@ export {
   type Secret,
   type Secrets,
 } from "./secret.ts";
-export { resolveRevision, SOURCE_RESOLVE, type Source } from "./source.ts";
+export {
+  type CheckResult,
+  type Draft,
+  type DraftDiff,
+  resolveRevision,
+  SOURCE_RESOLVE,
+  type Source,
+} from "./source.ts";
 export type { HostCapabilities, HostLifetime, HostOutputs, HostSpec } from "./host.ts";
 export {
   type CallOptions,
