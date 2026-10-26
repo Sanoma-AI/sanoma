@@ -255,7 +255,7 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   }
   const [loaded, connected] = await Promise.allSettled([
     load(),
-    SanomaClient.connect(config, options.onWrite && { onWrite: options.onWrite }),
+    SanomaClient.connect(config, { onWrite: options.onWrite }),
   ]);
   if (loaded.status === "rejected" && connected.status === "rejected") {
     throw new AggregateError(

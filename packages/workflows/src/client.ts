@@ -183,19 +183,18 @@ export class SanomaClient {
   private readonly storedSecrets: Secrets;
   /** The operator agent's chats: their rows and their transcripts, in the config's database. */
   readonly chats: Chats;
-  /** `ClientOptions.onWrite`. */
-  private readonly onWrite: (() => void) | undefined;
+  private readonly options: ClientOptions;
 
   private constructor(
     dbos: DBOSClient,
     config: ResolvedConfig,
     drivers: ReadonlyMap<string, Driver>,
-    onWrite: (() => void) | undefined,
+    options: ClientOptions,
   ) {
     this.dbos = dbos;
     this.config = config;
     this.drivers = drivers;
-    this.onWrite = onWrite;
+    this.options = options;
     this.audit = ownedLedger(config);
     this.pool = lazyPool(config.databaseUrl, "client");
     this.storedSecrets = storedSecrets(() => this.db(), "sanoma");
@@ -210,7 +209,7 @@ export class SanomaClient {
   static async connect(config: SanomaConfig, options: ClientOptions = {}): Promise<SanomaClient> {
     const resolved = resolveConfig(config);
     const dbos = await dbosClient(resolved.databaseUrl, resolved.appName);
-    return new SanomaClient(dbos, resolved, resolved.driversByVendor, options.onWrite);
+    return new SanomaClient(dbos, resolved, resolved.driversByVendor, options);
   }
 
   /**
@@ -253,7 +252,7 @@ export class SanomaClient {
     const hold = await this.startHold(workflow.name, parsed, startedBy, runId);
     const args: RunArgs = { input, startedBy, ...(sandbox === undefined ? {} : { sandbox }), ...(hold && { hold }) };
     const { onBehalfOf } = startedBy;
-    this.onWrite?.();
+    this.options.onWrite?.();
     // An id DBOS has already returns that run, unless it is another workflow's, which DBOS refuses.
     const handle = await this.dbos
       .enqueue(
@@ -613,7 +612,7 @@ export class SanomaClient {
     // The id names this message, so the run's answer says whether it decided with it, and is
     // in its idempotency key, so a retried send queues it once.
     const id = msg.id ?? randomUUID();
-    this.onWrite?.();
+    this.options.onWrite?.();
     await this.dbos.send(runId, { ...msg, id }, topicOf(target.id), messageKeyOf(target.id, id));
     // DBOSClient does not LISTEN for events: it polls, every 10 s unless told otherwise. A
     // running worker answers within moments, so poll often at first, then once a second.

@@ -196,9 +196,11 @@ function desiredOf(
     const place = holderOf(out, at);
     if (references[fieldPathOf(at)]?.by?.length && bound !== undefined && place) place.holder[place.key] = bound;
   }
-  const url = wakeup && urls.get(r.refs[wakeup.inputs.host] ?? "");
-  const named = wakeup && holderOf(out, wakeup.inputs.host);
-  if (url && named) named.holder[named.key] = url;
+  if (wakeup) {
+    const url = urls.get(r.refs[wakeup.inputs.host] ?? "");
+    const named = holderOf(out, wakeup.inputs.host);
+    if (url && named) named.holder[named.key] = url;
+  }
   // A host is given its source's clone URL and the commit its ref names now.
   const run = hosts.get(r.id);
   if (host && run) {

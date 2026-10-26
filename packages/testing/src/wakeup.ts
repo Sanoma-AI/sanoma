@@ -144,12 +144,13 @@ export async function checkWakeup(w: WakeupUnderTest): Promise<WakeupCheck[]> {
     // The tick's run, as the ledger records the time it was for; any tick's without `at`.
     const tickRun = async (at?: Date) => {
       // The newest first: the tick waited for is among the last few.
-      for (const run of await client.runs({ workflow: "wakeup-check-tick", limit: 10 })) {
-        const [started] = await client.ledger(run.runId);
-        if (at === undefined || (started?.type === "run.started" && started.scheduledFor === at.toISOString()))
-          return run;
-      }
-      return undefined;
+      const runs = await client.runs({ workflow: "wakeup-check-tick", limit: at ? 10 : 1 });
+      if (!at) return runs[0];
+      const starts = await Promise.all(runs.map(async (run) => (await client.ledger(run.runId))[0]));
+      return runs.find((_, i) => {
+        const started = starts[i];
+        return started?.type === "run.started" && started.scheduledFor === at.toISOString();
+      });
     };
     // DBOS fires a tick missed while the host was stopped from the schedule's last fire, so one
     // fires first, while the host runs (once a minute).

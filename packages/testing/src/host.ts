@@ -16,7 +16,6 @@ import {
   errorMessage,
   type HostLifetime,
   isEnded,
-  memoryLedger,
   type PlanAction,
   type Resource,
   resolveSecrets,
@@ -29,6 +28,7 @@ import {
 } from "@sanoma-ai/workflows";
 import { z } from "zod";
 import { waitFor } from "./build.ts";
+import { testWorkerConfig } from "./index.ts";
 
 // The conformance kit for the `Host` contract: whether a host runs the company as the runtime
 // needs. `checkHost` drives a declared host through callbacks (apply it, stop it, commit to its
@@ -615,10 +615,7 @@ export function fakeHost(start: StartHost, { lifetime = "long-lived", quietAfter
  */
 export function inProcessHost(config: SanomaConfig, databaseUrl: string, options: SupervisorOptions = {}): StartHost {
   return async ({ port }) => {
-    const worker = await superviseWorker(
-      { ...config, databaseUrl, ledger: config.ledger ?? memoryLedger() },
-      { quiet: true, ...options },
-    );
+    const worker = await superviseWorker(testWorkerConfig(config, databaseUrl), { quiet: true, ...options });
     const wakes: Wake[] = [];
     const server = createServer((req, res) => {
       const url = new URL(req.url ?? "/", "http://host");

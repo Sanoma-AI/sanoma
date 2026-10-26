@@ -12,7 +12,6 @@ import {
   SanomaClient,
   type SanomaConfig,
   startWorker,
-  type Supervisor,
   superviseWorker,
   wakeGeneration,
 } from "@sanoma-ai/workflows";
@@ -373,13 +372,13 @@ export async function serve(config: SanomaConfig, serveOptions: ServeOptions): P
   // An app on this machine alone is not the instance the host runs: its worker never stops
   // itself (its wakeup would wake that instance), and it never exits when quiet.
   const here = isLoopback(options.host ?? "127.0.0.1");
-  let worker: Supervisor | undefined;
-  const rule = here ? undefined : await exitRule(config, () => worker?.stopped === true, serveOptions);
-  const supervised = (worker = await superviseWorker(config, {
+  // Asked only once the worker stopped itself, after `supervised` is set.
+  const rule = here ? undefined : await exitRule(config, () => supervised.stopped, serveOptions);
+  const supervised = await superviseWorker(config, {
     ...workerOptions(config),
     selfStop: !here,
     ...(rule && { onStopped: rule.stopped }),
-  }));
+  });
   let wakeup: WakeupService | undefined;
   let app: Served;
   try {
