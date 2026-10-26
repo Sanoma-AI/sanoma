@@ -1,8 +1,10 @@
 import type { RunSummary } from "./client.ts";
 import type { CredentialStatus } from "./env.ts";
 import type { ApprovalState, Approver, Principal } from "./define.ts";
+import type { OpEntry, WorkflowEntry } from "./describe.ts";
 import type { LedgerRecord } from "./ledger.ts";
 import type { Effect } from "./op.ts";
+import type { PreviewRequest } from "./policy.ts";
 import type { DeclaredResource, ResourceProblem } from "./resources.ts";
 import type { OutlineNode } from "./outline.ts";
 
@@ -52,6 +54,24 @@ export const EFFECTS = ["read", "write", "publish", "send", "money", "access"] a
 
 /** What a workflow start's action id starts with, as a policy names it: `workflow:<name>`. */
 export const WORKFLOW_ACTION = "workflow:";
+
+/**
+ * What to ask the policy ahead of a run of `workflow` (`Policy.preview`, the principal aside): its
+ * start, then each operation it may call, with its effect, in the run (`inRun`). The run form's
+ * will-ask line asks it for the person; the Permissions grid (`permissionsGrid`) for each group.
+ */
+export function previewRequests(
+  workflow: Pick<WorkflowEntry, "name" | "ops">,
+  ops: ReadonlyMap<string, Pick<OpEntry, "effect">>,
+): Omit<PreviewRequest, "principal">[] {
+  return [
+    { action: { id: `${WORKFLOW_ACTION}${workflow.name}` } },
+    ...workflow.ops.map((id) => {
+      const effect = ops.get(id)?.effect;
+      return { action: effect === undefined ? { id } : { id, effect }, inRun: true };
+    }),
+  ];
+}
 
 /** A site's folder name under `sites/`, its URL segment: what the app mounts and `readSites` reads. */
 export const SITE_NAME = /^[a-z][a-z0-9-]*$/;

@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
 import { mintInstanceToken } from "@sanoma-ai/workflows/wakeup-service";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
-import { copyFixture, ensureBuilt, runCli, serving, startCli } from "./fixture.ts";
+import { copyFixture, FIXTURE_GRID, ensureBuilt, runCli, serving, startCli } from "./fixture.ts";
 
 // Needs Postgres (`pnpm db:up`) and the packages' builds: the fixture copy loads them as a
 // company repo would, from `dist/`, so `beforeAll` builds those that are stale.
@@ -190,8 +190,17 @@ describe("sanoma check", () => {
     dir = copyFixture();
     const ok = await runCli(dir, ["check"], { ...unconfigured, SANOMA_EVENTS: "1" });
     expect(ok.code, `${ok.stdout}${ok.stderr}`).toBe(0);
-    const checked = { sanoma: 1, event: "checked", ok: true, problems: [], warnings: [] };
-    expect(ok.stdout.endsWith(`${JSON.stringify(checked)}\n`)).toBe(true);
+    // The last line: the result, with the Permissions grid (no policies, so everyone may).
+    expect(ok.stdout.endsWith("\n")).toBe(true);
+    const checked: unknown = JSON.parse(ok.stdout.trimEnd().split("\n").at(-1)!);
+    expect(checked).toEqual({
+      sanoma: 1,
+      event: "checked",
+      ok: true,
+      problems: [],
+      warnings: [],
+      grid: FIXTURE_GRID,
+    });
     // The lines check prints, not all of stdout: on a fresh database DBOS logs "Created database …" there.
     expect(ok.stderr).toContain("passed hello/hello.feature › A post goes out");
     expect(ok.stderr.trimEnd().split("\n").at(-1)).toBe("ok");

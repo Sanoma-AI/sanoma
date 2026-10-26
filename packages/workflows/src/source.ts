@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { z } from "zod";
+import type { PermissionsGrid } from "./grid.ts";
 import { defineConnector, defineDriver, DriverError } from "./op.ts";
 
 // Where a company's files live, and how a change to them is recorded: a git repository on this
@@ -35,6 +36,22 @@ export interface Source {
   drafts?(): Promise<string[]>;
   /** What the draft `id` has committed since its branch left the checked-out one (read from the branch alone). */
   diff?(id: string): Promise<DraftDiff>;
+  /** Closes the draft `id`: its checkout removed and its branch deleted, whatever it held; nothing when it is gone. */
+  closeDraft?(id: string): Promise<void>;
+  /**
+   * `sanoma check` on the draft `id`, as a child in its checkout, one at a time in the process. A
+   * check that gives no result (a config that does not load, no install, a timeout) is a result
+   * of one problem saying why.
+   */
+  check?(id: string): Promise<CheckResult>;
+  /** The URL of the repository this one was cloned from (`origin`); undefined when it has none. */
+  remoteUrl?(): Promise<string | undefined>;
+  /**
+   * Fast-forwards the checked-out branch to `ref` in the repository at `url`, signed in with
+   * `token`, as `push` is: only when `ref` is checked out, nothing is uncommitted and the remote's
+   * `ref` contains it; otherwise `skipped`, saying why. The checked-out revision after.
+   */
+  follow?(target: { url: string; token: string; ref: string }): Promise<{ revision: string } | { skipped: string }>;
 }
 
 /**
@@ -61,6 +78,8 @@ export interface CheckResult {
   problems: string[];
   /** What is worth fixing but not wrong, one line each, `<file>:<line>:<col>: warning: <message>`: the sites' `warnings`. */
   warnings: string[];
+  /** The repo's Permissions grid (`permissionsGrid`), when its config loaded and its policies hold: what a change is reviewed by. */
+  grid?: PermissionsGrid;
 }
 
 /**

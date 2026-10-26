@@ -207,7 +207,10 @@ export default defineWorkflow({
   git("init", "--quiet", "--initial-branch=main");
   git("add", "--all");
   git("commit", "--quiet", "-m", "First");
-  app = await startApp(testApp.config, { port: 0, source: localGitSource(dir) });
+  app = await startApp(testApp.config, {
+    port: 0,
+    source: localGitSource(dir, { databaseUrl: testApp.config.databaseUrl! }),
+  });
 }, 600_000);
 
 afterAll(async () => {
