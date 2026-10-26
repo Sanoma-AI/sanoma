@@ -100,9 +100,12 @@ export interface ApprovalState extends Omit<ApprovalRequest, "covers"> {
   status: "pending" | "approved" | "rejected" | "withdrawn";
   /** Why it was withdrawn, once it is. */
   withdrawnReason?: string;
+  /** When it was withdrawn, once it is. */
+  withdrawnAt?: number;
+  /** Who withdrew it, when someone did rather than its run (`withdrawApprovals`). */
+  withdrawnBy?: string;
   requestedAt: number;
   decidedBy?: string;
-  /** When it was decided, or withdrawn while still pending. */
   decidedAt?: number;
   note?: string;
   /** The `id` of the decision or withdrawal message the run decided with, when it had one. */

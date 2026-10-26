@@ -34,6 +34,7 @@ import {
   opsById,
   recentRunsQuery,
   runLink,
+  settledAt,
   waitingRunsQuery,
   workflowTitles,
 } from "../queries.ts";
@@ -151,7 +152,7 @@ function Decided({ wanted }: { wanted: string | undefined }) {
 function DecidedToday() {
   const { decided } = useDecided(undefined);
   const midnight = new Date().setHours(0, 0, 0, 0);
-  const today = decided.filter(({ approval }) => (approval.decidedAt ?? approval.requestedAt) >= midnight);
+  const today = decided.filter(({ approval }) => settledAt(approval) >= midnight);
   if (today.length === 0) return null;
   return <Approvals label="Decided today" entries={today} show="decided" />;
 }
@@ -230,7 +231,7 @@ const InboxRow = memo(function InboxRow({
           </span>
         </span>
         <span className="shrink-0 text-xs text-muted-foreground">
-          <When at={approval.decidedAt ?? approval.requestedAt} />
+          <When at={settledAt(approval)} />
         </span>
       </Link>
     </li>

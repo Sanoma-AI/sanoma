@@ -354,10 +354,12 @@ describe("approvals a workflow asks for", () => {
       id: "approval-1",
       status: "withdrawn",
       withdrawnReason: "a new commit",
-      decidedAt: expect.any(Number),
+      withdrawnAt: expect.any(Number),
+      withdrawnBy: "alice",
       decidedWith: expect.any(String),
     });
     expect(withdrawn).not.toHaveProperty("decidedBy");
+    expect(withdrawn).not.toHaveProperty("decidedAt");
     // The list, then the decision event: both say so.
     expect((await c().approvals(runId))[0]).toEqual(withdrawn);
     expect(await app.raw.getEvent<ApprovalState>(runId, decisionEventOf("approval-1"), 0)).toEqual(withdrawn);
@@ -371,6 +373,7 @@ describe("approvals a workflow asks for", () => {
       expect.objectContaining({
         id: `${runId}:approval.withdrawn:approval-1`,
         approval: "approval-1",
+        by: "alice",
         reason: "a new commit",
       }),
     ]);
@@ -401,6 +404,17 @@ describe("approvals a workflow asks for", () => {
     const blank = await caught(c().withdraw(runId, "approval-1", "", { by: alice }));
     expect(errorCode(blank)).toBe("invalid_input");
     expect((await c().approvals(runId))[0]).toMatchObject({ status: "pending", refused: [] });
+
+    // Sent around the client's check: the run checks who withdraws too, and records the refusal.
+    await app.raw.send(runId, { withdraw: "mine now", by: { id: "intern" }, id: "w-1" }, topicOf("approval-1"));
+    await waitFor(async () => (await c().approvals(runId))[0]?.refused.length === 1);
+    expect((await c().approvals(runId))[0]).toMatchObject({
+      status: "pending",
+      refused: [{ by: "intern", id: "w-1", reason: "intern is not the approver; marketing-lead is" }],
+    });
+    expect(ofType(await c().ledger(runId), "approval.refused")).toEqual([
+      expect.objectContaining({ by: "intern", reason: "intern is not the approver; marketing-lead is" }),
+    ]);
 
     expect(await c().withdraw(runId, "approval-1", "not needed", { by: lead })).toMatchObject({
       status: "withdrawn",
@@ -535,8 +549,10 @@ forbid (principal == Sanoma::Principal::"solo", action == Sanoma::Action::"blues
     expect(signOff).toMatchObject({
       status: "withdrawn",
       withdrawnReason: "a new commit",
+      withdrawnAt: expect.any(Number),
       decidedBy: "marketing-lead",
     });
+    expect(signOff).not.toHaveProperty("withdrawnBy");
     expect(hold).toMatchObject({ requestedBy: "policy", op: "bluesky.post.create", status: "pending" });
     expect(approvedFor([signOff!], "bluesky.post.create", "marketing-lead")).toBe(false);
     expect(await app.raw.getEvent<ApprovalState>(runId, decisionEventOf("approval-1"), 0)).toEqual(signOff);
@@ -551,7 +567,7 @@ forbid (principal == Sanoma::Principal::"solo", action == Sanoma::Action::"blues
     const records = await c().ledger(runId);
     expect(ofType(records, "approval.withdrawn")).toEqual([
       expect.objectContaining({ approval: "approval-1", reason: "a new commit" }),
-      expect.objectContaining({ approval: "approval-2", reason: "another commit" }),
+      expect.objectContaining({ approval: "approval-2", by: "each", reason: "another commit" }),
     ]);
     expect(ofType(records, "op.called")).toEqual([
       expect.objectContaining({

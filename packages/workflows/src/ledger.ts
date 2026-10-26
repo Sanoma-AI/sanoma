@@ -100,7 +100,12 @@ export type LedgerRecord = {
       alone?: true;
     }
   /** The approval no longer stands: withdrawn while pending, or retired by its run once approved. */
-  | { type: "approval.withdrawn"; approval: string; reason: string }
+  | {
+      type: "approval.withdrawn";
+      approval: string;
+      /** Who withdrew it, when someone did rather than its run. */ by?: string;
+      reason: string;
+    }
   /**
    * A `ctx.sleep` began; `until` is when it ends, in ms since the epoch: the time asked for, or
    * for a duration the record's `at` plus the duration, as the runtime saw it. Written

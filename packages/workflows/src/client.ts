@@ -10,6 +10,7 @@ import {
   decisionEventOf,
   messageKeyOf,
   topicOf,
+  withdrawalRefusal,
 } from "./approvals.ts";
 import { beforeOf, decideCall, decideStart, recorded, startHoldOf } from "./call.ts";
 import { type Chats, chatStore } from "./chats.ts";
@@ -609,7 +610,8 @@ export class SanomaClient {
 
   /**
    * Withdraws the run's pending approval `approvalId`, saying `reason`, as `options.by`: the run's
-   * starter, or someone who may decide it (`not_approver` otherwise). The run reads the
+   * starter, or someone who may decide it (`not_approver` otherwise, here and again in the run,
+   * which records who withdrew it). The run reads the
    * withdrawal as a decision, and the step that waits on it throws `approval_withdrawn`. Returns
    * the approval as withdrawn, and refuses as `decide` does: `already_decided` when it is not
    * pending (or another decision reached the run first), `run_ended`, `no_pending_approval`,
@@ -627,11 +629,13 @@ export class SanomaClient {
       parseOrThrow(PrincipalOrId, options?.by, '`by` must be a principal, such as "alice" or { id: "alice" }'),
     );
     const { target, row } = await this.pendingApproval(runId, approvalId);
-    // The starter may withdraw what their own run asks; anyone else only as one who may decide it.
-    const refusal = by.id === row.authenticatedUser && !isVisitor(by) ? undefined : refusalOf(target, by, {}, []);
+    const refusal = withdrawalRefusal(target, by, row.authenticatedUser);
     if (refusal !== undefined) throw notApprover(runId, target, refusal);
     const id = randomUUID();
-    const now = await this.sendToApproval(runId, target, { withdraw, id }, options.timeoutSeconds);
+    const now = await this.sendToApproval(runId, target, { withdraw, by, id }, options.timeoutSeconds);
+    // Read, but refused: the run checks who withdraws too.
+    const refused = now.refused.find((r) => r.id === id);
+    if (refused) throw notApprover(runId, target, refused.reason);
     if (now.status !== "pending" && now.decidedWith !== id) throw alreadyDecided(runId, now);
     return now;
   }

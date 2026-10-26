@@ -1,4 +1,4 @@
-import type { RunStatus, RunSummary } from "@sanoma-ai/workflows";
+import type { ApprovalState, RunStatus, RunSummary } from "@sanoma-ai/workflows";
 import type {
   CollectionEntry,
   ConfigDescription,
@@ -360,13 +360,14 @@ export const lastRunsQuery = () =>
     staleTime: 5_000,
   });
 
-/** The approvals decided across the runs, each with its run, latest decision first: for `select`. */
+/** When an approval last changed: withdrawn, decided, else asked. */
+export const settledAt = (a: ApprovalState) => a.withdrawnAt ?? a.decidedAt ?? a.requestedAt;
+
+/** The approvals decided (or withdrawn) across the runs, each with its run, latest first: for `select`. */
 export const decidedOf = (runs: RunSummary[]) =>
   runs
     .flatMap((run) => run.approvals.filter((a) => a.status !== "pending").map((approval) => ({ run, approval })))
-    .toSorted(
-      (a, b) => (b.approval.decidedAt ?? b.approval.requestedAt) - (a.approval.decidedAt ?? a.approval.requestedAt),
-    );
+    .toSorted((a, b) => settledAt(b.approval) - settledAt(a.approval));
 
 /** What the Inbox lists (`?show=`): the pending approvals you may decide, all of them, or the decided. */
 const INBOX_FILTERS = ["mine", "waiting", "decided"] as const;

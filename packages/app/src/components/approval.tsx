@@ -98,10 +98,10 @@ export function ApprovalDetails({
         {approval.status === "withdrawn" && (
           <Fact label="Withdrawn">
             {approval.withdrawnReason}
-            {/* Withdrawn while pending: its decidedAt is when. */}
-            {!approval.decidedBy && approval.decidedAt ? (
+            {approval.withdrawnBy ? <>, by {approval.withdrawnBy}</> : null}
+            {approval.withdrawnAt ? (
               <>
-                , <When at={approval.decidedAt} />
+                , <When at={approval.withdrawnAt} />
               </>
             ) : null}
           </Fact>
