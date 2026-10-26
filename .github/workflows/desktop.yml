@@ -19,11 +19,16 @@ jobs:
     timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      # Node and pnpm from .mise.toml, the one pin; pnpm then switches to `packageManager`.
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
-          node-version: 24
-          cache: pnpm
+          cache: true
+      - id: pnpm
+        run: echo "store=$(pnpm store path)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pnpm.outputs.store }}
+          key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
       - run: pnpm install --frozen-lockfile
       # Ubuntu 24.04's AppArmor refuses Chromium's sandbox the user namespaces it needs; the shell keeps its sandbox on.
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0

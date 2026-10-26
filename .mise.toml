@@ -1,0 +1,6 @@
+# pnpm 11 switches itself to the exact version in package.json's
+# `packageManager`, which stays the one pin.
+
+[tools]
+node = "26"
+"npm:pnpm" = "11"

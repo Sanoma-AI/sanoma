@@ -43,11 +43,10 @@ jobs:
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
-      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
-      # No cache: a release never restores another run's cache.
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      # Node and pnpm from .mise.toml. No cache: a release never restores another run's cache.
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
-          node-version: 24
+          cache: false
       - run: pnpm install --frozen-lockfile
       # Builds the shell, stages Node for arm64 and x64 and pnpm, and packs both architectures
       # (electron-builder.yml), signed ad hoc: no keychain identity is looked for.
