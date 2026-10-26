@@ -14,7 +14,15 @@ import { Input } from "#/components/ui/input.tsx";
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup } from "#/components/ui/item.tsx";
 import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
-import { errorBodyOf, INFRA, type GoLiveChoices, type GoLiveRequest, type GoLiveRun } from "../../api.ts";
+import {
+  errorBodyOf,
+  INFRA,
+  type GoLiveChoices,
+  type GoLiveRequest,
+  type GoLiveRun,
+  connectedBy,
+  SETUP_VENDORS,
+} from "../../api.ts";
 import { ApplyPlanView } from "../../components/apply-plan.tsx";
 import {
   ButtonLink,
@@ -48,7 +56,7 @@ export const Route = createFileRoute("/setup/")({
 });
 
 /**
- * Going live: connect GitHub and Supabase, choose where the company goes, then apply the
+ * Going live: connect GitHub and the config's vendors, choose where the company goes, then apply the
  * repository and the database, push this repository to the new one, and apply the host. Each
  * step shows once the one before is done; the page reads how far it is from the files, the
  * lockfile and the runs, so it picks up where it was.
@@ -58,10 +66,12 @@ function GoLivePage() {
   const { data: progress } = useSuspenseQuery(goLiveProgressQuery());
   const isSet = (name: string) => status.tokens.some((t) => t.name === name && t.status === "set");
   const github = status.githubApp !== null || isSet("GITHUB_TOKEN");
-  const supabase = isSet("SUPABASE_ACCESS_TOKEN");
-  // Only when the config declares the sanoma-ops connector, whose step is optional.
-  const sanomaOps = status.tokens.some((t) => t.name === "SANOMA_OPS_TOKEN");
-  const opsConnected = isSet("SANOMA_OPS_TOKEN");
+  // The vendors the config asks tokens of, each connected once its `connectedBy` are stored.
+  const asked = new Set(status.tokens.map((t) => t.name));
+  const vendors = SETUP_VENDORS.filter((v) => v.tokens.some((name) => asked.has(name))).map((v) => ({
+    ...v,
+    connected: connectedBy(v).every(isSet),
+  }));
   const { run, bound } = progress;
   const data = bound.repo && bound.store;
   // The latest run is the host's once it is past the repository and database, or still going.
@@ -69,7 +79,7 @@ function GoLivePage() {
   return (
     <>
       <CrumbHeader />
-      <Region title="1. Connect GitHub and Supabase">
+      <Region title="1. Connect">
         <ItemGroup>
           <Item role="listitem" variant="outline" size="xs">
             <ItemContent>
@@ -83,31 +93,17 @@ function GoLivePage() {
               </ItemDescription>
             </ItemContent>
           </Item>
-          <Item role="listitem" variant="outline" size="xs">
-            <ItemContent>
-              <ItemHeading>
-                Supabase
-                <ToneBadge tone={supabase ? "ok" : "off"}>{supabase ? "connected" : "not connected"}</ToneBadge>
-              </ItemHeading>
-              <ItemDescription>An access token, which lists and creates projects.</ItemDescription>
-            </ItemContent>
-          </Item>
-          {sanomaOps && (
-            <Item role="listitem" variant="outline" size="xs">
+          {vendors.map((v) => (
+            <Item key={v.title} role="listitem" variant="outline" size="xs">
               <ItemContent>
                 <ItemHeading>
-                  sanoma-ops
-                  <ToneBadge tone={opsConnected ? "ok" : "off"}>
-                    {opsConnected ? "connected" : "not connected"}
-                  </ToneBadge>
+                  {v.title}
+                  <ToneBadge tone={v.connected ? "ok" : "off"}>{v.connected ? "connected" : "not connected"}</ToneBadge>
                 </ItemHeading>
-                <ItemDescription>
-                  Optional: a wakeup account, so the host stops when nothing is due and starts again in time. Connect it
-                  before choosing where the company goes, which declares the wakeup.
-                </ItemDescription>
+                <ItemDescription>{v.about}</ItemDescription>
               </ItemContent>
             </Item>
-          )}
+          ))}
         </ItemGroup>
         <div>
           <ButtonLink variant="outline">
@@ -123,10 +119,10 @@ function GoLivePage() {
             </p>
             <pre className="overflow-x-auto rounded-lg border p-3 text-xs">{progress.infra}</pre>
           </>
-        ) : github && supabase ? (
+        ) : github ? (
           <ChooseForm />
         ) : (
-          <p className="text-muted-foreground">Connect GitHub and Supabase first.</p>
+          <p className="text-muted-foreground">Connect GitHub first.</p>
         )}
       </Region>
       <Region title="3. Create the repository and the database">
@@ -167,15 +163,22 @@ function ChooseForm() {
 }
 
 function ChooseFields({ choices }: { choices: GoLiveChoices }) {
+  const { database, host, organizations } = choices;
+  const regions = database?.regions ?? null;
   const [form, setForm] = useState<GoLiveRequest>({
     owner: choices.owners[0]?.login ?? "",
     name: choices.name,
-    organization: choices.organizations[0]?.id ?? "",
-    region: "us-east-1",
+    ...(organizations?.[0] && { organization: organizations[0].id }),
+    region: regions?.includes("us-east-1") ? "us-east-1" : (regions?.[0] ?? ""),
+    ...(database && { database: database.type }),
+    ...(host && { host: host.type }),
     port: 8080,
   });
-  const set = (field: keyof GoLiveRequest) => (e: { target: { value: string } }) =>
-    setForm({ ...form, [field]: field === "port" ? Number(e.target.value) : e.target.value });
+  const set = (field: keyof GoLiveRequest) => (e: { target: { value: string } }) => {
+    const { value } = e.target;
+    // An empty size is the vendor's default: left out.
+    setForm({ ...form, [field]: field === "port" ? Number(value) : field === "size" && !value ? undefined : value });
+  };
   const queryClient = useQueryClient();
   const goLive = useServerFn(goLiveFn);
   const mutation = useMutation({
@@ -202,6 +205,12 @@ function ChooseFields({ choices }: { choices: GoLiveChoices }) {
           <code>sanoma.config.ts</code>.
         </Notice>
       )}
+      {choices.connect.length > 0 && (
+        <Notice variant="destructive">
+          Connect {choices.connect.join(" and ")} first: going live makes what this page shows with{" "}
+          {choices.connect.length > 1 ? "them" : "it"}.
+        </Notice>
+      )}
       {choices.errors.map((e) => (
         <Notice key={e} variant="destructive">
           {e}
@@ -224,34 +233,59 @@ function ChooseFields({ choices }: { choices: GoLiveChoices }) {
         <Field data-invalid={issue("name") ? true : undefined}>
           <FieldLabel htmlFor="go-live-name">Name</FieldLabel>
           <Input id="go-live-name" value={form.name} onChange={set("name")} autoComplete="off" />
-          <FieldDescription>The repository's, the Supabase project's and the host's.</FieldDescription>
+          <FieldDescription>The repository's, the database's and the host's.</FieldDescription>
           <FieldError>{issue("name")}</FieldError>
         </Field>
-        <Field data-invalid={issue("organization") ? true : undefined}>
-          <FieldLabel htmlFor="go-live-organization">Supabase organization</FieldLabel>
-          <NativeSelect id="go-live-organization" value={form.organization} onChange={set("organization")}>
-            {choices.organizations.map((o) => (
-              <NativeSelectOption key={o.id} value={o.id}>
-                {o.name}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-          <FieldError>{issue("organization")}</FieldError>
-        </Field>
         <Field>
-          <FieldLabel htmlFor="go-live-region">Region</FieldLabel>
-          <NativeSelect id="go-live-region" value={form.region} onChange={set("region")}>
-            {choices.regions.map((r) => (
-              <NativeSelectOption key={r} value={r}>
-                {r}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
+          <FieldLabel>Database</FieldLabel>
+          <span>{database?.title ?? "None"}</span>
+          <FieldDescription>The company's records, its runs and its ledger are kept here.</FieldDescription>
         </Field>
+        {organizations && (
+          <Field data-invalid={issue("organization") ? true : undefined}>
+            <FieldLabel htmlFor="go-live-organization">Supabase organization</FieldLabel>
+            <NativeSelect id="go-live-organization" value={form.organization ?? ""} onChange={set("organization")}>
+              {organizations.map((o) => (
+                <NativeSelectOption key={o.id} value={o.id}>
+                  {o.name}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+            <FieldError>{issue("organization")}</FieldError>
+          </Field>
+        )}
+        <Field data-invalid={issue("region") ? true : undefined}>
+          <FieldLabel htmlFor="go-live-region">Region</FieldLabel>
+          {regions ? (
+            <NativeSelect id="go-live-region" value={form.region} onChange={set("region")}>
+              {regions.map((r) => (
+                <NativeSelectOption key={r} value={r}>
+                  {r}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          ) : (
+            <Input id="go-live-region" value={form.region} onChange={set("region")} autoComplete="off" />
+          )}
+          <FieldError>{issue("region")}</FieldError>
+        </Field>
+        {database?.size && (
+          <Field data-invalid={issue("size") ? true : undefined}>
+            <FieldLabel htmlFor="go-live-size">Size</FieldLabel>
+            <Input id="go-live-size" value={form.size ?? ""} onChange={set("size")} autoComplete="off" />
+            <FieldDescription>
+              The database's compute size, as {database.title} names it; empty for its default.
+            </FieldDescription>
+            <FieldError>{issue("size")}</FieldError>
+          </Field>
+        )}
         <Field data-invalid={issue("port") ? true : undefined}>
           <FieldLabel htmlFor="go-live-port">Host</FieldLabel>
           <div className="flex items-center gap-2">
-            <span>{choices.host?.title ?? "None"} on this machine, port</span>
+            <span>
+              {host?.title ?? "None"}
+              {host && !host.publicUrl ? " on this machine" : ""}, port
+            </span>
             <Input
               id="go-live-port"
               className="w-24"
@@ -262,15 +296,22 @@ function ChooseFields({ choices }: { choices: GoLiveChoices }) {
             />
           </div>
           <FieldDescription>
-            It runs this company from the repository's <code>main</code>, answering at{" "}
-            <code>http://127.0.0.1:{form.port}</code>.
+            It runs this company from the repository's <code>main</code>
+            {host && !host.publicUrl ? (
+              <>
+                , answering at <code>http://127.0.0.1:{form.port}</code>
+              </>
+            ) : (
+              ", listening on this port"
+            )}
+            .
           </FieldDescription>
           <FieldError>{issue("port")}</FieldError>
         </Field>
       </FieldGroup>
       {error && <Notice variant="destructive">{error}</Notice>}
       <div>
-        <Button type="submit" disabled={mutation.isPending || choices.missing.length > 0}>
+        <Button type="submit" disabled={mutation.isPending || choices.missing.length > 0 || choices.connect.length > 0}>
           {mutation.isPending ? (
             <Spinner data-icon="inline-start" />
           ) : (

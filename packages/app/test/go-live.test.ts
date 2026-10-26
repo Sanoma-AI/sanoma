@@ -186,15 +186,20 @@ const OPS_URL = "http://127.0.0.1:3100";
 const choices = () => ({ owner: "acme", name: "acme-ops", organization: "acme-org", region: "eu-west-1", port });
 
 describe("going live", () => {
-  it("offers the token's accounts, Supabase's organizations and regions, and the host", async () => {
+  it("offers the token's accounts, the database with Supabase's organizations and regions, and the host", async () => {
     expect(await goLiveChoices(ctx)).toMatchObject({
       owners: [
         { login: "acme-dev", kind: "user", via: "token" },
         { login: "acme", kind: "organization", via: "token" },
       ],
       organizations: [{ id: "acme-org", name: "Acme" }],
-      regions: expect.arrayContaining(["us-east-1", "eu-west-1"]),
-      host: { type: "testhost.app", title: "Test host" },
+      database: {
+        type: "supabase.project",
+        title: "Project",
+        regions: expect.arrayContaining(["us-east-1", "eu-west-1"]),
+        size: false,
+      },
+      host: { type: "testhost.app", title: "Test host", publicUrl: false },
       missing: [],
       name: "acme-ops",
       errors: [],
@@ -223,8 +228,8 @@ describe("going live", () => {
         ``,
         `export const store = supabase.project({`,
         `  name: "acme-ops",`,
-        `  organization_id: "acme-org",`,
         `  region: "eu-west-1",`,
+        `  organization_id: "acme-org",`,
         `  database_password: secret("SUPABASE_DB_PASSWORD", { generate: true }),`,
         `});`,
         ``,

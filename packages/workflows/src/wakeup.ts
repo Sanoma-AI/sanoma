@@ -54,8 +54,8 @@ export interface WakeupSpec {
   outputs: (state: Record<string, unknown>) => WakeupOutputs;
 }
 
-/** The operations `defineResource` gives a type itself: never its register. */
-const RESOURCE_OPS = new Set(["read", "import", "plan", "create", "update", "delete"]);
+/** The operations `defineResource` gives a type itself: never its register, or a database's `storeUrl`. */
+export const RESOURCE_OPS = new Set(["read", "import", "plan", "create", "update", "delete"]);
 
 /**
  * Throws what is wrong with a resource type's `wakeup`: a type apply cannot change (not
@@ -99,12 +99,15 @@ export function checkWakeup(
 /** A registration every register operation must take: the input `checkWakeupOps` tries. */
 const SAMPLE: WakeupRegistration = { at: new Date(0).toISOString(), generation: 1 };
 
-/** True when `op`'s input keeps both fields of a registration: one that strips them takes neither. */
-function takesRegistration(op: Op): boolean {
+/**
+ * True when `op`'s input takes `sample` and keeps each of its fields: one that strips a field
+ * takes none of it. A wakeup's `register` is checked with it.
+ */
+function keepsInput(op: Op, sample: Record<string, unknown>): boolean {
   try {
-    const parsed = op.input.safeParse(SAMPLE);
-    const data = parsed.data as Partial<WakeupRegistration> | undefined;
-    return parsed.success && data?.at !== undefined && data.generation !== undefined;
+    const parsed = op.input.safeParse(sample);
+    const data = parsed.data as Record<string, unknown> | undefined;
+    return parsed.success && Object.keys(sample).every((key) => data?.[key] !== undefined);
   } catch {
     // An async refinement, which a sync parse cannot run: no input the runtime can check.
     return false;
@@ -129,7 +132,8 @@ export function checkWakeupOps(types: ReadonlyMap<string, Resource>, ops: Readon
     if (notHosts.length) throw new Error(`${id}: its wakeup's host may name ${notHosts.join(", ")}, which is no host`);
     const op = ops.get(type.wakeup.register);
     if (!op) throw new Error(`${id}: its wakeup's register, ${type.wakeup.register}, is no operation of its connector`);
-    if (!takesRegistration(op)) throw new Error(`${id}: its wakeup's register, ${op.id}, must take { at, generation }`);
+    if (!keepsInput(op, { ...SAMPLE }))
+      throw new Error(`${id}: its wakeup's register, ${op.id}, must take { at, generation }`);
   }
 }
 

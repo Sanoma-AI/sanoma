@@ -21,6 +21,7 @@
       "@sanoma-ai/workflows/shared": ["./packages/workflows/src/shared.ts"],
       "@sanoma-ai/workflows/wakeup-service": ["./packages/workflows/src/wakeup-service.ts"],
       "@sanoma-ai/testing": ["./packages/testing/src/index.ts"],
+      "@sanoma-ai/testing/database": ["./packages/testing/src/database.ts"],
       "@sanoma-ai/testing/features": ["./packages/testing/src/features.ts"],
       "@sanoma-ai/testing/harness": ["./packages/testing/src/harness.ts"],
       "@sanoma-ai/testing/host": ["./packages/testing/src/host.ts"],

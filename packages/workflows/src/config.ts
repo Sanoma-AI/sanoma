@@ -42,6 +42,7 @@ import { checkSchedule } from "./schedules.ts";
 import { computeVersion } from "./version.ts";
 import type { DeclaredResource } from "./resources.ts";
 import { checkWakeupOps, type DeclaredWakeup } from "./wakeup.ts";
+import { checkDatabaseOps } from "./database.ts";
 
 /**
  * What a worker runs, on which connectors: the argument to `startWorker`.
@@ -259,6 +260,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     ...(dataStore ? [collectionsConnector(declared)] : []),
   ]);
   checkWakeupOps(types, ops);
+  checkDatabaseOps(types, ops);
   const driversByVendor = new Map([...makersOf(config.connectors, "driver")].map(([vendor, make]) => [vendor, make()]));
   const drivers = indexDrivers(
     [

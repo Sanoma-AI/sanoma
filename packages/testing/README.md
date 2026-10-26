@@ -224,3 +224,15 @@ expect(results.every((r) => r.ok)).toBe(true);
 ```
 
 `fakeWakeup()` is a wakeup in this process (`testwakeup.timer`, its `host` a reference to a `testhost.app` declaration by its `url`): its driver's `register` arms one timer for the one timer apply created, replacing any armed before unless it is of the same or an older generation, that sends `GET {host}/wake?generation=N` at `at`, again every 250 ms until the host answers. `fire()` sends the armed wake now; `registered()` lists the registrations it took; `close()` disarms it. Its tests run it over `fakeHost` with `stops-on-exit` and `inProcessHost`, and so does the stack test (`test/stack.test.ts`), with no account: the fake wakeup declared and applied for the host, a sleeping run and a schedule, the worker stopping itself and the process stopped in between, then woken.
+
+## A database's conformance
+
+`@sanoma-ai/testing/database` decides whether a database (a resource type with a `database`, see [Databases](../workflows/README.md#databases)) holds the company as the runtime needs. `checkDatabase(db)` applies it (`db.apply()`, which must report it healthy), starts a worker on its URL (`db.url()`, the URL its `storeUrl` stores, read here for the test alone), and drives it through `db.client`, a `SanomaClient` on that URL, returning each check as `{ name, ok, error? }`: DBOS's tables migrate and the worker starts, `LISTEN` hears a credential change, and a queued run drains. A database whose `capabilities.pauses` is true also gives `suspend` (its compute suspended, every connection dropped) and is checked for a run queued after it, which the client's query wakes the compute for and the reconnecting worker drains. The worker and the client both run `databaseCheckConfig(url)` (`hostCheck` and `hostCheckWorkflows`, no root), so the client's runs are of the worker's version; the kit stops its worker.
+
+```ts
+const client = await SanomaClient.connect(databaseCheckConfig(await db.url()));
+const results = await checkDatabase({ type, apply, url, suspend, client });
+expect(results.every((r) => r.ok)).toBe(true);
+```
+
+`fakeDatabase(name?)` is a database of the test Postgres (`testdb.database` at `testDatabaseUrl(name)`, made by its `create` and dropped by its `delete`) that pauses: `suspend()` drops every connection to it, as a Neon compute's suspend does, and resolves to how many it dropped; `remove()` drops the database; its `storeUrl` stores the URL as `SANOMA_DATABASE_URL_<EXPORT>`. `connector` is for a config, `driver` for calling its operations directly.

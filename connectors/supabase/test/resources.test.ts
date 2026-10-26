@@ -39,6 +39,20 @@ describe("the generated Supabase resource type", () => {
 });
 
 describe("the supabase connector", () => {
+  it("meets the Database contract: neither pauses nor branches, its region from Supabase's list, its URL stored after a create", () => {
+    const database = declare.project.database!;
+    expect(database).toMatchObject({
+      capabilities: { pauses: false, branch: false },
+      inputs: { region: "region" },
+      storeUrl: "supabase.database.storeUrl",
+      regions: expect.arrayContaining(["us-east-1", "eu-west-1"]),
+    });
+    expect(declare.project.stateless).toBe(false);
+    expect(declare.project.afterCreate?.map((step) => step.op)).toContain(database.storeUrl);
+    expect(database.outputs({ name: "acme-ops" })).toEqual({ healthy: true });
+    expect(database.outputs({})).toEqual({ healthy: false });
+  });
+
   it("reads and imports a project, effect read, by its ref", () => {
     for (const op of [supabase.project.read, supabase.project.import]) {
       expect(op).toMatchObject({ vendor: "supabase", resource: "project", effect: "read", idempotent: true });

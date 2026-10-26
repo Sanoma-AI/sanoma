@@ -17,19 +17,20 @@ import {
   INFRA,
   PASSWORD_NOTE,
   type SetCredentialRequest,
+  SETUP_VENDORS,
   type SetupStatus,
 } from "../api.ts";
 import type { AppContext } from "../context.ts";
-import type { ActorContext } from "./core.ts";
+import { type ActorContext, invalid } from "./core.ts";
 import { cookie, cookies } from "../login/github.ts";
 import { signer } from "../login/keys.ts";
 import { escapeHtml } from "../login/page.ts";
 
-// Going live, step 1: connect GitHub and Supabase, and sanoma-ops when the config declares its
-// connector. GitHub through an App the company creates with GitHub's manifest flow
-// (`/setup/github/manifest`, then `/setup/github/callback`), whose keys are stored as encrypted
-// credentials; or, for a personal account, a token of the person's own. Supabase and sanoma-ops
-// through a pasted token. Nothing here sends a stored value to a page.
+// Going live, step 1: connect GitHub, and each vendor of a database, host or wakeup the config
+// declares: Supabase or Neon, Cloudflare, sanoma-ops. GitHub through an App the company creates
+// with GitHub's manifest flow (`/setup/github/manifest`, then `/setup/github/callback`), whose
+// keys are stored as encrypted credentials; or, for a personal account, a token of the person's
+// own. The others through a pasted token. Nothing here sends a stored value to a page.
 
 /** Where the App's keys are stored, by what GitHub's conversion calls them. `githubLogin` reads the client's. */
 export const GITHUB_APP = {
@@ -41,8 +42,6 @@ export const GITHUB_APP = {
   pem: "SANOMA_GITHUB_APP_PEM",
 } as const;
 
-/** The resource type whose connector "Connect sanoma-ops" is for. */
-export const SANOMA_OPS_WAKEUP = "sanomaOps.wakeup";
 /** sanoma-ops's account token, which "Connect sanoma-ops" stores. */
 export const OPS_TOKEN = "SANOMA_OPS_TOKEN";
 /** The wakeup service's URL, when one is stored: the worker on the host registers there. */
@@ -50,34 +49,53 @@ export const OPS_URL = "SANOMA_OPS_URL";
 
 /**
  * The tokens the page takes, pasted: the connectors' own variables, so their pages show the same
- * rows. One with `needs` is asked for only when the config declares that resource type.
+ * rows. One of a vendor's (`SETUP_VENDORS`) is asked for only when the config declares a type of
+ * that vendor. Cloudflare's are optional: going live runs the company there once both are
+ * stored, and on Docker without them.
  */
-export const SETUP_TOKENS: Record<string, { description: string; optional?: true; needs?: string }> = {
+export const SETUP_TOKENS: Record<string, { description: string; optional?: true }> = {
   GITHUB_TOKEN: {
     description:
       "A GitHub token of your own, for a personal account: an installation token cannot create a repository there. Needs the repo scope.",
   },
-  SUPABASE_ACCESS_TOKEN: { description: "A Supabase access token (supabase.com/dashboard/account/tokens)." },
+  SUPABASE_ACCESS_TOKEN: {
+    description: "A Supabase access token (supabase.com/dashboard/account/tokens).",
+  },
+  NEON_API_KEY: {
+    description: "An organization API key, from console.neon.tech, Organization settings, API keys.",
+  },
+  CLOUDFLARE_API_TOKEN: {
+    description:
+      "An API token with Workers Scripts Edit, Workers Containers Edit and Account Settings Read, from dash.cloudflare.com/profile/api-tokens.",
+    optional: true,
+  },
+  CLOUDFLARE_ACCOUNT_ID: {
+    description: "The account id, from the Workers & Pages overview.",
+    optional: true,
+  },
   [OPS_TOKEN]: {
     description:
       "Optional: a wakeup account's token (swa_…), from Sanoma, or from `sanoma wakeup account <label>` on a wakeup service of your own: the wakeup starts the company again when something is due after it stopped.",
     optional: true,
-    needs: SANOMA_OPS_WAKEUP,
   },
   [OPS_URL]: {
     description:
       "Optional: the wakeup service's URL, such as your own `sanoma wakeup`. Unset, the connector's default, Sanoma's hosted service.",
     optional: true,
-    needs: SANOMA_OPS_WAKEUP,
   },
 };
 
+/** The vendor a setup token is for, when it is a vendor's (`SETUP_VENDORS`). */
+const vendorOf = (name: string) => SETUP_VENDORS.find((v) => v.tokens.includes(name))?.vendor;
+
 /** The setup tokens this config asks for. */
-const setupTokens = ({ resolved }: AppContext) =>
-  Object.keys(SETUP_TOKENS).filter((name) => {
-    const { needs } = SETUP_TOKENS[name]!;
-    return needs === undefined || resolved.types.has(needs);
+const setupTokens = ({ resolved }: AppContext) => {
+  const vendors = new Set([...resolved.types.values()].map((type) => type.vendor));
+  return Object.keys(SETUP_TOKENS).filter((name) => {
+    const vendor = vendorOf(name);
+    return vendor === undefined || vendors.has(vendor);
   });
+};
 
 const CALLBACK = "/setup/github/callback";
 const CONNECT = "/setup/connect";
@@ -110,12 +128,7 @@ export async function setupStatus(app: AppContext): Promise<SetupStatus> {
 export async function setSetupToken(app: AppContext, actor: Principal, { name, value }: SetCredentialRequest) {
   const names = setupTokens(app);
   if (!names.includes(name)) {
-    const error = `${name} is not a setup token; they are ${names.join(", ")}`;
-    throw new ApiError(400, {
-      error,
-      code: "invalid_input",
-      issues: [{ path: ["name"], message: error, code: "custom" }],
-    });
+    invalid("name", `${name} is not a setup token; they are ${names.join(", ")}`);
   }
   const { client } = app;
   const before = name === OPS_TOKEN ? (await client.secrets([OPS_TOKEN])).get(OPS_TOKEN)?.value : undefined;
@@ -125,13 +138,12 @@ export async function setSetupToken(app: AppContext, actor: Principal, { name, v
 }
 
 /**
- * Mints the instance's own token (`SANOMA_WAKEUP_TOKEN`) when sanoma-ops's account token is stored
- * and it is not, or again when `fresh`, for a new account: storing the account's token does, and
- * going live, for an account token from the environment or the connector page.
+ * Mints the instance's own token (`SANOMA_WAKEUP_TOKEN`) when it is not stored, or again when
+ * `fresh`, for a new sanoma-ops account: storing the account's token does, and going live, when
+ * it declares a wakeup.
  */
 export async function mintWakeupToken(client: AppContext["client"], actor: Principal, fresh = false) {
-  const stored = await client.secrets([OPS_TOKEN, WAKEUP_TOKEN]);
-  if (stored.has(OPS_TOKEN) && (fresh || !stored.has(WAKEUP_TOKEN))) {
+  if (fresh || !(await client.secrets([WAKEUP_TOKEN])).has(WAKEUP_TOKEN)) {
     await client.setSecret(WAKEUP_TOKEN, mintInstanceToken(), { by: actor.id });
   }
 }

@@ -189,18 +189,71 @@ export interface SetupStatus {
   tokens: CredentialStatus[];
 }
 
+/**
+ * The vendors `/setup` connects with pasted tokens, as the pages show them and going live reads
+ * them: each one's id, its setup tokens (`SETUP_TOKENS`, asked for only when the config declares
+ * a type of the vendor), those that must all be stored for it to be connected (`connectedBy`,
+ * default all of them), and what connecting it does.
+ */
+export const SETUP_VENDORS: readonly {
+  vendor: string;
+  title: string;
+  tokens: readonly string[];
+  connectedBy?: readonly string[];
+  about: string;
+}[] = [
+  {
+    vendor: "supabase",
+    title: "Supabase",
+    tokens: ["SUPABASE_ACCESS_TOKEN"],
+    about: "An access token, which lists and creates projects.",
+  },
+  {
+    vendor: "neon",
+    title: "Neon",
+    tokens: ["NEON_API_KEY"],
+    about: "An organization API key, which creates projects.",
+  },
+  {
+    vendor: "cloudflare",
+    title: "Cloudflare",
+    tokens: ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"],
+    about:
+      "An API token and the account, so the company runs on Cloudflare Containers and stops when nothing is due. Connect it before choosing where the company goes.",
+  },
+  {
+    vendor: "sanomaOps",
+    title: "sanoma-ops",
+    tokens: ["SANOMA_OPS_TOKEN", "SANOMA_OPS_URL"],
+    connectedBy: ["SANOMA_OPS_TOKEN"],
+    about:
+      "Optional: a wakeup account, so the host stops when nothing is due and starts again in time. Connect it before choosing where the company goes, which declares the wakeup.",
+  },
+];
+
+/** The tokens that must all be stored for a `/setup` vendor to be connected. */
+export const connectedBy = (vendor: (typeof SETUP_VENDORS)[number]) => vendor.connectedBy ?? vendor.tokens;
+
 /** The data file going live writes, relative to the config's root. */
 export const INFRA = "resources/sanoma/infra.ts";
 
-/** What going live chooses (`goLiveFn`): who holds the repository, Supabase's organization and region, the host's port. */
+/**
+ * What going live chooses (`goLiveFn`): who holds the repository, the database's region (and
+ * size, when it takes one), Supabase's organization for a Supabase project, the host's port.
+ */
 export const GoLiveRequest = z.object({
   owner: z.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/, "Choose a GitHub account or organization"),
-  /** The repository's name, and the Supabase project's and the host's. */
+  /** The repository's name, and the database's and the host's. */
   name: z
     .string()
     .regex(/^[a-z0-9][a-z0-9-]{0,62}$/, "Lower case letters, digits and hyphens, starting with a letter or digit"),
-  organization: z.string().min(1, "Choose a Supabase organization"),
+  organization: z.string().min(1, "Choose a Supabase organization").optional(),
   region: z.string().min(1, "Choose a region"),
+  size: z.string().min(1).optional(),
+  /** The database type the page showed (`GoLiveChoices.database`): refused when going live would now choose another. */
+  database: z.string().min(1).optional(),
+  /** The host type the page showed (`GoLiveChoices.host`): refused when going live would now choose another. */
+  host: z.string().min(1).optional(),
   port: z.number().int().min(1024, "A port from 1024").max(65535, "A port up to 65535"),
 });
 export type GoLiveRequest = z.infer<typeof GoLiveRequest>;
@@ -238,13 +291,19 @@ export interface AvailableConnectors {
 export interface GoLiveChoices {
   /** The GitHub accounts a repository can be made in: the token's user and organizations, and the App's installations. */
   owners: { login: string; kind: "user" | "organization"; via: "token" | "app" }[];
-  /** The Supabase organizations the stored token sees. */
-  organizations: { id: string; name: string }[];
-  regions: readonly string[];
-  /** The host type the company runs on, `<vendor>.<type>`, and its title; null when the config has none. */
-  host: { type: string; title: string } | null;
+  /** The Supabase organizations the stored token sees, for a Supabase project; null for a database that takes none. */
+  organizations: { id: string; name: string }[] | null;
+  /**
+   * The database type the company's records go in, `<vendor>.<type>`, its title, the regions it
+   * takes (null when it lists none) and whether it takes a size; null when the config has none.
+   */
+  database: { type: string; title: string; regions: readonly string[] | null; size: boolean } | null;
+  /** The host type the company runs on, `<vendor>.<type>`, its title and whether its URL is public; null when the config has none. */
+  host: { type: string; title: string; publicUrl: boolean } | null;
   /** The resource types going live needs that the config's connectors do not declare. */
   missing: string[];
+  /** The vendors to connect first, by title: the chosen database's and host's, when not connected. */
+  connect: string[];
   /** A name to suggest: the app's. */
   name: string;
   /** What could not be listed, and why. */

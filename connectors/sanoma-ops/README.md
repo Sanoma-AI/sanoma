@@ -30,7 +30,7 @@ export const wakeup = sanomaOps.wakeup({ host });
 
 `register` takes `{ at, generation }`: an ISO 8601 time and a generation from 1; the stored instance token says which instance it is for. The worker calls it before it stops, with each new generation; the service applies one only when it is newer, so a retry, or a late duplicate, changes nothing. No workflow calls these operations: apply calls the resource's, and the worker calls `register`.
 
-The wakeup has no identity: the service names each instance, and the lockfile binds the declaration to its id. Its `host` holds the URL the service calls; a new one moves the instance, since its token names it. Its state is `{ id, host, at, generation, lastError }`, and it is `healthy` while it exists and the last call to the host's `/wake` did not fail.
+The wakeup has no identity: the service names each instance, and the lockfile binds the declaration to its id. Its `host` holds the URL the service calls, of a `docker.container` or a `cloudflare.container` (the host types it may name, `HOSTS` in `src/connector.ts`); a new one moves the instance, since its token names it. Its state is `{ id, host, at, generation, lastError }`, and it is `healthy` while it exists and the last call to the host's `/wake` did not fail.
 
 The logo the app shows beside these operations is Sanoma's own mark, the shield of [Phosphor Icons](https://phosphoricons.com) (MIT) that the app uses as its icon.
 

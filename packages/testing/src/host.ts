@@ -43,7 +43,8 @@ type State = Record<string, unknown>;
 /** The variable the credential check sets: the host's worker must hear the change over `LISTEN`. */
 export const HOST_CHECK_CREDENTIAL = "HOST_CHECK_TOKEN";
 
-const digest = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 16);
+/** A digest of a credential's value, which the probe reports instead of the value. */
+const credentialDigest = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 16);
 
 const hostCheckOps = defineConnector("hostcheck", {
   probe: {
@@ -58,7 +59,7 @@ const hostCheckOps = defineConnector("hostcheck", {
 });
 const hostCheckDriver = defineDriver(
   hostCheckOps,
-  { probe: { digest: async () => ({ digest: digest(process.env[HOST_CHECK_CREDENTIAL] ?? "") }) } },
+  { probe: { digest: async () => ({ digest: credentialDigest(process.env[HOST_CHECK_CREDENTIAL] ?? "") }) } },
   { env: z.object({ [HOST_CHECK_CREDENTIAL]: z.string().describe("Any value: the host check sets it") }) },
 );
 
@@ -131,6 +132,37 @@ export interface HostCheck {
 
 const startedBy = { id: "host-check" };
 
+/** `runId`'s run once it has ended, or undefined after `timeoutMs`. */
+export const runEnded = (client: SanomaClient, runId: string, timeoutMs: number) =>
+  waitFor(
+    () => client.run(runId),
+    (r) => r !== undefined && isEnded(r.status),
+    timeoutMs,
+  );
+
+/**
+ * Sets the check's credential to `credential` and waits until a probe run reads it: the worker,
+ * which loads the value when it hears the change over `LISTEN`, holds it (until then a probe
+ * fails, or reads the old one). The host and database kits' check.
+ */
+export async function credentialHeard(
+  client: SanomaClient,
+  credential: string,
+  by: { id: string },
+  timeoutMs: number,
+): Promise<void> {
+  await client.setCredential(HOST_CHECK_CREDENTIAL, credential, { by: by.id });
+  await waitFor(
+    async () => {
+      const runId = await client.start("host-check-credential", {}, { startedBy: by });
+      const run = await runEnded(client, runId, timeoutMs);
+      return run?.status === "finished" ? ((await client.result(runId)) as { digest: string }).digest : undefined;
+    },
+    (seen) => seen === credentialDigest(credential),
+    timeoutMs,
+  );
+}
+
 /**
  * Runs the conformance checks against a host, in order, each on its own (one failing goes on to
  * the next): the app answers on its port, a queued run drains, `LISTEN` hears a credential
@@ -159,14 +191,8 @@ export async function checkHost(host: HostUnderTest): Promise<HostCheck[]> {
       results.push({ name, ok: false, error: errorMessage(err) });
     }
   };
-  const ended = (runId: string) =>
-    waitFor(
-      () => client.run(runId),
-      (r) => r !== undefined && isEnded(r.status),
-      timeoutMs,
-    );
   const finish = async (runId: string) => {
-    const run = await ended(runId);
+    const run = await runEnded(client, runId, timeoutMs);
     if (run?.status !== "finished") throw new Error(`run ${runId} ended ${run?.status}: ${run?.error}`);
   };
 
@@ -181,19 +207,7 @@ export async function checkHost(host: HostUnderTest): Promise<HostCheck[]> {
   await check("a queued run drains", async () => {
     await finish(await client.start("host-check-drain", {}, { startedBy }));
   });
-  await check("LISTEN hears a credential change", async () => {
-    await client.setCredential(HOST_CHECK_CREDENTIAL, credential, { by: startedBy.id });
-    // The worker loads the value when it hears the change: until then a probe fails, or reads the old one.
-    await waitFor(
-      async () => {
-        const runId = await client.start("host-check-credential", {}, { startedBy });
-        const run = await ended(runId);
-        return run?.status === "finished" ? ((await client.result(runId)) as { digest: string }).digest : undefined;
-      },
-      (seen) => seen === digest(credential),
-      timeoutMs,
-    );
-  });
+  await check("LISTEN hears a credential change", () => credentialHeard(client, credential, startedBy, timeoutMs));
   await check("a sleep survives a restart", async () => {
     const runId = await client.start("host-check-sleep", { seconds: 2 }, { startedBy });
     await waitFor(async () => (await client.ledger(runId)).some((r) => r.type === "sleep.started"), Boolean, timeoutMs);
