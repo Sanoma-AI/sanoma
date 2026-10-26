@@ -24,7 +24,7 @@ export const ChangeFacts = z.object({
   stranded: z.array(z.string()),
   /** Whether `sanoma check` passed on the change. */
   checksOk: z.boolean(),
-  /** Whether the change edits the rules: a policy or a people file, which wait for `admin` (`runtimeHold`). */
+  /** Whether the change edits the rules: a policy (the root's or an app's) or a people file, which wait for `admin` (`runtimeHold`). */
   rules: z.boolean(),
 });
 export type ChangeFacts = z.infer<typeof ChangeFacts>;
@@ -138,14 +138,19 @@ export function touchesOf(files: readonly string[]): string[] {
 
 /** The group the runtime holds a change to the rules for. */
 const ADMIN = "admin";
-/** The paths in `touches` that are the rules whatever `rules` says: the policies, and the template's people file. */
-const RULES = ["policies/", "resources/people.ts"];
+/**
+ * Whether a path in `touches` is the rules whatever `rules` says: the policies, the root's or an
+ * app's (`apps/crm/policies/`), and the template's people file.
+ */
+const isRules = (path: string) =>
+  path === "policies/" || path === "resources/people.ts" || /^apps\/[^/]+\/policies\/$/.test(path);
 /** The runtime rule's id, as a hold's `reasons` name it. */
 const RULES_WAIT_FOR_ADMIN = "sanoma:rules-wait-for-admin";
 
 /**
  * The runtime's own rule, asked before any company policy and under `allowAll` too: a merge of a
- * change to the rules (`facts.rules`, or `touches` naming `policies/` or `resources/people.ts`) waits for `admin`, whoever made it, until an approval
+ * change to the rules (`facts.rules`, or `touches` naming `policies/`, an app's `policies/` or
+ * `resources/people.ts`) waits for `admin`, whoever made it, until an approval
  * addressed to `admin` covering the merge is approved; denied while no data file declares the
  * group. Undefined for anything else, which the company's policy alone decides. `people` are the
  * running instance's, never the change's, so a change cannot add its author to `admin`.
@@ -158,7 +163,7 @@ export function runtimeHold(
 ): Decision | undefined {
   const facts = opId === CHANGE_MERGE ? (input as { facts?: ChangeFacts }).facts : undefined;
   // The planner's `rules`, or what `touches` already says: a fact left false cannot skip the rule.
-  if (!facts || !(facts.rules || RULES.some((path) => facts.touches.includes(path)))) return undefined;
+  if (!facts || !(facts.rules || facts.touches.some(isRules))) return undefined;
   if (!groupNamesOf(people).includes(ADMIN)) {
     return deny(
       `A change to the policies or the people waits for the group "${ADMIN}", which no data file declares: ` +

@@ -69,6 +69,15 @@ describe("runtimeHold", () => {
       runtimeHold(CHANGE_MERGE, mergeInput(facts({ rules: false, touches: elsewhere })), [], people),
     ).toBeUndefined();
     expect(runtimeHold(CHANGE_OPEN, { id: "c1", title: "Money" }, [], people)).toBeUndefined();
+    // An app's policies are the rules too.
+    const appPolicy = touchesOf(["apps/crm/policies/crm.cedar"]);
+    expect(runtimeHold(CHANGE_MERGE, mergeInput(facts({ rules: false, touches: appPolicy })), [], people)).toEqual(
+      HOLD,
+    );
+    const appWorkflow = touchesOf(["apps/crm/workflows/policies.ts"]);
+    expect(
+      runtimeHold(CHANGE_MERGE, mergeInput(facts({ rules: false, touches: appWorkflow })), [], people),
+    ).toBeUndefined();
   });
 
   it("is lifted by an approval addressed to admin covering the merge, and by no other", () => {
