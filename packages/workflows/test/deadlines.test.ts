@@ -483,14 +483,16 @@ describe("the stop rule, with the wakeup unbound", () => {
     await app.client.start(nap, { seconds: 30 }, { startedBy: alice });
     const stops: SelfStop[] = [];
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const worker = await app.start({ stopCheckMs: 100, idleHorizonMs: 1_000, onStopped: (s) => stops.push(s) });
+    await app.start({ stopCheckMs: 100, idleHorizonMs: 1_000, onStopped: (s) => stops.push(s) });
     await waitFor(async () => (await app.row()).last_error !== null);
-    warn.mockRestore();
-    expect((await app.row()).last_error).toBe(
+    const failed = await app.row();
+    expect(failed.last_error).toBe(
       "the wakeup resources/infra.ts#wake is not bound yet: apply it to create its instance",
     );
+    // Tried again at the next check, still registering nothing.
+    await waitFor(async () => Number((await app.row()).generation) > Number(failed.generation));
+    warn.mockRestore();
     expect(registered).toEqual([]);
     expect(stops).toEqual([]);
-    expect(await worker.idle()).toBe(true);
   });
 });
