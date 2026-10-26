@@ -16,7 +16,7 @@ pnpm --filter @sanoma-ai/desktop start ~/Companies/acme  # or open a company at 
 
 `pnpm --filter @sanoma-ai/desktop run test:e2e` is the smoke test: it builds and stages as `start` does, then starts the shell with Playwright (no browsers to install) on a copy of `test/fixtures/company`, whose `pnpm install` links a fake launcher. The company's window must show the app on the Node the shell ships (inside the template's `engines`), and closing it must stop the launcher. CI runs it on Linux under xvfb for changes to this package (`.github/workflows/desktop.yml`); the root `pnpm test` runs the unit tests only.
 
-`pnpm --filter @sanoma-ai/desktop dist:dir` builds the app, unpacked, into `release/` (`electron-builder.yml`). Packaging, releases and the update check come later (#286).
+`pnpm --filter @sanoma-ai/desktop dist:dir` builds the app, unpacked, into `release/` (`electron-builder.yml`), and `dist` builds the dmg and zip for arm64 and x64 that [`desktop-release.yml`](../../.github/workflows/desktop-release.yml) uploads to a draft GitHub Release (the root README, "Desktop (preview)").
 
 ## What it does
 
@@ -30,8 +30,9 @@ pnpm --filter @sanoma-ai/desktop start ~/Companies/acme  # or open a company at 
 - **Clones a company** (File → Clone Company…, or Clone… in the start window): the start window asks for the repository's address, then a dialog for the folder to clone into; the system git clones it without ever prompting (`GIT_TERMINAL_PROMPT=0`, ssh in batch mode), so a public repository, or one the OS credential helper knows, works. The clone's output streams into the start window, then the company installs and starts as an opened one does; a failed clone says why in one line there (a failed sign-in points at signing in with GitHub, which comes later, #286 D6), and Start again clones again.
 - **Checks git first**: on macOS, `xcode-select -p`; without Apple's command line tools a dialog offers their installer and Check Again. Before New and Clone, a missing `user.name` or `user.email` is asked for once in the start window and set with `git config --global` (the launcher's init commits as them).
 - **Gets updates** (Company → Get Updates): only when the company has an `origin`, is on `main` and has nothing of its own (no change in the tree, untracked files included, and no commit GitHub does not have); otherwise it refuses in one line and changes nothing. It fetches `origin`'s `main`, says when there is nothing new, else stops the company, fast-forwards `main` (`git merge --ff-only origin/main`, a `git pull --ff-only` without a second fetch) and starts it again, which installs its packages; the window stays.
+- **Checks for a newer version**: at start and at most once a day (the time in `<userData>/settings.json`), it asks GitHub Releases for the newest `desktop-v*` that is neither a draft nor a prerelease (`src/update-check.ts`). A newer one gets one notification and a Help menu item that opens its release page; Help → Check for a Newer Sanoma asks at once. It never downloads or installs anything: an unsigned app cannot update itself.
 
-Not yet: packaging and releases, the shell's own updates, GitHub sign-in, Windows, signing.
+Not yet: updating itself, GitHub sign-in, Windows, signing.
 
 ## Why it ships a Node
 
