@@ -174,6 +174,15 @@ describe("the process manager", () => {
     await expect(launched.exited).resolves.toEqual({ code: 143, signal: null });
   });
 
+  test("a launcher that dies takes what it left in its group with it", async () => {
+    const port = await freePort();
+    const { launched, pids } = fakeLaunch("crash", port);
+    const [, grandchild] = await pids();
+    await expect(launched.ready).rejects.toThrow("exited with code 1");
+    await expect(launched.exited).resolves.toEqual({ code: 1, signal: null });
+    expect(alive(grandchild!)).toBe(false);
+  });
+
   test("stop kills a launcher that ignores SIGTERM", async () => {
     const port = await freePort();
     const { launched, lines } = fakeLaunch("stubborn", port, { killAfterMs: 300 });

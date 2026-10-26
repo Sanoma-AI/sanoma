@@ -56,11 +56,18 @@ interface Running {
 /** One session per company folder (by real path), and its window once the app answers. */
 const running = new Map<string, Running>();
 const windows = new Map<string, BrowserWindow>();
-/** Folders being opened: between the click and the session, a second click must not start another. */
-const opening = new Set<string>();
+/** Where each company's app answers now: its window's link rule reads it, as Restart may move the port. */
+const appUrls = new Map<string, string>();
+/** Folders being opened: between the click and the session, a second click must not start another, and Quit waits. */
+const opening = new Map<string, Promise<void>>();
+/** Port choices, one at a time: two companies opened at once must not both take the same free port. */
+let claiming: Promise<unknown> = Promise.resolve();
+let quitting = false;
 
 let startWindow: BrowserWindow | undefined;
 let state: StartState = { recent: [], phase: "idle", progress: [], log: [], warnings: [] };
+/** The log of the company the start window shows, its tail read when the state is sent. */
+let shownLog: CompanyLog | undefined;
 
 const archWarning = () =>
   app.runningUnderARM64Translation
@@ -74,6 +81,7 @@ function setState(next: Partial<StartState>) {
   state = { ...state, ...next };
   sendTimer ??= setTimeout(() => {
     sendTimer = undefined;
+    if (shownLog) state = { ...state, log: shownLog.tail() };
     startWindow?.webContents.send("start:state", state);
   }, 100);
 }
@@ -116,36 +124,38 @@ async function openCompany(dir: string) {
 
 /** Starts the company unless it runs or is starting; a failure to start says why in a dialog. */
 async function begin(path: string) {
-  if (running.has(path) || opening.has(path)) return;
-  opening.add(path);
-  try {
-    await start(path);
-  } catch (err) {
-    dialog.showErrorBox("The company could not start", err instanceof Error ? err.message : String(err));
-  } finally {
-    opening.delete(path);
-  }
+  if (running.has(path) || opening.has(path) || quitting) return;
+  const started = start(path).catch((err: unknown) =>
+    dialog.showErrorBox("The company could not start", err instanceof Error ? err.message : String(err)),
+  );
+  opening.set(path, started);
+  await started;
+  opening.delete(path);
 }
 
-async function start(path: string) {
+/** The company's port (`portFor`), remembered in companies.json with the company. */
+async function claimPort(path: string) {
   const companies = readCompanies(companiesFile());
   const { port, moved } = await portFor(companies, path);
   const company: Company = { path, name: companyName(path), port, lastOpened: new Date().toISOString() };
   writeCompanies(companiesFile(), remember(companies, company));
+  return { company, moved };
+}
+
+async function start(path: string) {
+  const claimed = claiming.then(() => claimPort(path));
+  claiming = claimed.catch(() => {});
+  const { company, moved } = await claimed;
+  const { port } = company;
+  if (quitting) return;
   buildMenu();
   const log = openLog(app.getPath("logs"), slugOf(path));
   const warnings = [...archWarning(), syncedFolderWarning(path, homedir()) ?? []].flat();
   for (const warning of warnings) log.write("shell", `warning: ${warning}`);
   if (moved) log.write("shell", `the remembered port is taken: the app moves to ${port}, and asks who you are again`);
   const shown = () => state.company?.path === path;
-  setState({
-    company: { path, name: company.name },
-    phase: "starting",
-    progress: [],
-    log: [],
-    warnings,
-    message: undefined,
-  });
+  if (!windows.has(path)) shownLog = log;
+  setState({ company: { path, name: company.name }, phase: "starting", progress: [], warnings, message: undefined });
   if (!windows.has(path)) showStart();
 
   const session = startSession({
@@ -156,7 +166,7 @@ async function start(path: string) {
     env: process.env,
     onLine(stream, line) {
       log.write(stream, line);
-      if (shown()) setState({ log: log.tail() });
+      if (shown()) setState({});
     },
     onProgress(step) {
       log.write("shell", step);
@@ -185,7 +195,8 @@ async function start(path: string) {
         : `The company stopped (${exit.signal ?? `exit code ${exit.code}`}).`);
     log.write("shell", why);
     windows.get(path)?.close();
-    setState({ company: { path, name: company.name }, phase: "failed", message: why, log: log.tail() });
+    shownLog = log;
+    setState({ company: { path, name: company.name }, phase: "failed", message: why });
     showStart();
   });
 }
@@ -206,6 +217,7 @@ async function restart(path: string) {
 
 /** The company's window: the app, in the company's own storage, with no preload and no Node. */
 function showCompany(path: string, name: string, url: string) {
+  appUrls.set(path, url);
   const existing = windows.get(path);
   if (existing) {
     void existing.loadURL(url);
@@ -219,9 +231,10 @@ function showCompany(path: string, name: string, url: string) {
   };
   const window = new BrowserWindow({ width: 1280, height: 840, title: name, webPreferences });
   windows.set(path, window);
-  guard(window.webContents, url, webPreferences);
+  guard(window.webContents, path, webPreferences);
   window.on("closed", () => {
     windows.delete(path);
+    appUrls.delete(path);
     void stop(path);
     buildMenu();
   });
@@ -234,23 +247,24 @@ function showCompany(path: string, name: string, url: string) {
  * the shell for the app, its sites and GitHub (a new window in the same storage), the default
  * browser gets other web links, and anything else is refused.
  */
-function guard(contents: WebContents, appUrl: string, webPreferences: Electron.WebPreferences) {
+function guard(contents: WebContents, path: string, webPreferences: Electron.WebPreferences) {
+  const target = (url: string) => linkTarget(url, appUrls.get(path) ?? "");
   const outside = (url: string) => {
-    if (linkTarget(url, appUrl) === "browser") void shell.openExternal(url);
+    if (target(url) === "browser") void shell.openExternal(url);
   };
   contents.on("will-navigate", (event) => {
-    if (linkTarget(event.url, appUrl) === "window") return;
+    if (target(event.url) === "window") return;
     event.preventDefault();
     outside(event.url);
   });
   contents.setWindowOpenHandler(({ url }) => {
-    if (linkTarget(url, appUrl) === "window") {
+    if (target(url) === "window") {
       return { action: "allow", overrideBrowserWindowOptions: { webPreferences } };
     }
     outside(url);
     return { action: "deny" };
   });
-  contents.on("did-create-window", (child) => guard(child.webContents, appUrl, webPreferences));
+  contents.on("did-create-window", (child) => guard(child.webContents, path, webPreferences));
 }
 
 async function chooseFolder() {
@@ -359,16 +373,19 @@ if (!app.requestSingleInstanceLock()) {
   ipcMain.handle("start:open", (_event, path: unknown) => typeof path === "string" && openCompany(path));
   ipcMain.handle("start:again", () => state.company && begin(state.company.path));
 
-  let quitting = false;
+  // Quit waits for each company: those still opening, then every session, stopped.
+  let stopped = false;
   app.on("before-quit", (event) => {
-    if (!running.size) return;
+    if (stopped || (!running.size && !opening.size)) return;
     event.preventDefault();
     if (quitting) return;
     quitting = true;
-    void Promise.all([...running.keys()].map(stop)).finally(() => {
-      running.clear();
-      app.quit();
-    });
+    void Promise.all(opening.values())
+      .then(() => Promise.all([...running.keys()].map(stop)))
+      .finally(() => {
+        stopped = true;
+        app.quit();
+      });
   });
   // ctrl-c in the terminal that started the shell, or a kill: quit as the menu does, stopping each company.
   for (const signal of ["SIGINT", "SIGTERM"] as const) process.on(signal, () => app.quit());

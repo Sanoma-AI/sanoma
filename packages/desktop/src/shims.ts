@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 /** `value` as one word for `sh`, in single quotes. */
@@ -15,11 +15,17 @@ export function shims(node: string, pnpm: string): Record<"node" | "pnpm", strin
   };
 }
 
-/** Writes `shims` into `dir`, executable, every time: the shell's own paths move when it is updated or moved. */
+/**
+ * Writes `shims` into `dir`, executable, at every start (the shell's own paths move when it is
+ * updated or moved): each through a temporary file and a rename, as another company's scripts may
+ * be running one, and only when it changed.
+ */
 export function writeShims(dir: string, node: string, pnpm: string): void {
   mkdirSync(dir, { recursive: true });
   for (const [name, text] of Object.entries(shims(node, pnpm))) {
-    writeFileSync(join(dir, name), text);
-    chmodSync(join(dir, name), 0o755);
+    const file = join(dir, name);
+    if (existsSync(file) && readFileSync(file, "utf8") === text) continue;
+    writeFileSync(`${file}.tmp`, text, { mode: 0o755 });
+    renameSync(`${file}.tmp`, file);
   }
 }

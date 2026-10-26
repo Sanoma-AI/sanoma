@@ -1,6 +1,7 @@
 // A fake `sanoma` launcher for the process manager's tests. FAKE_MODE says how it reports ready:
 // "event" (the JSON line), "line" (0.6.0's human line), "silent" (only /healthz answers), "fail"
-// (an error event, then exit 2), "stubborn" (as "silent", but ignores SIGTERM).
+// (an error event, then exit 2), "stubborn" (as "silent", but ignores SIGTERM), "crash" (exits 1,
+// leaving a process in its group).
 import { spawn } from "node:child_process";
 import { appendFileSync, existsSync } from "node:fs";
 import { createServer } from "node:http";
@@ -20,6 +21,8 @@ if (mode === "fail") {
 // In the launcher's process group, as a worker or a pnpm it ran would be.
 const grandchild = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
 console.log(`pids ${process.pid} ${grandchild.pid}`);
+// A crash: the launcher dies, its grandchild left behind in the group.
+if (mode === "crash") setTimeout(() => process.exit(1), 100);
 
 process.stdin.on("end", () => process.env.FAKE_STDIN && appendFileSync(process.env.FAKE_STDIN, "closed\n"));
 process.stdin.resume();

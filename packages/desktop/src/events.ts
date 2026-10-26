@@ -52,7 +52,8 @@ export function listeningUrlOf(line: string): string | undefined {
   return LISTENING.exec(line)?.[1];
 }
 
-/** Calls `onLine` with each line of `stream`, without its line ending. */
-export function eachLine(stream: Readable, onLine: (line: string) => void): void {
-  createInterface({ input: stream, crlfDelay: Infinity }).on("line", onLine);
+/** Calls `onLine` with each line of `stream`, without its line ending, then `onEnd`. */
+export function eachLine(stream: Readable, onLine: (line: string) => void, onEnd?: () => void): void {
+  const lines = createInterface({ input: stream, crlfDelay: Infinity }).on("line", onLine);
+  if (onEnd) lines.once("close", onEnd);
 }

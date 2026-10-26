@@ -36,9 +36,17 @@ export interface GroupOptions {
   killAfterMs?: number;
 }
 
+/** How long the shell waits, once a child exited, for the last lines it printed. */
+const DRAIN_MS = 1_000;
+
+const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
+
 /**
- * Runs `command` in a process group of its own (`detached`), so that `stop` reaches everything it
- * starts that stays in the group, each line it prints going to `onLine`.
+ * Runs `command` in a process group of its own (`detached`), each line it prints going to
+ * `onLine`. Once the child exits, for any reason, whatever it left in its group (a worker, a dev
+ * server holding the port) gets SIGTERM, and SIGKILL when still there at the deadline; `exited`
+ * resolves after that, and after the last lines it printed (or `DRAIN_MS`, when a process outside
+ * the group still holds its output open).
  */
 export function spawnGroup(
   command: string,
@@ -46,31 +54,46 @@ export function spawnGroup(
   { cwd, env, onLine, killAfterMs = KILL_AFTER_MS }: GroupOptions,
 ): Group {
   const child = spawn(command, args, { cwd, env, detached: true, stdio: ["pipe", "pipe", "pipe"] });
-  eachLine(child.stdout!, (line) => onLine("stdout", line));
-  eachLine(child.stderr!, (line) => onLine("stderr", line));
+  const drained = Promise.all(
+    (["stdout", "stderr"] as const).map(
+      (stream) => new Promise<void>((done) => eachLine(child[stream]!, (line) => onLine(stream, line), done)),
+    ),
+  );
   // A child that has stopped reading its stdin must not take this process down with EPIPE.
   child.stdin!.on("error", () => {});
+  /** Sends `name` (0: none, a check) to the child's group; false when the group is gone. */
+  const signal = (name: NodeJS.Signals | 0) => {
+    try {
+      process.kill(-child.pid!, name);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  /** When the group gets SIGKILL: set by `stop`, else the deadline after the child exits. */
+  let killAt: number | undefined;
   const exited = new Promise<Exit>((done) => {
-    child.once("exit", (code, signal) => done({ code, signal }));
+    child.once("exit", async (code, exitSignal) => {
+      killAt ??= Date.now() + killAfterMs;
+      signal("SIGTERM");
+      while (signal(0) && Date.now() < killAt) await sleep(100);
+      signal("SIGKILL");
+      await Promise.race([drained, sleep(DRAIN_MS)]);
+      done({ code, signal: exitSignal });
+    });
     child.once("error", (err) => {
       onLine("stderr", `could not start ${command}: ${err.message}`);
       done({ code: null, signal: null });
     });
   });
-  const signal = (name: NodeJS.Signals) => {
-    try {
-      process.kill(-child.pid!, name);
-    } catch {
-      // The group is gone already.
-    }
-  };
   let stopping: Promise<void> | undefined;
   const stop = () => {
-    if (child.exitCode !== null || child.signalCode !== null || child.pid === undefined) return exited.then(() => {});
+    if (child.pid === undefined) return exited.then(() => {});
     stopping ??= (async () => {
+      killAt ??= Date.now() + killAfterMs;
       child.stdin!.end();
       signal("SIGTERM");
-      const kill = setTimeout(() => signal("SIGKILL"), killAfterMs);
+      const kill = setTimeout(() => signal("SIGKILL"), Math.max(0, killAt - Date.now()));
       await exited;
       clearTimeout(kill);
     })();
@@ -160,7 +183,8 @@ export function launch({ node, cli, port, pollMs = 500, ...options }: LaunchOpti
     if (asking) return;
     asking = true;
     fetch(healthz, { signal: AbortSignal.timeout(2_000) })
-      .then((res) => res.ok && done({ url: `http://127.0.0.1:${port}`, sites: {} }))
+      // The event or the line, which say more (the sites, the host), follow at once: they win for a second.
+      .then((res) => res.ok && setTimeout(() => done({ url: `http://127.0.0.1:${port}`, sites: {} }), 1_000))
       .catch(() => {})
       .finally(() => (asking = false));
   }, pollMs);

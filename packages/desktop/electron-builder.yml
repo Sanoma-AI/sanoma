@@ -17,8 +17,15 @@ extraResources:
     to: node
   - from: stage/pnpm
     to: pnpm
+# The shell runs companies with the Node it ships (scripts/download-node.ts), never Electron's own.
 electronFuses:
-  runAsNode: true
+  runAsNode: false
 mac:
   category: public.app-category.business
   target: dir
+  # A folder dropped on the Dock icon, or `open -a Sanoma <folder>`, reaches the app (`open-file`).
+  extendInfo:
+    CFBundleDocumentTypes:
+      - CFBundleTypeName: Folder
+        CFBundleTypeRole: Viewer
+        LSItemContentTypes: [public.folder]
