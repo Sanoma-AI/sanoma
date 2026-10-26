@@ -174,7 +174,11 @@ export function neonOperations(neon: NeonApi) {
     const want = project.schema.parse(desired);
     if (!state) {
       const unknown = [...SET_BY_NEON, ...(want.pg_version === undefined ? ["pg_version"] : [])];
-      const planned = { size: DEFAULT_SIZE, ...want, ...Object.fromEntries(unknown.map((f) => [f, null])) };
+      const planned = {
+        ...want,
+        size: canonicalSize(want.size ?? DEFAULT_SIZE),
+        ...Object.fromEntries(unknown.map((f) => [f, null])),
+      };
       return { action: "create", planned, unknown, replace: [] };
     }
     const replace = IMMUTABLE.filter((f) => want[f] !== undefined && want[f] !== state[f]);
@@ -229,12 +233,15 @@ export function neonOperations(neon: NeonApi) {
         }
         if (fresh.action === "none" || !next) return { id, state };
         const resize = next.size !== state.size && next.size !== undefined;
+        if (resize && !state.default_endpoint_id) {
+          throw refused(`project.update: the project ${id} has no default compute to resize`, "no_compute");
+        }
         const limits = limitsOf(next.size);
         await neon.updateProject(id, {
           project: { name: next.name, ...(resize && { default_endpoint_settings: limits }) },
         });
-        if (resize && state.default_endpoint_id) {
-          await neon.updateEndpoint(id, state.default_endpoint_id, { endpoint: limits });
+        if (resize) {
+          await neon.updateEndpoint(id, state.default_endpoint_id!, { endpoint: limits });
         }
         return { id, state: next };
       },

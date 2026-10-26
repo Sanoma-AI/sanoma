@@ -25,7 +25,7 @@ One workspace package per vendor, each built on `@sanoma-ai/workflows`. A connec
 Where a connector's calls come from, in order; the schemas are hand-written Zod in every case, whatever carries the calls:
 
 1. **Resources** (things a company creates and keeps in sync): the vendor's OpenTofu/Terraform provider through the bridge, as a `tfConnector` record (Docker, GitHub, Stripe, Supabase).
-2. **Operations**: the vendor's officially supported TypeScript SDK as the transport, when one exists and is maintained (Bluesky's `@atproto/api`, Exa's `exa-js`, and Cloudflare's `cloudflare`, which carries its container and alarm resources too: the Worker they run is the package's own code, uploaded with them).
+2. **Operations**: the vendor's officially supported TypeScript SDK as the transport, when one exists and is maintained (Bluesky's `@atproto/api`, Exa's `exa-js`, Cloudflare's `cloudflare`, which carries its container and alarm resources too: the Worker they run is the package's own code, uploaded with them, and Neon's `@neondatabase/api-client`, which carries its project resource).
 3. No official SDK: a client generated from the vendor's published OpenAPI spec with Hey API, pinned to a commit and cut to the operations called, in `src/generated/`, never edited by hand (Resend).
 4. Neither: a driver hand-written on `fetch`, the last resort (Ghost).
 
