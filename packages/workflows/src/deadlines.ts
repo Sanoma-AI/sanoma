@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import { dbosStatusesOf } from "./client.ts";
 import type { Db } from "./db.ts";
@@ -212,13 +213,16 @@ export function stopWhenIdle(rule: StopRule): { close(): void } {
 
 /**
  * Calls the wakeup's register operation, as `SanomaClient.call` calls a driver: its input parsed,
- * a `CallContext` of the runtime's, and no ledger record, which is a run's. The idempotency key
- * is the deadline's, so a retried registration is one registration.
+ * a `CallContext` of the runtime's, and no ledger record, which is a run's.
  */
-async function registerWakeup({ register: { op, fn }, secrets, wakeup }: StopRule, registration: WakeupRegistration) {
+export async function registerWakeup(
+  { register: { op, fn }, secrets, wakeup }: Pick<StopRule, "register" | "secrets" | "wakeup">,
+  registration: WakeupRegistration,
+) {
   if (!fn) throw new Error(`${op.id} has no driver: the connector package must attach one`);
-  // The key names the wakeup too: two instances may register one deadline.
-  const key = `wakeup:${wakeup}:${registration.at}`;
+  // Fresh each time: a repeat of an earlier `at` after another registration must re-arm it, so no
+  // two registrations share a key (real drivers never dedupe on it anyway).
+  const key = `wakeup:${wakeup}:${randomUUID()}`;
   const context: CallContext = { idempotencyKey: key, runId: key, opId: op.id, attempt: 1, secrets, by: WAKEUP_AGENT };
   await fn(op.input.parse(registration), context);
 }

@@ -10,6 +10,7 @@ import { checkWakeup, wakeupCheckWorkflows } from "@sanoma-ai/testing/wakeup";
 import { delay, http, HttpResponse } from "msw";
 import { NodeRequest, sendNodeResponse } from "srvx/node";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { registerWakeup } from "../src/deadlines.ts";
 import { describeConfig } from "../src/describe.ts";
 import {
   type CallContext,
@@ -305,6 +306,37 @@ describe("sanoma.wakeup meets the Wakeup contract", () => {
 });
 
 const withHost = () => [fakeHost(async () => ({ url: "", stop: async () => undefined })).connector];
+
+describe("the built-in wakeup's fake under the stop rule's registrations", () => {
+  it("re-arms an earlier `at` registered again after another: register X, then Y, then X, and X fires", async () => {
+    let wakes = 0;
+    const server = createServer((req, res) => {
+      if (req.url === "/wake") wakes++;
+      res.writeHead(204).end();
+    });
+    await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const fake = fakeSanomaWakeup();
+    try {
+      const secrets = memorySecrets({ SANOMA_WAKEUP_TOKEN: mintInstanceToken() });
+      await op("create", { desired: { host: url } }, callWith(secrets), fake.driver);
+      const resolved = resolveConfig({ workflows: [], connectors: withHost(), ledger: memoryLedger() });
+      const rule = {
+        register: { op: resolved.ops.get("sanoma.wakeup.register")!, fn: fake.driver.ops["wakeup.register"] },
+        secrets,
+        wakeup: "resources/infra.ts#wakeup",
+      };
+      const x = new Date(Date.now() + 300).toISOString();
+      const y = new Date(Date.now() + 3_600_000).toISOString();
+      for (const at of [x, y, x]) await registerWakeup(rule, { at });
+      await vi.waitFor(() => expect(wakes).toBe(1), { timeout: 10_000 });
+    } finally {
+      fake.close();
+      server.closeAllConnections();
+      await new Promise<void>((done) => server.close(() => done()));
+    }
+  });
+});
 
 describe("sanoma.wakeup in a config", () => {
   it("is every config's with a host type, no connector named, and no config's without one", () => {

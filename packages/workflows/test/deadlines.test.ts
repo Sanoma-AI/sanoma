@@ -365,7 +365,7 @@ describe("the stop rule", () => {
       {
         input: { at },
         context: expect.objectContaining({
-          idempotencyKey: `wakeup:resources/infra.ts#wake:${at}`,
+          idempotencyKey: expect.stringMatching(/^wakeup:resources\/infra\.ts#wake:[0-9a-f-]{36}$/),
           opId: "acme.wakeup.register",
           attempt: 1,
           by: "wakeup",
