@@ -4,7 +4,6 @@ import { createSign } from "node:crypto";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { findPackageJSON } from "node:module";
 import { dirname, join } from "node:path";
-import { pathToFileURL } from "node:url";
 import {
   APPLY_WORKFLOW,
   errorMessage,
@@ -28,6 +27,7 @@ import {
 } from "../api.ts";
 import type { AppContext } from "../context.ts";
 import { asApplyPlan } from "../lib/apply-plan.ts";
+import { invalid } from "./core.ts";
 import { GITHUB_APP, mintWakeupToken, OPS_URL } from "./setup.ts";
 
 // Going live, steps 2 to 6 (step 1 is connect, in setup.ts): choose where the company goes,
@@ -80,15 +80,6 @@ const DATABASE_EXTRAS: Record<string, (choices: { organization?: string }) => Re
   },
 };
 
-/** Refuses the request for its `field`, as the form shows it beside the field. */
-function invalid(field: string, error: string): never {
-  throw new ApiError(400, {
-    error,
-    code: "invalid_input",
-    issues: [{ path: [field], message: error, code: "custom" }],
-  });
-}
-
 const GITHUB_API = "https://api.github.com";
 /** The wakeup's declaration in `infra.ts`, as `renderInfra` writes it. */
 const WAKEUP_LINE = /^export const wakeup = /m;
@@ -136,6 +127,12 @@ function pick(app: AppContext, stored: Connections, meets: (type: Resource) => u
   const among = connected.length ? connected : all;
   return preferred.map((id) => among.find((type) => idOf(type) === id)).find(Boolean) ?? among[0];
 }
+
+/** The titles of the vendors to connect before going live: the chosen database's and host's, when not connected. */
+const toConnect = ({ stored, database, host }: Awaited<ReturnType<typeof choose>>) =>
+  [database, host].flatMap((type) =>
+    type && !isConnected(stored, type.vendor) ? [SETUP_VENDORS.find((v) => v.vendor === type.vendor)!.title] : [],
+  );
 
 /**
  * What going live chooses now, from what is connected: the database (Neon's first), the host
@@ -206,7 +203,8 @@ async function installations({ client }: AppContext): Promise<Installation[]> {
  */
 export async function goLiveChoices(app: AppContext): Promise<GoLiveChoices> {
   const errors: string[] = [];
-  const { stored: tokens, database, host, wakeup } = await choose(app);
+  const chosen = await choose(app);
+  const { stored: tokens, database, host, wakeup } = chosen;
   const listed = async <T>(what: string, list: () => Promise<T[]>): Promise<T[]> => {
     try {
       return await list();
@@ -266,6 +264,7 @@ export async function goLiveChoices(app: AppContext): Promise<GoLiveChoices> {
       : null,
     host: host ? { type: idOf(host), title: host.title, publicUrl: host.host!.capabilities.publicUrl } : null,
     missing: missingTypes(app),
+    connect: toConnect(chosen),
     name:
       app.description.appName
         .toLowerCase()
@@ -309,14 +308,9 @@ function hostWakeup(
  * hoisted install counts), which the host's runtime image is tagged with.
  */
 async function sanomaVersion(root: string): Promise<string> {
-  const manifest = (() => {
-    try {
-      return findPackageJSON("sanoma", pathToFileURL(join(root, "package.json")));
-    } catch {
-      return undefined;
-    }
-  })();
-  const read = manifest && (await readFile(manifest, "utf8").catch(() => undefined));
+  const read = await Promise.resolve()
+    .then(() => readFile(findPackageJSON("sanoma", join(root, "package.json"))!, "utf8"))
+    .catch(() => undefined);
   const version = read && (JSON.parse(read) as { version?: unknown }).version;
   if (typeof version !== "string") {
     throw new ApiError(409, { error: `sanoma is not installed in the company's repository (${root}): install it` });
@@ -359,7 +353,7 @@ export async function renderInfra(
   if (size && !dbInputs.size) invalid("size", `${database.title} takes no size: reload the page`);
   const store: Record<string, DataValue> = { ...(hasField(database, "name") && { name }) };
   setPath(store, dbInputs.region, region);
-  if (dbInputs.size && size) setPath(store, dbInputs.size, size);
+  if (size) setPath(store, dbInputs.size!, size);
   Object.assign(store, DATABASE_EXTRAS[idOf(database)]?.({ ...(organization && { organization }) }));
 
   const { inputs } = host.host!;
@@ -427,12 +421,8 @@ export async function goLive(app: AppContext, actor: Principal, choices: GoLiveR
     });
   }
   // The database's and the host's vendors connected: their tokens are what apply makes them with.
-  for (const type of [chosen.database, chosen.host]) {
-    if (type && !isConnected(chosen.stored, type.vendor)) {
-      const title = SETUP_VENDORS.find((v) => v.vendor === type.vendor)?.title;
-      throw new ApiError(409, { error: `Connect ${title} first: it makes the ${type.title.toLowerCase()}` });
-    }
-  }
+  const connect = toConnect(chosen);
+  if (connect.length) throw new ApiError(409, { error: `Connect ${connect.join(" and ")} first` });
   const text = await renderInfra(app, choices, chosen);
   // Once the request is good: a wakeup's token may be the environment's or its connector page's, which mint nothing.
   if (chosen.wakeup.type) await mintWakeupToken(client, actor);

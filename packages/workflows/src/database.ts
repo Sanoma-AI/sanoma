@@ -115,8 +115,8 @@ export function checkDatabaseOps(types: ReadonlyMap<string, Resource>, ops: Read
       throw new Error(`${id}: its database's storeUrl, ${op.id}, is a resource type's own operation`);
     }
     // By its fields, not a sample's parse: an id or export with a format of its own is still one.
-    const shape = (op.input as { shape?: Record<string, unknown> }).shape ?? {};
-    if (!("export" in shape && ("ref" in shape || "id" in shape)))
+    const has = (field: string) => hasPath(op.input, field);
+    if (!(has("export") && (has("ref") || has("id"))))
       throw new Error(`${id}: its database's storeUrl, ${op.id}, must take { ref or id, export }`);
   }
 }

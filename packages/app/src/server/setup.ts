@@ -21,7 +21,7 @@ import {
   type SetupStatus,
 } from "../api.ts";
 import type { AppContext } from "../context.ts";
-import type { ActorContext } from "./core.ts";
+import { type ActorContext, invalid } from "./core.ts";
 import { cookie, cookies } from "../login/github.ts";
 import { signer } from "../login/keys.ts";
 import { escapeHtml } from "../login/page.ts";
@@ -128,12 +128,7 @@ export async function setupStatus(app: AppContext): Promise<SetupStatus> {
 export async function setSetupToken(app: AppContext, actor: Principal, { name, value }: SetCredentialRequest) {
   const names = setupTokens(app);
   if (!names.includes(name)) {
-    const error = `${name} is not a setup token; they are ${names.join(", ")}`;
-    throw new ApiError(400, {
-      error,
-      code: "invalid_input",
-      issues: [{ path: ["name"], message: error, code: "custom" }],
-    });
+    invalid("name", `${name} is not a setup token; they are ${names.join(", ")}`);
   }
   const { client } = app;
   const before = name === OPS_TOKEN ? (await client.secrets([OPS_TOKEN])).get(OPS_TOKEN)?.value : undefined;

@@ -170,6 +170,8 @@ describe("going live by contract", () => {
       },
       host: { type: "docker.container", publicUrl: false },
       missing: [],
+      // Neon's key is not stored; Docker is no vendor /setup connects.
+      connect: ["Neon"],
       errors: [],
     });
     const text = await renderInfra(app, choices);

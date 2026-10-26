@@ -193,14 +193,13 @@ export interface SetupStatus {
  * The vendors `/setup` connects with pasted tokens, as the pages show them and going live reads
  * them: each one's id, its setup tokens (`SETUP_TOKENS`, asked for only when the config declares
  * a type of the vendor), those that must all be stored for it to be connected (`connectedBy`,
- * default all of them), whether going live can do without it, and what connecting it does.
+ * default all of them), and what connecting it does.
  */
 export const SETUP_VENDORS: readonly {
   vendor: string;
   title: string;
   tokens: readonly string[];
   connectedBy?: readonly string[];
-  optional?: true;
   about: string;
 }[] = [
   {
@@ -219,7 +218,6 @@ export const SETUP_VENDORS: readonly {
     vendor: "cloudflare",
     title: "Cloudflare",
     tokens: ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"],
-    optional: true,
     about:
       "Optional: an API token and the account, so the company runs on Cloudflare Containers and stops when nothing is due. Connect it before choosing where the company goes.",
   },
@@ -228,7 +226,6 @@ export const SETUP_VENDORS: readonly {
     title: "sanoma-ops",
     tokens: ["SANOMA_OPS_TOKEN", "SANOMA_OPS_URL"],
     connectedBy: ["SANOMA_OPS_TOKEN"],
-    optional: true,
     about:
       "Optional: a wakeup account, so the host stops when nothing is due and starts again in time. Connect it before choosing where the company goes, which declares the wakeup.",
   },
@@ -303,6 +300,8 @@ export interface GoLiveChoices {
   host: { type: string; title: string; publicUrl: boolean } | null;
   /** The resource types going live needs that the config's connectors do not declare. */
   missing: string[];
+  /** The vendors to connect first, by title: the chosen database's and host's, when not connected. */
+  connect: string[];
   /** A name to suggest: the app's. */
   name: string;
   /** What could not be listed, and why. */

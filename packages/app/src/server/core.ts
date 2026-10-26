@@ -273,6 +273,15 @@ export async function scenarios({ resolved }: Pick<AppContext, "resolved">): Pro
   }
 }
 
+/** Refuses the request with a 400 `invalid_input`, its issue at `field`, as a form shows it beside the field. */
+export function invalid(field: string, error: string): never {
+  throw new ApiError(400, {
+    error,
+    code: "invalid_input",
+    issues: [{ path: [field], message: error, code: "custom" }],
+  });
+}
+
 /** A 404 `invalid_input` for a name the request gives that the config does not have, with an issue at its field. */
 const noSuch = (field: "workflow" | "scenario", error: string) =>
   new ApiError(404, {

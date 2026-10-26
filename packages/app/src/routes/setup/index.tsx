@@ -72,14 +72,6 @@ function GoLivePage() {
     ...v,
     connected: connectedBy(v).every(isSet),
   }));
-  // Going live needs GitHub and one of the vendors that make a database (the others are optional):
-  // it chooses among those connected.
-  const required = vendors.filter((v) => !v.optional);
-  const missing = [
-    ...(github ? [] : ["GitHub"]),
-    ...(required.length && !required.some((v) => v.connected) ? [required.map((v) => v.title).join(" or ")] : []),
-  ];
-  const connected = missing.length === 0;
   const { run, bound } = progress;
   const data = bound.repo && bound.store;
   // The latest run is the host's once it is past the repository and database, or still going.
@@ -127,10 +119,10 @@ function GoLivePage() {
             </p>
             <pre className="overflow-x-auto rounded-lg border p-3 text-xs">{progress.infra}</pre>
           </>
-        ) : connected ? (
+        ) : github ? (
           <ChooseForm />
         ) : (
-          <p className="text-muted-foreground">Connect {missing.join(" and ")} first.</p>
+          <p className="text-muted-foreground">Connect GitHub first.</p>
         )}
       </Region>
       <Region title="3. Create the repository and the database">
@@ -210,6 +202,12 @@ function ChooseFields({ choices }: { choices: GoLiveChoices }) {
         <Notice variant="destructive">
           The config's connectors declare no {choices.missing.join(", ")}: add their connectors to{" "}
           <code>sanoma.config.ts</code>.
+        </Notice>
+      )}
+      {choices.connect.length > 0 && (
+        <Notice variant="destructive">
+          Going live makes the database and the host with {choices.connect.join(" and ")}: connect{" "}
+          {choices.connect.length > 1 ? "them" : "it"} first.
         </Notice>
       )}
       {choices.errors.map((e) => (
@@ -312,7 +310,7 @@ function ChooseFields({ choices }: { choices: GoLiveChoices }) {
       </FieldGroup>
       {error && <Notice variant="destructive">{error}</Notice>}
       <div>
-        <Button type="submit" disabled={mutation.isPending || choices.missing.length > 0}>
+        <Button type="submit" disabled={mutation.isPending || choices.missing.length > 0 || choices.connect.length > 0}>
           {mutation.isPending ? (
             <Spinner data-icon="inline-start" />
           ) : (

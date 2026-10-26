@@ -101,8 +101,7 @@ const SAMPLE: WakeupRegistration = { at: new Date(0).toISOString(), generation: 
 
 /**
  * True when `op`'s input takes `sample` and keeps each of its fields: one that strips a field
- * takes none of it. A contract's operation (a wakeup's `register`, a database's `storeUrl`) is
- * checked with it.
+ * takes none of it. A wakeup's `register` is checked with it.
  */
 function keepsInput(op: Op, sample: Record<string, unknown>): boolean {
   try {
