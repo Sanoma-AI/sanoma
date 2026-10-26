@@ -23,10 +23,15 @@ export async function allowedPath(worktree: string, path: string): Promise<strin
   // A link is followed to what it names, which must be inside too; a broken one names nothing.
   if ((await lstat(full).catch(() => undefined))?.isSymbolicLink()) full = await realpath(full).catch(() => undefined);
   if (full === undefined) return undefined;
-  const inside = relative(root, full);
-  if (inside === ".." || inside.startsWith(`..${sep}`) || isAbsolute(inside)) return undefined;
+  if (!within(root, full)) return undefined;
   // Lower-cased: on a case-insensitive file system (macOS's default) `.GIT` is `.git`.
-  return OFF_LIMITS.has(inside.split(sep)[0]!.toLowerCase()) ? undefined : full;
+  return OFF_LIMITS.has(relative(root, full).split(sep)[0]!.toLowerCase()) ? undefined : full;
+}
+
+/** Whether the absolute path `full` is `dir` or under it, by their paths as given. */
+export function within(dir: string, full: string): boolean {
+  const inside = relative(dir, full);
+  return inside !== ".." && !inside.startsWith(`..${sep}`) && !isAbsolute(inside);
 }
 
 /** A repository a chat can draft in. */

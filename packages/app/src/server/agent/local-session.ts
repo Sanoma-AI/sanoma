@@ -2,14 +2,14 @@ import { spawn as spawnChild } from "node:child_process";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { Readable } from "node:stream";
 import {
   harnessSessionDataDirectoryPath,
   harnessStateDirectoryPath,
   type HarnessV1NetworkSandboxSession,
 } from "@ai-sdk/harness";
-import { allowedPath } from "./checkout.ts";
+import { allowedPath, within } from "./checkout.ts";
 
 // The sandbox session `HarnessAgent` runs a coding agent in, on this machine: its commands are
 // child processes in the draft's checkout, its files that checkout's and its own home's, its bridge
@@ -74,19 +74,15 @@ export class LocalSession implements HarnessV1NetworkSandboxSession {
   /** `path` as the session may use it: the checkout's by the checkout rule, else under its home; refused otherwise. */
   async #path(path: string): Promise<string> {
     const full = resolve(this.defaultWorkingDirectory, path);
-    const inHome = relative(this.#home, full);
-    if (inHome === "" || (!inHome.startsWith(`..${sep}`) && inHome !== ".." && !isAbsolute(inHome))) return full;
+    if (within(this.#home, full)) return full;
     const allowed = await allowedPath(this.defaultWorkingDirectory, full);
     if (allowed === undefined) throw new Error(`${path} is outside the checkout, or under .git or node_modules`);
     return allowed;
   }
 
   readBinaryFile = async ({ path }: At) => {
-    const full = await this.#path(path);
-    return readFile(full).then(
-      (bytes) => new Uint8Array(bytes),
-      () => null,
-    );
+    const bytes = await readFile(await this.#path(path)).catch(() => null);
+    return bytes && new Uint8Array(bytes);
   };
 
   readTextFile = async ({ path, startLine, endLine }: At & { startLine?: number; endLine?: number }) => {
@@ -100,7 +96,7 @@ export class LocalSession implements HarnessV1NetworkSandboxSession {
 
   readFile = async (at: At) => {
     const bytes = await this.readBinaryFile(at);
-    return bytes && (Readable.toWeb(Readable.from([bytes])) as ReadableStream<Uint8Array>);
+    return bytes && new Blob([bytes]).stream();
   };
 
   writeBinaryFile = async ({ path, content }: At & { content: Uint8Array }) => {
@@ -132,7 +128,9 @@ export class LocalSession implements HarnessV1NetworkSandboxSession {
     const kill = async () => {
       if (group !== undefined) killGroup(group);
     };
-    abortSignal?.addEventListener("abort", () => void kill(), { once: true });
+    const onAbort = () => void kill();
+    abortSignal?.addEventListener("abort", onAbort, { once: true });
+    void exited.then(() => abortSignal?.removeEventListener("abort", onAbort));
     return { pid: child.pid, stdout: web(child.stdout!), stderr: web(child.stderr!), wait: () => exited, kill };
   };
 

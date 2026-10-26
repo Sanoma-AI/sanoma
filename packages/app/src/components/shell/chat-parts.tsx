@@ -12,7 +12,7 @@ import { Card, CardContent, CardFooter, CardHeader } from "#/components/ui/card.
 import { Spinner } from "#/components/ui/spinner.tsx";
 import { useActor } from "../../actor.ts";
 import { pendingApprovals } from "../../api.ts";
-import { type ChatMessage, type DraftCard, heldRunOf, textOf } from "../../lib/chat.ts";
+import { type ChatMessage, type DraftCard, heldRunOf, pathOf, textOf } from "../../lib/chat.ts";
 import { decidableBy } from "../../lib/decidable.ts";
 import { approvalKey, configQuery, runQuery } from "../../queries.ts";
 import { ApprovalDecision, ApprovalDetails } from "../approval.tsx";
@@ -138,8 +138,8 @@ function stepLabel(step: ToolPart): string {
     case "lookup":
       return `Looked up ${String(input.op ?? "")}`;
     default: {
-      const file = input.file_path ?? input.path;
-      return typeof file === "string" ? `${getToolName(step)} ${file}` : getToolName(step);
+      const file = pathOf(input);
+      return file === undefined ? getToolName(step) : `${getToolName(step)} ${file}`;
     }
   }
 }
