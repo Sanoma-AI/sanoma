@@ -210,8 +210,8 @@ function reveal(shown: CompanyWindow, view: WebContentsView) {
   const other = view === shown.appView ? shown.shellView : shown.appView;
   other.setVisible(false);
   view.setVisible(true);
-  // The View menu acts on the focused page: the one shown.
-  if (!view.webContents.isDestroyed()) view.webContents.focus();
+  // The View menu acts on the focused page: the one shown (in the focused window only, never raising another).
+  if (shown.window.isFocused() && !view.webContents.isDestroyed()) view.webContents.focus();
 }
 
 /** Changes what the company's page shows, and sends it soon; any phase but `running` shows that page. */
@@ -373,7 +373,7 @@ async function begin(path: string, how?: Begin) {
   const started = start(path, shown, beginnings.get(path) ?? startSession).catch((err: unknown) => {
     // Before its session (no Node staged, an unreadable folder): its window says why.
     const message = hidePasswords(`The company could not start: ${messageOf(err)}`);
-    setCompanyState(shown, { phase: "failed", message, progress: [], log: [], reopens: reopensAfterFailure(path) });
+    setCompanyState(shown, { phase: "failed", message, progress: [], log: [], reopens: reopensAfterEnd(path) });
   });
   opening.set(path, started);
   runningChanged();
@@ -383,10 +383,11 @@ async function begin(path: string, how?: Begin) {
 }
 
 /**
- * After a failed start, whether the next launch still opens the company: not when its folder holds
- * no company (a failed clone or init), which also leaves Recent (`afterFailure`).
+ * Once a session has ended (failed, or stopped), whether the next launch still opens the company:
+ * not when its folder holds no company (a clone or init that failed or was stopped), which also
+ * leaves Recent (`afterFailure`).
  */
-function reopensAfterFailure(path: string): boolean {
+function reopensAfterEnd(path: string): boolean {
   const companies = readCompanies(companiesFile());
   const kept = afterFailure(companies, path);
   if (kept.length !== companies.length) {
@@ -465,7 +466,9 @@ async function start(path: string, shown: CompanyWindow, how: Begin) {
     if (entry.stopping) {
       log.write("shell", "stopped");
       log.close();
-      if (current()) setCompanyState(shown, { phase: "stopped", progress: [] });
+      // A clone or a new company stopped before it was there leaves Recent too.
+      const reopens = reopensAfterEnd(path);
+      if (current()) setCompanyState(shown, { phase: "stopped", progress: [], reopens });
       return;
     }
     const said = exit.error ?? "the log below says what";
@@ -475,7 +478,7 @@ async function start(path: string, shown: CompanyWindow, how: Begin) {
         : (exit.error ?? `The company stopped (${exit.signal ?? `exit code ${exit.code}`}).`);
     log.write("shell", why);
     log.close();
-    const reopens = reopensAfterFailure(path);
+    const reopens = reopensAfterEnd(path);
     if (!current()) return;
     setCompanyState(shown, { phase: "failed", message: hidePasswords(why), progress: [], reopens });
     // A company that stops on its own while its window is closed says so.
@@ -508,6 +511,7 @@ async function stopCompany(path: string) {
 
 /** Stops the company and starts it again in its window, which shows the start, then the app again. */
 async function restart(path: string) {
+  await opening.get(path);
   await stop(path);
   await begin(path);
 }
@@ -704,6 +708,7 @@ async function getUpdates(path: string): Promise<void> {
     const plan = await prepareUpdate(path, env);
     if ("refused" in plan) return say(plan.refused, true);
     if (!plan.behind) return say("This company is up to date with GitHub");
+    await opening.get(path);
     await stop(path);
     const failed = await fastForward(path, env).then(
       () => undefined,
@@ -852,7 +857,7 @@ function buildMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-/** The arguments after the executable (and, run from a checkout, the app's path). */
+/** The arguments after the executable; a checkout's app path among them is `ownPath`, which `folderArgument` skips. */
 const argsOf = (argv: readonly string[]) => argv.slice(1);
 /** The app's own path on a checkout's command line (`electron <app path>`), which is no company folder. */
 const ownPath = () => (process.defaultApp ? app.getAppPath() : undefined);
@@ -909,7 +914,6 @@ if (!app.requestSingleInstanceLock()) {
           stopped = true;
           app.quit();
         });
-      return;
     }
   });
   // ctrl-c in the terminal that started the shell, or a kill: quit as the menu does, stopping each company.
