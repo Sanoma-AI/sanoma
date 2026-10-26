@@ -5,7 +5,7 @@ import { resolveConfig } from "@sanoma-ai/workflows";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { check } from "../src/check.ts";
 import { type Loaded, loadConfig } from "../src/config.ts";
-import { copyFixture, ensureBuilt } from "./fixture.ts";
+import { copyFixture, ensureBuilt, FIXTURE_GRID } from "./fixture.ts";
 
 // Needs Postgres (`pnpm db:up`) for the scenarios. The fixture copy loads the packages from their builds.
 const databaseUrl = testDatabaseUrl("sanoma-check");
@@ -30,7 +30,7 @@ describe("check", () => {
       ok: true,
       problems: [],
       warnings: [],
-      grid: expect.objectContaining({ groups: [null, "agents"] }),
+      grid: FIXTURE_GRID,
     });
     // The generated SDK first, before tsc: the sites' tsc reads it.
     expect(log.slice(0, 7)).toEqual([

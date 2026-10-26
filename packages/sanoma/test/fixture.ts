@@ -29,6 +29,28 @@ export function ensureBuilt(): void {
   for (const [dir, outputs] of BUILT) ensure(join(repo, dir), outputs, ["pnpm", "run", "build"]);
 }
 
+const allow = { answer: "allow" };
+
+/**
+ * The fixture's Permissions grid, as `sanoma check` reports it: no policies, so everyone may;
+ * Ghost's operations write and publish, so none may be called directly.
+ */
+export const FIXTURE_GRID = {
+  groups: [null, "agents"],
+  workflows: [
+    {
+      id: "hello",
+      title: "Say hello",
+      cells: [allow, allow],
+      ops: [
+        { id: "ghost.post.create", cells: [allow, allow] },
+        { id: "ghost.post.publish", cells: [allow, allow] },
+      ],
+    },
+  ],
+  ops: [],
+};
+
 /**
  * A fresh copy of `fixtures/project` (or of the repo at `from`, such as the template), with what a
  * company repo installs: `sanoma` as pnpm lays out its tarball (its published files in

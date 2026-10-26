@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { type CheckResult, type Draft, errorMessage, type Source } from "@sanoma-ai/workflows";
+import type { SanomaEvent } from "./events.ts";
 
 const run = promisify(execFile);
 
@@ -11,15 +12,18 @@ const run = promisify(execFile);
 const gitIn = async (cwd: string, args: string[], env?: NodeJS.ProcessEnv) =>
   (await run("git", args, { cwd, env: { ...process.env, ...env } })).stdout.trim();
 
-/** Whether git in `cwd` ignores `path`; a failure of git's own (exit 128) is thrown. */
-const ignores = (cwd: string, path: string) =>
-  gitIn(cwd, ["check-ignore", "--quiet", "--", path]).then(
+/** Whether git in `cwd` answers yes (exit 0) or no (exit 1); a failure of git's own (exit 128) is thrown. */
+const holds = (cwd: string, args: string[]) =>
+  gitIn(cwd, args).then(
     () => true,
     (err: { code?: unknown }) => {
       if (err.code === 1) return false;
       throw err;
     },
   );
+
+/** Whether git in `cwd` ignores `path`. */
+const ignores = (cwd: string, path: string) => holds(cwd, ["check-ignore", "--quiet", "--", path]);
 
 /** A draft's id: a name, never a path. */
 const DRAFT_ID = /^[\w-]{1,64}$/;
@@ -86,8 +90,12 @@ const commitIn =
  */
 export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: string } = {}): Source {
   const git = (args: string[], env?: NodeJS.ProcessEnv) => gitIn(root, args, env);
+  const head = (ref = "HEAD") => git(["rev-parse", "--verify", `${ref}^{commit}`]);
   /** Where the draft `id`'s checkout is. */
   const draftAt = (id: string) => join(root, ".sanoma", "drafts", draftId(id));
+  /** Whether the local branch `branch` exists. */
+  const branched = (branch: string) =>
+    git(["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]).then(Boolean, () => false);
   /** The worktrees on a `draft/<id>` branch at their place, by id: whether each is still there. */
   const listed = async () => {
     const at = join(realpathSync(root), ".sanoma", "drafts");
@@ -107,7 +115,7 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
   return {
     root,
     commit: commitIn(root),
-    head: (ref = "HEAD") => git(["rev-parse", "--verify", `${ref}^{commit}`]),
+    head,
     async push({ url, token, ref }) {
       await git(["push", "--quiet", "--", url, `refs/heads/${ref}:refs/heads/${ref}`], signedIn(token)).catch(
         withoutToken(`git push to ${url}`, token),
@@ -129,17 +137,12 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
           withoutToken(`git fetch from ${url}`, token),
         );
         // The commit fetched, pinned: anything else may rewrite FETCH_HEAD before the merge.
-        const fetched = await git(["rev-parse", "--verify", "FETCH_HEAD^{commit}"]);
-        const behind = await git(["merge-base", "--is-ancestor", "HEAD", fetched]).then(
-          () => true,
-          (err: { code?: unknown }) => {
-            if (err.code === 1) return false;
-            throw err;
-          },
-        );
-        if (!behind) return { skipped: `${ref} has commits ${url} does not` };
+        const fetched = await head("FETCH_HEAD");
+        if (!(await holds(root, ["merge-base", "--is-ancestor", "HEAD", fetched]))) {
+          return { skipped: `${ref} has commits ${url} does not` };
+        }
         await git(["merge", "--quiet", "--ff-only", fetched]);
-        return { revision: await git(["rev-parse", "HEAD"]) };
+        return { revision: fetched };
       }),
     async draft(id): Promise<Draft> {
       const [branch, at] = [branchOf(id), draftAt(id)];
@@ -150,10 +153,9 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
           if (!(await ignores(root, at))) {
             throw new Error(`.sanoma/ is not in ${join(root, ".gitignore")}, so a draft there would be a change here`);
           }
-          const branched = await git(["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]).catch(() => "");
           // One whose directory is gone (`git clean -X`) is still listed: added again over that entry alone (`-f`).
           const over = here === false ? ["-f"] : [];
-          const from = branched ? [at, branch] : ["-b", branch, at, "HEAD"];
+          const from = (await branched(branch)) ? [at, branch] : ["-b", branch, at, "HEAD"];
           await git(["worktree", "add", "--quiet", ...over, ...from]);
         }
         const [installed, modules] = [join(root, "node_modules"), join(at, "node_modules")];
@@ -171,18 +173,20 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
       return { branch, root: at, commit: commitIn(at) };
     },
     closeDraft: async (id) => {
+      const [branch, at] = [branchOf(id), draftAt(id)];
       // Not under a check still running in it.
-      await checking;
+      await checkingAt.get(at);
       return serial(async () => {
-        const branch = branchOf(id);
         // Forced: whatever it holds uncommitted goes with it, and one whose directory is gone too.
-        if ((await listed()).has(id)) await git(["worktree", "remove", "--force", draftAt(id)]);
-        if (await git(["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]).catch(() => "")) {
-          await git(["branch", "--quiet", "-D", branch]);
-        }
+        if ((await listed()).has(id)) await git(["worktree", "remove", "--force", at]);
+        if (await branched(branch)) await git(["branch", "--quiet", "-D", branch]);
       });
     },
-    check: async (id) => checks(draftAt(id), databaseUrl),
+    async check(id) {
+      const at = draftAt(id);
+      if (!(await listed()).get(id)) return failed(`the draft ${id} is not open`);
+      return checks(at, databaseUrl);
+    },
     drafts: async () => [...(await listed())].flatMap(([id, here]) => (here ? [id] : [])).toSorted(),
     async diff(id) {
       // Three dots: from where the branch left the checked-out one, so what was merged since is not shown.
@@ -212,11 +216,15 @@ const CHECK_TIMEOUT_MS = 15 * 60_000;
 function checks(root: string, databaseUrl: string | undefined): Promise<CheckResult> {
   const done = checking.then(() => checkNow(root, databaseUrl).catch((err: unknown) => failed(errorMessage(err))));
   checking = done;
+  checkingAt.set(root, done);
+  void done.then(() => checkingAt.get(root) === done && checkingAt.delete(root));
   return done;
 }
 
-/** The check under way, if any. */
+/** The last check queued, if any. */
 let checking: Promise<unknown> = Promise.resolve();
+/** Each draft's last check queued, by its checkout, until it ends: what closing it waits for. */
+const checkingAt = new Map<string, Promise<CheckResult>>();
 
 const failed = (why: string): CheckResult => ({ ok: false, problems: [`sanoma check: ${why}`], warnings: [] });
 
@@ -253,19 +261,13 @@ async function checkNow(root: string, databaseUrl: string | undefined): Promise<
   let error: string | undefined;
   for (const line of ran.stdout.split("\n")) {
     if (!line.startsWith('{"sanoma":1,')) continue;
-    const {
-      sanoma: _,
-      event,
-      message,
-      ...fields
-    } = JSON.parse(line) as {
-      sanoma: 1;
-      event: string;
-      message?: string;
-    } & CheckResult;
-    // Every field of the result, the grid among them.
-    if (event === "checked") result = fields;
-    if (event === "error") error = message;
+    const event = JSON.parse(line) as SanomaEvent & { sanoma: 1 };
+    if (event.event === "checked") {
+      // Every field of the result, the grid among them.
+      const { sanoma: _, event: __, ...fields } = event;
+      result = fields;
+    }
+    if (event.event === "error") error = event.message;
   }
   return result ?? failed(error ?? (ran.stderr.trim().split("\n").at(-1) || "it gave no result"));
 }

@@ -170,7 +170,6 @@ export function loopTools(turn: ToolsTurn) {
       inputSchema: z.object({}),
       execute: async () => {
         if (!(await hasDraft())) throw new Error("Nothing is drafted yet: edit a file first");
-        await draft();
         checked = await checks(app, chat.id);
         await showCard();
         return checked;

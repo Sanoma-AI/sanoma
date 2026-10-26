@@ -16,7 +16,7 @@ import { pathToFileURL } from "node:url";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { localGitSource } from "../src/source.ts";
-import { copyFixture, ensureBuilt } from "./fixture.ts";
+import { copyFixture, FIXTURE_GRID, ensureBuilt } from "./fixture.ts";
 import { gitIdentity } from "./git.ts";
 
 let dir = "";
@@ -368,26 +368,11 @@ describe("localGitSource's check", () => {
       source.check!("unloadable"),
     ]);
     // The grid comes back as the check reported it: the fixture has no policies, so all allow.
-    const allow = { answer: "allow" };
     expect(passed).toEqual({
       ok: true,
       problems: [],
       warnings: [],
-      grid: {
-        groups: [null, "agents"],
-        workflows: [
-          {
-            id: "hello",
-            title: "Say hello",
-            cells: [allow, allow],
-            ops: [
-              { id: "ghost.post.create", cells: [allow, allow] },
-              { id: "ghost.post.publish", cells: [allow, allow] },
-            ],
-          },
-        ],
-        ops: [],
-      },
+      grid: FIXTURE_GRID,
     });
     expect(failed.ok).toBe(false);
     expect(failed.problems).toContainEqual(expect.stringMatching(/^workflows\/broken\.ts:1:14: .*'string'.*'number'/));
@@ -397,6 +382,11 @@ describe("localGitSource's check", () => {
       warnings: [],
     });
     await expect(source.check!("../escape")).rejects.toThrow(/A draft's id/);
+    expect(await source.check!("never")).toEqual({
+      ok: false,
+      problems: ["sanoma check: the draft never is not open"],
+      warnings: [],
+    });
 
     expect(await source.drafts!()).toEqual(["broken", "ok", "unloadable"]);
     expect(git("status", "--porcelain")).toBe("");
