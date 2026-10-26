@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { UsageError } from "../src/config.ts";
-import { appOptions, parseDomains, wakeRoute } from "../src/serve.ts";
+import { appOptions, parseDomains, quietExit, wakeRoute } from "../src/serve.ts";
 
 /** Sets these variables for the test, and unsets the other launcher variables appOptions reads. */
 function environment(values: Record<string, string>) {
@@ -165,5 +165,56 @@ describe("wakeRoute", () => {
     const rejected = await wake("?generation=3", () => Promise.reject(new Error("still starting")), log);
     expect(rejected.status).toBe(204);
     await vi.waitFor(() => expect(log).toHaveBeenCalledWith("a wake of generation 3 failed: still starting"));
+  });
+});
+
+describe("quietExit", () => {
+  it("exits once the worker has stopped and no request came for the quiet time, counted from the last", () => {
+    vi.useFakeTimers();
+    try {
+      let stopped = false;
+      const exit = vi.fn<() => void>();
+      const rule = quietExit({ quietMs: 10_000, stopped: () => stopped, exit });
+      // Running: the worker's stop is what looks.
+      vi.advanceTimersByTime(20_000);
+      rule.stopped();
+      expect(exit).not.toHaveBeenCalled();
+      stopped = true;
+      vi.advanceTimersByTime(5_000);
+      rule.request();
+      rule.stopped();
+      vi.advanceTimersByTime(9_000);
+      // A page's poll moves the end of the quiet.
+      rule.request();
+      vi.advanceTimersByTime(9_000);
+      expect(exit).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1_000);
+      expect(exit).toHaveBeenCalledTimes(1);
+      rule.stopped();
+      expect(exit).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not exit while a write has started the worker again, nor once closed", () => {
+    vi.useFakeTimers();
+    try {
+      let stopped = true;
+      const exit = vi.fn<() => void>();
+      const rule = quietExit({ quietMs: 10_000, stopped: () => stopped, exit });
+      rule.stopped();
+      stopped = false;
+      vi.advanceTimersByTime(60_000);
+      expect(exit).not.toHaveBeenCalled();
+      stopped = true;
+      rule.request();
+      rule.stopped();
+      rule.close();
+      vi.advanceTimersByTime(60_000);
+      expect(exit).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

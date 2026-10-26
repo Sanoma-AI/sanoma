@@ -193,18 +193,22 @@ async function withPostgres(
 /**
  * Starts what `start` starts over the loaded config, prints what runs (and where, when it
  * listens), and stops it on SIGINT or SIGTERM, then the Postgres `load` started, then exits 0. The worker names the vendors not
- * configured yet itself, in one line.
+ * configured yet itself, in one line. `start` is given `exit`, which stops it the same way, for
+ * a reason of its own (`ServeOptions.exit`).
  */
 async function keep(
   { config, resolved, postgres }: Loaded & { postgres?: EnsuredPostgres },
   start: (
     config: SanomaConfig,
     resolved: Loaded["resolved"],
+    exit: () => void,
   ) => Promise<{ stop(): Promise<void>; url?: string; sites?: Record<string, string> }>,
 ): Promise<never> {
   let started: Awaited<ReturnType<typeof start>>;
+  // The signal path, once it is set up below.
+  let exit: (() => void) | undefined;
   try {
-    started = await start(config, resolved);
+    started = await start(config, resolved, () => exit?.());
   } catch (err) {
     await postgres?.stop().catch(() => {});
     throw err;
@@ -220,7 +224,7 @@ async function keep(
     emit({ event: "ready", url: started.url, sites: started.sites ?? {} });
   }
   // Postgres last, once the worker and the app have closed their connections.
-  onSignal(() => started.stop().finally(() => postgres?.stop()));
+  exit = onSignal(() => started.stop().finally(() => postgres?.stop()));
   return new Promise(() => {});
 }
 
@@ -230,10 +234,10 @@ async function keep(
  */
 async function serveCommand(devServer: boolean): Promise<never> {
   const loaded = await load({ postgres: "start" });
-  return keep(loaded, async (config, resolved) => {
+  return keep(loaded, async (config, resolved, exit) => {
     (await import("./key.ts")).ensureSecretsKey(process.cwd(), log);
     const { serve } = await import("./serve.ts");
-    return serve(config, { port: port(), log, dev: devServer, resolved });
+    return serve(config, { port: port(), log, dev: devServer, resolved, exit });
   });
 }
 

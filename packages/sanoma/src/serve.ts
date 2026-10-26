@@ -4,6 +4,7 @@ import { dirname, extname, isAbsolute, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type AppOptions, githubLogin, type IngressRoute, startApp } from "@sanoma-ai/app";
 import {
+  declaredWakeup,
   errorMessage,
   isLoopback,
   type ResolvedConfig,
@@ -11,6 +12,8 @@ import {
   SanomaClient,
   type SanomaConfig,
   startWorker,
+  type Supervisor,
+  superviseWorker,
   wakeGeneration,
 } from "@sanoma-ai/workflows";
 import { describeConfig, readPeople, schemaOf, writeGenerated } from "@sanoma-ai/workflows/describe";
@@ -37,9 +40,15 @@ const rootOf = (config: SanomaConfig) => config.root ?? dirname(config.file!);
 /** The checkout, as the worker's and the app's `source`. */
 const sourceOf = (config: SanomaConfig) => localGitSource(rootOf(config));
 
-/** Starts the worker, promoted: a local worker is always the version to take queued runs, even one seen before. */
+/** What a worker of the launcher's starts with: promoted, since a local worker is always the version to take queued runs, even one seen before, and the checkout as its source. */
+const workerOptions = (config: SanomaConfig) => ({ promote: true, source: sourceOf(config) });
+
+/**
+ * Starts the worker, for `sanoma worker`: it never stops itself, since nothing in this process
+ * would start it again (no app hears a write or a wake). `serve` supervises its own.
+ */
 export async function runWorker(config: SanomaConfig): Promise<Stoppable> {
-  const worker = await startWorker(config, { promote: true, source: sourceOf(config) });
+  const worker = await startWorker(config, workerOptions(config));
   return { stop: () => worker.stop() };
 }
 
@@ -52,8 +61,20 @@ export interface ServeOptions {
   dev?: boolean;
   /** The config, resolved, when the caller has it: the Cedar schema is made from it. */
   resolved?: ResolvedConfig;
-  /** Called with the generation of each `GET /wake` the app answers (`wakeRoute`). Default: nothing. */
+  /**
+   * Ends the process as SIGTERM does (the launcher's signal path), for the exit rule
+   * (`exitRule`). Without it the process never ends by itself.
+   */
+  exit?: () => void;
+  /** How long the app goes without a request, the worker stopped, before the exit rule ends the process: 10 minutes by default. */
+  quietExitMs?: number;
+}
+
+/** The wakeup's route's: what it hands each generation to, and where a failure of that is said. */
+export interface WakeRouteOptions {
+  /** Called with the generation of each `GET /wake` the app answers. Default: nothing. */
   onWake?: (generation: number) => void | Promise<void>;
+  log: (line: string) => void;
 }
 
 /** Starts the app on `port`, with the host and login `appOptions` reads, and the sites built; `url` says where. */
@@ -67,7 +88,7 @@ export async function runApp(config: SanomaConfig, options: ServeOptions): Promi
  * harmless: the worker decides what it starts); any other is 400. `onWake` throwing or rejecting is logged,
  * never the wakeup's failure.
  */
-export function wakeRoute({ onWake, log }: Pick<ServeOptions, "onWake" | "log">): IngressRoute {
+export function wakeRoute({ onWake, log }: WakeRouteOptions): IngressRoute {
   return {
     method: "GET",
     path: "/wake",
@@ -258,41 +279,119 @@ export async function appOptions(readSecrets?: ReadSecrets): Promise<Pick<AppOpt
   }
 }
 
+/** What `quietExit` is told of the process: when a request arrives, and when the worker stopped itself; `close` ends it. */
+export interface QuietExit {
+  request(): void;
+  stopped(): void;
+  close(): void;
+}
+
 /**
- * The sites' build, the worker, the wakeup service when the config runs it (`wakeup: true`), then
- * the app, serving the service's routes, in this process; `stop` stops the app, the service, then
- * the worker.
+ * Calls `exit` once, when `stopped()` says the worker stopped itself and no request has arrived
+ * for `quietMs`: looked at when the worker stops (`QuietExit.stopped`), then again when the
+ * quiet would end. Its one timer never holds the process up.
+ */
+export function quietExit({
+  quietMs,
+  stopped,
+  exit,
+}: {
+  quietMs: number;
+  stopped: () => boolean;
+  exit: () => void;
+}): QuietExit {
+  let last = Date.now();
+  let timer: NodeJS.Timeout | undefined;
+  let done = false;
+  const look = () => {
+    clearTimeout(timer);
+    timer = undefined;
+    if (done || !stopped()) return;
+    const left = last + quietMs - Date.now();
+    if (left > 0) timer = setTimeout(look, left).unref();
+    else {
+      done = true;
+      exit();
+    }
+  };
+  return {
+    request: () => void (last = Date.now()),
+    stopped: look,
+    close() {
+      done = true;
+      clearTimeout(timer);
+    },
+  };
+}
+
+/**
+ * The exit rule, when the host the declared wakeup names stops the instance when its process
+ * exits (`stops-on-exit`): `quietExit`, for `quietExitMs` (10 minutes by default), ending the
+ * process through `exit`, so the host stops the instance and its next request starts it again.
+ * None without `exit`, on any other host (one that stops when quiet stops the instance itself, a
+ * long-lived one never does), or on an app on this machine alone (a loopback `host`), which is
+ * not the instance the host runs.
+ */
+async function exitRule(
+  config: SanomaConfig,
+  host: string | undefined,
+  stopped: () => boolean,
+  { exit, quietExitMs = 600_000 }: ServeOptions,
+): Promise<QuietExit | undefined> {
+  if (!exit || isLoopback(host ?? "127.0.0.1")) return undefined;
+  const lifetime = (await declaredWakeup(config))?.host?.type.host?.capabilities.lifetime;
+  return lifetime === "stops-on-exit" ? quietExit({ quietMs: quietExitMs, stopped, exit }) : undefined;
+}
+
+/**
+ * The sites' build, the worker under a supervisor (`superviseWorker`), the wakeup service when
+ * the config runs it (`wakeup: true`), then the app, serving `/wake` and the service's routes, in
+ * this process. A worker that stopped itself starts again on a wake its generation names, or on
+ * a write from the app (`AppOptions.onWrite`: a run's start, an approval's decision), never on
+ * a page read; the exit rule (`exitRule`) ends the process on a host that stops it on exit.
+ * `stop` stops the app, the service, then the worker.
  */
 export async function serve(config: SanomaConfig, serveOptions: ServeOptions): Promise<Served> {
   // Read and built before the worker starts, so a mistake in the variables or a site starts nothing.
   const options = await appStart(config, serveOptions);
-  const worker = await runWorker(config);
+  const { log } = serveOptions;
+  let worker: Supervisor | undefined;
+  const rule = await exitRule(config, options.host, () => worker?.stopped === true, serveOptions);
+  const supervised = (worker = await superviseWorker(config, {
+    ...workerOptions(config),
+    ...(rule && { onStopped: rule.stopped }),
+  }));
   let wakeup: WakeupService | undefined;
   let app: Served;
   try {
     if (config.wakeup === true) {
       const { databaseUrl } = serveOptions.resolved ?? resolveConfig(config);
-      const { log } = serveOptions;
       const { startWakeupService } = await import("@sanoma-ai/workflows/wakeup-service");
       wakeup = await startWakeupService({ databaseUrl, log: { info: log, warn: log } });
     }
-    app = await served(config, options, [wakeRoute(serveOptions), ...(wakeup?.routes ?? [])]);
+    app = await served(
+      config,
+      { ...options, onWrite: () => void supervised.resume(), ...(rule && { onRequest: rule.request }) },
+      [wakeRoute({ log, onWake: (generation) => supervised.wake(generation) }), ...(wakeup?.routes ?? [])],
+    );
   } catch (err) {
+    rule?.close();
     await wakeup?.stop().catch(() => {});
-    await worker.stop().catch(() => {});
+    await supervised.stop().catch(() => {});
     throw err;
   }
   return {
     url: app.url,
     sites: app.sites,
     async stop() {
+      rule?.close();
       try {
         await app.stop();
       } finally {
         try {
           await wakeup?.stop();
         } finally {
-          await worker.stop();
+          await supervised.stop();
         }
       }
     },
