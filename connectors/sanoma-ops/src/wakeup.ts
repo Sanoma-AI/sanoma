@@ -1,4 +1,5 @@
 import { type CallContext, DriverError, type PlanAction, type WakeupRegistration } from "@sanoma-ai/workflows";
+import { instanceUrl } from "@sanoma-ai/workflows/wakeup-service";
 
 // The wakeup type's operations over the wakeup service (`WakeupApi`): the driver's calls it over
 // HTTP, the fake's answers from its state. Both go through `wakeupOps`, so they plan, store the
@@ -38,8 +39,11 @@ const refused = (message: string, vendorCode?: string) =>
 const stateOf = ({ id, url, at, generation, lastError }: Instance) => ({ id, host: url, at, generation, lastError });
 type State = ReturnType<typeof stateOf>;
 
-/** A URL as the service keeps it: without a trailing slash. */
-const normalUrl = (url: unknown) => String(url).replace(/\/+$/, "");
+/** A URL as the service keeps it (`instanceUrl`, the service's own rule), or as given when the service would refuse it. */
+const normalUrl = (url: unknown) => {
+  const checked = instanceUrl(url);
+  return "url" in checked ? checked.url : String(url);
+};
 
 /**
  * The wakeup type's operations and `wakeup.register` over `api()`, made on each call: `create`
@@ -55,9 +59,16 @@ export function wakeupOps(api: () => WakeupApi) {
     const service = api();
     const host = normalUrl(desired.host);
     const made = await service.create(host);
-    if ((await secrets.ensure(WAKEUP_TOKEN, () => made.token)) !== made.token) {
-      // An instance no one can register with is removed again; the stored token stays.
-      await service.remove(made.id).catch(() => undefined);
+    // An instance no one can register with (its token not stored) is removed again.
+    const removeMade = () => service.remove(made.id).catch(() => undefined);
+    const stored = await secrets
+      .ensure(WAKEUP_TOKEN, () => made.token)
+      .catch(async (err: unknown) => {
+        await removeMade();
+        throw err;
+      });
+    if (stored !== made.token) {
+      await removeMade();
       throw refused(`wakeup.create: ${STALE}`, "stale");
     }
     const state: State = { id: made.id, host, at: null, generation: 0, lastError: null };
@@ -93,10 +104,16 @@ export function wakeupOps(api: () => WakeupApi) {
         throw refused(`wakeup.update: the plan changed (${expect.action}, now ${fresh.action})`, "plan_changed");
       }
       if (fresh.state && fresh.action === "none") return { id, state: fresh.state };
-      // A new instance has a new token: refused before the old instance is deleted.
+      // A new instance has a new token: refused before anything changes.
       if (await call.secrets.get(WAKEUP_TOKEN)) throw refused(`wakeup.update: ${STALE}`, "stale");
-      if (fresh.state) await api().remove(id);
-      return create(desired, call);
+      // The new one first, so a create that fails leaves the old one in place; the old one, its
+      // wake never registered again, is removed after, and one left behind wakes nothing new.
+      const made = await create(desired, call);
+      if (fresh.state)
+        await api()
+          .remove(id)
+          .catch(() => undefined);
+      return made;
     },
     delete: async ({ id }: { id: string }) => {
       await api().remove(id);

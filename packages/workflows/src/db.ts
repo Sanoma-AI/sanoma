@@ -334,6 +334,11 @@ export async function recordWakeupError(db: Db, owner: string, generation: numbe
   ]);
 }
 
+/** Records why nothing can be registered, at the row's generation: none is taken for it. */
+export async function recordWakeupProblem(db: Db, owner: string, error: string): Promise<void> {
+  await db.query(`UPDATE ${WAKEUP_TABLE} SET last_error = $2 WHERE id = 1 AND owner = $1`, [owner, error]);
+}
+
 /** Records that the worker stops now, with `generation` registered. */
 export async function recordWakeupStop(db: Db, owner: string, generation: number): Promise<void> {
   await db.query(`UPDATE ${WAKEUP_TABLE} SET stopped_at = now() WHERE id = 1 AND owner = $1 AND generation = $2`, [

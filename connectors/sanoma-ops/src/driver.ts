@@ -102,7 +102,8 @@ function serviceApi(timeoutMs: number): WakeupApi {
     } catch {
       // A proxy's HTML page, say: no body to read.
     }
-    if (status === 404 && absent) return undefined;
+    // The service's own 404 (its `{ error }`), not another server's at that URL.
+    if (status === 404 && absent && Problem.safeParse(json).success) return undefined;
     if (status < 200 || status >= 300) {
       const message = Problem.safeParse(json).data?.error ?? `HTTP ${status}`;
       throw new DriverError(`sanomaOps: ${where}: ${message}`, { retryable: retryableStatus(status), status });

@@ -1,3 +1,5 @@
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { DBOS, type DBOSClient, type WorkflowStatus } from "@dbos-inc/dbos-sdk";
 import { startTestWorker, testDatabaseUrl } from "@sanoma-ai/testing";
@@ -479,7 +481,9 @@ describe("the stop rule", () => {
 describe("the stop rule, with the wakeup unbound", () => {
   const app = useWorker("deadlines_unbound", { "resources/infra.ts": WAKEUP_FILE });
 
-  it("registers nothing and keeps running, recording that apply has not created the instance", async () => {
+  it("registers nothing and takes no generation until apply binds the wakeup, then registers with its binding", async () => {
+    // A run of this test before left its error on the row.
+    await app.pool.query(`UPDATE ${WAKEUP_TABLE} SET last_error = NULL WHERE id = 1`);
     await app.client.start(nap, { seconds: 30 }, { startedBy: alice });
     const stops: SelfStop[] = [];
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -489,10 +493,16 @@ describe("the stop rule, with the wakeup unbound", () => {
     expect(failed.last_error).toBe(
       "the wakeup resources/infra.ts#wake is not bound yet: apply it to create its instance",
     );
-    // Tried again at the next check, still registering nothing.
-    await waitFor(async () => Number((await app.row()).generation) > Number(failed.generation));
+    await new Promise((r) => setTimeout(r, 500));
+    expect((await app.row()).generation).toBe(failed.generation);
+    expect(warn.mock.calls.filter(([line]) => String(line).includes("is not bound yet"))).toHaveLength(1);
     warn.mockRestore();
     expect(registered).toEqual([]);
     expect(stops).toEqual([]);
+
+    // Apply binds it while the worker runs: the next check registers with the binding, and stops.
+    writeFileSync(join(app.config.root!, "resources", "sanoma.lock.json"), BOUND);
+    await waitFor(() => stops.length === 1);
+    expect(registered).toMatchObject([{ input: { id: "W_1", generation: stops[0]!.generation } }]);
   });
 });

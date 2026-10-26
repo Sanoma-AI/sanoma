@@ -1,7 +1,13 @@
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import { dbosStatusesOf } from "./client.ts";
 import type { Db } from "./db.ts";
-import { nextWakeupGeneration, recordWakeupError, recordWakeupRegistration, recordWakeupStop } from "./db.ts";
+import {
+  nextWakeupGeneration,
+  recordWakeupError,
+  recordWakeupProblem,
+  recordWakeupRegistration,
+  recordWakeupStop,
+} from "./db.ts";
 import type { ResolvedConfig } from "./config.ts";
 import { warn } from "./log.ts";
 import type { CallContext, DriverFn, Op } from "./op.ts";
@@ -137,10 +143,12 @@ export interface StopRule {
   /** This worker's id on the row (`owner`), fresh for each worker. */
   owner: string;
   /**
-   * The declared wakeup's binding, the vendor's id of its instance: what a registration names, and
-   * what scopes its idempotency key to this instance. Undefined while apply has not created it.
+   * The declared wakeup's binding now, the vendor's id of its instance: what a registration names,
+   * and what scopes its idempotency key to this instance. Read at each registration, so one apply
+   * makes or replaces while the worker runs is the one registered with; undefined while apply has
+   * not created it.
    */
-  binding: string | undefined;
+  binding: () => string | undefined;
   /** The wakeup's declaration (`<file>#<export>`), for the message when it is unbound. */
   declaration: string;
   /** The wakeup type's register operation, and its driver (none when the connector attaches none). */
@@ -176,6 +184,15 @@ export function stopWhenIdle(rule: StopRule): { close(): void } {
     const next = rule.deadlines.nextDeadline();
     const at = next?.toISOString() ?? null;
     const db = await rule.db();
+    const binding = at === null ? undefined : rule.binding();
+    if (at !== null && binding === undefined) {
+      // No generation is taken: nothing can be registered until apply creates the instance.
+      const message = `the wakeup ${rule.declaration} is not bound yet: apply it to create its instance`;
+      const line = `could not register the wakeup at ${at}, so the worker keeps running: ${message}`;
+      if (line !== lastProblem) await recordWakeupProblem(db, rule.owner, message);
+      problem(line);
+      return false;
+    }
     const generation = await nextWakeupGeneration(db, rule.owner);
     if (generation === undefined) {
       // A worker claims the row only when it starts, so this one never gets it back.
@@ -185,7 +202,7 @@ export function stopWhenIdle(rule: StopRule): { close(): void } {
     }
     if (at !== null) {
       try {
-        await registerWakeup(rule, { at, generation });
+        await registerWakeup(rule, { id: binding!, at, generation });
       } catch (err) {
         const message = errorMessage(err);
         await recordWakeupError(db, rule.owner, generation, message);
@@ -229,19 +246,12 @@ export function stopWhenIdle(rule: StopRule): { close(): void } {
  * Calls the wakeup's register operation, as `SanomaClient.call` calls a driver: its input parsed
  * (the instance's id, its binding, with `at` and `generation`), a `CallContext` of the runtime's,
  * and no ledger record, which is a run's. The idempotency key is the generation's, so a retried
- * registration is one registration. Throws, registering nothing, while the wakeup is unbound: a
- * failed registration, which keeps the worker up.
+ * registration is one registration.
  */
-async function registerWakeup(
-  { register: { op, fn }, secrets, binding, declaration }: StopRule,
-  { at, generation }: Omit<WakeupRegistration, "id">,
-) {
-  if (binding === undefined) {
-    throw new Error(`the wakeup ${declaration} is not bound yet: apply it to create its instance`);
-  }
+async function registerWakeup({ register: { op, fn }, secrets }: StopRule, registration: WakeupRegistration) {
   if (!fn) throw new Error(`${op.id} has no driver: the connector package must attach one`);
   // Every database counts generations from 0, so the key names the wakeup too.
-  const key = `wakeup:${binding}:${generation}`;
+  const key = `wakeup:${registration.id}:${registration.generation}`;
   const context: CallContext = { idempotencyKey: key, runId: key, opId: op.id, attempt: 1, secrets, by: WAKEUP_AGENT };
-  await fn(op.input.parse({ id: binding, at, generation } satisfies WakeupRegistration), context);
+  await fn(op.input.parse(registration), context);
 }

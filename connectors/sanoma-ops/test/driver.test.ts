@@ -11,6 +11,8 @@ const { server, play, sent } = replay(replayOptions);
 
 const ID = "00000000-0000-4000-8000-000000000001";
 const HOST = "https://company.example.test";
+/** An instance as `GET /wakeup/instances/{id}` shows it. */
+const shown = { id: ID, url: HOST, at: null, generation: 0, calledAt: null, attempts: 0, lastError: null };
 const callWith = (secrets: Secrets = memorySecrets()): CallContext => ({
   idempotencyKey: "run-1:1",
   runId: "run-1",
@@ -66,11 +68,41 @@ describe.skipIf(live)("sanomaOpsDriver", () => {
   });
 
   it("refuses a new host while a token is stored, before it deletes the instance", async () => {
-    const shown = { id: ID, url: HOST, at: null, generation: 0, calledAt: null, attempts: 0, lastError: null };
     play("new-host", [{ method: "GET", path: `/wakeup/instances/${ID}`, status: 200, body: shown }]);
     const secrets = memorySecrets({ SANOMA_WAKEUP_TOKEN: "swi_old" });
     const update = op("update", { id: ID, desired: { host: "https://elsewhere.example.test" } }, callWith(secrets));
     expect(await failure(update)).toMatchObject({ retryable: false, vendorCode: "stale" });
+  });
+
+  it("plans no change for the same host written another way, as the service keeps URLs", async () => {
+    play("same-host", [{ method: "GET", path: `/wakeup/instances/${ID}`, status: 200, body: shown }]);
+    const plan = await op("plan", { id: ID, desired: { host: "https://COMPANY.example.test:443/" } });
+    expect(plan).toMatchObject({ action: "none", replace: [] });
+  });
+
+  it("replaces an instance for a new host once no token is stored: the new one first, then the old one", async () => {
+    const NEW = "00000000-0000-4000-8000-000000000002";
+    play("replace", [
+      { method: "GET", path: `/wakeup/instances/${ID}`, status: 200, body: shown },
+      { method: "POST", path: "/wakeup/instances", status: 201, body: { id: NEW, token: "swi_new" } },
+      { method: "DELETE", path: `/wakeup/instances/${ID}`, status: 204, body: null },
+    ]);
+    const secrets = memorySecrets();
+    const desired = { host: "https://elsewhere.example.test" };
+    const made = await op(
+      "update",
+      { id: ID, desired, expect: { action: "replace", replace: ["host"] } },
+      callWith(secrets),
+    );
+    expect(made).toMatchObject({ id: NEW, state: { host: "https://elsewhere.example.test" } });
+    expect(await secrets.get("SANOMA_WAKEUP_TOKEN")).toBe("swi_new");
+  });
+
+  it("reads a 404 that is not the service's as a failure, not as gone", async () => {
+    play("not-the-service", [
+      { method: "GET", path: `/wakeup/instances/${ID}`, status: 404, body: "<html>Not found</html>" },
+    ]);
+    expect(await failure(op("read", { id: ID }))).toMatchObject({ status: 404, retryable: false });
   });
 
   it("reads an instance the service does not have as gone, and deletes it as done", async () => {

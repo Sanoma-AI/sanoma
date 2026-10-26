@@ -1,4 +1,5 @@
-import { DriverError, type WakeupRegistration } from "@sanoma-ai/workflows";
+import { DriverError, retryableStatus, type WakeupRegistration } from "@sanoma-ai/workflows";
+import { instanceUrl } from "@sanoma-ai/workflows/wakeup-service";
 import { defineFake, type FakeOptions } from "@sanoma-ai/workflows/fake";
 import { sanomaOpsOps } from "./connector.ts";
 import { type Instance, type WakeupApi, wakeupOps } from "./wakeup.ts";
@@ -19,15 +20,13 @@ const RETRY_MS = 250;
 const MAX_DELAY_MS = 2 ** 31 - 1;
 
 const fail = (status: number, message: string) =>
-  new DriverError(`sanomaOps: ${message}`, { retryable: status >= 500, status });
+  new DriverError(`sanomaOps: ${message}`, { retryable: retryableStatus(status), status });
 
-/** An http(s) URL with no user, password, query or fragment, as the service takes one; else a 400. */
+/** The URL as the service keeps it (`instanceUrl`, its own rule), or the service's 400. */
 function checkedUrl(value: string): string {
-  const url = !/[?#]/.test(value) && URL.canParse(value) ? new URL(value) : undefined;
-  if (!url || !/^https?:$/.test(url.protocol) || url.username || url.password) {
-    throw fail(400, "url must be an http(s) URL with no user, password, query or fragment");
-  }
-  return url.href.replace(/\/+$/, "");
+  const checked = instanceUrl(value);
+  if ("error" in checked) throw fail(400, checked.error);
+  return checked.url;
 }
 
 /**
