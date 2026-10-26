@@ -15,6 +15,7 @@ concurrency:
 jobs:
   build:
     runs-on: macos-latest
+    timeout-minutes: 45
     # Actions pinned to commits, as in release.yml: this job writes releases.
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0

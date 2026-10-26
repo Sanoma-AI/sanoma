@@ -48,7 +48,7 @@ const isReleasePage = (url: unknown) => typeof url === "string" && url.startsWit
 export function newerRelease(current: string, releases: readonly GitHubRelease[]): Newer | undefined {
   let found: Newer | undefined;
   for (const release of releases) {
-    if (release.draft || release.prerelease || !release.tag_name.startsWith(TAG_PREFIX)) continue;
+    if (release.draft || release.prerelease || !release.tag_name?.startsWith(TAG_PREFIX)) continue;
     if (!isReleasePage(release.html_url)) continue;
     const version = release.tag_name.slice(TAG_PREFIX.length);
     if (isLater(version, found?.version ?? current)) found = { version, url: release.html_url };
@@ -63,7 +63,9 @@ export async function fetchReleases(current: string, fetchImpl: typeof fetch = f
     signal: AbortSignal.timeout(30_000),
   });
   if (!res.ok) throw new Error(`GitHub answered ${res.status} ${res.statusText}`);
-  return (await res.json()) as GitHubRelease[];
+  const releases: unknown = await res.json();
+  if (!Array.isArray(releases)) throw new Error("GitHub answered without a list of releases");
+  return releases as GitHubRelease[];
 }
 
 /** The shell's own settings (`<userData>/settings.json`): only the update check's for now. */

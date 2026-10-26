@@ -115,6 +115,7 @@ test("fetchReleases asks GitHub's API and fails on an error status", async () =>
   expect(asked[0]![0]).toBe(RELEASES_URL);
   expect(asked[0]![1]?.headers).toMatchObject({ "User-Agent": "Sanoma/0.1.0" });
   await expect(fetchReleases("0.1.0", answer(403, { message: "rate limited" }))).rejects.toThrow(/403/);
+  await expect(fetchReleases("0.1.0", answer(200, { message: "not a list" }))).rejects.toThrow(/list of releases/);
 });
 
 const github = (releases: GitHubRelease[]) => (async () => Response.json(releases)) as unknown as typeof fetch;

@@ -673,9 +673,12 @@ if (!app.requestSingleInstanceLock()) {
   void app.whenReady().then(() => {
     app.setAboutPanelOptions({ applicationName: "Sanoma", applicationVersion: app.getVersion() });
     buildMenu();
-    checkForUpdate(false);
-    // Hourly against the saved time, not a day-long timer, which would not count the hours asleep.
-    setInterval(() => checkForUpdate(false), 60 * 60 * 1000);
+    // The built app only: a checkout's shell (start, the smoke test) shares its settings and asks GitHub only from Help.
+    if (app.isPackaged) {
+      checkForUpdate(false);
+      // Hourly against the saved time, not a day-long timer, which would not count the hours asleep.
+      setInterval(() => checkForUpdate(false), 60 * 60 * 1000);
+    }
     const folder = folderArgument(argsOf(process.argv), process.cwd()) ?? dropped.at(-1);
     if (folder) void openCompany(folder);
     else showStart();
