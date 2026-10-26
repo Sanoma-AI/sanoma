@@ -66,7 +66,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 const companiesFile = () => join(app.getPath("userData"), "companies.json");
 const logFile = (path: string) => join(app.getPath("logs"), `${slugOf(path)}.log`);
 const settingsFile = () => join(app.getPath("userData"), "settings.json");
-const preload = join(here, "preload.cjs");
+/** The shell's own pages': the start window's and each company window's progress page. */
+const shellPreferences = { preload: join(here, "preload.cjs"), contextIsolation: true, sandbox: true };
 
 /** Changes the entry companies.json has for `path` (`updated`), read and written at once. */
 const patchCompany = (path: string, patch: Partial<Company>) =>
@@ -76,6 +77,8 @@ const patchCompany = (path: string, patch: Partial<Company>) =>
 export interface StartState {
   recent: RecentCompany[];
   warnings: string[];
+  /** One line the start window shows: why what was asked did not happen (`problem`), or what did. */
+  notice?: { text: string; problem: boolean };
   /** A form the start window shows: a repository's address to clone, or who commits. */
   ask?: { kind: "clone"; url?: string; problem?: string } | ({ kind: "identity"; problem?: string } & Identity);
 }
@@ -134,6 +137,7 @@ let quitting = false;
 
 let startWindow: BrowserWindow | undefined;
 let ask: StartState["ask"];
+let notice: StartState["notice"];
 
 const archWarning = () =>
   app.runningUnderARM64Translation
@@ -142,6 +146,8 @@ const archWarning = () =>
       ]
     : [];
 
+/** Whether the company runs or is starting now. */
+const isLive = (path: string) => running.has(path) || opening.has(path);
 /** The companies running or starting now, by real path. */
 const live = () => new Set([...running.keys(), ...opening.keys()]);
 
@@ -158,6 +164,7 @@ function sendStart() {
 const startState = (): StartState => ({
   recent: recentOf(readCompanies(companiesFile()), live()),
   warnings: archWarning(),
+  notice,
   ask,
 });
 
@@ -181,7 +188,7 @@ function showStart() {
     width: 640,
     height: 720,
     title: "Sanoma",
-    webPreferences: { preload, contextIsolation: true, sandbox: true },
+    webPreferences: shellPreferences,
   });
   shellPage(startWindow.webContents);
   startWindow.on("closed", () => {
@@ -198,15 +205,19 @@ function shellPage(contents: WebContents) {
   contents.setWindowOpenHandler(() => ({ action: "deny" }));
 }
 
+/** Shows one of the window's two views, the shell's page or the app, in place of the other. */
+function reveal(shown: CompanyWindow, view: WebContentsView) {
+  const other = view === shown.appView ? shown.shellView : shown.appView;
+  other.setVisible(false);
+  view.setVisible(true);
+  // The View menu acts on the focused page: the one shown.
+  if (!view.webContents.isDestroyed()) view.webContents.focus();
+}
+
 /** Changes what the company's page shows, and sends it soon; any phase but `running` shows that page. */
 function setCompanyState(shown: CompanyWindow, next: Partial<CompanyState>) {
   shown.state = { ...shown.state, ...next };
-  if (next.phase && next.phase !== "running") {
-    shown.appView.setVisible(false);
-    shown.shellView.setVisible(true);
-    // The View menu acts on the focused page: the one shown.
-    if (!shown.shellView.webContents.isDestroyed()) shown.shellView.webContents.focus();
-  }
+  if (next.phase && next.phase !== "running") reveal(shown, shown.shellView);
   shown.sendTimer ??= setTimeout(() => {
     shown.sendTimer = undefined;
     if (shown.log) shown.state = { ...shown.state, log: shown.log.tail() };
@@ -224,10 +235,9 @@ function showApp(shown: CompanyWindow, url: string) {
     .catch(() => {})
     .finally(() => {
       // It may have stopped meanwhile, or started again.
-      if (shown.state.phase !== "running" || shown.url !== url || shown.window.isDestroyed()) return;
-      shown.shellView.setVisible(false);
-      shown.appView.setVisible(true);
-      shown.appView.webContents.focus();
+      if (shown.state.phase === "running" && shown.url === url && !shown.window.isDestroyed()) {
+        reveal(shown, shown.appView);
+      }
     });
 }
 
@@ -259,7 +269,7 @@ function windowFor(path: string): CompanyWindow {
     ),
     title: name,
   });
-  const shellView = new WebContentsView({ webPreferences: { preload, contextIsolation: true, sandbox: true } });
+  const shellView = new WebContentsView({ webPreferences: shellPreferences });
   shellPage(shellView.webContents);
   const webPreferences = {
     partition: partitionOf(path),
@@ -299,7 +309,7 @@ function windowFor(path: string): CompanyWindow {
   window.on("close", (event) => {
     saveBounds(path, shown);
     // While it runs (or starts), closing hides it: the company goes on, its workflows with it.
-    if (!quitting && (running.has(path) || opening.has(path))) {
+    if (!quitting && isLive(path)) {
       event.preventDefault();
       // A full-screen window hidden as it is would leave its Space behind, empty.
       if (!window.isFullScreen()) return window.hide();
@@ -319,18 +329,23 @@ function windowFor(path: string): CompanyWindow {
   return shown;
 }
 
+/**
+ * Says `text` in the start window, shown, in place of what it said last: in the window, never a
+ * native dialog, which would hold up the shell (and its smoke test) until someone clicks it.
+ */
+function tell(text: string, problem = true) {
+  notice = { text, problem };
+  showStart();
+}
+
 /** Opens the company in `dir`: shows its window when it runs already, else starts it in its window. */
 async function openCompany(dir: string) {
+  notice = undefined;
   if (!isCompanyFolder(dir)) {
-    await dialog.showMessageBox({
-      type: "warning",
-      message: "This folder holds no company",
-      detail: `${dir} has no sanoma.config.ts. Open the folder a company was started in.`,
-    });
-    return;
+    return tell(`${dir} holds no company (no sanoma.config.ts): open the folder a company was started in.`);
   }
   const path = realpathSync(dir);
-  if (running.has(path) || opening.has(path)) return showWindow(path);
+  if (isLive(path)) return showWindow(path);
   await begin(path);
 }
 
@@ -349,7 +364,7 @@ const beginnings = new Map<string, Begin>();
  * failure to start says why there.
  */
 async function begin(path: string, how?: Begin) {
-  if (running.has(path) || opening.has(path) || quitting) return;
+  if (isLive(path) || quitting) return;
   if (how) beginnings.set(path, how);
   const shown = windowFor(path);
   setCompanyState(shown, { phase: "starting", progress: [], log: [], message: undefined, reopens: true });
@@ -425,7 +440,8 @@ async function start(path: string, shown: CompanyWindow, how: Begin) {
     env: process.env,
     onLine(stream, line) {
       log.write(stream, line);
-      if (current()) setCompanyState(shown, {});
+      // The page gets the log's tail while it shows; once it shows again, the next state carries it.
+      if (current() && shown.state.phase !== "running") setCompanyState(shown, {});
     },
     onProgress(step) {
       log.write("shell", step);
@@ -475,14 +491,19 @@ async function stop(path: string) {
   await entry.session.stop();
 }
 
+/** The next launch does not open the company (`Company.open`), and its window's page says so. */
+function dontReopen(path: string) {
+  patchCompany(path, { open: false });
+  const shown = windows.get(path);
+  if (shown) setCompanyState(shown, { reopens: false });
+}
+
 /** Company → Stop: the company stops, its window shows Start again, and the next launch does not open it. */
 async function stopCompany(path: string) {
   // Still choosing its port: its session is not there to stop yet.
   await opening.get(path);
-  patchCompany(path, { open: false });
+  dontReopen(path);
   await stop(path);
-  const shown = windows.get(path);
-  if (shown) setCompanyState(shown, { reopens: false });
 }
 
 /** Stops the company and starts it again in its window, which shows the start, then the app again. */
@@ -508,6 +529,10 @@ function guard(contents: WebContents, path: string, webPreferences: Electron.Web
   };
   contents.on("will-navigate", navigate);
   contents.on("will-redirect", navigate);
+  // A page's beforeunload never holds up Quit, which would leave the shell half quit.
+  contents.on("will-prevent-unload", (event) => {
+    if (quitting) event.preventDefault();
+  });
   contents.setWindowOpenHandler(({ url }) => {
     if (target(url) === "window") {
       return { action: "allow", overrideBrowserWindowOptions: { webPreferences } };
@@ -530,8 +555,6 @@ async function chooseFolder() {
   });
   if (!canceled && filePaths[0]) await openCompany(filePaths[0]);
 }
-
-const say = (message: string, detail?: string) => void dialog.showMessageBox({ type: "info", message, detail });
 
 const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
@@ -605,6 +628,7 @@ async function gitReady(): Promise<boolean> {
 
 /** File → New Company…: an empty folder (made in the dialog, or chosen), then the launcher's init there. */
 async function newCompany(): Promise<void> {
+  notice = undefined;
   const { canceled, filePaths } = await dialog.showOpenDialog({
     title: "Choose or make an empty folder for the new company",
     buttonLabel: "Start Company Here",
@@ -614,7 +638,7 @@ async function newCompany(): Promise<void> {
   const dir = filePaths[0];
   if (canceled || !dir) return;
   const problem = isCompanyFolder(dir) ? `${dir} holds a company already: open it instead.` : newCompanyProblem(dir);
-  if (problem) return say("Choose an empty folder", problem);
+  if (problem) return tell(problem);
   const warning = syncedFolderWarning(dir, homedir());
   if (warning) {
     const { response } = await dialog.showMessageBox({
@@ -637,6 +661,7 @@ async function newCompany(): Promise<void> {
  * shows it and a failure, and Start again clones again.
  */
 async function cloneCompanyFlow(): Promise<void> {
+  notice = undefined;
   let url = "";
   let problem: string | undefined;
   do {
@@ -655,7 +680,7 @@ async function cloneCompanyFlow(): Promise<void> {
   if (canceled || !filePaths[0]) return;
   const parent = realpathSync(filePaths[0]);
   const target = cloneTarget(url, parent);
-  if ("problem" in target) return say("Sanoma cannot clone it there", target.problem);
+  if ("problem" in target) return tell(target.problem);
   if (!(await identityReady(parent))) return;
   await begin(target.dir, cloneSession(url));
 }
@@ -671,11 +696,13 @@ const updating = new Set<string>();
 async function getUpdates(path: string): Promise<void> {
   if (updating.has(path)) return;
   updating.add(path);
+  const name = windows.get(path)?.state.name ?? companyName(path);
+  const say = (text: string, problem = false) => tell(`${name}: ${text}`, problem);
   try {
     if (!(await gitReady())) return;
     const env = gitEnv(process.env);
     const plan = await prepareUpdate(path, env);
-    if ("refused" in plan) return say(plan.refused);
+    if ("refused" in plan) return say(plan.refused, true);
     if (!plan.behind) return say("This company is up to date with GitHub");
     await stop(path);
     const failed = await fastForward(path, env).then(
@@ -683,12 +710,10 @@ async function getUpdates(path: string): Promise<void> {
       (err: unknown) => gitFailure(messageOf(err), "The update did not apply"),
     );
     await begin(path);
-    say(
-      failed ??
-        `Got ${plan.behind} new ${plan.behind === 1 ? "change" : "changes"} from GitHub; the company is starting again`,
-    );
+    if (failed) say(failed, true);
+    else say(`Got ${plan.behind} new ${plan.behind === 1 ? "change" : "changes"} from GitHub; it is starting again`);
   } catch (err) {
-    say("Sanoma could not get updates", messageOf(err));
+    say(`Sanoma could not get updates: ${messageOf(err)}`, true);
   } finally {
     updating.delete(path);
   }
@@ -828,13 +853,15 @@ function buildMenu() {
 }
 
 /** The arguments after the executable (and, run from a checkout, the app's path). */
-const argsOf = (argv: readonly string[]) => argv.slice(process.defaultApp ? 2 : 1);
+const argsOf = (argv: readonly string[]) => argv.slice(1);
+/** The app's own path on a checkout's command line (`electron <app path>`), which is no company folder. */
+const ownPath = () => (process.defaultApp ? app.getAppPath() : undefined);
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on("second-instance", (_event, argv, cwd) => {
-    const folder = folderArgument(argsOf(argv), cwd);
+    const folder = folderArgument(argsOf(argv), cwd, ownPath());
     if (folder) void openCompany(folder);
     else if (windows.size) showWindow([...windows.keys()].at(-1)!);
     else showStart();
@@ -860,10 +887,8 @@ if (!app.requestSingleInstanceLock()) {
   });
   // A company that failed: the next launch does not open it.
   ipcMain.handle("start:skip", ({ sender }) => {
-    const [path, shown] = companyOf(sender) ?? [];
-    if (!path || !shown) return;
-    patchCompany(path, { open: false });
-    setCompanyState(shown, { reopens: false });
+    const [path] = companyOf(sender) ?? [];
+    if (path) dontReopen(path);
   });
   ipcMain.handle("start:create", () => newCompany());
   ipcMain.handle("start:clone", () => cloneCompanyFlow());
@@ -886,11 +911,6 @@ if (!app.requestSingleInstanceLock()) {
         });
       return;
     }
-    // The app exits now, unless a page cancels it (beforeunload): then the shell goes on as before.
-    setTimeout(() => {
-      quitting = stopped = false;
-      stoppingAll = undefined;
-    }, 1_000);
   });
   // ctrl-c in the terminal that started the shell, or a kill: quit as the menu does, stopping each company.
   for (const signal of ["SIGINT", "SIGTERM"] as const) process.on(signal, () => app.quit());
@@ -913,7 +933,7 @@ if (!app.requestSingleInstanceLock()) {
     // The companies open at the last Quit open again, each in its window at its saved bounds.
     const reopen = toReopen(readCompanies(companiesFile()));
     for (const path of reopen) void begin(path);
-    const folder = folderArgument(argsOf(process.argv), process.cwd()) ?? dropped.at(-1);
+    const folder = folderArgument(argsOf(process.argv), process.cwd(), ownPath()) ?? dropped.at(-1);
     if (folder) void openCompany(folder);
     else if (!reopen.length) showStart();
   });

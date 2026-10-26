@@ -30,6 +30,10 @@ function renderAsk(ask) {
 
 function render(state) {
   renderAsk(state.ask);
+  const notice = $("notice");
+  notice.hidden = !state.notice;
+  notice.textContent = state.notice?.text ?? "";
+  notice.className = state.notice?.problem ? "failed" : "muted";
   $("warnings").replaceChildren(
     ...state.warnings.map((text) =>
       Object.assign(document.createElement("p"), { className: "warning", textContent: text }),

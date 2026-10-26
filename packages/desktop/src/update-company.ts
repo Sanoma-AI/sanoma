@@ -8,13 +8,16 @@ const nothing = () => undefined;
 /** The lockfile the shell's own `pnpm install --prefer-offline` (`startSession`) may rewrite. */
 export const LOCKFILE = "pnpm-lock.yaml";
 
+/** `git status --porcelain=v2`'s line for the root lockfile changed in the tree only. */
+const SHELL_LOCKFILE = new RegExp(`^1 \\.M (\\S+ ){6}${LOCKFILE.replace(".", "\\.")}$`);
+
 /**
  * The person's own changes in `git status --porcelain=v2` output, one line each: all but the root
  * lockfile changed in the tree only (`.M`), which is the shell's own install's doing, and which
  * `fastForward` puts back before it moves `main`.
  */
 export const ownChanges = (status: string): string[] =>
-  status.split("\n").filter((line) => line && !/^1 \.M (\S+ ){6}pnpm-lock\.yaml$/.test(line));
+  status.split("\n").filter((line) => line && !SHELL_LOCKFILE.test(line));
 
 /** What Get Updates found: why it does nothing, or how many commits `main` is behind GitHub's (0: up to date). */
 export type UpdatePlan = { refused: string } | { behind: number };

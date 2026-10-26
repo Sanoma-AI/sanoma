@@ -2,6 +2,7 @@
 // Node the shell ships; one window shows the start, then the app; closing it leaves the launcher
 // running, opening the folder again shows it, Quit stops it, and the next launch opens it again.
 import { cpSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { once } from "node:events";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -101,11 +102,7 @@ test("opens a company in one window from progress to app, keeps it running when 
     expect(satisfies(node, engines.node), `Node ${node} for ${engines.node}`).toBe(true);
 
     // As the person does: the window closes, and the company goes on running.
-    await shell.evaluate(({ BaseWindow, BrowserWindow }) =>
-      BaseWindow.getAllWindows()
-        .find((window) => !(window instanceof BrowserWindow))!
-        .close(),
-    );
+    await shell.evaluate(({ BaseWindow }, id) => BaseWindow.fromId(id)!.close(), progress!.id);
     await expect.poll(async () => (await companyWindows(shell!))[0]?.visible).toBe(false);
     await new Promise((resolve) => setTimeout(resolve, 1_000));
     expect(existsSync(join(company, "stopped")), "closing the window leaves the company running").toBe(false);
@@ -121,15 +118,15 @@ test("opens a company in one window from progress to app, keeps it running when 
 
     // Quit stops it, and keeps where its window was and that it was open.
     const bounds = { x: 120, y: 90, width: 900, height: 700 };
-    await shell.evaluate(
-      ({ BaseWindow, BrowserWindow }, to) =>
-        BaseWindow.getAllWindows()
-          .find((window) => !(window instanceof BrowserWindow))!
-          .setBounds(to),
+    await shell.evaluate(({ BaseWindow }, [id, to]) => BaseWindow.fromId(id)!.setBounds(to), [
+      progress!.id,
       bounds,
-    );
+    ] as const);
+    const first = shell.process();
     await shell.close();
     shell = undefined;
+    // Its single-instance lock goes with the process: the next launch must not hand its folder to this one.
+    if (first.exitCode === null && first.signalCode === null) await once(first, "exit");
     expect(existsSync(join(company, "stopped")), "Quit stops the company").toBe(true);
 
     // The next launch, with no folder named, opens it again at those bounds.
@@ -138,6 +135,8 @@ test("opens a company in one window from progress to app, keeps it running when 
       .poll(async () => isApp(showing((await companyWindows(shell!))[0])), { timeout: 45_000, intervals: [100] })
       .toBe(true);
     expect((await companyWindows(shell))[0]!.bounds).toEqual(bounds);
+    // Its windows only: the app's own folder on the command line is no company to complain about.
+    expect(await shell.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)).toBe(0);
   } catch (err) {
     if (log && existsSync(log)) console.error(`the shell's log:\n${readFileSync(log, "utf8")}`);
     throw err;

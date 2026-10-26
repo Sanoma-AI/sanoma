@@ -13,14 +13,16 @@ const isDirectory = (path: string) => {
 };
 
 /**
- * The folder named on a command line (`argv` without the executable and, run from a checkout,
- * its app path), resolved against `cwd`: the last argument that is a directory. Flags, such as
+ * The folder named on a command line (`argv` without the executable), resolved against `cwd`:
+ * the last argument that is a directory and not `appPath`, the app's own folder a checkout's
+ * shell is started with (`electron <app path>`, wherever its flags put it). Flags, such as
  * Chromium's, and anything else are skipped.
  */
-export function folderArgument(args: readonly string[], cwd: string): string | undefined {
+export function folderArgument(args: readonly string[], cwd: string, appPath?: string): string | undefined {
   return args
     .filter((arg) => !arg.startsWith("-"))
     .map((arg) => resolve(cwd, arg))
+    .filter((path) => path !== appPath)
     .findLast(isDirectory);
 }
 

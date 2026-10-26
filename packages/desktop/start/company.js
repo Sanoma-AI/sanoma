@@ -13,13 +13,14 @@ const messages = {
   starting: (state) => `Starting ${state.path}`,
   running: () => "Opening the app",
   stopped: () => "Stopped",
+  failed: (state) => state.message,
 };
 
 function render(state) {
   document.title = state.name;
   $("company-name").textContent = state.name;
   const message = $("company-message");
-  message.textContent = state.phase === "failed" ? state.message : messages[state.phase](state);
+  message.textContent = messages[state.phase](state);
   message.className = state.phase === "failed" ? "failed" : "muted";
   $("warnings").replaceChildren(
     ...state.warnings.map((text) =>

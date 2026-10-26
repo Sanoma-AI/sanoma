@@ -448,11 +448,15 @@ describe("logs", () => {
 });
 
 describe("places", () => {
-  test("the folder on a command line: the last directory, flags skipped", () => {
+  test("the folder on a command line: the last directory, flags and the app's own folder skipped", () => {
     const dir = temp();
     expect(folderArgument(["--inspect", "-psn_0_123", dir], "/")).toBe(dir);
     expect(folderArgument(["missing"], dir)).toBeUndefined();
     expect(folderArgument(["."], dir)).toBe(dir);
+    // A checkout's shell: `electron --flags <app path> [folder]`; the app's own folder is no company.
+    const app = temp();
+    expect(folderArgument(["--inspect=0", app, "--user-data-dir=/x"], "/", app)).toBeUndefined();
+    expect(folderArgument([app, dir], "/", app)).toBe(dir);
   });
 
   test("warns about folders iCloud syncs", () => {
