@@ -114,8 +114,18 @@ function serviceApi(timeoutMs: number): WakeupApi {
     return parsed.data;
   };
   return {
-    put: async (url, token) =>
-      (await send("POST", "/wakeup/instances", accountToken(), { reply: Posted, body: { url, token } }))!,
+    put: async (url, token) => {
+      try {
+        return (await send("POST", "/wakeup/instances", accountToken(), { reply: Posted, body: { url, token } }))!;
+      } catch (error) {
+        // Another account's instance's token: the advice is the company's, so it is here, not the service's.
+        if (!(error instanceof DriverError) || error.status !== 409) throw error;
+        throw new DriverError(
+          `${error.message}: a new account needs a new instance token (store the new account's token in /setup, which mints one)`,
+          { retryable: false, status: 409, cause: error },
+        );
+      }
+    },
     get: (id): Promise<Instance | undefined> =>
       send("GET", instance(id), accountToken(), { reply: instanceSchema, absent: true }),
     async remove(id) {

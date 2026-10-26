@@ -313,10 +313,7 @@ export async function startWakeupService({
     );
     const row = rows[0];
     if (!row) {
-      return problem(
-        409,
-        "the token is another account's instance's: a new account needs a new instance token (clear SANOMA_WAKEUP_TOKEN, then store the account's token again in /setup, which mints one)",
-      );
+      return problem(409, "the token is another account's instance's");
     }
     return json(row.made ? 201 : 200, { id: row.id });
   }
@@ -428,19 +425,22 @@ function startLoop({
     }
     // Stopped mid-call: nothing is known of it, so it is called again once its claim lapses.
     if (stopping.signal.aborted) return;
+    // Recorded only on the registration called: one replaced (a newer generation), or moved to
+    // another URL (its generation counted again from 0), is called again.
+    const same = "WHERE id = $1 AND generation = $2 AND url = $3";
     if (error === undefined) {
       await pool.query(
-        `UPDATE ${WAKEUP_INSTANCES_TABLE} SET called_at = $3, attempts = 0, next_attempt_at = NULL, ` +
-          "last_error = NULL WHERE id = $1 AND generation = $2",
-        [row.id, row.generation, now()],
+        `UPDATE ${WAKEUP_INSTANCES_TABLE} SET called_at = $4, attempts = 0, next_attempt_at = NULL, ` +
+          `last_error = NULL ${same}`,
+        [row.id, row.generation, row.url, now()],
       );
       log.info(`wakeup: called ${target}`);
     } else {
       await pool.query(
-        `UPDATE ${WAKEUP_INSTANCES_TABLE} SET attempts = attempts + 1, last_error = $3, ` +
-          `next_attempt_at = $4::timestamptz + least(power(2, attempts), ${MAX_BACKOFF_S}) * interval '1 second' ` +
-          "WHERE id = $1 AND generation = $2",
-        [row.id, row.generation, error, now()],
+        `UPDATE ${WAKEUP_INSTANCES_TABLE} SET attempts = attempts + 1, last_error = $4, ` +
+          `next_attempt_at = $5::timestamptz + least(power(2, attempts), ${MAX_BACKOFF_S}) * interval '1 second' ` +
+          same,
+        [row.id, row.generation, row.url, error, now()],
       );
       log.warn(`wakeup: calling ${target} failed (${error}); it is tried again`);
     }

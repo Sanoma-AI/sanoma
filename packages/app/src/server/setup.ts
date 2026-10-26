@@ -60,7 +60,8 @@ export const SETUP_TOKENS: Record<string, { description: string; optional?: true
   SUPABASE_ACCESS_TOKEN: { description: "A Supabase access token (supabase.com/dashboard/account/tokens)." },
   [OPS_TOKEN]: {
     description:
-      "A wakeup account's token (swa_…), from Sanoma, or from `sanoma wakeup account <label>` on a wakeup service of your own: the wakeup starts the company again when something is due after it stopped.",
+      "Optional: a wakeup account's token (swa_…), from Sanoma, or from `sanoma wakeup account <label>` on a wakeup service of your own: the wakeup starts the company again when something is due after it stopped.",
+    optional: true,
     needs: SANOMA_OPS_WAKEUP,
   },
   [OPS_URL]: {
@@ -102,8 +103,9 @@ export async function setupStatus(app: AppContext): Promise<SetupStatus> {
 
 /**
  * Stores a pasted token as the actor: one of the config's setup tokens only. Storing sanoma-ops's
- * account token also mints the instance's own (`SANOMA_WAKEUP_TOKEN`) when none is stored, so
- * going live can give the host it from the first apply, and the wakeup's create registers it.
+ * account token also mints the instance's own (`SANOMA_WAKEUP_TOKEN`) when none is stored, and a
+ * new one for another account's, so going live can give the host it from the first apply, and the
+ * wakeup's create registers it.
  */
 export async function setSetupToken(app: AppContext, actor: Principal, { name, value }: SetCredentialRequest) {
   const names = setupTokens(app);
@@ -116,8 +118,20 @@ export async function setSetupToken(app: AppContext, actor: Principal, { name, v
     });
   }
   const { client } = app;
+  const before = name === OPS_TOKEN ? (await client.secrets([OPS_TOKEN])).get(OPS_TOKEN)?.value : undefined;
   await client.setSecret(name, value, { by: actor.id });
-  if (name === OPS_TOKEN && !(await client.secrets([WAKEUP_TOKEN])).has(WAKEUP_TOKEN)) {
+  // Another account's: the instance token the old one registered would be refused (a 409).
+  if (name === OPS_TOKEN) await mintWakeupToken(client, actor, before !== undefined && before !== value);
+}
+
+/**
+ * Mints the instance's own token (`SANOMA_WAKEUP_TOKEN`) when sanoma-ops's account token is stored
+ * and it is not, or again when `fresh`, for a new account: storing the account's token does, and
+ * going live, for an account token from the environment or the connector page.
+ */
+export async function mintWakeupToken(client: AppContext["client"], actor: Principal, fresh = false) {
+  const stored = await client.secrets([OPS_TOKEN, WAKEUP_TOKEN]);
+  if (stored.has(OPS_TOKEN) && (fresh || !stored.has(WAKEUP_TOKEN))) {
     await client.setSecret(WAKEUP_TOKEN, mintInstanceToken(), { by: actor.id });
   }
 }

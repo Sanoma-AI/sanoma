@@ -258,7 +258,7 @@ describe("startWakeupService", () => {
     const other = await service!.mintAccount("other");
     expect(await register({ url: "https://theirs.test", token }, other.token)).toMatchObject({
       status: 409,
-      json: { error: expect.stringMatching(/^the token is another account's instance's: a new account needs/) },
+      json: { error: "the token is another account's instance's" },
     });
     expect(await shown()).toMatchObject({ url: "https://moved.test" });
     const { rows } = await pool.query(`SELECT count(*)::int AS n FROM ${WAKEUP_INSTANCES_TABLE}`);
@@ -396,6 +396,28 @@ describe("startWakeupService", () => {
         "http://instance.test/base/wake?generation=1",
         "http://instance.test/base/wake?generation=2",
       ]),
+    );
+  });
+
+  it("calls a moved instance's registration made during a call to its old URL, the same generation as the call's", async () => {
+    await start();
+    const { account, token } = await instance();
+    const release = Promise.withResolvers<void>();
+    answer = async (url) => {
+      if (url.startsWith("http://instance.test/")) await release.promise;
+      return new Response(null, { status: 204 });
+    };
+    await wake(token, ago(1_000), 1);
+    await vi.waitFor(() => expect(calls).toHaveLength(1));
+    // Moved, its generation counts again from 0: its first registration there is a 1 again.
+    const moved = { url: "http://moved.test", token };
+    expect(await send("POST", "/wakeup/instances", { token: account.token, body: moved })).toMatchObject({
+      status: 200,
+    });
+    await wake(token, ago(500), 1);
+    release.resolve();
+    await vi.waitFor(() =>
+      expect(calls).toEqual(["http://instance.test/base/wake?generation=1", "http://moved.test/wake?generation=1"]),
     );
   });
 

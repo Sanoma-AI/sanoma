@@ -52,6 +52,17 @@ describe.skipIf(live)("sanomaOpsDriver", () => {
     expect(sent[0]).toMatchObject({ body: { url: HOST, token } });
   });
 
+  it("refuses another account's instance token with the way out: a new one from /setup", async () => {
+    const error = "the token is another account's instance's";
+    play("taken", [{ method: "POST", path: "/wakeup/instances", status: 409, body: { error } }]);
+    const call = callWith(memorySecrets({ SANOMA_WAKEUP_TOKEN: mintInstanceToken() }));
+    expect(await failure(op("create", { desired: { host: HOST } }, call))).toMatchObject({
+      status: 409,
+      retryable: false,
+      message: expect.stringMatching(new RegExp(`${error}: a new account needs a new instance token .*/setup`)),
+    });
+  });
+
   it("registers a wake with the instance's own token", async () => {
     play("register");
     const token = mintInstanceToken();

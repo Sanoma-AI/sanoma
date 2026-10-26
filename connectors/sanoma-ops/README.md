@@ -74,7 +74,7 @@ The company mints the instance's token, not the service: "Connect sanoma-ops" in
 
 ### Errors and retries
 
-A 408, a 429, a 5xx, a timeout (10 s; `timeoutMs` changes it) or no reply is retryable; any other 4xx is not (a 401 for a token the service does not know, a 403 for another account's instance, a 409 for an instance token another account posted, a 400 for a bad URL, token or registration). `status` is kept, and the message is the service's `error`. A 404 is an instance that is gone only when it is the service's own (its JSON `{ error }`); another server's 404 at `SANOMA_OPS_URL` is a failure. The service has no error codes, so `vendorCode` is set only for the driver's own refusal, `plan_changed` (an `update` whose fresh plan differs from the one apply approved).
+A 408, a 429, a 5xx, a timeout (10 s; `timeoutMs` changes it) or no reply is retryable; any other 4xx is not (a 401 for a token the service does not know, a 403 for another account's instance, a 409 for an instance token another account posted, a 400 for a bad URL, token or registration). `status` is kept, and the message is the service's `error` (a 409's followed by the way out: store the new account's token in `/setup`, which mints a new instance token). A 404 is an instance that is gone only when it is the service's own (its JSON `{ error }`); another server's 404 at `SANOMA_OPS_URL` is a failure. The service has no error codes, so `vendorCode` is set only for the driver's own refusal, `plan_changed` (an `update` whose fresh plan differs from the one apply approved).
 
 ### Testing the driver
 

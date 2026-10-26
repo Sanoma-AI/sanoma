@@ -24,7 +24,7 @@ import {
 } from "../api.ts";
 import type { AppContext } from "../context.ts";
 import { asApplyPlan } from "../lib/apply-plan.ts";
-import { GITHUB_APP, OPS_TOKEN, OPS_URL, SANOMA_OPS_WAKEUP } from "./setup.ts";
+import { GITHUB_APP, mintWakeupToken, OPS_TOKEN, OPS_URL, SANOMA_OPS_WAKEUP } from "./setup.ts";
 
 // Going live, steps 2 to 6 (step 1 is connect, in setup.ts): choose where the company goes,
 // write `resources/sanoma/infra.ts`, apply the repository and the database, push the local
@@ -139,7 +139,7 @@ async function installations({ client }: AppContext): Promise<Installation[]> {
  */
 export async function goLiveChoices(app: AppContext): Promise<GoLiveChoices> {
   const errors: string[] = [];
-  const tokens = await app.client.secrets(["GITHUB_TOKEN", "SUPABASE_ACCESS_TOKEN", OPS_TOKEN]);
+  const tokens = await app.client.secrets(["GITHUB_TOKEN", "SUPABASE_ACCESS_TOKEN"]);
   const listed = async <T>(what: string, list: () => Promise<T[]>): Promise<T[]> => {
     try {
       return await list();
@@ -184,7 +184,7 @@ export async function goLiveChoices(app: AppContext): Promise<GoLiveChoices> {
     }
   }
   const host = hostType(app);
-  const cannot = host && tokens.has(OPS_TOKEN) ? unwakeable(app, host) : undefined;
+  const cannot = host && (await hostWakeup(app, host)).cannot;
   if (cannot) errors.push(cannot);
   return {
     owners,
@@ -203,36 +203,36 @@ export async function goLiveChoices(app: AppContext): Promise<GoLiveChoices> {
 }
 
 /**
- * Why the config's sanoma-ops wakeup cannot wake its host type, or undefined when it can or the
- * config declares none: going live then declares no wakeup, and the choices say why.
+ * Whether going live declares a wakeup, the one rule the choices and `renderInfra` share: when
+ * the config has sanoma-ops's wakeup type and sanoma-ops is connected (its account token stored),
+ * `secrets` are what the host is given for it (the instance's token, which `goLive` mints first
+ * when none is stored, and `SANOMA_OPS_URL` when one is), or `cannot` says why the type cannot
+ * wake this host's, and none is declared. Neither: no wakeup, and nothing to say.
  */
-function unwakeable({ resolved }: AppContext, host: Resource): string | undefined {
+async function hostWakeup(
+  { resolved, client }: AppContext,
+  host: Resource,
+): Promise<{ secrets?: Record<string, DataValue>; cannot?: string }> {
   const type = resolved.types.get(SANOMA_OPS_WAKEUP);
-  if (!type?.wakeup) return undefined;
+  if (!type?.wakeup) return {};
+  const stored = await client.secrets([OPS_TOKEN, OPS_URL]);
+  if (!stored.has(OPS_TOKEN)) return {};
   const hosts = wakeupHostTypes(type);
   const id = `${host.vendor}.${host.type}`;
-  return hosts.includes(id)
-    ? undefined
-    : `sanoma-ops's wakeup cannot wake a ${id} (it wakes ${hosts.join(", ")}): going live declares none, and the host stays up`;
-}
-
-/**
- * The secrets the host is given for its wakeup, when going live declares one: the config has
- * sanoma-ops's wakeup type, for this host type, and "Connect sanoma-ops" stored the account's
- * token and minted the instance's, which the worker on the host registers with, at
- * `SANOMA_OPS_URL` when one is stored. Undefined for no wakeup.
- */
-async function wakeupSecrets(app: AppContext, host: Resource) {
-  if (!app.resolved.types.has(SANOMA_OPS_WAKEUP) || unwakeable(app, host)) return undefined;
-  const stored = await app.client.secrets([OPS_TOKEN, WAKEUP_TOKEN, OPS_URL]);
-  if (!stored.has(OPS_TOKEN) || !stored.has(WAKEUP_TOKEN)) return undefined;
-  return { [WAKEUP_TOKEN]: secret(WAKEUP_TOKEN), ...(stored.has(OPS_URL) && { [OPS_URL]: secret(OPS_URL) }) };
+  if (!hosts.includes(id)) {
+    return {
+      cannot: `sanoma-ops's wakeup cannot wake a ${id} (it wakes ${hosts.join(", ")}): going live declares none, and the host stays up`,
+    };
+  }
+  return {
+    secrets: { [WAKEUP_TOKEN]: secret(WAKEUP_TOKEN), ...(stored.has(OPS_URL) && { [OPS_URL]: secret(OPS_URL) }) },
+  };
 }
 
 /**
  * `infra.ts`'s text for the choices: the repository, the database, the host that runs the company
  * from them and, once sanoma-ops is connected, the wakeup that starts the host again, whose
- * instance token the host is given from the first apply (`wakeupSecrets`).
+ * instance token the host is given from the first apply (`hostWakeup`).
  */
 export async function renderInfra(app: AppContext, { name, organization, region, port }: Omit<GoLiveRequest, "owner">) {
   const host = hostType(app);
@@ -248,7 +248,7 @@ export async function renderInfra(app: AppContext, { name, organization, region,
     if (!pkg) throw new ApiError(409, { error: `The ${vendor} connector names no package to import from` });
     return { source: `${pkg}/resources`, imported: vendor, local: vendor };
   };
-  const wakeup = await wakeupSecrets(app, host);
+  const wakeup = (await hostWakeup(app, host)).secrets;
   const { inputs } = host.host!;
   const fields = host.schema.shape as Record<string, unknown>;
   const hosted: Record<string, DataValue> = {
@@ -317,6 +317,8 @@ export async function goLive(app: AppContext, actor: Principal, choices: GoLiveR
       error: "The GitHub connector creates the repository with GITHUB_TOKEN: connect a token",
     });
   }
+  // sanoma-ops's token may be the environment's or its connector page's, which mint nothing.
+  await mintWakeupToken(client, actor);
   const text = await renderInfra(app, choices);
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, text);
