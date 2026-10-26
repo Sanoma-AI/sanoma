@@ -1,10 +1,12 @@
 import { DBOS } from "@dbos-inc/dbos-sdk";
+import { randomUUID } from "node:crypto";
 import { awaitApproval } from "./approvals.ts";
 import { buildCtx, decideStart, isInfrastructureError, startHoldOf } from "./call.ts";
 import { dbosStatusesOf } from "./client.ts";
 import { declaredWakeup, type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { storedSecrets, watchCredentials } from "./credentials.ts";
-import { DBOS_DATABASE_OPTIONS, lazyPool, prepareDatabase } from "./db.ts";
+import { claimWakeup, DBOS_DATABASE_OPTIONS, lazyPool, prepareDatabase } from "./db.ts";
+import { deadlineRegistry, type Deadlines, idle, onOwnQueue, type SelfStop, stopWhenIdle } from "./deadlines.ts";
 import type { WorkflowDefinition } from "./define.ts";
 import { credentialsOf, unconfigured, unconfiguredSummary } from "./env.ts";
 import { errorInfo, parseOrThrow, PolicyDeniedError } from "./errors.ts";
@@ -23,8 +25,30 @@ export interface Worker {
    * The worker names them in one line at start, unless started `quiet`.
    */
   readonly unconfigured: readonly string[];
+  /**
+   * Its runs' deadlines: each sleeping run's, and the sources added here (a schedule's next
+   * fire), which a stop registers the earliest of with the wakeup.
+   */
+  readonly deadlines: Deadlines;
+  /**
+   * True when nothing this worker would run can run soon (`idle` in deadlines.ts): no run executing,
+   * none queued, every unfinished one blocked in a sleep or an approval, the next deadline past
+   * `idleHorizonMs`. False once stopped.
+   */
+  idle(): Promise<boolean>;
+  /** Stops the worker; a second call waits for the first. */
   stop(): Promise<void>;
 }
+
+/**
+ * How many times DBOS may start a run again before it gives up on it
+ * (`MAX_RECOVERY_ATTEMPTS_EXCEEDED`). Every start of a worker counts one for each unfinished run
+ * of its version, and a worker that stops when idle starts again at each wake and each request:
+ * at one every five minutes, DBOS's default of 100 would fail a run waiting on an approval within
+ * nine hours. 100,000 is a year of that; a run that crashes its process at every recovery is still
+ * given up on, after as many restarts.
+ */
+const MAX_RECOVERY_ATTEMPTS = 100_000;
 
 // DBOS registrations are process-wide and survive shutdown, so a name is registered once, and
 // its function reads the state of the worker running when a run starts, definition and all; the
@@ -50,6 +74,20 @@ export interface WorkerOptions {
   promote?: boolean;
   /** The company's repository, which apply commits the lockfile to; the launcher passes its checkout. */
   source?: Source;
+  /**
+   * How soon a deadline keeps the worker up (`idle`): 60 s by default, so apply's short sleeps
+   * and other short waits never stop it.
+   */
+  idleHorizonMs?: number;
+  /** How often a worker whose data files declare a wakeup checks whether it may stop: every 15 s by default. */
+  stopCheckMs?: number;
+  /**
+   * Given, and with a wakeup declared, the worker stops itself when idle (`stopCheckMs`); without
+   * it, nobody would start another, so it never does. Called once the worker has stopped itself, with the deadline it registered with the
+   * wakeup (null for none) and that registration's generation: a supervisor starts a fresh
+   * worker on the next request or wake (`shouldWake`), since a stopped one cannot launch again.
+   */
+  onStopped?: (stopped: SelfStop) => void;
 }
 
 /**
@@ -63,8 +101,11 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
   // Check everything before touching the state a running worker reads.
   const resolved = resolveConfig(config);
   setLogLevel(options.logLevel);
+  // Read once, when it matters: a worker stops itself, registering its next deadline there, only
+  // when its caller hears it stop (`onStopped`).
+  const wakeup = options.onStopped || config.wakeup === true ? await declaredWakeup(config) : undefined;
   // The wakeup service wakes the instances that stop: one that runs it must not stop with its worker.
-  if (config.wakeup === true && (await declaredWakeup(config))) {
+  if (config.wakeup === true && wakeup) {
     throw new Error(
       "The config runs the wakeup service (`wakeup: true`) and declares a wakeup of its own: an instance that runs the service must not stop, so leave out one of them",
     );
@@ -78,6 +119,9 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
   // The config's own, or a Postgres store made for this worker, which `stop` then closes.
   const ledger = ownedLedger(resolved);
   const secrets = lazyPool(resolved.databaseUrl, "secrets");
+  let stopRule: { close(): void } | undefined;
+  let stopping: Promise<void> | undefined;
+  const horizonMs = options.idleHorizonMs ?? 60_000;
   const state: WorkerState = {
     app: resolved.appName,
     ops: resolved.ops,
@@ -95,26 +139,38 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     workflows: resolved.workflows,
     outlines: new Map([...resolved.workflows].map(([name, wf]) => [name, outlineOf(wf)])),
     stopped: false,
+    deadlines: deadlineRegistry(),
   };
   const credentials = await watchCredentials(resolved.databaseUrl, resolved.driversByVendor);
   const worker: Worker = {
     unconfigured: [...credentialsOf(resolved.driversByVendor, (name) => process.env[name])]
       .filter(([vendor, statuses]) => unconfigured(vendor, statuses))
       .map(([vendor]) => vendor),
-    async stop() {
-      state.stopped = true;
-      // Each is closed whatever the one before did; the first failure is what stop throws.
-      let failed: { error: unknown } | undefined;
-      for (const close of [
-        () => DBOS.shutdown(),
-        () => credentials.close(),
-        () => secrets.close(),
-        () => ledger.close(),
-        async () => resolved.dataStore?.close(),
-      ]) {
-        await close().catch((error: unknown) => (failed ??= { error }));
-      }
-      if (failed) throw failed.error;
+    deadlines: state.deadlines,
+    async idle() {
+      return !state.stopped && idle(state.deadlines, resolved, horizonMs);
+    },
+    stop() {
+      // A stop that failed may be tried again.
+      return (stopping ??= (async () => {
+        state.stopped = true;
+        stopRule?.close();
+        // Each is closed whatever the one before did; the first failure is what stop throws.
+        let failed: { error: unknown } | undefined;
+        for (const close of [
+          () => DBOS.shutdown(),
+          () => credentials.close(),
+          () => secrets.close(),
+          () => ledger.close(),
+          async () => resolved.dataStore?.close(),
+        ]) {
+          await close().catch((error: unknown) => (failed ??= { error }));
+        }
+        if (failed) {
+          stopping = undefined;
+          throw failed.error;
+        }
+      })());
     },
   };
   // Runs recovered during launch start before it returns, so they must already find this
@@ -162,6 +218,25 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     if (summary && !options.quiet) warn(summary);
     if (resolved.policyProblems.length && !options.quiet) {
       warn(`the policies do not hold, so every call and start is refused:\n  ${resolved.policyProblems.join("\n  ")}`);
+    }
+    if (wakeup && options.onStopped) {
+      const owner = randomUUID();
+      await claimWakeup(await secrets.db(), owner);
+      const registerId = wakeup.type.wakeup!.register;
+      stopRule = stopWhenIdle({
+        // The row is one more of the runtime's tables: the secrets' pool, on the same database.
+        db: () => secrets.db(),
+        owner,
+        wakeup: wakeup.binding ?? wakeup.id,
+        // `resolveConfig` checked the operation is the config's (`checkWakeupOps`).
+        register: { op: resolved.ops.get(registerId)!, fn: resolved.drivers.get(registerId) },
+        secrets: state.secrets,
+        deadlines: state.deadlines,
+        idle: () => worker.idle(),
+        everyMs: options.stopCheckMs ?? 15_000,
+        stop: () => worker.stop(),
+        onStopped: options.onStopped,
+      });
     }
   } catch (err) {
     // Once DBOS is launched, the caller gets no worker to stop: stop it here, so no run goes on
@@ -214,9 +289,7 @@ async function warnAboutStrandedRuns({ appName, version, queueName }: ResolvedCo
   });
   const otherVersion = runs.filter((r) => r.applicationVersion && r.applicationVersion !== version);
   // Recovery moves a worker's own runs to DBOS's internal queues, which are fine.
-  const otherQueue = runs.filter(
-    (r) => !otherVersion.includes(r) && r.queueName && r.queueName !== queueName && !r.queueName.startsWith("_dbos_"),
-  );
+  const otherQueue = runs.filter((r) => !otherVersion.includes(r) && !onOwnQueue(r.queueName, queueName));
   if (!otherVersion.length && !otherQueue.length) return;
   const ids = [...otherVersion, ...otherQueue].map((r) => r.workflowID);
   warn(
@@ -232,14 +305,22 @@ async function warnAboutStrandedRuns({ appName, version, queueName }: ResolvedCo
 function register(name: string) {
   DBOS.registerWorkflow((args: RunArgs) => quietIfSandbox(args.sandbox !== undefined, () => runWorkflow(name, args)), {
     name,
+    maxRecoveryAttempts: MAX_RECOVERY_ATTEMPTS,
   });
 }
 
-/** One run of the workflow registered as `name`, on the state of the worker running when it starts. */
-async function runWorkflow(name: string, { input, startedBy, sandbox, hold }: RunArgs): Promise<unknown> {
+/**
+ * One run of the workflow registered as `name`, on the state of the worker running when it
+ * starts, counted busy in its deadlines but while it waits.
+ */
+async function runWorkflow(name: string, args: RunArgs): Promise<unknown> {
   const state = current;
   // A stopped worker's state stays current while DBOS shuts down.
   if (!state || state.stopped) throw new Error(`Run of "${name}" started with no worker running`);
+  return state.deadlines.running(DBOS.workflowID!, () => runOn(state, name, args));
+}
+
+async function runOn(state: WorkerState, name: string, { input, startedBy, sandbox, hold }: RunArgs): Promise<unknown> {
   const wf = state.workflows.get(name);
   const outline = state.outlines.get(name);
   // Registered by an earlier worker in this process, whose config had it; this one's has not.

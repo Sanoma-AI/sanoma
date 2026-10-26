@@ -1490,7 +1490,7 @@ describe("people in a scenario: who is acting, held for a group, denied with a r
       throw new Error("expected the feature not to load");
     };
     expect(await thrownBy("    Given cy is acting\n    When refund runs\n")).toBe(
-      "people.feature:3: cy is not a declared person or agent; resources/ declares ada, bo, refund-bot, scenarios, host-check, schedule",
+      "people.feature:3: cy is not a declared person or agent; resources/ declares ada, bo, refund-bot, scenarios, host-check, schedule, wakeup",
     );
     expect(await thrownBy('    When refund runs\n    Then shop.refunds.create was held for group "sales"\n')).toBe(
       'people.feature:4: no group "sales"; resources/ declares agents, finance, visitors',

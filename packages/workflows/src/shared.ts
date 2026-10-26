@@ -277,8 +277,10 @@ export function visitorPrincipal(login: string, subject: string): Principal {
 /** Who a public page runs as when nobody is signed in. */
 export const ANONYMOUS_PRINCIPAL: Principal = Object.freeze({ id: ANONYMOUS, groups: [] });
 
-/** The runtime's own agents (scenarios, the host check, scheduled runs), declared whether a data file names them or not. */
-export const RUNTIME_AGENTS: readonly string[] = ["scenarios", "host-check", "schedule"];
+/** The runtime's agent that registers the instance's wakeup (`register`'s `CallContext.by`). */
+export const WAKEUP_AGENT = "wakeup";
+/** The runtime's own agents (scenarios, the host check, scheduled runs, the wakeup's registration), declared whether a data file names them or not. */
+export const RUNTIME_AGENTS: readonly string[] = ["scenarios", "host-check", "schedule", WAKEUP_AGENT];
 
 /** The declared resources of one of the runtime's people types, by `desired`. */
 const peopleOfType = <T>(resources: readonly PeopleResource[], type: "person" | "agent" | "group") =>
