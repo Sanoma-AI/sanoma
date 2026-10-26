@@ -241,6 +241,10 @@ const machineRoute: IngressRoute = {
     }),
 };
 
+/** Starts the app with `machineRoute` at each of `paths`. */
+const ingressAt = (...paths: string[]) =>
+  startApp(config, { ingress: paths.map((path) => ({ ...machineRoute, path })) });
+
 /** Who is asking: the `x-sanoma-actor` header the page sends, or other headers, to an app's context. */
 interface As {
   actor?: string;
@@ -1527,15 +1531,14 @@ describe("the page", () => {
     expect(await rawStatus(app.url, "/workflows", { host: "attacker.example:80" })).toBe(403);
   });
 
-  it("answers an ingress route before the login, whatever name it is addressed to, by its exact path and method", async () => {
+  it("answers an ingress route before the login, whatever name it is addressed to, by its exact path, and 405 for another method", async () => {
     expect(await rawStatus(app.url, "/machine?generation=3", { host: "10.0.0.7:3000" })).toBe(204);
     const res = await fetch(new URL("/machine?generation=4", app.url));
     expect([res.status, res.headers.get("x-generation")]).toEqual([204, "4"]);
-    // Another method or path is the login's, which refuses the host.
+    // Another method is refused; another path is the login's, which refuses the host.
+    const post = await fetch(new URL("/machine", app.url), { method: "POST" });
+    expect([post.status, post.headers.get("allow")]).toEqual([405, "GET"]);
     expect(await rawStatus(app.url, "/machine/", { host: "10.0.0.7:3000" })).toBe(403);
-    expect(
-      await fetch(new URL("/machine", app.url), { method: "POST" }).then((r) => r.headers.get("x-generation")),
-    ).toBeNull();
   });
 
   it("answers a host's probe at /healthz before the login, whatever name it is addressed to", async () => {
@@ -2262,6 +2265,14 @@ describe("startApp", () => {
       /^The app has no login, so it listens on this machine only, not 0\.0\.0\.0/,
     );
     expect(() => loopbackLogin().check("::1")).not.toThrow();
+  });
+
+  it("refuses an ingress route at no path, at /healthz, or at a path another has", async () => {
+    await expect(ingressAt("wake")).rejects.toThrow(
+      'An ingress route\'s path starts with / and is not /healthz, unlike "wake"',
+    );
+    await expect(ingressAt("/healthz")).rejects.toThrow(/is not \/healthz, unlike "\/healthz"/);
+    await expect(ingressAt("/wake", "/wake")).rejects.toThrow("Two ingress routes have the path /wake");
   });
 
   it("says to build the app when it is not built", async () => {

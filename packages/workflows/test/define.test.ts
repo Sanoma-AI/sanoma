@@ -33,6 +33,7 @@ describe("defineWorkflow", () => {
     expect(at({ schedule: "0 0 9 * * *" })).toThrow(
       /its schedule "0 0 9 \* \* \*" is a cron expression of five fields/,
     );
+    expect(at({ schedule: "0 9 * * *", timezone: "+05:30" })).toThrow(/its timezone "\+05:30" is no IANA time zone/);
     expect(at({ schedule: "0 9 * * *", timezone: "Mars/Olympus" })).toThrow(
       'Workflow "timed": its timezone "Mars/Olympus" is no IANA time zone, such as "Europe/Amsterdam"',
     );

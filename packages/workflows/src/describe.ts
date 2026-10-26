@@ -365,12 +365,20 @@ function domainProblems(
       const others = `${names.length === 2 ? "both " : ""}${names.slice(0, -1).join(", ")}`;
       messages.push(`${domain} is the domain of ${others} and ${names.at(-1)}`);
     }
-    if (!messages.length || root === undefined) continue;
-    const file = read(join(root, resource.file));
-    const at = typeof file === "string" ? {} : file.at(resource.span[0]);
-    for (const message of messages) problems.push({ file: resource.file, ...at, message });
+    if (root !== undefined) problems.push(...messages.map((message) => problemAt(root, resource, read, message)));
   }
   return problems;
+}
+
+/** `message` at a declaration's `export const`. */
+function problemAt(
+  root: string,
+  resource: DeclaredResource,
+  read: (path: string) => SourceFile | string,
+  message: string,
+): ResourceProblem {
+  const file = read(join(root, resource.file));
+  return { file: resource.file, ...(typeof file === "string" ? {} : file.at(resource.span[0])), message };
 }
 
 /** A problem at each declared wakeup when there are several: an instance registers with one. */
@@ -382,12 +390,9 @@ function wakeupProblems(
 ): ResourceProblem[] {
   const wakeups = wakeupsAmong(declared, types);
   if (wakeups.length < 2 || root === undefined) return [];
-  return wakeups.map(({ declared: resource }) => {
-    const file = read(join(root, resource.file));
-    const at = typeof file === "string" ? {} : file.at(resource.span[0]);
-    const others = wakeups.filter((w) => w.declared !== resource).map((w) => w.id);
-    return { file: resource.file, ...at, message: twoWakeups(others) };
-  });
+  return wakeups.map(({ id, declared: resource }) =>
+    problemAt(root, resource, read, twoWakeups(wakeups.filter((w) => w.id !== id).map((w) => w.id))),
+  );
 }
 
 /**

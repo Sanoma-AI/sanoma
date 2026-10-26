@@ -116,6 +116,10 @@ describe("a wakeup type", () => {
     expect(() =>
       resolveConfig({ workflows: [], connectors: [acmeWith(register(z.object({ when: z.string() })))] }),
     ).toThrow("acme.wakeup: its wakeup's register, acme.wakeup.register, must take { at, generation }");
+    // One that strips them takes neither.
+    expect(() => resolveConfig({ workflows: [], connectors: [acmeWith(register(z.object({})))] })).toThrow(
+      /must take \{ at, generation \}/,
+    );
     expect(resolveConfig({ workflows: [], connectors: [acmeWith()] }).ops.has("acme.wakeup.register")).toBe(true);
   });
 });

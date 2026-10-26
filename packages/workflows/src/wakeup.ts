@@ -79,6 +79,18 @@ export function checkWakeup(
 /** A registration every register operation must take: the input `checkWakeupOps` tries. */
 const SAMPLE: WakeupRegistration = { at: new Date(0).toISOString(), generation: 1 };
 
+/** True when `op`'s input keeps both fields of a registration: one that strips them takes neither. */
+function takesRegistration(op: Op): boolean {
+  try {
+    const parsed = op.input.safeParse(SAMPLE);
+    const data = parsed.data as Partial<WakeupRegistration> | undefined;
+    return parsed.success && data?.at !== undefined && data.generation !== undefined;
+  } catch {
+    // An async refinement, which a sync parse cannot run: no input the runtime can check.
+    return false;
+  }
+}
+
 /**
  * Throws when a wakeup type's `register` is not among the config's operations, or does not take
  * `WakeupRegistration`. Here rather than in `defineConnector`, which sees one connector before
@@ -89,8 +101,7 @@ export function checkWakeupOps(types: ReadonlyMap<string, Resource>, ops: Readon
     if (!type.wakeup) continue;
     const op = ops.get(type.wakeup.register);
     if (!op) throw new Error(`${id}: its wakeup's register, ${type.wakeup.register}, is no operation of its connector`);
-    if (!op.input.safeParse(SAMPLE).success)
-      throw new Error(`${id}: its wakeup's register, ${op.id}, must take { at, generation }`);
+    if (!takesRegistration(op)) throw new Error(`${id}: its wakeup's register, ${op.id}, must take { at, generation }`);
   }
 }
 
@@ -134,9 +145,10 @@ export async function declaredWakeups(config: SanomaConfig): Promise<DeclaredWak
 }
 
 /**
- * The one wakeup the config's data files declare, or undefined: with none, and with several,
- * which `describeConfig` reports as a problem at each. Server-side: it reads the data files and
- * the lockfile.
+ * The one wakeup the config's data files declare, or undefined: with none, with several (which
+ * `describeConfig` reports as a problem at each), and with one whose declaration, or its host's,
+ * has a problem (the reader leaves those out, and reports them). Undefined means the instance has
+ * no wakeup, so it must not stop. Server-side: it reads the data files and the lockfile.
  */
 export async function declaredWakeup(config: SanomaConfig): Promise<DeclaredWakeup | undefined> {
   const found = await declaredWakeups(config);

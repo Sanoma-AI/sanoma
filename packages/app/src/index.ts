@@ -67,8 +67,9 @@ export interface AppOptions {
   domains?: Record<string, string>;
   /**
    * Machine routes, answered right after `/healthz` and ahead of the public sites and the login,
-   * at any host name: a request whose path is exactly `path` (and whose method is `method`, when
-   * given) is answered by `handle`. Nothing checks who is asking, so each checks its own token.
+   * at any host name: a request whose path is exactly `path` is answered by `handle`, or with 405
+   * when `method` is given and the request's is another. One route per path, never `/healthz`.
+   * Nothing checks who is asking, so each checks its own token; never give one a page's path.
    */
   ingress?: readonly IngressRoute[];
 }
@@ -134,8 +135,11 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
     console.warn(`sanoma app: warnings in the sites (\`sanoma check\` lists them):\n${warnings.join("\n")}`);
   const hosts = publicHosts(description, options.domains ?? {});
   const ingress = options.ingress ?? [];
-  for (const route of ingress) {
-    if (!route.path.startsWith("/")) throw new Error(`An ingress route's path starts with /, not "${route.path}"`);
+  for (const [i, route] of ingress.entries()) {
+    if (!route.path.startsWith("/") || route.path === "/healthz")
+      throw new Error(`An ingress route's path starts with / and is not /healthz, unlike "${route.path}"`);
+    if (ingress.slice(0, i).some((other) => other.path === route.path))
+      throw new Error(`Two ingress routes have the path ${route.path}: give each path one route`);
   }
   const server = createServer((req, res) => {
     handle(req, res).catch((err: unknown) => {
@@ -156,7 +160,11 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
       return void res.end(req.method === "HEAD" ? undefined : "ok\n");
     }
     // A machine route, before the login too: it checks its own token.
-    const route = ingress.find((r) => r.path === path && (r.method === undefined || r.method === req.method));
+    const route = ingress.find((r) => r.path === path);
+    if (route?.method !== undefined && route.method !== req.method) {
+      res.writeHead(405, { allow: route.method, "content-type": "text/plain; charset=utf-8" });
+      return void res.end(`${path} answers ${route.method} only\n`);
+    }
     if (route) return sendNodeResponse(res, await route.handle(new NodeRequest({ req, res })));
     // A public site's host, ahead of the staff login, which it never reaches: the site's front door.
     const asked = hostName(req.headers.host ?? "");
