@@ -17,9 +17,11 @@ import { Badge } from "#/components/ui/badge.tsx";
 import { Button } from "#/components/ui/button.tsx";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "#/components/ui/sheet.tsx";
 import { useSites } from "#/lib/sites.ts";
+import type { Tone } from "#/lib/tone.ts";
 import { cn } from "#/lib/utils.ts";
+import type { AppConfig, Place } from "../../api.ts";
 import { configQuery, pendingOf, waitingRunsQuery } from "../../queries.ts";
-import { toneBadge } from "../kit.tsx";
+import { Tip, toneBadge } from "../kit.tsx";
 import { NavUser } from "./nav-user.tsx";
 
 // The bar: Chat, then the app's sections in groups, then who you are. A section is a page; there
@@ -67,7 +69,8 @@ const ACTIVE = { "data-active": true } as const;
 /**
  * The bar, on the `sidebar` surface: Chat, which folds and unfolds the chat column (`chat`; left
  * out in the phone's sheet, which has no column), the sections (Sites, Data and Permissions only
- * when there are sites, collections or policies), and the user menu at its foot.
+ * when there are sites, collections or policies), and at its foot what the open window is
+ * (`PlaceBadge`) above the user menu.
  */
 export function Bar({ chat, className }: { chat?: { open: boolean; toggle: () => void }; className?: string }) {
   const { data: has } = useSuspenseQuery({ ...configQuery(), select: selectBar });
@@ -117,7 +120,8 @@ export function Bar({ chat, className }: { chat?: { open: boolean; toggle: () =>
           </Fragment>
         ))}
       </nav>
-      <div className="mt-auto">
+      <div className="mt-auto flex flex-col items-center gap-2">
+        <PlaceBadge />
         <NavUser />
       </div>
     </div>
@@ -140,6 +144,40 @@ function Item({ section: { icon: Icon, label }, children }: { section: Section; 
 /** The short rule between the bar's groups. */
 function Rule() {
   return <div aria-hidden="true" className="my-1 h-px w-9 shrink-0 bg-border" />;
+}
+
+/** What the badge reads from the config: where this instance is. */
+const selectPlace = ({ place, databaseHost }: AppConfig) => ({ place, databaseHost });
+
+/** Each place's badge: its words and its tone. */
+const PLACES: Record<Place, { label: string; tone: Tone }> = {
+  "this-computer": { label: "This computer", tone: "idle" },
+  live: { label: "Live", tone: "ok" },
+};
+
+/**
+ * What the open window is, from what this instance connects to (`placeOf`): This computer or
+ * Live, its tip the database's host and nothing more (the default socket's is none, an unreadable URL's unknown).
+ */
+function PlaceBadge() {
+  const { data } = useSuspenseQuery({ ...configQuery(), select: selectPlace });
+  const { label, tone } = PLACES[data.place];
+  return (
+    <Tip
+      tip={
+        data.databaseHost === undefined
+          ? "Database host unknown"
+          : `Database on ${data.databaseHost || "a local socket"}`
+      }
+    >
+      <Badge
+        tabIndex={0}
+        className={cn(toneBadge({ tone }), "h-auto max-w-full rounded-md text-center text-bar whitespace-normal")}
+      >
+        {label}
+      </Badge>
+    </Tip>
+  );
 }
 
 /**

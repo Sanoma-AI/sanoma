@@ -15,6 +15,7 @@ import {
 } from "./api.ts";
 import {
   adopt,
+  appConfig,
   callApi,
   clearCredential,
   credentials,
@@ -33,7 +34,6 @@ import {
   signOutUrl,
   startRun,
   validate,
-  withoutSources,
 } from "./server/core.ts";
 import { availableConnectors } from "./server/available.ts";
 import { goLive, goLiveChoices, goLiveHost, goLiveProgress } from "./server/go-live.ts";
@@ -51,7 +51,7 @@ import { withPrincipal } from "./middleware.ts";
 const READ = { method: "GET", strict: { output: false } } as const;
 const CHANGE = { method: "POST", strict: { output: false } } as const;
 
-export const getConfig = createServerFn(READ).handler(({ context }) => withoutSources(context.app.description));
+export const getConfig = createServerFn(READ).handler(({ context }) => appConfig(context.app));
 
 /** A file the config names (a workflow's or a data file), as it is now; `null` for any other. */
 export const getSource = createServerFn(READ)

@@ -38,6 +38,16 @@ export const ACTOR_COOKIE = "sanoma_actor";
 /** Where the page keeps the name in this browser's storage, which the header is sent from. */
 export const ACTOR_KEY = "sanoma.actor";
 
+/** What the open window is, from what this instance connects to; never a flag (`placeOf`). */
+export type Place = "this-computer" | "live";
+
+/**
+ * What `getConfig` answers: the description, less the workflows' sources, and where this instance
+ * is: its `place`, and its database's host (only the host, never the URL; none when it cannot be
+ * read), which the bar's badge says as its tip.
+ */
+export type AppConfig = ConfigDescription & { place: Place; databaseHost?: string };
+
 /**
  * Who the server says is asking. With a login provider (`fromServer`), it is whoever signed in,
  * which the page shows and cannot change; with the default loopback login, it is whatever name

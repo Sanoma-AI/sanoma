@@ -45,12 +45,13 @@ import {
 } from "../src/api.ts";
 import type { AppContext, LoginProvider } from "../src/context.ts";
 import { availableConnectors, JSDELIVR, NPM_REGISTRY } from "../src/server/available.ts";
-import { loopbackLogin } from "../src/loopback.ts";
+import { databaseHost, loopbackLogin, placeOf } from "../src/loopback.ts";
 import { admitting } from "../src/login/admission.ts";
 import {
   type ActorContext,
   actorOf,
   adopt,
+  appConfig,
   asApiError,
   clearCredential,
   credentials,
@@ -201,10 +202,12 @@ const clients: SanomaClient[] = [];
 async function contextOf(cfg: SanomaConfig, login = loopbackLogin()): Promise<AppContext> {
   const client = await SanomaClient.connect(cfg);
   clients.push(client);
+  const resolved = resolveConfig(cfg);
   return {
-    resolved: resolveConfig(cfg),
+    resolved,
     description: describeConfig(cfg),
     client,
+    place: placeOf(resolved.databaseUrl),
     login: admitting(login, () => ({ people: [], problems: [] })),
   };
 }
@@ -425,8 +428,12 @@ describe("the server functions", () => {
     });
   });
 
-  it("describe the config: workflows, ops, built-ins, the policy and the version, without the workflows' sources", async () => {
-    const body = withoutSources(ctx.description);
+  it("describe the config: workflows, ops, built-ins, the policy and the version, without the workflows' sources, and where the instance is", async () => {
+    const body = appConfig(ctx);
+    // The test database is on this machine; of its URL, only the host is sent.
+    expect(body.place).toBe("this-computer");
+    expect(body.databaseHost).toBe(databaseHost(ctx.resolved.databaseUrl));
+    expect(JSON.stringify(body)).not.toContain(ctx.resolved.databaseUrl);
     expect(body.appName).toBe("sanoma");
     expect(body.version).toMatch(/^sanoma@/);
     expect(body.policy).toEqual({ defined: true, version: expect.stringMatching(/^[0-9a-f]{12}$/) });
@@ -832,6 +839,8 @@ describe("the page", () => {
     ]);
     expect(section(html, "/workflows")).toMatch(/data-active="true"[^>]*aria-current="page"/);
     expect(section(html, "/inbox")).not.toMatch(/data-active="true"|aria-current/);
+    // At its foot, what the window is, the test database being on this machine, its tip the host.
+    expect(html).toMatch(/>This computer<\/span><span [^>]*hidden="">Database on [^<@]+<\/span>/);
     // The config has a policy: Permissions says what it does, so the overview says nothing of it.
     expect(html).not.toContain("No policy");
     // The chat column, open with no cookie: its empty state, and a composer that cannot send yet,

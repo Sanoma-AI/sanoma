@@ -42,6 +42,7 @@ const context = (): AppContext => ({
   resolved: resolveConfig(test.config),
   description: describeConfig(test.config),
   client: test.client,
+  place: "this-computer",
   login: admitting(loopbackLogin(), () => ({ people: [], problems: [] })),
   source,
 });

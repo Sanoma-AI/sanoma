@@ -118,6 +118,7 @@ async function callAs(actor: string, data: CallRequest) {
     resolved: resolveConfig(testApp.config),
     description: describeConfig(testApp.config),
     client: testApp.client,
+    place: "this-computer" as const,
     login: admitting(loopbackLogin(), () => ({ people: [], problems: [] })),
   };
   try {

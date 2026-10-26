@@ -38,6 +38,7 @@ import {
   type AdoptRequest,
   type AdoptResponse,
   ApiError,
+  type AppConfig,
   type CallRequest,
   type ClearCredentialRequest,
   type CredentialsResponse,
@@ -56,7 +57,7 @@ import {
 } from "../api.ts";
 import type { AppContext } from "../context.ts";
 import { previewRequests } from "../lib/preview.ts";
-import { LOOPBACK } from "../loopback.ts";
+import { databaseHost, LOOPBACK } from "../loopback.ts";
 
 // What the server functions do. Server-only: each takes the app context that startApp passes
 // with every request. Every expected failure is an ApiError.
@@ -122,6 +123,13 @@ export const validate =
  */
 export const readStartRun = (data: StartRunRequest): StartRunRequest =>
   parse(startRunSchema(data), data, "The request");
+
+/** What `getConfig` answers (`AppConfig`): the description `withoutSources`, and where this instance is. */
+export const appConfig = (app: AppContext): AppConfig => ({
+  ...withoutSources(app.description),
+  place: app.place,
+  databaseHost: databaseHost(app.resolved.databaseUrl),
+});
 
 /**
  * The description as the page gets it (`getConfig`): without the source of a workflow

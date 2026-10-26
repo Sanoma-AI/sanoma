@@ -1,5 +1,6 @@
 import type { Principal, ResolvedConfig, SanomaClient, Source } from "@sanoma-ai/workflows";
 import type { ConfigDescription } from "@sanoma-ai/workflows/describe";
+import type { Place } from "./api.ts";
 
 /**
  * What a login vouches for about who is asking: a name they gave (`id`, the loopback's), a
@@ -57,6 +58,8 @@ export interface AppContext {
    * when not given.
    */
   policyFiles?: { file: string; text: string }[];
+  /** Where this instance is, from `resolved.databaseUrl` (`placeOf`): what the bar's badge says. */
+  place: Place;
   client: SanomaClient;
   /** `AppOptions.login`, or `loopbackLogin()`, admitting only a declared person (`admitting`). */
   login: AdmittingLogin;
