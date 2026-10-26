@@ -18,7 +18,6 @@ export const ENGINES: Readonly<Record<EngineName, Engine>> = {
   loop,
   pi: harnessEngine("pi"),
   "claude-code": harnessEngine("claude-code"),
-  codex: harnessEngine("codex"),
 };
 
 /** What the browser sends: the chat's id (its own, for a new chat) and the person's new message. */

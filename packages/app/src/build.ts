@@ -51,7 +51,6 @@ const RUNTIME = [
   "@ai-sdk/harness",
   "@ai-sdk/harness-pi",
   "@ai-sdk/harness-claude-code",
-  "@ai-sdk/harness-codex",
 ];
 const isRuntime = (id: string) => RUNTIME.some((name) => id === name || id.startsWith(`${name}/`));
 
@@ -501,10 +500,10 @@ function runtimeExternal(runtimeFrom: string): Plugin {
         const workflows = await this.resolve("@sanoma-ai/workflows", runtimeFrom, opts);
         if (workflows) resolved = await this.resolve(source, workflows.id, opts);
       }
-      // The app's own dependencies (the harness adapters), from its install.
-      resolved ??= await this.resolve(source, defaultRuntimeFrom, opts);
-      if (!resolved)
-        return this.error(`${source} does not resolve from ${runtimeFrom}, its @sanoma-ai/workflows or the app`);
+      // The harness adapters are the app's own dependencies: from its install.
+      if (!resolved && source.startsWith("@ai-sdk/harness"))
+        resolved = await this.resolve(source, defaultRuntimeFrom, opts);
+      if (!resolved) return this.error(`${source} does not resolve from ${runtimeFrom} or its @sanoma-ai/workflows`);
       return { id: pathToFileURL(resolved.id).href, external: "absolute" };
     },
   };

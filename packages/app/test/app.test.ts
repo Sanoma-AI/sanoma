@@ -889,7 +889,7 @@ describe("the page", () => {
       /<span[^>]*><span[^>]*>Workflows<\/span><\/span><textarea(?![^>]*disabled="")[^>]*aria-label="Message the agent"/,
     );
     expect(column).toMatch(/<button[^>]*disabled=""[^>]*aria-label="Send"/);
-    // A new chat's engine, chosen in the composer: our loop first; Codex is not offered.
+    // A new chat's engine, chosen in the composer: our loop first.
     const engines = column?.match(/<select[^>]*aria-label="Engine"[^>]*>([\s\S]*?)<\/select>/)?.[1] ?? "";
     expect([...engines.matchAll(/<option[^>]*>([^<]*)<\/option>/g)].map((option) => option[1])).toEqual([
       "Sanoma",

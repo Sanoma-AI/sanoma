@@ -28,7 +28,6 @@ import {
   ENGINE_NAMES,
   type EngineName,
   errorParts,
-  OFFERED_ENGINES,
   textOf,
   unfinished,
 } from "../../lib/chat.ts";
@@ -265,9 +264,9 @@ function Composer({
             value={engine.value}
             onChange={(e) => engine.set(e.target.value as EngineName)}
           >
-            {OFFERED_ENGINES.map((name) => (
+            {Object.entries(ENGINE_NAMES).map(([name, label]) => (
               <NativeSelectOption key={name} value={name}>
-                {ENGINE_NAMES[name]}
+                {label}
               </NativeSelectOption>
             ))}
           </NativeSelect>

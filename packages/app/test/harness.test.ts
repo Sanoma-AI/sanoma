@@ -295,14 +295,20 @@ describe.each(engines)("the chat on %s", (engine, name, enabled) => {
   );
 });
 
-describe("the chat on an engine without its key", () => {
-  it("says which key is missing, as the reply's error", async () => {
-    vi.stubEnv("OPENAI_API_KEY", undefined);
-    const stream = await opening(`codex-${RUN}`, "codex", "Hi");
-    const chunks: string[] = [];
-    for await (const chunk of stream) if (chunk.type === "error") chunks.push(chunk.errorText);
-    expect(chunks).toEqual(["openai is not configured: OPENAI_API_KEY; no connector gives it yet"]);
-    expect(await testApp.client.chats.get(`codex-${RUN}`)).toMatchObject({ engine: "codex" });
+describe("the chat on a coding agent without its key", () => {
+  it("says which key is missing, with its connector's page, as the reply's error", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", undefined);
+    try {
+      const stream = await opening(`nokey-${RUN}`, "pi", "Hi");
+      const chunks: string[] = [];
+      for await (const chunk of stream) if (chunk.type === "error") chunks.push(chunk.errorText);
+      expect(chunks).toEqual([
+        "anthropic is not configured: ANTHROPIC_API_KEY; set it on the connector page [connector:anthropic]",
+      ]);
+      expect(await testApp.client.chats.get(`nokey-${RUN}`)).toMatchObject({ engine: "pi" });
+    } finally {
+      vi.stubEnv("ANTHROPIC_API_KEY", KEY);
+    }
   });
 });
 

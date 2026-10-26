@@ -21,13 +21,7 @@ export interface DraftCard {
  * The engines a chat can open on, by the name its row keeps, with the name the chat shows: our
  * loop, or an existing coding agent through `HarnessAgent` on the company's key.
  */
-export const ENGINE_NAMES = { loop: "Sanoma", pi: "Pi", "claude-code": "Claude Code", codex: "Codex" } as const;
-
-/**
- * The engines a new chat offers. Not Codex: its adapter asks for no permission (it runs every
- * command and edit unasked), so the checkout rule cannot answer for it (vercel/ai#22550).
- */
-export const OFFERED_ENGINES = ["loop", "pi", "claude-code"] as const satisfies readonly EngineName[];
+export const ENGINE_NAMES = { loop: "Sanoma", pi: "Pi", "claude-code": "Claude Code" } as const;
 
 /** An engine's name, as a chat's row keeps it. */
 export type EngineName = keyof typeof ENGINE_NAMES;

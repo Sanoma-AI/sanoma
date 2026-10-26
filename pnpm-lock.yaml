@@ -211,9 +211,6 @@ importers:
       '@ai-sdk/harness-claude-code':
         specifier: 1.0.162
         version: 1.0.162(zod@4.6.5)
-      '@ai-sdk/harness-codex':
-        specifier: 1.0.160
-        version: 1.0.160(zod@4.6.5)
       '@ai-sdk/harness-pi':
         specifier: 1.0.160
         version: 1.0.160(@aws-sdk/credential-provider-node@3.972.88)(@modelcontextprotocol/sdk@1.32.1(supports-color@11.0.0)(zod@4.6.5))(@smithy/signature-v4@5.7.4)(supports-color@11.0.0)(ws@8.22.0)(zod@4.6.5)
@@ -600,12 +597,6 @@ packages:
 
   '@ai-sdk/harness-claude-code@1.0.162':
     resolution: {integrity: sha512-ZbkAmK+Zda7f79EMJnbyMpN06tSdQ2ZS+tUm83q73e47WiRuriqXVSzzN4MNS5CBGJPuNblbW7JBI+J/1TUZuA==}
-    engines: {node: '>=22'}
-    peerDependencies:
-      zod: ^3.25.76 || ^4.1.8
-
-  '@ai-sdk/harness-codex@1.0.160':
-    resolution: {integrity: sha512-ePJiFxXqDqEWnkcejU6D4lGA/y5Y+0vghOwk71aAEhKeoEPkJGRm2koO18PFpvsTHFL0eGf2OS4+XFtLnktAkQ==}
     engines: {node: '>=22'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -5641,17 +5632,6 @@ snapshots:
       zod: 4.6.5
 
   '@ai-sdk/harness-claude-code@1.0.162(zod@4.6.5)':
-    dependencies:
-      '@ai-sdk/harness': 1.0.158(ws@8.22.0)(zod@4.6.5)
-      '@ai-sdk/provider': 4.0.31
-      '@ai-sdk/provider-utils': 5.0.64(zod@4.6.5)
-      ws: 8.22.0
-      zod: 4.6.5
-    transitivePeerDependencies:
-      - bufferutil
-      - utf-8-validate
-
-  '@ai-sdk/harness-codex@1.0.160(zod@4.6.5)':
     dependencies:
       '@ai-sdk/harness': 1.0.158(ws@8.22.0)(zod@4.6.5)
       '@ai-sdk/provider': 4.0.31

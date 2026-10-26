@@ -5,9 +5,8 @@ import { promisify } from "node:util";
 import type { HarnessV1, HarnessV1PermissionMode } from "@ai-sdk/harness";
 import { HarnessAgent } from "@ai-sdk/harness/agent";
 import { createClaudeCode } from "@ai-sdk/harness-claude-code";
-import { createCodex } from "@ai-sdk/harness-codex";
 import { createPi } from "@ai-sdk/harness-pi";
-import type { Draft, Principal, Source } from "@sanoma-ai/workflows";
+import type { Draft, Principal } from "@sanoma-ai/workflows";
 import {
   createUIMessageStream,
   generateId,
@@ -21,14 +20,14 @@ import { type ChatMessage, ENGINE_NAMES, noKeyText, textOf } from "../../lib/cha
 import { checks } from "../drafts.ts";
 import { modelRegistry } from "../models.ts";
 import { secretValues } from "../secrets.ts";
-import { allowedPath } from "./checkout.ts";
+import { allowedPath, drafting, openDraft } from "./checkout.ts";
 import { freePort, LocalSession } from "./local-session.ts";
 import { harnessInstructions } from "./prompt.ts";
 import { chatResponse, type Engine, type EngineTurn } from "./transcript.ts";
 
 // The chat's second engine: an existing coding agent driven by the AI SDK's `HarnessAgent` in a
 // local session of ours (`LocalSession`), in the chat's draft, on the company's model key. Pi runs
-// in this process; Claude Code and Codex through their adapter's bridge, a child of the session.
+// in this process; Claude Code through its adapter's bridge, a child of the session.
 // A turn is one harness session: made, run to its end (its permission requests answered by the
 // checkout rule), destroyed. Then what the agent changed is committed on the draft and checked.
 
@@ -67,15 +66,8 @@ const RUNTIMES = {
     harness: (auth) =>
       createClaudeCode({ auth, env: { CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1", DISABLE_AUTOUPDATER: "1" } }),
   },
-  codex: {
-    vendor: "openai",
-    key: "OPENAI_API_KEY",
-    baseUrl: "OPENAI_BASE_URL",
-    qualified: false,
-    // Codex's adapter asks for nothing (`supportsBuiltinToolApprovals: false`); no other mode starts.
-    permissionMode: "allow-all",
-    harness: (auth) => createCodex({ auth }),
-  },
+  // Later: Codex, once its adapter asks before an edit or a command (vercel/ai#22550); it runs only
+  // `allow-all`, which the checkout rule could not answer for.
 } satisfies Record<string, Runtime>;
 
 /** The runtimes' names, each an engine a chat's row keeps. */
@@ -85,6 +77,9 @@ export type RuntimeName = keyof typeof RUNTIMES;
 const NO_SHELL = "No shell commands in this chat until previews exist: edit the files; the checks run after your turn";
 
 const git = promisify(execFile);
+
+/** The session starting, if any: sessions start one at a time. */
+let starting: Promise<unknown> = Promise.resolve();
 
 /** The engine for `name`: a turn of a chat through that runtime, its transcript written as it goes. */
 export const harnessEngine =
@@ -114,14 +109,9 @@ async function runTurn(
   { app, chat, messages, principal, signal }: EngineTurn,
   writer: UIMessageStreamWriter<ChatMessage>,
 ) {
-  const repo = app.source;
-  if (!repo?.draft || !repo.diff) throw new Error("This instance has no repository to draft a change in");
+  const repo = drafting(app);
   // The agent works in the chat's draft from its first turn.
-  const draft = await repo.draft(chat.id);
-  if (chat.draftId !== chat.id) {
-    await app.client.chats.attach(chat.id, chat.id);
-    chat.draftId = chat.id;
-  }
+  const draft = await openDraft(app, chat);
   const [auth, model, instructions] = await Promise.all([
     authFor(app, runtime),
     modelFor(app, runtime),
@@ -141,8 +131,12 @@ async function runTurn(
     sandboxConfig: { workDir: "." },
   });
   const said = messages.at(-1)!;
+  let committed = false;
   try {
-    const session = await agent.createSession({ sessionId, sandboxSession: local, abortSignal: signal });
+    // One at a time: a bridge's first session installs it under the home they share.
+    const started = starting.then(() => agent.createSession({ sessionId, sandboxSession: local, abortSignal: signal }));
+    starting = started.catch(() => undefined);
+    const session = await started;
     try {
       let result = await agent.stream({ session, prompt: textOf(said), abortSignal: signal });
       for (let first = true; ; first = false) {
@@ -159,13 +153,15 @@ async function runTurn(
     }
   } finally {
     await local.destroy();
+    // What it changed is kept on the draft however the turn ended (an error, or a new message).
+    committed = await commitTurn(draft, principal, `${ENGINE_NAMES[name]}: ${textOf(said, " ").trim().slice(0, 72)}`);
   }
-  if (await commitTurn(draft, principal, `${ENGINE_NAMES[name]}: ${textOf(said, " ").trim().slice(0, 72)}`)) {
+  if (committed && !signal.aborted) {
     const checked = await checks(draft.root, app.resolved.databaseUrl);
     writer.write({
       type: "data-draft",
       id: "draft",
-      data: { branch: draft.branch, ...(await (repo as Required<Source>).diff(chat.id)), checks: checked },
+      data: { branch: draft.branch, ...(await repo.diff(chat.id)), checks: checked },
     });
   }
   writer.write({ type: "finish" });
