@@ -75,6 +75,14 @@ describe("LocalSession", () => {
     await local.writeTextFile({ path: join(home, ".ai-sdk-harness/x.json"), content: "{}" });
     expect(await local.readTextFile({ path: join(home, ".ai-sdk-harness/x.json") })).toBe("{}");
     expect(await local.readTextFile({ path: "workflows/missing.ts" })).toBeNull();
+    // Its own run files, but not another session's, whose bridge's start config holds the key.
+    const runs = join(home, ".ai-sdk-harness/.agent-runs");
+    await local.writeTextFile({ path: join(runs, "s1/x.json"), content: "{}" });
+    mkdirSync(join(runs, "s2"), { recursive: true });
+    writeFileSync(join(runs, "s2/start-config.json"), "{}");
+    await expect(local.readTextFile({ path: join(runs, "s2/start-config.json") })).rejects.toThrow(
+      /outside the checkout/,
+    );
     for (const path of ["../outside.txt", "/etc/passwd", "out/x", ".git/config", "node_modules/x/index.js"]) {
       await expect(local.writeTextFile({ path, content: "no" }), path).rejects.toThrow(/outside the checkout/);
       await expect(local.readBinaryFile({ path }), path).rejects.toThrow(/outside the checkout/);

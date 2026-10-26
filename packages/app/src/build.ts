@@ -39,20 +39,12 @@ const pkgDir = realpathSync(fileURLToPath(new URL("..", import.meta.url)));
 // The runtime and what it loads stay outside the server bundle: the server imports them from the
 // consumer's install, so the app and the worker share one copy. (The app imports no connector; a
 // config's connectors reach it only through startApp.) `ai` too: the chat's loop and a connector's
-// model half (`ConnectorSetup.model`) then share one AI SDK. And `HarnessAgent`'s adapters
-// (`@ai-sdk/harness*`), which read their bridges' files beside their own `dist/`.
-const RUNTIME = [
-  "@sanoma-ai/workflows",
-  "@sanoma-ai/bridge",
-  "@dbos-inc/dbos-sdk",
-  "pg",
-  "zod",
-  "ai",
-  "@ai-sdk/harness",
-  "@ai-sdk/harness-pi",
-  "@ai-sdk/harness-claude-code",
-];
-const isRuntime = (id: string) => RUNTIME.some((name) => id === name || id.startsWith(`${name}/`));
+// model half (`ConnectorSetup.model`) then share one AI SDK.
+const RUNTIME = ["@sanoma-ai/workflows", "@sanoma-ai/bridge", "@dbos-inc/dbos-sdk", "pg", "zod", "ai"];
+/** The app's own dependencies kept out of the bundle, from its install: `HarnessAgent` and its adapters, which read their bridges' files beside their own `dist/`. */
+const OWN = ["@ai-sdk/harness", "@ai-sdk/harness-pi", "@ai-sdk/harness-claude-code"];
+const EXTERNAL = [...RUNTIME, ...OWN];
+const isIn = (names: string[], id: string) => names.some((name) => id === name || id.startsWith(`${name}/`));
 
 // The browser bundle may import only types from the runtime (DBOS, Postgres), and the values of
 // `@sanoma-ai/workflows/shared`. `import type` is erased before resolution, so anything else of
@@ -240,7 +232,7 @@ function packageConfig(): InlineConfig {
       ],
     },
     environments: {
-      ssr: { resolve: { external: RUNTIME } },
+      ssr: { resolve: { external: EXTERNAL } },
     },
     server: { port: 3000 },
   };
@@ -481,8 +473,8 @@ function sharedDeps(repo: string, src: string): Plugin {
 
 /**
  * The server bundle holds everything but the runtime, which it imports by absolute URL from
- * `runtimeFrom`'s resolution (pg and DBOS through `@sanoma-ai/workflows`', the harness adapters
- * through the app's), so it needs nothing from the company's install. Build only: dev's server
+ * `runtimeFrom`'s resolution (pg and DBOS through `@sanoma-ai/workflows`'), and the app's own
+ * (`OWN`) from the app's install, so it needs nothing from the company's install. Build only: dev's server
  * resolves as Node does.
  */
 function runtimeExternal(runtimeFrom: string): Plugin {
@@ -493,16 +485,18 @@ function runtimeExternal(runtimeFrom: string): Plugin {
     config: () => ({ environments: { ssr: { resolve: { noExternal: true } } } }),
     applyToEnvironment: (environment) => environment.name === "ssr",
     async resolveId(source, _importer, options) {
-      if (!isRuntime(source)) return;
+      if (!isIn(EXTERNAL, source)) return;
       const opts = { ...options, skipSelf: true };
+      if (isIn(OWN, source)) {
+        const own = await this.resolve(source, defaultRuntimeFrom, opts);
+        if (!own) return this.error(`${source} does not resolve from the app`);
+        return { id: pathToFileURL(own.id).href, external: "absolute" };
+      }
       let resolved = await this.resolve(source, runtimeFrom, opts);
       if (!resolved) {
         const workflows = await this.resolve("@sanoma-ai/workflows", runtimeFrom, opts);
         if (workflows) resolved = await this.resolve(source, workflows.id, opts);
       }
-      // The harness adapters are the app's own dependencies: from its install.
-      if (!resolved && source.startsWith("@ai-sdk/harness"))
-        resolved = await this.resolve(source, defaultRuntimeFrom, opts);
       if (!resolved) return this.error(`${source} does not resolve from ${runtimeFrom} or its @sanoma-ai/workflows`);
       return { id: pathToFileURL(resolved.id).href, external: "absolute" };
     },
@@ -555,7 +549,7 @@ export async function appDevServer(
     // `src/ui.ts`, whose types Node refuses to strip under node_modules, so from an npm install
     // every page would fail (a linked checkout hides it). `sanoma` is compiled, as the build
     // compiles everything.
-    environments: { ssr: { resolve: { external: RUNTIME, noExternal: ["sanoma"] } } },
+    environments: { ssr: { resolve: { external: EXTERNAL, noExternal: ["sanoma"] } } },
     optimizeDeps: {
       // Shipped as source, compiled with the pages.
       exclude: ["sanoma", "@sanoma-ai/app"],

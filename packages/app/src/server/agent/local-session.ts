@@ -60,6 +60,8 @@ export class LocalSession implements HarnessV1NetworkSandboxSession {
   readonly ports: ReadonlyArray<number>;
   readonly env: Readonly<Record<string, string>>;
   readonly #home: string;
+  /** Its own run files (`.agent-runs/<id>`), which a bridge writes the model's key into. */
+  readonly #runs: string;
   /** The process groups its commands lead, killed by `stop` whether or not their leader has exited. */
   readonly #groups = new Set<number>();
 
@@ -67,6 +69,8 @@ export class LocalSession implements HarnessV1NetworkSandboxSession {
     this.id = id;
     this.defaultWorkingDirectory = resolve(root);
     this.#home = resolve(home);
+    const state = harnessStateDirectoryPath({ sandboxHomeDir: this.#home });
+    this.#runs = harnessSessionDataDirectoryPath({ stateDirectory: state, sessionId: id });
     this.ports = [port];
     this.env = sessionEnv(this.#home);
   }
@@ -74,7 +78,8 @@ export class LocalSession implements HarnessV1NetworkSandboxSession {
   /** `path` as the session may use it: the checkout's by the checkout rule, else under its home; refused otherwise. */
   async #path(path: string): Promise<string> {
     const full = resolve(this.defaultWorkingDirectory, path);
-    if (within(this.#home, full)) return full;
+    // Its home, but no other session's run files (a bridge's start config holds the key).
+    if (within(this.#home, full) && (!within(dirname(this.#runs), full) || within(this.#runs, full))) return full;
     const allowed = await allowedPath(this.defaultWorkingDirectory, full);
     if (allowed === undefined) throw new Error(`${path} is outside the checkout, or under .git or node_modules`);
     return allowed;
@@ -123,12 +128,17 @@ export class LocalSession implements HarnessV1NetworkSandboxSession {
     if (group !== undefined) this.#groups.add(group);
     const exited = new Promise<{ exitCode: number }>((done) => {
       child.on("error", () => done({ exitCode: 127 }));
-      child.on("close", (code) => done({ exitCode: code ?? 1 }));
+      child.on("close", (code) => {
+        // Forgotten once none of its group is left, so `stop` kills no group its pid leads later.
+        if (group !== undefined && !groupAlive(group)) this.#groups.delete(group);
+        done({ exitCode: code ?? 1 });
+      });
     });
     const kill = async () => {
       if (group !== undefined) killGroup(group);
     };
     const onAbort = () => void kill();
+    if (abortSignal?.aborted) onAbort();
     abortSignal?.addEventListener("abort", onAbort, { once: true });
     void exited.then(() => abortSignal?.removeEventListener("abort", onAbort));
     return { pid: child.pid, stdout: web(child.stdout!), stderr: web(child.stderr!), wait: () => exited, kill };
@@ -161,17 +171,23 @@ export class LocalSession implements HarnessV1NetworkSandboxSession {
   /** Stops it and deletes its `.agent-runs` (the bridge's start files, the model's key in them). */
   destroy = async () => {
     await this.stop();
-    const state = harnessStateDirectoryPath({ sandboxHomeDir: this.#home });
-    await rm(harnessSessionDataDirectoryPath({ stateDirectory: state, sessionId: this.id }), {
-      recursive: true,
-      force: true,
-    });
+    await rm(this.#runs, { recursive: true, force: true });
   };
 
   restricted = () => this;
 }
 
 const web = (stream: Readable) => Readable.toWeb(stream) as ReadableStream<Uint8Array>;
+
+/** Whether any process of the group `group` is left. */
+function groupAlive(group: number): boolean {
+  try {
+    process.kill(-group, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /** Kills the process group `group` (a `detached` child's pid). */
 function killGroup(group: number) {

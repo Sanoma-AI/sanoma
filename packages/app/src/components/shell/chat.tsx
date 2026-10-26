@@ -132,7 +132,9 @@ function Conversation({ id, initial, onSend }: { id: string; initial: ChatMessag
   const fresh = messages.length === 0;
   const send = (text: string) => {
     onSend();
-    void sendMessage({ text }, fresh ? { body: { engine } } : undefined);
+    // Every message names it: the server opens a new chat on it (one whose first send failed, too)
+    // and keeps an open chat's own.
+    void sendMessage({ text }, { body: { engine } });
   };
   return (
     <>

@@ -1,10 +1,7 @@
-import { execFile } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import type { HarnessV1 } from "@ai-sdk/harness";
 import { HarnessAgent } from "@ai-sdk/harness/agent";
-import type { Draft, Principal } from "@sanoma-ai/workflows";
 import { errorMessage } from "@sanoma-ai/workflows/shared";
 import {
   createUIMessageStream,
@@ -71,8 +68,6 @@ export type RuntimeName = keyof typeof RUNTIMES;
 /** What the agent is told when a shell command or a path outside the checkout rule is refused. */
 const NO_SHELL = "No shell commands in this chat until previews exist: edit the files; the checks run after your turn";
 
-const git = promisify(execFile);
-
 /** A bridge's first session, by its runtime: it installs the bridge under the shared home, so the next ones wait for it. */
 const installing = new Map<RuntimeName, Promise<unknown>>();
 
@@ -103,10 +98,11 @@ async function runTurn(
   const repo = drafting(app);
   // Kept across restarts: a bridge installs its agent under it once.
   const home = join(repo.root, ".sanoma", "agent-home");
+  // The key first: a turn without it opens no draft.
+  const auth = await authFor(app);
   // The agent works in the chat's draft from its first turn.
-  const [draft, auth, model, port] = await Promise.all([
+  const [draft, model, port] = await Promise.all([
     openDraft(app, chat),
-    authFor(app),
     modelFor(app, runtime),
     freePort(),
     mkdir(home, { recursive: true }),
@@ -124,17 +120,21 @@ async function runTurn(
     sandboxConfig: { workDir: "." },
   });
   const said = messages.at(-1)!;
-  let committed = false;
+  let failed: { err: unknown } | undefined;
   try {
     const create = () => agent.createSession({ sessionId, sandboxSession: local, abortSignal: signal });
     const installed = installing.get(name);
     const started = installed ? installed.then(create) : create();
-    // A failed first start is tried again by the next.
-    if (runtime.bridge && !installed)
+    // Kept as whether it started (not the session); a failed first start is tried again by the next.
+    if (runtime.bridge && !installed) {
       installing.set(
         name,
-        started.catch(() => installing.delete(name)),
+        started.then(
+          () => undefined,
+          () => void installing.delete(name),
+        ),
       );
+    }
     const session = await started;
     try {
       let result = await agent.stream({ session, prompt: textOf(said), abortSignal: signal });
@@ -161,15 +161,20 @@ async function runTurn(
     } finally {
       await session.destroy();
     }
+  } catch (err) {
+    failed = { err };
   } finally {
     await local.destroy();
-    // What it changed is kept on the draft however the turn ended (an error, or a new message).
-    committed = await commitTurn(draft, principal, `${ENGINE_NAMES[name]}: ${textOf(said, " ").trim().slice(0, 72)}`);
   }
+  // What it changed is kept on the draft, and shown, however the turn ended (an error too); a turn a
+  // new message stopped leaves the card to the next.
+  const message = `${ENGINE_NAMES[name]}: ${textOf(said, " ").trim().slice(0, 72)}`;
+  const committed = (await draft.commit({ paths: ["."], message, author: principal.id })) !== undefined;
   if (committed && !signal.aborted) {
     const [checked, diff] = await Promise.all([checks(draft.root, app.resolved.databaseUrl), repo.diff(chat.id)]);
     writer.write({ type: "data-draft", id: "draft", data: { branch: draft.branch, ...diff, checks: checked } });
   }
+  if (failed) throw failed.err;
   writer.write({ type: "finish" });
 }
 
@@ -201,28 +206,18 @@ async function modelFor(app: AppContext, { qualified }: Runtime): Promise<string
 
 /**
  * The checkout rule's answer to a built-in call: an edit of a file the rule allows in the draft
- * (`allowedPath`) is approved; a command, a file outside it or under `.git` or `node_modules`, or a
- * call that names no file, is denied with the reason, which the agent reads. Never a policy call.
+ * (`allowedPath`) is approved; a command, an edit outside it or under `.git` or `node_modules`, and
+ * any other call that asks, are denied with the reason, which the agent reads. Never a policy call.
  */
 async function answer(root: string, approvalId: string, toolName: string, kind: string | undefined, input: unknown) {
   const deny = (reason: string) => ({ type: "tool-approval-response" as const, approvalId, approved: false, reason });
-  const path = pathOf(input);
   if (kind === "bash") return deny(`${toolName}: ${NO_SHELL}`);
-  if (path === undefined) return deny(`${toolName} names no file in your checkout: edit the files themselves`);
+  const path = pathOf(input);
+  if (kind !== "edit" || path === undefined) {
+    return deny(`${toolName} is not available in this chat: edit the files in your checkout`);
+  }
   if ((await allowedPath(root, path)) === undefined) {
     return deny(`${path} is outside your checkout, or under .git or node_modules`);
   }
   return { type: "tool-approval-response" as const, approvalId, approved: true };
-}
-
-/** Commits what the turn changed in the draft (every path git sees changed); whether it committed anything. */
-async function commitTurn(draft: Draft, principal: Principal, message: string): Promise<boolean> {
-  const { stdout } = await git("git", ["status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=all"], {
-    cwd: draft.root,
-  });
-  const paths = stdout
-    .split("\0")
-    .filter(Boolean)
-    .map((entry) => entry.slice(3));
-  return (await draft.commit({ paths, message, author: principal.id })) !== undefined;
 }
