@@ -7,6 +7,8 @@ import { type CheckResult, errorMessage } from "@sanoma-ai/workflows";
 import {
   type ConfigDescription,
   describeConfig,
+  type PermissionsGrid,
+  permissionsGrid,
   readPeople,
   schemaOf,
   writeGenerated,
@@ -38,11 +40,13 @@ const LINTED = ["workflows", "resources", "sites"];
  * wrong under `content/` (as `writeSiteFiles` reads it). Their problems in the order tsc, the sites' tsc, oxlint,
  * the policies, the config, the folders refused as sites, the content's problems, the sites' build. Then, unless the policies do not hold, every scenario against the fakes (`runScenarios`), each step that did not hold a
  * problem. `ok` when there are no problems; the sites' `warnings` beside them never make it not.
+ * With them, the repo's Permissions grid (`permissionsGrid`, as the app's Permissions page has
+ * it), from the same config and description, which a change is reviewed by.
  */
 export async function check(
   { config, root, resolved }: Loaded,
   { databaseUrl, log }: CheckOptions,
-): Promise<CheckResult> {
+): Promise<CheckResult & { grid: PermissionsGrid }> {
   log("config");
   const policies = resolved.policyProblems;
   const description = describeConfig(config);
@@ -82,7 +86,7 @@ export async function check(
     for (const f of failed) problems.push(`${f.scenario} › ${f.step}: ${f.message}`);
   }
   const warnings = description.sites.flatMap((site) => site.warnings.map(warningLine));
-  return { ok: problems.length === 0, problems, warnings };
+  return { ok: problems.length === 0, problems, warnings, grid: permissionsGrid(resolved, description) };
 }
 
 /**

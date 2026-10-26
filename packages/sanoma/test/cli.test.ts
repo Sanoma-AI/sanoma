@@ -190,8 +190,33 @@ describe("sanoma check", () => {
     dir = copyFixture();
     const ok = await runCli(dir, ["check"], { ...unconfigured, SANOMA_EVENTS: "1" });
     expect(ok.code, `${ok.stdout}${ok.stderr}`).toBe(0);
-    const checked = { sanoma: 1, event: "checked", ok: true, problems: [], warnings: [] };
-    expect(ok.stdout.endsWith(`${JSON.stringify(checked)}\n`)).toBe(true);
+    // The last line: the result, with the Permissions grid (no policies, so everyone may).
+    expect(ok.stdout.endsWith("\n")).toBe(true);
+    const checked: unknown = JSON.parse(ok.stdout.trimEnd().split("\n").at(-1)!);
+    const allow = { answer: "allow" };
+    expect(checked).toEqual({
+      sanoma: 1,
+      event: "checked",
+      ok: true,
+      problems: [],
+      warnings: [],
+      grid: {
+        groups: [null, "agents"],
+        workflows: [
+          {
+            id: "hello",
+            title: "Say hello",
+            cells: [allow, allow],
+            ops: [
+              { id: "ghost.post.create", cells: [allow, allow] },
+              { id: "ghost.post.publish", cells: [allow, allow] },
+            ],
+          },
+        ],
+        // Ghost's operations write and publish: none may be called directly.
+        ops: [],
+      },
+    });
     // The lines check prints, not all of stdout: on a fresh database DBOS logs "Created database …" there.
     expect(ok.stderr).toContain("passed hello/hello.feature › A post goes out");
     expect(ok.stderr.trimEnd().split("\n").at(-1)).toBe("ok");

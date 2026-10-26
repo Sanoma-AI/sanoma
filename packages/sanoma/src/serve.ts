@@ -9,6 +9,7 @@ import {
   isLoopback,
   type ResolvedConfig,
   resolveConfig,
+  resolveDatabaseUrl,
   SanomaClient,
   type SanomaConfig,
   startWorker,
@@ -36,8 +37,8 @@ export interface Served extends Stoppable {
 /** The checkout the config was loaded from (`loadConfig` sets its `file`). */
 const rootOf = (config: SanomaConfig) => config.root ?? dirname(config.file!);
 
-/** The checkout, as the worker's and the app's `source`. */
-const sourceOf = (config: SanomaConfig) => localGitSource(rootOf(config));
+/** The checkout, as the worker's and the app's `source`, a draft's check on the config's database. */
+const sourceOf = (config: SanomaConfig) => localGitSource(rootOf(config), { databaseUrl: resolveDatabaseUrl(config) });
 
 /** What a worker of the launcher's starts with: promoted, since a local worker is always the version to take queued runs, even one seen before, and the checkout as its source. */
 const workerOptions = (config: SanomaConfig) => ({ promote: true, source: sourceOf(config) });

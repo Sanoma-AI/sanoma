@@ -13,8 +13,10 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { localGitSource } from "../src/source.ts";
+import { copyFixture, ensureBuilt } from "./fixture.ts";
 import { gitIdentity } from "./git.ts";
 
 let dir = "";
@@ -86,6 +88,92 @@ describe("localGitSource", () => {
     } finally {
       rmSync(remote, { recursive: true, force: true });
     }
+  });
+});
+
+describe("localGitSource and the repository it was cloned from", () => {
+  let origin = "";
+  let url = "";
+  beforeEach(() => {
+    origin = `${dir}-origin.git`;
+    execFileSync("git", ["init", "--quiet", "--bare", "--initial-branch=main", origin]);
+    url = pathToFileURL(origin).href;
+  });
+  afterEach(() => rmSync(origin, { recursive: true, force: true }));
+
+  /** `origin` added and `main` pushed to it, as a clone has them. */
+  const cloned = () => {
+    git("remote", "add", "origin", url);
+    git("push", "--quiet", "origin", "main");
+  };
+
+  /** A commit on the remote's `main` from another clone, as a merge there makes one: its revision. */
+  const mergedThere = (file: string) => {
+    const other = `${dir}-other`;
+    const there = (...args: string[]) => execFileSync("git", args, { cwd: other, encoding: "utf8" }).trim();
+    execFileSync("git", ["clone", "--quiet", url, other]);
+    try {
+      writeFileSync(join(other, file), `export const ${file.replace(/\W/g, "")} = 1;\n`);
+      there("add", file);
+      there("commit", "--quiet", "-m", `Merge ${file}`);
+      there("push", "--quiet", "origin", "main");
+      return there("rev-parse", "HEAD");
+    } finally {
+      rmSync(other, { recursive: true, force: true });
+    }
+  };
+
+  it("reads the remote's URL, and none without one", async () => {
+    const source = localGitSource(dir);
+    expect(await source.remoteUrl!()).toBeUndefined();
+    cloned();
+    expect(await source.remoteUrl!()).toBe(url);
+  });
+
+  it("follows the remote's main: a fast-forward, keeping the token out of every trace", async () => {
+    cloned();
+    const source = localGitSource(dir);
+    const merged = mergedThere("merged.ts");
+    const token = "ghs_secret-token-value";
+    expect(await source.follow!({ url, token, ref: "main" })).toEqual({ revision: merged });
+    expect(await source.head()).toBe(merged);
+    expect(readFileSync(join(dir, "merged.ts"), "utf8")).toContain("merged");
+    expect(git("status", "--porcelain")).toBe("");
+    expect(readFileSync(join(dir, ".git", "config"), "utf8")).not.toContain(token);
+    // Again with nothing new: the same revision.
+    expect(await source.follow!({ url, token, ref: "main" })).toEqual({ revision: merged });
+
+    const failed = source.follow!({ url: `${url}-missing`, token, ref: "main" });
+    await expect(failed).rejects.toThrow(/^git fetch from file:.*-missing failed: /);
+    await expect(failed).rejects.not.toThrow(token);
+  });
+
+  it("skips following when the checkout has uncommitted changes, another branch is checked out, or main has its own commits", async () => {
+    cloned();
+    const source = localGitSource(dir);
+    const before = await source.head();
+    mergedThere("merged.ts");
+    const target = { url, token: "t", ref: "main" };
+
+    writeFileSync(join(dir, "README.md"), "# acme, edited\n");
+    expect(await source.follow!(target)).toEqual({ skipped: "the checkout has uncommitted changes" });
+    git("checkout", "--quiet", "README.md");
+    writeFileSync(join(dir, "new.ts"), "export const n = 1;\n");
+    expect(await source.follow!(target)).toEqual({ skipped: "the checkout has uncommitted changes" });
+    rmSync(join(dir, "new.ts"));
+
+    git("checkout", "--quiet", "-b", "other");
+    expect(await source.follow!(target)).toEqual({ skipped: "other is checked out, not main" });
+    git("checkout", "--quiet", "--detach");
+    expect(await source.follow!(target)).toEqual({ skipped: "no branch is checked out, not main" });
+    git("checkout", "--quiet", "main");
+    expect(await source.head()).toBe(before);
+
+    // A commit of its own here (the app's Adopt commits on the checked-out branch): no fast-forward.
+    writeFileSync(join(dir, "local.ts"), "export const l = 1;\n");
+    const local = await source.commit({ paths: ["local.ts"], message: "Local", author: "alice" });
+    expect(await source.follow!(target)).toEqual({ skipped: `main has commits ${url} does not` });
+    expect(await source.head()).toBe(local!.revision);
   });
 });
 
@@ -203,6 +291,29 @@ describe("localGitSource's drafts", () => {
     expect(git("branch", "--list", "draft/*")).toBe("");
   });
 
+  it("closes a draft: its checkout and its branch gone, whatever it held, and nothing for one closed already", async () => {
+    const source = localGitSource(dir);
+    const draft = await source.draft!("done");
+    writeFileSync(join(draft.root, "done.ts"), "export const done = 1;\n");
+    await draft.commit({ paths: ["done.ts"], message: "Done", author: "agent" });
+    writeFileSync(join(draft.root, "uncommitted.ts"), "export const u = 1;\n");
+    const other = await source.draft!("other");
+
+    await source.closeDraft!("done");
+    expect(existsSync(draft.root)).toBe(false);
+    expect(git("branch", "--list", "--format=%(refname:short)", "draft/*")).toBe("draft/other");
+    expect(await source.drafts!()).toEqual(["other"]);
+    await source.closeDraft!("done");
+
+    // One whose directory is gone (`git clean -X`) still listed, its branch kept: both go.
+    rmSync(other.root, { recursive: true, force: true });
+    await source.closeDraft!("other");
+    expect(git("branch", "--list", "draft/*")).toBe("");
+    expect(git("worktree", "list", "--porcelain")).not.toContain("drafts");
+    expect(status()).toBe("");
+    await expect(source.closeDraft!("../escape")).rejects.toThrow(/A draft's id/);
+  });
+
   it("pushes a draft by its branch", async () => {
     const source = localGitSource(dir);
     const draft = await source.draft!("p");
@@ -218,4 +329,77 @@ describe("localGitSource's drafts", () => {
       rmSync(remote, { recursive: true, force: true });
     }
   });
+});
+
+describe("localGitSource's check", () => {
+  it("runs sanoma check in each draft, one at a time, with every field of its result and the live checkout untouched", async () => {
+    // The fixture company in a git repository of its own: the installed bin as a child in each
+    // draft, on the packages' builds (made when stale) and Postgres.
+    ensureBuilt();
+    rmSync(dir, { recursive: true, force: true });
+    dir = copyFixture();
+    writeFileSync(join(dir, ".gitignore"), ".sanoma/\nnode_modules/\n");
+    git("init", "--quiet", "--initial-branch=main");
+    git("add", "--all");
+    git("commit", "--quiet", "-m", "First");
+    const source = localGitSource(dir, { databaseUrl: testDatabaseUrl("drafts") });
+    const [, broken, unloadable] = await Promise.all([
+      source.draft!("ok"),
+      source.draft!("broken"),
+      source.draft!("unloadable"),
+    ]);
+    writeFileSync(join(broken.root, "workflows", "broken.ts"), 'export const n: number = "one";\n');
+    // Its config prints a passing result as it loads, which does not pass it: the launcher's comes last.
+    const fake = JSON.stringify({ sanoma: 1, event: "checked", ok: true, problems: [], warnings: [] });
+    const config = join(broken.root, "sanoma.config.ts");
+    writeFileSync(config, `console.log(${JSON.stringify(fake)});\n${readFileSync(config, "utf8")}`);
+    await broken.commit({ paths: ["workflows/broken.ts", "sanoma.config.ts"], message: "Break", author: "agent" });
+    // A config that does not load, and says what the check's environment holds (but what macOS adds to every one).
+    const names = 'Object.keys(process.env).filter((n) => !n.startsWith("__CF_")).sort().join(" ")';
+    const says = `throw new Error(\`no config; env \${${names}}\`);\n`;
+    writeFileSync(join(unloadable.root, "sanoma.config.ts"), says);
+    await unloadable.commit({ paths: ["sanoma.config.ts"], message: "Unload", author: "agent" });
+    // A credential of this process never reaches the check.
+    vi.stubEnv("GHOST_ADMIN_API_KEY", "not-for-the-check");
+
+    const [passed, failed, refused] = await Promise.all([
+      source.check!("ok"),
+      source.check!("broken"),
+      source.check!("unloadable"),
+    ]);
+    // The grid comes back as the check reported it: the fixture has no policies, so all allow.
+    const allow = { answer: "allow" };
+    expect(passed).toEqual({
+      ok: true,
+      problems: [],
+      warnings: [],
+      grid: {
+        groups: [null, "agents"],
+        workflows: [
+          {
+            id: "hello",
+            title: "Say hello",
+            cells: [allow, allow],
+            ops: [
+              { id: "ghost.post.create", cells: [allow, allow] },
+              { id: "ghost.post.publish", cells: [allow, allow] },
+            ],
+          },
+        ],
+        ops: [],
+      },
+    });
+    expect(failed.ok).toBe(false);
+    expect(failed.problems).toContainEqual(expect.stringMatching(/^workflows\/broken\.ts:1:14: .*'string'.*'number'/));
+    expect(refused).toEqual({
+      ok: false,
+      problems: [expect.stringMatching(/^sanoma check: .*no config; env HOME PATH SANOMA_DATABASE_URL SANOMA_EVENTS$/)],
+      warnings: [],
+    });
+    await expect(source.check!("../escape")).rejects.toThrow(/A draft's id/);
+
+    expect(await source.drafts!()).toEqual(["broken", "ok", "unloadable"]);
+    expect(git("status", "--porcelain")).toBe("");
+    expect(git("log", "--format=%s")).toBe("First");
+  }, 600_000);
 });
