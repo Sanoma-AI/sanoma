@@ -51,41 +51,42 @@ A finished run: the graph shows how each step went, and the ledger records each 
 
 ## Contents
 
-| Path                                                                   | What it is                                                                                   |
-| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| [`packages/`](packages/AGENTS.md)                                      | Core workspace packages                                                                      |
-| [`sanoma`](packages/sanoma/README.md)                                  | The bin a company repo runs, checks and exports itself with; what its workflows import       |
-| [`@sanoma-ai/workflows`](packages/workflows/README.md)                 | Define connectors and workflows, run them durably on DBOS, and lint them                     |
-| [`@sanoma-ai/app`](packages/app/README.md)                             | Web UI over a config, started with `startApp(config)`                                        |
-| [`@sanoma-ai/testing`](packages/testing/README.md)                     | `startTestWorker`, `testDatabaseUrl`, a vitest test app, vendor replay, and scenario testing |
-| [`@sanoma-ai/bridge`](packages/bridge/README.md)                       | OpenTofu providers: the provider-bridge client, its fake, the resource generator             |
-| [`@sanoma-ai/desktop`](packages/desktop/README.md)                     | The desktop shell (private): runs a company folder's own launcher and shows the app          |
-| [`connectors/`](connectors/AGENTS.md)                                  | Vendor connectors, one workspace package each                                                |
-| [`@sanoma-ai/connector-ghost`](connectors/ghost/README.md)             | Ghost Admin API post operations and an in-memory fake                                        |
-| [`@sanoma-ai/connector-resend`](connectors/resend/README.md)           | Resend broadcast and email operations and an in-memory fake                                  |
-| [`@sanoma-ai/connector-exa`](connectors/exa/README.md)                 | Exa web search, page contents, similar pages and answers, and an in-memory fake              |
-| [`@sanoma-ai/connector-bluesky`](connectors/bluesky/README.md)         | Bluesky post operations and an in-memory fake                                                |
-| [`@sanoma-ai/connector-docker`](connectors/docker/README.md)           | The local Docker host: a container that runs the company, through its OpenTofu provider      |
-| [`@sanoma-ai/connector-github`](connectors/github/README.md)           | GitHub resources read through its OpenTofu provider, and a replay fake                       |
-| [`@sanoma-ai/connector-stripe`](connectors/stripe/README.md)           | Stripe resources read through its OpenTofu provider, and a replay fake                       |
-| [`@sanoma-ai/connector-supabase`](connectors/supabase/README.md)       | Supabase projects read through its OpenTofu provider, and a replay fake                      |
-| [`@sanoma-ai/connector-sanoma-ops`](connectors/sanoma-ops/README.md)   | The hosted wakeup on sanoma-ops, which wakes a stopped host at a time, and an in-memory fake |
-| [`@sanoma-ai/connector-better-auth`](connectors/better-auth/README.md) | Better Auth, a visitor login for public sites, on the company's database                     |
-| [`@sanoma-ai/connector-anthropic`](connectors/anthropic/README.md)     | Anthropic's Claude models for the app's agent, through the AI SDK                            |
-| [`modules/`](modules/AGENTS.md)                                        | Placeholder for parts not written yet                                                        |
-| [`types/`](types/AGENTS.md)                                            | Ambient type declarations shared by the packages                                             |
-| [`.github/`](.github/AGENTS.md)                                        | GitHub Actions CI and the README's images                                                    |
-| [`.claude/`](.claude/)                                                 | Agent skills for Claude Code                                                                 |
-| [`.agents/`](.agents/)                                                 | Vendored agent skills                                                                        |
-| [`package.json`](package.json)                                         | Root scripts: checks, build, test, `db:up`, `bridge:download`, `postgres:download`           |
-| [`tsconfig.json`](tsconfig.json)                                       | Root TypeScript config: `sanoma`'s shipped options, with `@sanoma-ai/*` paths to each `src/` |
-| [`vitest.config.ts`](vitest.config.ts)                                 | Test config with aliases to the package sources                                              |
-| [`docker-compose.yml`](docker-compose.yml)                             | Postgres for DBOS on port 5433                                                               |
-| [`lefthook.yml`](lefthook.yml)                                         | Pre-commit format and lint on staged files                                                   |
-| [`.oxlintrc.json`](.oxlintrc.json)                                     | Lint config                                                                                  |
-| [`.oxfmtrc.json`](.oxfmtrc.json)                                       | Format config                                                                                |
-| [`pnpm-workspace.yaml`](pnpm-workspace.yaml)                           | Workspace globs: `packages/*` and `connectors/*`                                             |
-| [`skills-lock.json`](skills-lock.json)                                 | Lock file for installed agent skills                                                         |
+| Path                                                                   | What it is                                                                                    |
+| ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| [`packages/`](packages/AGENTS.md)                                      | Core workspace packages                                                                       |
+| [`sanoma`](packages/sanoma/README.md)                                  | The bin a company repo runs, checks and exports itself with; what its workflows import        |
+| [`@sanoma-ai/workflows`](packages/workflows/README.md)                 | Define connectors and workflows, run them durably on DBOS, and lint them                      |
+| [`@sanoma-ai/app`](packages/app/README.md)                             | Web UI over a config, started with `startApp(config)`                                         |
+| [`@sanoma-ai/testing`](packages/testing/README.md)                     | `startTestWorker`, `testDatabaseUrl`, a vitest test app, vendor replay, and scenario testing  |
+| [`@sanoma-ai/bridge`](packages/bridge/README.md)                       | OpenTofu providers: the provider-bridge client, its fake, the resource generator              |
+| [`@sanoma-ai/desktop`](packages/desktop/README.md)                     | The desktop shell (private): runs a company folder's own launcher and shows the app           |
+| [`connectors/`](connectors/AGENTS.md)                                  | Vendor connectors, one workspace package each                                                 |
+| [`@sanoma-ai/connector-ghost`](connectors/ghost/README.md)             | Ghost Admin API post operations and an in-memory fake                                         |
+| [`@sanoma-ai/connector-resend`](connectors/resend/README.md)           | Resend broadcast and email operations and an in-memory fake                                   |
+| [`@sanoma-ai/connector-exa`](connectors/exa/README.md)                 | Exa web search, page contents, similar pages and answers, and an in-memory fake               |
+| [`@sanoma-ai/connector-bluesky`](connectors/bluesky/README.md)         | Bluesky post operations and an in-memory fake                                                 |
+| [`@sanoma-ai/connector-cloudflare`](connectors/cloudflare/README.md)   | Cloudflare Containers: a host that stops when quiet, and a Durable Object alarm that wakes it |
+| [`@sanoma-ai/connector-docker`](connectors/docker/README.md)           | The local Docker host: a container that runs the company, through its OpenTofu provider       |
+| [`@sanoma-ai/connector-github`](connectors/github/README.md)           | GitHub resources read through its OpenTofu provider, and a replay fake                        |
+| [`@sanoma-ai/connector-stripe`](connectors/stripe/README.md)           | Stripe resources read through its OpenTofu provider, and a replay fake                        |
+| [`@sanoma-ai/connector-supabase`](connectors/supabase/README.md)       | Supabase projects read through its OpenTofu provider, and a replay fake                       |
+| [`@sanoma-ai/connector-sanoma-ops`](connectors/sanoma-ops/README.md)   | The hosted wakeup on sanoma-ops, which wakes a stopped host at a time, and an in-memory fake  |
+| [`@sanoma-ai/connector-better-auth`](connectors/better-auth/README.md) | Better Auth, a visitor login for public sites, on the company's database                      |
+| [`@sanoma-ai/connector-anthropic`](connectors/anthropic/README.md)     | Anthropic's Claude models for the app's agent, through the AI SDK                             |
+| [`modules/`](modules/AGENTS.md)                                        | Placeholder for parts not written yet                                                         |
+| [`types/`](types/AGENTS.md)                                            | Ambient type declarations shared by the packages                                              |
+| [`.github/`](.github/AGENTS.md)                                        | GitHub Actions CI and the README's images                                                     |
+| [`.claude/`](.claude/)                                                 | Agent skills for Claude Code                                                                  |
+| [`.agents/`](.agents/)                                                 | Vendored agent skills                                                                         |
+| [`package.json`](package.json)                                         | Root scripts: checks, build, test, `db:up`, `bridge:download`, `postgres:download`            |
+| [`tsconfig.json`](tsconfig.json)                                       | Root TypeScript config: `sanoma`'s shipped options, with `@sanoma-ai/*` paths to each `src/`  |
+| [`vitest.config.ts`](vitest.config.ts)                                 | Test config with aliases to the package sources                                               |
+| [`docker-compose.yml`](docker-compose.yml)                             | Postgres for DBOS on port 5433                                                                |
+| [`lefthook.yml`](lefthook.yml)                                         | Pre-commit format and lint on staged files                                                    |
+| [`.oxlintrc.json`](.oxlintrc.json)                                     | Lint config                                                                                   |
+| [`.oxfmtrc.json`](.oxfmtrc.json)                                       | Format config                                                                                 |
+| [`pnpm-workspace.yaml`](pnpm-workspace.yaml)                           | Workspace globs: `packages/*` and `connectors/*`                                              |
+| [`skills-lock.json`](skills-lock.json)                                 | Lock file for installed agent skills                                                          |
 
 Connectors live here under `connectors/`; one moves to its own repo only when someone outside the team maintains it.
 
