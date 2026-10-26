@@ -179,11 +179,7 @@ export const LedgerRow = memo(function LedgerRow({
       break;
     case "approval.withdrawn":
       kind = "withdrawn";
-      body = (
-        <p>
-          {record.by ?? "The run"} withdrew “{title(record.approval)}”: {record.reason}
-        </p>
-      );
+      body = <p>{traceLine(record, title)}</p>;
       break;
     case "approval.refused":
       kind = "ignored";

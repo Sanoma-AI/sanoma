@@ -600,12 +600,7 @@ export class SanomaClient {
     // The id names this message, so the run's answer says whether it decided with it, and is
     // in its idempotency key, so a retried send queues it once.
     const id = msg.id ?? randomUUID();
-    const now = await this.sendToApproval(runId, target, { ...msg, id }, options.timeoutSeconds);
-    // Read, but refused: the run checks the sender again, and said no.
-    const refused = now.refused.find((r) => r.id === id);
-    if (refused) throw notApprover(runId, target, refused.reason);
-    if (now.status !== "pending" && now.decidedWith !== id) throw alreadyDecided(runId, now);
-    return now;
+    return this.sendToApproval(runId, target, { ...msg, id }, options.timeoutSeconds);
   }
 
   /**
@@ -632,12 +627,7 @@ export class SanomaClient {
     const refusal = withdrawalRefusal(target, by, row.authenticatedUser);
     if (refusal !== undefined) throw notApprover(runId, target, refusal);
     const id = randomUUID();
-    const now = await this.sendToApproval(runId, target, { withdraw, by, id }, options.timeoutSeconds);
-    // Read, but refused: the run checks who withdraws too.
-    const refused = now.refused.find((r) => r.id === id);
-    if (refused) throw notApprover(runId, target, refused.reason);
-    if (now.status !== "pending" && now.decidedWith !== id) throw alreadyDecided(runId, now);
-    return now;
+    return this.sendToApproval(runId, target, { withdraw, by, id }, options.timeoutSeconds);
   }
 
   /**
@@ -671,7 +661,9 @@ export class SanomaClient {
 
   /**
    * Sends a message with an `id` to the approval and waits up to `timeoutSeconds` (30 by
-   * default) for the run to read it: the approval as the run then has it.
+   * default) for the run to read it: the approval as the run then has it, still `pending` if it
+   * has not read it. `not_approver` when the run refused it, `already_decided` when another
+   * message decided it first.
    */
   private async sendToApproval(
     runId: string,
@@ -693,7 +685,13 @@ export class SanomaClient {
             pollingIntervalMs: 1000,
           })
         : null);
-    return decided ?? (await this.approvals(runId)).find((a) => a.id === target.id) ?? target;
+    const now = decided ?? (await this.approvals(runId)).find((a) => a.id === target.id) ?? target;
+    // Read, but refused: the run checks the sender again, and said no.
+    const refused = now.refused.find((r) => r.id === message.id);
+    if (refused) throw notApprover(runId, target, refused.reason);
+    // Another message reached the run first.
+    if (now.status !== "pending" && now.decidedWith !== message.id) throw alreadyDecided(runId, now);
+    return now;
   }
 
   /**

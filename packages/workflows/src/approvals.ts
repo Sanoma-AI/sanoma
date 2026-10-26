@@ -151,9 +151,8 @@ export async function awaitApproval(
       const { withdraw: reason, by, id } = withdrawal;
       const refused = by && withdrawalRefusal(state, by, run.actor.id);
       if (refused === undefined) {
-        Object.assign(state, { status: "withdrawn", withdrawnReason: reason, withdrawnAt: at, decidedWith: id });
-        if (by) state.withdrawnBy = by.id;
-        await recordWithdrawn(run, [state], reason, at, by?.id);
+        state.decidedWith = id;
+        await withdrawn(run, [state], reason, at, by?.id);
         throw new WithdrawnError(title, state.id, reason);
       }
       await refuse(run, state, { by: by!.id, ...(id === undefined ? {} : { id }), at, reason: refused });
@@ -231,9 +230,7 @@ const heldOf = ({ seq, reasons }: HeldCall) => ({
 export async function withdrawApprovals(run: Run, covering: string, reason: string): Promise<void> {
   const retired = run.approvals.filter((a) => a.status === "approved" && a.covers.includes(covering));
   if (!retired.length) return;
-  const at = await DBOS.now();
-  for (const a of retired) Object.assign(a, { status: "withdrawn", withdrawnReason: reason, withdrawnAt: at });
-  await recordWithdrawn(run, retired, reason, at);
+  await withdrawn(run, retired, reason, await DBOS.now());
 }
 
 /** Records a message the approval ignored, on the approval and in the ledger. */
@@ -252,14 +249,17 @@ async function refuse(run: Run, state: ApprovalState, refused: ApprovalState["re
 }
 
 /**
- * Publishes approvals just withdrawn as a decision is: the list, then the ledger (with who
- * withdrew them, when someone did), then each one's decision event.
+ * Withdraws the approvals (by `by`, when someone rather than the run does) and publishes them as a
+ * decision is: the list, then the ledger, then each one's decision event.
  */
-async function recordWithdrawn(run: Run, withdrawn: readonly ApprovalState[], reason: string, at: number, by?: string) {
-  await DBOS.setEvent(APPROVALS_EVENT, run.approvals);
-  for (const a of withdrawn) {
-    const body = { type: "approval.withdrawn", approval: a.id, ...(by === undefined ? {} : { by }), reason } as const;
-    await write(run, entry(run, body, { key: a.id, at }));
+async function withdrawn(run: Run, approvals: readonly ApprovalState[], reason: string, at: number, by?: string) {
+  const who = by === undefined ? {} : { by };
+  for (const a of approvals) {
+    Object.assign(a, { status: "withdrawn", withdrawnReason: reason, withdrawnAt: at }, by && { withdrawnBy: by });
   }
-  for (const a of withdrawn) await DBOS.setEvent(decisionEventOf(a.id), a);
+  await DBOS.setEvent(APPROVALS_EVENT, run.approvals);
+  for (const a of approvals) {
+    await write(run, entry(run, { type: "approval.withdrawn", approval: a.id, ...who, reason }, { key: a.id, at }));
+  }
+  for (const a of approvals) await DBOS.setEvent(decisionEventOf(a.id), a);
 }
