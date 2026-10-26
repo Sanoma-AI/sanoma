@@ -1,7 +1,7 @@
 import type { z } from "zod";
 import { hasPath } from "./host.ts";
 import type { Op } from "./op.ts";
-import type { Resource } from "./resource.ts";
+import type { References, Resource } from "./resource.ts";
 import type { DeclaredResource } from "./resources.ts";
 
 // The `Wakeup` contract: what a resource type that wakes a stopped instance at a time declares
@@ -44,11 +44,16 @@ export interface WakeupSpec {
   outputs: (state: Record<string, unknown>) => WakeupOutputs;
 }
 
+/** The operations `defineResource` gives a type itself: never its register. */
+const RESOURCE_OPS = new Set(["read", "import", "plan", "create", "update", "delete"]);
+
 /**
  * Throws what is wrong with a resource type's `wakeup`: a type apply cannot change (not
- * `writable`), a `host` that names no field or no reference, a `register` that is not an
- * operation of the type's own group, `outputs` that is not a function. Whether the connector
- * has that operation is `checkWakeupOps`'s, which `resolveConfig` runs.
+ * `writable`), a host (stopped when its wake is due), a `host` that names no field or no
+ * reference resolved `by` a field, a `register` that is not an operation of the type's own group
+ * or is one of its resource operations, `outputs` that is not a function. Whether the connector
+ * has that operation, and the reference names a host, is `checkWakeupOps`'s, which
+ * `resolveConfig` runs.
  */
 export function checkWakeup(
   what: string,
@@ -57,20 +62,26 @@ export function checkWakeup(
     vendor: string;
     type: string;
     schema: z.ZodObject;
-    fields: { references?: Readonly<Record<string, unknown>> };
+    fields: { references?: References };
     writable?: boolean;
+    host?: unknown;
   },
 ): void {
   const problems: string[] = [];
   if (!type.writable) problems.push("it must be writable, so apply can create and update it");
+  if (type.host) problems.push("a host cannot be its own wakeup: it is stopped when the wake is due");
   const host = wakeup.inputs?.host;
+  const reference = typeof host === "string" ? type.fields.references?.[host] : undefined;
   if (typeof host !== "string" || !hasPath(type.schema, host)) problems.push(`inputs.host names no field (${host})`);
-  else if (!Object.hasOwn(type.fields.references ?? {}, host))
-    problems.push(`inputs.host must be a reference to the host (fields.references), not ${host}`);
+  else if (!reference) problems.push(`inputs.host must be a reference to the host (fields.references), not ${host}`);
+  else if (!reference.by?.length)
+    problems.push("inputs.host must be resolved `by` the field of the host's state that holds its URL");
   const group = `${type.vendor}.${type.type}.`;
   const register: unknown = wakeup.register;
-  if (typeof register !== "string" || !register.startsWith(group) || !/^\w+$/.test(register.slice(group.length)))
+  const name = typeof register === "string" && register.startsWith(group) ? register.slice(group.length) : "";
+  if (!/^\w+$/.test(name))
     problems.push(`register must name an operation of its own group, ${group}<op> (${String(register)})`);
+  else if (RESOURCE_OPS.has(name)) problems.push(`register must be an operation of its own, not the type's ${name}`);
   if (typeof wakeup.outputs !== "function") problems.push("outputs must be a function of the state");
   if (problems.length) throw new Error(`${what}: its wakeup: ${problems.join("; ")}`);
 }
@@ -91,13 +102,18 @@ function takesRegistration(op: Op): boolean {
 }
 
 /**
- * Throws when a wakeup type's `register` is not among the config's operations, or does not take
+ * Throws when a wakeup type's host reference names a type of the config that is no host, or its
+ * `register` is not among the config's operations, or does not take
  * `WakeupRegistration`. Here rather than in `defineConnector`, which sees one connector before
  * its package merges in the operations it adds to a resource's group (Supabase's pattern).
  */
 export function checkWakeupOps(types: ReadonlyMap<string, Resource>, ops: ReadonlyMap<string, Op>): void {
   for (const [id, type] of types) {
     if (!type.wakeup) continue;
+    // The types it may name that the config has, each a host; one it lacks no data file can declare.
+    const named = [type.fields.references?.[type.wakeup.inputs.host]?.type ?? []].flat();
+    const notHosts = named.filter((t) => types.has(t) && !types.get(t)!.host);
+    if (notHosts.length) throw new Error(`${id}: its wakeup's host may name ${notHosts.join(", ")}, which is no host`);
     const op = ops.get(type.wakeup.register);
     if (!op) throw new Error(`${id}: its wakeup's register, ${type.wakeup.register}, is no operation of its connector`);
     if (!takesRegistration(op)) throw new Error(`${id}: its wakeup's register, ${op.id}, must take { at, generation }`);

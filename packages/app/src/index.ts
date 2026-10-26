@@ -136,8 +136,10 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   const hosts = publicHosts(description, options.domains ?? {});
   const ingress = new Map<string, IngressRoute>();
   for (const route of options.ingress ?? []) {
-    if (!route.path.startsWith("/") || route.path === "/healthz")
-      throw new Error(`An ingress route's path starts with / and is not /healthz, unlike "${route.path}"`);
+    if (!/^\/[^?#]*$/.test(route.path) || route.path === "/healthz")
+      throw new Error(
+        `An ingress route's path starts with /, has no query and is not /healthz, unlike "${route.path}"`,
+      );
     if (ingress.has(route.path))
       throw new Error(`Two ingress routes have the path ${route.path}: give each path one route`);
     ingress.set(route.path, route);
@@ -163,7 +165,11 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
     // A machine route, before the login too: it checks its own token.
     const route = path === undefined ? undefined : ingress.get(path);
     if (route?.method !== undefined && route.method !== req.method) {
-      res.writeHead(405, { allow: route.method, "content-type": "text/plain; charset=utf-8" });
+      res.writeHead(405, {
+        allow: route.method,
+        "content-type": "text/plain; charset=utf-8",
+        "cache-control": "no-store",
+      });
       return void res.end(`${path} answers ${route.method} only\n`);
     }
     if (route) return sendNodeResponse(res, await route.handle(new NodeRequest({ req, res })));

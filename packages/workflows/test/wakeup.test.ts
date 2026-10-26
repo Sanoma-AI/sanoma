@@ -47,7 +47,9 @@ const wakeup: WakeupSpec = {
   register: "acme.wakeup.register",
   outputs: (state) => ({ healthy: state.healthy === true }),
 };
-const wakeupOf = (overrides: Partial<WakeupSpec> & { writable?: boolean; references?: boolean } = {}) =>
+const wakeupOf = (
+  overrides: Partial<WakeupSpec> & { writable?: boolean; references?: boolean; by?: boolean; to?: string } = {},
+) =>
   defineResource({
     vendor: "acme",
     type: "wakeup",
@@ -58,7 +60,9 @@ const wakeupOf = (overrides: Partial<WakeupSpec> & { writable?: boolean; referen
       immutable: [],
       vendorOwned: [],
       writeOnly: [],
-      ...(overrides.references !== false && { references: { host: { type: "acme.service", by: ["url"] } } }),
+      ...(overrides.references !== false && {
+        references: { host: { type: overrides.to ?? "acme.service", ...(overrides.by !== false && { by: ["url"] }) } },
+      }),
     },
     find: ({ name }) => name,
     writable: overrides.writable ?? true,
@@ -105,9 +109,38 @@ describe("a wakeup type", () => {
       /register must name an operation of its own group, acme\.wakeup\.<op> \(acme\.service\.register\)/,
     ],
     ["a register that is no id", { register: "register" }, /register must name an operation of its own group/],
+    [
+      "a register that is one of its resource operations",
+      { register: "acme.wakeup.update" },
+      /register must be an operation of its own, not the type's update/,
+    ],
+    ["a host that is not resolved by a field", { by: false }, /inputs\.host must be resolved `by` the field/],
     ["outputs that are not a function", { outputs: undefined as never }, /outputs must be a function of the state/],
   ])("is refused with %s", (_, overrides, message) => {
     expect(() => wakeupOf(overrides)).toThrow(message);
+  });
+
+  it("is refused on a host, which is stopped when its wake is due", () => {
+    expect(() =>
+      defineResource({
+        vendor: "acme",
+        type: "service",
+        title: "Service",
+        schema: service.schema,
+        fields: { ...service.fields, references: { repo: { type: "acme.service", by: ["url"] } } },
+        writable: true,
+        host: service.host!,
+        wakeup: { ...wakeup, inputs: { host: "repo" }, register: "acme.service.register" },
+      }),
+    ).toThrow(/a host cannot be its own wakeup/);
+  });
+
+  it("is refused by resolveConfig when its host reference names a type of the config that is no host", () => {
+    const types = defineConnector("acme", { service, wakeup: wakeupOf({ to: "acme.wakeup" }) }, { package: "@acme/x" });
+    const merged = { ...types, wakeup: { ...types.wakeup, ...register().wakeup } } as typeof types;
+    expect(() => resolveConfig({ workflows: [], connectors: [merged] })).toThrow(
+      "acme.wakeup: its wakeup's host may name acme.wakeup, which is no host",
+    );
   });
 
   it("is refused by resolveConfig when its connector lacks its register, or that takes no { at, generation }", () => {

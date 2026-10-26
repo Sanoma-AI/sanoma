@@ -424,12 +424,23 @@ export function readDataFiles(
       done.set(id, undefined);
     }
   }
+  // An instance registers with one wakeup: several are each a problem, and left out, as is any that names one.
+  const wakeups = [...declarations].filter(
+    ([, { file, exp }]) => types.get(`${vendors.get(file)!.get(exp.vendor)}.${exp.type}`)?.wakeup,
+  );
+  if (wakeups.length > 1) {
+    for (const [id, { file, exp }] of wakeups) {
+      const others = wakeups.filter(([other]) => other !== id).map(([other]) => other);
+      file.problem(exp.start, `an instance has one wakeup: leave out this one or ${others.join(", ")}`);
+      done.set(id, undefined);
+    }
+  }
   const keys = new Set([...files.values()].flatMap((f) => f.data.declared.map((name) => `${f.rel}#${name}`)));
   const orphans = Object.entries(lock.bindings)
     .filter(([key]) => !keys.has(key))
     .map(([key, binding]) => ({ key, ...binding }));
 
-  let resources: DeclaredResource[] = [];
+  const resources: DeclaredResource[] = [];
   for (const [id, { file, exp }] of declarations) {
     const result = declare(id);
     if (!result) continue;
@@ -447,17 +458,6 @@ export function readDataFiles(
       desired,
       refs: result.refs,
     });
-  }
-  // An instance registers with one wakeup: several are each a problem, and left out.
-  const wakeups = resources.filter((r) => types.get(`${r.vendor}.${r.type}`)?.wakeup);
-  if (wakeups.length > 1) {
-    for (const w of wakeups) {
-      const others = wakeups.filter((o) => o !== w).map((o) => o.id);
-      declarations
-        .get(w.id)!
-        .file.problem(w.span[0], `an instance has one wakeup: leave out this one or ${others.join(", ")}`);
-    }
-    resources = resources.filter((r) => !wakeups.includes(r));
   }
   const collections = [...files.values()].flatMap(({ rel, data }) =>
     data.collections.map((c) => ({

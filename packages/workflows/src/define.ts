@@ -301,7 +301,7 @@ function checkTrigger(name: string, trigger: unknown): void {
 }
 
 const isTimeZone = (zone: unknown): boolean => {
-  // An offset (`+05:30`), which Intl takes too, is no zone: it has no daylight saving time.
+  // An offset (`+05:30`), which Intl takes too, is no IANA zone name.
   if (typeof zone !== "string" || /^[+-]/.test(zone)) return false;
   try {
     return Boolean(new Intl.DateTimeFormat("en", { timeZone: zone }));

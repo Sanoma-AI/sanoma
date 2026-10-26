@@ -2268,8 +2268,9 @@ describe("startApp", () => {
   });
 
   it("refuses an ingress route at no path, at /healthz, or at a path another has", async () => {
+    await expect(ingressAt("/wake?x")).rejects.toThrow(/has no query and is not \/healthz, unlike "\/wake\?x"/);
     await expect(ingressAt("wake")).rejects.toThrow(
-      'An ingress route\'s path starts with / and is not /healthz, unlike "wake"',
+      'An ingress route\'s path starts with /, has no query and is not /healthz, unlike "wake"',
     );
     await expect(ingressAt("/healthz")).rejects.toThrow(/is not \/healthz, unlike "\/healthz"/);
     await expect(ingressAt("/wake", "/wake")).rejects.toThrow("Two ingress routes have the path /wake");
