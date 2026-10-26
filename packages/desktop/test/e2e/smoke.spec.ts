@@ -9,7 +9,7 @@ import { _electron as electron, type ElectronApplication, expect, test } from "@
 import { slugOf } from "../../src/companies.ts";
 import { runtimeOf } from "../../src/runtime.ts";
 
-const pkg = fileURLToPath(new URL("../../", import.meta.url));
+const pkg = realpathSync(fileURLToPath(new URL("../../", import.meta.url)));
 /** The Electron binary: the `electron` package's main export, in Node, is its path. */
 const executablePath = createRequire(import.meta.url)("electron") as string;
 const { engines } = JSON.parse(
@@ -63,11 +63,13 @@ test("opens a company, shows its app on the shipped Node, and stops it with the 
     // As the person does: the company's window closes, and its launcher is stopped.
     await window.close();
     await expect.poll(() => existsSync(join(company, "stopped")), { timeout: 15_000, intervals: [100] }).toBe(true);
+    // And the shell goes on, with its start window.
+    expect(await shell.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)).toBeGreaterThan(0);
   } catch (err) {
     if (log && existsSync(log)) console.error(`the shell's log:\n${readFileSync(log, "utf8")}`);
     throw err;
   } finally {
-    await shell?.close();
+    await shell?.close().catch(() => {});
     rmSync(work, { recursive: true, force: true });
     if (log) rmSync(log, { force: true });
   }
