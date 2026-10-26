@@ -365,8 +365,8 @@ describe("window state", () => {
     const saved = { x: 100, y: 80, width: 900, height: 700 };
     expect(windowBounds(saved, [screen])).toEqual(saved);
     expect(windowBounds({ ...saved, x: 2000 }, [screen, second])).toEqual({ ...saved, x: 2000 });
-    // Half off the edge: enough of it is there to grab.
-    expect(windowBounds({ ...saved, x: 1000 }, [screen])).toEqual({ ...saved, x: 1000 });
+    // Half off the edge: moved onto the display whole.
+    expect(windowBounds({ ...saved, x: 1000 }, [screen])).toEqual({ ...saved, x: 540 });
   });
 
   test("at the default size the first time, or when its display is gone", () => {
@@ -375,8 +375,8 @@ describe("window state", () => {
     expect(windowBounds({ x: 1400, y: 80, width: 900, height: 700 }, [screen])).toEqual(DEFAULT_SIZE);
   });
 
-  test("no larger than its display", () => {
-    expect(windowBounds({ x: 0, y: 25, width: 1920, height: 1080 }, [screen])).toEqual({
+  test("no larger than its display, and on it whole", () => {
+    expect(windowBounds({ x: 300, y: 300, width: 1920, height: 1080 }, [screen])).toEqual({
       x: 0,
       y: 25,
       width: 1440,

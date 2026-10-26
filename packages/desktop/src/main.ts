@@ -204,6 +204,8 @@ function setCompanyState(shown: CompanyWindow, next: Partial<CompanyState>) {
   if (next.phase && next.phase !== "running") {
     shown.appView.setVisible(false);
     shown.shellView.setVisible(true);
+    // The View menu acts on the focused page: the one shown.
+    if (!shown.shellView.webContents.isDestroyed()) shown.shellView.webContents.focus();
   }
   shown.sendTimer ??= setTimeout(() => {
     shown.sendTimer = undefined;
@@ -299,7 +301,10 @@ function windowFor(path: string): CompanyWindow {
     // While it runs (or starts), closing hides it: the company goes on, its workflows with it.
     if (!quitting && (running.has(path) || opening.has(path))) {
       event.preventDefault();
-      window.hide();
+      // A full-screen window hidden as it is would leave its Space behind, empty.
+      if (!window.isFullScreen()) return window.hide();
+      window.once("leave-full-screen", () => window.hide());
+      window.setFullScreen(false);
     }
   });
   window.on("closed", () => {
@@ -353,7 +358,7 @@ async function begin(path: string, how?: Begin) {
   const started = start(path, shown, beginnings.get(path) ?? startSession).catch((err: unknown) => {
     // Before its session (no Node staged, an unreadable folder): its window says why.
     const message = hidePasswords(`The company could not start: ${messageOf(err)}`);
-    setCompanyState(shown, { phase: "failed", message, progress: [], log: [], reopens: forgetIfEmpty(path) });
+    setCompanyState(shown, { phase: "failed", message, progress: [], log: [], reopens: reopensAfterFailure(path) });
   });
   opening.set(path, started);
   runningChanged();
@@ -363,15 +368,18 @@ async function begin(path: string, how?: Begin) {
 }
 
 /**
- * After a failed start: a folder that holds no company (a failed clone or init) leaves Recent
- * (`afterFailure`). Whether the next launch still opens it.
+ * After a failed start, whether the next launch still opens the company: not when its folder holds
+ * no company (a failed clone or init), which also leaves Recent (`afterFailure`).
  */
-function forgetIfEmpty(path: string): boolean {
-  const companies = afterFailure(readCompanies(companiesFile()), path);
-  writeCompanies(companiesFile(), companies);
-  buildMenu();
-  sendStart();
-  return companies.some((c) => c.path === path && c.open);
+function reopensAfterFailure(path: string): boolean {
+  const companies = readCompanies(companiesFile());
+  const kept = afterFailure(companies, path);
+  if (kept.length !== companies.length) {
+    writeCompanies(companiesFile(), kept);
+    buildMenu();
+    sendStart();
+  }
+  return kept.some((c) => c.path === path && c.open);
 }
 
 /** The company's port (`portFor`), remembered in companies.json with the company, marked open. */
@@ -451,7 +459,7 @@ async function start(path: string, shown: CompanyWindow, how: Begin) {
         : (exit.error ?? `The company stopped (${exit.signal ?? `exit code ${exit.code}`}).`);
     log.write("shell", why);
     log.close();
-    const reopens = forgetIfEmpty(path);
+    const reopens = reopensAfterFailure(path);
     if (!current()) return;
     setCompanyState(shown, { phase: "failed", message: hidePasswords(why), progress: [], reopens });
     // A company that stops on its own while its window is closed says so.
@@ -469,6 +477,8 @@ async function stop(path: string) {
 
 /** Company → Stop: the company stops, its window shows Start again, and the next launch does not open it. */
 async function stopCompany(path: string) {
+  // Still choosing its port: its session is not there to stop yet.
+  await opening.get(path);
   patchCompany(path, { open: false });
   await stop(path);
   const shown = windows.get(path);
@@ -863,19 +873,24 @@ if (!app.requestSingleInstanceLock()) {
   // Quit waits for each company: those still opening, then every session, stopped. What is open
   // stays marked so (`Company.open`), for the next launch.
   let stopped = false;
-  let stopping = false;
+  let stoppingAll: Promise<unknown> | undefined;
   app.on("before-quit", (event) => {
     quitting = true;
-    if (stopped || (!running.size && !opening.size)) return;
-    event.preventDefault();
-    if (stopping) return;
-    stopping = true;
-    void Promise.all(opening.values())
-      .then(() => Promise.all([...running.keys()].map(stop)))
-      .finally(() => {
-        stopped = true;
-        app.quit();
-      });
+    if (!stopped && (running.size || opening.size)) {
+      event.preventDefault();
+      stoppingAll ??= Promise.all(opening.values())
+        .then(() => Promise.all([...running.keys()].map(stop)))
+        .finally(() => {
+          stopped = true;
+          app.quit();
+        });
+      return;
+    }
+    // The app exits now, unless a page cancels it (beforeunload): then the shell goes on as before.
+    setTimeout(() => {
+      quitting = stopped = false;
+      stoppingAll = undefined;
+    }, 1_000);
   });
   // ctrl-c in the terminal that started the shell, or a kill: quit as the menu does, stopping each company.
   for (const signal of ["SIGINT", "SIGTERM"] as const) process.on(signal, () => app.quit());
