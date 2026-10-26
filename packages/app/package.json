@@ -61,7 +61,6 @@
     "typecheck:ui": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "4.0.88",
     "@ai-sdk/provider": "4.0.34",
     "@ai-sdk/react": "4.0.157",
     "@base-ui/react": "^1.9.0",

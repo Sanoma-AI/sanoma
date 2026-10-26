@@ -37,6 +37,12 @@
     "@ai-sdk/provider": "4.0.34",
     "ai": "7.0.153"
   },
+  "devDependencies": {
+    "zod": "^4.6.5"
+  },
+  "peerDependencies": {
+    "zod": "^4"
+  },
   "engines": {
     "node": "24 || >=26"
   }

@@ -47,6 +47,10 @@ importers:
       ai:
         specifier: 7.0.153
         version: 7.0.153(zod@4.6.5)
+    devDependencies:
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
 
   connectors/better-auth:
     dependencies:
@@ -195,9 +199,6 @@ importers:
 
   packages/app:
     dependencies:
-      '@ai-sdk/anthropic':
-        specifier: 4.0.88
-        version: 4.0.88(zod@4.6.5)
       '@ai-sdk/provider':
         specifier: 4.0.34
         version: 4.0.34
@@ -481,9 +482,6 @@ importers:
 
   packages/workflows:
     dependencies:
-      '@ai-sdk/anthropic':
-        specifier: 4.0.88
-        version: 4.0.88(zod@4.6.5)
       '@ai-sdk/provider':
         specifier: 4.0.34
         version: 4.0.34
