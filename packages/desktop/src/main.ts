@@ -1,6 +1,6 @@
 // The shell's main process: wiring only. What it runs and how is in the modules it imports, which
 // never import electron and are tested on their own.
-import { mkdirSync, realpathSync } from "node:fs";
+import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,6 +26,7 @@ import {
 } from "./companies.ts";
 import {
   addressProblem,
+  type Cloning,
   cloneCompany,
   cloneTarget,
   createSession,
@@ -43,7 +44,7 @@ import {
 } from "./git.ts";
 import { USAGE_EXIT } from "./launcher.ts";
 import { linkTarget } from "./links.ts";
-import { type CompanyLog, openLog } from "./logs.ts";
+import { type CompanyLog, hidePasswords, openLog } from "./logs.ts";
 import { folderArgument, isCompanyFolder, syncedFolderWarning } from "./places.ts";
 import { runtimeOf } from "./runtime.ts";
 import { type Session, startSession } from "./session.ts";
@@ -121,7 +122,11 @@ function showStart() {
   });
   startWindow.webContents.on("will-navigate", (event) => event.preventDefault());
   startWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-  startWindow.on("closed", () => (startWindow = undefined));
+  startWindow.on("closed", () => {
+    startWindow = undefined;
+    // Its form goes with it: New Company or Clone, waiting on it, stops.
+    answerIdentity?.(undefined);
+  });
   void startWindow.loadFile(join(here, "..", "start", "index.html"));
 }
 
@@ -189,7 +194,8 @@ async function start(path: string) {
   if (!windows.has(path)) show({ phase: "starting", progress: [], warnings, message: undefined });
 
   // An empty folder is a new company (`newCompany`): the launcher's init starts it, then serves it.
-  const session = (isCompanyFolder(path) ? startSession : createSession)({
+  const empty = !isCompanyFolder(path) && !newCompanyProblem(path);
+  const session = (empty ? createSession : startSession)({
     repo: path,
     port,
     ...runtimeOf({ packaged: app.isPackaged, appPath: app.getAppPath(), resourcesPath: process.resourcesPath }),
@@ -345,10 +351,14 @@ async function answered(answer: Identity | undefined) {
   if (!answer) return answerIdentity(undefined);
   const problem = identityProblem(answer);
   if (problem) return setState({ ask: { ...state.ask, ...answer, problem } });
+  // A second Save, or Cancel, while git saves it: only this answer's flow goes on, once.
+  const done = answerIdentity;
+  answerIdentity = undefined;
   try {
     await setIdentity(answer, gitEnv(process.env));
-    answerIdentity(answer);
+    done(answer);
   } catch (err) {
+    answerIdentity = done;
     setState({ ask: { ...state.ask, ...answer, problem: `git could not save it: ${(err as Error).message}` } });
   }
 }
@@ -386,7 +396,6 @@ async function newCompany(): Promise<void> {
   });
   const dir = filePaths[0];
   if (canceled || !dir) return;
-  mkdirSync(dir, { recursive: true });
   const problem = isCompanyFolder(dir) ? `${dir} holds a company already: open it instead.` : newCompanyProblem(dir);
   if (problem) return say("Choose an empty folder", problem);
   const warning = syncedFolderWarning(dir, homedir());
@@ -411,6 +420,9 @@ function askClone() {
   setState({ ask: { kind: "clone" } });
   showStart();
 }
+
+/** The clones running: Quit stops them. */
+const clones = new Set<Cloning>();
 
 /** Clones `url` into a folder the person chooses, with the system git, then opens it. */
 async function clone(url: string): Promise<void> {
@@ -438,7 +450,7 @@ async function clone(url: string): Promise<void> {
   setState({
     company: { path: dir, name: companyName(dir) },
     phase: "starting",
-    message: `Cloning ${url} into ${dir}`,
+    message: hidePasswords(`Cloning ${url} into ${dir}`),
     progress: ["Cloning"],
     warnings,
   });
@@ -451,12 +463,14 @@ async function clone(url: string): Promise<void> {
       setState({});
     },
   });
-  // Quit waits for it, and a second Clone of the same folder does nothing meanwhile.
+  // Quit stops it and waits for it; a second Clone of the same folder does nothing meanwhile.
+  clones.add(cloning);
   opening.set(
     dir,
     cloning.done.then(() => {}),
   );
   const failed = await cloning.done;
+  clones.delete(cloning);
   opening.delete(dir);
   log.write("shell", failed ?? "cloned");
   log.close();
@@ -464,6 +478,7 @@ async function clone(url: string): Promise<void> {
     shownLog = undefined;
     setState({ company: undefined, phase: "idle", progress: [], log: [], message: undefined, warnings: [] });
   }
+  if (quitting) return;
   if (failed) return say("The company could not be cloned", failed);
   await openCompany(dir);
 }
@@ -496,6 +511,8 @@ async function getUpdates(path: string): Promise<void> {
         ? `The update did not apply: ${failed}`
         : `Got ${plan.behind} new ${plan.behind === 1 ? "change" : "changes"} from GitHub; the company is starting again`,
     );
+  } catch (err) {
+    say("Sanoma could not get updates", (err as Error).message);
   } finally {
     updating.delete(path);
   }
@@ -604,6 +621,7 @@ if (!app.requestSingleInstanceLock()) {
     event.preventDefault();
     if (quitting) return;
     quitting = true;
+    for (const cloning of clones) void cloning.stop();
     void Promise.all(opening.values())
       .then(() => Promise.all([...running.keys()].map(stop)))
       .finally(() => {

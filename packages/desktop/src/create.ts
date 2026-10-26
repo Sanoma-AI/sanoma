@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import type { Company } from "./companies.ts";
 import { AUTH_MESSAGE, isAuthFailure } from "./git.ts";
 import { launch, launcherEnv, spawnGroup, type Stream } from "./launcher.ts";
+import { hidePasswords } from "./logs.ts";
 import type { Session, SessionOptions } from "./session.ts";
 import { writeShims } from "./shims.ts";
 
@@ -113,7 +114,7 @@ export function cloneCompany(
     const stderr = said.join("\n");
     if (isAuthFailure(stderr)) return AUTH_MESSAGE;
     const last = said.findLast((line) => line.trim()) ?? (signal ? `stopped (${signal})` : `exit code ${code}`);
-    return `git could not clone ${url}: ${last.replace(/^fatal: /, "")}`;
+    return hidePasswords(`git could not clone ${url}: ${last.replace(/^fatal: /, "")}`);
   });
   return { done, stop: group.stop };
 }

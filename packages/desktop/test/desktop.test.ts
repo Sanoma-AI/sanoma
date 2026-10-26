@@ -15,10 +15,10 @@ import {
   slugOf,
   writeCompanies,
 } from "../src/companies.ts";
-import { eventOf, listeningUrlOf, redactedLine } from "../src/events.ts";
+import { eventOf, listeningUrlOf } from "../src/events.ts";
 import { launch, launcherEnv, launcherOf, type Stream, USAGE_EXIT } from "../src/launcher.ts";
 import { linkTarget } from "../src/links.ts";
-import { openLog, TAIL_LINES } from "../src/logs.ts";
+import { hidePasswords, openLog, TAIL_LINES } from "../src/logs.ts";
 import { folderArgument, syncedFolderWarning } from "../src/places.ts";
 import { startSession } from "../src/session.ts";
 import { shims, writeShims } from "../src/shims.ts";
@@ -92,27 +92,6 @@ describe("launcher events", () => {
     expect(eventOf('{"event":"ready","url":"http://x"}')).toBeUndefined();
     expect(eventOf("{not json")).toBeUndefined();
     expect(eventOf("acme running call")).toBeUndefined();
-  });
-
-  test("hides the password in an event's URLs before the line is logged", () => {
-    const database =
-      '{"sanoma":1,"event":"database","how":"started","url":"postgresql://postgres:s3cret@127.0.0.1:54321/sanoma","place":"this-computer"}';
-    expect(redactedLine(database)).toBe(
-      '{"sanoma":1,"event":"database","how":"started","url":"postgresql://***@127.0.0.1:54321/sanoma","place":"this-computer"}',
-    );
-    expect(redactedLine('{"sanoma":1,"event":"x","nested":{"url":"https://u:p@h/x"}}')).toBe(
-      '{"sanoma":1,"event":"x","nested":{"url":"https://***@h/x"}}',
-    );
-    const ready = '{"sanoma":1,"event":"ready","url":"http://127.0.0.1:3100","sites":{}}';
-    expect(redactedLine(ready)).toBe(ready);
-    expect(redactedLine("postgresql://postgres:s3cret@h/db is not an event")).toBe(
-      "postgresql://postgres:s3cret@h/db is not an event",
-    );
-    expect(redactedLine("{not json")).toBe("{not json");
-    const log = openLog(temp(), "acme");
-    log.write("stdout", database);
-    expect(readFileSync(log.file, "utf8")).not.toContain("s3cret");
-    expect(log.tail().join("\n")).not.toContain("s3cret");
   });
 
   test("reads where the app is from the line a launcher without events prints", () => {
@@ -353,6 +332,31 @@ describe("the link rule", () => {
 });
 
 describe("logs", () => {
+  test("hide the password in any URL before a line is logged", () => {
+    const database =
+      '{"sanoma":1,"event":"database","how":"started","url":"postgresql://postgres:s3cret@127.0.0.1:54321/sanoma","place":"this-computer"}';
+    expect(hidePasswords(database)).toBe(
+      '{"sanoma":1,"event":"database","how":"started","url":"postgresql://***@127.0.0.1:54321/sanoma","place":"this-computer"}',
+    );
+    expect(hidePasswords("connect failed for postgresql://u:pa/ss@host/db")).toBe(
+      "connect failed for postgresql://***@host/db",
+    );
+    expect(hidePasswords("git clone https://ghp_token@github.com/acme/co")).toBe(
+      "git clone https://***@github.com/acme/co",
+    );
+    for (const kept of [
+      '{"sanoma":1,"event":"ready","url":"http://127.0.0.1:3100","sites":{}}',
+      "GET https://registry.npmjs.org/@sanoma%2Fconnector-resend: Not Found - 404",
+      "git@github.com:acme/co.git",
+    ]) {
+      expect(hidePasswords(kept)).toBe(kept);
+    }
+    const log = openLog(temp(), "acme");
+    log.write("stdout", database);
+    expect(readFileSync(log.file, "utf8")).not.toContain("s3cret");
+    expect(log.tail().join("\n")).not.toContain("s3cret");
+  });
+
   test("timestamps each line, keeps the previous start's log as .1.log, and the last lines", () => {
     const dir = temp();
     const first = openLog(dir, "acme");
