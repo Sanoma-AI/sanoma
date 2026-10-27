@@ -7,10 +7,12 @@ import type { LoopTools } from "../server/agent/tools.ts";
 
 /**
  * The draft card's data, the `data-draft` part an engine writes (one per reply, by the id
- * `draft`, updated in place) whenever the chat's draft changes: its branch, its committed change
- * (`Source.diff`) and, once it ran, the checks since the last edit.
+ * `draft`, updated in place) whenever the chat's draft changes: the draft's id (its branch's
+ * `draft/<id>`, the chat's id; every engine writes it, but a card saved before it did lacks it),
+ * its branch, its committed change (`Source.diff`) and, once it ran, the checks since the last edit.
  */
 export interface DraftCard {
+  draft?: string;
   branch: string;
   files: string[];
   summary: string;

@@ -18,7 +18,7 @@ import { z } from "zod";
 import type { AppContext } from "../../context.ts";
 import type { DraftCard, HeldOutput } from "../../lib/chat.ts";
 import { checks } from "../drafts.ts";
-import { drafting, mustAllow, openDraft } from "./checkout.ts";
+import { drafting, mustAllow, openDraft, tellCommits } from "./checkout.ts";
 
 // Our loop's tools: reading the repository, editing the chat's draft (opened by the first edit,
 // committed at each), taking and updating an app there (a git merge of its source), its checks,
@@ -72,7 +72,7 @@ export function loopTools(turn: ToolsTurn) {
   const readRoot = async () => ((await hasDraft()) ? (await draft()).root : source().root);
   const showCard = async () => {
     const { branch } = await draft();
-    turn.showDraft({ branch, ...(await source().diff(chat.id)), ...(checked && { checks: checked }) });
+    turn.showDraft({ draft: chat.id, branch, ...(await source().diff(chat.id)), ...(checked && { checks: checked }) });
   };
   /**
    * The turn's writes and checks, one at a time: the model may call several tools at once, and a
@@ -94,7 +94,7 @@ export function loopTools(turn: ToolsTurn) {
     const file = await inRepo(root, full);
     const committed = await commit({ paths: [file], message, author: principal.id });
     checked = undefined;
-    await showCard();
+    await Promise.all([committed && tellCommits(app.client, chat.id, principal), showCard()]);
     return { path: file, committed: committed?.revision ?? "nothing changed" };
   };
 

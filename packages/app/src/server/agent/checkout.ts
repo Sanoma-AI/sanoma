@@ -1,6 +1,6 @@
 import { lstat, realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import type { Chat, Draft, Source } from "@sanoma-ai/workflows";
+import { type Chat, type Draft, errorCode, type Principal, type SanomaClient, type Source } from "@sanoma-ai/workflows";
 import type { UIMessageStreamWriter } from "ai";
 import type { AppContext } from "../../context.ts";
 import { type ChatMessage, textOf } from "../../lib/chat.ts";
@@ -90,9 +90,28 @@ export async function openDraft(app: AppContext, chat: Chat): Promise<Draft> {
 }
 
 /**
+ * Tells the change of the draft `id`, when it has one under way, that its branch has new commits,
+ * as `by` (`SanomaClient.changeEvent`): its run plans again and withdraws a Publish asked on the
+ * old head. Nothing when the draft has no change, or its change has ended. A notice that fails is
+ * logged, never the turn's failure: the commit has landed, and the merge refuses a head that moved.
+ */
+export async function tellCommits(client: SanomaClient, id: string, by: Principal): Promise<void> {
+  try {
+    await client.changeEvent(id, { kind: "commits" }, { by });
+  } catch (err) {
+    if (!NO_CHANGE.has(errorCode(err) ?? ""))
+      console.error(`sanoma app: telling the change of ${id} its new commits failed:`, err);
+  }
+}
+
+/** What `changeEvent` fails with for a draft with no change under way. */
+const NO_CHANGE = new Set(["run_not_found", "run_ended"]);
+
+/**
  * The end of a coding agent's turn, however it ended (an error too): what it changed committed on
- * the chat's draft as the person, under `title` and their message, then, unless a new message
- * stopped it (the next turn shows the card), the draft's card (`data-draft`) from its checks and its diff.
+ * the chat's draft as the person, under `title` and their message, its change told (`tellCommits`),
+ * then, unless a new message stopped it (the next turn shows the card), the draft's card
+ * (`data-draft`) from its checks and its diff.
  */
 export async function commitTurn(
   { app, chat, messages, principal, signal }: EngineTurn,
@@ -102,9 +121,16 @@ export async function commitTurn(
 ) {
   const message = `${title}: ${textOf(messages.at(-1)!, " ").trim().slice(0, 72)}`;
   const committed = (await draft.commit({ paths: ["."], message, author: principal.id })) !== undefined;
-  if (!committed || signal.aborted) return;
-  const [checked, diff] = await Promise.all([checks(app, chat.id), drafting(app).diff(chat.id)]);
-  writer.write({ type: "data-draft", id: "draft", data: { branch: draft.branch, ...diff, checks: checked } });
+  if (!committed) return;
+  // Told even when the turn was stopped: the commit has landed.
+  const told = tellCommits(app.client, chat.id, principal);
+  if (signal.aborted) return told;
+  const [checked, diff] = await Promise.all([checks(app, chat.id), drafting(app).diff(chat.id), told]);
+  writer.write({
+    type: "data-draft",
+    id: "draft",
+    data: { draft: chat.id, branch: draft.branch, ...diff, checks: checked },
+  });
 }
 
 /** The real path of `dir`: of its nearest ancestor that exists, with the rest joined on. */

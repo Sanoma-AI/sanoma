@@ -1,9 +1,9 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { CatchBoundary, createFileRoute, type ErrorComponentProps } from "@tanstack/react-router";
 import type { PreviewAnswer } from "@sanoma-ai/workflows";
 import type { Span } from "@sanoma-ai/workflows/describe";
-import { ANONYMOUS, approverLabel } from "@sanoma-ai/workflows/shared";
-import { useRef, useState } from "react";
+import { ANONYMOUS, approverLabel, errorMessage } from "@sanoma-ai/workflows/shared";
+import { Suspense, useRef, useState } from "react";
 import { Button } from "#/components/ui/button.tsx";
 import { Card, CardHeader } from "#/components/ui/card.tsx";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "#/components/ui/sheet.tsx";
@@ -21,14 +21,17 @@ import {
   PolicyProblems,
   pageTitle,
   plural,
+  StatusDot,
 } from "../components/common.tsx";
-import { permissionsQuery } from "../queries.ts";
+import { hostEnforcementQuery, permissionsQuery } from "../queries.ts";
 
 export const Route = createFileRoute("/permissions")({
   staticData: { crumb: "Permissions" },
   head: ({ match }) => pageTitle(match.staticData.crumb),
   loader: ({ context: { queryClient } }) => {
     if (!import.meta.env.SSR) void loadCode();
+    // The host's line streams in after the grid: a slow host never holds the page.
+    void queryClient.prefetchQuery(hostEnforcementQuery());
     return queryClient.query({ ...permissionsQuery(), staleTime: "static" });
   },
   component: PermissionsPage,
@@ -97,6 +100,11 @@ function PermissionsPage() {
               }}
             />
           </Card>
+          <CatchBoundary getResetKey={() => "host"} errorComponent={HostEnforcementFailed}>
+            <Suspense fallback={null}>
+              <HostEnforcementLine />
+            </Suspense>
+          </CatchBoundary>
           {data.files.map(({ file, text, policies }) => (
             <PolicyCode key={file} file={file} text={text} span={policies.find((p) => p.id === shown)?.span} />
           ))}
@@ -148,6 +156,32 @@ function PolicyLine({ data }: { data: PermissionsResponse }) {
       · {plural(groups, "group")} · {plural(data.workflows.length, "workflow")} · {plural(ops, "operation")}
     </p>
   );
+}
+
+/**
+ * Under the grid, whether the repository's host holds every change to `main` to a merge (a pull
+ * request and the `sanoma` check) and, when it does not, why, as the host says: until it does, the
+ * grid holds only for what goes through Sanoma. Nothing without a remote.
+ */
+function HostEnforcementLine() {
+  const { data } = useSuspenseQuery(hostEnforcementQuery());
+  if (!data) return null;
+  const missing = [!data.pullRequest && "a pull request", !data.check && "the sanoma check"].filter(Boolean);
+  return (
+    <p className="flex items-baseline gap-2 text-sm text-muted-foreground">
+      <StatusDot tone={missing.length ? "waiting" : "ok"} />
+      <span>
+        {missing.length
+          ? `${data.host} does not require ${missing.join(" or ")} on main.${data.reason ? ` ${data.reason}` : ""} Until then a push around Sanoma lands in the ledger as a gap.`
+          : `${data.host} requires a pull request and the sanoma check on main.`}
+      </span>
+    </p>
+  );
+}
+
+/** The line's place when what the host enforces could not be read: the grid stays. */
+function HostEnforcementFailed({ error }: ErrorComponentProps) {
+  return <p className="text-sm text-muted-foreground">Could not read what the host enforces: {errorMessage(error)}</p>;
 }
 
 /**
