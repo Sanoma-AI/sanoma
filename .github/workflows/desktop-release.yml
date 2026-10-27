@@ -48,28 +48,30 @@ jobs:
         with:
           cache: false
       - run: pnpm install --frozen-lockfile
-      # Builds the shell, stages Node for arm64 and x64 and pnpm, and packs both architectures
-      # (electron-builder.yml), signed ad hoc: no keychain identity is looked for.
-      - run: pnpm --filter @sanoma-ai/desktop run dist
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      # Stages Node for arm64 and x64 and pnpm, then Forge builds and packs both architectures
+      # (forge.config.mts), signed ad hoc.
+      - run: pnpm --filter @sanoma-ai/desktop run make
       - name: Each app verifies and carries its own architecture's Node
-        working-directory: packages/desktop/release
+        working-directory: packages/desktop/out
         run: |
-          for pair in mac-arm64:arm64 mac:x86_64; do
-            app="${pair%%:*}/Sanoma.app"
+          for pair in arm64:arm64 x64:x86_64; do
+            app="Sanoma-darwin-${pair%%:*}/Sanoma.app"
             codesign --verify --deep --strict --verbose=2 "$app"
             node_arch=$(lipo -archs "$app/Contents/Resources/node/node")
             [ "$node_arch" = "${pair##*:}" ] || { echo "::error::$app carries a $node_arch Node"; exit 1; }
           done
-          ls -l ./*.dmg ./*.zip
+      # Forge names the dmg Sanoma-<version>-<arch>.dmg, the README's download name; the zip
+      # (Sanoma-darwin-<arch>-<version>.zip, no name option) is given the same form.
       - name: Draft release
-        working-directory: packages/desktop/release
+        working-directory: packages/desktop/out/make
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
+          for arch in arm64 x64; do
+            mv "zip/darwin/$arch/Sanoma-darwin-$arch-$VERSION.zip" "zip/darwin/$arch/Sanoma-$VERSION-$arch.zip"
+          done
           gh release create "desktop-v$VERSION" --repo "$GITHUB_REPOSITORY" --draft --target "$GITHUB_SHA" \
-            --title "Sanoma desktop $VERSION (unsigned preview)" --notes-file ../RELEASE_NOTES.md \
-            "Sanoma-$VERSION"-*.dmg "Sanoma-$VERSION"-*.zip
+            --title "Sanoma desktop $VERSION (unsigned preview)" --notes-file ../../RELEASE_NOTES.md \
+            dmg/*/"Sanoma-$VERSION"-*.dmg zip/darwin/*/"Sanoma-$VERSION"-*.zip
           echo "Draft release desktop-v$VERSION from $GITHUB_SHA: publish it on GitHub after trying the download." >> "$GITHUB_STEP_SUMMARY"

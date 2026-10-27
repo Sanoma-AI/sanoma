@@ -1,4 +1,4 @@
-// Fills stage/, what electron-builder copies into the app's resources (`extraResources`) and what
+// Fills stage/, what Forge copies into the app's resources (forge.config.mts) and what
 // the shell runs from the checkout: `stage/node-<arch>` (the pinned Node, `download-node.ts`) for
 // each architecture asked for (this one by default), and `stage/pnpm`, a copy of the pnpm that runs
 // this script (its package, by real path), so the shell installs a company with the pnpm the

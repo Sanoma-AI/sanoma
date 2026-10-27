@@ -55,6 +55,7 @@
     "packages/*/src",
     "packages/*/test",
     "packages/*/scripts",
+    "packages/desktop/*.mts",
     "connectors/*/src",
     "connectors/*/test",
     "scripts/*.ts"
