@@ -5,6 +5,7 @@ import { defineFake, type FakeOptions } from "@sanoma-ai/workflows/fake";
 import { NodeRequest, sendNodeResponse } from "srvx/node";
 import { cloudflareOps } from "./connector.ts";
 import { alarmOps, type Application, type CloudflareApi, containerOps, type ReadBinding, scriptOf } from "./ops.ts";
+import { accountImage } from "./registry.ts";
 import { Instance, OBJECT_CLASS, type ObjectState, worker } from "./worker.ts";
 
 /** A `GET /wake` a container answered: when. */
@@ -38,7 +39,12 @@ export interface FakeCloudflareState extends Record<string, unknown> {
   scripts: Record<string, { bindings: ReadBinding[]; subdomain: boolean }>;
   /** The container applications, by id. */
   applications: Record<string, Application & { name: string }>;
+  /** The account's registry: each image copied in, by its reference there, and the image it was copied from. */
+  images: Record<string, string>;
 }
+
+/** The fake account's id, which its registry's references name: the fixtures' made-up one. */
+const FAKE_ACCOUNT = "0123456789abcdef0123456789abcdef";
 
 /** How long the fake waits before it rings an alarm again that threw, and how often: Cloudflare retries six times. */
 const RETRY_MS = 250;
@@ -239,7 +245,8 @@ type FakeObject = ReturnType<typeof fakeObject>;
 
 /**
  * An in-memory Cloudflare account for tests, as the API answers: Workers in `state.scripts`,
- * container applications in `state.applications`, and the account's workers.dev URLs served in
+ * container applications in `state.applications`, the images copied into its registry in
+ * `state.images` (nothing is pulled), and the account's workers.dev URLs served in
  * this process, one server on a port of this machine per Worker name (a name with no Worker
  * answers workers.dev's 404). Each Worker runs the package's own object code
  * (`worker/instance.js`) over a `ctx` in this process: its container runs `start`'s runtime
@@ -360,6 +367,10 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
         found.image = image;
         await objects.get(found.name)?.stop();
       },
+      account: FAKE_ACCOUNT,
+      async copyImage(image) {
+        state.images[accountImage(image, FAKE_ACCOUNT)] = image;
+      },
       async deleteApplication(id) {
         const found = state.applications[id];
         delete state.applications[id];
@@ -376,7 +387,7 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
   const fake = defineFake(
     cloudflareOps,
     {
-      initial: (): FakeCloudflareState => ({ seq: 0, scripts: {}, applications: {} }),
+      initial: (): FakeCloudflareState => ({ seq: 0, scripts: {}, applications: {}, images: {} }),
       ops: (state) => ({
         container: containerOps(() => api(state), { startTimeoutMs: 60_000, pollMs: 50 }),
         alarm: alarmOps(() => api(state)),

@@ -24,7 +24,7 @@ import { secret } from "sanoma/resources";
 
 export const host = cloudflare.container({
   name: "acme", // the Worker sanoma-acme, at https://sanoma-acme.<subdomain>.workers.dev
-  image: "docker.io/sanomaai/runtime:0.7.0",
+  image: "ghcr.io/sanoma-ai/runtime:0.7.0", // copied into the account's registry at apply
   source: repo, // a declared github.repository, or a clone URL
   ref: "main",
   port: 3000,
@@ -37,16 +37,16 @@ export const host = cloudflare.container({
 export const wakeup = cloudflare.alarm({ host });
 ```
 
-| Field                  | What it is                                                                                                                              |
-| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`                 | The company's name, its identity: lowercase letters, digits and dashes, up to 56; the Worker and its application are `sanoma-<name>`    |
-| `image`                | The Sanoma runtime image, pinned to a tag or digest, never `latest`; a registry Cloudflare pulls from (Docker Hub, or Cloudflare's own) |
-| `source`               | The company repository: a clone URL, or a declared `github.repository`                                                                  |
-| `ref`                  | The branch it runs, never a commit: apply resolves it and sets the hidden `revision`, so a merge is drift on the container              |
-| `port`                 | The port the runtime listens on in the container (its `PORT`)                                                                           |
-| `secrets`              | Environment variables, each a `secret(...)`: the Worker's secret bindings, write-only, never in an output, the ledger or a checkpoint   |
-| `domains`              | Optional: a public site's domain, by site name, passed as `SANOMA_DOMAINS`; routing a domain to the Worker is not done here yet         |
-| `id`, `url`, `healthy` | Cloudflare's: the application's id, the Worker's workers.dev URL, and whether it answers                                                |
+| Field                  | What it is                                                                                                                                           |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`                 | The company's name, its identity: lowercase letters, digits and dashes, up to 56; the Worker and its application are `sanoma-<name>`                 |
+| `image`                | The Sanoma runtime image, pinned to a tag or digest, never `latest`: any registry's, which apply copies into the account's ([The image](#the-image)) |
+| `source`               | The company repository: a clone URL, or a declared `github.repository`                                                                               |
+| `ref`                  | The branch it runs, never a commit: apply resolves it and sets the hidden `revision`, so a merge is drift on the container                           |
+| `port`                 | The port the runtime listens on in the container (its `PORT`)                                                                                        |
+| `secrets`              | Environment variables, each a `secret(...)`: the Worker's secret bindings, write-only, never in an output, the ledger or a checkpoint                |
+| `domains`              | Optional: a public site's domain, by site name, passed as `SANOMA_DOMAINS`; routing a domain to the Worker is not done here yet                      |
+| `id`, `url`, `healthy` | Cloudflare's: the application's id, the Worker's workers.dev URL, and whether it answers                                                             |
 
 The host's outputs are `{ url, revision, healthy }`. Its capabilities: stops when quiet, a public URL, it runs an image rather than building one, no fixed egress. `healthy` is the application existing and the Worker answering `/__sanoma/health`, which does not start a stopped container: a stopped host is healthy, and a read or a drift check leaves it stopped.
 
@@ -66,6 +66,12 @@ The package ships the Worker it uploads, `worker/`: `index.js`, which exports th
 
 Cloudflare stops the container after ten quiet minutes; the object, its storage and its alarm stay, and the next request or alarm starts the container again. A create uploads the Worker with the object's migration (`new_sqlite_classes`) and its class as a container's (`containers: [{ class_name }]`, as Wrangler sends it), turns its workers.dev URL on, and makes the container application for the object's namespace (the `namespace_id` the Worker's settings then show; `basic`, one instance at most, none until a request); an update uploads it again and, for a new image, rolls the application out to it (`rolling`, all at once). Either waits for the Worker to answer at the new revision. The image's label is the one the Worker names, not the one Cloudflare started: whether a container started while a rollout is still going runs the new image is what the live run checks. A secret's new value goes up with the next update for another reason (a plan compares secret names, never values: the Worker's settings never show them), and a running container keeps the old one until it starts again. A delete deletes the application, then the Worker with its object's storage. A Worker of that name that is not Sanoma's (no `SANOMA_INSTANCE` binding) reads as gone, and a create or a delete refuses to touch it.
 
+## The image
+
+A container application runs an image of its own account's registry, `registry.cloudflare.com/<account id>/...`, which Cloudflare stores and pulls without a limit (Docker Hub's pulls are not cached and are limited per address). So a create or an update first copies the declared image there, unless it is in the account's registry already, and the application runs the copy: `ghcr.io/sanoma-ai/runtime:0.8.1` becomes `registry.cloudflare.com/<account id>/sanoma-ai-runtime:0.8.1` (the path with `-` for `/`, the same tag or digest). The copy is registry to registry in Node, no Docker: the source pulled anonymously (a public image; the token its registry's challenge names), the target pushed to with temporary credentials from `containers.registries.credentials.generate` (push and pull, an hour, never stored or logged). Each blob the account lacks is streamed across in one request of its known length, then the manifest, unchanged; when the account's manifest for that tag already has the source's digest, nothing is copied, and a digest-pinned source must answer that digest. Docker Hub is not copied from: declare `ghcr.io/sanoma-ai/runtime`. The source must be one image manifest (OCI or Docker v2), not an index: the release pushes one (`provenance: false`). It comes before the upload, so a copy that fails leaves the Worker as it was.
+
+The Worker's `SANOMA_IMAGE` binding holds the declared image and the application its copy, so a read reports the declared image, a plan and drift compare the declaration with it, and a declaration that names `ghcr.io` plans no change once applied. An image pushed by hand (`npx wrangler containers push`) is declared as the `registry.cloudflare.com/<account id>/...` reference Wrangler prints and runs as it is; another account's is copied like any other registry's image.
+
 ## Scale to zero
 
 1. **The connector.** Add `cloudflare` to the connectors in `sanoma.config.ts`: the worker on the host calls `cloudflare.alarm.register` through it.
@@ -79,9 +85,9 @@ To stop scaling to zero, delete the `wakeup` line and apply: the alarm is delete
 
 `@sanoma-ai/connector-cloudflare/driver` calls Cloudflare through its official SDK, [`cloudflare`](https://www.npmjs.com/package/cloudflare) (Stainless), with its own retries off (the runtime retries what is retryable), and calls the company's Worker with `fetch`. The `cloudflare` connector the package root exports carries it and its fake (`withSetup` from `@sanoma-ai/workflows`), so a config names the connector alone and workflows never import the driver (the lint refuses that).
 
-`./driver` (`cloudflareDriver`; `cloudflareDriver({ timeoutMs, startTimeoutMs, pollMs })`: 30 s a request, ten minutes for the Worker to answer at a new revision, two seconds between tries) and `./fake` (`fakeCloudflare`) are internal entries, for tests.
+`./driver` (`cloudflareDriver`; `cloudflareDriver({ timeoutMs, startTimeoutMs, pollMs })`: 30 s a request, ten minutes for the Worker to answer at a new revision, two seconds between tries; each request of the image's copy may take ten minutes) and `./fake` (`fakeCloudflare`) are internal entries, for tests.
 
-A read is the Worker's settings (its bindings: what it runs is its plain-text bindings, never a secret's value), the application of its name (its image) and the account's subdomain (its URL); a plan compares the declared image, source, ref, revision, port, domains (left out too) and secret names with them. The requests are made one after another, in the order the fixtures hold.
+A read is the Worker's settings (its bindings: what it runs is its plain-text bindings, never a secret's value), the application of its name (whether it exists, its id) and the account's subdomain (its URL); a plan compares the declared image, source, ref, revision, port, domains (left out too) and secret names with them. The requests are made one after another, in the order the fixtures hold.
 
 ### Environment
 
@@ -96,7 +102,7 @@ When either is unset, a call fails, not retryable, naming it. The driver declare
 
 ### Errors and retries
 
-A 429, a 5xx, a timeout or no reply is retryable; any other 4xx is not. `status` and `vendorCode` (Cloudflare's first error `code`) are kept. The driver's own refusals are not retryable: `exists` (a Worker of that name that is not Sanoma's, which is neither overwritten nor deleted), `plan_changed` (an update whose plan changed since it was approved, or is not an update: a new name is a delete and a create), `no_token` and `token` (a host without the company's `SANOMA_WAKEUP_TOKEN`, or with another one), and a Worker that did not answer at its revision in time, which says what it answered.
+A 429, a 5xx, a timeout or no reply is retryable, the image's copy's requests too; any other 4xx is not. `status` and `vendorCode` (Cloudflare's first error `code`) are kept. The driver's own refusals are not retryable: `exists` (a Worker of that name that is not Sanoma's, which is neither overwritten nor deleted), `plan_changed` (an update whose plan changed since it was approved, or is not an update: a new name is a delete and a create), `no_token` and `token` (a host without the company's `SANOMA_WAKEUP_TOKEN`, or with another one), and a Worker that did not answer at its revision in time, which says what it answered.
 
 ### Plan
 
@@ -104,7 +110,7 @@ Containers need the Workers Paid plan. An instance is billed while it runs, by i
 
 ### Testing the driver
 
-`test/driver.test.ts` and the features replay Cloudflare's replies (`test/fixtures`) with [`@sanoma-ai/testing/replay`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/testing/README.md#replaying-a-vendors-api): `pnpm vitest run connectors/cloudflare` needs no account. The fixtures are **written from Cloudflare's API reference, not recorded**: no account was at hand when the connector was written. A recording replaces them (`SANOMA_LIVE=1 SANOMA_RECORD=1` on the features test), losing the account's id and subdomain, ids and tokens; until then, a reply the reference gets wrong is wrong here too. The upload's `containers` field is Wrangler's and not in the reference or the SDK's types: the live run is what checks it. The driver tests only replay.
+`test/driver.test.ts` and the features replay Cloudflare's replies (`test/fixtures`) with [`@sanoma-ai/testing/replay`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/testing/README.md#replaying-a-vendors-api): `pnpm vitest run connectors/cloudflare` needs no account. The fixtures are **written from Cloudflare's API reference, not recorded**: no account was at hand when the connector was written. A recording replaces them (`SANOMA_LIVE=1 SANOMA_RECORD=1` on the features test), losing the account's id and subdomain, ids and tokens; until then, a reply the reference gets wrong is wrong here too. The upload's `containers` field is Wrangler's and not in the reference or the SDK's types: the live run is what checks it. The image's copy is tested against two small registries in this process (`test/registry.test.ts`), and the driver's call for its credentials over replies written from the SDK's types and the OCI distribution spec; that Cloudflare's registry takes the copy as written is what the live run checks. The driver tests only replay.
 
 ### Running it live
 
@@ -119,7 +125,7 @@ SANOMA_LIVE=1 CLOUDFLARE_API_TOKEN=... CLOUDFLARE_ACCOUNT_ID=... \
 
 It needs:
 
-- a published runtime image Cloudflare can pull, `docker.io/sanomaai/runtime:<version>` (the `sanoma` package's version; `CLOUDFLARE_TEST_IMAGE` names another);
+- a published runtime image, `ghcr.io/sanoma-ai/runtime:<version>` (the `sanoma` package's version), which apply copies into the account's registry; `CLOUDFLARE_TEST_IMAGE` names another;
 - `CLOUDFLARE_TEST_CHECKOUT`: a clone of a company repository whose `origin` Cloudflare can clone and this machine can push to (each deploy check pushes an empty commit), holding the kits' company: [`connectors/docker/test/fixtures/company`](../docker/test/fixtures/company) with `sanoma` from npm, its config registering `wakeupCheckWorkflows` (the host checks' workflows and a tick every minute);
 - `CLOUDFLARE_TEST_DATABASE_URL`: a Postgres both the container and this machine reach, empty, the company's;
 - Postgres here for the operator that applies the host (`pnpm db:up`).
@@ -136,7 +142,7 @@ The connector carries steps for [scenarios](https://github.com/Sanoma-AI/sanoma/
 
 ## Testing
 
-`@sanoma-ai/connector-cloudflare/fake` is an in-memory Cloudflare account, the fake the connector carries: each sandbox run makes one of its own. Its Workers answer on ports of this machine, one per Worker name, and run the package's own object code over a `ctx` in this process: storage in memory, an alarm on a timer (again after a throw), and a container that runs what `start` returns for the image and revision it was started at (by default a stub that answers `/healthz` and `/wake`). An upload restarts the object over its new bindings; a rollout stops the container, as Cloudflare replaces it.
+`@sanoma-ai/connector-cloudflare/fake` is an in-memory Cloudflare account, the fake the connector carries: each sandbox run makes one of its own. Its registry is in memory too: a copy records the image under its reference there and pulls nothing. Its Workers answer on ports of this machine, one per Worker name, and run the package's own object code over a `ctx` in this process: storage in memory, an alarm on a timer (again after a throw), and a container that runs what `start` returns for the image and revision it was started at (by default a stub that answers `/healthz` and `/wake`). An upload restarts the object over its new bindings; a rollout stops the container, as Cloudflare replaces it.
 
 ```ts
 import { fakeCloudflare } from "@sanoma-ai/connector-cloudflare/fake";

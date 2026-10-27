@@ -1,15 +1,19 @@
+import { createHash } from "node:crypto";
 import { type Exchange, live, replay } from "@sanoma-ai/testing/replay";
 import { type CallContext, memorySecrets } from "@sanoma-ai/workflows";
 import { delay, http, HttpResponse } from "msw";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { cloudflareDriver } from "../src/driver.ts";
-import { API, replayOptions } from "./replay.ts";
+import { API, replayOptions, TEST_ACCOUNT } from "./replay.ts";
 
 // Replays test/fixtures, written from Cloudflare's API reference (README, "Testing the driver").
 // Live, `test/live.ts` and the features run against an account instead: these tests check the
 // requests the driver makes and how it reads made-up replies.
 
 const { server, play, fixture, sent } = replay(replayOptions);
+
+/** The runtime image in the fixtures' account's registry: what its application runs. */
+const RUNS = `registry.cloudflare.com/${TEST_ACCOUNT}/sanoma-ai-runtime`;
 
 const TOKEN = "swi_the-company-token";
 const URL_OF = "https://sanoma-company.example.workers.dev";
@@ -30,7 +34,7 @@ const op = (name: string, input: object, call = callWith({ SANOMA_WAKEUP_TOKEN: 
 
 const desired = {
   name: "company",
-  image: "docker.io/sanomaai/runtime:0.7.0",
+  image: `${RUNS}:0.7.0`,
   source: "https://github.com/acme/company.git",
   ref: "main",
   revision: "abc123",
@@ -40,7 +44,7 @@ const desired = {
 const state = {
   id: "00000000-0000-4000-8000-000000000001",
   name: "company",
-  image: "docker.io/sanomaai/runtime:0.7.0",
+  image: `${RUNS}:0.7.0`,
   source: "https://github.com/acme/company.git",
   ref: "main",
   revision: "abc123",
@@ -128,7 +132,10 @@ describe.skipIf(live)("cloudflareDriver", () => {
         scheduling_policy: "default",
         instances: 0,
         max_instances: 1,
-        configuration: { image: "docker.io/sanomaai/runtime:0.7.0", instance_type: "basic" },
+        configuration: {
+          image: `${RUNS}:0.7.0`,
+          instance_type: "basic",
+        },
         // The namespace the upload made, as the Worker's settings name it.
         durable_objects: { namespace_id: "0123456789abcdef0123456789abcde0" },
       });
@@ -136,7 +143,11 @@ describe.skipIf(live)("cloudflareDriver", () => {
 
     it("rolls a new image out without the migration, and polls until the Worker answers at the new revision", async () => {
       play("update-to-a-new-image");
-      const next = { ...desired, image: "docker.io/sanomaai/runtime:0.8.0", revision: "def456" };
+      const next = {
+        ...desired,
+        image: `${RUNS}:0.8.0`,
+        revision: "def456",
+      };
       const done = await op("container.update", {
         id: "company",
         desired: next,
@@ -146,13 +157,94 @@ describe.skipIf(live)("cloudflareDriver", () => {
       const form = await formOf(sent.find((r) => r.method === "PUT")!);
       expect(form.get("metadata[migrations][new_tag]")).toBeNull();
       expect(sent.find((r) => r.path.endsWith("/rollouts"))!.body).toEqual({
-        description: "Sanoma: docker.io/sanomaai/runtime:0.8.0",
+        description: `Sanoma: ${RUNS}:0.8.0`,
         strategy: "rolling",
         kind: "full_auto",
         step_percentage: 100,
-        target_configuration: { image: "docker.io/sanomaai/runtime:0.8.0", instance_type: "basic" },
+        target_configuration: {
+          image: `${RUNS}:0.8.0`,
+          instance_type: "basic",
+        },
       });
       expect(sent.filter((r) => r.path === "/__sanoma/health?start=1")).toHaveLength(2);
+    });
+
+    it("copies a ghcr.io image into the account's registry first, with credentials Cloudflare makes, and runs the copy", async () => {
+      // The distribution API's replies (OCI distribution spec) and the credentials' (the SDK's
+      // `containers.registries.credentials.generate`), written by hand. The copy is in the account
+      // already, so nothing more is pushed: registry.test.ts copies blobs against registries here.
+      const OCI = "application/vnd.oci.image.manifest.v1+json";
+      const manifest = JSON.stringify({ schemaVersion: 2, mediaType: OCI, config: {}, layers: [] });
+      const digest = `sha256:${createHash("sha256").update(manifest).digest("hex")}`;
+      const copy = `/v2/${TEST_ACCOUNT}/sanoma-ai-runtime/manifests/0.7.0`;
+      const [subdomain, settings, ...rest] = fixture("create");
+      play("copy-an-image", [
+        subdomain!,
+        settings!,
+        reply(
+          apiPath("/containers/registries/registry.cloudflare.com/credentials"),
+          200,
+          {
+            success: true,
+            errors: [],
+            messages: [],
+            result: {
+              account_id: TEST_ACCOUNT,
+              registry_host: "registry.cloudflare.com",
+              username: "v1",
+              password: "temporary",
+            },
+          },
+          "POST",
+        ),
+        {
+          method: "GET",
+          path: "/v2/",
+          status: 401,
+          headers: { "www-authenticate": 'Bearer realm="https://ghcr.io/token",service="ghcr.io"' },
+          body: null,
+        },
+        reply("/token?service=ghcr.io&scope=repository:sanoma-ai/runtime:pull", 200, { token: "anonymous" }),
+        {
+          method: "GET",
+          path: "/v2/sanoma-ai/runtime/manifests/0.7.0",
+          status: 200,
+          headers: { "content-type": OCI },
+          body: manifest,
+        },
+        reply("/v2/", 200, null),
+        { method: "HEAD", path: copy, status: 200, headers: { "docker-content-digest": digest }, body: null },
+        ...rest,
+      ]);
+      const made = await op("container.create", { desired: { ...desired, image: "ghcr.io/sanoma-ai/runtime:0.7.0" } });
+      expect(made).toEqual({ id: "company", state: { ...state, image: "ghcr.io/sanoma-ai/runtime:0.7.0" } });
+      const credentials = sent.find((r) => r.path.endsWith("/credentials"))!;
+      expect(credentials.body).toEqual({ permissions: ["push", "pull"], expiration_minutes: 60 });
+      expect(
+        sent.find((r) => r.path.endsWith("/manifests/0.7.0") && r.method === "GET")!.headers.get("authorization"),
+      ).toBe("Bearer anonymous");
+      const head = sent.find((r) => r.method === "HEAD")!;
+      expect(head.headers.get("authorization")).toBe(`Basic ${Buffer.from("v1:temporary").toString("base64")}`);
+      expect(sent.find((r) => r.path.endsWith("/containers/applications") && r.method === "POST")!.body).toMatchObject({
+        configuration: { image: state.image },
+      });
+    });
+
+    it("plans nothing for a ghcr.io image the Worker names, whose copy the application runs", async () => {
+      // The Worker's `SANOMA_IMAGE` binding holds the declared image; the application its copy.
+      play(
+        "plan-the-copy",
+        only("update-to-a-new-image", (_, i) => i < 3).map((exchange) =>
+          JSON.parse(
+            JSON.stringify(exchange).replaceAll(`"text":"${RUNS}:0.7.0"`, '"text":"ghcr.io/sanoma-ai/runtime:0.7.0"'),
+          ),
+        ),
+      );
+      const planned = await op("container.plan", {
+        id: "company",
+        desired: { ...desired, image: "ghcr.io/sanoma-ai/runtime:0.7.0" },
+      });
+      expect(planned).toMatchObject({ action: "none" });
     });
 
     it("refuses an update whose plan changed since it was approved", async () => {

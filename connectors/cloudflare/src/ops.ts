@@ -10,6 +10,7 @@ import {
 import { domainsOf, domainsText } from "@sanoma-ai/workflows/shared";
 import { instanceUrl, mintInstanceToken, WAKEUP_TOKEN } from "@sanoma-ai/workflows/wakeup-service";
 import { alarm, container } from "./connector.ts";
+import { accountImage } from "./registry.ts";
 import {
   HEALTH_PATH,
   MAIN_MODULE,
@@ -93,6 +94,10 @@ export interface CloudflareApi {
   upload(script: string, upload: Upload): Promise<void>;
   /** Turns its workers.dev URL on (`POST …/scripts/{name}/subdomain { enabled }`). */
   enableSubdomain(script: string): Promise<void>;
+  /** The account's id, which its registry's references name (`accountImage`). */
+  account: string;
+  /** Copies an image of another registry into the account's, as `accountImage(image, account)`. */
+  copyImage(image: string): Promise<void>;
   /** Deletes the Worker, its object's storage with it; nothing when there is none. */
   deleteScript(script: string): Promise<void>;
   /** The container application of that name, if any (`GET …/containers/applications?name=`). */
@@ -188,7 +193,8 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
     const state: ContainerState = {
       id: app?.id ?? null,
       name,
-      image: app?.image ?? "",
+      // The declared image is the Worker's binding; the application runs its copy (`accountImage`).
+      image: text.get(TEXT.image) ?? app?.image ?? "",
       source: text.get(TEXT.source) ?? "",
       ref: text.get(TEXT.ref) ?? "",
       revision: text.get(TEXT.revision) ?? null,
@@ -209,9 +215,11 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
   const plan = async ({ id, desired }: { id?: string; desired?: Record<string, unknown> }): Promise<Planned> => {
     const found = id === undefined ? undefined : await inspect(id, false);
     if (!desired) return { action: found ? "delete" : "none", ...NONE };
-    const { secrets, ...planned } = desired;
+    const { secrets, ...declared } = desired;
     const unknown = [...container.fields.vendorOwned];
-    if (!found) return { action: "create", planned, unknown, replace: [] };
+    // A create plans without the account: it needs no credentials yet.
+    if (!found) return { action: "create", planned: declared, unknown, replace: [] };
+    const planned: Record<string, unknown> = declared;
     const { state } = found;
     if (planned.name !== state.name) return { action: "replace", planned, unknown, replace: ["name"] };
     const changed =
@@ -260,6 +268,10 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
         "exists",
       );
     }
+    // Copied before anything changes, so a copy that fails leaves the Worker as it was. Each apply
+    // asks again, which costs a manifest's HEAD once the copy is there, and puts back one gone.
+    const runs = accountImage(image, cf.account);
+    if (runs !== image) await cf.copyImage(image);
     const served = domains ? domainsText(domains) : undefined;
     const text = {
       [TEXT.source]: source,
@@ -293,8 +305,8 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
       // The application is made for the object's namespace, which the first upload made.
       const namespace = (await cf.bindings(script))?.find((b) => b.name === NAMESPACE)?.namespace_id;
       if (!namespace) throw refused(`${script}: Cloudflare names no namespace for its ${NAMESPACE} binding`);
-      app = await cf.createApplication(script, image, namespace);
-    } else if (app.image !== image) await cf.rollout(app.id, image);
+      app = await cf.createApplication(script, runs, namespace);
+    } else if (app.image !== runs) await cf.rollout(app.id, runs);
     await started(cf, script, url, revision);
     const state: ContainerState = {
       id: app.id,

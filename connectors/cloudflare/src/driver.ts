@@ -3,10 +3,12 @@ import type { Cloudflare } from "cloudflare";
 import { z } from "zod";
 import { cloudflareOps } from "./connector.ts";
 import { alarmOps, type Application, type CloudflareApi, containerOps, type ReadBinding, refused } from "./ops.ts";
+import { CLOUDFLARE_REGISTRY, copyImage } from "./registry.ts";
 
 /*
  * Cloudflare's driver, over its official SDK (`cloudflare`, Stainless) for the API, and plain
- * `fetch` for the company's own Worker (its health and wake routes). A timeout on each request.
+ * `fetch` for the company's own Worker (its health and wake routes) and the image's copy into the
+ * account's registry (`registry.ts`). A timeout on each request.
  */
 
 export interface CloudflareDriverOptions {
@@ -183,6 +185,20 @@ function accountApi(timeoutMs: number, subdomains: Map<string, Promise<string>>)
           target_configuration: { image, instance_type: "basic" },
         }),
       );
+    },
+    account: account_id,
+    async copyImage(image) {
+      // Push and pull for an hour, never stored: each copy asks for its own.
+      const { username, password } = await calling(
+        `POST containers/registries/${CLOUDFLARE_REGISTRY}/credentials`,
+        (cf) =>
+          cf.containers.registries.credentials.generate(CLOUDFLARE_REGISTRY, {
+            account_id,
+            permissions: ["push", "pull"],
+            expiration_minutes: 60,
+          }),
+      );
+      await copyImage(image, { account: account_id, username, password });
     },
     async deleteApplication(id) {
       await found(`DELETE containers/applications/${id}`, (cf) =>

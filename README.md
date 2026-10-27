@@ -150,10 +150,17 @@ pnpm --filter <name> pack --pack-destination "$TMPDIR"
 npm publish "$TMPDIR"/<file>.tgz --access public
 ```
 
-The [runtime image](packages/sanoma/README.md#hosting-it-yourself) a container host runs is [`sanomaai/runtime`](https://hub.docker.com/r/sanomaai/runtime) on Docker Hub, tagged with the `sanoma` version and never `latest`. After the packages publish, `release.yml` pushes the tag when Docker Hub does not have it, logged in with the repository secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (unset, it skips with a notice). A tag is never replaced, so a change to `packages/sanoma/runtime/` ships with a new `sanoma` version. By hand, after `docker login`, when `docker buildx imagetools inspect sanomaai/runtime:<version>` finds no such tag:
+The [runtime image](packages/sanoma/README.md#hosting-it-yourself) a container host runs is [`ghcr.io/sanoma-ai/runtime`](https://github.com/orgs/Sanoma-AI/packages/container/package/runtime) on GitHub's registry, public, tagged with the `sanoma` version and never `latest`, one linux/amd64 manifest. After the packages publish, `release.yml` pushes the tag when the registry does not have it, with the job's `GITHUB_TOKEN` (`packages: write`); the package was made public once by hand in its GitHub settings. A tag is never replaced, so a change to `packages/sanoma/runtime/` ships with a new `sanoma` version. By hand, after `docker login ghcr.io`, when `docker buildx imagetools inspect ghcr.io/sanoma-ai/runtime:<version>` finds no such tag:
 
 ```sh
-docker buildx build --platform linux/amd64 --provenance=false -t sanomaai/runtime:<version> --push packages/sanoma/runtime
+docker buildx build --platform linux/amd64 --provenance=false -t ghcr.io/sanoma-ai/runtime:<version> --push packages/sanoma/runtime
+```
+
+A Cloudflare container runs the image from its account's own registry: apply copies it there from ghcr.io ([the connector](connectors/cloudflare/README.md#the-image)). To put an image there by hand instead, build it and push it with Wrangler, then declare the reference it prints (`registry.cloudflare.com/<account id>/sanoma-runtime:<version>`), which apply runs as it is:
+
+```sh
+docker build --platform linux/amd64 -t sanoma-runtime:<version> packages/sanoma/runtime
+npx wrangler containers push sanoma-runtime:<version>
 ```
 
 ## License

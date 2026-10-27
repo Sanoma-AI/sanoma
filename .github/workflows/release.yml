@@ -1,7 +1,7 @@
 name: Release
 # Run by hand on release/<version>, a branch at the bump's merge commit, never on main (README "Release"):
 # it publishes every public package whose version is not yet on npm, then pushes the runtime image for the
-# sanoma version when Docker Hub does not have it yet.
+# sanoma version to GitHub's registry (ghcr.io/sanoma-ai/runtime) when it does not have it yet.
 on:
   workflow_dispatch:
 
@@ -69,45 +69,34 @@ jobs:
   runtime-image:
     needs: publish
     runs-on: ubuntu-latest
+    # The job's GITHUB_TOKEN pushes the package; no other secret. The package ghcr.io/sanoma-ai/runtime
+    # was made public once by hand in GitHub (its package settings): Cloudflare pulls it anonymously.
     permissions:
       contents: read
-    # Actions pinned to commits, as in the publish job: this job holds the Docker Hub token.
+      packages: write
+    # Actions pinned to commits, as in the publish job: this job can push the runtime image.
     steps:
-      # Secrets cannot be read in `if:`, so this step reads them and says whether to go on.
-      - name: Docker Hub secrets are set
-        id: hub
-        env:
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-        run: |
-          if [ -n "$DOCKERHUB_USERNAME" ] && [ -n "$DOCKERHUB_TOKEN" ]; then
-            echo "set=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::notice title=Runtime image skipped::The secrets DOCKERHUB_USERNAME and DOCKERHUB_TOKEN are not both set."
-          fi
-      - if: steps.hub.outputs.set
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-      - if: steps.hub.outputs.set
-        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - if: steps.hub.outputs.set
-        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       # Tagged with the sanoma version, never `latest`. A run that published only other packages
       # finds the tag there and pushes nothing, so a version's image is never replaced.
-      - name: Tag not yet on Docker Hub
+      - name: Tag not yet on ghcr.io
         id: image
-        if: steps.hub.outputs.set
         run: |
-          tag="docker.io/sanomaai/runtime:$(jq -r .version packages/sanoma/package.json)"
+          tag="ghcr.io/sanoma-ai/runtime:$(jq -r .version packages/sanoma/package.json)"
           if docker buildx imagetools inspect "$tag" > /dev/null 2> "$RUNNER_TEMP/inspect.err"; then
-            echo "::notice title=Runtime image skipped::$tag is already on Docker Hub."
-          # Only a missing tag (or, before the first push, a missing repository) is a push; any other
-          # error stops here, as pushing then could replace a tag that is there.
-          elif grep -qE ': not found|repository does not exist' "$RUNNER_TEMP/inspect.err"; then
+            echo "::notice title=Runtime image skipped::$tag is already on ghcr.io."
+          # Only a missing tag (or, before the first push, a missing package, which ghcr.io answers
+          # as denied) is a push; any other error stops here, as pushing then could replace a tag
+          # that is there. A token denied a package it cannot read cannot push to it either.
+          elif grep -qiE ': not found|manifest unknown|name unknown|denied' "$RUNNER_TEMP/inspect.err"; then
             echo "tag=$tag" >> "$GITHUB_OUTPUT"
           else
             cat "$RUNNER_TEMP/inspect.err" >&2
@@ -119,7 +108,7 @@ jobs:
         with:
           context: packages/sanoma/runtime
           platforms: linux/amd64
-          # One image manifest, not an index with an attestation, for a host that pulls it by tag.
+          # One image manifest, not an index with an attestation: the copy into Cloudflare's registry takes one.
           provenance: false
           push: true
           tags: ${{ steps.image.outputs.tag }}

@@ -207,7 +207,7 @@ describe("going live by contract", () => {
     });
     const text = await renderInfra(app, choices);
     expect(text).toContain(
-      `export const host = cloudflare.container({\n  name: "acme-ops",\n  image: "docker.io/sanomaai/runtime:9.9.9",\n`,
+      `export const host = cloudflare.container({\n  name: "acme-ops",\n  image: "ghcr.io/sanoma-ai/runtime:9.9.9",\n`,
     );
     // A wakeup service wakes a Cloudflare container too: the host's own vendor's wakeup comes first.
     expect(text).toContain(`export const wakeup = cloudflare.alarm({\n  host: host,\n});\n`);
