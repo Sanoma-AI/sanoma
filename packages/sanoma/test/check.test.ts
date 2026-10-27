@@ -138,11 +138,14 @@ export default defineWorkflow({
       expect(loaded.config.workflows?.map((w) => w.name)).toEqual(["introduce", "crm.follow-up", "shop.follow-up"]);
       expect(loaded.config.collections?.map((c) => c.name)).toEqual(["crm.customers", "shop.customers"]);
       const log: string[] = [];
-      expect(await check(loaded, { databaseUrl, log: (l) => log.push(l) })).toEqual({
-        ok: true,
-        problems: [],
-        warnings: [],
-      });
+      const result = await check(loaded, { databaseUrl, log: (l) => log.push(l) });
+      expect(result).toEqual({ ok: true, problems: [], warnings: [], grid: expect.any(Object) });
+      // The Permissions grid names an app's workflows and operations by its folder too.
+      expect(result.grid!.workflows.map((w) => [w.id, w.ops.map((op) => op.id)])).toEqual([
+        ["crm.follow-up", ["data.crm.customers.get", "data.crm.customers.save"]],
+        ["introduce", ["data.shop.customers.get", "data.crm.customers.save"]],
+        ["shop.follow-up", ["data.shop.customers.get"]],
+      ]);
       // The site under apps/crm/sites builds at /sites/crm/pipeline, and its tsc writes sites/tsconfig.json.
       expect(log).toEqual(expect.arrayContaining(["build crm/pipeline", "oxlint workflows sites apps"]));
       expect(log).toContain("passed apps/crm/scenarios/follow-up.feature › A customer is followed up");
