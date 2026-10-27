@@ -5,6 +5,7 @@ import type {
   ChangeView,
   CredentialStatus,
   ErrorCode,
+  HostEnforcement,
   InputIssue,
   LedgerRecord,
   PreviewRequest,
@@ -457,6 +458,13 @@ export interface PermissionsResponse extends PermissionsGrid {
    */
   files: { file: string; text: string; policies: { id: string; span: Span }[] }[];
 }
+
+/**
+ * What the repository's host enforces on `main` (`getHostEnforcement`), with the host's name (its
+ * connector's title): whether it refuses a change that is not a pull request and requires the
+ * `sanoma` check; null without a remote, or with no connector for its host.
+ */
+export type EnforcementResponse = (HostEnforcement & { host: string }) | null;
 
 /** The `body` of the error a server function fails with. */
 export interface ErrorResponse {

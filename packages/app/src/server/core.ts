@@ -17,6 +17,7 @@ import {
   PolicyDeniedError,
   type PreviewAnswer,
   Principal,
+  remoteFor,
   type RunSummary,
   type SanomaError,
 } from "@sanoma-ai/workflows";
@@ -43,6 +44,7 @@ import {
   type ClearCredentialRequest,
   type CredentialsResponse,
   type DecideCall,
+  type EnforcementResponse,
   type ErrorResponse,
   type PermissionsResponse,
   type PreviewQuery,
@@ -56,6 +58,7 @@ import {
 } from "../api.ts";
 import type { AppContext } from "../context.ts";
 import { databaseHost, LOOPBACK } from "../loopback.ts";
+import { secretValues } from "./secrets.ts";
 
 // What the server functions do. Server-only: each takes the app context that startApp passes
 // with every request. Every expected failure is an ApiError.
@@ -385,6 +388,47 @@ export function hasRemote({ source }: AppContext): Promise<boolean> {
 
 /** Each repository's last answer to `hasRemote`, and when it was asked. */
 const remotes = new WeakMap<object, { at: number; has: Promise<boolean> }>();
+
+/**
+ * Sends the draft of `actor`'s chat `id` for review: opens its change (`SanomaClient.openChange`,
+ * the open one when it has one), titled as the chat is, its page this app's `/changes/<id>` at
+ * `origin`, where the pull request's status links. The change's run id; a 404 for a chat that is
+ * not the actor's.
+ */
+export async function openChange(
+  { client }: Pick<AppContext, "client">,
+  actor: Principal,
+  id: string,
+  origin: string,
+): Promise<{ runId: string }> {
+  const chat = await client.chats.get(id);
+  if (chat?.person !== actor.id) throw new ApiError(404, { error: `No chat ${id}` });
+  const page = new URL(`/changes/${encodeURIComponent(id)}`, origin).href;
+  return { runId: await client.openChange({ id, title: chat.title, page }, { startedBy: actor }) };
+}
+
+/**
+ * What the repository's host enforces on `main` (`SourceHost.enforcement`), with the host's name:
+ * the Permissions page's line. Null without a remote, or when no connector's remote half is for
+ * its host. A host that cannot be asked is logged, and answered as enforcing nothing, saying why.
+ */
+export async function hostEnforcement({
+  client,
+  description,
+  resolved,
+  source,
+}: Pick<AppContext, "client" | "description" | "resolved" | "source">): Promise<EnforcementResponse> {
+  const url = await source?.remoteUrl?.();
+  const found = url === undefined ? undefined : remoteFor(resolved.remotes, url);
+  if (!found) return null;
+  const host = description.vendors[found.vendor]!.title;
+  try {
+    return { host, ...(await found.remote.open(found.repo, { secrets: secretValues(client) }).enforcement("main")) };
+  } catch (err) {
+    console.error(`sanoma app: asking ${host} what it enforces on main failed:`, err);
+    return { host, pullRequest: false, check: false, reason: errorMessage(err) };
+  }
+}
 
 /** The report of a drift run once it ends (`SanomaClient.driftReport`). */
 export const driftReport = ({ client }: AppContext, runId: string): Promise<DriftReport> => client.driftReport(runId);

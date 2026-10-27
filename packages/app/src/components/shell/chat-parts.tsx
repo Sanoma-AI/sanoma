@@ -1,6 +1,5 @@
 import { CheckIcon } from "@phosphor-icons/react/dist/csr/Check";
 import { CopyIcon } from "@phosphor-icons/react/dist/csr/Copy";
-import { GitBranchIcon } from "@phosphor-icons/react/dist/csr/GitBranch";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import { approverLabel } from "@sanoma-ai/workflows/shared";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
@@ -18,7 +17,8 @@ import { type ChatMessage, type DraftCard, heldRunOf, pathOf, type SignInCard, t
 import { decidableBy } from "../../lib/decidable.ts";
 import { approvalKey, configQuery, runQuery } from "../../queries.ts";
 import { ApprovalDecision, ApprovalDetails } from "../approval.tsx";
-import { CardHeading, plural, TipButton } from "../common.tsx";
+import { CardHeading, TipButton } from "../common.tsx";
+import { DraftCardView } from "./draft-card.tsx";
 
 // What the chat draws of the agent's reply, per app.md's Chat: plain text at the reply size, the
 // steps as a quiet checked list, a held lookup as the Inbox's approval card, and the draft as a
@@ -172,55 +172,6 @@ function stepLabel(step: ToolPart): string {
       return file === undefined ? getToolName(step) : `${getToolName(step)} ${file}`;
     }
   }
-}
-
-/**
- * The draft's card: its branch, what it changes (git's summary), its checks, and how it is
- * applied: merging its branch, by hand; the live instance runs the old code until it restarts.
- */
-function DraftCardView({ draft }: { draft: DraftCard }) {
-  const { checks } = draft;
-  return (
-    <Card size="sm" role="region" aria-label="Draft">
-      <CardHeader>
-        <CardHeading>
-          <span className="flex items-center gap-1.5">
-            <GitBranchIcon aria-hidden="true" className="shrink-0" />
-            <code className="truncate">{draft.branch}</code>
-          </span>
-        </CardHeading>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-2">
-        {draft.summary ? (
-          <pre className="overflow-x-auto font-mono text-xs whitespace-pre">{draft.summary}</pre>
-        ) : (
-          <p className="text-muted-foreground">No change committed yet.</p>
-        )}
-        {checks === undefined ? (
-          <p className="text-muted-foreground">Not checked since the last edit.</p>
-        ) : checks.ok ? (
-          <p className="flex items-center gap-1.5">
-            <CheckIcon aria-hidden="true" /> Checks pass
-            {checks.warnings.length > 0 && `, with ${plural(checks.warnings.length, "warning")}`}
-          </p>
-        ) : (
-          <div className="flex flex-col gap-1">
-            <p className="flex items-center gap-1.5 text-destructive">
-              <XIcon aria-hidden="true" /> Checks fail: {plural(checks.problems.length, "problem")}
-            </p>
-            <ul className="list-disc pl-5 font-mono text-xs break-words">
-              {checks.problems.map((problem, i) => (
-                <li key={i}>{problem}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </CardContent>
-      <CardFooter className="border-t text-xs text-muted-foreground">
-        Merge the branch to apply it. The live instance keeps running the old code until it restarts.
-      </CardFooter>
-    </Card>
-  );
 }
 
 /** `url` when it is an https link that parses (the vendor wrote it), else undefined. */

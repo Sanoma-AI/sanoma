@@ -263,6 +263,7 @@ describe("the chat on a person's own agent", () => {
     // The edit is the draft's commit, checked; the live checkout is as it was.
     expect(reply!.parts.filter((part) => part.type === "data-draft").map((part) => part.data)).toEqual([
       {
+        draft: id,
         branch: `draft/${id}`,
         files: ["workflows/offboarding.ts"],
         summary: expect.stringContaining("workflows/offboarding.ts"),

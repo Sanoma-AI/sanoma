@@ -1,4 +1,4 @@
-import { ANONYMOUS } from "@sanoma-ai/workflows/shared";
+import { ANONYMOUS, DRAFT_ID } from "@sanoma-ai/workflows/shared";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import {
@@ -27,9 +27,11 @@ import {
   driftReport,
   fileSource,
   hasRemote,
+  hostEnforcement,
   lastRuns,
   listRuns,
   nextFires,
+  openChange,
   permissions,
   preview,
   readStartRun,
@@ -112,6 +114,15 @@ export const getChange = createServerFn(READ)
 
 /** Whether the repository has a remote, where its changes are reviewed: the bar's Changes. */
 export const getRemote = createServerFn(READ).handler(({ context }) => hasRemote(context.app));
+
+/** Sends the person's chat's draft for review: its change opened, its run's id. */
+export const openChangeFn = createServerFn(CHANGE)
+  .middleware([withPrincipal])
+  .validator(validate(z.object({ id: z.string().regex(DRAFT_ID) })))
+  .handler(({ data, context }) => openChange(context.app, context.principal, data.id, context.origin));
+
+/** What the repository's host enforces on main: the Permissions page's line; null without a remote. */
+export const getHostEnforcement = createServerFn(READ).handler(({ context }) => hostEnforcement(context.app));
 
 export const startRunFn = createServerFn(CHANGE)
   .middleware([withPrincipal])

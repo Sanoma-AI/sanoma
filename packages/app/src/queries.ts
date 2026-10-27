@@ -16,7 +16,7 @@ import {
   type Saved,
 } from "@sanoma-ai/workflows/shared";
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { linkOptions, useNavigate } from "@tanstack/react-router";
+import { isNotFound, linkOptions, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -24,6 +24,7 @@ import {
   type AvailableConnectors,
   type ChangesQuery,
   type CredentialsResponse,
+  errorBodyOf,
   pendingApprovals,
   type PreviewQuery,
   RUNS_LIMIT,
@@ -46,6 +47,7 @@ import {
   getDriftReport,
   getGoLiveChoices,
   getGoLiveProgress,
+  getHostEnforcement,
   getLastRuns,
   getNextFires,
   getPermissions,
@@ -55,6 +57,7 @@ import {
   getScenarios,
   getSetupStatus,
   getSource,
+  openChangeFn,
   previewFn,
   callFn,
   startRunFn,
@@ -574,13 +577,41 @@ export const changesQuery = (query: ChangesQuery = {}) =>
     refetchInterval: (q) => (q.state.data?.some((c) => changePoll(c) === POLL_MS) ? POLL_MS : 30_000),
   });
 
-/** The change of the draft `id` (`getChange`), under RUNS_KEY, so Publish refreshes it: polled as `changePoll` says. */
+/**
+ * The change of the draft `id` (`getChange`), under RUNS_KEY, so Publish and Send for review
+ * refresh it: polled as `changePoll` says. A draft with no change is the router's not-found,
+ * neither tried again nor polled.
+ */
 export const changeQuery = (id: string) =>
   queryOptions({
     queryKey: [...RUNS_KEY, "change", id],
     queryFn: () => getChange({ data: { id } }),
-    refetchInterval: (q) => (q.state.data ? changePoll(q.state.data) : POLL_MS),
+    retry: (failures, err) => !isNotFound(err) && failures < 3,
+    refetchInterval: (q) => (q.state.data ? changePoll(q.state.data) : isNotFound(q.state.error) ? false : POLL_MS),
   });
+
+/**
+ * Sends a chat's draft for review (`openChangeFn`, by the draft's id), then says so, refreshes the
+ * changes and opens the change's review.
+ */
+export function useOpenChange() {
+  const open = useServerFn(openChangeFn);
+  const go = useNavigate();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => open({ data: { id } }),
+    onSuccess: async (_, id) => {
+      toast.success("Sent for review");
+      void queryClient.invalidateQueries({ queryKey: RUNS_KEY });
+      await go({ to: "/changes/$id", params: { id } });
+    },
+    onError: (err) => toast.error(`Could not send it for review: ${errorBodyOf(err)?.error ?? errorMessage(err)}`),
+  });
+}
+
+/** What the repository's host enforces on main (`getHostEnforcement`): asked again after 5 minutes at most. */
+export const hostEnforcementQuery = () =>
+  queryOptions({ queryKey: ["host-enforcement"], queryFn: () => getHostEnforcement(), staleTime: 5 * 60_000 });
 
 /**
  * Whether the repository has a remote: the bar's Changes. Read once per page load: it rarely

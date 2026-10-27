@@ -12,6 +12,7 @@ import {
   type Policy,
   resolveConfig,
   type SanomaConfig,
+  type Source,
 } from "@sanoma-ai/workflows";
 import { describeConfig, readPeople } from "@sanoma-ai/workflows/describe";
 import { personsOf } from "@sanoma-ai/workflows/shared";
@@ -19,11 +20,12 @@ import { defineFake } from "@sanoma-ai/workflows/fake";
 import { executablePath, launch } from "puppeteer-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
+import { fakeRemote } from "../../workflows/test/fakes/remote.ts";
 import people from "../../workflows/test/fixtures/people/sanoma.config.ts";
 import { ACTOR_COOKIE, ACTOR_KEY } from "../src/api.ts";
 import { type App, startApp } from "../src/index.ts";
 import { spanLines } from "../src/lib/lines.ts";
-import { permissions } from "../src/server/core.ts";
+import { hostEnforcement, permissions } from "../src/server/core.ts";
 
 // The Permissions page: its grid and the policy files through the server core
 // (`getPermissions`), the page as the server renders it, and in Chrome the who-are-you picker,
@@ -86,7 +88,13 @@ forbid (principal in Sanoma::Group::"agents", action == Sanoma::Action::"shop.re
 mkdirSync(join(root, "policies"));
 writeFileSync(join(root, "policies", "refunds.cedar"), POLICIES);
 
-const config: SanomaConfig = { workflows: [refund], connectors: [withFake(shop, fake)], root };
+// A host the repository's remote may be on, for the line under the grid: its `enforcement` changed by a test.
+const remote = fakeRemote();
+/** The repository's remote, as the app's source reports it: none until a test sets one. */
+let origin: string | undefined;
+const source: Source = { root, commit: () => undefined, head: () => "HEAD", remoteUrl: async () => origin };
+
+const config: SanomaConfig = { workflows: [refund], connectors: [withFake(shop, fake), remote.connector], root };
 // The root's policy, made from policies/refunds.cedar.
 const resolved = resolveConfig(config);
 const cedar = resolved.policy;
@@ -141,6 +149,43 @@ describe("the Permissions grid", () => {
   });
 });
 
+describe("what the host enforces", () => {
+  const context = { client: undefined as never, description, resolved, source };
+
+  it("is nothing without a remote, or with no connector for its host", async () => {
+    expect(await hostEnforcement({ ...context, source: undefined })).toBeNull();
+    origin = undefined;
+    expect(await hostEnforcement(context)).toBeNull();
+    origin = "https://elsewhere.example/acme/company.git";
+    expect(await hostEnforcement(context)).toBeNull();
+  });
+
+  it("is the host's answer on main, by the connector's name; a host that fails, nothing enforced and why", async () => {
+    origin = remote.url;
+    expect(await hostEnforcement(context)).toEqual({
+      host: "fakegit",
+      pullRequest: false,
+      check: false,
+      reason: "a fake host enforces nothing",
+    });
+    const { enforcement } = remote.host;
+    remote.host.enforcement = async () => {
+      throw new Error("the host is down");
+    };
+    try {
+      expect(await hostEnforcement(context)).toEqual({
+        host: "fakegit",
+        pullRequest: false,
+        check: false,
+        reason: "the host is down",
+      });
+    } finally {
+      remote.host.enforcement = enforcement;
+      origin = undefined;
+    }
+  });
+});
+
 describe("the picker's people", () => {
   it("are the declared persons, not agents nor groups, with their names; none when no one is declared", () => {
     expect(personsOf(readPeople(root).people)).toEqual([{ id: "ada", name: "Ada Lovelace" }, { id: "bo" }]);
@@ -149,13 +194,19 @@ describe("the picker's people", () => {
   });
 });
 
+/** The Permissions page as ada sees it, as the server renders it. */
+const permissionsPage = async (app: App) =>
+  (
+    await (await fetch(new URL("/permissions", app.url), { headers: { cookie: `${ACTOR_COOKIE}=ada` } })).text()
+  ).replaceAll("<!-- -->", "");
+
 describe("the Permissions page", () => {
   const testApp = useTestApp(config, { databaseUrl: testDatabaseUrl("permissions") });
   let app: App;
 
   beforeAll(async () => {
     ensureBuilt(appDir, ["dist/server/server.js"], ["pnpm", "exec", "vite", "build"]);
-    app = await startApp(testApp.config, { port: 0 });
+    app = await startApp(testApp.config, { port: 0, source });
   }, 120_000);
 
   afterAll(async () => {
@@ -197,6 +248,24 @@ describe("the Permissions page", () => {
     // The policy is the Permissions page's: the Workflows page says nothing of it while it holds.
     const workflows = (await (await fetch(new URL("/workflows", app.url))).text()).replaceAll("<!-- -->", "");
     expect(workflows).not.toContain("policies/*.cedar");
+  });
+
+  it("says under the grid whether the host requires a merge, and nothing without a remote", async () => {
+    expect(await permissionsPage(app)).not.toContain("check on <code>main</code>");
+    const { enforcement } = remote.host;
+    origin = remote.url;
+    try {
+      expect(await permissionsPage(app)).toContain(
+        "fakegit does not require a pull request and the <code>sanoma</code> check on <code>main</code>. a fake host enforces nothing Until then a push around Sanoma lands in the ledger as a gap.",
+      );
+      remote.host.enforcement = async () => ({ pullRequest: true, check: true });
+      const html = await permissionsPage(app);
+      expect(html).toContain("fakegit requires a pull request and the <code>sanoma</code> check on <code>main</code>.");
+      expect(html).not.toContain("Until then");
+    } finally {
+      remote.host.enforcement = enforcement;
+      origin = undefined;
+    }
   });
 
   it("picks a declared person, shows their groups, a cell's rule in a sheet, and New run's will-ask line, in Chrome", async (ctx) => {

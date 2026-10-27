@@ -21,15 +21,19 @@ import {
   PolicyProblems,
   pageTitle,
   plural,
+  StatusDot,
 } from "../components/common.tsx";
-import { permissionsQuery } from "../queries.ts";
+import { hostEnforcementQuery, permissionsQuery } from "../queries.ts";
 
 export const Route = createFileRoute("/permissions")({
   staticData: { crumb: "Permissions" },
   head: ({ match }) => pageTitle(match.staticData.crumb),
-  loader: ({ context: { queryClient } }) => {
+  loader: async ({ context: { queryClient } }) => {
     if (!import.meta.env.SSR) void loadCode();
-    return queryClient.query({ ...permissionsQuery(), staleTime: "static" });
+    await Promise.all([
+      queryClient.query({ ...permissionsQuery(), staleTime: "static" }),
+      queryClient.query(hostEnforcementQuery()),
+    ]);
   },
   component: PermissionsPage,
 });
@@ -97,6 +101,7 @@ function PermissionsPage() {
               }}
             />
           </Card>
+          <HostEnforcementLine />
           {data.files.map(({ file, text, policies }) => (
             <PolicyCode key={file} file={file} text={text} span={policies.find((p) => p.id === shown)?.span} />
           ))}
@@ -146,6 +151,34 @@ function PolicyLine({ data }: { data: PermissionsResponse }) {
         </>
       )}{" "}
       · {plural(groups, "group")} · {plural(data.workflows.length, "workflow")} · {plural(ops, "operation")}
+    </p>
+  );
+}
+
+/**
+ * Under the grid, whether the repository's host holds every change to `main` to a merge (a pull
+ * request and the `sanoma` check) and, when it does not, why, as the host says: until it does, the
+ * grid holds only for what goes through Sanoma. Nothing without a remote.
+ */
+function HostEnforcementLine() {
+  const { data } = useSuspenseQuery(hostEnforcementQuery());
+  if (!data) return null;
+  const enforced = data.pullRequest && data.check;
+  return (
+    <p className="flex items-baseline gap-2 text-sm text-muted-foreground">
+      <StatusDot tone={enforced ? "ok" : "waiting"} />
+      <span>
+        {enforced ? (
+          <>
+            {data.host} requires a pull request and the <code>sanoma</code> check on <code>main</code>.
+          </>
+        ) : (
+          <>
+            {data.host} does not require a pull request and the <code>sanoma</code> check on <code>main</code>.
+            {data.reason && ` ${data.reason}`} Until then a push around Sanoma lands in the ledger as a gap.
+          </>
+        )}
+      </span>
     </p>
   );
 }

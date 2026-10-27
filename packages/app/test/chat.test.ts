@@ -263,6 +263,7 @@ describe("the chat", () => {
     const cards = reply!.parts.filter((part) => part.type === "data-draft");
     expect(cards).toHaveLength(1);
     expect(cards[0]!.data).toEqual({
+      draft: id,
       branch: `draft/${id}`,
       files: ["workflows/offboarding.ts"],
       summary: expect.stringContaining("workflows/offboarding.ts"),
