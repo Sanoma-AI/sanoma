@@ -4,19 +4,19 @@ import { buildCtx, decideStart, isInfrastructureError, startHoldOf } from "./cal
 import { dbosStatusesOf } from "./client.ts";
 import { declaredWakeup, type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { storedSecrets, watchCredentials } from "./credentials.ts";
-import { DBOS_DATABASE_OPTIONS, lazyPool, prepareDatabase } from "./db.ts";
+import { type Db, DBOS_DATABASE_OPTIONS, lazyPool, prepareDatabase } from "./db.ts";
 import { deadlineRegistry, type Deadlines, idle, onOwnQueue, type SelfStop, stopWhenIdle } from "./deadlines.ts";
 import type { WorkflowDefinition } from "./define.ts";
 import { credentialsOf, unconfigured, unconfiguredSummary } from "./env.ts";
 import { errorInfo, parseOrThrow, PolicyDeniedError } from "./errors.ts";
 import { entry, ownedLedger, skipped, write, writeFailure } from "./ledger.ts";
-import { dbosLogger, quietIfSandbox, setLogLevel, warn } from "./log.ts";
+import { dbosLogger, info, quietIfSandbox, setLogLevel, warn } from "./log.ts";
 import { lineStartsOf, readSource } from "./ast.ts";
 import { callsOf, outlineWithSource } from "./outline.ts";
 import { currentRun, type Run, type RunArgs, type WorkerState, type WorkflowOutline } from "./run.ts";
 import { applyScheduled, nextScheduledFire, type ScheduledStarter, scheduledStarter } from "./schedules.ts";
 import type { Source } from "./source.ts";
-import { approverLabel, errorMessage, WORKFLOW_ACTION } from "./shared.ts";
+import { approverLabel, CHANGE_WORKFLOW, errorMessage, WORKFLOW_ACTION } from "./shared.ts";
 
 export interface Worker {
   /**
@@ -222,6 +222,8 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
         );
       }
     }
+    // Change runs move to the latest version only: a rollback's worker, unless promoted, leaves them be.
+    if (isLatest) await carryChangeRuns(resolved, () => secrets.db());
     await DBOS.registerQueue(resolved.queueName);
     // The schedules are the latest version's: an older worker leaves them as the newer set them.
     if (isLatest && options.schedules !== false) {
@@ -286,6 +288,53 @@ function outlineOf(wf: WorkflowDefinition<any, any>): WorkflowOutline {
     );
   }
   return { file: outline.file, lineStarts: lineStartsOf(source!), calls: callsOf(outline.nodes) };
+}
+
+/**
+ * Takes over the change runs another version of the app left unfinished whose change code is this
+ * worker's (`changeCode`, which `SanomaClient.start` records on each), when this worker is the
+ * latest version: a change's own deploy restarts the worker on the merged code, a new version,
+ * which DBOS would never give the run to.
+ * Each keeps its id, its history and its unread messages (an approval decided, an event told while
+ * no worker ran): a PENDING one is queued again on DBOS's internal queue (`resumeWorkflows`), then
+ * every queued one is stamped with this version, the one column the runtime writes in DBOS's own
+ * table, so the queue gives it to this worker, which replays it. A run stopped between the two is
+ * still queued on its old version, so the next start takes it. DBOS's `rewindWorkflow` would keep
+ * the id too, but only from a run cancelled first, and it deletes the unread messages. Runs of the
+ * company's workflows, the change's own `apply` and `drift` children among them, stay on their
+ * version (`warnAboutStrandedRuns`); a change awaits a child by its id, wherever it runs. An older
+ * worker still running such a run (a rolling deploy) runs it on until it stops, as with DBOS's own
+ * recovery of a live worker's runs.
+ */
+async function carryChangeRuns({ appName, version, changeCode }: ResolvedConfig, db: () => Promise<Db>) {
+  const list = (status: "PENDING" | "ENQUEUED") =>
+    DBOS.listWorkflows({
+      workflowName: CHANGE_WORKFLOW,
+      status,
+      applicationName: appName,
+      attributes: { changeCode },
+      loadInput: false,
+      loadOutput: false,
+    }).then((runs) => runs.filter((r) => r.applicationVersion && r.applicationVersion !== version));
+  const pending = await list("PENDING");
+  if (pending.length) await DBOS.resumeWorkflows(pending.map((r) => r.workflowID));
+  const queued = (await list("ENQUEUED")).map((r) => r.workflowID);
+  if (!queued.length) return;
+  // DBOS's system tables are in its schema, `dbos` (dbos-sdk 5.2.11). Still queued, so no worker has
+  // dequeued it meanwhile: one that has runs it on its own version.
+  const { rows } = await (
+    await db()
+  ).query<{ workflow_uuid: string }>(
+    `UPDATE dbos.workflow_status SET application_version = $1
+     WHERE workflow_uuid = ANY($2) AND status = 'ENQUEUED' AND application_version <> $1
+     RETURNING workflow_uuid`,
+    [version, queued],
+  );
+  if (rows.length) {
+    info(
+      `carried ${rows.length} change run(s) onto version ${version}: ${rows.map((r) => r.workflow_uuid).join(", ")}`,
+    );
+  }
 }
 
 /**
