@@ -474,7 +474,7 @@ const ICON_NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
  * have is left out, and its site draws the default for its kind.
  */
 async function iconsModule(repo?: string): Promise<string> {
-  if (repo === undefined) return "export default {};";
+  if (repo === undefined) return "export default new Map();";
   const { siteIcons } = await import("@sanoma-ai/workflows/describe");
   const lucide = dirname(createRequire(import.meta.url).resolve("lucide-react/package.json"));
   // Lucide's module per icon, `dist/esm/icons/<name>.mjs` (the package has no `exports` map): a
@@ -486,14 +486,14 @@ async function iconsModule(repo?: string): Promise<string> {
     .filter((name) => ICON_NAME.test(name) && existsSync(file(name)))
     .toSorted();
   const imports = names.map((name, i) => `import icon${i} from ${JSON.stringify(file(name))};\n`);
-  return `${imports.join("")}export default { ${names.map((name, i) => `${JSON.stringify(name)}: icon${i}`).join(", ")} };`;
+  return `${imports.join("")}export default new Map([${names.map((name, i) => `[${JSON.stringify(name)}, icon${i}]`).join(", ")}]);`;
 }
 
 /** The modules the sites' `site.ts` make, by id, each read from the repo (none without one, the package's own build). */
-const SITE_MODULES: Record<string, (repo?: string) => Promise<string>> = {
-  [LOCALES]: localesModule,
-  [ICONS]: iconsModule,
-};
+const SITE_MODULES = new Map([
+  [LOCALES, localesModule],
+  [ICONS, iconsModule],
+]);
 
 /**
  * What the sites' `site.ts` say, read and never run, for the app's router and bar:
@@ -509,10 +509,9 @@ function sitesPlugin(repo?: string): Plugin {
   const texts = new Map<string, string>();
   return {
     name: "sanoma:sites",
-    resolveId: (source) => (Object.hasOwn(SITE_MODULES, source) ? `\0${source}` : undefined),
+    resolveId: (source) => (SITE_MODULES.has(source) ? `\0${source}` : undefined),
     async load(id) {
-      const read =
-        id.startsWith("\0") && Object.hasOwn(SITE_MODULES, id.slice(1)) ? SITE_MODULES[id.slice(1)] : undefined;
+      const read = id.startsWith("\0") ? SITE_MODULES.get(id.slice(1)) : undefined;
       if (!read) return;
       if (!texts.has(id)) texts.set(id, await read(repo));
       return texts.get(id);
@@ -526,7 +525,7 @@ function sitesPlugin(repo?: string): Plugin {
         const site = event.endsWith("Dir") && !deeper.length && (routes === undefined || routes === "routes");
         const route = routes === "routes" && /\.tsx?$/.test(file);
         if (!site && !route && !(routes === "site.ts" && !deeper.length)) return;
-        for (const [name, read] of Object.entries(SITE_MODULES)) {
+        for (const [name, read] of SITE_MODULES) {
           const id = `\0${name}`;
           let next: string;
           try {

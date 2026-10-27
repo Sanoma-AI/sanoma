@@ -23,6 +23,6 @@ declare module "virtual:sanoma/locales" {
 
 /** The Lucide icons the sites' `site.ts` name, by name, as the `sanoma:sites` plugin reads them (`siteIcons`): `SiteIcon` imports it. */
 declare module "virtual:sanoma/icons" {
-  const icons: Record<string, import("lucide-react").LucideIcon>;
+  const icons: ReadonlyMap<string, import("lucide-react").LucideIcon>;
   export default icons;
 }
