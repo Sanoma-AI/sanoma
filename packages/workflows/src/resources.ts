@@ -149,13 +149,13 @@ export function readPeople(root: string | undefined): DeclaredPeople {
   if (cached?.stamp === stamp) return cached.read;
   // With the wakeup's type, which the same constructors declare: read, and only the people's kept.
   const read = readDataFiles(root, [peopleConnector, wakeupOps], undefined, (source) => DECLARES_PEOPLE.test(source));
-  const declared = read.resources.filter((r) => Object.hasOwn(sanoma, r.type));
+  const ofPeople = read.resources.filter((r) => Object.hasOwn(sanoma, r.type));
   // The people are the company's: an app, taken from elsewhere, declares none.
   const inApp = (r: DeclaredResource) => r.file.startsWith(`${APPS_DIR}/`);
-  const people = declared.filter((r) => !inApp(r));
+  const people = ofPeople.filter((r) => !inApp(r));
   // The people are never bound, so the lockfile's problems are not theirs.
   const own = read.problems.filter((p) => p.file !== LOCKFILE);
-  for (const r of declared.filter(inApp)) {
+  for (const r of ofPeople.filter(inApp)) {
     own.push({
       file: r.file,
       message: `${r.id} declares a ${r.type} in an app: the people are the company's, declared in resources/ at the root`,
