@@ -60,9 +60,10 @@ describe("the people types", () => {
       "sanoma.change.review",
       "sanoma.change.merge",
       "sanoma.change.close",
+      "sanoma.apps.list",
     ]);
-    // And the change workflow, in every config.
-    expect([...resolved.workflows.keys()]).toEqual(["change"]);
+    // No drift or apply: the change workflow, and call for the listing of apps, in every config.
+    expect([...resolved.workflows.keys()]).toEqual(["change", "call"]);
   });
 });
 

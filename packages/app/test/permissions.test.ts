@@ -188,8 +188,8 @@ describe("the Permissions page", () => {
     expect(html).toContain(
       'aria-label="hold · group finance: the rule for shop.refunds.create in refund for someone in agents"',
     );
-    // No public site, so no visitor's columns.
-    expect(html.match(/>allow</g)).toHaveLength(5);
+    // No public site, so no visitor's columns; the built-in sanoma.apps.list's row is allow across.
+    expect(html.match(/>allow</g)).toHaveLength(8);
     // The policy file under the grid, titled by its path, its text plain until the code loads.
     expect(html).toContain(">policies/refunds.cedar</h2>");
     expect(html).toContain("forbid (principal, action == Sanoma::Action::&quot;workflow:refund&quot;, resource)");

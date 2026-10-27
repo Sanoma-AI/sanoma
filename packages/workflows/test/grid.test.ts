@@ -117,6 +117,8 @@ describe("permissionsGrid", () => {
       },
     ]);
     expect(grid.ops).toEqual([
+      // The runtime's listing of apps, which a page may call: a visitor only with a permit.
+      { id: "sanoma.apps.list", cells: [...Array.from({ length: 3 }, () => ({ answer: "allow" })), ...visitorDenied] },
       {
         // A money operation is called only in a run: not a direct row.
         id: "shop.refunds.list",
@@ -150,7 +152,7 @@ describe("permissionsGrid", () => {
       readPeople(root).people,
     );
     const rule = { id: "policies/agents.cedar#1", file: "policies/agents.cedar" };
-    expect(gridOf(onBehalf).ops[0]!.cells).toEqual([
+    expect(gridOf(onBehalf).ops.find((row) => row.id === "shop.refunds.list")!.cells).toEqual([
       { answer: "deny", rule },
       { answer: "hold", rule, approver: "whom it acts for" },
       { answer: "deny", rule },
@@ -164,6 +166,7 @@ describe("permissionsGrid", () => {
     expect([...none.workflows, ...none.workflows.flatMap((w) => w.ops), ...none.ops].map((row) => row.cells)).toEqual([
       [...allowed, ...visitorDenied],
       [...allowed, { answer: "allow" }, { answer: "allow" }],
+      [...allowed, ...visitorDenied],
       [...allowed, ...visitorDenied],
     ]);
   });

@@ -84,6 +84,7 @@ describe("describeConfig", () => {
       "resend.broadcast.create",
       "resend.broadcast.send",
       "resend.emails.send",
+      "sanoma.apps.list",
       "sanoma.change.close",
       "sanoma.change.merge",
       "sanoma.change.open",
@@ -367,10 +368,12 @@ describe("a workflow's name in a site's api", () => {
         renamed("then"),
       ],
     });
-    const apiProblems = workflows.map((wf) => [
-      wf.name,
-      wf.problems.filter((p) => p.message.includes("api.")).map((p) => [p.line, p.column, p.message]),
-    ]);
+    const apiProblems = workflows
+      .filter((wf) => !wf.builtin)
+      .map((wf) => [
+        wf.name,
+        wf.problems.filter((p) => p.message.includes("api.")).map((p) => [p.line, p.column, p.message]),
+      ]);
     expect(apiProblems).toEqual([
       ["announce", []],
       ["change", []],

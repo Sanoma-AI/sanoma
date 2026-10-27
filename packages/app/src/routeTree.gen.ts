@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AppsRouteImport } from './routes/apps'
 import { Route as ConnectorsRouteRouteImport } from './routes/connectors/route'
 import { Route as DataRouteRouteImport } from './routes/data/route'
 import { Route as InboxRouteImport } from './routes/inbox'
@@ -40,6 +41,11 @@ import { Route as WorkflowsNameRunsIdRouteImport } from './routes/workflows/$nam
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppsRoute = AppsRouteImport.update({
+  id: '/apps',
+  path: '/apps',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ConnectorsRouteRoute = ConnectorsRouteRouteImport.update({
@@ -178,6 +184,7 @@ export interface FileRoutesByFullPath {
   '/connectors': typeof ConnectorsRouteRouteWithChildren
   '/data': typeof DataRouteRouteWithChildren
   '/workflows': typeof WorkflowsRouteRouteWithChildren
+  '/apps': typeof AppsRoute
   '/inbox': typeof InboxRoute
   '/permissions': typeof PermissionsRoute
   '/resources': typeof ResourcesRoute
@@ -204,6 +211,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/apps': typeof AppsRoute
   '/inbox': typeof InboxRoute
   '/permissions': typeof PermissionsRoute
   '/resources': typeof ResourcesRoute
@@ -233,6 +241,7 @@ export interface FileRoutesById {
   '/connectors': typeof ConnectorsRouteRouteWithChildren
   '/data': typeof DataRouteRouteWithChildren
   '/workflows': typeof WorkflowsRouteRouteWithChildren
+  '/apps': typeof AppsRoute
   '/inbox': typeof InboxRoute
   '/permissions': typeof PermissionsRoute
   '/resources': typeof ResourcesRoute
@@ -264,6 +273,7 @@ export interface FileRouteTypes {
     | '/connectors'
     | '/data'
     | '/workflows'
+    | '/apps'
     | '/inbox'
     | '/permissions'
     | '/resources'
@@ -290,6 +300,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/apps'
     | '/inbox'
     | '/permissions'
     | '/resources'
@@ -318,6 +329,7 @@ export interface FileRouteTypes {
     | '/connectors'
     | '/data'
     | '/workflows'
+    | '/apps'
     | '/inbox'
     | '/permissions'
     | '/resources'
@@ -348,6 +360,7 @@ export interface RootRouteChildren {
   ConnectorsRouteRoute: typeof ConnectorsRouteRouteWithChildren
   DataRouteRoute: typeof DataRouteRouteWithChildren
   WorkflowsRouteRoute: typeof WorkflowsRouteRouteWithChildren
+  AppsRoute: typeof AppsRoute
   InboxRoute: typeof InboxRoute
   PermissionsRoute: typeof PermissionsRoute
   ResourcesRoute: typeof ResourcesRoute
@@ -371,6 +384,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/apps': {
+      id: '/apps'
+      path: '/apps'
+      fullPath: '/apps'
+      preLoaderRoute: typeof AppsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/connectors': {
@@ -620,6 +640,7 @@ const rootRouteChildren: RootRouteChildren = {
   ConnectorsRouteRoute: ConnectorsRouteRouteWithChildren,
   DataRouteRoute: DataRouteRouteWithChildren,
   WorkflowsRouteRoute: WorkflowsRouteRouteWithChildren,
+  AppsRoute: AppsRoute,
   InboxRoute: InboxRoute,
   PermissionsRoute: PermissionsRoute,
   ResourcesRoute: ResourcesRoute,

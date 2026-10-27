@@ -23,7 +23,7 @@ import {
 import { defineFake } from "../src/fake.ts";
 import { companyConfig, companyDir, companyFakes, nodeIdOf } from "./fixtures/company/fakes.ts";
 import company from "./fixtures/company/sanoma.config.ts";
-import { visitorPrincipal } from "../src/shared.ts";
+import { CALL_WORKFLOW, visitorPrincipal } from "../src/shared.ts";
 import { rootWith, useApp, withoutSetup } from "./harness.ts";
 
 // Needs Postgres: `pnpm db:up`. The company fixture's data files, checked against the GitHub
@@ -314,7 +314,13 @@ describe("the built-in drift workflow in a config", () => {
   const bare = { ...company, connectors: company.connectors.map(withoutSetup) };
 
   it("is added, with apply, when the connectors declare resource types, using each type's import that has a driver", () => {
-    expect([...resolveConfig(config).workflows.keys()]).toEqual([DRIFT_WORKFLOW, APPLY_WORKFLOW, CHANGE_WORKFLOW]);
+    // Beside change and call, built in every config (call for the listing of apps).
+    expect([...resolveConfig(config).workflows.keys()]).toEqual([
+      DRIFT_WORKFLOW,
+      APPLY_WORKFLOW,
+      CHANGE_WORKFLOW,
+      CALL_WORKFLOW,
+    ]);
     const entry = describeConfig(config).workflows.find((wf) => wf.name === DRIFT_WORKFLOW);
     expect(entry).toMatchObject({ name: "drift", title: "Check resources for drift", builtin: true });
     expect(entry?.ops).toEqual([
@@ -339,6 +345,7 @@ describe("the built-in drift workflow in a config", () => {
     // Without drivers they are there all the same, and use nothing: each resource reports the missing driver.
     expect(describeConfig(bare).workflows).toMatchObject([
       { name: "apply", builtin: true, ops: [] },
+      { name: "call", builtin: true, ops: ["sanoma.apps.list"] },
       { name: "change", builtin: true },
       { name: "drift", builtin: true, ops: [] },
     ]);
@@ -346,8 +353,8 @@ describe("the built-in drift workflow in a config", () => {
 
   it("is not added when no connector declares a resource type, and the config's own workflows are not built-in", () => {
     const marketing = { ...company, connectors: [bluesky] };
-    // Only the change workflow, which every config has.
-    expect([...resolveConfig(marketing).workflows.keys()]).toEqual([CHANGE_WORKFLOW]);
+    // Only the change workflow and call (for the listing of apps), which every config has.
+    expect([...resolveConfig(marketing).workflows.keys()]).toEqual([CHANGE_WORKFLOW, CALL_WORKFLOW]);
     const own = defineWorkflow({ name: "own", trigger: "manual", input: z.object({}), uses: [], run: async () => 1 });
     expect(
       describeConfig({ ...company, workflows: [own] }).workflows.find((wf) => wf.name === "own"),

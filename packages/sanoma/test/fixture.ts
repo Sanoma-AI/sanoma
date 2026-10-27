@@ -33,7 +33,8 @@ const allow = { answer: "allow" };
 
 /**
  * The fixture's Permissions grid, as `sanoma check` reports it: no policies, so everyone may;
- * Ghost's operations write and publish, so none may be called directly.
+ * Ghost's operations write and publish, so none may be called directly: only the runtime's
+ * listing of apps, built in.
  */
 export const FIXTURE_GRID = {
   groups: [null, "agents"],
@@ -48,7 +49,8 @@ export const FIXTURE_GRID = {
       ],
     },
   ],
-  ops: [],
+  // The runtime's listing of apps, built in: the one operation anyone may call directly.
+  ops: [{ id: "sanoma.apps.list", cells: [allow, allow] }],
 };
 
 /**

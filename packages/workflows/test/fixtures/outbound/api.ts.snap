@@ -66,6 +66,17 @@ interface CompanyApi {
       }, unknown>;
     };
   };
+  /** sanoma: the operations a person may call directly. */
+  sanoma: {
+    apps: {
+      /**
+       * List the apps on GitHub (the topic sanoma-app), with Sanoma's claims about each
+       *
+       * `sanoma.apps.list`, a read.
+       */
+      list: OpFn<{}, unknown>;
+    };
+  };
   /** The company's collections. */
   data: {
     /** Outbound: the collection `outbound`, keyed by `company`. */

@@ -1,16 +1,15 @@
 import type { ConfigDescription } from "@sanoma-ai/workflows/describe";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { type CredentialStatus, credentialReady } from "@sanoma-ai/workflows/shared";
+import { connectorTier, type CredentialStatus, credentialReady } from "@sanoma-ai/workflows/shared";
 import { CaretRightIcon } from "@phosphor-icons/react/dist/csr/CaretRight";
 import { PlugIcon } from "@phosphor-icons/react/dist/csr/Plug";
 import { Suspense } from "react";
 import { z } from "zod";
-import { Badge } from "#/components/ui/badge.tsx";
 import { ItemActions, ItemContent, ItemDescription, ItemGroup, ItemMedia, ItemTitle } from "#/components/ui/item.tsx";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "#/components/ui/sheet.tsx";
 import { Skeleton } from "#/components/ui/skeleton.tsx";
-import { type AvailableConnector, tierOf } from "../../api.ts";
+import type { AvailableConnector } from "../../api.ts";
 import {
   CrumbHeader,
   ExternalLink,
@@ -20,6 +19,7 @@ import {
   Notice,
   plural,
   Region,
+  TierBadge,
   VendorLogo,
 } from "../../components/common.tsx";
 import { availableConnectorsQuery, configQuery, connectorsOf, credentialsQuery } from "../../queries.ts";
@@ -69,7 +69,7 @@ function Installed() {
               <ItemTitle>
                 {vendor.title}
                 <code className="font-normal text-muted-foreground">{id}</code>
-                {vendor.package && <TierBadge pkg={vendor.package} />}
+                {vendor.package && <TierBadge tier={connectorTier(vendor.package)} />}
               </ItemTitle>
               <ItemDescription>
                 {plural(ops.length, "operation")} · used by {plural(workflows.length, "workflow")}
@@ -110,7 +110,7 @@ function Available() {
                   <ItemTitle>
                     {c.title}
                     <code className="font-normal text-muted-foreground">{c.package}</code>
-                    <TierBadge pkg={c.package} />
+                    <TierBadge tier={connectorTier(c.package)} />
                   </ItemTitle>
                   <ItemDescription>
                     {c.description ? `${c.description} · ` : ""}v{c.version}
@@ -140,7 +140,7 @@ function AddSteps({ connector: c }: { connector: AvailableConnector }) {
         <SheetTitle className="flex items-center gap-2">
           <ConnectorLogo connector={c} />
           {c.title}
-          <TierBadge pkg={c.package} />
+          <TierBadge tier={connectorTier(c.package)} />
         </SheetTitle>
         <SheetDescription>
           <code>{c.package}</code> v{c.version}
@@ -182,16 +182,6 @@ function ConnectorLogo({ connector: { logo } }: { connector: AvailableConnector 
     <Logo {...logo} alt="" className="size-6" />
   ) : (
     <PlugIcon aria-hidden="true" className="size-6 text-muted-foreground" />
-  );
-}
-
-/** Whose a connector package is: Sanoma's own, or the community's. */
-function TierBadge({ pkg }: { pkg: string }) {
-  const tier = tierOf(pkg);
-  return (
-    <Badge variant={tier === "official" ? "secondary" : "outline"}>
-      {tier === "official" ? "Official" : "Community"}
-    </Badge>
   );
 }
 

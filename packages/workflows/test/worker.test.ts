@@ -116,10 +116,11 @@ describe("startWorker, resolveConfig and describeConfig", () => {
       version: expect.stringMatching(/^sanoma@[0-9a-f]{64}$/),
       queueName: "sanoma:sanoma",
     });
-    // The config's workflow, and the change workflow every config has.
+    // The config's workflow, the change workflow every config has, and call for the listing of apps.
     expect([...resolved.workflows]).toEqual([
       ["announce", announce],
       ["change", expect.objectContaining({ name: "change" })],
+      ["call", expect.objectContaining({ name: "call" })],
     ]);
     expect([...resolved.ops.keys()].toSorted()).toEqual([
       "bluesky.post.create",
@@ -128,6 +129,7 @@ describe("startWorker, resolveConfig and describeConfig", () => {
       "resend.broadcast.create",
       "resend.broadcast.send",
       "resend.emails.send",
+      "sanoma.apps.list",
       "sanoma.change.close",
       "sanoma.change.merge",
       "sanoma.change.open",

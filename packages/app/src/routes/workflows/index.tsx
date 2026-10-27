@@ -28,7 +28,8 @@ import {
   VendorLogo,
   When,
 } from "../../components/common.tsx";
-import { NewWorkflowButton } from "../../components/new-workflow.tsx";
+import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
+import { ChatButton } from "../../components/chat-button.tsx";
 import { LinkRow, RunsTable } from "../../components/runs-table.tsx";
 import { startsOf } from "../../components/workflow.tsx";
 import {
@@ -115,7 +116,15 @@ function WorkflowsPage() {
   const runs = view === "runs";
   return (
     <>
-      <CrumbHeader count={config.workflows.length} action={<NewWorkflowButton />}>
+      <CrumbHeader
+        count={config.workflows.length}
+        action={
+          <ChatButton prompt="Make a workflow that ">
+            <PlusIcon aria-hidden="true" data-icon="inline-start" />
+            New workflow
+          </ChatButton>
+        }
+      >
         {/* The config's version, cut to a few characters: its whole hash in the tooltip. */}
         <span className="flex min-w-0 items-center gap-1 text-sm text-muted-foreground">
           Version

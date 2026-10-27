@@ -79,6 +79,7 @@ const sites = {
               `${own}/**`,
               `!${own}/site`,
               `!${own}/ui`,
+              `!${own}/claims`,
               "@sanoma-ai/workflows/**",
               "@sanoma-ai/bridge/**",
               "@dbos-inc/**",

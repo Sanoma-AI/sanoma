@@ -88,12 +88,21 @@ const ada = { id: "ada" };
 describe("isDirect", () => {
   const types = new Map([["acme.widget", {}]]);
   it.each([
-    ["a collection's write", { vendor: "data", resource: "outbound", effect: "write" }, true],
-    ["a vendor's read", { vendor: "acme", resource: "customer", effect: "read" }, true],
-    ["a vendor's write", { vendor: "acme", resource: "customer", effect: "write" }, false],
-    ["a vendor's send", { vendor: "acme", resource: "mail", effect: "send" }, false],
-    ["the runtime's own read", { vendor: "sanoma", resource: "source", effect: "read" }, false],
-    ["a resource type's read", { vendor: "acme", resource: "widget", effect: "read" }, false],
+    ["a collection's write", { id: "data.outbound.save", vendor: "data", resource: "outbound", effect: "write" }, true],
+    ["a vendor's read", { id: "acme.customer.get", vendor: "acme", resource: "customer", effect: "read" }, true],
+    ["a vendor's write", { id: "acme.customer.update", vendor: "acme", resource: "customer", effect: "write" }, false],
+    ["a vendor's send", { id: "acme.mail.send", vendor: "acme", resource: "mail", effect: "send" }, false],
+    [
+      "the runtime's own read",
+      { id: "sanoma.source.resolve", vendor: "sanoma", resource: "source", effect: "read" },
+      false,
+    ],
+    [
+      "the runtime's listing of apps",
+      { id: "sanoma.apps.list", vendor: "sanoma", resource: "apps", effect: "read" },
+      true,
+    ],
+    ["a resource type's read", { id: "acme.widget.get", vendor: "acme", resource: "widget", effect: "read" }, false],
   ] as const)("is %s: %o", (_, op, direct) => {
     expect(isDirect(op, types)).toBe(direct);
   });
@@ -317,15 +326,20 @@ describe("the built-in call workflow in a config", () => {
       "data.outbound.get",
       "data.outbound.list",
       "data.outbound.save",
+      "sanoma.apps.list",
     ]);
     expect(description.ops.filter((op) => op.direct).map((op) => op.id)).toEqual(entry?.ops);
     expect(description.ops.find((op) => op.id === "acme.customer.rename")).toMatchObject({ direct: false });
   });
 
-  it("is not added when none may be, and no workflow of the config may be named call", () => {
+  it("is in every config, for the runtime's listing of apps, and no workflow of the config may be named call", () => {
     const writes = defineConnector("acme", { customer: { rename } });
     const none = { ...config, connectors: [writes], collections: [] };
-    expect(resolveConfig(none).workflows.has(CALL_WORKFLOW)).toBe(false);
+    expect(
+      resolveConfig(none)
+        .workflows.get(CALL_WORKFLOW)
+        ?.uses.map((op: { id: string }) => op.id),
+    ).toEqual(["sanoma.apps.list"]);
     const named = defineWorkflow({
       name: "call",
       trigger: "manual",

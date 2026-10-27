@@ -1,8 +1,8 @@
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Outlet, useLoaderData, useMatches } from "@tanstack/react-router";
-import { lazy, Suspense, useEffect, useState } from "react";
+import { generateId } from "ai";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { DensityProvider } from "#/components/density.tsx";
-import { NewWorkflowDialog } from "#/components/new-workflow.tsx";
 import { Toaster } from "#/components/ui/sonner.tsx";
 import { TooltipProvider } from "#/components/ui/tooltip.tsx";
 import { ActorContext, useActorState } from "../actor.ts";
@@ -10,6 +10,7 @@ import { actorQuery, configQuery } from "../queries.ts";
 import { DemoBanner } from "./demo-banner.tsx";
 import { Bar, PhoneBar } from "./shell/bar.tsx";
 import { ChatColumn } from "./shell/chat.tsx";
+import { type ChatPrompt, ChatPromptContext, type Prompt } from "./shell/chat-prompt.ts";
 import { BESIDE_PAGE, CHAT_COOKIE, rememberPref } from "./shell/prefs.ts";
 
 // The app's chrome around every page on the app's host: the bar, the chat column, the page, who
@@ -20,7 +21,8 @@ const WhoAreYou = lazy(() => import("./who-are-you.tsx"));
 
 /**
  * The chrome: the bar, the chat column beside it (while open; never in a demo), then the page on
- * the paper, under a demo's banner, and the dialogs. The bar and the column stay as the page scrolls; on a phone the bar is a sheet
+ * the paper, under a demo's banner, and the dialogs. A page opens the chat with a prompt through
+ * `useChatPrompt`, which the chrome provides but in a demo. The bar and the column stay as the page scrolls; on a phone the bar is a sheet
  * behind a menu button, and there is no column.
  */
 export default function Root() {
@@ -52,45 +54,64 @@ export default function Root() {
     beside.addEventListener("change", follow);
     return () => beside.removeEventListener("change", follow);
   }, [unset]);
+  // The prompt a page last opened the chat with: the column opens on its new chat until folded.
+  const [prompt, setPrompt] = useState<Prompt>();
   const toggleChat = () => {
     rememberPref(CHAT_COOKIE, chat ? "closed" : "open");
+    if (chat) setPrompt(undefined);
     setChat(!chat);
     setUnset(false);
   };
+  const chatPrompt = useMemo<ChatPrompt | undefined>(
+    () =>
+      demo
+        ? undefined
+        : {
+            open: (text) => {
+              rememberPref(CHAT_COOKIE, "open");
+              setChat(true);
+              setUnset(false);
+              setPrompt({ id: generateId(), text });
+            },
+          },
+    [demo],
+  );
   // A page that asks for it (a workflow's, for its graph) takes the full width.
   const wide = useMatches({ select: (matches) => matches.some((match) => match.staticData.wide) });
   return (
     <ActorContext value={actor}>
-      {/* One provider for every tooltip: the bar's, and any a page shows. */}
-      <TooltipProvider>
-        <DensityProvider defaultCompact={compact}>
-          <div className="flex min-h-svh">
-            <Bar
-              chat={demo ? undefined : { open: chat, toggle: toggleChat }}
-              className="sticky top-0 hidden h-svh self-start md:flex"
-            />
-            {chat && !demo && <ChatColumn besidePageOnly={unset} />}
-            {/* The page: its frame (title row, tabs, one card) is its children, the region gap apart. */}
-            <main data-slot="page" className="flex min-w-0 flex-1 flex-col">
-              {demo && <DemoBanner demo={demo} />}
-              <PhoneBar />
-              <div
-                data-wide={wide || undefined}
-                className="mx-auto flex w-full max-w-6xl flex-col gap-(--gap-region) p-4 data-wide:max-w-none sm:px-6"
-              >
-                <Outlet />
-              </div>
-            </main>
-          </div>
-          <NewWorkflowDialog />
-          {!actor.fromServer && actor.actor === null && (
-            <Suspense fallback={null}>
-              <WhoAreYou />
-            </Suspense>
-          )}
-          <Toaster />
-        </DensityProvider>
-      </TooltipProvider>
+      <ChatPromptContext value={chatPrompt}>
+        {/* One provider for every tooltip: the bar's, and any a page shows. */}
+        <TooltipProvider>
+          <DensityProvider defaultCompact={compact}>
+            <div className="flex min-h-svh">
+              <Bar
+                chat={demo ? undefined : { open: chat, toggle: toggleChat }}
+                className="sticky top-0 hidden h-svh self-start md:flex"
+              />
+              {/* A new prompt opens a column of its own, on the prompt's chat. */}
+              {chat && !demo && <ChatColumn key={prompt?.id} besidePageOnly={unset} prompt={prompt} />}
+              {/* The page: its frame (title row, tabs, one card) is its children, the region gap apart. */}
+              <main data-slot="page" className="flex min-w-0 flex-1 flex-col">
+                {demo && <DemoBanner demo={demo} />}
+                <PhoneBar />
+                <div
+                  data-wide={wide || undefined}
+                  className="mx-auto flex w-full max-w-6xl flex-col gap-(--gap-region) p-4 data-wide:max-w-none sm:px-6"
+                >
+                  <Outlet />
+                </div>
+              </main>
+            </div>
+            {!actor.fromServer && actor.actor === null && (
+              <Suspense fallback={null}>
+                <WhoAreYou />
+              </Suspense>
+            )}
+            <Toaster />
+          </DensityProvider>
+        </TooltipProvider>
+      </ChatPromptContext>
     </ActorContext>
   );
 }
