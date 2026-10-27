@@ -75,8 +75,13 @@ export async function runApp(config: SanomaConfig, options: ServeOptions): Promi
   return served(config, await appStart(config, options), []);
 }
 
-/** `SANOMA_DEMO=1`: the repo runs as a demo (`AppOptions.demo`). */
-const demoAsked = () => process.env.SANOMA_DEMO === "1";
+/**
+ * `SANOMA_DEMO=1`: the repo runs as a demo (`AppOptions.demo`): the session host, with the config's
+ * `demo.sessions` (`sanoma demo`), else one instance. The host's own processes run with
+ * `SANOMA_DEMO=instance`, one instance whatever the config says (its seed's, its shared one), and
+ * `SANOMA_DEMO=copy`, a visitor's session over a copy of the seed (`AppOptions.demo`'s `"copy"`).
+ */
+const demoAsked = () => ["1", "instance", "copy"].includes(process.env.SANOMA_DEMO ?? "");
 
 /**
  * Why `sanoma worker` or `sanoma app` does not run a demo alone: its vendors' fakes live in the
@@ -163,6 +168,9 @@ async function appSites(
   return { dev: { repo: root } };
 }
 
+/** This bin's file, beside this module: `cli.js` once built, `cli.ts` in a checkout. */
+export const cliFile = () => fileURLToPath(new URL(`./cli${extname(fileURLToPath(import.meta.url))}`, import.meta.url));
+
 /** Where a change cannot reach the config from: the sites, what sanoma writes, the install, git. */
 const NOT_CONFIG = new Set(["sites", ".sanoma", "node_modules", ".git"]);
 
@@ -174,7 +182,7 @@ const NOT_CONFIG = new Set(["sites", ".sanoma", "node_modules", ".git"]);
  * changes while one runs are one more run after it.
  */
 function apiWriter(config: SanomaConfig, log: (line: string) => void): (file: string) => void {
-  const cli = fileURLToPath(new URL(`./cli${extname(fileURLToPath(import.meta.url))}`, import.meta.url));
+  const cli = cliFile();
   // By real path, as the dev server's watcher names files.
   const root = realpathSync(rootOf(config));
   const cwd = config.file ? dirname(config.file) : root;
@@ -251,7 +259,7 @@ export async function appOptions(
   const host = env.SANOMA_APP_HOST || undefined;
   const options = { host, ...(domains && { domains }) };
   // The demo login signs everyone in as the company's people, on any host: no GitHub sign-in.
-  if (demoAsked()) return { ...options, demo: true };
+  if (demoAsked()) return { ...options, demo: process.env.SANOMA_DEMO === "copy" ? "copy" : true };
   const beyond = host !== undefined && !isLoopback(host);
   const found = new Map<string, string>(GITHUB.flatMap((name) => (env[name] ? [[name, env[name]]] : [])));
   if ((beyond || found.size) && readSecrets && found.size < GITHUB.length) {
