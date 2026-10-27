@@ -26,6 +26,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
   type CellChange,
+  cellSpoken,
   cellWords,
   compareAnswers,
   diffGrids,
@@ -193,6 +194,10 @@ describe("diffGrids", () => {
     expect(diff.ops.map((op) => cellWords(op.cells[0]!))).toEqual([
       "hold · group finance → hold · group admin",
       "deny → depends",
+    ]);
+    expect(diff.ops.map((op) => cellSpoken(op.cells[0]!))).toEqual([
+      "changed: hold for group finance, then hold for group admin",
+      "changed: deny, then depends",
     ]);
     expect(diffSummary(diff)).toEqual(["2 changed"]);
   });

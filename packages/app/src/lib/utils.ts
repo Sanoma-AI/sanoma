@@ -8,3 +8,6 @@ import tables from "./cn-tables.ts";
  * from "cn", use it too.
  */
 export const cn = createCn(tables);
+
+/** `n` and `word`, plural unless `n` is one ("3 groups"). */
+export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;

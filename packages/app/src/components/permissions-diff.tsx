@@ -4,7 +4,7 @@ import { Button } from "#/components/ui/button.tsx";
 import { Card } from "#/components/ui/card.tsx";
 import {
   answerWords,
-  CHANGE_WORDS,
+  cellSpoken,
   cellWords,
   type DiffCell,
   type DiffRow,
@@ -14,10 +14,7 @@ import {
 } from "#/lib/grid-diff.ts";
 import { GRID_CHANGE_TONE } from "#/lib/tone.ts";
 import { ToneBadge } from "./kit.tsx";
-import { Mark, PermissionsTable } from "./permissions-grid.tsx";
-
-/** An answer as a sentence says it: a hold, whom it asks. */
-const spoken = (cell: DiffCell["before"]) => (!cell ? "nothing" : answerWords(cell).replace(" · ", " for "));
+import { PermissionsTable } from "./permissions-grid.tsx";
 
 /**
  * A change to the Permissions grid, `before` (main's) against `after` (the branch's), in the grid's
@@ -56,19 +53,13 @@ export function PermissionsDiff({ before, after }: { before: PermissionsGrid; af
   );
 }
 
-/** A diff's cell: unchanged, the grid's muted mark; changed, a badge in its change's tone, before → after. */
+/** A diff's cell: unchanged, its answer muted, as the grid shows `allow`; changed, a badge in its change's tone, before → after. */
 function DiffMark({ cell }: { cell: DiffCell }) {
   const answer = cell.after ?? cell.before;
   if (!answer) return null;
-  if (cell.change === "same") return <Mark cell={answer} muted />;
-  const label =
-    cell.change === "added"
-      ? `${CHANGE_WORDS.added}: ${spoken(cell.after)}`
-      : cell.change === "removed"
-        ? `${CHANGE_WORDS.removed}: ${spoken(cell.before)}`
-        : `${CHANGE_WORDS[cell.change]}: ${spoken(cell.before)}, then ${spoken(cell.after)}`;
+  if (cell.change === "same") return <span className="text-muted-foreground">{answerWords(answer)}</span>;
   return (
-    <ToneBadge tone={GRID_CHANGE_TONE[cell.change]} aria-label={label}>
+    <ToneBadge tone={GRID_CHANGE_TONE[cell.change]} aria-label={cellSpoken(cell)}>
       {cellWords(cell)}
     </ToneBadge>
   );

@@ -2,7 +2,7 @@ import type { PreviewAnswer } from "@sanoma-ai/workflows";
 import { Link } from "@tanstack/react-router";
 import { Fragment, type ReactNode } from "react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/components/ui/table.tsx";
-import { answerWords, columnLabel } from "#/lib/grid-diff.ts";
+import { answerWords, columnLabel, type Group } from "#/lib/grid-diff.ts";
 import { PREVIEW_TONE } from "#/lib/tone.ts";
 import { cn } from "#/lib/utils.ts";
 import { ToneBadge } from "./kit.tsx";
@@ -11,8 +11,6 @@ import { ToneBadge } from "./kit.tsx";
 // groups across, each workflow's start with the operations it calls under it and each direct
 // operation down, and what goes in a cell the caller's.
 
-/** A column: a group's name, `null` for someone in no group, or `anonymous`, who is in none either. */
-export type Group = string | null;
 /** What a row is about: a workflow's start, or an operation, called in a workflow or directly. */
 export type Kind = "workflow" | "op";
 /** A row of the table: an id, a title (a workflow's), and under a workflow the operations it uses. */
@@ -40,7 +38,7 @@ export function PermissionsTable<R extends TableRowOf<R>>({
   cell,
   linkRow,
 }: PermissionsTableProps<R>) {
-  const rows = { groups, cell, linkRow };
+  const shared = { groups, cell, linkRow };
   return (
     <Table>
       <TableHeader>
@@ -55,8 +53,8 @@ export function PermissionsTable<R extends TableRowOf<R>>({
           ))}
         </TableRow>
       </TableHeader>
-      <Rows kind="workflow" rows={workflows} {...rows} />
-      <Rows kind="op" rows={ops} {...rows} />
+      <Rows kind="workflow" rows={workflows} {...shared} />
+      <Rows kind="op" rows={ops} {...shared} />
     </Table>
   );
 }
@@ -117,19 +115,11 @@ function Line<R extends TableRowOf<R>>({
 
 /**
  * A cell: `allow` muted, else a badge in its tone (a hold naming whom it asks), a button when it
- * opens a rule (`what` names the cell for its label); every answer muted when `muted`.
+ * opens a rule (`what` names the cell for its label).
  */
-export function Mark({
-  cell,
-  what,
-  open,
-  muted = false,
-}: { cell: PreviewAnswer; muted?: boolean } & (
-  | { what: string; open: (() => void) | undefined }
-  | { what?: undefined; open?: undefined }
-)) {
+export function Mark({ cell, what, open }: { cell: PreviewAnswer; what: string; open: (() => void) | undefined }) {
   const label = answerWords(cell);
-  if (muted || cell.answer === "allow") return <span className="text-muted-foreground">{label}</span>;
+  if (cell.answer === "allow") return <span className="text-muted-foreground">{label}</span>;
   const button = open && {
     render: <button type="button" />,
     onClick: open,
