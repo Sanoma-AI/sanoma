@@ -3,10 +3,10 @@ import { appClaim, appTier, type Claims, claims, TIERS } from "./claims.ts";
 import { defineConnector, defineDriver } from "./op.ts";
 import { errorMessage } from "./shared.ts";
 
-// The apps a company could take: GitHub's repositories with the topic `sanoma-app`, read when
-// asked and never stored, joined with Sanoma's claims (`claims.ts`). One built-in read operation,
-// `sanoma.apps.list`, which the app's Apps page and a public site's pages both call (`isDirect`
-// admits it), under the policy as the person asking.
+// The apps a company could take: GitHub's repositories with the topic `sanoma-app`, searched at
+// most once per `FRESH_MS` and kept only in the process, joined with Sanoma's claims
+// (`claims.ts`). One built-in read operation, `sanoma.apps.list`, which the app's Apps page and a
+// public site's pages both call (`isDirect` admits it), under the policy as the person asking.
 
 /** The topic a source repository carries so the listing finds it. */
 export const APP_TOPIC = "sanoma-app";
@@ -14,6 +14,10 @@ export const APP_TOPIC = "sanoma-app";
 export const GITHUB_API = "https://api.github.com";
 /** How long GitHub gets to answer, so a slow or absent network only empties the list. */
 const TIMEOUT_MS = 5_000;
+/** How long one search answers the listing: a public page lists per visitor, and GitHub allows ten searches a minute. */
+export const FRESH_MS = 10 * 60_000;
+/** How long a failed search answers (GitHub's rate limit counts by the minute). */
+export const RETRY_MS = 60_000;
 
 /** One repository of GitHub's search answer: what the list shows of it. */
 const Found = z.object({
@@ -22,6 +26,7 @@ const Found = z.object({
   description: z.string().nullish(),
   license: z.object({ spdx_id: z.string().nullish() }).nullish(),
 });
+type Found = z.infer<typeof Found>;
 const Search = z.object({ items: z.array(z.unknown()) });
 
 /** An app's source on GitHub, with what Sanoma claims about it. */
@@ -60,11 +65,11 @@ export const appsListOps = defineConnector("sanoma", {
   },
 });
 
-/** The driver of `sanoma.apps.list`: GitHub's search, now. */
+/** The driver of `sanoma.apps.list`: GitHub's search, remembered for `FRESH_MS`. */
 export const appsListDriver = defineDriver(appsListOps, { apps: { list: () => availableApps() } });
 
 /** An app found, with what `from` claims about it. */
-function listed(found: z.infer<typeof Found>, from: Claims): AvailableApp {
+function listed(found: Found, from: Claims): AvailableApp {
   const repo = found.full_name;
   const claim = appClaim(repo, from);
   const solutions = (claim?.solutions ?? []).flatMap((id) => {
@@ -87,33 +92,77 @@ function listed(found: z.infer<typeof Found>, from: Claims): AvailableApp {
 const official = (app: AvailableApp) => Number(app.tier === "official");
 
 /**
- * The repositories GitHub finds with the topic `sanoma-app`, not archived, the first hundred, each with what
- * `from` claims about it (the claims by default), official first, then by name. A repository
- * GitHub describes otherwise than expected is left out. When GitHub cannot be searched the list
- * is empty, and says why.
+ * The repositories GitHub finds with the topic `sanoma-app`, not archived, the first hundred, but
+ * those it describes otherwise than expected; throws when it cannot be searched.
  */
-export async function availableApps(from: Claims = claims): Promise<AvailableApps> {
+export async function searchGitHub(): Promise<Found[]> {
   const url = `${GITHUB_API}/search/repositories?q=${encodeURIComponent(`topic:${APP_TOPIC} archived:false`)}&per_page=100`;
-  let items: unknown[];
+  const res = await fetch(url, {
+    headers: { accept: "application/vnd.github+json", "user-agent": "sanoma", "x-github-api-version": "2022-11-28" },
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+  });
+  if (!res.ok) {
+    await res.body?.cancel();
+    throw new Error(`${new URL(url).host} answered ${res.status} to ${new URL(url).pathname}`);
+  }
+  return Search.parse(await res.json()).items.flatMap((item) => {
+    const found = Found.safeParse(item);
+    return found.success ? [found.data] : [];
+  });
+}
+
+/**
+ * `search`, remembered: its last result answers for `FRESH_MS` (by `now`), the calls meanwhile share
+ * one search, and when a later search fails the last result still answers. A failure with
+ * nothing remembered throws. After a failure the next search waits `RETRY_MS`, so a rate-limited
+ * search is not retried per call.
+ */
+export function remembered<T>(search: () => Promise<T>, now: () => number = Date.now): () => Promise<T> {
+  let last: { value: T } | undefined;
+  /** The last search's answer, or the one in flight, which answers until `until`. */
+  let answer: Promise<T> | undefined;
+  let until = 0;
+  return () => {
+    if (answer && now() < until) return answer;
+    answer = search().then(
+      (value) => {
+        last = { value };
+        until = now() + FRESH_MS;
+        return value;
+      },
+      (err: unknown) => {
+        until = now() + RETRY_MS;
+        if (last) return last.value;
+        throw err;
+      },
+    );
+    // After the call, so a search that throws at once leaves the next call to search again.
+    until = Infinity;
+    return answer;
+  };
+}
+
+/** GitHub's search as the driver makes it: once per `FRESH_MS` for the process. */
+const searched = remembered(searchGitHub);
+
+/**
+ * The apps `search` finds (GitHub's, remembered, by default), each with what `from` claims about
+ * it (the claims by default), official first, then by name. When GitHub cannot be searched and nothing is remembered,
+ * the list is empty, and says why.
+ */
+export async function availableApps(
+  from: Claims = claims,
+  search: () => Promise<Found[]> = searched,
+): Promise<AvailableApps> {
+  let found: Found[];
   try {
-    const res = await fetch(url, {
-      headers: { accept: "application/vnd.github+json", "user-agent": "sanoma", "x-github-api-version": "2022-11-28" },
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
-    if (!res.ok) {
-      await res.body?.cancel();
-      throw new Error(`${new URL(url).host} answered ${res.status} to ${new URL(url).pathname}`);
-    }
-    items = Search.parse(await res.json()).items;
+    found = await search();
   } catch (err) {
     return { apps: [], error: `Could not search GitHub: ${errorMessage(err)}` };
   }
   return {
-    apps: items
-      .flatMap((item) => {
-        const found = Found.safeParse(item);
-        return found.success ? [listed(found.data, from)] : [];
-      })
+    apps: found
+      .map((repo) => listed(repo, from))
       .toSorted((a, b) => official(b) - official(a) || a.repo.localeCompare(b.repo, "en")),
   };
 }

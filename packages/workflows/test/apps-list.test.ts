@@ -1,14 +1,22 @@
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { APP_TOPIC, availableApps, GITHUB_API } from "../src/apps-list.ts";
+import {
+  APP_TOPIC,
+  availableApps,
+  FRESH_MS,
+  GITHUB_API,
+  RETRY_MS,
+  remembered,
+  searchGitHub,
+} from "../src/apps-list.ts";
 import { appTier, type Claims, claims, connectorTier } from "../src/claims.ts";
 import { describeConfig } from "../src/describe.ts";
 import { resolveConfig } from "../src/index.ts";
 import { APPS_LIST } from "../src/shared.ts";
 
-// The listing of apps (`sanoma.apps.list`): GitHub's search for the topic, mocked, joined with
-// Sanoma's claims; and the claims file itself.
+// The listing of apps (`sanoma.apps.list`): GitHub's search for the topic, mocked, remembered
+// for the process and joined with Sanoma's claims; and the claims file itself.
 
 const repo = (full_name: string, more: object = {}) => ({
   full_name,
@@ -45,20 +53,35 @@ const CLAIMS: Claims = {
 
 let searched: URL | undefined;
 let headers: Headers | undefined;
+let searches = 0;
 const github = setupServer(
   http.get(`${GITHUB_API}/search/repositories`, ({ request }) => {
+    searches += 1;
     searched = new URL(request.url);
     headers = request.headers;
     return HttpResponse.json({ total_count: FOUND.length, items: FOUND });
   }),
 );
+/** GitHub refusing the search, with `status` or with no answer at all. */
+const refuse = (status?: number) =>
+  github.use(
+    http.get(`${GITHUB_API}/search/repositories`, () =>
+      status ? new HttpResponse(null, { status }) : HttpResponse.error(),
+    ),
+  );
+/** The listing when GitHub answered 403. */
+const REFUSED = { apps: [], error: "Could not search GitHub: api.github.com answered 403 to /search/repositories" };
+
 beforeAll(() => github.listen({ onUnhandledFrame: "error" }));
-afterEach(() => github.resetHandlers());
+afterEach(() => {
+  github.resetHandlers();
+  searches = 0;
+});
 afterAll(() => github.close());
 
 describe("sanoma.apps.list", () => {
   it("lists GitHub's repositories with the topic, joined with the claims, Sanoma's first", async () => {
-    expect(await availableApps(CLAIMS)).toEqual({
+    expect(await availableApps(CLAIMS, searchGitHub)).toEqual({
       apps: [
         {
           repo: "Sanoma-AI/tenant-portal",
@@ -94,16 +117,53 @@ describe("sanoma.apps.list", () => {
   });
 
   it("says why when GitHub cannot be searched, and lists nothing", async () => {
-    github.use(http.get(`${GITHUB_API}/search/repositories`, () => new HttpResponse(null, { status: 403 })));
-    expect(await availableApps(CLAIMS)).toEqual({
-      apps: [],
-      error: "Could not search GitHub: api.github.com answered 403 to /search/repositories",
-    });
-    github.use(http.get(`${GITHUB_API}/search/repositories`, () => HttpResponse.error()));
-    expect(await availableApps(CLAIMS)).toMatchObject({
+    refuse(403);
+    expect(await availableApps(CLAIMS, searchGitHub)).toEqual(REFUSED);
+    refuse();
+    expect(await availableApps(CLAIMS, searchGitHub)).toMatchObject({
       apps: [],
       error: expect.stringMatching(/^Could not search GitHub: /),
     });
+  });
+
+  it("searches once per window, the calls meanwhile sharing it, and keeps the last result when a search fails", async () => {
+    let now = 0;
+    const search = remembered(searchGitHub, () => now);
+    const [first, second] = await Promise.all([availableApps(CLAIMS, search), availableApps(CLAIMS, search)]);
+    expect(second).toEqual(first);
+    expect(first.apps).toHaveLength(3);
+    now = FRESH_MS - 1;
+    expect(await availableApps(CLAIMS, search)).toEqual(first);
+    expect(searches).toBe(1);
+
+    now = FRESH_MS;
+    expect(await availableApps(CLAIMS, search)).toEqual(first);
+    expect(searches).toBe(2);
+
+    now = 2 * FRESH_MS;
+    refuse();
+    expect(await availableApps(CLAIMS, search)).toEqual(first);
+    github.resetHandlers();
+    now += RETRY_MS - 1;
+    expect(await availableApps(CLAIMS, search)).toEqual(first);
+    expect(searches).toBe(2);
+    now += 1;
+    expect(await availableApps(CLAIMS, search)).toEqual(first);
+    expect(searches).toBe(3);
+  });
+
+  it("lists nothing, and says why, when the first search fails, and searches again a minute later", async () => {
+    let now = 0;
+    const search = remembered(searchGitHub, () => now);
+    refuse(403);
+    expect(await availableApps(CLAIMS, search)).toEqual(REFUSED);
+    github.resetHandlers();
+    now = RETRY_MS - 1;
+    expect(await availableApps(CLAIMS, search)).toEqual(REFUSED);
+    expect(searches).toBe(0);
+    now = RETRY_MS;
+    expect((await availableApps(CLAIMS, search)).apps).toHaveLength(3);
+    expect(searches).toBe(1);
   });
 
   it("is a built-in read in every config, which a page may call directly", () => {
