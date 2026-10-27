@@ -27,12 +27,10 @@ const DEFINED: Record<string, SiteDefinition | undefined> = Object.fromEntries(
 export interface Site {
   /** Its key: the folder's name, `<app>/<name>` for an app's site. */
   name: string;
-  /** The app whose folder holds it; absent for one at the root. */
+  /** The app whose folder holds it, which the bar groups it by; absent for one at the root. */
   app?: string;
   title: string;
   icon: SiteDefinition["icon"];
-  /** The app whose folder it comes from, which the bar groups it by: none while the build mounts only the root's `sites/`. */
-  app?: string;
   pages: { to: string; label: string }[];
 }
 
