@@ -252,8 +252,8 @@ export const availableConnectorsQuery = () =>
 /**
  * The apps on GitHub with Sanoma's claims, `sanoma.apps.list` called as `actor` (the person on the
  * page, whom the call names itself): read every 10 minutes at most, as GitHub's search is
- * rate-limited, and again on the next visit after it could not be reached. A call that fails
- * (refused by the policy, say) is a list saying why.
+ * rate-limited (ten a minute per address), and after a minute when it could not be reached. A
+ * call that fails (refused by the policy, say) is a list saying why.
  */
 export const availableAppsQuery = (actor: string) =>
   queryOptions({
@@ -263,7 +263,7 @@ export const availableAppsQuery = (actor: string) =>
         apps: [],
         error: errorMessage(err),
       })),
-    staleTime: (query) => (query.state.data?.error ? 0 : 10 * 60_000),
+    staleTime: (query) => (query.state.data?.error ? 60_000 : 10 * 60_000),
   });
 
 /** What going live can choose from: read once a minute at most, as each list asks GitHub or Supabase. */

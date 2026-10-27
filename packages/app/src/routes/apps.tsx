@@ -102,7 +102,7 @@ function AppsPage() {
         )}
       </Region>
       <Region title="Available">
-        <AvailableApps taken={new Set(taken.map((app) => sameRepo(app.source!)))} />
+        <AvailableRegion taken={new Set(taken.map((app) => sameRepo(app.source!)))} />
       </Region>
     </>
   );
@@ -136,7 +136,7 @@ function AppItem({ app, children }: { app: RepoApp; children?: ReactNode }) {
  * knows who you are (in the browser, with the default login), and read by the page, so GitHub never
  * holds up the rest.
  */
-function AvailableApps({ taken }: { taken: ReadonlySet<string> }) {
+function AvailableRegion({ taken }: { taken: ReadonlySet<string> }) {
   const { actor } = useActor();
   const waiting = <Skeleton className="h-16 w-full" />;
   if (!actor) return waiting;

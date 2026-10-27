@@ -368,14 +368,13 @@ describe("a workflow's name in a site's api", () => {
         renamed("then"),
       ],
     });
-    const apiProblems = workflows
-      .filter((wf) => !wf.builtin)
-      .map((wf) => [
-        wf.name,
-        wf.problems.filter((p) => p.message.includes("api.")).map((p) => [p.line, p.column, p.message]),
-      ]);
+    const apiProblems = workflows.map((wf) => [
+      wf.name,
+      wf.problems.filter((p) => p.message.includes("api.")).map((p) => [p.line, p.column, p.message]),
+    ]);
     expect(apiProblems).toEqual([
       ["announce", []],
+      ["call", []],
       ["change", []],
       ["data", [[1, 1, "A site calls this workflow api.data, which is the collections': rename it"]]],
       ["ghost", [[1, 1, "A site calls this workflow api.ghost, which is the vendor ghost's operations: rename it"]]],
