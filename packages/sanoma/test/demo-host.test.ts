@@ -234,12 +234,13 @@ describe("sanoma demo with demo.sessions", () => {
         await waitFor(
           async () => {
             await a.get("/inbox");
-            return oidOf(`${database}_seed`);
+            return output().stderr;
           },
-          (oid) => oid !== undefined && oid !== seed,
+          (stderr) => stderr.includes(`${database}_seed seeded afresh`),
           90_000,
         );
-        expect(output().stderr).toContain(`${database}_seed seeded afresh`);
+        expect(await oidOf(`${database}_seed`)).not.toBe(seed);
+        expect(await oidOf(`${database}_seed_old`)).toBeUndefined();
         expect(a.session()).toBe(first);
         expect(await inA.run(run!.runId)).toMatchObject({ status: "finished" });
         expect((await a.get("/inbox")).html).not.toContain(WAITING);

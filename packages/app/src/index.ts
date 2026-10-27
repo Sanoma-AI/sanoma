@@ -453,6 +453,7 @@ async function demoReset(
     await settled(
       client,
       moments.map((m) => m.runId),
+      copy,
     );
   };
   await seed();
@@ -468,17 +469,17 @@ async function demoReset(
 const settles = (status: RunStatus | undefined) => status === "waiting" || (status !== undefined && isEnded(status));
 
 /**
- * Until each of `runIds` waits or has ended, and none of the app's runs is queued (a copy's
+ * Until each of `runIds` waits or has ended and, for a `copy`, none of its runs is queued (its
  * recovered runs are, until the worker replays them to their wait), for up to `SETTLE_MS`; then
  * a warning, and on.
  */
-async function settled(client: SanomaClient, runIds: readonly string[]): Promise<void> {
+async function settled(client: SanomaClient, runIds: readonly string[], copy: boolean): Promise<void> {
   const deadline = Date.now() + SETTLE_MS;
   let left = runIds;
   for (let wait = 50; ; wait = Math.min(wait * 2, 1000)) {
     const runs = await Promise.all(left.map((id) => client.run(id)));
     left = left.filter((_, i) => !settles(runs[i]?.status));
-    if (!left.length && !(await client.runs({ status: "queued", limit: 1 })).length) return;
+    if (!left.length && !(copy && (await client.runs({ status: "queued", limit: 1 })).length)) return;
     if (Date.now() > deadline) {
       console.warn(`sanoma app: the demo's runs had not settled after ${SETTLE_MS / 1000} s: serving it as it is`);
       return;

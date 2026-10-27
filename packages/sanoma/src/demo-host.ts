@@ -103,6 +103,8 @@ export async function startDemoHost(config: SanomaConfig, options: DemoHostOptio
   const name = decodeURIComponent(base.pathname.slice(1));
   const seed = `${name}_seed`;
   const next = `${name}_seed_next`;
+  /** The last seed, while the next is renamed in: put back if that fails. */
+  const old = `${name}_seed_old`;
   if (Buffer.byteLength(name) + LONGEST_SUFFIX > MAX_NAME) {
     throw new UsageError(
       `The demo's database "${name}" has too long a name for its sessions' beside it: at most ${MAX_NAME - LONGEST_SUFFIX} bytes`,
@@ -123,6 +125,8 @@ export async function startDemoHost(config: SanomaConfig, options: DemoHostOptio
   admin.on("error", (err) => log(`demo host: a Postgres connection failed: ${errorMessage(err)}`));
   const sql = (text: string, values?: unknown[]) => admin.query(text, values);
   const drop = (database: string) => sql(`DROP DATABASE IF EXISTS ${escapeIdentifier(database)} WITH (FORCE)`);
+  const rename = (from: string, to: string) =>
+    sql(`ALTER DATABASE ${escapeIdentifier(from)} RENAME TO ${escapeIdentifier(to)}`);
 
   // The copies and the swap of the seed, one at a time: Postgres copies or renames only a
   // database nobody is connected to, and a copy holds a connection to the seed while it runs.
@@ -144,17 +148,20 @@ export async function startDemoHost(config: SanomaConfig, options: DemoHostOptio
       const create = `CREATE DATABASE ${escapeIdentifier(database)} TEMPLATE ${escapeIdentifier(seed)}`;
       if (!clone) return void (await sql(create));
       const conn = await admin.connect();
+      let failed: Error | undefined;
       try {
         await conn.query("SET file_copy_method = clone");
-        return void (await conn.query(`${create} STRATEGY FILE_COPY`));
+        await conn.query(`${create} STRATEGY FILE_COPY`);
       } catch (err) {
-        await conn.query("RESET file_copy_method");
-        await conn.query(create);
-        clone = false;
-        log(`demo host: copying the seed by the default strategy, since a clone failed: ${errorMessage(err)}`);
+        failed = err instanceof Error ? err : new Error(String(err));
       } finally {
-        conn.release();
+        // A connection whose clone failed is not kept, nor its setting.
+        conn.release(failed);
       }
+      if (!failed) return;
+      await sql(create);
+      clone = false;
+      log(`demo host: copying the seed by the default strategy, since a clone failed: ${errorMessage(failed)}`);
     });
 
   /** `sanoma serve` as a demo over `database`: `kind` `instance` (the seed's, the shared one) or `copy` (a session's). */
@@ -233,24 +240,41 @@ export async function startDemoHost(config: SanomaConfig, options: DemoHostOptio
     await drop(next);
     await (await startChild("instance", next, "demo seed")).stop();
     await onSeed(async () => {
-      await drop(seed);
-      // A connection of the stopped process's may still be closing.
-      await sql("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1", [next]);
-      await sql(`ALTER DATABASE ${escapeIdentifier(next)} RENAME TO ${escapeIdentifier(seed)}`);
+      // A connection of the stopped process's may still be closing: ended, waiting up to 5 s for each.
+      await sql("SELECT pg_terminate_backend(pid, 5000) FROM pg_stat_activity WHERE datname = $1", [next]);
+      // The last seed set aside, not dropped, until the next is in its place.
+      await drop(old);
+      const had = Boolean((await sql("SELECT 1 FROM pg_database WHERE datname = $1", [seed])).rowCount);
+      if (had) await rename(seed, old);
+      try {
+        await rename(next, seed);
+      } catch (err) {
+        if (had) await rename(old, seed);
+        throw err;
+      }
+      await drop(old);
     });
   }
 
-  // Sessions an earlier host left, stopped before it dropped them: nothing of a session outlives it.
-  for (const { datname } of (await sql("SELECT datname FROM pg_database")).rows as { datname: string }[]) {
-    if (datname.startsWith(`${name}_s_`) && /^[0-9a-f]{8}$/.test(datname.slice(name.length + 3))) await drop(datname);
+  let cap: number;
+  try {
+    // Sessions an earlier host left, stopped before it dropped them: nothing of a session outlives it.
+    for (const { datname } of (await sql("SELECT datname FROM pg_database")).rows as { datname: string }[]) {
+      if (datname.startsWith(`${name}_s_`) && /^[0-9a-f]{8}$/.test(datname.slice(name.length + 3))) await drop(datname);
+    }
+    await seedAfresh();
+    cap = config.demo?.sessions === true ? await defaultCap() : Number(config.demo?.sessions);
+  } catch (err) {
+    await drop(next).catch(() => {});
+    await admin.end();
+    throw err;
   }
-  await seedAfresh();
-  const cap = config.demo?.sessions === true ? await defaultCap() : Number(config.demo?.sessions);
   log(`demo host: a session per visitor, at most ${cap} at once, each a copy of ${seed}`);
 
   /** `sessions: true`'s cap: as many sessions as the memory and Postgres's free connections hold, at least one. */
   async function defaultCap(): Promise<number> {
-    const memory = process.constrainedMemory() || totalmem();
+    // No limit reads 0, or on some systems a number as big as a 64-bit integer allows.
+    const memory = Math.min(process.constrainedMemory() || Infinity, totalmem());
     const { rows } = await sql(
       "SELECT current_setting('max_connections')::int - current_setting('superuser_reserved_connections')::int" +
         " - count(*)::int AS free FROM pg_stat_activity",
@@ -313,22 +337,29 @@ export async function startDemoHost(config: SanomaConfig, options: DemoHostOptio
     }
   }
 
-  /** A session for a new visitor: a warm one, else one made now, within the cap; else none. */
+  /**
+   * A session for a new visitor: a warm one, else one made now, within the cap; else none, and
+   * none when one failed to start (the visitor goes to the shared instance this time).
+   */
   async function take(): Promise<Session | undefined> {
     for (;;) {
-      const ready = warm.shift() ?? (room() > 0 ? make() : undefined);
+      const ready =
+        warm.shift() ??
+        (room() > 0
+          ? make().catch((err: unknown) => void log(`demo host: a session could not start: ${errorMessage(err)}`))
+          : undefined);
       if (!ready) return undefined;
       refill();
       const session = await ready;
-      if (session && !session.child.ended() && !closed) {
+      if (!session || closed) return void (session && retire(session));
+      if (!session.child.ended()) {
         session.seen = Date.now();
         live.set(session.token, session);
         log(`demo host: session ${session.id} taken (${live.size} of ${cap})`);
         return session;
       }
-      // A warm one that failed to start or has exited since: the next, or one made now.
-      if (session) retire(session);
-      if (closed) return undefined;
+      // A warm one that has exited since: the next, or one made now.
+      retire(session);
     }
   }
 
@@ -422,10 +453,11 @@ export async function startDemoHost(config: SanomaConfig, options: DemoHostOptio
       session.seen = Date.now();
       return forward(req, res, session.child.url);
     }
-    if (kept === SHARED) return forward(req, res, (await sharedInstance()).url);
+    // A visitor of the shared instance gets a session of their own once there is room again.
     const taken = await track(take());
     const url = taken?.child.url ?? (await sharedInstance()).url;
-    return forward(req, res, url, sessionCookie(req, taken?.token ?? SHARED));
+    const value = taken?.token ?? SHARED;
+    return forward(req, res, url, value === kept ? undefined : sessionCookie(req, value));
   }
 
   refill();
@@ -483,10 +515,9 @@ async function forward(req: IncomingMessage, res: ServerResponse, url: string, c
     path: req.url,
     headers: req.headers,
   });
-  const [[answer]] = await Promise.all([
-    once(upstream, "response") as Promise<[IncomingMessage]>,
-    pipeline(req, upstream),
-  ]);
+  // The body sent on as the answer comes: a child may answer (and close) before it has read it all.
+  pipeline(req, upstream).catch(() => {});
+  const [answer] = (await once(upstream, "response")) as [IncomingMessage];
   const headers = { ...answer.headers };
   if (cookie) headers["set-cookie"] = [...(answer.headers["set-cookie"] ?? []), cookie];
   res.writeHead(answer.statusCode ?? 502, headers);
