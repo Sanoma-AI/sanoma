@@ -36,10 +36,10 @@ export const NODE = {
 };
 
 /** What the release has for `platform` (`<os>-<arch>`, as `process.platform` and `process.arch` name them). */
-export function archiveOf(platform: string, version = NODE.version) {
+export function archiveOf(platform: string) {
   const windows = platform.startsWith("win32-");
   // The release names Windows `win`, and ships it as a .zip with node.exe at its top.
-  const name = `node-v${version}-${platform.replace(/^win32-/, "win-")}`;
+  const name = `node-v${NODE.version}-${platform.replace(/^win32-/, "win-")}`;
   return {
     name,
     file: `${name}.${windows ? "zip" : "tar.gz"}`,

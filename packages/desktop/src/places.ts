@@ -5,8 +5,8 @@ import { isAbsolute, join, relative, resolve } from "node:path";
  * The path a company is known by: its real path, which on Windows is also in the case the disk has
  * (`realpathSync.native`), as `C:\Users\a\acme` and `c:\users\a\ACME` are one folder there.
  */
-export const realPathOf = (dir: string, platform: NodeJS.Platform = process.platform) =>
-  platform === "win32" ? realpathSync.native(dir) : realpathSync(dir);
+export const realPathOf = (dir: string) =>
+  process.platform === "win32" ? realpathSync.native(dir) : realpathSync(dir);
 
 /** A folder holds a company when it has a `sanoma.config.ts`. */
 export const isCompanyFolder = (dir: string) => existsSync(join(dir, "sanoma.config.ts"));
@@ -72,9 +72,11 @@ function syncedBy(
 export function syncedFolderWarning(
   path: string,
   home: string,
-  exists: (path: string) => boolean = existsSync,
-  platform: NodeJS.Platform = process.platform,
-  env: NodeJS.ProcessEnv = process.env,
+  {
+    exists = existsSync,
+    platform = process.platform,
+    env = process.env,
+  }: { exists?: (path: string) => boolean; platform?: NodeJS.Platform; env?: NodeJS.ProcessEnv } = {},
 ): string | undefined {
   const service = syncedBy(path, home, exists, platform, env);
   const safer = platform === "win32" ? join(home, "Companies") : "~/Companies";

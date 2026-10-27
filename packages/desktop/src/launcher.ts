@@ -1,6 +1,6 @@
 import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, posix, resolve, win32 } from "node:path";
 import { eachLine, eventOf, listeningUrlOf } from "./events.ts";
 
 /** Where a line came from: one of the child's streams. */
@@ -181,13 +181,12 @@ export function launcherEnv(
   platform: NodeJS.Platform = process.platform,
 ): NodeJS.ProcessEnv {
   const windows = platform === "win32";
-  const separator = windows ? ";" : ":";
-  const key = (windows && Object.keys(base).find((name) => name.toUpperCase() === "PATH")) || "PATH";
-  const rest = windows
-    ? Object.fromEntries(Object.entries(base).filter(([name]) => name.toUpperCase() !== "PATH"))
-    : base;
-  const path = [...first, ...(base[key] ?? "").split(separator), ...(windows ? [] : EXTRA_PATH)].filter(Boolean);
-  return { ...rest, SANOMA_EVENTS: "1", SANOMA_APP_PORT: String(port), [key]: [...new Set(path)].join(separator) };
+  const { delimiter } = windows ? win32 : posix;
+  const isPath = (name: string) => (windows ? name.toUpperCase() === "PATH" : name === "PATH");
+  const key = Object.keys(base).find(isPath) ?? "PATH";
+  const rest = Object.fromEntries(Object.entries(base).filter(([name]) => !isPath(name)));
+  const path = [...first, ...(base[key] ?? "").split(delimiter), ...(windows ? [] : EXTRA_PATH)].filter(Boolean);
+  return { ...rest, SANOMA_EVENTS: "1", SANOMA_APP_PORT: String(port), [key]: [...new Set(path)].join(delimiter) };
 }
 
 export interface LaunchOptions extends GroupOptions {

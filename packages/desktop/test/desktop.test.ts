@@ -529,7 +529,8 @@ describe("places", () => {
     const home = join("/", "Users", "a");
     const icloud = join(home, "Library", "Mobile Documents", "com~apple~CloudDocs");
     const syncs = (dir: string) => (path: string) => path === join(icloud, dir);
-    const mac = (path: string, exists?: (path: string) => boolean) => syncedFolderWarning(path, home, exists, "darwin");
+    const mac = (path: string, exists?: (path: string) => boolean) =>
+      syncedFolderWarning(path, home, { exists, platform: "darwin" });
     expect(mac(join(icloud, "acme"))).toMatch(/iCloud/);
     expect(mac(join(home, "Documents", "acme"), syncs("Documents"))).toMatch(/iCloud/);
     expect(mac(join(home, "Documents", "acme"), syncs("Desktop"))).toBeUndefined();
@@ -539,7 +540,7 @@ describe("places", () => {
   test("on Windows, warns about folders OneDrive or iCloud syncs", () => {
     const home = join("/", "Users", "a");
     const env = { OneDrive: join(home, "OneDrive"), OneDriveCommercial: join(home, "OneDrive - Acme") };
-    const onWindows = (path: string) => syncedFolderWarning(path, home, () => true, "win32", env);
+    const onWindows = (path: string) => syncedFolderWarning(path, home, { platform: "win32", env });
     expect(onWindows(join(home, "OneDrive", "Documents", "acme"))).toMatch(/OneDrive syncs/);
     expect(onWindows(join(home, "OneDrive - Acme", "acme"))).toMatch(/OneDrive syncs/);
     expect(onWindows(join(home, "iCloudDrive", "acme"))).toMatch(/iCloud syncs/);
