@@ -138,6 +138,21 @@ export interface DemoConfig {
   reseed?: number;
 }
 
+/** Refuses a `demo` whose numbers make no demo: `sessions` `true` or a whole number above 0, `idle` and `reseed` minutes above 0. */
+function checkDemo(demo: DemoConfig | undefined): void {
+  const { sessions, idle, reseed } = demo ?? {};
+  if (sessions !== undefined && sessions !== true && !(Number.isInteger(sessions) && sessions > 0)) {
+    throw new Error(
+      `The config's \`demo.sessions\` is \`true\` or how many at once, a whole number above 0, not ${JSON.stringify(sessions)}`,
+    );
+  }
+  for (const [key, minutes] of Object.entries({ idle, reseed })) {
+    if (minutes !== undefined && !(typeof minutes === "number" && minutes > 0)) {
+      throw new Error(`The config's \`demo.${key}\` is minutes, a number above 0, not ${JSON.stringify(minutes)}`);
+    }
+  }
+}
+
 /** A config, checked, with everything a worker, client or app derives from it. */
 export interface ResolvedConfig {
   /**
@@ -311,6 +326,7 @@ export function resolveConfig(config: SanomaConfig, options: ResolveOptions = {}
   if (config.policy !== undefined) {
     throw new Error("The config's `policy` is gone: the policy is policies/*.cedar in the root; leave it out");
   }
+  checkDemo(config.demo);
   const collections = collectionsOf(config);
   const ledger = ledgerOf(config);
   const root = rootOf(config);

@@ -8,6 +8,7 @@ import { dirname } from "node:path";
 import { createInterface } from "node:readline";
 import { pipeline } from "node:stream/promises";
 import { errorMessage, type SanomaConfig } from "@sanoma-ai/workflows";
+import { parse, serialize } from "cookie-es";
 import { escapeIdentifier, Pool } from "pg";
 import { UsageError } from "./config.ts";
 import { cliFile, type Served } from "./serve.ts";
@@ -46,17 +47,21 @@ const SESSION_CONNECTIONS = 6;
 /** Each child's pools, its DBOS system pool among them, at most this big (`SANOMA_POOL_SIZE`). */
 const POOL_SIZE = "3";
 
-/** How long a child has to stop before it is killed. */
+/** How long a child has to listen (the seed's may build the sites first), and to stop, before it is killed. */
+const START_MS = 180_000;
 const STOP_MS = 15_000;
 
-/** Postgres's longest name, in bytes. */
+/** Postgres's longest name, in bytes, and the longest the host adds to the demo's: a session's `_s_<id>`. */
 const MAX_NAME = 63;
+const LONGEST_SUFFIX = "_s_00000000".length;
 
 /** One process of the host's: `sanoma serve` as a demo, listening at `url` on this machine. */
 interface Child {
   url: string;
   /** Resolves when the process has exited, stopped or not. */
   exited: Promise<void>;
+  /** Whether it has exited. */
+  ended(): boolean;
   stop(): Promise<void>;
 }
 
@@ -97,9 +102,9 @@ export async function startDemoHost(config: SanomaConfig, options: DemoHostOptio
   const name = decodeURIComponent(base.pathname.slice(1));
   const seed = `${name}_seed`;
   const next = `${name}_seed_next`;
-  if (Buffer.byteLength(next) > MAX_NAME) {
+  if (Buffer.byteLength(name) + LONGEST_SUFFIX > MAX_NAME) {
     throw new UsageError(
-      `The demo's database "${name}" has too long a name for its seed's beside it: at most ${MAX_NAME - 10} bytes`,
+      `The demo's database "${name}" has too long a name for its sessions' beside it: at most ${MAX_NAME - LONGEST_SUFFIX} bytes`,
     );
   }
   const urlOf = (database: string) => {
@@ -129,24 +134,25 @@ export async function startDemoHost(config: SanomaConfig, options: DemoHostOptio
     return done;
   };
 
-  // A clone where Postgres 18 and the file system have one (APFS, XFS, Btrfs); else the default.
+  // A clone where Postgres 18 and the file system have one (APFS, XFS, Btrfs); else the default,
+  // for good once a clone fails where the default copy then works.
   let clone = Number((await sql("SHOW server_version_num")).rows[0].server_version_num) >= 180_000;
   const copy = (database: string) =>
     onSeed(async () => {
       const create = `CREATE DATABASE ${escapeIdentifier(database)} TEMPLATE ${escapeIdentifier(seed)}`;
-      if (clone) {
-        const conn = await admin.connect();
-        try {
-          await conn.query("SET file_copy_method = clone");
-          return void (await conn.query(`${create} STRATEGY FILE_COPY`));
-        } catch {
-          clone = false;
-        } finally {
-          await conn.query("RESET file_copy_method").catch(() => {});
-          conn.release();
-        }
+      if (!clone) return void (await sql(create));
+      const conn = await admin.connect();
+      try {
+        await conn.query("SET file_copy_method = clone");
+        return void (await conn.query(`${create} STRATEGY FILE_COPY`));
+      } catch (err) {
+        await conn.query("RESET file_copy_method");
+        await conn.query(create);
+        clone = false;
+        log(`demo host: copying the seed by the default strategy, since a clone failed: ${errorMessage(err)}`);
+      } finally {
+        conn.release();
       }
-      await sql(create);
     });
 
   /** `sanoma serve` as a demo over `database`: `kind` `instance` (the seed's, the shared one) or `copy` (a session's). */
@@ -170,6 +176,7 @@ export async function startDemoHost(config: SanomaConfig, options: DemoHostOptio
     const exited = new Promise<void>((done) => child.once("exit", () => done()));
     createInterface({ input: child.stderr! }).on("line", (line) => log(`${label}: ${line}`));
     const url = await new Promise<string>((ready, failed) => {
+      setTimeout(() => failed(new Error(`${label} did not listen within ${START_MS / 1000} s`)), START_MS).unref();
       createInterface({ input: child.stdout! }).on("line", (line) => {
         let event: { event?: string; url?: string; message?: string } = {};
         try {
@@ -190,6 +197,7 @@ export async function startDemoHost(config: SanomaConfig, options: DemoHostOptio
     return {
       url,
       exited,
+      ended: () => child.exitCode !== null || child.signalCode !== null,
       stop: () =>
         (stopping ??= (async () => {
           if (child.exitCode !== null || child.signalCode !== null) return;
@@ -239,11 +247,18 @@ export async function startDemoHost(config: SanomaConfig, options: DemoHostOptio
 
   const live = new Map<string, Session>();
   let warm: Promise<Session | undefined>[] = [];
-  /** Sessions taken for a visitor and not live yet. */
-  let taking = 0;
+  /** Sessions neither live nor warm that still count toward the cap: taken and not live yet, or stale and ending. */
+  let between = 0;
+  /** What is under way besides the warm sessions' start (a visitor's `take`, a session ending), which `stop` waits for. */
+  const pending = new Set<Promise<unknown>>();
+  const track = <T>(work: Promise<T>): Promise<T> => {
+    pending.add(work);
+    void work.finally(() => pending.delete(work)).catch(() => {});
+    return work;
+  };
   let shared: Promise<Child> | undefined;
   let closed = false;
-  const room = () => cap - live.size - warm.length - taking;
+  const room = () => cap - live.size - warm.length - between;
 
   /** A session: a copy of the seed, and a child over it. One whose child exits is live no more. */
   async function make(): Promise<Session> {
@@ -258,11 +273,12 @@ export async function startDemoHost(config: SanomaConfig, options: DemoHostOptio
       throw err;
     }
     const session = { id, token: randomBytes(24).toString("base64url"), database, child, seen: Date.now() };
+    // A warm one that exits is found out when it is taken (`take`).
     void child.exited.then(() => {
       if (live.get(session.token) !== session) return;
       live.delete(session.token);
       log(`demo host: session ${id} exited`);
-      void end(session).finally(refill);
+      retire(session);
     });
     return session;
   }
@@ -285,24 +301,23 @@ export async function startDemoHost(config: SanomaConfig, options: DemoHostOptio
     for (;;) {
       const ready = warm.shift() ?? (room() > 0 ? make() : undefined);
       if (!ready) return undefined;
-      taking++;
+      between++;
       let session: Session | undefined;
       try {
         refill();
         session = await ready;
       } finally {
-        taking--;
+        between--;
       }
-      // A warm one that failed: the next, or one made now.
-      if (!session) continue;
-      if (closed) {
-        await end(session);
-        return undefined;
+      if (session && !session.child.ended() && !closed) {
+        session.seen = Date.now();
+        live.set(session.token, session);
+        log(`demo host: session ${session.id} taken (${live.size} of ${cap})`);
+        return session;
       }
-      session.seen = Date.now();
-      live.set(session.token, session);
-      log(`demo host: session ${session.id} taken (${live.size} of ${cap})`);
-      return session;
+      // A warm one that failed to start or has exited since: the next, or one made now.
+      if (session) retire(session);
+      if (closed) return undefined;
     }
   }
 
@@ -315,15 +330,26 @@ export async function startDemoHost(config: SanomaConfig, options: DemoHostOptio
     }
   }
 
+  /** A session no visitor has (any more) ended, counted toward the cap until it is, then the warm ones made again. */
+  function retire(session: Session): void {
+    between++;
+    void track(
+      end(session)
+        .catch((err: unknown) => log(`demo host: session ${session.id} could not be dropped: ${errorMessage(err)}`))
+        .finally(() => {
+          between--;
+          refill();
+        }),
+    );
+  }
+
   const sweep = setInterval(
     () => {
       for (const session of live.values()) {
         if (Date.now() - session.seen < idleMs) continue;
         live.delete(session.token);
         log(`demo host: session ${session.id} idle, dropped`);
-        void end(session)
-          .catch((err: unknown) => log(`demo host: session ${session.id} could not be dropped: ${errorMessage(err)}`))
-          .finally(refill);
+        retire(session);
       }
     },
     Math.min(Math.max(idleMs / 4, 250), 60_000),
@@ -340,8 +366,17 @@ export async function startDemoHost(config: SanomaConfig, options: DemoHostOptio
         // The warm sessions are copies of the last seed: made again from this one.
         const stale = warm;
         warm = [];
+        between += stale.length;
+        for (const ready of stale) {
+          void track(
+            ready.then((session) => {
+              between--;
+              if (session) retire(session);
+              else refill();
+            }),
+          );
+        }
         refill();
-        for (const session of await Promise.all(stale)) if (session) await end(session);
       })()
         .catch((err: unknown) => log(`demo host: the seed could not be built afresh: ${errorMessage(err)}`))
         .finally(() => {
@@ -352,12 +387,18 @@ export async function startDemoHost(config: SanomaConfig, options: DemoHostOptio
   };
   scheduleReseed();
 
-  /** The shared instance, past the cap: one demo on the database itself, seeded as any, started once. */
-  const sharedInstance = () =>
-    (shared ??= startChild("instance", name, "demo shared").catch((err: unknown) => {
-      shared = undefined;
-      throw err;
-    }));
+  /** The shared instance, past the cap: one demo on the database itself, seeded as any, started again once it exits. */
+  const sharedInstance = () => {
+    if (closed) return Promise.reject(new Error("the demo host is stopping"));
+    if (shared) return shared;
+    const starting = startChild("instance", name, "demo shared");
+    shared = starting;
+    starting.then(
+      (child) => void child.exited.then(() => shared === starting && (shared = undefined)),
+      () => shared === starting && (shared = undefined),
+    );
+    return starting;
+  };
 
   const server = createServer((req, res) => {
     answer(req, res).catch((err: unknown) => {
@@ -376,14 +417,14 @@ export async function startDemoHost(config: SanomaConfig, options: DemoHostOptio
       res.writeHead(200, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
       return void res.end("ok\n");
     }
-    const kept = cookieOf(req, SESSION_COOKIE);
+    const kept = parse(req.headers.cookie ?? "")[SESSION_COOKIE];
     const session = kept === undefined ? undefined : live.get(kept);
     if (session) {
       session.seen = Date.now();
       return forward(req, res, session.child.url);
     }
     if (kept === SHARED) return forward(req, res, (await sharedInstance()).url);
-    const taken = await take();
+    const taken = await track(take());
     const url = taken?.child.url ?? (await sharedInstance()).url;
     return forward(req, res, url, sessionCookie(req, taken?.token ?? SHARED));
   }
@@ -410,6 +451,8 @@ export async function startDemoHost(config: SanomaConfig, options: DemoHostOptio
         server.closeAllConnections();
       });
       await reseeding;
+      // Until nothing is under way: what ends may set another session ending.
+      while (pending.size) await Promise.allSettled(pending);
       const sessions = [...live.values(), ...(await Promise.all(warm)).filter((s) => s !== undefined)];
       live.clear();
       warm = [];
@@ -423,18 +466,14 @@ export async function startDemoHost(config: SanomaConfig, options: DemoHostOptio
   };
 }
 
-/** The cookie `name` of `req`, or undefined. */
-function cookieOf(req: IncomingMessage, name: string): string | undefined {
-  for (const part of (req.headers.cookie ?? "").split(";")) {
-    const [key, ...value] = part.trim().split("=");
-    if (key === name) return value.join("=");
-  }
-  return undefined;
-}
-
 /** The session cookie for `value`: for this browser's visit, Lax as the demo login's, Secure behind TLS. */
 const sessionCookie = (req: IncomingMessage, value: string) =>
-  `${SESSION_COOKIE}=${value}; Path=/; HttpOnly; SameSite=Lax${req.headers["x-forwarded-proto"] === "https" ? "; Secure" : ""}`;
+  serialize(SESSION_COOKIE, value, {
+    path: "/",
+    httpOnly: true,
+    sameSite: "lax",
+    secure: req.headers["x-forwarded-proto"] === "https",
+  });
 
 /** `req` sent on to the child at `url` as it came, and its answer back, with `cookie` set besides its own. */
 async function forward(req: IncomingMessage, res: ServerResponse, url: string, cookie?: string): Promise<void> {
