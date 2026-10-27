@@ -9,9 +9,9 @@
   "scripts": {
     "stage:resources": "node scripts/stage.ts",
     "start": "node scripts/electron.ts && pnpm run stage:resources && electron-forge start --",
-    "package": "node scripts/electron.ts && pnpm run stage:resources && electron-forge package",
-    "make": "node scripts/electron.ts && pnpm run stage:resources --arch arm64 --arch x64 && electron-forge make --arch arm64,x64",
-    "test:e2e": "pnpm run package && playwright test"
+    "package": "pnpm run stage:resources && electron-forge package",
+    "make": "pnpm run stage:resources --arch arm64 --arch x64 && electron-forge make --arch arm64,x64",
+    "test:e2e": "node scripts/electron.ts && pnpm run package && playwright test"
   },
   "devDependencies": {
     "@electron-forge/cli": "8.0.1",

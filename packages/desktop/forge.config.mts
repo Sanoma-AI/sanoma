@@ -13,8 +13,6 @@ import { FuseV1Options, FuseVersion } from "@electron/fuses";
 
 const config: ForgeConfig = {
   packagerConfig: {
-    name: "Sanoma",
-    executableName: "Sanoma",
     appBundleId: "ai.sanoma.desktop",
     appCategoryType: "public.app-category.business",
     asar: true,
@@ -29,13 +27,9 @@ const config: ForgeConfig = {
         { CFBundleTypeName: "Folder", CFBundleTypeRole: "Viewer", LSItemContentTypes: ["public.folder"] },
       ],
     },
-    // Unsigned preview: an ad-hoc signature, as Apple silicon reports an app with none as damaged.
-    // Gatekeeper still blocks it once ("Open Anyway"; README "Desktop (preview)"). Library
-    // validation rejects an ad-hoc app's frameworks, so the hardened runtime waits for a Developer ID.
-    // With an Apple Developer account: `osxSign: {}` (the keychain's identity, hardened runtime on)
-    // and `osxNotarize: { appleId, appleIdPassword, teamId }` from secrets.
-    // `identityValidation: false` passes "-" to codesign rather than looking it up in the keychain;
-    // `continueOnError: false` fails the build when signing does, which packager would only warn about.
+    // Unsigned preview, signed ad hoc: Apple silicon reports an app with no signature as damaged.
+    // "-" goes to codesign as is (no keychain lookup), a failed signature fails the build, and the
+    // hardened runtime waits for a Developer ID (library validation rejects ad-hoc frameworks).
     osxSign: {
       identity: "-",
       identityValidation: false,
@@ -50,15 +44,15 @@ const config: ForgeConfig = {
     },
   },
   makers: [
-    new MakerDMG({}, ["darwin"]),
-    new MakerSquirrel({ name: "Sanoma", setupExe: "Sanoma-Setup.exe" }, ["win32"]),
+    new MakerDMG(),
+    new MakerSquirrel({ name: "Sanoma", setupExe: "Sanoma-Setup.exe" }),
     new MakerZIP({}, ["darwin", "win32"]),
   ],
   plugins: [
     new VitePlugin({
       build: [
         { entry: "src/main.ts", config: "vite.main.config.mts", target: "main" },
-        { entry: "src/preload.ts", config: "vite.preload.config.mts", target: "preload" },
+        { entry: "src/preload.ts", config: "vite.main.config.mts", target: "preload" },
       ],
       // The shell's own pages (start/): the start window and a company window's progress page.
       renderer: [{ name: "start", config: "vite.renderer.config.mts" }],

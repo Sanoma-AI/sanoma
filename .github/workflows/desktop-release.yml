@@ -60,26 +60,18 @@ jobs:
             node_arch=$(lipo -archs "$app/Contents/Resources/node/node")
             [ "$node_arch" = "${pair##*:}" ] || { echo "::error::$app carries a $node_arch Node"; exit 1; }
           done
-      # Forge writes dmg/<arch>/Sanoma-<version>-<arch>.dmg and zip/darwin/<arch>/Sanoma-darwin-<arch>-<version>.zip:
-      # both are given the dmg's form, which the README's download steps name.
-      - name: Collect the installers
-        working-directory: packages/desktop/out/make
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          mkdir ../release
-          for arch in arm64 x64; do
-            cp "dmg/$arch/Sanoma-$VERSION-$arch.dmg" ../release/
-            cp "zip/darwin/$arch/Sanoma-darwin-$arch-$VERSION.zip" "../release/Sanoma-$VERSION-$arch.zip"
-          done
-          ls -l ../release
+      # Forge names the dmg Sanoma-<version>-<arch>.dmg, the README's download name; the zip
+      # (Sanoma-darwin-<arch>-<version>.zip, no name option) is given the same form.
       - name: Draft release
-        working-directory: packages/desktop/out/release
+        working-directory: packages/desktop/out/make
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
+          for arch in arm64 x64; do
+            mv "zip/darwin/$arch/Sanoma-darwin-$arch-$VERSION.zip" "zip/darwin/$arch/Sanoma-$VERSION-$arch.zip"
+          done
           gh release create "desktop-v$VERSION" --repo "$GITHUB_REPOSITORY" --draft --target "$GITHUB_SHA" \
             --title "Sanoma desktop $VERSION (unsigned preview)" --notes-file ../../RELEASE_NOTES.md \
-            "Sanoma-$VERSION"-*.dmg "Sanoma-$VERSION"-*.zip
+            dmg/*/"Sanoma-$VERSION"-*.dmg zip/darwin/*/"Sanoma-$VERSION"-*.zip
           echo "Draft release desktop-v$VERSION from $GITHUB_SHA: publish it on GitHub after trying the download." >> "$GITHUB_STEP_SUMMARY"
