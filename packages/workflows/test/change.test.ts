@@ -5,6 +5,7 @@ import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
 import { fakeHost, testRepository } from "@sanoma-ai/testing/host";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { Pool } from "pg";
 import { z } from "zod";
 import { lintWorkflow } from "../src/lint.ts";
 import { CHANGE_MERGE, type ChangeReport, defineWorkflow, type LedgerRecord, memoryLedger } from "../src/index.ts";
@@ -42,6 +43,25 @@ const waits = defineWorkflow({
   },
 });
 
+/**
+ * The test's database, dropped before its worker starts: the runs a change test leaves (a draft's
+ * `change:<id>`, a sleeping `waits` run) would be found by the next run of the file.
+ */
+function freshDatabase(suffix: string): string {
+  const url = testDatabaseUrl(suffix);
+  beforeAll(async () => {
+    const server = new URL(url);
+    server.pathname = "/postgres";
+    const admin = new Pool({ connectionString: server.toString() });
+    try {
+      await admin.query(`DROP DATABASE IF EXISTS "${new URL(url).pathname.slice(1)}" WITH (FORCE)`);
+    } finally {
+      await admin.end();
+    }
+  });
+  return url;
+}
+
 const merges = (records: LedgerRecord[]) =>
   records.filter((r) => r.type === "op.called" && r.op === CHANGE_MERGE && !r.error);
 const opsOf = (records: LedgerRecord[]) => records.flatMap((r) => (r.type === "op.called" ? [r.op] : []));
@@ -52,7 +72,7 @@ describe("the change workflow", () => {
   const repo = memorySource({ root: here, remote });
   const app = useTestApp(
     { workflows: [waits], connectors: [remote.connector], ledger: memoryLedger(), root },
-    { databaseUrl: testDatabaseUrl("change"), source: repo.source },
+    { databaseUrl: freshDatabase("change"), source: repo.source },
   );
   afterAll(() => repo.remove());
 
@@ -335,7 +355,7 @@ describe("the change workflow on a repository with no remote", () => {
   const repo = memorySource({ root: here });
   const app = useTestApp(
     { workflows: [], connectors: [], ledger: memoryLedger(), root },
-    { databaseUrl: testDatabaseUrl("change-local"), source: repo.source },
+    { databaseUrl: freshDatabase("change-local"), source: repo.source },
   );
   afterAll(() => repo.remove());
 
@@ -361,7 +381,7 @@ describe("the change workflow's deploy on a declared host", () => {
   const repo = memorySource({ root: here, remote });
   const app = useTestApp(
     { workflows: [], connectors: [host.connector, remote.connector], ledger: memoryLedger(), root },
-    { databaseUrl: testDatabaseUrl("change-deploy"), source: repo.source },
+    { databaseUrl: freshDatabase("change-deploy"), source: repo.source },
   );
   beforeAll(() => source.commit());
   afterAll(async () => {

@@ -104,8 +104,8 @@ describe("SanomaClient", () => {
     const err = await caught(c().start("nope", {}, { startedBy: alice }));
     expect(errorCode(err)).toBe("invalid_input");
     expect(err).toMatchObject({
-      message: 'No workflow named "nope"; the config has announce, clock, double',
-      data: { workflow: "nope", workflows: ["announce", "clock", "double"] },
+      message: 'No workflow named "nope"; the config has announce, clock, double, change',
+      data: { workflow: "nope", workflows: ["announce", "clock", "double", "change"] },
     });
   });
 

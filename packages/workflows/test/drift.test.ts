@@ -8,6 +8,7 @@ import { z } from "zod";
 import { describeConfig, writeLockfile } from "../src/describe.ts";
 import {
   APPLY_WORKFLOW,
+  CHANGE_WORKFLOW,
   defineConnector,
   defineResource,
   defineWorkflow,
@@ -313,7 +314,7 @@ describe("the built-in drift workflow in a config", () => {
   const bare = { ...company, connectors: company.connectors.map(withoutSetup) };
 
   it("is added, with apply, when the connectors declare resource types, using each type's import that has a driver", () => {
-    expect([...resolveConfig(config).workflows.keys()]).toEqual([DRIFT_WORKFLOW, APPLY_WORKFLOW]);
+    expect([...resolveConfig(config).workflows.keys()]).toEqual([DRIFT_WORKFLOW, APPLY_WORKFLOW, CHANGE_WORKFLOW]);
     const entry = describeConfig(config).workflows.find((wf) => wf.name === DRIFT_WORKFLOW);
     expect(entry).toMatchObject({ name: "drift", title: "Check resources for drift", builtin: true });
     expect(entry?.ops).toEqual([
@@ -338,20 +339,22 @@ describe("the built-in drift workflow in a config", () => {
     // Without drivers they are there all the same, and use nothing: each resource reports the missing driver.
     expect(describeConfig(bare).workflows).toMatchObject([
       { name: "apply", builtin: true, ops: [] },
+      { name: "change", builtin: true },
       { name: "drift", builtin: true, ops: [] },
     ]);
   });
 
   it("is not added when no connector declares a resource type, and the config's own workflows are not built-in", () => {
     const marketing = { ...company, connectors: [bluesky] };
-    expect(resolveConfig(marketing).workflows.size).toBe(0);
+    // Only the change workflow, which every config has.
+    expect([...resolveConfig(marketing).workflows.keys()]).toEqual([CHANGE_WORKFLOW]);
     const own = defineWorkflow({ name: "own", trigger: "manual", input: z.object({}), uses: [], run: async () => 1 });
     expect(
       describeConfig({ ...company, workflows: [own] }).workflows.find((wf) => wf.name === "own"),
     ).not.toHaveProperty("builtin");
   });
 
-  it.each(["drift", "apply"])("refuses a config workflow named %s, a built-in's name", (name) => {
+  it.each(["drift", "apply", "change"])("refuses a config workflow named %s, a built-in's name", (name) => {
     const named = defineWorkflow({ name, trigger: "manual", input: z.object({}), uses: [], run: async () => 1 });
     expect(() => resolveConfig({ ...company, workflows: [named] })).toThrow(
       `A workflow is named "${name}", the name of a built-in workflow`,
