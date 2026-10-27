@@ -221,8 +221,8 @@ const DEFAULT_LIKE = (name: string) =>
 /** Two steps given one name, and how to tell them apart. */
 const TWICE = (name: string, fix: string) =>
   `two steps of this workflow are named "${name}": a name given is one step's, so a test or the graph can tell them apart; ${fix}`;
-/** A name given that reads as an operation's id: what an unnamed call is called. */
-const OP_ID = /^[\w-]+(\.[\w-]+){2,3}$/;
+/** A name given that reads as an operation's id, four segments only for an app's collection: what an unnamed call is called. */
+const OP_ID = new RegExp(String.raw`^([\w-]+(\.[\w-]+){2}|${DATA_VENDOR}(\.[\w-]+){3})$`);
 
 /** Where a function's body starts: its own statement rules, nothing of the caller's. */
 const bodyOf = (fn: Node): Where => ({ fn, inCatch: false });

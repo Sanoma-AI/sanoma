@@ -302,6 +302,11 @@ describe("lintWorkflow on run, which the worker holds to the outline", () => {
       defaultLike("ghost\\.post\\.create"),
     ]);
     expect(inRun(`await ctx.ghost.post.create({ title: "a" }, { name: "Sleep" });`)).toEqual([defaultLike("Sleep")]);
+    // Four segments read as an id only for an app's collection's operation.
+    expect(inRun(`await ctx.sleep({ ms: 1 }, { name: "data.crm.customers.get" });`)).toEqual([
+      defaultLike("data\\.crm\\.customers\\.get"),
+    ]);
+    expect(inRun(`await ctx.sleep({ ms: 1 }, { name: "q4.report.send.final" });`)).toEqual([]);
     // A name the outline cannot read.
     const unread = expect.stringMatching(/^a step's name must be a string literal, or a top-level const holding one/);
     expect(inRun(`await ctx.sleep({ ms: 1 }, { name: input.k });`)).toEqual([unread]);
