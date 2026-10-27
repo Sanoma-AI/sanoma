@@ -52,12 +52,15 @@ export function archiveOf(platform: string, version = NODE.version) {
 /**
  * The tar that reads the archive. A .zip needs bsdtar, which reads zip as well: macOS's `tar`, and
  * Windows 10's and later's System32\tar.exe, named by its path because Git for Windows can put its
- * GNU tar (which reads no zip) first on PATH. GNU tar on Linux cannot stage a Windows Node.
+ * GNU tar (which reads no zip) first on PATH. Linux's GNU tar cannot: a Windows Node is staged on
+ * Windows or macOS.
  */
-const tarFor = (file: string) =>
-  file.endsWith(".zip") && process.platform === "win32"
-    ? join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe")
-    : "tar";
+function tarFor(file: string): string {
+  if (!file.endsWith(".zip")) return "tar";
+  if (process.platform === "win32") return join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe");
+  if (process.platform === "darwin") return "tar";
+  throw new Error(`${file} is a zip, which only bsdtar reads: stage a Windows Node on Windows or macOS`);
+}
 
 /**
  * Puts `platform`'s Node binary (`node`, or `node.exe` on Windows) and its LICENSE in `out`,
@@ -72,6 +75,8 @@ export async function downloadNode(platform: string, out: string): Promise<void>
   if (existsSync(join(out, binary)) && existsSync(version) && readFileSync(version, "utf8").trim() === NODE.version) {
     return;
   }
+  // Before the download: why it cannot be read.
+  const tar = tarFor(file);
   const url = `https://nodejs.org/dist/v${NODE.version}/${file}`;
   console.error(`downloading ${url}`);
   const res = await fetch(url, { signal: AbortSignal.timeout(300_000) });
@@ -83,8 +88,8 @@ export async function downloadNode(platform: string, out: string): Promise<void>
   try {
     writeFileSync(join(work, file), archive);
     // bsdtar and GNU tar both tell a gzip from its contents; a zip only bsdtar reads (`tarFor`).
-    const tar = spawnSync(tarFor(file), ["-xf", file, entry, `${name}/LICENSE`], { cwd: work, stdio: "inherit" });
-    if (tar.status !== 0) throw new Error(`could not extract ${name} from ${file}`);
+    const extracted = spawnSync(tar, ["-xf", file, entry, `${name}/LICENSE`], { cwd: work, stdio: "inherit" });
+    if (extracted.status !== 0) throw new Error(`could not extract ${name} from ${file}`);
     mkdirSync(out, { recursive: true });
     // Beside it, then over it: a shell running from stage/ never sees half a binary.
     copyFileSync(join(work, ...entry.split("/")), join(out, `${binary}.tmp`));

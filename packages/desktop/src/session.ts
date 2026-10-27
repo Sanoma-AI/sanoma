@@ -32,8 +32,8 @@ export interface Session {
 }
 
 /**
- * Opens a company: writes the shims, runs `pnpm install --prefer-offline` in it (the staged pnpm) (a failure is
- * only a warning while `node_modules/sanoma` is there), then its own launcher (`launch`).
+ * Opens a company: writes the shims, runs the staged pnpm's `install --prefer-offline` in it (a
+ * failure is only a warning while `node_modules/sanoma` is there), then its own launcher (`launch`).
  */
 export function startSession(options: SessionOptions): Session {
   const { repo, port, node, pnpm, bin, onLine, onProgress, killAfterMs, pollMs } = options;

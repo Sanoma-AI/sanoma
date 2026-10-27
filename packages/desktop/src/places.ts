@@ -1,5 +1,12 @@
-import { existsSync, statSync } from "node:fs";
+import { existsSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
+
+/**
+ * The path a company is known by: its real path, which on Windows is also in the case the disk has
+ * (`realpathSync.native`), as `C:\Users\a\acme` and `c:\users\a\ACME` are one folder there.
+ */
+export const realPathOf = (dir: string, platform: NodeJS.Platform = process.platform) =>
+  platform === "win32" ? realpathSync.native(dir) : realpathSync(dir);
 
 /** A folder holds a company when it has a `sanoma.config.ts`. */
 export const isCompanyFolder = (dir: string) => existsSync(join(dir, "sanoma.config.ts"));

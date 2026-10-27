@@ -23,7 +23,7 @@ import { eventOf, listeningUrlOf } from "../src/events.ts";
 import { launch, launcherEnv, launcherOf, type Stream, USAGE_EXIT } from "../src/launcher.ts";
 import { linkTarget } from "../src/links.ts";
 import { hidePasswords, openLog, TAIL_LINES } from "../src/logs.ts";
-import { folderArgument, syncedFolderWarning } from "../src/places.ts";
+import { folderArgument, realPathOf, syncedFolderWarning } from "../src/places.ts";
 import { archWarnings, runtimeOf } from "../src/runtime.ts";
 import { startSession } from "../src/session.ts";
 import { shims, writeShims } from "../src/shims.ts";
@@ -318,21 +318,23 @@ describe("the shims", () => {
   test("on Windows, pnpm.cmd, and the Node's own folder on PATH in place of a node shim", () => {
     const node = "C:\\Program Files\\Sanoma\\resources\\node\\node.exe";
     expect(shims(node, "C:\\100%\\pnpm\\bin\\pnpm.mjs", "win32")).toEqual({
-      "pnpm.cmd": `@echo off\r\n"${node}" "C:\\100%%\\pnpm\\bin\\pnpm.mjs" %*\r\n`,
+      "pnpm.cmd": `@echo off\r\nchcp 65001 >nul 2>&1\r\n"${node}" "C:\\100%%\\pnpm\\bin\\pnpm.mjs" %*\r\n`,
     });
     const dir = join(temp(), "bin");
     expect(writeShims(dir, join("C:", "node", "node.exe"), "p", "win32")).toEqual([dir, join("C:", "node")]);
     expect(existsSync(join(dir, "pnpm.cmd")) && !existsSync(join(dir, "node"))).toBe(true);
   });
 
-  test("put this platform's Node first on PATH, and run pnpm's script with it", () => {
-    const dir = join(temp(), "bin");
-    const env = launcherEnv(process.env, writeShims(dir, process.execPath, fixture("pnpm.mjs")), 3100);
+  test("put this platform's Node first on PATH, and run pnpm's script with it, from a path that is not ASCII", () => {
+    const dir = join(temp(), "José", "bin");
+    const script = join(temp(), "José", "pnpm.mjs");
+    cpSync(fixture("pnpm.mjs"), script);
+    const env = launcherEnv(process.env, writeShims(dir, process.execPath, script), 3100);
     // What a company's script, or a program without a shell, runs as `node`.
     expect(execFileSync("node", ["-p", "process.execPath"], { env, encoding: "utf8" }).trim()).toBe(process.execPath);
     // A .cmd runs only through a shell.
-    const pnpm = windows ? `"${join(dir, "pnpm.cmd")}" install` : `'${join(dir, "pnpm")}' install`;
-    expect(execSync(pnpm, { encoding: "utf8" })).toBe("Done in 0.1s\n");
+    const install = windows ? `"${join(dir, "pnpm.cmd")}" install` : `'${join(dir, "pnpm")}' install`;
+    expect(execSync(install, { encoding: "utf8" })).toBe("Done in 0.1s\n");
   });
 });
 
@@ -514,6 +516,13 @@ describe("places", () => {
     const app = temp();
     expect(folderArgument(["--inspect=0", app, "--user-data-dir=/x"], "/", app)).toBeUndefined();
     expect(folderArgument([app, dir], "/", app)).toBe(dir);
+  });
+
+  test.runIf(windows)("on Windows, a folder is known by the case its disk has", () => {
+    const dir = join(temp(), "Acme");
+    mkdirSync(dir);
+    expect(realPathOf(dir.toUpperCase())).toBe(realPathOf(dir));
+    expect(realPathOf(dir).endsWith("Acme")).toBe(true);
   });
 
   test("warns about folders iCloud syncs", () => {

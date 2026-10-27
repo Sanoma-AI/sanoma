@@ -1,6 +1,5 @@
 // The shell's main process: wiring only. What it runs and how is in the modules it imports, which
 // never import electron and are tested on their own.
-import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
@@ -55,7 +54,7 @@ import {
 import { USAGE_EXIT } from "./launcher.ts";
 import { linkTarget } from "./links.ts";
 import { type CompanyLog, hidePasswords, openLog } from "./logs.ts";
-import { folderArgument, isCompanyFolder, syncedFolderWarning } from "./places.ts";
+import { folderArgument, isCompanyFolder, realPathOf, syncedFolderWarning } from "./places.ts";
 import { archWarnings, runtimeOf } from "./runtime.ts";
 import { type Session, type SessionOptions, startSession } from "./session.ts";
 import { type Newer, readSettings, runCheck, savedNewer } from "./update-check.ts";
@@ -343,7 +342,7 @@ async function openCompany(dir: string) {
   if (!isCompanyFolder(dir)) {
     return tell(`${dir} holds no company (no sanoma.config.ts): open the folder a company was started in.`);
   }
-  const path = realpathSync(dir);
+  const path = realPathOf(dir);
   if (isLive(path)) return showWindow(path);
   await begin(path);
 }
@@ -655,7 +654,7 @@ async function newCompany(): Promise<void> {
     if (response === 0) return newCompany();
   }
   if (!(await gitReady()) || !(await identityReady(dir))) return;
-  await begin(realpathSync(dir), createSession);
+  await begin(realPathOf(dir), createSession);
 }
 
 /**
@@ -681,7 +680,7 @@ async function cloneCompanyFlow(): Promise<void> {
     properties: ["openDirectory", "createDirectory"],
   });
   if (canceled || !filePaths[0]) return;
-  const parent = realpathSync(filePaths[0]);
+  const parent = realPathOf(filePaths[0]);
   const target = cloneTarget(url, parent);
   if ("problem" in target) return tell(target.problem);
   if (!(await identityReady(parent))) return;

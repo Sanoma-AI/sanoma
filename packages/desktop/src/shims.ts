@@ -19,7 +19,8 @@ export function shims(
   platform: NodeJS.Platform = process.platform,
 ): Record<string, string> {
   if (platform === "win32") {
-    return { "pnpm.cmd": `@echo off\r\n${quoteCmd(node)} ${quoteCmd(pnpm)} %*\r\n` };
+    // cmd reads a batch file in the console's code page: UTF-8 first, for a path such as C:\Users\José.
+    return { "pnpm.cmd": `@echo off\r\nchcp 65001 >nul 2>&1\r\n${quoteCmd(node)} ${quoteCmd(pnpm)} %*\r\n` };
   }
   return {
     node: `#!/bin/sh\nexec ${quote(node)} "$@"\n`,
