@@ -1,6 +1,6 @@
 {
   "name": "@sanoma-ai/connector-stripe",
-  "version": "0.4.5",
+  "version": "0.4.6",
   "description": "Stripe resources (products, webhook endpoints) for Sanoma, read through the OpenTofu provider",
   "keywords": [
     "connector",
