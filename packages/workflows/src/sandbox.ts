@@ -176,12 +176,10 @@ export async function seedSandbox(run: Run, name: string): Promise<void> {
       }
       const instance = state.instanceFakes;
       const fakes = instance ?? new Map([...state.fakes].map(([vendor, make]) => [vendor, make()]));
+      // The fakes' drivers, and the built-in ones that read only the repository (`sanoma.apps.list`).
       const drivers = instance
         ? state.drivers
-        : indexDrivers(
-            [...fakes.values()].map((f) => f.driver),
-            state.ops,
-          );
+        : indexDrivers([...[...fakes.values()].map((f) => f.driver), ...state.repoDrivers], state.ops);
       // What the scenario seeds is checked by `applyGivens`.
       const missing = opIdsOf(state.workflows.get(run.workflow)!).filter((id) => !drivers.has(id));
       if (missing.length) {

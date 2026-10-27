@@ -14,6 +14,7 @@ import {
 import { defineFake } from "../src/fake.ts";
 import { setupOf } from "../src/op.ts";
 import { check, drive, loadScenarios, type Scenario } from "../src/scenario.ts";
+import { runScenario } from "../src/scenarios.ts";
 import announce from "./fixtures/announce.ts";
 import { failure, inSeconds, pending, types, useApp, waitFor } from "./harness.ts";
 
@@ -206,6 +207,18 @@ describe("sandbox runs", () => {
     expect(errorCode(missing)).toBe("invalid_input");
     expect((missing as Error).message).toBe('No scenario named "Nope"');
     expect(types(await ledger(unknown))).toEqual(["run.started", "run.failed"]);
+  });
+
+  it("runs a direct call: the built-in drivers that read only the repository are there beside the fakes", async () => {
+    // `call` uses every operation that may be called directly, `sanoma.apps.list` among them, which
+    // no connector's fake implements: the sandbox has its built-in driver instead of refusing the run.
+    const direct = await scenario("Apps listed directly");
+    const { run, checks, ledger: records } = await runScenario(direct, { client: c(), scope: scope() });
+    expect(records.find((r) => r.type === "run.failed")).toBeUndefined();
+    expect(run).toMatchObject({ status: "finished" });
+    expect(types(records)).toContain("op.called sanoma.apps.list");
+    expect(checks.filter((k) => !k.ok)).toEqual([]);
+    expect(live).toEqual([]);
   });
 
   it("refuses a workflow that uses an operation with no fake, and parses the input before seeding", async () => {

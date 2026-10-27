@@ -4,7 +4,7 @@ import type { DeadlineRegistry } from "./deadlines.ts";
 import type { ApprovalState, Approver, Principal, WorkflowDefinition } from "./define.ts";
 import type { Fake } from "./fake.ts";
 import type { LedgerStore } from "./ledger.ts";
-import type { DriverFn, Op } from "./op.ts";
+import type { Driver, DriverFn, Op } from "./op.ts";
 import type { CallNode } from "./outline.ts";
 import type { Policy } from "./policy.ts";
 import type { Resource } from "./resource.ts";
@@ -44,6 +44,8 @@ export interface WorkerState {
   ops: Map<string, Op>;
   /** The drivers' functions, by operation id, each guarded by its driver's `env` (`indexDrivers` in config.ts). */
   drivers: Map<string, DriverFn>;
+  /** The built-in drivers that read only the repository (`sanoma.apps.list`): a sandbox run has them beside its fakes. */
+  repoDrivers: readonly Driver[];
   /** The makers of the config's fake vendors, by vendor id: a sandbox run makes its own of each when it is seeded. */
   fakes: Map<string, () => Fake<any, any>>;
   /** The instance's fakes, by vendor id, when it runs on them (`fakes: "instance"`): its sandbox runs seed and call these, not fakes of their own. */
