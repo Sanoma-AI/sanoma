@@ -1,6 +1,7 @@
 // Electron Forge, from its Vite + TypeScript template. `make` builds the app for this platform's
-// arm64 and x64 into out/make (a dmg and a zip on macOS; on Windows, once the shell runs there (#419), a Squirrel installer and a zip);
-// desktop-release.yml uploads them to a draft GitHub Release. `package` builds it, unpacked, into out/.
+// arm64 and x64 into out/make: a dmg and a zip on macOS, a Squirrel installer and a zip on Windows
+// (where the shell itself runs once #419 lands). desktop-release.yml uploads the Mac ones to a draft
+// GitHub Release. `package` builds the app, unpacked, into out/.
 import { cpSync } from "node:fs";
 import { join } from "node:path";
 import { MakerDMG } from "@electron-forge/maker-dmg";
