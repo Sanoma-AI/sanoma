@@ -20,6 +20,7 @@ import {
   type RemoteContext,
   type RemoteHalf,
   remoteFor,
+  type RepoRef,
   type Source,
   type SourceHost,
 } from "./source.ts";
@@ -137,7 +138,7 @@ export function reservedFor(
 export const BASE = "main";
 
 /** The company's credentials for a host, as its remote half asks for them (`Secrets` puts the environment first). */
-export const remoteContext = (secrets: Secrets): RemoteContext => ({
+const remoteContext = (secrets: Secrets): RemoteContext => ({
   async secrets(names) {
     const found = await Promise.all(names.map(async (name) => [name, await secrets.get(name)] as const));
     return new Map(found.filter((entry): entry is readonly [string, string] => Boolean(entry[1])));
@@ -159,18 +160,18 @@ export function sourceOfRun(): Source {
 const openedHosts = new WeakMap<RemoteHalf, WeakMap<Secrets, Map<string, SourceHost>>>();
 
 /**
- * The worker's repository and its host, for a call made in a run (a change's driver and its
- * steps): the source the worker was given (`sourceOfRun`), the clone URL of its `origin` and that
- * repository on the host whose connector's remote half matches the URL, opened once per remote
- * half, secrets and URL, so its token is kept between calls. A `DriverError` when the repository
- * has no remote (saving is publishing then: there is nothing to review a branch on) or no
- * connector is for its host.
+ * The company's repository and its host: `source`, by default the worker's for a call made in a
+ * run (a change's driver and its steps, `sourceOfRun`), the clone URL of its `origin`, and that
+ * repository (`repo`) on the host whose connector's remote half matches the URL, opened once per
+ * remote half, secrets and URL, so its token is kept between calls. A `DriverError` when the
+ * repository has no remote (`no_remote`: saving is publishing then, there is nothing to review a
+ * branch on) or no connector is for its host (`no_remote_half`).
  */
 export async function repositoryOf(
   remotes: ReadonlyMap<string, RemoteHalf>,
   secrets: Secrets,
-): Promise<{ source: Source; url: string; host: SourceHost }> {
-  const source = sourceOfRun();
+  source: Source = sourceOfRun(),
+): Promise<{ source: Source; url: string; repo: RepoRef; host: SourceHost }> {
   const url = await source.remoteUrl?.();
   if (!url) {
     throw new DriverError("saving is publishing: this repository has no remote", {
@@ -191,7 +192,7 @@ export async function repositoryOf(
   bySecrets.set(secrets, byUrl);
   const host = byUrl.get(url) ?? found.remote.open(found.repo, remoteContext(secrets));
   byUrl.set(url, host);
-  return { source, url, host };
+  return { source, url, repo: found.repo, host };
 }
 
 /**

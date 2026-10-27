@@ -3,7 +3,7 @@ import { appendFileSync, existsSync, lstatSync, mkdirSync, realpathSync, symlink
 import { readFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
-import { type CheckResult, type Draft, errorMessage, type Source } from "@sanoma-ai/workflows";
+import { type CheckResult, type Draft, draftBranch, draftOf, errorMessage, type Source } from "@sanoma-ai/workflows";
 import type { SanomaEvent } from "./events.ts";
 
 const run = promisify(execFile);
@@ -35,7 +35,7 @@ function draftId(id: string): string {
 }
 
 /** The branch of the draft `id`. */
-const branchOf = (id: string) => `draft/${draftId(id)}`;
+const branchOf = (id: string) => draftBranch(draftId(id));
 
 // One git write at a time in this process, whichever source makes it: two tool calls of one turn
 // may open, or commit to, one draft at once, and the worker and the app each hold a source.
@@ -130,7 +130,7 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
     follow: ({ url, token, ref }) =>
       serial(async () => {
         // A draft's branch is checked out in the draft's own checkout.
-        const id = ref.startsWith("draft/") ? ref.slice("draft/".length) : undefined;
+        const id = draftOf(ref);
         const cwd = id !== undefined && DRAFT_ID.test(id) && (await listed()).get(id) ? draftAt(id) : root;
         const gitHere = (args: string[], env?: NodeJS.ProcessEnv) => gitIn(cwd, args, env);
         const on = await gitHere(["branch", "--show-current"]);

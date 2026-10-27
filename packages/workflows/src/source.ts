@@ -28,8 +28,9 @@ export interface Source {
   /** Pushes `ref` to the repository at `url`, signed in with `token` (a draft by its `branch`). */
   push?(target: { url: string; token: string; ref: string }): void | Promise<void>;
   /**
-   * The draft `id` (letters, digits, `_` and `-`), opened: made from the checked-out revision the
-   * first time, then the same one, edits and all, until its branch is deleted.
+   * The draft `id` (letters, digits, `_` and `-`), opened on its branch (`draftBranch`): made from
+   * the checked-out revision the first time, then the same one, edits and all, until its branch is
+   * deleted.
    */
   draft?(id: string): Promise<Draft>;
   /** The open drafts' ids, sorted. */
@@ -54,6 +55,12 @@ export interface Source {
    */
   follow?(target: { url: string; token: string; ref: string }): Promise<{ revision: string } | { skipped: string }>;
 }
+
+/** The branch of the draft `id`, as a source names it: `draft/<id>`. */
+export const draftBranch = (id: string) => `draft/${id}`;
+
+/** The draft whose branch `branch` is (`draftBranch`), or undefined for a branch that is no draft's. */
+export const draftOf = (branch: string) => (branch.startsWith("draft/") ? branch.slice("draft/".length) : undefined);
 
 /**
  * A draft: a checkout of its own, at `root`, on `branch`, which `commit` records in as

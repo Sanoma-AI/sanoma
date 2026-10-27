@@ -16,7 +16,8 @@ const plain = (status: number, text: string) =>
 /**
  * Answers a webhook of `vendor`'s host: 404 when no connector's remote half of that vendor reads
  * webhooks or its secret is not stored (`no_webhook_secret`), 401 when the signature is missing or
- * wrong (`bad_signature`), else 204 once every event it carries is done (`remoteEvent`). The
+ * wrong (`bad_signature`), 400 for a signed body it cannot read (`bad_payload`), else 204 once
+ * every event it carries is done (`remoteEvent`). The
  * secret is read as the half's other credentials are: the environment's first, then the stored one.
  */
 export async function remoteWebhook(app: AppContext, vendor: string, request: Request): Promise<Response> {
@@ -30,6 +31,7 @@ export async function remoteWebhook(app: AppContext, vendor: string, request: Re
     const vendorCode = (err as { vendorCode?: string } | undefined)?.vendorCode;
     if (vendorCode === "no_webhook_secret") return plain(404, `${vendor}'s webhook secret is not stored\n`);
     if (vendorCode === "bad_signature") return plain(401, "The signature is missing or wrong\n");
+    if (vendorCode === "bad_payload") return plain(400, "The body is not one the connector reads\n");
     throw err;
   }
   for (const event of events) await app.client.remoteEvent(event, { by: BY });

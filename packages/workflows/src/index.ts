@@ -169,7 +169,9 @@ export {
 export {
   type CheckResult,
   type Draft,
+  draftBranch,
   type DraftDiff,
+  draftOf,
   type HostEnforcement,
   type PullRequest,
   type RemoteContext,

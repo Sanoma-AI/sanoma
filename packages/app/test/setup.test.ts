@@ -150,7 +150,12 @@ describe("creating the GitHub App", () => {
         statuses: "write",
       },
       default_events: ["push", "pull_request"],
-      hook_attributes: { url: `${app.url}/webhooks/github`, active: true },
+      // On this machine, which GitHub cannot reach: off.
+      hook_attributes: { url: `${app.url}/webhooks/github`, active: false },
+    });
+    expect(githubManifest("https://acme.example", "Sanoma acme").hook_attributes).toEqual({
+      url: "https://acme.example/webhooks/github",
+      active: true,
     });
     expect(html).toContain('document.getElementById("manifest").submit()');
     const line = res.headers.getSetCookie().find((l) => l.startsWith("sanoma_setup_state="))!;

@@ -30,7 +30,7 @@ import {
   type ChangeReport,
   type ChangeState,
   initialChangeState,
-  remoteContext,
+  repositoryOf,
 } from "./change.ts";
 import { DRIFT_WORKFLOW, type DriftReport } from "./drift.ts";
 import { isDirect } from "./direct.ts";
@@ -70,18 +70,10 @@ import {
   SCHEDULE_AGENT,
   WORKFLOW_ACTION,
 } from "./shared.ts";
-import { type RemoteEvent, remoteFor, type RepoRef, type Source, type SourceHost } from "./source.ts";
-
-/** The branch prefix of a draft (`draft/<id>`), as `Source.draft` names it. */
-const DRAFT_BRANCH = "draft/";
+import { draftOf, type RemoteEvent, type RepoRef, type Source } from "./source.ts";
 
 /** The company's repository on its host, for `remoteEvent`. */
-interface Repository {
-  source: Source;
-  url: string;
-  repo: RepoRef;
-  host: SourceHost;
-}
+type Repository = Awaited<ReturnType<typeof repositoryOf>>;
 
 /** Whether two references name one repository: a host's names are compared without case. */
 const sameRepo = (a: RepoRef, b: RepoRef) =>
@@ -259,8 +251,6 @@ export class SanomaClient {
   /** The operator agent's chats: their rows and their transcripts, in the config's database. */
   readonly chats: Chats;
   private readonly options: ClientOptions;
-  /** The repository on its host that `remoteEvent` opened last, by clone URL: its token is kept while it holds. */
-  private opened?: { url: string; host: SourceHost };
 
   private constructor(
     dbos: DBOSClient,
@@ -934,28 +924,31 @@ export class SanomaClient {
 
   /**
    * Does what a host's webhook says happened (`RemoteEvent`, from a remote half's `webhook`) to the
-   * company's repository, the `origin` of `ClientOptions.source`; an event of another repository,
-   * or one this client has no source for, is ignored. Idempotent: a delivery told again does nothing more.
+   * company's repository, the `origin` of `ClientOptions.source` (`repositoryOf`); an event of
+   * another repository, or with no source, is ignored. A delivery told again does nothing more.
    *
-   * - `pushed` to `main`: apply on the declared hosts (`ResolvedConfig.hosts`), as `host-check`, as
-   *   the run `deploy:<head>`; nothing with no host, nor while a change is merging or deploying,
-   *   which deploys `main` itself after its merge.
-   * - `pushed` to `draft/<id>` with the change of `id` open: the host's commits fetched into the
-   *   draft (`Source.follow` on its branch), then the change told `commits`, as `by`; nothing when
-   *   the draft or the change is at that head already (the run's own push).
-   * - `closed` for `draft/<id>` with the change open: the change told `merged` (with its merge
-   *   commit) or `closed`, as `by`. The run checks either on the host before it believes it.
+   * - `pushed` to `main`: the checkout follows `main`, then apply on the declared hosts
+   *   (`ResolvedConfig.hosts`) as `host-check`, as the run `deploy:<head>`, once per head; nothing
+   *   with no host, nor while a change is merging or deploying, which does both itself.
+   * - `pushed` to a draft's branch (`draftOf`) with its change open: the host's commits fetched into
+   *   the draft (`Source.follow` on its branch), then the change told `commits`, as `by`; nothing
+   *   when the change or the draft is at that head already (the run's own push), or when the draft
+   *   cannot fast-forward to it (warned).
+   * - `closed` for the open change's pull request: the change told `merged` (with its merge commit)
+   *   or `closed`, as `by`. The run checks either on the host before it believes it.
    */
   async remoteEvent(event: RemoteEvent, options: { by: Principal | string }): Promise<void> {
     const repository = await this.repository();
     if (!repository || !sameRepo(repository.repo, event.repo)) return;
-    if (event.kind === "pushed" && event.branch === BASE) return this.deployPush(event.head);
-    if (!event.branch.startsWith(DRAFT_BRANCH)) return;
-    const id = event.branch.slice(DRAFT_BRANCH.length);
+    if (event.kind === "pushed" && event.branch === BASE) return this.deployPush(repository, event.head);
+    const id = draftOf(event.branch);
+    if (id === undefined) return;
     const change = await this.change(id);
     if (!change || isEnded(change.status)) return;
     let told: ChangeEvent;
     if (event.kind === "closed") {
+      // A pull request of an earlier change of the draft is not this one's.
+      if (event.number !== change.state.pullRequest?.number) return;
       told = event.merged && event.sha !== undefined ? { kind: "merged", sha: event.sha } : { kind: "closed" };
     } else {
       if (change.state.head === event.head || !(await this.fetched(repository, event.branch, event.head))) return;
@@ -970,39 +963,45 @@ export class SanomaClient {
     );
   }
 
-  /** Apply on the declared hosts after a push of `head` to `main` (`remoteEvent`). */
-  private async deployPush(head: string): Promise<void> {
-    const hosts = await this.config.hosts();
-    if (!hosts.length) return;
+  /** After a push of `head` to `main` (`remoteEvent`): the checkout follows it, then apply on the declared hosts. */
+  private async deployPush({ source, url, host }: Repository, head: string): Promise<void> {
+    const runId = `deploy:${head}`;
+    if (await this.run(runId)) return;
     const open = await this.changes({ open: true, limit: 100 });
     if (open.some(({ state }) => state.phase === "merging" || state.phase === "deploying")) return;
-    await this.apply({ only: hosts }, { startedBy: HOST_CHECK_AGENT, runId: `deploy:${head}` });
+    // First, as a change's deploy does: the hosts, and what apply reads, are then main's.
+    const moved = await (async () => source.follow?.({ url, token: await host.token(), ref: BASE }))().catch(
+      (err: unknown) => ({ skipped: errorMessage(err) }),
+    );
+    if (moved && "skipped" in moved) warn(`the checkout did not follow ${BASE} before its deploy: ${moved.skipped}`);
+    const hosts = await this.config.hosts();
+    if (hosts.length) await this.apply({ only: hosts }, { startedBy: HOST_CHECK_AGENT, runId });
   }
 
   /**
    * Brings `head`, pushed to the draft's `branch` on the host, into the draft: false when it holds
-   * it already. A draft that cannot fast-forward to it is warned about, and true: the change's next
-   * push fails then, and says why.
+   * it already, or cannot take it (a commit of its own, or one uncommitted: warned).
    */
   private async fetched({ source, url, host }: Repository, branch: string, head: string): Promise<boolean> {
     const local = await Promise.resolve(source.head(branch)).catch(() => undefined);
     if (local === head) return false;
     const moved = await source.follow?.({ url, token: await host.token(), ref: branch });
-    if (moved && "skipped" in moved) warn(`${branch} could not take the host's commits: ${moved.skipped}`);
+    if (moved && "skipped" in moved) {
+      warn(`${branch} did not take the host's commits: ${moved.skipped}`);
+      return false;
+    }
     return true;
   }
 
-  /** The source's repository on its host (`remoteFor` its `origin`), opened once per URL; undefined with no source, remote or half for it. */
+  /** The repository of `ClientOptions.source` on its host (`repositoryOf`); undefined with no source, remote or half for it. */
   private async repository(): Promise<Repository | undefined> {
     const { source } = this.options;
-    const url = await source?.remoteUrl?.();
-    if (!source || url === undefined) return undefined;
-    const found = remoteFor(this.config.remotes, url);
-    if (!found) return undefined;
-    if (this.opened?.url !== url) {
-      this.opened = { url, host: found.remote.open(found.repo, remoteContext(this.storedSecrets)) };
-    }
-    return { source, url, repo: found.repo, host: this.opened.host };
+    if (!source) return undefined;
+    return repositoryOf(this.config.remotes, this.storedSecrets, source).catch((err: unknown) => {
+      const code = (err as { vendorCode?: string }).vendorCode;
+      if (code === "no_remote" || code === "no_remote_half") return undefined;
+      throw err;
+    });
   }
 
   /** The runs of the draft `id`'s change, newest first: `change:<id>` and `change:<id>~<n>`. */

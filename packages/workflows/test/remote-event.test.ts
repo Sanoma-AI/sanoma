@@ -78,22 +78,25 @@ describe("remoteEvent on a change", () => {
     await app.client.result(runId);
   });
 
-  it("ignores the run's own push, a branch that is no draft's, a draft with no change, and another repository", async () => {
+  it("ignores the run's own push, another pull request, a branch that is no draft's, a draft with no change, and another repository", async () => {
     const runId = await open("own");
-    const { head } = (await app.client.change("own"))!.state;
+    const { head, pullRequest } = (await app.client.change("own"))!.state;
     const follows = source.follows.length;
     for (const event of [
       { kind: "pushed", repo, branch: "draft/own", head: head! },
+      // An earlier change's pull request of the same draft.
+      { kind: "closed", repo, branch: "draft/own", number: pullRequest!.number + 100, merged: false },
       { kind: "pushed", repo, branch: "feature", head: sha("feature") },
       { kind: "pushed", repo, branch: "draft/none", head: sha("none") },
       { kind: "closed", repo, branch: "draft/none", number: 99, merged: false },
-      { kind: "pushed", repo: { owner: "acme", name: "other" }, branch: "draft/own", head: sha("other") },
-      // No host is declared, so a push to main applies nothing.
-      { kind: "pushed", repo, branch: "main", head: sha("main") },
+      { kind: "pushed", repo: { owner: "acme", name: "other" }, branch: "main", head: sha("other") },
     ] satisfies RemoteEvent[]) {
       await used.client.remoteEvent(event, BY);
     }
     expect(source.follows.length).toBe(follows);
+    // No host is declared: a push to main moves the checkout, and applies nothing.
+    await used.client.remoteEvent({ kind: "pushed", repo, branch: "main", head: sha("main") }, BY);
+    expect(source.follows.slice(follows)).toEqual([{ url: remote.url, token: expect.any(String), ref: "main" }]);
     expect(await app.client.runs({ workflow: "apply" }).catch(() => [])).toEqual([]);
     await app.client.decide(runId, { decision: "approve", by: { id: "alice" } });
     expect(await app.client.result(runId)).toMatchObject({ outcome: "merged" });
@@ -183,6 +186,8 @@ describe("remoteEvent on a push to main", () => {
     ]);
     const report = await app.client.applyReport(`deploy:${head}`);
     expect(report.results).toEqual([expect.objectContaining({ id: "resources/infra.ts#app", status: "done" })]);
+    // The checkout followed main first, once.
+    expect(source.follows).toEqual([{ url: remote.url, token: expect.any(String), ref: "main" }]);
   });
 
   it("leaves main to a change that is deploying it: the change applies the hosts itself", async () => {

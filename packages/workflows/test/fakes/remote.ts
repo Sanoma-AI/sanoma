@@ -5,6 +5,8 @@ import { dirname, join } from "node:path";
 import {
   type CheckResult,
   defineConnector,
+  draftBranch,
+  draftOf,
   DriverError,
   type PullRequest,
   type RemoteEvent,
@@ -206,10 +208,6 @@ export function fakeRemote({ url = "https://git.example/acme/company.git" }: { u
 
 export type FakeRemote = ReturnType<typeof fakeRemote>;
 
-/** A draft's branch, and the draft a branch is (undefined for one that is no draft's). */
-const branchOf = (id: string) => `draft/${id}`;
-const idOf = (ref: string) => (ref.startsWith("draft/") ? ref.slice("draft/".length) : undefined);
-
 /**
  * A company's repository in memory, at `root` (its live checkout, where nothing is written), its
  * `origin` the fake host's `url` (none when `remote` is not given). Each draft is a directory of
@@ -227,7 +225,7 @@ export function memorySource({ root, remote }: { root: string; remote?: FakeRemo
   const pushes: { url: string; token: string; ref: string }[] = [];
   let followed: ((ref: string) => { revision: string } | { skipped: string }) | undefined;
   const dir = mkdtempSync(join(tmpdir(), "sanoma-drafts-"));
-  const draftOf = (id: string) => {
+  const draftAt = (id: string) => {
     const draft = drafts.get(id);
     if (!draft) throw new Error(`no draft ${id}`);
     return draft;
@@ -237,24 +235,24 @@ export function memorySource({ root, remote }: { root: string; remote?: FakeRemo
     root,
     commit: () => undefined,
     head(ref = "HEAD") {
-      const id = idOf(ref);
-      if (id !== undefined) return draftOf(id).head;
+      const id = draftOf(ref);
+      if (id !== undefined) return draftAt(id).head;
       return remote?.branches.get("main") ?? sha("main");
     },
     async push(target) {
       pushes.push(target);
-      const id = idOf(target.ref);
-      if (remote && id !== undefined) remote.push(target.ref, draftOf(id).head);
+      const id = draftOf(target.ref);
+      if (remote && id !== undefined) remote.push(target.ref, draftAt(id).head);
     },
     async draft(id) {
-      const draft = draftOf(id);
-      return { branch: branchOf(id), root: draft.root, commit: () => undefined };
+      const draft = draftAt(id);
+      return { branch: draftBranch(id), root: draft.root, commit: () => undefined };
     },
     async drafts() {
       return [...drafts.keys()].toSorted();
     },
     async diff(id) {
-      const files = [...draftOf(id).files.keys()].toSorted();
+      const files = [...draftAt(id).files.keys()].toSorted();
       return { files, summary: `${files.length} files changed` };
     },
     async closeDraft(id) {
@@ -271,9 +269,9 @@ export function memorySource({ root, remote }: { root: string; remote?: FakeRemo
       const answer = followed?.(target.ref);
       if (answer) return answer;
       // A draft's branch takes the host's commits on it.
-      const id = idOf(target.ref);
+      const id = draftOf(target.ref);
       const pushed = remote?.branches.get(target.ref);
-      if (id !== undefined && pushed !== undefined) draftOf(id).head = pushed;
+      if (id !== undefined && pushed !== undefined) draftAt(id).head = pushed;
       return { revision: pushed ?? sha(target.ref) };
     },
   };

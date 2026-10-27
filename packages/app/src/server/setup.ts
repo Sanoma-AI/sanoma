@@ -6,7 +6,7 @@ import { existsSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 import { promisify } from "node:util";
-import { type CredentialStatus, errorMessage, memorySecrets, type Principal } from "@sanoma-ai/workflows";
+import { type CredentialStatus, errorMessage, isLoopback, memorySecrets, type Principal } from "@sanoma-ai/workflows";
 import { type DataValue, formatOptions, renderDataFile } from "@sanoma-ai/workflows/describe";
 import { secret as secretOf } from "@sanoma-ai/workflows/resources";
 import { mintInstanceToken, WAKEUP_TOKEN } from "@sanoma-ai/workflows/wakeup-service";
@@ -149,7 +149,10 @@ export async function mintWakeupToken(client: AppContext["client"], actor: Princ
   }
 }
 
-/** The manifest the App is created from: its OAuth callback is the login's, its webhook this app's. */
+/**
+ * The manifest the App is created from: its OAuth callback is the login's, its webhook this app's,
+ * on unless the app is on this machine, which GitHub cannot reach.
+ */
 export function githubManifest(origin: string, name: string) {
   return {
     name,
@@ -157,7 +160,7 @@ export function githubManifest(origin: string, name: string) {
     redirect_url: `${origin}${CALLBACK}`,
     callback_urls: [`${origin}/auth/github/callback`],
     // `remoteWebhook` answers it: a push deploys or plans a change again, a closed pull request ends one.
-    hook_attributes: { url: `${origin}/webhooks/github`, active: true },
+    hook_attributes: { url: `${origin}/webhooks/github`, active: !isLoopback(new URL(origin).hostname) },
     public: false,
     default_permissions: {
       administration: "write",
