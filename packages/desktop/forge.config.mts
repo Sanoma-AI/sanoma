@@ -1,5 +1,5 @@
 // Electron Forge, from its Vite + TypeScript template. `make` builds the app for this platform's
-// arm64 and x64 into out/make (a dmg and a zip on macOS, a Squirrel installer and a zip on Windows);
+// arm64 and x64 into out/make (a dmg and a zip on macOS; on Windows, once the shell runs there (#419), a Squirrel installer and a zip);
 // desktop-release.yml uploads them to a draft GitHub Release. `package` builds it, unpacked, into out/.
 import { cpSync } from "node:fs";
 import { join } from "node:path";
@@ -18,7 +18,7 @@ const config: ForgeConfig = {
     asar: true,
     // stage/ is filled by scripts/stage.ts: pnpm, the same for every architecture, goes in here;
     // the pinned Node goes in per architecture (`packageAfterCopy`).
-    extraResource: ["stage/pnpm"],
+    extraResource: [join(import.meta.dirname, "stage", "pnpm")],
     extendInfo: {
       // The Node it ships needs macOS 13.5; Electron alone would open on 13.0.
       LSMinimumSystemVersion: "13.5",
