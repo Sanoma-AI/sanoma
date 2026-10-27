@@ -125,7 +125,7 @@ describe("the change workflow", () => {
       head,
       pullRequest: { number: pr.number, url: pr.url },
       sha,
-      deploy: { followed: sha },
+      deploy: { follow: { revision: sha } },
     });
     expect(remote.merges).toEqual([
       { number: pr.number, sha: head, method: "squash", title: `Tighten the rules (#${pr.number})` },
@@ -303,6 +303,21 @@ describe("the change workflow", () => {
     await app.client.result(runId);
   });
 
+  it("reports failing checks on the host, and still asks Publish", async () => {
+    const head = repo.edit("unchecked", { "notes/unchecked.md": "\n" });
+    repo.checks("unchecked", { ok: false, problems: [], warnings: [] });
+    const runId = await open("unchecked");
+    await waitFor(pending(() => app.client, runId));
+    expect((await app.client.change("unchecked"))!.state.facts).toMatchObject({ checksOk: false });
+    expect(remote.statuses.at(-1)).toMatchObject({
+      sha: head,
+      state: "failure",
+      description: expect.stringMatching(/^sanoma check fails\. /),
+    });
+    await app.client.changeEvent("unchecked", { kind: "close", by: "alice" }, { by: "alice" });
+    await app.client.result(runId);
+  });
+
   it("refuses to open a change of a draft that is not there", async () => {
     const runId = await open("nothing");
     await expect(app.client.result(runId)).rejects.toThrow('There is no open draft "nothing"');
@@ -364,14 +379,13 @@ describe("the change workflow's deploy on a declared host", () => {
     const hostId = "resources/infra.ts#app";
     expect(report).toMatchObject({
       outcome: "merged",
-      deploy: { runId: `${runId}:deploy`, hosts: [hostId] },
+      deploy: { follow: { revision: expect.any(String) }, apply: { runId: `${runId}:deploy`, hosts: [hostId] } },
       verified: { runId: `${runId}:verify`, drifted: [] },
     });
-    expect(report.deploy).not.toHaveProperty("error");
+    expect(report.deploy!.apply).not.toHaveProperty("error");
     const applied = await app.client.applyReport(`${runId}:deploy`);
     expect(applied.results).toEqual([expect.objectContaining({ id: hostId, status: "done" })]);
     // The checkout follows main first, so the hosts applied are the merged ones.
     expect(repo.follows).toEqual([{ url: remote.url, token: expect.any(String), ref: "main" }]);
-    expect(report.deploy).toMatchObject({ followed: expect.any(String) });
   });
 });

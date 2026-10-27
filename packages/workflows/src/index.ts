@@ -82,7 +82,6 @@ export {
   type ChangeDecision,
   type ChangeDeploy,
   type ChangeEvent,
-  ChangeEventSchema,
   ChangeFacts,
   ChangeInput,
   changeOps,
@@ -92,7 +91,6 @@ export {
   runtimeHold,
   touchesOf,
 } from "./change.ts";
-export { CHANGE_WORKFLOW, type ChangeSteps, changeWorkflow } from "./change-workflow.ts";
 export { isDirect } from "./direct.ts";
 export {
   DRIFT_WORKFLOW,
@@ -228,6 +226,7 @@ export {
   CHANGE_OPEN,
   CHANGE_REVIEW,
   CHANGE_TOPIC,
+  CHANGE_WORKFLOW,
   declaresPeople,
   type PeopleResource,
   personOf,

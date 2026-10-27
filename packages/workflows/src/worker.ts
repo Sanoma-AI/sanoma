@@ -144,8 +144,12 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     secrets: storedSecrets(() => secrets.db(), "sanoma"),
     workflows: resolved.workflows,
     outlines: new Map([...resolved.workflows].map(([name, wf]) => [name, outlineOf(wf)])),
-    // Filled below, before any run starts: every name of this config's is registered then.
-    registered: registered as unknown as ReadonlyMap<string, (args: RunArgs) => Promise<unknown>>,
+    // `registered` is filled below, before any run starts: every name of this config's is registered then.
+    startRun: async (name, runId, args) => {
+      const fn = registered.get(name) as unknown as ((args: RunArgs) => Promise<unknown>) | undefined;
+      if (!fn) throw new Error(`The worker has no workflow "${name}" to start`);
+      return DBOS.startWorkflow(fn, { workflowID: runId })(args);
+    },
     stopped: false,
     deadlines: deadlineRegistry(),
   };

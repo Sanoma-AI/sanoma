@@ -9,13 +9,11 @@ import type {
   changeOps,
   MergeInput,
 } from "./change.ts";
-import { ChangeInput } from "./change.ts";
+import { ADMIN, ChangeInput, initialChangeState } from "./change.ts";
 import { defineWorkflow, type WorkflowDefinition } from "./define.ts";
 import { errorCode, isRunControlError, type SanomaError } from "./errors.ts";
-import { type CHANGE_WORKFLOW, errorMessage } from "./shared.ts";
+import { approverLabel, type CHANGE_WORKFLOW, errorMessage } from "./shared.ts";
 import type { CheckResult } from "./source.ts";
-
-export { CHANGE_WORKFLOW } from "./shared.ts";
 
 // The built-in `change` workflow: the life of a change to the company's repository, from its
 // draft to live. It opens the draft's branch as a pull request, checks and plans it, asks the
@@ -39,8 +37,8 @@ export interface ChangeSteps {
   retire(reason: string): Promise<void>;
   /** After the merge: the checkout follows `main`, then apply on the declared hosts, as a run of its own this one waits for. */
   deploy(sha: string): Promise<ChangeDeploy>;
-  /** The pull request as the host has it: merged or closed, else undefined while it is open. */
-  settled(number: number): Promise<ChangeEvent | undefined>;
+  /** What the host says became of the pull request: merged or closed, else (still open) `commits`, to plan again. */
+  settled(number: number): Promise<ChangeEvent>;
   /** After an apply on the hosts: drift on them, as a run of its own; undefined with no host. */
   verify(deploy: ChangeDeploy): Promise<ChangeVerified | undefined>;
   /** Closes the draft the change merged. */
@@ -55,19 +53,15 @@ type ChangeUse = (typeof changeOps.change)[keyof typeof changeOps.change] | "app
 /** The approval Publish is: the Inbox's title for it. */
 const PUBLISH = "Publish the change";
 
-/** The review card, which this version does not write. */
-const NO_CARD = { status: "unavailable", reason: "This version writes no review card on the host" } as const;
-
-/** The `sanoma` status's state on the host: pending while it can merge, failure while checks fail or the policy denies. */
-const reviewState = (decision: ChangeDecision, facts: ChangeFacts) =>
-  decision.answer === "deny" || !facts.checksOk ? ("failure" as const) : ("pending" as const);
-
-/** The `sanoma` status's description: what the change waits for. */
-function reviewOf(decision: ChangeDecision, facts: ChangeFacts): string {
-  if (decision.answer === "deny") return `Denied: ${decision.reason ?? "the policy refuses it"}`;
-  const who = typeof decision.approver === "string" ? decision.approver : `${decision.approver?.group ?? "admin"}`;
-  const checks = facts.checksOk ? "" : "sanoma check fails. ";
-  return `${checks}${decision.title ?? `Waits for ${who} to publish it`}`;
+/** The `sanoma` status on the host: pending while it can merge, failure while checks fail or the policy denies; and what it waits for. */
+function reviewOf(decision: ChangeDecision, facts: ChangeFacts): { state: "pending" | "failure"; description: string } {
+  if (decision.answer === "deny") {
+    return { state: "failure", description: `Denied: ${decision.reason ?? "the policy refuses it"}` };
+  }
+  const waits = decision.title ?? `Waits for ${approverLabel(decision.approver ?? { group: ADMIN })} to publish it`;
+  return facts.checksOk
+    ? { state: "pending", description: waits }
+    : { state: "failure", description: `sanoma check fails. ${waits}` };
 }
 
 /**
@@ -105,71 +99,47 @@ export function changeWorkflow(
     input: ChangeInput,
     uses: [ops.change.open, ops.change.review, ops.change.merge, ops.change.close, "approval"],
     run: async (ctx, input) => {
-      const state: ChangeState = {
-        id: input.id,
-        branch: "",
-        title: input.title,
-        ...(input.page !== undefined && { page: input.page }),
-        phase: "opening",
-        card: NO_CARD,
+      const state = initialChangeState(input);
+      /** Moves the change on, and publishes where it is. */
+      const show = (patch: Partial<ChangeState>) => {
+        Object.assign(state, patch);
+        return steps.publish(state);
       };
       let report: ChangeReport | undefined;
       while (report === undefined) {
         // An approval is given for a head: one approved for an earlier round lifts no hold on this one.
         await steps.retire("the change was planned again at a new head");
-        Object.assign(state, { phase: "opening", decision: undefined, blocked: undefined });
-        await steps.publish(state);
+        await show({ phase: "opening", decision: undefined, blocked: undefined });
         const opened = await ctx.sanoma.change.open(input);
         const pullRequest = { number: opened.number, url: opened.url };
-        Object.assign(state, { branch: opened.branch, pullRequest, head: opened.head, phase: "checking" });
-        await steps.publish(state);
+        await show({ branch: opened.branch, pullRequest, head: opened.head, phase: "checking" });
         const check = await steps.check(input.id);
-        Object.assign(state, { check, phase: "planning" });
-        await steps.publish(state);
+        await show({ check, phase: "planning" });
         const facts = await steps.plan(input.id, check);
         const merge = { id: input.id, number: opened.number, head: opened.head, title: input.title, facts };
         const decision = await steps.ahead(merge);
-        Object.assign(state, { facts, decision, phase: "reviewing" });
-        await steps.publish(state);
+        await show({ facts, decision, phase: "reviewing" });
         await ctx.sanoma.change.review({
           id: input.id,
           number: opened.number,
           head: opened.head,
-          state: reviewState(decision, facts),
-          description: reviewOf(decision, facts),
+          ...reviewOf(decision, facts),
           ...(input.page !== undefined && { page: input.page }),
         });
         // What came in while the round was planned decides it before any approval is asked.
         let told = await steps.queued();
         let event: ChangeEvent | undefined;
-        if (told === undefined && decision.answer === "deny") {
-          Object.assign(state, { phase: "blocked", blocked: decision.reason });
-          await steps.publish(state);
-          told = await steps.next();
-        } else if (told === undefined) {
-          let approved = false;
+        let blocked = told === undefined && decision.answer === "deny" ? decision.reason : undefined;
+        if (told === undefined && blocked === undefined) {
           try {
-            Object.assign(state, { phase: "waiting" });
-            await steps.publish(state);
+            await show({ phase: "waiting" });
             await ctx.approval(PUBLISH, {
               approver: decision.approver!,
               covers: [ops.change.merge],
               details: JSON.stringify({ change: { id: input.id, title: input.title, branch: opened.branch }, facts }),
               links: [opened.url, ...(input.page === undefined ? [] : [input.page])],
             });
-            approved = true;
-          } catch (err) {
-            // A withdrawal comes with an event, else Publish was taken back. A rejection of Publish closes the change.
-            const code = errorCode(err);
-            if (code === "approval_withdrawn") told = await steps.queued();
-            else if (code === "approval_rejected") {
-              event = { kind: "close", by: ((err as SanomaError).data.by as { id: string }).id };
-            } else throw err;
-          }
-          let blocked = told === undefined && event === undefined && !approved ? "Publish was withdrawn" : undefined;
-          if (approved) {
-            Object.assign(state, { phase: "merging" });
-            await steps.publish(state);
+            await show({ phase: "merging" });
             let merged: Awaited<ReturnType<typeof ctx.sanoma.change.merge>>;
             try {
               merged = await ctx.sanoma.change.merge(merge);
@@ -182,43 +152,42 @@ export function changeWorkflow(
             else if (merged.outcome === "closed") event = { kind: "closed" };
             else if (merged.outcome === "moved") event = { kind: "commits" };
             else blocked = merged.reason ?? "the host refuses the merge";
-          }
-          if (blocked !== undefined) {
-            Object.assign(state, { phase: "blocked", blocked });
-            await steps.publish(state);
-            told = await steps.next();
+          } catch (err) {
+            // A withdrawal comes with an event, else Publish was taken back. A rejection of Publish closes the change.
+            const code = errorCode(err);
+            if (code === "approval_withdrawn") {
+              told = await steps.queued();
+              if (told === undefined) blocked = "Publish was withdrawn";
+            } else if (code === "approval_rejected") {
+              event = { kind: "close", by: ((err as SanomaError).data.by as { id: string }).id };
+            } else throw err;
           }
         }
+        if (blocked !== undefined) {
+          await show({ phase: "blocked", blocked });
+          told = await steps.next();
+        }
         // An event someone told is checked on the host: a pull request merged or closed only as it says.
-        if (told?.kind === "merged" || told?.kind === "closed")
-          told = (await steps.settled(opened.number)) ?? { kind: "commits" };
+        if (told?.kind === "merged" || told?.kind === "closed") told = await steps.settled(opened.number);
         event ??= told!;
         if (event.kind === "merged") {
-          Object.assign(state, { phase: "deploying" });
-          await steps.publish(state);
+          await show({ phase: "deploying" });
           const deploy = await steps.deploy(event.sha);
           const verified = await steps.verify(deploy);
           await steps.closeDraft(input.id);
-          const at = await ctx.now();
-          const done = { sha: event.sha, at, deploy, ...(verified && { verified }) };
-          Object.assign(state, { phase: "merged", merged: done });
-          await steps.publish(state);
+          const merged = { sha: event.sha, at: await ctx.now(), deploy, ...(verified && { verified }) };
+          await show({ phase: "merged", merged });
           report = {
             outcome: "merged",
             head: opened.head,
             pullRequest,
-            sha: event.sha,
+            sha: merged.sha,
             deploy,
             ...(verified && { verified }),
           };
-        } else if (event.kind === "close") {
-          await ctx.sanoma.change.close({ id: input.id, number: opened.number });
-          Object.assign(state, { phase: "closed", closedBy: event.by });
-          await steps.publish(state);
-          report = { outcome: "closed", head: opened.head, pullRequest };
-        } else if (event.kind === "closed") {
-          Object.assign(state, { phase: "closed" });
-          await steps.publish(state);
+        } else if (event.kind !== "commits") {
+          if (event.kind === "close") await ctx.sanoma.change.close({ id: input.id, number: opened.number });
+          await show({ phase: "closed", ...(event.kind === "close" && { closedBy: event.by }) });
           report = { outcome: "closed", head: opened.head, pullRequest };
         }
       }

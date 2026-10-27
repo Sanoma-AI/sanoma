@@ -343,7 +343,8 @@ export function resolveConfig(config: SanomaConfig, options: ResolveOptions = {}
   // Built-in: checking the resources the data files declare against their vendors, and applying them.
   const connectors = connectorsOf(config);
   // The types the data files may declare: the vendors' and the people's, whose resources are left out.
-  const read = () => readDeclared(root, connectors, resourceTypesOf(connectors), types);
+  const declarable = resourceTypesOf(connectors);
+  const read = () => readDeclared(root, connectors, declarable, types);
   if (types.size) {
     names.set(
       DRIFT_WORKFLOW,

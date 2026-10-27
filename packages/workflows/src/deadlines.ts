@@ -18,11 +18,7 @@ import type { WakeupRegistration } from "./wakeup.ts";
  * What a run blocked in a wait waits for: a sleep, until its deadline; or, with no deadline, an
  * approval's decision, a message (a change run's `ChangeEvent`), or another run it started.
  */
-export type Wait =
-  | { kind: "sleep"; until: number }
-  | { kind: "approval" }
-  | { kind: "message" }
-  | { kind: "run"; id: string };
+export type Wait = { kind: "sleep"; until: number } | { kind: "approval" | "message" | "run" };
 
 /** A deadline besides the sleeping runs', such as a schedule's next fire; undefined for none. */
 export type DeadlineSource = () => Date | undefined;

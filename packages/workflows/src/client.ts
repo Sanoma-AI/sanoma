@@ -28,6 +28,7 @@ import {
   ChangeInput,
   type ChangeReport,
   type ChangeState,
+  initialChangeState,
 } from "./change.ts";
 import { DRIFT_WORKFLOW, type DriftReport } from "./drift.ts";
 import { isDirect } from "./direct.ts";
@@ -824,20 +825,17 @@ export class SanomaClient {
 
   /** The changes, newest first: `open` ones (not ended) or the others, else all; at most `limit` (20). */
   async changes({ open, limit = 20 }: ChangesFilter = {}): Promise<ChangeView[]> {
-    const rows = await firstMatching(
-      (page) =>
-        this.dbos.listWorkflows({
-          ...page,
-          workflowName: CHANGE_WORKFLOW,
-          applicationName: this.config.appName,
-          sortDesc: true,
-          loadInput: true,
-          loadOutput: true,
-        }),
-      (row) => open === undefined || open !== isEnded(runStatus(row.status, [])),
+    const rows = await this.dbos.listWorkflows({
+      workflowName: CHANGE_WORKFLOW,
+      applicationName: this.config.appName,
+      ...(open !== undefined && {
+        status: open ? dbosStatusesOf("running") : dbosStatusesOf("finished", "failed", "cancelled"),
+      }),
+      sortDesc: true,
       limit,
-      Math.max(limit * 2, 50),
-    );
+      loadInput: true,
+      loadOutput: true,
+    });
     return Promise.all(rows.map((row) => this.changeView(row)));
   }
 
@@ -881,7 +879,7 @@ export class SanomaClient {
     this.options.onWrite?.();
     await this.dbos.send(runId, told, CHANGE_TOPIC);
     if (held && refusal === undefined) {
-      await this.withdraw(runId, held.id, withdrawalOf(told), { by, timeoutSeconds: 5 }).catch((err: unknown) => {
+      await this.withdraw(runId, held.id, WITHDRAWAL[told.kind], { by, timeoutSeconds: 5 }).catch((err: unknown) => {
         // Decided or ended meanwhile: the run reads the event when it next waits, if it does.
         if (!["already_decided", "run_ended", "no_pending_approval"].includes(errorCode(err) ?? "")) throw err;
       });
@@ -899,7 +897,7 @@ export class SanomaClient {
       loadInput: load,
       loadOutput: load,
     });
-    return rows.filter((r) => r.workflowID === base || r.workflowID.startsWith(`${base}~`));
+    return rows.filter((r) => isChangeRunOf(id, r.workflowID));
   }
 
   /** A change run's row as the app shows it: its summary, its last `ChangeState` and, once finished, its report. */
@@ -908,15 +906,8 @@ export class SanomaClient {
       this.summarize(row),
       this.dbos.getEvent<ChangeState>(row.workflowID, CHANGE_EVENT, 0),
     ]);
-    const input = ((row.input as [RunArgs?] | undefined)?.[0]?.input ?? {}) as Partial<ChangeInput>;
-    const state: ChangeState = published ?? {
-      id: input.id ?? row.workflowID.replace(/^change:/, "").replace(/~\d+$/, ""),
-      branch: "",
-      title: input.title ?? "",
-      ...(input.page !== undefined && { page: input.page }),
-      phase: "opening",
-      card: { status: "unavailable", reason: "This version writes no review card on the host" },
-    };
+    const input = (row.input as [RunArgs])[0].input as ChangeInput;
+    const state = published ?? initialChangeState(input);
     const { runId, status, startedBy, approvals } = summary;
     return {
       runId,
@@ -1212,12 +1203,12 @@ const isChangeRunOf = (id: string, runId: string | undefined) => {
 };
 
 /** Why a change event withdraws the merge's pending approval. */
-const withdrawalOf = (event: ChangeEvent): string =>
-  event.kind === "commits"
-    ? "The change has new commits"
-    : event.kind === "close"
-      ? "The change is being closed"
-      : `The pull request was ${event.kind} on the host`;
+const WITHDRAWAL: Record<ChangeEvent["kind"], string> = {
+  commits: "The change has new commits",
+  close: "The change is being closed",
+  closed: "The pull request was closed on the host",
+  merged: "The pull request was merged on the host",
+};
 
 const notApprover = (runId: string, a: ApprovalState, reason: string) =>
   new SanomaError("not_approver", `${reason} (${a.id})`, { runId, approvalId: a.id, approver: a.approver, reason });

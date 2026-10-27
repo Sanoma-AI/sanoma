@@ -1,11 +1,19 @@
 import { z } from "zod";
 import type { ApprovalState, Approver } from "./define.ts";
+import { errorInfo } from "./errors.ts";
 import { type CallContext, defineConnector, defineDriver, type Driver, DriverError } from "./op.ts";
 import { approve, approvedFor, type Decision, deny } from "./policy.ts";
 import { isChangeOp, type Resource } from "./resource.ts";
 import { currentRun } from "./run.ts";
 import type { Secrets } from "./secret.ts";
-import { APPLY_WORKFLOW, CHANGE_MERGE, CHANGE_WORKFLOW, groupNamesOf, type PeopleResource } from "./shared.ts";
+import {
+  APPLY_WORKFLOW,
+  CHANGE_MERGE,
+  CHANGE_WORKFLOW,
+  errorMessage,
+  groupNamesOf,
+  type PeopleResource,
+} from "./shared.ts";
 import {
   type CheckResult,
   type RemoteContext,
@@ -127,33 +135,41 @@ export function reservedFor(
 /** The branch a change merges into. */
 const BASE = "main";
 
-/** Who reads the company's credentials for a host: the environment's first, then the stored ones, as a login half does. */
-export const remoteContext = (secrets: Secrets): RemoteContext => ({
+/** The company's credentials for a host, as its remote half asks for them (`Secrets` puts the environment first). */
+const remoteContext = (secrets: Secrets): RemoteContext => ({
   async secrets(names) {
-    const found = await Promise.all(
-      names.map(async (name) => [name, process.env[name] || (await secrets.get(name))] as const),
-    );
+    const found = await Promise.all(names.map(async (name) => [name, await secrets.get(name)] as const));
     return new Map(found.filter((entry): entry is readonly [string, string] => Boolean(entry[1])));
   },
 });
 
-/**
- * The worker's repository and its host, for a call made in a run (a change's driver and its
- * steps): the source the worker was given, the clone URL of its `origin` and that repository on
- * the host whose connector's remote half matches the URL, opened once for the call so its token
- * is minted once. A `DriverError` when the worker has no source, when the repository has no remote
- * (saving is publishing then: there is nothing to review a branch on) or no connector is for its host.
- */
-export async function repositoryOf(
-  remotes: ReadonlyMap<string, RemoteHalf>,
-  secrets: Secrets,
-): Promise<{ source: Source; url: string; host: SourceHost }> {
+/** The worker's repository, read from the run; a `DriverError` outside one, or for a worker given none. */
+export function sourceOfRun(): Source {
   const source = currentRun.getStore()?.state.source;
   if (!source) {
     throw new DriverError("This worker was given no repository (`source`), so it cannot change one", {
       retryable: false,
     });
   }
+  return source;
+}
+
+/** Each host opened, by its remote half, the secrets it reads and the clone URL: its token is minted once and kept while it holds. */
+const openedHosts = new WeakMap<RemoteHalf, WeakMap<Secrets, Map<string, SourceHost>>>();
+
+/**
+ * The worker's repository and its host, for a call made in a run (a change's driver and its
+ * steps): the source the worker was given (`sourceOfRun`), the clone URL of its `origin` and that
+ * repository on the host whose connector's remote half matches the URL, opened once per remote
+ * half, secrets and URL, so its token is kept between calls. A `DriverError` when the repository
+ * has no remote (saving is publishing then: there is nothing to review a branch on) or no
+ * connector is for its host.
+ */
+export async function repositoryOf(
+  remotes: ReadonlyMap<string, RemoteHalf>,
+  secrets: Secrets,
+): Promise<{ source: Source; url: string; host: SourceHost }> {
+  const source = sourceOfRun();
   const url = await source.remoteUrl?.();
   if (!url) {
     throw new DriverError("saving is publishing: this repository has no remote", {
@@ -168,16 +184,19 @@ export async function repositoryOf(
       vendorCode: "no_remote_half",
     });
   }
-  return { source, url, host: found.remote.open(found.repo, remoteContext(secrets)) };
+  const bySecrets = openedHosts.get(found.remote) ?? new WeakMap<Secrets, Map<string, SourceHost>>();
+  openedHosts.set(found.remote, bySecrets);
+  const byUrl = bySecrets.get(secrets) ?? new Map<string, SourceHost>();
+  bySecrets.set(secrets, byUrl);
+  const host = byUrl.get(url) ?? found.remote.open(found.repo, remoteContext(secrets));
+  byUrl.set(url, host);
+  return { source, url, host };
 }
-
-/** The `DriverError` code a host gave, read by property: the error may come from another copy of the package. */
-const vendorCodeOf = (err: unknown) => (err as { vendorCode?: unknown } | null)?.vendorCode;
 
 /**
  * The driver of a change's operations, over the repository the worker was given (`source`, read
  * from the run) and its host (`remotes`, the connectors' remote halves: `remoteFor` its
- * `origin`). Each call opens the host once, so its token is minted once.
+ * `origin`, opened once and kept: `repositoryOf`).
  *
  * - `open` pushes the draft's branch and opens its pull request into `main` (the open one when it
  *   has one): safe to retry. Its `head` is the branch's commit as pushed.
@@ -235,11 +254,11 @@ export function changeDriver(remotes: ReadonlyMap<string, RemoteHalf>): Driver {
           }));
         } catch (err) {
           // Not merged: Sanoma's status on the head goes back to failing, so the host does not merge it either.
-          const reason = (err as Error).message;
+          const reason = errorMessage(err);
           await host
             .setStatus({ sha: head, state: "failure", description: `Not published: ${reason}`.slice(0, 140) })
             .catch(() => undefined);
-          const code = vendorCodeOf(err);
+          const { vendorCode: code } = errorInfo(err);
           if (code === "head_moved") return { outcome: "moved" as const };
           if (code === "not_mergeable") return { outcome: "blocked" as const, reason };
           throw err;
@@ -276,7 +295,7 @@ export const ADMIN = "admin";
  * Whether a path in `touches` is the rules whatever `rules` says: the policies, the root's or an
  * app's (`apps/crm/policies/`), and the template's people file.
  */
-const isRules = (path: string) =>
+export const isRules = (path: string) =>
   path === "policies/" || path === "resources/people.ts" || /^apps\/[^/]+\/policies\/$/.test(path);
 /** The runtime rule's id, as a hold's `reasons` name it. */
 const RULES_WAIT_FOR_ADMIN = "sanoma:rules-wait-for-admin";
@@ -314,19 +333,13 @@ export function runtimeHold(
  * What a change run is told (on `CHANGE_TOPIC`): new commits on its branch, a close someone asked
  * for, or its pull request closed or merged on the host.
  */
-export type ChangeEvent =
-  | { kind: "commits" }
-  | { kind: "close"; by: string }
-  | { kind: "closed" }
-  | { kind: "merged"; sha: string };
-
-/** A `ChangeEvent`, as a run reads one off its topic. */
-export const ChangeEventSchema: z.ZodType<ChangeEvent> = z.discriminatedUnion("kind", [
+export const ChangeEventSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("commits") }),
   z.object({ kind: z.literal("close"), by: z.string().min(1) }),
   z.object({ kind: z.literal("closed") }),
   z.object({ kind: z.literal("merged"), sha: z.string().min(1) }),
 ]);
+export type ChangeEvent = z.infer<typeof ChangeEventSchema>;
 
 /** What a merge is asked with: the change, its pull request at the head planned, and the facts. */
 export type MergeInput = z.input<typeof changeOps.change.merge.input>;
@@ -338,16 +351,14 @@ export type MergeInput = z.input<typeof changeOps.change.merge.input>;
  */
 export type ChangeDecision = NonNullable<ChangeState["decision"]>;
 
-/** What became of the deploy after a merge: the apply run started on the declared hosts, or the laptop's `main` fast-forwarded (`followed`) or not (`skipped`, why). */
+/**
+ * What became of the deploy after a merge: the checkout fast-forwarded to `main` (`follow`: the
+ * revision, why not, or its error), then the apply run on the declared hosts, when any.
+ */
 export interface ChangeDeploy {
-  /** The apply run started on the hosts, and its error when it failed. */
-  runId?: string;
-  error?: string;
-  /** The declared hosts' ids (`<file>#<export>`) the apply run was restricted to. */
-  hosts?: string[];
-  /** The revision the checkout was fast-forwarded to, with no host declared. */
-  followed?: string;
-  skipped?: string;
+  follow: { revision: string } | { skipped: string } | { error: string };
+  /** The apply run, restricted to the declared hosts' ids (`<file>#<export>`), and its error when it failed. */
+  apply?: { runId: string; hosts: string[]; error?: string };
 }
 
 /** The drift run that read the hosts back after their apply, and the hosts it found not as declared. */
@@ -393,6 +404,19 @@ export interface ChangeState {
   /** Who closed it, when someone asked (a `close` event, or a rejection of the Publish approval). */
   closedBy?: string;
 }
+
+/** The review card on the host, which this version does not write. */
+export const NO_CARD = { status: "unavailable", reason: "This version writes no review card on the host" } as const;
+
+/** Where a change is before its run has opened it. */
+export const initialChangeState = (input: ChangeInput): ChangeState => ({
+  id: input.id,
+  branch: "",
+  title: input.title,
+  ...(input.page !== undefined && { page: input.page }),
+  phase: "opening",
+  card: NO_CARD,
+});
 
 /** How a change run ended. */
 export interface ChangeReport {
