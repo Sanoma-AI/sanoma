@@ -880,6 +880,10 @@ describe("the page", () => {
       /<span[^>]*><span[^>]*>Workflows<\/span><\/span><textarea(?![^>]*disabled="")[^>]*aria-label="Message the agent"/,
     );
     expect(column).toMatch(/<button[^>]*disabled=""[^>]*aria-label="Send"/);
+    // No connector gives a model: the composer says where to add one (chat.test.ts has the rest).
+    expect(column?.replaceAll("<!-- -->", "")).toMatch(
+      /Connect a model to start: <a[^>]*href="\/connectors\?add=%40sanoma-ai%2Fconnector-anthropic"[^>]*>add the Anthropic connector<\/a>\./,
+    );
     // A new chat's engine, chosen in the composer: our loop first, a person's own agents last.
     const engines = column?.match(/<select[^>]*aria-label="Engine"[^>]*>([\s\S]*?)<\/select>/)?.[1] ?? "";
     expect([...engines.matchAll(/<option[^>]*>([^<]*)<\/option>/g)].map((option) => option[1])).toEqual([

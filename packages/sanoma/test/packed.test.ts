@@ -18,6 +18,8 @@ const env = {
   SANOMA_DATABASE_URL: testDatabaseUrl("sanoma-packed"),
   SANOMA_APP_PORT: "0",
   SANOMA_DEV_REPO: "",
+  // The chat's model has no key: none from the shell.
+  ANTHROPIC_API_KEY: "",
   // A chat's draft commits as someone.
   ...gitIdentity(),
 };
@@ -37,7 +39,12 @@ const files: Record<string, string> = {
     private: true,
     type: "module",
     // A Tailwind plugin, whose peer is `tailwindcss`: the company installs no Tailwind of its own.
-    dependencies: { sanoma: "file:vendor/sanoma.tgz", "@tailwindcss/typography": "0.5.20" },
+    // And the template's model connector, as a new company installs it.
+    dependencies: {
+      sanoma: "file:vendor/sanoma.tgz",
+      "@sanoma-ai/connector-anthropic": "file:vendor/connector-anthropic.tgz",
+      "@tailwindcss/typography": "0.5.20",
+    },
     // The checkout's pnpm, whose pnpm-workspace.yaml overrides (and "-") these rely on.
     packageManager: JSON.parse(readFileSync(join(checkout, "package.json"), "utf8")).packageManager,
   }),
@@ -58,6 +65,10 @@ const files: Record<string, string> = {
       ),
     },
   }),
+  // The template's model connector: the chat's model, its key not set yet.
+  "sanoma.config.ts": readFileSync(join(fixture, "sanoma.config.ts"), "utf8")
+    .replace("import hello", 'import { anthropic } from "@sanoma-ai/connector-anthropic";\nimport hello')
+    .replace("connectors: []", "connectors: [anthropic]"),
   // The site's stylesheet with a plugin, as the README's recipe has it.
   "sites/hello/style.css": `${readFileSync(join(fixture, "sites/hello/style.css"), "utf8")}@plugin "@tailwindcss/typography";\n`,
   // Imported by the Sites panel on every page.
@@ -92,13 +103,14 @@ describe("sanoma from packed tarballs: the dev server", () => {
     for (const [path, text] of Object.entries(files)) writeFileSync(join(dir, path), text);
     mkdirSync(join(dir, "vendor"));
     // Built above: prepack's clean and build would only repeat it. A failure's error carries pnpm's message.
-    await Promise.all(
-      ["sanoma", ...workspace].map((pkg) =>
-        run("pnpm", ["pack", "--config.ignore-scripts=true", "--out", join(dir, "vendor", `${pkg}.tgz`)], {
-          cwd: join(checkout, "packages", pkg),
-        }),
-      ),
-    );
+    const pack = (from: string, name: string) =>
+      run("pnpm", ["pack", "--config.ignore-scripts=true", "--out", join(dir, "vendor", `${name}.tgz`)], {
+        cwd: join(checkout, from),
+      });
+    await Promise.all([
+      ...["sanoma", ...workspace].map((pkg) => pack(join("packages", pkg), pkg)),
+      pack("connectors/anthropic", "connector-anthropic"),
+    ]);
     // No lockfile to freeze (CI sets it by default).
     await run("pnpm", ["install", "--prefer-offline", "--no-frozen-lockfile"], { cwd: dir });
     // pnpm's hidden hoist, where Node would find the plugin's peer by chance: without it, nowhere.
@@ -133,6 +145,17 @@ describe("sanoma from packed tarballs: the dev server", () => {
     expect(post).toContain("<h3>The first post</h3>");
     expect(post).toContain("Read from <strong>content/posts/hello.md</strong>.");
     expect(stderr()).not.toContain("ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING");
+  }, 60_000);
+
+  it("starts the chat saying to connect a model, linking to the Anthropic connector's page, until its key is set", async () => {
+    const { url } = server!;
+    const html = (await (await fetch(`${url}/workflows`)).text()).replaceAll("<!-- -->", "");
+    expect(html, stderr()).toMatch(
+      /Connect a model to start: <a[^>]*href="\/connectors\/anthropic"[^>]*>set its key on the Anthropic connector page<\/a>/,
+    );
+    const page = await fetch(`${url}/connectors/anthropic`);
+    expect(page.status, stderr()).toBe(200);
+    expect(await page.text()).toContain("<code>ANTHROPIC_API_KEY</code>");
   }, 60_000);
 
   it("builds a site's stylesheet whose @plugin imports tailwindcss/plugin, from the app's Tailwind", async () => {

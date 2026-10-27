@@ -11,7 +11,7 @@ import {
   ToolLoopAgent,
 } from "ai";
 import { noKeyText } from "../../lib/chat.ts";
-import { modelRegistry } from "../models.ts";
+import { modelRegistry, modelVendor } from "../models.ts";
 import { instructions } from "./prompt.ts";
 import { type LoopTools, loopTools } from "./tools.ts";
 import { chatResponse, type EngineTurn } from "./transcript.ts";
@@ -45,10 +45,11 @@ const loopAgent = (model: LanguageModel, system: string, tools: LoopTools) =>
 
 /** The loop's engine: a turn of `chat` as a UI message stream, its transcript written as it goes. */
 export async function run({ chat, messages, principal, app, signal }: EngineTurn): Promise<Response> {
-  const vendor = [...app.resolved.models.keys()][0];
+  // `postChat` refuses a turn of the loop (`onModelConnector`) while no connector gives a model (`chatModel`).
+  const vendor = modelVendor(app)!;
   /** What the chat says for a failure: a missing key with its connector's page; the AI SDK's own errors as they are. */
   const onError = (err: unknown): string => {
-    if (LoadAPIKeyError.isInstance(err) && vendor) return noKeyText(vendor, err.message);
+    if (LoadAPIKeyError.isInstance(err)) return noKeyText(vendor, err.message);
     if (AISDKError.isInstance(err)) return err.message;
     console.error("sanoma app: a chat turn failed:", err);
     return "Something went wrong; the server's log says what";
@@ -56,13 +57,6 @@ export async function run({ chat, messages, principal, app, signal }: EngineTurn
   const stream = createUIMessageStream({
     onError,
     execute: async ({ writer }) => {
-      if (!vendor) {
-        throw new AISDKError({
-          name: "NoModel",
-          message:
-            "No connector gives the agent a model: install one with a model, such as @sanoma-ai/connector-anthropic",
-        });
-      }
       const [registry, system] = await Promise.all([modelRegistry(app), instructions(app, principal, chat)]);
       const model = registry.languageModel(`${vendor}/default`);
       const tools = loopTools({

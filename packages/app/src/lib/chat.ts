@@ -56,6 +56,12 @@ export const ENGINE_NAMES = {
 /** Whether an engine spends the person's own plan: their own agent over ACP. */
 export const ownPlan = (engine: string) => engine.startsWith("acp-");
 
+/** Whether an engine answers on the company's model connector (`chatModel`): our loop; a coding agent says what it lacks itself. */
+export const onModelConnector = (engine: string) => engine === "loop";
+
+/** The connector a company without a model adds: Anthropic's, which the template installs. */
+export const MODEL_CONNECTOR = "@sanoma-ai/connector-anthropic";
+
 /** The file a coding agent's built-in call names: the cross-harness `file_path`, or an adapter's own field. */
 export function pathOf(input: unknown): string | undefined {
   const fields = (input ?? {}) as Record<string, unknown>;
@@ -91,6 +97,12 @@ export const heldRunOf = (output: unknown): string | undefined => {
 
 /** What a turn's error says when the model's connector has no key: its message, then its connector's page. */
 export const noKeyText = (vendor: string, message: string) => `${message} [connector:${vendor}]`;
+
+/** Why a turn of the loop is refused while it has no model (`chatModel`): with its connector's page (`noKeyText`), when there is one. */
+export const noModelText = (vendor?: string) =>
+  vendor
+    ? noKeyText(vendor, `Connect a model to start: ${vendor} is not configured`)
+    : `Connect a model to start: add a connector with a model, such as ${MODEL_CONNECTOR}`;
 
 /** The connector whose page a turn's error text points to (`noKeyText`), and the text without it. */
 export function errorParts(text: string): { text: string; vendor?: string } {

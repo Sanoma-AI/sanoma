@@ -3,8 +3,9 @@ import { safeValidateUIMessages } from "ai";
 import { z } from "zod";
 import { ApiError } from "../../api.ts";
 import type { AppContext } from "../../context.ts";
-import { type ChatMessage, type EngineName, textOf } from "../../lib/chat.ts";
+import { type ChatMessage, type EngineName, noModelText, onModelConnector, textOf } from "../../lib/chat.ts";
 import { type ActorContext, parse, requireActor, toApiError } from "../core.ts";
+import { chatModel } from "../models.ts";
 import { acpEngine } from "./acp.ts";
 import { harnessEngine } from "./harness.ts";
 import { run as loop } from "./loop.ts";
@@ -45,7 +46,8 @@ const stops = new Map<string, AbortController>();
  * a 400 for one it refuses, or one the chat has already), opens the chat on its first message
  * (the engine the request names, titled by the message), stops a turn of it under way, loads its
  * transcript and settles what a turn a restart cut short left unfinished, writes the new message,
- * and answers with its engine's stream. A chat of someone else is a 404.
+ * and answers with its engine's stream. A chat of someone else is a 404; a turn of the loop
+ * while it has no model (`chatModel`), a 409 before the chat opens.
  */
 export async function postChat(request: Request, context: ActorContext & { site?: string }): Promise<Response> {
   const { app } = context;
@@ -71,6 +73,11 @@ export async function postChat(request: Request, context: ActorContext & { site?
     }
     const load = async () => (chat ? await chats.load(chat.id) : []);
     if ((await load()).some((m) => m.id === message.id)) throw invalid(`The chat has a message ${message.id} already`);
+    // A valid message the loop cannot answer yet: refused before the chat opens, as the composer says.
+    if (onModelConnector(named)) {
+      const model = await chatModel(app);
+      if (!model.ready) throw new ApiError(409, { error: noModelText(model.vendor) });
+    }
     stops.get(body.id)?.abort();
     await written(body.id);
     // Read once the turn stopped has written its reply.

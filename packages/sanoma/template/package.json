@@ -8,6 +8,7 @@
     "env": "sanoma env"
   },
   "dependencies": {
+    "@sanoma-ai/connector-anthropic": "latest",
     "@sanoma-ai/connector-ghost": "latest",
     "sanoma": "latest"
   },
