@@ -18,7 +18,7 @@ import { z } from "zod";
 import { localGitSource } from "../../sanoma/src/source.ts";
 import { copyFixture, ensureBuilt } from "../../sanoma/test/fixture.ts";
 import { gitIdentity } from "../../sanoma/test/git.ts";
-import { fakeRemote } from "../../workflows/test/fakes/remote.ts";
+import { type FakeRemote, fakeRemote } from "../../workflows/test/fakes/remote.ts";
 import { freshDatabase } from "../../workflows/test/harness.ts";
 import type { AppContext } from "../src/context.ts";
 import { type App, startApp } from "../src/index.ts";
@@ -68,8 +68,8 @@ const WITH_SUPPORT = `${PEOPLE}export const support = sanoma.group({ name: "supp
 const TITLE = "Admin skips the finance hold; support joins";
 
 /** The bare repository the checkout was cloned from, the fake host's. */
-const origin = mkdtempSync(join(tmpdir(), "sanoma-origin-"));
-const remote = fakeRemote({ url: pathToFileURL(origin).href, origin });
+let origin = "";
+let remote: FakeRemote;
 
 let dir = "";
 /** The git settings of the file's own user. */
@@ -85,6 +85,8 @@ let app: App;
 beforeAll(async () => {
   ensureBuilt();
   gitConfig = dirname(gitIdentity(vi.stubEnv).GIT_CONFIG_GLOBAL!);
+  origin = mkdtempSync(join(tmpdir(), "sanoma-origin-"));
+  remote = fakeRemote({ url: pathToFileURL(origin).href, origin });
   dir = copyFixture();
   // No scenarios: each check runs sooner.
   rmSync(join(dir, "scenarios"), { recursive: true });
@@ -132,7 +134,8 @@ async function drafted(id: string, title: string, files: Record<string, string>)
   return draft;
 }
 
-describe("a change, from a chat's draft to main", () => {
+// Each round runs `sanoma check` as a child process, so a test waits up to `ROUND_MS` for one, and more.
+describe("a change, from a chat's draft to main", { timeout: 2 * ROUND_MS }, () => {
   let runId = "";
   let draft: Awaited<ReturnType<typeof drafted>>;
 
@@ -242,7 +245,7 @@ describe("a change, from a chat's draft to main", () => {
     expect(html).toMatch(
       new RegExp(`<dt[^>]*>Merged</dt><dd[^>]*><code title="${merged}">${merged.slice(0, 8)}</code>`),
     );
-    expect(html).toContain(`follows main at ${merged.slice(0, 8)}`);
+    expect(html).toContain(`follows main at <code title="${merged}">${merged.slice(0, 8)}</code>`);
     expect(html).not.toContain("Rejecting closes the change.");
 
     // The checkout followed: main is the squash, its files the draft's, and the draft is gone.

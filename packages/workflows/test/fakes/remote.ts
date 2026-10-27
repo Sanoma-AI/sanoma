@@ -112,20 +112,24 @@ export function fakeRemote({
     pr.head = branches.get(pr.branch) ?? pr.head;
     let merged = sha(`merge ${pr.number} ${pr.head}`);
     if (origin !== undefined) {
-      // A squash: the tree main and the branch make together, as one commit on main.
+      // A squash: the tree the base and the branch make together, as one commit on the base.
       let tree: string;
       try {
-        tree = git("merge-tree", "--write-tree", "main", pr.head).split("\n")[0]!;
-      } catch {
-        // As a host refuses a pull request that conflicts with its base.
-        throw new DriverError("the branch conflicts with main", { retryable: false, vendorCode: "not_mergeable" });
+        tree = git("merge-tree", "--write-tree", pr.base, pr.head).split("\n")[0]!;
+      } catch (err) {
+        // Exit 1 is a conflict, which a host refuses as such; anything else is git's own failure.
+        if ((err as { status?: number }).status !== 1) throw err;
+        throw new DriverError(`the branch conflicts with ${pr.base}`, {
+          retryable: false,
+          vendorCode: "not_mergeable",
+        });
       }
-      merged = git("commit-tree", tree, "-p", "main", "-m", title);
-      git("update-ref", "refs/heads/main", merged);
+      merged = git("commit-tree", tree, "-p", pr.base, "-m", title);
+      git("update-ref", `refs/heads/${pr.base}`, merged);
     }
     pr.state = "merged";
     pr.mergeSha = merged;
-    branches.set("main", merged);
+    branches.set(pr.base, merged);
     return merged;
   };
 

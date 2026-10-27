@@ -6,8 +6,7 @@ import { approverName, isSettled, ruleOf } from "#/lib/changes.ts";
 import { cn } from "#/lib/utils.ts";
 import { runLink } from "../queries.ts";
 import { ApprovalDecision, PUBLISH_VERBS } from "./approval.tsx";
-import { Commit } from "./change-glance.tsx";
-import { CardHeading, Fact, Facts, FLOAT, FloatingCard, When } from "./common.tsx";
+import { CardHeading, Commit, Fact, Facts, FLOAT, FloatingCard, When } from "./common.tsx";
 
 /**
  * A change's decision, floating over its review: the policy's answer as a sentence, the facts
@@ -90,11 +89,15 @@ function Merged({ merged }: { merged: NonNullable<ChangeView["state"]["merged"]>
       </Fact>
       {follow && (
         <Fact label="This computer">
-          {"revision" in follow
-            ? `follows main at ${follow.revision.slice(0, 8)}`
-            : "skipped" in follow
-              ? `did not follow main: ${follow.skipped}`
-              : `could not follow main: ${follow.error}`}
+          {"revision" in follow ? (
+            <>
+              follows main at <Commit sha={follow.revision} />
+            </>
+          ) : "skipped" in follow ? (
+            `did not follow main: ${follow.skipped}`
+          ) : (
+            `could not follow main: ${follow.error}`
+          )}
         </Fact>
       )}
       {deploy?.apply && (
