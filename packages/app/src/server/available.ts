@@ -1,9 +1,10 @@
 // oxlint-disable-next-line import/no-unassigned-import
 import "@tanstack/react-start/server-only";
 import { errorMessage, isSvgElement, SanomaPackageField } from "@sanoma-ai/workflows";
+import { connectorTier } from "@sanoma-ai/workflows/shared";
 import { svgDataUrl } from "@sanoma-ai/workflows/describe";
 import { z } from "zod";
-import { type AvailableConnector, type AvailableConnectors, tierOf } from "../api.ts";
+import type { AvailableConnector, AvailableConnectors } from "../api.ts";
 
 /** npm's registry: the search, and each package's latest version. */
 export const NPM_REGISTRY = "https://registry.npmjs.org";
@@ -63,7 +64,7 @@ async function listed(name: string): Promise<AvailableConnector | undefined> {
 }
 
 /** 1 for Sanoma's own package, which the list shows first. */
-const official = (c: AvailableConnector) => Number(tierOf(c.package) === "official");
+const official = (c: AvailableConnector) => Number(connectorTier(c.package) === "official");
 
 /**
  * The connector packages on npm: found by their keyword, each described by the `sanoma` field of

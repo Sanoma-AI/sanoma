@@ -345,7 +345,7 @@ describe("parseFeature", () => {
       /^scenarios\/x\.feature:3: no operation "ghost\.post\.burn"; the config has bluesky\.post\.create, ghost\.post\.create, /,
     );
     expect(await thrown(`Feature: A\n  Scenario: S\n    When refund runs\n`)).toBe(
-      'scenarios/x.feature:3: no workflow "refund"; the config has announce, change',
+      'scenarios/x.feature:3: no workflow "refund"; the config has announce, call, change',
     );
   });
 

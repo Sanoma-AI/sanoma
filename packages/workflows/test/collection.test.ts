@@ -218,11 +218,12 @@ describe("a config's collections", () => {
     expect([...resolved.collections]).toEqual([["outbound", outbound]]);
     expect(resolved.ops.get("data.outbound.save")).toBe(outbound.save);
     expect([...resolved.drivers.keys()]).toEqual([
-      // The built-in placeholder for a change's operations, in every config.
+      // The built-in placeholder for a change's operations and the listing of apps, in every config.
       "sanoma.change.open",
       "sanoma.change.review",
       "sanoma.change.merge",
       "sanoma.change.close",
+      "sanoma.apps.list",
       "data.outbound.get",
       "data.outbound.list",
       "data.outbound.save",

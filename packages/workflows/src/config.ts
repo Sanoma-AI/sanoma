@@ -42,6 +42,7 @@ import type { Policy } from "./policy.ts";
 import { type Resource, resourceTypesOf, withoutWriteOnly } from "./resource.ts";
 import { APPLY_WORKFLOW, BUILT_IN_WORKFLOWS, CALL_WORKFLOW, CHANGE_WORKFLOW, DATA_VENDOR } from "./shared.ts";
 import { type RemoteHalf, sourceDriver, sourceOps } from "./source.ts";
+import { appsListDriver, appsListOps } from "./apps-list.ts";
 import type { Steps } from "./steps.ts";
 import { checkSchedule } from "./schedules.ts";
 import { computeVersion } from "./version.ts";
@@ -300,10 +301,12 @@ export function resolveConfig(config: SanomaConfig, options: ResolveOptions = {}
   const databaseUrl = resolveDatabaseUrl(config);
   const declared = [...collections.values()];
   const dataStore = declared.length ? lazyPool(databaseUrl, "data") : undefined;
-  // Built-in, in every config: a change's operations, which the template's policy names (`sanoma.change.merge`).
+  // Built-in, in every config: a change's operations, which the template's policy names
+  // (`sanoma.change.merge`), and the listing of apps a page may call (`sanoma.apps.list`).
   const ops = indexConnectors([
     ...running,
     changeOps,
+    appsListOps,
     ...(hosts ? [sourceOps] : []),
     ...(dataStore ? [collectionsConnector(declared)] : []),
   ]);
@@ -319,6 +322,7 @@ export function resolveConfig(config: SanomaConfig, options: ResolveOptions = {}
     [
       ...driversByVendor.values(),
       changeDriver(remotes),
+      appsListDriver,
       ...(hosts ? [sourceDriver] : []),
       ...(dataStore ? [collectionsDriver(declared, dataStore)] : []),
     ],

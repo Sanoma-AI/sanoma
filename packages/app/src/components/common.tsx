@@ -40,7 +40,7 @@ import { utcText } from "#/lib/time.ts";
 import { cn, plural } from "#/lib/utils.ts";
 import { APPROVAL_TONE, DECISION_TONE, type Tone } from "#/lib/tone.ts";
 import type { OpEntry } from "@sanoma-ai/workflows/describe";
-import { approverLabel } from "@sanoma-ai/workflows/shared";
+import { approverLabel, type Tier } from "@sanoma-ai/workflows/shared";
 import { configQuery, type SiteCaller } from "../queries.ts";
 import type { CodeProps } from "./code.tsx";
 import type { GraphProps } from "./graph.tsx";
@@ -114,6 +114,18 @@ export function ledgerTone(record: LedgerRecord): Tone {
 /** Marks a sandbox run: one seeded from the scenario named, calling fakes, not the vendors. */
 export function SandboxBadge({ name }: { name: string }) {
   return <ToneBadge tone="idle">sandbox · {name}</ToneBadge>;
+}
+
+/** How each tier reads (Sanoma's claims, `sanoma/claims`). */
+const TIER_LABELS: Record<Tier, string> = {
+  official: "Official",
+  "vendor-verified": "Vendor verified",
+  community: "Community",
+};
+
+/** Whose a connector or an app is, as Sanoma's claims say (`connectorTier`, `appTier`). */
+export function TierBadge({ tier }: { tier: Tier }) {
+  return <Badge variant={tier === "community" ? "outline" : "secondary"}>{TIER_LABELS[tier]}</Badge>;
 }
 
 /**

@@ -23,10 +23,14 @@ export type { DriftField, DriftReport, DriftResult, DriftStatus } from "./drift.
 export type { ApplyPlan, ApplyReport, ApplyResult, PlanAnswer, PlanStep } from "./apply.ts";
 export type { CredentialStatus } from "./env.ts";
 export type { ChangeDeploy, ChangeEvent, ChangeFacts, ChangeReport, ChangeState, ChangeVerified } from "./change.ts";
+export type { AvailableApp, AvailableApps } from "./apps-list.ts";
 
 // What a UI in the browser may use from the runtime, besides types: `@sanoma-ai/workflows/shared`.
 // Nothing here imports DBOS, Node or zod, so a browser bundle can carry it; the runtime uses the
 // same functions, so a page answers these questions the way a run does.
+
+// Sanoma's claims, data (`sanoma/claims` re-exports them).
+export * from "./claims.ts";
 
 /**
  * What a `ctx.sleep` without a `{ name }` is called, in its outline node and its ledger record
@@ -256,6 +260,9 @@ export const CHANGE_EVENT = "change";
  * approval's, whose topic is its id (`approval-<n>`).
  */
 export const CHANGE_TOPIC = "change:event";
+
+/** Lists the apps on GitHub with Sanoma's claims: the one runtime operation a page may call (`isDirect`). */
+export const APPS_LIST = "sanoma.apps.list";
 
 /** The workflows the runtime adds itself, which a config's own may not be named: drift, apply, call and change. */
 export const BUILT_IN_WORKFLOWS: ReadonlySet<string> = new Set([

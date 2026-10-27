@@ -35,13 +35,13 @@ describe("sanoma serve", () => {
       expect(readFileSync(join(dir, ".env"), "utf8")).toMatch(/^SANOMA_SECRETS_KEY=[A-Za-z0-9+/]{43}=\n$/);
       expect(`${stdout}${stderr}`).not.toMatch(/is not configured|DeprecationWarning/);
       const url = stdout.match(/at (http:\/\/127\.0\.0\.1:\d+); ctrl-c to stop/)![1]!;
-      // The app is up: its home lists the config's one workflow, rendered on the server.
+      // The app is up: its home lists the config's one workflow, and the built-in call, rendered on the server.
       const res = await fetch(`${url}/workflows`);
       expect(res.status).toBe(200);
       const html = await res.text();
       const rows = html.matchAll(/<td[^>]*><div[^>]*><a[^>]*href="\/workflows\/([^"?]+)"/g);
-      // The company's workflow, and the change workflow every config has.
-      expect([...rows].map(([, name]) => name)).toEqual(["change", "hello"]);
+      // The company's workflow, and the change and call workflows every config has.
+      expect([...rows].map(([, name]) => name)).toEqual(["call", "change", "hello"]);
       // On a config without problems: startApp warns about any it finds in the files before it listens.
       expect(output().stderr).not.toContain("the config's files have problems");
       // No sites: the build the app ships, and nothing written under .sanoma but the generated files.

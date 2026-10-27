@@ -60,7 +60,7 @@ export const siteFile = {
     const imported = (node: AstNode) => {
       if (leaves(node)) {
         context.report({
-          message: `A site imports only from inside sites/, \`sanoma/site\`, \`sanoma/ui\` and its packages: ${String(node.source.value)} leaves sites/.`,
+          message: `A site imports only from inside sites/, \`sanoma/site\`, \`sanoma/ui\`, \`sanoma/claims\` and its packages: ${String(node.source.value)} leaves sites/.`,
           node: node.source,
         });
       }

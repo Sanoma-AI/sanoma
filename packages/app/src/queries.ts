@@ -6,7 +6,15 @@ import type {
   SiteCall,
   WorkflowEntry,
 } from "@sanoma-ai/workflows/describe";
-import { apiNameOf, errorMessage, isEnded, LIST_LIMIT, type ListQuery, type Saved } from "@sanoma-ai/workflows/shared";
+import {
+  apiNameOf,
+  type AvailableApps,
+  errorMessage,
+  isEnded,
+  LIST_LIMIT,
+  type ListQuery,
+  type Saved,
+} from "@sanoma-ai/workflows/shared";
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { linkOptions, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
@@ -239,6 +247,23 @@ export const availableConnectorsQuery = () =>
     queryFn: (): Promise<AvailableConnectors> =>
       getAvailableConnectors().catch((err: unknown) => ({ connectors: [], error: errorMessage(err) })),
     staleTime: (query) => (query.state.data?.error ? 0 : 10 * 60_000),
+  });
+
+/**
+ * The apps on GitHub with Sanoma's claims, `sanoma.apps.list` called as `actor` (the person on the
+ * page, whom the call names itself): read every 10 minutes at most, as GitHub's search is
+ * rate-limited (ten a minute per address), and after a minute when it could not be reached. A
+ * call that fails (refused by the policy, say) is a list saying why.
+ */
+export const availableAppsQuery = (actor: string) =>
+  queryOptions({
+    queryKey: ["available-apps", actor],
+    queryFn: (): Promise<AvailableApps> =>
+      ((api as UntypedApi).sanoma.apps.list({}) as Promise<AvailableApps>).catch((err: unknown) => ({
+        apps: [],
+        error: errorMessage(err),
+      })),
+    staleTime: (query) => (query.state.data?.error ? 60_000 : 10 * 60_000),
   });
 
 /** What going live can choose from: read once a minute at most, as each list asks GitHub or Supabase. */

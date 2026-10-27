@@ -84,6 +84,7 @@ describe("describeConfig", () => {
       "resend.broadcast.create",
       "resend.broadcast.send",
       "resend.emails.send",
+      "sanoma.apps.list",
       "sanoma.change.close",
       "sanoma.change.merge",
       "sanoma.change.open",
@@ -373,6 +374,7 @@ describe("a workflow's name in a site's api", () => {
     ]);
     expect(apiProblems).toEqual([
       ["announce", []],
+      ["call", []],
       ["change", []],
       ["data", [[1, 1, "A site calls this workflow api.data, which is the collections': rename it"]]],
       ["ghost", [[1, 1, "A site calls this workflow api.ghost, which is the vendor ghost's operations: rename it"]]],

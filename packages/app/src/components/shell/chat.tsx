@@ -35,21 +35,22 @@ import {
 import { CHATS_KEY, chatQuery, chatsQuery } from "../../queries.ts";
 import { useCrumbs } from "../common.tsx";
 import { Reply } from "./chat-parts.tsx";
+import type { Prompt } from "./chat-prompt.ts";
 
 // The chat column, beside the bar on the same surface: the operator agent (POST /api/chat, its
 // stream read by the AI SDK's useChat), your chats, and the composer carrying the page you are on.
 
 /**
  * The chat column (`#chat`, which the bar's Chat controls): your latest chat (or the one you
- * pick, or a new one), and at its foot the composer. In the page's flow from `lg` up; between `md`
- * and `lg`, over the page beside the bar (not while `besidePageOnly`, until Chat opens it there);
- * not on a phone.
+ * pick, or a new one, or the new one a page's `prompt` opens with its text in the composer), and
+ * at its foot the composer. In the page's flow from `lg` up; between `md` and `lg`, over the page
+ * beside the bar (not while `besidePageOnly`, until Chat opens it there); not on a phone.
  */
-export function ChatColumn({ besidePageOnly = false }: { besidePageOnly?: boolean }) {
+export function ChatColumn({ besidePageOnly = false, prompt }: { besidePageOnly?: boolean; prompt?: Prompt }) {
   const { actor } = useActor();
   const { data: chats = [] } = useQuery({ ...chatsQuery(), enabled: !!actor });
   // A new chat's id is the browser's: the first message opens the chat by it.
-  const [picked, setPicked] = useState<string>();
+  const [picked, setPicked] = useState(prompt?.id);
   const [fresh] = useState(generateId);
   const id = picked ?? chats[0]?.id ?? fresh;
   const chat = chats.find((c) => c.id === id);
@@ -92,19 +93,26 @@ export function ChatColumn({ besidePageOnly = false }: { besidePageOnly?: boolea
         </Button>
       </div>
       {/* Kept open once you write in it: a newer chat in the list does not take its place. */}
-      <ChatPane key={id} id={id} known={chat !== undefined} onSend={() => setPicked(id)} />
+      <ChatPane
+        key={id}
+        id={id}
+        known={chat !== undefined}
+        draft={id === prompt?.id ? prompt.text : undefined}
+        onSend={() => setPicked(id)}
+      />
     </aside>
   );
 }
 
 /**
  * A chat: its transcript as stored when it is one you have had (as it was when opened, so the
- * first message of a new one does not read it back), then the conversation over it.
+ * first message of a new one does not read it back), then the conversation over it; a new one's
+ * composer holds `draft`.
  */
-function ChatPane({ id, known, onSend }: { id: string; known: boolean; onSend: () => void }) {
+function ChatPane({ id, known, draft, onSend }: { id: string; known: boolean; draft?: string; onSend: () => void }) {
   const [stored] = useState(known);
   const { data, error } = useQuery({ ...chatQuery(id), enabled: stored });
-  if (!stored) return <Conversation id={id} initial={[]} onSend={onSend} />;
+  if (!stored) return <Conversation id={id} initial={[]} draft={draft} onSend={onSend} />;
   if (error) return <p className="p-4 text-destructive">Could not read the chat: {error.message}</p>;
   if (data === undefined) {
     return (
@@ -116,8 +124,18 @@ function ChatPane({ id, known, onSend }: { id: string; known: boolean; onSend: (
   return <Conversation id={id} initial={data?.messages ?? []} onSend={onSend} />;
 }
 
-/** The conversation: its messages, a turn's error, Continue after a turn that stopped short, and the composer. */
-function Conversation({ id, initial, onSend }: { id: string; initial: ChatMessage[]; onSend: () => void }) {
+/** The conversation: its messages, a turn's error, Continue after a turn that stopped short, and the composer (holding `draft`). */
+function Conversation({
+  id,
+  initial,
+  draft,
+  onSend,
+}: {
+  id: string;
+  initial: ChatMessage[];
+  draft?: string;
+  onSend: () => void;
+}) {
   const queryClient = useQueryClient();
   const transport = useMemo(() => chatTransport("/api/chat", actorHeaders), []);
   const { messages, sendMessage, status, error } = useChat<ChatMessage>({
@@ -162,7 +180,12 @@ function Conversation({ id, initial, onSend }: { id: string; initial: ChatMessag
         )}
       </div>
       <div className="p-3">
-        <Composer busy={busy} onSend={send} engine={fresh ? { value: engine, set: setEngine } : undefined} />
+        <Composer
+          busy={busy}
+          onSend={send}
+          draft={draft}
+          engine={fresh ? { value: engine, set: setEngine } : undefined}
+        />
       </div>
     </>
   );
@@ -200,6 +223,13 @@ function TurnError({ message }: { message: string }) {
   );
 }
 
+/** Focuses a text box with its caret after its text: where a prompt's words go on. */
+const focusAtEnd = (box: HTMLTextAreaElement | null) => {
+  if (!box) return;
+  box.focus();
+  box.setSelectionRange(box.value.length, box.value.length);
+};
+
 /** The engines, the composer's choices: ours on the company's key, then a person's own (`ownPlan`). */
 const NAMES = Object.keys(ENGINE_NAMES) as EngineName[];
 const OURS = NAMES.filter((name) => !ownPlan(name));
@@ -229,20 +259,23 @@ function EmptyChat() {
 }
 
 /**
- * The composer: the page as a chip, the message, the engine a new chat opens on (`engine`, only
- * then: a person's own agents in a group of their own), Send (Enter; Shift+Enter for a new line).
+ * The composer: the page as a chip, the message (starting as `draft`, focused at its end, when a
+ * page opened the chat with it), the engine a new chat opens on (`engine`, only then: a person's
+ * own agents in a group of their own), Send (Enter; Shift+Enter for a new line).
  */
 function Composer({
   busy,
   onSend,
+  draft,
   engine,
 }: {
   busy: boolean;
   onSend: (text: string) => void;
+  draft?: string;
   engine?: { value: EngineName; set: (engine: EngineName) => void };
 }) {
   const page = useCrumbs().at(-1)?.label;
-  const [text, setText] = useState("");
+  const [text, setText] = useState(draft ?? "");
 
   const submit = (e?: FormEvent) => {
     e?.preventDefault();
@@ -262,6 +295,7 @@ function Composer({
       )}
       <Textarea
         rows={2}
+        ref={draft ? focusAtEnd : undefined}
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {

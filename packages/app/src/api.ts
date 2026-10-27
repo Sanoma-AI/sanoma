@@ -262,14 +262,6 @@ export const GoLiveRequest = z.object({
 });
 export type GoLiveRequest = z.infer<typeof GoLiveRequest>;
 
-/**
- * Whose a connector is: Sanoma's own (the `@sanoma-ai/` scope) or the community's, any other
- * package. Sanoma's reviewed list, when it exists, will say more.
- */
-export type Tier = "official" | "community";
-
-export const tierOf = (pkg: string): Tier => (pkg.startsWith("@sanoma-ai/") ? "official" : "community");
-
 /** A connector package on npm (`getAvailableConnectors`). */
 export interface AvailableConnector {
   /** The npm package name, what `pnpm add` takes. */
