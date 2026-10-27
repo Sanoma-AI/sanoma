@@ -2,6 +2,7 @@ import { CHANGE_WORKFLOW } from "@sanoma-ai/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ChangeDecision } from "#/components/change-decision.tsx";
+import { PullRequestLink } from "#/components/change-glance.tsx";
 import {
   CrumbHeader,
   FloatHost,
@@ -61,10 +62,7 @@ function ChangePage() {
           )}
           {state.pullRequest && (
             <>
-              <a href={state.pullRequest.url} target="_blank" rel="noreferrer">
-                #{state.pullRequest.number} <span aria-hidden="true">↗</span>
-              </a>{" "}
-              ·{" "}
+              <PullRequestLink pullRequest={state.pullRequest} /> ·{" "}
             </>
           )}
           opened by {starterName(change)} · <When at={change.createdAt} /> ·{" "}
@@ -103,6 +101,8 @@ function Refusal({ change: { state } }: { change: ChangeDetail }) {
   return null;
 }
 
+const AND = new Intl.ListFormat("en", { type: "conjunction" });
+
 /**
  * Until the change is merged or closed, the waiting runs of the workflows it edits, as its last
  * plan found them, which publishing cannot move: "2 runs of Offboarding are waiting, and this
@@ -112,16 +112,13 @@ function Stranded({ change }: { change: ChangeDetail }) {
   const { data: titles } = useSuspenseQuery({ ...configQuery(), select: workflowTitles });
   const stranded = change.state.facts?.stranded ?? [];
   if (stranded.length === 0 || isSettled(change.state)) return null;
-  const names = new Intl.ListFormat("en", { type: "conjunction" }).format(
-    change.edits.map((name) => titles[name] ?? name),
-  );
-  const runs = plural(stranded.length, "run");
+  const names = AND.format(change.edits.map((name) => titles[name] ?? name));
+  const one = stranded.length === 1;
+  const runs = `${plural(stranded.length, "run")} of ${names || "the workflows this change edits"} ${one ? "is" : "are"} waiting`;
   return (
     <Notice>
-      {names
-        ? `${runs} of ${names} ${stranded.length === 1 ? "is" : "are"} waiting, and this change edits ${names}`
-        : `${runs} of the workflows this change edits ${stranded.length === 1 ? "is" : "are"} waiting`}
-      : publishing cannot move {stranded.length === 1 ? "it" : "them"} to the new version.{" "}
+      {names ? `${runs}, and this change edits ${names}` : runs}: publishing cannot move {one ? "it" : "them"} to the
+      new version.{" "}
       {stranded.map((runId, i) => (
         <span key={runId}>
           {i > 0 && ", "}

@@ -245,6 +245,12 @@ export const CALL_WORKFLOW = "call";
  */
 export const CHANGE_WORKFLOW = "change";
 
+/**
+ * The draft a change's run is of: `change:<id>` (its first run) or `change:<id>~<n>` (a later
+ * one); undefined for any other run id.
+ */
+export const changeIdOf = (runId: string): string | undefined => /^change:([\w-]{1,64})(?:~\d+)?$/.exec(runId)?.[1];
+
 /** Opens a change: its draft's branch pushed and a pull request opened for it. */
 export const CHANGE_OPEN = "sanoma.change.open";
 /** Reports Sanoma's review of a change to its host (the `sanoma` commit status). */

@@ -1,8 +1,23 @@
 import { useQuery } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { type MouseEventHandler, useMemo } from "react";
 import { type ChangeRef, filesOf, groupFiles } from "#/lib/changes.ts";
 import { diffGrids, diffSummary } from "#/lib/grid-diff.ts";
 import { changeQuery, permissionsQuery } from "../queries.ts";
+
+/** A change's pull request on its host, "#12 ↗", in a new tab. */
+export function PullRequestLink({
+  pullRequest,
+  onClick,
+}: {
+  pullRequest: { number: number; url: string };
+  onClick?: MouseEventHandler;
+}) {
+  return (
+    <a href={pullRequest.url} target="_blank" rel="noreferrer" onClick={onClick}>
+      #{pullRequest.number} <span aria-hidden="true">↗</span>
+    </a>
+  );
+}
 
 /**
  * A change at a glance, in an approval's card (the Inbox's Publish): how many files of each kind
@@ -11,8 +26,8 @@ import { changeQuery, permissionsQuery } from "../queries.ts";
  */
 export function ChangeGlance({ change }: { change: ChangeRef }) {
   const groups = groupFiles(filesOf(change.facts));
-  // Read once for the grid: the glance does not follow the change as its page does.
-  const { data: view } = useQuery({ ...changeQuery(change.change.id), refetchInterval: false });
+  // Read for the grid alone: the glance does not follow the change as its page does.
+  const { data: view } = useQuery({ ...changeQuery(change.change.id), refetchInterval: false, staleTime: 60_000 });
   const { data: main } = useQuery(permissionsQuery());
   const branch = view?.state.check?.grid;
   const grid = useMemo(() => (main && branch ? diffSummary(diffGrids(main, branch)) : []), [main, branch]);

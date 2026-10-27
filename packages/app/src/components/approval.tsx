@@ -253,7 +253,7 @@ function DecideDialog({
   approval,
   open,
   decision,
-  verbs = VERBS,
+  verbs,
   onClose,
   onQueued,
 }: {
@@ -261,7 +261,7 @@ function DecideDialog({
   approval: ApprovalState;
   open: boolean;
   decision: Decision;
-  verbs?: Verbs;
+  verbs: Verbs;
   onClose: () => void;
   /** The run has not read the decision yet: it stays queued, and the card says so. */
   onQueued: (decision: Decision) => void;

@@ -1,4 +1,4 @@
-import { CHANGE_WORKFLOW } from "@sanoma-ai/workflows/shared";
+import { CHANGE_WORKFLOW, changeIdOf } from "@sanoma-ai/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { PlayIcon } from "@phosphor-icons/react/dist/csr/Play";
@@ -15,7 +15,6 @@ import {
   When,
 } from "#/components/common.tsx";
 import { WorkflowView } from "#/components/workflow-view.tsx";
-import { changeIdOf } from "#/lib/changes.ts";
 import { RUN_TONE } from "#/lib/tone.ts";
 import { runName, starterName } from "#/api.ts";
 import { runLink, runQuery, useWorkflow } from "#/queries.ts";

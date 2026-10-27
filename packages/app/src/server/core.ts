@@ -326,11 +326,7 @@ export async function lastRuns({ client, description }: AppContext): Promise<Rec
 }
 
 /** The changes, newest first, open or done or all (`SanomaClient.changes`). */
-export async function changes({ client }: AppContext, query: z.output<typeof ChangesQuery>) {
-  // One row per draft, its latest run's: `changes` lists runs, and a draft's later run (`~2`) is the change now.
-  const seen = new Set<string>();
-  return (await client.changes(query)).filter(({ state }) => !seen.has(state.id) && seen.add(state.id));
-}
+export const changes = ({ client }: AppContext, query: z.output<typeof ChangesQuery>) => client.changes(query);
 
 /**
  * The change of the draft `id` (`SanomaClient.change`), with the config's workflows whose files
@@ -354,14 +350,21 @@ export async function change({ client, resolved, source }: AppContext, id: strin
  * shows Changes. Not the URL itself, which may carry a token. A repository git cannot read has
  * none, logged, so every page's bar still renders.
  */
-export async function hasRemote({ source }: AppContext): Promise<boolean> {
-  try {
-    return (await source?.remoteUrl?.()) !== undefined;
-  } catch (err) {
+export function hasRemote({ source }: AppContext): Promise<boolean> {
+  if (!source) return Promise.resolve(false);
+  // Every page's root loader asks: git is asked at most once a minute per repository.
+  const kept = remotes.get(source);
+  if (kept && Date.now() - kept.at < 60_000) return kept.has;
+  const has = (async () => (await source.remoteUrl?.()) !== undefined)().catch((err: unknown) => {
     console.error("sanoma app: reading the repository's remote failed:", err);
     return false;
-  }
+  });
+  remotes.set(source, { at: Date.now(), has });
+  return has;
 }
+
+/** Each repository's last answer to `hasRemote`, and when it was asked. */
+const remotes = new WeakMap<object, { at: number; has: Promise<boolean> }>();
 
 /** The report of a drift run once it ends (`SanomaClient.driftReport`). */
 export const driftReport = ({ client }: AppContext, runId: string): Promise<DriftReport> => client.driftReport(runId);

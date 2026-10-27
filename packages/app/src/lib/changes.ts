@@ -1,5 +1,6 @@
 import type { Approver } from "@sanoma-ai/workflows";
 import type { ChangeFacts, ChangeState } from "@sanoma-ai/workflows/shared";
+import { detailsObject } from "./apply-plan.ts";
 
 // A change's words and groups for its pages (`routes/changes/`), the Inbox's glance and the run
 // page, without React: in the ops manager's words, the branch and the pull request underneath.
@@ -77,19 +78,9 @@ export interface ChangeRef {
 
 /** An approval's details as a change's Publish, when they are one (`{ change, facts }`, or its JSON), told by its shape. */
 export function asChangeRef(details: unknown): ChangeRef | undefined {
-  let value = details;
-  if (typeof value === "string") {
-    try {
-      value = JSON.parse(value);
-    } catch {
-      return undefined;
-    }
-  }
-  if (typeof value !== "object" || value === null) return undefined;
+  const value = detailsObject(details);
+  if (!value) return undefined;
   const { change, facts } = value as Partial<Record<keyof ChangeRef, Record<string, unknown>>>;
   const named = change && ["id", "title", "branch"].every((key) => typeof change[key] === "string");
   return named && Array.isArray(facts?.touches) ? (value as ChangeRef) : undefined;
 }
-
-/** The draft a change's run is of (`change:<id>`, or `change:<id>~<n>` for a later run), if it is one. */
-export const changeIdOf = (runId: string) => /^change:([\w-]{1,64})(?:~\d+)?$/.exec(runId)?.[1];

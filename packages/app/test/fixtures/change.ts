@@ -2,7 +2,7 @@ import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ensureBuilt, testDatabaseUrl, withFake } from "@sanoma-ai/testing";
+import { ensureBuilt, testDatabaseUrl, waitFor, withFake } from "@sanoma-ai/testing";
 import { type TestApp, useTestApp } from "@sanoma-ai/testing/harness";
 import { defineConnector, defineWorkflow, resolveConfig, type SanomaConfig } from "@sanoma-ai/workflows";
 import { describeConfig, type PermissionsGrid, permissionsGrid } from "@sanoma-ai/workflows/describe";
@@ -66,15 +66,6 @@ function writeRoot(files: Record<string, string>, from?: string): string {
     writeFileSync(join(root, path), text);
   }
   return root;
-}
-
-/** Polls `check` every 100 ms until it is true, for 15 s at most. */
-export async function waitFor(check: () => Promise<boolean> | boolean, timeoutMs = 15_000) {
-  const deadline = Date.now() + timeoutMs;
-  while (!(await check())) {
-    if (Date.now() > deadline) throw new Error("timed out waiting");
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
 }
 
 export interface ChangeApp {
@@ -155,8 +146,9 @@ export function useChangeApp(name: string): ChangeApp {
       repo.checks(id, { ok: true, problems: [], warnings: [], grid: fixture.gridWith(files) });
       const page = new URL(`/changes/${id}`, fixture.app.url).href;
       const runId = await testApp.client.openChange({ id, title, page }, { startedBy });
-      await waitFor(async () =>
-        (await testApp.client.approvals(runId)).some((a) => a.status === "pending" && a.covers.includes(CHANGE_MERGE)),
+      await waitFor(
+        () => testApp.client.approvals(runId),
+        (approvals) => approvals.some((a) => a.status === "pending" && a.covers.includes(CHANGE_MERGE)),
       );
       return runId;
     },

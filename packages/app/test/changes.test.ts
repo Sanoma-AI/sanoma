@@ -1,7 +1,7 @@
-import { CHANGE_MERGE } from "@sanoma-ai/workflows/shared";
+import { CHANGE_MERGE, changeIdOf } from "@sanoma-ai/workflows/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type App, startApp } from "../src/index.ts";
-import { asChangeRef, changeIdOf, groupFiles, phaseLabel } from "../src/lib/changes.ts";
+import { asChangeRef, groupFiles, phaseLabel } from "../src/lib/changes.ts";
 import { cellWords, diffGrids } from "../src/lib/grid-diff.ts";
 import { barLabels } from "./bar-helpers.ts";
 import { REFUNDS_WAIT, useChangeApp } from "./fixtures/change.ts";

@@ -7,6 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#
 import { filesOf, phaseLabel } from "#/lib/changes.ts";
 import { CHANGE_TONE } from "#/lib/tone.ts";
 import { CrumbHeader, LinkTab, LinkTabs, Nothing, Notice, ToneBadge, When } from "../../components/common.tsx";
+import { PullRequestLink } from "../../components/change-glance.tsx";
 import { LinkRow } from "../../components/runs-table.tsx";
 import { changesQuery } from "../../queries.ts";
 
@@ -85,9 +86,7 @@ function ChangesTable({ changes }: { changes: ChangeView[] }) {
               <TableCell className="tabular-nums">{state.facts ? filesOf(state.facts).length : "-"}</TableCell>
               <TableCell>
                 {state.pullRequest ? (
-                  <a href={state.pullRequest.url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>
-                    #{state.pullRequest.number} <span aria-hidden="true">↗</span>
-                  </a>
+                  <PullRequestLink pullRequest={state.pullRequest} onClick={(e) => e.stopPropagation()} />
                 ) : (
                   <span className="text-muted-foreground">-</span>
                 )}

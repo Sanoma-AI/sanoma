@@ -557,7 +557,7 @@ export const changesQuery = (query: ChangesQuery = {}) =>
   queryOptions({
     queryKey: [...RUNS_KEY, "changes", query],
     queryFn: () => getChanges({ data: query }),
-    refetchInterval: (q) => Math.min(30_000, ...(q.state.data ?? []).map((c) => changePoll(c) || 30_000)),
+    refetchInterval: (q) => (q.state.data?.some((c) => changePoll(c) === POLL_MS) ? POLL_MS : 30_000),
   });
 
 /** The change of the draft `id` (`getChange`), under RUNS_KEY, so Publish refreshes it: polled as `changePoll` says. */
