@@ -56,7 +56,7 @@ import { USAGE_EXIT } from "./launcher.ts";
 import { linkTarget } from "./links.ts";
 import { type CompanyLog, hidePasswords, openLog } from "./logs.ts";
 import { folderArgument, isCompanyFolder, syncedFolderWarning } from "./places.ts";
-import { runtimeOf } from "./runtime.ts";
+import { archWarnings, runtimeOf } from "./runtime.ts";
 import { type Session, type SessionOptions, startSession } from "./session.ts";
 import { type Newer, readSettings, runCheck, savedNewer } from "./update-check.ts";
 import { fastForward, prepareUpdate } from "./update-company.ts";
@@ -143,12 +143,7 @@ let startWindow: BrowserWindow | undefined;
 let ask: StartState["ask"];
 let notice: StartState["notice"];
 
-const archWarning = () =>
-  app.runningUnderARM64Translation
-    ? [
-        "This is the Intel build of Sanoma on an Apple silicon Mac: download the Apple silicon (arm64) build, which runs faster.",
-      ]
-    : [];
+const archWarning = () => archWarnings(app.runningUnderARM64Translation);
 
 /** Whether the company runs or is starting now. */
 const isLive = (path: string) => running.has(path) || opening.has(path);
@@ -800,9 +795,11 @@ function updateItems(): MenuItemConstructorOptions[] {
 }
 
 function buildMenu() {
+  const isMac = process.platform === "darwin";
   const recent = readCompanies(companiesFile());
   const template: MenuItemConstructorOptions[] = [
-    { role: "appMenu" },
+    // macOS's app menu holds Quit; elsewhere File does.
+    ...(isMac ? [{ role: "appMenu" } as const] : []),
     {
       label: "File",
       submenu: [
@@ -818,6 +815,7 @@ function buildMenu() {
         { type: "separator" },
         { label: "Show Start Window", click: showStart },
         { role: "close", label: "Close Window" },
+        ...(isMac ? [] : [{ type: "separator" } as const, { role: "quit" } as const]),
       ],
     },
     { role: "editMenu" },
@@ -827,7 +825,7 @@ function buildMenu() {
         { label: "Restart", accelerator: "CmdOrCtrl+Shift+R", click: forFocused(restart) },
         { label: "Stop", click: forFocused(stopCompany) },
         { label: "Get Updates", click: forFocused(getUpdates) },
-        { label: "Show in Finder", click: forFocused((path) => shell.openPath(path)) },
+        { label: isMac ? "Show in Finder" : "Show in Folder", click: forFocused((path) => shell.openPath(path)) },
         { label: "Show Log", click: forFocused((path) => shell.openPath(logFile(path))) },
       ],
     },

@@ -1,5 +1,6 @@
 name: Desktop
-# The desktop shell's smoke test (packages/desktop/test/e2e), on Linux under xvfb; ci.yml runs its unit tests.
+# The desktop shell's smoke test (packages/desktop/test/e2e), on Linux under xvfb, and its unit tests
+# on Windows; ci.yml runs its unit tests on Linux.
 on:
   push:
     branches: [main]
@@ -34,3 +35,22 @@ jobs:
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       # Downloads Electron (skipped by `allowBuilds`), builds, stages the pinned Node and this pnpm, then runs Playwright.
       - run: xvfb-run -a pnpm --filter @sanoma-ai/desktop run test:e2e
+
+  # The shell's own Windows code (process trees, pnpm.cmd, Path), against the runner's git.
+  unit-windows:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        with:
+          cache: true
+      - id: pnpm
+        shell: bash
+        run: echo "store=$(pnpm store path)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pnpm.outputs.store }}
+          key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm vitest run packages/desktop

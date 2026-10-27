@@ -9,13 +9,21 @@ export interface RunOptions {
   env?: NodeJS.ProcessEnv;
 }
 
-/** `Run` with `execFile`: the error's message is the command's stderr, trimmed, when it printed any. */
+/**
+ * `Run` with `execFile`: the error's message is the command's stderr, trimmed, when it printed any.
+ * On Windows, no console window flashes up for it.
+ */
 export const run: Run = (command, args, { cwd, env } = {}) =>
   new Promise((resolve, reject) =>
-    execFile(command, args, { cwd, env, timeout: 600_000, maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) => {
-      if (!err) return resolve(stdout.trim());
-      reject(Object.assign(new Error(stderr.trim() || err.message), { code: err.code }));
-    }),
+    execFile(
+      command,
+      args,
+      { cwd, env, timeout: 600_000, maxBuffer: 64 * 1024 * 1024, windowsHide: true },
+      (err, stdout, stderr) => {
+        if (!err) return resolve(stdout.trim());
+        reject(Object.assign(new Error(stderr.trim() || err.message), { code: err.code }));
+      },
+    ),
   );
 
 /**

@@ -32,20 +32,20 @@ export interface Session {
 }
 
 /**
- * Opens a company: writes the shims, runs `pnpm install --prefer-offline` in it (a failure is
+ * Opens a company: writes the shims, runs `pnpm install --prefer-offline` in it (the staged pnpm) (a failure is
  * only a warning while `node_modules/sanoma` is there), then its own launcher (`launch`).
  */
 export function startSession(options: SessionOptions): Session {
   const { repo, port, node, pnpm, bin, onLine, onProgress, killAfterMs, pollMs } = options;
   let current: Group | undefined;
   let stopped = false;
-  const env = launcherEnv(options.env, bin, port);
-  const group = { cwd: repo, env, onLine, killAfterMs };
 
   const run = async (): Promise<{ ready: Promise<string>; exited: Promise<Exit> } | undefined> => {
-    writeShims(bin, node, pnpm);
+    const env = launcherEnv(options.env, writeShims(bin, node, pnpm), port);
+    const group = { cwd: repo, env, onLine, killAfterMs };
     onProgress("Installing packages");
-    current = spawnGroup(join(bin, "pnpm"), ["install", "--prefer-offline"], group);
+    // The shim's own command, run without it: Windows starts a `.cmd` only through a shell.
+    current = spawnGroup(node, [pnpm, "install", "--prefer-offline"], group);
     const installed = await current.exited;
     if (stopped) return undefined;
     if (installed.code !== 0) {

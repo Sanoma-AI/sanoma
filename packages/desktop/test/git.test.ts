@@ -193,7 +193,7 @@ describe("a new company", () => {
     await expect(session.ready).resolves.toBe(`http://localhost:${port}`);
     expect(readFileSync(calls, "utf8")).toBe("dlx sanoma\n");
     expect(existsSync(join(repo, "sanoma.config.ts"))).toBe(true);
-    expect(existsSync(join(bin, "pnpm"))).toBe(true);
+    expect(existsSync(join(bin, process.platform === "win32" ? "pnpm.cmd" : "pnpm"))).toBe(true);
     expect(lines).toContain(`env ${port} 1 ${bin}`);
     expect(progress).toEqual(["Starting a new company with sanoma from npm"]);
     await session.stop();

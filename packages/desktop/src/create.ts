@@ -39,9 +39,8 @@ export function newCompanyProblem(dir: string): string | undefined {
 export function createSession(options: SessionOptions): Session {
   if (newCompanyProblem(options.repo)) return startSession(options);
   const { repo, port, node, pnpm, bin, onLine, onProgress, killAfterMs, pollMs } = options;
-  writeShims(bin, node, pnpm);
+  const env = launcherEnv(options.env, writeShims(bin, node, pnpm), port);
   onProgress("Starting a new company with sanoma from npm");
-  const env = launcherEnv(options.env, bin, port);
   const launched = launch({
     cwd: repo,
     env,
