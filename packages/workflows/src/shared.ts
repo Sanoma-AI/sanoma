@@ -249,7 +249,11 @@ export const CHANGE_WORKFLOW = "change";
  * The draft a change's run is of: `change:<id>` (its first run) or `change:<id>~<n>` (a later
  * one); undefined for any other run id.
  */
-export const changeIdOf = (runId: string): string | undefined => /^change:([\w-]{1,64})(?:~\d+)?$/.exec(runId)?.[1];
+export const changeIdOf = (runId: string): string | undefined => CHANGE_RUN.exec(runId)?.[1];
+
+/** What a draft's id may be (`ChangeInput.id`), the part of its branch and its change's run ids after `draft/` and `change:`. */
+export const DRAFT_ID = /^[\w-]{1,64}$/;
+const CHANGE_RUN = new RegExp(`^change:(${DRAFT_ID.source.slice(1, -1)})(?:~\\d+)?$`);
 
 /** Opens a change: its draft's branch pushed and a pull request opened for it. */
 export const CHANGE_OPEN = "sanoma.change.open";

@@ -569,10 +569,11 @@ export const changeQuery = (id: string) =>
   });
 
 /**
- * Whether the repository has a remote: the bar's Changes. Rarely changes (going live adds one), so
- * read again once a minute at most.
+ * Whether the repository has a remote: the bar's Changes. Read once per page load: it rarely
+ * changes (going live adds one), and the root loader waits for it on every navigation.
  */
-export const remoteQuery = () => queryOptions({ queryKey: ["remote"], queryFn: () => getRemote(), staleTime: 60_000 });
+export const remoteQuery = () =>
+  queryOptions({ queryKey: ["remote"], queryFn: () => getRemote(), staleTime: Number.POSITIVE_INFINITY });
 
 /** Every collection's records are under this key, each collection's under its name after it. */
 export const DATA_KEY = ["data"] as const;

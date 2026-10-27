@@ -1,6 +1,7 @@
-import type { Approver, PreviewAnswer } from "@sanoma-ai/workflows";
+import type { PreviewAnswer } from "@sanoma-ai/workflows";
 import { WORKFLOW_ACTION } from "@sanoma-ai/workflows/shared";
 import type { PreviewQuery } from "../api.ts";
+import { approverName } from "./changes.ts";
 
 // The run form's "will ask" line: what the policy would answer the person for a workflow's start
 // and every operation it may call, before the run starts (`previewFn`), asked as `previewRequests`
@@ -14,7 +15,6 @@ const AND = new Intl.ListFormat("en", { type: "conjunction" });
 const named = (id: string) => (id.startsWith(WORKFLOW_ACTION) ? "the start" : id);
 
 /** An approver as the line names it: the person's id, or the group's name. */
-const asked = (approver: Approver) => (typeof approver === "string" ? approver : approver.group);
 
 /**
  * What the policy will do ahead of the run, in one line: nothing when it allows everything;
@@ -32,7 +32,7 @@ export function willAsk(requests: PreviewQuery, answers: readonly PreviewAnswer[
     if (a.answer === "hold") {
       // A hold always names its approver (`cedarPolicy`).
       const key = JSON.stringify(a.approver);
-      const hold = holds.get(key) ?? { who: asked(a.approver!), actions: [] };
+      const hold = holds.get(key) ?? { who: approverName(a.approver!), actions: [] };
       hold.actions.push(action);
       holds.set(key, hold);
     } else if (a.answer === "deny") {

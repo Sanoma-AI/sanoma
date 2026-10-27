@@ -21,7 +21,7 @@ import { Field, FieldDescription, FieldError, FieldLabel } from "#/components/ui
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
 import { Textarea } from "#/components/ui/textarea.tsx";
-import { approverLabel, CHANGE_WORKFLOW, isEnded, OWN_CHANGE } from "@sanoma-ai/workflows/shared";
+import { approverLabel, CHANGE_MERGE, CHANGE_WORKFLOW, isEnded, OWN_CHANGE } from "@sanoma-ai/workflows/shared";
 import { type DecideRequest, errorBodyOf } from "../api.ts";
 import { asApplyPlan } from "../lib/apply-plan.ts";
 import { asChangeRef } from "../lib/changes.ts";
@@ -53,6 +53,8 @@ export interface Verbs {
   reject: string;
 }
 const VERBS: Verbs = { approve: "Approve", reject: "Reject" };
+/** A change's Publish (the merge's approval) is decided as Publish and Reject, wherever it shows. */
+export const PUBLISH_VERBS: Verbs = { approve: "Publish", reject: "Reject" };
 
 /** The run an approval belongs to: an approval left pending by a run that ended gets no controls. */
 type ApprovalRun = Pick<RunSummary, "runId" | "status" | "workflow" | "startedBy">;
@@ -179,10 +181,11 @@ function Details({ details }: { details: ApprovalState["details"] }) {
 export function ApprovalDecision({
   run,
   approval,
-  verbs = VERBS,
+  verbs = approval.covers.includes(CHANGE_MERGE) ? PUBLISH_VERBS : VERBS,
 }: {
   run: ApprovalRun;
   approval: ApprovalState;
+  /** The buttons' words: Approve and Reject, or Publish and Reject on a change's merge. */
   verbs?: Verbs;
 }) {
   // The decision stays put while the dialog animates closed, so its verb and colour do not flip.

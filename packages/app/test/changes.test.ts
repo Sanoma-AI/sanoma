@@ -144,6 +144,8 @@ describe("the Changes section", () => {
       /<dt[^>]*>Change<\/dt><dd[^>]*><a [^>]*href="\/changes\/rules"[^>]*>Refunds wait for finance<\/a>/,
     );
     expect(html).toContain('aria-label="What the change edits"');
+    // Decided as Publish here too.
+    expect(html).toMatch(/<button[^>]*>(?:(?!<\/button>)[\s\S])*Publish<\/button>/);
     // The glance in place of the details' JSON.
     expect(html).not.toContain("&quot;touches&quot;");
   });
@@ -163,6 +165,17 @@ describe("the Changes section", () => {
     const done = await fixture.page("/changes?show=done");
     // One row per draft: its latest run's.
     expect(done.html.match(/href="\/changes\/rules"/g)).toHaveLength(1);
+  });
+
+  it("lists a draft once, by its latest run: open again, it leaves Done", async () => {
+    const again = await fixture.draft("rules", { "policies/more.cedar": "\n" }, { title: "More rules" });
+    expect(again).toBe("change:rules~2");
+    const open = await fixture.page("/changes");
+    expect(open.html.match(/href="\/changes\/rules"/g)).toHaveLength(1);
+    expect(open.html).toContain(">More rules</a>");
+    expect((await fixture.page("/changes?show=done")).html).not.toContain('href="/changes/rules"');
+    await fixture.testApp.client.changeEvent("rules", { kind: "close", by: "alice" }, { by: "alice" });
+    await fixture.testApp.client.result(again);
   });
 
   it("is not found for a draft with no change", async () => {

@@ -829,24 +829,27 @@ export class SanomaClient {
   }
 
   /**
-   * The changes, newest first: `open` ones (not ended) or the others, else all; at most `limit`
-   * (20) runs read, each draft's newest of them shown.
+   * The changes, newest first, each draft's by its latest run (`change`): `open` ones (not ended)
+   * or the others, else all; at most `limit` (20).
    */
   async changes({ open, limit = 20 }: ChangesFilter = {}): Promise<ChangeView[]> {
-    const rows = await this.dbos.listWorkflows({
+    const runs = await this.dbos.listWorkflows({
       workflowName: CHANGE_WORKFLOW,
       applicationName: this.config.appName,
-      ...(open !== undefined && {
-        status: open ? dbosStatusesOf("queued", "running") : dbosStatusesOf(...ENDED_STATUSES),
-      }),
       sortDesc: true,
-      limit,
-      loadInput: true,
-      loadOutput: true,
+      loadInput: false,
+      loadOutput: false,
     });
-    // A draft's later run (`~2`) is its change now: its earlier runs are not read further.
-    const latest = [...Map.groupBy(rows, (row) => changeIdOf(row.workflowID)).values()].map(([row]) => row!);
-    return Promise.all(latest.map((row) => this.changeView(row)));
+    // A draft's later run (`~2`) is its change now: an earlier one is neither open nor done.
+    const ended = new Set<string>(dbosStatusesOf(...ENDED_STATUSES));
+    const ids = [...Map.groupBy(runs, (run) => changeIdOf(run.workflowID)).values()]
+      .map(([run]) => run!)
+      .filter((run) => open === undefined || ended.has(run.status) !== open)
+      .slice(0, limit)
+      .map((run) => run.workflowID);
+    if (ids.length === 0) return [];
+    const rows = await this.dbos.listWorkflows({ workflowIDs: ids, sortDesc: true, loadInput: true, loadOutput: true });
+    return Promise.all(rows.map((row) => this.changeView(row)));
   }
 
   /** The change of the draft `id`: its latest run's (`openChange`), or undefined when it has none. */

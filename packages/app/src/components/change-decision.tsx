@@ -5,11 +5,8 @@ import { CardContent, CardFooter, CardHeader } from "#/components/ui/card.tsx";
 import { approverName, isSettled, ruleOf } from "#/lib/changes.ts";
 import { cn } from "#/lib/utils.ts";
 import { runLink } from "../queries.ts";
-import { ApprovalDecision, type Verbs } from "./approval.tsx";
+import { ApprovalDecision, PUBLISH_VERBS } from "./approval.tsx";
 import { CardHeading, Fact, Facts, FLOAT, FloatingCard, When } from "./common.tsx";
-
-/** Publish's buttons: the merge approval decided as any approval is, in the ops manager's words. */
-const PUBLISH: Verbs = { approve: "Publish", reject: "Reject" };
 
 /**
  * A change's decision, floating over its review: the policy's answer as a sentence, the facts
@@ -50,7 +47,7 @@ export function ChangeDecision({ change }: { change: ChangeView }) {
       </CardContent>
       {publish && (
         <CardFooter className="flex-wrap gap-2">
-          <ApprovalDecision run={run} approval={publish} verbs={PUBLISH} />
+          <ApprovalDecision run={run} approval={publish} verbs={PUBLISH_VERBS} />
           <p className="w-full text-sm text-muted-foreground">Rejecting closes the change.</p>
         </CardFooter>
       )}

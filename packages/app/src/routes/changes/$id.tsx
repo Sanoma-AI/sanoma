@@ -114,11 +114,11 @@ function Stranded({ change }: { change: ChangeDetail }) {
   if (stranded.length === 0 || isSettled(change.state)) return null;
   const names = AND.format(change.edits.map((name) => titles[name] ?? name));
   const one = stranded.length === 1;
-  const runs = `${plural(stranded.length, "run")} of ${names || "the workflows this change edits"} ${one ? "is" : "are"} waiting`;
   return (
     <Notice>
-      {names ? `${runs}, and this change edits ${names}` : runs}: publishing cannot move {one ? "it" : "them"} to the
-      new version.{" "}
+      {plural(stranded.length, "run")} of{" "}
+      {names ? `${names}, which this change edits,` : "the workflows this change edits"} {one ? "is" : "are"} waiting:
+      publishing cannot move {one ? "it" : "them"} to the new version.{" "}
       {stranded.map((runId, i) => (
         <span key={runId}>
           {i > 0 && ", "}
