@@ -106,6 +106,15 @@ async function work(client, sessionId, cwd) {
     log({ wroteOutside: false, error: err.message });
   }
 
+  // Another person's home, beside its own, read through the client: refused, as outside the draft.
+  try {
+    const other = join(dirname(process.env.HOME), "lead", ".credentials.json");
+    const { content: read } = await client.request("fs/read_text_file", { sessionId, path: other });
+    log({ readOther: read });
+  } catch (err) {
+    log({ readOther: false, error: err.message });
+  }
+
   // A command it asks for: refused. One it runs through the client's terminal: its own.
   const shell = { toolCallId: "shell", title: "cat /etc/hosts", kind: "execute" };
   await update(client, sessionId, { sessionUpdate: "tool_call", ...shell, status: "pending" });

@@ -12,24 +12,31 @@ const OFF_LIMITS = new Set([".git", "node_modules"]);
 
 /**
  * The checkout rule: the absolute path `path` (relative to `worktree`, or absolute) names, when an
- * agent may read or write it there; undefined when it may not. Its parent's real path, the nearest
- * directory that exists followed by the rest (and the file's own, when it is a link), must lie
- * under the worktree's real path (the worktree itself is allowed, for a listing), and its first
- * segment there may not be `.git` or `node_modules` (a draft's `node_modules` is a link into the
- * live install). One rule for every engine: our loop's tools, `HarnessAgent`'s permission requests
- * and an ACP agent's.
+ * agent may read or write it there; undefined when it may not. Its real path must lie under the
+ * worktree's (`realWithin`; the worktree itself is allowed, for a listing), and its first segment
+ * there may not be `.git` or `node_modules` (a draft's `node_modules` is a link into the live
+ * install). One rule for every engine: our loop's tools, `HarnessAgent`'s permission requests and
+ * an ACP agent's.
  */
 export async function allowedPath(worktree: string, path: string): Promise<string | undefined> {
-  const root = await realpath(worktree);
+  const real = await realWithin(worktree, path);
+  // Lower-cased: on a case-insensitive file system (macOS's default) `.GIT` is `.git`.
+  return real && !OFF_LIMITS.has(real.inside.split(sep)[0]!.toLowerCase()) ? real.full : undefined;
+}
+
+/**
+ * The real path of `path` (relative to `dir`, or absolute), and that path relative to `dir`'s real
+ * path, when it lies under it or is it; undefined otherwise. Real as far as it exists: its parent's
+ * real path (the nearest directory that exists, followed by the rest), and the file's own when it
+ * is a link, so a link never leads out.
+ */
+export async function realWithin(dir: string, path: string): Promise<{ full: string; inside: string } | undefined> {
+  const root = await realpath(dir);
   const wanted = resolve(root, path);
-  const parent = await realParent(dirname(wanted));
-  let full: string | undefined = join(parent, basename(wanted));
+  let full: string | undefined = join(await realParent(dirname(wanted)), basename(wanted));
   // A link is followed to what it names, which must be inside too; a broken one names nothing.
   if ((await lstat(full).catch(() => undefined))?.isSymbolicLink()) full = await realpath(full).catch(() => undefined);
-  if (full === undefined) return undefined;
-  if (!within(root, full)) return undefined;
-  // Lower-cased: on a case-insensitive file system (macOS's default) `.GIT` is `.git`.
-  return OFF_LIMITS.has(relative(root, full).split(sep)[0]!.toLowerCase()) ? undefined : full;
+  return full !== undefined && within(root, full) ? { full, inside: relative(root, full) } : undefined;
 }
 
 /** What an agent is told when the checkout rule refuses `path`. */
@@ -62,8 +69,15 @@ export function drafting(app: AppContext): Drafting {
   return repo as Drafting;
 }
 
-/** Where the coding agents' installs and sign-ins are kept across restarts. */
-export const agentHome = (app: AppContext) => join(drafting(app).root, ".sanoma", "agent-home");
+/**
+ * The coding agents' state of the kind `kind`, kept across restarts under `.sanoma/agent-home`,
+ * one directory per kind so that no engine's files cover another's: `harness`, the company-key
+ * session's home (its bridges' installs and run files, Pi's settings); `acp`, a person's own
+ * agents' installs (`acp/<agent>`, the shims, pnpm's store); `people`, each person's own `HOME`
+ * (`people/<id>`), where only that person's agent keeps its sign-in and nothing of ours reads.
+ */
+export const agentHome = (app: AppContext, kind: "harness" | "acp" | "people") =>
+  join(drafting(app).root, ".sanoma", "agent-home", kind);
 
 /** The chat's draft, opened (or found open), and attached to the chat's row the first time. */
 export async function openDraft(app: AppContext, chat: Chat): Promise<Draft> {

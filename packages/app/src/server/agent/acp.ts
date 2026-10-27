@@ -149,19 +149,19 @@ async function runTurn(name: OwnAgentName, engineTurn: EngineTurn, writer: UIMes
   if (!isPerson(principal)) {
     throw new Error(`${agent.title} runs on a person's own plan, and ${principal.id} is not a person`);
   }
-  // Kept across restarts: the installs, and each person's sign-ins.
-  const home = agentHome(app);
+  // Kept across restarts, apart: the installs, and each person's sign-ins.
+  const agents = agentHome(app, "acp");
   const draft = await openDraft(app, chat);
   writer.write({ type: "start", messageId: generateId() });
   const relay = new Relay(writer);
   let turn: AcpTurn | undefined;
   try {
-    const dir = join(home, "acp", name);
+    const dir = join(agents, name);
     // A new message does not wait for a first install: it goes on, for the next turn.
-    await untilAborted(install(agent, dir, home), signal);
-    const personal = join(home, "people", personDir(principal.id));
+    await untilAborted(install(agent, dir, agents), signal);
+    const personal = join(agentHome(app, "people"), personDir(principal.id));
     const bins = join(dir, "node_modules", ".bin");
-    const [shimmed] = await Promise.all([shims(home), mkdir(personal, { recursive: true })]);
+    const [shimmed] = await Promise.all([shims(agents), mkdir(personal, { recursive: true })]);
     const env = sessionEnv(personal);
     turn = new AcpTurn(agent, relay, signal, {
       chatId: chat.id,
@@ -616,7 +616,8 @@ const quote = (word: string) => (/^[\w./=:-]+$/.test(word) ? word : `'${word.rep
 
 /**
  * Installs `agent` into `dir`, once: its packages at their versions by the `pnpm` on the session's
- * `PATH`, as the HarnessAgent bridges run it (the desktop shell ships no npm), outside the
+ * `PATH`, as the HarnessAgent bridges run it (the desktop shell ships no npm), with `home` (the
+ * installs' `acp`) as its `HOME`, so pnpm's store and cache stay with the installs, outside the
  * company's workspace and with no install script run but the vendor's own `setup`, as
  * `installed.json` records. The last install's `node_modules` goes first: pnpm refuses one made
  * from another store (the repo moved) or by another major version. Another turn waits for an
@@ -670,8 +671,8 @@ function untilAborted<T>(promise: Promise<T>, signal: AbortSignal, timeout?: { m
 }
 
 /** The shims' directory, first on the agent's PATH: each of `SHIMS` refuses, so nothing of this machine's user signs the agent in. */
-async function shims(home: string): Promise<string> {
-  const dir = join(home, "acp", "shims");
+async function shims(agents: string): Promise<string> {
+  const dir = join(agents, "shims");
   await mkdir(dir, { recursive: true });
   await Promise.all(
     SHIMS.map((name) =>

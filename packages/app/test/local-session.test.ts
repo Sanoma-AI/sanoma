@@ -10,11 +10,17 @@ import { freePort, LocalSession } from "../src/server/agent/local-session.ts";
 
 const base = realpathSync(mkdtempSync(join(tmpdir(), "sanoma-session-")));
 const root = join(base, "draft");
-const home = join(base, "home");
+// The agents' state as `agentHome` lays it out: the session's home beside a person's own agents'
+// installs and each person's sign-ins.
+const agentHome = join(base, "agent-home");
+const home = join(agentHome, "harness");
 mkdirSync(join(root, "workflows"), { recursive: true });
 mkdirSync(join(root, ".git"));
 mkdirSync(join(root, "node_modules"));
-mkdirSync(home);
+mkdirSync(home, { recursive: true });
+mkdirSync(join(agentHome, "people/ada"), { recursive: true });
+writeFileSync(join(agentHome, "people/ada/.credentials.json"), "{}");
+mkdirSync(join(agentHome, "acp/opencode/node_modules"), { recursive: true });
 execFileSync("ln", ["-s", tmpdir(), join(root, "out")]);
 
 const session = (id = "s1") => new LocalSession({ id, root, home, port: 4321 });
@@ -80,14 +86,35 @@ describe("LocalSession", () => {
     await local.writeTextFile({ path: join(runs, "s1/x.json"), content: "{}" });
     mkdirSync(join(runs, "s2"), { recursive: true });
     writeFileSync(join(runs, "s2/start-config.json"), "{}");
-    await expect(local.readTextFile({ path: join(runs, "s2/start-config.json") })).rejects.toThrow(
-      /outside the checkout/,
-    );
+    for (const path of [
+      join(runs, "s2/start-config.json"),
+      join(home, ".ai-sdk-harness/.AGENT-RUNS/s2/start-config.json"),
+    ]) {
+      await expect(local.readTextFile({ path }), path).rejects.toThrow(/outside the checkout/);
+    }
     for (const path of ["../outside.txt", "/etc/passwd", "out/x", ".git/config", "node_modules/x/index.js"]) {
       await expect(local.writeTextFile({ path, content: "no" }), path).rejects.toThrow(/outside the checkout/);
       await expect(local.readBinaryFile({ path }), path).rejects.toThrow(/outside the checkout/);
     }
     expect(existsSync(join(base, "outside.txt"))).toBe(false);
+  });
+
+  it("never reaches a person's own-agent sign-ins or the own agents' installs beside its home", async () => {
+    const local = session();
+    // A link in its home leads nowhere else.
+    execFileSync("ln", ["-s", join(agentHome, "people/ada"), join(home, "ada")]);
+    for (const path of [
+      join(agentHome, "people/ada/.credentials.json"),
+      join(home, "../people/ada/.credentials.json"),
+      join(home, "ada/.credentials.json"),
+    ]) {
+      await expect(local.readTextFile({ path }), path).rejects.toThrow(/outside the checkout/);
+    }
+    for (const path of [join(agentHome, "acp/opencode/node_modules/x.js"), join(home, "../acp/shims/gh")]) {
+      await expect(local.writeTextFile({ path, content: "no" }), path).rejects.toThrow(/outside the checkout/);
+    }
+    expect(existsSync(join(agentHome, "acp/opencode/node_modules/x.js"))).toBe(false);
+    expect(existsSync(join(agentHome, "acp/shims"))).toBe(false);
   });
 
   it("kills each command's whole process group, and deletes only its own .agent-runs, when destroyed", async () => {

@@ -128,6 +128,9 @@ export default defineWorkflow({
   git("init", "--quiet", "--initial-branch=main");
   git("add", "--all");
   git("commit", "--quiet", "-m", "First");
+  // Another person's sign-in, which nothing of ours reads for ada's agent.
+  mkdirSync(join(home(), "people/lead"), { recursive: true });
+  writeFileSync(join(home(), "people/lead/.credentials.json"), `lead's token ${RUN}`);
   plant("opencode", { signIn: "none", mode: "work" });
   plant("copilot", { signIn: "terminal", mode: "hello" });
   plant("pi", { signIn: "once", mode: "hello" });
@@ -219,6 +222,10 @@ describe("the chat on a person's own agent", () => {
       { asked: "Edit always", chosen: "cancelled" },
     ]);
     expect(log.find((entry) => "wroteOutside" in entry)).toMatchObject({ wroteOutside: false });
+    expect(log.find((entry) => "readOther" in entry)).toEqual({
+      readOther: false,
+      error: expect.stringContaining("is outside your checkout"),
+    });
     expect(existsSync(join(draftRoot, "node_modules/evil.js"))).toBe(false);
 
     // The agent ran in the draft with the person's own home, signs in and reads files as the client

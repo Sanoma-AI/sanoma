@@ -2,14 +2,14 @@ import { spawn as spawnChild } from "node:child_process";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { Readable, Writable } from "node:stream";
 import {
   harnessSessionDataDirectoryPath,
   harnessStateDirectoryPath,
   type HarnessV1NetworkSandboxSession,
 } from "@ai-sdk/harness";
-import { allowedPath, within } from "./checkout.ts";
+import { allowedPath, realWithin, within } from "./checkout.ts";
 
 // The sandbox session `HarnessAgent` runs a coding agent in, on this machine: its commands are
 // child processes in the draft's checkout, its files that checkout's and its own home's, its bridge
@@ -24,7 +24,13 @@ export interface LocalSessionOptions {
   id: string;
   /** The draft's checkout (`Draft.root`): where the agent works, and the only files of the repository it may touch. */
   root: string;
-  /** Its `HOME`, kept across restarts: a bridge installs its agent under it once (`.ai-sdk-harness`). */
+  /**
+   * Its `HOME`, kept across restarts: a bridge installs its agent under it once (`.ai-sdk-harness`).
+   * The session may read and write anything under it, so it holds nothing of another engine's:
+   * `agentHome(app, "harness")`, beside a person's own agents' installs and sign-ins, not above them.
+   * That holds for the session's own file calls (Pi's); a bridge reads, and runs what it starts, as
+   * this machine's user.
+   */
   home: string;
   /** The loopback port its bridge listens on (`freePort`). */
   port: number;
@@ -78,8 +84,14 @@ export class LocalSession implements HarnessV1NetworkSandboxSession {
   /** `path` as the session may use it: the checkout's by the checkout rule, else under its home; refused otherwise. */
   async #path(path: string): Promise<string> {
     const full = resolve(this.defaultWorkingDirectory, path);
-    // Its home, but no other session's run files (a bridge's start config holds the key).
-    if (within(this.#home, full) && (!within(dirname(this.#runs), full) || within(this.#runs, full))) return full;
+    // Its home, by real paths (a link there leads nowhere else), but no other session's run files
+    // (a bridge's start config holds the key), in any case (macOS's file system ignores it).
+    const home = within(this.#home, full) ? await realWithin(this.#home, full) : undefined;
+    if (home !== undefined) {
+      const inside = home.inside.toLowerCase();
+      const runs = relative(this.#home, this.#runs).toLowerCase();
+      if (!within(dirname(runs), inside) || within(runs, inside)) return home.full;
+    }
     const allowed = await allowedPath(this.defaultWorkingDirectory, full);
     if (allowed === undefined) throw new Error(`${path} is outside the checkout, or under .git or node_modules`);
     return allowed;
