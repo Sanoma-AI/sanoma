@@ -152,7 +152,7 @@ function AvailableList({ actor, taken }: { actor: string; taken: ReadonlySet<str
   const apps = data.apps.filter((app) => !taken.has(sameRepo(app.url)));
   return (
     <>
-      {data.error && <Notice>GitHub could not be searched, so only the repo&apos;s apps show. {data.error}</Notice>}
+      {data.error && <Notice>Only the repo&apos;s apps show. {data.error}</Notice>}
       {!data.error && apps.length === 0 && (
         <Nothing title="No other apps found on GitHub">
           An app&apos;s source repository carries the topic <code>sanoma-app</code>.
