@@ -6,6 +6,8 @@ import { type ApplyDeclared, applyWorkflow } from "./apply.ts";
 import { applySteps } from "./apply-steps.ts";
 import { callWorkflow } from "./call-workflow.ts";
 import { changeDriver, changeOps, reservedFor } from "./change.ts";
+import { changeSteps } from "./change-steps.ts";
+import { changeWorkflow } from "./change-workflow.ts";
 import {
   type Collection,
   collectionsConnector,
@@ -38,7 +40,7 @@ import {
 import { type CedarPolicySource, policyAt } from "./cedar.ts";
 import type { Policy } from "./policy.ts";
 import { type Resource, resourceTypesOf, withoutWriteOnly } from "./resource.ts";
-import { APPLY_WORKFLOW, BUILT_IN_WORKFLOWS, CALL_WORKFLOW, DATA_VENDOR } from "./shared.ts";
+import { APPLY_WORKFLOW, BUILT_IN_WORKFLOWS, CALL_WORKFLOW, CHANGE_WORKFLOW, DATA_VENDOR } from "./shared.ts";
 import { type RemoteHalf, sourceDriver, sourceOps } from "./source.ts";
 import type { Steps } from "./steps.ts";
 import { checkSchedule } from "./schedules.ts";
@@ -312,10 +314,11 @@ export function resolveConfig(config: SanomaConfig, options: ResolveOptions = {}
   const driversByVendor = instanceFakes
     ? new Map([...instanceFakes].map(([vendor, fake]) => [vendor, fake.driver]))
     : new Map([...makersOf(running, "driver")].map(([vendor, make]) => [vendor, make()]));
+  const remotes = new Map([...makersOf(config.connectors, "remote")].map(([vendor, make]) => [vendor, make()]));
   const drivers = indexDrivers(
     [
       ...driversByVendor.values(),
-      changeDriver(),
+      changeDriver(remotes),
       ...(hosts ? [sourceDriver] : []),
       ...(dataStore ? [collectionsDriver(declared, dataStore)] : []),
     ],
@@ -338,17 +341,21 @@ export function resolveConfig(config: SanomaConfig, options: ResolveOptions = {}
     names.set(wf.name, wf);
   }
   // Built-in: checking the resources the data files declare against their vendors, and applying them.
+  const connectors = connectorsOf(config);
+  // The types the data files may declare: the vendors' and the people's, whose resources are left out.
+  const declarable = resourceTypesOf(connectors);
+  const read = () => readDeclared(root, connectors, declarable, types);
   if (types.size) {
-    const connectors = connectorsOf(config);
-    // The types the data files may declare: the vendors' and the people's, whose resources are left out.
-    const declarable = resourceTypesOf(connectors);
-    const read = () => readDeclared(root, connectors, declarable, types);
     names.set(
       DRIFT_WORKFLOW,
       driftWorkflow(types, ops, drivers, () => DBOS.runStep(read, { name: "drift:data-files" })),
     );
     names.set(APPLY_WORKFLOW, applyWorkflow(types, ops, drivers, applySteps(appName, root, read)));
   }
+  // Built-in, in every config: the life of a change, which deploys to the declared hosts after its merge.
+  const hostIds = async () =>
+    (await read()).resources.filter((r) => types.get(`${r.vendor}.${r.type}`)?.host).map((r) => r.id);
+  names.set(CHANGE_WORKFLOW, changeWorkflow(changeOps, changeSteps({ remotes, hosts: hostIds })));
   // Built-in: a direct call the policy holds for an approval, made a run, when any operation may be called directly.
   const call = callWorkflow(ops, drivers, types);
   if (call.uses.length) names.set(CALL_WORKFLOW, call);
@@ -366,7 +373,7 @@ export function resolveConfig(config: SanomaConfig, options: ResolveOptions = {}
     ...(instanceFakes && { instanceFakes }),
     logins: makersOf(config.connectors, "login"),
     models: makersOf(config.connectors, "model"),
-    remotes: new Map([...makersOf(config.connectors, "remote")].map(([vendor, make]) => [vendor, make()])),
+    remotes,
     ...(scenarios && { scenarios }),
     types,
     steps: [...new Set([...running.flatMap((c) => setupOf(c).steps ?? []), ...(config.steps ?? [])])],

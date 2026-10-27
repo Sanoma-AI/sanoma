@@ -79,12 +79,15 @@ export {
 } from "./apply.ts";
 export { CALL_WORKFLOW, CallInput } from "./call-workflow.ts";
 export {
+  type ChangeDecision,
+  type ChangeDeploy,
   type ChangeEvent,
   ChangeFacts,
   ChangeInput,
   changeOps,
   type ChangeReport,
   type ChangeState,
+  type ChangeVerified,
   runtimeHold,
   touchesOf,
 } from "./change.ts";
@@ -199,6 +202,8 @@ export {
 } from "./wakeup.ts";
 export {
   type CallOptions,
+  type ChangesFilter,
+  type ChangeView,
   type ClientOptions,
   SanomaClient,
   type RunsFilter,
@@ -220,6 +225,7 @@ export {
   CHANGE_MERGE,
   CHANGE_OPEN,
   CHANGE_REVIEW,
+  CHANGE_TOPIC,
   CHANGE_WORKFLOW,
   declaresPeople,
   type PeopleResource,

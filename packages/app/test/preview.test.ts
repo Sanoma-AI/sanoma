@@ -66,7 +66,10 @@ const config = { workflows: [refund], connectors: [withFake(shop, fake)], root }
 const resolved = resolveConfig(config);
 const cedar = resolved.policy;
 const description = describeConfig(config);
-const requests = previewRequests(description.workflows[0]!, new Map(description.ops.map((op) => [op.id, op])));
+const requests = previewRequests(
+  description.workflows.find((wf) => wf.name === "refund")!,
+  new Map(description.ops.map((op) => [op.id, op])),
+);
 
 /** The line the run form shows `who`, named in the loopback login's header, under `policy`. */
 async function lineFor(policy: Policy, who: string) {

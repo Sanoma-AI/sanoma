@@ -71,7 +71,7 @@ describe("describeConfig", () => {
       uses: [bluesky.post.create, "all"],
       run: async (ctx) => ctx.all([() => ctx.bluesky.post.create({ text: "x" })]),
     });
-    const wf = describeConfig({ ...base, workflows: [fan] }).workflows[0]!;
+    const wf = describeConfig({ ...base, workflows: [fan] }).workflows.find((w) => w.name === "fan")!;
     expect(wf.builtins).toEqual(["all"]);
   });
 
@@ -310,7 +310,7 @@ export default defineWorkflow({
     // A file defining two workflows gives each its problems; one it does not define, the outline's error too.
     const again = { ...definedIn(file), name: "again" } as typeof announce;
     const twice = describeConfig({ ...base, workflows: [definedIn(file), again], root: dir }).workflows;
-    expect(twice.map((wf) => [wf.name, wf.problems])).toEqual([
+    expect(twice.filter((wf) => !wf.builtin).map((wf) => [wf.name, wf.problems])).toEqual([
       ["again", [...found, { line: 1, column: 1, message: expect.stringMatching(/holds no workflow named "again"$/) }]],
       ["announce", found],
     ]);
@@ -373,6 +373,7 @@ describe("a workflow's name in a site's api", () => {
     ]);
     expect(apiProblems).toEqual([
       ["announce", []],
+      ["change", []],
       ["data", [[1, 1, "A site calls this workflow api.data, which is the collections': rename it"]]],
       ["ghost", [[1, 1, "A site calls this workflow api.ghost, which is the vendor ghost's operations: rename it"]]],
       [

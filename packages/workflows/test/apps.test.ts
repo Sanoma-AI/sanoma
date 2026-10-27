@@ -139,7 +139,7 @@ describe("apps", () => {
   it("describes each kind with its app: workflows, collections and sites, the apps themselves, nothing wrong", () => {
     const description = describeConfig(config);
     expect(description.apps.map((app) => app.name)).toEqual(["crm", "shop"]);
-    const own = description.workflows.filter((w) => w.name !== "call");
+    const own = description.workflows.filter((w) => !w.builtin);
     expect(own.map(({ name, app, problems }) => ({ name, app, problems }))).toEqual([
       { name: "crm.follow-up", app: "crm", problems: [] },
       { name: "introduce", app: undefined, problems: [] },

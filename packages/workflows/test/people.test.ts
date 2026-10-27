@@ -61,7 +61,8 @@ describe("the people types", () => {
       "sanoma.change.merge",
       "sanoma.change.close",
     ]);
-    expect([...resolved.workflows.keys()]).toEqual([]);
+    // And the change workflow, in every config.
+    expect([...resolved.workflows.keys()]).toEqual(["change"]);
   });
 });
 

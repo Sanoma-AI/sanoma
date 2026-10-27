@@ -21,6 +21,15 @@ import { dbosClient, lazyPool, type LazyPool } from "./db.ts";
 import { type CredentialStatus, credentialsOf } from "./env.ts";
 import { type ApprovalState, Principal, type WorkflowDefinition } from "./define.ts";
 import { APPLY_WORKFLOW, type ApplyInput, type ApplyReport } from "./apply.ts";
+import {
+  ADMIN,
+  type ChangeEvent,
+  ChangeEventSchema,
+  ChangeInput,
+  type ChangeReport,
+  type ChangeState,
+  initialChangeState,
+} from "./change.ts";
 import { DRIFT_WORKFLOW, type DriftReport } from "./drift.ts";
 import { isDirect } from "./direct.ts";
 import {
@@ -42,7 +51,12 @@ import type { Secrets } from "./secret.ts";
 import {
   BUILT_IN_WORKFLOWS,
   CALL_WORKFLOW,
+  CHANGE_EVENT,
+  CHANGE_MERGE,
+  CHANGE_TOPIC,
+  CHANGE_WORKFLOW,
   DATA_VENDOR,
+  ENDED_STATUSES,
   errorMessage,
   isEnded,
   isVisitor,
@@ -154,6 +168,24 @@ export interface StartOptions {
   sandbox?: string;
 }
 
+/** A change as the app shows it: its run, where the change is (`ChangeState`), and how it ended. */
+export interface ChangeView {
+  runId: string;
+  status: RunStatus;
+  startedBy?: Principal;
+  approvals: ApprovalState[];
+  /** What the run last published (`CHANGE_EVENT`); `opening`, with no branch yet, before it has. */
+  state: ChangeState;
+  /** The run's output, once it has finished. */
+  report?: ChangeReport;
+}
+
+/** Which changes `SanomaClient.changes` lists: `open` (not ended) or not, and at most `limit` (20), newest first. */
+export interface ChangesFilter {
+  open?: boolean;
+  limit?: number;
+}
+
 /** What `SanomaClient.call` takes besides the operation's id and its input. */
 export interface CallOptions {
   /**
@@ -263,6 +295,9 @@ export class SanomaClient {
       options.sandbox,
       "`sandbox` must be the name of a scenario in the config's `scenarios/`",
     );
+    if (workflow.name === CHANGE_WORKFLOW && !isChangeRunOf((parsed as ChangeInput).id, runId)) {
+      throw new SanomaError("invalid_input", "A change is started with openChange, which names its run", { runId });
+    }
     const hold = await this.startHold(workflow.name, parsed, startedBy, runId);
     const args: RunArgs = { input, startedBy, ...(sandbox === undefined ? {} : { sandbox }), ...(hold && { hold }) };
     const { onBehalfOf } = startedBy;
@@ -776,6 +811,116 @@ export class SanomaClient {
   }
 
   /**
+   * Starts the built-in change workflow on the draft `input.id` (`ChangeInput`): its run id is
+   * `change:<id>`, or `change:<id>~<n>` once that run has ended (the second `~2`). While a run of
+   * the change has not ended, returns its id and starts nothing.
+   */
+  async openChange(input: ChangeInput, options: StartOptions): Promise<string> {
+    const { id } = parseOrThrow(ChangeInput, input, "Not a change to open");
+    const runs = await this.changeRuns(id);
+    const open = runs.find((r) => !isEnded(runStatus(r.status, [])));
+    if (open) return open.workflowID;
+    const runId = runs.length ? `${changeRunId(id)}~${runs.length + 1}` : changeRunId(id);
+    return this.start(this.config.workflows.get(CHANGE_WORKFLOW)!, input, { ...options, runId });
+  }
+
+  /** The changes, newest first: `open` ones (not ended) or the others, else all; at most `limit` (20). */
+  async changes({ open, limit = 20 }: ChangesFilter = {}): Promise<ChangeView[]> {
+    const rows = await this.dbos.listWorkflows({
+      workflowName: CHANGE_WORKFLOW,
+      applicationName: this.config.appName,
+      ...(open !== undefined && {
+        status: open ? dbosStatusesOf("queued", "running") : dbosStatusesOf(...ENDED_STATUSES),
+      }),
+      sortDesc: true,
+      limit,
+      loadInput: true,
+      loadOutput: true,
+    });
+    return Promise.all(rows.map((row) => this.changeView(row)));
+  }
+
+  /** The change of the draft `id`: its latest run's (`openChange`), or undefined when it has none. */
+  async change(id: string): Promise<ChangeView | undefined> {
+    const [row] = await this.changeRuns(id, { load: true });
+    return row && this.changeView(row);
+  }
+
+  /**
+   * Tells the change of the draft `id` what happened (`ChangeEvent`), as `options.by`: new commits
+   * on its branch, a close asked for, or its pull request closed or merged on the host. The event is
+   * queued for its latest run, which reads it when it next waits; a pending approval of the merge
+   * (Publish, or a hold on it) is withdrawn as `by` (C4's `withdraw`), so a run waiting on it reads
+   * the event now. A `close` is refused (`not_approver`) unless `by` may withdraw that approval; the
+   * other kinds are facts, so a withdrawal `by` may not make is skipped and the run's merge refuses a
+   * head that moved. `run_not_found` when the draft has no change, `run_ended` when its run has ended.
+   */
+  async changeEvent(id: string, event: ChangeEvent, options: { by: Principal | string }): Promise<void> {
+    const by = await this.admitted(
+      parseOrThrow(PrincipalOrId, options?.by, '`by` must be a principal, such as "alice" or { id: "alice" }'),
+    );
+    const given = parseOrThrow(ChangeEventSchema, event, "Not a change event");
+    // A close is asked for by whoever asks it, whatever the event names.
+    const told: ChangeEvent = given.kind === "close" ? { kind: "close", by: by.id } : given;
+    const [row] = await this.changeRuns(id);
+    if (!row) throw new SanomaError("run_not_found", `The draft ${id} has no change`, { id });
+    const runId = row.workflowID;
+    const approvals = await this.approvals(runId);
+    const status = runStatus(row.status, approvals);
+    if (isEnded(status)) {
+      throw new SanomaError("run_ended", `Run ${runId} has ${status}; it takes no more events`, { runId, status });
+    }
+    const held = approvals.find((a) => a.status === "pending" && a.covers.includes(CHANGE_MERGE));
+    // A close is whoever may withdraw Publish's, or with none pending, the starter's or admin's.
+    const refusal = withdrawalRefusal(held ?? { approver: { group: ADMIN } }, by, row.authenticatedUser);
+    if (refusal !== undefined && told.kind === "close") {
+      if (held) throw notApprover(runId, held, refusal);
+      throw new SanomaError("not_approver", refusal, { runId, reason: refusal });
+    }
+    this.options.onWrite?.();
+    await this.dbos.send(runId, told, CHANGE_TOPIC);
+    if (held && refusal === undefined) {
+      await this.withdraw(runId, held.id, WITHDRAWAL[told.kind], { by, timeoutSeconds: 5 }).catch((err: unknown) => {
+        // Decided or ended meanwhile: the run reads the event when it next waits, if it does.
+        if (!["already_decided", "run_ended", "no_pending_approval"].includes(errorCode(err) ?? "")) throw err;
+      });
+    }
+  }
+
+  /** The runs of the draft `id`'s change, newest first: `change:<id>` and `change:<id>~<n>`. */
+  private async changeRuns(id: string, { load = false } = {}) {
+    const base = changeRunId(id);
+    const rows = await this.dbos.listWorkflows({
+      workflow_id_prefix: base,
+      workflowName: CHANGE_WORKFLOW,
+      applicationName: this.config.appName,
+      sortDesc: true,
+      loadInput: load,
+      loadOutput: load,
+    });
+    return rows.filter((r) => isChangeRunOf(id, r.workflowID));
+  }
+
+  /** A change run's row as the app shows it: its summary, its last `ChangeState` and, once finished, its report. */
+  private async changeView(row: Parameters<SanomaClient["summarize"]>[0] & { input?: unknown; output?: unknown }) {
+    const [summary, published] = await Promise.all([
+      this.summarize(row),
+      this.dbos.getEvent<ChangeState>(row.workflowID, CHANGE_EVENT, 0),
+    ]);
+    const input = (row.input as [RunArgs])[0].input as ChangeInput;
+    const state = published ?? initialChangeState(input);
+    const { runId, status, startedBy, approvals } = summary;
+    return {
+      runId,
+      status,
+      ...(startedBy && { startedBy }),
+      approvals,
+      state,
+      ...(row.status === "SUCCESS" && { report: row.output as ChangeReport }),
+    } satisfies ChangeView;
+  }
+
+  /**
    * Stores a value for a variable a driver's `env` declares, as `by`, and tells the workers: each
    * loads it into its environment, unless its environment sets the variable itself. Refuses
    * (`invalid_input`) a name no driver declares, and a value the variable's schema refuses, with
@@ -1048,6 +1193,23 @@ const alreadyDecided = (runId: string, a: ApprovalState) =>
       ...(a.withdrawnReason === undefined ? {} : { withdrawnReason: a.withdrawnReason }),
     },
   );
+
+/** A change's first run's id: `change:<draft id>`. */
+const changeRunId = (id: string) => `change:${id}`;
+
+/** True when `runId` is a run of the draft `id`'s change: `change:<id>` or `change:<id>~<n>`. */
+const isChangeRunOf = (id: string, runId: string | undefined) => {
+  const base = changeRunId(id);
+  return runId === base || (runId?.startsWith(`${base}~`) === true && /^\d+$/.test(runId.slice(base.length + 1)));
+};
+
+/** Why a change event withdraws the merge's pending approval. */
+const WITHDRAWAL: Record<ChangeEvent["kind"], string> = {
+  commits: "The change has new commits",
+  close: "The change is being closed",
+  closed: "The pull request was closed on the host",
+  merged: "The pull request was merged on the host",
+};
 
 const notApprover = (runId: string, a: ApprovalState, reason: string) =>
   new SanomaError("not_approver", `${reason} (${a.id})`, { runId, approvalId: a.id, approver: a.approver, reason });
