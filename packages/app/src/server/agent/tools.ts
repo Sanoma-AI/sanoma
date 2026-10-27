@@ -75,13 +75,14 @@ export function loopTools(turn: ToolsTurn) {
     turn.showDraft({ branch, ...(await source().diff(chat.id)), ...(checked && { checks: checked }) });
   };
   /**
-   * The turn's writes, one at a time: the model may call several tools at once, and a merge must
-   * never see another edit's file uncommitted, nor an edit read a file a merge then rewrites.
+   * The turn's writes and checks, one at a time: the model may call several tools at once, and a
+   * merge must never see another edit's file uncommitted, nor an edit or the checks a merge half
+   * done (the reads read the draft's last commit).
    */
-  let writes: Promise<unknown> = Promise.resolve();
-  const inTurn = <T>(write: () => Promise<T>): Promise<T> => {
-    const done = writes.then(write);
-    writes = done.catch(() => undefined);
+  let queue: Promise<unknown> = Promise.resolve();
+  const inTurn = <T>(run: () => Promise<T>): Promise<T> => {
+    const done = queue.then(run);
+    queue = done.catch(() => undefined);
     return done;
   };
   /** Writes `text` at `path` in the draft and commits it with `message`. */
@@ -203,7 +204,7 @@ export function loopTools(turn: ToolsTurn) {
           .string()
           .optional()
           .describe(
-            "A branch, tag or commit of it; its default branch when left out (an update follows the default branch)",
+            "A branch, tag or full commit id of it; its default branch when left out (an update follows the default branch)",
           ),
         folder: z
           .string()
@@ -222,12 +223,13 @@ export function loopTools(turn: ToolsTurn) {
       description:
         "Run `sanoma check` on your draft: types, the workflow lint, the data files and the scenarios. Run it after your edits and fix what it finds.",
       inputSchema: z.object({}),
-      execute: async () => {
-        if (!(await hasDraft())) throw new Error("Nothing is drafted yet: edit a file first");
-        checked = await checks(app, chat.id);
-        await showCard();
-        return checked;
-      },
+      execute: () =>
+        inTurn(async () => {
+          if (!(await hasDraft())) throw new Error("Nothing is drafted yet: edit a file first");
+          checked = await checks(app, chat.id);
+          await showCard();
+          return checked;
+        }),
     }),
     lookup: tool({
       description:

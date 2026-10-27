@@ -34,6 +34,7 @@ import {
 } from "./api.ts";
 import {
   getActor,
+  getAppBehind,
   getAvailableConnectors,
   getChange,
   getChanges,
@@ -273,6 +274,14 @@ export const availableAppsQuery = (actor: string) =>
         error: errorMessage(err),
       })),
     staleTime: (query) => (query.state.data?.error ? 60_000 : 10 * 60_000),
+  });
+
+/** How far the app `folder` is behind its source: a fetch from its repository, so read once a minute at most. */
+export const appBehindQuery = (folder: string) =>
+  queryOptions({
+    queryKey: ["app-behind", folder],
+    queryFn: () => getAppBehind({ data: { folder } }),
+    staleTime: 60_000,
   });
 
 /** What going live can choose from: read once a minute at most, as each list asks GitHub or Supabase. */

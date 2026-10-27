@@ -489,6 +489,9 @@ describe("localGitSource's apps", () => {
     expect(await update.update!({ folder: "crm", author: "ada" })).toEqual({ ...updated, merged: 0 });
     await mergeDraft(repo, "update");
     expect(await repo.behind!("crm")).toBe(0);
+    // A commit that changes nothing an update takes (the source's root only) is not counted.
+    crm.commit({ "README.md": "# The starter, a third time\n" }, "Root only");
+    expect(await repo.behind!("crm")).toBe(0);
 
     // The company and the source both change one line: the merge commits the file with its markers.
     writeFileSync(join(dir, "apps/crm/title.ts"), 'export const title = "Follow up soon";\n');

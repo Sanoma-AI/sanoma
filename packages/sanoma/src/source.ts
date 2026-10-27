@@ -131,9 +131,12 @@ function sourceOf(cwd: string, folder: string): string {
   return app.source;
 }
 
-/** How many commits `from` has that `HEAD` lacks, in the checkout at `cwd`. */
-const behindIn = async (cwd: string, from: string) =>
-  Number(await gitIn(cwd, ["rev-list", "--count", `HEAD..${from}`]));
+/**
+ * How many commits `from` has that `HEAD` lacks, in the checkout at `cwd`, of those that change
+ * what a merge of the app `folder` takes: its folder and `package.json`.
+ */
+const behindIn = async (cwd: string, from: string, folder: string) =>
+  Number(await gitIn(cwd, ["rev-list", "--count", `HEAD..${from}`, "--", `apps/${folder}`, "package.json"]));
 
 /** Paths git printed with `-z`. */
 const pathsOf = (z: string) => z.split("\0").filter(Boolean);
@@ -154,7 +157,7 @@ async function mergeIn(
 ): Promise<AppMerge> {
   if (await gitIn(cwd, ["status", "--porcelain"]))
     throw new Error("The draft has uncommitted changes: commit them first");
-  const merged = await behindIn(cwd, from);
+  const merged = await behindIn(cwd, from, folder);
   if (!merged && !take) return { folder, revision: await gitIn(cwd, ["rev-parse", "HEAD"]), merged, conflicts: [] };
   const as = { GIT_AUTHOR_NAME: `${author} via Sanoma` };
   if (merged) {
@@ -370,7 +373,7 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
       const url = sourceOf(root, folder);
       const from = await fetchSource(root, url);
       await mustShareHistory(root, from, folder, url);
-      return behindIn(root, from);
+      return behindIn(root, from, folder);
     },
     drafts: async () => [...(await listed())].flatMap(([id, here]) => (here ? [id] : [])).toSorted(),
     async diff(id) {

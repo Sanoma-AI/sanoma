@@ -157,7 +157,10 @@ function stepLabel(step: ToolPart): string {
         ? `Took the app from ${String(input.url ?? "")}`
         : `Updated apps/${String(input.folder ?? "")}`;
       const result =
-        step.state === "output-available" ? (step.output as { conflicts?: string[] } | undefined) : undefined;
+        step.state === "output-available"
+          ? (step.output as { merged?: number; conflicts?: string[] } | undefined)
+          : undefined;
+      if (!taken && result?.merged === 0) return `apps/${String(input.folder ?? "")} is up to date`;
       const conflicts = result?.conflicts?.length ?? 0;
       return conflicts ? `${what}: ${conflicts} ${conflicts === 1 ? "conflict" : "conflicts"} to resolve` : what;
     }

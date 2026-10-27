@@ -1,12 +1,13 @@
 import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
 import type { AppEntry, ConfigDescription } from "@sanoma-ai/workflows/describe";
 import type { AvailableApp } from "@sanoma-ai/workflows/shared";
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { type ReactNode, Suspense } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup } from "#/components/ui/item.tsx";
 import { Skeleton } from "#/components/ui/skeleton.tsx";
+import { takeAppPrompt, updateAppPrompt } from "#/lib/apps.ts";
 import { plural } from "#/lib/utils.ts";
 import { useActor } from "../actor.ts";
 import { ChatButton } from "../components/chat-button.tsx";
@@ -20,7 +21,7 @@ import {
   Region,
   TierBadge,
 } from "../components/common.tsx";
-import { availableAppsQuery, configQuery } from "../queries.ts";
+import { appBehindQuery, availableAppsQuery, configQuery } from "../queries.ts";
 
 // `/apps`, in the bar's Setup group: where the company's apps are made and taken. An app is a
 // folder of `apps/`, made here (no source) or merged from a source repository (`app.ts`'s
@@ -55,8 +56,8 @@ const sameRepo = (url: string) =>
 
 /**
  * The company's apps, then those on GitHub: its own (no source), those taken from a source, each
- * with its source, and the available ones, each with its README, a solution's demo holding it and
- * Add. New app, Add and (later) Update open the chat with what to ask the agent.
+ * with its source, how far behind it is and Update, and the available ones, each with its README, a
+ * solution's demo holding it and Add. New app, Add and Update open the chat with what to ask the agent.
  */
 function AppsPage() {
   const { data: apps } = useSuspenseQuery({ ...configQuery(), select: selectApps });
@@ -93,9 +94,12 @@ function AppsPage() {
         ) : (
           <ItemGroup>
             {taken.map((app) => (
-              // TODO(#362): how many commits it is behind its source (`Source.behind`), and Update.
               <AppItem key={app.name} app={app}>
+                <Behind folder={app.name} />
                 <ExternalLink href={app.source!}>Source</ExternalLink>
+                <ChatButton variant="secondary" prompt={updateAppPrompt(app.name)}>
+                  Update
+                </ChatButton>
               </AppItem>
             ))}
           </ItemGroup>
@@ -128,6 +132,28 @@ function AppItem({ app, children }: { app: RepoApp; children?: ReactNode }) {
       </ItemContent>
       {children && <ItemActions>{children}</ItemActions>}
     </Item>
+  );
+}
+
+/**
+ * How many commits a taken app's source has that the repo lacks: a fetch, read by the page after
+ * it shows (never on the server's render), so a slow or unreachable source holds nothing up.
+ */
+function Behind({ folder }: { folder: string }) {
+  const { data } = useQuery(appBehindQuery(folder));
+  if (data === undefined) return <Skeleton className="h-5 w-24" />;
+  if ("error" in data) {
+    // A failed fetch's message can run long: a line of it, the rest on hover.
+    return (
+      <span className="max-w-72 truncate text-sm text-muted-foreground" title={data.error}>
+        {data.error}
+      </span>
+    );
+  }
+  return (
+    <span className="text-sm text-muted-foreground">
+      {data.behind === 0 ? "Up to date" : `${plural(data.behind, "commit")} behind`}
+    </span>
   );
 }
 
@@ -193,7 +219,7 @@ function AvailableItem({ app }: { app: AvailableApp }) {
         {app.solutions.flatMap(({ id, title, demo }) =>
           demo ? [<ExternalLink key={id} href={demo}>{`Try it: ${title}`}</ExternalLink>] : [],
         )}
-        <ChatButton variant="secondary" prompt={`Take ${app.url} as an app`}>
+        <ChatButton variant="secondary" prompt={takeAppPrompt(app.url)}>
           <PlusIcon aria-hidden="true" data-icon="inline-start" />
           Add
         </ChatButton>

@@ -56,8 +56,9 @@ export interface Source {
   follow?(target: { url: string; token: string; ref: string }): Promise<{ revision: string } | { skipped: string }>;
   /**
    * How many commits the source repository of the app `folder` (the URL its `apps/<folder>/app.ts`
-   * names) has on its default branch that the checked-out one lacks: fetched now. An error when
-   * the app names no source.
+   * names) has on its default branch that the checked-out one lacks, of those changing what an
+   * update merges (`apps/<folder>/` and `package.json`): fetched now. An error when the app names
+   * no source.
    */
   behind?(folder: string): Promise<number>;
 }
@@ -103,7 +104,7 @@ export interface AppMerge {
   folder: string;
   /** The draft's commit after the merge. */
   revision: string;
-  /** The source's commits the merge brought in; 0 when the draft had them all, and nothing was merged. */
+  /** The source's commits the merge brought in that change the app's folder or `package.json`; 0 when the draft had them all, and nothing was merged. */
   merged: number;
   /** The files git could not merge, relative to the root, committed with conflict markers; empty when it merged clean. */
   conflicts: string[];

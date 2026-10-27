@@ -183,6 +183,26 @@ export async function fileSource(
   }
 }
 
+/**
+ * How many commits the app `folder`'s source has that the live checkout lacks, fetched now
+ * (`Source.behind`), or why that cannot be told: offline, no shared history, or an instance whose
+ * repository cannot fetch. Only an app the description lists, taken from a source.
+ */
+export async function appBehind(
+  { source, description }: Pick<AppContext, "source" | "description">,
+  folder: string,
+): Promise<{ behind: number } | { error: string }> {
+  if (!description.apps.some((app) => app.name === folder && app.source !== undefined)) {
+    return { error: `No app apps/${folder}/ taken from a source` };
+  }
+  if (!source?.behind) return { error: "This instance's repository cannot fetch an app's source" };
+  try {
+    return { behind: await source.behind(folder) };
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+}
+
 const NO_RECORDS = "No records for a run that has started; is the app reading the same ledger as the worker?";
 
 /** Failures to read a run's ledger or scenario already logged, by run and message: a page polls its run every 2 s. */

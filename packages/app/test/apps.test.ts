@@ -2,7 +2,8 @@ import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { ensureBuilt, testDatabaseUrl } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
-import { memoryLedger, type SanomaConfig } from "@sanoma-ai/workflows";
+import { memoryLedger, type SanomaConfig, type Source } from "@sanoma-ai/workflows";
+import { describeConfig } from "@sanoma-ai/workflows/describe";
 import { APPS_LIST, type AvailableApps } from "@sanoma-ai/workflows/shared";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
@@ -16,11 +17,13 @@ import thank from "../../workflows/test/fixtures/company-apps/apps/shop/workflow
 import introduce from "../../workflows/test/fixtures/company-apps/workflows/introduce.ts";
 import { ACTOR_COOKIE, ACTOR_KEY } from "../src/api.ts";
 import { type App, startApp } from "../src/index.ts";
+import { takeAppPrompt, updateAppPrompt } from "../src/lib/apps.ts";
+import { appBehind } from "../src/server/core.ts";
 import { barLink } from "./bar-helpers.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built app (built when stale). The Apps page on the
 // company-apps fixture (crm taken from a source, shop the company's own), GitHub's search mocked
-// with msw; and the chat a page opens with a prompt (New app, Add, New workflow), in Chrome,
+// with msw; and the chat a page opens with a prompt (New app, Add, Update, New workflow), in Chrome,
 // skipped without it (or `CHROME_PATH`).
 
 const appDir = fileURLToPath(new URL("..", import.meta.url));
@@ -90,7 +93,21 @@ describe("the Apps page", () => {
     expect(taken).toContain(">crm<");
     expect(taken).toContain("From <code>https://github.com/example/crm</code>");
     expect(taken).toContain('href="https://github.com/example/crm"');
+    expect(taken).toContain(">Update<");
     expect(shown).toContain(">New app<");
+  });
+
+  it("tells how far a taken app is behind its source, or why it cannot", async () => {
+    const description = describeConfig(testApp.config);
+    // Only `behind` is read.
+    const behind = (folder: string, source?: Pick<Source, "behind">) =>
+      appBehind({ description, source: source as Source | undefined }, folder);
+    const fetched = { behind: async (folder: string) => (folder === "crm" ? 3 : 0) };
+    expect(await behind("crm", fetched)).toEqual({ behind: 3 });
+    expect(await behind("shop", fetched)).toEqual({ error: "No app apps/shop/ taken from a source" });
+    expect(await behind("crm")).toEqual({ error: "This instance's repository cannot fetch an app's source" });
+    const offline = { behind: () => Promise.reject(new Error("git fetch from https://github.com/example/crm failed")) };
+    expect(await behind("crm", offline)).toEqual({ error: "git fetch from https://github.com/example/crm failed" });
   });
 
   it("reads GitHub's apps through sanoma.apps.list, as the person, under the policy", async () => {
@@ -113,7 +130,7 @@ describe("the Apps page", () => {
 });
 
 describe("a prompt in the chat", () => {
-  it("is what New app, Add and New workflow open the chat with, in Chrome", async (test) => {
+  it("is what New app, Add, Update and New workflow open the chat with, in Chrome", async (test) => {
     const chrome = process.env.CHROME_PATH ?? (await executablePath("chrome").catch(() => ""));
     if (!existsSync(chrome)) test.skip("no Chrome: install Google Chrome or set CHROME_PATH");
     // Wide enough for the chat column beside the page.
@@ -168,7 +185,13 @@ describe("a prompt in the chat", () => {
       await tab.evaluate(
         `[...document.querySelectorAll("main [role=listitem]")].find((item) => item.textContent.includes("someone/inventory")).querySelector("button").click()`,
       );
-      await lands("Take https://github.com/someone/inventory as an app");
+      await lands(takeAppPrompt("https://github.com/someone/inventory"));
+
+      // Update on the app taken: how far behind it is (this instance's repository cannot fetch, so
+      // why not), then a new chat asking the agent to update it.
+      await tab.waitForFunction(`document.querySelector("main").textContent.includes("cannot fetch an app's source")`);
+      await click("Update");
+      await lands(updateAppPrompt("crm"));
 
       // New workflow on the Workflows page, as it was a dialog before.
       await tab.goto(new URL("/workflows", app.url).href, { waitUntil: "networkidle0" });
