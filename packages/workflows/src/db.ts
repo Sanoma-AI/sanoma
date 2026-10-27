@@ -82,11 +82,19 @@ const MADE_ALREADY = new Set(["23505", "42P04", "42P07", "42710"]);
 export const madeAlready = (err: unknown): boolean => MADE_ALREADY.has(pgCode(err));
 
 /**
+ * `SANOMA_POOL_SIZE`, read once: the most connections each Postgres pool of the process opens, its
+ * pg pools' and DBOS's system pool alike; unset, theirs (10 each). `sanoma demo`'s session host sets
+ * it low for each visitor's process, so a session costs a few connections, not a dozen.
+ */
+const askedPoolSize = Number(process.env.SANOMA_POOL_SIZE);
+const POOL_SIZE = Number.isInteger(askedPoolSize) && askedPoolSize > 0 ? askedPoolSize : undefined;
+
+/**
  * A pool on the config's database for `what` (a word for the messages). An idle connection that
  * drops (Postgres restarted) is replaced on the next query; unheard, it would end the process.
  */
 export function openPool(databaseUrl: string, what: string): Pool {
-  const pool = new Pool({ connectionString: databaseUrl });
+  const pool = new Pool({ connectionString: databaseUrl, ...(POOL_SIZE !== undefined && { max: POOL_SIZE }) });
   pool.on("error", (err) => warn(`a ${what} connection failed: ${errorMessage(err)}`));
   return pool;
 }
@@ -99,7 +107,10 @@ export function openPool(databaseUrl: string, what: string): Pool {
  * queries at once on one client, which pg deprecates. `prepareDatabase` sets the same 60 s guard
  * on the database instead. Remove the switch when DBOS awaits its `SET`.
  */
-export const DBOS_DATABASE_OPTIONS = { systemDatabaseIdleTransactionTimeoutMs: 0 } as const;
+export const DBOS_DATABASE_OPTIONS = {
+  systemDatabaseIdleTransactionTimeoutMs: 0,
+  ...(POOL_SIZE !== undefined && { systemDatabasePoolSize: POOL_SIZE }),
+} as const;
 
 /**
  * Stamps the change runs `ids` still unfinished on another version with the application version

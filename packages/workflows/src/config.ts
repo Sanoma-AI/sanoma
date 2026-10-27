@@ -114,12 +114,28 @@ export interface SanomaConfig {
    * that sets it and declares a wakeup of its own.
    */
   wakeup?: true;
+  /** How this repo runs as a demo (`sanoma demo`, or `SANOMA_DEMO=1` on a host). */
+  demo?: DemoConfig;
+}
+
+/** A demo's settings (`SanomaConfig.demo`). */
+export interface DemoConfig {
   /**
-   * What the app says when it runs this repo as a demo (`sanoma demo`): `start`, the URL its
-   * banner's "Start with these apps" opens, such as the hosted wizard with the demo's apps
-   * chosen; without one, the banner has no such link.
+   * The URL the banner's "Start with these apps" opens, such as the hosted wizard with the demo's
+   * apps chosen; without one, the banner has no such link.
    */
-  demo?: { start?: string };
+  start?: string;
+  /**
+   * A session per visitor: each visitor gets a copy of the seeded database and a process of their
+   * own over it, so the moments wait for them alone and nothing they type reaches another. At most
+   * this many at once, or with `true` as many as the machine's memory and Postgres's connections
+   * hold; past it, visitors share one demo instance. Without it, every visitor shares that instance.
+   */
+  sessions?: true | number;
+  /** Minutes a visitor's session lives unused before it is dropped. Default 30. */
+  idle?: number;
+  /** Minutes between seeds of the demo afresh (its shared instance, or the sessions' seed). Default 60. */
+  reseed?: number;
 }
 
 /** A config, checked, with everything a worker, client or app derives from it. */
