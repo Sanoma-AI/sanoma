@@ -173,6 +173,9 @@ export interface ChangeView {
   runId: string;
   status: RunStatus;
   startedBy?: Principal;
+  /** When the run started, and when its row last changed (epoch ms), as `RunSummary` has them. */
+  createdAt: number;
+  updatedAt?: number;
   approvals: ApprovalState[];
   /** What the run last published (`CHANGE_EVENT`); `opening`, with no branch yet, before it has. */
   state: ChangeState;
@@ -909,11 +912,13 @@ export class SanomaClient {
     ]);
     const input = (row.input as [RunArgs])[0].input as ChangeInput;
     const state = published ?? initialChangeState(input);
-    const { runId, status, startedBy, approvals } = summary;
+    const { runId, status, startedBy, createdAt, updatedAt, approvals } = summary;
     return {
       runId,
       status,
       ...(startedBy && { startedBy }),
+      createdAt,
+      ...(updatedAt !== undefined && { updatedAt }),
       approvals,
       state,
       ...(row.status === "SUCCESS" && { report: row.output as ChangeReport }),
