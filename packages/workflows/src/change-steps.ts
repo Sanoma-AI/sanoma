@@ -82,11 +82,13 @@ async function drain(
   settle: () => Promise<ChangeEvent>,
   first?: ChangeEvent,
 ): Promise<ChangeEvent | undefined> {
-  let strongest = first;
+  const checked = (event: ChangeEvent) => (event.kind === "merged" || event.kind === "closed" ? settle() : event);
+  let strongest = first && (await checked(first));
   for (let event = await received(run, 0); event; event = await received(run, 0)) {
-    if (strongest === undefined || WEIGHT[event.kind] > WEIGHT[strongest.kind]) strongest = event;
+    const told = await checked(event);
+    if (strongest === undefined || WEIGHT[told.kind] > WEIGHT[strongest.kind]) strongest = told;
   }
-  return strongest?.kind === "merged" || strongest?.kind === "closed" ? settle() : strongest;
+  return strongest;
 }
 
 /**
