@@ -73,7 +73,7 @@ function Home() {
 
 ### The kit and RunForm
 
-A site imports how its pages look from `sanoma/ui`, which is this package's `@sanoma-ai/app/ui`: the app's own components, so its pages look like the app's (Tailwind's classes and the theme's tokens apply to a site's files too: `bg-card`, `text-muted-foreground`, `bg-primary/10`; the app's theme has only its tokens, so Tailwind's default palette, `bg-white` or `text-red-500`, generates nothing there, only in [a site's own stylesheet](#a-sites-own-stylesheet)). It is presentational only: nothing in it talks to the running app (its queries, server functions, actor or config), so it could ship as a package of its own. It is an explicit list, and nothing else of the app is public:
+A site imports how its pages look from `sanoma/ui`, which is this package's `@sanoma-ai/app/ui`: the app's own components, so its pages look like the app's (Tailwind's classes and the theme's tokens apply to a site's files too: `bg-card`, `text-muted-foreground`, `bg-primary/10`; the app's theme has only its tokens, so Tailwind's default palette, `bg-white` or `text-red-500`, generates nothing there, only in [a site's own stylesheet](#a-sites-own-stylesheet) without [the kit's](#the-kit-on-a-site)). It is presentational only: nothing in it talks to the running app (its queries, server functions, actor or config), so it could ship as a package of its own. It is an explicit list, and nothing else of the app is public:
 
 - the shadcn components the app is built from: `Button`, `Input`, `Label`, `Textarea`, `Checkbox`, `NativeSelect`, `Slider`, `Badge`, `Separator`, `Skeleton`, `Spinner`, and the parts of `Field`, `Card`, `Alert`, `Table`, `Tabs`, `Dialog`, `Sheet`, `Popover`, `Tooltip`, `DropdownMenu`, `Empty`, `Item`, `ButtonGroup`, `Collapsible`, `Breadcrumb` and `Avatar`; and sonner's `toast`, shown by the app's toaster;
 - the app's own pieces: `PageHeader` (a page's `<h1>`, its `title`), `Region`, `Facts` and `Fact`, `Tip`, `ButtonLink`, `ToneBadge` (with `dot`, a status pill), `toneBadge`, `effectBadge`, `StatusDot` (and the `Tone` type), `Notice`, `Nothing`, and `FloatingCard` (the one card with a shadow, for a selection shown over a page's card, placed by its `className`);
@@ -163,7 +163,51 @@ export const Route = createFileRoute("/sites/www")({
 - It imports `tailwindcss/theme` and `tailwindcss/utilities`, not `tailwindcss`: a site's pages are also shown inside the app at `/sites/<name>`, and Tailwind's preflight would restyle the app around them. The site writes its base rules under a class of its own (`.www` above) instead, and rules for its own host under `[data-site="<name>"]`: there the document is `<html data-site="<name>">`, and inside the app it has no `data-site`.
 - Its utilities are a layer inside the app's (`utilities.<name>`), scanned from the site's folder only (`source("./")`): inside the app, the app's own utilities win over the site's, so the site's `hidden` leaves the bar's `md:flex` alone. Imported into `utilities` itself, the site's would override the app's responsive variants, and hide the bar. A site that uses components from outside its folder names them for the scan (`@source "../../components";`).
 - `tailwindcss` and its `theme`, `utilities` and `preflight` resolve to the app's install, as the app's own stylesheet does: the repo installs nothing for them. A `@plugin` is a package the repo installs itself (`pnpm add @tailwindcss/typography`); what it imports of `tailwindcss` (`tailwindcss/plugin`, `tailwindcss/colors`) resolves to the app's install too.
-- Its theme is Tailwind's default, not the app's: a class both use where the app's theme differs (`rounded-lg`, `font-sans`) takes the app's value while the page is shown inside the app, and the site's on the site's own host. Its theme variables are another matter: one both name (`--font-sans`, once a site's class uses it) takes the site's value inside the app, in the app's chrome too. A site keeps its own tokens under names the app does not use (`--font-body`, not `--font-sans`), so its classes look the same in both and leave the app's alone.
+- Its theme is Tailwind's default, not the app's (until it imports [the kit's](#the-kit-on-a-site)): a class both use where the app's theme differs (`rounded-lg`, `font-sans`) takes the app's value while the page is shown inside the app, and the site's on the site's own host. Its theme variables are another matter: one both name (`--font-sans`, once a site's class uses it) takes the site's value inside the app, in the app's chrome too. A site keeps its own tokens under names the app does not use (`--font-body`, not `--font-sans`), so its classes look the same in both and leave the app's alone.
+
+#### The kit on a site
+
+The kit's look is in the app's stylesheet, which a public site's own host does not load. A site that uses `sanoma/ui` there imports the look into its own stylesheet, after Tailwind's utilities, and gives the kit its colours:
+
+```css
+/* sites/www/style.css */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme" layer(theme);
+@import "tailwindcss/utilities" layer(utilities.www) source("./");
+@import "sanoma/ui.css";
+
+/* A colour of the site's own: bg-brand. */
+@theme {
+  --color-brand: oklch(0.62 0.17 45);
+}
+
+/* The kit's colours, by shadcn's names: on the site's own host, and under its class inside the app. */
+[data-site="www"],
+.www {
+  --background: light-dark(oklch(0.98 0.005 80), oklch(0.18 0.01 80));
+  --foreground: light-dark(oklch(0.22 0.01 80), oklch(0.95 0.005 80));
+  --card: light-dark(oklch(1 0 0), oklch(0.22 0.01 80));
+  --secondary: light-dark(oklch(0.94 0.005 80), oklch(0.27 0.01 80));
+  --muted-foreground: light-dark(oklch(0.5 0.01 80), oklch(0.72 0.01 80));
+  --border: light-dark(oklch(0.9 0.005 80), oklch(0.3 0.01 80));
+  --primary: oklch(0.62 0.17 45);
+  --primary-foreground: oklch(1 0 0);
+}
+
+/* On its own host only: the visitor's light or dark, the page's colours and the kit's font. Inside
+   the app, the app's light or dark, which its light-dark() values then follow. */
+[data-site="www"] {
+  color-scheme: light dark;
+}
+[data-site="www"] body {
+  @apply bg-background font-sans text-foreground;
+}
+```
+
+- `sanoma/ui.css` brings the kit's classes (Tailwind scans its components where they are installed), its `dark` and `compact` variants, shadcn's and tw-animate's CSS (the `data-open:` variants, the animations), its fonts (IBM Plex Sans and Mono, Fraunces), the app's theme (`bg-primary`, `rounded-lg`, `font-sans`) and the part of preflight its elements need (`src/ui.css`). On the site's own host that part is the whole page's reset, the site's own elements too; inside the app, which loads all of preflight, it changes nothing.
+- Its theme turns Tailwind's palette off, as the app's does: `bg-white` generates nothing, and a colour of the site's own is a token in an `@theme` after the import.
+- The kit's colours are tokens by shadcn's names (the list is `src/ui.css`), in the theme layer, so any rule of the site's wins. Set them under `[data-site="<name>"]` for the site's own host and under the site's class for its pages inside the app, never on `:root`, which inside the app would recolour the app. A name that is another's there (`--popover` is `--card`, `--ring` is `--primary`) follows the site's value on its own host, but inside the app only when the site sets it too; and inside the app the kit's popups (dialogs, menus, tooltips), drawn outside the site's class, keep the app's colours.
+- A `light-dark()` value follows the visitor's light or dark once the site says `color-scheme: light dark`, so a site that follows dark gives one to each surface and text colour it shows (`--card`, `--secondary`, `--muted-foreground`, `--border` above; `--destructive` if it shows errors): a name it leaves keeps the kit's light value. The `dark:` variant, the kit's and the site's own classes' alike once it imports the kit, follows `.dark` on `<html>`, which only the app sets, never a public host: there it never applies, and the tones' and effects' pale badges stay light.
 
 ### Calling operations and workflows
 
@@ -272,7 +316,7 @@ function Post() {
 A public site (`defineSite({ public: true })`) is served at the root of its own host, and at `/sites/<name>` on the app's host as any site is, in the app's chrome, for the people who run it.
 
 - **Its hosts.** `<name>.localhost` on the app's port (a browser sends `*.localhost` to this machine, and the loopback login lets it through), and the domain `startApp`'s `domains` gives it (`{ www: "sanoma.example" }`; the `sanoma` bin reads `SANOMA_DOMAINS`, which a host resource's `domains` sets). A domain naming a site that is missing or not public is warned about and served nowhere. `app.sites` gives each public site served, by name, at `http://<name>.localhost:<port>`; the Sites page links to the site's domain, else, on a page of this machine, to `<name>.localhost` (the server, which cannot know that address, says Public until the browser does).
-- **One build, two routings.** On the site's host the router mounts the site at `/`: a page's `<Link to="/sites/www/blog">` is `/blog` there and `/sites/www/blog` on the app's host, and a path outside the site, `/workflows` among them, is the site's not-found page, a 404. The document there is bare: charset, viewport, a body with no margin, in a layer ahead of the site's stylesheet so any rule of the site's overrides it, the browser's light scheme (a site whose colours follow the visitor's light or dark, with `light-dark()`, says so in its stylesheet, as above: `[data-site="www"] { color-scheme: light dark; }`, not `:root`, which inside the app would override the app's own), and `<html data-site="<name>">`, which a site's stylesheet may scope its own host's rules to ([A site's own stylesheet](#a-sites-own-stylesheet)); no app stylesheet, theme, icon, chrome or config, which the app's host loads in chunks of their own. The site's layout sets its own icon and stylesheet in its `head`, and each page its title.
+- **One build, two routings.** On the site's host the router mounts the site at `/`: a page's `<Link to="/sites/www/blog">` is `/blog` there and `/sites/www/blog` on the app's host, and a path outside the site, `/workflows` among them, is the site's not-found page, a 404. The document there is bare: charset, viewport, a body with no margin, in a layer ahead of the site's stylesheet so any rule of the site's overrides it, the browser's light scheme (a site whose colours follow the visitor's light or dark, with `light-dark()`, says so in its stylesheet, as above: `[data-site="www"] { color-scheme: light dark; }`, not `:root`, which inside the app would override the app's own), and `<html data-site="<name>">`, which a site's stylesheet may scope its own host's rules to ([A site's own stylesheet](#a-sites-own-stylesheet)); no app stylesheet, theme, icon, chrome or config, which the app's host loads in chunks of their own. The site's layout sets its own icon and stylesheet in its `head`, and each page its title; the kit's look comes with that stylesheet ([The kit on a site](#the-kit-on-a-site)).
 - **Not found and errors.** A page not found there, a path no page has or a loader's `notFound()` ([Content](#content)), answers 404, titled "Page not found" unless a route of the site gives a title: a title in the layout's `head` stays on every page, a page not found too, so give each page its own. Where the site draws no `notFoundComponent` or `errorComponent`, the page is a plain one of the app's (a heading and a line, no app styles), and an error's message stays out of it.
 - **Its front door.** A request to the site's host never reaches the staff login, and its cookie and `x-sanoma-actor` header are ignored there. The site's login (`defineSite({ public: true, login: "<connector>" })`, a connector's login half) answers `/auth/<connector>/*` and verifies a visitor, who acts as `visitor:<connector>:<subject>` in the group `visitors`; anyone else, and everyone on a site with no login, acts as `anonymous`. Only `callFn` (a site's `api`) and `getActor` (`useActor()`, which says nobody for `anonymous`) answer there: any other server function is not there (a change's 404, a read's not-found), nor any other `/auth/` route (404), and a method but GET, HEAD and POST is a 405. Every request there carries `x-sanoma-client-ip` (`CLIENT_IP_HEADER`), set from the socket, a client's own copy overwritten. What a visitor may call is the policy's, by a `permit` ([above](#calling-operations-and-workflows)).
 - **Its login.** `startApp` makes each public site's login half once it listens, before it resolves, with the company's database, a key of its own to sign its cookies with (derived from `SANOMA_SECRETS_KEY` for `login <connector>`, so a login like Better Auth needs no secret set), its stored secrets and the site's origins (`http://<name>.localhost:*`, and `https://<domain>` with a domain); a request that comes first waits for it, and `app.close()` closes it. A public site whose `site.ts` has a problem (its login may be one not read), or whose login fails to start, is served on no host, a 503, and the app's log says why; the app itself starts, so the connector's page, or `SANOMA_SECRETS_KEY` in the environment, can give what the login lacks.

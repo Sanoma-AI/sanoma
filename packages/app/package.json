@@ -48,7 +48,8 @@
     "./ui": {
       "types": "./src/ui.ts",
       "default": "./src/ui.ts"
-    }
+    },
+    "./ui.css": "./src/ui.css"
   },
   "publishConfig": {
     "access": "public"

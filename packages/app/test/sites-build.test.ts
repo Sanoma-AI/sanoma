@@ -179,7 +179,7 @@ import css from "../style.css?url";
 
 export const Route = createFileRoute("/sites/hello/styled")({
   head: () => ({ links: [{ rel: "stylesheet", href: css }] }),
-  component: () => <span className="${siteClass} hidden" />,
+  component: () => <span className="${siteClass} hidden bg-hello" />,
 });
 `;
 
@@ -193,11 +193,15 @@ const stylesheets = (html: string) =>
 describe("a company's app with its sites", () => {
   // The fixture has no .gitignore, and nor has its copy: nothing tells Tailwind to skip `.sanoma/`.
   const repo = company({
-    // A site's own stylesheet, the README's recipe, linked by the page using its class.
+    // A site's own stylesheet, the README's recipe with the kit and a token of its own and one of
+    // the kit's in its colours, linked by the page using its classes.
     "sites/hello/style.css": [
       "@layer theme, base, components, utilities;",
       '@import "tailwindcss/theme" layer(theme);',
       '@import "tailwindcss/utilities" layer(utilities.hello) source("./");',
+      '@import "sanoma/ui.css";',
+      "@theme { --color-hello: oklch(0.6 0.2 30); }",
+      '[data-site="hello"] { --primary: red; }',
     ].join("\n"),
     "sites/hello/routes/styled.tsx": styledPage,
     "sites/hello/routes/missing.tsx": sitePage(
@@ -487,6 +491,13 @@ describe("a company's app with its sites", () => {
     expect(site).toContain("letter-spacing:.37em");
     // In a layer inside the app's utilities, which the app's own win over.
     expect(site).toMatch(/@layer utilities\.hello\{[^]*\.hidden\{display:none\}/);
+    // The kit's (sanoma/ui.css): its classes and variants, with the site's own token beside its
+    // tokens, and its colour for one of them; never all of preflight.
+    expect(site).toMatch(/\.bg-primary\{background-color:var\(--primary\)\}/);
+    expect(site).toMatch(/\.data-open\\:[\w-]+:where\(\[data-state=open\]\)/);
+    expect(site).toMatch(/\.bg-hello\{background-color:var\(--color-hello\)\}/);
+    expect(site).toMatch(/\[data-site=hello\]\{--primary:red\}/);
+    expect(site).not.toContain("tab-size");
   });
 
   it("renders content from content/: the list and a post's HTML, from a chunk of its own, and never a draft", async () => {
