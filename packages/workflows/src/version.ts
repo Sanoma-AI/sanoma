@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
+import { dirname, extname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { jsonSchemaOf, opIdsOf, type WorkflowDefinition } from "./define.ts";
 import { upFrom } from "./paths.ts";
 
@@ -63,23 +64,36 @@ export function computeVersion({
 }): string {
   const named = process.env.DBOS__APPVERSION?.trim();
   if (named) return `${appName}@${named}`;
-  const workflows = definitions
-    .map(
-      (wf) =>
-        [
-          wf.name,
-          wf.run.toString(),
-          opIdsOf(wf),
-          // The input schema is parsed outside steps on replay, so a change to it must change the version.
-          inputSchemaOf(wf),
-        ] as const,
-    )
-    .toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-  const hash = createHash("sha256")
-    .update(JSON.stringify([appName, RUNTIME_VERSION, STEP_LAYOUT, installedDbosVersion(), ...workflows]))
-    .digest("hex");
-  return `${appName}@${hash}`;
+  const workflows = definitions.map(codeOf).toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return `${appName}@${sha256([appName, RUNTIME_VERSION, STEP_LAYOUT, installedDbosVersion(), ...workflows])}`;
 }
+
+/**
+ * A hash of the built-in `change` workflow's own code, which each change run carries (the
+ * `changeCode` attribute) so that a worker on another version of the app may take it over
+ * (`carryChangeRuns` in worker.ts): what `computeVersion` hashes of that one workflow, with the
+ * text of its file and of its steps' (`change-steps`), `RUNTIME_VERSION`, `STEP_LAYOUT` and the
+ * installed DBOS version. Never the company's workflows nor `DBOS__APPVERSION`: a merge that
+ * changes only the company's code leaves it as it is.
+ */
+export function changeCodeOf(change: WorkflowDefinition<any, any>): string {
+  // The steps' module sits beside this one, both `.ts` in the source and `.js` once built.
+  const steps = fileURLToPath(new URL(`./change-steps${extname(import.meta.url)}`, import.meta.url));
+  const files = [change.file, steps].map((file) => readFileSync(file, "utf8"));
+  return sha256([RUNTIME_VERSION, STEP_LAYOUT, installedDbosVersion(), codeOf(change), ...files]);
+}
+
+const sha256 = (parts: unknown[]) => createHash("sha256").update(JSON.stringify(parts)).digest("hex");
+
+/** What the hashes read of a workflow: its name, the source of its `run`, its operations and its input schema. */
+const codeOf = (wf: WorkflowDefinition<any, any>) =>
+  [
+    wf.name,
+    wf.run.toString(),
+    opIdsOf(wf),
+    // The input schema is parsed outside steps on replay, so a change to it must change the version.
+    inputSchemaOf(wf),
+  ] as const;
 
 /** The workflow's input schema as the hash sees it: its JSON Schema, or its text when zod can't convert it. */
 function inputSchemaOf(wf: WorkflowDefinition<any, any>): unknown {

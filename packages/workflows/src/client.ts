@@ -301,6 +301,8 @@ export class SanomaClient {
     const hold = await this.startHold(workflow.name, parsed, startedBy, runId);
     const args: RunArgs = { input, startedBy, ...(sandbox === undefined ? {} : { sandbox }), ...(hold && { hold }) };
     const { onBehalfOf } = startedBy;
+    // A change run carries its code's hash, so a worker on another version whose change code is the same takes it over.
+    const changeCode = workflow.name === CHANGE_WORKFLOW ? this.config.changeCode : undefined;
     this.options.onWrite?.();
     // An id DBOS has already returns that run, unless it is another workflow's, which DBOS refuses.
     const handle = await this.dbos
@@ -314,7 +316,9 @@ export class SanomaClient {
           authenticatedRoles: startedBy.groups ?? [],
           // Kept on the run's status row too, so a listing tells sandbox runs apart without its input,
           // and says whom an agent's run is for (DBOS keeps the principal's id and groups itself).
-          ...((sandbox !== undefined || onBehalfOf !== undefined) && { attributes: { sandbox, onBehalfOf } }),
+          ...((sandbox !== undefined || onBehalfOf !== undefined || changeCode !== undefined) && {
+            attributes: { sandbox, onBehalfOf, changeCode },
+          }),
         },
         args,
       )
