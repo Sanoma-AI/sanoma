@@ -181,7 +181,7 @@ describe("what the host enforces", () => {
       host: "fakegit",
       pullRequest: false,
       check: false,
-      reason: "the host is down",
+      reason: "fakegit could not be asked; the app's log says why.",
     });
   });
 });

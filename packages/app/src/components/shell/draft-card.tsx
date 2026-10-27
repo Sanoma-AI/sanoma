@@ -63,7 +63,7 @@ export function DraftCardView({ draft }: { draft: DraftCard }) {
       <CardFooter className="border-t text-xs text-muted-foreground">
         {/* A card saved before cards carried their draft's id keeps its old words. */}
         {remote && draft.draft !== undefined ? (
-          <Review draft={draft} />
+          <Review draft={draft} id={draft.draft} />
         ) : (
           "Merge the branch to apply it. The live instance keeps running the old code until it restarts."
         )}
@@ -77,8 +77,8 @@ export function DraftCardView({ draft }: { draft: DraftCard }) {
  * review once it has one, and Send for review while it has none open and none published (disabled,
  * saying why, until something is committed and the checks since the last edit pass).
  */
-function Review({ draft }: { draft: DraftCard }) {
-  const { data: change, error } = useQuery(changeQuery(draft.draft));
+function Review({ draft, id }: { draft: DraftCard; id: string }) {
+  const { data: change, error } = useQuery(changeQuery(id));
   const send = useOpenChange();
   if (error) return <>Could not read its change: {error.message}</>;
   // Still reading it; null when the draft has none.
@@ -97,7 +97,7 @@ function Review({ draft }: { draft: DraftCard }) {
       disabled={why !== undefined || send.isPending}
       focusableWhenDisabled
       className="data-disabled:opacity-50"
-      onClick={() => send.mutate(draft.draft)}
+      onClick={() => send.mutate(id)}
     >
       Send for review
     </Button>
@@ -110,7 +110,7 @@ function Review({ draft }: { draft: DraftCard }) {
             {phaseLabel(change.state)}
           </ToneBadge>
           <ButtonLink variant="outline" size="xs">
-            <Link to="/changes/$id" params={{ id: draft.draft }}>
+            <Link to="/changes/$id" params={{ id: id }}>
               Open the review
             </Link>
           </ButtonLink>

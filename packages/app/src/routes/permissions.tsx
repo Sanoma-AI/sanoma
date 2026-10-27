@@ -1,8 +1,8 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { CatchBoundary, createFileRoute, type ErrorComponentProps } from "@tanstack/react-router";
 import type { PreviewAnswer } from "@sanoma-ai/workflows";
 import type { Span } from "@sanoma-ai/workflows/describe";
-import { ANONYMOUS, approverLabel } from "@sanoma-ai/workflows/shared";
+import { ANONYMOUS, approverLabel, errorMessage } from "@sanoma-ai/workflows/shared";
 import { Suspense, useRef, useState } from "react";
 import { Button } from "#/components/ui/button.tsx";
 import { Card, CardHeader } from "#/components/ui/card.tsx";
@@ -100,9 +100,11 @@ function PermissionsPage() {
               }}
             />
           </Card>
-          <Suspense fallback={null}>
-            <HostEnforcementLine />
-          </Suspense>
+          <CatchBoundary getResetKey={() => "host"} errorComponent={HostEnforcementFailed}>
+            <Suspense fallback={null}>
+              <HostEnforcementLine />
+            </Suspense>
+          </CatchBoundary>
           {data.files.map(({ file, text, policies }) => (
             <PolicyCode key={file} file={file} text={text} span={policies.find((p) => p.id === shown)?.span} />
           ))}
@@ -175,6 +177,11 @@ function HostEnforcementLine() {
       </span>
     </p>
   );
+}
+
+/** The line's place when what the host enforces could not be read: the grid stays. */
+function HostEnforcementFailed({ error }: ErrorComponentProps) {
+  return <p className="text-sm text-muted-foreground">Could not read what the host enforces: {errorMessage(error)}</p>;
 }
 
 /**

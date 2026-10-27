@@ -418,8 +418,8 @@ export async function openChange(
 /**
  * What the repository's host enforces on `main` (`SourceHost.enforcement`), with the host's name:
  * the Permissions page's line. Null without a remote, or when no connector's remote half is for
- * its host; a repository git cannot read has none (`remoteUrlOf`). A host that
- * cannot be asked is logged, and answered as enforcing nothing, saying why.
+ * its host; a repository git cannot read has none (`remoteUrlOf`). A host that cannot be asked
+ * is logged, and answered as enforcing nothing, saying so (its error stays in the log).
  */
 export async function hostEnforcement({
   client,
@@ -435,7 +435,7 @@ export async function hostEnforcement({
     return { host, ...(await found.remote.open(found.repo, { secrets: secretValues(client) }).enforcement("main")) };
   } catch (err) {
     console.error(`sanoma app: asking ${host} what it enforces on main failed:`, err);
-    return { host, pullRequest: false, check: false, reason: errorMessage(err) };
+    return { host, pullRequest: false, check: false, reason: `${host} could not be asked; the app's log says why.` };
   }
 }
 

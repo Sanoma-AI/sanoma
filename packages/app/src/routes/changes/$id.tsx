@@ -24,10 +24,12 @@ import { changeQuery, configQuery, permissionsQuery, runLink, workflowTitles } f
 export const Route = createFileRoute("/changes/$id")({
   // The change, and main's Permissions grid, which its branch's is diffed against.
   loader: async ({ context: { queryClient }, params }) => {
-    const [change] = await Promise.all([
+    const [kept] = await Promise.all([
       queryClient.query({ ...changeQuery(params.id), staleTime: "static" }),
       queryClient.query({ ...permissionsQuery(), staleTime: "static" }),
     ]);
+    // None kept (a draft card read it before its change opened) is read again.
+    const change = kept ?? (await queryClient.fetchQuery(changeQuery(params.id)));
     if (!change) throw notFound();
     return { crumb: change.state.title };
   },

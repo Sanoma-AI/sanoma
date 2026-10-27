@@ -579,13 +579,14 @@ export const changesQuery = (query: ChangesQuery = {}) =>
 
 /**
  * The change of the draft `id` (`getChange`), null when it has none, under RUNS_KEY, so Publish
- * and Send for review refresh it: polled as `changePoll` says, a draft with none not at all.
+ * and Send for review refresh it: polled as `changePoll` says, a draft with none every 30 s (a
+ * change may open from elsewhere).
  */
 export const changeQuery = (id: string) =>
   queryOptions({
     queryKey: [...RUNS_KEY, "change", id],
     queryFn: () => getChange({ data: { id } }),
-    refetchInterval: ({ state: { data } }) => (data === null ? false : data ? changePoll(data) : POLL_MS),
+    refetchInterval: ({ state: { data } }) => (data === null ? 30_000 : data ? changePoll(data) : POLL_MS),
   });
 
 /**
