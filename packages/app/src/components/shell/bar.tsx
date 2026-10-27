@@ -1,4 +1,3 @@
-import type { ConfigDescription } from "@sanoma-ai/workflows/describe";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { ClientOnly, Link, trimPathRight, useRouterState } from "@tanstack/react-router";
 import type { Icon as PhosphorIcon } from "@phosphor-icons/react";
@@ -33,7 +32,7 @@ import { NavUser } from "./nav-user.tsx";
  * An item in the bar: its page, lit there and on the pages under it (and on the page `also` names),
  * shown only `when` the config has those.
  */
-type Section = { to: string; label: string; icon: PhosphorIcon; when?: "data" | "policy"; also?: string };
+type Section = { to: string; label: string; icon: PhosphorIcon; when?: "data" | "policy" | "live"; also?: string };
 
 /** What happens, across the company's apps: Sanoma's own pages. */
 const WORK: Section[] = [
@@ -48,13 +47,17 @@ const SETUP: Section[] = [
   { to: "/connectors", label: "Connectors", icon: PlugIcon },
   { to: "/apps", label: "Apps", icon: SquaresFourIcon },
   { to: "/permissions", label: "Permissions", icon: KeyIcon, when: "policy" },
-  { to: "/setup", label: "Go live", icon: RocketIcon },
+  { to: "/setup", label: "Go live", icon: RocketIcon, when: "live" },
 ];
 
-/** What the bar reads from the config: whether it has collections and a policy, and which sites are public. */
-const selectBar = (config: ConfigDescription) => ({
+/**
+ * What the bar reads from the config: whether it has collections and a policy, which sites are
+ * public, and whether it is a demo (which never goes live).
+ */
+const selectBar = (config: AppConfig) => ({
   data: config.collections.length > 0,
   policy: config.policy.defined,
+  live: !config.demo,
   public: new Set(config.sites.filter((site) => site.public).map((site) => site.name)),
 });
 
@@ -73,12 +76,12 @@ const siteTile = ({ title, icon, pages }: Site, isPublic: boolean, lit: boolean)
  * The bar's groups, split by a short rule: Inbox and Workflows; the company's sites, a group for
  * the root's and then one for each app's, by the app's name (a site with no page it can link to
  * left out); then Setup. Data shows with collections, or with sites, its page leading to theirs;
- * Permissions with a policy.
+ * Permissions with a policy; Go live but in a demo.
  */
 function useGroups(): Tile[][] {
   const { data: has } = useSuspenseQuery({ ...configQuery(), select: selectBar });
   const sites = useSites();
-  const shown = { data: has.data || sites.length > 0, policy: has.policy };
+  const shown = { data: has.data || sites.length > 0, policy: has.policy, live: has.live };
   const path = useRouterState({ select: ({ location }) => trimPathRight(location.pathname) });
   const section = ({ to, label, icon: Icon, also }: Section): Tile => ({
     to,

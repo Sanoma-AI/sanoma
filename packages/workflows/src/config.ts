@@ -106,6 +106,12 @@ export interface SanomaConfig {
    * that sets it and declares a wakeup of its own.
    */
   wakeup?: true;
+  /**
+   * What the app says when it runs this repo as a demo (`sanoma demo`): `start`, the URL its
+   * banner's "Start with these apps" opens, such as the hosted wizard with the demo's apps
+   * chosen; without one, the banner has no such link.
+   */
+  demo?: { start?: string };
 }
 
 /** A config, checked, with everything a worker, client or app derives from it. */

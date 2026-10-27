@@ -9,6 +9,7 @@ import type {
   PreviewRequest,
   Principal,
   RunSummary,
+  SanomaConfig,
 } from "@sanoma-ai/workflows";
 import type { ConfigDescription, PermissionsGrid, Span } from "@sanoma-ai/workflows/describe";
 import type { Check, Scenario } from "@sanoma-ai/workflows/scenario";
@@ -43,9 +44,18 @@ export type Place = "this-computer" | "live";
 /**
  * What `getConfig` answers: the description, less the workflows' sources, and where this instance
  * is: its `place`, and its database's host (only the host, never the URL; none when it cannot be
- * read), which the bar's badge says as its tip.
+ * read), which the bar's badge says as its tip; and, in a demo, what its banner shows.
  */
-export type AppConfig = ConfigDescription & { place: Place; databaseHost?: string };
+export type AppConfig = ConfigDescription & { place: Place; databaseHost?: string; demo?: DemoInfo };
+
+/** The search parameter a demo's link names whom you are with (`demoLogin`): a moment's URL is `/<path>?as=<person>`. */
+export const DEMO_AS = "as";
+
+/**
+ * What a demo's banner reads besides the people (`getConfig`, only when the app runs as one): the
+ * config's `demo`, whose `start` is the URL "Start with these apps" opens.
+ */
+export type DemoInfo = NonNullable<SanomaConfig["demo"]>;
 
 /**
  * Who the server says is asking. With a login provider (`fromServer`), it is whoever signed in,

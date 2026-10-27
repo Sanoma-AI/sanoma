@@ -167,6 +167,35 @@ describe("reseed", () => {
     expect((await leads()).map((r) => r.key)).toEqual(["Acme", "Globex"]);
     await waitFor(pending(() => client, state.moments[0]!.runId));
     expect(titles()).toEqual(["Acme Pro", "Old news"]);
+
+    // Once more: the moment left waiting is cancelled, so only the new one waits.
+    const again = await reseed(client, resolved);
+    await waitFor(pending(() => client, again.moments[0]!.runId));
+    expect(await client.run(state.moments[0]!.runId)).toMatchObject({ status: "cancelled" });
+    expect((await client.runs({ status: "waiting" })).map((r) => r.runId)).toEqual([again.moments[0]!.runId]);
+  });
+
+  it("seeds one half: memory the fakes alone, as a copy of the database needs, and database the rest", async () => {
+    const waiting = async () => (await client.runs({ status: "waiting" })).map((r) => r.runId);
+    const before = await waiting();
+    await client.call(
+      "data.outbound.save",
+      { record: { company: "Initech", contact: "bo@initech.test", stage: "won", owner: "leon" } },
+      { actor: "leon" },
+    );
+    const memory = await reseed(client, resolved, { only: "memory" });
+    expect(memory).toMatchObject({ worlds: ["Acme's pipeline"], moments: [] });
+    expect(memory.problems).toEqual([expect.stringMatching(/^world "A flaky blog"/)]);
+    expect(titles()).toEqual(["Old news"]);
+    expect((await leads()).map((r) => r.key)).toEqual(["Acme", "Globex", "Initech"]);
+    expect(await waiting()).toEqual(before);
+
+    const database = await reseed(client, resolved, { only: "database" });
+    expect((await leads()).map((r) => r.key)).toEqual(["Acme", "Globex"]);
+    await waitFor(pending(() => client, database.moments[0]!.runId));
+    expect(await waiting()).toEqual([database.moments[0]!.runId]);
+    // The fakes kept what memory seeded; only the new moment's run added to them.
+    expect(titles()).toEqual(["Acme Pro", "Old news"]);
   });
 });
 
