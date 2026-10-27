@@ -43,8 +43,8 @@ export interface FakeCloudflareState extends Record<string, unknown> {
   images: Record<string, string>;
 }
 
-/** The fake account's id, which its registry's references name. */
-export const FAKE_ACCOUNT = "0123456789abcdef0123456789abcdef";
+/** The fake account's id, which its registry's references name: the fixtures' made-up one. */
+const FAKE_ACCOUNT = "0123456789abcdef0123456789abcdef";
 
 /** How long the fake waits before it rings an alarm again that threw, and how often: Cloudflare retries six times. */
 const RETRY_MS = 250;
@@ -367,11 +367,9 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
         found.image = image;
         await objects.get(found.name)?.stop();
       },
-      accountImage: (image) => accountImage(image, FAKE_ACCOUNT),
+      account: FAKE_ACCOUNT,
       async copyImage(image) {
-        const copy = accountImage(image, FAKE_ACCOUNT);
-        if (copy !== image) state.images[copy] = image;
-        return copy;
+        state.images[accountImage(image, FAKE_ACCOUNT)] = image;
       },
       async deleteApplication(id) {
         const found = state.applications[id];

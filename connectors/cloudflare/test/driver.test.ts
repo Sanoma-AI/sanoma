@@ -12,6 +12,9 @@ import { API, replayOptions, TEST_ACCOUNT } from "./replay.ts";
 
 const { server, play, fixture, sent } = replay(replayOptions);
 
+/** The runtime image in the fixtures' account's registry: what its application runs. */
+const RUNS = `registry.cloudflare.com/${TEST_ACCOUNT}/sanoma-ai-runtime`;
+
 const TOKEN = "swi_the-company-token";
 const URL_OF = "https://sanoma-company.example.workers.dev";
 const callWith = (values: Record<string, string> = {}): CallContext => ({
@@ -31,7 +34,7 @@ const op = (name: string, input: object, call = callWith({ SANOMA_WAKEUP_TOKEN: 
 
 const desired = {
   name: "company",
-  image: "registry.cloudflare.com/0123456789abcdef0123456789abcdef/sanoma-ai-runtime:0.7.0",
+  image: `${RUNS}:0.7.0`,
   source: "https://github.com/acme/company.git",
   ref: "main",
   revision: "abc123",
@@ -41,7 +44,7 @@ const desired = {
 const state = {
   id: "00000000-0000-4000-8000-000000000001",
   name: "company",
-  image: "registry.cloudflare.com/0123456789abcdef0123456789abcdef/sanoma-ai-runtime:0.7.0",
+  image: `${RUNS}:0.7.0`,
   source: "https://github.com/acme/company.git",
   ref: "main",
   revision: "abc123",
@@ -130,7 +133,7 @@ describe.skipIf(live)("cloudflareDriver", () => {
         instances: 0,
         max_instances: 1,
         configuration: {
-          image: "registry.cloudflare.com/0123456789abcdef0123456789abcdef/sanoma-ai-runtime:0.7.0",
+          image: `${RUNS}:0.7.0`,
           instance_type: "basic",
         },
         // The namespace the upload made, as the Worker's settings name it.
@@ -142,7 +145,7 @@ describe.skipIf(live)("cloudflareDriver", () => {
       play("update-to-a-new-image");
       const next = {
         ...desired,
-        image: "registry.cloudflare.com/0123456789abcdef0123456789abcdef/sanoma-ai-runtime:0.8.0",
+        image: `${RUNS}:0.8.0`,
         revision: "def456",
       };
       const done = await op("container.update", {
@@ -154,12 +157,12 @@ describe.skipIf(live)("cloudflareDriver", () => {
       const form = await formOf(sent.find((r) => r.method === "PUT")!);
       expect(form.get("metadata[migrations][new_tag]")).toBeNull();
       expect(sent.find((r) => r.path.endsWith("/rollouts"))!.body).toEqual({
-        description: "Sanoma: registry.cloudflare.com/0123456789abcdef0123456789abcdef/sanoma-ai-runtime:0.8.0",
+        description: `Sanoma: ${RUNS}:0.8.0`,
         strategy: "rolling",
         kind: "full_auto",
         step_percentage: 100,
         target_configuration: {
-          image: "registry.cloudflare.com/0123456789abcdef0123456789abcdef/sanoma-ai-runtime:0.8.0",
+          image: `${RUNS}:0.8.0`,
           instance_type: "basic",
         },
       });

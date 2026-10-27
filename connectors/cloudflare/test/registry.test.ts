@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { accountImage, copyImage } from "../src/registry.ts";
+import { TEST_ACCOUNT as ACCOUNT } from "./replay.ts";
 
 // The image's copy against two small OCI registries in this process: a source that hands out an
 // anonymous bearer token, as ghcr.io does, and a target that takes basic credentials, as the
@@ -10,7 +11,6 @@ import { accountImage, copyImage } from "../src/registry.ts";
 // credentials is in driver.test.ts.
 
 const OCI = "application/vnd.oci.image.manifest.v1+json";
-const ACCOUNT = "0123456789abcdef0123456789abcdef";
 const sha = (bytes: string | Uint8Array) => `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
 
 /** A registry in this process: its manifests and blobs, and the requests it took. */
@@ -112,8 +112,7 @@ describe("copyImage", () => {
   const to = () => ({ account: ACCOUNT, username: "user", password: "pass", registry: target.host });
 
   it("streams the blobs the account lacks, then puts the manifest unchanged", async () => {
-    const copy = await copyImage(image(), to(), 5_000);
-    expect(copy).toBe(`${target.host}/${ACCOUNT}/sanoma-ai-runtime:0.8.1`);
+    await copyImage(image(), to(), 5_000);
     const name = `/v2/${ACCOUNT}/sanoma-ai-runtime`;
     expect(target.manifests.get(`${ACCOUNT}/sanoma-ai-runtime:0.8.1`)).toEqual({ type: OCI, bytes: manifest });
     for (const blob of [config, ...layers]) expect(target.blobs.get(sha(blob))).toEqual(blob);
@@ -149,7 +148,6 @@ describe("accountImage", () => {
     expect(accountImage(`ghcr.io/sanoma-ai/runtime${digest}`, ACCOUNT)).toBe(
       `registry.cloudflare.com/${ACCOUNT}/sanoma-ai-runtime${digest}`,
     );
-    expect(accountImage("node:26", ACCOUNT)).toBe(`registry.cloudflare.com/${ACCOUNT}/library-node:26`);
     const there = `registry.cloudflare.com/${ACCOUNT}/sanoma-ai-runtime:0.8.1`;
     expect(accountImage(there, ACCOUNT)).toBe(there);
   });

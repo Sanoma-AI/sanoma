@@ -18,21 +18,16 @@ const MANIFESTS = [
   "application/vnd.docker.distribution.manifest.v2+json",
 ];
 
-/** An image reference split up, as Docker reads it: `ghcr.io` / `sanoma-ai/runtime` / `:` / `0.8.1` (or `@` / `sha256:…`). */
+/** An image reference split up: `ghcr.io` / `sanoma-ai/runtime` / `:` / `0.8.1` (or `@` / `sha256:…`). */
 function parse(image: string) {
   const at = image.indexOf("@");
   const colon = image.lastIndexOf(":");
   const split = at >= 0 ? at : colon > image.lastIndexOf("/") ? colon : image.length;
   const path = image.slice(0, split);
-  const first = path.slice(0, Math.max(0, path.indexOf("/")));
-  // A first part that is no host name is a Docker Hub path, a one-part one an official image's.
-  const named = /[.:]/.test(first) || first === "localhost";
-  const host = named ? first : "docker.io";
-  const rest = named ? path.slice(first.length + 1) : path;
-  const hub = host === "docker.io";
+  const slash = path.indexOf("/");
   return {
-    host: hub ? "registry-1.docker.io" : host,
-    name: hub && !rest.includes("/") ? `library/${rest}` : rest,
+    host: path.slice(0, Math.max(0, slash)),
+    name: path.slice(slash + 1),
     sep: image[split] ?? "",
     reference: image.slice(split + 1),
   };
@@ -62,21 +57,19 @@ export interface CopyTarget {
 const origin = (host: string) => `${/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host) ? "http" : "https"}://${host}`;
 
 /**
- * Copies `image` into the account's registry, unless it is there already (the target's manifest by
- * that tag has the source's digest), and returns the reference the application runs
- * (`accountImage`). Each blob the target lacks is streamed from the source; the manifest goes
- * last, its bytes and media type unchanged, so its digest is the source's. Each request may take
- * `timeoutMs`. A failure is a `DriverError`, retryable as its status is; the credentials are in no
- * message.
+ * Copies `image` into the account's registry as `accountImage(image)`, unless the target's
+ * manifest by that tag has the source's digest already. Each blob the target lacks is streamed
+ * from the source; the manifest goes last, its bytes and media type unchanged, so its digest is
+ * the source's. Each request may take `timeoutMs` (default ten minutes: a layer streams through).
+ * A failure is a `DriverError`, retryable as its status is; the credentials are in no message.
  */
-export async function copyImage(image: string, target: CopyTarget, timeoutMs: number): Promise<string> {
-  const registry = target.registry ?? CLOUDFLARE_REGISTRY;
-  const copy = accountImage(image, target.account, registry);
-  if (copy === image) return image;
+export async function copyImage(image: string, target: CopyTarget, timeoutMs = 10 * 60_000): Promise<void> {
   const source = parse(image);
-  const to = parse(copy);
+  const to = parse(accountImage(image, target.account, target.registry));
   const ref = source.reference;
   const refuse = (why: string) => new DriverError(`cloudflare: copying ${image}: ${why}`, { retryable: false });
+  if (!/[.:]/.test(source.host))
+    throw refuse("name the registry it is in, such as ghcr.io/sanoma-ai/runtime:<version>");
 
   /** A request of the copy's: an answer that is not `ok` (or in `also`) is a DriverError. */
   const send = async (url: string, init: RequestInit & { duplex?: "half" }, also: number[] = []) => {
@@ -105,16 +98,15 @@ export async function copyImage(image: string, target: CopyTarget, timeoutMs: nu
   };
 
   /**
-   * The `authorization` header for `scope` on `host`, as a Docker client finds it: none when `/v2/`
-   * answers, the basic credentials when it asks for them, else a token from the realm its
-   * `Bearer` challenge names (with the basic credentials, when there are any).
+   * The `authorization` header for `scope` on `host`, as a Docker client finds it: none (or the
+   * basic credentials) when `/v2/` answers, else a token from the realm its `Bearer` challenge
+   * names (asked with the basic credentials, when there are any).
    */
   const authorize = async (host: string, scope: string, basic?: string): Promise<Record<string, string>> => {
     const given: Record<string, string> = basic ? { authorization: basic } : {};
     const ping = await ask(`${origin(host)}/v2/`, { headers: given }, [401]);
     if (ping.ok) return given;
     const challenge = ping.headers.get("www-authenticate") ?? "";
-    if (/^basic/i.test(challenge) && basic) return given;
     const params = Object.fromEntries([...challenge.matchAll(/(\w+)="([^"]*)"/g)].map(([, k, v]) => [k!, v!]));
     if (!/^bearer/i.test(challenge) || !params.realm) {
       throw refuse(`${host} asks for no credentials it can be given`);
@@ -147,7 +139,7 @@ export async function copyImage(image: string, target: CopyTarget, timeoutMs: nu
     { method: "HEAD", headers: { ...push, accept: mediaType } },
     [404],
   );
-  if (there.ok && there.headers.get("docker-content-digest") === digest) return copy;
+  if (there.ok && there.headers.get("docker-content-digest") === digest) return;
 
   const manifest = JSON.parse(new TextDecoder().decode(bytes)) as {
     config: { digest: string; size: number };
@@ -176,5 +168,4 @@ export async function copyImage(image: string, target: CopyTarget, timeoutMs: nu
     headers: { ...push, "content-type": mediaType },
     body: bytes,
   });
-  return copy;
 }

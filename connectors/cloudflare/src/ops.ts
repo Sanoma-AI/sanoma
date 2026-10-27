@@ -10,6 +10,7 @@ import {
 import { domainsOf, domainsText } from "@sanoma-ai/workflows/shared";
 import { instanceUrl, mintInstanceToken, WAKEUP_TOKEN } from "@sanoma-ai/workflows/wakeup-service";
 import { alarm, container } from "./connector.ts";
+import { accountImage } from "./registry.ts";
 import {
   HEALTH_PATH,
   MAIN_MODULE,
@@ -93,10 +94,10 @@ export interface CloudflareApi {
   upload(script: string, upload: Upload): Promise<void>;
   /** Turns its workers.dev URL on (`POST …/scripts/{name}/subdomain { enabled }`). */
   enableSubdomain(script: string): Promise<void>;
-  /** The image the application runs for a declared one: itself in Cloudflare's registry, else its copy in the account's (`accountImage`). */
-  accountImage(image: string): string;
-  /** Copies a declared image into the account's registry unless it is there already; the image the application runs. */
-  copyImage(image: string): Promise<string>;
+  /** The account's id, which its registry's references name (`accountImage`). */
+  account: string;
+  /** Copies an image of another registry into the account's, as `accountImage(image, account)`. */
+  copyImage(image: string): Promise<void>;
   /** Deletes the Worker, its object's storage with it; nothing when there is none. */
   deleteScript(script: string): Promise<void>;
   /** The container application of that name, if any (`GET …/containers/applications?name=`). */
@@ -213,20 +214,24 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
   const plan = async ({ id, desired }: { id?: string; desired?: Record<string, unknown> }): Promise<Planned> => {
     const found = id === undefined ? undefined : await inspect(id, false);
     if (!desired) return { action: found ? "delete" : "none", ...NONE };
-    const { secrets, ...planned } = desired;
+    const { secrets, ...declared } = desired;
     const unknown = [...container.fields.vendorOwned];
-    if (!found) return { action: "create", planned, unknown, replace: [] };
+    // A create plans without the account: it needs no credentials yet.
+    if (!found) return { action: "create", planned: declared, unknown, replace: [] };
+    // The application runs the image's copy in the account's registry: that is what a read shows.
+    const planned: Record<string, unknown> = {
+      ...declared,
+      image: accountImage(declared.image as string, api().account),
+    };
     const { state } = found;
     if (planned.name !== state.name) return { action: "replace", planned, unknown, replace: ["name"] };
-    // The application runs the image's copy in the account's registry: that is what a read shows.
-    const runs: Record<string, unknown> = { ...planned };
-    if (typeof planned.image === "string") runs.image = api().accountImage(planned.image);
     const changed =
       // `domains` left out is compared too: removing them is a change.
-      COMPARED.some((field) => (field in planned || field === "domains") && !same(field, runs[field], state[field])) ||
-      sorted(Object.keys(secrets ?? {})) !== sorted(found.secrets);
+      COMPARED.some(
+        (field) => (field in planned || field === "domains") && !same(field, planned[field], state[field]),
+      ) || sorted(Object.keys(secrets ?? {})) !== sorted(found.secrets);
     if (!changed) return { action: "none", planned: state, ...NONE };
-    return { action: "update", planned: { ...state, ...runs }, ...NONE };
+    return { action: "update", planned: { ...state, ...planned }, ...NONE };
   };
 
   /** Waits until the Worker at `url` answers at `revision`, which starts its container. */
@@ -266,8 +271,11 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
         "exists",
       );
     }
-    // Before anything changes: a copy that fails leaves the Worker as it was.
-    const runs = await cf.copyImage(image);
+    // Copied before anything changes, so a copy that fails leaves the Worker as it was; not again
+    // once the Worker runs the copy, as a version's tag is never replaced.
+    const runs = accountImage(image, cf.account);
+    const running = current?.find((b) => b.name === TEXT.image)?.text;
+    if (runs !== image && running !== runs) await cf.copyImage(image);
     const served = domains ? domainsText(domains) : undefined;
     const text = {
       [TEXT.source]: source,

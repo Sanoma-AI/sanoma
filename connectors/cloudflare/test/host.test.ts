@@ -117,5 +117,8 @@ describe("cloudflare.container meets the Host contract on the fake", () => {
     ]);
     // A deploy started the container again at the new revision, behind the same URL.
     expect(Object.keys(fake.state.scripts)).toEqual(["sanoma-company"]);
+    // The ghcr.io image was copied into the account's registry once, and the application runs the copy.
+    expect(Object.values(fake.state.images)).toEqual([declared.image]);
+    expect(Object.values(fake.state.applications).map((a) => a.image)).toEqual(Object.keys(fake.state.images));
   });
 });
