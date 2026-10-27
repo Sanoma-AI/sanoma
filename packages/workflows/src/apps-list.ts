@@ -26,6 +26,7 @@ const Found = z.object({
   description: z.string().nullish(),
   license: z.object({ spdx_id: z.string().nullish() }).nullish(),
 });
+type Found = z.infer<typeof Found>;
 const Search = z.object({ items: z.array(z.unknown()) });
 
 /** An app's source on GitHub, with what Sanoma claims about it. */
@@ -68,7 +69,7 @@ export const appsListOps = defineConnector("sanoma", {
 export const appsListDriver = defineDriver(appsListOps, { apps: { list: () => availableApps() } });
 
 /** An app found, with what `from` claims about it. */
-function listed(found: z.infer<typeof Found>, from: Claims): AvailableApp {
+function listed(found: Found, from: Claims): AvailableApp {
   const repo = found.full_name;
   const claim = appClaim(repo, from);
   const solutions = (claim?.solutions ?? []).flatMap((id) => {
@@ -90,8 +91,11 @@ function listed(found: z.infer<typeof Found>, from: Claims): AvailableApp {
 /** 1 for an official app, which the list shows first. */
 const official = (app: AvailableApp) => Number(app.tier === "official");
 
-/** The repositories GitHub finds with the topic `sanoma-app`, not archived, the first hundred, as it answers; throws when it cannot be searched. */
-export async function searchGitHub(): Promise<unknown[]> {
+/**
+ * The repositories GitHub finds with the topic `sanoma-app`, not archived, the first hundred, but
+ * those it describes otherwise than expected; throws when it cannot be searched.
+ */
+export async function searchGitHub(): Promise<Found[]> {
   const url = `${GITHUB_API}/search/repositories?q=${encodeURIComponent(`topic:${APP_TOPIC} archived:false`)}&per_page=100`;
   const res = await fetch(url, {
     headers: { accept: "application/vnd.github+json", "user-agent": "sanoma", "x-github-api-version": "2022-11-28" },
@@ -101,7 +105,10 @@ export async function searchGitHub(): Promise<unknown[]> {
     await res.body?.cancel();
     throw new Error(`${new URL(url).host} answered ${res.status} to ${new URL(url).pathname}`);
   }
-  return Search.parse(await res.json()).items;
+  return Search.parse(await res.json()).items.flatMap((item) => {
+    const found = Found.safeParse(item);
+    return found.success ? [found.data] : [];
+  });
 }
 
 /**
@@ -112,29 +119,25 @@ export async function searchGitHub(): Promise<unknown[]> {
  */
 export function remembered<T>(search: () => Promise<T>, now: () => number = Date.now): () => Promise<T> {
   let last: { value: T } | undefined;
-  let failure: unknown;
-  let next = 0;
-  let pending: Promise<T> | undefined;
+  /** The last search's answer, or the one in flight, which answers until `until`. */
+  let answer: Promise<T> | undefined;
+  let until = 0;
   return () => {
-    if (now() < next) return last ? Promise.resolve(last.value) : Promise.reject(failure);
-    pending ??= search()
-      .then(
-        (value) => {
-          last = { value };
-          next = now() + FRESH_MS;
-          return value;
-        },
-        (err: unknown) => {
-          next = now() + RETRY_MS;
-          if (last) return last.value;
-          failure = err;
-          throw err;
-        },
-      )
-      .finally(() => {
-        pending = undefined;
-      });
-    return pending;
+    if (answer && now() < until) return answer;
+    until = Infinity;
+    answer = search().then(
+      (value) => {
+        last = { value };
+        until = now() + FRESH_MS;
+        return value;
+      },
+      (err: unknown) => {
+        until = now() + RETRY_MS;
+        if (last) return last.value;
+        throw err;
+      },
+    );
+    return answer;
   };
 }
 
@@ -143,26 +146,22 @@ const searched = remembered(searchGitHub);
 
 /**
  * The apps `search` finds (GitHub's, remembered, by default), each with what `from` claims about
- * it (the claims by default), official first, then by name. A repository GitHub describes
- * otherwise than expected is left out. When GitHub cannot be searched and nothing is remembered,
+ * it (the claims by default), official first, then by name. When GitHub cannot be searched and nothing is remembered,
  * the list is empty, and says why.
  */
 export async function availableApps(
   from: Claims = claims,
-  search: () => Promise<unknown[]> = searched,
+  search: () => Promise<Found[]> = searched,
 ): Promise<AvailableApps> {
-  let items: unknown[];
+  let found: Found[];
   try {
-    items = await search();
+    found = await search();
   } catch (err) {
     return { apps: [], error: `Could not search GitHub: ${errorMessage(err)}` };
   }
   return {
-    apps: items
-      .flatMap((item) => {
-        const found = Found.safeParse(item);
-        return found.success ? [listed(found.data, from)] : [];
-      })
+    apps: found
+      .map((repo) => listed(repo, from))
       .toSorted((a, b) => official(b) - official(a) || a.repo.localeCompare(b.repo, "en")),
   };
 }

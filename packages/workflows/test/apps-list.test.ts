@@ -62,6 +62,16 @@ const github = setupServer(
     return HttpResponse.json({ total_count: FOUND.length, items: FOUND });
   }),
 );
+/** GitHub refusing the search, with `status` or with no answer at all. */
+const refuse = (status?: number) =>
+  github.use(
+    http.get(`${GITHUB_API}/search/repositories`, () =>
+      status ? new HttpResponse(null, { status }) : HttpResponse.error(),
+    ),
+  );
+/** The listing when GitHub answered 403. */
+const REFUSED = { apps: [], error: "Could not search GitHub: api.github.com answered 403 to /search/repositories" };
+
 beforeAll(() => github.listen({ onUnhandledFrame: "error" }));
 afterEach(() => {
   github.resetHandlers();
@@ -107,12 +117,9 @@ describe("sanoma.apps.list", () => {
   });
 
   it("says why when GitHub cannot be searched, and lists nothing", async () => {
-    github.use(http.get(`${GITHUB_API}/search/repositories`, () => new HttpResponse(null, { status: 403 })));
-    expect(await availableApps(CLAIMS, searchGitHub)).toEqual({
-      apps: [],
-      error: "Could not search GitHub: api.github.com answered 403 to /search/repositories",
-    });
-    github.use(http.get(`${GITHUB_API}/search/repositories`, () => HttpResponse.error()));
+    refuse(403);
+    expect(await availableApps(CLAIMS, searchGitHub)).toEqual(REFUSED);
+    refuse();
     expect(await availableApps(CLAIMS, searchGitHub)).toMatchObject({
       apps: [],
       error: expect.stringMatching(/^Could not search GitHub: /),
@@ -134,7 +141,7 @@ describe("sanoma.apps.list", () => {
     expect(searches).toBe(2);
 
     now = 2 * FRESH_MS;
-    github.use(http.get(`${GITHUB_API}/search/repositories`, () => HttpResponse.error()));
+    refuse();
     expect(await availableApps(CLAIMS, search)).toEqual(first);
     github.resetHandlers();
     now += RETRY_MS - 1;
@@ -148,12 +155,11 @@ describe("sanoma.apps.list", () => {
   it("lists nothing, and says why, when the first search fails, and searches again a minute later", async () => {
     let now = 0;
     const search = remembered(searchGitHub, () => now);
-    github.use(http.get(`${GITHUB_API}/search/repositories`, () => new HttpResponse(null, { status: 403 })));
-    const refused = { apps: [], error: "Could not search GitHub: api.github.com answered 403 to /search/repositories" };
-    expect(await availableApps(CLAIMS, search)).toEqual(refused);
+    refuse(403);
+    expect(await availableApps(CLAIMS, search)).toEqual(REFUSED);
     github.resetHandlers();
     now = RETRY_MS - 1;
-    expect(await availableApps(CLAIMS, search)).toEqual(refused);
+    expect(await availableApps(CLAIMS, search)).toEqual(REFUSED);
     expect(searches).toBe(0);
     now = RETRY_MS;
     expect((await availableApps(CLAIMS, search)).apps).toHaveLength(3);
