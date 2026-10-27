@@ -32,6 +32,7 @@ import { type Published, PUBLISHED_FILE, publishedOf } from "./content-files.ts"
 import { seoFile } from "./seo.ts";
 import { siteHost } from "./site-path.ts";
 import { secretValues } from "./server/secrets.ts";
+import { remoteWebhook } from "./server/webhooks.ts";
 
 export { ACTOR_HEADER } from "./api.ts";
 export type { LoginProvider, ResolveActor } from "./context.ts";
@@ -73,6 +74,8 @@ export interface AppOptions {
    * at any host name: a request whose path is exactly `path` is answered by `handle`, or with 405
    * when `method` is given and the request's is another. One route per path, never `/healthz`.
    * Nothing checks who is asking, so each checks its own token; never give one a page's path.
+   * Besides these, the app answers `POST /webhooks/<vendor>` for each connector's remote half that
+   * reads webhooks (`remoteWebhook`), but in a demo.
    */
   ingress?: readonly IngressRoute[];
   /**
@@ -171,7 +174,17 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
     console.warn(`sanoma app: warnings in the sites (\`sanoma check\` lists them):\n${warnings.join("\n")}`);
   const hosts = publicHosts(description, options.domains ?? {});
   const ingress = new Map<string, IngressRoute>();
-  for (const route of options.ingress ?? []) {
+  // A git host's webhooks, answered once the app is made: a demo's instance never hears its host.
+  const webhooks: IngressRoute[] = demo
+    ? []
+    : [...resolved.remotes]
+        .filter(([, half]) => half.webhook)
+        .map(([vendor]) => ({
+          method: "POST",
+          path: `/webhooks/${vendor}`,
+          handle: (request) => remoteWebhook(app, vendor, request),
+        }));
+  for (const route of [...(options.ingress ?? []), ...webhooks]) {
     if (!/^\/[^?#]*$/.test(route.path) || route.path === "/healthz")
       throw new Error(
         `An ingress route's path starts with /, has no query and is not /healthz, unlike "${route.path}"`,
@@ -277,7 +290,11 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   const [loaded, connected] = await Promise.allSettled([
     load(),
     // On the caller's resolution, as its worker; a demo's on its own too, the instance's fakes.
-    SanomaClient.connect(config, { onWrite: options.onWrite, ...((demo || options.resolved) && { resolved }) }),
+    SanomaClient.connect(config, {
+      onWrite: options.onWrite,
+      ...(options.source && { source: options.source }),
+      ...((demo || options.resolved) && { resolved }),
+    }),
   ]);
   if (loaded.status === "rejected" && connected.status === "rejected") {
     throw new AggregateError(

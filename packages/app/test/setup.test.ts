@@ -142,9 +142,15 @@ describe("creating the GitHub App", () => {
       redirect_url: `${app.url}/setup/github/callback`,
       callback_urls: [`${app.url}/auth/github/callback`],
       public: false,
-      default_permissions: { administration: "write", contents: "write", metadata: "read", pull_requests: "write" },
+      default_permissions: {
+        administration: "write",
+        contents: "write",
+        metadata: "read",
+        pull_requests: "write",
+        statuses: "write",
+      },
       default_events: ["push", "pull_request"],
-      hook_attributes: { active: false },
+      hook_attributes: { url: `${app.url}/webhooks/github`, active: true },
     });
     expect(html).toContain('document.getElementById("manifest").submit()');
     const line = res.headers.getSetCookie().find((l) => l.startsWith("sanoma_setup_state="))!;

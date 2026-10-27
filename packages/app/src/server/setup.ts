@@ -156,14 +156,16 @@ export function githubManifest(origin: string, name: string) {
     url: origin,
     redirect_url: `${origin}${CALLBACK}`,
     callback_urls: [`${origin}/auth/github/callback`],
-    // Off until the app has a route that receives them: GitHub would fail every delivery.
-    hook_attributes: { url: `${origin}/webhooks/github`, active: false },
+    // `remoteWebhook` answers it: a push deploys or plans a change again, a closed pull request ends one.
+    hook_attributes: { url: `${origin}/webhooks/github`, active: true },
     public: false,
     default_permissions: {
       administration: "write",
       contents: "write",
       metadata: "read",
       pull_requests: "write",
+      // The `sanoma` commit status a change's review sets.
+      statuses: "write",
     },
     default_events: ["push", "pull_request"],
   };
