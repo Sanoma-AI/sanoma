@@ -44,9 +44,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
  && rm -rf /var/lib/apt/lists/* \
  && npm install -g pnpm@11 && npm cache clean --force
 COPY --from=bridge /out/provider-bridge /usr/local/bin/provider-bridge
-# github.com's host keys as the image is built: what a start trusts when GitHub's API cannot answer.
-COPY github-known-hosts.mjs /usr/local/share/sanoma/github-known-hosts.mjs
-RUN node /usr/local/share/sanoma/github-known-hosts.mjs > /usr/local/share/sanoma/github_known_hosts
+# GitHub's SSH host keys, read at start, and the copy committed beside it for when GitHub's API cannot answer.
+COPY github-known-hosts.mjs github_known_hosts /usr/local/share/sanoma/
 COPY --chmod=755 entrypoint.sh /usr/local/bin/sanoma-runtime
 ENV SANOMA_BRIDGE_BIN=/usr/local/bin/provider-bridge \
     SANOMA_APP_HOST=0.0.0.0 \

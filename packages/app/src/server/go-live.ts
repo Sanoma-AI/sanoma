@@ -191,17 +191,6 @@ const githubHeaders = (token: string) => ({
   "user-agent": "sanoma",
 });
 
-/**
- * Stores a new deploy key's private half as `SANOMA_SOURCE_KEY` unless one is stored: RSA 3072
- * in PKCS#1 PEM, which OpenSSH reads as it is (Node writes no OpenSSH private key, which ed25519
- * would need).
- */
-async function ensureSourceKey(client: AppContext["client"], actor: Principal) {
-  if ((await client.secrets([SOURCE_KEY])).has(SOURCE_KEY)) return;
-  const { privateKey } = await promisify(generateKeyPair)("rsa", { modulusLength: 3072 });
-  await client.setSecret(SOURCE_KEY, privateKey.export({ type: "pkcs1", format: "pem" }).toString(), { by: actor.id });
-}
-
 /** RFC 4253's `string`: the bytes after their length, 32 bits big-endian. */
 function sshString(bytes: Buffer) {
   const length = Buffer.alloc(4);
@@ -216,12 +205,19 @@ function sshMpint(value: string) {
 }
 
 /**
- * The public half of an RSA private key in PEM, in OpenSSH's one-line format, as GitHub takes a
- * deploy key: `ssh-rsa`, then the base64 of the strings `ssh-rsa`, `e` and `n`.
+ * A new deploy key: its private half RSA 3072 in PKCS#1 PEM, which OpenSSH reads as it is (Node
+ * writes no OpenSSH private key, which ed25519 would need), and its public half in OpenSSH's
+ * one-line format, as GitHub takes it: `ssh-rsa`, then the base64 of the strings `ssh-rsa`, `e`
+ * and `n`.
  */
-function sshPublicKey(pem: string): string {
-  const { e, n } = createPublicKey(pem).export({ format: "jwk" });
-  return `ssh-rsa ${Buffer.concat([sshString(Buffer.from("ssh-rsa")), sshMpint(e!), sshMpint(n!)]).toString("base64")}`;
+export async function sourceKeyPair(): Promise<{ privateKey: string; publicKey: string }> {
+  const { privateKey } = await promisify(generateKeyPair)("rsa", { modulusLength: 3072 });
+  const { e, n } = createPublicKey(privateKey).export({ format: "jwk" });
+  const wire = Buffer.concat([sshString(Buffer.from("ssh-rsa")), sshMpint(e!), sshMpint(n!)]);
+  return {
+    privateKey: privateKey.export({ type: "pkcs1", format: "pem" }).toString(),
+    publicKey: `ssh-rsa ${wire.toString("base64")}`,
+  };
 }
 
 /**
@@ -361,8 +357,8 @@ async function sanomaVersion(root: string): Promise<string> {
 }
 
 /**
- * `infra.ts`'s text for the choices: the repository and its read-only deploy key (the public half
- * of the stored `SANOMA_SOURCE_KEY`, which the host is given to clone with), the database, the
+ * `infra.ts`'s text for the choices: the repository and its read-only deploy key (`deployKey`, the
+ * public half of `SANOMA_SOURCE_KEY`, which the host is given to clone with), the database, the
  * host that runs the company from them and, once a wakeup for the host is connected, the wakeup
  * that starts the host again, whose instance token the host is given from the first apply
  * (`hostWakeup`).
@@ -370,6 +366,7 @@ async function sanomaVersion(root: string): Promise<string> {
 export async function renderInfra(
   app: AppContext,
   { name, organization, region, size, database: shownDatabase, host: shown, port }: Omit<GoLiveRequest, "owner">,
+  deployKey: string,
   chosen?: Awaited<ReturnType<typeof choose>>,
 ) {
   const { database, host, wakeup } = chosen ?? (await choose(app));
@@ -422,8 +419,6 @@ export async function renderInfra(
   });
   setPath(hosted, inputs.port, port);
   const woken = wakeup.type;
-  const sourceKey = (await app.client.secrets([SOURCE_KEY])).get(SOURCE_KEY)?.value;
-  if (!sourceKey) throw new ApiError(409, { error: `${SOURCE_KEY} is not stored: going live stores it first` });
   return renderDataFile(
     {
       imports: [...new Set(["github", database.vendor, host.vendor, ...(woken ? [woken.vendor] : [])])].map(
@@ -438,7 +433,7 @@ export async function renderInfra(
           desired: {
             repository: new Reference("repo"),
             title: "Sanoma host",
-            key: sshPublicKey(sourceKey),
+            key: deployKey,
             read_only: true,
           },
         },
@@ -461,8 +456,8 @@ export async function renderInfra(
 }
 
 /**
- * Step 3 and 4: stores the host's deploy key (`SANOMA_SOURCE_KEY`) unless one is, writes
- * `infra.ts` for the choices and commits it, stores the owner as the GitHub connector's
+ * Step 3 and 4: writes `infra.ts` for the choices with a new deploy key, whose private half it
+ * stores as `SANOMA_SOURCE_KEY`, and commits it, stores the owner as the GitHub connector's
  * `GITHUB_OWNER`, and starts apply on the repository, its deploy key and the database. Apply
  * creates them, binds them in the lockfile and, once the project is healthy, stores its database
  * URL (its `afterCreate`). Refused once the file is written: going live writes it once.
@@ -488,16 +483,17 @@ export async function goLive(app: AppContext, actor: Principal, choices: GoLiveR
   // The database's and the host's vendors connected: their tokens are what apply makes them with.
   const connect = toConnect(chosen);
   if (connect.length) throw new ApiError(409, { error: `Connect ${connect.join(" and ")} first` });
-  // Before the file, which declares its public half: a request refused after it keeps it for the next.
-  await ensureSourceKey(client, actor);
-  const text = await renderInfra(app, choices, chosen);
+  // A new key each time: GitHub takes a key for one repository only, and none declares this one yet.
+  const key = await sourceKeyPair();
+  const text = await renderInfra(app, choices, key.publicKey, chosen);
+  await client.setSecret(SOURCE_KEY, key.privateKey, { by: actor.id });
   // Once the request is good: a wakeup's token may be the environment's or its connector page's, which mint nothing.
   if (chosen.wakeup.type) await mintWakeupToken(client, actor);
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, text);
   await source?.commit({
     paths: [INFRA],
-    message: "Go live: declare the repository, database and host",
+    message: "Go live: declare the repository, its deploy key, the database and the host",
     author: actor.id,
   });
   await client.setSecret("GITHUB_OWNER", choices.owner, { by: actor.id });
@@ -527,13 +523,14 @@ async function pushToken(app: AppContext, repo: RepoRef): Promise<string> {
 /**
  * Steps 5 and 6: pushes the local repository's `main`, with `infra.ts` and the lockfile on top,
  * to the repository apply made, then starts apply on the host (and its wakeup, when declared).
- * Refused until the repository and the database are bound.
+ * Refused until the repository, its deploy key (which the host clones with) and the database are
+ * bound.
  */
 export async function goLiveHost(app: AppContext, actor: Principal): Promise<{ runId: string }> {
   const { client, resolved, source } = app;
   const { bindings } = readLockfile(resolved.root!);
-  if (!bindings[KEYS.repo] || !bindings[KEYS.store]) {
-    throw new ApiError(409, { error: "Apply the repository and the database first" });
+  if (!bindings[KEYS.repo] || !bindings[KEYS.deployKey] || !bindings[KEYS.store]) {
+    throw new ApiError(409, { error: "Apply the repository, its deploy key and the database first" });
   }
   if (!source?.push) throw new ApiError(409, { error: "The app has no repository to push from" });
   // The database's `afterCreate` stores it (its `storeUrl`); one bound without it (a hook that failed) cannot run a host.

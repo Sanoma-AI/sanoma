@@ -1,4 +1,4 @@
-import { createPublicKey, generateKeyPairSync } from "node:crypto";
+import { createPublicKey } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,7 +17,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { INFRA } from "../src/api.ts";
 import type { AppContext } from "../src/context.ts";
-import { goLiveChoices, renderInfra } from "../src/server/go-live.ts";
+import { goLiveChoices, renderInfra, sourceKeyPair } from "../src/server/go-live.ts";
 
 // Going live chooses the database, the host and the wakeup by their contracts, among the config's
 // types: among those whose vendor is connected, Neon's database first, Cloudflare's host first,
@@ -139,17 +139,11 @@ const docker = defineConnector(
 );
 const fly = defineConnector("fly", { app: hostOf("fly", "app", "stops-when-quiet", true) }, { package: "@acme/fly" });
 
-/** The host's deploy key, as going live stores it before it renders `infra.ts`. */
-const SOURCE_KEY = generateKeyPairSync("rsa", { modulusLength: 3072 })
-  .privateKey.export({ type: "pkcs1", format: "pem" })
-  .toString();
+/** A deploy key, as going live makes one for `infra.ts`. */
+const KEY = await sourceKeyPair();
 
-/**
- * Going live's context for a config, with `stored` the secrets the client says are stored, and
- * the deploy key's private half (`SANOMA_SOURCE_KEY`) unless `stored` says otherwise.
- */
-function contextOf(connectors: Connector<any, any>[], given: Record<string, string> = {}): AppContext {
-  const stored: Record<string, string> = { SANOMA_SOURCE_KEY: SOURCE_KEY, ...given };
+/** Going live's context for a config, with `stored` the secrets the client says are stored. */
+function contextOf(connectors: Connector<any, any>[], stored: Record<string, string> = {}): AppContext {
   const config: SanomaConfig = { workflows: [], connectors, root };
   return {
     resolved: resolveConfig(config),
@@ -190,7 +184,7 @@ describe("going live by contract", () => {
       connect: ["Neon"],
       errors: [],
     });
-    const text = await renderInfra(app, choices);
+    const text = await renderInfra(app, choices, KEY.publicKey);
     expect(text).toContain(
       `export const store = neon.project({\n  name: "acme-ops",\n  region: "aws-eu-central-1",\n  size: "0.25",\n});\n`,
     );
@@ -199,29 +193,30 @@ describe("going live by contract", () => {
     expect(text).not.toContain("wakeup");
   });
 
-  it("declares the repository's read-only deploy key, whose private half the host is given to clone with", async () => {
-    const text = await renderInfra(contextOf(ALL), choices);
-    const declared =
-      /export const deployKey = github\.repository_deploy_key\(\{\n  repository: repo,\n  title: "Sanoma host",\n  key: "(ssh-rsa [A-Za-z0-9+/=]+)",\n  read_only: true,\n\}\);\n/.exec(
-        text,
-      );
-    expect(declared).not.toBeNull();
-    // The stored key's public half, in OpenSSH's format: `ssh-rsa`, then e and n, each after its length.
-    const wire = Buffer.from(declared![1]!.slice("ssh-rsa ".length), "base64");
+  it("makes a deploy key OpenSSH reads: PKCS#1 PEM, and its public half in OpenSSH's format", () => {
+    expect(KEY.privateKey).toMatch(/^-----BEGIN RSA PRIVATE KEY-----\n/);
+    // `ssh-rsa`, then the strings `ssh-rsa`, e and n, each after its length.
+    expect(KEY.publicKey).toMatch(/^ssh-rsa [A-Za-z0-9+/]+=*$/);
+    const wire = Buffer.from(KEY.publicKey.slice("ssh-rsa ".length), "base64");
     const fields: Buffer[] = [];
     for (let at = 0; at < wire.length; at += 4 + wire.readUInt32BE(at)) {
       fields.push(wire.subarray(at + 4, at + 4 + wire.readUInt32BE(at)));
     }
     const [kind, e, n] = fields;
     expect(kind!.toString()).toBe("ssh-rsa");
-    const jwk = createPublicKey(SOURCE_KEY).export({ format: "jwk" });
+    const jwk = createPublicKey(KEY.privateKey).export({ format: "jwk" });
     // An mpint with its top bit set leads with a zero byte, which a JWK's integer has not.
     expect(n![0]).toBe(0);
     expect({ e: e!.toString("base64url"), n: n!.subarray(1).toString("base64url") }).toEqual({ e: jwk.e, n: jwk.n });
+  });
+
+  it("declares the repository's read-only deploy key, whose private half the host is given to clone with", async () => {
+    const text = await renderInfra(contextOf(ALL), choices, KEY.publicKey);
+    expect(text).toContain(
+      `export const deployKey = github.repository_deploy_key({\n  repository: repo,\n  title: "Sanoma host",\n  key: "${KEY.publicKey}",\n  read_only: true,\n});\n`,
+    );
     expect(text).toContain(`    SANOMA_SOURCE_KEY: secret("SANOMA_SOURCE_KEY"),\n`);
     expect(text).toContain("export default [repo, deployKey, store, host];");
-    // The private half is never in the file.
-    expect(text).not.toContain("PRIVATE KEY");
     // Read back as the worker reads it: the key names the repository, which apply makes first.
     const other = mkdtempSync(join(tmpdir(), "sanoma-go-live-contract-read-"));
     try {
@@ -240,15 +235,8 @@ describe("going live by contract", () => {
     }
   });
 
-  it("refuses to render before the deploy key is stored", async () => {
-    await expect(renderInfra(contextOf(ALL, { SANOMA_SOURCE_KEY: "" }), choices)).rejects.toMatchObject({
-      status: 409,
-      message: "SANOMA_SOURCE_KEY is not stored: going live stores it first",
-    });
-  });
-
   it("leaves out the size when none is chosen", async () => {
-    expect(await renderInfra(contextOf(ALL), unsized)).toContain(
+    expect(await renderInfra(contextOf(ALL), unsized, KEY.publicKey)).toContain(
       `export const store = neon.project({\n  name: "acme-ops",\n  region: "aws-eu-central-1",\n});\n`,
     );
   });
@@ -264,7 +252,7 @@ describe("going live by contract", () => {
       title: "cloudflare container",
       publicUrl: true,
     });
-    const text = await renderInfra(app, choices);
+    const text = await renderInfra(app, choices, KEY.publicKey);
     expect(text).toContain(
       `export const host = cloudflare.container({\n  name: "acme-ops",\n  image: "ghcr.io/sanoma-ai/runtime:9.9.9",\n`,
     );
@@ -279,12 +267,16 @@ describe("going live by contract", () => {
     const half = contextOf(ALL, { CLOUDFLARE_API_TOKEN: "cf" });
     expect((await goLiveChoices(half)).host?.type).toBe("docker.container");
     const connected = contextOf(ALL, { CLOUDFLARE_API_TOKEN: "cf", CLOUDFLARE_ACCOUNT_ID: "acct" });
-    await expect(renderInfra(connected, { ...choices, host: "docker.container" })).rejects.toMatchObject({
-      status: 409,
-      message: "Going live now runs the company on cloudflare.container, not docker.container: reload the page",
-    });
+    await expect(renderInfra(connected, { ...choices, host: "docker.container" }, KEY.publicKey)).rejects.toMatchObject(
+      {
+        status: 409,
+        message: "Going live now runs the company on cloudflare.container, not docker.container: reload the page",
+      },
+    );
     const supabaseConnected = contextOf(ALL, { SUPABASE_ACCESS_TOKEN: "sb" });
-    await expect(renderInfra(supabaseConnected, { ...choices, database: "neon.project" })).rejects.toMatchObject({
+    await expect(
+      renderInfra(supabaseConnected, { ...choices, database: "neon.project" }, KEY.publicKey),
+    ).rejects.toMatchObject({
       status: 409,
       message: "Going live now keeps the company's records in supabase.project, not neon.project: reload the page",
     });
@@ -292,19 +284,19 @@ describe("going live by contract", () => {
 
   it("chooses among connected vendors: Supabase's database without Neon's key, Fly's host without Cloudflare's", async () => {
     const app = contextOf([github, supabase, neon, cloudflare, fly], { SUPABASE_ACCESS_TOKEN: "sb" });
-    const text = await renderInfra(app, { ...unsized, region: "eu-west-1", organization: "org" });
+    const text = await renderInfra(app, { ...unsized, region: "eu-west-1", organization: "org" }, KEY.publicKey);
     expect(text).toContain("export const store = supabase.project({");
     expect(text).toContain("export const host = fly.app({");
   });
 
   it("refuses a region the database does not list, and a size it does not take", async () => {
-    await expect(renderInfra(contextOf(ALL), { ...choices, region: "mars" })).rejects.toMatchObject({
+    await expect(renderInfra(contextOf(ALL), { ...choices, region: "mars" }, KEY.publicKey)).rejects.toMatchObject({
       status: 400,
       body: { issues: [{ path: ["region"] }] },
     });
     const supabaseOnly = contextOf([github, supabase, docker]);
     await expect(
-      renderInfra(supabaseOnly, { ...choices, region: "eu-west-1", organization: "org" }),
+      renderInfra(supabaseOnly, { ...choices, region: "eu-west-1", organization: "org" }, KEY.publicKey),
     ).rejects.toMatchObject({ status: 400, body: { issues: [{ path: ["size"] }] } });
   });
 
@@ -329,7 +321,7 @@ describe("going live by contract", () => {
       any,
       any
     >;
-    const text = await renderInfra(contextOf([github, connector, docker]), unsized);
+    const text = await renderInfra(contextOf([github, connector, docker]), unsized, KEY.publicKey);
     expect(text).toContain(
       `export const store = nested.db({\n  name: "acme-ops",\n  settings: { region: "aws-eu-central-1" },\n});\n`,
     );
@@ -340,14 +332,16 @@ describe("going live by contract", () => {
     expect((await goLiveChoices(app)).errors).toEqual([
       "No connected wakeup wakes a fly.app (Wakeup (sanoma.wakeup) wakes cloudflare.container, docker.container, testhost.app): going live declares none, and the host stays up",
     ]);
-    expect(await renderInfra(app, choices)).not.toContain("wakeup");
+    expect(await renderInfra(app, choices, KEY.publicKey)).not.toContain("wakeup");
   });
 
   it("reports a missing database type, and a Supabase project without an organization", async () => {
     expect((await goLiveChoices(contextOf([github, docker]))).missing).toEqual(["a database type"]);
-    await expect(renderInfra(contextOf([github, docker]), unsized)).rejects.toMatchObject({ status: 409 });
+    await expect(renderInfra(contextOf([github, docker]), unsized, KEY.publicKey)).rejects.toMatchObject({
+      status: 409,
+    });
     await expect(
-      renderInfra(contextOf([github, supabase, docker]), { ...unsized, region: "eu-west-1" }),
+      renderInfra(contextOf([github, supabase, docker]), { ...unsized, region: "eu-west-1" }, KEY.publicKey),
     ).rejects.toMatchObject({ status: 400, body: { issues: [{ path: ["organization"] }] } });
   });
 });

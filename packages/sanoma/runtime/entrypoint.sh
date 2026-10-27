@@ -11,10 +11,11 @@ set -eu
 dir="${SANOMA_WORKDIR:-$HOME/company}"
 
 # SANOMA_SOURCE_KEY, a read-only deploy key's private half (what going live gives a host): the
-# fetch goes to github.com over SSH with it, trusting only github.com's host keys, GitHub's own
-# list (api.github.com/meta, over HTTPS), else the image's copy of it. SANOMA_SOURCE_TOKEN, a
-# token, goes in a header instead. Either is for these commands only, never in .git/config,
-# whose origin stays SANOMA_SOURCE, and is gone before the company starts.
+# fetch goes to GitHub over SSH with it, on the HTTPS port (ssh.github.com:443, which egress
+# allows where 22 may not be), trusting only GitHub's host keys, its own list (api.github.com/meta,
+# over HTTPS), else the image's copy of it. SANOMA_SOURCE_TOKEN, a token, goes in a header
+# instead. Either is for these commands only, never in .git/config, whose origin stays
+# SANOMA_SOURCE; the key's file is gone before the company starts.
 ssh=""
 auth=""
 if [ -n "${SANOMA_SOURCE_KEY:-}" ]; then
@@ -26,9 +27,10 @@ if [ -n "${SANOMA_SOURCE_KEY:-}" ]; then
       ;;
   esac
   keys="$(mktemp -d)"
+  trap 'rm -rf "$keys"' EXIT
   (umask 077 && printf '%s\n' "$SANOMA_SOURCE_KEY" > "$keys/key")
   if ! node /usr/local/share/sanoma/github-known-hosts.mjs > "$keys/known_hosts"; then
-    echo "sanoma-runtime: api.github.com did not list github.com's host keys: trusting the image's copy" >&2
+    echo "sanoma-runtime: api.github.com did not list GitHub's host keys: trusting the image's copy" >&2
     cp /usr/local/share/sanoma/github_known_hosts "$keys/known_hosts"
   fi
   ssh="ssh -F /dev/null -i $keys/key -o IdentitiesOnly=yes -o UserKnownHostsFile=$keys/known_hosts -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=yes"
@@ -37,7 +39,7 @@ elif [ -n "${SANOMA_SOURCE_TOKEN:-}" ]; then
 fi
 git_() {
   if [ -n "$ssh" ]; then
-    git -c "url.git@github.com:.insteadOf=https://github.com/" -c "core.sshCommand=$ssh" -C "$dir" "$@"
+    git -c "url.ssh://git@ssh.github.com:443/.insteadOf=https://github.com/" -c "core.sshCommand=$ssh" -C "$dir" "$@"
   elif [ -n "$auth" ]; then
     git -c "$auth" -C "$dir" "$@"
   else
@@ -51,8 +53,8 @@ git -C "$dir" remote add origin "$SANOMA_SOURCE"
 # One commit when the server allows fetching it by id (GitHub does), else the whole history.
 git_ fetch -q --depth 1 origin "$SANOMA_REVISION" || git_ fetch -q --tags origin
 git -C "$dir" checkout -q --detach "$SANOMA_REVISION"
+# `exec` runs no EXIT trap.
 if [ -n "$ssh" ]; then rm -rf "$keys"; fi
-unset SANOMA_SOURCE_KEY SANOMA_SOURCE_TOKEN
 
 cd "$dir"
 pnpm install --frozen-lockfile

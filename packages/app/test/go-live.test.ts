@@ -26,7 +26,14 @@ import { type GoLiveProgress, INFRA } from "../src/api.ts";
 import type { AppContext } from "../src/context.ts";
 import { loopbackLogin } from "../src/loopback.ts";
 import { admitting } from "../src/login/admission.ts";
-import { goLive, goLiveChoices, goLiveHost, goLiveProgress, renderInfra } from "../src/server/go-live.ts";
+import {
+  goLive,
+  goLiveChoices,
+  goLiveHost,
+  goLiveProgress,
+  renderInfra,
+  sourceKeyPair,
+} from "../src/server/go-live.ts";
 import { setSetupToken } from "../src/server/setup.ts";
 
 // Going live end to end, on fakes, from a company with nothing but a first commit: the choices
@@ -139,12 +146,6 @@ beforeAll(async () => {
   api.listen({ onUnhandledFrame: "bypass" });
   await app.client.setSecret("GITHUB_TOKEN", "ghp_test-token", { by: "alice" });
   await app.client.setSecret("SUPABASE_ACCESS_TOKEN", "sbp_test-token", { by: "alice" });
-  // A deploy key stored as going live stores one, for `renderInfra` before `goLive`.
-  await app.client.setSecret(
-    "SANOMA_SOURCE_KEY",
-    generateKeyPairSync("rsa", { modulusLength: 3072 }).privateKey.export({ type: "pkcs1", format: "pem" }).toString(),
-    { by: "alice" },
-  );
   ctx = {
     resolved: resolveConfig(app.config),
     description: describeConfig(app.config),
@@ -189,7 +190,9 @@ const settled = () =>
     60_000,
   );
 
-/** The deploy key `infra.ts` declares: the stored key's public half. */
+/** A deploy key for `renderInfra`, as going live makes one. */
+const KEY = await sourceKeyPair();
+/** The deploy key `infra.ts` declares. */
 const deployKeyOf = (text: string) => /\n {2}key: "(ssh-rsa [A-Za-z0-9+/=]+)",\n/.exec(text)?.[1];
 
 /** Approves the run's pending approval as the lead, then waits for the run to end. */
@@ -232,9 +235,7 @@ describe("going live", () => {
   });
 
   it("writes infra.ts as a data file the config reads: the repository, the database, and a host running them", async () => {
-    const text = await renderInfra(ctx, choices());
-    const key = deployKeyOf(text);
-    expect(key).toBeDefined();
+    const text = await renderInfra(ctx, choices(), KEY.publicKey);
     expect(text).toBe(
       [
         `import { github } from "@sanoma-ai/connector-github/resources";`,
@@ -250,7 +251,7 @@ describe("going live", () => {
         `export const deployKey = github.repository_deploy_key({`,
         `  repository: repo,`,
         `  title: "Sanoma host",`,
-        `  key: "${key}",`,
+        `  key: "${KEY.publicKey}",`,
         `  read_only: true,`,
         `});`,
         ``,
@@ -298,7 +299,7 @@ describe("going live", () => {
   it("declares sanoma.wakeup after the host once a wakeup service is connected, the host given the instance's token", async () => {
     await setSetupToken(ctx, alice, { name: "SANOMA_WAKEUP_ACCOUNT_TOKEN", value: wakeup.account });
     await setSetupToken(ctx, alice, { name: "SANOMA_WAKEUP_URL", value: wakeup.url });
-    const text = await renderInfra(ctx, choices());
+    const text = await renderInfra(ctx, choices(), KEY.publicKey);
     expect(text).toContain(`import { sanoma, secret } from "sanoma/resources";`);
     // The worker on the host registers with the instance's token, at the service's URL.
     expect(text).toContain(
@@ -329,18 +330,16 @@ describe("going live", () => {
   });
 
   it("goes from the choices to a host answering at its URL", async () => {
-    // No deploy key stored: going live mints one before it writes infra.ts.
-    const db = new Client({ connectionString: databaseUrl });
-    await db.connect();
-    await db.query("DELETE FROM sanoma_credentials WHERE name = 'SANOMA_SOURCE_KEY'");
-    await db.end();
     // Steps 3 and 4: infra.ts committed, the owner stored, apply on the repository, its deploy key and the database.
     await goLive(ctx, alice, choices());
     const sourceKey = (await app.client.secrets(["SANOMA_SOURCE_KEY"])).get("SANOMA_SOURCE_KEY")!.value;
     expect(sourceKey).toMatch(/^-----BEGIN RSA PRIVATE KEY-----\n/);
-    expect(deployKeyOf(readFileSync(join(root, INFRA), "utf8"))).toMatch(/^ssh-rsa /);
+    // A key of its own, its public half declared.
+    const declared = deployKeyOf(readFileSync(join(root, INFRA), "utf8"));
+    expect(declared).toMatch(/^ssh-rsa /);
+    expect(declared).not.toBe(KEY.publicKey);
     expect(git("log", "-1", "--format=%an|%s", "--", INFRA)).toBe(
-      "alice via Sanoma|Go live: declare the repository, database and host",
+      "alice via Sanoma|Go live: declare the repository, its deploy key, the database and the host",
     );
     expect((await app.client.secrets(["GITHUB_OWNER"])).get("GITHUB_OWNER")?.value).toBe("acme");
     let progress = await settled();
