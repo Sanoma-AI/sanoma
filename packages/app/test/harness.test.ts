@@ -204,6 +204,9 @@ export default defineWorkflow({
   );
   writeFileSync(join(dir, "AGENTS.md"), "# Fixture Co\n\nOffboarding happens on the person's last day.\n");
   writeFileSync(join(dir, ".gitignore"), ".sanoma/\nnode_modules/\n");
+  // A person's own agent's sign-in, beside the session's home.
+  mkdirSync(join(dir, ".sanoma/agent-home/people/ada"), { recursive: true });
+  writeFileSync(join(dir, ".sanoma/agent-home/people/ada/.credentials.json"), "{}");
   git("init", "--quiet", "--initial-branch=main");
   git("add", "--all");
   git("commit", "--quiet", "-m", "First");
@@ -291,8 +294,11 @@ describe.each(engines)("the chat on %s", (engine, name, enabled) => {
       // The chat keeps its engine, its draft and its transcript; the session's run files are gone.
       expect(await testApp.client.chats.get(id)).toMatchObject({ engine, draftId: id });
       await waitFor(async () => (await testApp.client.chats.load(id)).length === 2);
-      const runs = join(dir, ".sanoma/agent-home/.ai-sdk-harness/.agent-runs");
+      const runs = join(dir, ".sanoma/agent-home/harness/.ai-sdk-harness/.agent-runs");
       expect(existsSync(runs) ? readdirSync(runs) : []).toEqual([]);
+      // The session's state is all in its own home, beside people's own agents'.
+      expect(readdirSync(join(dir, ".sanoma/agent-home")).toSorted()).toEqual(["harness", "people"]);
+      expect(existsSync(join(dir, ".sanoma/agent-home/people/ada/.credentials.json"))).toBe(true);
     },
     engine === "pi" ? 300_000 : 900_000,
   );

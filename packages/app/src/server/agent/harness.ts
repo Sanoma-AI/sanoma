@@ -88,8 +88,9 @@ export const harnessEngine =
 async function runTurn(name: RuntimeName, turn: EngineTurn, writer: UIMessageStreamWriter<ChatMessage>) {
   const { app, chat, messages, principal, signal } = turn;
   const runtime: Runtime = RUNTIMES[name];
-  // Kept across restarts: a bridge installs its agent under it once.
-  const home = agentHome(app);
+  // Kept across restarts: a bridge installs its agent under it once. Its own, beside the own
+  // agents' installs and people's sign-ins, which its files never reach.
+  const home = agentHome(app, "harness");
   // The key first: a turn without it opens no draft.
   const auth = await authFor(app);
   // The agent works in the chat's draft from its first turn.
