@@ -1,5 +1,6 @@
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { DBOSClient } from "@dbos-inc/dbos-sdk";
 import { startTestWorker } from "@sanoma-ai/testing";
 import { Pool } from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -63,8 +64,10 @@ describe("carrying change runs onto a new version", () => {
   const [one, two] = [resolveConfig(v1), resolveConfig(v2)];
   const workers: Worker[] = [];
   let client: SanomaClient;
+  let raw: DBOSClient;
   beforeAll(async () => {
     client = await SanomaClient.connect(v2);
+    raw = await dbosClient(databaseUrl);
   });
   const leftPending: string[] = [];
 
@@ -73,7 +76,6 @@ describe("carrying change runs onto a new version", () => {
     await Promise.all(workers.splice(0).map((w) => w.stop()));
   });
   afterAll(async () => {
-    const raw = await dbosClient(databaseUrl);
     try {
       await raw.cancelWorkflows(leftPending);
     } finally {
@@ -94,14 +96,7 @@ describe("carrying change runs onto a new version", () => {
     await worker.stop();
   };
   /** The run's status row: its version, status and attributes. */
-  const row = async (runId: string) => {
-    const raw = await dbosClient(databaseUrl);
-    try {
-      return await raw.getWorkflow(runId);
-    } finally {
-      await raw.destroy();
-    }
-  };
+  const row = (runId: string) => raw.getWorkflow(runId);
   const open = async (id: string) => client.openChange({ id, title: `Change ${id}` }, { startedBy: "alice" });
 
   it("keeps the change code apart from the company's workflows", () => {

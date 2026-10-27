@@ -4,7 +4,7 @@ import { buildCtx, decideStart, isInfrastructureError, startHoldOf } from "./cal
 import { dbosStatusesOf } from "./client.ts";
 import { declaredWakeup, type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { storedSecrets, watchCredentials } from "./credentials.ts";
-import { type Db, DBOS_DATABASE_OPTIONS, lazyPool, prepareDatabase } from "./db.ts";
+import { type Db, DBOS_DATABASE_OPTIONS, lazyPool, prepareDatabase, stampVersion } from "./db.ts";
 import { deadlineRegistry, type Deadlines, idle, onOwnQueue, type SelfStop, stopWhenIdle } from "./deadlines.ts";
 import type { WorkflowDefinition } from "./define.ts";
 import { credentialsOf, unconfigured, unconfiguredSummary } from "./env.ts";
@@ -291,24 +291,13 @@ function outlineOf(wf: WorkflowDefinition<any, any>): WorkflowOutline {
 }
 
 /**
- * Takes over the change runs another version of the app left unfinished whose change code is this
- * worker's (`changeCode`, which `SanomaClient.start` records on each), when this worker is the
- * latest version: a change's own deploy restarts the worker on the merged code, a new version,
- * which DBOS would never give the run to. Each keeps its id, its history and its unread messages
- * (an approval decided, an event told while no worker ran): a PENDING one is queued again on
- * DBOS's internal queue (`resumeWorkflows`), then each queued one is stamped with this version,
- * the one column the runtime writes in DBOS's own table, so the queue gives it to this worker,
- * which replays it. A run stopped between the two is still queued on its old version, so the next
- * start takes it. DBOS's `rewindWorkflow` would keep the id too, but only of a run cancelled
- * first, and it deletes the unread messages.
- *
- * A PENDING run is taken as DBOS's own recovery takes one, only from this worker's executor id: a
- * run another executor holds is that executor's to finish. An older worker of the same id still
- * running it (a rolling deploy) goes on until it stops, and both may run it meanwhile, as with
- * DBOS's recovery. Runs of the company's workflows, the change's own `apply` and `drift` children
- * among them, stay on their version (`warnAboutStrandedRuns`): a change awaits a child by its id,
- * so a child its deploy interrupted waits for its own version's worker, and the change with it.
- * A failure here is warned about, and the worker starts without carrying.
+ * Takes over the unfinished change runs of other versions whose change code is this worker's,
+ * keeping each run's id, history and unread messages: a change's own deploy restarts the worker on
+ * the merged code, a new version, which DBOS would never give the run to. A PENDING one is queued
+ * again (`resumeWorkflows`), only from this worker's executor id as DBOS's own recovery takes one,
+ * then every queued one is stamped with this version (`stampVersion`); one stopped between the two
+ * is still queued on its old version, for the next start. Not `rewindWorkflow`, which takes only a
+ * cancelled run and deletes its unread messages. A failure is warned about, and the worker starts.
  */
 async function carryChangeRuns({ appName, version, changeCode }: ResolvedConfig, db: () => Promise<Db>) {
   try {
@@ -330,21 +319,12 @@ async function carryChangeRuns({ appName, version, changeCode }: ResolvedConfig,
     if (!runs.length) return;
     const pending = runs.filter((r) => r.status === "PENDING").map((r) => r.workflowID);
     if (pending.length) await DBOS.resumeWorkflows(pending);
-    // DBOS's system tables are in its schema, `dbos` (dbos-sdk 5.2.11). Still queued, so no worker has
-    // dequeued it meanwhile: one that has runs it on its own version.
-    const { rows } = await (
-      await db()
-    ).query<{ workflow_uuid: string }>(
-      `UPDATE dbos.workflow_status SET application_version = $1
-       WHERE workflow_uuid = ANY($2) AND status = 'ENQUEUED' AND application_version <> $1
-       RETURNING workflow_uuid`,
-      [version, runs.map((r) => r.workflowID)],
+    const carried = await stampVersion(
+      await db(),
+      runs.map((r) => r.workflowID),
+      version,
     );
-    if (rows.length) {
-      info(
-        `carried ${rows.length} change run(s) onto version ${version}: ${rows.map((r) => r.workflow_uuid).join(", ")}`,
-      );
-    }
+    if (carried.length) info(`carried ${carried.length} change run(s) onto version ${version}: ${carried.join(", ")}`);
   } catch (err) {
     warn(`carrying the change runs of other versions onto ${version} failed, so they stay there: ${errorMessage(err)}`);
   }

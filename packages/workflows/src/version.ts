@@ -1,8 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, extname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import { jsonSchemaOf, opIdsOf, type WorkflowDefinition } from "./define.ts";
 import { upFrom } from "./paths.ts";
 
@@ -69,26 +68,14 @@ export function computeVersion({
 }
 
 /**
- * A hash of the built-in `change` workflow's own code, which each change run carries (the
- * `changeCode` attribute) so that a worker on another version of the app may take it over
- * (`carryChangeRuns` in worker.ts): what `computeVersion` hashes of that one workflow, with the
- * text of its file and of its steps' (`change-steps`), `RUNTIME_VERSION`, `STEP_LAYOUT` and the
- * installed DBOS version. Never the company's workflows nor `DBOS__APPVERSION`: a merge that
- * changes only the company's code leaves it as it is.
+ * A hash of the built-in `change` workflow's own code, which each change run carries (its
+ * `changeCode` attribute) so a worker on another version of the app may take it over
+ * (`carryChangeRuns` in worker.ts): what `computeVersion` hashes of that one workflow, with
+ * `RUNTIME_VERSION`, `STEP_LAYOUT` and the installed DBOS version. Never the company's workflows
+ * nor `DBOS__APPVERSION`, so a merge that changes only the company's code leaves it as it is.
  */
 export function changeCodeOf(change: WorkflowDefinition<any, any>): string {
-  // The steps' module sits beside this one, both `.ts` in the source and `.js` once built.
-  const steps = fileURLToPath(new URL(`./change-steps${extname(import.meta.url)}`, import.meta.url));
-  const files = [change.file, steps].map(sourceOf);
-  return sha256([RUNTIME_VERSION, STEP_LAYOUT, installedDbosVersion(), codeOf(change), ...files]);
-}
-
-/** Each runtime file's text, read once: the installed package does not change under a process. */
-const sources = new Map<string, string>();
-function sourceOf(file: string): string {
-  let text = sources.get(file);
-  if (text === undefined) sources.set(file, (text = readFileSync(file, "utf8")));
-  return text;
+  return sha256([RUNTIME_VERSION, STEP_LAYOUT, installedDbosVersion(), codeOf(change)]);
 }
 
 const sha256 = (parts: unknown[]) => createHash("sha256").update(JSON.stringify(parts)).digest("hex");

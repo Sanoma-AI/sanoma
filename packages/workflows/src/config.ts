@@ -131,10 +131,7 @@ export interface ResolvedConfig {
   databaseUrl: string;
   /** The DBOS application version: `<appName>@<DBOS__APPVERSION, or a hash of the workflows>`. */
   version: string;
-  /**
-   * A hash of the built-in change workflow's own code (`changeCodeOf`), which each change run
-   * carries: a worker takes over the pending change runs of another version that carry its own.
-   */
+  /** The hash of the built-in change workflow's own code (`changeCodeOf`), which each change run carries. */
   changeCode: string;
   /** The DBOS queue runs are started on: `sanoma:<appName>`. */
   queueName: string;

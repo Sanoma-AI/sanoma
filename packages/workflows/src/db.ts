@@ -102,6 +102,22 @@ export function openPool(databaseUrl: string, what: string): Pool {
 export const DBOS_DATABASE_OPTIONS = { systemDatabaseIdleTransactionTimeoutMs: 0 } as const;
 
 /**
+ * Stamps the runs `ids` still queued with the application version `version`, so DBOS's queue gives
+ * them to a worker of that version; the ids it stamped. DBOS has no call for it (a run's version is
+ * set at its start, `forkWorkflow` makes a new id, `rewindWorkflow` takes only an ended run), so this
+ * is the runtime's one write to DBOS's own tables, in its schema `dbos` (dbos-sdk 5.2.11). A run no
+ * longer queued has been taken by a worker, which runs it on its own version: it is left.
+ */
+export async function stampVersion(db: Db, ids: readonly string[], version: string): Promise<string[]> {
+  const { rows } = await db.query<{ workflow_uuid: string }>(
+    `UPDATE dbos.workflow_status SET application_version = $1
+     WHERE workflow_uuid = ANY($2) AND status = 'ENQUEUED' RETURNING workflow_uuid`,
+    [version, ids],
+  );
+  return rows.map((r) => r.workflow_uuid);
+}
+
+/**
  * A DBOS client of the app `applicationName` on the database at `databaseUrl`, as every client of
  * the runtime, its tests and `@sanoma-ai/testing` make one (`DBOS_DATABASE_OPTIONS`).
  */
