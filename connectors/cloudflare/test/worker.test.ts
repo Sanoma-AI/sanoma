@@ -21,7 +21,7 @@ const TOKEN = "swi_the-company-token";
 const ENV = {
   SANOMA_INSTANCE: { not: "a string" },
   SANOMA_REVISION: "r2",
-  SANOMA_IMAGE: "registry.cloudflare.com/0123456789abcdef0123456789abcdef/sanoma-ai-runtime:0.7.0",
+  SANOMA_IMAGE: "ghcr.io/sanoma-ai/runtime:0.7.0",
   SANOMA_SOURCE: "https://github.com/acme/company.git",
   PORT: "3000",
   SANOMA_WAKEUP_TOKEN: TOKEN,
@@ -122,7 +122,7 @@ describe("the Worker's object", () => {
     expect(options).toEqual({
       env: {
         SANOMA_REVISION: "r2",
-        SANOMA_IMAGE: "registry.cloudflare.com/0123456789abcdef0123456789abcdef/sanoma-ai-runtime:0.7.0",
+        SANOMA_IMAGE: "ghcr.io/sanoma-ai/runtime:0.7.0",
         SANOMA_SOURCE: "https://github.com/acme/company.git",
         PORT: "3000",
         SANOMA_WAKEUP_TOKEN: TOKEN,

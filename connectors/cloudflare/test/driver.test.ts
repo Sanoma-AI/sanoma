@@ -217,7 +217,7 @@ describe.skipIf(live)("cloudflareDriver", () => {
         ...rest,
       ]);
       const made = await op("container.create", { desired: { ...desired, image: "ghcr.io/sanoma-ai/runtime:0.7.0" } });
-      expect(made).toEqual({ id: "company", state });
+      expect(made).toEqual({ id: "company", state: { ...state, image: "ghcr.io/sanoma-ai/runtime:0.7.0" } });
       const credentials = sent.find((r) => r.path.endsWith("/credentials"))!;
       expect(credentials.body).toEqual({ permissions: ["push", "pull"], expiration_minutes: 60 });
       expect(
@@ -230,10 +230,15 @@ describe.skipIf(live)("cloudflareDriver", () => {
       });
     });
 
-    it("plans nothing for a ghcr.io image whose copy the application runs", async () => {
+    it("plans nothing for a ghcr.io image the Worker names, whose copy the application runs", async () => {
+      // The Worker's `SANOMA_IMAGE` binding holds the declared image; the application its copy.
       play(
         "plan-the-copy",
-        only("update-to-a-new-image", (_, i) => i < 3),
+        only("update-to-a-new-image", (_, i) => i < 3).map((exchange) =>
+          JSON.parse(
+            JSON.stringify(exchange).replaceAll(`"text":"${RUNS}:0.7.0"`, '"text":"ghcr.io/sanoma-ai/runtime:0.7.0"'),
+          ),
+        ),
       );
       const planned = await op("container.plan", {
         id: "company",

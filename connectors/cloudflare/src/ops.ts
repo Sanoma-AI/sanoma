@@ -193,7 +193,8 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
     const state: ContainerState = {
       id: app?.id ?? null,
       name,
-      image: app?.image ?? "",
+      // The declared image is the Worker's binding; the application runs its copy (`accountImage`).
+      image: text.get(TEXT.image) ?? app?.image ?? "",
       source: text.get(TEXT.source) ?? "",
       ref: text.get(TEXT.ref) ?? "",
       revision: text.get(TEXT.revision) ?? null,
@@ -218,11 +219,7 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
     const unknown = [...container.fields.vendorOwned];
     // A create plans without the account: it needs no credentials yet.
     if (!found) return { action: "create", planned: declared, unknown, replace: [] };
-    // The application runs the image's copy in the account's registry: that is what a read shows.
-    const planned: Record<string, unknown> = {
-      ...declared,
-      image: accountImage(declared.image as string, api().account),
-    };
+    const planned: Record<string, unknown> = declared;
     const { state } = found;
     if (planned.name !== state.name) return { action: "replace", planned, unknown, replace: ["name"] };
     const changed =
@@ -280,7 +277,7 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
       [TEXT.source]: source,
       [TEXT.ref]: ref,
       [TEXT.revision]: revision,
-      [TEXT.image]: runs,
+      [TEXT.image]: image,
       [TEXT.port]: String(port),
       [TEXT.url]: url,
       ...(served && { [TEXT.domains]: served }),
@@ -314,7 +311,7 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
     const state: ContainerState = {
       id: app.id,
       name,
-      image: runs,
+      image,
       source,
       ref,
       revision,
