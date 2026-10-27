@@ -26,14 +26,7 @@ import { type GoLiveProgress, INFRA } from "../src/api.ts";
 import type { AppContext } from "../src/context.ts";
 import { loopbackLogin } from "../src/loopback.ts";
 import { admitting } from "../src/login/admission.ts";
-import {
-  goLive,
-  goLiveChoices,
-  goLiveHost,
-  goLiveProgress,
-  renderInfra,
-  sourceKeyPair,
-} from "../src/server/go-live.ts";
+import { goLive, goLiveChoices, goLiveHost, goLiveProgress, renderInfra } from "../src/server/go-live.ts";
 import { setSetupToken } from "../src/server/setup.ts";
 
 // Going live end to end, on fakes, from a company with nothing but a first commit: the choices
@@ -190,10 +183,8 @@ const settled = () =>
     60_000,
   );
 
-/** A deploy key for `renderInfra`, as going live makes one. */
-const KEY = await sourceKeyPair();
-/** The deploy key `infra.ts` declares. */
-const deployKeyOf = (text: string) => /\n {2}key: "(ssh-rsa [A-Za-z0-9+/=]+)",\n/.exec(text)?.[1];
+/** A deploy key's public half, as `renderInfra` takes it. */
+const DEPLOY_KEY = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC0deploykey";
 
 /** Approves the run's pending approval as the lead, then waits for the run to end. */
 async function approveRun(progress: GoLiveProgress) {
@@ -228,14 +219,14 @@ describe("going live", () => {
     });
     expect(await goLiveProgress(ctx)).toEqual({
       infra: null,
-      bound: { repo: false, store: false, host: false },
+      bound: { repo: false, deployKey: false, store: false, host: false },
       run: null,
       host: null,
     });
   });
 
   it("writes infra.ts as a data file the config reads: the repository, the database, and a host running them", async () => {
-    const text = await renderInfra(ctx, choices(), KEY.publicKey);
+    const text = await renderInfra(ctx, choices(), DEPLOY_KEY);
     expect(text).toBe(
       [
         `import { github } from "@sanoma-ai/connector-github/resources";`,
@@ -251,7 +242,7 @@ describe("going live", () => {
         `export const deployKey = github.repository_deploy_key({`,
         `  repository: repo,`,
         `  title: "Sanoma host",`,
-        `  key: "${KEY.publicKey}",`,
+        `  key: "${DEPLOY_KEY}",`,
         `  read_only: true,`,
         `});`,
         ``,
@@ -299,7 +290,7 @@ describe("going live", () => {
   it("declares sanoma.wakeup after the host once a wakeup service is connected, the host given the instance's token", async () => {
     await setSetupToken(ctx, alice, { name: "SANOMA_WAKEUP_ACCOUNT_TOKEN", value: wakeup.account });
     await setSetupToken(ctx, alice, { name: "SANOMA_WAKEUP_URL", value: wakeup.url });
-    const text = await renderInfra(ctx, choices(), KEY.publicKey);
+    const text = await renderInfra(ctx, choices(), DEPLOY_KEY);
     expect(text).toContain(`import { sanoma, secret } from "sanoma/resources";`);
     // The worker on the host registers with the instance's token, at the service's URL.
     expect(text).toContain(
@@ -334,10 +325,7 @@ describe("going live", () => {
     await goLive(ctx, alice, choices());
     const sourceKey = (await app.client.secrets(["SANOMA_SOURCE_KEY"])).get("SANOMA_SOURCE_KEY")!.value;
     expect(sourceKey).toMatch(/^-----BEGIN RSA PRIVATE KEY-----\n/);
-    // A key of its own, its public half declared.
-    const declared = deployKeyOf(readFileSync(join(root, INFRA), "utf8"));
-    expect(declared).toMatch(/^ssh-rsa /);
-    expect(declared).not.toBe(KEY.publicKey);
+    expect(readFileSync(join(root, INFRA), "utf8")).toMatch(/\n {2}key: "ssh-rsa [A-Za-z0-9+/]+=*",\n/);
     expect(git("log", "-1", "--format=%an|%s", "--", INFRA)).toBe(
       "alice via Sanoma|Go live: declare the repository, its deploy key, the database and the host",
     );
@@ -359,7 +347,7 @@ describe("going live", () => {
       { id: `${INFRA}#deployKey`, status: "done" },
       { id: `${INFRA}#store`, status: "done" },
     ]);
-    expect(progress.bound).toEqual({ repo: true, store: true, host: false });
+    expect(progress.bound).toEqual({ repo: true, deployKey: true, store: true, host: false });
     // The project's afterCreate stored its database URL, through its session pooler.
     const url = (await app.client.secrets(["SANOMA_DATABASE_URL_STORE"])).get("SANOMA_DATABASE_URL_STORE")?.value;
     expect(url).toMatch(/^postgresql:\/\/postgres\.[\w-]+:.+@aws-0-eu-west-1\.pooler\.supabase\.com:5432\/postgres/);

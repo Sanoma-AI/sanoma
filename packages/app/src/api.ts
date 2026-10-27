@@ -346,7 +346,7 @@ export interface GoLiveRun {
 export interface GoLiveProgress {
   /** `resources/sanoma/infra.ts`, once written. */
   infra: string | null;
-  bound: { repo: boolean; store: boolean; host: boolean };
+  bound: { repo: boolean; deployKey: boolean; store: boolean; host: boolean };
   /** The latest apply run. */
   run: GoLiveRun | null;
   /** Where the host answers, from the last apply that made or changed it, and whether `/healthz` answers. */

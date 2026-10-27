@@ -1,6 +1,6 @@
 // oxlint-disable-next-line import/no-unassigned-import
 import "@tanstack/react-start/server-only";
-import { createPublicKey, generateKeyPair } from "node:crypto";
+import { generateKeyPair } from "node:crypto";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { findPackageJSON } from "node:module";
 import { dirname, join } from "node:path";
@@ -50,6 +50,8 @@ const KEYS = {
   host: `${INFRA}#host`,
   wakeup: `${INFRA}#wakeup`,
 } as const;
+/** What the first apply makes (step 3), and what must be bound before the host's. */
+const BEFORE_HOST = [KEYS.repo, KEYS.deployKey, KEYS.store];
 
 /** The repository type going live declares. */
 const REPOSITORY = "github.repository";
@@ -73,11 +75,7 @@ const PUBLISHED_IMAGE = "ghcr.io/sanoma-ai/runtime";
 /** The secret the database's URL is stored in: its `storeUrl` for the export `store`. */
 const DATABASE_URL = databaseUrlSecret("store");
 const SECRETS_KEY = "SANOMA_SECRETS_KEY";
-/**
- * The private half of the repository's read-only deploy key, which the host clones the private
- * repository with at every start (the runtime image's entrypoint): stored, given to the host
- * among its secrets, never in a data file. Its public half is the `deployKey` going live declares.
- */
+/** The private half of the `deployKey` going live declares: stored, and given to the host (see `goLive`). */
 const SOURCE_KEY = "SANOMA_SOURCE_KEY";
 
 /**
@@ -211,8 +209,8 @@ function sshMpint(value: string) {
  * and `n`.
  */
 export async function sourceKeyPair(): Promise<{ privateKey: string; publicKey: string }> {
-  const { privateKey } = await promisify(generateKeyPair)("rsa", { modulusLength: 3072 });
-  const { e, n } = createPublicKey(privateKey).export({ format: "jwk" });
+  const { privateKey, publicKey } = await promisify(generateKeyPair)("rsa", { modulusLength: 3072 });
+  const { e, n } = publicKey.export({ format: "jwk" });
   const wire = Buffer.concat([sshString(Buffer.from("ssh-rsa")), sshMpint(e!), sshMpint(n!)]);
   return {
     privateKey: privateKey.export({ type: "pkcs1", format: "pem" }).toString(),
@@ -497,7 +495,7 @@ export async function goLive(app: AppContext, actor: Principal, choices: GoLiveR
     author: actor.id,
   });
   await client.setSecret("GITHUB_OWNER", choices.owner, { by: actor.id });
-  const runId = await client.apply({ only: [KEYS.repo, KEYS.deployKey, KEYS.store] }, { startedBy: actor });
+  const runId = await client.apply({ only: BEFORE_HOST }, { startedBy: actor });
   return { runId };
 }
 
@@ -529,7 +527,7 @@ async function pushToken(app: AppContext, repo: RepoRef): Promise<string> {
 export async function goLiveHost(app: AppContext, actor: Principal): Promise<{ runId: string }> {
   const { client, resolved, source } = app;
   const { bindings } = readLockfile(resolved.root!);
-  if (!bindings[KEYS.repo] || !bindings[KEYS.deployKey] || !bindings[KEYS.store]) {
+  if (BEFORE_HOST.some((key) => !bindings[key])) {
     throw new ApiError(409, { error: "Apply the repository, its deploy key and the database first" });
   }
   if (!source?.push) throw new ApiError(409, { error: "The app has no repository to push from" });
@@ -602,7 +600,12 @@ export async function goLiveProgress(app: AppContext): Promise<GoLiveProgress> {
   const root = app.resolved.root;
   const infra = root === undefined ? null : await readFile(join(root, INFRA), "utf8").catch(() => null);
   const bindings = root === undefined ? {} : readLockfile(root).bindings;
-  const bound = { repo: !!bindings[KEYS.repo], store: !!bindings[KEYS.store], host: !!bindings[KEYS.host] };
+  const bound = {
+    repo: !!bindings[KEYS.repo],
+    deployKey: !!bindings[KEYS.deployKey],
+    store: !!bindings[KEYS.store],
+    host: !!bindings[KEYS.host],
+  };
   const run = await latestRun(app);
   return { infra, bound, run, host: bound.host && run && isEnded(run.status) ? await hostAnswer(app) : null };
 }

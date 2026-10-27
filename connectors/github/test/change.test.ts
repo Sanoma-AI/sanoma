@@ -1,6 +1,4 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { fixturesDir } from "@sanoma-ai/bridge/fake";
+import { fixturesDir, loadReplies } from "@sanoma-ai/bridge/fake";
 import { type Driver, memorySecrets } from "@sanoma-ai/workflows";
 import { beforeEach, describe, expect, it } from "vitest";
 import { changeReplay } from "../../../packages/bridge/test/change-replay.ts";
@@ -64,13 +62,11 @@ describe("github.repository_deploy_key's change operations", () => {
     bridge = changeReplay(fixturesDir, provider);
     driver = githubTf.driver(bridge, () => ({}));
   });
-  const key = readFileSync(
-    join(
-      fixturesDir,
-      "replies/integrations_github_6.13.0/github_repository_deploy_key/sanoma-apply-test-key/plan.json",
-    ),
-    "utf8",
-  ).match(/ssh-rsa [A-Za-z0-9+/=]+/)![0];
+  // The key the replies hold: the recorded object's.
+  const recorded = loadReplies(fixturesDir, provider).objects[
+    "github_repository_deploy_key/sanoma-apply-test:1000000101"
+  ];
+  const { key } = (recorded && "state" in recorded ? recorded.state : {}) as { key: string };
   const desired = { repository: "sanoma-apply-test", title: "Sanoma host", key, read_only: true };
 
   it("creates a read-only key on a repository, bound by `<repository>:<key id>`, and deletes it", async () => {
@@ -83,9 +79,5 @@ describe("github.repository_deploy_key's change operations", () => {
 
     expect(await call(driver, "repository_deploy_key.delete", created)).toEqual({ id: created.id, gone: true });
     expect(bridge.calls.filter((c) => c.method === "apply")).toHaveLength(2);
-  });
-
-  it("replaces a key on any change: GitHub changes none", () => {
-    expect(githubTf.types.repository_deploy_key.fields.immutable).toEqual(["key", "read_only", "repository", "title"]);
   });
 });

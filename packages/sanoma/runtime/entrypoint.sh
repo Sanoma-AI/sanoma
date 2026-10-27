@@ -16,8 +16,6 @@ dir="${SANOMA_WORKDIR:-$HOME/company}"
 # over HTTPS), else the image's copy of it. SANOMA_SOURCE_TOKEN, a token, goes in a header
 # instead. Either is for these commands only, never in .git/config, whose origin stays
 # SANOMA_SOURCE; the key's file is gone before the company starts.
-ssh=""
-auth=""
 if [ -n "${SANOMA_SOURCE_KEY:-}" ]; then
   case "$SANOMA_SOURCE" in
     https://github.com/*) ;;
@@ -34,18 +32,13 @@ if [ -n "${SANOMA_SOURCE_KEY:-}" ]; then
     cp /usr/local/share/sanoma/github_known_hosts "$keys/known_hosts"
   fi
   ssh="ssh -F /dev/null -i $keys/key -o IdentitiesOnly=yes -o UserKnownHostsFile=$keys/known_hosts -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=yes"
+  git_() { git -c "url.ssh://git@ssh.github.com:443/.insteadOf=https://github.com/" -c "core.sshCommand=$ssh" -C "$dir" "$@"; }
 elif [ -n "${SANOMA_SOURCE_TOKEN:-}" ]; then
   auth="http.extraHeader=Authorization: Basic $(printf 'x-access-token:%s' "$SANOMA_SOURCE_TOKEN" | base64 | tr -d '\n')"
+  git_() { git -c "$auth" -C "$dir" "$@"; }
+else
+  git_() { git -C "$dir" "$@"; }
 fi
-git_() {
-  if [ -n "$ssh" ]; then
-    git -c "url.ssh://git@ssh.github.com:443/.insteadOf=https://github.com/" -c "core.sshCommand=$ssh" -C "$dir" "$@"
-  elif [ -n "$auth" ]; then
-    git -c "$auth" -C "$dir" "$@"
-  else
-    git -C "$dir" "$@"
-  fi
-}
 
 rm -rf "$dir"
 git init -q "$dir"
@@ -54,7 +47,7 @@ git -C "$dir" remote add origin "$SANOMA_SOURCE"
 git_ fetch -q --depth 1 origin "$SANOMA_REVISION" || git_ fetch -q --tags origin
 git -C "$dir" checkout -q --detach "$SANOMA_REVISION"
 # `exec` runs no EXIT trap.
-if [ -n "$ssh" ]; then rm -rf "$keys"; fi
+rm -rf "${keys:-}"
 
 cd "$dir"
 pnpm install --frozen-lockfile

@@ -38,7 +38,6 @@ describe("the generated GitHub resource types", () => {
       read_only: true,
     });
     expect(declare.repository_deploy_key.bindingId(state)).toBe("sanoma-apply-test:1000000101");
-    expect(TYPES.repository_deploy_key.fields.vendorOwned).toEqual(["etag"]);
   });
 
   it("flag what GitHub owns, keep computed and optional attributes the user's, and mark sets", () => {

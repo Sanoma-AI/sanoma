@@ -72,7 +72,7 @@ function GoLivePage() {
     connected: v.tokens.every(isSet),
   }));
   const { run, bound } = progress;
-  const data = bound.repo && bound.store;
+  const data = bound.repo && bound.deployKey && bound.store;
   // The latest run is the host's once it is past the repository and database, or still going.
   const hostRun = run && data && (!isEnded(run.status) || run.results?.some((r) => r.id === `${INFRA}#host`));
   return (
@@ -126,7 +126,7 @@ function GoLivePage() {
       </Region>
       <Region title="3. Create the repository and the database">
         {data ? (
-          <p>The repository and the database are made, and bound in the lockfile.</p>
+          <p>The repository, its deploy key and the database are made, and bound in the lockfile.</p>
         ) : run && progress.infra !== null ? (
           <>
             <RunStatus run={run} />

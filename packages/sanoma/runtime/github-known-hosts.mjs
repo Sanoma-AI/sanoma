@@ -5,7 +5,8 @@
 // a start trusts when the API cannot answer.
 const res = await fetch("https://api.github.com/meta", {
   headers: { accept: "application/vnd.github+json", "user-agent": "sanoma-runtime" },
-  signal: AbortSignal.timeout(10_000),
+  // Short: the image has a copy to fall back on.
+  signal: AbortSignal.timeout(3_000),
 });
 if (!res.ok) throw new Error(`api.github.com answered ${res.status} to /meta`);
 const { ssh_keys: keys } = await res.json();
