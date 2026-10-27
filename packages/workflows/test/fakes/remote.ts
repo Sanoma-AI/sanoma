@@ -67,7 +67,8 @@ export interface FakePullRequest extends PullRequest {
  *
  * Given `origin`, a bare git repository (`url` its clone URL, as `localGitSource` pushes to and
  * follows it), the host's branches are that repository's, read each time the host is asked, and a
- * merge is a real squash: one commit on its `main` with the pull request's tree, titled as asked.
+ * merge is a real squash: one commit on its `main` with the pull request's tree, titled as asked
+ * (`not_mergeable` when the two conflict). It needs git 2.38 or later (`merge-tree --write-tree`).
  */
 export function fakeRemote({
   url = "https://git.example/acme/company.git",
@@ -112,7 +113,13 @@ export function fakeRemote({
     let merged = sha(`merge ${pr.number} ${pr.head}`);
     if (origin !== undefined) {
       // A squash: the tree main and the branch make together, as one commit on main.
-      const tree = git("merge-tree", "--write-tree", "main", pr.head).split("\n")[0]!;
+      let tree: string;
+      try {
+        tree = git("merge-tree", "--write-tree", "main", pr.head).split("\n")[0]!;
+      } catch {
+        // As a host refuses a pull request that conflicts with its base.
+        throw new DriverError("the branch conflicts with main", { retryable: false, vendorCode: "not_mergeable" });
+      }
       merged = git("commit-tree", tree, "-p", "main", "-m", title);
       git("update-ref", "refs/heads/main", merged);
     }
@@ -166,8 +173,9 @@ export function fakeRemote({
       if (pr.state !== "open" || view(pr).head !== at) {
         throw new DriverError("the branch moved", { retryable: false, vendorCode: "head_moved", status: 409 });
       }
+      const merged = mergeNow(pr, title);
       merges.push({ number, sha: at, method, ...(title !== undefined && { title }) });
-      return { sha: mergeNow(pr, title) };
+      return { sha: merged };
     },
     async closePullRequest(number) {
       pull(number).state = "closed";
@@ -218,8 +226,9 @@ export function fakeRemote({
     failMerge(code: "head_moved" | "not_mergeable") {
       failures.push(code);
     },
-    /** Someone pushes `head` to `branch` on the host. */
+    /** Someone pushes `head` to `branch` on the host (with `origin`, a commit that repository holds). */
     push(branch: string, head: string) {
+      if (origin !== undefined) git("update-ref", `refs/heads/${branch}`, head);
       branches.set(branch, head);
     },
     /** Someone closes the pull request on the host. */

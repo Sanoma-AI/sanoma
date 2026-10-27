@@ -1,10 +1,10 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { ghost } from "@sanoma-ai/connector-ghost";
-import { ensureBuilt as ensureAppBuilt, startTestWorker, waitFor } from "@sanoma-ai/testing";
+import { startTestWorker, waitFor } from "@sanoma-ai/testing";
 import {
   defineWorkflow,
   memoryLedger,
@@ -36,7 +36,6 @@ import { PEOPLE, pageOf, renderDraftCard } from "./fixtures/change.ts";
 // publishes, the host squash-merges and the checkout follows main. Another change is rejected,
 // and closed. Needs Postgres (`pnpm db:up`) and builds the packages the fixture loads.
 
-const appDir = fileURLToPath(new URL("..", import.meta.url));
 const databaseUrl = freshDatabase("changes_e2e");
 
 /** The fixture's own workflow, as its `workflows/hello.ts` declares it, for the app's config. */
@@ -74,6 +73,8 @@ const origin = mkdtempSync(join(tmpdir(), "sanoma-origin-"));
 const remote = fakeRemote({ url: pathToFileURL(origin).href, origin });
 
 let dir = "";
+/** The git settings of the file's own user. */
+let gitConfig = "";
 const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim();
 const atOrigin = (...args: string[]) => execFileSync("git", args, { cwd: origin, encoding: "utf8" }).trim();
 let source: ReturnType<typeof localGitSource>;
@@ -84,8 +85,7 @@ let app: App;
 
 beforeAll(async () => {
   ensureBuilt();
-  ensureAppBuilt(appDir, ["dist/server/server.js"], ["pnpm", "exec", "vite", "build"]);
-  gitIdentity(vi.stubEnv);
+  gitConfig = dirname(gitIdentity(vi.stubEnv).GIT_CONFIG_GLOBAL!);
   dir = copyFixture();
   // No scenarios: each check runs sooner.
   rmSync(join(dir, "scenarios"), { recursive: true });
@@ -118,8 +118,11 @@ afterAll(async () => {
   await client?.close();
   await worker?.stop();
   vi.unstubAllEnvs();
-  for (const at of [dir, origin]) if (at) rmSync(at, { recursive: true, force: true });
+  for (const at of [dir, origin, gitConfig]) if (at) rmSync(at, { recursive: true, force: true });
 });
+
+/** How long a round may take to ask Publish: a push, `sanoma check` on the draft as a child process, the plan. */
+const ROUND_MS = 50_000;
 
 /** The pending Publish of the change run `runId`, once it asks. */
 const publishOf = async (runId: string) =>
@@ -127,6 +130,7 @@ const publishOf = async (runId: string) =>
     await waitFor(
       () => client.approvals(runId),
       (approvals) => approvals.some((a) => a.status === "pending" && a.covers.includes(CHANGE_MERGE)),
+      ROUND_MS,
     )
   ).find((a) => a.status === "pending" && a.covers.includes(CHANGE_MERGE))!;
 
@@ -231,6 +235,7 @@ describe("a change, from a chat's draft to main", () => {
       (approvals) =>
         approvals.some((a) => a.id === asked.id && a.status === "withdrawn") &&
         approvals.some((a) => a.status === "pending" && a.covers.includes(CHANGE_MERGE)),
+      ROUND_MS,
     );
     expect((await client.change("rules"))!.state.head).toBe(head);
     expect((await remote.host.pullRequestFor("draft/rules"))!.head).toBe(head);
