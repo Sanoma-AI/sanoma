@@ -37,7 +37,7 @@ import { siteOf } from "#/lib/locales.ts";
 import { hasOneUrl } from "#/site-path.ts";
 import { useSites } from "#/lib/sites.ts";
 import { utcText } from "#/lib/time.ts";
-import { cn } from "#/lib/utils.ts";
+import { cn, plural } from "#/lib/utils.ts";
 import { APPROVAL_TONE, DECISION_TONE, type Tone } from "#/lib/tone.ts";
 import type { OpEntry } from "@sanoma-ai/workflows/describe";
 import { approverLabel } from "@sanoma-ai/workflows/shared";
@@ -702,7 +702,7 @@ export function DecisionNote({ note }: { note: string }) {
   return <q className="block text-muted-foreground italic">{note}</q>;
 }
 
-export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+export { plural };
 
 /** What is wrong in the data files: their resources are left out until it is fixed. */
 export function Problems({ problems }: { problems: ResourceProblem[] }) {
