@@ -90,6 +90,7 @@ export function releaseCheck(
   changed: (pkg: Manifest) => string[],
 ): { problems: string[]; publish: string[] } {
   const problems: string[] = [];
+  const publish: string[] = [];
   /** The version each package will be released at: its own when new; a patch above when it needs one. */
   const next = new Map<string, string>();
   for (const pkg of packages) {
@@ -100,6 +101,7 @@ export function releaseCheck(
       );
     }
     if (typeof has === "string") {
+      publish.push(`${pkg.name}@${pkg.version}`);
       next.set(pkg.name, pkg.version);
       continue;
     }
@@ -129,8 +131,7 @@ export function releaseCheck(
       more = true;
     }
   }
-  const publish = packages.filter((pkg) => typeof npm.get(pkg.name) === "string");
-  return { problems, publish: publish.map((pkg) => `${pkg.name}@${pkg.version}`) };
+  return { problems, publish };
 }
 
 if (import.meta.main) {
@@ -138,7 +139,7 @@ if (import.meta.main) {
     (pkg) => !pkg.private,
   );
   const npm = new Map(packages.map((pkg) => [pkg.name, onNpm(pkg)]));
-  const { problems, publish } = releaseCheck(packages, npm, (pkg) => changedSince(pkg));
+  const { problems, publish } = releaseCheck(packages, npm, changedSince);
   for (const line of publish) console.log(line);
   for (const line of problems) console.error(process.env.GITHUB_ACTIONS ? `::error::${line}` : line);
   process.exitCode = problems.length ? 1 : 0;

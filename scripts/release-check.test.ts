@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { gitIdentity } from "../packages/sanoma/test/git.ts";
 import { changedSince, type Manifest, type OnNpm, releaseCheck } from "./release-check.ts";
 
 /** A package.json for the fixture's package `a`, its `version` line followed by more, as in the workspace. */
@@ -14,11 +15,9 @@ const npm = (entries: [string, OnNpm][]) => new Map(entries);
 describe("changedSince", () => {
   let root: string;
   let pkg: Manifest;
+  const identity = gitIdentity();
   const git = (...args: string[]) =>
-    execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.com", ...args], {
-      cwd: root,
-      encoding: "utf8",
-    }).trim();
+    execFileSync("git", args, { cwd: root, env: { ...process.env, ...identity }, encoding: "utf8" }).trim();
   const commit = (files: Record<string, string>) => {
     for (const [path, text] of Object.entries(files)) {
       mkdirSync(dirname(join(root, path)), { recursive: true });
@@ -30,7 +29,7 @@ describe("changedSince", () => {
   };
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), "release-check-"));
-    git("init", "-q");
+    git("init", "-q", "--initial-branch=main");
     pkg = { name: "a", version: "0.1.0", path: join(root, "packages/a") };
     commit({ "packages/a/package.json": manifest("0.1.0"), "packages/a/src/index.ts": "1" });
   });

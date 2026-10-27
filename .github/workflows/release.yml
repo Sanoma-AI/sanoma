@@ -1,8 +1,7 @@
 name: Release
-# Run by hand on release/<version>, a branch pushed at the bump's merge commit on main (README "Release"),
-# never on main itself: it publishes every public package whose version is not yet on npm, then pushes the
-# runtime image for the sanoma version when Docker Hub does not have it yet. A rerun after a partial failure
-# takes the same branch, so one release comes from one commit; the branch is deleted after.
+# Run by hand on release/<version>, a branch at the bump's merge commit, never on main (README "Release"):
+# it publishes every public package whose version is not yet on npm, then pushes the runtime image for the
+# sanoma version when Docker Hub does not have it yet.
 on:
   workflow_dispatch:
 
@@ -45,22 +44,14 @@ jobs:
         with:
           cache: false
       - run: pnpm install --frozen-lockfile
-      # Every public package is on npm (a new one is published by hand first), each left at its public
-      # version still matches its source and takes the new versions it depends on. The check prints the
-      # versions this run will publish.
+      # The script's header says what it refuses; it prints the versions this run will publish.
       - name: Release check
         run: |
-          node scripts/release-check.ts > "$RUNNER_TEMP/to-publish.txt"
           {
             echo "## To publish"
-            echo
-            if [ -s "$RUNNER_TEMP/to-publish.txt" ]; then
-              echo '```'
-              cat "$RUNNER_TEMP/to-publish.txt"
-              echo '```'
-            else
-              echo "Nothing: every version is already public."
-            fi
+            echo '```'
+            node scripts/release-check.ts
+            echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
       # Packages already public are skipped without running prepack, so their dependents need this
       # build; the packages being published rebuild in their prepack, which keeps the hand path safe.
@@ -68,23 +59,7 @@ jobs:
       # --no-git-checks: the first step checks the commit instead. The prepack of each
       # @sanoma-ai/bridge-<platform> downloads the provider-bridge release RELEASE pins, and of each
       # @sanoma-ai/postgres-<platform> zonky's jar from Maven Central (unzip and xz on the runner).
-      # --report-summary writes each published version to pnpm-publish-summary.json.
-      - run: pnpm publish -r --no-git-checks --report-summary
-      - name: Published versions
-        run: |
-          jq -r '.publishedPackages[] | "\(.name)@\(.version)"' pnpm-publish-summary.json > published.txt
-          cat published.txt
-          if [ ! -s published.txt ]; then
-            echo "Nothing published: every version is already public." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          {
-            echo "## Published versions"
-            echo
-            echo '```'
-            cat published.txt
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+      - run: pnpm publish -r --no-git-checks
 
   runtime-image:
     needs: publish
