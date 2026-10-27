@@ -137,6 +137,13 @@ const RESERVED_GROUPS: ReadonlyMap<string, string> = new Map([
 ]);
 
 /**
+ * A person, agent or group declared in an app's data file: refused, because the people are the
+ * company's, so neither the policy (`readPeople`) nor `describeConfig` counts it.
+ */
+export const inAppPeople = (r: DeclaredResource): boolean =>
+  r.vendor === "sanoma" && Object.hasOwn(sanoma, r.type) && r.file.startsWith(`${APPS_DIR}/`);
+
+/**
  * The people, agents and groups the data files under `root` declare (`sanoma.person`, `.agent`,
  * `.group`), read without running them, as `principalOf` takes them, with what is wrong in their
  * files; none without a root. Read again only when a data file changed (by its size and time),
@@ -150,12 +157,10 @@ export function readPeople(root: string | undefined): DeclaredPeople {
   // With the wakeup's type, which the same constructors declare: read, and only the people's kept.
   const read = readDataFiles(root, [peopleConnector, wakeupOps], undefined, (source) => DECLARES_PEOPLE.test(source));
   const ofPeople = read.resources.filter((r) => Object.hasOwn(sanoma, r.type));
-  // The people are the company's: an app, taken from elsewhere, declares none.
-  const inApp = (r: DeclaredResource) => r.file.startsWith(`${APPS_DIR}/`);
-  const people = ofPeople.filter((r) => !inApp(r));
+  const people = ofPeople.filter((r) => !inAppPeople(r));
   // The people are never bound, so the lockfile's problems are not theirs.
   const own = read.problems.filter((p) => p.file !== LOCKFILE);
-  for (const r of ofPeople.filter(inApp)) {
+  for (const r of ofPeople.filter(inAppPeople)) {
     own.push({
       file: r.file,
       message: `${r.id} declares a ${r.type} in an app: the people are the company's, declared in resources/ at the root`,

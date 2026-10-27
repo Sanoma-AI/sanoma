@@ -71,8 +71,11 @@ describe("apps", () => {
     const other = rootWith({
       "sanoma.config.ts": "",
       "apps/crm/resources/people.ts":
-        'import { sanoma } from "sanoma/resources";\n\nexport const eve = sanoma.person({ id: "eve" });\n',
+        'import { sanoma } from "sanoma/resources";\n\nexport const eve = sanoma.person({ id: "eve" });\n' +
+        'export const sales = sanoma.group({ name: "sales", members: [eve] });\n',
     });
+    // Nor does describeConfig count them, so the Permissions grid has no column the policy lacks.
+    expect(describeConfig({ connectors: [], root: other }).resources).toEqual([]);
     expect(readPeople(other)).toEqual({
       people: [],
       problems: [
@@ -80,6 +83,11 @@ describe("apps", () => {
           file: "apps/crm/resources/people.ts",
           message:
             "apps/crm/resources/people.ts#eve declares a person in an app: the people are the company's, declared in resources/ at the root",
+        },
+        {
+          file: "apps/crm/resources/people.ts",
+          message:
+            "apps/crm/resources/people.ts#sales declares a group in an app: the people are the company's, declared in resources/ at the root",
         },
       ],
     });

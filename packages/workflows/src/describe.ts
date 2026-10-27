@@ -15,6 +15,7 @@ import {
   type DataFiles,
   type DeclaredCollection,
   type DeclaredResource,
+  inAppPeople,
   readDataFiles,
   type ResourceProblem,
 } from "./resources.ts";
@@ -349,7 +350,8 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     vendors,
     resourceTypes,
     collections,
-    resources: dataFiles.resources,
+    // An app's people are refused (`readPeople`), so the grid and the People page never show them.
+    resources: dataFiles.resources.filter((r) => !inAppPeople(r)),
     orphans: dataFiles.orphans,
     problems: [
       ...dataFiles.problems,
