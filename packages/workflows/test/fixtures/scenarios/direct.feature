@@ -1,5 +1,5 @@
 Feature: Call an operation directly
-  A sandbox run of call has the built-in drivers that read only the repository (sanoma.apps.list)
+  A sandbox run of call has the built-in drivers that need no credentials (sanoma.apps.list)
   beside its fakes: it is not refused for them, and may call them.
 
   Scenario: Apps listed directly

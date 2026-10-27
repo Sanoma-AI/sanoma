@@ -145,10 +145,11 @@ export interface ResolvedConfig {
   /** The drivers' functions, by operation id, each guarded by its driver's `env` (`indexDrivers`). */
   drivers: Map<string, DriverFn>;
   /**
-   * The built-in drivers that read only the repository (`sanoma.apps.list`), so a sandbox run
-   * has them beside its fakes: they are in `drivers` too.
+   * The built-in drivers a sandbox run calls beside its fakes, since no fake implements them: those
+   * that need no credentials and change nothing (`sanoma.apps.list`, GitHub's public search). They
+   * are in `drivers` too.
    */
-  repoDrivers: readonly Driver[];
+  sandboxDrivers: readonly Driver[];
   /**
    * The driver each vendor's connector attaches, made once for this resolution, by vendor id in
    * `connectors` order: what `drivers` indexes and the credentials are read from (`credentialsOf`).
@@ -331,13 +332,13 @@ export function resolveConfig(config: SanomaConfig, options: ResolveOptions = {}
     ? new Map([...instanceFakes].map(([vendor, fake]) => [vendor, fake.driver]))
     : new Map([...makersOf(running, "driver")].map(([vendor, make]) => [vendor, make()]));
   const remotes = new Map([...makersOf(config.connectors, "remote")].map(([vendor, make]) => [vendor, make()]));
-  // Built-in, reading only the repository: what a sandbox run has beside its fakes (sandbox.ts).
-  const repoDrivers = [appsListDriver];
+  // Built-in, needing no credentials and changing nothing: what a sandbox run calls beside its fakes (sandbox.ts).
+  const sandboxDrivers = [appsListDriver];
   const drivers = indexDrivers(
     [
       ...driversByVendor.values(),
       changeDriver(remotes),
-      ...repoDrivers,
+      ...sandboxDrivers,
       ...(hostTyped ? [sourceDriver] : []),
       ...(dataStore ? [collectionsDriver(declared, dataStore)] : []),
     ],
@@ -388,7 +389,7 @@ export function resolveConfig(config: SanomaConfig, options: ResolveOptions = {}
     queueName: `sanoma:${appName}`,
     ops,
     drivers,
-    repoDrivers,
+    sandboxDrivers,
     driversByVendor,
     fakes,
     ...(instanceFakes && { instanceFakes }),

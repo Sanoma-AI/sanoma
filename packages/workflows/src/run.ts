@@ -44,8 +44,8 @@ export interface WorkerState {
   ops: Map<string, Op>;
   /** The drivers' functions, by operation id, each guarded by its driver's `env` (`indexDrivers` in config.ts). */
   drivers: Map<string, DriverFn>;
-  /** The built-in drivers that read only the repository (`sanoma.apps.list`): a sandbox run has them beside its fakes. */
-  repoDrivers: readonly Driver[];
+  /** The built-in drivers that need no credentials and change nothing (`sanoma.apps.list`): a sandbox run calls them beside its fakes. */
+  sandboxDrivers: readonly Driver[];
   /** The makers of the config's fake vendors, by vendor id: a sandbox run makes its own of each when it is seeded. */
   fakes: Map<string, () => Fake<any, any>>;
   /** The instance's fakes, by vendor id, when it runs on them (`fakes: "instance"`): its sandbox runs seed and call these, not fakes of their own. */

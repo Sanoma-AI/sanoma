@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { http, HttpResponse } from "msw";
+import { setupServer } from "msw/node";
+import { describe, expect, it, onTestFinished } from "vitest";
 import { z } from "zod";
+import { GITHUB_API } from "../src/apps-list.ts";
 import {
   defineConnector,
   defineWorkflow,
@@ -209,14 +212,23 @@ describe("sandbox runs", () => {
     expect(types(await ledger(unknown))).toEqual(["run.started", "run.failed"]);
   });
 
-  it("runs a direct call: the built-in drivers that read only the repository are there beside the fakes", async () => {
+  it("runs a direct call: the built-in drivers no fake implements are there beside the fakes", async () => {
     // `call` uses every operation that may be called directly, `sanoma.apps.list` among them, which
-    // no connector's fake implements: the sandbox has its built-in driver instead of refusing the run.
+    // no connector's fake implements: the sandbox calls its built-in driver instead of refusing the run.
+    // That driver searches GitHub, mocked here.
+    const github = setupServer(
+      http.get(`${GITHUB_API}/search/repositories`, () =>
+        HttpResponse.json({ items: [{ full_name: "acme/crm", html_url: "https://github.com/acme/crm" }] }),
+      ),
+    );
+    github.listen();
+    onTestFinished(() => github.close());
     const direct = await scenario("Apps listed directly");
     const { run, checks, ledger: records } = await runScenario(direct, { client: c(), scope: scope() });
-    expect(records.find((r) => r.type === "run.failed")).toBeUndefined();
     expect(run).toMatchObject({ status: "finished" });
-    expect(types(records)).toContain("op.called sanoma.apps.list");
+    expect(records.find((r) => r.type === "op.called" && r.op === "sanoma.apps.list")).toMatchObject({
+      output: { apps: [{ repo: "acme/crm" }] },
+    });
     expect(checks.filter((k) => !k.ok)).toEqual([]);
     expect(live).toEqual([]);
   });
