@@ -376,8 +376,10 @@ export const ANONYMOUS_PRINCIPAL: Principal = Object.freeze({ id: ANONYMOUS, gro
 export const WAKEUP_AGENT = "wakeup";
 /** The runtime's agent a scheduled run is started by (`trigger: { schedule }`): the policy decides its starts. */
 export const SCHEDULE_AGENT = "schedule";
+/** The runtime's agent that checks and deploys the hosts: drift's, and apply's after a push to `main` (`SanomaClient.remoteEvent`). */
+export const HOST_CHECK_AGENT = "host-check";
 /** The runtime's own agents (scenarios, the host check, scheduled runs, the wakeup's registration), declared whether a data file names them or not. */
-export const RUNTIME_AGENTS: readonly string[] = ["scenarios", "host-check", SCHEDULE_AGENT, WAKEUP_AGENT];
+export const RUNTIME_AGENTS: readonly string[] = ["scenarios", HOST_CHECK_AGENT, SCHEDULE_AGENT, WAKEUP_AGENT];
 
 /** The declared resources of one of the runtime's people types, by `desired`. */
 const peopleOfType = <T>(resources: readonly PeopleResource[], type: "person" | "agent" | "group") =>

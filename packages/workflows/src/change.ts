@@ -134,10 +134,10 @@ export function reservedFor(
 }
 
 /** The branch a change merges into. */
-const BASE = "main";
+export const BASE = "main";
 
 /** The company's credentials for a host, as its remote half asks for them (`Secrets` puts the environment first). */
-const remoteContext = (secrets: Secrets): RemoteContext => ({
+export const remoteContext = (secrets: Secrets): RemoteContext => ({
   async secrets(names) {
     const found = await Promise.all(names.map(async (name) => [name, await secrets.get(name)] as const));
     return new Map(found.filter((entry): entry is readonly [string, string] => Boolean(entry[1])));

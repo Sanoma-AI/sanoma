@@ -232,6 +232,7 @@ export {
   personOf,
   principalOf,
   RUNTIME_AGENTS,
+  HOST_CHECK_AGENT,
   SCHEDULE_AGENT,
   credentialReady,
   DEFAULT_SLEEP_NAME,

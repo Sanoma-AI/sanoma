@@ -23,12 +23,14 @@ import { type ApprovalState, Principal, type WorkflowDefinition } from "./define
 import { APPLY_WORKFLOW, type ApplyInput, type ApplyReport } from "./apply.ts";
 import {
   ADMIN,
+  BASE,
   type ChangeEvent,
   ChangeEventSchema,
   ChangeInput,
   type ChangeReport,
   type ChangeState,
   initialChangeState,
+  remoteContext,
 } from "./change.ts";
 import { DRIFT_WORKFLOW, type DriftReport } from "./drift.ts";
 import { isDirect } from "./direct.ts";
@@ -43,6 +45,7 @@ import {
   SanomaError,
 } from "./errors.ts";
 import { insertRecord, type LedgerRecord, type OwnedLedger, ownedLedger } from "./ledger.ts";
+import { warn } from "./log.ts";
 import type { CallContext, Driver, Op } from "./op.ts";
 import { allowAll, type RecordedDecision } from "./policy.ts";
 import { admit, readPeople } from "./resources.ts";
@@ -59,6 +62,7 @@ import {
   DATA_VENDOR,
   ENDED_STATUSES,
   errorMessage,
+  HOST_CHECK_AGENT,
   isEnded,
   isVisitor,
   refusalOf,
@@ -66,6 +70,22 @@ import {
   SCHEDULE_AGENT,
   WORKFLOW_ACTION,
 } from "./shared.ts";
+import { type RemoteEvent, remoteFor, type RepoRef, type Source, type SourceHost } from "./source.ts";
+
+/** The branch prefix of a draft (`draft/<id>`), as `Source.draft` names it. */
+const DRAFT_BRANCH = "draft/";
+
+/** The company's repository on its host, for `remoteEvent`. */
+interface Repository {
+  source: Source;
+  url: string;
+  repo: RepoRef;
+  host: SourceHost;
+}
+
+/** Whether two references name one repository: a host's names are compared without case. */
+const sameRepo = (a: RepoRef, b: RepoRef) =>
+  a.owner.toLowerCase() === b.owner.toLowerCase() && a.name.toLowerCase() === b.name.toLowerCase();
 
 /** A principal, or its id alone. */
 const PrincipalOrId = z.union([
@@ -218,6 +238,11 @@ export interface ClientOptions {
    * `dataStore`.
    */
   resolved?: ResolvedConfig;
+  /**
+   * The company's repository, as the worker is given it: what `remoteEvent` acts for (its
+   * `origin`) and fetches a draft's new commits into. Without one, `remoteEvent` does nothing.
+   */
+  source?: Source;
 }
 
 /** Talks to the runtime from another process (the app, a script), through the shared Postgres. */
@@ -234,6 +259,8 @@ export class SanomaClient {
   /** The operator agent's chats: their rows and their transcripts, in the config's database. */
   readonly chats: Chats;
   private readonly options: ClientOptions;
+  /** The repository on its host that `remoteEvent` opened last, by clone URL: its token is kept while it holds. */
+  private opened?: { url: string; host: SourceHost };
 
   private constructor(
     dbos: DBOSClient,
@@ -871,8 +898,9 @@ export class SanomaClient {
    * the event now. A `close` is refused (`not_approver`) unless `by` may withdraw that approval; the
    * other kinds are facts, so a withdrawal `by` may not make is skipped and the run's merge refuses a
    * head that moved. `run_not_found` when the draft has no change, `run_ended` when its run has ended.
+   * With `key`, an event told again under the same key is queued once while the run has not read it.
    */
-  async changeEvent(id: string, event: ChangeEvent, options: { by: Principal | string }): Promise<void> {
+  async changeEvent(id: string, event: ChangeEvent, options: { by: Principal | string; key?: string }): Promise<void> {
     const by = await this.admitted(
       parseOrThrow(PrincipalOrId, options?.by, '`by` must be a principal, such as "alice" or { id: "alice" }'),
     );
@@ -895,13 +923,86 @@ export class SanomaClient {
       throw new SanomaError("not_approver", refusal, { runId, reason: refusal });
     }
     this.options.onWrite?.();
-    await this.dbos.send(runId, told, CHANGE_TOPIC);
+    await this.dbos.send(runId, told, CHANGE_TOPIC, options.key);
     if (held && refusal === undefined) {
       await this.withdraw(runId, held.id, WITHDRAWAL[told.kind], { by, timeoutSeconds: 5 }).catch((err: unknown) => {
         // Decided or ended meanwhile: the run reads the event when it next waits, if it does.
         if (!["already_decided", "run_ended", "no_pending_approval"].includes(errorCode(err) ?? "")) throw err;
       });
     }
+  }
+
+  /**
+   * Does what a host's webhook says happened (`RemoteEvent`, from a remote half's `webhook`) to the
+   * company's repository, the `origin` of `ClientOptions.source`; an event of another repository,
+   * or one this client has no source for, is ignored. Idempotent: a delivery told again does nothing more.
+   *
+   * - `pushed` to `main`: apply on the declared hosts (`ResolvedConfig.hosts`), as `host-check`, as
+   *   the run `deploy:<head>`; nothing with no host, nor while a change is merging or deploying,
+   *   which deploys `main` itself after its merge.
+   * - `pushed` to `draft/<id>` with the change of `id` open: the host's commits fetched into the
+   *   draft (`Source.follow` on its branch), then the change told `commits`, as `by`; nothing when
+   *   the draft or the change is at that head already (the run's own push).
+   * - `closed` for `draft/<id>` with the change open: the change told `merged` (with its merge
+   *   commit) or `closed`, as `by`. The run checks either on the host before it believes it.
+   */
+  async remoteEvent(event: RemoteEvent, options: { by: Principal | string }): Promise<void> {
+    const repository = await this.repository();
+    if (!repository || !sameRepo(repository.repo, event.repo)) return;
+    if (event.kind === "pushed" && event.branch === BASE) return this.deployPush(event.head);
+    if (!event.branch.startsWith(DRAFT_BRANCH)) return;
+    const id = event.branch.slice(DRAFT_BRANCH.length);
+    const change = await this.change(id);
+    if (!change || isEnded(change.status)) return;
+    let told: ChangeEvent;
+    if (event.kind === "closed") {
+      told = event.merged && event.sha !== undefined ? { kind: "merged", sha: event.sha } : { kind: "closed" };
+    } else {
+      if (change.state.head === event.head || !(await this.fetched(repository, event.branch, event.head))) return;
+      told = { kind: "commits" };
+    }
+    const key = event.kind === "pushed" ? event.head : `${event.number}:${event.sha ?? "closed"}`;
+    await this.changeEvent(id, told, { by: options.by, key: `${event.kind}:${event.branch}:${key}` }).catch(
+      (err: unknown) => {
+        // Ended, or gone, since it was read: nothing to tell.
+        if (!["run_ended", "run_not_found"].includes(errorCode(err) ?? "")) throw err;
+      },
+    );
+  }
+
+  /** Apply on the declared hosts after a push of `head` to `main` (`remoteEvent`). */
+  private async deployPush(head: string): Promise<void> {
+    const hosts = await this.config.hosts();
+    if (!hosts.length) return;
+    const open = await this.changes({ open: true, limit: 100 });
+    if (open.some(({ state }) => state.phase === "merging" || state.phase === "deploying")) return;
+    await this.apply({ only: hosts }, { startedBy: HOST_CHECK_AGENT, runId: `deploy:${head}` });
+  }
+
+  /**
+   * Brings `head`, pushed to the draft's `branch` on the host, into the draft: false when it holds
+   * it already. A draft that cannot fast-forward to it is warned about, and true: the change's next
+   * push fails then, and says why.
+   */
+  private async fetched({ source, url, host }: Repository, branch: string, head: string): Promise<boolean> {
+    const local = await Promise.resolve(source.head(branch)).catch(() => undefined);
+    if (local === head) return false;
+    const moved = await source.follow?.({ url, token: await host.token(), ref: branch });
+    if (moved && "skipped" in moved) warn(`${branch} could not take the host's commits: ${moved.skipped}`);
+    return true;
+  }
+
+  /** The source's repository on its host (`remoteFor` its `origin`), opened once per URL; undefined with no source, remote or half for it. */
+  private async repository(): Promise<Repository | undefined> {
+    const { source } = this.options;
+    const url = await source?.remoteUrl?.();
+    if (!source || url === undefined) return undefined;
+    const found = remoteFor(this.config.remotes, url);
+    if (!found) return undefined;
+    if (this.opened?.url !== url) {
+      this.opened = { url, host: found.remote.open(found.repo, remoteContext(this.storedSecrets)) };
+    }
+    return { source, url, repo: found.repo, host: this.opened.host };
   }
 
   /** The runs of the draft `id`'s change, newest first: `change:<id>` and `change:<id>~<n>`. */

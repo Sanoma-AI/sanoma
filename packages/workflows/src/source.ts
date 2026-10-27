@@ -47,9 +47,10 @@ export interface Source {
   /** The URL of the repository this one was cloned from (`origin`); undefined when it has none. */
   remoteUrl?(): Promise<string | undefined>;
   /**
-   * Fast-forwards the checked-out branch to `ref` in the repository at `url`, signed in with
-   * `token`, as `push` is: only when `ref` is checked out, nothing is uncommitted and the remote's
-   * `ref` contains it; otherwise `skipped`, saying why. The checked-out revision after.
+   * Fast-forwards the branch `ref` to `ref` in the repository at `url`, signed in with `token`, as
+   * `push` is, where it is checked out: the root's checked-out branch, or an open draft's (by its
+   * `branch`), whose new commits on the host it takes so. Only when nothing is uncommitted there
+   * and the remote's `ref` contains it; otherwise `skipped`, saying why. The revision after.
    */
   follow?(target: { url: string; token: string; ref: string }): Promise<{ revision: string } | { skipped: string }>;
 }

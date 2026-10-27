@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -7,6 +7,7 @@ import {
   defineConnector,
   DriverError,
   type PullRequest,
+  type RemoteEvent,
   type RemoteHalf,
   type Source,
   type SourceHost,
@@ -15,11 +16,28 @@ import {
 
 // A git host and a company's repository, both in memory, for the change workflow's tests and the
 // lanes that build on it (webhooks, the app's review page, the end-to-end test). `fakeRemote` is a
-// connector whose remote half is a host holding pull requests, statuses and merges; `memorySource`
-// is a `Source` with drafts, whose `push` reaches that host and whose `follow` records the call.
+// connector whose remote half is a host holding pull requests, statuses and merges, whose webhook
+// is signed JSON (`delivery`); `memorySource` is a `Source` with drafts, whose `push` reaches that
+// host and whose `follow` records the call.
 
 /** A made-up commit id, unique per `seed`. */
 export const sha = (seed: string) => createHash("sha1").update(seed).digest("hex");
+
+/** The secret the fake host signs its webhooks with, read through the half's `secrets`. */
+export const FAKE_WEBHOOK_SECRET = "FAKEGIT_WEBHOOK_SECRET";
+/** The header the fake host's webhook carries its signature in. */
+const SIGNATURE = "x-fakegit-signature";
+const hmac = (secret: string, body: string) => createHmac("sha256", secret).update(body).digest("hex");
+
+/** A delivery of the fake host's webhook carrying `events`, signed with `secret` (none: unsigned). */
+export function delivery(events: RemoteEvent[], secret?: string): RequestInit {
+  const body = JSON.stringify(events);
+  return {
+    method: "POST",
+    body,
+    headers: { "content-type": "application/json", ...(secret !== undefined && { [SIGNATURE]: hmac(secret, body) }) },
+  };
+}
 
 /** A status the host was given, in order. */
 export interface FakeStatus {
@@ -136,6 +154,16 @@ export function fakeRemote({ url = "https://git.example/acme/company.git" }: { u
   const half: RemoteHalf = {
     matches: (given) => (given === url ? { owner: "acme", name: "company" } : undefined),
     open: () => host,
+    // A delivery is the events themselves, as JSON, signed as `delivery` signs it.
+    async webhook(request, { secrets }) {
+      const secret = (await secrets([FAKE_WEBHOOK_SECRET])).get(FAKE_WEBHOOK_SECRET);
+      if (!secret) throw new DriverError("no webhook secret", { retryable: false, vendorCode: "no_webhook_secret" });
+      const body = await request.text();
+      if (request.headers.get(SIGNATURE) !== hmac(secret, body)) {
+        throw new DriverError("bad signature", { retryable: false, status: 401, vendorCode: "bad_signature" });
+      }
+      return JSON.parse(body) as RemoteEvent[];
+    },
   };
   const connector = withSetup(defineConnector("fakegit", {}), { remote: () => half });
 
@@ -188,7 +216,7 @@ const idOf = (ref: string) => (ref.startsWith("draft/") ? ref.slice("draft/".len
  * its own holding the files `edit` writes, on the branch `draft/<id>`, its head moved by each edit;
  * `diff` names the files edited. `push` puts a branch's head on the host; `check` answers `checks`
  * (ok by default) and counts each; `follow` and `closeDraft` record their calls, and `follow`
- * answers `followed` (the host's `main`, by default).
+ * answers `followed` (the host's branch, by default; a draft's branch moves the draft's head to it).
  */
 export function memorySource({ root, remote }: { root: string; remote?: FakeRemote }) {
   const drafts = new Map<string, { root: string; files: Map<string, string>; head: string; edits: number }>();
@@ -240,7 +268,13 @@ export function memorySource({ root, remote }: { root: string; remote?: FakeRemo
     remoteUrl: async () => remote?.url,
     async follow(target) {
       follows.push(target);
-      return followed?.(target.ref) ?? { revision: remote?.branches.get(target.ref) ?? sha(target.ref) };
+      const answer = followed?.(target.ref);
+      if (answer) return answer;
+      // A draft's branch takes the host's commits on it.
+      const id = idOf(target.ref);
+      const pushed = remote?.branches.get(target.ref);
+      if (id !== undefined && pushed !== undefined) draftOf(id).head = pushed;
+      return { revision: pushed ?? sha(target.ref) };
     },
   };
 
