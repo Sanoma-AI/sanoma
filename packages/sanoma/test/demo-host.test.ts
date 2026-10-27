@@ -5,6 +5,7 @@ import { SanomaClient } from "@sanoma-ai/workflows";
 import { collection } from "@sanoma-ai/workflows/data";
 import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { SESSION_COOKIE } from "../src/demo-host.ts";
 import { copyFixture, ensureBuilt, serving } from "./fixture.ts";
 
 // Needs Postgres (`pnpm db:up`) with the right to make databases, and the packages' builds. The
@@ -129,7 +130,7 @@ function visitor(url: string) {
     }
     return { status: res.status, html: (await res.text()).replaceAll("<!-- -->", "") };
   };
-  return { get, session: () => jar.get("sanoma_demo_session") };
+  return { get, session: () => jar.get(SESSION_COOKIE) };
 }
 
 /** The session the host's log said it took last: its id, the suffix of its copy's name. */

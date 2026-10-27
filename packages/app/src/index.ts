@@ -145,7 +145,7 @@ interface Responder {
  */
 export async function startApp(config: SanomaConfig, options: AppOptions = {}): Promise<App> {
   const host = options.host ?? "127.0.0.1";
-  const demo = options.demo === true || options.demo === "copy";
+  const demo = !!options.demo;
   const resolved = options.resolved ?? resolveConfig(config, demo ? { fakes: "instance" } : {});
   if (demo && !resolved.instanceFakes) {
     throw new Error('A demo runs on its connectors\' fakes: resolve its config with `{ fakes: "instance" }`');
@@ -348,7 +348,12 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   let reset: { stop(): void } | undefined;
   try {
     // Seeded before it listens, so the first visitor finds the moments started.
-    if (demo) reset = await demoReset(client, resolved, config, options.demo === "copy");
+    if (demo) {
+      reset = await demoReset(client, resolved, {
+        copy: options.demo === "copy",
+        minutes: config.demo?.reseed ?? DEMO_RESET_MINUTES,
+      });
+    }
     await new Promise<void>((done, fail) => {
       server.once("error", fail);
       server.listen(options.port ?? 0, host, () => {
@@ -438,8 +443,7 @@ const SETTLE_MS = 30_000;
 async function demoReset(
   client: SanomaClient,
   resolved: ResolvedConfig,
-  config: SanomaConfig,
-  copy: boolean,
+  { copy, minutes }: { copy: boolean; minutes: number },
 ): Promise<{ stop(): void }> {
   // Loaded only for a demo: it loads Cucumber.
   const { reseed } = await import("@sanoma-ai/workflows/scenarios");
@@ -455,7 +459,7 @@ async function demoReset(
   if (copy) return { stop() {} };
   const timer = setInterval(
     () => void seed().catch((err: unknown) => console.error("sanoma app: sanoma.demo.reset failed:", err)),
-    (config.demo?.reseed ?? DEMO_RESET_MINUTES) * 60_000,
+    minutes * 60_000,
   ).unref();
   return { stop: () => clearInterval(timer) };
 }
@@ -470,15 +474,16 @@ const settles = (status: RunStatus | undefined) => status === "waiting" || (stat
  */
 async function settled(client: SanomaClient, runIds: readonly string[]): Promise<void> {
   const deadline = Date.now() + SETTLE_MS;
-  for (;;) {
-    const runs = await Promise.all(runIds.map((id) => client.run(id)));
-    if (runs.every((run) => settles(run?.status)) && !(await client.runs({ status: "queued", limit: 1 })).length)
-      return;
+  let left = runIds;
+  for (let wait = 50; ; wait = Math.min(wait * 2, 1000)) {
+    const runs = await Promise.all(left.map((id) => client.run(id)));
+    left = left.filter((_, i) => !settles(runs[i]?.status));
+    if (!left.length && !(await client.runs({ status: "queued", limit: 1 })).length) return;
     if (Date.now() > deadline) {
       console.warn(`sanoma app: the demo's runs had not settled after ${SETTLE_MS / 1000} s: serving it as it is`);
       return;
     }
-    await new Promise((done) => setTimeout(done, 100));
+    await new Promise((done) => setTimeout(done, wait));
   }
 }
 
