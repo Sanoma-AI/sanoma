@@ -271,11 +271,10 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
         "exists",
       );
     }
-    // Copied before anything changes, so a copy that fails leaves the Worker as it was; not again
-    // once the Worker runs the copy, as a version's tag is never replaced.
+    // Copied before anything changes, so a copy that fails leaves the Worker as it was. Each apply
+    // asks again, which costs a manifest's HEAD once the copy is there, and puts back one gone.
     const runs = accountImage(image, cf.account);
-    const running = current?.find((b) => b.name === TEXT.image)?.text;
-    if (runs !== image && running !== runs) await cf.copyImage(image);
+    if (runs !== image) await cf.copyImage(image);
     const served = domains ? domainsText(domains) : undefined;
     const text = {
       [TEXT.source]: source,

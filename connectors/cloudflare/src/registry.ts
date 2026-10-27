@@ -18,12 +18,17 @@ const MANIFESTS = [
   "application/vnd.docker.distribution.manifest.v2+json",
 ];
 
-/** An image reference split up: `ghcr.io` / `sanoma-ai/runtime` / `:` / `0.8.1` (or `@` / `sha256:…`). */
+/**
+ * An image reference split up: `ghcr.io` / `sanoma-ai/runtime` / `:` / `0.8.1` (or `@` /
+ * `sha256:…`; a tag beside a digest is dropped, as the digest names the image).
+ */
 function parse(image: string) {
   const at = image.indexOf("@");
-  const colon = image.lastIndexOf(":");
-  const split = at >= 0 ? at : colon > image.lastIndexOf("/") ? colon : image.length;
-  const path = image.slice(0, split);
+  const named = at >= 0 ? image.slice(0, at) : image;
+  const colon = named.lastIndexOf(":");
+  const tagAt = colon > named.lastIndexOf("/") ? colon : named.length;
+  const split = at >= 0 ? at : tagAt;
+  const path = image.slice(0, tagAt);
   const slash = path.indexOf("/");
   return {
     host: path.slice(0, Math.max(0, slash)),
@@ -39,7 +44,7 @@ function parse(image: string) {
  * (`ghcr.io/sanoma-ai/runtime:0.8.1` → `registry.cloudflare.com/<account>/sanoma-ai-runtime:0.8.1`).
  */
 export function accountImage(image: string, account: string, registry = CLOUDFLARE_REGISTRY): string {
-  if (image.startsWith(`${CLOUDFLARE_REGISTRY}/${account}/`)) return image;
+  if (image.startsWith(`${registry}/${account}/`)) return image;
   const { name, sep, reference } = parse(image);
   return `${registry}/${account}/${name.replaceAll("/", "-")}${sep}${reference}`;
 }
@@ -68,8 +73,10 @@ export async function copyImage(image: string, target: CopyTarget, timeoutMs = 1
   const to = parse(accountImage(image, target.account, target.registry));
   const ref = source.reference;
   const refuse = (why: string) => new DriverError(`cloudflare: copying ${image}: ${why}`, { retryable: false });
-  if (!/[.:]/.test(source.host))
-    throw refuse("name the registry it is in, such as ghcr.io/sanoma-ai/runtime:<version>");
+  // Docker Hub is not copied from: its API is on another host, and its pulls are limited.
+  if (!/[.:]/.test(source.host) || source.host === "docker.io") {
+    throw refuse("name the registry it is in, not Docker Hub: ghcr.io/sanoma-ai/runtime:<version>");
+  }
 
   /** A request of the copy's: an answer that is not `ok` (or in `also`) is a DriverError. */
   const send = async (url: string, init: RequestInit & { duplex?: "half" }, also: number[] = []) => {
@@ -107,6 +114,7 @@ export async function copyImage(image: string, target: CopyTarget, timeoutMs = 1
     const ping = await ask(`${origin(host)}/v2/`, { headers: given }, [401]);
     if (ping.ok) return given;
     const challenge = ping.headers.get("www-authenticate") ?? "";
+    if (/^basic/i.test(challenge) && basic) throw refuse(`${host} refused the temporary credentials`);
     const params = Object.fromEntries([...challenge.matchAll(/(\w+)="([^"]*)"/g)].map(([, k, v]) => [k!, v!]));
     if (!/^bearer/i.test(challenge) || !params.realm) {
       throw refuse(`${host} asks for no credentials it can be given`);

@@ -148,6 +148,9 @@ describe("accountImage", () => {
     expect(accountImage(`ghcr.io/sanoma-ai/runtime${digest}`, ACCOUNT)).toBe(
       `registry.cloudflare.com/${ACCOUNT}/sanoma-ai-runtime${digest}`,
     );
+    expect(accountImage(`ghcr.io/sanoma-ai/runtime:0.8.1${digest}`, ACCOUNT)).toBe(
+      `registry.cloudflare.com/${ACCOUNT}/sanoma-ai-runtime${digest}`,
+    );
     const there = `registry.cloudflare.com/${ACCOUNT}/sanoma-ai-runtime:0.8.1`;
     expect(accountImage(there, ACCOUNT)).toBe(there);
   });
