@@ -102,19 +102,26 @@ export function openPool(databaseUrl: string, what: string): Pool {
 export const DBOS_DATABASE_OPTIONS = { systemDatabaseIdleTransactionTimeoutMs: 0 } as const;
 
 /**
- * Stamps the runs `ids` still queued with the application version `version`, so DBOS's queue gives
- * them to a worker of that version; the ids it stamped. DBOS has no call for it (a run's version is
- * set at its start, `forkWorkflow` makes a new id, `rewindWorkflow` takes only an ended run), so this
- * is the runtime's one write to DBOS's own tables, in its schema `dbos` (dbos-sdk 5.2.11). A run no
- * longer queued has been taken by a worker, which runs it on its own version: it is left.
+ * Stamps the change runs `ids` still unfinished on another version with the application version
+ * `version`, so DBOS gives them to a worker of that version: those it stamped, each with its status
+ * (a PENDING one is the caller's to queue again). DBOS has no call for it (a run's version is set at
+ * its start, `forkWorkflow` makes a new id, `rewindWorkflow` takes only an ended run), so this is the
+ * runtime's one write to DBOS's own tables, in its schema `dbos` (dbos-sdk 5.2.11). One statement:
+ * of two workers stamping a run, one does.
  */
-export async function stampVersion(db: Db, ids: readonly string[], version: string): Promise<string[]> {
-  const { rows } = await db.query<{ workflow_uuid: string }>(
+export async function stampVersion(
+  db: Db,
+  ids: readonly string[],
+  version: string,
+): Promise<{ id: string; pending: boolean }[]> {
+  const { rows } = await db.query<{ workflow_uuid: string; status: string }>(
     `UPDATE dbos.workflow_status SET application_version = $1
-     WHERE workflow_uuid = ANY($2) AND status = 'ENQUEUED' RETURNING workflow_uuid`,
+     WHERE workflow_uuid = ANY($2) AND name = 'change' AND status IN ('PENDING', 'ENQUEUED')
+       AND application_version <> $1
+     RETURNING workflow_uuid, status`,
     [version, ids],
   );
-  return rows.map((r) => r.workflow_uuid);
+  return rows.map((r) => ({ id: r.workflow_uuid, pending: r.status === "PENDING" }));
 }
 
 /**

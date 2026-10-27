@@ -293,38 +293,33 @@ function outlineOf(wf: WorkflowDefinition<any, any>): WorkflowOutline {
 /**
  * Takes over the unfinished change runs of other versions whose change code is this worker's,
  * keeping each run's id, history and unread messages: a change's own deploy restarts the worker on
- * the merged code, a new version, which DBOS would never give the run to. A PENDING one is queued
- * again (`resumeWorkflows`), only from this worker's executor id as DBOS's own recovery takes one,
- * then every queued one is stamped with this version (`stampVersion`); one stopped between the two
- * is still queued on its old version, for the next start. Not `rewindWorkflow`, which takes only a
- * cancelled run and deletes its unread messages. A failure is warned about, and the worker starts.
+ * the merged code, a new version, which DBOS would never give the run to. Each is stamped with this
+ * version (`stampVersion`), and a PENDING one queued again on the app's queue (`resumeWorkflows`);
+ * one stopped between the two is PENDING on this version, which DBOS's recovery takes. Not
+ * `rewindWorkflow`, which takes only a cancelled run and deletes its unread messages. It assumes one
+ * live worker per database, as a deploy does: an older one still running such a run runs it on
+ * until it stops. A failure is warned about, and the worker starts.
  */
-async function carryChangeRuns({ appName, version, changeCode }: ResolvedConfig, db: () => Promise<Db>) {
+async function carryChangeRuns({ appName, version, changeCode, queueName }: ResolvedConfig, db: () => Promise<Db>) {
   try {
-    const runs = (
-      await DBOS.listWorkflows({
-        workflowName: CHANGE_WORKFLOW,
-        status: ["PENDING", "ENQUEUED"],
-        applicationName: appName,
-        attributes: { changeCode },
-        loadInput: false,
-        loadOutput: false,
-      })
-    ).filter(
-      (r) =>
-        r.applicationVersion &&
-        r.applicationVersion !== version &&
-        (r.status === "ENQUEUED" || r.executorId === DBOS.executorID),
-    );
-    if (!runs.length) return;
-    const pending = runs.filter((r) => r.status === "PENDING").map((r) => r.workflowID);
-    if (pending.length) await DBOS.resumeWorkflows(pending);
-    const carried = await stampVersion(
-      await db(),
-      runs.map((r) => r.workflowID),
-      version,
-    );
-    if (carried.length) info(`carried ${carried.length} change run(s) onto version ${version}: ${carried.join(", ")}`);
+    const runs = await DBOS.listWorkflows({
+      workflowName: CHANGE_WORKFLOW,
+      status: ["PENDING", "ENQUEUED"],
+      applicationName: appName,
+      attributes: { changeCode },
+      loadInput: false,
+      loadOutput: false,
+    });
+    const theirs = runs
+      .filter((r) => r.applicationVersion && r.applicationVersion !== version)
+      .map((r) => r.workflowID);
+    if (!theirs.length) return;
+    const carried = await stampVersion(await db(), theirs, version);
+    const pending = carried.filter((r) => r.pending).map((r) => r.id);
+    if (pending.length) await DBOS.resumeWorkflows(pending, { queueName });
+    if (carried.length) {
+      info(`carried ${carried.length} change run(s) onto version ${version}: ${carried.map((r) => r.id).join(", ")}`);
+    }
   } catch (err) {
     warn(`carrying the change runs of other versions onto ${version} failed, so they stay there: ${errorMessage(err)}`);
   }
