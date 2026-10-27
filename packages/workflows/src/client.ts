@@ -56,6 +56,7 @@ import {
   CHANGE_TOPIC,
   CHANGE_WORKFLOW,
   DATA_VENDOR,
+  ENDED_STATUSES,
   errorMessage,
   isEnded,
   isVisitor,
@@ -829,7 +830,7 @@ export class SanomaClient {
       workflowName: CHANGE_WORKFLOW,
       applicationName: this.config.appName,
       ...(open !== undefined && {
-        status: open ? dbosStatusesOf("running") : dbosStatusesOf("finished", "failed", "cancelled"),
+        status: open ? dbosStatusesOf("queued", "running") : dbosStatusesOf(...ENDED_STATUSES),
       }),
       sortDesc: true,
       limit,

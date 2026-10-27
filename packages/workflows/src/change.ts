@@ -225,8 +225,9 @@ export function changeDriver(remotes: ReadonlyMap<string, RemoteHalf>): Driver {
           });
         }
         const { branch } = await source.draft(id);
-        await source.push({ url, token: await host.token(), ref: branch });
+        // The head is read before the push: a commit made in the draft meanwhile is the next round's.
         const head = await source.head(branch);
+        await source.push({ url, token: await host.token(), ref: branch });
         const pr = await host.openPullRequest({ branch, base: BASE, title, body: body ?? "" });
         return { number: pr.number, url: pr.url, head, branch };
       },

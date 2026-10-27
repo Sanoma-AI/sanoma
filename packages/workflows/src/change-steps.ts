@@ -72,13 +72,21 @@ async function received(run: Run, timeoutSeconds: number): Promise<ChangeEvent |
   }
 }
 
-/** Of `first` and the events waiting on the change's topic, read without waiting, the one that weighs most; undefined for none. */
-async function drain(run: Run, first?: ChangeEvent): Promise<ChangeEvent | undefined> {
+/**
+ * Of `first` and the events waiting on the change's topic, read without waiting, the one that
+ * weighs most; undefined for none. A `merged` or `closed` someone told is checked on the host
+ * (`settle`) as it is read, so a claim the pull request does not bear out weighs as `commits`.
+ */
+async function drain(
+  run: Run,
+  settle: () => Promise<ChangeEvent>,
+  first?: ChangeEvent,
+): Promise<ChangeEvent | undefined> {
   let strongest = first;
   for (let event = await received(run, 0); event; event = await received(run, 0)) {
     if (strongest === undefined || WEIGHT[event.kind] > WEIGHT[strongest.kind]) strongest = event;
   }
-  return strongest;
+  return strongest?.kind === "merged" || strongest?.kind === "closed" ? settle() : strongest;
 }
 
 /**
@@ -93,7 +101,11 @@ async function child(
   input: unknown,
 ): Promise<{ runId: string; output?: unknown; error?: string }> {
   const runId = `${run.id}:${suffix}`;
-  const handle = await run.state.startRun(name, runId, { input, startedBy: run.actor });
+  const handle = await run.state.startRun(name, runId, {
+    input,
+    startedBy: run.actor,
+    ...(run.sandbox !== undefined && { sandbox: run.sandbox }),
+  });
   try {
     return { runId, output: await run.state.deadlines.waiting(run.id, { kind: "run" }, () => handle.getResult()) };
   } catch (err) {
@@ -115,6 +127,18 @@ export interface ChangeStepsOptions {
 
 /** The change workflow's steps for a config. */
 export function changeSteps({ remotes, hosts }: ChangeStepsOptions): ChangeSteps {
+  /** What the host says became of the pull request: merged or closed, else (still open) `commits`, to plan again. */
+  const settled = (number: number) =>
+    DBOS.runStep(
+      async (): Promise<ChangeEvent> => {
+        const { host } = await repositoryOf(remotes, runNow().state.secrets);
+        const pr = await host.pullRequest(number);
+        if (pr.state === "merged") return { kind: "merged", sha: pr.mergeSha ?? pr.head };
+        return pr.state === "closed" ? { kind: "closed" } : { kind: "commits" };
+      },
+      { name: "change:settled" },
+    );
+
   return {
     check: (id) =>
       DBOS.runStep(
@@ -195,16 +219,16 @@ export function changeSteps({ remotes, hosts }: ChangeStepsOptions): ChangeSteps
         { name: "change:policy" },
       ),
 
-    async next() {
+    async next(number) {
       const run = runNow();
       for (;;) {
         // An event comes from a request (`SanomaClient.changeEvent`), which wakes a stopped worker: no deadline.
         const event = await received(run, RECV_SECONDS);
-        if (event) return (await drain(run, event)) ?? event;
+        if (event) return (await drain(run, () => settled(number), event))!;
       }
     },
 
-    queued: () => drain(runNow()),
+    queued: (number) => drain(runNow(), () => settled(number)),
 
     retire: (reason) => withdrawApprovals(runNow(), CHANGE_MERGE, reason),
 
@@ -233,26 +257,19 @@ export function changeSteps({ remotes, hosts }: ChangeStepsOptions): ChangeSteps
       return { follow, apply: { runId, hosts: declared, ...(error !== undefined && { error }) } };
     },
 
-    settled: (number) =>
-      DBOS.runStep(
-        async (): Promise<ChangeEvent> => {
-          const { host } = await repositoryOf(remotes, runNow().state.secrets);
-          const pr = await host.pullRequest(number);
-          if (pr.state === "merged") return { kind: "merged", sha: pr.mergeSha ?? pr.head };
-          return pr.state === "closed" ? { kind: "closed" } : { kind: "commits" };
-        },
-        { name: "change:settled" },
-      ),
-
     async verify({ apply }) {
       const run = runNow();
       if (apply === undefined || !run.state.workflows.has(DRIFT_WORKFLOW)) return undefined;
       const { runId, output, error } = await child(run, DRIFT_WORKFLOW, "verify", {});
       const applied = new Set(apply.hosts);
-      const drifted = ((output as DriftReport | undefined)?.resources ?? [])
-        .filter((r) => applied.has(r.id) && r.status !== "clean")
-        .map((r) => r.id);
-      return { runId, drifted, ...(error !== undefined && { error }) } satisfies ChangeVerified;
+      const read = ((output as DriftReport | undefined)?.resources ?? []).filter((r) => applied.has(r.id));
+      // A host drift could not read is no drift: it is said in `error`.
+      const drifted = read.filter((r) => r.status !== "clean" && r.status !== "error").map((r) => r.id);
+      const unread = read.filter((r) => r.status === "error").map((r) => r.id);
+      const errors = [error, ...(unread.length ? [`could not read ${unread.join(", ")}`] : [])].filter(
+        (e) => e !== undefined,
+      );
+      return { runId, drifted, ...(errors.length && { error: errors.join("; ") }) } satisfies ChangeVerified;
     },
 
     closeDraft: (id) => DBOS.runStep(async () => sourceOfRun().closeDraft?.(id), { name: "change:close-draft" }),
