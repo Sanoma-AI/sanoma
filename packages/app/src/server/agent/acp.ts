@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import * as acp from "@agentclientprotocol/sdk";
@@ -618,8 +618,9 @@ const quote = (word: string) => (/^[\w./=:-]+$/.test(word) ? word : `'${word.rep
  * Installs `agent` into `dir`, once: its packages at their versions by the `pnpm` on the session's
  * `PATH`, as the HarnessAgent bridges run it (the desktop shell ships no npm), outside the
  * company's workspace and with no install script run but the vendor's own `setup`, as
- * `installed.json` records. Another turn waits for an install under way; a failed one is tried
- * again by the next.
+ * `installed.json` records. The last install's `node_modules` goes first: pnpm refuses one made
+ * from another store (the repo moved) or by another major version. Another turn waits for an
+ * install under way; a failed one is tried again by the next.
  */
 async function install(agent: OwnAgent, dir: string, home: string): Promise<void> {
   const marker = join(dir, "installed.json");
@@ -628,6 +629,7 @@ async function install(agent: OwnAgent, dir: string, home: string): Promise<void
   let running = installs.get(dir);
   if (!running) {
     running = (async () => {
+      await rm(join(dir, "node_modules"), { recursive: true, force: true });
       await mkdir(dir, { recursive: true });
       await writeFile(join(dir, "package.json"), '{ "private": true }\n');
       const env = sessionEnv(home);
