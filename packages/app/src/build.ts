@@ -477,7 +477,11 @@ async function iconsModule(repo?: string): Promise<string> {
   if (repo === undefined) return "export default {};";
   const { siteIcons } = await import("@sanoma-ai/workflows/describe");
   const lucide = dirname(createRequire(import.meta.url).resolve("lucide-react/package.json"));
-  const file = (name: string) => join(lucide, "dist", "esm", "icons", `${name}.mjs`);
+  // Lucide's module per icon, `dist/esm/icons/<name>.mjs` (the package has no `exports` map): a
+  // release that moves them fails the build here rather than leaving every site its default.
+  const dir = join(lucide, "dist", "esm", "icons");
+  if (!existsSync(dir)) throw new Error(`sanoma: lucide-react has no icons at ${dir}`);
+  const file = (name: string) => join(dir, `${name}.mjs`);
   const names = [...new Set(Object.values(siteIcons(repo)))]
     .filter((name) => ICON_NAME.test(name) && existsSync(file(name)))
     .toSorted();
@@ -530,7 +534,7 @@ function sitesPlugin(repo?: string): Plugin {
           } catch (err) {
             // A folder gone while it was read: the next event reads again.
             server.config.logger.warn(`sanoma: reading the sites failed: ${String(err)}`);
-            return;
+            continue;
           }
           if (next === texts.get(id)) continue;
           texts.set(id, next);

@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { describeConfig, siteContentPages, siteLocales } from "../src/describe.ts";
+import { describeConfig, siteContentPages, siteIcons, siteLocales } from "../src/describe.ts";
 import { defineConnector, defineWorkflow, type SanomaConfig, withSetup } from "../src/index.ts";
 import { leads } from "../../app/test/fixtures/company-sites/resources/data.ts";
 import { tree } from "./tree.ts";
@@ -178,6 +178,8 @@ describe("readSites", () => {
         warnings: [],
       },
     ]);
+    // The icons the app's build bundles: the one site that names one.
+    expect(siteIcons(root)).toEqual({ hello: "life-buoy" });
   });
 
   it("resolves api names to workflows, collections and operations, and makes a problem of each that does not exist", () => {

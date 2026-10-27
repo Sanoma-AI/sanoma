@@ -10,7 +10,8 @@ import ICONS from "virtual:sanoma/icons";
  * the app's own icons beside it.
  */
 export function SiteIcon({ icon, public: isPublic }: { icon?: string; public: boolean }) {
-  const Icon = icon === undefined ? undefined : ICONS[icon];
+  // Its own names only: `constructor` is a name too, of every object's.
+  const Icon = icon !== undefined && Object.hasOwn(ICONS, icon) ? ICONS[icon] : undefined;
   if (Icon) return <Icon strokeWidth={1.5} aria-hidden="true" />;
   return isPublic ? <GlobeIcon aria-hidden="true" /> : <BrowserIcon aria-hidden="true" />;
 }
