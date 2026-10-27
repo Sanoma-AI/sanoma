@@ -2,11 +2,8 @@ import type { ApplyPlan, PlanStep, Rebind } from "@sanoma-ai/workflows/describe"
 
 // The words and groups of the change view (components/apply-plan.tsx), without React.
 
-/**
- * An approval's details as an apply plan, when they are one: the plan itself or its JSON, told
- * apart by its shape (problems, rebinds and steps, each a list).
- */
-export function asApplyPlan(details: unknown): ApplyPlan | undefined {
+/** An approval's details as an object: the value itself, or its JSON; undefined for anything else. */
+export function detailsObject(details: unknown): object | undefined {
   let value = details;
   if (typeof value === "string") {
     try {
@@ -15,7 +12,16 @@ export function asApplyPlan(details: unknown): ApplyPlan | undefined {
       return undefined;
     }
   }
-  if (typeof value !== "object" || value === null) return undefined;
+  return typeof value === "object" && value !== null ? value : undefined;
+}
+
+/**
+ * An approval's details as an apply plan, when they are one: the plan itself or its JSON, told
+ * apart by its shape (problems, rebinds and steps, each a list).
+ */
+export function asApplyPlan(details: unknown): ApplyPlan | undefined {
+  const value = detailsObject(details);
+  if (!value) return undefined;
   const { problems, rebinds, steps } = value as Partial<Record<keyof ApplyPlan, unknown>>;
   return Array.isArray(problems) && Array.isArray(rebinds) && Array.isArray(steps) ? (value as ApplyPlan) : undefined;
 }

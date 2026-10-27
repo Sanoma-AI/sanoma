@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppsRouteImport } from './routes/apps'
+import { Route as ChangesRouteRouteImport } from './routes/changes/route'
 import { Route as ConnectorsRouteRouteImport } from './routes/connectors/route'
 import { Route as DataRouteRouteImport } from './routes/data/route'
 import { Route as InboxRouteImport } from './routes/inbox'
@@ -20,6 +21,8 @@ import { Route as StartRouteImport } from './routes/start'
 import { Route as WorkflowsRouteRouteImport } from './routes/workflows/route'
 import { Route as ApiChatRouteImport } from './routes/api/chat'
 import { Route as ApiSignInRouteImport } from './routes/api/sign-in'
+import { Route as ChangesIndexRouteImport } from './routes/changes/index'
+import { Route as ChangesIdRouteImport } from './routes/changes/$id'
 import { Route as ConnectorsIndexRouteImport } from './routes/connectors/index'
 import { Route as ConnectorsVendorRouteImport } from './routes/connectors/$vendor'
 import { Route as DataIndexRouteImport } from './routes/data/index'
@@ -46,6 +49,11 @@ const IndexRoute = IndexRouteImport.update({
 const AppsRoute = AppsRouteImport.update({
   id: '/apps',
   path: '/apps',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ChangesRouteRoute = ChangesRouteRouteImport.update({
+  id: '/changes',
+  path: '/changes',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ConnectorsRouteRoute = ConnectorsRouteRouteImport.update({
@@ -92,6 +100,16 @@ const ApiSignInRoute = ApiSignInRouteImport.update({
   id: '/api/sign-in',
   path: '/api/sign-in',
   getParentRoute: () => rootRouteImport,
+} as any)
+const ChangesIndexRoute = ChangesIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => ChangesRouteRoute,
+} as any)
+const ChangesIdRoute = ChangesIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => ChangesRouteRoute,
 } as any)
 const ConnectorsIndexRoute = ConnectorsIndexRouteImport.update({
   id: '/',
@@ -181,6 +199,7 @@ const WorkflowsNameRunsIdRoute = WorkflowsNameRunsIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/changes': typeof ChangesRouteRouteWithChildren
   '/connectors': typeof ConnectorsRouteRouteWithChildren
   '/data': typeof DataRouteRouteWithChildren
   '/workflows': typeof WorkflowsRouteRouteWithChildren
@@ -192,11 +211,13 @@ export interface FileRoutesByFullPath {
   '/workflows/$name': typeof WorkflowsNameRouteRouteWithChildren
   '/api/chat': typeof ApiChatRoute
   '/api/sign-in': typeof ApiSignInRoute
+  '/changes/$id': typeof ChangesIdRoute
   '/connectors/$vendor': typeof ConnectorsVendorRoute
   '/data/$name': typeof DataNameRoute
   '/runs/$id': typeof RunsIdRoute
   '/setup/connect': typeof SetupConnectRoute
   '/setup/existing': typeof SetupExistingRoute
+  '/changes/': typeof ChangesIndexRoute
   '/connectors/': typeof ConnectorsIndexRoute
   '/data/': typeof DataIndexRoute
   '/runs/': typeof RunsIndexRoute
@@ -218,11 +239,13 @@ export interface FileRoutesByTo {
   '/start': typeof StartRoute
   '/api/chat': typeof ApiChatRoute
   '/api/sign-in': typeof ApiSignInRoute
+  '/changes/$id': typeof ChangesIdRoute
   '/connectors/$vendor': typeof ConnectorsVendorRoute
   '/data/$name': typeof DataNameRoute
   '/runs/$id': typeof RunsIdRoute
   '/setup/connect': typeof SetupConnectRoute
   '/setup/existing': typeof SetupExistingRoute
+  '/changes': typeof ChangesIndexRoute
   '/connectors': typeof ConnectorsIndexRoute
   '/data': typeof DataIndexRoute
   '/runs': typeof RunsIndexRoute
@@ -238,6 +261,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/changes': typeof ChangesRouteRouteWithChildren
   '/connectors': typeof ConnectorsRouteRouteWithChildren
   '/data': typeof DataRouteRouteWithChildren
   '/workflows': typeof WorkflowsRouteRouteWithChildren
@@ -249,11 +273,13 @@ export interface FileRoutesById {
   '/workflows/$name': typeof WorkflowsNameRouteRouteWithChildren
   '/api/chat': typeof ApiChatRoute
   '/api/sign-in': typeof ApiSignInRoute
+  '/changes/$id': typeof ChangesIdRoute
   '/connectors/$vendor': typeof ConnectorsVendorRoute
   '/data/$name': typeof DataNameRoute
   '/runs/$id': typeof RunsIdRoute
   '/setup/connect': typeof SetupConnectRoute
   '/setup/existing': typeof SetupExistingRoute
+  '/changes/': typeof ChangesIndexRoute
   '/connectors/': typeof ConnectorsIndexRoute
   '/data/': typeof DataIndexRoute
   '/runs/': typeof RunsIndexRoute
@@ -270,6 +296,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/changes'
     | '/connectors'
     | '/data'
     | '/workflows'
@@ -281,11 +308,13 @@ export interface FileRouteTypes {
     | '/workflows/$name'
     | '/api/chat'
     | '/api/sign-in'
+    | '/changes/$id'
     | '/connectors/$vendor'
     | '/data/$name'
     | '/runs/$id'
     | '/setup/connect'
     | '/setup/existing'
+    | '/changes/'
     | '/connectors/'
     | '/data/'
     | '/runs/'
@@ -307,11 +336,13 @@ export interface FileRouteTypes {
     | '/start'
     | '/api/chat'
     | '/api/sign-in'
+    | '/changes/$id'
     | '/connectors/$vendor'
     | '/data/$name'
     | '/runs/$id'
     | '/setup/connect'
     | '/setup/existing'
+    | '/changes'
     | '/connectors'
     | '/data'
     | '/runs'
@@ -326,6 +357,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/changes'
     | '/connectors'
     | '/data'
     | '/workflows'
@@ -337,11 +369,13 @@ export interface FileRouteTypes {
     | '/workflows/$name'
     | '/api/chat'
     | '/api/sign-in'
+    | '/changes/$id'
     | '/connectors/$vendor'
     | '/data/$name'
     | '/runs/$id'
     | '/setup/connect'
     | '/setup/existing'
+    | '/changes/'
     | '/connectors/'
     | '/data/'
     | '/runs/'
@@ -357,6 +391,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ChangesRouteRoute: typeof ChangesRouteRouteWithChildren
   ConnectorsRouteRoute: typeof ConnectorsRouteRouteWithChildren
   DataRouteRoute: typeof DataRouteRouteWithChildren
   WorkflowsRouteRoute: typeof WorkflowsRouteRouteWithChildren
@@ -391,6 +426,13 @@ declare module '@tanstack/react-router' {
       path: '/apps'
       fullPath: '/apps'
       preLoaderRoute: typeof AppsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/changes': {
+      id: '/changes'
+      path: '/changes'
+      fullPath: '/changes'
+      preLoaderRoute: typeof ChangesRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/connectors': {
@@ -455,6 +497,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/api/sign-in'
       preLoaderRoute: typeof ApiSignInRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/changes/': {
+      id: '/changes/'
+      path: '/'
+      fullPath: '/changes/'
+      preLoaderRoute: typeof ChangesIndexRouteImport
+      parentRoute: typeof ChangesRouteRoute
+    }
+    '/changes/$id': {
+      id: '/changes/$id'
+      path: '/$id'
+      fullPath: '/changes/$id'
+      preLoaderRoute: typeof ChangesIdRouteImport
+      parentRoute: typeof ChangesRouteRoute
     }
     '/connectors/': {
       id: '/connectors/'
@@ -578,6 +634,20 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface ChangesRouteRouteChildren {
+  ChangesIdRoute: typeof ChangesIdRoute
+  ChangesIndexRoute: typeof ChangesIndexRoute
+}
+
+const ChangesRouteRouteChildren: ChangesRouteRouteChildren = {
+  ChangesIdRoute: ChangesIdRoute,
+  ChangesIndexRoute: ChangesIndexRoute,
+}
+
+const ChangesRouteRouteWithChildren = ChangesRouteRoute._addFileChildren(
+  ChangesRouteRouteChildren,
+)
+
 interface ConnectorsRouteRouteChildren {
   ConnectorsVendorRoute: typeof ConnectorsVendorRoute
   ConnectorsIndexRoute: typeof ConnectorsIndexRoute
@@ -637,6 +707,7 @@ const WorkflowsRouteRouteWithChildren = WorkflowsRouteRoute._addFileChildren(
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ChangesRouteRoute: ChangesRouteRouteWithChildren,
   ConnectorsRouteRoute: ConnectorsRouteRouteWithChildren,
   DataRouteRoute: DataRouteRouteWithChildren,
   WorkflowsRouteRoute: WorkflowsRouteRouteWithChildren,

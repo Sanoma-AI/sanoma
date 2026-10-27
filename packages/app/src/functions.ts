@@ -5,6 +5,7 @@ import {
   type ActorInfo,
   AdoptRequest,
   CallRequest,
+  ChangesQuery,
   ClearCredentialRequest,
   ConnectExistingRequest,
   DecideCall,
@@ -17,11 +18,14 @@ import {
   adopt,
   appConfig,
   callApi,
+  change,
+  changes,
   clearCredential,
   credentials,
   decide,
   driftReport,
   fileSource,
+  hasRemote,
   lastRuns,
   listRuns,
   nextFires,
@@ -93,6 +97,19 @@ export const getLastRuns = createServerFn(READ).handler(({ context }) => lastRun
 export const getRun = createServerFn(READ)
   .validator(validate(z.object({ id: z.string().min(1) })))
   .handler(({ data, context }) => runDetail(context.app, data.id));
+
+/** The changes, newest first: the open ones, the done ones, or all (`ChangesQuery`). */
+export const getChanges = createServerFn(READ)
+  .validator(validate(ChangesQuery))
+  .handler(({ data, context }) => changes(context.app, data));
+
+/** The change of a draft, by the draft's id, or the router's not-found when it has none. */
+export const getChange = createServerFn(READ)
+  .validator(validate(z.object({ id: z.string().min(1) })))
+  .handler(({ data, context }) => change(context.app, data.id));
+
+/** Whether the repository has a remote, where its changes are reviewed: the bar's Changes. */
+export const getRemote = createServerFn(READ).handler(({ context }) => hasRemote(context.app));
 
 export const startRunFn = createServerFn(CHANGE)
   .middleware([withPrincipal])

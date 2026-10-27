@@ -55,6 +55,7 @@ import {
   CHANGE_MERGE,
   CHANGE_TOPIC,
   CHANGE_WORKFLOW,
+  changeIdOf,
   DATA_VENDOR,
   ENDED_STATUSES,
   errorMessage,
@@ -173,6 +174,9 @@ export interface ChangeView {
   runId: string;
   status: RunStatus;
   startedBy?: Principal;
+  /** When the run started, and when its row last changed (epoch ms), as `RunSummary` has them. */
+  createdAt: number;
+  updatedAt?: number;
   approvals: ApprovalState[];
   /** What the run last published (`CHANGE_EVENT`); `opening`, with no branch yet, before it has. */
   state: ChangeState;
@@ -829,19 +833,27 @@ export class SanomaClient {
     return this.start(this.config.workflows.get(CHANGE_WORKFLOW)!, input, { ...options, runId });
   }
 
-  /** The changes, newest first: `open` ones (not ended) or the others, else all; at most `limit` (20). */
+  /**
+   * The changes, newest first, each draft's by its latest run (`change`): `open` ones (not ended)
+   * or the others, else all; at most `limit` (20).
+   */
   async changes({ open, limit = 20 }: ChangesFilter = {}): Promise<ChangeView[]> {
-    const rows = await this.dbos.listWorkflows({
+    const runs = await this.dbos.listWorkflows({
       workflowName: CHANGE_WORKFLOW,
       applicationName: this.config.appName,
-      ...(open !== undefined && {
-        status: open ? dbosStatusesOf("queued", "running") : dbosStatusesOf(...ENDED_STATUSES),
-      }),
       sortDesc: true,
-      limit,
-      loadInput: true,
-      loadOutput: true,
+      loadInput: false,
+      loadOutput: false,
     });
+    // A draft's later run (`~2`) is its change now: an earlier one is neither open nor done.
+    const ended = new Set<string>(dbosStatusesOf(...ENDED_STATUSES));
+    const ids = [...Map.groupBy(runs, (run) => changeIdOf(run.workflowID)).values()]
+      .map(([run]) => run!)
+      .filter((run) => open === undefined || ended.has(run.status) !== open)
+      .slice(0, limit)
+      .map((run) => run.workflowID);
+    if (ids.length === 0) return [];
+    const rows = await this.dbos.listWorkflows({ workflowIDs: ids, sortDesc: true, loadInput: true, loadOutput: true });
     return Promise.all(rows.map((row) => this.changeView(row)));
   }
 
@@ -914,11 +926,13 @@ export class SanomaClient {
     ]);
     const input = (row.input as [RunArgs])[0].input as ChangeInput;
     const state = published ?? initialChangeState(input);
-    const { runId, status, startedBy, approvals } = summary;
+    const { runId, status, startedBy, createdAt, updatedAt, approvals } = summary;
     return {
       runId,
       status,
       ...(startedBy && { startedBy }),
+      createdAt,
+      ...(updatedAt !== undefined && { updatedAt }),
       approvals,
       state,
       ...(row.status === "SUCCESS" && { report: row.output as ChangeReport }),
@@ -1203,10 +1217,7 @@ const alreadyDecided = (runId: string, a: ApprovalState) =>
 const changeRunId = (id: string) => `change:${id}`;
 
 /** True when `runId` is a run of the draft `id`'s change: `change:<id>` or `change:<id>~<n>`. */
-const isChangeRunOf = (id: string, runId: string | undefined) => {
-  const base = changeRunId(id);
-  return runId === base || (runId?.startsWith(`${base}~`) === true && /^\d+$/.test(runId.slice(base.length + 1)));
-};
+const isChangeRunOf = (id: string, runId: string | undefined) => runId !== undefined && changeIdOf(runId) === id;
 
 /** Why a change event withdraws the merge's pending approval. */
 const WITHDRAWAL: Record<ChangeEvent["kind"], string> = {

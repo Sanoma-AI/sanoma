@@ -10,6 +10,7 @@ import {
   APPLY_WORKFLOW,
   CHANGE_MERGE,
   CHANGE_WORKFLOW,
+  DRAFT_ID,
   errorMessage,
   groupNamesOf,
   type PeopleResource,
@@ -49,7 +50,7 @@ export type ChangeFacts = z.infer<typeof ChangeFacts>;
 
 /** What opening a change takes: its draft's id, and the pull request's title, body and the change page's link. */
 export const ChangeInput = z.object({
-  id: z.string().regex(/^[\w-]{1,64}$/),
+  id: z.string().regex(DRAFT_ID),
   title: z.string().min(1),
   body: z.string().optional(),
   page: z.string().url().optional(),

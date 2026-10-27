@@ -1,4 +1,4 @@
-import type { ApprovalState, RunStatus, RunSummary } from "@sanoma-ai/workflows";
+import type { ApprovalState, ChangeView, RunStatus, RunSummary } from "@sanoma-ai/workflows";
 import type {
   CollectionEntry,
   ConfigDescription,
@@ -22,6 +22,7 @@ import { toast } from "sonner";
 import { z } from "zod";
 import {
   type AvailableConnectors,
+  type ChangesQuery,
   type CredentialsResponse,
   pendingApprovals,
   type PreviewQuery,
@@ -34,6 +35,8 @@ import {
 import {
   getActor,
   getAvailableConnectors,
+  getChange,
+  getChanges,
   getChat,
   getChats,
   getConfig,
@@ -44,6 +47,7 @@ import {
   getLastRuns,
   getNextFires,
   getPermissions,
+  getRemote,
   getRun,
   getRuns,
   getScenarios,
@@ -538,6 +542,38 @@ export const runQuery = (id: string) =>
       return !status || isEnded(status) ? false : POLL_MS;
     },
   });
+
+/**
+ * How often a change is read again: every `POLL_MS` while its run is under way on its own
+ * (opening to deploying), never once its run has ended (merged, closed, or failed), else every
+ * 30 s: waiting on Publish or blocked on an event, it moves when someone acts, and a decision
+ * from this tab refreshes it at once (RUNS_KEY).
+ */
+const changePoll = ({ status, state }: Pick<ChangeView, "status" | "state">): number | false =>
+  isEnded(status) ? false : state.phase === "waiting" || state.phase === "blocked" ? 30_000 : POLL_MS;
+
+/** The changes, newest first (`ChangesQuery`), under RUNS_KEY: polled at the pace of the busiest (`changePoll`). */
+export const changesQuery = (query: ChangesQuery = {}) =>
+  queryOptions({
+    queryKey: [...RUNS_KEY, "changes", query],
+    queryFn: () => getChanges({ data: query }),
+    refetchInterval: (q) => (q.state.data?.some((c) => changePoll(c) === POLL_MS) ? POLL_MS : 30_000),
+  });
+
+/** The change of the draft `id` (`getChange`), under RUNS_KEY, so Publish refreshes it: polled as `changePoll` says. */
+export const changeQuery = (id: string) =>
+  queryOptions({
+    queryKey: [...RUNS_KEY, "change", id],
+    queryFn: () => getChange({ data: { id } }),
+    refetchInterval: (q) => (q.state.data ? changePoll(q.state.data) : POLL_MS),
+  });
+
+/**
+ * Whether the repository has a remote: the bar's Changes. Read once per page load: it rarely
+ * changes (going live adds one), and the root loader waits for it on every navigation.
+ */
+export const remoteQuery = () =>
+  queryOptions({ queryKey: ["remote"], queryFn: () => getRemote(), staleTime: Number.POSITIVE_INFINITY });
 
 /** Every collection's records are under this key, each collection's under its name after it. */
 export const DATA_KEY = ["data"] as const;
