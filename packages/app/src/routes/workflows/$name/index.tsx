@@ -77,6 +77,7 @@ function WorkflowPage() {
       >
         {workflow && <code className="text-muted-foreground">{name}</code>}
         {workflow?.builtin && <Badge variant="secondary">built-in</Badge>}
+        {workflow?.app && <Badge variant="secondary">{workflow.app}</Badge>}
       </CrumbHeader>
       <ScenarioErrors errors={errors} />
       <LinkTabs label="Views" value={view ?? "graph"}>

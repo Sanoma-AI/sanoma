@@ -245,7 +245,7 @@ describe("sanoma check", () => {
       grid: FIXTURE_GRID,
     });
     // The lines check prints, not all of stdout: on a fresh database DBOS logs "Created database …" there.
-    expect(ok.stderr).toContain("passed hello/hello.feature › A post goes out");
+    expect(ok.stderr).toContain("passed scenarios/hello/hello.feature › A post goes out");
     expect(ok.stderr.trimEnd().split("\n").at(-1)).toBe("ok");
     // The scenarios use the fakes alone: no credentials to report, and nothing but check's own lines and DBOS's setup.
     expect(`${ok.stdout}${ok.stderr}`).not.toMatch(/not configured|DeprecationWarning|Error in step/);

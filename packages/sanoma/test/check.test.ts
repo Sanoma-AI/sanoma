@@ -1,5 +1,6 @@
 import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { resolveConfig } from "@sanoma-ai/workflows";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -46,7 +47,7 @@ describe("check", () => {
     expect(readFileSync(join(dir, ".sanoma/schema.cedarschema"), "utf8")).toContain(
       'action "ghost.post.publish" in [Action::"effect:publish"]',
     );
-    expect(log).toContain("passed hello/hello.feature › A post goes out");
+    expect(log).toContain("passed scenarios/hello/hello.feature › A post goes out");
     expect(readFileSync(join(dir, ".oxlintrc.json"), "utf8")).toBe(
       `{\n  "extends": [\n    "./node_modules/sanoma/oxlint.json"\n  ]\n}\n`,
     );
@@ -125,6 +126,32 @@ export default defineWorkflow({
       );
       expect(result).toEqual({ ok: true, problems: [], warnings: [], grid: expect.any(Object) });
       expect(log).toContain("oxlint workflows resources");
+    } finally {
+      rmSync(own, { recursive: true, force: true });
+    }
+  }, 180_000);
+
+  it("passes a company of apps: each app's workflows, collections, policies and scenarios, named by its folder", async () => {
+    const own = copyFixture(fileURLToPath(new URL("../../workflows/test/fixtures/company-apps/", import.meta.url)));
+    try {
+      const loaded = await loadIn(own);
+      expect(loaded.config.workflows?.map((w) => w.name)).toEqual(["introduce", "crm.follow-up", "shop.follow-up"]);
+      expect(loaded.config.collections?.map((c) => c.name)).toEqual(["crm.customers", "shop.customers"]);
+      const log: string[] = [];
+      const result = await check(loaded, { databaseUrl, log: (l) => log.push(l) });
+      expect(result).toEqual({ ok: true, problems: [], warnings: [], grid: expect.any(Object) });
+      // The Permissions grid names an app's workflows and operations by its folder too.
+      expect(result.grid!.workflows.map((w) => [w.id, w.ops.map((op) => op.id)])).toEqual([
+        ["crm.follow-up", ["data.crm.customers.get", "data.crm.customers.save"]],
+        ["introduce", ["data.shop.customers.get", "data.crm.customers.save"]],
+        ["shop.follow-up", ["data.shop.customers.get"]],
+      ]);
+      // The site under apps/crm/sites builds at /sites/crm/pipeline, and its tsc writes sites/tsconfig.json.
+      expect(log).toEqual(expect.arrayContaining(["build crm/pipeline", "oxlint workflows sites apps"]));
+      expect(log).toContain("passed apps/crm/scenarios/follow-up.feature › A customer is followed up");
+      expect(readFileSync(join(own, ".sanoma/schema.cedarschema"), "utf8")).toContain(
+        'action "data.crm.customers.save"',
+      );
     } finally {
       rmSync(own, { recursive: true, force: true });
     }

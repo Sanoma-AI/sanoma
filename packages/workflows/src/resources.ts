@@ -1,5 +1,5 @@
 import { readFileSync, statSync } from "node:fs";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, relative, resolve, sep } from "node:path";
 import { parsed } from "./ast.ts";
 import {
   type DataFile,
@@ -11,7 +11,7 @@ import {
 } from "./datafile.ts";
 import { type Binding, type Bindings, LOCKFILE, readLockfile } from "./lockfile.ts";
 import { type Connector, VENDOR } from "./op.ts";
-import { filesUnder } from "./paths.ts";
+import { APPS_DIR, filesUnder, kindDirs } from "./paths.ts";
 import { peopleConnector, sanoma } from "./person.ts";
 import { wakeupOps } from "./wakeup-type.ts";
 import type { Span } from "./outline.ts";
@@ -28,6 +28,7 @@ import {
   personOf,
   principalOf,
   problemLine,
+  qualified,
   RUNTIME_AGENTS,
   VISITORS,
 } from "./shared.ts";
@@ -65,9 +66,9 @@ export interface DeclaredResource {
 export interface DeclaredCollection {
   /** `<file>#<export>`, as a resource's: `resources/data.ts#outbound`. */
   id: string;
-  /** `resources/data.ts`. */
+  /** `resources/data.ts`, or an app's `apps/<app>/resources/data.ts`. */
   file: string;
-  /** The collection's name, its operations' middle segment (`data.<name>.get`). */
+  /** The collection's name, its operations' middle segments (`data.<name>.get`): an app's with its app, `crm.contacts`. */
   name: string;
   /** Its `export const` statement, as UTF-16 offsets into the file's text. */
   span: Span;
@@ -119,7 +120,8 @@ const peopleRead = new Map<string, { stamp: string; read: DeclaredPeople }>();
 
 /** Each data file under `root` with its size and modification time: unchanged while the files are. */
 const filesStamp = (root: string) =>
-  dataFilesUnder(join(root, "resources"))
+  kindDirs(root, "resources")
+    .flatMap(dataFilesUnder)
     .map((path) => {
       // Gone since it was listed (an editor's save by rename): stamped as such, and read next time.
       const stat = statSync(path, { bigint: true, throwIfNoEntry: false });
@@ -135,6 +137,13 @@ const RESERVED_GROUPS: ReadonlyMap<string, string> = new Map([
 ]);
 
 /**
+ * A person, agent or group declared in an app's data file: refused, because the people are the
+ * company's, so neither the policy (`readPeople`) nor `describeConfig` counts it.
+ */
+export const inAppPeople = (r: DeclaredResource): boolean =>
+  r.vendor === "sanoma" && Object.hasOwn(sanoma, r.type) && r.file.startsWith(`${APPS_DIR}/`);
+
+/**
  * The people, agents and groups the data files under `root` declare (`sanoma.person`, `.agent`,
  * `.group`), read without running them, as `principalOf` takes them, with what is wrong in their
  * files; none without a root. Read again only when a data file changed (by its size and time),
@@ -147,9 +156,16 @@ export function readPeople(root: string | undefined): DeclaredPeople {
   if (cached?.stamp === stamp) return cached.read;
   // With the wakeup's type, which the same constructors declare: read, and only the people's kept.
   const read = readDataFiles(root, [peopleConnector, wakeupOps], undefined, (source) => DECLARES_PEOPLE.test(source));
-  const people = read.resources.filter((r) => Object.hasOwn(sanoma, r.type));
+  const ofPeople = read.resources.filter((r) => Object.hasOwn(sanoma, r.type));
+  const people = ofPeople.filter((r) => !inAppPeople(r));
   // The people are never bound, so the lockfile's problems are not theirs.
   const own = read.problems.filter((p) => p.file !== LOCKFILE);
+  for (const r of ofPeople.filter(inAppPeople)) {
+    own.push({
+      file: r.file,
+      message: `${r.id} declares a ${r.type} in an app: the people are the company's, declared in resources/ at the root`,
+    });
+  }
   const ids = new Map<string, DeclaredResource>();
   for (const r of people) {
     if (r.type === "group") {
@@ -262,7 +278,8 @@ export function readDataFiles(
 
   const files = new Map<string, FileEntry>();
   const left = new Set<string>();
-  for (const path of dataFilesUnder(join(root, "resources"))) {
+  // The root's, then each app's: a data file imports only from its own `resources/`.
+  for (const [dir, path] of kindDirs(root, "resources").flatMap((d) => dataFilesUnder(d).map((p) => [d, p] as const))) {
     const rel = relative(root, path).split(sep).join("/");
     const source = readFileSync(path, "utf8");
     if (partial && !partial(source)) {
@@ -270,7 +287,7 @@ export function readDataFiles(
       continue;
     }
     const { program, problems: syntax, at } = parsed(source, path);
-    const data = readDataFile(program, path, join(root, "resources"));
+    const data = readDataFile(program, path, dir);
     const problem = (offset: number, message: string) => problems.push({ file: rel, ...at(offset), message });
     for (const p of syntax) problems.push({ file: rel, ...p });
     for (const p of data.problems) problem(p.start, p.message);
@@ -465,7 +482,8 @@ export function readDataFiles(
     data.collections.map((c) => ({
       id: `${rel}#${c.export}`,
       file: rel,
-      name: c.name,
+      // An app's, `apps/<app>/resources/data.ts`, is named with its app, as `collection()` names it.
+      name: qualified(rel.startsWith(`${APPS_DIR}/`) ? rel.split("/")[1] : undefined, c.name),
       span: [c.start, c.end] as Span,
     })),
   );

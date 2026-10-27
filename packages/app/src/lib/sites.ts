@@ -2,30 +2,35 @@ import { isLoopback } from "@sanoma-ai/workflows/shared";
 import { useRouter } from "@tanstack/react-router";
 import { useMemo, useSyncExternalStore } from "react";
 import type { SiteDefinition } from "../site.ts";
-import { hasOneUrl, sitePath, withoutOptional } from "../site-path.ts";
+import { hasOneUrl, siteHost, sitePath, withoutOptional } from "../site-path.ts";
 import { siteOf } from "./locales.ts";
 
 // A company's sites, for the bar, the Sites page and the crumbs: each site the build mounts
 // under /sites/<name>, named by its `site.ts`, with its pages from the router's tree.
 
 /**
- * Each site's `sites/<name>/site.ts` default export (`defineSite`), by its folder's name; a
- * `site.ts` without one names nothing. Root-relative: the root is the company repo in its build,
- * and in the package's own build the package, where it matches nothing.
+ * Each site's `sites/<name>/site.ts` (an app's `apps/<app>/sites/<name>/site.ts`) default export
+ * (`defineSite`), by its key (`<app>/<name>` for an app's); a `site.ts` without one names nothing.
+ * Root-relative: the root is the company repo in its build, and in the package's own build the
+ * package, where it matches nothing.
  */
 const DEFINED: Record<string, SiteDefinition | undefined> = Object.fromEntries(
-  Object.entries(import.meta.glob<{ default?: SiteDefinition }>("/sites/*/site.ts", { eager: true })).map(
-    ([file, module]) => [file.split("/")[2], module.default],
-  ),
+  Object.entries(
+    import.meta.glob<{ default?: SiteDefinition }>(["/sites/*/site.ts", "/apps/*/sites/*/site.ts"], { eager: true }),
+  ).map(([file, module]) => {
+    const [, top, app, , site] = file.split("/");
+    return [top === "apps" ? `${app}/${site}` : app!, module.default];
+  }),
 );
 
 /** A site in the bar and on the Sites page: its title and icon, and its pages, the site's home first. */
 export interface Site {
+  /** Its key: the folder's name, `<app>/<name>` for an app's site. */
   name: string;
+  /** The app whose folder holds it, which the bar groups it by; absent for one at the root. */
+  app?: string;
   title: string;
   icon: SiteDefinition["icon"];
-  /** The app whose folder it comes from, which the bar groups it by: none while the build mounts only the root's `sites/`. */
-  app?: string;
   pages: { to: string; label: string }[];
 }
 
@@ -46,9 +51,11 @@ export function useSites(): Site[] {
     for (const [path, to, route] of byPath.toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
       const name = siteOf(to);
       if (name === undefined) continue;
+      const app = name.includes("/") ? name.slice(0, name.indexOf("/")) : undefined;
       const site = sites.get(name) ?? {
         name,
-        title: DEFINED[name]?.title ?? name,
+        ...(app !== undefined && { app }),
+        title: DEFINED[name]?.title ?? name.slice(name.indexOf("/") + 1),
         icon: DEFINED[name]?.icon,
         pages: [],
       };
@@ -71,7 +78,7 @@ type PageAddress = Pick<Location, "protocol" | "hostname" | "port">;
 export function publicAddress(site: { name: string; domain?: string }, page?: PageAddress): string | undefined {
   if (site.domain) return `https://${site.domain}/`;
   if (!page || !isLoopback(page.hostname)) return undefined;
-  return `${page.protocol}//${site.name}.localhost${page.port ? `:${page.port}` : ""}/`;
+  return `${page.protocol}//${siteHost(site.name)}.localhost${page.port ? `:${page.port}` : ""}/`;
 }
 
 const unchanging = () => () => {};

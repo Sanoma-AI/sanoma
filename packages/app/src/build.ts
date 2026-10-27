@@ -19,7 +19,7 @@ import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { createRequire, registerHooks } from "node:module";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { problemLine, SITE_NAME } from "@sanoma-ai/workflows/shared";
+import { APP_NAME, problemLine, SITE_NAME, siteKey } from "@sanoma-ai/workflows/shared";
 import type { InlineConfig, Logger, Plugin, ViteDevServer } from "vite";
 import {
   CONTENT_TYPES,
@@ -57,9 +57,10 @@ const SHARED = /^(react|react-dom|@tanstack\/[^/]+|@sanoma-ai\/app)(\/.*)?$/;
 
 /**
  * `sites/__virtual.ts`, committed and never edited by hand: the sites mount's listing, every
- * folder with a `routes/` and a URL-segment name (as `sitesOf`), re-read by the route generator on
- * any change under `sites/`. It imports only Node's modules, since a company repo cannot import
- * TanStack's (pnpm installs them beside the app, not in the repo).
+ * folder with a `routes/` and a URL-segment name (as `sitesOf`), the root's at `/sites/<name>`
+ * and each app's (`apps/<app>/sites/<name>`) at `/sites/<app>/<name>`, re-read by the route
+ * generator on any change under `sites/`. It imports only Node's modules, since a company repo
+ * cannot import TanStack's (pnpm installs them beside the app, not in the repo).
  */
 const SITES_VIRTUAL = `// Written by sanoma: the sites the app mounts under /sites. Do not edit.
 import { existsSync, readdirSync } from "node:fs";
@@ -67,11 +68,30 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
+const apps = join(here, "..", "apps");
 
-export default () =>
-  readdirSync(here, { withFileTypes: true })
-    .filter((d) => d.isDirectory() && /${SITE_NAME.source}/.test(d.name) && existsSync(join(here, d.name, "routes")))
-    .map((d) => ({ type: "physical" as const, directory: \`\${d.name}/routes\`, pathPrefix: \`/\${d.name}\` }));
+/** The folders of \`dir\` whose names match \`name\`, \`within\` one when given. */
+const folders = (dir: string, name: RegExp, within?: string) =>
+  existsSync(dir)
+    ? readdirSync(dir, { withFileTypes: true })
+        .filter((d) => d.isDirectory() && name.test(d.name) && (!within || existsSync(join(dir, d.name, within))))
+        .map((d) => d.name)
+    : [];
+
+/** The sites in \`dir\` (\`at\` from here), mounted under \`/<prefix><name>\`. */
+const mounts = (dir: string, at: string, prefix: string) =>
+  folders(dir, /${SITE_NAME.source}/, "routes").map((name) => ({
+    type: "physical" as const,
+    directory: \`\${at}\${name}/routes\`,
+    pathPrefix: \`/\${prefix}\${name}\`,
+  }));
+
+export default () => [
+  ...mounts(here, "", ""),
+  ...folders(apps, /${APP_NAME.source}/).flatMap((app) =>
+    mounts(join(apps, app, "sites"), \`../apps/\${app}/sites/\`, \`\${app}/\`),
+  ),
+];
 `;
 
 /** The app's source and the compiler options a site is checked with, by real path. */
@@ -79,19 +99,44 @@ export function appSources(): { src: string; tsconfig: string } {
   return { src: join(pkgDir, "src"), tsconfig: join(pkgDir, "tsconfig.site.json") };
 }
 
-/** A repo's sites: folders under `sites/` with a `routes/`, and those refused for a name that is not a URL segment. */
-export function sitesOf(repo: string): { sites: string[]; refused: string[] } {
-  const dir = join(repo, "sites");
-  const folders = existsSync(dir)
+/** The names of the folders of `dir` that `keep` keeps, sorted; none when `dir` is not there. */
+const foldersOf = (dir: string, keep: (name: string) => boolean): string[] =>
+  existsSync(dir)
     ? readdirSync(dir, { withFileTypes: true })
-        .filter((d) => d.isDirectory() && existsSync(join(dir, d.name, "routes")))
+        .filter((d) => d.isDirectory() && keep(d.name))
         .map((d) => d.name)
         .toSorted()
     : [];
-  return {
-    sites: folders.filter((name) => SITE_NAME.test(name)),
-    refused: folders.filter((name) => !SITE_NAME.test(name)),
-  };
+
+/** `file`'s path under the sites folder it is in, `sites/` or an app's `apps/<app>/sites/`, by segment; undefined outside them. */
+function underSites(repo: string, file: string): string[] | undefined {
+  const parts = relative(repo, file).split(sep);
+  if (parts[0] === "sites" && parts.length > 1) return parts.slice(1);
+  const app = parts[0] === "apps" && parts[2] === "sites" && APP_NAME.test(parts[1] ?? "");
+  return app && parts.length > 3 ? parts.slice(3) : undefined;
+}
+
+/** Where a repo's sites are, relative to it: `sites/`, then each app's `apps/<app>/sites/`. */
+const siteTrees = (repo: string): { app?: string; dir: string }[] => [
+  { dir: "sites" },
+  ...foldersOf(join(repo, "apps"), (name) => APP_NAME.test(name)).map((app) => ({ app, dir: `apps/${app}/sites` })),
+];
+
+/**
+ * A repo's sites: folders under `sites/`, then each app's `apps/<app>/sites/`, with a `routes/`, by
+ * key (`siteKey`: `<app>/<name>` for an app's), and the folders refused for a name that is not a
+ * URL segment, relative to the repo.
+ */
+export function sitesOf(repo: string): { sites: string[]; refused: string[] } {
+  const sites: string[] = [];
+  const refused: string[] = [];
+  for (const { app, dir } of siteTrees(repo)) {
+    for (const name of foldersOf(join(repo, dir), (folder) => existsSync(join(repo, dir, folder, "routes")))) {
+      if (SITE_NAME.test(name)) sites.push(siteKey(app, name));
+      else refused.push(`${dir}/${name}`);
+    }
+  }
+  return { sites, refused };
 }
 
 /**
@@ -155,7 +200,14 @@ function siteTsconfig(root: string) {
         "@sanoma-ai/app/*": [`${src}/*.ts`],
       },
     },
-    include: ["../../sites", "./routeTree.gen.ts", "../api.ts", "../content.ts", join(src, "env.d.ts")],
+    include: [
+      "../../sites",
+      "../../apps/*/sites",
+      "./routeTree.gen.ts",
+      "../api.ts",
+      "../content.ts",
+      join(src, "env.d.ts"),
+    ],
   };
 }
 
@@ -328,7 +380,7 @@ function repoConfig(repo: string, runtimeFrom = defaultRuntimeFrom): InlineConfi
         importProtection: {
           behavior: "error",
           // The app's source (relative to the root when it is installed in the repo) and the sites.
-          include: [`${src}/**`, `${srcDirectory}/**`, "sites/**"],
+          include: [`${src}/**`, `${srcDirectory}/**`, "sites/**", "apps/*/sites/**"],
           // The defaults exclude node_modules, where the app's own source is in a company's install.
           // A site reaches the runtime most easily through `sanoma`, and Node's startApp through the app's root.
           client: { specifiers: [CLIENT_DENIED, /^(sanoma|@sanoma-ai\/app)$/], excludeFiles: [] },
@@ -401,18 +453,23 @@ function contentPlugin(repo?: string): Plugin {
 
 const LOCALES = "virtual:sanoma/locales";
 
-/** `virtual:sanoma/locales`'s text: each site's languages (`siteLocales`), and its content pages' kinds (`siteContentPages`). */
+/**
+ * `virtual:sanoma/locales`'s text: each site's languages (`siteLocales`), its content pages' kinds
+ * (`siteContentPages`), and every site's key (`sitesUnder`), which a path is resolved against (`siteOf`).
+ */
 async function localesModule(repo: string): Promise<string> {
-  const { siteContentPages, siteLocales } = await import("@sanoma-ai/workflows/describe");
-  return `export default ${JSON.stringify(siteLocales(repo))};\nexport const contentPages = ${JSON.stringify(siteContentPages(repo))};`;
+  const { siteContentPages, siteLocales, sitesUnder } = await import("@sanoma-ai/workflows/describe");
+  const sites = sitesUnder(repo).map(({ name }) => name);
+  return `export default ${JSON.stringify(siteLocales(repo))};\nexport const contentPages = ${JSON.stringify(siteContentPages(repo))};\nexport const sites = ${JSON.stringify(sites)};`;
 }
 
 /**
  * `virtual:sanoma/locales`, which the router's `lib/locales.ts` imports: each public site's
  * languages from its `site.ts` (`siteLocales`, read and never run), by name, and the kind each
  * content page reads (`siteContentPages`); without a repo, none. Read once for every environment;
- * on the dev server, again when a `site.ts`, a route file or a folder of `sites/<name>/` or its
- * `routes/` (which make a site) changes, comes or goes, reloaded when they changed.
+ * on the dev server, again when a `site.ts`, a route file or a folder of `sites/<name>/` (or an
+ * app's `apps/<app>/sites/<name>/`) or its `routes/` (which make a site) changes, comes or goes,
+ * reloaded when they changed.
  */
 function localesPlugin(repo?: string): Plugin {
   const id = `\0${LOCALES}`;
@@ -422,16 +479,16 @@ function localesPlugin(repo?: string): Plugin {
     resolveId: (source) => (source === LOCALES ? id : undefined),
     async load(loaded) {
       if (loaded !== id) return;
-      if (repo === undefined) return "export default {};\nexport const contentPages = {};";
+      if (repo === undefined) return "export default {};\nexport const contentPages = {};\nexport const sites = [];";
       text ??= await localesModule(repo);
       return text;
     },
     configureServer(server) {
       if (repo === undefined) return;
-      const sites = join(repo, "sites") + sep;
       server.watcher.on("all", async (event, file) => {
-        if (!file.startsWith(sites)) return;
-        const [, routes, ...deeper] = file.slice(sites.length).split(sep);
+        const under = underSites(repo, file);
+        if (!under) return;
+        const [, routes, ...deeper] = under;
         const site = event.endsWith("Dir") && !deeper.length && (routes === undefined || routes === "routes");
         const route = routes === "routes" && /\.tsx?$/.test(file);
         if (!site && !route && !(routes === "site.ts" && !deeper.length)) return;
@@ -554,7 +611,7 @@ export async function appDevServer(
       // Shipped as source, compiled with the pages.
       exclude: ["sanoma", "@sanoma-ai/app"],
       // Every page, so the first visit finds the dependencies optimized, not a reload to do it.
-      entries: [`${src}/routes/**/*.tsx`, "sites/**/*.tsx"],
+      entries: [`${src}/routes/**/*.tsx`, "sites/**/*.tsx", "apps/*/sites/**/*.tsx"],
     },
   });
   const ssr = server.environments.ssr;
@@ -577,7 +634,6 @@ export async function appDevServer(
  * `sanoma:shared-deps` makes it.
  */
 function devPlugins(repo: string, src: string, onFileChange?: (file: string) => void): Plugin[] {
-  const sitesDir = join(repo, "sites") + sep;
   const css = join(src, "style.css");
   // A file in the app's source whose id, with the specifier in its query, stands in for a
   // company file's shared import on the server: the module runner resolves it from the app.
@@ -628,11 +684,11 @@ function devPlugins(repo: string, src: string, onFileChange?: (file: string) => 
       apply: "serve",
       configureServer(server) {
         const refresh = (file: string) => {
-          if (!file.startsWith(sitesDir)) return;
+          if (!underSites(repo, file)) return;
           for (const env of Object.values(server.environments)) {
             for (const [id, mod] of env.moduleGraph.idToModuleMap) {
               // The stylesheet itself, not a `?url` import of it, whose importer would update for nothing.
-              const sheet = /\.css(\?(?!url\b)|$)/.test(id) && (mod.file === css || id.startsWith(sitesDir));
+              const sheet = /\.css(\?(?!url\b)|$)/.test(id) && (mod.file === css || underSites(repo, id) !== undefined);
               if (sheet) void env.reloadModule(mod);
             }
           }
@@ -674,8 +730,8 @@ function devPlugins(repo: string, src: string, onFileChange?: (file: string) => 
 }
 
 /**
- * The build's key: the app's version and source directory, every file under `sites/` and
- * `content/` (dotfiles and dot-folders aside), and where the runtime the server bundle imports by URL is installed (a real path names
+ * The build's key: the app's version and source directory, every file under `sites/`, an app's
+ * sites and `content/` (dotfiles and dot-folders aside), and where the runtime the server bundle imports by URL is installed (a real path names
  * its version under pnpm), so an upgrade of the runtime is a new build.
  */
 function buildKey(repo: string, runtimeFrom: string): string {
@@ -688,7 +744,7 @@ function buildKey(repo: string, runtimeFrom: string): string {
     const dir = moduleDir(name, dirname(runtimeFrom)) ?? (workflows && moduleDir(name, realpathSync(workflows)));
     hash.update(`${name}=${dir === undefined ? "" : realpathSync(dir)}\0`);
   }
-  const files = ["sites", "content"]
+  const files = [...siteTrees(repo).map(({ dir }) => dir), "content"]
     .flatMap((dir) =>
       existsSync(join(repo, dir)) ? readdirSync(join(repo, dir), { recursive: true, withFileTypes: true }) : [],
     )
@@ -726,8 +782,8 @@ export async function buildApp(
   const root = realpathSync(repo);
   const { log } = options;
   writeSiteFiles(root);
-  for (const name of sitesOf(root).refused) {
-    log?.(`sites/${name} is not mounted: a site's folder name is a URL segment (lowercase letters, digits and dashes)`);
+  for (const dir of sitesOf(root).refused) {
+    log?.(`${dir} is not mounted: a site's folder name is a URL segment (lowercase letters, digits and dashes)`);
   }
   const runtimeFrom = options.runtimeFrom ?? defaultRuntimeFrom;
   const distDir = join(root, ".sanoma", "app", "build", buildKey(root, runtimeFrom));

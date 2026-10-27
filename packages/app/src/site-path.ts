@@ -1,5 +1,8 @@
 // Importing nothing, so the router and the Sites page (in the browser) and `startApp`'s sitemap (Node) share them.
 
+/** A public site's host label on this machine: its key with the app last, `crm/pipeline` as `pipeline.crm` (`<label>.localhost`). */
+export const siteHost = (site: string): string => site.split("/").toReversed().join(".");
+
 /** A route tree's path on `site`'s own host, where its routes are at the root: `/sites/<site>/blog` is `/blog`. */
 export function sitePath(site: string, path: string): string {
   const prefix = `/sites/${site}`;

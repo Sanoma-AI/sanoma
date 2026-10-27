@@ -1,7 +1,7 @@
 {
   "overrides": [
     {
-      "files": ["workflows/**"],
+      "files": ["workflows/**", "apps/*/workflows/**"],
       "jsPlugins": ["./dist/plugin.js"],
       "rules": {
         "sanoma/date": "error",
@@ -109,7 +109,7 @@
       }
     },
     {
-      "files": ["resources/**"],
+      "files": ["resources/**", "apps/*/resources/**"],
       "jsPlugins": ["./dist/plugin.js"],
       "rules": { "sanoma/data-file": "error" }
     }

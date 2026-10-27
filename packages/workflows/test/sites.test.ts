@@ -112,6 +112,7 @@ describe("readSites", () => {
       {
         name: "hello",
         title: "Hello desk",
+        icon: "life-buoy",
         public: true,
         // A layout and its index are one page; a page per post, the one kind its file reads.
         pages: [

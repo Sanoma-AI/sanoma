@@ -1,6 +1,6 @@
 import { tfConnector, type TfMapped } from "@sanoma-ai/bridge/connector";
 import { DriverError, vendorInfo } from "@sanoma-ai/workflows";
-import { DOMAIN_NAME, domainsOf, domainsText, SITE_NAME } from "@sanoma-ai/workflows/shared";
+import { DOMAIN_NAME, domainsOf, domainsText, SITE_KEY } from "@sanoma-ai/workflows/shared";
 import { z } from "zod";
 import { docker_container, provider } from "./resources.gen.ts";
 
@@ -48,7 +48,7 @@ const container = z.object({
     .describe("Environment variables holding secrets, each a `secret(...)`: SANOMA_DATABASE_URL, SANOMA_SECRETS_KEY"),
   port: z.number().int().min(1).max(65_535).describe("The port on 127.0.0.1 the app answers on"),
   domains: z
-    .record(z.string().regex(SITE_NAME), z.string().regex(DOMAIN_NAME))
+    .record(z.string().regex(SITE_KEY), z.string().regex(DOMAIN_NAME))
     // Empty, it would read back as none, a change on every plan.
     .refine((domains) => Object.keys(domains).length > 0, "leave `domains` out rather than empty")
     .nullish()

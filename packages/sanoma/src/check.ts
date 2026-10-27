@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { type CheckResult, errorMessage } from "@sanoma-ai/workflows";
 import {
   type ConfigDescription,
+  crossAppImports,
   describeConfig,
   permissionsGrid,
   readPeople,
@@ -23,22 +24,23 @@ export interface CheckOptions {
   log: (line: string) => void;
 }
 
-/** The directories oxlint reads, those that exist. */
-const LINTED = ["workflows", "resources", "sites"];
+/** The directories oxlint reads, those that exist: the apps' hold the same kinds, which the same rules match. */
+const LINTED = ["workflows", "resources", "sites", "apps"];
 
 /**
  * Checks a repo the way its tests would, without a test framework: what is wrong in its
  * `policies/**\/*.cedar` (`policyProblems`, as `resolveConfig` reads them); the generated files written first (`writeGenerated`: `.sanoma/api.ts` and the Cedar schema,
  * each when it changed); `tsc -p tsconfig.json` in
  * its root; oxlint in the root, with the repo's `.oxlintrc.json` (written when missing, to extend
- * this package's `oxlint.json`), over `workflows/`, `resources/` and `sites/`; every problem
+ * this package's `oxlint.json`), over `workflows/`, `resources/`, `sites/` and `apps/`; every problem
  * `describeConfig` finds in the data files and the workflows' files (the import rules and what
  * the outline cannot draw: what the worker refuses to start with), and each site's call to what
  * the config does not have; with sites, their generated files written first and, beside those
  * three, the app built with them and `tsc -p sites/tsconfig.json` (`checkSites`), and what is
  * wrong under `content/` (as `writeSiteFiles` reads it). Their problems in the order tsc, the sites' tsc, oxlint,
  * the policies, the config, the folders refused as sites, the content's problems, the sites' build. Then, unless the policies do not hold, every scenario against the fakes (`runScenarios`), each step that did not hold a
- * problem. `ok` when there are no problems; the sites' `warnings` beside them never make it not.
+ * problem. `ok` when there are no problems; the warnings beside them (the sites', and an import
+ * from one app's folder into another's) never make it not.
  * With them, the repo's Permissions grid (`permissionsGrid`, as the app's Permissions page has
  * it), from the same config and description, which a change is reviewed by: none when the
  * policies do not hold, since every cell would be the refusing policy's deny.
@@ -63,7 +65,7 @@ export async function check(
   ]);
   const read = configProblems(description, root);
   const unmounted = refused.map(
-    (name) => `sites/${name}: a site's folder name is a URL segment (lowercase letters, digits and dashes)`,
+    (dir) => `${dir}: a site's folder name is a URL segment (lowercase letters, digits and dashes)`,
   );
   const problems = [
     ...tsc,
@@ -77,7 +79,7 @@ export async function check(
   ];
 
   if (resolved.scenarios === undefined) {
-    log("no scenarios: the config's root has no `scenarios/` directory");
+    log("no scenarios: neither the config's root nor an app has a `scenarios/` directory");
   } else if (policies.length) {
     log("no scenarios: the policies do not hold");
   } else {
@@ -85,7 +87,10 @@ export async function check(
     const { failed } = await runScenarios(config, { databaseUrl, log });
     for (const f of failed) problems.push(`${f.scenario} › ${f.step}: ${f.message}`);
   }
-  const warnings = description.sites.flatMap((site) => site.warnings.map(warningLine));
+  const warnings = [
+    ...description.sites.flatMap((site) => site.warnings),
+    ...crossAppImports(root, description.apps),
+  ].map(warningLine);
   const grid = policies.length ? undefined : permissionsGrid(resolved, description);
   return { ok: problems.length === 0, problems, warnings, ...(grid && { grid }) };
 }

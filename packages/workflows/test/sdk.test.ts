@@ -56,7 +56,7 @@ const plan = defineWorkflow({
 /** `plan` as if defined with this name: defineWorkflow takes no `planIt`. */
 const named = (name: string) => ({ ...plan, name }) as typeof plan;
 
-const config = { ...outbound, connectors: [acme], workflows: [...outbound.workflows, plan] };
+const config = { ...outbound, connectors: [acme], workflows: [...(outbound.workflows ?? []), plan] };
 
 describe("generateApi", () => {
   it("types each workflow, each direct operation and each collection, with their JSDoc", async () => {

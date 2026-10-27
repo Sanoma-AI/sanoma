@@ -156,9 +156,12 @@ export function buildCtx(wf: WorkflowDefinition<any, any>, run: Run): any {
     };
   const members: Record<string, any> = {};
   for (const op of uses.filter(isOp)) {
-    const vendor = (members[op.vendor] ??= {});
-    const resource = (vendor[op.resource] ??= {});
-    resource[op.name] = placed(op.id, (node, input) =>
+    // By the id's segments: an app's collection, `data.crm.contacts.get`, is `ctx.data.crm.contacts.get`.
+    const group = op.id
+      .split(".")
+      .slice(0, -1)
+      .reduce<Record<string, any>>((at, key) => (at[key] ??= {}), members);
+    group[op.name] = placed(op.id, (node, input) =>
       serial(run, () => callOp(run, op.id, input, { node: node.path, name: named(node) ?? op.id })),
     );
   }

@@ -32,8 +32,8 @@ export async function describeScenarios(
   if (!resolved.scenarios) {
     throw new Error(
       resolved.root === undefined
-        ? "describeScenarios needs the config's `root`, whose `scenarios/` holds the scenarios"
-        : `describeScenarios found no \`scenarios/\` in ${resolved.root}`,
+        ? "describeScenarios needs the config's `root`, whose `scenarios/` (and each app's) holds the scenarios"
+        : `describeScenarios found no \`scenarios/\` in ${resolved.root}, nor in an app of it`,
     );
   }
   const { scenarios: loaded, errors } = await loadScenarios(resolved);
@@ -41,7 +41,9 @@ export async function describeScenarios(
   // A mistyped directory loads nothing, and a test file that registers no tests would pass.
   if (scenarios.length === 0 && errors.length === 0) {
     const none = loaded.length ? "no scenarios to run (only worlds, and moments that decide nothing)" : "no scenarios";
-    throw new Error(`describeScenarios found ${none} in ${fileURLToPath(resolved.scenarios)}`);
+    throw new Error(
+      `describeScenarios found ${none} in ${fileURLToPath(resolved.scenarios)}'s scenarios/ or its apps'`,
+    );
   }
   for (const { file, message } of errors) {
     it(file, () => {

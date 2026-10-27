@@ -1,9 +1,9 @@
 import { realpathSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, relative, sep } from "node:path";
 import { byPosition, childrenOf, type LintProblem, type Node, parsed, type SourceFile } from "./ast.ts";
 import { COLLECTIONS_FILE, readDataFile } from "./datafile.ts";
 import { constsOf, outlineBody, workflowLiterals } from "./outline.ts";
-import { inside, nearestDir, RELATIVE } from "./paths.ts";
+import { APPS_DIR, inside, nearestDir, RELATIVE } from "./paths.ts";
 // From src/ and from dist/ alike, the package's own oxlint.json: the one list of allowed names.
 import oxlint from "../oxlint.json" with { type: "json" };
 
@@ -203,16 +203,31 @@ function whyRefused(spec: string, filename: string | undefined, root: string | u
     const target = join(dirname(filename), spec);
     if (inside(root, target)) return undefined;
     const tree = basename(root) === "workflows";
-    // The collections, which a workflow names in `uses`: the one data file the runtime imports too.
-    if (tree && realPath(target) === realPath(join(dirname(root), "resources", COLLECTIONS_FILE))) return undefined;
+    // The collections, which a workflow names in `uses`: the one data file the runtime imports too,
+    // the root's or an app's (`apps/<app>/resources/data.ts`), wherever the workflow is.
+    if (tree && isCollectionsFile(realPath(target), realPath(dirname(root)))) return undefined;
     return (
       `it reaches outside ${tree ? `${basename(root)}/` : "this directory"}, toward the config and its drivers; ${THROUGH_CTX}` +
-      (tree ? "; of the files outside it, only resources/data.ts (the collections) may be imported" : "")
+      (tree
+        ? "; of the files outside it, only resources/data.ts (the collections, the root's or an app's apps/<app>/resources/data.ts) may be imported"
+        : "")
     );
   }
   for (const [pattern, reason] of REFUSED_PACKAGES) if (pattern.test(spec)) return reason;
   if (ALLOWED_PACKAGE.test(spec)) return undefined;
   return "import only from `sanoma` (or `@sanoma-ai/workflows`), a `@sanoma-ai/connector-*` package, zod, or a file beside this one";
+}
+
+/**
+ * Whether `target` is a collections file of the company whose workflows' tree is in `base` (the
+ * root, or an app's `apps/<app>/`): `<root>/resources/data.ts` or `<root>/apps/<app>/resources/data.ts`.
+ */
+function isCollectionsFile(target: string, base: string): boolean {
+  const root = basename(dirname(base)) === APPS_DIR ? dirname(dirname(base)) : base;
+  const parts = relative(root, target).split(sep);
+  const [first, app] = parts;
+  const rest = first === APPS_DIR && app !== undefined ? parts.slice(2) : parts;
+  return rest.length === 2 && rest[0] === "resources" && rest[1] === COLLECTIONS_FILE;
 }
 
 /** A path's real path, or the path itself when it does not exist. */

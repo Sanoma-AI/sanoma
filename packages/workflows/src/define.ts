@@ -2,6 +2,8 @@ import { fileURLToPath } from "node:url";
 import { getCallSites } from "node:util";
 import { z } from "zod";
 import { isOp, type Op } from "./op.ts";
+import { appOfFile } from "./paths.ts";
+import { type DATA_VENDOR, qualified } from "./shared.ts";
 
 /**
  * Who is acting: the person or agent that starts a run, calls an operation or decides an
@@ -171,17 +173,25 @@ export interface StepOptions {
 
 type OpsOf<U extends readonly Use[]> = Extract<U[number], Op>;
 
-type CtxOps<O extends Op> = {
-  readonly [V in O["vendor"]]: {
-    readonly [R in Extract<O, { vendor: V }>["resource"]]: {
-      readonly [N in Extract<O, { vendor: V; resource: R }>["name"]]: Extract<
-        O,
-        { vendor: V; resource: R; name: N }
-      > extends Op<any, any, any, infer I, infer Out>
-        ? (input: I, options?: StepOptions) => Promise<Out>
-        : never;
-    };
+type VendorCtx<O extends Op, V> = {
+  readonly [R in Extract<O, { vendor: V }>["resource"]]: {
+    readonly [N in Extract<O, { vendor: V; resource: R }>["name"]]: Extract<
+      O,
+      { vendor: V; resource: R; name: N }
+    > extends Op<any, any, any, infer I, infer Out>
+      ? (input: I, options?: StepOptions) => Promise<Out>
+      : never;
   };
+};
+
+/**
+ * `ctx.<vendor>.<resource>.<op>`. An app's collections are `ctx.data.<app>.<name>` at run time,
+ * a folder's name no type knows: that level is untyped (`any`), the root's collections typed.
+ */
+type CtxOps<O extends Op> = {
+  readonly [V in O["vendor"]]: V extends typeof DATA_VENDOR
+    ? VendorCtx<O, V> & { readonly [app: string]: any }
+    : VendorCtx<O, V>;
 };
 
 interface ApprovalCtx {
@@ -256,7 +266,10 @@ export type Trigger = "manual" | { readonly schedule: string; readonly timezone?
 
 export interface WorkflowDefinition<U extends readonly Use[] = readonly Use[], S extends z.ZodType = z.ZodType> {
   readonly kind: "workflow";
+  /** Its name, as written at the root; in an app's folder, `<app>.<name>` (`app`). */
   readonly name: string;
+  /** The app whose folder defined it (`apps/<app>/`), from its `file`; absent for one at the root. */
+  readonly app?: string;
   readonly title?: string;
   readonly trigger: Trigger;
   readonly input: S;
@@ -273,8 +286,13 @@ export interface WorkflowDefinition<U extends readonly Use[] = readonly Use[], S
 /** The ids of the operations a workflow `uses`, in the order declared. */
 export const opIdsOf = (wf: Pick<WorkflowDefinition, "uses">): string[] => wf.uses.filter(isOp).map((op) => op.id);
 
+/**
+ * Defines a workflow in its own file. Its `name` is a lowercase letter, then lowercase letters,
+ * digits and dashes; in an app's folder (`apps/<app>/`, `appOfFile`) the runtime names it
+ * `<app>.<name>`, so two apps may each have a `sync`.
+ */
 export function defineWorkflow<const U extends readonly Use[], S extends z.ZodType>(
-  def: Omit<WorkflowDefinition<U, S>, "kind" | "file">,
+  def: Omit<WorkflowDefinition<U, S>, "kind" | "file" | "app">,
 ): WorkflowDefinition<U, S> {
   if (!/^[a-z][a-z0-9-]*$/.test(def.name)) {
     throw new Error(`Workflow name "${def.name}" must be lowercase letters, digits and dashes`);
@@ -293,7 +311,8 @@ export function defineWorkflow<const U extends readonly Use[], S extends z.ZodTy
         "its outline is read from the file, and a run is held to the outline",
     );
   }
-  return Object.freeze({ kind: "workflow", ...def, file });
+  const app = appOfFile(file);
+  return Object.freeze({ kind: "workflow", ...def, name: qualified(app, def.name), ...(app && { app }), file });
 }
 
 /** True when `{}` parses: a schema zod can check only asynchronously is taken as accepting it, and the run parses it. */

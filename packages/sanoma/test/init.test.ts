@@ -237,8 +237,8 @@ describe("the template", () => {
     expect(logged.indexOf("wrote .sanoma/api.ts")).toBeLessThan(logged.indexOf("tsc"));
     expect(readdirSync(join(dir, ".sanoma"))).toEqual(["api.ts", "schema.cedarschema"]);
     // The policy holds, so the scenarios ran: each passed under it.
-    expect(logged).toContain("passed publish-post/publish.feature › The editor approves");
-    expect(logged).toContain("passed publish-post/publish.feature › An editor publishes without a review");
+    expect(logged).toContain("passed scenarios/publish-post/publish.feature › The editor approves");
+    expect(logged).toContain("passed scenarios/publish-post/publish.feature › An editor publishes without a review");
     expect(readFileSync(join(dir, ".sanoma/api.ts"), "utf8")).toContain("publishPost: WorkflowFn<");
     const current = await runCli(dir, ["env", "--check"], env);
     expect(current.code, current.stderr).toBe(0);

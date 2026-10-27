@@ -56,7 +56,7 @@ const SERVER = `A site has no server code: ${REMEDY}`;
 const APP =
   "A site imports how a page looks from `sanoma/ui` and what talks to the app (its route APIs, `api`, `RunForm`, `useActor`) from `sanoma/site`; the rest of the app is its server.";
 const sites = {
-  files: ["sites/**"],
+  files: ["sites/**", "apps/*/sites/**"],
   // The listing of the sites the build generates.
   excludeFiles: ["sites/__virtual.ts"],
   jsPlugins: ["./dist/oxlint-plugin.js"],

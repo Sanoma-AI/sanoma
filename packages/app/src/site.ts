@@ -110,16 +110,17 @@ export function useMessages<M>(messages: Messages<M>): M {
 }
 
 /**
- * A site's `sites/<name>/site.ts` (optional): how the app's bar and Sites page name it, whether it is
- * public, and in which languages. `sanoma` reads `title`, `public`, `login` and `locales` without
- * running the file.
+ * A site's `sites/<name>/site.ts` (optional; an app's `apps/<app>/sites/<name>/site.ts`): how the
+ * app's bar and Sites page name it, whether it is public, and in which languages. `sanoma` reads
+ * `title`, `icon`, `public`, `login` and `locales` without running the file.
  */
 export interface SiteDefinition {
   /** The site's name on the Sites page and in its crumb; the folder's name when not given. */
   title?: string;
   /**
    * Its tile's icon in the bar, and beside its title: a [Lucide](https://lucide.dev/icons) icon's
-   * name (`"calendar-days"`); left out, a globe for a public site and a window for one in the app.
+   * name (`"calendar-days"`), a literal, read without running site.ts; left out, a globe for a
+   * public site and a window for one in the app.
    */
   icon?: IconName;
   /** Served at the root of its own domain to visitors, not people (a literal: read without running site.ts). */

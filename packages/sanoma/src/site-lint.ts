@@ -32,6 +32,13 @@ const inside = (dir: string, path: string): boolean => {
   return to !== ".." && !to.startsWith(`..${sep}`);
 };
 
+/** The `sites/` `file` is in, under the repo at `cwd`: the root's, or an app's `apps/<app>/sites/`. */
+function sitesOf(cwd: string, file: string): string | undefined {
+  const [top, app, under] = relative(cwd, file).split(sep);
+  if (top === "sites") return join(cwd, "sites");
+  return top === "apps" && app !== undefined && under === "sites" ? join(cwd, "apps", app, "sites") : undefined;
+}
+
 export const siteFile = {
   meta: {
     type: "problem",
@@ -41,12 +48,12 @@ export const siteFile = {
     },
   },
   create(context: RuleContext) {
-    // oxlint runs in the repo's root, where the override's `sites/**` matches.
-    const sites = join(context.cwd, "sites");
-    /** A relative import, not of types alone, that resolves outside `sites/`. */
+    // oxlint runs in the repo's root, where the override's `sites/**` and `apps/*/sites/**` match.
+    const sites = sitesOf(context.cwd, context.filename);
+    /** A relative import, not of types alone, that resolves outside the file's `sites/`. */
     const leaves = (node: AstNode): boolean => {
       const source: unknown = node.source?.value;
-      if (typeof source !== "string" || !source.startsWith(".") || !inside(sites, context.filename)) return false;
+      if (typeof source !== "string" || !source.startsWith(".") || sites === undefined) return false;
       if (node.importKind === "type" || node.exportKind === "type") return false;
       return !inside(sites, resolve(dirname(context.filename), source));
     };

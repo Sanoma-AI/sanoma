@@ -11,6 +11,9 @@ export { CALL_WORKFLOW } from "./shared.ts";
 // approval, so the approval reaches the Inbox like any run's. It is a workflow like any other,
 // held to the same lint: the call goes through `ctx`, under the policy, in the ledger.
 
+/** An operation on `ctx`. */
+type OpCall = (input: unknown) => Promise<unknown>;
+
 /** The call workflow's input: the operation's id, and its input. */
 export const CallInput = z.object({ op: z.string(), input: z.unknown() });
 
@@ -37,8 +40,13 @@ export function callWorkflow(
     uses,
     // `ctx` refuses an operation that is not in `uses`: one that may not be called directly, or has no driver.
     run: async (ctx, input) => {
-      const [vendor = "", resource = "", name = ""] = input.op.split(".");
-      return ctx[vendor]![resource]![name]!(input.input);
+      // Four segments for an app's collection: `data.<app>.<collection>.<op>`.
+      const [vendor = "", a = "", b = "", c] = input.op.split(".");
+      return c === undefined
+        ? ctx[vendor]![a]![b]!(input.input)
+        : (ctx as unknown as Record<string, Record<string, Record<string, Record<string, OpCall>>>>)[vendor]![a]![b]![
+            c
+          ]!(input.input);
     },
   });
 }

@@ -73,15 +73,15 @@ describe("the company's scenarios", () => {
   it("all load", () => {
     expect(loaded.errors).toEqual([]);
     expect(loaded.scenarios.map((s) => [s.file, s.workflow])).toEqual([
-      ["apply.feature", "apply"],
-      ["drift.feature", "drift"],
-      ["drift.feature", "drift"],
-      ["drift.feature", "drift"],
-      ["drift.feature", "drift"],
-      ["inspect.feature", "inspect"],
-      ["inspect.feature", "inspect"],
-      ["inspect.feature", "inspect"],
-      ["inspect.feature", "inspect"],
+      ["scenarios/apply.feature", "apply"],
+      ["scenarios/drift.feature", "drift"],
+      ["scenarios/drift.feature", "drift"],
+      ["scenarios/drift.feature", "drift"],
+      ["scenarios/drift.feature", "drift"],
+      ["scenarios/inspect.feature", "inspect"],
+      ["scenarios/inspect.feature", "inspect"],
+      ["scenarios/inspect.feature", "inspect"],
+      ["scenarios/inspect.feature", "inspect"],
     ]);
   });
 

@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -261,8 +261,9 @@ describe("a config's collections", () => {
   it("are seeded by a scenario's step, which refuses a key field other than the quoted key", async () => {
     const dir = mkdtempSync(join(tmpdir(), "sanoma-data-feature-"));
     try {
+      mkdirSync(join(dir, "scenarios"));
       writeFileSync(
-        join(dir, "a.feature"),
+        join(dir, "scenarios/a.feature"),
         'Feature: A\n  Scenario: B\n    Given data.outbound "Acme" has\n      | company | Globex |\n    When outbound-next runs with\n      | company | Acme |\n',
       );
       const resolved = resolveConfig({ ...base, workflows: [outboundNext], collections: [outbound] });
