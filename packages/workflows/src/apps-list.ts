@@ -124,7 +124,6 @@ export function remembered<T>(search: () => Promise<T>, now: () => number = Date
   let until = 0;
   return () => {
     if (answer && now() < until) return answer;
-    until = Infinity;
     answer = search().then(
       (value) => {
         last = { value };
@@ -137,6 +136,8 @@ export function remembered<T>(search: () => Promise<T>, now: () => number = Date
         throw err;
       },
     );
+    // After the call, so a search that throws at once leaves the next call to search again.
+    until = Infinity;
     return answer;
   };
 }
