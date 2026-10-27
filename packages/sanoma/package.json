@@ -1,6 +1,6 @@
 {
   "name": "sanoma",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "description": "One command over a Sanoma repo: run the worker and the app, check it, write its .env.example, export a run's ledger",
   "keywords": [
     "approvals",

@@ -1,6 +1,6 @@
 {
   "name": "@sanoma-ai/connector-exa",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Exa web search, page contents, similar pages and cited answers for Sanoma workflows",
   "keywords": [
     "connector",
