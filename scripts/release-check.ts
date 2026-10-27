@@ -4,7 +4,7 @@
  *
  * - A package npm does not have yet. npm adds a trusted publisher only to a package that exists, and
  *   `pnpm publish -r` stops at the first package it cannot publish, so a new one is published by hand first.
- * - A package left at a version already on npm whose shipped files changed since the commit that set that
+ * - A package left at a version already on npm whose source changed since the commit that set that
  *   version (or made the package public): npm's copy lacks the change, so it needs a new version.
  * - A package left at a public version that must take every new version it depends on, as npm has its
  *   ranges. An exact pin (`workspace:*`, as `sanoma` pins the runtime) never does, nor a `^` peer range
@@ -14,8 +14,8 @@
  * publishing; `node scripts/release-check.ts` by hand.
  */
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join, relative, sep } from "node:path";
 import semver from "semver";
 
 export interface Manifest {
@@ -51,21 +51,34 @@ function onNpm({ name, version }: Manifest): OnNpm {
   return view([name, "name"]) ? "new version" : "new package";
 }
 
+/** A package.json as an install sees it: its devDependencies never reach one. */
+const shipped = (text: string) => JSON.stringify({ ...JSON.parse(text), devDependencies: undefined });
+
 /**
- * The commits since the one that last set this package's version, or removed its `private`, that touch a
- * file it ships: its `package.json` and its `files`, with `dist` read as the `src` it is built from.
+ * The commits since the one that last set this package's version, or removed its `private`, that touch
+ * what it is built from: its directory (not `test/` or an `AGENTS.md`), a file outside it that its
+ * `prepack` names (the download script of a binary package), and its `package.json` when more than its
+ * `devDependencies` differs.
  */
 export function changedSince(pkg: Manifest, root = process.cwd()): string[] {
+  const git = (...args: string[]) => run("git", args, root).trim();
   const manifest = join(pkg.path, "package.json");
-  const set = run("git", ["log", "-1", "--format=%H", '-G"(version|private)":', "--", manifest], root).trim();
+  const set = git("log", "-1", "--format=%H", '-G"(version|private)":', "--", manifest);
   if (!set) return [];
-  const { files = ["."] } = JSON.parse(readFileSync(manifest, "utf8")) as { files?: string[] };
-  const specs = files.map((file) =>
-    file.startsWith("!")
-      ? `:(exclude)${join(pkg.path, file.slice(1))}`
-      : join(pkg.path, file === "dist" ? "src" : file),
-  );
-  return run("git", ["log", "--format=%h", `${set}..`, "--", manifest, ...specs], root)
+  const now = readFileSync(manifest, "utf8");
+  const same = shipped(now) === shipped(git("show", `${set}:./${relative(root, manifest)}`));
+  const prepack = String((JSON.parse(now) as { scripts?: { prepack?: string } }).scripts?.prepack ?? "")
+    .split(/\s+/)
+    .map((word) => join(pkg.path, word))
+    .filter((path) => !path.startsWith(pkg.path + sep) && existsSync(path));
+  const specs = [
+    pkg.path,
+    `:(exclude)${join(pkg.path, "test")}`,
+    `:(exclude,glob)${pkg.path}/**/AGENTS.md`,
+    ...(same ? [`:(exclude)${manifest}`] : []),
+    ...prepack,
+  ];
+  return git("log", "--format=%h", `${set}..`, "--", ...specs)
     .split("\n")
     .filter(Boolean);
 }
@@ -94,7 +107,7 @@ export function releaseCheck(
     if (!commits.length) continue;
     const more = commits.length > 3 ? ` and ${commits.length - 3} more` : "";
     problems.push(
-      `${pkg.name}@${pkg.version} is on npm, but ${commits.slice(0, 3).join(", ")}${more} changed what it ships since: give it a new version`,
+      `${pkg.name}@${pkg.version} is on npm, but ${commits.slice(0, 3).join(", ")}${more} changed its source since: give it a new version`,
     );
     next.set(pkg.name, semver.inc(pkg.version, "patch")!);
   }

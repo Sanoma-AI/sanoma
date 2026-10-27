@@ -33,6 +33,9 @@ jobs:
             *) echo "::error::Run on release/<version> pushed at the bump's merge commit, not $GITHUB_REF (README \"Release\")"; exit 1 ;;
           esac
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "::error::$GITHUB_SHA is not on main"; exit 1; }
+          # A rerun takes the commit of the branch's first run: a branch moved since would split the release.
+          first=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow release.yml --branch "$GITHUB_REF_NAME" --limit 100 --json headSha -q 'map(.headSha) | last')
+          [ "${first:-$GITHUB_SHA}" = "$GITHUB_SHA" ] || { echo "::error::$GITHUB_REF_NAME first ran from $first, not $GITHUB_SHA: push it back there"; exit 1; }
           ci=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$GITHUB_SHA" --branch main --json conclusion -q '.[0].conclusion')
           [ "$ci" = success ] || { echo "::error::CI on $GITHUB_SHA is '${ci:-not run}', not success"; exit 1; }
           echo "Publishing from \`$GITHUB_SHA\` on \`$GITHUB_REF_NAME\`." >> "$GITHUB_STEP_SUMMARY"

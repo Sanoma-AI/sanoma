@@ -5,9 +5,9 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { changedSince, type Manifest, type OnNpm, releaseCheck } from "./release-check.ts";
 
-/** A package.json for the fixture's package `a`. */
-const manifest = (fields: object) =>
-  JSON.stringify({ name: "a", files: ["dist", "!src/AGENTS.md", "README.md"], ...fields }, null, 2);
+/** A package.json for the fixture's package `a`, its `version` line followed by more, as in the workspace. */
+const manifest = (version: string, fields: object = {}) =>
+  JSON.stringify({ name: "a", version, scripts: { prepack: "node ../tools/download.ts" }, ...fields }, null, 2);
 const workspace = (name: string, version: string): Manifest => ({ name, version, path: `/${name}` });
 const npm = (entries: [string, OnNpm][]) => new Map(entries);
 
@@ -32,28 +32,33 @@ describe("changedSince", () => {
     root = mkdtempSync(join(tmpdir(), "release-check-"));
     git("init", "-q");
     pkg = { name: "a", version: "0.1.0", path: join(root, "packages/a") };
-    commit({ "packages/a/package.json": manifest({ version: "0.1.0" }), "packages/a/src/index.ts": "1" });
+    commit({ "packages/a/package.json": manifest("0.1.0"), "packages/a/src/index.ts": "1" });
   });
   afterEach(() => rmSync(root, { recursive: true, force: true }));
 
-  it("names commits to what the package ships since its version was set", () => {
-    commit({
+  it("names commits to the package's source since its version was set", () => {
+    const dev = commit({
       "packages/a/test/index.test.ts": "test",
       "packages/a/src/AGENTS.md": "notes",
+      "packages/a/package.json": manifest("0.1.0", { devDependencies: { msw: "^2" } }),
       "packages/b/src/x.ts": "b",
     });
     expect(changedSince(pkg, root)).toEqual([]);
     const source = commit({ "packages/a/src/index.ts": "2" });
-    const readme = commit({ "packages/a/README.md": "docs" });
-    expect(changedSince(pkg, root)).toEqual([readme, source]);
-    commit({ "packages/a/package.json": manifest({ version: "0.1.1" }) });
+    const download = commit({ "packages/tools/download.ts": "v2" });
+    const dependency = commit({
+      "packages/a/package.json": manifest("0.1.0", { dependencies: { zod: "^4" } }),
+    });
+    // Once more than its devDependencies differs, every commit to its package.json counts.
+    expect(changedSince(pkg, root)).toEqual([dependency, download, source, dev]);
+    commit({ "packages/a/package.json": manifest("0.1.1") });
     expect(changedSince(pkg, root)).toEqual([]);
   });
 
   it("counts from the commit that made the package public", () => {
-    commit({ "packages/a/package.json": manifest({ version: "0.1.0", private: true }) });
+    commit({ "packages/a/package.json": manifest("0.1.0", { private: true }) });
     commit({ "packages/a/src/index.ts": "2" });
-    commit({ "packages/a/package.json": manifest({ version: "0.1.0" }) });
+    commit({ "packages/a/package.json": manifest("0.1.0") });
     expect(changedSince(pkg, root)).toEqual([]);
   });
 });
@@ -90,7 +95,7 @@ describe("releaseCheck", () => {
     );
     expect(result.publish).toEqual([]);
     expect(result.problems).toEqual([
-      "@sanoma-ai/workflows@0.7.1 is on npm, but a1, b2, c3 and 2 more changed what it ships since: give it a new version",
+      "@sanoma-ai/workflows@0.7.1 is on npm, but a1, b2, c3 and 2 more changed its source since: give it a new version",
       "sanoma@0.7.1 takes @sanoma-ai/workflows 0.7.1, not 0.7.2: give it a new version too",
     ]);
   });
