@@ -1,15 +1,25 @@
 import { z } from "zod";
 import type { ApprovalState, Approver } from "./define.ts";
-import { defineConnector, defineDriver, type Driver, DriverError } from "./op.ts";
+import { type CallContext, defineConnector, defineDriver, type Driver, DriverError } from "./op.ts";
 import { approve, approvedFor, type Decision, deny } from "./policy.ts";
 import { isChangeOp, type Resource } from "./resource.ts";
+import { currentRun } from "./run.ts";
+import type { Secrets } from "./secret.ts";
 import { APPLY_WORKFLOW, CHANGE_MERGE, CHANGE_WORKFLOW, groupNamesOf, type PeopleResource } from "./shared.ts";
-import type { CheckResult } from "./source.ts";
+import {
+  type CheckResult,
+  type RemoteContext,
+  type RemoteHalf,
+  remoteFor,
+  type Source,
+  type SourceHost,
+} from "./source.ts";
 
 // A change: how a draft of the company's repository goes live, as the built-in `change` workflow
-// runs it (lane C5): its four operations on the built-in connector `sanoma`, the facts a policy
-// decides its merge on (the attributes of its `Sanoma::Change`), and the runtime's own rule that
-// a change to the rules waits for `admin`, before any company policy is asked.
+// runs it (`change-workflow.ts`): its four operations on the built-in connector `sanoma` and their
+// driver over the repository's host, the facts a policy decides its merge on (the attributes of
+// its `Sanoma::Change`), and the runtime's own rule that a change to the rules waits for `admin`,
+// before any company policy is asked.
 
 /**
  * What the planner finds in a change, before the policy is asked: the attributes of the
@@ -114,13 +124,132 @@ export function reservedFor(
   return undefined;
 }
 
-const notBuilt = async (): Promise<never> => {
-  throw new DriverError("not built", { retryable: false });
-};
+/** The branch a change merges into. */
+const BASE = "main";
 
-/** A placeholder: lane C5 replaces it with the driver over the repository's host. */
-export function changeDriver(): Driver {
-  return defineDriver(changeOps, { change: { open: notBuilt, review: notBuilt, merge: notBuilt, close: notBuilt } });
+/** Who reads the company's credentials for a host: the environment's first, then the stored ones, as a login half does. */
+export const remoteContext = (secrets: Secrets): RemoteContext => ({
+  async secrets(names) {
+    const found = await Promise.all(
+      names.map(async (name) => [name, process.env[name] || (await secrets.get(name))] as const),
+    );
+    return new Map(found.filter((entry): entry is readonly [string, string] => Boolean(entry[1])));
+  },
+});
+
+/**
+ * The worker's repository and its host, for a call made in a run (a change's driver and its
+ * steps): the source the worker was given, the clone URL of its `origin` and that repository on
+ * the host whose connector's remote half matches the URL, opened once for the call so its token
+ * is minted once. A `DriverError` when the worker has no source, when the repository has no remote
+ * (saving is publishing then: there is nothing to review a branch on) or no connector is for its host.
+ */
+export async function repositoryOf(
+  remotes: ReadonlyMap<string, RemoteHalf>,
+  secrets: Secrets,
+): Promise<{ source: Source; url: string; host: SourceHost }> {
+  const source = currentRun.getStore()?.state.source;
+  if (!source) {
+    throw new DriverError("This worker was given no repository (`source`), so it cannot change one", {
+      retryable: false,
+    });
+  }
+  const url = await source.remoteUrl?.();
+  if (!url) {
+    throw new DriverError("saving is publishing: this repository has no remote", {
+      retryable: false,
+      vendorCode: "no_remote",
+    });
+  }
+  const found = remoteFor(remotes, url);
+  if (!found) {
+    throw new DriverError(`No connector's remote half is for ${url}: add the connector of its host`, {
+      retryable: false,
+      vendorCode: "no_remote_half",
+    });
+  }
+  return { source, url, host: found.remote.open(found.repo, remoteContext(secrets)) };
+}
+
+/** The `DriverError` code a host gave, read by property: the error may come from another copy of the package. */
+const vendorCodeOf = (err: unknown) => (err as { vendorCode?: unknown } | null)?.vendorCode;
+
+/**
+ * The driver of a change's operations, over the repository the worker was given (`source`, read
+ * from the run) and its host (`remotes`, the connectors' remote halves: `remoteFor` its
+ * `origin`). Each call opens the host once, so its token is minted once.
+ *
+ * - `open` pushes the draft's branch and opens its pull request into `main` (the open one when it
+ *   has one): safe to retry. Its `head` is the branch's commit as pushed.
+ * - `review` sets the `sanoma` status on the head, linking to the change page: `pending`, or
+ *   `failure`; never `success`, which only a merge sets.
+ * - `merge` reads the pull request: merged already (a retry whose answer was lost) or closed are
+ *   answered as they are; a branch at another commit than `head`, on the host or in the draft, is
+ *   `moved`. Else it sets the status `success` and squash-merges at `head`: the host's `head_moved`
+ *   is `moved`, `not_mergeable` is `blocked` with the host's reason. The branch is then deleted,
+ *   as far as it can be.
+ * - `close` closes the pull request.
+ */
+export function changeDriver(remotes: ReadonlyMap<string, RemoteHalf>): Driver {
+  const open = (call: CallContext) => repositoryOf(remotes, call.secrets);
+  return defineDriver(changeOps, {
+    change: {
+      async open({ id, title, body }, call) {
+        const { source, url, host } = await open(call);
+        if (!source.draft || !source.drafts || !source.push) {
+          throw new DriverError("This repository keeps no drafts, so it has no change to open", { retryable: false });
+        }
+        if (!(await source.drafts()).includes(id)) {
+          throw new DriverError(`There is no open draft "${id}" to send for review`, {
+            retryable: false,
+            vendorCode: "no_draft",
+          });
+        }
+        const { branch } = await source.draft(id);
+        await source.push({ url, token: await host.token(), ref: branch });
+        const head = await source.head(branch);
+        const pr = await host.openPullRequest({ branch, base: BASE, title, body: body ?? "" });
+        return { number: pr.number, url: pr.url, head, branch };
+      },
+      async review({ head, state, description, page }, call) {
+        const { host } = await open(call);
+        await host.setStatus({ sha: head, state, description, ...(page !== undefined && { targetUrl: page }) });
+        return {};
+      },
+      async merge({ number, head, title }, call) {
+        const { source, host } = await open(call);
+        const pr = await host.pullRequest(number);
+        if (pr.state === "merged")
+          return { outcome: "merged" as const, ...(pr.mergeSha !== undefined && { sha: pr.mergeSha }) };
+        if (pr.state === "closed") return { outcome: "closed" as const };
+        // Commits the run has not planned: pushed to the host, or made in the draft and not pushed yet.
+        const local = await Promise.resolve(source.head(pr.branch)).catch(() => undefined);
+        if (pr.head !== head || (local !== undefined && local !== head)) return { outcome: "moved" as const };
+        await host.setStatus({ sha: head, state: "success", description: "Published through Sanoma" });
+        let sha: string;
+        try {
+          ({ sha } = await host.mergePullRequest(number, {
+            sha: head,
+            method: "squash",
+            title: `${title} (#${number})`,
+          }));
+        } catch (err) {
+          const code = vendorCodeOf(err);
+          if (code === "head_moved") return { outcome: "moved" as const };
+          if (code === "not_mergeable") return { outcome: "blocked" as const, reason: (err as Error).message };
+          throw err;
+        }
+        // Best effort: a branch left behind holds nothing the merge did not take.
+        await host.deleteBranch?.(pr.branch).catch(() => undefined);
+        return { outcome: "merged" as const, sha };
+      },
+      async close({ number }, call) {
+        const { host } = await open(call);
+        await host.closePullRequest(number);
+        return { closed: true as const };
+      },
+    },
+  });
 }
 
 /**
@@ -176,12 +305,52 @@ export function runtimeHold(
   return approve(approver, { title: "A change to the rules waits for admin", reasons: [RULES_WAIT_FOR_ADMIN] });
 }
 
-/** What a change run is told while it waits: new commits on its branch, a close asked for, or its pull request closed or merged on the host. */
+/**
+ * What a change run is told (on `CHANGE_TOPIC`): new commits on its branch, a close someone asked
+ * for, or its pull request closed or merged on the host.
+ */
 export type ChangeEvent =
   | { kind: "commits" }
   | { kind: "close"; by: string }
   | { kind: "closed" }
   | { kind: "merged"; sha: string };
+
+/** A `ChangeEvent`, as a run reads one off its topic. */
+export const ChangeEventSchema: z.ZodType<ChangeEvent> = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("commits") }),
+  z.object({ kind: z.literal("close"), by: z.string().min(1) }),
+  z.object({ kind: z.literal("closed") }),
+  z.object({ kind: z.literal("merged"), sha: z.string().min(1) }),
+]);
+
+/** What a merge is asked with: the change, its pull request at the head planned, and the facts. */
+export type MergeInput = z.input<typeof changeOps.change.merge.input>;
+
+/**
+ * The policy's answer to a change's merge, asked ahead (`ChangeState.decision`): `allow`, `hold`
+ * for the approver and title the policy gave, or `deny` with its reason. An allowed or held change
+ * has an `approver`, whose approval is Publish: the hold's, else whoever drafted it.
+ */
+export type ChangeDecision = NonNullable<ChangeState["decision"]>;
+
+/** What became of the deploy after a merge: the apply run started on the declared hosts, or the laptop's `main` fast-forwarded (`followed`) or not (`skipped`, why). */
+export interface ChangeDeploy {
+  /** The apply run started on the hosts, and its error when it failed. */
+  runId?: string;
+  error?: string;
+  /** The declared hosts' ids (`<file>#<export>`) the apply run was restricted to. */
+  hosts?: string[];
+  /** The revision the checkout was fast-forwarded to, with no host declared. */
+  followed?: string;
+  skipped?: string;
+}
+
+/** The drift run that read the hosts back after their apply, and the hosts it found not as declared. */
+export interface ChangeVerified {
+  runId: string;
+  drifted: string[];
+  error?: string;
+}
 
 /** Where a change is, as its run publishes it (`CHANGE_EVENT`) for the app. */
 export interface ChangeState {
@@ -213,8 +382,11 @@ export interface ChangeState {
   };
   /** The review card on the host: unavailable in this version. */
   card: { status: "unavailable"; reason: string };
-  merged?: { sha: string; at: number; deploy?: { runId?: string; followed?: string; skipped?: string } };
+  merged?: { sha: string; at: number; deploy?: ChangeDeploy; verified?: ChangeVerified };
+  /** Why the change cannot merge now: the policy denies it, or the host refuses the merge. */
   blocked?: string;
+  /** Who closed it, when someone asked (a `close` event, or a rejection of the Publish approval). */
+  closedBy?: string;
 }
 
 /** How a change run ended. */
@@ -223,5 +395,6 @@ export interface ChangeReport {
   head: string;
   pullRequest: { number: number; url: string };
   sha?: string;
-  deploy?: { runId?: string };
+  deploy?: ChangeDeploy;
+  verified?: ChangeVerified;
 }

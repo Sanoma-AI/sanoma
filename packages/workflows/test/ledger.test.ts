@@ -297,6 +297,7 @@ const runOn = (ledger: LedgerStore): Run => ({
     secrets: memorySecrets(),
     workflows: new Map(),
     outlines: new Map(),
+    registered: new Map(),
     stopped: false,
     deadlines: deadlineRegistry(),
   },

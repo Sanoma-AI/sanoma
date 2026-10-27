@@ -72,6 +72,11 @@ export interface WorkerState {
   /** Each workflow's outline, by name: read once when the worker starts, every run is held to it (`call_not_in_outline`). */
   outlines: Map<string, WorkflowOutline>;
   /**
+   * The function each workflow name is registered with DBOS as, by name: what a built-in starts a
+   * run of another with (`DBOS.startWorkflow`), as the change run starts apply and drift.
+   */
+  registered: ReadonlyMap<string, (args: RunArgs) => Promise<unknown>>;
+  /**
    * Set when the worker stops, before DBOS shuts down. DBOS abandons a stopped worker's run
    * functions, which then fail as their next DBOS call finds the database closed. Such a failure,
    * one with none of our codes, is not recorded: the run recovered on the next worker records

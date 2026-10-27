@@ -22,7 +22,7 @@ export type { DeclaredResource, ResourceProblem } from "./resources.ts";
 export type { DriftField, DriftReport, DriftResult, DriftStatus } from "./drift.ts";
 export type { ApplyPlan, ApplyReport, ApplyResult, PlanAnswer, PlanStep } from "./apply.ts";
 export type { CredentialStatus } from "./env.ts";
-export type { ChangeEvent, ChangeFacts, ChangeReport, ChangeState } from "./change.ts";
+export type { ChangeDeploy, ChangeEvent, ChangeFacts, ChangeReport, ChangeState, ChangeVerified } from "./change.ts";
 
 // What a UI in the browser may use from the runtime, besides types: `@sanoma-ai/workflows/shared`.
 // Nothing here imports DBOS, Node or zod, so a browser bundle can carry it; the runtime uses the
@@ -251,6 +251,11 @@ export const CHANGE_MERGE = "sanoma.change.merge";
 export const CHANGE_CLOSE = "sanoma.change.close";
 /** The DBOS event a change run publishes its `ChangeState` on. */
 export const CHANGE_EVENT = "change";
+/**
+ * The `recv` topic a change run is told what happened to its change on (a `ChangeEvent`): never an
+ * approval's, whose topic is its id (`approval-<n>`).
+ */
+export const CHANGE_TOPIC = "change:event";
 
 /** The workflows the runtime adds itself, which a config's own may not be named: drift, apply, call and change. */
 export const BUILT_IN_WORKFLOWS: ReadonlySet<string> = new Set([

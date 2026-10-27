@@ -144,6 +144,8 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     secrets: storedSecrets(() => secrets.db(), "sanoma"),
     workflows: resolved.workflows,
     outlines: new Map([...resolved.workflows].map(([name, wf]) => [name, outlineOf(wf)])),
+    // Filled below, before any run starts: every name of this config's is registered then.
+    registered: registered as unknown as ReadonlyMap<string, (args: RunArgs) => Promise<unknown>>,
     stopped: false,
     deadlines: deadlineRegistry(),
   };

@@ -14,8 +14,15 @@ import type { WakeupRegistration } from "./wakeup.ts";
 // blocked in a `ctx` wait, and until when. DBOS sees both as PENDING. A worker that registers a
 // wakeup stops itself once nothing can run before the next deadline (`stopWhenIdle`).
 
-/** What a run blocked in a `ctx` wait waits for: a sleep, until its deadline, or an approval's decision, which has none. */
-export type Wait = { kind: "sleep"; until: number } | { kind: "approval" };
+/**
+ * What a run blocked in a wait waits for: a sleep, until its deadline; or, with no deadline, an
+ * approval's decision, a message (a change run's `ChangeEvent`), or another run it started.
+ */
+export type Wait =
+  | { kind: "sleep"; until: number }
+  | { kind: "approval" }
+  | { kind: "message" }
+  | { kind: "run"; id: string };
 
 /** A deadline besides the sleeping runs', such as a schedule's next fire; undefined for none. */
 export type DeadlineSource = () => Date | undefined;

@@ -18,6 +18,13 @@ interface CompanyApi {
     op: string;
     input: unknown;
   }, unknown>;
+  /** Publish a change: the workflow `change`, built in. */
+  change: WorkflowFn<{
+    id: string;
+    title: string;
+    body?: string;
+    page?: string;
+  }, unknown>;
   /** Move a lead on: the workflow `outbound-next`. */
   outboundNext: WorkflowFn<{
     company: string;

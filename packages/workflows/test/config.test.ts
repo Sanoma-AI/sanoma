@@ -172,13 +172,15 @@ describe("resolveConfig on the connectors' setups", () => {
 });
 
 describe("a change's operations, built in", () => {
-  it("are in every config, with no connector, each with the placeholder driver", async () => {
+  it("are in every config, with no connector, each with a driver over the worker's repository", async () => {
     const resolved = resolveConfig({ workflows: [], connectors: [] });
     const ids = ["sanoma.change.open", "sanoma.change.review", "sanoma.change.merge", "sanoma.change.close"];
     expect([...resolved.ops.keys()]).toEqual(ids);
     expect(ids.map((id) => resolved.ops.get(id)!.effect)).toEqual(["write", "write", "write", "write"]);
     expect(resolved.ops.get("sanoma.change.merge")!.target!({ id: "c1" })).toBe("change:c1");
-    await expect(resolved.drivers.get("sanoma.change.merge")!({}, {} as never)).rejects.toThrow("not built");
+    await expect(resolved.drivers.get("sanoma.change.merge")!({}, {} as never)).rejects.toThrow(
+      "This worker was given no repository",
+    );
     // Not a vendor with credentials to set.
     expect(resolved.driversByVendor.size).toBe(0);
   });
