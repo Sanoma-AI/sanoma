@@ -304,6 +304,8 @@ describe("the draft card", () => {
     });
     expect(failing).toMatch(/<button[^>]*aria-disabled="true"[^>]*>Send for review<\/button>/);
     expect(failing).toContain("The checks fail: fix what they find first.");
+    const empty = await render({ ...card(passing), files: [], summary: "" }, { change: "none" });
+    expect(empty).toContain("Nothing is committed on the draft yet.");
     const ready = await render(card(passing), { change: "none" });
     expect(ready).toMatch(/<button[^>]*aria-disabled="false"[^>]*>Send for review<\/button>/);
     expect(ready).not.toContain("Merge the branch to apply it.");
@@ -320,6 +322,12 @@ describe("the draft card", () => {
     expect(closed).toContain("Closed");
     expect(closed).toContain("Open the review");
     expect(closed).toContain("Send for review");
+    // A published draft is in main: nothing to send again.
+    const merged = await render(card(passing), {
+      change: { ...waiting, status: "finished", state: { phase: "merged" } },
+    });
+    expect(merged).toContain("Published");
+    expect(merged).not.toContain("Send for review");
   });
 
   it("keeps merging by hand without a remote", async () => {

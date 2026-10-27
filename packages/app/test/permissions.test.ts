@@ -251,16 +251,19 @@ describe("the Permissions page", () => {
   });
 
   it("says under the grid whether the host requires a merge, and nothing without a remote", async () => {
-    expect(await permissionsPage(app)).not.toContain("check on <code>main</code>");
+    expect(await permissionsPage(app)).not.toContain("the sanoma check on main");
     const { enforcement } = remote.host;
     origin = remote.url;
     try {
       expect(await permissionsPage(app)).toContain(
-        "fakegit does not require a pull request and the <code>sanoma</code> check on <code>main</code>. a fake host enforces nothing Until then a push around Sanoma lands in the ledger as a gap.",
+        "fakegit does not require a pull request or the sanoma check on main. a fake host enforces nothing Until then a push around Sanoma lands in the ledger as a gap.",
       );
+      // A ruleset requiring the pull request alone: what it lacks.
+      remote.host.enforcement = async () => ({ pullRequest: true, check: false });
+      expect(await permissionsPage(app)).toContain("fakegit does not require the sanoma check on main. Until then");
       remote.host.enforcement = async () => ({ pullRequest: true, check: true });
       const html = await permissionsPage(app);
-      expect(html).toContain("fakegit requires a pull request and the <code>sanoma</code> check on <code>main</code>.");
+      expect(html).toContain("fakegit requires a pull request and the sanoma check on main.");
       expect(html).not.toContain("Until then");
     } finally {
       remote.host.enforcement = enforcement;

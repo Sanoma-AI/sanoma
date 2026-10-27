@@ -3,7 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import type { PreviewAnswer } from "@sanoma-ai/workflows";
 import type { Span } from "@sanoma-ai/workflows/describe";
 import { ANONYMOUS, approverLabel } from "@sanoma-ai/workflows/shared";
-import { useRef, useState } from "react";
+import { Suspense, useRef, useState } from "react";
 import { Button } from "#/components/ui/button.tsx";
 import { Card, CardHeader } from "#/components/ui/card.tsx";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "#/components/ui/sheet.tsx";
@@ -28,12 +28,11 @@ import { hostEnforcementQuery, permissionsQuery } from "../queries.ts";
 export const Route = createFileRoute("/permissions")({
   staticData: { crumb: "Permissions" },
   head: ({ match }) => pageTitle(match.staticData.crumb),
-  loader: async ({ context: { queryClient } }) => {
+  loader: ({ context: { queryClient } }) => {
     if (!import.meta.env.SSR) void loadCode();
-    await Promise.all([
-      queryClient.query({ ...permissionsQuery(), staleTime: "static" }),
-      queryClient.query(hostEnforcementQuery()),
-    ]);
+    // The host's line streams in after the grid: a slow host never holds the page.
+    void queryClient.prefetchQuery(hostEnforcementQuery());
+    return queryClient.query({ ...permissionsQuery(), staleTime: "static" });
   },
   component: PermissionsPage,
 });
@@ -101,7 +100,9 @@ function PermissionsPage() {
               }}
             />
           </Card>
-          <HostEnforcementLine />
+          <Suspense fallback={null}>
+            <HostEnforcementLine />
+          </Suspense>
           {data.files.map(({ file, text, policies }) => (
             <PolicyCode key={file} file={file} text={text} span={policies.find((p) => p.id === shown)?.span} />
           ))}
@@ -163,21 +164,14 @@ function PolicyLine({ data }: { data: PermissionsResponse }) {
 function HostEnforcementLine() {
   const { data } = useSuspenseQuery(hostEnforcementQuery());
   if (!data) return null;
-  const enforced = data.pullRequest && data.check;
+  const missing = [!data.pullRequest && "a pull request", !data.check && "the sanoma check"].filter(Boolean);
   return (
     <p className="flex items-baseline gap-2 text-sm text-muted-foreground">
-      <StatusDot tone={enforced ? "ok" : "waiting"} />
+      <StatusDot tone={missing.length ? "waiting" : "ok"} />
       <span>
-        {enforced ? (
-          <>
-            {data.host} requires a pull request and the <code>sanoma</code> check on <code>main</code>.
-          </>
-        ) : (
-          <>
-            {data.host} does not require a pull request and the <code>sanoma</code> check on <code>main</code>.
-            {data.reason && ` ${data.reason}`} Until then a push around Sanoma lands in the ledger as a gap.
-          </>
-        )}
+        {missing.length
+          ? `${data.host} does not require ${missing.join(" or ")} on main.${data.reason ? ` ${data.reason}` : ""} Until then a push around Sanoma lands in the ledger as a gap.`
+          : `${data.host} requires a pull request and the sanoma check on main.`}
       </span>
     </p>
   );

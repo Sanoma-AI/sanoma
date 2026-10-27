@@ -61,7 +61,8 @@ export function DraftCardView({ draft }: { draft: DraftCard }) {
         )}
       </CardContent>
       <CardFooter className="border-t text-xs text-muted-foreground">
-        {remote ? (
+        {/* A card saved before cards carried their draft's id keeps its old words. */}
+        {remote && draft.draft !== undefined ? (
           <Review draft={draft} />
         ) : (
           "Merge the branch to apply it. The live instance keeps running the old code until it restarts."
@@ -73,8 +74,8 @@ export function DraftCardView({ draft }: { draft: DraftCard }) {
 
 /**
  * Where the draft goes from here, on a repository with a remote: its change's phase and Open the
- * review once it has one, and Send for review while it has none open (disabled, saying why,
- * until the checks since the last edit pass).
+ * review once it has one, and Send for review while it has none open and none published (disabled,
+ * saying why, until something is committed and the checks since the last edit pass).
  */
 function Review({ draft }: { draft: DraftCard }) {
   const { data: change, error } = useQuery(changeQuery(draft.draft));
@@ -82,11 +83,13 @@ function Review({ draft }: { draft: DraftCard }) {
   if (error && !isNotFound(error)) return <>Could not read its change: {error.message}</>;
   if (!change && !error) return null;
   const why =
-    draft.checks === undefined
-      ? "Run the checks first: ask the agent to check the draft."
-      : draft.checks.ok
-        ? undefined
-        : "The checks fail: fix what they find first.";
+    draft.files.length === 0
+      ? "Nothing is committed on the draft yet."
+      : draft.checks === undefined
+        ? "Run the checks first: ask the agent to check the draft."
+        : draft.checks.ok
+          ? undefined
+          : "The checks fail: fix what they find first.";
   const button = (
     <Button
       size="xs"
@@ -112,7 +115,8 @@ function Review({ draft }: { draft: DraftCard }) {
           </ButtonLink>
         </>
       )}
-      {(!change || isEnded(change.status)) && (why === undefined ? button : <Tip tip={why}>{button}</Tip>)}
+      {(!change || (isEnded(change.status) && change.state.phase !== "merged")) &&
+        (why === undefined ? button : <Tip tip={why}>{button}</Tip>)}
     </div>
   );
 }

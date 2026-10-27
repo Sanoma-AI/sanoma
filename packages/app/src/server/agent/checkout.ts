@@ -92,13 +92,15 @@ export async function openDraft(app: AppContext, chat: Chat): Promise<Draft> {
 /**
  * Tells the change of the draft `id`, when it has one under way, that its branch has new commits,
  * as `by` (`SanomaClient.changeEvent`): its run plans again and withdraws a Publish asked on the
- * old head. Nothing when the draft has no change, or its change has ended.
+ * old head. Nothing when the draft has no change, or its change has ended. A notice that fails is
+ * logged, never the turn's failure: the commit has landed, and the merge refuses a head that moved.
  */
 export async function tellCommits(client: SanomaClient, id: string, by: Principal): Promise<void> {
   try {
     await client.changeEvent(id, { kind: "commits" }, { by });
   } catch (err) {
-    if (!NO_CHANGE.has(errorCode(err) ?? "")) throw err;
+    if (!NO_CHANGE.has(errorCode(err) ?? ""))
+      console.error(`sanoma app: telling the change of ${id} its new commits failed:`, err);
   }
 }
 
