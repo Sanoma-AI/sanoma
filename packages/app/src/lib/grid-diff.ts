@@ -24,7 +24,10 @@ export interface DiffCell {
   change: CellChange;
 }
 
-/** A row of both grids: `changed` when a cell of its own or of an operation under it is. */
+/**
+ * A row of both grids: `changed` when a cell of its own or of an operation under it is, a cell in
+ * a new or removed column too, since its answer there is new or gone.
+ */
 export interface DiffRow {
   id: string;
   title?: string;
@@ -60,10 +63,10 @@ export function compareAnswers(before?: PreviewAnswer, after?: PreviewAnswer): C
   return STRICTNESS[after.answer] > STRICTNESS[before.answer] ? "looser" : "tighter";
 }
 
-/** Each of `after`'s items, then each of `before`'s it lacks, by key: the union in a stable order. */
-function union<T>(before: readonly T[], after: readonly T[], key: (item: T) => string): T[] {
-  const kept = new Set(after.map(key));
-  return [...after, ...before.filter((item) => !kept.has(key(item)))];
+/** Each of `after`'s items, then each of `before`'s it lacks: the union in a stable order. */
+function union<T>(before: readonly T[], after: readonly T[]): T[] {
+  const kept = new Set(after);
+  return [...after, ...before.filter((item) => !kept.has(item))];
 }
 
 /** Rows by `id#occurrence`: a workflow may use an operation twice; elsewhere an id is the row's alone. */
@@ -84,8 +87,7 @@ function byOccurrence<R extends PermissionsRow>(rows: readonly R[]): Map<string,
  * direct operations by id. A row or column only `after` has is `added`, only `before` `removed`.
  */
 export function diffGrids(before: PermissionsGrid, after: PermissionsGrid): GridDiff {
-  // `null` (no group) apart from a group named "null".
-  const columns = union(before.groups, after.groups, (group) => JSON.stringify(group));
+  const columns = union(before.groups, after.groups);
   const at = (grid: PermissionsGrid) => columns.map((group) => grid.groups.indexOf(group));
   const beforeAt = at(before);
   const afterAt = at(after);
@@ -112,7 +114,7 @@ export function diffGrids(before: PermissionsGrid, after: PermissionsGrid): Grid
   /** Two lists of rows aligned by `id#occurrence`, `after`'s order first. */
   const rowsOf = <R extends PermissionsRow>(was: readonly R[], now: readonly R[], row: (a?: R, b?: R) => DiffRow) => {
     const [a, b] = [byOccurrence(was), byOccurrence(now)];
-    return union([...a.keys()], [...b.keys()], (key) => key).map((key) => row(a.get(key), b.get(key)));
+    return union([...a.keys()], [...b.keys()]).map((key) => row(a.get(key), b.get(key)));
   };
 
   const workflows = rowsOf(before.workflows, after.workflows, (was, now) =>
@@ -145,9 +147,9 @@ export function onlyChanged(diff: GridDiff, maxRows = Infinity): GridDiff {
   return { ...diff, workflows: take(diff.workflows), ops: take(diff.ops) };
 }
 
-/** An answer in the grid's words: a hold names whom it asks. */
-export const answerWords = (answer: PreviewAnswer): string =>
-  answer.answer === "hold" && answer.approver ? `hold · ${approverLabel(answer.approver)}` : answer.answer;
+/** An answer in the grid's words: a hold names whom it asks, after `joint` (a sentence's " for "). */
+export const answerWords = (answer: PreviewAnswer, joint = " · "): string =>
+  answer.answer === "hold" && answer.approver ? `hold${joint}${approverLabel(answer.approver)}` : answer.answer;
 
 /**
  * A cell in words, before → after ("hold · group admin → allow"); one answer when it is the same,
@@ -159,15 +161,11 @@ export function cellWords({ before, after, change }: DiffCell): string {
   return answer ? answerWords(answer) : "";
 }
 
-/** An answer as a sentence says it: a hold, whom it asks. */
-const spokenAnswer = (answer: PreviewAnswer): string =>
-  answer.answer === "hold" && answer.approver ? `hold for ${approverLabel(answer.approver)}` : answer.answer;
-
 /** A changed cell spoken, its change then its answers ("loosened: hold for group admin, then allow"), for its label. */
 export const cellSpoken = ({ before, after, change }: DiffCell): string =>
   `${CHANGE_WORDS[change]}: ${[before, after]
     .filter((answer) => answer !== undefined)
-    .map(spokenAnswer)
+    .map((answer) => answerWords(answer, " for "))
     .join(", then ")}`;
 
 /** What a change did to a cell, in a word. */
