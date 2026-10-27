@@ -47,6 +47,7 @@ import type { AppContext, LoginProvider } from "../src/context.ts";
 import { availableConnectors, JSDELIVR, NPM_REGISTRY } from "../src/server/available.ts";
 import { databaseHost, loopbackLogin, placeOf } from "../src/loopback.ts";
 import { admitting } from "../src/login/admission.ts";
+import { barLabels, barLink } from "./bar-helpers.ts";
 import {
   type ActorContext,
   actorOf,
@@ -328,19 +329,6 @@ async function page(path: string, base = app.url, init?: RequestInit) {
   const html = await res.text();
   return { status: res.status, html, text: html.replaceAll("<!-- -->", "") };
 }
-
-/** The bar's sections, in its groups: each group's labels, in order. */
-const barGroups = (html: string) =>
-  (html.match(/<nav aria-label="Sections"[^>]*>([\s\S]*?)<\/nav>/)?.[1] ?? "")
-    .split("</ul>")
-    .map((group) => [...group.matchAll(/>([^<>]+)<\/a>/g)].map(([, label]) => label))
-    .filter((labels) => labels.length > 0);
-
-/** The opening tag of a section's link in the bar: the one to `to`. */
-const section = (html: string, to: string) =>
-  html
-    .match(/<nav aria-label="Sections"[^>]*>([\s\S]*?)<\/nav>/)?.[1]
-    ?.match(new RegExp(`<a [^>]*href="${to}"[^>]*>`))?.[0];
 
 /** The bar's Chat button: whether the chat column is open (`aria-expanded`), the column it controls then. */
 function chatOpen(html: string) {
@@ -868,13 +856,13 @@ describe("the page", () => {
     // The bar: Chat, then Inbox and Workflows, no site tiles (the package's own build has no
     // sites), then Setup (with Data and Permissions, as the config has collections and a policy),
     // the current lit.
-    expect(barGroups(html)).toEqual([
+    expect(barLabels(html)).toEqual([
       ["Inbox", "Workflows"],
       ["Data", "Resources", "Connectors", "Apps", "Permissions", "Go live"],
     ]);
-    expect(section(html, "/apps")).toBeDefined();
-    expect(section(html, "/workflows")).toMatch(/data-active="true"[^>]*aria-current="page"/);
-    expect(section(html, "/inbox")).not.toMatch(/data-active="true"|aria-current/);
+    expect(barLink(html, "/apps")).toBeDefined();
+    expect(barLink(html, "/workflows")).toMatch(/data-active="true"[^>]*aria-current="page"/);
+    expect(barLink(html, "/inbox")).not.toMatch(/data-active="true"|aria-current/);
     // At its foot, what the window is, the test database being on this machine, its tip the host.
     expect(html).toMatch(/>This computer<\/span><span [^>]*hidden="">Database on [^<@]+<\/span>/);
     // The config has a policy: Permissions says what it does, so the overview says nothing of it.
@@ -1399,8 +1387,8 @@ describe("the page", () => {
     expect(folded.html).not.toContain('id="chat"');
     expect(folded.html).not.toContain('aria-label="Message the agent"');
     // The bar's sections remain, the current one lit.
-    expect(section(folded.html, "/workflows")).toContain('aria-current="page"');
-    expect(section(folded.html, "/inbox")).not.toContain("aria-current");
+    expect(barLink(folded.html, "/workflows")).toContain('aria-current="page"');
+    expect(barLink(folded.html, "/inbox")).not.toContain("aria-current");
     // Open, said so or by default: anything else in the cookie reads as open.
     for (const cookie of ["sanoma_chat=open", "sanoma_chat=nonsense"]) {
       const open = await page("/resources", app.url, { headers: { cookie } });
@@ -1498,7 +1486,7 @@ describe("the page", () => {
     expect(filtered.html).toContain(`href="/workflows/announce?view=runs&amp;runs=sandbox&amp;run=${sandboxId}"`);
     expect(tabNamed(filtered.html, "Runs")?.count).toBe(sandbox.length);
     // The filter is the page's: the bar's links do not carry it.
-    expect(section(filtered.html, "/workflows")).toBeDefined();
+    expect(barLink(filtered.html, "/workflows")).toBeDefined();
     expect(filtered.html).not.toContain('href="/workflows?runs=');
     expect(filtered.html).not.toContain('href="/inbox?runs=');
 
@@ -1808,7 +1796,7 @@ describe("resources and drift", () => {
     expect(tabNamed(runs.html, "All runs")?.selected).toBe(true);
     expect(tabNamed(runs.html, "All")).toMatchObject({ href: "/workflows", selected: false });
     // The bar's Workflows is lit on both.
-    for (const shown of [overview, runs]) expect(section(shown.html, "/workflows")).toContain('aria-current="page"');
+    for (const shown of [overview, runs]) expect(barLink(shown.html, "/workflows")).toContain('aria-current="page"');
     expect(runs.html).toContain('aria-label="Status"');
   });
 
@@ -2070,7 +2058,7 @@ describe("an app configured otherwise", () => {
       const lead = (await workflowsAs("marketing-lead")).replaceAll("<!-- -->", "");
       expect(tabNamed(lead, "Waiting on you")?.count).toBe(1);
       // This app's root has no policies: no Permissions in the bar, and the overview says so.
-      expect(section(lead, "/permissions")).toBeUndefined();
+      expect(barLink(lead, "/permissions")).toBeUndefined();
       expect(lead).toContain("No policy: every operation call is allowed");
       // Announce first, its count beside its title, though drift ran last.
       const rows = lead.slice(lead.indexOf("<tbody"));

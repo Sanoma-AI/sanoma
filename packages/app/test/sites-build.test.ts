@@ -33,6 +33,7 @@ import { executablePath, launch } from "puppeteer-core";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { ACTOR_COOKIE, ACTOR_HEADER } from "../src/api.ts";
 import { type App, startApp } from "../src/index.ts";
+import { barGroups, barLink } from "./bar-helpers.ts";
 import { loginContexts } from "./fixtures/company-sites/login.ts";
 import fixture from "./fixtures/company-sites/sanoma.config.ts";
 
@@ -151,20 +152,6 @@ function linkTag(html: string, text: string) {
   const start = html.lastIndexOf("<a ", html.indexOf(text));
   return start < 0 ? undefined : html.slice(start, html.indexOf(">", start) + 1);
 }
-
-/** The bar's sections: its `<nav>`'s contents. */
-const barOf = (html: string) => html.match(/<nav aria-label="Sections"[^>]*>([\s\S]*?)<\/nav>/)?.[1] ?? "";
-
-/** The bar's items, in its groups: each group's links, `[href, label]`, in order. */
-const barGroups = (html: string) =>
-  barOf(html)
-    .split("</ul>")
-    .map((group) => [...group.matchAll(/<a [^>]*href="([^"]+)"[^>]*>(?:(?!<\/a>)[\s\S])*>([^<>]+)<\/a>/g)])
-    .map((links) => links.map(([, href, label]) => [href, label]))
-    .filter((links) => links.length > 0);
-
-/** The opening tag of the bar's link to `to`. */
-const tile = (html: string, to: string) => barOf(html).match(new RegExp(`<a [^>]*href="${to}"[^>]*>`))?.[0];
 
 /** The page's canonical URL. */
 const canonical = (html: string) => /<link rel="canonical" href="([^"]+)"/.exec(html)?.[1];
@@ -298,11 +285,11 @@ describe("a company's app with its sites", () => {
         ["/setup", "Go live"],
       ],
     ]);
-    expect(tile(html, "/sites/hello")).toContain('aria-current="page"');
-    expect(tile(html, "/sites/members")).not.toContain("aria-current");
+    expect(barLink(html, "/sites/hello")).toContain('aria-current="page"');
+    expect(barLink(html, "/sites/members")).not.toContain("aria-current");
     // Lit on the site's other pages too.
     const styled = (await (await fetch(new URL("/sites/hello/styled", app.url))).text()).replaceAll("<!-- -->", "");
-    expect(tile(styled, "/sites/hello")).toContain('aria-current="page"');
+    expect(barLink(styled, "/sites/hello")).toContain('aria-current="page"');
     expect(html).toContain('<aside id="chat" aria-label="Chat"');
     const workflows = await fetch(new URL("/workflows", app.url));
     expect(workflows.status).toBe(200);
@@ -420,8 +407,9 @@ describe("a company's app with its sites", () => {
       /<ul aria-label="Languages"[^>]*><li><code>en<\/code><span[^>]*> default<\/span><\/li><li><code>fr<\/code><\/li><\/ul>/,
     );
     expect(hello).toMatch(/<td[^>]*><span[^>]*>One<\/span><\/td>/);
-    // No tile in the bar for this page: Data's header leads here.
-    expect(tile(html, "/sites")).toBeUndefined();
+    // No tile in the bar for this page: Data's header leads here, and Data is lit here.
+    expect(barLink(html, "/sites")).toBeUndefined();
+    expect(barLink(html, "/data")).toContain('data-active="true"');
     const data = (await (await fetch(new URL("/data", app.url))).text()).replaceAll("<!-- -->", "");
     expect(linkTag(data, ">Sites</a>")).toContain('href="/sites"');
   });
