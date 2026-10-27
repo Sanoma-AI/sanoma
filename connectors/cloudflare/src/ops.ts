@@ -226,7 +226,7 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
       COMPARED.some((field) => (field in planned || field === "domains") && !same(field, runs[field], state[field])) ||
       sorted(Object.keys(secrets ?? {})) !== sorted(found.secrets);
     if (!changed) return { action: "none", planned: state, ...NONE };
-    return { action: "update", planned: { ...state, ...planned }, ...NONE };
+    return { action: "update", planned: { ...state, ...runs }, ...NONE };
   };
 
   /** Waits until the Worker at `url` answers at `revision`, which starts its container. */

@@ -93,9 +93,10 @@ jobs:
           tag="ghcr.io/sanoma-ai/runtime:$(jq -r .version packages/sanoma/package.json)"
           if docker buildx imagetools inspect "$tag" > /dev/null 2> "$RUNNER_TEMP/inspect.err"; then
             echo "::notice title=Runtime image skipped::$tag is already on ghcr.io."
-          # Only a missing tag (or, before the first push, a missing package) is a push; any other
-          # error stops here, as pushing then could replace a tag that is there.
-          elif grep -qiE ': not found|manifest unknown|name unknown' "$RUNNER_TEMP/inspect.err"; then
+          # Only a missing tag (or, before the first push, a missing package, which ghcr.io answers
+          # as denied) is a push; any other error stops here, as pushing then could replace a tag
+          # that is there.
+          elif grep -qiE ': not found|manifest unknown|name unknown|denied' "$RUNNER_TEMP/inspect.err"; then
             echo "tag=$tag" >> "$GITHUB_OUTPUT"
           else
             cat "$RUNNER_TEMP/inspect.err" >&2

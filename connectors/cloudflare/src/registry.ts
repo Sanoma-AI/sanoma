@@ -9,7 +9,7 @@ import { DriverError, errorMessage, retryableStatus } from "@sanoma-ai/workflows
  * credentials the driver gets from Cloudflare.
  */
 
-/** Cloudflare's registry. An image already there runs as declared; any other is copied in. */
+/** Cloudflare's registry. An image already in the account's runs as declared; any other is copied in. */
 export const CLOUDFLARE_REGISTRY = "registry.cloudflare.com";
 
 /** The one image manifest a copy takes, never an index: the release pushes one (`provenance: false`). */
@@ -40,11 +40,11 @@ function parse(image: string) {
 
 /**
  * The image the account's container application runs for `image`: `image` itself when it is in
- * Cloudflare's registry, else its copy there, `<registry>/<account>/<path with - for />:<tag>`
+ * the account's registry, else its copy there, `<registry>/<account>/<path with - for />:<tag>`
  * (`ghcr.io/sanoma-ai/runtime:0.8.1` → `registry.cloudflare.com/<account>/sanoma-ai-runtime:0.8.1`).
  */
 export function accountImage(image: string, account: string, registry = CLOUDFLARE_REGISTRY): string {
-  if (image.startsWith(`${CLOUDFLARE_REGISTRY}/`)) return image;
+  if (image.startsWith(`${CLOUDFLARE_REGISTRY}/${account}/`)) return image;
   const { name, sep, reference } = parse(image);
   return `${registry}/${account}/${name.replaceAll("/", "-")}${sep}${reference}`;
 }
@@ -76,6 +76,7 @@ export async function copyImage(image: string, target: CopyTarget, timeoutMs: nu
   const source = parse(image);
   const to = parse(copy);
   const ref = source.reference;
+  const refuse = (why: string) => new DriverError(`cloudflare: copying ${image}: ${why}`, { retryable: false });
 
   /** A request of the copy's: an answer that is not `ok` (or in `also`) is a DriverError. */
   const send = async (url: string, init: RequestInit & { duplex?: "half" }, also: number[] = []) => {
@@ -116,10 +117,7 @@ export async function copyImage(image: string, target: CopyTarget, timeoutMs: nu
     if (/^basic/i.test(challenge) && basic) return given;
     const params = Object.fromEntries([...challenge.matchAll(/(\w+)="([^"]*)"/g)].map(([, k, v]) => [k!, v!]));
     if (!/^bearer/i.test(challenge) || !params.realm) {
-      throw new DriverError(`cloudflare: copying ${image}: ${host} asks for no credentials it can be given`, {
-        retryable: false,
-        status: 401,
-      });
+      throw refuse(`${host} asks for no credentials it can be given`);
     }
     const url = new URL(params.realm);
     if (params.service) url.searchParams.set("service", params.service);
@@ -128,6 +126,7 @@ export async function copyImage(image: string, target: CopyTarget, timeoutMs: nu
       token?: string;
       access_token?: string;
     };
+    if (!(token ?? access_token)) throw refuse(`${url.origin}${url.pathname} gave no token`);
     return { authorization: `Bearer ${token ?? access_token}` };
   };
 
@@ -136,12 +135,9 @@ export async function copyImage(image: string, target: CopyTarget, timeoutMs: nu
   const got = await send(`${from}/manifests/${ref}`, { headers: { ...pull, accept: MANIFESTS.join(", ") } });
   const mediaType = got.headers.get("content-type")?.split(";")[0]?.trim() ?? "";
   const bytes = new Uint8Array(await got.arrayBuffer());
-  if (!MANIFESTS.includes(mediaType)) {
-    throw new DriverError(`cloudflare: copying ${image}: its manifest is ${mediaType || "untyped"}, not one image's`, {
-      retryable: false,
-    });
-  }
+  if (!MANIFESTS.includes(mediaType)) throw refuse(`its manifest is ${mediaType || "untyped"}, not one image's`);
   const digest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+  if (source.sep === "@" && digest !== ref) throw refuse(`its registry answered a manifest of digest ${digest}`);
 
   const basic = `Basic ${Buffer.from(`${target.username}:${target.password}`).toString("base64")}`;
   const push = await authorize(to.host, `repository:${to.name}:pull,push`, basic);
@@ -154,21 +150,25 @@ export async function copyImage(image: string, target: CopyTarget, timeoutMs: nu
   if (there.ok && there.headers.get("docker-content-digest") === digest) return copy;
 
   const manifest = JSON.parse(new TextDecoder().decode(bytes)) as {
-    config: { digest: string };
-    layers: { digest: string }[];
+    config: { digest: string; size: number };
+    layers: { digest: string; size: number }[];
   };
-  for (const { digest: blob } of [manifest.config, ...manifest.layers]) {
+  for (const { digest: blob, size } of [manifest.config, ...manifest.layers]) {
     const head = await ask(`${into}/blobs/${blob}`, { method: "HEAD", headers: push }, [404]);
     if (head.ok) continue;
     const started = await ask(`${into}/blobs/uploads/`, { method: "POST", headers: push });
     const location = new URL(started.headers.get("location") ?? "", `${into}/blobs/uploads/`);
     location.searchParams.set("digest", blob);
-    const body = await send(`${from}/blobs/${blob}`, { headers: pull });
+    const { body } = await send(`${from}/blobs/${blob}`, { headers: pull });
+    // One monolithic upload of a known length, streamed: no layer is held in memory.
     await ask(location.href, {
       method: "PUT",
-      headers: { ...push, "content-type": "application/octet-stream" },
-      body: body.body,
+      headers: { ...push, "content-type": "application/octet-stream", "content-length": String(size) },
+      body,
       duplex: "half",
+    }).catch(async (error: unknown) => {
+      await body?.cancel().catch(() => undefined);
+      throw error;
     });
   }
   await ask(`${into}/manifests/${ref}`, {
