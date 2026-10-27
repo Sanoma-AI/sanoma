@@ -1,13 +1,13 @@
 import type { ConfigDescription } from "@sanoma-ai/workflows/describe";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { ClientOnly, Link } from "@tanstack/react-router";
+import { ClientOnly, Link, trimPathRight, useRouterState } from "@tanstack/react-router";
 import type { Icon as PhosphorIcon } from "@phosphor-icons/react";
-import { BrowserIcon } from "@phosphor-icons/react/dist/csr/Browser";
 import { CubeIcon } from "@phosphor-icons/react/dist/csr/Cube";
 import { KeyIcon } from "@phosphor-icons/react/dist/csr/Key";
 import { PlugIcon } from "@phosphor-icons/react/dist/csr/Plug";
 import { RocketIcon } from "@phosphor-icons/react/dist/csr/Rocket";
 import { SparkleIcon } from "@phosphor-icons/react/dist/csr/Sparkle";
+import { SquaresFourIcon } from "@phosphor-icons/react/dist/csr/SquaresFour";
 import { TableIcon } from "@phosphor-icons/react/dist/csr/Table";
 import { TrayIcon } from "@phosphor-icons/react/dist/csr/Tray";
 import { TreeStructureIcon } from "@phosphor-icons/react/dist/csr/TreeStructure";
@@ -16,50 +16,98 @@ import { Fragment, type ReactNode, useState } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Button } from "#/components/ui/button.tsx";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "#/components/ui/sheet.tsx";
-import { useSites } from "#/lib/sites.ts";
+import { siteOf } from "#/lib/locales.ts";
+import { type Site, useSites } from "#/lib/sites.ts";
 import type { Tone } from "#/lib/tone.ts";
 import { cn } from "#/lib/utils.ts";
 import type { AppConfig, Place } from "../../api.ts";
 import { configQuery, pendingOf, waitingRunsQuery } from "../../queries.ts";
 import { Tip, toneBadge } from "../kit.tsx";
+import { SiteIcon } from "../site-icon.tsx";
 import { NavUser } from "./nav-user.tsx";
 
-// The bar: Chat, then the app's sections in groups, then who you are. A section is a page; there
-// is nothing beside the bar but the chat column.
+// The bar: Chat, then Sanoma's own pages, the company's sites and how it is set up, in groups,
+// then who you are. Each item is a page; there is nothing beside the bar but the chat column.
 
-/** A section in the bar: its page, lit there and on the pages under it (a site's, for Sites). */
-type Section = { to: string; label: string; icon: PhosphorIcon; when?: "sites" | "data" | "policy" };
+/**
+ * An item in the bar: its page, lit there and on the pages under it (and on the page `also` names),
+ * shown only `when` the config has those.
+ */
+type Section = { to: string; label: string; icon: PhosphorIcon; when?: "data" | "policy"; also?: string };
 
-/** The sections, in groups split by a short rule: what happens, what the company built, how it is set up. */
-const GROUPS: Section[][] = [
-  [
-    { to: "/inbox", label: "Inbox", icon: TrayIcon },
-    { to: "/workflows", label: "Workflows", icon: TreeStructureIcon },
-  ],
-  [
-    { to: "/sites", label: "Sites", icon: BrowserIcon, when: "sites" },
-    { to: "/data", label: "Data", icon: TableIcon, when: "data" },
-  ],
-  [
-    { to: "/resources", label: "Resources", icon: CubeIcon },
-    { to: "/connectors", label: "Connectors", icon: PlugIcon },
-    { to: "/permissions", label: "Permissions", icon: KeyIcon, when: "policy" },
-    { to: "/setup", label: "Go live", icon: RocketIcon },
-  ],
+/** What happens, across the company's apps: Sanoma's own pages. */
+const WORK: Section[] = [
+  { to: "/inbox", label: "Inbox", icon: TrayIcon },
+  { to: "/workflows", label: "Workflows", icon: TreeStructureIcon },
 ];
 
-/** What the bar reads from the config: whether it has collections and a policy. */
+/** How the company is set up. Data's page leads to the Sites page too, and is lit there. */
+const SETUP: Section[] = [
+  { to: "/data", label: "Data", icon: TableIcon, when: "data", also: "/sites" },
+  { to: "/resources", label: "Resources", icon: CubeIcon },
+  { to: "/connectors", label: "Connectors", icon: PlugIcon },
+  { to: "/apps", label: "Apps", icon: SquaresFourIcon },
+  { to: "/permissions", label: "Permissions", icon: KeyIcon, when: "policy" },
+  { to: "/setup", label: "Go live", icon: RocketIcon },
+];
+
+/** What the bar reads from the config: whether it has collections and a policy, and which sites are public. */
 const selectBar = (config: ConfigDescription) => ({
   data: config.collections.length > 0,
   policy: config.policy.defined,
+  public: new Set(config.sites.filter((site) => site.public).map((site) => site.name)),
 });
+
+/** A tile of the bar: its link, label and icon, and whether it is lit beyond its link's own pages. */
+type Tile = { to: string; label: string; icon: ReactNode; lit?: boolean };
+
+/** A site's tile: to its first page (its home, when it has one), lit on any of its pages. */
+const siteTile = ({ title, icon, pages }: Site, isPublic: boolean, lit: boolean): Tile => ({
+  to: pages[0]!.to,
+  label: title,
+  icon: <SiteIcon icon={icon} public={isPublic} />,
+  lit,
+});
+
+/**
+ * The bar's groups, split by a short rule: Inbox and Workflows; the company's sites, a group for
+ * the root's and then one for each app's, by the app's name (a site with no page it can link to
+ * left out); then Setup. Data shows with collections, or with sites, its page leading to theirs;
+ * Permissions with a policy.
+ */
+function useGroups(): Tile[][] {
+  const { data: has } = useSuspenseQuery({ ...configQuery(), select: selectBar });
+  const sites = useSites();
+  const shown = { data: has.data || sites.length > 0, policy: has.policy };
+  const path = useRouterState({ select: ({ location }) => trimPathRight(location.pathname) });
+  const section = ({ to, label, icon: Icon, also }: Section): Tile => ({
+    to,
+    label,
+    icon: <Icon aria-hidden="true" />,
+    lit: also === path,
+  });
+  // By code unit, the same on the server and in any browser: the root's ("") first.
+  const byApp = Map.groupBy(
+    sites.filter((site) => site.pages.length > 0),
+    (site) => site.app ?? "",
+  );
+  return [
+    WORK.map(section),
+    ...[...byApp.keys()]
+      .toSorted()
+      .map((app) =>
+        byApp.get(app)!.map((site) => siteTile(site, has.public.has(site.name), siteOf(path) === site.name)),
+      ),
+    SETUP.filter((item) => !item.when || shown[item.when]).map(section),
+  ];
+}
 
 /**
  * An item of the bar: its icon in a tile, its label under it; the tile filled while it is current
  * (`data-active`: a section's page or one under it, Chat while its column is open).
  */
 const ITEM =
-  "group/item relative flex w-full flex-col items-center gap-1 rounded-lg text-bar text-sidebar-foreground outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring data-active:font-medium";
+  "group/item relative flex w-full flex-col items-center gap-1 rounded-lg text-center text-bar wrap-break-word text-sidebar-foreground outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring data-active:font-medium";
 const TILE =
   "flex size-9 items-center justify-center rounded-lg transition-colors group-hover/item:bg-secondary/60 group-data-active/item:bg-secondary [&_svg]:size-5";
 
@@ -68,16 +116,11 @@ const ACTIVE = { "data-active": true } as const;
 
 /**
  * The bar, on the `sidebar` surface: Chat, which folds and unfolds the chat column (`chat`; left
- * out in the phone's sheet, which has no column), the sections (Sites, Data and Permissions only
- * when there are sites, collections or policies), and at its foot what the open window is
- * (`PlaceBadge`) above the user menu.
+ * out in the phone's sheet, which has no column), the groups (`useGroups`), and at its foot what
+ * the open window is (`PlaceBadge`) above the user menu.
  */
 export function Bar({ chat, className }: { chat?: { open: boolean; toggle: () => void }; className?: string }) {
-  const { data: has } = useSuspenseQuery({ ...configQuery(), select: selectBar });
-  const shown = { sites: useSites().length > 0, data: has.data, policy: has.policy };
-  const groups = GROUPS.map((group) => group.filter((section) => !section.when || shown[section.when])).filter(
-    (group) => group.length > 0,
-  );
+  const groups = useGroups();
   return (
     <div
       className={cn(
@@ -106,13 +149,17 @@ export function Bar({ chat, className }: { chat?: { open: boolean; toggle: () =>
       )}
       <nav aria-label="Sections" className="flex w-full flex-col items-center gap-1.5">
         {groups.map((group, i) => (
-          <Fragment key={group[0]!.label}>
+          <Fragment key={group[0]!.to}>
             {i > 0 && <Rule />}
             <ul className="flex w-full flex-col gap-1.5">
-              {group.map((section) => (
-                <li key={section.label}>
-                  <Link to={section.to} activeProps={ACTIVE} className={ITEM}>
-                    <Item section={section}>{section.to === "/inbox" && <InboxCount />}</Item>
+              {group.map(({ to, label, icon, lit }) => (
+                <li key={to}>
+                  <Link to={to} activeProps={ACTIVE} data-active={lit || undefined} className={ITEM}>
+                    <span className={cn(TILE, "relative")}>
+                      {icon}
+                      {to === "/inbox" && <InboxCount />}
+                    </span>
+                    {label}
                   </Link>
                 </li>
               ))}
@@ -125,19 +172,6 @@ export function Bar({ chat, className }: { chat?: { open: boolean; toggle: () =>
         <NavUser />
       </div>
     </div>
-  );
-}
-
-/** An item's tile, holding its icon and `children` (a badge), and its label. */
-function Item({ section: { icon: Icon, label }, children }: { section: Section; children?: ReactNode }) {
-  return (
-    <>
-      <span className={cn(TILE, "relative")}>
-        <Icon aria-hidden="true" />
-        {children}
-      </span>
-      {label}
-    </>
   );
 }
 

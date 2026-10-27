@@ -3,7 +3,7 @@
 // router. Source, loaded only by Vite in a company's build; browser code, nothing server-side. A
 // route file still imports `createFileRoute` from `@tanstack/react-router` itself: the route
 // generator rewrites its path there, and only there.
-import type { ComponentType } from "react";
+import type { IconName } from "lucide-react/dynamic";
 import { usePageLanguages } from "./lib/locales.ts";
 
 export {
@@ -110,15 +110,18 @@ export function useMessages<M>(messages: Messages<M>): M {
 }
 
 /**
- * A site's `sites/<name>/site.ts` (optional): how the app's Sites page names it, whether it is
+ * A site's `sites/<name>/site.ts` (optional): how the app's bar and Sites page name it, whether it is
  * public, and in which languages. `sanoma` reads `title`, `public`, `login` and `locales` without
  * running the file.
  */
 export interface SiteDefinition {
   /** The site's name on the Sites page and in its crumb; the folder's name when not given. */
   title?: string;
-  /** An icon beside its title: a component that takes a `className`. */
-  icon?: ComponentType<{ className?: string }>;
+  /**
+   * Its tile's icon in the bar, and beside its title: a [Lucide](https://lucide.dev/icons) icon's
+   * name (`"calendar-days"`); left out, a globe for a public site and a window for one in the app.
+   */
+  icon?: IconName;
   /** Served at the root of its own domain to visitors, not people (a literal: read without running site.ts). */
   public?: boolean;
   /** The connector in sanoma.config.ts whose login half signs visitors in; left out, every page runs as `anonymous`. */

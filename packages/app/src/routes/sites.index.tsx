@@ -6,6 +6,7 @@ import { Card } from "#/components/ui/card.tsx";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/components/ui/table.tsx";
 import { usePublicAddress, useSites } from "#/lib/sites.ts";
 import { CrumbHeader, Nothing, pageTitle } from "../components/common.tsx";
+import { SiteIcon } from "../components/site-icon.tsx";
 import { configQuery } from "../queries.ts";
 
 // `/sites` itself, the one path there no site can take (a site's pages are `/sites/<name>/…`):
@@ -16,15 +17,15 @@ export const Route = createFileRoute("/sites/")({
   component: SitesPage,
 });
 
-/**
- * The company's sites, with how many, as a table in one card: each site under its title (and
- * icon) and folder, its pages (those with no path parameter, its home first), a public site's own
- * address, where visitors see it at the root of its host, and its languages.
- */
 /** The config's public sites, by name. */
 const publicSitesByName = (config: ConfigDescription) =>
   new Map(config.sites.filter((site) => site.public).map((site) => [site.name, site]));
 
+/**
+ * The company's sites, with how many, as a table in one card: each site under its icon, title
+ * and folder, its pages (those with no path parameter, its home first), a public site's own
+ * address, where visitors see it at the root of its host, and its languages.
+ */
 function SitesPage() {
   const sites = useSites();
   const { data: publicSites } = useSuspenseQuery({
@@ -50,11 +51,11 @@ function SitesPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {sites.map(({ name, title, icon: Icon, pages }) => (
+              {sites.map(({ name, title, icon, pages }) => (
                 <TableRow key={name}>
                   <TableCell className="align-top font-medium">
-                    <div className="flex items-center gap-2">
-                      {Icon && <Icon aria-hidden="true" className="size-4" />}
+                    <div className="flex items-center gap-2 [&_svg]:size-4">
+                      <SiteIcon icon={icon} public={publicSites.has(name)} />
                       {pages[0] ? <Link to={pages[0].to}>{title}</Link> : title}
                       <code className="text-xs font-normal text-muted-foreground">sites/{name}</code>
                     </div>

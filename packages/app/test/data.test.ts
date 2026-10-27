@@ -148,10 +148,11 @@ describe("the Data section", () => {
   it("puts Data in the bar, and /data listing each collection in a table, a row linking to its grid", async () => {
     const { status, html } = await page("/data");
     expect(status).toBe(200);
-    // Data in the bar, lit here, with Sites and Data in their own group (no sites in this config).
+    // Data in the bar, lit here; no Sites in its header, as this build has no sites.
     expect(html).toMatch(
       /<nav aria-label="Sections"[^>]*>(?:(?!<\/nav>)[\s\S])*<a [^>]*href="\/data"[^>]*aria-current="page"[^>]*>(?:(?!<\/a>)[\s\S])*Data<\/a>/,
     );
+    expect(html).not.toContain('href="/sites"');
     // The page's title, with how many collections there are.
     expect(html).toMatch(/<h1[^>]*>Data<span[^>]*>1<\/span><\/h1>/);
     const row = html.match(
