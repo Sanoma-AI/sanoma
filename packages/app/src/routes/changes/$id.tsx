@@ -2,7 +2,7 @@ import { CHANGE_WORKFLOW } from "@sanoma-ai/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { ChangeDecision } from "#/components/change-decision.tsx";
-import { PullRequestLink } from "#/components/change-glance.tsx";
+import { Commit, PullRequestLink } from "#/components/change-glance.tsx";
 import {
   CrumbHeader,
   FloatHost,
@@ -67,7 +67,7 @@ function ChangePage() {
               {state.head && (
                 <>
                   {" "}
-                  at <code title={state.head}>{state.head.slice(0, 8)}</code>
+                  at <Commit sha={state.head} />
                 </>
               )}{" "}
               ·{" "}

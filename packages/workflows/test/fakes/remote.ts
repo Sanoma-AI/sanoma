@@ -107,8 +107,8 @@ export function fakeRemote({
     if (!pr) throw new DriverError(`no pull request #${number}`, { retryable: false, status: 404 });
     return pr;
   };
+  /** Merges `pr` at its branch's commit, read from the host (`sync` first, given `origin`). */
   const mergeNow = (pr: FakePullRequest, title = pr.title) => {
-    sync();
     pr.head = branches.get(pr.branch) ?? pr.head;
     let merged = sha(`merge ${pr.number} ${pr.head}`);
     if (origin !== undefined) {
@@ -214,7 +214,11 @@ export function fakeRemote({
     half,
     host,
     pulls,
-    branches,
+    /** Each branch's commit on the host (read from `origin` when given). */
+    get branches() {
+      sync();
+      return branches;
+    },
     statuses,
     merges,
     deleted,
@@ -237,6 +241,7 @@ export function fakeRemote({
     },
     /** Someone merges the pull request on the host: its merge commit. */
     merge(number: number) {
+      sync();
       return mergeNow(pull(number));
     },
     /** The pull request of `branch` (the latest), as the host keeps it. */

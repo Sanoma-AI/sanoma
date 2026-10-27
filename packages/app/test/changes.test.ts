@@ -1,6 +1,5 @@
-import { waitFor } from "@sanoma-ai/testing";
 import type { CheckResult } from "@sanoma-ai/workflows";
-import { CHANGE_MERGE, changeIdOf } from "@sanoma-ai/workflows/shared";
+import { changeIdOf } from "@sanoma-ai/workflows/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type App, startApp } from "../src/index.ts";
 import type { DraftCard } from "../src/lib/chat.ts";
@@ -9,7 +8,7 @@ import { openChange } from "../src/server/core.ts";
 import { asChangeRef, groupFiles, phaseLabel } from "../src/lib/changes.ts";
 import { cellWords, diffGrids } from "../src/lib/grid-diff.ts";
 import { barLabels } from "./bar-helpers.ts";
-import { REFUNDS_WAIT, renderDraftCard, useChangeApp } from "./fixtures/change.ts";
+import { publishedAgain, publishOf, REFUNDS_WAIT, renderDraftCard, useChangeApp } from "./fixtures/change.ts";
 
 // The Changes section and a change's review: the words and groups (`lib/changes.ts`), then a real
 // change of a draft that edits `policies/`, over C5's fake host, as the server renders its pages;
@@ -144,7 +143,7 @@ describe("the Changes section", () => {
   });
 
   it("links the change from Publish in the Inbox", async () => {
-    const publish = (await fixture.testApp.client.approvals(runId)).find((a) => a.covers.includes(CHANGE_MERGE))!;
+    const publish = await publishOf(fixture.testApp.client, runId);
     const { html } = await fixture.page(`/inbox?approval=${encodeURIComponent(`${runId}/${publish.id}`)}`);
     expect(html).toMatch(
       /<dt[^>]*>Change<\/dt><dd[^>]*><a [^>]*href="\/changes\/rules"[^>]*>Refunds wait for finance<\/a>/,
@@ -201,10 +200,7 @@ describe("the Changes section", () => {
     const { runId: opened } = await openChange({ client }, { id: "alice" }, "card", fixture.app.url);
     expect(opened).toBe("change:card");
     const page = new URL("/changes/card", fixture.app.url).href;
-    const publish = await waitFor(
-      () => client.approvals(opened),
-      (approvals) => approvals.some((a) => a.status === "pending" && a.covers.includes(CHANGE_MERGE)),
-    );
+    const publish = await publishOf(client, opened);
     const view = (await client.change("card"))!;
     expect(view.startedBy).toEqual({ id: "alice" });
     expect(view.state.title).toBe("Refunds name the order");
@@ -216,13 +212,7 @@ describe("the Changes section", () => {
     // A new commit on the draft: Publish, asked on the old head, is withdrawn and asked again.
     fixture.repo.edit("card", { "workflows/notes.md": "Refunds name the order and the person.\n" });
     await tellCommits(client, "card", { id: "alice" });
-    const old = publish.find((a) => a.status === "pending" && a.covers.includes(CHANGE_MERGE))!;
-    await waitFor(
-      () => client.approvals(opened),
-      (approvals) =>
-        approvals.some((a) => a.id === old.id && a.status === "withdrawn") &&
-        approvals.some((a) => a.status === "pending" && a.covers.includes(CHANGE_MERGE)),
-    );
+    await publishedAgain(client, opened, publish);
     await client.changeEvent("card", { kind: "close", by: "alice" }, { by: "alice" });
     await client.result(opened);
     // Its change has ended: nothing is told.

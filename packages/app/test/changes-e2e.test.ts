@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { ghost } from "@sanoma-ai/connector-ghost";
-import { startTestWorker, waitFor } from "@sanoma-ai/testing";
+import { startTestWorker } from "@sanoma-ai/testing";
 import {
   defineWorkflow,
   memoryLedger,
@@ -13,7 +13,6 @@ import {
   type SanomaConfig,
   type Worker,
 } from "@sanoma-ai/workflows";
-import { CHANGE_MERGE } from "@sanoma-ai/workflows/shared";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { localGitSource } from "../../sanoma/src/source.ts";
@@ -26,7 +25,7 @@ import { type App, startApp } from "../src/index.ts";
 import { tellCommits } from "../src/server/agent/checkout.ts";
 import { change, hasRemote, openChange } from "../src/server/core.ts";
 import { checks } from "../src/server/drafts.ts";
-import { PEOPLE, pageOf, renderDraftCard } from "./fixtures/change.ts";
+import { PEOPLE, pageOf, publishedAgain, publishOf, renderDraftCard } from "./fixtures/change.ts";
 
 // The life of a change, end to end, as a person drives it through the app: the sanoma package's
 // fixture company in its own git repository (`localGitSource`), cloned from a bare repository the
@@ -124,16 +123,6 @@ afterAll(async () => {
 /** How long a round may take to ask Publish: a push, `sanoma check` on the draft as a child process, the plan. */
 const ROUND_MS = 50_000;
 
-/** The pending Publish of the change run `runId`, once it asks. */
-const publishOf = async (runId: string) =>
-  (
-    await waitFor(
-      () => client.approvals(runId),
-      (approvals) => approvals.some((a) => a.status === "pending" && a.covers.includes(CHANGE_MERGE)),
-      ROUND_MS,
-    )
-  ).find((a) => a.status === "pending" && a.covers.includes(CHANGE_MERGE))!;
-
 /** Opens the draft `id` of alice's chat titled `title`, committing `files` on it: the draft. */
 async function drafted(id: string, title: string, files: Record<string, string>) {
   await client.chats.open({ id, person: "alice", engine: "loop", title });
@@ -170,7 +159,7 @@ describe("a change, from a chat's draft to main", () => {
   it("sends it for review: a pull request on the host, the change checked and waiting for admin", async () => {
     ({ runId } = await openChange({ client }, { id: "alice" }, "rules", app.url));
     expect(runId).toBe("change:rules");
-    await publishOf(runId);
+    await publishOf(client, runId, ROUND_MS);
     const pr = remote.pullOf("draft/rules")!;
     expect(pr).toMatchObject({ state: "open", base: "main", title: TITLE, head: git("rev-parse", "draft/rules") });
     expect(atOrigin("rev-parse", "draft/rules")).toBe(pr.head);
@@ -199,7 +188,7 @@ describe("a change, from a chat's draft to main", () => {
   });
 
   it("puts Publish in the Inbox, linking the change, with what it edits", async () => {
-    const publish = await publishOf(runId);
+    const publish = await publishOf(client, runId, ROUND_MS);
     const { html } = await pageOf(app, `/inbox?approval=${encodeURIComponent(`${runId}/${publish.id}`)}`);
     expect(html).toMatch(new RegExp(`<dt[^>]*>Change</dt><dd[^>]*><a [^>]*href="/changes/rules"[^>]*>${TITLE}</a>`));
     expect(html).toMatch(
@@ -224,19 +213,13 @@ describe("a change, from a chat's draft to main", () => {
   });
 
   it("asks Publish again for a new commit on the draft, at its new head", async () => {
-    const asked = await publishOf(runId);
+    const asked = await publishOf(client, runId, ROUND_MS);
     writeFileSync(join(draft.root, "NOTES.md"), "Admin says hello without waiting.\n");
     await draft.commit({ paths: ["NOTES.md"], message: "Say why", author: "alice" });
     // As the agent's turn tells it, once it commits.
     await tellCommits(client, "rules", { id: "alice" });
     const head = git("rev-parse", "draft/rules");
-    await waitFor(
-      () => client.approvals(runId),
-      (approvals) =>
-        approvals.some((a) => a.id === asked.id && a.status === "withdrawn") &&
-        approvals.some((a) => a.status === "pending" && a.covers.includes(CHANGE_MERGE)),
-      ROUND_MS,
-    );
+    await publishedAgain(client, runId, asked, ROUND_MS);
     expect((await client.change("rules"))!.state.head).toBe(head);
     expect((await remote.host.pullRequestFor("draft/rules"))!.head).toBe(head);
     const { html } = await pageOf(app, "/changes/rules");
@@ -272,7 +255,7 @@ describe("a change, from a chat's draft to main", () => {
   it("closes a change its drafter rejects: the pull request closed, the page says Closed", async () => {
     await drafted("notes", "Say why in the README", { "README.md": "# Fixture Co\n\nHellos wait for finance.\n" });
     const { runId: notes } = await openChange({ client }, { id: "alice" }, "notes", app.url);
-    await publishOf(notes);
+    await publishOf(client, notes, ROUND_MS);
     await client.decide(notes, { decision: "reject", by: { id: "alice" }, note: "Not yet" });
     expect(await client.result(notes)).toMatchObject({ outcome: "closed" });
     expect(remote.pullOf("draft/notes")!.state).toBe("closed");

@@ -4,7 +4,14 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureBuilt, testDatabaseUrl, waitFor, withFake } from "@sanoma-ai/testing";
 import { type TestApp, useTestApp } from "@sanoma-ai/testing/harness";
-import { defineConnector, defineWorkflow, resolveConfig, type SanomaConfig } from "@sanoma-ai/workflows";
+import {
+  type ApprovalState,
+  defineConnector,
+  defineWorkflow,
+  resolveConfig,
+  type SanomaClient,
+  type SanomaConfig,
+} from "@sanoma-ai/workflows";
 import { describeConfig, type PermissionsGrid, permissionsGrid } from "@sanoma-ai/workflows/describe";
 import { defineFake } from "@sanoma-ai/workflows/fake";
 import { CHANGE_MERGE } from "@sanoma-ai/workflows/shared";
@@ -151,15 +158,42 @@ export function useChangeApp(name: string): ChangeApp {
       repo.checks(id, { ok: true, problems: [], warnings: [], grid: fixture.gridWith(files) });
       const page = new URL(`/changes/${id}`, fixture.app.url).href;
       const runId = await testApp.client.openChange({ id, title, page }, { startedBy });
-      await waitFor(
-        () => testApp.client.approvals(runId),
-        (approvals) => approvals.some((a) => a.status === "pending" && a.covers.includes(CHANGE_MERGE)),
-      );
+      await publishOf(testApp.client, runId);
       return runId;
     },
     page: (path, as) => pageOf(fixture.app, path, as),
   };
   return fixture;
+}
+
+/** Whether `approval` is a change's Publish waiting: pending, covering the merge. */
+const asksPublish = (approval: ApprovalState) =>
+  approval.status === "pending" && approval.covers.includes(CHANGE_MERGE);
+
+/** The change run `runId`'s pending Publish, once it asks (within `timeoutMs`, `waitFor`'s by default). */
+export async function publishOf(client: SanomaClient, runId: string, timeoutMs?: number): Promise<ApprovalState> {
+  return (
+    await waitFor(
+      () => client.approvals(runId),
+      (all) => all.some(asksPublish),
+      timeoutMs,
+    )
+  ).find(asksPublish)!;
+}
+
+/** The change run `runId`'s Publish asked again, once `old` (asked on an earlier head) is withdrawn. */
+export async function publishedAgain(
+  client: SanomaClient,
+  runId: string,
+  old: ApprovalState,
+  timeoutMs?: number,
+): Promise<ApprovalState> {
+  const asked = await waitFor(
+    () => client.approvals(runId),
+    (all) => all.some((a) => a.id === old.id && a.status === "withdrawn") && all.some(asksPublish),
+    timeoutMs,
+  );
+  return asked.find(asksPublish)!;
 }
 
 /** A page of `app` as `as` (ada) sees it, its HTML with React's text separators removed. */

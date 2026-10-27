@@ -4,6 +4,11 @@ import { type ChangeRef, filesOf, groupFiles } from "#/lib/changes.ts";
 import { diffGrids, diffSummary } from "#/lib/grid-diff.ts";
 import { changeQuery, permissionsQuery } from "../queries.ts";
 
+/** A commit by its first 8 characters, the whole id in its tooltip. */
+export function Commit({ sha }: { sha: string }) {
+  return <code title={sha}>{sha.slice(0, 8)}</code>;
+}
+
 /** A change's pull request on its host, "#12 ↗", in a new tab. */
 export function PullRequestLink({
   pullRequest,

@@ -6,6 +6,7 @@ import { approverName, isSettled, ruleOf } from "#/lib/changes.ts";
 import { cn } from "#/lib/utils.ts";
 import { runLink } from "../queries.ts";
 import { ApprovalDecision, PUBLISH_VERBS } from "./approval.tsx";
+import { Commit } from "./change-glance.tsx";
 import { CardHeading, Fact, Facts, FLOAT, FloatingCard, When } from "./common.tsx";
 
 /**
@@ -85,7 +86,7 @@ function Merged({ merged }: { merged: NonNullable<ChangeView["state"]["merged"]>
   return (
     <>
       <Fact label="Merged">
-        <code title={merged.sha}>{merged.sha.slice(0, 8)}</code>, <When at={merged.at} />
+        <Commit sha={merged.sha} />, <When at={merged.at} />
       </Fact>
       {follow && (
         <Fact label="This computer">
