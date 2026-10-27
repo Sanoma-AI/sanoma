@@ -129,19 +129,23 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
       }),
     follow: ({ url, token, ref }) =>
       serial(async () => {
-        const on = await git(["branch", "--show-current"]);
+        // A draft's branch is checked out in the draft's own checkout.
+        const id = ref.startsWith("draft/") ? ref.slice("draft/".length) : undefined;
+        const cwd = id !== undefined && DRAFT_ID.test(id) && (await listed()).get(id) ? draftAt(id) : root;
+        const gitHere = (args: string[], env?: NodeJS.ProcessEnv) => gitIn(cwd, args, env);
+        const on = await gitHere(["branch", "--show-current"]);
         if (on !== ref)
           return { skipped: on ? `${on} is checked out, not ${ref}` : `no branch is checked out, not ${ref}` };
-        if (await git(["status", "--porcelain"])) return { skipped: "the checkout has uncommitted changes" };
-        await git(["fetch", "--quiet", "--no-tags", "--", url, `refs/heads/${ref}`], signedIn(token)).catch(
+        if (await gitHere(["status", "--porcelain"])) return { skipped: "the checkout has uncommitted changes" };
+        await gitHere(["fetch", "--quiet", "--no-tags", "--", url, `refs/heads/${ref}`], signedIn(token)).catch(
           withoutToken(`git fetch from ${url}`, token),
         );
         // The commit fetched, pinned: anything else may rewrite FETCH_HEAD before the merge.
-        const fetched = await head("FETCH_HEAD");
-        if (!(await holds(root, ["merge-base", "--is-ancestor", "HEAD", fetched]))) {
+        const fetched = await gitHere(["rev-parse", "--verify", "FETCH_HEAD^{commit}"]);
+        if (!(await holds(cwd, ["merge-base", "--is-ancestor", "HEAD", fetched]))) {
           return { skipped: `${ref} has commits ${url} does not` };
         }
-        await git(["merge", "--quiet", "--ff-only", fetched]);
+        await gitHere(["merge", "--quiet", "--ff-only", fetched]);
         return { revision: fetched };
       }),
     async draft(id): Promise<Draft> {

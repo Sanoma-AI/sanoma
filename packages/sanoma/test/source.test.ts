@@ -175,6 +175,43 @@ describe("localGitSource and the repository it was cloned from", () => {
     expect(await source.follow!(target)).toEqual({ skipped: `main has commits ${url} does not` });
     expect(await source.head()).toBe(local!.revision);
   });
+
+  it("follows a draft's branch in the draft's checkout: the host's commits on it, the live checkout left alone", async () => {
+    writeFileSync(join(dir, ".gitignore"), ".sanoma/\n");
+    git("add", ".gitignore");
+    git("commit", "--quiet", "-m", "Ignore");
+    cloned();
+    const source = localGitSource(dir);
+    const live = await source.head();
+    const draft = await source.draft!("x");
+    const token = "ghs_secret-token-value";
+    await source.push!({ url, token, ref: draft.branch });
+    // Someone pushes to the draft's branch on the host.
+    const other = `${dir}-other`;
+    const there = (...args: string[]) => execFileSync("git", args, { cwd: other, encoding: "utf8" }).trim();
+    execFileSync("git", ["clone", "--quiet", "--branch", draft.branch, url, other]);
+    try {
+      writeFileSync(join(other, "pushed.ts"), "export const p = 1;\n");
+      there("add", "pushed.ts");
+      there("commit", "--quiet", "-m", "Pushed on the host");
+      there("push", "--quiet", "origin", draft.branch);
+      const pushed = there("rev-parse", "HEAD");
+
+      const target = { url, token, ref: draft.branch };
+      expect(await source.follow!(target)).toEqual({ revision: pushed });
+      expect(await source.head(draft.branch)).toBe(pushed);
+      expect(readFileSync(join(draft.root, "pushed.ts"), "utf8")).toContain("p = 1");
+      expect(await source.head()).toBe(live);
+      expect(existsSync(join(dir, "pushed.ts"))).toBe(false);
+
+      // A commit of the draft's own that the host lacks: no fast-forward.
+      writeFileSync(join(draft.root, "mine.ts"), "export const m = 1;\n");
+      await draft.commit({ paths: ["mine.ts"], message: "Mine", author: "alice" });
+      expect(await source.follow!(target)).toEqual({ skipped: `${draft.branch} has commits ${url} does not` });
+    } finally {
+      rmSync(other, { recursive: true, force: true });
+    }
+  });
 });
 
 const status = () => git("status", "--porcelain", "--ignored=no");
