@@ -23,6 +23,7 @@ import { type ConfigDescription, describeConfig, readPeople, type SiteEntry } fr
 import { NodeRequest, sendNodeResponse } from "srvx/node";
 import type { AppContext, LoginProvider, RequestContext, ServerEntry } from "./context.ts";
 import { admitting } from "./login/admission.ts";
+import { demoLogin } from "./login/demo.ts";
 import { loginKey } from "./login/keys.ts";
 import { publicFront } from "./login/public.ts";
 import { hostName, loopbackLogin, placeOf } from "./loopback.ts";
@@ -79,6 +80,21 @@ export interface AppOptions {
    * stopped itself. Must not throw.
    */
   onWrite?: () => void;
+  /**
+   * Runs the repo as a demo: every vendor on its fake, one per vendor for the instance
+   * (`resolveConfig`'s `fakes: "instance"`), the demo login (anyone is one of the company's
+   * people, `?as=<id>` choosing whom), the world and the moments of its scenarios seeded on start
+   * and again every hour (`reseed`, on the timer `sanoma.demo.reset`), a banner saying who you
+   * are and that nothing is saved, and no chat agent and no Go live. The worker that runs its
+   * runs must share the instance's fakes: start it in this process with the same `resolved`.
+   */
+  demo?: boolean;
+  /**
+   * The config as the caller resolved it (`resolveConfig(config, options)`), shared with a worker
+   * in this process, as a demo's must be; the caller closes its `dataStore`. Default: resolved
+   * here, with `fakes: "instance"` in a demo.
+   */
+  resolved?: ResolvedConfig;
 }
 
 /** One of `AppOptions.ingress`: a machine route, such as the wakeup's `/wake`. */
@@ -118,12 +134,18 @@ interface Responder {
  */
 export async function startApp(config: SanomaConfig, options: AppOptions = {}): Promise<App> {
   const host = options.host ?? "127.0.0.1";
-  const given = options.login ?? loopbackLogin();
-  given.check(host);
+  const demo = options.demo === true;
+  const resolved = options.resolved ?? resolveConfig(config, demo ? { fakes: "instance" } : {});
+  if (demo && !resolved.instanceFakes) {
+    throw new Error('A demo runs on its connectors\' fakes: resolve its config with `{ fakes: "instance" }`');
+  }
+  // A demo's client shares the resolution, so a store made here is closed here.
+  const ownedStore = demo && !options.resolved ? resolved.dataStore : undefined;
+  const given = options.login ?? (demo ? demoLogin(() => readPeople(resolved.root).people) : loopbackLogin());
+  given.check(host, { demo });
   if (options.dev && !isLoopback(host)) {
     throw new Error(`The dev server listens on this machine only, not ${host}: serve a build there`);
   }
-  const resolved = resolveConfig(config);
   // Read right after the policy made from them, so the Permissions page shows what decides.
   const policyFiles = resolved.root === undefined ? [] : readPolicyFiles(resolved.root);
   const login = admitting(given, () => readPeople(resolved.root));
@@ -211,6 +233,11 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
       if (answer) return sendNodeResponse(res, answer);
       return responder.respond(req, res, request, { app: site, site: entry.name, origin });
     }
+    // A demo has no agent and never goes live: those pages and routes are not there.
+    if (demo && path !== undefined && closedInDemo(path)) {
+      res.writeHead(404, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
+      return void res.end("Not in a demo\n");
+    }
     const request = new NodeRequest({ req, res });
     // Then the login sees every request (pages, server functions and static files alike): its
     // own routes, and any it will not let through.
@@ -247,7 +274,8 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   }
   const [loaded, connected] = await Promise.allSettled([
     load(),
-    SanomaClient.connect(config, { onWrite: options.onWrite }),
+    // On the caller's resolution, as its worker; a demo's on its own too, the instance's fakes.
+    SanomaClient.connect(config, { onWrite: options.onWrite, ...((demo || options.resolved) && { resolved }) }),
   ]);
   if (loaded.status === "rejected" && connected.status === "rejected") {
     throw new AggregateError(
@@ -273,6 +301,7 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
     client,
     login,
     source: options.source,
+    ...(demo && { demo: { ...config.demo } }),
   };
   // Each public site served, by name, with its own context, whose login is its front door: its
   // login half, if it has one, made once the app listens (`openLogins`). A public site whose
@@ -292,7 +321,10 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
     sites.set(site.name, { ...app, site: site.name, login: publicFront(site, half?.promise) });
   }
 
+  let reset: { stop(): void } | undefined;
   try {
+    // Seeded before it listens, so the first visitor finds the moments started.
+    if (demo) reset = await demoReset(client, resolved);
     await new Promise<void>((done, fail) => {
       server.once("error", fail);
       server.listen(options.port ?? 0, host, () => {
@@ -301,8 +333,10 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
       });
     });
   } catch (err) {
+    reset?.stop();
     await responder.close();
     await closeQuietly(client);
+    await ownedStore?.close();
     throw err;
   }
 
@@ -316,6 +350,7 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
     sites: Object.fromEntries([...sites.keys()].map((name) => [name, `http://${localHost(name)}:${address.port}`])),
     close() {
       closing ??= (async () => {
+        reset?.stop();
         try {
           // Together: the server waits for upgraded sockets (the dev server's websocket), which
           // only the responder's close ends.
@@ -335,11 +370,53 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
             ),
           );
           await closeQuietly(client);
+          await ownedStore?.close();
         }
       })();
       return closing;
     },
   };
+}
+
+/** What a demo does not serve: Go live (`/setup` and the GitHub App's routes under it) and the agent's routes. */
+const DEMO_CLOSED = /^\/(setup|api\/chat|api\/sign-in)(\/|$)/i;
+
+/**
+ * Whether a demo leaves `path` unserved (`DEMO_CLOSED`), read as the router matches it: decoded,
+ * in any case, repeated slashes as one.
+ */
+function closedInDemo(path: string): boolean {
+  let read = path;
+  try {
+    read = decodeURIComponent(path);
+  } catch {
+    // Malformed: the router finds no route for it either.
+  }
+  return DEMO_CLOSED.test(read.replace(/\/{2,}/g, "/"));
+}
+
+/** How often a demo is seeded afresh (`sanoma.demo.reset`): every hour. */
+const DEMO_RESET_MS = 60 * 60 * 1000;
+
+/**
+ * A demo's seed (`reseed`): once now, then every hour from now, `sanoma.demo.reset`: a timer in
+ * this process, which holds the instance's fakes, not a schedule of the worker's (a demo's Runs
+ * do not list it, and a new process starts its hour again). What a seed could not do is logged;
+ * so is a later seed that fails, and the next hour tries again. `stop` ends the timer.
+ */
+async function demoReset(client: SanomaClient, resolved: ResolvedConfig): Promise<{ stop(): void }> {
+  // Loaded only for a demo: it loads Cucumber.
+  const { reseed } = await import("@sanoma-ai/workflows/scenarios");
+  const seed = async () => {
+    const { problems } = await reseed(client, resolved);
+    for (const problem of problems) console.warn(`sanoma app: the demo's seed: ${problem}`);
+  };
+  await seed();
+  const timer = setInterval(
+    () => void seed().catch((err: unknown) => console.error("sanoma app: sanoma.demo.reset failed:", err)),
+    DEMO_RESET_MS,
+  ).unref();
+  return { stop: () => clearInterval(timer) };
 }
 
 /** A public site's host on this machine. */

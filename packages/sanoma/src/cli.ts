@@ -23,6 +23,10 @@ Runs the repo in the working directory, from its sanoma.config.ts (after its .en
                                       and the repo's sites/, when it has any, from a dev server that shows each
                                       edit as it is saved. In an empty directory, first starts a company there: the
                                       template, .env, an install and a git repository
+  sanoma demo                         sanoma as a demo, on <database>_demo: every vendor on its fake, anyone signed
+                                      in as one of the company's people (?as=<id>), the world and moments of
+                                      scenarios/ seeded on start and every hour, nothing kept; SANOMA_DEMO=1 does
+                                      the same on a host, on the database it names
   sanoma worker                       the worker alone, for a deployment
   sanoma app                          the app alone (built with the sites), for a deployment
   sanoma wakeup                       the wakeup service alone, on the config's database: it calls each instance
@@ -88,6 +92,10 @@ export async function main(argv: string[]): Promise<number> {
       const repo = devRepo(process.cwd(), linked);
       return repo === undefined ? serveCommand(true) : dev(repo, linked);
     }
+    case "demo":
+      // As `sanoma serve` reads it on a host: the app's options take it from the environment.
+      process.env.SANOMA_DEMO = "1";
+      return serveCommand(true, { demo: true });
     case "serve":
       // --dev (hidden): the child dev mode supervises, serving the sites as `sanoma` does.
       return serveCommand(values.dev ?? false);
@@ -146,15 +154,27 @@ const port = (fallback = 3000) => Number(process.env.SANOMA_APP_PORT ?? fallback
  * problem with them is a `UsageError`, so nothing starts on policies that do not hold. Without
  * `policies`, they are left to the caller (`check` reports them). With `postgres`, its database
  * answers first (`withPostgres`: "start" starts the company's own, "find" only finds it running),
- * so the config resolves on it.
+ * so the config resolves on it. With `demo` (`sanoma demo`, whose seed empties its database), the
+ * config runs on `<database>_demo` beside that one, never on the company's own data.
  */
-async function load({ policies = true, postgres }: { policies?: boolean; postgres?: "start" | "find" } = {}): Promise<
+async function load({
+  policies = true,
+  postgres,
+  demo = false,
+}: { policies?: boolean; postgres?: "start" | "find"; demo?: boolean } = {}): Promise<
   Loaded & { postgres?: EnsuredPostgres }
 > {
   const loaded = await loadConfig();
   const ensured = postgres && (await withPostgres(namedDatabaseUrl(loaded.config), loaded.root, postgres === "start"));
-  const { resolveConfig } = await import("@sanoma-ai/workflows");
+  const { resolveConfig, resolveDatabaseUrl } = await import("@sanoma-ai/workflows");
   try {
+    if (demo) {
+      // As `check` runs its scenarios on `_check`: the runtime makes the database when it is not there.
+      const own = new URL(resolveDatabaseUrl(loaded.config));
+      own.pathname = `${own.pathname}_demo`;
+      process.env.SANOMA_DATABASE_URL = own.toString();
+      loaded.config = { ...loaded.config, databaseUrl: own.toString() };
+    }
     const resolved = resolveConfig(loaded.config);
     if (policies && resolved.policyProblems.length) {
       throw new UsageError(`The policies do not hold:\n${resolved.policyProblems.join("\n")}`);
@@ -228,8 +248,8 @@ async function keep(
  * `sanoma serve` (and `sanoma` outside dev mode): Postgres (the company's own unless one is
  * named), then the worker and the app in this process. With `devServer` (`sanoma`), a repo's sites are served from Vite's dev server, not built.
  */
-async function serveCommand(devServer: boolean): Promise<never> {
-  const loaded = await load({ postgres: "start" });
+async function serveCommand(devServer: boolean, { demo = false } = {}): Promise<never> {
+  const loaded = await load({ postgres: "start", demo });
   return keep(loaded, async (config, resolved) => {
     (await import("./key.ts")).ensureSecretsKey(process.cwd(), log);
     const { serve } = await import("./serve.ts");

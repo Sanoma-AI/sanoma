@@ -1,6 +1,6 @@
 import type { Principal, ResolvedConfig, SanomaClient, Source } from "@sanoma-ai/workflows";
 import type { ConfigDescription } from "@sanoma-ai/workflows/describe";
-import type { Place } from "./api.ts";
+import type { DemoInfo, Place } from "./api.ts";
 
 /**
  * What a login vouches for about who is asking: a name they gave (`id`, the loopback's), a
@@ -27,8 +27,11 @@ export type ResolveActor = (request: Request) => LoginIdentity | undefined | Pro
 export interface LoginProvider {
   /** Names the provider; its routes, if any, are under `/auth/<name>/`. */
   name: string;
-  /** Throws when the app may not listen on `listenHost` with this provider. */
-  check(listenHost: string): void;
+  /**
+   * Throws when the app may not listen on `listenHost` with this provider, or may not run with
+   * it as it was started (`demo`: `startApp`'s `demo`, which only the demo login needs).
+   */
+  check(listenHost: string, started?: { demo?: boolean }): void;
   resolveActor: ResolveActor;
   /**
    * Sees every request first: answers the ones it owns (its `/auth/<name>/` routes, and a request
@@ -65,6 +68,11 @@ export interface AppContext {
   login: AdmittingLogin;
   /** The company's repository, which Adopt commits a data file's change to; without one, it only writes the file. */
   source?: Source;
+  /**
+   * Set when the app runs as a demo (`startApp`'s `demo`): the config's `demo`, the banner's
+   * "Start with these apps" URL among it. A demo has no chat agent and no Go live.
+   */
+  demo?: DemoInfo;
   /**
    * On a public site's own host, the site: its copy of the context, whose `login` is the site's
    * front door (`publicFront`), so only `callFn` and `getActor` answer there, as a visitor.

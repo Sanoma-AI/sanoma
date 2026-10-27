@@ -524,6 +524,21 @@ export class SanomaClient {
     return row ? { runId: row.workflowID, output: row.output, at: row.updatedAt ?? row.createdAt } : null;
   }
 
+  /**
+   * Cancels every run of the app that has not ended (queued, running or waiting), as a demo's
+   * `reseed` starts afresh: its moments' runs from the last seed would otherwise wait beside the
+   * new ones.
+   */
+  async cancelUnfinished(): Promise<void> {
+    const rows = await this.dbos.listWorkflows({
+      status: dbosStatusesOf("queued", "running"),
+      applicationName: this.config.appName,
+      loadInput: false,
+      loadOutput: false,
+    });
+    if (rows.length) await this.dbos.cancelWorkflows(rows.map((r) => r.workflowID));
+  }
+
   /** The run's audit record, in order, from the ledger store. */
   async ledger(runId: string): Promise<LedgerRecord[]> {
     await this.mustExist(runId);
