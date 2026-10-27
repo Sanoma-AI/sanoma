@@ -73,6 +73,7 @@ export {
   type SiteEntry,
   type SitePage,
   siteContentPages,
+  siteIcons,
   siteLocales,
   sitesUnder,
 } from "./sites.ts";

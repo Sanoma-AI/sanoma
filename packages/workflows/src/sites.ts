@@ -274,6 +274,21 @@ export function siteLocales(root: string): Record<string, string[]> {
 }
 
 /**
+ * Each site's icon (`defineSite({ icon })`, a Lucide icon's name as written) under `root`, by name,
+ * for the sites whose `site.ts` gives one: the icons the app's build bundles (`virtual:sanoma/icons`).
+ * Read as `readSites` reads it, never run.
+ */
+export function siteIcons(root: string): Record<string, string> {
+  const none = new Set<string>();
+  return Object.fromEntries(
+    sitesUnder(root).flatMap(({ name, dir }) => {
+      const { icon } = siteOptionsOf(join(root, dir, "site.ts"), { vendors: none, logins: none });
+      return icon === undefined ? [] : [[name, icon]];
+    }),
+  );
+}
+
+/**
  * The sites under `root`, by key (`siteKey`): each folder of `sites/` with a `routes/` whose name
  * is a URL segment, then each app's `apps/<app>/sites/`, with its folder relative to `root`.
  */
