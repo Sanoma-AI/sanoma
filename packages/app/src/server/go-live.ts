@@ -11,6 +11,7 @@ import {
   type Principal,
   type RepoRef,
   type Resource,
+  vendorCodeOf,
   wakeupHostTypes,
 } from "@sanoma-ai/workflows";
 import { type DataValue, formatOptions, readLockfile, Reference, renderDataFile } from "@sanoma-ai/workflows/describe";
@@ -453,8 +454,7 @@ async function pushToken(app: AppContext, repo: RepoRef): Promise<string> {
     return await remote.open(repo, context).token("token");
   } catch (err) {
     // Neither a token nor the App: something to connect, not GitHub failing.
-    if ((err as { vendorCode?: string } | undefined)?.vendorCode === "no_token")
-      throw new ApiError(409, { error: errorMessage(err) });
+    if (vendorCodeOf(err) === "no_token") throw new ApiError(409, { error: errorMessage(err) });
     throw err;
   }
 }

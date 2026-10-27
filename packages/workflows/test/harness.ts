@@ -10,7 +10,7 @@ import { fakeResend } from "@sanoma-ai/connector-resend/fake";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { type TestApp, useTestApp } from "@sanoma-ai/testing/harness";
 import type { Fake, FakeCall, FakeOptions } from "@sanoma-ai/workflows/fake";
-import { Pool } from "pg";
+import { escapeIdentifier, Pool } from "pg";
 import { afterAll, beforeAll, beforeEach } from "vitest";
 import {
   type Connector,
@@ -40,6 +40,21 @@ export function rootWith(files: Record<string, string>, from?: string): string {
   return root;
 }
 
+/** A people file declaring `alice` alone, for a root's `resources/people.ts`. */
+export const ALICE = `import { sanoma } from "sanoma/resources";
+
+export const alice = sanoma.person({ id: "alice" });
+`;
+
+/** A data file declaring one `testhost.app` (`fakeHost`'s) built from the repository at `url`: `resources/infra.ts#app`. */
+export const testhostInfra = (url: string) =>
+  [
+    'import { testhost } from "@sanoma-ai/testing-host/resources";',
+    "",
+    `export const app = testhost.app({ name: "company", source: ${JSON.stringify(url)}, ref: "main", port: 0 });`,
+    "",
+  ].join("\n");
+
 /**
  * `testDatabaseUrl(suffix)`, its database dropped before the file's workers start: for a test
  * whose runs, left waiting (a draft's `change:<id>`, a sleeping run), the next run of the file
@@ -52,7 +67,7 @@ export function freshDatabase(suffix: string): string {
     server.pathname = "/postgres";
     const admin = new Pool({ connectionString: server.toString() });
     try {
-      await admin.query(`DROP DATABASE IF EXISTS "${new URL(url).pathname.slice(1)}" WITH (FORCE)`);
+      await admin.query(`DROP DATABASE IF EXISTS ${escapeIdentifier(new URL(url).pathname.slice(1))} WITH (FORCE)`);
     } finally {
       await admin.end();
     }

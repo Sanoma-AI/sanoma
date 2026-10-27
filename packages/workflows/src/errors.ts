@@ -51,6 +51,9 @@ export function errorCode(e: unknown): ErrorCode | undefined {
   return code !== undefined && KNOWN.has(code) ? (code as ErrorCode) : undefined;
 }
 
+/** A `DriverError`'s `vendorCode` (`no_token`, `bad_signature`), read as a property: undefined for anything else. */
+export const vendorCodeOf = (e: unknown): string | undefined => own<string>(e, "vendorCode", "string");
+
 /**
  * True when the error says trying again would only repeat it (`retryable: false`), as a
  * `DriverError` for a vendor's final answer or a ledger store for a corrupt file does. Read as

@@ -28,8 +28,9 @@ export interface Source {
   /** Pushes `ref` to the repository at `url`, signed in with `token` (a draft by its `branch`). */
   push?(target: { url: string; token: string; ref: string }): void | Promise<void>;
   /**
-   * The draft `id` (letters, digits, `_` and `-`), opened: made from the checked-out revision the
-   * first time, then the same one, edits and all, until its branch is deleted.
+   * The draft `id` (letters, digits, `_` and `-`), opened on its branch (`draftBranch`): made from
+   * the checked-out revision the first time, then the same one, edits and all, until its branch is
+   * deleted.
    */
   draft?(id: string): Promise<Draft>;
   /** The open drafts' ids, sorted. */
@@ -47,12 +48,19 @@ export interface Source {
   /** The URL of the repository this one was cloned from (`origin`); undefined when it has none. */
   remoteUrl?(): Promise<string | undefined>;
   /**
-   * Fast-forwards the checked-out branch to `ref` in the repository at `url`, signed in with
-   * `token`, as `push` is: only when `ref` is checked out, nothing is uncommitted and the remote's
-   * `ref` contains it; otherwise `skipped`, saying why. The checked-out revision after.
+   * Fast-forwards the branch `ref` to `ref` in the repository at `url`, signed in with `token`, as
+   * `push` is, where it is checked out: the root's checked-out branch, or an open draft's (by its
+   * `branch`), whose new commits on the host it takes so. Only when nothing is uncommitted there
+   * and the remote's `ref` contains it; otherwise `skipped`, saying why. The revision after.
    */
   follow?(target: { url: string; token: string; ref: string }): Promise<{ revision: string } | { skipped: string }>;
 }
+
+/** The branch of the draft `id`, as a source names it: `draft/<id>`. */
+export const draftBranch = (id: string) => `draft/${id}`;
+
+/** The draft whose branch `branch` is (`draftBranch`), or undefined for a branch that is no draft's. */
+export const draftOf = (branch: string) => (branch.startsWith("draft/") ? branch.slice("draft/".length) : undefined);
 
 /**
  * A draft: a checkout of its own, at `root`, on `branch`, which `commit` records in as

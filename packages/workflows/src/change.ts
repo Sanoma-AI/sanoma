@@ -20,6 +20,7 @@ import {
   type RemoteContext,
   type RemoteHalf,
   remoteFor,
+  type RepoRef,
   type Source,
   type SourceHost,
 } from "./source.ts";
@@ -134,7 +135,7 @@ export function reservedFor(
 }
 
 /** The branch a change merges into. */
-const BASE = "main";
+export const BASE = "main";
 
 /** The company's credentials for a host, as its remote half asks for them (`Secrets` puts the environment first). */
 const remoteContext = (secrets: Secrets): RemoteContext => ({
@@ -159,18 +160,18 @@ export function sourceOfRun(): Source {
 const openedHosts = new WeakMap<RemoteHalf, WeakMap<Secrets, Map<string, SourceHost>>>();
 
 /**
- * The worker's repository and its host, for a call made in a run (a change's driver and its
- * steps): the source the worker was given (`sourceOfRun`), the clone URL of its `origin` and that
- * repository on the host whose connector's remote half matches the URL, opened once per remote
- * half, secrets and URL, so its token is kept between calls. A `DriverError` when the repository
- * has no remote (saving is publishing then: there is nothing to review a branch on) or no
- * connector is for its host.
+ * The company's repository and its host: `source`, by default the worker's for a call made in a
+ * run (a change's driver and its steps, `sourceOfRun`), the clone URL of its `origin`, and that
+ * repository (`repo`) on the host whose connector's remote half matches the URL, opened once per
+ * remote half, secrets and URL, so its token is kept between calls. A `DriverError` when the
+ * repository has no remote (`no_remote`: saving is publishing then, there is nothing to review a
+ * branch on) or no connector is for its host (`no_remote_half`).
  */
 export async function repositoryOf(
   remotes: ReadonlyMap<string, RemoteHalf>,
   secrets: Secrets,
-): Promise<{ source: Source; url: string; host: SourceHost }> {
-  const source = sourceOfRun();
+  source: Source = sourceOfRun(),
+): Promise<{ source: Source; url: string; repo: RepoRef; host: SourceHost }> {
   const url = await source.remoteUrl?.();
   if (!url) {
     throw new DriverError("saving is publishing: this repository has no remote", {
@@ -191,7 +192,27 @@ export async function repositoryOf(
   bySecrets.set(secrets, byUrl);
   const host = byUrl.get(url) ?? found.remote.open(found.repo, remoteContext(secrets));
   byUrl.set(url, host);
-  return { source, url, host };
+  return { source, url, repo: found.repo, host };
+}
+
+/**
+ * Fast-forwards the checkout to the host's `main` (`Source.follow`), as a deploy does first so the
+ * hosts and what apply reads are main's: the revision after, why it did not, or the error, never
+ * thrown (what is merged is merged; a deploy that cannot follow still applies).
+ */
+export async function followBase(
+  remotes: ReadonlyMap<string, RemoteHalf>,
+  secrets: Secrets,
+  source?: Source,
+): Promise<{ revision: string } | { skipped: string } | { error: string }> {
+  try {
+    const { source: at, url, host } = await repositoryOf(remotes, secrets, source);
+    if (!at.follow) return { skipped: "this repository cannot follow its remote" };
+    const moved = await at.follow({ url, token: await host.token(), ref: BASE });
+    return "revision" in moved ? { revision: moved.revision } : moved;
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
 }
 
 /**

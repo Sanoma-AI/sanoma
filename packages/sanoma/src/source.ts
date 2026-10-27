@@ -3,7 +3,7 @@ import { appendFileSync, existsSync, lstatSync, mkdirSync, realpathSync, symlink
 import { readFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
-import { type CheckResult, type Draft, errorMessage, type Source } from "@sanoma-ai/workflows";
+import { type CheckResult, type Draft, draftBranch, draftOf, errorMessage, type Source } from "@sanoma-ai/workflows";
 import type { SanomaEvent } from "./events.ts";
 
 const run = promisify(execFile);
@@ -35,7 +35,7 @@ function draftId(id: string): string {
 }
 
 /** The branch of the draft `id`. */
-const branchOf = (id: string) => `draft/${draftId(id)}`;
+const branchOf = (id: string) => draftBranch(draftId(id));
 
 // One git write at a time in this process, whichever source makes it: two tool calls of one turn
 // may open, or commit to, one draft at once, and the worker and the app each hold a source.
@@ -90,7 +90,8 @@ const commitIn =
  */
 export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: string } = {}): Source {
   const git = (args: string[], env?: NodeJS.ProcessEnv) => gitIn(root, args, env);
-  const head = (ref = "HEAD") => git(["rev-parse", "--verify", `${ref}^{commit}`]);
+  /** The commit `ref` names, in the checkout at `cwd` (the root's by default). */
+  const head = (ref = "HEAD", cwd = root) => gitIn(cwd, ["rev-parse", "--verify", `${ref}^{commit}`]);
   /** Where the draft `id`'s checkout is. */
   const draftAt = (id: string) => join(root, ".sanoma", "drafts", draftId(id));
   /** Whether the local branch `branch` exists. */
@@ -104,9 +105,8 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
       entries.flatMap((entry) => {
         const fields = entry.split("\0");
         const path = fields.find((f) => f.startsWith("worktree "))?.slice("worktree ".length);
-        const id = fields
-          .find((f) => f.startsWith("branch refs/heads/draft/"))
-          ?.slice("branch refs/heads/draft/".length);
+        const branch = fields.find((f) => f.startsWith("branch refs/heads/"))?.slice("branch refs/heads/".length);
+        const id = branch === undefined ? undefined : draftOf(branch);
         return id && path === join(at, id) ? [[id, !fields.some((f) => f.startsWith("prunable"))] as const] : [];
       }),
     );
@@ -115,7 +115,7 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
   return {
     root,
     commit: commitIn(root),
-    head,
+    head: (ref) => head(ref),
     async push({ url, token, ref }) {
       await git(["push", "--quiet", "--", url, `refs/heads/${ref}:refs/heads/${ref}`], signedIn(token)).catch(
         withoutToken(`git push to ${url}`, token),
@@ -127,23 +127,29 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
         if (err.code === 2) return undefined;
         throw err;
       }),
-    follow: ({ url, token, ref }) =>
-      serial(async () => {
-        const on = await git(["branch", "--show-current"]);
+    follow: async ({ url, token, ref }) => {
+      // A draft's branch is checked out in the draft's own checkout, and moves under no check running in it.
+      const id = draftOf(ref);
+      const cwd = id !== undefined && DRAFT_ID.test(id) && (await listed()).get(id) ? draftAt(id) : root;
+      await checkingAt.get(cwd);
+      return serial(async () => {
+        const gitHere = (args: string[], env?: NodeJS.ProcessEnv) => gitIn(cwd, args, env);
+        const on = await gitHere(["branch", "--show-current"]);
         if (on !== ref)
           return { skipped: on ? `${on} is checked out, not ${ref}` : `no branch is checked out, not ${ref}` };
-        if (await git(["status", "--porcelain"])) return { skipped: "the checkout has uncommitted changes" };
-        await git(["fetch", "--quiet", "--no-tags", "--", url, `refs/heads/${ref}`], signedIn(token)).catch(
+        if (await gitHere(["status", "--porcelain"])) return { skipped: "the checkout has uncommitted changes" };
+        await gitHere(["fetch", "--quiet", "--no-tags", "--", url, `refs/heads/${ref}`], signedIn(token)).catch(
           withoutToken(`git fetch from ${url}`, token),
         );
         // The commit fetched, pinned: anything else may rewrite FETCH_HEAD before the merge.
-        const fetched = await head("FETCH_HEAD");
-        if (!(await holds(root, ["merge-base", "--is-ancestor", "HEAD", fetched]))) {
+        const fetched = await head("FETCH_HEAD", cwd);
+        if (!(await holds(cwd, ["merge-base", "--is-ancestor", "HEAD", fetched]))) {
           return { skipped: `${ref} has commits ${url} does not` };
         }
-        await git(["merge", "--quiet", "--ff-only", fetched]);
+        await gitHere(["merge", "--quiet", "--ff-only", fetched]);
         return { revision: fetched };
-      }),
+      });
+    },
     async draft(id): Promise<Draft> {
       const [branch, at] = [branchOf(id), draftAt(id)];
       await serial(async () => {

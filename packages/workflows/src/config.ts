@@ -168,6 +168,12 @@ export interface ResolvedConfig {
   /** The remote halves the connectors attach, made once for this resolution, by vendor id in `connectors` order: `remoteFor` finds a URL's. */
   remotes: ReadonlyMap<string, RemoteHalf>;
   /**
+   * The resources the data files under `root` declare whose type is a host (`<file>#<export>`),
+   * read at each call: what a change's deploy and a push to `main` apply. None when no connector
+   * declares a host type.
+   */
+  hosts(): Promise<string[]>;
+  /**
    * `root`, as a `file:` URL, when `scenarios/` or an app's `apps/<app>/scenarios/` in it is a
    * directory: the feature files under those, each named by its path from the root.
    */
@@ -298,7 +304,7 @@ export function resolveConfig(config: SanomaConfig, options: ResolveOptions = {}
   const running = withBuiltIns(config.connectors);
   const types = resourceTypesOf(running);
   // Built-in: `sanoma.source.resolve`, which apply and drift call for a host's revision.
-  const hosts = [...types.values()].some((type) => type.host);
+  const hostTyped = [...types.values()].some((type) => type.host);
   // Built-in: the collections' operations, `data.<name>.<op>`, on the config's database.
   const databaseUrl = resolveDatabaseUrl(config);
   const declared = [...collections.values()];
@@ -309,7 +315,7 @@ export function resolveConfig(config: SanomaConfig, options: ResolveOptions = {}
     ...running,
     changeOps,
     appsListOps,
-    ...(hosts ? [sourceOps] : []),
+    ...(hostTyped ? [sourceOps] : []),
     ...(dataStore ? [collectionsConnector(declared)] : []),
   ]);
   checkWakeupOps(types, ops);
@@ -325,7 +331,7 @@ export function resolveConfig(config: SanomaConfig, options: ResolveOptions = {}
       ...driversByVendor.values(),
       changeDriver(remotes),
       appsListDriver,
-      ...(hosts ? [sourceDriver] : []),
+      ...(hostTyped ? [sourceDriver] : []),
       ...(dataStore ? [collectionsDriver(declared, dataStore)] : []),
     ],
     ops,
@@ -359,9 +365,9 @@ export function resolveConfig(config: SanomaConfig, options: ResolveOptions = {}
     names.set(APPLY_WORKFLOW, applyWorkflow(types, ops, drivers, applySteps(appName, root, read)));
   }
   // Built-in, in every config: the life of a change, which deploys to the declared hosts after its merge.
-  const hostIds = async () =>
+  const hosts = async () =>
     (await read()).resources.filter((r) => types.get(`${r.vendor}.${r.type}`)?.host).map((r) => r.id);
-  names.set(CHANGE_WORKFLOW, changeWorkflow(changeOps, changeSteps({ remotes, hosts: hostIds })));
+  names.set(CHANGE_WORKFLOW, changeWorkflow(changeOps, changeSteps({ remotes, hosts })));
   // Built-in: a direct call the policy holds for an approval, made a run, when any operation may be called directly.
   const call = callWorkflow(ops, drivers, types);
   if (call.uses.length) names.set(CALL_WORKFLOW, call);
@@ -381,6 +387,7 @@ export function resolveConfig(config: SanomaConfig, options: ResolveOptions = {}
     logins: makersOf(config.connectors, "login"),
     models: makersOf(config.connectors, "model"),
     remotes,
+    hosts,
     ...(scenarios && { scenarios }),
     types,
     steps: [...new Set([...running.flatMap((c) => setupOf(c).steps ?? []), ...(config.steps ?? [])])],
