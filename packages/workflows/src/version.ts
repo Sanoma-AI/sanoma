@@ -79,8 +79,16 @@ export function computeVersion({
 export function changeCodeOf(change: WorkflowDefinition<any, any>): string {
   // The steps' module sits beside this one, both `.ts` in the source and `.js` once built.
   const steps = fileURLToPath(new URL(`./change-steps${extname(import.meta.url)}`, import.meta.url));
-  const files = [change.file, steps].map((file) => readFileSync(file, "utf8"));
+  const files = [change.file, steps].map(sourceOf);
   return sha256([RUNTIME_VERSION, STEP_LAYOUT, installedDbosVersion(), codeOf(change), ...files]);
+}
+
+/** Each runtime file's text, read once: the installed package does not change under a process. */
+const sources = new Map<string, string>();
+function sourceOf(file: string): string {
+  let text = sources.get(file);
+  if (text === undefined) sources.set(file, (text = readFileSync(file, "utf8")));
+  return text;
 }
 
 const sha256 = (parts: unknown[]) => createHash("sha256").update(JSON.stringify(parts)).digest("hex");

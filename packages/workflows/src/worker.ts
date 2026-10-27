@@ -294,46 +294,59 @@ function outlineOf(wf: WorkflowDefinition<any, any>): WorkflowOutline {
  * Takes over the change runs another version of the app left unfinished whose change code is this
  * worker's (`changeCode`, which `SanomaClient.start` records on each), when this worker is the
  * latest version: a change's own deploy restarts the worker on the merged code, a new version,
- * which DBOS would never give the run to.
- * Each keeps its id, its history and its unread messages (an approval decided, an event told while
- * no worker ran): a PENDING one is queued again on DBOS's internal queue (`resumeWorkflows`), then
- * every queued one is stamped with this version, the one column the runtime writes in DBOS's own
- * table, so the queue gives it to this worker, which replays it. A run stopped between the two is
- * still queued on its old version, so the next start takes it. DBOS's `rewindWorkflow` would keep
- * the id too, but only from a run cancelled first, and it deletes the unread messages. Runs of the
- * company's workflows, the change's own `apply` and `drift` children among them, stay on their
- * version (`warnAboutStrandedRuns`); a change awaits a child by its id, wherever it runs. An older
- * worker still running such a run (a rolling deploy) runs it on until it stops, as with DBOS's own
- * recovery of a live worker's runs.
+ * which DBOS would never give the run to. Each keeps its id, its history and its unread messages
+ * (an approval decided, an event told while no worker ran): a PENDING one is queued again on
+ * DBOS's internal queue (`resumeWorkflows`), then each queued one is stamped with this version,
+ * the one column the runtime writes in DBOS's own table, so the queue gives it to this worker,
+ * which replays it. A run stopped between the two is still queued on its old version, so the next
+ * start takes it. DBOS's `rewindWorkflow` would keep the id too, but only of a run cancelled
+ * first, and it deletes the unread messages.
+ *
+ * A PENDING run is taken as DBOS's own recovery takes one, only from this worker's executor id: a
+ * run another executor holds is that executor's to finish. An older worker of the same id still
+ * running it (a rolling deploy) goes on until it stops, and both may run it meanwhile, as with
+ * DBOS's recovery. Runs of the company's workflows, the change's own `apply` and `drift` children
+ * among them, stay on their version (`warnAboutStrandedRuns`): a change awaits a child by its id,
+ * so a child its deploy interrupted waits for its own version's worker, and the change with it.
+ * A failure here is warned about, and the worker starts without carrying.
  */
 async function carryChangeRuns({ appName, version, changeCode }: ResolvedConfig, db: () => Promise<Db>) {
-  const list = (status: "PENDING" | "ENQUEUED") =>
-    DBOS.listWorkflows({
-      workflowName: CHANGE_WORKFLOW,
-      status,
-      applicationName: appName,
-      attributes: { changeCode },
-      loadInput: false,
-      loadOutput: false,
-    }).then((runs) => runs.filter((r) => r.applicationVersion && r.applicationVersion !== version));
-  const pending = await list("PENDING");
-  if (pending.length) await DBOS.resumeWorkflows(pending.map((r) => r.workflowID));
-  const queued = (await list("ENQUEUED")).map((r) => r.workflowID);
-  if (!queued.length) return;
-  // DBOS's system tables are in its schema, `dbos` (dbos-sdk 5.2.11). Still queued, so no worker has
-  // dequeued it meanwhile: one that has runs it on its own version.
-  const { rows } = await (
-    await db()
-  ).query<{ workflow_uuid: string }>(
-    `UPDATE dbos.workflow_status SET application_version = $1
-     WHERE workflow_uuid = ANY($2) AND status = 'ENQUEUED' AND application_version <> $1
-     RETURNING workflow_uuid`,
-    [version, queued],
-  );
-  if (rows.length) {
-    info(
-      `carried ${rows.length} change run(s) onto version ${version}: ${rows.map((r) => r.workflow_uuid).join(", ")}`,
+  try {
+    const runs = (
+      await DBOS.listWorkflows({
+        workflowName: CHANGE_WORKFLOW,
+        status: ["PENDING", "ENQUEUED"],
+        applicationName: appName,
+        attributes: { changeCode },
+        loadInput: false,
+        loadOutput: false,
+      })
+    ).filter(
+      (r) =>
+        r.applicationVersion &&
+        r.applicationVersion !== version &&
+        (r.status === "ENQUEUED" || r.executorId === DBOS.executorID),
     );
+    if (!runs.length) return;
+    const pending = runs.filter((r) => r.status === "PENDING").map((r) => r.workflowID);
+    if (pending.length) await DBOS.resumeWorkflows(pending);
+    // DBOS's system tables are in its schema, `dbos` (dbos-sdk 5.2.11). Still queued, so no worker has
+    // dequeued it meanwhile: one that has runs it on its own version.
+    const { rows } = await (
+      await db()
+    ).query<{ workflow_uuid: string }>(
+      `UPDATE dbos.workflow_status SET application_version = $1
+       WHERE workflow_uuid = ANY($2) AND status = 'ENQUEUED' AND application_version <> $1
+       RETURNING workflow_uuid`,
+      [version, runs.map((r) => r.workflowID)],
+    );
+    if (rows.length) {
+      info(
+        `carried ${rows.length} change run(s) onto version ${version}: ${rows.map((r) => r.workflow_uuid).join(", ")}`,
+      );
+    }
+  } catch (err) {
+    warn(`carrying the change runs of other versions onto ${version} failed, so they stay there: ${errorMessage(err)}`);
   }
 }
 
