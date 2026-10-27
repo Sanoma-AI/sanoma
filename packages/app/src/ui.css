@@ -1,0 +1,301 @@
+/*
+ * The kit's look (`sanoma/ui`, ui.ts): what its components need and nothing of the app's shell.
+ * The app's style.css imports it after Tailwind; a site's own stylesheet imports it as
+ * `sanoma/ui.css`, after Tailwind's theme and utilities (README, "The kit on a site"). It brings no
+ * Tailwind of its own and never all of preflight, which would restyle the app around a site's page:
+ * only the part the kit's elements need (below).
+ */
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/ibm-plex-sans";
+@import "@fontsource-variable/ibm-plex-sans/wght-italic.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+@import "@fontsource/ibm-plex-mono/400-italic.css";
+@import "@fontsource-variable/fraunces";
+/* The kit's classes, relative to this file, so also from an install, where Tailwind does not look. */
+@source "./components/ui";
+@source "./components/kit.tsx";
+@source "./lib/tone.ts";
+
+@custom-variant dark (&:is(.dark *));
+/* Compact density: `data-density="compact"` on #app, which DensityProvider (density.tsx) sets. */
+@custom-variant compact (&:is([data-density=compact] *));
+
+/*
+ * The theme: the brand's palette in shadcn's token names (paper `background`, the bar's `sidebar`,
+ * `card`, the `secondary` track, ink `foreground`, pine `primary`), and beside them one pair per
+ * operation effect and per tone (`--x` is the badge's background, `--x-foreground` its text).
+ * Every text colour is at least 4.5:1 on the fill it sits on, a tone's foreground 3:1 on the
+ * surfaces as a dot. Light is `:root`, dark is `.dark` on <html>, which the theme script in the
+ * document head sets before the page paints; a role that shares another's colour names it with
+ * `var()` once, on `:root`, so `.dark` sets only the sources. Only these exist as colours: `@theme`
+ * below resets Tailwind's palette, so a tint is a token with an alpha (`bg-primary/10`). In the
+ * theme layer, so that any unlayered rule wins: a site's own values for these names (README).
+ */
+@layer theme {
+  :root {
+    color-scheme: light;
+    --radius: 0.5rem;
+    --background: oklch(0.975 0.006 153.8);
+    --foreground: oklch(0.219 0.011 163.8);
+    --card: oklch(0.995 0.003 145.6);
+    --card-foreground: var(--foreground);
+    --popover: var(--card);
+    --popover-foreground: var(--foreground);
+    --primary: oklch(0.49 0.08 176.5);
+    --primary-foreground: oklch(1 0 0);
+    --secondary: oklch(0.931 0.009 150.7);
+    --secondary-foreground: var(--foreground);
+    --muted: var(--secondary);
+    --muted-foreground: oklch(0.5 0.015 164.4);
+    --accent: var(--secondary);
+    --accent-foreground: var(--foreground);
+    --destructive: oklch(0.518 0.163 27.5);
+    --border: oklch(0.895 0.009 150.7);
+    --input: var(--border);
+    --ring: var(--primary);
+    --sidebar: oklch(0.953 0.007 151.9);
+    --sidebar-foreground: var(--foreground);
+    --sidebar-primary: var(--primary);
+    --sidebar-primary-foreground: var(--primary-foreground);
+    --sidebar-accent: var(--secondary);
+    --sidebar-accent-foreground: var(--foreground);
+    --sidebar-border: var(--border);
+    --sidebar-ring: var(--primary);
+    /* Behind a dialog or a sheet: the ink, faint, darkening the page. */
+    --overlay: color-mix(in oklch, var(--foreground) 10%, transparent);
+
+    /* Effects: pale tints with deep, saturated text. */
+    --effect-read: oklch(0.95 0.012 250);
+    --effect-read-foreground: oklch(0.42 0.04 255);
+    --effect-write: oklch(0.94 0.035 255);
+    --effect-write-foreground: oklch(0.46 0.16 260);
+    --effect-publish: oklch(0.94 0.04 300);
+    --effect-publish-foreground: oklch(0.47 0.2 295);
+    --effect-send: oklch(0.95 0.045 70);
+    --effect-send-foreground: oklch(0.5 0.13 55);
+    --effect-money: oklch(0.95 0.045 155);
+    --effect-money-foreground: oklch(0.47 0.12 155);
+    --effect-access: oklch(0.94 0.04 25);
+    --effect-access-foreground: oklch(0.5 0.18 27);
+
+    /*
+     * Tones: what a status means, shared by runs, approvals, policy decisions and ledger records
+     * (common.tsx maps each to one). ok finished or allowed, bad failed or refused, waiting on a
+     * person, active running, idle queued, off cancelled or nothing to say.
+     */
+    --tone-ok: oklch(0.948 0.02 154.9);
+    --tone-ok-foreground: oklch(0.498 0.101 153.8);
+    --tone-bad: oklch(0.937 0.022 24.4);
+    --tone-bad-foreground: var(--destructive);
+    --tone-waiting: oklch(0.953 0.027 87.9);
+    --tone-waiting-foreground: oklch(0.514 0.105 74.7);
+    --tone-active: oklch(0.94 0.035 240);
+    --tone-active-foreground: oklch(0.47 0.15 245);
+    --tone-idle: oklch(0.95 0.015 280);
+    --tone-idle-foreground: oklch(0.45 0.06 280);
+    --tone-off: oklch(0.95 0 0);
+    --tone-off-foreground: oklch(0.48 0 0);
+
+    /* Source code (code.tsx): muted hues, readable on the card. */
+    --code-keyword: oklch(0.5 0.15 260);
+    --code-string: oklch(0.5 0.12 150);
+    --code-number: oklch(0.55 0.13 60);
+    --code-punctuation: oklch(0.5 0 0);
+    --code-highlight: color-mix(in oklch, var(--primary) 7%, transparent);
+
+    /*
+     * The gaps between a page's regions and inside a section (`gap-(--gap-region)`,
+     * `gap-(--gap-section)`, which Region reads); Compact cuts them on #app (style.css).
+     */
+    --gap-region: --spacing(6);
+    --gap-section: --spacing(3);
+  }
+
+  .dark {
+    color-scheme: dark;
+    --background: oklch(0.173 0.006 156.5);
+    --foreground: oklch(0.941 0.009 145.5);
+    --card: oklch(0.216 0.01 159.2);
+    --primary: oklch(0.7 0.101 175.1);
+    --primary-foreground: oklch(0.205 0.018 177);
+    --secondary: oklch(0.261 0.011 156.3);
+    --muted-foreground: oklch(0.72 0.012 158.7);
+    --destructive: oklch(0.741 0.123 25.3);
+    --border: oklch(0.299 0.009 159.5);
+    --sidebar: oklch(0.2 0.007 164.1);
+    --overlay: color-mix(in oklch, var(--background) 50%, transparent);
+
+    /* Effects: deep, low-lightness fills that sit on the dark cards, with light text. */
+    --effect-read: oklch(0.3 0.02 255);
+    --effect-read-foreground: oklch(0.85 0.03 255);
+    --effect-write: oklch(0.3 0.07 260);
+    --effect-write-foreground: oklch(0.84 0.09 260);
+    --effect-publish: oklch(0.3 0.08 300);
+    --effect-publish-foreground: oklch(0.84 0.1 300);
+    --effect-send: oklch(0.32 0.06 60);
+    --effect-send-foreground: oklch(0.86 0.1 70);
+    --effect-money: oklch(0.3 0.06 155);
+    --effect-money-foreground: oklch(0.85 0.12 155);
+    --effect-access: oklch(0.3 0.08 25);
+    --effect-access-foreground: oklch(0.83 0.1 25);
+
+    --tone-ok: oklch(0.284 0.034 157.1);
+    --tone-ok-foreground: oklch(0.751 0.116 155.4);
+    --tone-bad: oklch(0.275 0.043 24.7);
+    --tone-waiting: oklch(0.269 0.037 86.7);
+    --tone-waiting-foreground: oklch(0.792 0.12 83.3);
+    --tone-active: oklch(0.31 0.07 245);
+    --tone-active-foreground: oklch(0.84 0.09 245);
+    --tone-idle: oklch(0.3 0.03 280);
+    --tone-idle-foreground: oklch(0.84 0.05 280);
+    --tone-off: oklch(0.28 0 0);
+    --tone-off-foreground: oklch(0.78 0 0);
+
+    --code-keyword: oklch(0.78 0.1 255);
+    --code-string: oklch(0.8 0.12 150);
+    --code-number: oklch(0.82 0.11 75);
+    --code-punctuation: oklch(0.7 0 0);
+    --code-highlight: color-mix(in oklch, var(--primary) 12%, transparent);
+  }
+}
+
+@theme inline {
+  /* Only the tokens: Tailwind's default palette (bg-white, text-red-500, …) is off. */
+  --color-*: initial;
+  --font-sans: "IBM Plex Sans Variable", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  /* Display only: the wordmark and, in the app, an empty state's headline (font-display). */
+  --font-display: "Fraunces Variable", serif;
+  /* shadcn's titles (Card, Dialog, Sheet): the sans, as the body. */
+  --font-heading: "IBM Plex Sans Variable", sans-serif;
+  /* The two sizes off Tailwind's scale: a chat reply's text (text-reply), and the label under a
+     section's icon in the bar (text-bar). */
+  --text-reply: 0.9375rem;
+  --text-reply--line-height: 1.6;
+  --text-bar: 0.6875rem;
+  --text-bar--line-height: 1;
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-overlay: var(--overlay);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+
+  --color-effect-read: var(--effect-read);
+  --color-effect-read-foreground: var(--effect-read-foreground);
+  --color-effect-write: var(--effect-write);
+  --color-effect-write-foreground: var(--effect-write-foreground);
+  --color-effect-publish: var(--effect-publish);
+  --color-effect-publish-foreground: var(--effect-publish-foreground);
+  --color-effect-send: var(--effect-send);
+  --color-effect-send-foreground: var(--effect-send-foreground);
+  --color-effect-money: var(--effect-money);
+  --color-effect-money-foreground: var(--effect-money-foreground);
+  --color-effect-access: var(--effect-access);
+  --color-effect-access-foreground: var(--effect-access-foreground);
+  --color-tone-ok: var(--tone-ok);
+  --color-tone-ok-foreground: var(--tone-ok-foreground);
+  --color-tone-bad: var(--tone-bad);
+  --color-tone-bad-foreground: var(--tone-bad-foreground);
+  --color-tone-waiting: var(--tone-waiting);
+  --color-tone-waiting-foreground: var(--tone-waiting-foreground);
+  --color-tone-active: var(--tone-active);
+  --color-tone-active-foreground: var(--tone-active-foreground);
+  --color-tone-idle: var(--tone-idle);
+  --color-tone-idle-foreground: var(--tone-idle-foreground);
+  --color-tone-off: var(--tone-off);
+  --color-tone-off-foreground: var(--tone-off-foreground);
+}
+
+/*
+ * What the kit's elements need of preflight (tailwindcss 4.3's), each rule as preflight has it, so
+ * that inside the app, which loads all of it, nothing changes (keep them so on an upgrade); and shadcn's border and outline colours. On a site's
+ * own host it is the page's reset: unscoped, as the kit's elements are anywhere on the page.
+ */
+@layer base {
+  *,
+  ::before,
+  ::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    border: 0 solid;
+  }
+  [hidden]:where(:not([hidden="until-found"])) {
+    display: none !important;
+  }
+  hr {
+    height: 0;
+    color: inherit;
+    border-top-width: 1px;
+  }
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-size: inherit;
+    font-weight: inherit;
+  }
+  a {
+    color: inherit;
+    text-decoration: inherit;
+  }
+  table {
+    text-indent: 0;
+    border-color: inherit;
+    border-collapse: collapse;
+  }
+  ol,
+  ul,
+  menu {
+    list-style: none;
+  }
+  img,
+  svg {
+    display: block;
+    vertical-align: middle;
+  }
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+    color: inherit;
+    background-color: transparent;
+  }
+  * {
+    @apply border-border outline-ring/50;
+  }
+}
