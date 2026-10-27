@@ -330,7 +330,7 @@ export function resolveConfig(config: SanomaConfig, options: ResolveOptions = {}
     [
       ...driversByVendor.values(),
       changeDriver(remotes),
-      appsListDriver,
+      ...sandboxDrivers,
       ...(hostTyped ? [sourceDriver] : []),
       ...(dataStore ? [collectionsDriver(declared, dataStore)] : []),
     ],
@@ -425,6 +425,12 @@ function collectionsOf(config: SanomaConfig): Map<string, Collection> {
   }
   return collections;
 }
+
+/**
+ * The built-in drivers no fake implements that a sandbox run calls beside its fakes (`seedSandbox`):
+ * those that need no credentials and change nothing, as `sanoma.apps.list` (GitHub's public search).
+ */
+export const sandboxDrivers: readonly Driver[] = [appsListDriver];
 
 /**
  * `sanoma.wakeup`, the runtime's own: the type's operations and `sanoma.wakeup.register` (effect

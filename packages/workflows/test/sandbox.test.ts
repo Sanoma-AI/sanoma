@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { http, HttpResponse } from "msw";
+import { setupServer } from "msw/node";
+import { describe, expect, it, onTestFinished } from "vitest";
 import { z } from "zod";
+import { GITHUB_API } from "../src/apps-list.ts";
 import {
   defineConnector,
   defineWorkflow,
@@ -14,6 +17,7 @@ import {
 import { defineFake } from "../src/fake.ts";
 import { setupOf } from "../src/op.ts";
 import { check, drive, loadScenarios, type Scenario } from "../src/scenario.ts";
+import { runScenario } from "../src/scenarios.ts";
 import announce from "./fixtures/announce.ts";
 import { failure, inSeconds, pending, types, useApp, waitFor } from "./harness.ts";
 
@@ -206,6 +210,27 @@ describe("sandbox runs", () => {
     expect(errorCode(missing)).toBe("invalid_input");
     expect((missing as Error).message).toBe('No scenario named "Nope"');
     expect(types(await ledger(unknown))).toEqual(["run.started", "run.failed"]);
+  });
+
+  it("runs a direct call: the built-in drivers no fake implements are there beside the fakes", async () => {
+    // `call` uses every operation that may be called directly, `sanoma.apps.list` among them, which
+    // no connector's fake implements: the sandbox calls its built-in driver instead of refusing the run.
+    // That driver searches GitHub, mocked here.
+    const github = setupServer(
+      http.get(`${GITHUB_API}/search/repositories`, () =>
+        HttpResponse.json({ items: [{ full_name: "acme/crm", html_url: "https://github.com/acme/crm" }] }),
+      ),
+    );
+    github.listen();
+    onTestFinished(() => github.close());
+    const direct = await scenario("Apps listed directly");
+    const { run, checks, ledger: records } = await runScenario(direct, { client: c(), scope: scope() });
+    expect(run).toMatchObject({ status: "finished" });
+    expect(records.find((r) => r.type === "op.called" && r.op === "sanoma.apps.list")).toMatchObject({
+      output: { apps: [{ repo: "acme/crm" }] },
+    });
+    expect(checks.filter((k) => !k.ok)).toEqual([]);
+    expect(live).toEqual([]);
   });
 
   it("refuses a workflow that uses an operation with no fake, and parses the input before seeding", async () => {
