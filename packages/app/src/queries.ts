@@ -38,6 +38,7 @@ import {
   getChange,
   getChanges,
   getChat,
+  getChatModel,
   getChats,
   getConfig,
   getCredentials,
@@ -239,6 +240,10 @@ export const credentialsQuery = () =>
 /** What is connected for going live (the connect page): under the credentials' key, so setting one refreshes both. */
 export const setupStatusQuery = () =>
   queryOptions({ queryKey: ["credentials", "setup"], queryFn: () => getSetupStatus(), staleTime: 5_000 });
+
+/** Whether the chat has a model to answer on: under the credentials' key, so setting its key refreshes it. */
+export const chatModelQuery = () =>
+  queryOptions({ queryKey: ["credentials", "chat-model"], queryFn: () => getChatModel(), staleTime: 5_000 });
 
 /**
  * The connectors on npm: read every 10 minutes at most, as npm's list changes rarely, and again

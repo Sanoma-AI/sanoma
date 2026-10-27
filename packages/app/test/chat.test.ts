@@ -5,9 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { LanguageModelV4CallOptions, LanguageModelV4StreamPart } from "@ai-sdk/provider";
+import { anthropic } from "@sanoma-ai/connector-anthropic";
 import { ensureBuilt as ensureAppBuilt, testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
-import { defineConnector, defineDriver, isEnded, withSetup } from "@sanoma-ai/workflows";
+import { defineConnector, defineDriver, isEnded, SanomaClient, withSetup } from "@sanoma-ai/workflows";
 import { customProvider, getToolName, isToolUIPart, readUIMessageStream } from "ai";
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -232,11 +233,11 @@ async function send(id: string, history: ChatMessage[], text: string, onSnapshot
   return reply;
 }
 
-/** A request to the route, as fetch sends it, from the app's own origin unless `headers` say otherwise. */
-const post = (body: unknown, headers: Record<string, string> = {}) =>
-  fetch(new URL("/api/chat", app!.url), {
+/** A request to the route of the app at `url`, as fetch sends it, from its own origin unless `headers` say otherwise. */
+const post = (body: unknown, headers: Record<string, string> = {}, url = app!.url) =>
+  fetch(new URL("/api/chat", url), {
     method: "POST",
-    headers: { "content-type": "application/json", origin: new URL(app!.url).origin, ...headers },
+    headers: { "content-type": "application/json", origin: new URL(url).origin, ...headers },
     body: JSON.stringify(body),
   });
 
@@ -364,6 +365,65 @@ describe("the chat", () => {
     );
     expect(elsewhere.status).toBe(403);
     expect(await testApp.client.chats.get(`other-${RUN}`)).toBeUndefined();
+  });
+});
+
+/** The chat column of `path` as the server renders it for `actor`. */
+async function chatColumn(url: string, path = "/workflows", actor = "ada") {
+  const res = await fetch(new URL(path, url), { headers: { [ACTOR_HEADER]: actor } });
+  expect(res.status).toBe(200);
+  const html = (await res.text()).replaceAll("<!-- -->", "");
+  return html.match(/<aside id="chat" aria-label="Chat"[^>]*>([\s\S]*?)<\/aside>/)?.[1] ?? "";
+}
+
+describe("the composer and a model", () => {
+  it("has no note and Send waiting for a message once a connector gives a model", async () => {
+    const column = await chatColumn(app!.url);
+    expect(column).toContain('aria-label="Message the agent"');
+    expect(column).not.toContain("Connect a model");
+    expect(column).toMatch(/<button(?![^>]*aria-describedby)[^>]*aria-label="Send"/);
+  });
+
+  describe("on Anthropic's connector, without its key", () => {
+    // A fresh company: the template's Anthropic connector, its key not set yet, on a database of its own.
+    const config = { workflows: [], connectors: [anthropic], root, databaseUrl: testDatabaseUrl("chat-no-model") };
+    let bare: App | undefined;
+    let client: SanomaClient | undefined;
+    beforeAll(async () => {
+      client = await SanomaClient.connect(config);
+      await client.clearCredential("ANTHROPIC_API_KEY", { by: "ada" });
+      bare = await startApp(config, { port: 0 });
+    });
+    afterAll(async () => {
+      vi.stubEnv("ANTHROPIC_API_KEY", undefined);
+      await bare?.close();
+      await client?.close();
+    });
+
+    it("says to connect a model, linking to the connector page, with Send off; and refuses a turn before the chat opens", async () => {
+      const column = await chatColumn(bare!.url);
+      expect(column).toMatch(
+        /<div id="[^"]+"><p[^>]*>Connect a model to start: <a[^>]*href="\/connectors\/anthropic"[^>]*>set its key on the Anthropic connector page<\/a>\.<\/p>/,
+      );
+      const note = /<div id="([^"]+)"><p[^>]*>Connect a model/.exec(column)![1]!;
+      expect(column).toMatch(new RegExp(`<button[^>]*disabled=""[^>]*aria-label="Send" aria-describedby="${note}"`));
+
+      const chatId = `bare-${RUN}`;
+      const res = await post({ id: chatId, message: userMessage("Hi") }, { [ACTOR_HEADER]: "ada" }, bare!.url);
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({
+        error: "Connect a model to start: anthropic is not configured [connector:anthropic]",
+      });
+      expect(await client!.chats.get(chatId)).toBeUndefined();
+    });
+
+    it("drops the note once the key is set", async () => {
+      // Made up, and never sent: the page only asks whether it is set.
+      vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-not-a-key");
+      const column = await chatColumn(bare!.url);
+      expect(column).not.toContain("Connect a model");
+      expect(column).toMatch(/<button(?![^>]*aria-describedby)[^>]*aria-label="Send"/);
+    });
   });
 });
 

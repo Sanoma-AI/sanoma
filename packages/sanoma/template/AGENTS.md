@@ -29,6 +29,8 @@ npm run check       # tsc, the lint, the policies, what the worker would refuse,
 npm run env         # rewrites .env.example from the connectors' variables
 ```
 
+The app's chat answers on the company's Anthropic key (`@sanoma-ai/connector-anthropic`, the chat's model). Paste it on the Anthropic connector page (Connectors, then Anthropic) once the app is up; until it is there, the chat says to connect a model and links to that page.
+
 ## Rules
 
 - A workflow imports only from `sanoma`, its connectors and relative files, and does the same thing every time it is replayed: `ctx.now()` and `ctx.sleep()`, never `Date.now()` or `new Date()` (`new Date(await ctx.now())` for a date, read in UTC) or timers; configuration comes in as input, never from `process.env`. The `check` script holds workflows and data files to this.

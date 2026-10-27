@@ -23,7 +23,7 @@ import {
   TEMPLATE,
   whoIsStarting,
 } from "../src/init.ts";
-import { copyFixture, ensureBuilt, runCli } from "./fixture.ts";
+import { copyFixture, ensureBuilt, linkConnector, runCli } from "./fixture.ts";
 import { gitIdentity } from "./git.ts";
 
 const version = (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string })
@@ -73,7 +73,11 @@ describe("startCompany", () => {
     }
     const pkg = JSON.parse(read("package.json")) as { name: string; dependencies: Record<string, string> };
     expect(pkg.name).toBe("acme-ops");
-    expect(pkg.dependencies).toEqual({ "@sanoma-ai/connector-ghost": "latest", sanoma: `^${version}` });
+    expect(pkg.dependencies).toEqual({
+      "@sanoma-ai/connector-anthropic": "latest",
+      "@sanoma-ai/connector-ghost": "latest",
+      sanoma: `^${version}`,
+    });
     expect(existsSync(join(dir, "gitignore"))).toBe(false);
     // pnpm's alone.
     expect(existsSync(join(dir, "pnpm-workspace.yaml"))).toBe(false);
@@ -223,9 +227,12 @@ describe("the template", () => {
     const started = fresh();
     await startCompany(started, { creator, install: async () => {} });
     dir = copyFixture(started);
+    // The template's other connector: the chat's model.
+    linkConnector(dir, "anthropic");
     rmSync(started, { recursive: true, force: true });
     const env = {
       SANOMA_DATABASE_URL: testDatabaseUrl("sanoma-template"),
+      ANTHROPIC_API_KEY: "",
       GHOST_ADMIN_URL: "",
       GHOST_ADMIN_API_KEY: "",
     };

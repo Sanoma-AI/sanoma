@@ -6,7 +6,7 @@ import { SparkleIcon } from "@phosphor-icons/react/dist/csr/Sparkle";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { generateId } from "ai";
-import { type FormEvent, useMemo, useState } from "react";
+import { type FormEvent, type ReactNode, useId, useMemo, useState } from "react";
 import { Button } from "#/components/ui/button.tsx";
 import {
   DropdownMenu,
@@ -28,11 +28,13 @@ import {
   ENGINE_NAMES,
   type EngineName,
   errorParts,
+  MODEL_CONNECTOR,
+  onModelConnector,
   ownPlan,
   textOf,
   unfinished,
 } from "../../lib/chat.ts";
-import { CHATS_KEY, chatQuery, chatsQuery } from "../../queries.ts";
+import { CHATS_KEY, chatModelQuery, chatQuery, chatsQuery, configQuery } from "../../queries.ts";
 import { useCrumbs } from "../common.tsx";
 import { Reply } from "./chat-parts.tsx";
 import type { Prompt } from "./chat-prompt.ts";
@@ -121,19 +123,26 @@ function ChatPane({ id, known, draft, onSend }: { id: string; known: boolean; dr
       </div>
     );
   }
-  return <Conversation id={id} initial={data?.messages ?? []} onSend={onSend} />;
+  return <Conversation id={id} initial={data?.messages ?? []} openedOn={data?.chat.engine} onSend={onSend} />;
 }
 
-/** The conversation: its messages, a turn's error, Continue after a turn that stopped short, and the composer (holding `draft`). */
+/**
+ * The conversation: its messages, a turn's error, Continue after a turn that stopped short, and
+ * the composer (holding `draft`), which says "Connect a model" (and Continue is not offered) while
+ * the chat's engine (its own, `openedOn`, else the one chosen for a new chat) needs the model
+ * connector and it has no key.
+ */
 function Conversation({
   id,
   initial,
   draft,
+  openedOn,
   onSend,
 }: {
   id: string;
   initial: ChatMessage[];
   draft?: string;
+  openedOn?: string;
   onSend: () => void;
 }) {
   const queryClient = useQueryClient();
@@ -144,11 +153,15 @@ function Conversation({
     transport,
     // Its title in the list (the open transcript is useChat's own, read again when next opened).
     onFinish: () => void queryClient.invalidateQueries({ queryKey: CHATS_KEY, exact: true }),
+    // A refused turn may be one the model's status here was too old to stop: read it again.
+    onError: () => void queryClient.invalidateQueries({ queryKey: chatModelQuery().queryKey }),
   });
   const busy = status === "submitted" || status === "streaming";
-  // A new chat opens on the engine chosen in the composer; it keeps that one after.
-  const [engine, setEngine] = useState<EngineName>("loop");
+  // The chat's own engine; a new chat opens on the one chosen in the composer and keeps it after.
+  const [engine, setEngine] = useState<EngineName>(() => (openedOn as EngineName | undefined) ?? "loop");
   const fresh = messages.length === 0;
+  const { data: model } = useQuery(chatModelQuery());
+  const noModel = model?.ready === false && onModelConnector(engine);
   const send = (text: string) => {
     onSend();
     // Every message names it: the server opens a new chat on it (one whose first send failed, too)
@@ -170,7 +183,7 @@ function Conversation({
         )}
         {status === "submitted" && <Spinner aria-label="Waiting for the agent" />}
         {error && <TurnError message={error.message} />}
-        {!busy && !error && stoppedShort(messages) && (
+        {!busy && !error && !noModel && stoppedShort(messages) && (
           <div className="flex items-center gap-2 text-muted-foreground">
             <span>The last turn stopped before it finished.</span>
             <Button variant="secondary" size="sm" onClick={() => send("continue")}>
@@ -184,7 +197,8 @@ function Conversation({
           busy={busy}
           onSend={send}
           draft={draft}
-          engine={fresh ? { value: engine, set: setEngine } : undefined}
+          engine={fresh && !openedOn ? { value: engine, set: setEngine } : undefined}
+          note={noModel ? <ConnectModel vendor={model?.vendor} /> : undefined}
         />
       </div>
     </>
@@ -213,10 +227,7 @@ function TurnError({ message }: { message: string }) {
       {vendor && (
         <>
           {" "}
-          <Link to="/connectors/$vendor" params={{ vendor }} className="underline underline-offset-4">
-            Set it on its connector page
-          </Link>
-          .
+          <ConnectorPageLink vendor={vendor}>Set it on its connector page</ConnectorPageLink>.
         </>
       )}
     </p>
@@ -242,6 +253,31 @@ const engineOption = (name: EngineName) => (
   </NativeSelectOption>
 );
 
+/** A link to a connector's page, where its credentials are set. */
+const ConnectorPageLink = ({ vendor, children }: { vendor: string; children: ReactNode }) => (
+  <Link to="/connectors/$vendor" params={{ vendor }} className="underline underline-offset-4">
+    {children}
+  </Link>
+);
+
+/** The composer's note while the chat has no model: where to set its connector's key, or to add one (its sheet on the Connectors page). */
+function ConnectModel({ vendor }: { vendor?: string }) {
+  const { data: title } = useQuery({ ...configQuery(), select: (config) => vendor && config.vendors[vendor]?.title });
+  return (
+    <p className="text-muted-foreground">
+      Connect a model to start:{" "}
+      {vendor ? (
+        <ConnectorPageLink vendor={vendor}>set its key on the {title ?? vendor} connector page</ConnectorPageLink>
+      ) : (
+        <Link to="/connectors" search={{ add: MODEL_CONNECTOR }} className="underline underline-offset-4">
+          add the Anthropic connector
+        </Link>
+      )}
+      .
+    </p>
+  );
+}
+
 function EmptyChat() {
   return (
     <Empty className="p-6">
@@ -261,25 +297,29 @@ function EmptyChat() {
 /**
  * The composer: the page as a chip, the message (starting as `draft`, focused at its end, when a
  * page opened the chat with it), the engine a new chat opens on (`engine`, only then: a person's
- * own agents in a group of their own), Send (Enter; Shift+Enter for a new line).
+ * own agents in a group of their own), Send (Enter; Shift+Enter for a new line), and while there
+ * is a `note` (where to connect a model), the note, Send off.
  */
 function Composer({
   busy,
   onSend,
   draft,
   engine,
+  note,
 }: {
   busy: boolean;
   onSend: (text: string) => void;
   draft?: string;
   engine?: { value: EngineName; set: (engine: EngineName) => void };
+  note?: ReactNode;
 }) {
   const page = useCrumbs().at(-1)?.label;
   const [text, setText] = useState(draft ?? "");
+  const noteId = useId();
 
   const submit = (e?: FormEvent) => {
     e?.preventDefault();
-    if (busy || !text.trim()) return;
+    if (busy || note || !text.trim()) return;
     onSend(text.trim());
     setText("");
   };
@@ -305,6 +345,7 @@ function Composer({
         placeholder="Ask anything…"
         className="min-h-0 resize-none rounded-none border-0 bg-transparent p-0 shadow-none focus-visible:ring-0 dark:bg-transparent"
       />
+      {note && <div id={noteId}>{note}</div>}
       <div className="flex items-center justify-end gap-2">
         {engine && (
           <NativeSelect
@@ -318,7 +359,14 @@ function Composer({
             <NativeSelectOptGroup label="Your own plan">{OWN.map(engineOption)}</NativeSelectOptGroup>
           </NativeSelect>
         )}
-        <Button type="submit" size="icon-sm" variant="secondary" disabled={busy || !text.trim()} aria-label="Send">
+        <Button
+          type="submit"
+          size="icon-sm"
+          variant="secondary"
+          disabled={busy || !!note || !text.trim()}
+          aria-label="Send"
+          aria-describedby={note ? noteId : undefined}
+        >
           {busy ? <Spinner /> : <ArrowUpIcon aria-hidden="true" />}
         </Button>
       </div>

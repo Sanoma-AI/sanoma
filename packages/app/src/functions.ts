@@ -45,6 +45,7 @@ import { goLive, goLiveChoices, goLiveHost, goLiveProgress } from "./server/go-l
 import { connectExisting, setSetupToken, setupStatus } from "./server/setup.ts";
 import { withPrincipal } from "./middleware.ts";
 import { chatFor } from "./server/agent/turn.ts";
+import { chatModel } from "./server/models.ts";
 
 // The page's reads and changes, as server functions: the app's only HTTP surface. Each parses its
 // argument and calls the server core (server/core.ts). Failures, the actor header and the actor
@@ -190,6 +191,9 @@ export const connectExistingFn = createServerFn(CHANGE)
   .middleware([withPrincipal])
   .validator(validate(ConnectExistingRequest))
   .handler(({ data, context }) => connectExisting(context.app, context.principal, data));
+
+/** Whether the chat has a model to answer on, its connector's key set: the composer says "Connect a model" until then. */
+export const getChatModel = createServerFn(READ).handler(({ context }) => chatModel(context.app));
 
 /** The person's chats, the newest first; a turn is `POST /api/chat` (routes/api/chat.ts). */
 export const getChats = createServerFn(READ)

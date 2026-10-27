@@ -201,6 +201,15 @@ export interface ScenariosResponse {
  */
 export type CredentialsResponse = Record<string, CredentialStatus[]>;
 
+/**
+ * Whether the chat has a model to answer on (`getChatModel`): the connector whose model the loop
+ * uses, when one has a model half, and whether its key is set.
+ */
+export interface ChatModel {
+  vendor?: string;
+  ready: boolean;
+}
+
 /** What `setCredentialFn` takes: a declared variable and its value, stored as the actor. The value is never sent back. */
 export const SetCredentialRequest = z.object({
   name: z.string().min(1, "Name a variable"),

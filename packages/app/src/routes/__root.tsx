@@ -9,7 +9,7 @@ import { CHAT_COOKIE, chatPref, type ChatPref } from "#/components/shell/prefs.t
 import { defaultLocaleOf, type PageLanguages, pageLanguages, usePageLanguages } from "#/lib/locales.ts";
 import { alternatesOf } from "#/site-path.ts";
 import { ActorContext, useActorState } from "../actor.ts";
-import { actorQuery, configQuery, remoteQuery, waitingRunsQuery } from "../queries.ts";
+import { actorQuery, chatModelQuery, configQuery, remoteQuery, waitingRunsQuery } from "../queries.ts";
 import { pageHost, siteOrigin } from "../site-url.ts";
 // Phosphor's regular shield-check, the app's icon.
 import favicon from "../favicon.svg?url";
@@ -126,6 +126,9 @@ async function appLoader(queryClient: QueryClient): Promise<Prefs> {
     queryClient.query({ ...actorQuery(), staleTime: "static" }),
     queryClient.query({ ...configQuery(), staleTime: "static" }),
     queryClient.query(remoteQuery()),
+    // Whether the chat has a model, so its composer says so from the first render; read again by
+    // the composer (a failed read here leaves it to the browser).
+    queryClient.query({ ...chatModelQuery(), staleTime: "static" }).catch(() => {}),
   ]);
   return readPrefs();
 }

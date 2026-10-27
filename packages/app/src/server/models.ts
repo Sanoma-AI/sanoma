@@ -1,6 +1,8 @@
 import type { ProviderV4 } from "@ai-sdk/provider";
 import type { ResolvedConfig, SanomaClient } from "@sanoma-ai/workflows";
+import { credentialReady } from "@sanoma-ai/workflows/shared";
 import { createProviderRegistry } from "ai";
+import type { ChatModel } from "../api.ts";
 import type { AppContext } from "../context.ts";
 import { secretValues } from "./secrets.ts";
 
@@ -30,4 +32,21 @@ export function modelRegistry({ resolved, client }: Pick<AppContext, "resolved" 
   byClient.set(client, registry);
   registry.catch(() => byClient.delete(client));
   return registry;
+}
+
+/** The connector whose model the chat's loop answers on: the first with a model half, if any. */
+export const modelVendor = ({ resolved }: Pick<AppContext, "resolved">): string | undefined =>
+  resolved.models.keys().next().value;
+
+/**
+ * Whether the chat's loop has a model to answer on: the model's connector (`modelVendor`), ready
+ * once each variable its driver declares is (`credentialReady`), set in the environment or on its
+ * connector page (`SanomaClient.credentials`, never a value). Until it is, the composer says
+ * "Connect a model" and `POST /api/chat` refuses a turn of the loop.
+ */
+export async function chatModel({ resolved, client }: Pick<AppContext, "resolved" | "client">): Promise<ChatModel> {
+  const vendor = modelVendor({ resolved });
+  if (!vendor) return { ready: false };
+  const statuses = (await client.credentials()).get(vendor) ?? [];
+  return { vendor, ready: statuses.every(credentialReady) };
 }
