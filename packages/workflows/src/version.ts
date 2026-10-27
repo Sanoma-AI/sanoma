@@ -63,23 +63,32 @@ export function computeVersion({
 }): string {
   const named = process.env.DBOS__APPVERSION?.trim();
   if (named) return `${appName}@${named}`;
-  const workflows = definitions
-    .map(
-      (wf) =>
-        [
-          wf.name,
-          wf.run.toString(),
-          opIdsOf(wf),
-          // The input schema is parsed outside steps on replay, so a change to it must change the version.
-          inputSchemaOf(wf),
-        ] as const,
-    )
-    .toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-  const hash = createHash("sha256")
-    .update(JSON.stringify([appName, RUNTIME_VERSION, STEP_LAYOUT, installedDbosVersion(), ...workflows]))
-    .digest("hex");
-  return `${appName}@${hash}`;
+  const workflows = definitions.map(codeOf).toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return `${appName}@${sha256([appName, RUNTIME_VERSION, STEP_LAYOUT, installedDbosVersion(), ...workflows])}`;
 }
+
+/**
+ * A hash of the built-in `change` workflow's own code, which each change run carries (its
+ * `changeCode` attribute) so a worker on another version of the app may take it over
+ * (`carryChangeRuns` in worker.ts): what `computeVersion` hashes of that one workflow, with
+ * `RUNTIME_VERSION`, `STEP_LAYOUT` and the installed DBOS version. Never the company's workflows
+ * nor `DBOS__APPVERSION`, so a merge that changes only the company's code leaves it as it is.
+ */
+export function changeCodeOf(change: WorkflowDefinition<any, any>): string {
+  return sha256([RUNTIME_VERSION, STEP_LAYOUT, installedDbosVersion(), codeOf(change)]);
+}
+
+const sha256 = (parts: unknown[]) => createHash("sha256").update(JSON.stringify(parts)).digest("hex");
+
+/** What the hashes read of a workflow: its name, the source of its `run`, its operations and its input schema. */
+const codeOf = (wf: WorkflowDefinition<any, any>) =>
+  [
+    wf.name,
+    wf.run.toString(),
+    opIdsOf(wf),
+    // The input schema is parsed outside steps on replay, so a change to it must change the version.
+    inputSchemaOf(wf),
+  ] as const;
 
 /** The workflow's input schema as the hash sees it: its JSON Schema, or its text when zod can't convert it. */
 function inputSchemaOf(wf: WorkflowDefinition<any, any>): unknown {

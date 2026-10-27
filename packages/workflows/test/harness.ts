@@ -10,7 +10,8 @@ import { fakeResend } from "@sanoma-ai/connector-resend/fake";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { type TestApp, useTestApp } from "@sanoma-ai/testing/harness";
 import type { Fake, FakeCall, FakeOptions } from "@sanoma-ai/workflows/fake";
-import { afterAll, beforeEach } from "vitest";
+import { Pool } from "pg";
+import { afterAll, beforeAll, beforeEach } from "vitest";
 import {
   type Connector,
   jsonlLedger,
@@ -37,6 +38,26 @@ export function rootWith(files: Record<string, string>, from?: string): string {
   }
   afterAll(() => rmSync(root, { recursive: true, force: true }));
   return root;
+}
+
+/**
+ * `testDatabaseUrl(suffix)`, its database dropped before the file's workers start: for a test
+ * whose runs, left waiting (a draft's `change:<id>`, a sleeping run), the next run of the file
+ * would otherwise find.
+ */
+export function freshDatabase(suffix: string): string {
+  const url = testDatabaseUrl(suffix);
+  beforeAll(async () => {
+    const server = new URL(url);
+    server.pathname = "/postgres";
+    const admin = new Pool({ connectionString: server.toString() });
+    try {
+      await admin.query(`DROP DATABASE IF EXISTS "${new URL(url).pathname.slice(1)}" WITH (FORCE)`);
+    } finally {
+      await admin.end();
+    }
+  });
+  return url;
 }
 
 export async function waitFor(check: () => Promise<boolean> | boolean, timeoutMs = 15_000) {

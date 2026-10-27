@@ -45,7 +45,7 @@ import { type RemoteHalf, sourceDriver, sourceOps } from "./source.ts";
 import { appsListDriver, appsListOps } from "./apps-list.ts";
 import type { Steps } from "./steps.ts";
 import { checkSchedule } from "./schedules.ts";
-import { computeVersion } from "./version.ts";
+import { changeCodeOf, computeVersion } from "./version.ts";
 import type { DeclaredResource } from "./resources.ts";
 import { checkWakeupOps, type DeclaredWakeup } from "./wakeup.ts";
 import { sanomaWakeupDriver, wakeupSteps } from "./wakeup-driver.ts";
@@ -132,6 +132,8 @@ export interface ResolvedConfig {
   databaseUrl: string;
   /** The DBOS application version: `<appName>@<DBOS__APPVERSION, or a hash of the workflows>`. */
   version: string;
+  /** The hash of the built-in change workflow's own code (`changeCodeOf`), which each change run carries. */
+  changeCode: string;
   /** The DBOS queue runs are started on: `sanoma:<appName>`. */
   queueName: string;
   /**
@@ -369,6 +371,7 @@ export function resolveConfig(config: SanomaConfig, options: ResolveOptions = {}
     databaseUrl,
     // The built-in's code and operations are part of the app's version, like the config's own.
     version: computeVersion({ appName, workflows: [...names.values()] }),
+    changeCode: changeCodeOf(names.get(CHANGE_WORKFLOW)!),
     queueName: `sanoma:${appName}`,
     ops,
     drivers,

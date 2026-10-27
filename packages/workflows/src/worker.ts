@@ -4,19 +4,19 @@ import { buildCtx, decideStart, isInfrastructureError, startHoldOf } from "./cal
 import { dbosStatusesOf } from "./client.ts";
 import { declaredWakeup, type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { storedSecrets, watchCredentials } from "./credentials.ts";
-import { DBOS_DATABASE_OPTIONS, lazyPool, prepareDatabase } from "./db.ts";
+import { type Db, DBOS_DATABASE_OPTIONS, lazyPool, prepareDatabase, stampVersion } from "./db.ts";
 import { deadlineRegistry, type Deadlines, idle, onOwnQueue, type SelfStop, stopWhenIdle } from "./deadlines.ts";
 import type { WorkflowDefinition } from "./define.ts";
 import { credentialsOf, unconfigured, unconfiguredSummary } from "./env.ts";
 import { errorInfo, parseOrThrow, PolicyDeniedError } from "./errors.ts";
 import { entry, ownedLedger, skipped, write, writeFailure } from "./ledger.ts";
-import { dbosLogger, quietIfSandbox, setLogLevel, warn } from "./log.ts";
+import { dbosLogger, info, quietIfSandbox, setLogLevel, warn } from "./log.ts";
 import { lineStartsOf, readSource } from "./ast.ts";
 import { callsOf, outlineWithSource } from "./outline.ts";
 import { currentRun, type Run, type RunArgs, type WorkerState, type WorkflowOutline } from "./run.ts";
 import { applyScheduled, nextScheduledFire, type ScheduledStarter, scheduledStarter } from "./schedules.ts";
 import type { Source } from "./source.ts";
-import { approverLabel, errorMessage, WORKFLOW_ACTION } from "./shared.ts";
+import { approverLabel, CHANGE_WORKFLOW, errorMessage, WORKFLOW_ACTION } from "./shared.ts";
 
 export interface Worker {
   /**
@@ -222,6 +222,8 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
         );
       }
     }
+    // Change runs move to the latest version only: a rollback's worker, unless promoted, leaves them be.
+    if (isLatest) await carryChangeRuns(resolved, () => secrets.db());
     await DBOS.registerQueue(resolved.queueName);
     // The schedules are the latest version's: an older worker leaves them as the newer set them.
     if (isLatest && options.schedules !== false) {
@@ -286,6 +288,41 @@ function outlineOf(wf: WorkflowDefinition<any, any>): WorkflowOutline {
     );
   }
   return { file: outline.file, lineStarts: lineStartsOf(source!), calls: callsOf(outline.nodes) };
+}
+
+/**
+ * Takes over the unfinished change runs of other versions whose change code is this worker's,
+ * keeping each run's id, history and unread messages: a change's own deploy restarts the worker on
+ * the merged code, a new version, which DBOS would never give the run to. Each is stamped with this
+ * version (`stampVersion`), and a PENDING one queued again on the app's queue (`resumeWorkflows`);
+ * one stopped between the two is PENDING on this version, which DBOS's recovery takes. Not
+ * `rewindWorkflow`, which takes only a cancelled run and deletes its unread messages. It assumes one
+ * live worker per database, as a deploy does: an older one still running such a run runs it on
+ * until it stops. A failure is warned about, and the worker starts.
+ */
+async function carryChangeRuns({ appName, version, changeCode, queueName }: ResolvedConfig, db: () => Promise<Db>) {
+  try {
+    const runs = await DBOS.listWorkflows({
+      workflowName: CHANGE_WORKFLOW,
+      status: ["PENDING", "ENQUEUED"],
+      applicationName: appName,
+      attributes: { changeCode },
+      loadInput: false,
+      loadOutput: false,
+    });
+    const theirs = runs
+      .filter((r) => r.applicationVersion && r.applicationVersion !== version)
+      .map((r) => r.workflowID);
+    if (!theirs.length) return;
+    const carried = await stampVersion(await db(), theirs, version);
+    const pending = carried.filter((r) => r.pending).map((r) => r.id);
+    if (pending.length) await DBOS.resumeWorkflows(pending, { queueName });
+    if (carried.length) {
+      info(`carried ${carried.length} change run(s) onto version ${version}: ${carried.map((r) => r.id).join(", ")}`);
+    }
+  } catch (err) {
+    warn(`carrying the change runs of other versions onto ${version} failed, so they stay there: ${errorMessage(err)}`);
+  }
 }
 
 /**

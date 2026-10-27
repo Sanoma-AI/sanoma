@@ -102,6 +102,29 @@ export function openPool(databaseUrl: string, what: string): Pool {
 export const DBOS_DATABASE_OPTIONS = { systemDatabaseIdleTransactionTimeoutMs: 0 } as const;
 
 /**
+ * Stamps the change runs `ids` still unfinished on another version with the application version
+ * `version`, so DBOS gives them to a worker of that version: those it stamped, each with its status
+ * (a PENDING one is the caller's to queue again). DBOS has no call for it (a run's version is set at
+ * its start, `forkWorkflow` makes a new id, `rewindWorkflow` takes only an ended run), so this is the
+ * runtime's one write to DBOS's own tables, in its schema `dbos` (dbos-sdk 5.2.11). One statement:
+ * of two workers stamping a run, one does.
+ */
+export async function stampVersion(
+  db: Db,
+  ids: readonly string[],
+  version: string,
+): Promise<{ id: string; pending: boolean }[]> {
+  const { rows } = await db.query<{ workflow_uuid: string; status: string }>(
+    `UPDATE dbos.workflow_status SET application_version = $1
+     WHERE workflow_uuid = ANY($2) AND name = 'change' AND status IN ('PENDING', 'ENQUEUED')
+       AND application_version <> $1
+     RETURNING workflow_uuid, status`,
+    [version, ids],
+  );
+  return rows.map((r) => ({ id: r.workflow_uuid, pending: r.status === "PENDING" }));
+}
+
+/**
  * A DBOS client of the app `applicationName` on the database at `databaseUrl`, as every client of
  * the runtime, its tests and `@sanoma-ai/testing` make one (`DBOS_DATABASE_OPTIONS`).
  */

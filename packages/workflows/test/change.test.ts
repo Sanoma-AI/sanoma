@@ -1,16 +1,14 @@
 import { readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
 import { fakeHost, testRepository } from "@sanoma-ai/testing/host";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { Pool } from "pg";
 import { z } from "zod";
 import { lintWorkflow } from "../src/lint.ts";
 import { CHANGE_MERGE, type ChangeReport, defineWorkflow, type LedgerRecord, memoryLedger } from "../src/index.ts";
 import { fakeRemote, memorySource } from "./fakes/remote.ts";
-import { pending, rootWith, waitFor } from "./harness.ts";
+import { freshDatabase, pending, rootWith, waitFor } from "./harness.ts";
 
 // Needs Postgres: `pnpm db:up`. The change workflow end to end over a fake host and a repository
 // in memory: open, plan, hold, Publish, merge, deploy. The repository's root is this directory,
@@ -42,25 +40,6 @@ const waits = defineWorkflow({
     await ctx.sleep({ hours: 1 });
   },
 });
-
-/**
- * The test's database, dropped before its worker starts: the runs a change test leaves (a draft's
- * `change:<id>`, a sleeping `waits` run) would be found by the next run of the file.
- */
-function freshDatabase(suffix: string): string {
-  const url = testDatabaseUrl(suffix);
-  beforeAll(async () => {
-    const server = new URL(url);
-    server.pathname = "/postgres";
-    const admin = new Pool({ connectionString: server.toString() });
-    try {
-      await admin.query(`DROP DATABASE IF EXISTS "${new URL(url).pathname.slice(1)}" WITH (FORCE)`);
-    } finally {
-      await admin.end();
-    }
-  });
-  return url;
-}
 
 const merges = (records: LedgerRecord[]) =>
   records.filter((r) => r.type === "op.called" && r.op === CHANGE_MERGE && !r.error);
