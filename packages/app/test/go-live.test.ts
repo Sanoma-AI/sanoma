@@ -219,7 +219,8 @@ describe("going live", () => {
     });
     expect(await goLiveProgress(ctx)).toEqual({
       infra: null,
-      bound: { repo: false, deployKey: false, store: false, host: false },
+      beforeHost: [`${INFRA}#repo`, `${INFRA}#store`],
+      bound: { beforeHost: false, host: false },
       run: null,
       host: null,
     });
@@ -347,7 +348,8 @@ describe("going live", () => {
       { id: `${INFRA}#deployKey`, status: "done" },
       { id: `${INFRA}#store`, status: "done" },
     ]);
-    expect(progress.bound).toEqual({ repo: true, deployKey: true, store: true, host: false });
+    expect(progress.beforeHost).toEqual([`${INFRA}#repo`, `${INFRA}#deployKey`, `${INFRA}#store`]);
+    expect(progress.bound).toEqual({ beforeHost: true, host: false });
     // The project's afterCreate stored its database URL, through its session pooler.
     const url = (await app.client.secrets(["SANOMA_DATABASE_URL_STORE"])).get("SANOMA_DATABASE_URL_STORE")?.value;
     expect(url).toMatch(/^postgresql:\/\/postgres\.[\w-]+:.+@aws-0-eu-west-1\.pooler\.supabase\.com:5432\/postgres/);

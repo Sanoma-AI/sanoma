@@ -319,6 +319,10 @@ describe("going live by contract", () => {
 
   it("reports a missing database type, and a Supabase project without an organization", async () => {
     expect((await goLiveChoices(contextOf([github, docker]))).missing).toEqual(["a database type"]);
+    // A GitHub connector of a release before deploy keys.
+    const earlier = contextOf([github, supabase, docker]);
+    (earlier.resolved.types as Map<string, unknown>).delete("github.repository_deploy_key");
+    expect((await goLiveChoices(earlier)).missing).toEqual(["github.repository_deploy_key"]);
     await expect(renderInfra(contextOf([github, docker]), unsized, DEPLOY_KEY)).rejects.toMatchObject({
       status: 409,
     });

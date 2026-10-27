@@ -1,7 +1,7 @@
 // oxlint-disable-next-line import/no-unassigned-import
 import "@tanstack/react-start/server-only";
 import { generateKeyPair } from "node:crypto";
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { findPackageJSON } from "node:module";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -50,11 +50,16 @@ const KEYS = {
   host: `${INFRA}#host`,
   wakeup: `${INFRA}#wakeup`,
 } as const;
-/** What the first apply makes (step 3), and what must be bound before the host's. */
-const BEFORE_HOST = [KEYS.repo, KEYS.deployKey, KEYS.store];
+/**
+ * What the first apply makes (step 3), and what must be bound before the host's, of what `infra`
+ * declares: a file written before deploy keys declares none, and its host clones as it did.
+ */
+const beforeHost = (infra: string) =>
+  /^export const deployKey\b/m.test(infra) ? [KEYS.repo, KEYS.deployKey, KEYS.store] : [KEYS.repo, KEYS.store];
 
-/** The repository type going live declares. */
+/** The repository type going live declares, and its deploy key's. */
 const REPOSITORY = "github.repository";
+const DEPLOY_KEY = "github.repository_deploy_key";
 
 /** The database type going live prefers when the config has it: Neon's, which pauses. */
 const NEON = "neon.project";
@@ -103,11 +108,14 @@ const SUPABASE_API = "https://api.supabase.com";
 const idOf = (type: Resource) => `${type.vendor}.${type.type}`;
 const hasField = (type: Resource, field: string) => field in (type.schema.shape as Record<string, unknown>);
 
-/** What going live declares that the config's connectors do not: the repository type, a database type, a host type. */
+/**
+ * What going live declares that the config's connectors do not: the repository type and its
+ * deploy key's (a GitHub connector of an earlier release has none), a database type, a host type.
+ */
 const missingTypes = ({ resolved }: AppContext) => {
   const types = [...resolved.types.values()];
   return [
-    ...(resolved.types.has(REPOSITORY) ? [] : [REPOSITORY]),
+    ...[REPOSITORY, DEPLOY_KEY].filter((id) => !resolved.types.has(id)),
     ...(types.some((type) => type.database) ? [] : ["a database type"]),
     ...(types.some((type) => type.host) ? [] : ["a host type"]),
   ];
@@ -464,9 +472,7 @@ export async function goLive(app: AppContext, actor: Principal, choices: GoLiveR
   const { client, resolved, source } = app;
   if (resolved.root === undefined) throw new Error("The config has no root, so its data files cannot be written");
   const path = join(resolved.root, INFRA);
-  if (await exists(path)) {
-    throw new ApiError(409, { error: `${INFRA} is written already: change it in the file, and apply from Resources` });
-  }
+  if (await exists(path)) throw writtenAlready();
   // `SANOMA_SECRETS_KEY` is the host's from this process's environment, where the launcher's
   // `.env` sets it, and where the secrets store reads it first: there is nothing to store.
   if (!process.env[SECRETS_KEY]) throw new ApiError(409, { error: `${SECRETS_KEY} is not set` });
@@ -484,20 +490,33 @@ export async function goLive(app: AppContext, actor: Principal, choices: GoLiveR
   // A new key each time: GitHub takes a key for one repository only, and none declares this one yet.
   const key = await sourceKeyPair();
   const text = await renderInfra(app, choices, key.publicKey, chosen);
-  await client.setSecret(SOURCE_KEY, key.privateKey, { by: actor.id });
-  // Once the request is good: a wakeup's token may be the environment's or its connector page's, which mint nothing.
-  if (chosen.wakeup.type) await mintWakeupToken(client, actor);
   await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, text);
+  // Exclusive, before the key is stored: of two requests at once, one writes its public half and
+  // stores its private half, and the other is refused.
+  await writeFile(path, text, { flag: "wx" }).catch((err: NodeJS.ErrnoException) => {
+    throw err.code === "EEXIST" ? writtenAlready() : err;
+  });
+  try {
+    await client.setSecret(SOURCE_KEY, key.privateKey, { by: actor.id });
+    // Once the request is good: a wakeup's token may be the environment's or its connector page's, which mint nothing.
+    if (chosen.wakeup.type) await mintWakeupToken(client, actor);
+  } catch (err) {
+    // Unwritten again, so going live can be tried again.
+    await rm(path, { force: true });
+    throw err;
+  }
   await source?.commit({
     paths: [INFRA],
     message: "Go live: declare the repository, its deploy key, the database and the host",
     author: actor.id,
   });
   await client.setSecret("GITHUB_OWNER", choices.owner, { by: actor.id });
-  const runId = await client.apply({ only: BEFORE_HOST }, { startedBy: actor });
+  const runId = await client.apply({ only: beforeHost(text) }, { startedBy: actor });
   return { runId };
 }
+
+const writtenAlready = () =>
+  new ApiError(409, { error: `${INFRA} is written already: change it in the file, and apply from Resources` });
 
 /**
  * The token a push to `repo` signs in with, from the GitHub connector's remote half: the stored
@@ -527,7 +546,8 @@ async function pushToken(app: AppContext, repo: RepoRef): Promise<string> {
 export async function goLiveHost(app: AppContext, actor: Principal): Promise<{ runId: string }> {
   const { client, resolved, source } = app;
   const { bindings } = readLockfile(resolved.root!);
-  if (BEFORE_HOST.some((key) => !bindings[key])) {
+  const infra = await readFile(join(resolved.root!, INFRA), "utf8").catch(() => "");
+  if (beforeHost(infra).some((key) => !bindings[key])) {
     throw new ApiError(409, { error: "Apply the repository, its deploy key and the database first" });
   }
   if (!source?.push) throw new ApiError(409, { error: "The app has no repository to push from" });
@@ -542,7 +562,6 @@ export async function goLiveHost(app: AppContext, actor: Principal): Promise<{ r
     throw new ApiError(409, { error: "Check out main, where infra.ts and the lockfile are committed, then push" });
   }
   const owner = (await client.secrets(["GITHUB_OWNER"])).get("GITHUB_OWNER")?.value;
-  const infra = await readFile(join(resolved.root!, INFRA), "utf8");
   // The repository's name as going live wrote it, first in the file.
   const name = REPO_NAME.exec(infra)?.[1];
   if (!owner || !name) throw new ApiError(409, { error: `Cannot tell the repository from ${INFRA} and GITHUB_OWNER` });
@@ -600,12 +619,14 @@ export async function goLiveProgress(app: AppContext): Promise<GoLiveProgress> {
   const root = app.resolved.root;
   const infra = root === undefined ? null : await readFile(join(root, INFRA), "utf8").catch(() => null);
   const bindings = root === undefined ? {} : readLockfile(root).bindings;
-  const bound = {
-    repo: !!bindings[KEYS.repo],
-    deployKey: !!bindings[KEYS.deployKey],
-    store: !!bindings[KEYS.store],
-    host: !!bindings[KEYS.host],
-  };
+  const before = beforeHost(infra ?? "");
+  const bound = { beforeHost: before.every((key) => !!bindings[key]), host: !!bindings[KEYS.host] };
   const run = await latestRun(app);
-  return { infra, bound, run, host: bound.host && run && isEnded(run.status) ? await hostAnswer(app) : null };
+  return {
+    infra,
+    beforeHost: before,
+    bound,
+    run,
+    host: bound.host && run && isEnded(run.status) ? await hostAnswer(app) : null,
+  };
 }

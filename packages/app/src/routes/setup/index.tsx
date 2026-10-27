@@ -72,7 +72,7 @@ function GoLivePage() {
     connected: v.tokens.every(isSet),
   }));
   const { run, bound } = progress;
-  const data = bound.repo && bound.deployKey && bound.store;
+  const data = bound.beforeHost;
   // The latest run is the host's once it is past the repository and database, or still going.
   const hostRun = run && data && (!isEnded(run.status) || run.results?.some((r) => r.id === `${INFRA}#host`));
   return (
@@ -114,7 +114,7 @@ function GoLivePage() {
         {progress.infra !== null ? (
           <>
             <p className="text-muted-foreground">
-              <code>resources/sanoma/infra.ts</code> declares the repository, the database and the host:
+              <code>resources/sanoma/infra.ts</code> declares the repository, its deploy key, the database and the host:
             </p>
             <pre className="overflow-x-auto rounded-lg border p-3 text-xs">{progress.infra}</pre>
           </>
@@ -124,13 +124,13 @@ function GoLivePage() {
           <p className="text-muted-foreground">Connect GitHub first.</p>
         )}
       </Region>
-      <Region title="3. Create the repository and the database">
+      <Region title="3. Create the repository, its deploy key and the database">
         {data ? (
           <p>The repository, its deploy key and the database are made, and bound in the lockfile.</p>
         ) : run && progress.infra !== null ? (
           <>
             <RunStatus run={run} />
-            {isEnded(run.status) && <ApplyAgain />}
+            {isEnded(run.status) && <ApplyAgain only={progress.beforeHost} />}
           </>
         ) : (
           <p className="text-muted-foreground">Apply creates them once the file is written.</p>
@@ -354,10 +354,9 @@ function RunStatus({ run }: { run: GoLiveRun }) {
   );
 }
 
-/** Starts apply on the repository and the database again, as Resources' Apply would, on these two. */
-function ApplyAgain() {
+/** Starts apply again on what the first apply makes (`only`), as Resources' Apply would on those. */
+function ApplyAgain({ only }: { only: string[] }) {
   const start = useStartRun();
-  const only = [`${INFRA}#repo`, `${INFRA}#store`];
   return (
     <div>
       <Button
