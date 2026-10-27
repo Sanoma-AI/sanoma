@@ -38,7 +38,7 @@ import { type CedarPolicySource, policyAt } from "./cedar.ts";
 import type { Policy } from "./policy.ts";
 import { type Resource, resourceTypesOf, withoutWriteOnly } from "./resource.ts";
 import { APPLY_WORKFLOW, BUILT_IN_WORKFLOWS, CALL_WORKFLOW, DATA_VENDOR } from "./shared.ts";
-import { sourceDriver, sourceOps } from "./source.ts";
+import { type RemoteHalf, sourceDriver, sourceOps } from "./source.ts";
 import type { Steps } from "./steps.ts";
 import { checkSchedule } from "./schedules.ts";
 import { computeVersion } from "./version.ts";
@@ -149,6 +149,8 @@ export interface ResolvedConfig {
   logins: ReadonlyMap<string, NonNullable<ConnectorSetup["login"]>>;
   /** The makers of the model halves the connectors attach, by vendor id in `connectors` order: the app makes each once for its model registry. */
   models: ReadonlyMap<string, NonNullable<ConnectorSetup["model"]>>;
+  /** The remote halves the connectors attach, made once for this resolution, by vendor id in `connectors` order: `remoteFor` finds a URL's. */
+  remotes: ReadonlyMap<string, RemoteHalf>;
   /** `scenarios/` in `root`, as a `file:` URL, when that directory exists. */
   scenarios?: URL;
   /** The resource types the connectors declare (and `sanoma.wakeup`, beside a host type), by `<vendor>.<type>`: what the drift workflow checks and scenarios seed. */
@@ -350,6 +352,7 @@ export function resolveConfig(config: SanomaConfig, options: ResolveOptions = {}
     ...(instanceFakes && { instanceFakes }),
     logins: makersOf(config.connectors, "login"),
     models: makersOf(config.connectors, "model"),
+    remotes: new Map([...makersOf(config.connectors, "remote")].map(([vendor, make]) => [vendor, make()])),
     ...(scenarios && { scenarios }),
     types,
     steps: [...new Set([...running.flatMap((c) => setupOf(c).steps ?? []), ...(config.steps ?? [])])],

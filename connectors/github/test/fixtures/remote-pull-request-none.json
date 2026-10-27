@@ -1,0 +1,8 @@
+[
+  {
+    "method": "GET",
+    "path": "/repos/Sanoma-AI/sanoma/pulls?state=all&head=Sanoma-AI:draft/nothing",
+    "status": 200,
+    "body": []
+  }
+]

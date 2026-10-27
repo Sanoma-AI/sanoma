@@ -164,9 +164,17 @@ export {
   type CheckResult,
   type Draft,
   type DraftDiff,
+  type HostEnforcement,
+  type PullRequest,
+  type RemoteContext,
+  type RemoteEvent,
+  type RemoteHalf,
+  remoteFor,
+  type RepoRef,
   resolveRevision,
   SOURCE_RESOLVE,
   type Source,
+  type SourceHost,
 } from "./source.ts";
 export type { HostCapabilities, HostLifetime, HostOutputs, HostSpec } from "./host.ts";
 export {

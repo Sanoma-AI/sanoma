@@ -10,4 +10,6 @@ Change `src/resources.config.ts` and `src/connector.ts` for resource definitions
 
 Preserve GitHub identity and find rules, including composite branch-protection identities. The current connector reads and imports resources only; keep operation effects and fake behavior consistent with that contract.
 
+`src/remote.ts` is the remote half (`SourceHost` in `@sanoma-ai/workflows`' `src/source.ts`): plain `fetch`, no Octokit, every token read through `secrets` when called and never logged or recorded (`scrub` in `test/remote.test.ts`). Its tests replay GitHub's answers in `test/fixtures/remote-*.json` and hand-written ones for writes, which skip themselves live so no run opens or merges a pull request.
+
 Run `pnpm vitest run connectors/github` and `pnpm typecheck`; these tests need no vendor credentials. After regeneration, check that a second generation produces no diff.
