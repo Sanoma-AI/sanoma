@@ -976,9 +976,11 @@ export class SanomaClient {
     // First, as a change's deploy does: the hosts, and what apply reads, are then main's.
     const moved = await followBase(this.config.remotes, this.storedSecrets, source);
     if (!("revision" in moved)) {
+      // Not on stale files, and nothing recorded as `deploy:<head>`: a redelivery may deploy it.
       warn(
-        `the checkout did not follow ${BASE} before its deploy: ${"skipped" in moved ? moved.skipped : moved.error}`,
+        `${BASE} was not deployed: the checkout did not follow it: ${"skipped" in moved ? moved.skipped : moved.error}`,
       );
+      return;
     }
     const hosts = await this.config.hosts();
     if (hosts.length) await this.apply({ only: hosts }, { startedBy: HOST_CHECK_AGENT, runId });
@@ -1000,13 +1002,15 @@ export class SanomaClient {
 
   /**
    * Brings `head`, pushed to the draft's `branch` on the host, into the draft: false when it holds
-   * it already, or cannot take it (a commit of its own, or one uncommitted: warned).
+   * it already, or cannot take it (no `follow`, a commit of its own, or one uncommitted: warned).
    */
   private async fetched({ source, url, host }: Repository, branch: string, head: string): Promise<boolean> {
     const local = await Promise.resolve(source.head(branch)).catch(() => undefined);
     if (local === head) return false;
-    const moved = await source.follow?.({ url, token: await host.token(), ref: branch });
-    if (moved && "skipped" in moved) {
+    const moved = source.follow
+      ? await source.follow({ url, token: await host.token(), ref: branch })
+      : { skipped: "this repository cannot follow its remote" };
+    if ("skipped" in moved) {
       warn(`${branch} did not take the host's commits: ${moved.skipped}`);
       return false;
     }

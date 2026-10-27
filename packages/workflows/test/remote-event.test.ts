@@ -161,6 +161,18 @@ describe("remoteEvent on a push to main", () => {
     expect(source.follows).toEqual([{ url: remote.url, token: expect.any(String), ref: "main" }]);
   });
 
+  it("deploys nothing while the checkout cannot follow main, so a redelivery deploys it", async () => {
+    const head = await git.commit();
+    const event: RemoteEvent = { kind: "pushed", repo, branch: "main", head };
+    source.following(() => ({ skipped: "an uncommitted edit" }));
+    await app.client.remoteEvent(event, BY);
+    expect((await app.client.runs({ workflow: "apply" })).map((r) => r.runId)).not.toContain(`deploy:${head}`);
+    source.following((ref) => ({ revision: remote.branches.get(ref) ?? sha(ref) }));
+    await app.client.remoteEvent(event, BY);
+    const report = await app.client.applyReport(`deploy:${head}`);
+    expect(report.results).toEqual([expect.objectContaining({ id: "resources/infra.ts#app", status: "done" })]);
+  });
+
   it("leaves main to a change that is deploying it: the change applies the hosts itself", async () => {
     const gate = Promise.withResolvers<void>();
     held = gate.promise;

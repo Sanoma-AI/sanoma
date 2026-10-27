@@ -127,11 +127,12 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
         if (err.code === 2) return undefined;
         throw err;
       }),
-    follow: ({ url, token, ref }) =>
-      serial(async () => {
-        // A draft's branch is checked out in the draft's own checkout.
-        const id = draftOf(ref);
-        const cwd = id !== undefined && DRAFT_ID.test(id) && (await listed()).get(id) ? draftAt(id) : root;
+    follow: async ({ url, token, ref }) => {
+      // A draft's branch is checked out in the draft's own checkout, and moves under no check running in it.
+      const id = draftOf(ref);
+      const cwd = id !== undefined && DRAFT_ID.test(id) && (await listed()).get(id) ? draftAt(id) : root;
+      await checkingAt.get(cwd);
+      return serial(async () => {
         const gitHere = (args: string[], env?: NodeJS.ProcessEnv) => gitIn(cwd, args, env);
         const on = await gitHere(["branch", "--show-current"]);
         if (on !== ref)
@@ -147,7 +148,8 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
         }
         await gitHere(["merge", "--quiet", "--ff-only", fetched]);
         return { revision: fetched };
-      }),
+      });
+    },
     async draft(id): Promise<Draft> {
       const [branch, at] = [branchOf(id), draftAt(id)];
       await serial(async () => {
