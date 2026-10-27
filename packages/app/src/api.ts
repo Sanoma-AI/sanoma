@@ -57,7 +57,7 @@ export const DEMO_AS = "as";
  * What a demo's banner reads besides the people (`getConfig`, only when the app runs as one): the
  * config's `demo`, whose `start` is the URL "Start with these apps" opens.
  */
-export type DemoInfo = NonNullable<SanomaConfig["demo"]>;
+export type DemoInfo = Pick<NonNullable<SanomaConfig["demo"]>, "start">;
 
 /**
  * Who the server says is asking. With a login provider (`fromServer`), it is whoever signed in,

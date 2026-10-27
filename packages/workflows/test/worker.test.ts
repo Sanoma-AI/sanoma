@@ -90,6 +90,16 @@ const refused: [string, Partial<SanomaConfig>, RegExp][] = [
     { policy: () => ({ kind: "deny", reason: "no" }) } as never,
     /^The config's `policy` is gone: the policy is policies\/\*\.cedar in the root; leave it out$/,
   ],
+  [
+    "a demo with no sessions to give",
+    { demo: { sessions: 0 } },
+    /^The config's `demo.sessions` is `true` or how many at once, a whole number above 0, not 0$/,
+  ],
+  [
+    "a demo reseeded back to back",
+    { demo: { reseed: 0 } },
+    /^The config's `demo.reseed` is minutes, a number above 0, not 0$/,
+  ],
 ];
 
 describe("startWorker, resolveConfig and describeConfig", () => {

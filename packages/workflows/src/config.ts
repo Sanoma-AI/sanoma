@@ -114,12 +114,43 @@ export interface SanomaConfig {
    * that sets it and declares a wakeup of its own.
    */
   wakeup?: true;
+  /** How this repo runs as a demo (`sanoma demo`, or `SANOMA_DEMO=1` on a host). */
+  demo?: DemoConfig;
+}
+
+/** A demo's settings (`SanomaConfig.demo`). */
+export interface DemoConfig {
   /**
-   * What the app says when it runs this repo as a demo (`sanoma demo`): `start`, the URL its
-   * banner's "Start with these apps" opens, such as the hosted wizard with the demo's apps
-   * chosen; without one, the banner has no such link.
+   * The URL the banner's "Start with these apps" opens, such as the hosted wizard with the demo's
+   * apps chosen; without one, the banner has no such link.
    */
-  demo?: { start?: string };
+  start?: string;
+  /**
+   * A session per visitor: each visitor gets a copy of the seeded database and a process of their
+   * own over it, so the moments wait for them alone and nothing they type reaches another. At most
+   * this many at once, or with `true` as many as the machine's memory and Postgres's connections
+   * hold; past it, visitors share one demo instance. Without it, every visitor shares that instance.
+   */
+  sessions?: true | number;
+  /** Minutes a visitor's session lives unused before it is dropped. Default 30. */
+  idle?: number;
+  /** Minutes between seeds of the demo afresh (its shared instance, or the sessions' seed). Default 60. */
+  reseed?: number;
+}
+
+/** Refuses a `demo` whose numbers make no demo: `sessions` `true` or a whole number above 0, `idle` and `reseed` minutes above 0. */
+function checkDemo(demo: DemoConfig | undefined): void {
+  const { sessions, idle, reseed } = demo ?? {};
+  if (sessions !== undefined && sessions !== true && !(Number.isInteger(sessions) && sessions > 0)) {
+    throw new Error(
+      `The config's \`demo.sessions\` is \`true\` or how many at once, a whole number above 0, not ${JSON.stringify(sessions)}`,
+    );
+  }
+  for (const [key, minutes] of Object.entries({ idle, reseed })) {
+    if (minutes !== undefined && !(typeof minutes === "number" && minutes > 0)) {
+      throw new Error(`The config's \`demo.${key}\` is minutes, a number above 0, not ${JSON.stringify(minutes)}`);
+    }
+  }
 }
 
 /** A config, checked, with everything a worker, client or app derives from it. */
@@ -295,6 +326,7 @@ export function resolveConfig(config: SanomaConfig, options: ResolveOptions = {}
   if (config.policy !== undefined) {
     throw new Error("The config's `policy` is gone: the policy is policies/*.cedar in the root; leave it out");
   }
+  checkDemo(config.demo);
   const collections = collectionsOf(config);
   const ledger = ledgerOf(config);
   const root = rootOf(config);
