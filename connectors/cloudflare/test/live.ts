@@ -51,7 +51,7 @@ process.env.DBOS__APPVERSION = APP_VERSION;
 const ref = git("rev-parse", "--abbrev-ref", "HEAD");
 const declared = {
   name: NAME,
-  image: process.env.CLOUDFLARE_TEST_IMAGE ?? `docker.io/sanomaai/runtime:${version}`,
+  image: process.env.CLOUDFLARE_TEST_IMAGE ?? `ghcr.io/sanoma-ai/runtime:${version}`,
   source: git("remote", "get-url", "origin"),
   ref,
   port: 3000,

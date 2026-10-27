@@ -25,7 +25,7 @@ const containerSchema = z.object({
     .regex(/^[^\s@]+(:[\w][\w.-]{0,127}|@sha256:[0-9a-f]{64})$/, "pin the image to a tag or a digest")
     .refine((image) => !image.endsWith(":latest"), "pin the image to a version, not `latest`")
     .describe(
-      "The Sanoma runtime image on Docker Hub, pinned to a tag or a digest: `docker.io/sanomaai/runtime:<version>`",
+      "The Sanoma runtime image, pinned to a tag or a digest: `ghcr.io/sanoma-ai/runtime:<version>`, which apply copies into the account's registry",
     ),
   source: z.string().min(1).describe("The company repository's clone URL, or a declared GitHub repository"),
   ref: z.string().min(1).describe("The branch it runs, such as `main`, never a commit"),
@@ -55,7 +55,8 @@ const containerSchema = z.object({
  * subdomain, whose one Durable Object (`SanomaInstance`) starts the runtime image in a Container
  * on a request and stops it ten minutes after the last (`Host`: stops when quiet, its URL public).
  * What it runs is in the Worker's plain-text bindings, so a read tells its revision with no
- * container running. A deploy uploads the Worker again; a new image rolls the application out.
+ * container running. A deploy uploads the Worker again; a new image is copied into the account's
+ * registry (any registry's but Cloudflare's own) and rolls the application out to the copy.
  */
 export const container = defineResource({
   vendor: "cloudflare",

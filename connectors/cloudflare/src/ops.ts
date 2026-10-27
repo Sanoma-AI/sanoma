@@ -93,6 +93,10 @@ export interface CloudflareApi {
   upload(script: string, upload: Upload): Promise<void>;
   /** Turns its workers.dev URL on (`POST …/scripts/{name}/subdomain { enabled }`). */
   enableSubdomain(script: string): Promise<void>;
+  /** The image the application runs for a declared one: itself in Cloudflare's registry, else its copy in the account's (`accountImage`). */
+  accountImage(image: string): string;
+  /** Copies a declared image into the account's registry unless it is there already; the image the application runs. */
+  copyImage(image: string): Promise<string>;
   /** Deletes the Worker, its object's storage with it; nothing when there is none. */
   deleteScript(script: string): Promise<void>;
   /** The container application of that name, if any (`GET …/containers/applications?name=`). */
@@ -214,11 +218,13 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
     if (!found) return { action: "create", planned, unknown, replace: [] };
     const { state } = found;
     if (planned.name !== state.name) return { action: "replace", planned, unknown, replace: ["name"] };
+    // The application runs the image's copy in the account's registry: that is what a read shows.
+    const runs: Record<string, unknown> = { ...planned };
+    if (typeof planned.image === "string") runs.image = api().accountImage(planned.image);
     const changed =
       // `domains` left out is compared too: removing them is a change.
-      COMPARED.some(
-        (field) => (field in planned || field === "domains") && !same(field, planned[field], state[field]),
-      ) || sorted(Object.keys(secrets ?? {})) !== sorted(found.secrets);
+      COMPARED.some((field) => (field in planned || field === "domains") && !same(field, runs[field], state[field])) ||
+      sorted(Object.keys(secrets ?? {})) !== sorted(found.secrets);
     if (!changed) return { action: "none", planned: state, ...NONE };
     return { action: "update", planned: { ...state, ...planned }, ...NONE };
   };
@@ -260,12 +266,14 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
         "exists",
       );
     }
+    // Before anything changes: a copy that fails leaves the Worker as it was.
+    const runs = await cf.copyImage(image);
     const served = domains ? domainsText(domains) : undefined;
     const text = {
       [TEXT.source]: source,
       [TEXT.ref]: ref,
       [TEXT.revision]: revision,
-      [TEXT.image]: image,
+      [TEXT.image]: runs,
       [TEXT.port]: String(port),
       [TEXT.url]: url,
       ...(served && { [TEXT.domains]: served }),
@@ -293,13 +301,13 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
       // The application is made for the object's namespace, which the first upload made.
       const namespace = (await cf.bindings(script))?.find((b) => b.name === NAMESPACE)?.namespace_id;
       if (!namespace) throw refused(`${script}: Cloudflare names no namespace for its ${NAMESPACE} binding`);
-      app = await cf.createApplication(script, image, namespace);
-    } else if (app.image !== image) await cf.rollout(app.id, image);
+      app = await cf.createApplication(script, runs, namespace);
+    } else if (app.image !== runs) await cf.rollout(app.id, runs);
     await started(cf, script, url, revision);
     const state: ContainerState = {
       id: app.id,
       name,
-      image,
+      image: runs,
       source,
       ref,
       revision,

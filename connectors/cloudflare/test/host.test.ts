@@ -40,7 +40,7 @@ describe("cloudflare.container meets the Host contract on the fake", () => {
   const root = mkdtempSync(join(tmpdir(), "sanoma-cloudflare-host-"));
   const declared = {
     name: "company",
-    image: "docker.io/sanomaai/runtime:0.7.0",
+    image: "ghcr.io/sanoma-ai/runtime:0.7.0",
     source: repo.url,
     ref: "main",
     port: 3000,

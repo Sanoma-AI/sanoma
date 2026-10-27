@@ -60,8 +60,11 @@ const DOCKER = "docker.container";
 
 /** The runtime image a container on this machine runs: `docker build -t sanoma-runtime packages/sanoma/runtime`. */
 export const RUNTIME_IMAGE = "sanoma-runtime";
-/** The runtime image every other host runs, tagged with the version of `sanoma` the company installs. */
-const PUBLISHED_IMAGE = "docker.io/sanomaai/runtime";
+/**
+ * The runtime image every other host runs, tagged with the version of `sanoma` the company
+ * installs: GitHub's registry, which Cloudflare's container copies into its account at apply.
+ */
+const PUBLISHED_IMAGE = "ghcr.io/sanoma-ai/runtime";
 
 /** The secret the database's URL is stored in: its `storeUrl` for the export `store`. */
 const DATABASE_URL = databaseUrlSecret("store");

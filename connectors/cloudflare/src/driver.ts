@@ -3,16 +3,22 @@ import type { Cloudflare } from "cloudflare";
 import { z } from "zod";
 import { cloudflareOps } from "./connector.ts";
 import { alarmOps, type Application, type CloudflareApi, containerOps, type ReadBinding, refused } from "./ops.ts";
+import { accountImage, CLOUDFLARE_REGISTRY, copyImage } from "./registry.ts";
 
 /*
  * Cloudflare's driver, over its official SDK (`cloudflare`, Stainless) for the API, and plain
- * `fetch` for the company's own Worker (its health and wake routes). A timeout on each request.
+ * `fetch` for the company's own Worker (its health and wake routes) and the image's copy into the
+ * account's registry (`registry.ts`). A timeout on each request.
  */
 
 export interface CloudflareDriverOptions {
   /** How long one request may take, in milliseconds. Default 30 000. */
   timeoutMs?: number;
-  /** How long a create or update waits for the Worker to answer at its new revision. Default 10 minutes: a cold start clones and installs. */
+  /**
+   * How long a create or update waits for the Worker to answer at its new revision, and how long
+   * each request of the image's copy may take (a layer streams through). Default 10 minutes: a
+   * cold start clones and installs.
+   */
   startTimeoutMs?: number;
   /** How long between two tries of the Worker while it starts. Default 2 000. */
   pollMs?: number;
@@ -72,7 +78,7 @@ const application = (app: { id: string }): Application => ({
  * The account at `CLOUDFLARE_ACCOUNT_ID` with `CLOUDFLARE_API_TOKEN`, read when an operation is
  * called. `subdomains` keeps each account's workers.dev subdomain once read, for the driver's life.
  */
-function accountApi(timeoutMs: number, subdomains: Map<string, Promise<string>>): CloudflareApi {
+function accountApi(timeoutMs: number, copyTimeoutMs: number, subdomains: Map<string, Promise<string>>): CloudflareApi {
   const token = process.env.CLOUDFLARE_API_TOKEN;
   const account_id = process.env.CLOUDFLARE_ACCOUNT_ID;
   if (!token) throw refused(`CLOUDFLARE_API_TOKEN is not set (${env.shape.CLOUDFLARE_API_TOKEN.description})`);
@@ -184,6 +190,21 @@ function accountApi(timeoutMs: number, subdomains: Map<string, Promise<string>>)
         }),
       );
     },
+    accountImage: (image) => accountImage(image, account_id),
+    async copyImage(image) {
+      if (accountImage(image, account_id) === image) return image;
+      // Push and pull for an hour, never stored: each copy asks for its own.
+      const { username, password } = await calling(
+        `POST containers/registries/${CLOUDFLARE_REGISTRY}/credentials`,
+        (cf) =>
+          cf.containers.registries.credentials.generate(CLOUDFLARE_REGISTRY, {
+            account_id,
+            permissions: ["push", "pull"],
+            expiration_minutes: 60,
+          }),
+      );
+      return copyImage(image, { account: account_id, username, password }, copyTimeoutMs);
+    },
     async deleteApplication(id) {
       await found(`DELETE containers/applications/${id}`, (cf) =>
         cf.containers.applications.delete(id, { account_id }),
@@ -202,7 +223,7 @@ function accountApi(timeoutMs: number, subdomains: Map<string, Promise<string>>)
 export function cloudflareDriver(options: CloudflareDriverOptions = {}) {
   const { timeoutMs = 30_000, startTimeoutMs = 10 * 60_000, pollMs = 2_000 } = options;
   const subdomains = new Map<string, Promise<string>>();
-  const api = () => accountApi(timeoutMs, subdomains);
+  const api = () => accountApi(timeoutMs, startTimeoutMs, subdomains);
   // The alarm only calls the Worker, so it needs no account.
   const worker = { send: sender(timeoutMs) };
   return defineDriver(

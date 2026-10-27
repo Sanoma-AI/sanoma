@@ -67,7 +67,7 @@ describe("cloudflare.alarm meets the Wakeup contract on the fake", () => {
   beforeAll(async () => {
     const desired = {
       name: "company",
-      image: "docker.io/sanomaai/runtime:0.7.0",
+      image: "ghcr.io/sanoma-ai/runtime:0.7.0",
       source: "file:///unused.git",
       ref: "main",
       port: 3000,
@@ -113,7 +113,7 @@ describe("cloudflare.alarm in a data file", () => {
         "",
         "export const host = cloudflare.container({",
         '  name: "company",',
-        '  image: "docker.io/sanomaai/runtime:0.7.0",',
+        '  image: "ghcr.io/sanoma-ai/runtime:0.7.0",',
         '  source: "https://github.com/acme/company.git",',
         '  ref: "main",',
         "  port: 3000,",
