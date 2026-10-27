@@ -1,0 +1,24 @@
+[
+  {
+    "method": "GET",
+    "path": "/repos/Sanoma-AI/sanoma/pulls?state=all&head=Sanoma-AI:task/348-cloudflare",
+    "status": 200,
+    "body": [
+      {
+        "number": 354,
+        "html_url": "https://github.com/Sanoma-AI/sanoma/pull/354",
+        "state": "closed",
+        "title": "Cloudflare connector: a container host that stops when quiet, and its alarm wakeup (#348)",
+        "merged_at": "2026-10-26T20:04:17Z",
+        "merge_commit_sha": "c0d01228f40b81ba18af0d9367d5ca54449a307e",
+        "head": {
+          "ref": "task/348-cloudflare",
+          "sha": "d0f4599f343d75d878e5a1648a4a0ea607655c28"
+        },
+        "base": {
+          "ref": "main"
+        }
+      }
+    ]
+  }
+]

@@ -15,6 +15,7 @@ import {
   defineSteps,
   defineWorkflow,
   memoryLedger,
+  type RemoteHalf,
   resolveConfig,
   type SanomaConfig,
   withSetup,
@@ -143,6 +144,23 @@ describe("resolveConfig on the connectors' setups", () => {
     expect(() =>
       resolveConfig(config({ connectors: [ghost, answers, withSetup(resend, { model: () => model() }), bluesky] })),
     ).toThrow('Two connectors in `connectors` attach a model for "resend"; keep one per vendor');
+  });
+
+  it("makes each remote half once per resolution, by vendor, one per vendor", () => {
+    const make = vi.fn<() => RemoteHalf>(() => ({ matches: () => undefined, open: () => ({}) as never }));
+    const hosts = withSetup(resend, { remote: make });
+    const resolved = resolveConfig(config({ connectors: [ghost, hosts, { ...hosts }, bluesky] }));
+    expect([...resolved.remotes.keys()]).toEqual(["resend"]);
+    expect(make).toHaveBeenCalledTimes(1);
+    expect(resolved.remotes.get("resend")).toBe(make.mock.results[0]!.value);
+    expect(resolveConfig(config()).remotes.size).toBe(0);
+    // GitHub's package attaches its own.
+    expect([...resolveConfig(config({ connectors: [ghost, resend, bluesky, github] })).remotes.keys()]).toEqual([
+      "github",
+    ]);
+    expect(() =>
+      resolveConfig(config({ connectors: [ghost, hosts, withSetup(resend, { remote: () => make() }), bluesky] })),
+    ).toThrow('Two connectors in `connectors` attach a remote for "resend"; keep one per vendor');
   });
 
   it("refuses a workflow using an operation whose connector attaches no driver", () => {

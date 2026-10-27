@@ -2,6 +2,7 @@ import type { ProviderV4 } from "@ai-sdk/provider";
 import type { z } from "zod";
 import type { Fake } from "./fake.ts";
 import type { Secrets } from "./secret.ts";
+import type { RemoteHalf } from "./source.ts";
 import type { Steps } from "./steps.ts";
 
 /**
@@ -308,7 +309,8 @@ export interface Driver {
  * to call: the config then names the connector alone, and never a driver, a fake, steps or a
  * login. Any may be missing: a workflow using an operation of a connector with no driver is
  * refused, a connector with no fake has none for sandbox runs, one with no login half signs no
- * visitor in, and one with no model half gives the app no models.
+ * visitor in, one with no model half gives the app no models, and one with no remote half hosts
+ * no repository a change is reviewed on.
  */
 export interface ConnectorSetup {
   /** Makes the live driver, which reads its credentials from the environment when called: once per resolved config. */
@@ -331,6 +333,11 @@ export interface ConnectorSetup {
    * and a missing one fails that call.
    */
   model?: (context: ModelContext) => ProviderV4 | Promise<ProviderV4>;
+  /**
+   * Makes the connector's remote half, a git host's pull requests, statuses and webhooks: once per
+   * resolved config (`ResolvedConfig.remotes`). It reads its credentials when called.
+   */
+  remote?: () => RemoteHalf;
 }
 
 /** What the app gives a connector's model half (`ConnectorSetup.model`): the secrets, as a login half reads them. */

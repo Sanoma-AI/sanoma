@@ -45,6 +45,7 @@
       "@sanoma-ai/connector-*/fake": ["./connectors/*/src/fake.ts"],
       "@sanoma-ai/connector-*/driver": ["./connectors/*/src/driver.ts"],
       "@sanoma-ai/connector-*/resources": ["./connectors/*/src/resources.ts"],
+      "@sanoma-ai/connector-*/remote": ["./connectors/*/src/remote.ts"],
       "@sanoma-ai/connector-*": ["./connectors/*/src/index.ts"]
     }
   },

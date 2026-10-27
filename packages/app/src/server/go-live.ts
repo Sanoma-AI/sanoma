@@ -1,6 +1,5 @@
 // oxlint-disable-next-line import/no-unassigned-import
 import "@tanstack/react-start/server-only";
-import { createSign } from "node:crypto";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { findPackageJSON } from "node:module";
 import { dirname, join } from "node:path";
@@ -10,6 +9,7 @@ import {
   errorMessage,
   isEnded,
   type Principal,
+  type RepoRef,
   type Resource,
   wakeupHostTypes,
 } from "@sanoma-ai/workflows";
@@ -29,7 +29,8 @@ import {
 import type { AppContext } from "../context.ts";
 import { asApplyPlan } from "../lib/apply-plan.ts";
 import { invalid } from "./core.ts";
-import { GITHUB_APP, mintWakeupToken, OPS_URL } from "./setup.ts";
+import { secretValues } from "./secrets.ts";
+import { mintWakeupToken, OPS_URL } from "./setup.ts";
 
 // Going live, steps 2 to 6 (step 1 is connect, in setup.ts): choose where the company goes,
 // write `resources/sanoma/infra.ts`, apply the repository and the database, push the local
@@ -167,8 +168,8 @@ const exists = (path: string) =>
   );
 
 /** `url`'s answer as JSON, or an error saying who answered what. */
-async function fetchJson<T>(url: string, headers: Record<string, string>, method = "GET"): Promise<T> {
-  const res = await fetch(url, { method, headers: { accept: "application/json", ...headers } });
+async function fetchJson<T>(url: string, headers: Record<string, string>): Promise<T> {
+  const res = await fetch(url, { headers: { accept: "application/json", ...headers } });
   if (!res.ok) throw new Error(`${new URL(url).host} answered ${res.status} to ${new URL(url).pathname}`);
   return (await res.json()) as T;
 }
@@ -180,25 +181,15 @@ const githubHeaders = (token: string) => ({
   "user-agent": "sanoma",
 });
 
-const jwtPart = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
-
-/** A JWT the GitHub App signs for itself, good for 9 minutes: what its installations are listed with. */
-function appJwt(appId: string, pem: string): string {
-  const now = Math.floor(Date.now() / 1000);
-  const body = `${jwtPart({ alg: "RS256", typ: "JWT" })}.${jwtPart({ iat: now - 60, exp: now + 540, iss: appId })}`;
-  return `${body}.${createSign("RSA-SHA256").update(body).sign(pem, "base64url")}`;
-}
-
-type Installation = { id: number; account: { login: string; type: string } };
-
-/** The GitHub App's installations, when its keys are stored. */
-async function installations({ client }: AppContext): Promise<Installation[]> {
-  const found = await client.secrets([GITHUB_APP.id, GITHUB_APP.pem]);
-  const id = found.get(GITHUB_APP.id)?.value;
-  const pem = found.get(GITHUB_APP.pem)?.value;
-  if (!id || !pem) return [];
-  return fetchJson<Installation[]>(`${GITHUB_API}/app/installations`, githubHeaders(appJwt(id, pem)));
-}
+/**
+ * The GitHub connector's remote half over the stored credentials alone: going live lists accounts
+ * with the stored `GITHUB_TOKEN` (`connections`), so it pushes with that one too, not one this
+ * process's environment happens to have.
+ */
+const githubOf = (app: AppContext) => ({
+  remote: app.resolved.remotes.get("github"),
+  context: { secrets: secretValues(app.client, { environment: false }) },
+});
 
 /**
  * What the page offers: the GitHub accounts the token (its user and organizations) and the App
@@ -233,7 +224,11 @@ export async function goLiveChoices(app: AppContext): Promise<GoLiveChoices> {
           fetchJson<{ login: string }[]>(`${GITHUB_API}/user/orgs`, githubHeaders(github)),
         )
       : [],
-    listed("The GitHub App's installations", () => installations(app)),
+    // The accounts the GitHub App is installed on, from the GitHub connector's remote half.
+    listed("The GitHub App's installations", async () => {
+      const { remote, context } = githubOf(app);
+      return (await remote?.owners?.(context)) ?? [];
+    }),
     supabase
       ? listed("Supabase's organizations", () =>
           fetchJson<{ id: string; name: string }[]>(`${SUPABASE_API}/v1/organizations`, {
@@ -246,14 +241,8 @@ export async function goLiveChoices(app: AppContext): Promise<GoLiveChoices> {
     ...user.map(({ login }) => ({ login, kind: "user" as const, via: "token" as const })),
     ...orgs.map(({ login }) => ({ login, kind: "organization" as const, via: "token" as const })),
   ];
-  for (const { account } of installed) {
-    if (!owners.some((o) => o.login === account.login)) {
-      owners.push({
-        login: account.login,
-        kind: account.type === "Organization" ? "organization" : "user",
-        via: "app",
-      });
-    }
+  for (const { login, kind } of installed) {
+    if (!owners.some((o) => o.login === login)) owners.push({ login, kind, via: "app" });
   }
   if (wakeup.cannot) errors.push(wakeup.cannot);
   return {
@@ -451,22 +440,23 @@ export async function goLive(app: AppContext, actor: Principal, choices: GoLiveR
 }
 
 /**
- * The token a push to the owner's repository signs in with: the stored `GITHUB_TOKEN`, else an
- * installation token of the GitHub App installed on the owner.
+ * The token a push to `repo` signs in with, from the GitHub connector's remote half: the stored
+ * `GITHUB_TOKEN`, else an installation token of the GitHub App installed on the owner.
  */
-async function pushToken(app: AppContext, owner: string): Promise<string> {
-  const stored = await app.client.secrets(["GITHUB_TOKEN", GITHUB_APP.id, GITHUB_APP.pem]);
-  const token = stored.get("GITHUB_TOKEN")?.value;
-  if (token) return token;
-  const installation = (await installations(app)).find((i) => i.account.login.toLowerCase() === owner.toLowerCase());
-  if (!installation) throw new ApiError(409, { error: `No GitHub token, and the App is not installed on ${owner}` });
-  const jwt = appJwt(stored.get(GITHUB_APP.id)!.value, stored.get(GITHUB_APP.pem)!.value);
-  const { token: made } = await fetchJson<{ token: string }>(
-    `${GITHUB_API}/app/installations/${installation.id}/access_tokens`,
-    githubHeaders(jwt),
-    "POST",
-  );
-  return made;
+async function pushToken(app: AppContext, repo: RepoRef): Promise<string> {
+  const { remote, context } = githubOf(app);
+  if (!remote)
+    throw new ApiError(409, {
+      error: "The GitHub connector has no remote half: install @sanoma-ai/connector-github of this release",
+    });
+  try {
+    return await remote.open(repo, context).token("token");
+  } catch (err) {
+    // Neither a token nor the App: something to connect, not GitHub failing.
+    if ((err as { vendorCode?: string } | undefined)?.vendorCode === "no_token")
+      throw new ApiError(409, { error: errorMessage(err) });
+    throw err;
+  }
 }
 
 /**
@@ -499,7 +489,7 @@ export async function goLiveHost(app: AppContext, actor: Principal): Promise<{ r
   try {
     await source.push({
       url: `https://github.com/${owner}/${name}.git`,
-      token: await pushToken(app, owner),
+      token: await pushToken(app, { owner, name }),
       ref: "main",
     });
   } catch (err) {
