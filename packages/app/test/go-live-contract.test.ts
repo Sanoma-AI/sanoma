@@ -1,3 +1,4 @@
+import { createPublicKey, generateKeyPairSync } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,9 +12,10 @@ import {
   resolveConfig,
   type SanomaConfig,
 } from "@sanoma-ai/workflows";
-import { describeConfig } from "@sanoma-ai/workflows/describe";
+import { describeConfig, readDataFiles } from "@sanoma-ai/workflows/describe";
 import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
+import { INFRA } from "../src/api.ts";
 import type { AppContext } from "../src/context.ts";
 import { goLiveChoices, renderInfra } from "../src/server/go-live.ts";
 
@@ -137,8 +139,17 @@ const docker = defineConnector(
 );
 const fly = defineConnector("fly", { app: hostOf("fly", "app", "stops-when-quiet", true) }, { package: "@acme/fly" });
 
-/** Going live's context for a config, with `stored` the secrets the client says are stored. */
-function contextOf(connectors: Connector<any, any>[], stored: Record<string, string> = {}): AppContext {
+/** The host's deploy key, as going live stores it before it renders `infra.ts`. */
+const SOURCE_KEY = generateKeyPairSync("rsa", { modulusLength: 3072 })
+  .privateKey.export({ type: "pkcs1", format: "pem" })
+  .toString();
+
+/**
+ * Going live's context for a config, with `stored` the secrets the client says are stored, and
+ * the deploy key's private half (`SANOMA_SOURCE_KEY`) unless `stored` says otherwise.
+ */
+function contextOf(connectors: Connector<any, any>[], given: Record<string, string> = {}): AppContext {
+  const stored: Record<string, string> = { SANOMA_SOURCE_KEY: SOURCE_KEY, ...given };
   const config: SanomaConfig = { workflows: [], connectors, root };
   return {
     resolved: resolveConfig(config),
@@ -186,6 +197,54 @@ describe("going live by contract", () => {
     expect(text).toContain(`export const host = docker.container({\n  name: "acme-ops",\n  image: "sanoma-runtime",\n`);
     expect(text).not.toContain("supabase");
     expect(text).not.toContain("wakeup");
+  });
+
+  it("declares the repository's read-only deploy key, whose private half the host is given to clone with", async () => {
+    const text = await renderInfra(contextOf(ALL), choices);
+    const declared =
+      /export const deployKey = github\.repository_deploy_key\(\{\n  repository: repo,\n  title: "Sanoma host",\n  key: "(ssh-rsa [A-Za-z0-9+/=]+)",\n  read_only: true,\n\}\);\n/.exec(
+        text,
+      );
+    expect(declared).not.toBeNull();
+    // The stored key's public half, in OpenSSH's format: `ssh-rsa`, then e and n, each after its length.
+    const wire = Buffer.from(declared![1]!.slice("ssh-rsa ".length), "base64");
+    const fields: Buffer[] = [];
+    for (let at = 0; at < wire.length; at += 4 + wire.readUInt32BE(at)) {
+      fields.push(wire.subarray(at + 4, at + 4 + wire.readUInt32BE(at)));
+    }
+    const [kind, e, n] = fields;
+    expect(kind!.toString()).toBe("ssh-rsa");
+    const jwk = createPublicKey(SOURCE_KEY).export({ format: "jwk" });
+    // An mpint with its top bit set leads with a zero byte, which a JWK's integer has not.
+    expect(n![0]).toBe(0);
+    expect({ e: e!.toString("base64url"), n: n!.subarray(1).toString("base64url") }).toEqual({ e: jwk.e, n: jwk.n });
+    expect(text).toContain(`    SANOMA_SOURCE_KEY: secret("SANOMA_SOURCE_KEY"),\n`);
+    expect(text).toContain("export default [repo, deployKey, store, host];");
+    // The private half is never in the file.
+    expect(text).not.toContain("PRIVATE KEY");
+    // Read back as the worker reads it: the key names the repository, which apply makes first.
+    const other = mkdtempSync(join(tmpdir(), "sanoma-go-live-contract-read-"));
+    try {
+      mkdirSync(join(other, "resources", "sanoma"), { recursive: true });
+      writeFileSync(join(other, INFRA), text);
+      const read = readDataFiles(other, ALL);
+      expect(read.problems).toEqual([]);
+      expect(read.resources.find((r) => r.id === `${INFRA}#deployKey`)).toMatchObject({
+        vendor: "github",
+        type: "repository_deploy_key",
+        refs: { repository: `${INFRA}#repo` },
+        desired: { repository: "acme-ops", read_only: true },
+      });
+    } finally {
+      rmSync(other, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses to render before the deploy key is stored", async () => {
+    await expect(renderInfra(contextOf(ALL, { SANOMA_SOURCE_KEY: "" }), choices)).rejects.toMatchObject({
+      status: 409,
+      message: "SANOMA_SOURCE_KEY is not stored: going live stores it first",
+    });
   });
 
   it("leaves out the size when none is chosen", async () => {

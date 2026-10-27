@@ -25,6 +25,22 @@ describe("the generated GitHub resource types", () => {
     expect(parsed.security_and_analysis).toMatchObject({ secret_scanning: { status: "disabled" } });
   });
 
+  it("parse the recorded read of a deploy key, bound by `<repository>:<key id>`", () => {
+    const state = TYPES.repository_deploy_key.schema.parse(
+      fromTfState(
+        TYPES.repository_deploy_key.shape,
+        recorded("github_repository_deploy_key/sanoma-apply-test_1000000101/read.json"),
+      ),
+    );
+    expect(state).toMatchObject({
+      id: "sanoma-apply-test:1000000101",
+      repository: "sanoma-apply-test",
+      read_only: true,
+    });
+    expect(declare.repository_deploy_key.bindingId(state)).toBe("sanoma-apply-test:1000000101");
+    expect(TYPES.repository_deploy_key.fields.vendorOwned).toEqual(["etag"]);
+  });
+
   it("flag what GitHub owns, keep computed and optional attributes the user's, and mark sets", () => {
     expect(TYPES.repository.fields.vendorOwned).toEqual(expect.arrayContaining(["html_url", "repo_id", "node_id"]));
     expect(TYPES.repository.fields.vendorOwned).not.toContain("etag");
@@ -54,7 +70,12 @@ describe("the github connector", () => {
   });
 
   it("keeps the resource types beside the connector's vendor", () => {
-    expect(Object.keys(declare)).toEqual(["repository", "branch_protection", "team_membership"]);
+    expect(Object.keys(declare)).toEqual([
+      "repository",
+      "branch_protection",
+      "team_membership",
+      "repository_deploy_key",
+    ]);
     expect(declare.repository.vendor).toBe("github");
   });
 
@@ -78,6 +99,18 @@ describe("the github connector", () => {
     // @ts-expect-error only a repository
     expect(() => declare.team_membership({ team_id: site, username: "octocat" })).toThrow(/team_id takes a value/);
     expect(declare.team_membership({ team_id: "core", username: "octocat" }).name).toBe("core:octocat");
+    // A deploy key names its repository the same way, and is found by its binding alone.
+    const key = declare.repository_deploy_key({
+      repository: site,
+      title: "Sanoma host",
+      key: "ssh-rsa AAAA",
+      read_only: true,
+    });
+    expect(key).toMatchObject({
+      desired: { repository: "website" },
+      refs: { repository: "github.repository:website" },
+    });
+    expect(declare.repository_deploy_key.identity).toBeUndefined();
   });
 
   it("compares a repository's topics, a set, in any order, and only declared fields", () => {

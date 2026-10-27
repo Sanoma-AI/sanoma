@@ -1,6 +1,6 @@
 # @sanoma-ai/connector-github
 
-GitHub resources for [`@sanoma-ai/workflows`](https://www.npmjs.com/package/@sanoma-ai/workflows): repositories, branch protection rules and team memberships, read through the [`integrations/github`](https://github.com/integrations/terraform-provider-github) OpenTofu provider (6.13.0) on [provider-bridge](https://github.com/Sanoma-AI/provider-bridge), and the company repository's pull requests, through its [remote half](#remote-half).
+GitHub resources for [`@sanoma-ai/workflows`](https://www.npmjs.com/package/@sanoma-ai/workflows): repositories, branch protection rules, team memberships and deploy keys, read through the [`integrations/github`](https://github.com/integrations/terraform-provider-github) OpenTofu provider (6.13.0) on [provider-bridge](https://github.com/Sanoma-AI/provider-bridge), and the company repository's pull requests, through its [remote half](#remote-half).
 
 ## Usage
 
@@ -8,17 +8,20 @@ GitHub resources for [`@sanoma-ai/workflows`](https://www.npmjs.com/package/@san
 npm install @sanoma-ai/connector-github
 ```
 
-Each resource type has two operations, both effect `read` and idempotent, with the id as the policy's `target`; a repository is writable, so it has the change operations too, which only apply calls:
+Each resource type has two operations, both effect `read` and idempotent, with the id as the policy's `target`; a repository and a deploy key are writable, so they have the change operations too, which only apply calls:
 
-| Type                | Operations                                                                        | Identity                | Binding id                  |
-| ------------------- | --------------------------------------------------------------------------------- | ----------------------- | --------------------------- |
-| `repository`        | `github.repository.read`, `.import`, and `.plan`, `.create`, `.update`, `.delete` | `name`                  | `node_id`                   |
-| `branch_protection` | `github.branch_protection.read`, `github.branch_protection.import`                | `repository_id:pattern` | `id` (its node id, `BPR_…`) |
-| `team_membership`   | `github.team_membership.read`, `github.team_membership.import`                    | `team_id:username`      | `id` (`team_id:username`)   |
+| Type                    | Operations                                                                                   | Identity                   | Binding id                     |
+| ----------------------- | -------------------------------------------------------------------------------------------- | -------------------------- | ------------------------------ |
+| `repository`            | `github.repository.read`, `.import`, and `.plan`, `.create`, `.update`, `.delete`            | `name`                     | `node_id`                      |
+| `branch_protection`     | `github.branch_protection.read`, `github.branch_protection.import`                           | `repository_id:pattern`    | `id` (its node id, `BPR_…`)    |
+| `team_membership`       | `github.team_membership.read`, `github.team_membership.import`                               | `team_id:username`         | `id` (`team_id:username`)      |
+| `repository_deploy_key` | `github.repository_deploy_key.read`, `.import`, and `.plan`, `.create`, `.update`, `.delete` | none: found by its binding | `id` (`<repository>:<key id>`) |
 
 `import` takes `{ id }`, an identity or a binding id (what the [lockfile](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#bindings) keeps, which a rename does not change), and returns the object's `state`. The provider imports a repository by its name and a rule by `repository:pattern`, so the driver resolves a node id (`R_…`, `BPR_…`) to those first, with one GraphQL `node(id)` query, and refuses one in a repository of another owner than `GITHUB_OWNER` (default: the token's user); a node id GitHub does not know is gone. The fake finds an object by its binding id too, with no query; `read` takes a state an earlier call returned (`{ id, state, handle }`), or just `{ id }`, and returns its fresh `state`, or `gone: true` when it no longer exists. See [Resources](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#resources).
 
-A repository's `create`, `update` and `delete` plan and apply through the provider (see [`@sanoma-ai/bridge`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/bridge/README.md#connectors-for-opentofu-providers)); a create's `id` is the new repository's node id. Their tests replay synthetic replies of an empty repository (`sanoma-apply-test*` in `@sanoma-ai/bridge`'s `testdata/replies`) until they are recorded in a test organization.
+A deploy key is an SSH key that may fetch one repository (read-only unless `read_only: false`), what going live gives the company's host to clone the private repository with ([Cloning a private repository](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/README.md#cloning-a-private-repository)). GitHub changes no field of one, so a change to any is a replace (`update` deletes the old key and makes a new one), and GitHub reads `key` back without its comment, so declare it as `<type> <base64>`.
+
+A repository's `create`, `update` and `delete` plan and apply through the provider (see [`@sanoma-ai/bridge`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/bridge/README.md#connectors-for-opentofu-providers)); a create's `id` is the new repository's node id. Their tests replay synthetic replies of an empty repository and of a deploy key on it (`sanoma-apply-test*` in `@sanoma-ai/bridge`'s `testdata/replies`, in the provider's shape) until they are recorded in a test organization.
 
 A data file declares resources with the constructors in `@sanoma-ai/connector-github/resources`:
 
@@ -27,9 +30,15 @@ import { github } from "@sanoma-ai/connector-github/resources";
 
 export const site = github.repository({ name: "website", delete_branch_on_merge: true, has_wiki: false });
 export const siteMain = github.branch_protection({ repository_id: site, pattern: "main", enforce_admins: true });
+export const siteKey = github.repository_deploy_key({
+  repository: site,
+  title: "CI",
+  key: "ssh-rsa AAAA…",
+  read_only: true,
+});
 ```
 
-A branch protection rule names its repository by the declared repository itself (`repository_id: site`), which stands for its name: the rule is `website:main`. Only `repository_id` takes a resource, and only a repository; see [Data files](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#data-files).
+A branch protection rule names its repository by the declared repository itself (`repository_id: site`), which stands for its name: the rule is `website:main`; a deploy key's `repository` the same way. Only those take a resource, and only a repository; see [Data files](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#data-files).
 
 The fields are the provider's attributes, by their names. A list block of at most one item (`pages`, `security_and_analysis`, `template`) is one object. Only declared fields are compared for drift; sets (`topics`, and five lists in a branch protection rule) are compared in any order.
 
@@ -62,7 +71,7 @@ Every call is plain `fetch` with GitHub's media type and `X-GitHub-Api-Version: 
 
 ## Resource types
 
-`src/resources.gen.ts` is generated from the provider's schema by `pnpm generate`, which runs [`@sanoma-ai/bridge/tfschema`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/bridge/src/tfschema/AGENTS.md) with `src/resources.config.ts`: the provider (its release, sha256 and recorded schema are `@sanoma-ai/bridge`'s pin and fixture), the types to generate, and the attributes whose change replaces the object (ForceNew in the provider's source, which the schema does not carry). It is checked in and never edited by hand; `pnpm generate` on a clean tree changes nothing. `src/connector.ts` is the rest, one `tfConnector` record from [`@sanoma-ai/bridge/connector`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/bridge/README.md#connectors-for-opentofu-providers): each type's title, identity, `find` and `bindingId`, the field that names another resource (`branch_protection.repository_id`), and GitHub's title, logo and package. The connector, the constructors, the driver and the fake all derive from it.
+`src/resources.gen.ts` is generated from the provider's schema by `pnpm generate`, which runs [`@sanoma-ai/bridge/tfschema`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/bridge/src/tfschema/AGENTS.md) with `src/resources.config.ts`: the provider (its release, sha256 and recorded schema are `@sanoma-ai/bridge`'s pin and fixture), the types to generate, and the attributes whose change replaces the object (ForceNew in the provider's source, which the schema does not carry). It is checked in and never edited by hand; `pnpm generate` on a clean tree changes nothing. `src/connector.ts` is the rest, one `tfConnector` record from [`@sanoma-ai/bridge/connector`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/bridge/README.md#connectors-for-opentofu-providers): each type's title, identity, `find` and `bindingId`, the fields that name another resource (`branch_protection.repository_id`, `repository_deploy_key.repository`), and GitHub's title, logo and package. The connector, the constructors, the driver and the fake all derive from it.
 
 Attributes that are computed and not optional (`html_url`, `repo_id`) are vendor-owned: never drift, and a data file may not declare them. Those the provider marks computed and optional (`etag`, `topics`, `visibility`, `default_branch`) are yours to set, and compared only when declared.
 

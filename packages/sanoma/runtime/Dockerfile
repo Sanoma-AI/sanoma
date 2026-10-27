@@ -1,9 +1,10 @@
 # syntax=docker/dockerfile:1
 #
-# The Sanoma runtime: Node, git, pnpm and provider-bridge, and no company code. At start,
-# entrypoint.sh clones the company's repository (SANOMA_SOURCE) at a commit (SANOMA_REVISION),
-# installs it and runs `sanoma serve` on PORT. A host passes those, and the two bootstrap
-# secrets, SANOMA_DATABASE_URL and SANOMA_SECRETS_KEY, as environment variables.
+# The Sanoma runtime: Node, git, an SSH client, pnpm and provider-bridge, and no company code. At
+# start, entrypoint.sh clones the company's repository (SANOMA_SOURCE) at a commit
+# (SANOMA_REVISION), with its deploy key (SANOMA_SOURCE_KEY) when set, installs it and runs
+# `sanoma serve` on PORT. A host passes those, and the two bootstrap secrets, SANOMA_DATABASE_URL
+# and SANOMA_SECRETS_KEY, as environment variables.
 #
 #   docker build -t sanoma-runtime packages/sanoma/runtime
 #
@@ -39,9 +40,13 @@ RUN test -n "$BRIDGE_VERSION" || { echo "BRIDGE_FROM=release needs BRIDGE_VERSIO
 FROM bridge-${BRIDGE_FROM} AS bridge
 
 FROM node:26-bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git && rm -rf /var/lib/apt/lists/* \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git openssh-client \
+ && rm -rf /var/lib/apt/lists/* \
  && npm install -g pnpm@11 && npm cache clean --force
 COPY --from=bridge /out/provider-bridge /usr/local/bin/provider-bridge
+# github.com's host keys as the image is built: what a start trusts when GitHub's API cannot answer.
+COPY github-known-hosts.mjs /usr/local/share/sanoma/github-known-hosts.mjs
+RUN node /usr/local/share/sanoma/github-known-hosts.mjs > /usr/local/share/sanoma/github_known_hosts
 COPY --chmod=755 entrypoint.sh /usr/local/bin/sanoma-runtime
 ENV SANOMA_BRIDGE_BIN=/usr/local/bin/provider-bridge \
     SANOMA_APP_HOST=0.0.0.0 \

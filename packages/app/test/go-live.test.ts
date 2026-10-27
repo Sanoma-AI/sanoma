@@ -35,7 +35,8 @@ import { setSetupToken } from "../src/server/setup.ts";
 // after the project is made, the push to a bare repository standing in for GitHub's, and apply on
 // a host in this process, which ends answering at its URL, with a wakeup service connected (one
 // in this process, on a database of its own): `sanoma.wakeup` declared after the host, which is
-// given the instance's token from its first apply. Needs Postgres.
+// given the instance's token from its first apply, and the repository's deploy key, whose
+// private half the host is given to clone with. Needs Postgres.
 
 const databaseUrl = testDatabaseUrl("go_live");
 const dir = mkdtempSync(join(tmpdir(), "sanoma-go-live-"));
@@ -125,6 +126,7 @@ const NAMES = [
   "SANOMA_WAKEUP_URL",
   "SANOMA_WAKEUP_ACCOUNT_TOKEN",
   "SANOMA_WAKEUP_TOKEN",
+  "SANOMA_SOURCE_KEY",
 ];
 const alice = { id: "alice" };
 let ctx: AppContext;
@@ -137,6 +139,12 @@ beforeAll(async () => {
   api.listen({ onUnhandledFrame: "bypass" });
   await app.client.setSecret("GITHUB_TOKEN", "ghp_test-token", { by: "alice" });
   await app.client.setSecret("SUPABASE_ACCESS_TOKEN", "sbp_test-token", { by: "alice" });
+  // A deploy key stored as going live stores one, for `renderInfra` before `goLive`.
+  await app.client.setSecret(
+    "SANOMA_SOURCE_KEY",
+    generateKeyPairSync("rsa", { modulusLength: 3072 }).privateKey.export({ type: "pkcs1", format: "pem" }).toString(),
+    { by: "alice" },
+  );
   ctx = {
     resolved: resolveConfig(app.config),
     description: describeConfig(app.config),
@@ -181,6 +189,9 @@ const settled = () =>
     60_000,
   );
 
+/** The deploy key `infra.ts` declares: the stored key's public half. */
+const deployKeyOf = (text: string) => /\n {2}key: "(ssh-rsa [A-Za-z0-9+/=]+)",\n/.exec(text)?.[1];
+
 /** Approves the run's pending approval as the lead, then waits for the run to end. */
 async function approveRun(progress: GoLiveProgress) {
   await app.client.decide(progress.run!.runId, { decision: "approve", by: { id: "lead" } });
@@ -222,6 +233,8 @@ describe("going live", () => {
 
   it("writes infra.ts as a data file the config reads: the repository, the database, and a host running them", async () => {
     const text = await renderInfra(ctx, choices());
+    const key = deployKeyOf(text);
+    expect(key).toBeDefined();
     expect(text).toBe(
       [
         `import { github } from "@sanoma-ai/connector-github/resources";`,
@@ -232,6 +245,13 @@ describe("going live", () => {
         `export const repo = github.repository({`,
         `  name: "acme-ops",`,
         `  visibility: "private",`,
+        `});`,
+        ``,
+        `export const deployKey = github.repository_deploy_key({`,
+        `  repository: repo,`,
+        `  title: "Sanoma host",`,
+        `  key: "${key}",`,
+        `  read_only: true,`,
         `});`,
         ``,
         `export const store = supabase.project({`,
@@ -248,15 +268,16 @@ describe("going live", () => {
         `  secrets: {`,
         `    SANOMA_DATABASE_URL: secret("SANOMA_DATABASE_URL_STORE"),`,
         `    SANOMA_SECRETS_KEY: secret("SANOMA_SECRETS_KEY"),`,
+        `    SANOMA_SOURCE_KEY: secret("SANOMA_SOURCE_KEY"),`,
         `  },`,
         `  port: ${port},`,
         `});`,
         ``,
-        `export default [repo, store, host];`,
+        `export default [repo, deployKey, store, host];`,
         ``,
       ].join("\n"),
     );
-    // Read back as the worker reads it, in a directory of its own: three resources, no problems.
+    // Read back as the worker reads it, in a directory of its own: four resources, no problems.
     const other = mkdtempSync(join(tmpdir(), "sanoma-go-live-read-"));
     try {
       mkdirSync(join(other, "resources", "sanoma"), { recursive: true });
@@ -265,6 +286,7 @@ describe("going live", () => {
       expect(read.problems).toEqual([]);
       expect(read.resources.map((r) => [r.id, `${r.vendor}.${r.type}`, r.refs])).toEqual([
         [`${INFRA}#repo`, "github.repository", {}],
+        [`${INFRA}#deployKey`, "github.repository_deploy_key", { repository: `${INFRA}#repo` }],
         [`${INFRA}#store`, "supabase.project", {}],
         [`${INFRA}#host`, "testhost.app", { source: `${INFRA}#repo` }],
       ]);
@@ -283,7 +305,7 @@ describe("going live", () => {
       `    SANOMA_WAKEUP_TOKEN: secret("SANOMA_WAKEUP_TOKEN"),\n    SANOMA_WAKEUP_URL: secret("SANOMA_WAKEUP_URL"),\n`,
     );
     expect(text).toContain(`export const wakeup = sanoma.wakeup({\n  host: host,\n});\n`);
-    expect(text).toContain(`export default [repo, store, host, wakeup];`);
+    expect(text).toContain(`export default [repo, deployKey, store, host, wakeup];`);
     const other = mkdtempSync(join(tmpdir(), "sanoma-go-live-read-"));
     try {
       mkdirSync(join(other, "resources", "sanoma"), { recursive: true });
@@ -292,6 +314,7 @@ describe("going live", () => {
       const read = readResources({ ...config, root: other });
       expect(read.map((r) => [r.id, `${r.vendor}.${r.type}`, r.refs])).toEqual([
         [`${INFRA}#repo`, "github.repository", {}],
+        [`${INFRA}#deployKey`, "github.repository_deploy_key", { repository: `${INFRA}#repo` }],
         [`${INFRA}#store`, "supabase.project", {}],
         [`${INFRA}#host`, "testhost.app", { source: `${INFRA}#repo` }],
         [`${INFRA}#wakeup`, "sanoma.wakeup", { host: `${INFRA}#host` }],
@@ -306,8 +329,16 @@ describe("going live", () => {
   });
 
   it("goes from the choices to a host answering at its URL", async () => {
-    // Steps 3 and 4: infra.ts committed, the owner stored, apply on the repository and the database.
+    // No deploy key stored: going live mints one before it writes infra.ts.
+    const db = new Client({ connectionString: databaseUrl });
+    await db.connect();
+    await db.query("DELETE FROM sanoma_credentials WHERE name = 'SANOMA_SOURCE_KEY'");
+    await db.end();
+    // Steps 3 and 4: infra.ts committed, the owner stored, apply on the repository, its deploy key and the database.
     await goLive(ctx, alice, choices());
+    const sourceKey = (await app.client.secrets(["SANOMA_SOURCE_KEY"])).get("SANOMA_SOURCE_KEY")!.value;
+    expect(sourceKey).toMatch(/^-----BEGIN RSA PRIVATE KEY-----\n/);
+    expect(deployKeyOf(readFileSync(join(root, INFRA), "utf8"))).toMatch(/^ssh-rsa /);
     expect(git("log", "-1", "--format=%an|%s", "--", INFRA)).toBe(
       "alice via Sanoma|Go live: declare the repository, database and host",
     );
@@ -317,6 +348,7 @@ describe("going live", () => {
     expect(progress.run).toMatchObject({ status: "waiting", pending: { plan: { problems: [] } } });
     expect(progress.run!.pending!.plan!.steps.map((s) => [s.id, s.action])).toEqual([
       [`${INFRA}#repo`, "create"],
+      [`${INFRA}#deployKey`, "create"],
       [`${INFRA}#store`, "create"],
     ]);
     // Going live writes the file once.
@@ -325,6 +357,7 @@ describe("going live", () => {
     progress = await approveRun(progress);
     expect(progress.run!.results).toMatchObject([
       { id: `${INFRA}#repo`, status: "done" },
+      { id: `${INFRA}#deployKey`, status: "done" },
       { id: `${INFRA}#store`, status: "done" },
     ]);
     expect(progress.bound).toEqual({ repo: true, store: true, host: false });
@@ -358,8 +391,9 @@ describe("going live", () => {
     expect(progress.run!.results![0]).toMatchObject({ id: `${INFRA}#host`, status: "done" });
     expect(progress.bound.host).toBe(true);
     expect(progress.host).toEqual({ url: `http://127.0.0.1:${port}`, healthy: true });
-    // The host runs main as pushed, given the database URL, the key and the wakeup's instance
-    // token, minted when the wakeup service was connected, none of which any ledger record holds.
+    // The host runs main as pushed, given the database URL, the key, the deploy key's private half
+    // and the wakeup's instance token, minted when the wakeup service was connected, none of which
+    // any ledger record holds.
     const token = (await app.client.secrets(["SANOMA_WAKEUP_TOKEN"])).get("SANOMA_WAKEUP_TOKEN")!.value;
     expect(token).toMatch(/^swi_/);
     expect(started).toEqual([
@@ -369,6 +403,7 @@ describe("going live", () => {
         secrets: {
           SANOMA_DATABASE_URL: url,
           SANOMA_SECRETS_KEY: process.env.SANOMA_SECRETS_KEY,
+          SANOMA_SOURCE_KEY: sourceKey,
           SANOMA_WAKEUP_TOKEN: token,
           SANOMA_WAKEUP_URL: wakeup.url,
         },
@@ -379,6 +414,7 @@ describe("going live", () => {
     expect(ledgers).not.toContain(url);
     expect(ledgers).not.toContain(process.env.SANOMA_SECRETS_KEY);
     expect(ledgers).not.toContain(token);
+    expect(ledgers).not.toContain("PRIVATE KEY");
   });
 
   it("deletes the wakeup's instance at the service once its line is removed and the orphan answered delete", async () => {
@@ -403,7 +439,7 @@ describe("going live", () => {
       readFileSync(path, "utf8")
         .replace(`import { sanoma, secret } from "sanoma/resources";`, `import { secret } from "sanoma/resources";`)
         .replace(`export const wakeup = sanoma.wakeup({\n  host: host,\n});\n\n`, "")
-        .replace("[repo, store, host, wakeup]", "[repo, store, host]"),
+        .replace("[repo, deployKey, store, host, wakeup]", "[repo, deployKey, store, host]"),
     );
     git("commit", "--quiet", "-am", "Remove the wakeup");
     await app.client.apply({ only: [key], answers: { [key]: "delete" } }, { startedBy: alice });

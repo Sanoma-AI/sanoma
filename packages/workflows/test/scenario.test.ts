@@ -954,7 +954,7 @@ describe("resources and policy outcomes", () => {
 
   it("names an unknown resource type, field or value, and a drift result in a scenario that does not run drift", async () => {
     expect(await thrown(drifting('    Given github.gist "x" is gone\n'), company)).toBe(
-      'scenarios/x.feature:3: no resource type "github.gist"; the config has github.branch_protection, github.repository, github.team_membership, stripe.product, stripe.webhook_endpoint',
+      'scenarios/x.feature:3: no resource type "github.gist"; the config has github.branch_protection, github.repository, github.repository_deploy_key, github.team_membership, stripe.product, stripe.webhook_endpoint',
     );
     expect(await thrown(drifting('    Given github.repository "x" has\n      | nope | 1 |\n'), company)).toMatch(
       /^scenarios\/x\.feature:3: no field "nope" in github\.repository "x"; it has allow_auto_merge, /,

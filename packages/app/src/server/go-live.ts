@@ -1,8 +1,10 @@
 // oxlint-disable-next-line import/no-unassigned-import
 import "@tanstack/react-start/server-only";
+import { createPublicKey, generateKeyPair } from "node:crypto";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { findPackageJSON } from "node:module";
 import { dirname, join } from "node:path";
+import { promisify } from "node:util";
 import {
   APPLY_WORKFLOW,
   databaseUrlSecret,
@@ -33,15 +35,17 @@ import { secretValues } from "./secrets.ts";
 import { mintWakeupToken, WAKEUP_URL } from "./setup.ts";
 
 // Going live, steps 2 to 6 (step 1 is connect, in setup.ts): choose where the company goes,
-// write `resources/sanoma/infra.ts`, apply the repository and the database, push the local
-// repository to the new one, apply the host, and wait until it answers. Every change to a vendor
-// is the built-in apply workflow's; what this file calls itself is only reading lists of accounts
-// to choose from, and git. The database, the host and the wakeup are chosen by their contracts
-// (`database`, `host`, `wakeup`) among the config's resource types, never named but to prefer one.
+// write `resources/sanoma/infra.ts`, apply the repository, the deploy key the host clones it with
+// and the database, push the local repository to the new one, apply the host, and wait until it
+// answers. Every change to a vendor is the built-in apply workflow's; what this file calls itself
+// is only reading lists of accounts to choose from, and git. The database, the host and the
+// wakeup are chosen by their contracts (`database`, `host`, `wakeup`) among the config's resource
+// types, never named but to prefer one.
 
 /** What `infra.ts` declares, by export: the lockfile's keys. */
 const KEYS = {
   repo: `${INFRA}#repo`,
+  deployKey: `${INFRA}#deployKey`,
   store: `${INFRA}#store`,
   host: `${INFRA}#host`,
   wakeup: `${INFRA}#wakeup`,
@@ -69,6 +73,12 @@ const PUBLISHED_IMAGE = "ghcr.io/sanoma-ai/runtime";
 /** The secret the database's URL is stored in: its `storeUrl` for the export `store`. */
 const DATABASE_URL = databaseUrlSecret("store");
 const SECRETS_KEY = "SANOMA_SECRETS_KEY";
+/**
+ * The private half of the repository's read-only deploy key, which the host clones the private
+ * repository with at every start (the runtime image's entrypoint): stored, given to the host
+ * among its secrets, never in a data file. Its public half is the `deployKey` going live declares.
+ */
+const SOURCE_KEY = "SANOMA_SOURCE_KEY";
 
 /**
  * What going live fills in a database type beyond its contract's inputs, by type, from the
@@ -180,6 +190,39 @@ const githubHeaders = (token: string) => ({
   "x-github-api-version": "2022-11-28",
   "user-agent": "sanoma",
 });
+
+/**
+ * Stores a new deploy key's private half as `SANOMA_SOURCE_KEY` unless one is stored: RSA 3072
+ * in PKCS#1 PEM, which OpenSSH reads as it is (Node writes no OpenSSH private key, which ed25519
+ * would need).
+ */
+async function ensureSourceKey(client: AppContext["client"], actor: Principal) {
+  if ((await client.secrets([SOURCE_KEY])).has(SOURCE_KEY)) return;
+  const { privateKey } = await promisify(generateKeyPair)("rsa", { modulusLength: 3072 });
+  await client.setSecret(SOURCE_KEY, privateKey.export({ type: "pkcs1", format: "pem" }).toString(), { by: actor.id });
+}
+
+/** RFC 4253's `string`: the bytes after their length, 32 bits big-endian. */
+function sshString(bytes: Buffer) {
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(bytes.length);
+  return Buffer.concat([length, bytes]);
+}
+
+/** RFC 4253's `mpint` of a JWK's integer, unsigned with no leading zero: one first when its top bit is set. */
+function sshMpint(value: string) {
+  const bytes = Buffer.from(value, "base64url");
+  return sshString(bytes[0]! & 0x80 ? Buffer.concat([Buffer.of(0), bytes]) : bytes);
+}
+
+/**
+ * The public half of an RSA private key in PEM, in OpenSSH's one-line format, as GitHub takes a
+ * deploy key: `ssh-rsa`, then the base64 of the strings `ssh-rsa`, `e` and `n`.
+ */
+function sshPublicKey(pem: string): string {
+  const { e, n } = createPublicKey(pem).export({ format: "jwk" });
+  return `ssh-rsa ${Buffer.concat([sshString(Buffer.from("ssh-rsa")), sshMpint(e!), sshMpint(n!)]).toString("base64")}`;
+}
 
 /**
  * The GitHub connector's remote half over the stored credentials alone: going live lists accounts
@@ -318,9 +361,11 @@ async function sanomaVersion(root: string): Promise<string> {
 }
 
 /**
- * `infra.ts`'s text for the choices: the repository, the database, the host that runs the company
- * from them and, once a wakeup for the host is connected, the wakeup that starts the host again,
- * whose instance token the host is given from the first apply (`hostWakeup`).
+ * `infra.ts`'s text for the choices: the repository and its read-only deploy key (the public half
+ * of the stored `SANOMA_SOURCE_KEY`, which the host is given to clone with), the database, the
+ * host that runs the company from them and, once a wakeup for the host is connected, the wakeup
+ * that starts the host again, whose instance token the host is given from the first apply
+ * (`hostWakeup`).
  */
 export async function renderInfra(
   app: AppContext,
@@ -372,10 +417,13 @@ export async function renderInfra(
   setPath(hosted, inputs.secrets, {
     SANOMA_DATABASE_URL: secret(DATABASE_URL),
     SANOMA_SECRETS_KEY: secret(SECRETS_KEY),
+    [SOURCE_KEY]: secret(SOURCE_KEY),
     ...wakeup.secrets,
   });
   setPath(hosted, inputs.port, port);
   const woken = wakeup.type;
+  const sourceKey = (await app.client.secrets([SOURCE_KEY])).get(SOURCE_KEY)?.value;
+  if (!sourceKey) throw new ApiError(409, { error: `${SOURCE_KEY} is not stored: going live stores it first` });
   return renderDataFile(
     {
       imports: [...new Set(["github", database.vendor, host.vendor, ...(woken ? [woken.vendor] : [])])].map(
@@ -383,6 +431,17 @@ export async function renderInfra(
       ),
       exports: [
         { name: "repo", vendor: "github", type: "repository", desired: { name, visibility: "private" } },
+        {
+          name: "deployKey",
+          vendor: "github",
+          type: "repository_deploy_key",
+          desired: {
+            repository: new Reference("repo"),
+            title: "Sanoma host",
+            key: sshPublicKey(sourceKey),
+            read_only: true,
+          },
+        },
         { name: "store", vendor: database.vendor, type: database.type, desired: store },
         { name: "host", vendor: host.vendor, type: host.type, desired: hosted },
         ...(woken
@@ -402,10 +461,11 @@ export async function renderInfra(
 }
 
 /**
- * Step 3 and 4: writes `infra.ts` for the choices and commits it, stores the owner as the GitHub
- * connector's `GITHUB_OWNER`, and starts apply on the repository and the database. Apply creates
- * both, binds them in the lockfile and, once the project is healthy, stores its database URL
- * (its `afterCreate`). Refused once the file is written: going live writes it once.
+ * Step 3 and 4: stores the host's deploy key (`SANOMA_SOURCE_KEY`) unless one is, writes
+ * `infra.ts` for the choices and commits it, stores the owner as the GitHub connector's
+ * `GITHUB_OWNER`, and starts apply on the repository, its deploy key and the database. Apply
+ * creates them, binds them in the lockfile and, once the project is healthy, stores its database
+ * URL (its `afterCreate`). Refused once the file is written: going live writes it once.
  */
 export async function goLive(app: AppContext, actor: Principal, choices: GoLiveRequest): Promise<{ runId: string }> {
   const { client, resolved, source } = app;
@@ -428,6 +488,8 @@ export async function goLive(app: AppContext, actor: Principal, choices: GoLiveR
   // The database's and the host's vendors connected: their tokens are what apply makes them with.
   const connect = toConnect(chosen);
   if (connect.length) throw new ApiError(409, { error: `Connect ${connect.join(" and ")} first` });
+  // Before the file, which declares its public half: a request refused after it keeps it for the next.
+  await ensureSourceKey(client, actor);
   const text = await renderInfra(app, choices, chosen);
   // Once the request is good: a wakeup's token may be the environment's or its connector page's, which mint nothing.
   if (chosen.wakeup.type) await mintWakeupToken(client, actor);
@@ -439,7 +501,7 @@ export async function goLive(app: AppContext, actor: Principal, choices: GoLiveR
     author: actor.id,
   });
   await client.setSecret("GITHUB_OWNER", choices.owner, { by: actor.id });
-  const runId = await client.apply({ only: [KEYS.repo, KEYS.store] }, { startedBy: actor });
+  const runId = await client.apply({ only: [KEYS.repo, KEYS.deployKey, KEYS.store] }, { startedBy: actor });
   return { runId };
 }
 

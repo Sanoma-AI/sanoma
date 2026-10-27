@@ -1,6 +1,12 @@
 import { tfConnector } from "@sanoma-ai/bridge/connector";
 import { vendorInfo } from "@sanoma-ai/workflows";
-import { github_branch_protection, github_repository, github_team_membership, provider } from "./resources.gen.ts";
+import {
+  github_branch_protection,
+  github_repository,
+  github_repository_deploy_key,
+  github_team_membership,
+  provider,
+} from "./resources.gen.ts";
 
 /**
  * GitHub, through the `integrations/github` OpenTofu provider: the generated resource types,
@@ -34,9 +40,20 @@ export const githubTf = tfConnector({
       identity: "team_id:username",
       find: ({ team_id, username }) => `${team_id}:${username}`,
     },
+    // An SSH key that may clone one repository: a host's, read-only. Found only by its binding,
+    // the provider's `<repository>:<key id>`; apply creates and deletes it (GitHub changes none).
+    repository_deploy_key: {
+      tf: github_repository_deploy_key,
+      title: "Deploy key",
+      writable: true,
+    },
   },
   // GitHub holds a rule's repository by its node id (`R_…`); a data file names it by its name.
-  references: { branch_protection: { repository_id: { type: "github.repository", by: ["name", "node_id"] } } },
+  // A deploy key's `repository` is the repository's name, as the provider takes it.
+  references: {
+    branch_protection: { repository_id: { type: "github.repository", by: ["name", "node_id"] } },
+    repository_deploy_key: { repository: { type: "github.repository" } },
+  },
   // The provider answers an import of a rule that is not there `failed_precondition`, saying it
   // "could not find" it (recorded: testdata/replies/…/github_branch_protection/provider-bridge_main).
   missing: (e) =>

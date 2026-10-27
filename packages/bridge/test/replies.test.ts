@@ -16,6 +16,7 @@ describe("loadReplies", () => {
       "github_branch_protection/provider-bridge:main",
       "github_repository/provider-bridge",
       "github_repository/sanoma",
+      "github_repository_deploy_key/sanoma-apply-test:1000000101",
     ]);
     expect(objects["github_repository/sanoma"]).toMatchObject({
       typeName: "github_repository",
