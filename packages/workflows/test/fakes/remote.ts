@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { createHash, createHmac } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -19,8 +20,8 @@ import {
 // A git host and a company's repository, both in memory, for the change workflow's tests and the
 // lanes that build on it (webhooks, the app's review page, the end-to-end test). `fakeRemote` is a
 // connector whose remote half is a host holding pull requests, statuses and merges, whose webhook
-// is signed JSON (`delivery`); `memorySource` is a `Source` with drafts, whose `push` reaches that
-// host and whose `follow` records the call.
+// is signed JSON (`delivery`), its branches in memory or in a bare git repository; `memorySource`
+// is a `Source` with drafts, whose `push` reaches that host and whose `follow` records the call.
 
 /** A made-up commit id, unique per `seed`. */
 export const sha = (seed: string) => createHash("sha1").update(seed).digest("hex");
@@ -63,8 +64,15 @@ export interface FakePullRequest extends PullRequest {
  * `tokens` given out. `branches` is each branch's commit as pushed. `failMerge(code)` makes the
  * next merge fail with that `vendorCode` (`head_moved`, `not_mergeable`); `push`, `close` and
  * `merge` act as someone on the host would, outside Sanoma.
+ *
+ * Given `origin`, a bare git repository (`url` its clone URL, as `localGitSource` pushes to and
+ * follows it), the host's branches are that repository's, read each time the host is asked, and a
+ * merge is a real squash: one commit on its `main` with the pull request's tree, titled as asked.
  */
-export function fakeRemote({ url = "https://git.example/acme/company.git" }: { url?: string } = {}) {
+export function fakeRemote({
+  url = "https://git.example/acme/company.git",
+  origin,
+}: { url?: string; origin?: string } = {}) {
   const pulls = new Map<number, FakePullRequest>();
   const branches = new Map<string, string>();
   const statuses: FakeStatus[] = [];
@@ -73,6 +81,16 @@ export function fakeRemote({ url = "https://git.example/acme/company.git" }: { u
   const failures: string[] = [];
   let opened = 0;
   let tokens = 0;
+  const git = (...args: string[]) => execFileSync("git", args, { cwd: origin, encoding: "utf8" }).trim();
+  /** The branches as `origin` holds them now, when the host is a git repository. */
+  const sync = () => {
+    if (origin === undefined) return;
+    branches.clear();
+    for (const line of git("for-each-ref", "--format=%(refname:lstrip=2) %(objectname)", "refs/heads/").split("\n")) {
+      const [branch, head] = line.split(" ");
+      if (branch && head) branches.set(branch, head);
+    }
+  };
 
   const view = (pr: FakePullRequest): PullRequest => ({
     number: pr.number,
@@ -88,12 +106,20 @@ export function fakeRemote({ url = "https://git.example/acme/company.git" }: { u
     if (!pr) throw new DriverError(`no pull request #${number}`, { retryable: false, status: 404 });
     return pr;
   };
-  const mergeNow = (pr: FakePullRequest) => {
+  const mergeNow = (pr: FakePullRequest, title = pr.title) => {
+    sync();
     pr.head = branches.get(pr.branch) ?? pr.head;
+    let merged = sha(`merge ${pr.number} ${pr.head}`);
+    if (origin !== undefined) {
+      // A squash: the tree main and the branch make together, as one commit on main.
+      const tree = git("merge-tree", "--write-tree", "main", pr.head).split("\n")[0]!;
+      merged = git("commit-tree", tree, "-p", "main", "-m", title);
+      git("update-ref", "refs/heads/main", merged);
+    }
     pr.state = "merged";
-    pr.mergeSha = sha(`merge ${pr.number} ${pr.head}`);
-    branches.set("main", pr.mergeSha);
-    return pr.mergeSha;
+    pr.mergeSha = merged;
+    branches.set("main", merged);
+    return merged;
   };
 
   const host: SourceHost = {
@@ -101,14 +127,17 @@ export function fakeRemote({ url = "https://git.example/acme/company.git" }: { u
       return `token-${++tokens}`;
     },
     async pullRequestFor(branch) {
+      sync();
       const all = [...pulls.values()].filter((p) => p.branch === branch);
       const pr = all.find((p) => p.state === "open") ?? all.at(-1);
       return pr && view(pr);
     },
     async pullRequest(number) {
+      sync();
       return view(pull(number));
     },
     async openPullRequest({ branch, base, title, body }) {
+      sync();
       const head = branches.get(branch);
       if (head === undefined) throw new DriverError(`no branch ${branch} on the host`, { retryable: false });
       const open = [...pulls.values()].find((p) => p.branch === branch && p.base === base && p.state === "open");
@@ -128,6 +157,7 @@ export function fakeRemote({ url = "https://git.example/acme/company.git" }: { u
       return view(pr);
     },
     async mergePullRequest(number, { sha: at, method, title }) {
+      sync();
       const pr = pull(number);
       if (pr.state === "merged") return { sha: pr.mergeSha! };
       const failure = failures.shift();
@@ -137,12 +167,13 @@ export function fakeRemote({ url = "https://git.example/acme/company.git" }: { u
         throw new DriverError("the branch moved", { retryable: false, vendorCode: "head_moved", status: 409 });
       }
       merges.push({ number, sha: at, method, ...(title !== undefined && { title }) });
-      return { sha: mergeNow(pr) };
+      return { sha: mergeNow(pr, title) };
     },
     async closePullRequest(number) {
       pull(number).state = "closed";
     },
     async deleteBranch(branch) {
+      if (origin !== undefined) git("update-ref", "-d", `refs/heads/${branch}`);
       branches.delete(branch);
       deleted.push(branch);
     },

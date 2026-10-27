@@ -1,10 +1,6 @@
 import { waitFor } from "@sanoma-ai/testing";
 import type { CheckResult } from "@sanoma-ai/workflows";
 import { CHANGE_MERGE, changeIdOf } from "@sanoma-ai/workflows/shared";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router";
-import { createElement, type ReactNode } from "react";
-import { renderToString } from "react-dom/server";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type App, startApp } from "../src/index.ts";
 import type { DraftCard } from "../src/lib/chat.ts";
@@ -13,7 +9,7 @@ import { openChange } from "../src/server/core.ts";
 import { asChangeRef, groupFiles, phaseLabel } from "../src/lib/changes.ts";
 import { cellWords, diffGrids } from "../src/lib/grid-diff.ts";
 import { barLabels } from "./bar-helpers.ts";
-import { REFUNDS_WAIT, useChangeApp } from "./fixtures/change.ts";
+import { REFUNDS_WAIT, renderDraftCard, useChangeApp } from "./fixtures/change.ts";
 
 // The Changes section and a change's review: the words and groups (`lib/changes.ts`), then a real
 // change of a draft that edits `policies/`, over C5's fake host, as the server renders its pages;
@@ -244,20 +240,6 @@ const card = (checks?: CheckResult): DraftCard => ({
 });
 
 describe("the draft card", () => {
-  // By a path TypeScript does not follow: the components are JSX and DOM, checked by typecheck:ui,
-  // and `queries.ts` defines server functions (see data.test.ts).
-  type Card = (props: { draft: DraftCard }) => ReactNode;
-  type Keyed = (id?: string) => { queryKey: readonly unknown[] };
-  const load = async () => {
-    const [{ DraftCardView }, { changeQuery, remoteQuery }] = await Promise.all([
-      import(new URL("../src/components/shell/draft-card.tsx", import.meta.url).href) as Promise<{
-        DraftCardView: Card;
-      }>,
-      import(new URL("../src/queries.ts", import.meta.url).href) as Promise<{ changeQuery: Keyed; remoteQuery: Keyed }>,
-    ]);
-    return { DraftCardView, changeQuery, remoteQuery };
-  };
-
   const waiting = {
     runId: "change:card",
     status: "waiting",
@@ -266,59 +248,41 @@ describe("the draft card", () => {
     edits: [],
     state: { phase: "waiting", decision: { answer: "hold", approver: { group: "admin" } } },
   };
-
-  /**
-   * The card as the server renders it, in a router and over a query cache holding whether the
-   * repository has a remote and the draft's change (null when it has none; unread when left out).
-   */
-  const render = async (draft: DraftCard, { remote = true, change }: { remote?: boolean; change?: object | null }) => {
-    const { DraftCardView, changeQuery, remoteQuery } = await load();
-    const queryClient = new QueryClient();
-    queryClient.setQueryData(remoteQuery().queryKey, remote);
-    if (change !== undefined) queryClient.setQueryData(changeQuery(draft.draft).queryKey, change);
-    const router = createRouter({
-      routeTree: createRootRoute({
-        component: () =>
-          createElement(QueryClientProvider, { client: queryClient }, createElement(DraftCardView, { draft })),
-      }),
-      history: createMemoryHistory({ initialEntries: ["/"] }),
-    });
-    await router.load();
-    return renderToString(createElement(RouterProvider, { router })).replaceAll("<!-- -->", "");
-  };
-
   it("offers Send for review once the checks pass, and says why not before", async () => {
-    const unchecked = await render(card(), { change: null });
+    const unchecked = await renderDraftCard(card(), { change: null });
     // Disabled, yet focusable, so its tip still shows.
     expect(unchecked).toMatch(
       /<button(?=[^>]*data-disabled="")[^>]*aria-disabled="true"[^>]*>Send for review<\/button>/,
     );
     expect(unchecked).toContain("Run the checks first: ask the agent to check the draft.");
-    const failing = await render(card({ ok: false, problems: ["workflows/refund.ts:1:1: no"], warnings: [] }), {
-      change: null,
-    });
+    const failing = await renderDraftCard(
+      card({ ok: false, problems: ["workflows/refund.ts:1:1: no"], warnings: [] }),
+      {
+        change: null,
+      },
+    );
     expect(failing).toMatch(/<button[^>]*aria-disabled="true"[^>]*>Send for review<\/button>/);
     expect(failing).toContain("The checks fail: fix what they find first.");
-    const empty = await render({ ...card(passing), files: [], summary: "" }, { change: null });
+    const empty = await renderDraftCard({ ...card(passing), files: [], summary: "" }, { change: null });
     expect(empty).toContain("Nothing is committed on the draft yet.");
-    const ready = await render(card(passing), { change: null });
+    const ready = await renderDraftCard(card(passing), { change: null });
     expect(ready).toMatch(/<button[^>]*aria-disabled="false"[^>]*>Send for review<\/button>/);
     expect(ready).not.toContain("Merge the branch to apply it.");
   });
 
   it("shows the change's phase and Open the review once it has one, Send for review again once it has ended", async () => {
-    const html = await render(card(passing), { change: waiting });
+    const html = await renderDraftCard(card(passing), { change: waiting });
     expect(html).toContain("Waiting for admin");
     expect(html).toMatch(/<a [^>]*href="\/changes\/card"[^>]*>Open the review<\/a>/);
     expect(html).not.toContain("Send for review");
-    const closed = await render(card(passing), {
+    const closed = await renderDraftCard(card(passing), {
       change: { ...waiting, status: "finished", state: { phase: "closed" } },
     });
     expect(closed).toContain("Closed");
     expect(closed).toContain("Open the review");
     expect(closed).toContain("Send for review");
     // A published draft is in main: nothing to send again.
-    const merged = await render(card(passing), {
+    const merged = await renderDraftCard(card(passing), {
       change: { ...waiting, status: "finished", state: { phase: "merged" } },
     });
     expect(merged).toContain("Published");
@@ -326,7 +290,7 @@ describe("the draft card", () => {
   });
 
   it("keeps merging by hand without a remote", async () => {
-    const html = await render(card(passing), { remote: false });
+    const html = await renderDraftCard(card(passing), { remote: false });
     expect(html).toContain("Merge the branch to apply it.");
     expect(html).not.toContain("Send for review");
   });

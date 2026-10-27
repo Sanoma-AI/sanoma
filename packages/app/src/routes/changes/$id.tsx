@@ -43,7 +43,8 @@ export const Route = createFileRoute("/changes/$id")({
 
 /**
  * A change's review, in the ops manager's words: under Changes, its title, where it is, and a
- * line for the developer (its branch, its pull request, who opened it when, its run); then one
+ * line for the developer (its branch at the head it last planned, its pull request, who opened it
+ * when, its run); then one
  * card: why it cannot publish, the runs it would strand, what changed by kind and who may do
  * what, with the decision (`ChangeDecision`) floating over its right.
  */
@@ -62,7 +63,14 @@ function ChangePage() {
         <span className="text-muted-foreground">
           {state.branch && (
             <>
-              <code>{state.branch}</code> ·{" "}
+              <code>{state.branch}</code>
+              {state.head && (
+                <>
+                  {" "}
+                  at <code title={state.head}>{state.head.slice(0, 8)}</code>
+                </>
+              )}{" "}
+              ·{" "}
             </>
           )}
           {state.pullRequest && (
