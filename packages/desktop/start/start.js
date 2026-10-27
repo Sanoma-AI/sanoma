@@ -1,6 +1,6 @@
 // The start window: the recent companies (marked when they run), Open folder, New company, Clone
 // (its form) and the identity form. Each company starts in a window of its own (company.js).
-// `window.sanoma` is the preload's bridge (src/preload.cts).
+// `window.sanoma` is the preload's bridge (src/preload.ts).
 const bridge = window.sanoma;
 const $ = (id) => document.getElementById(id);
 

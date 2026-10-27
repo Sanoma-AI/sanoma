@@ -2,8 +2,7 @@
 // never import electron and are tested on their own.
 import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import {
   app,
   BaseWindow,
@@ -19,6 +18,7 @@ import {
   WebContentsView,
   webContents,
 } from "electron";
+import squirrelStartup from "electron-squirrel-startup";
 import {
   afterFailure,
   type Company,
@@ -62,12 +62,16 @@ import { type Newer, readSettings, runCheck, savedNewer } from "./update-check.t
 import { fastForward, prepareUpdate } from "./update-company.ts";
 import { windowBounds } from "./window-state.ts";
 
-const here = dirname(fileURLToPath(import.meta.url));
 const companiesFile = () => join(app.getPath("userData"), "companies.json");
 const logFile = (path: string) => join(app.getPath("logs"), `${slugOf(path)}.log`);
 const settingsFile = () => join(app.getPath("userData"), "settings.json");
 /** The shell's own pages': the start window's and each company window's progress page. */
-const shellPreferences = { preload: join(here, "preload.cjs"), contextIsolation: true, sandbox: true };
+const shellPreferences = { preload: join(__dirname, "preload.cjs"), contextIsolation: true, sandbox: true };
+/** Loads one of start/'s pages: from Vite's dev server under `pnpm start`, else from the build. */
+const loadShellPage = (contents: Electron.WebContents, page: "index.html" | "company.html") =>
+  START_VITE_DEV_SERVER_URL
+    ? contents.loadURL(`${START_VITE_DEV_SERVER_URL}/${page}`)
+    : contents.loadFile(join(__dirname, "..", "renderer", START_VITE_NAME, page));
 
 /** Changes the entry companies.json has for `path` (`updated`), read and written at once. */
 const patchCompany = (path: string, patch: Partial<Company>) =>
@@ -196,7 +200,7 @@ function showStart() {
     // Its form goes with it: New Company or Clone, waiting on it, stops.
     answer?.(undefined);
   });
-  void startWindow.loadFile(join(here, "..", "start", "index.html"));
+  void loadShellPage(startWindow.webContents, "index.html");
 }
 
 /** One of the shell's own pages: it never navigates and opens nothing. */
@@ -325,7 +329,7 @@ function windowFor(path: string): CompanyWindow {
     // Closed while it does not run: the next launch does not open it. Quit keeps what is open.
     if (!quitting) patchCompany(path, { open: false });
   });
-  void shellView.webContents.loadFile(join(here, "..", "start", "company.html"));
+  void loadShellPage(shellView.webContents, "company.html");
   return shown;
 }
 
@@ -862,7 +866,8 @@ const argsOf = (argv: readonly string[]) => argv.slice(1);
 /** The app's own path on a checkout's command line (`electron <app path>`), which is no company folder. */
 const ownPath = () => (process.defaultApp ? app.getAppPath() : undefined);
 
-if (!app.requestSingleInstanceLock()) {
+// Windows: the Squirrel installer runs the app to add or remove its shortcuts, then expects it to quit.
+if (squirrelStartup || !app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on("second-instance", (_event, argv, cwd) => {

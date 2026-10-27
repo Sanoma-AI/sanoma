@@ -8,8 +8,8 @@ export interface Runtime {
 }
 
 /**
- * Where they are: in a built app, the `node` and `pnpm` folders electron-builder copies into its
- * resources (`extraResources`); run from the checkout, `stage/node-<arch>` and `stage/pnpm`
+ * Where they are: in a built app, the `node` and `pnpm` folders Forge copies into its
+ * resources (forge.config.mts); run from the checkout, `stage/node-<arch>` and `stage/pnpm`
  * beside the package (`scripts/stage.ts`). The pnpm script is the one its `package.json` names.
  */
 export function runtimeOf(where: { packaged: boolean; appPath: string; resourcesPath: string }): Runtime {

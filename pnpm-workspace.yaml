@@ -6,8 +6,11 @@ packages:
 allowBuilds:
   # The desktop shell's Electron binary (~100 MB): `pnpm --filter @sanoma-ai/desktop start` downloads it when missing.
   electron: false
-  # electron-builder's Windows installer, unused: the shell builds for macOS.
-  electron-winstaller: false
+  # The desktop makers (packages/desktop/forge.config.mts): the dmg's Finder metadata, and the
+  # Windows installer's 7-Zip for this architecture.
+  electron-winstaller: true
+  fs-xattr: true
+  macos-alias: true
   lefthook: false
   # Pi's model providers (through @ai-sdk/harness-pi): their install scripts are not needed.
   "@google/genai": false
@@ -16,3 +19,7 @@ overrides:
   # One AI SDK: @ai-sdk/harness 1.0.158 pins ai 7.0.147. Its later releases' Claude Code and Codex
   # adapters ship without their bridges' lockfiles (vercel/ai#23829); drop this once one does.
   ai: 7.0.153
+# pnpm's default, stated: Electron Forge's system check (packages/desktop) asks for a hoist pattern
+# or the hoisted linker. The shell's build is bundled by Vite and packs no node_modules.
+hoistPattern:
+  - "*"

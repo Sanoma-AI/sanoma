@@ -1,3 +1,4 @@
 stage/
-release/
+out/
+.vite/
 test-results/

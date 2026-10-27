@@ -48,28 +48,38 @@ jobs:
         with:
           cache: false
       - run: pnpm install --frozen-lockfile
-      # Builds the shell, stages Node for arm64 and x64 and pnpm, and packs both architectures
-      # (electron-builder.yml), signed ad hoc: no keychain identity is looked for.
-      - run: pnpm --filter @sanoma-ai/desktop run dist
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      # Stages Node for arm64 and x64 and pnpm, then Forge builds and packs both architectures
+      # (forge.config.mts), signed ad hoc.
+      - run: pnpm --filter @sanoma-ai/desktop run make
       - name: Each app verifies and carries its own architecture's Node
-        working-directory: packages/desktop/release
+        working-directory: packages/desktop/out
         run: |
-          for pair in mac-arm64:arm64 mac:x86_64; do
-            app="${pair%%:*}/Sanoma.app"
+          for pair in arm64:arm64 x64:x86_64; do
+            app="Sanoma-darwin-${pair%%:*}/Sanoma.app"
             codesign --verify --deep --strict --verbose=2 "$app"
             node_arch=$(lipo -archs "$app/Contents/Resources/node/node")
             [ "$node_arch" = "${pair##*:}" ] || { echo "::error::$app carries a $node_arch Node"; exit 1; }
           done
-          ls -l ./*.dmg ./*.zip
+      # Forge names the dmg `Sanoma-<version>-<arch>.dmg` and the zip `Sanoma-darwin-<arch>-<version>.zip`:
+      # both are given the dmg's form, which the README's download steps name.
+      - name: Collect the installers
+        working-directory: packages/desktop/out/make
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          mkdir ../release
+          for arch in arm64 x64; do
+            cp "Sanoma-$VERSION-$arch.dmg" ../release/
+            cp "zip/darwin/$arch/Sanoma-darwin-$arch-$VERSION.zip" "../release/Sanoma-$VERSION-$arch.zip"
+          done
+          ls -l ../release
       - name: Draft release
-        working-directory: packages/desktop/release
+        working-directory: packages/desktop/out/release
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           gh release create "desktop-v$VERSION" --repo "$GITHUB_REPOSITORY" --draft --target "$GITHUB_SHA" \
-            --title "Sanoma desktop $VERSION (unsigned preview)" --notes-file ../RELEASE_NOTES.md \
+            --title "Sanoma desktop $VERSION (unsigned preview)" --notes-file ../../RELEASE_NOTES.md \
             "Sanoma-$VERSION"-*.dmg "Sanoma-$VERSION"-*.zip
           echo "Draft release desktop-v$VERSION from $GITHUB_SHA: publish it on GitHub after trying the download." >> "$GITHUB_STEP_SUMMARY"

@@ -1,7 +1,7 @@
 // The bridge of the shell's own pages, the start window and a company window's progress page
-// (CommonJS: a sandboxed preload cannot be a module). The app's view in a company window has no
-// preload: the app does not know it runs in the shell.
-const { contextBridge, ipcRenderer } = require("electron") as typeof import("electron");
+// (Vite builds it as CommonJS, preload.cjs: a sandboxed preload cannot be a module). The app's view
+// in a company window has no preload: the app does not know it runs in the shell.
+import { contextBridge, ipcRenderer } from "electron";
 
 contextBridge.exposeInMainWorld("sanoma", {
   state: () => ipcRenderer.invoke("start:state"),

@@ -16,7 +16,7 @@ pnpm --filter @sanoma-ai/desktop start ~/Companies/acme  # or open a company at 
 
 `pnpm --filter @sanoma-ai/desktop run test:e2e` is the smoke test: it builds and stages as `start` does, then starts the shell with Playwright (no browsers to install) on a copy of `test/fixtures/company`, whose `pnpm install` links a fake launcher. One window must show the start, then the app on the Node the shell ships (inside the template's `engines`), with no other window made; closing it must leave the launcher running, opening the folder again must show that window without a new start, Quit must stop the launcher, and the next launch must open the company again at the window's bounds. CI runs it on Linux under xvfb for changes to this package (`.github/workflows/desktop.yml`); the root `pnpm test` runs the unit tests only.
 
-`pnpm --filter @sanoma-ai/desktop dist:dir` builds the app, unpacked, into `release/` (`electron-builder.yml`), and `dist` builds the dmg and zip for arm64 and x64 that [`desktop-release.yml`](../../.github/workflows/desktop-release.yml) uploads to a draft GitHub Release (the root README, "Desktop (preview)").
+`pnpm --filter @sanoma-ai/desktop package` builds the app, unpacked, into `out/` (Electron Forge, `forge.config.mts`), and `make` builds the dmg and zip for arm64 and x64 into `out/make` that [`desktop-release.yml`](../../.github/workflows/desktop-release.yml) uploads to a draft GitHub Release (the root README, "Desktop (preview)").
 
 ## What it does
 
