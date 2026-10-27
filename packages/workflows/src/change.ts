@@ -234,9 +234,14 @@ export function changeDriver(remotes: ReadonlyMap<string, RemoteHalf>): Driver {
             title: `${title} (#${number})`,
           }));
         } catch (err) {
+          // Not merged: Sanoma's status on the head goes back to failing, so the host does not merge it either.
+          const reason = (err as Error).message;
+          await host
+            .setStatus({ sha: head, state: "failure", description: `Not published: ${reason}`.slice(0, 140) })
+            .catch(() => undefined);
           const code = vendorCodeOf(err);
           if (code === "head_moved") return { outcome: "moved" as const };
-          if (code === "not_mergeable") return { outcome: "blocked" as const, reason: (err as Error).message };
+          if (code === "not_mergeable") return { outcome: "blocked" as const, reason };
           throw err;
         }
         // Best effort: a branch left behind holds nothing the merge did not take.
@@ -266,7 +271,7 @@ export function touchesOf(files: readonly string[]): string[] {
 }
 
 /** The group the runtime holds a change to the rules for. */
-const ADMIN = "admin";
+export const ADMIN = "admin";
 /**
  * Whether a path in `touches` is the rules whatever `rules` says: the policies, the root's or an
  * app's (`apps/crm/policies/`), and the template's people file.

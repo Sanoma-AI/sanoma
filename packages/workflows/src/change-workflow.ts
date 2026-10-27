@@ -11,8 +11,8 @@ import type {
 } from "./change.ts";
 import { ChangeInput } from "./change.ts";
 import { defineWorkflow, type WorkflowDefinition } from "./define.ts";
-import { errorCode, type SanomaError } from "./errors.ts";
-import type { CHANGE_WORKFLOW } from "./shared.ts";
+import { errorCode, isRunControlError, type SanomaError } from "./errors.ts";
+import { type CHANGE_WORKFLOW, errorMessage } from "./shared.ts";
 import type { CheckResult } from "./source.ts";
 
 export { CHANGE_WORKFLOW } from "./shared.ts";
@@ -37,8 +37,10 @@ export interface ChangeSteps {
   queued(): Promise<ChangeEvent | undefined>;
   /** Withdraws every approval of the run approved for the merge, saying `reason`: none lifts a hold on a newer head. */
   retire(reason: string): Promise<void>;
-  /** After the merge: apply on the declared hosts, as a run of its own this one waits for; with none, the checkout follows `main`. */
+  /** After the merge: the checkout follows `main`, then apply on the declared hosts, as a run of its own this one waits for. */
   deploy(sha: string): Promise<ChangeDeploy>;
+  /** The pull request as the host has it: merged or closed, else undefined while it is open. */
+  settled(number: number): Promise<ChangeEvent | undefined>;
   /** After an apply on the hosts: drift on them, as a run of its own; undefined with no host. */
   verify(deploy: ChangeDeploy): Promise<ChangeVerified | undefined>;
   /** Closes the draft the change merged. */
@@ -84,8 +86,10 @@ function reviewOf(decision: ChangeDecision, facts: ChangeFacts): string {
  * pull request `closed` or `merged` on the host ends the change as it is. A rejected Publish
  * closes it too. A merge whose branch moved plans another round; one the host refuses waits.
  *
- * Once merged, the deploy (`steps.deploy`): apply on the declared hosts, as a run this one waits
- * for, then drift on them (`steps.verify`); with no host, the checkout fast-forwarded to `main`.
+ * Once merged, the deploy (`steps.deploy`): the checkout follows `main`, then apply on the
+ * declared hosts, as a run this one waits for, then drift on them (`steps.verify`). A `merged` or
+ * `closed` event someone told is checked on the host first (`steps.settled`); one it does not bear
+ * out plans another round. A Publish withdrawn with no event waits, blocked, for the next one.
  * Then the draft is closed. Each phase is published (`steps.publish`, `CHANGE_EVENT`); the run's
  * output is its `ChangeReport`.
  */
@@ -136,12 +140,14 @@ export function changeWorkflow(
           ...(input.page !== undefined && { page: input.page }),
         });
         // What came in while the round was planned decides it before any approval is asked.
-        let event = await steps.queued();
-        if (event === undefined && decision.answer === "deny") {
+        let told = await steps.queued();
+        let event: ChangeEvent | undefined;
+        if (told === undefined && decision.answer === "deny") {
           Object.assign(state, { phase: "blocked", blocked: decision.reason });
           await steps.publish(state);
-          event = await steps.next();
-        } else if (event === undefined) {
+          told = await steps.next();
+        } else if (told === undefined) {
+          let approved = false;
           try {
             Object.assign(state, { phase: "waiting" });
             await steps.publish(state);
@@ -151,26 +157,42 @@ export function changeWorkflow(
               details: JSON.stringify({ change: { id: input.id, title: input.title, branch: opened.branch }, facts }),
               links: [opened.url, ...(input.page === undefined ? [] : [input.page])],
             });
-            Object.assign(state, { phase: "merging" });
-            await steps.publish(state);
-            const merged = await ctx.sanoma.change.merge(merge);
-            if (merged.outcome === "merged") event = { kind: "merged", sha: merged.sha ?? opened.head };
-            else if (merged.outcome === "closed") event = { kind: "closed" };
-            else if (merged.outcome === "moved") event = { kind: "commits" };
-            else {
-              Object.assign(state, { phase: "blocked", blocked: merged.reason ?? "the host refuses the merge" });
-              await steps.publish(state);
-              event = await steps.next();
-            }
+            approved = true;
           } catch (err) {
-            // A withdrawal is an event: the run reads it. A rejection of Publish closes the change.
+            // A withdrawal comes with an event, else Publish was taken back. A rejection of Publish closes the change.
             const code = errorCode(err);
-            if (code === "approval_withdrawn") event = await steps.next();
+            if (code === "approval_withdrawn") told = await steps.queued();
             else if (code === "approval_rejected") {
               event = { kind: "close", by: ((err as SanomaError).data.by as { id: string }).id };
             } else throw err;
           }
+          let blocked = told === undefined && event === undefined && !approved ? "Publish was withdrawn" : undefined;
+          if (approved) {
+            Object.assign(state, { phase: "merging" });
+            await steps.publish(state);
+            let merged: Awaited<ReturnType<typeof ctx.sanoma.change.merge>>;
+            try {
+              merged = await ctx.sanoma.change.merge(merge);
+            } catch (err) {
+              // Approved, but the policy or the host refuses the merge now: the change waits, as for a refusal.
+              if (isRunControlError(err)) throw err;
+              merged = { outcome: "blocked", reason: errorMessage(err) };
+            }
+            if (merged.outcome === "merged") event = { kind: "merged", sha: merged.sha ?? opened.head };
+            else if (merged.outcome === "closed") event = { kind: "closed" };
+            else if (merged.outcome === "moved") event = { kind: "commits" };
+            else blocked = merged.reason ?? "the host refuses the merge";
+          }
+          if (blocked !== undefined) {
+            Object.assign(state, { phase: "blocked", blocked });
+            await steps.publish(state);
+            told = await steps.next();
+          }
         }
+        // An event someone told is checked on the host: a pull request merged or closed only as it says.
+        if (told?.kind === "merged" || told?.kind === "closed")
+          told = (await steps.settled(opened.number)) ?? { kind: "commits" };
+        event ??= told!;
         if (event.kind === "merged") {
           Object.assign(state, { phase: "deploying" });
           await steps.publish(state);

@@ -20,6 +20,7 @@ const PEOPLE = `import { sanoma } from "sanoma/resources";
 
 export const alice = sanoma.person({ id: "alice" });
 export const ada = sanoma.person({ id: "ada" });
+export const bob = sanoma.person({ id: "bob" });
 export const admin = sanoma.group({ name: "admin", members: [ada] });
 `;
 // A change that touches secret/ is denied: anything else is allowed, but for the runtime's own rule.
@@ -217,6 +218,39 @@ describe("the change workflow", () => {
     expect(opsOf(await app.client.ledger(runId))).not.toContain("sanoma.change.close");
   });
 
+  it("checks a merged or closed event on the host: one the pull request does not bear out plans again", async () => {
+    repo.edit("told", { "notes/told.md": "\n" });
+    const runId = await open("told");
+    await waitFor(pending(() => app.client, runId));
+    await app.client.changeEvent("told", { kind: "merged", sha: "0".repeat(40) }, { by: "alice" });
+    await waitFor(pending(() => app.client, runId, 2));
+    expect((await app.client.change("told"))!.state.phase).toBe("waiting");
+    expect(remote.pullOf("draft/told")).toMatchObject({ state: "open" });
+    expect(repo.closed).not.toContain("told");
+    await app.client.changeEvent("told", { kind: "close", by: "alice" }, { by: "alice" });
+    expect(await app.client.result(runId)).toMatchObject({ outcome: "closed" });
+  });
+
+  it("waits, blocked, when Publish is withdrawn with no event; new commits ask again", async () => {
+    repo.edit("taken", { "notes/taken.md": "\n" });
+    const runId = await open("taken");
+    await waitFor(pending(() => app.client, runId));
+    const [publish] = (await app.client.change("taken"))!.approvals;
+    await app.client.withdraw(runId, publish!.id, "not yet", { by: "alice" });
+    await waitFor(async () => (await phaseOf("taken")) === "blocked");
+    expect((await app.client.change("taken"))!.state.blocked).toBe("Publish was withdrawn");
+    await app.client.changeEvent("taken", { kind: "commits" }, { by: "alice" });
+    await waitFor(pending(() => app.client, runId, 2));
+    await app.client.changeEvent("taken", { kind: "close", by: "alice" }, { by: "alice" });
+    await app.client.result(runId);
+  });
+
+  it("is started only by openChange, which names its run", async () => {
+    await expect(
+      app.client.start("change", { id: "side", title: "Side door" }, { startedBy: "alice" }),
+    ).rejects.toMatchObject({ code: "invalid_input" });
+  });
+
   it("closes the change when Publish is rejected", async () => {
     repo.edit("rejected", { "notes/no.md": "\n" });
     const runId = await open("rejected");
@@ -237,6 +271,10 @@ describe("the change workflow", () => {
     });
     expect(remote.statuses.at(-1)).toMatchObject({ sha: denied, state: "failure" });
     expect((await app.client.change("secret"))!.approvals).toEqual([]);
+    // With no approval to withdraw, a close is the starter's or admin's.
+    await expect(app.client.changeEvent("secret", { kind: "close", by: "bob" }, { by: "bob" })).rejects.toMatchObject({
+      code: "not_approver",
+    });
 
     await app.restart();
     const head = repo.edit("secret", { "secret/key.txt": null, "notes/safe.md": "\n" });
@@ -332,7 +370,8 @@ describe("the change workflow's deploy on a declared host", () => {
     expect(report.deploy).not.toHaveProperty("error");
     const applied = await app.client.applyReport(`${runId}:deploy`);
     expect(applied.results).toEqual([expect.objectContaining({ id: hostId, status: "done" })]);
-    // With a host, the instance is the host's to update: the checkout does not follow.
-    expect(repo.follows).toEqual([]);
+    // The checkout follows main first, so the hosts applied are the merged ones.
+    expect(repo.follows).toEqual([{ url: remote.url, token: expect.any(String), ref: "main" }]);
+    expect(report.deploy).toMatchObject({ followed: expect.any(String) });
   });
 });

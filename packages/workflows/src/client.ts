@@ -21,7 +21,14 @@ import { dbosClient, lazyPool, type LazyPool } from "./db.ts";
 import { type CredentialStatus, credentialsOf } from "./env.ts";
 import { type ApprovalState, Principal, type WorkflowDefinition } from "./define.ts";
 import { APPLY_WORKFLOW, type ApplyInput, type ApplyReport } from "./apply.ts";
-import { type ChangeEvent, ChangeEventSchema, ChangeInput, type ChangeReport, type ChangeState } from "./change.ts";
+import {
+  ADMIN,
+  type ChangeEvent,
+  ChangeEventSchema,
+  ChangeInput,
+  type ChangeReport,
+  type ChangeState,
+} from "./change.ts";
 import { DRIFT_WORKFLOW, type DriftReport } from "./drift.ts";
 import { isDirect } from "./direct.ts";
 import {
@@ -286,6 +293,9 @@ export class SanomaClient {
       options.sandbox,
       "`sandbox` must be the name of a scenario in the config's `scenarios/`",
     );
+    if (workflow.name === CHANGE_WORKFLOW && !isChangeRunOf((parsed as ChangeInput).id, runId)) {
+      throw new SanomaError("invalid_input", "A change is started with openChange, which names its run", { runId });
+    }
     const hold = await this.startHold(workflow.name, parsed, startedBy, runId);
     const args: RunArgs = { input, startedBy, ...(sandbox === undefined ? {} : { sandbox }), ...(hold && { hold }) };
     const { onBehalfOf } = startedBy;
@@ -862,8 +872,12 @@ export class SanomaClient {
       throw new SanomaError("run_ended", `Run ${runId} has ${status}; it takes no more events`, { runId, status });
     }
     const held = approvals.find((a) => a.status === "pending" && a.covers.includes(CHANGE_MERGE));
-    const refusal = held && withdrawalRefusal(held, by, row.authenticatedUser);
-    if (held && refusal !== undefined && told.kind === "close") throw notApprover(runId, held, refusal);
+    // A close is whoever may withdraw Publish's, or with none pending, the starter's or admin's.
+    const refusal = withdrawalRefusal(held ?? { approver: { group: ADMIN } }, by, row.authenticatedUser);
+    if (refusal !== undefined && told.kind === "close") {
+      if (held) throw notApprover(runId, held, refusal);
+      throw new SanomaError("not_approver", refusal, { runId, reason: refusal });
+    }
     this.options.onWrite?.();
     await this.dbos.send(runId, told, CHANGE_TOPIC);
     if (held && refusal === undefined) {
@@ -1190,6 +1204,12 @@ const alreadyDecided = (runId: string, a: ApprovalState) =>
 
 /** A change's first run's id: `change:<draft id>`. */
 const changeRunId = (id: string) => `change:${id}`;
+
+/** True when `runId` is a run of the draft `id`'s change: `change:<id>` or `change:<id>~<n>`. */
+const isChangeRunOf = (id: string, runId: string | undefined) => {
+  const base = changeRunId(id);
+  return runId === base || (runId?.startsWith(`${base}~`) === true && /^\d+$/.test(runId.slice(base.length + 1)));
+};
 
 /** Why a change event withdraws the merge's pending approval. */
 const withdrawalOf = (event: ChangeEvent): string =>

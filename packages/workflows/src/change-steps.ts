@@ -4,6 +4,7 @@ import { DBOS } from "@dbos-inc/dbos-sdk";
 import { withdrawApprovals } from "./approvals.ts";
 import { decide } from "./call.ts";
 import {
+  ADMIN,
   type ChangeDecision,
   type ChangeEvent,
   ChangeEventSchema,
@@ -189,7 +190,7 @@ export function changeSteps({ remotes, hosts }: ChangeStepsOptions): ChangeSteps
           // Allowed: Publish is still someone's to press: whoever drafted it, else admin for an agent acting for no one.
           const { actor } = run;
           const drafter = actor.onBehalfOf ?? (actor.groups?.includes(AGENTS) ? undefined : actor.id);
-          return { answer: "allow", approver: drafter ?? { group: "admin" } };
+          return { answer: "allow", approver: drafter ?? { group: ADMIN } };
         },
         { name: "change:policy" },
       ),
@@ -212,24 +213,45 @@ export function changeSteps({ remotes, hosts }: ChangeStepsOptions): ChangeSteps
 
     async deploy() {
       const run = runNow();
-      const declared = run.state.workflows.has(APPLY_WORKFLOW)
-        ? await DBOS.runStep(hosts, { name: "change:hosts" })
-        : [];
-      if (declared.length) {
-        const { runId, error } = await child(run, APPLY_WORKFLOW, "deploy", { only: declared });
-        return { runId, hosts: declared, ...(error !== undefined && { error }) } satisfies ChangeDeploy;
-      }
-      // No host: this checkout is the live instance, fast-forwarded to the merge.
-      return DBOS.runStep(
+      // The checkout moves to the merge first, so the hosts and what apply reads are the merged ones.
+      const followed = await DBOS.runStep(
         async (): Promise<ChangeDeploy> => {
-          const { source, url, host } = await repositoryOf(remotes, run.state.secrets);
-          if (!source.follow) return { skipped: "this repository cannot follow its remote" };
-          const followed = await source.follow({ url, token: await host.token(), ref: "main" });
-          return "revision" in followed ? { followed: followed.revision } : { skipped: followed.skipped };
+          try {
+            const { source, url, host } = await repositoryOf(remotes, run.state.secrets);
+            if (!source.follow) return { skipped: "this repository cannot follow its remote" };
+            const moved = await source.follow({ url, token: await host.token(), ref: "main" });
+            return "revision" in moved ? { followed: moved.revision } : { skipped: moved.skipped };
+          } catch (err) {
+            // Merged already: a deploy that fails is the change's to report, not a failed run.
+            return { error: `following main: ${errorMessage(err)}` };
+          }
         },
         { name: "change:follow" },
       );
+      const declared = run.state.workflows.has(APPLY_WORKFLOW)
+        ? await DBOS.runStep(hosts, { name: "change:hosts" })
+        : [];
+      if (!declared.length) return followed;
+      const { runId, error } = await child(run, APPLY_WORKFLOW, "deploy", { only: declared });
+      const errors = [followed.error, error].filter((e) => e !== undefined);
+      return {
+        ...followed,
+        runId,
+        hosts: declared,
+        ...(errors.length && { error: errors.join("; ") }),
+      } satisfies ChangeDeploy;
     },
+
+    settled: (number) =>
+      DBOS.runStep(
+        async (): Promise<ChangeEvent | undefined> => {
+          const { host } = await repositoryOf(remotes, runNow().state.secrets);
+          const pr = await host.pullRequest(number);
+          if (pr.state === "merged") return { kind: "merged", sha: pr.mergeSha ?? pr.head };
+          return pr.state === "closed" ? { kind: "closed" } : undefined;
+        },
+        { name: "change:settled" },
+      ),
 
     async verify(deploy) {
       const run = runNow();
