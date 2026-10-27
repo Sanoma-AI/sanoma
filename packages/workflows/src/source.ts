@@ -54,6 +54,12 @@ export interface Source {
    * and the remote's `ref` contains it; otherwise `skipped`, saying why. The revision after.
    */
   follow?(target: { url: string; token: string; ref: string }): Promise<{ revision: string } | { skipped: string }>;
+  /**
+   * How many commits the source repository of the app `folder` (the URL its `apps/<folder>/app.ts`
+   * names) has on its default branch that the checked-out one lacks: fetched now. An error when
+   * the app names no source.
+   */
+  behind?(folder: string): Promise<number>;
 }
 
 /** The branch of the draft `id`, as a source names it: `draft/<id>`. */
@@ -71,6 +77,36 @@ export interface Draft {
   branch: string;
   root: string;
   commit: Source["commit"];
+  /**
+   * Takes an app into the draft: fetches `ref` (the default branch by default) of the repository
+   * at `url`, a source (a public company repo with one `apps/<folder>/`), and merges it in with its
+   * history (`--allow-unrelated-histories`), as one merge commit by `author`. What it merges is
+   * `apps/<folder>/` and `package.json`; every other file stays the draft's. `folder` may be left
+   * out when the source has one app. Refused when the draft has `apps/<folder>/` already.
+   */
+  take?(app: { url: string; ref?: string; folder?: string; author: string }): Promise<AppMerge>;
+  /**
+   * Merges the new commits of the app `folder`'s source (the URL its `app.ts` names, its default
+   * branch) into the draft, by `author`, as `take` merges: `apps/<folder>/` and `package.json`.
+   */
+  update?(app: { folder: string; author: string }): Promise<AppMerge>;
+}
+
+/**
+ * What taking or updating an app merged into a draft. A line both sides changed is committed with
+ * git's markers in its file (ours, the merge base and theirs), so the draft's checks fail until the
+ * agent resolves it; a file one side deleted stays as the draft had it. The merge commit keeps the
+ * source's history either way.
+ */
+export interface AppMerge {
+  /** The app's folder: `apps/<folder>/`. */
+  folder: string;
+  /** The draft's commit after the merge. */
+  revision: string;
+  /** The source's commits the merge brought in; 0 when the draft had them all, and nothing was merged. */
+  merged: number;
+  /** The files git could not merge, relative to the root, committed with conflict markers; empty when it merged clean. */
+  conflicts: string[];
 }
 
 /** A draft's change: the files it touches, relative to the root, and git's `--stat` of it. */

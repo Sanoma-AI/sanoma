@@ -18,6 +18,7 @@ import { gitIdentity } from "../../sanoma/test/git.ts";
 import { localGitSource } from "../../sanoma/src/source.ts";
 import { ACTOR_HEADER } from "../src/api.ts";
 import { type App, startApp } from "../src/index.ts";
+import { takeAppPrompt } from "../src/lib/apps.ts";
 import { type ChatMessage, chatTransport } from "../src/lib/chat.ts";
 import { allowedPath } from "../src/server/agent/checkout.ts";
 
@@ -50,6 +51,10 @@ const SCRIPT: Record<string, Step[]> = {
   ],
   "Look up Acme": [{ tool: "lookup", input: { op: "crm.customer.find", input: { name: "Acme" } } }, { text: "Acme." }],
   continue: [{ text: "Acme Ltd is a customer since 2019." }],
+  [takeAppPrompt("file:///srv/crm")]: [
+    { tool: "take_app", input: { url: "file:///srv/crm" } },
+    { text: "That source is not a public repository." },
+  ],
 };
 
 const usage = {
@@ -337,6 +342,20 @@ describe("the chat", () => {
     });
     // The model saw the settled lookup's result before it answered.
     expect(JSON.stringify(model.doStreamCalls.at(-1)!.prompt)).toContain("Acme Ltd");
+  }, 300_000);
+
+  it("takes an app only from a public repository: the Apps page's prompt and the source's refusal", async () => {
+    const other = `apps-${RUN}`;
+    const reply = await send(other, [], takeAppPrompt("file:///srv/crm"));
+    expect(toolParts(reply).map((part) => [getToolName(part), part.state])).toEqual([["take_app", "output-error"]]);
+    // The model reads why (the person's step says only that it failed), and answers.
+    expect(JSON.stringify(model.doStreamCalls.at(-1)!.prompt)).toMatch(
+      /git fetch from file:\/\/\/srv\/crm failed: .*transport 'file' not allowed/,
+    );
+    expect(reply!.parts.at(-1)).toMatchObject({ type: "text", text: "That source is not a public repository." });
+    expect(systems.at(-1)).toContain("take_app takes an app into your draft");
+    // Its draft holds nothing.
+    expect(git("log", "--format=%s", `draft/${other}`)).toBe("First");
   }, 300_000);
 
   it("refuses another person's chat, a message that is not one or that the chat has, and a request that is not same-origin", async () => {

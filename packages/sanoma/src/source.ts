@@ -1,9 +1,20 @@
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { appendFileSync, existsSync, lstatSync, mkdirSync, realpathSync, symlinkSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
-import { type CheckResult, type Draft, draftBranch, draftOf, errorMessage, type Source } from "@sanoma-ai/workflows";
+import {
+  type AppMerge,
+  type CheckResult,
+  type Draft,
+  draftBranch,
+  draftOf,
+  errorMessage,
+  readApps,
+  type Source,
+} from "@sanoma-ai/workflows";
+import { APP_NAME } from "@sanoma-ai/workflows/shared";
 import type { SanomaEvent } from "./events.ts";
 
 const run = promisify(execFile);
@@ -80,6 +91,140 @@ const commitIn =
       return { revision: await gitIn(cwd, ["rev-parse", "HEAD"]) };
     });
 
+// Taking and updating an app: a source repository's history merged into a draft. A source is a
+// public repository: fetched by https alone (`GIT_ALLOW_PROTOCOL`, unless the environment sets its
+// own list), with no credential helper and no prompt, into a ref of its own, so two fetches run
+// at once and outside the one git write.
+
+/** A ref a source is taken at: a branch, a tag or a commit id, never an option or a refspec. */
+const SOURCE_REF = /^(?!-)(?!.*\.\.)[\w./-]{1,200}$/;
+
+/** How long a source's fetch may take. */
+const FETCH_TIMEOUT_MS = 2 * 60_000;
+
+/** The commit `ref` (the default branch when absent) names in the repository at `url`, fetched into the checkout at `cwd`. */
+async function fetchSource(cwd: string, url: string, ref?: string): Promise<string> {
+  if (ref !== undefined && !SOURCE_REF.test(ref))
+    throw new Error(`Not a branch, tag or commit: ${JSON.stringify(ref)}`);
+  const into = `refs/sanoma/fetched/${randomUUID()}`;
+  const args = ["-c", "credential.helper=", "fetch", "--quiet", "--no-tags", "--no-write-fetch-head"];
+  await run("git", [...args, "--", url, `+${ref ?? "HEAD"}:${into}`], {
+    cwd,
+    env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_ALLOW_PROTOCOL: process.env.GIT_ALLOW_PROTOCOL ?? "https" },
+    timeout: FETCH_TIMEOUT_MS,
+  }).catch((err: { stderr?: string; message: string }) => {
+    throw new Error(`git fetch from ${url} failed: ${err.stderr?.trim() || err.message}`);
+  });
+  try {
+    return await gitIn(cwd, ["rev-parse", "--verify", `${into}^{commit}`]);
+  } finally {
+    // Its commit is pinned by its id.
+    await gitIn(cwd, ["update-ref", "-d", into]);
+  }
+}
+
+/** The source URL of the app `folder` in the checkout at `cwd`, as its `app.ts` names it; an error when it names none. */
+function sourceOf(cwd: string, folder: string): string {
+  const app = readApps(cwd).find((a) => a.name === folder);
+  if (!app) throw new Error(`There is no app apps/${folder}/`);
+  if (app.source === undefined) throw new Error(`apps/${folder}/app.ts names no source: the app is the company's own`);
+  return app.source;
+}
+
+/** How many commits `from` has that `HEAD` lacks, in the checkout at `cwd`. */
+const behindIn = async (cwd: string, from: string) =>
+  Number(await gitIn(cwd, ["rev-list", "--count", `HEAD..${from}`]));
+
+/** Paths git printed with `-z`. */
+const pathsOf = (z: string) => z.split("\0").filter(Boolean);
+
+/**
+ * Merges the commit `from` into the draft at `cwd` as one commit by `author`, titled `message`,
+ * with its history (`take`: the first time the two meet, or another app of a source merged here
+ * already). What it merges is the app's folder (a take's, the source's as it is) and `package.json`
+ * (its connectors): every other file stays the company's, as does a file one side deleted, since
+ * the source's root is the starter's and the rest of it the source's own. A file git could not
+ * merge is committed with its markers (ours, the base, theirs) and named in `conflicts`. Refused
+ * when the draft has uncommitted changes; a failure once the merge has begun puts the draft back.
+ */
+async function mergeIn(
+  cwd: string,
+  from: string,
+  { folder, message, author, take }: { folder: string; message: string; author: string; take?: boolean },
+): Promise<AppMerge> {
+  if (await gitIn(cwd, ["status", "--porcelain"]))
+    throw new Error("The draft has uncommitted changes: commit them first");
+  const merged = await behindIn(cwd, from);
+  if (!merged && !take) return { folder, revision: await gitIn(cwd, ["rev-parse", "HEAD"]), merged, conflicts: [] };
+  const as = { GIT_AUTHOR_NAME: `${author} via Sanoma` };
+  if (merged) {
+    const merge = ["-c", "merge.conflictStyle=diff3", "merge", "--quiet", "--no-ff", "--no-commit"];
+    const failed = await gitIn(cwd, [...merge, ...(take ? ["--allow-unrelated-histories"] : []), from], as).then(
+      () => undefined,
+      (err: { stderr?: string; stdout?: string; message: string }) => err,
+    );
+    if (!(await holds(cwd, ["rev-parse", "--quiet", "--verify", "MERGE_HEAD"]))) {
+      throw new Error(
+        `git merge of ${from} failed: ${failed?.stderr?.trim() || failed?.stdout?.trim() || failed?.message}`,
+      );
+    }
+  }
+  try {
+    // The draft has no such folder: a take's is the source's whole, whatever the history here says.
+    if (take) await gitIn(cwd, ["checkout", from, "--", `apps/${folder}`]);
+    const outside = pathsOf(
+      await gitIn(cwd, [
+        "diff",
+        "--name-only",
+        "-z",
+        "HEAD",
+        "--",
+        ".",
+        `:(exclude)apps/${folder}`,
+        ":(exclude)package.json",
+      ]),
+    );
+    // Each unmerged file's stages: without ours (2) or theirs (3), one side deleted it.
+    const stages = new Map<string, string[]>();
+    for (const entry of pathsOf(await gitIn(cwd, ["ls-files", "--unmerged", "-z"]))) {
+      const tab = entry.indexOf("\t");
+      const path = entry.slice(tab + 1);
+      stages.set(path, [...(stages.get(path) ?? []), entry.slice(0, tab).split(" ")[2]!]);
+    }
+    const bothSides = (path: string) => ["2", "3"].every((stage) => stages.get(path)!.includes(stage));
+    const kept = new Set(outside);
+    const conflicts = [...stages.keys()].filter((path) => !kept.has(path) && bothSides(path)).toSorted();
+    await keepOurs(cwd, [...new Set([...outside, ...[...stages.keys()].filter((path) => !bothSides(path))])]);
+    if (conflicts.length) await gitIn(cwd, ["add", "--", ...conflicts], { GIT_LITERAL_PATHSPECS: "1" });
+    const left = conflicts.length ? `\n\nConflicts left to resolve:\n${conflicts.map((f) => `- ${f}`).join("\n")}` : "";
+    await gitIn(cwd, ["commit", "--quiet", "-m", `${message}${left}`], as);
+    return { folder, revision: await gitIn(cwd, ["rev-parse", "HEAD"]), merged, conflicts };
+  } catch (err) {
+    // The draft was clean: back to its commit, the merge (if any) with it.
+    await gitIn(cwd, ["reset", "--quiet", "--hard", "HEAD"]).catch(() => undefined);
+    throw err;
+  }
+}
+
+/** Refuses `from` unless the checkout at `cwd` shares history with it: a take squashed or rebased away leaves no base. */
+async function mustShareHistory(cwd: string, from: string, folder: string, url: string): Promise<void> {
+  if (!(await holds(cwd, ["merge-base", "HEAD", from]))) {
+    throw new Error(`apps/${folder}/ shares no history with ${url}: was it taken by a squashed or rebased merge?`);
+  }
+}
+
+/** The files at `paths` in the checkout at `cwd` as `HEAD` has them, merged or not: those it lacks removed. */
+async function keepOurs(cwd: string, paths: string[]): Promise<void> {
+  if (!paths.length) return;
+  // Paths, not patterns: a file's name may hold a `*`.
+  const literal = { GIT_LITERAL_PATHSPECS: "1" };
+  const listed = await gitIn(cwd, ["ls-tree", "-r", "--name-only", "-z", "HEAD", "--", ...paths], literal);
+  const ours = new Set(pathsOf(listed));
+  const gone = paths.filter((path) => !ours.has(path));
+  if (ours.size) await gitIn(cwd, ["checkout", "HEAD", "--", ...ours], literal);
+  if (gone.length) await gitIn(cwd, ["rm", "--quiet", "--force", "--", ...gone], literal);
+}
+
 /**
  * The local git checkout at `root` as a `Source`: commits on the current branch, as the
  * machine's git identity with the author named `<author> via Sanoma`, pushes a branch to a
@@ -87,6 +232,8 @@ const commitIn =
  * worktree at `<root>/.sanoma/drafts/<id>` on the branch `draft/<id>`, with the root's
  * `node_modules` linked into it; `git worktree list` is the one record of which are open. A
  * draft's `sanoma check` runs on `<databaseUrl>_check` (the launcher's database when it is not given).
+ * A draft takes an app (`git merge --allow-unrelated-histories` of its source) and updates one
+ * (a merge of its source's default branch); `behind` fetches an app's source into the checkout.
  */
 export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: string } = {}): Source {
   const git = (args: string[], env?: NodeJS.ProcessEnv) => gitIn(root, args, env);
@@ -176,7 +323,37 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
           }
         }
       });
-      return { branch, root: at, commit: commitIn(at) };
+      return {
+        branch,
+        root: at,
+        commit: commitIn(at),
+        take: async ({ url, ref, folder, author }) => {
+          const from = await fetchSource(at, url, ref);
+          return serial(async () => {
+            const apps = pathsOf(await gitIn(at, ["ls-tree", "-d", "--name-only", "-z", from, "--", "apps/"]))
+              .map((path) => path.slice("apps/".length))
+              .filter((name) => APP_NAME.test(name));
+            const name = folder ?? (apps.length === 1 ? apps[0] : undefined);
+            if (name === undefined || !apps.includes(name)) {
+              const held = apps.map((a) => `apps/${a}/`).join(", ");
+              if (!held) throw new Error(`${url} holds no app: a source holds one apps/<name>/`);
+              throw new Error(
+                `${url} ${folder ? `has no apps/${folder}/` : "holds more than one app"}: it holds ${held}`,
+              );
+            }
+            if (existsSync(join(at, "apps", name))) throw new Error(`apps/${name}/ is here already: update it instead`);
+            return mergeIn(at, from, { folder: name, message: `Take ${name} from ${url}`, author, take: true });
+          });
+        },
+        update: async ({ folder, author }) => {
+          const url = sourceOf(at, folder);
+          const from = await fetchSource(at, url);
+          return serial(async () => {
+            await mustShareHistory(at, from, folder, url);
+            return mergeIn(at, from, { folder, message: `Update ${folder} from ${url}`, author });
+          });
+        },
+      };
     },
     closeDraft: async (id) => {
       const [branch, at] = [branchOf(id), draftAt(id)];
@@ -189,6 +366,12 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
       });
     },
     check: async (id) => checks(draftAt(id), databaseUrl, async () => (await listed()).get(id) === true),
+    async behind(folder) {
+      const url = sourceOf(root, folder);
+      const from = await fetchSource(root, url);
+      await mustShareHistory(root, from, folder, url);
+      return behindIn(root, from);
+    },
     drafts: async () => [...(await listed())].flatMap(([id, here]) => (here ? [id] : [])).toSorted(),
     async diff(id) {
       // Three dots: from where the branch left the checked-out one, so what was merged since is not shown.
@@ -198,7 +381,7 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
         git(["diff", "--no-renames", "--name-only", "-z", range, "--"]),
         git(["diff", "--no-renames", "--no-color", "--stat", range, "--"]),
       ]);
-      return { files: names.split("\0").filter(Boolean), summary };
+      return { files: pathsOf(names), summary };
     },
   };
 }

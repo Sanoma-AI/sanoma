@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import {
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -368,6 +369,198 @@ describe("localGitSource's drafts", () => {
   });
 });
 
+/**
+ * A source repository in a directory of its own, with `files` at their paths, in one commit on
+ * `main`: what `commit` adds later is another commit there. Its `apps/<app>/app.ts` names its URL.
+ */
+function sourceRepo(files: Record<string, string>) {
+  const at = mkdtempSync(join(tmpdir(), "sanoma-app-source-"));
+  const url = pathToFileURL(at).href;
+  const there = (...args: string[]) => execFileSync("git", args, { cwd: at, encoding: "utf8" }).trim();
+  const commit = (changed: Record<string, string>, message: string) => {
+    for (const [path, text] of Object.entries(changed)) {
+      mkdirSync(join(at, path, ".."), { recursive: true });
+      writeFileSync(join(at, path), text.replaceAll("<url>", url));
+    }
+    there("add", "--all");
+    there("commit", "--quiet", "-m", message);
+    return there("rev-parse", "HEAD");
+  };
+  there("init", "--quiet", "--initial-branch=main");
+  commit(files, "The source");
+  return { at, url, commit };
+}
+
+/** An app's `app.ts`, naming the source's URL (`<url>`, filled in when written). */
+const APP_TS = 'import { defineApp } from "sanoma";\n\nexport default defineApp({ source: "<url>" });\n';
+
+/** The draft's branch merged into main as a person merges it (a merge, not a squash), and the draft closed. */
+const mergeDraft = async (repo: ReturnType<typeof localGitSource>, id: string) => {
+  git("merge", "--quiet", "--ff-only", `draft/${id}`);
+  await repo.closeDraft!(id);
+};
+
+describe("localGitSource's apps", () => {
+  const sources: string[] = [];
+  beforeEach(() => {
+    // The sources here are directories on this machine: a source is https unless the environment says otherwise.
+    vi.stubEnv("GIT_ALLOW_PROTOCOL", "file");
+    writeFileSync(join(dir, ".gitignore"), ".sanoma/\nnode_modules/\n");
+    writeFileSync(join(dir, "package.json"), '{ "name": "acme" }\n');
+    git("add", "--all");
+    git("commit", "--quiet", "-m", "Acme");
+  });
+  afterEach(() => {
+    for (const at of sources.splice(0)) rmSync(at, { recursive: true, force: true });
+  });
+  const source = (files: Record<string, string>) => {
+    const made = sourceRepo(files);
+    sources.push(made.at);
+    return made;
+  };
+  it("takes an app with its history, the company's root kept, then merges the source's new commits, clean or with markers", async () => {
+    const crm = source({
+      // The starter's root: another README, a starter file and a package.json with the app's connectors.
+      "README.md": "# The starter\n",
+      "hello.ts": "export const hello = 1;\n",
+      "package.json": '{ "name": "crm", "dependencies": { "@sanoma-ai/connector-ghost": "1" } }\n',
+      "apps/crm/app.ts": APP_TS,
+      "apps/crm/title.ts": 'export const title = "Follow up";\n',
+      "apps/crm/old.ts": "export const old = 1;\n",
+    });
+    const repo = localGitSource(dir);
+    const take = await repo.draft!("take");
+    const at = (path: string) => readFileSync(join(take.root, path), "utf8");
+    const taken = await take.take!({ url: crm.url, author: "ada" });
+    expect(taken).toEqual({
+      folder: "crm",
+      revision: await repo.head(take.branch),
+      merged: 1,
+      conflicts: ["package.json"],
+    });
+    expect(at("apps/crm/app.ts")).toContain(crm.url);
+    expect(at("apps/crm/title.ts")).toContain('"Follow up"');
+    // The root stays the company's; package.json is both, with git's markers, for the agent.
+    expect(at("README.md")).toBe("# acme\n");
+    expect(existsSync(join(take.root, "hello.ts"))).toBe(false);
+    expect(at("package.json")).toMatch(
+      /^<<<<<<< HEAD\n\{ "name": "acme" \}\n\|\|\|\|\|\|\| empty tree\n=======\n.*connector-ghost.*\n>>>>>>> [0-9a-f]{40}\n$/,
+    );
+    const draftGit = (...args: string[]) => execFileSync("git", args, { cwd: take.root, encoding: "utf8" }).trim();
+    expect(draftGit("status", "--porcelain")).toBe("");
+    // One merge commit, by the person through Sanoma, whose second parent is the source's.
+    expect(draftGit("log", "-1", "--format=%an|%P|%s")).toBe(
+      `ada via Sanoma|${git("rev-parse", "main")} ${execFileSync("git", ["rev-parse", "HEAD"], { cwd: crm.at, encoding: "utf8" }).trim()}|Take crm from ${crm.url}`,
+    );
+    expect(draftGit("log", "-1", "--format=%b")).toBe("Conflicts left to resolve:\n- package.json");
+
+    // The agent resolves package.json; the person merges the draft.
+    writeFileSync(
+      join(take.root, "package.json"),
+      '{ "name": "acme", "dependencies": { "@sanoma-ai/connector-ghost": "1" } }\n',
+    );
+    await take.commit({ paths: ["package.json"], message: "Ghost for the CRM", author: "agent" });
+    await mergeDraft(repo, "take");
+    expect(await repo.behind!("crm")).toBe(0);
+
+    // The company deletes one of the app's files.
+    git("rm", "--quiet", "apps/crm/old.ts");
+    git("commit", "--quiet", "-m", "No old");
+
+    // A commit on the source: behind by one, then merged clean, and nothing more to merge after.
+    // Only the app's folder: the source's root and the file the company deleted stay the company's.
+    crm.commit(
+      {
+        "apps/crm/title.ts": 'export const title = "Follow up with a customer";\n',
+        "apps/crm/old.ts": "export const old = 2;\n",
+        "README.md": "# The starter, again\n",
+        "workflows/demo.ts": "export const demo = 1;\n",
+      },
+      "Say who",
+    );
+    expect(await repo.behind!("crm")).toBe(1);
+    const update = await repo.draft!("update");
+    const updated = await update.update!({ folder: "crm", author: "ada" });
+    expect(updated).toEqual({ folder: "crm", revision: await repo.head(update.branch), merged: 1, conflicts: [] });
+    expect(readFileSync(join(update.root, "apps/crm/title.ts"), "utf8")).toContain("with a customer");
+    expect(readFileSync(join(update.root, "README.md"), "utf8")).toBe("# acme\n");
+    for (const gone of ["apps/crm/old.ts", "workflows/demo.ts"])
+      expect(existsSync(join(update.root, gone))).toBe(false);
+    expect(await update.update!({ folder: "crm", author: "ada" })).toEqual({ ...updated, merged: 0 });
+    await mergeDraft(repo, "update");
+    expect(await repo.behind!("crm")).toBe(0);
+
+    // The company and the source both change one line: the merge commits the file with its markers.
+    writeFileSync(join(dir, "apps/crm/title.ts"), 'export const title = "Follow up soon";\n');
+    git("commit", "--quiet", "-am", "Soon");
+    crm.commit({ "apps/crm/title.ts": 'export const title = "Follow up today";\n' }, "Today");
+    const conflict = await repo.draft!("conflict");
+    const conflicted = await conflict.update!({ folder: "crm", author: "ada" });
+    expect(conflicted).toMatchObject({ merged: 1, conflicts: ["apps/crm/title.ts"] });
+    expect(readFileSync(join(conflict.root, "apps/crm/title.ts"), "utf8")).toMatch(
+      /^<<<<<<< HEAD\n.*"Follow up soon".*\n\|\|\|\|\|\|\| [0-9a-f]+\n.*"Follow up with a customer".*\n=======\n.*"Follow up today".*\n>>>>>>> [0-9a-f]{40}\n$/,
+    );
+    expect(execFileSync("git", ["status", "--porcelain"], { cwd: conflict.root, encoding: "utf8" })).toBe("");
+    // The live checkout never moved.
+    expect(git("status", "--porcelain")).toBe("");
+  });
+
+  it("refuses an app it cannot take or update, and leaves the draft as it was", async () => {
+    const two = source({ "apps/a/app.ts": APP_TS, "apps/b/app.ts": APP_TS, "apps/b/y.ts": "export const y = 1;\n" });
+    const repo = localGitSource(dir);
+    const draft = await repo.draft!("refused");
+    const before = await repo.head(draft.branch);
+    const take = (url: string, more: { ref?: string; folder?: string } = {}) =>
+      draft.take!({ url, author: "ada", ...more });
+    await expect(take(two.url)).rejects.toThrow(`${two.url} holds more than one app: it holds apps/a/, apps/b/`);
+    await expect(take(two.url, { folder: "c" })).rejects.toThrow(
+      `${two.url} has no apps/c/: it holds apps/a/, apps/b/`,
+    );
+    await expect(take(two.url, { ref: "main:refs/heads/main" })).rejects.toThrow(/^Not a branch, tag or commit/);
+    await expect(take(two.url, { ref: "--upload-pack=x" })).rejects.toThrow(/^Not a branch, tag or commit/);
+    await expect(take(`${two.url}-missing`)).rejects.toThrow(/^git fetch from file:.*-missing failed: /);
+    vi.stubEnv("GIT_ALLOW_PROTOCOL", undefined);
+    await expect(take(two.url)).rejects.toThrow(/^git fetch from file:.* failed: .*transport 'file' not allowed/);
+    vi.stubEnv("GIT_ALLOW_PROTOCOL", "file");
+
+    expect((await take(two.url, { folder: "a" })).conflicts).toEqual([]);
+    await expect(take(two.url, { folder: "a" })).rejects.toThrow("apps/a/ is here already: update it instead");
+    // Only the folder taken: the source's other app stays there, and its history is here now.
+    expect(existsSync(join(draft.root, "apps/b"))).toBe(false);
+    // Taken later, it comes whole, though its history is here: what changed in it since, and what did not.
+    two.commit({ "apps/b/y.ts": "export const y = 2;\n", "apps/b/z.ts": "export const z = 1;\n" }, "More of b");
+    expect(await take(two.url, { folder: "b" })).toMatchObject({ folder: "b", merged: 1, conflicts: [] });
+    for (const file of ["app.ts", "y.ts", "z.ts"]) expect(existsSync(join(draft.root, "apps/b", file))).toBe(true);
+    const empty = source({ "README.md": "# The starter\n" });
+    await expect(take(empty.url)).rejects.toThrow(`${empty.url} holds no app: a source holds one apps/<name>/`);
+
+    // An app of the company's own, one never taken (no shared history), and one not there.
+    mkdirSync(join(draft.root, "apps/own"));
+    writeFileSync(
+      join(draft.root, "apps/own/app.ts"),
+      'import { defineApp } from "sanoma";\n\nexport default defineApp({});\n',
+    );
+    mkdirSync(join(draft.root, "apps/stray"));
+    writeFileSync(join(draft.root, "apps/stray/app.ts"), APP_TS.replace("<url>", two.url));
+    await expect(draft.update!({ folder: "stray", author: "ada" })).rejects.toThrow(
+      "The draft has uncommitted changes",
+    );
+    await draft.commit({ paths: ["apps"], message: "Own apps", author: "agent" });
+    const update = (folder: string) => draft.update!({ folder, author: "ada" });
+    await expect(update("own")).rejects.toThrow("apps/own/app.ts names no source: the app is the company's own");
+    await expect(update("gone")).rejects.toThrow("There is no app apps/gone/");
+    // Its source is a's, merged above: a has history with it, stray is merely named so.
+    expect((await update("stray")).merged).toBe(0);
+    const other = source({ "apps/stray/app.ts": APP_TS });
+    writeFileSync(join(draft.root, "apps/stray/app.ts"), APP_TS.replace("<url>", other.url));
+    await draft.commit({ paths: ["apps/stray/app.ts"], message: "Stray", author: "agent" });
+    await expect(update("stray")).rejects.toThrow(`apps/stray/ shares no history with ${other.url}`);
+    await expect(repo.behind!("own")).rejects.toThrow("There is no app apps/own/");
+    expect(execFileSync("git", ["status", "--porcelain"], { cwd: draft.root, encoding: "utf8" })).toBe("");
+    expect(await repo.head(draft.branch)).not.toBe(before);
+  });
+});
+
 describe("localGitSource's check", () => {
   it("runs sanoma check in each draft, one at a time, with every field of its result and the live checkout untouched", async () => {
     // The fixture company in a git repository of its own: the installed bin as a child in each
@@ -428,5 +621,63 @@ describe("localGitSource's check", () => {
     expect(await source.drafts!()).toEqual(["broken", "ok", "unloadable"]);
     expect(git("status", "--porcelain")).toBe("");
     expect(git("log", "--format=%s")).toBe("First");
+  }, 600_000);
+
+  it("takes an app from a source made from the starter, passing sanoma check, then updates it clean", async () => {
+    // The starter's root, the fixture's with the template's includes, in the company and in the
+    // source; the source adds the company-apps fixture's crm (but its site, which the check would
+    // build) with an app.ts naming it, as a source's own names its repository.
+    ensureBuilt();
+    vi.stubEnv("GIT_ALLOW_PROTOCOL", "file");
+    rmSync(dir, { recursive: true, force: true });
+    dir = copyFixture();
+    const starter = {
+      ".gitignore": ".sanoma/\nnode_modules/\n",
+      "tsconfig.json": readFileSync(new URL("../template/tsconfig.json", import.meta.url), "utf8"),
+    };
+    for (const [path, text] of Object.entries(starter)) writeFileSync(join(dir, path), text);
+    git("init", "--quiet", "--initial-branch=main");
+    git("add", "--all");
+    git("commit", "--quiet", "-m", "First");
+    const crm = sourceRepo({ ...starter, "apps/crm/app.ts": APP_TS });
+    try {
+      cpSync(new URL("./fixtures/project/", import.meta.url), crm.at, { recursive: true });
+      cpSync(
+        new URL("../../workflows/test/fixtures/company-apps/apps/crm/", import.meta.url),
+        join(crm.at, "apps/crm"),
+        {
+          recursive: true,
+          filter: (path) => !path.includes("/sites") && !path.endsWith("app.ts"),
+        },
+      );
+      crm.commit({}, "The CRM");
+
+      const source = localGitSource(dir, { databaseUrl: testDatabaseUrl("apps") });
+      const take = await source.draft!("take");
+      expect(await take.take!({ url: crm.url, author: "ada" })).toMatchObject({ folder: "crm", conflicts: [] });
+      // Its scenario runs crm.follow-up, and the grid has the app's workflow.
+      const checked = await source.check!("take");
+      expect(checked).toMatchObject({ ok: true, problems: [] });
+      expect(checked.grid?.workflows.map((w) => w.id)).toEqual(["crm.follow-up", "hello"]);
+
+      git("merge", "--quiet", "--ff-only", take.branch);
+      await source.closeDraft!("take");
+      crm.commit(
+        {
+          "apps/crm/workflows/follow-up.ts": readFileSync(
+            join(crm.at, "apps/crm/workflows/follow-up.ts"),
+            "utf8",
+          ).replace('"Follow up"', '"Follow up with a customer"'),
+        },
+        "Say who",
+      );
+      expect(await source.behind!("crm")).toBe(1);
+      const update = await source.draft!("update");
+      expect(await update.update!({ folder: "crm", author: "ada" })).toMatchObject({ merged: 1, conflicts: [] });
+      expect(readFileSync(join(update.root, "apps/crm/workflows/follow-up.ts"), "utf8")).toContain("with a customer");
+      expect(await source.check!("update")).toMatchObject({ ok: true, problems: [] });
+    } finally {
+      rmSync(crm.at, { recursive: true, force: true });
+    }
   }, 600_000);
 });

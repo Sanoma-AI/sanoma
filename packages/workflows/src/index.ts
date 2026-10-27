@@ -168,6 +168,7 @@ export {
   type Secrets,
 } from "./secret.ts";
 export {
+  type AppMerge,
   type CheckResult,
   type Draft,
   draftBranch,

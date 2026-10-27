@@ -150,6 +150,17 @@ function stepLabel(step: ToolPart): string {
           ? "Ran the checks: they pass"
           : "Ran the checks: they fail";
     }
+    case "take_app":
+    case "update_app": {
+      const taken = getToolName(step) === "take_app";
+      const what = taken
+        ? `Took the app from ${String(input.url ?? "")}`
+        : `Updated apps/${String(input.folder ?? "")}`;
+      const result =
+        step.state === "output-available" ? (step.output as { conflicts?: string[] } | undefined) : undefined;
+      const conflicts = result?.conflicts?.length ?? 0;
+      return conflicts ? `${what}: ${conflicts} ${conflicts === 1 ? "conflict" : "conflicts"} to resolve` : what;
+    }
     case "lookup":
       return `Looked up ${String(input.op ?? "")}`;
     default: {
