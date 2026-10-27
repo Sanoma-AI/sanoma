@@ -82,7 +82,7 @@ Feature: Cloudflare containers and alarms
       """
     Then it returns
       """
-      { "state": { "at": null, "generation": 0, "healthy": true } }
+      { "state": { "at": null, "healthy": true } }
       """
 
   Scenario: Register
@@ -92,31 +92,29 @@ Feature: Cloudflare containers and alarms
       { "desired": { "host": "$host.state.url" } }
       """
     And cloudflare.alarm.register is called with
-      | at         | 2099-01-01T00:00:00Z |
-      | generation | 1                    |
+      | at | 2099-01-01T00:00:00Z |
     And cloudflare.alarm.read is called with
       | id | $host.state.url |
-    Then a Cloudflare wake is registered with generation 1
+    Then cloudflare.alarm.register was called with
+      | at | 2099-01-01T00:00:00Z |
     And it returns
       """
-      { "state": { "at": "2099-01-01T00:00:00.000Z", "generation": 1, "healthy": true } }
+      { "state": { "at": "2099-01-01T00:00:00.000Z", "healthy": true } }
       """
 
-  Scenario: Register an older generation
+  Scenario: Register again
     Given a Cloudflare container for "company" at revision "abc123"
     When cloudflare.alarm.create is called with
       """
       { "desired": { "host": "$host.state.url" } }
       """
     And cloudflare.alarm.register is called with
-      | at         | 2099-01-01T00:00:00Z |
-      | generation | 2                    |
+      | at | 2099-01-01T00:00:00Z |
     And cloudflare.alarm.register is called with
-      | at         | 2098-01-01T00:00:00Z |
-      | generation | 1                    |
+      | at | 2098-01-01T00:00:00Z |
     And cloudflare.alarm.read is called with
       | id | $host.state.url |
     Then it returns
       """
-      { "state": { "at": "2099-01-01T00:00:00.000Z", "generation": 2 } }
+      { "state": { "at": "2098-01-01T00:00:00.000Z" } }
       """

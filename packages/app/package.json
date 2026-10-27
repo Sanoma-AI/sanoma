@@ -113,7 +113,6 @@
     "@sanoma-ai/connector-ghost": "workspace:*",
     "@sanoma-ai/connector-github": "workspace:*",
     "@sanoma-ai/connector-resend": "workspace:*",
-    "@sanoma-ai/connector-sanoma-ops": "workspace:*",
     "@sanoma-ai/connector-stripe": "workspace:*",
     "@sanoma-ai/connector-supabase": "workspace:*",
     "@sanoma-ai/testing": "workspace:*",

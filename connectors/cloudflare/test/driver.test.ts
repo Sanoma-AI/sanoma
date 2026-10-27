@@ -329,9 +329,9 @@ describe.skipIf(live)("cloudflareDriver", () => {
   describe("cloudflare.alarm", () => {
     it("creates the alarm of a host that holds the token, storing the token and the host's URL", async () => {
       const call = callWith();
-      play("alarm", [wake(200, { at: null, generation: 0 })]);
+      play("alarm", [wake(200, { at: null })]);
       const made = await op("alarm.create", { desired: { host: `${URL_OF}/` } }, call);
-      expect(made).toEqual({ id: URL_OF, state: { host: URL_OF, at: null, generation: 0, rang: null, healthy: true } });
+      expect(made).toEqual({ id: URL_OF, state: { host: URL_OF, at: null, rang: null, healthy: true } });
       const token = await call.secrets.get("SANOMA_WAKEUP_TOKEN");
       expect(token).toMatch(/^swi_/);
       expect(await call.secrets.get("SANOMA_HOST_URL")).toBe(URL_OF);
@@ -365,20 +365,20 @@ describe.skipIf(live)("cloudflareDriver", () => {
       expect(await op("alarm.read", { id: URL_OF }, callWith())).toEqual({
         id: URL_OF,
         gone: false,
-        state: { host: URL_OF, at: null, generation: 0, rang: null, healthy: false },
+        state: { host: URL_OF, at: null, rang: null, healthy: false },
       });
     });
 
     it("registers a wake at the stored host's wake route, with the token", async () => {
       play("register-only", [wake(204, null, "PUT")]);
       const call = callWith({ SANOMA_WAKEUP_TOKEN: TOKEN, SANOMA_HOST_URL: URL_OF });
-      expect(await op("alarm.register", { at: "2099-01-01T00:00:00Z", generation: 3 }, call)).toEqual({});
-      expect(sent[0]!.body).toEqual({ at: "2099-01-01T00:00:00Z", generation: 3 });
+      expect(await op("alarm.register", { at: "2099-01-01T00:00:00Z" }, call)).toEqual({});
+      expect(sent[0]!.body).toEqual({ at: "2099-01-01T00:00:00Z" });
       expect(sent[0]!.headers.get("authorization") === `Bearer ${TOKEN}`).toBe(true);
     });
 
     it("refuses to register before the alarm stored the host's URL, without a request", async () => {
-      await expect(op("alarm.register", { at: "2099-01-01T00:00:00Z", generation: 1 })).rejects.toMatchObject({
+      await expect(op("alarm.register", { at: "2099-01-01T00:00:00Z" })).rejects.toMatchObject({
         retryable: false,
         message: expect.stringContaining("SANOMA_HOST_URL is not set"),
       });
@@ -388,7 +388,7 @@ describe.skipIf(live)("cloudflareDriver", () => {
     it("fails a register the Worker could not take as retryable", async () => {
       play("register-failed", [wake(503, { error: "storage is not available" }, "PUT")]);
       const call = callWith({ SANOMA_WAKEUP_TOKEN: TOKEN, SANOMA_HOST_URL: URL_OF });
-      await expect(op("alarm.register", { at: "2099-01-01T00:00:00Z", generation: 1 }, call)).rejects.toMatchObject({
+      await expect(op("alarm.register", { at: "2099-01-01T00:00:00Z" }, call)).rejects.toMatchObject({
         retryable: true,
         status: 503,
         message: `cloudflare: PUT ${URL_OF}/__sanoma/wake: storage is not available`,

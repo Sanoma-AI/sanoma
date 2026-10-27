@@ -17,7 +17,7 @@ import { lazyPool, type LazyPool } from "./db.ts";
 import { callerFile, type Use, type WorkflowDefinition } from "./define.ts";
 import { DRIFT_WORKFLOW, driftWorkflow } from "./drift.ts";
 import { statusesOf, unconfigured } from "./env.ts";
-import type { Fake } from "./fake.ts";
+import { type Fake, fakeSanomaWakeup } from "./fake.ts";
 import { peopleConnector } from "./person.ts";
 import type { LedgerStore } from "./ledger.ts";
 import {
@@ -32,6 +32,7 @@ import {
   checkConnector,
   setupOf,
   VENDOR,
+  withSetup,
 } from "./op.ts";
 import { type CedarPolicySource, policyAt } from "./cedar.ts";
 import type { Policy } from "./policy.ts";
@@ -43,6 +44,8 @@ import { checkSchedule } from "./schedules.ts";
 import { computeVersion } from "./version.ts";
 import type { DeclaredResource } from "./resources.ts";
 import { checkWakeupOps, type DeclaredWakeup } from "./wakeup.ts";
+import { sanomaWakeupDriver, wakeupSteps } from "./wakeup-driver.ts";
+import { wakeupOps } from "./wakeup-type.ts";
 import { checkDatabaseOps } from "./database.ts";
 
 /**
@@ -119,8 +122,8 @@ export interface ResolvedConfig {
   queueName: string;
   /**
    * The operations the connectors declare, by id, the built-in `sanoma.change.*` (`changeOps`, in
-   * every config), `sanoma.source.resolve` when one declares a host type, and the collections'
-   * (`data.<name>.<op>`).
+   * every config), `sanoma.source.resolve` and `sanoma.wakeup`'s when one declares a host type,
+   * and the collections' (`data.<name>.<op>`).
    */
   ops: Map<string, Op>;
   /** The drivers' functions, by operation id, each guarded by its driver's `env` (`indexDrivers`). */
@@ -150,7 +153,7 @@ export interface ResolvedConfig {
   remotes: ReadonlyMap<string, RemoteHalf>;
   /** `scenarios/` in `root`, as a `file:` URL, when that directory exists. */
   scenarios?: URL;
-  /** The resource types the connectors declare, by `<vendor>.<type>`: what the drift workflow checks and scenarios seed. */
+  /** The resource types the connectors declare (and `sanoma.wakeup`, beside a host type), by `<vendor>.<type>`: what the drift workflow checks and scenarios seed. */
   types: ReadonlyMap<string, Resource>;
   /** The steps scenarios can use besides the generic ones: each connector's (`withSetup`), once each, then the config's own. */
   steps: readonly Steps[];
@@ -272,7 +275,9 @@ export function resolveConfig(config: SanomaConfig, options: ResolveOptions = {}
   const root = rootOf(config);
   const appName = appNameAt(root);
   const scenarios = scenariosAt(root);
-  const types = resourceTypesOf(config.connectors);
+  // With the built-in `sanoma.wakeup` when they declare a host type.
+  const running = withBuiltIns(config.connectors);
+  const types = resourceTypesOf(running);
   // Built-in: `sanoma.source.resolve`, which apply and drift call for a host's revision.
   const hosts = [...types.values()].some((type) => type.host);
   // Built-in: the collections' operations, `data.<name>.<op>`, on the config's database.
@@ -281,18 +286,18 @@ export function resolveConfig(config: SanomaConfig, options: ResolveOptions = {}
   const dataStore = declared.length ? lazyPool(databaseUrl, "data") : undefined;
   // Built-in, in every config: a change's operations, which the template's policy names (`sanoma.change.merge`).
   const ops = indexConnectors([
-    ...config.connectors,
+    ...running,
     changeOps,
     ...(hosts ? [sourceOps] : []),
     ...(dataStore ? [collectionsConnector(declared)] : []),
   ]);
   checkWakeupOps(types, ops);
   checkDatabaseOps(types, ops);
-  const fakes = makersOf(config.connectors, "fake");
-  const instanceFakes = options.fakes === "instance" ? instanceFakesOf(config.connectors, fakes) : undefined;
+  const fakes = makersOf(running, "fake");
+  const instanceFakes = options.fakes === "instance" ? instanceFakesOf(running, fakes) : undefined;
   const driversByVendor = instanceFakes
     ? new Map([...instanceFakes].map(([vendor, fake]) => [vendor, fake.driver]))
-    : new Map([...makersOf(config.connectors, "driver")].map(([vendor, make]) => [vendor, make()]));
+    : new Map([...makersOf(running, "driver")].map(([vendor, make]) => [vendor, make()]));
   const drivers = indexDrivers(
     [
       ...driversByVendor.values(),
@@ -350,7 +355,7 @@ export function resolveConfig(config: SanomaConfig, options: ResolveOptions = {}
     remotes: new Map([...makersOf(config.connectors, "remote")].map(([vendor, make]) => [vendor, make()])),
     ...(scenarios && { scenarios }),
     types,
-    steps: [...new Set([...config.connectors.flatMap((c) => setupOf(c).steps ?? []), ...(config.steps ?? [])])],
+    steps: [...new Set([...running.flatMap((c) => setupOf(c).steps ?? []), ...(config.steps ?? [])])],
     collections,
     ...(dataStore && { dataStore }),
     workflows: names,
@@ -386,9 +391,32 @@ function collectionsOf(config: SanomaConfig): Map<string, Collection> {
   return collections;
 }
 
-/** The config's connectors and the runtime's people types' (`peopleConnector`): what its data files are read against. */
+/**
+ * `sanoma.wakeup`, the runtime's own: the type's operations and `sanoma.wakeup.register` (effect
+ * `write`), which the worker registers each deadline through before it stops, with its live
+ * driver (`sanomaWakeupDriver`), its fake (`fakeSanomaWakeup`) and its step. `withBuiltIns`
+ * merges it into every config with a host type.
+ */
+export const sanomaWakeup = withSetup(wakeupOps, {
+  driver: sanomaWakeupDriver,
+  fake: fakeSanomaWakeup,
+  steps: wakeupSteps,
+});
+
+/**
+ * The connectors and, when they declare a host type, the runtime's own wakeup (`sanoma.wakeup`),
+ * the fallback for a host with no clock of its own: what a config runs on. The same array when
+ * they declare none.
+ */
+const withBuiltIns = (connectors: Connector<any, any>[]): Connector<any, any>[] =>
+  [...resourceTypesOf(connectors).values()].some((type) => type.host) ? [...connectors, sanomaWakeup] : connectors;
+
+/**
+ * The config's connectors (with `sanoma.wakeup` when they declare a host type) and the runtime's
+ * people types' (`peopleConnector`): what its data files are read against.
+ */
 export const connectorsOf = (config: Pick<SanomaConfig, "connectors">): Connector<any, any>[] => [
-  ...config.connectors,
+  ...withBuiltIns(config.connectors),
   peopleConnector,
 ];
 
@@ -462,7 +490,7 @@ function scenariosAt(root: string | undefined): URL | undefined {
  * The one wakeup the config's data files declare, or undefined: with none, and with one the reader
  * leaves out for a problem (its declaration's or its host's; several wakeups are each one).
  * Undefined means the instance has no wakeup, so it must not stop. Server-side: it reads the data
- * files and the lockfile, only when a connector declares a wakeup type.
+ * files and the lockfile, only when the config has a wakeup type (`sanoma.wakeup` beside any host type).
  */
 export async function declaredWakeup(config: SanomaConfig): Promise<DeclaredWakeup | undefined> {
   const connectors = connectorsOf(config);

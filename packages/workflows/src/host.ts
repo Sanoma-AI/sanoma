@@ -7,14 +7,13 @@ import type { z } from "zod";
 /**
  * How a host keeps the runtime up:
  * - `long-lived`: the process is restarted if it exits, and never stopped for being quiet (Docker).
- * - `stops-on-exit`: the host stops the instance when its process exits, and starts it again on
- *   the next request (Fly).
  * - `stops-when-quiet`: the host stops the instance after a while without inbound requests, and
  *   starts it again on the next request (a free Render service, Cloudflare Containers).
  *
  * A host that stops needs a declared `Wakeup` for what is due at a time while it is stopped.
+ * Later: `stops-on-exit`, with a host that stops the instance when its process exits (Fly).
  */
-export type HostLifetime = "long-lived" | "stops-on-exit" | "stops-when-quiet";
+export type HostLifetime = "long-lived" | "stops-when-quiet";
 
 /** What a host can do, for choosing one. */
 export interface HostCapabilities {
@@ -62,7 +61,7 @@ export interface HostSpec {
   outputs: (state: Record<string, unknown>) => HostOutputs;
 }
 
-const LIFETIMES: readonly HostLifetime[] = ["long-lived", "stops-on-exit", "stops-when-quiet"];
+const LIFETIMES: readonly HostLifetime[] = ["long-lived", "stops-when-quiet"];
 
 /** True when `schema` has a field at the dotted `path`, looking through optional, nullable and default wrappers. */
 export function hasPath(schema: z.ZodType, path: string): boolean {

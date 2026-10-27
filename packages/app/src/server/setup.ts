@@ -27,7 +27,7 @@ import { signer } from "../login/keys.ts";
 import { escapeHtml } from "../login/page.ts";
 
 // Going live, step 1: connect GitHub, and each vendor of a database, host or wakeup the config
-// declares: Supabase or Neon, Cloudflare, sanoma-ops. GitHub through an App the company creates
+// declares: Supabase or Neon, Cloudflare, a wakeup service. GitHub through an App the company creates
 // with GitHub's manifest flow (`/setup/github/manifest`, then `/setup/github/callback`), whose
 // keys are stored as encrypted credentials; or, for a personal account, a token of the person's
 // own. The others through a pasted token. Nothing here sends a stored value to a page.
@@ -42,10 +42,10 @@ export const GITHUB_APP = {
   pem: "SANOMA_GITHUB_APP_PEM",
 } as const;
 
-/** sanoma-ops's account token, which "Connect sanoma-ops" stores. */
-export const OPS_TOKEN = "SANOMA_OPS_TOKEN";
-/** The wakeup service's URL, when one is stored: the worker on the host registers there. */
-export const OPS_URL = "SANOMA_OPS_URL";
+/** A wakeup service's account token, which "Connect a wakeup service" stores. */
+export const WAKEUP_ACCOUNT_TOKEN = "SANOMA_WAKEUP_ACCOUNT_TOKEN";
+/** The wakeup service's URL: the worker on the host registers there. */
+export const WAKEUP_URL = "SANOMA_WAKEUP_URL";
 
 /**
  * The tokens the page takes, pasted: the connectors' own variables, so their pages show the same
@@ -73,14 +73,14 @@ export const SETUP_TOKENS: Record<string, { description: string; optional?: true
     description: "The account id, from the Workers & Pages overview.",
     optional: true,
   },
-  [OPS_TOKEN]: {
+  [WAKEUP_URL]: {
     description:
-      "Optional: a wakeup account's token (swa_…), from Sanoma, or from `sanoma wakeup account <label>` on a wakeup service of your own: the wakeup starts the company again when something is due after it stopped.",
+      "Optional: a wakeup service's URL, Sanoma's or your own `sanoma wakeup`, reachable from the host: it starts the company again when something is due after it stopped.",
     optional: true,
   },
-  [OPS_URL]: {
+  [WAKEUP_ACCOUNT_TOKEN]: {
     description:
-      "Optional: the wakeup service's URL, such as your own `sanoma wakeup`. Unset, the connector's default, Sanoma's hosted service.",
+      "Optional: an account's token at that service (swa_…), from Sanoma, or from `sanoma wakeup account <label>` on a service of your own.",
     optional: true,
   },
 };
@@ -120,8 +120,8 @@ export async function setupStatus(app: AppContext): Promise<SetupStatus> {
 }
 
 /**
- * Stores a pasted token as the actor: one of the config's setup tokens only. Storing sanoma-ops's
- * account token also mints the instance's own (`SANOMA_WAKEUP_TOKEN`) when none is stored, and a
+ * Stores a pasted token as the actor: one of the config's setup tokens only. Storing a wakeup
+ * service's account token also mints the instance's own (`SANOMA_WAKEUP_TOKEN`) when none is stored, and a
  * new one for another account's, so going live can give the host it from the first apply, and the
  * wakeup's create registers it.
  */
@@ -131,15 +131,16 @@ export async function setSetupToken(app: AppContext, actor: Principal, { name, v
     invalid("name", `${name} is not a setup token; they are ${names.join(", ")}`);
   }
   const { client } = app;
-  const before = name === OPS_TOKEN ? (await client.secrets([OPS_TOKEN])).get(OPS_TOKEN)?.value : undefined;
+  const account = name === WAKEUP_ACCOUNT_TOKEN;
+  const before = account ? (await client.secrets([name])).get(name)?.value : undefined;
   await client.setSecret(name, value, { by: actor.id });
   // Another account's: the instance token the old one registered would be refused (a 409).
-  if (name === OPS_TOKEN) await mintWakeupToken(client, actor, before !== undefined && before !== value);
+  if (account) await mintWakeupToken(client, actor, before !== undefined && before !== value);
 }
 
 /**
  * Mints the instance's own token (`SANOMA_WAKEUP_TOKEN`) when it is not stored, or again when
- * `fresh`, for a new sanoma-ops account: storing the account's token does, and going live, when
+ * `fresh`, for a new account at the wakeup service: storing the account's token does, and going live, when
  * it declares a wakeup.
  */
 export async function mintWakeupToken(client: AppContext["client"], actor: Principal, fresh = false) {

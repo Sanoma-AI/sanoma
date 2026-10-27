@@ -155,16 +155,16 @@ describe("fakeHost's lifetime", () => {
     expect(host.type).toBe(fakeHostType);
     expect(host.type.host?.capabilities.lifetime).toBe("long-lived");
     await expect(host.stop()).rejects.toThrow("a long-lived host does not stop");
-    expect(() => fakeHost(stub().start, { lifetime: "stops-on-exit", quietAfterMs: 10 })).toThrow(
-      "quietAfterMs is for a host that stops-when-quiet, not one that is stops-on-exit",
+    expect(() => fakeHost(stub().start, { quietAfterMs: 10 })).toThrow(
+      "quietAfterMs is for a host that stops-when-quiet, not one that is long-lived",
     );
   });
 
-  it("stops-on-exit: keeps its URL across a stop, and the next request starts it again as it was", async () => {
+  it("stops-when-quiet: keeps its URL across a stop, and the next request starts it again as it was", async () => {
     const { starts, start } = stub();
-    const host = fakeHost(start, { lifetime: "stops-on-exit" });
+    const host = fakeHost(start, { lifetime: "stops-when-quiet" });
     try {
-      expect(host.type.host?.capabilities.lifetime).toBe("stops-on-exit");
+      expect(host.type.host?.capabilities.lifetime).toBe("stops-when-quiet");
       const url = await create(host);
       expect(await (await fetch(url)).text()).toBe(`abc ${key}`);
       await host.stop();

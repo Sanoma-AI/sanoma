@@ -3,9 +3,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { sanomaOps } from "@sanoma-ai/connector-sanoma-ops";
 import { supabase } from "@sanoma-ai/connector-supabase";
 import { ensureBuilt, testDatabaseUrl } from "@sanoma-ai/testing";
+import { fakeHost } from "@sanoma-ai/testing/host";
 import { defineConfig, defineConnector, defineResource, resolveConfig, SanomaClient } from "@sanoma-ai/workflows";
 import { describeConfig } from "@sanoma-ai/workflows/describe";
 import { http, HttpResponse } from "msw";
@@ -67,8 +67,8 @@ const NAMES = [
   "NEON_API_KEY",
   "CLOUDFLARE_API_TOKEN",
   "CLOUDFLARE_ACCOUNT_ID",
-  "SANOMA_OPS_TOKEN",
-  "SANOMA_OPS_URL",
+  "SANOMA_WAKEUP_URL",
+  "SANOMA_WAKEUP_ACCOUNT_TOKEN",
   "SANOMA_WAKEUP_TOKEN",
 ];
 let app: App;
@@ -247,7 +247,7 @@ describe("the connect page", () => {
 /** The instance's wakeup token, as stored (every client here is on the one database). */
 const instanceToken = async () => (await client.secrets(["SANOMA_WAKEUP_TOKEN"])).get("SANOMA_WAKEUP_TOKEN")?.value;
 
-describe("Connect sanoma-ops", () => {
+describe("Connect a wakeup service", () => {
   it("mints the instance's token once, as going live does when it declares a wakeup, and again when fresh", async () => {
     const db = new Client({ connectionString: config.databaseUrl });
     try {
@@ -265,45 +265,51 @@ describe("Connect sanoma-ops", () => {
     }
   });
 
-  it("is asked for only when the config declares the connector, and mints the instance's token beside the account's", async () => {
-    // Not declared (the config above): no sanoma-ops rows, and its tokens are refused.
+  it("is asked for only when the config declares a host, and mints the instance's token beside the account's", async () => {
+    // No host type (the config above): no wakeup rows, and its tokens are refused.
     expect((await setupStatus(ctx)).tokens.map((t) => t.name)).toEqual(["GITHUB_TOKEN", "SUPABASE_ACCESS_TOKEN"]);
     await expect(
-      setSetupToken(ctx, { id: "alice" }, { name: "SANOMA_OPS_TOKEN", value: `swa_${"a".repeat(43)}` }),
+      setSetupToken(ctx, { id: "alice" }, { name: "SANOMA_WAKEUP_ACCOUNT_TOKEN", value: `swa_${"a".repeat(43)}` }),
     ).rejects.toThrow(/not a setup token/);
 
-    const declared = defineConfig({ ...config, connectors: [supabase, sanomaOps] });
+    // A host type brings the runtime's own wakeup, sanoma.wakeup.
+    const host = fakeHost(async () => ({ url: "", stop: async () => undefined }));
+    const declared = defineConfig({ ...config, connectors: [supabase, host.connector] });
     const opsClient = await SanomaClient.connect(declared);
     try {
       const ops: AppContext = { ...ctx, resolved: resolveConfig(declared), client: opsClient };
       expect((await setupStatus(ops)).tokens).toEqual([
         expect.objectContaining({ name: "GITHUB_TOKEN" }),
         expect.objectContaining({ name: "SUPABASE_ACCESS_TOKEN" }),
-        expect.objectContaining({ name: "SANOMA_OPS_TOKEN", optional: true, status: "missing" }),
-        expect.objectContaining({ name: "SANOMA_OPS_URL", optional: true, status: "missing" }),
+        expect.objectContaining({ name: "SANOMA_WAKEUP_URL", optional: true, status: "missing" }),
+        expect.objectContaining({ name: "SANOMA_WAKEUP_ACCOUNT_TOKEN", optional: true, status: "missing" }),
       ]);
-      // The connector's own checks: an account's token starts swa_.
+      // The driver's own checks: an account's token starts swa_.
       await expect(
-        setSetupToken(ops, { id: "alice" }, { name: "SANOMA_OPS_TOKEN", value: "not-a-token" }),
+        setSetupToken(ops, { id: "alice" }, { name: "SANOMA_WAKEUP_ACCOUNT_TOKEN", value: "not-a-token" }),
       ).rejects.toThrow(/swa_/);
       expect((await opsClient.secrets(["SANOMA_WAKEUP_TOKEN"])).size).toBe(0);
 
       const account = `swa_${"a".repeat(43)}`;
-      await setSetupToken(ops, { id: "alice" }, { name: "SANOMA_OPS_TOKEN", value: account });
+      await setSetupToken(ops, { id: "alice" }, { name: "SANOMA_WAKEUP_ACCOUNT_TOKEN", value: account });
       const minted = (await opsClient.secrets(["SANOMA_WAKEUP_TOKEN"])).get("SANOMA_WAKEUP_TOKEN");
       expect(minted).toMatchObject({ value: expect.stringMatching(/^swi_[\w-]{43}$/), setBy: "alice" });
       // Stored again, the same account's: the instance keeps its token.
-      await setSetupToken(ops, { id: "alice" }, { name: "SANOMA_OPS_TOKEN", value: account });
+      await setSetupToken(ops, { id: "alice" }, { name: "SANOMA_WAKEUP_ACCOUNT_TOKEN", value: account });
       expect(await instanceToken()).toBe(minted!.value);
       // Another account's: a new instance token, as the old one is the old account's instance's.
-      await setSetupToken(ops, { id: "alice" }, { name: "SANOMA_OPS_TOKEN", value: `swa_${"b".repeat(43)}` });
+      await setSetupToken(
+        ops,
+        { id: "alice" },
+        { name: "SANOMA_WAKEUP_ACCOUNT_TOKEN", value: `swa_${"b".repeat(43)}` },
+      );
       const renewed = await instanceToken();
       expect(renewed).toMatch(/^swi_[\w-]{43}$/);
       expect(renewed).not.toBe(minted!.value);
-      await setSetupToken(ops, { id: "alice" }, { name: "SANOMA_OPS_URL", value: "http://127.0.0.1:4100" });
+      await setSetupToken(ops, { id: "alice" }, { name: "SANOMA_WAKEUP_URL", value: "http://127.0.0.1:4100" });
       expect((await setupStatus(ops)).tokens.slice(2)).toEqual([
-        expect.objectContaining({ name: "SANOMA_OPS_TOKEN", status: "set", setBy: "alice" }),
-        expect.objectContaining({ name: "SANOMA_OPS_URL", status: "set" }),
+        expect.objectContaining({ name: "SANOMA_WAKEUP_URL", status: "set" }),
+        expect.objectContaining({ name: "SANOMA_WAKEUP_ACCOUNT_TOKEN", status: "set", setBy: "alice" }),
       ]);
       // The instance's token is never among what the page is told.
       expect(JSON.stringify(await setupStatus(ops))).not.toContain(renewed);

@@ -10,7 +10,6 @@ import {
   type SanomaConfig,
   startWorker,
   type WakeupSpec,
-  wakeGeneration,
 } from "../src/index.ts";
 import { rootWith } from "./harness.ts";
 
@@ -33,7 +32,7 @@ const service = defineResource({
   find: ({ name }) => name,
   writable: true,
   host: {
-    capabilities: { lifetime: "stops-on-exit", publicUrl: true, buildsFromGit: true, staticEgress: false },
+    capabilities: { lifetime: "stops-when-quiet", publicUrl: true, buildsFromGit: true, staticEgress: false },
     inputs: { source: "repo", ref: "branch", secrets: "env", port: "port" },
     revision: "commit",
     outputs: (state) => ({ url: String(state.url), healthy: true }),
@@ -68,7 +67,7 @@ const wakeupOf = (
     wakeup: { ...wakeup, ...overrides },
   });
 
-const registration = z.object({ at: z.iso.datetime(), generation: z.number().int().nonnegative() });
+const registration = z.object({ at: z.iso.datetime() });
 const register = (input: z.ZodType = registration) =>
   defineConnector("acme", {
     wakeup: { register: { effect: "write", idempotent: true, input, output: z.object({}), target: () => "w" } },
@@ -142,16 +141,16 @@ describe("a wakeup type", () => {
     );
   });
 
-  it("is refused by resolveConfig when its connector lacks its register, or that takes no { at, generation }", () => {
+  it("is refused by resolveConfig when its connector lacks its register, or that takes no { at }", () => {
     expect(() => resolveConfig({ workflows: [], connectors: [acmeTypes()] })).toThrow(
       "acme.wakeup: its wakeup's register, acme.wakeup.register, is no operation of its connector",
     );
     expect(() =>
       resolveConfig({ workflows: [], connectors: [acmeWith(register(z.object({ when: z.string() })))] }),
-    ).toThrow("acme.wakeup: its wakeup's register, acme.wakeup.register, must take { at, generation }");
+    ).toThrow("acme.wakeup: its wakeup's register, acme.wakeup.register, must take { at }");
     // One that strips them takes neither.
     expect(() => resolveConfig({ workflows: [], connectors: [acmeWith(register(z.object({})))] })).toThrow(
-      /must take \{ at, generation \}/,
+      /must take \{ at \}/,
     );
     expect(resolveConfig({ workflows: [], connectors: [acmeWith()] }).ops.has("acme.wakeup.register")).toBe(true);
   });
@@ -211,23 +210,5 @@ describe("startWorker", () => {
     await expect(startWorker(configAt(root, { wakeup: true }))).rejects.toThrow(
       /^The config runs the wakeup service \(`wakeup: true`\) and declares a wakeup of its own/,
     );
-  });
-});
-
-describe("wakeGeneration", () => {
-  it("reads a /wake request's generation in digits alone, and nothing else", () => {
-    expect(wakeGeneration("http://h/wake?generation=0")).toBe(0);
-    expect(wakeGeneration(new URL("http://h/wake?generation=42"))).toBe(42);
-    for (const query of [
-      "",
-      "?generation=",
-      "?generation=-1",
-      "?generation=1.0",
-      "?generation=0x10",
-      "?generation=1e3",
-    ]) {
-      expect(wakeGeneration(`http://h/wake${query}`), query).toBeUndefined();
-    }
-    expect(wakeGeneration(`http://h/wake?generation=${"9".repeat(20)}`)).toBeUndefined();
   });
 });

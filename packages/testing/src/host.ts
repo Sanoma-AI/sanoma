@@ -19,7 +19,6 @@ import {
   type PlanAction,
   type Resource,
   resolveSecrets,
-  wakeGeneration,
   type SanomaClient,
   type SanomaConfig,
   superviseWorker,
@@ -106,9 +105,8 @@ export interface HostUnderTest {
   /** Stops the host through its resource's operations (its `delete`); `apply` starts it again. */
   stop(): Promise<void>;
   /**
-   * Stops the company's runtime the way the host's lifetime does (its process exits, or it goes
-   * quiet), its URL kept: the next request to the URL starts it again. Required unless the
-   * host is `long-lived`.
+   * Stops the company's runtime the way the host's lifetime does (it goes quiet), its URL kept:
+   * the next request to the URL starts it again. Required unless the host is `long-lived`.
    */
   suspend?(): Promise<void>;
   /** A client on the host's database, its config with `hostCheck` and `hostCheckWorkflows`. */
@@ -167,7 +165,7 @@ export async function credentialHeard(
  * Runs the conformance checks against a host, in order, each on its own (one failing goes on to
  * the next): the app answers on its port, a queued run drains, `LISTEN` hears a credential
  * change, a sleep survives a restart, a new commit shows as drift that apply clears, and no
- * secret is in the ledger. A host that stops (any `lifetime` but `long-lived`) is also checked
+ * secret is in the ledger. A host that stops (`stops-when-quiet`) is also checked
  * for what a request to its URL starts again (`suspend`, then a `/wake`): a run queued while it
  * was stopped drains, and a sleep that ended while it was stopped continues. Leaves the host
  * applied, and its check's credential cleared.
@@ -220,10 +218,9 @@ export async function checkHost(host: HostUnderTest): Promise<HostCheck[]> {
       if (!host.suspend) throw new Error(`a host that is ${spec.capabilities.lifetime} needs suspend to be checked`);
       await host.suspend();
     };
-    // A request, as a wakeup sends it, until the host answers 204 (one starting may answer 503
-    // first): generation 0 is older than any the worker registers.
+    // A request, as a wakeup sends it, until the host answers 204 (one starting may answer 503 first).
     const wake = async () => {
-      const at = new URL("/wake?generation=0", spec.outputs(applied).url);
+      const at = new URL("/wake", spec.outputs(applied).url);
       const answer = () => fetch(at).then((res) => res.status, errorMessage);
       await waitFor(answer, (status) => status === 204, timeoutMs);
     };
@@ -324,9 +321,8 @@ export function throughWorkflows(
   };
 }
 
-/** A `GET /wake` the runtime answered: the generation it was given, and when. */
+/** A `GET /wake` the runtime answered: when. */
 export interface Wake {
-  generation: number;
   at: Date;
 }
 
@@ -334,7 +330,7 @@ export interface Wake {
 export interface Running {
   url: string;
   stop(): Promise<void>;
-  /** Each `GET /wake?generation=N` it answered, in order, when it records them (`inProcessHost` does). */
+  /** Each `GET /wake` it answered, in order, when it records them (`inProcessHost` does). */
   wakes?: readonly Wake[];
 }
 
@@ -624,7 +620,7 @@ export function fakeHost(start: StartHost, { lifetime = "long-lived", quietAfter
  * A `StartHost` for `fakeHost` that runs `config` in this process, as `sanoma serve` does: a
  * worker on `databaseUrl` under a supervisor (`superviseWorker`, given `options`), which stops
  * itself when idle with a wakeup declared, and a server that answers `/healthz`, and
- * `GET /wake?generation=N` with 204, each one recorded as the running host's `wakes` and handed to
+ * `GET /wake` with 204, each one recorded as the running host's `wakes` and handed to
  * the supervisor (the app itself needs its build, which this package does not).
  */
 export function inProcessHost(config: SanomaConfig, databaseUrl: string, options: SupervisorOptions = {}): StartHost {
@@ -635,12 +631,8 @@ export function inProcessHost(config: SanomaConfig, databaseUrl: string, options
       const url = new URL(req.url ?? "/", "http://host");
       if (url.pathname === "/healthz") return void res.writeHead(200).end("ok\n");
       if (url.pathname !== "/wake" || req.method !== "GET") return void res.writeHead(404).end();
-      const generation = wakeGeneration(url);
-      if (generation === undefined) return void res.writeHead(400).end();
-      wakes.push({ generation, at: new Date() });
-      worker
-        .wake(generation)
-        .catch((err: unknown) => console.warn(`a wake of generation ${generation} failed: ${errorMessage(err)}`));
+      wakes.push({ at: new Date() });
+      worker.wake().catch((err: unknown) => console.warn(`a wake failed: ${errorMessage(err)}`));
       res.writeHead(204, { "cache-control": "no-store" }).end();
     });
     const url = await listen(server, port).catch(async (err: unknown) => {

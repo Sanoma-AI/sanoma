@@ -171,8 +171,7 @@
     "path": "/__sanoma/wake",
     "status": 200,
     "body": {
-      "at": null,
-      "generation": 0
+      "at": null
     }
   },
   {
@@ -186,8 +185,7 @@
     "path": "/__sanoma/wake",
     "status": 200,
     "body": {
-      "at": "2099-01-01T00:00:00.000Z",
-      "generation": 1
+      "at": "2099-01-01T00:00:00.000Z"
     }
   }
 ]

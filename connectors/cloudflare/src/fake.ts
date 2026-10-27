@@ -1,15 +1,14 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { DriverError, errorMessage, retryableStatus, wakeGeneration } from "@sanoma-ai/workflows";
+import { DriverError, errorMessage, retryableStatus } from "@sanoma-ai/workflows";
 import { defineFake, type FakeOptions } from "@sanoma-ai/workflows/fake";
 import { NodeRequest, sendNodeResponse } from "srvx/node";
 import { cloudflareOps } from "./connector.ts";
 import { alarmOps, type Application, type CloudflareApi, containerOps, type ReadBinding, scriptOf } from "./ops.ts";
 import { Instance, OBJECT_CLASS, type ObjectState, worker } from "./worker.ts";
 
-/** A `GET /wake?generation=N` a container answered: the generation it was given, and when. */
+/** A `GET /wake` a container answered: when. */
 export interface FakeWake {
-  generation: number;
   at: Date;
 }
 
@@ -65,9 +64,8 @@ const stubContainer: StartContainer = async () => {
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://container");
     if (url.pathname === "/healthz") return void res.writeHead(200).end("ok\n");
-    const generation = url.pathname === "/wake" ? wakeGeneration(url) : undefined;
-    if (generation === undefined) return void res.writeHead(404).end();
-    wakes.push({ generation, at: new Date() });
+    if (url.pathname !== "/wake") return void res.writeHead(404).end();
+    wakes.push({ at: new Date() });
     res.writeHead(204).end();
   });
   await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));

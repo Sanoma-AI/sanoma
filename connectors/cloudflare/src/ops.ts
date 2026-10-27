@@ -359,14 +359,9 @@ const hostUrl = (host: unknown) => {
 };
 
 /** An alarm's state: the host's, its registered wake and when it last rang, and whether the host's Worker took this company's token. */
-const alarmState = (
-  host: string,
-  wake: { at?: unknown; generation?: unknown; rang?: unknown } | undefined,
-  healthy: boolean,
-) => ({
+const alarmState = (host: string, wake: { at?: unknown; rang?: unknown } | undefined, healthy: boolean) => ({
   host,
   at: typeof wake?.at === "string" ? wake.at : null,
-  generation: typeof wake?.generation === "number" ? wake.generation : 0,
   rang: typeof wake?.rang === "string" ? wake.rang : null,
   healthy,
 });

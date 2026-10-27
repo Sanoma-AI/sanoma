@@ -99,6 +99,8 @@
   },
   "devDependencies": {
     "@types/pg": "^8.23.1",
+    "msw": "^3.0.2",
+    "srvx": "^0.11.22",
     "zod": "^4.6.5"
   },
   "peerDependencies": {

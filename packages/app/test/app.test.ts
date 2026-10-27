@@ -231,14 +231,14 @@ afterAll(async () => {
   rmSync(appRoot, { recursive: true, force: true });
 });
 
-/** A machine route, as the wakeup's `/wake` will be: it answers 204 with the generation it was given. */
+/** A machine route, as the wakeup's `/wake` is: it answers 204 with the query it was given. */
 const machineRoute: IngressRoute = {
   method: "GET",
   path: "/machine",
   handle: async (request) =>
     new Response(null, {
       status: 204,
-      headers: { "x-generation": new URL(request.url).searchParams.get("generation") ?? "" },
+      headers: { "x-query": new URL(request.url).search },
     }),
 };
 
@@ -1566,9 +1566,9 @@ describe("the page", () => {
   });
 
   it("answers an ingress route before the login, whatever name it is addressed to, by its exact path, and 405 for another method", async () => {
-    expect(await rawStatus(app.url, "/machine?generation=3", { host: "10.0.0.7:3000" })).toBe(204);
-    const res = await fetch(new URL("/machine?generation=4", app.url));
-    expect([res.status, res.headers.get("x-generation")]).toEqual([204, "4"]);
+    expect(await rawStatus(app.url, "/machine?n=3", { host: "10.0.0.7:3000" })).toBe(204);
+    const res = await fetch(new URL("/machine?n=4", app.url));
+    expect([res.status, res.headers.get("x-query")]).toEqual([204, "?n=4"]);
     // Another method is refused; another path is the login's, which refuses the host.
     const post = await fetch(new URL("/machine", app.url), { method: "POST" });
     expect([post.status, post.headers.get("allow")]).toEqual([405, "GET"]);
@@ -1582,22 +1582,6 @@ describe("the page", () => {
     }
     expect(await rawStatus(app.url, "/machines/a", { host: "10.0.0.7:3000" })).toBe(200);
     expect(await rawStatus(app.url, "/machinesx", { host: "10.0.0.7:3000" })).toBe(403);
-  });
-
-  it("tells onRequest of each request as it arrives and as its response closes, a machine route's and a page's, but a host's probe", async () => {
-    const ended = vi.fn<() => void>();
-    const onRequest = vi.fn<() => () => void>(() => ended);
-    const counted = await startApp(config, { ingress: [machineRoute], onRequest });
-    try {
-      await (await fetch(new URL("/healthz", counted.url))).text();
-      expect(onRequest).not.toHaveBeenCalled();
-      await (await fetch(new URL("/machine?generation=1", counted.url))).text();
-      await (await fetch(new URL("/workflows", counted.url))).text();
-      expect(onRequest).toHaveBeenCalledTimes(2);
-      await vi.waitFor(() => expect(ended).toHaveBeenCalledTimes(2));
-    } finally {
-      await counted.close();
-    }
   });
 
   it("answers a host's probe at /healthz before the login, whatever name it is addressed to", async () => {

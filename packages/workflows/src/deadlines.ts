@@ -1,7 +1,8 @@
+import { randomUUID } from "node:crypto";
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import { dbosStatusesOf } from "./client.ts";
 import type { Db } from "./db.ts";
-import { nextWakeupGeneration, recordWakeupError, recordWakeupRegistration, recordWakeupStop } from "./db.ts";
+import { recordWakeupError, recordWakeupRegistration, recordWakeupStop } from "./db.ts";
 import type { ResolvedConfig } from "./config.ts";
 import { warn } from "./log.ts";
 import type { CallContext, DriverFn, Op } from "./op.ts";
@@ -124,18 +125,15 @@ export async function idle(deadlines: Deadlines, scope: IdleScope, horizonMs: nu
   return (await DBOS.getLatestApplicationVersion()).versionName !== scope.version;
 }
 
-/** What `onStopped` hears when the worker stopped itself: the deadline it registered (null for none) and its generation. */
+/** What `onStopped` hears when the worker stopped itself: the deadline it registered, null for none. */
 export interface SelfStop {
   at: string | null;
-  generation: number;
 }
 
 /** What the stop rule acts on: the wakeup row, the wakeup's register operation, and the worker. */
 export interface StopRule {
   /** The wakeup row's database. */
   db: () => Promise<Db>;
-  /** This worker's id on the row (`owner`), fresh for each worker. */
-  owner: string;
   /** The declared wakeup's binding, else its declaration's id: what scopes a registration's idempotency key to this instance. */
   wakeup: string;
   /** The wakeup type's register operation, and its driver (none when the connector attaches none). */
@@ -150,12 +148,12 @@ export interface StopRule {
 }
 
 /**
- * Checks every `everyMs` whether the worker is `idle`; when it is, counts the wakeup row's
- * generation up, registers the next deadline with the wakeup (none when there is no deadline at
- * all), and stops the worker, then tells `onStopped`. A failed registration is recorded on the
- * row and logged once for each new message, and the worker keeps running: the next check tries
- * again with a new generation. A run that arrives while it registers keeps the worker up, since
- * the worker must be idle twice, with the same deadline, before it stops. `close` ends the checks.
+ * Checks every `everyMs` whether the worker is `idle`; when it is, registers the next deadline
+ * with the wakeup, replacing what it held (none when there is no deadline at all), and stops the
+ * worker, then tells `onStopped`. A failed registration is recorded on the row and logged once for
+ * each new message, and the worker keeps running: the next check tries again. A run that arrives
+ * while it registers keeps the worker up, since the worker must be idle twice, with the same
+ * deadline, before it stops. `close` ends the checks.
  */
 export function stopWhenIdle(rule: StopRule): { close(): void } {
   let closed = false;
@@ -171,30 +169,23 @@ export function stopWhenIdle(rule: StopRule): { close(): void } {
     const next = rule.deadlines.nextDeadline();
     const at = next?.toISOString() ?? null;
     const db = await rule.db();
-    const generation = await nextWakeupGeneration(db, rule.owner);
-    if (generation === undefined) {
-      // A worker claims the row only when it starts, so this one never gets it back.
-      warn("another worker registers this instance's wakeups now, so this one keeps running and stops checking");
-      closed = true;
-      return false;
-    }
     if (at !== null) {
       try {
-        await registerWakeup(rule, { at, generation });
+        await registerWakeup(rule, { at });
       } catch (err) {
         const message = errorMessage(err);
-        await recordWakeupError(db, rule.owner, generation, message);
+        await recordWakeupError(db, message);
         problem(`could not register the wakeup at ${at}, so the worker keeps running: ${message}`);
         return false;
       }
-      await recordWakeupRegistration(db, rule.owner, generation, at);
+      await recordWakeupRegistration(db, at);
     }
     lastProblem = undefined;
     if (closed || !(await rule.idle()) || rule.deadlines.nextDeadline()?.toISOString() !== next?.toISOString())
       return false;
-    await recordWakeupStop(db, rule.owner, generation);
+    await recordWakeupStop(db);
     await rule.stop().catch((err: unknown) => warn(`the worker could not stop cleanly: ${errorMessage(err)}`));
-    rule.onStopped?.({ at, generation });
+    rule.onStopped?.({ at });
     return true;
   };
 
@@ -222,13 +213,16 @@ export function stopWhenIdle(rule: StopRule): { close(): void } {
 
 /**
  * Calls the wakeup's register operation, as `SanomaClient.call` calls a driver: its input parsed,
- * a `CallContext` of the runtime's, and no ledger record, which is a run's. The idempotency key
- * is the generation's, so a retried registration is one registration.
+ * a `CallContext` of the runtime's, and no ledger record, which is a run's.
  */
-async function registerWakeup({ register: { op, fn }, secrets, wakeup }: StopRule, registration: WakeupRegistration) {
+export async function registerWakeup(
+  { register: { op, fn }, secrets, wakeup }: Pick<StopRule, "register" | "secrets" | "wakeup">,
+  registration: WakeupRegistration,
+) {
   if (!fn) throw new Error(`${op.id} has no driver: the connector package must attach one`);
-  // Every database counts generations from 0, so the key names the wakeup too.
-  const key = `wakeup:${wakeup}:${registration.generation}`;
+  // Fresh each time: a repeat of an earlier `at` after another registration must re-arm it, so no
+  // two registrations share a key (real drivers never dedupe on it anyway).
+  const key = `wakeup:${wakeup}:${randomUUID()}`;
   const context: CallContext = { idempotencyKey: key, runId: key, opId: op.id, attempt: 1, secrets, by: WAKEUP_AGENT };
   await fn(op.input.parse(registration), context);
 }

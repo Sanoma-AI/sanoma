@@ -68,8 +68,11 @@ const group = defineResource({
  */
 export const sanoma = { person, agent, group };
 
+/** The runtime's own vendor, as a data file imports its constructors: `import { sanoma } from "sanoma/resources"`. */
+export const SANOMA_INFO = { title: "Sanoma", package: "sanoma" };
+
 /**
  * The runtime's own connector of the people types: every config's, so its data files may declare
  * them. Its package is `sanoma`, whose `/resources` entry exports `sanoma`.
  */
-export const peopleConnector = defineConnector("sanoma", sanoma, { title: "Sanoma", package: "sanoma" });
+export const peopleConnector = defineConnector("sanoma", sanoma, SANOMA_INFO);

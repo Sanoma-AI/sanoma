@@ -90,7 +90,6 @@ const alarmSchema = z.object({
     .min(1)
     .describe("The host's URL, whose Worker holds the alarm: a data file names the host's declaration"),
   at: z.string().nullish().describe("When the instance asked to be woken last, null until it has"),
-  generation: z.number().int().nullish().describe("The generation of that registration, 0 until one"),
   rang: z
     .string()
     .nullish()
@@ -100,7 +99,7 @@ const alarmSchema = z.object({
 
 /**
  * `cloudflare.alarm({ host })`: the Durable Object alarm of the host's own Worker, which starts
- * the container at the time the worker registered and calls its `/wake?generation=N`. The alarm
+ * the container at the time the worker registered and calls its `/wake`. The alarm
  * is the host's object's, so it has no id of its own: its binding is the host's URL, and a new
  * host is a new alarm. The host's `secrets` must carry `SANOMA_WAKEUP_TOKEN`, which `create`
  * mints when none is stored.
@@ -112,7 +111,7 @@ export const alarm = defineResource({
   schema: alarmSchema,
   fields: {
     immutable: ["host"],
-    vendorOwned: ["at", "generation", "rang", "healthy"],
+    vendorOwned: ["at", "rang", "healthy"],
     writeOnly: [],
     references: { host: { type: ["cloudflare.container"], by: ["url"] } },
   },
@@ -132,14 +131,10 @@ const types = defineConnector("cloudflare", { container, alarm }, vendorInfo(imp
 const registerSpec = {
   register: {
     effect: "write",
-    // The object applies a generation only when it is newer: a retry changes nothing.
+    // Each replaces the wake registered before: a retry changes nothing.
     idempotent: true,
-    description:
-      "Set the host's alarm to wake it at `at` with `generation`, replacing the wake registered before unless that one is newer",
-    input: z.object({
-      at: z.iso.datetime({ offset: true }).describe("When to wake the host, ISO 8601"),
-      generation: z.number().int().min(1).describe("Counts up from 1: only a newer one replaces the wake"),
-    }),
+    description: "Set the host's alarm to wake it at `at`, replacing the wake registered before",
+    input: z.object({ at: z.iso.datetime({ offset: true }).describe("When to wake the host, ISO 8601") }),
     output: z.object({}),
   },
 } satisfies Record<string, OpSpec>;

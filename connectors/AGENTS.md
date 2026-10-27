@@ -16,7 +16,6 @@ One workspace package per vendor, each built on `@sanoma-ai/workflows`. A connec
 | [`github/`](github/AGENTS.md)           | `@sanoma-ai/connector-github`: GitHub resources read through its OpenTofu provider, and pull requests (a remote half) |
 | [`neon/`](neon/AGENTS.md)               | `@sanoma-ai/connector-neon`: Neon projects (the company's database, which pauses and branches), branches and computes |
 | [`resend/`](resend/AGENTS.md)           | `@sanoma-ai/connector-resend`: Resend broadcast and email operations and an in-memory fake                            |
-| [`sanoma-ops/`](sanoma-ops/AGENTS.md)   | `@sanoma-ai/connector-sanoma-ops`: the hosted wakeup on sanoma-ops (`sanomaOps.wakeup`), which wakes a stopped host   |
 | [`stripe/`](stripe/AGENTS.md)           | `@sanoma-ai/connector-stripe`: Stripe resources read through its OpenTofu provider                                    |
 | [`supabase/`](supabase/AGENTS.md)       | `@sanoma-ai/connector-supabase`: Supabase projects (OpenTofu provider), pooler and health                             |
 

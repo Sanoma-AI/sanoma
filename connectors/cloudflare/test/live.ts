@@ -162,11 +162,10 @@ try {
   const poll = setInterval(async () => {
     try {
       const { state } = (await op("alarm.read", { id: url })) as {
-        state?: { generation: number; rang: string | null };
+        state?: { rang: string | null };
       };
-      if (state?.rang && !wakes.some((w) => w.generation === state.generation)) {
-        wakes.push({ generation: state.generation, at: new Date(state.rang) });
-      }
+      const rang = state?.rang ? new Date(state.rang) : undefined;
+      if (rang && !wakes.some((w) => w.at.getTime() === rang.getTime())) wakes.push({ at: rang });
     } catch {
       // The next poll asks again.
     }

@@ -7,7 +7,9 @@ import type { DeclaredResource } from "./resources.ts";
 // The `Wakeup` contract: what a resource type that wakes a stopped instance at a time declares
 // about itself, beside `Host`. Declaring one in a data file is the whole switch: the worker then
 // registers its next deadline with it before it stops, and the wakeup calls the host's
-// `GET {url}/wake?generation=N` then. The contract is here; the worker's side is `deadlines.ts`.
+// `GET {url}/wake` then: a wake is "resume if stopped", so one that arrives late, twice or for a
+// replaced registration starts a worker that finds nothing to do and stops again. The contract is
+// here; the worker's side is `deadlines.ts`.
 
 /** What a wakeup's state says of it. */
 export interface WakeupOutputs {
@@ -18,18 +20,6 @@ export interface WakeupOutputs {
 export interface WakeupRegistration {
   /** When to wake the instance, as an ISO 8601 date-time. */
   at: string;
-  /** Counts up with each registration: one with a newer generation replaces the older. */
-  generation: number;
-}
-
-/**
- * The `generation` of a `GET /wake?generation=N` request: a non-negative integer, in digits
- * alone; undefined for none or any other.
- */
-export function wakeGeneration(url: string | URL): number | undefined {
-  const given = new URL(url).searchParams.get("generation") ?? "";
-  const generation = Number(given);
-  return /^\d+$/.test(given) && Number.isSafeInteger(generation) ? generation : undefined;
 }
 
 /**
@@ -48,7 +38,7 @@ export interface WakeupSpec {
    * The id of the type's own register operation, `<vendor>.<type>.<op>`: an operation in the
    * type's own group of its connector, beside `read` and `import` (the way Supabase adds
    * `project.health` beside `project`). The runtime calls it with `WakeupRegistration`,
-   * at least once per registration; a newer `generation` replaces the older.
+   * at least once per registration; each replaces whatever the wakeup held.
    */
   register: string;
   outputs: (state: Record<string, unknown>) => WakeupOutputs;
@@ -97,7 +87,7 @@ export function checkWakeup(
 }
 
 /** A registration every register operation must take: the input `checkWakeupOps` tries. */
-const SAMPLE: WakeupRegistration = { at: new Date(0).toISOString(), generation: 1 };
+const SAMPLE: WakeupRegistration = { at: new Date(0).toISOString() };
 
 /**
  * True when `op`'s input takes `sample` and keeps each of its fields: one that strips a field
@@ -132,8 +122,7 @@ export function checkWakeupOps(types: ReadonlyMap<string, Resource>, ops: Readon
     if (notHosts.length) throw new Error(`${id}: its wakeup's host may name ${notHosts.join(", ")}, which is no host`);
     const op = ops.get(type.wakeup.register);
     if (!op) throw new Error(`${id}: its wakeup's register, ${type.wakeup.register}, is no operation of its connector`);
-    if (!keepsInput(op, { ...SAMPLE }))
-      throw new Error(`${id}: its wakeup's register, ${op.id}, must take { at, generation }`);
+    if (!keepsInput(op, { ...SAMPLE })) throw new Error(`${id}: its wakeup's register, ${op.id}, must take { at }`);
   }
 }
 

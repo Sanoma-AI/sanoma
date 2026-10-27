@@ -7,7 +7,7 @@ import {
   memorySecrets,
   SanomaClient,
   type SanomaConfig,
-  shouldWake,
+  type SelfStop,
 } from "@sanoma-ai/workflows";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { testDatabaseUrl, waitFor } from "../src/index.ts";
@@ -15,7 +15,7 @@ import { fakeHost, hostCheck, inProcessHost } from "../src/host.ts";
 import { fakeWakeup, wakeupCheckWorkflows } from "../src/wakeup.ts";
 
 // Needs Postgres: `pnpm db:up`. Scale to zero end to end, on fakes and no account: a host that
-// stops when its process exits, running the company in this process as `sanoma serve` does (a
+// stops when quiet, running the company in this process as `sanoma serve` does (a
 // worker under its supervisor), the fake wakeup applied for it, a sleeping run and a schedule.
 // The worker stops itself when idle and registers its next deadline; the process stops; a wake
 // starts it again; the worker stops again, and a wake starts a fresh one in the same process.
@@ -54,10 +54,10 @@ describe("scale to zero, the stack on fakes", () => {
     databaseUrl,
   };
   // Idle once nothing is due within a second, looked at four times a second: the schedule's next
-  // tick is never more than a minute away, the default horizon.
-  const host = fakeHost(inProcessHost(config, databaseUrl, { idleHorizonMs: 1_000, stopCheckMs: 250 }), {
-    lifetime: "stops-on-exit",
-  });
+  // tick is never more than a minute away, the default horizon. Every worker's stop, in order.
+  const stops: SelfStop[] = [];
+  const options = { idleHorizonMs: 1_000, stopCheckMs: 250, onStopped: (s: SelfStop) => stops.push(s) };
+  const host = fakeHost(inProcessHost(config, databaseUrl, options), { lifetime: "stops-when-quiet" });
   const wakeup = fakeWakeup();
   config.connectors.push(host.connector, wakeup.connector);
   let client: SanomaClient;
@@ -109,28 +109,22 @@ describe("scale to zero, the stack on fakes", () => {
       expect(timer).toMatchObject({ state: { name: "wake", host: url } });
 
       // The worker stops itself with its next deadline registered; then the process stops, as a
-      // host that stops on exit stops it once the app is quiet.
-      const registered = await waitFor(
-        async () => {
-          const last = wakeup.registered().at(-1);
-          return last && (await shouldWake(databaseUrl, last.generation)) ? last : undefined;
-        },
-        Boolean,
-        30_000,
-      );
+      // host that stops when quiet stops it.
+      const first = (await waitFor(() => stops.find((s) => s.at !== null), Boolean, 30_000))!;
+      expect(wakeup.registered().at(-1)).toEqual({ at: first.at });
+      const before = wakeup.registered().length;
       await host.stop();
       const stopped = new Date();
 
       // The wake starts the process; the sleep ends; the worker stops again; a wake starts a fresh
       // one in the process; the tick that fell while it was stopped runs. In either order.
       expect(await client.result(sleeping, 120_000)).toEqual({ slept: 5 });
-      // A registration for a tick, made as the worker stopped after the process stopped, whose
-      // wake arrived, and the tick it was for ran.
+      // A registration for a tick, made as a worker stopped after the process stopped, a wake
+      // arrived after its time, and the tick it was for ran.
       const tick = (await waitFor(
         async () => {
-          for (const r of wakeup.registered()) {
-            if (r.generation <= registered!.generation || !host.wakes().some((w) => w.generation === r.generation))
-              continue;
+          for (const r of wakeup.registered().slice(before)) {
+            if (!host.wakes().some((w) => w.at.getTime() >= Date.parse(r.at))) continue;
             if (await tickRan(r.at)) return r;
           }
           return undefined;
@@ -144,13 +138,9 @@ describe("scale to zero, the stack on fakes", () => {
 
       const wakes = host.wakes();
       // The wake for the deadline the worker stopped with came after the process stopped, and started it.
-      expect(wakes.find((w) => w.generation === registered!.generation)?.at.getTime()).toBeGreaterThanOrEqual(
-        stopped.getTime(),
-      );
+      expect(wakes.some((w) => w.at.getTime() >= Math.max(stopped.getTime(), Date.parse(first.at!)))).toBe(true);
       // The tick's wake came at its time, or after.
-      expect(wakes.find((w) => w.generation === tick.generation)!.at.getTime()).toBeGreaterThanOrEqual(
-        Date.parse(tick.at),
-      );
+      expect(wakes.some((w) => w.at.getTime() >= Date.parse(tick.at))).toBe(true);
       expect(wakes.length).toBeGreaterThanOrEqual(2);
       expect(wakeup.registered().length).toBeGreaterThanOrEqual(2);
     },
