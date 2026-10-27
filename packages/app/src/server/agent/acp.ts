@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import * as acp from "@agentclientprotocol/sdk";
@@ -39,7 +39,7 @@ type SignIn =
 interface OwnAgent {
   /** The vendor's name for it. */
   title: string;
-  /** What is installed for it, each at the version it was tried with (`npm install --ignore-scripts`). */
+  /** What is installed for it, each at the version it was tried with (installed without install scripts). */
   packages: readonly string[];
   /** The install's script to run once installed: the vendor's own `postinstall`, which the install skips. */
   setup?: string;
@@ -615,9 +615,12 @@ const personDir = (id: string) =>
 const quote = (word: string) => (/^[\w./=:-]+$/.test(word) ? word : `'${word.replaceAll("'", `'\\''`)}'`);
 
 /**
- * Installs `agent` into `dir`, once: its packages at their versions by this Node's npm, with no
- * install script run but the vendor's own `setup`, as `installed.json` records. Another turn waits
- * for an install under way; a failed one is tried again by the next.
+ * Installs `agent` into `dir`, once: its packages at their versions by the `pnpm` on the session's
+ * `PATH`, as the HarnessAgent bridges run it (the desktop shell ships no npm), outside the
+ * company's workspace and with no install script run but the vendor's own `setup`, as
+ * `installed.json` records. The last install's `node_modules` goes first: pnpm refuses one made
+ * from another store (the repo moved) or by another major version. Another turn waits for an
+ * install under way; a failed one is tried again by the next.
  */
 async function install(agent: OwnAgent, dir: string, home: string): Promise<void> {
   const marker = join(dir, "installed.json");
@@ -626,11 +629,12 @@ async function install(agent: OwnAgent, dir: string, home: string): Promise<void
   let running = installs.get(dir);
   if (!running) {
     running = (async () => {
+      await rm(join(dir, "node_modules"), { recursive: true, force: true });
       await mkdir(dir, { recursive: true });
       await writeFile(join(dir, "package.json"), '{ "private": true }\n');
       const env = sessionEnv(home);
-      const npm = ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--loglevel=error", ...agent.packages];
-      await new Command("npm", npm, { cwd: dir, env }).done();
+      const pnpm = ["add", "--ignore-scripts", "--ignore-workspace", "--loglevel=error", ...agent.packages];
+      await new Command("pnpm", pnpm, { cwd: dir, env }).done();
       if (agent.setup) {
         const setup = join(dir, agent.setup);
         await new Command("node", [setup], { cwd: dirname(setup), env }).done();
