@@ -4,9 +4,9 @@ import { defineConnector, defineDriver } from "./op.ts";
 import { errorMessage } from "./shared.ts";
 
 // The apps a company could take: GitHub's repositories with the topic `sanoma-app`, searched at
-// most once per `FRESH_MS` and kept only in the process, joined with Sanoma's claims (`claims.ts`). One built-in read operation,
-// `sanoma.apps.list`, which the app's Apps page and a public site's pages both call (`isDirect`
-// admits it), under the policy as the person asking.
+// most once per `FRESH_MS` and kept only in the process, joined with Sanoma's claims
+// (`claims.ts`). One built-in read operation, `sanoma.apps.list`, which the app's Apps page and a
+// public site's pages both call (`isDirect` admits it), under the policy as the person asking.
 
 /** The topic a source repository carries so the listing finds it. */
 export const APP_TOPIC = "sanoma-app";
@@ -16,6 +16,8 @@ export const GITHUB_API = "https://api.github.com";
 const TIMEOUT_MS = 5_000;
 /** How long one search answers the listing: a public page lists per visitor, and GitHub allows ten searches a minute. */
 export const FRESH_MS = 10 * 60_000;
+/** How long a failed search answers (GitHub's rate limit counts by the minute). */
+export const RETRY_MS = 60_000;
 
 /** One repository of GitHub's search answer: what the list shows of it. */
 const Found = z.object({
@@ -105,21 +107,27 @@ export async function searchGitHub(): Promise<unknown[]> {
 /**
  * `search`, remembered: its last result answers for `FRESH_MS` (by `now`), the calls meanwhile share
  * one search, and when a later search fails the last result still answers. A failure with
- * nothing remembered throws.
+ * nothing remembered throws. After a failure the next search waits `RETRY_MS`, so a rate-limited
+ * search is not retried per call.
  */
 export function remembered<T>(search: () => Promise<T>, now: () => number = Date.now): () => Promise<T> {
-  let last: { value: T; at: number } | undefined;
+  let last: { value: T } | undefined;
+  let failure: unknown;
+  let next = 0;
   let pending: Promise<T> | undefined;
   return () => {
-    if (last && now() - last.at < FRESH_MS) return Promise.resolve(last.value);
+    if (now() < next) return last ? Promise.resolve(last.value) : Promise.reject(failure);
     pending ??= search()
       .then(
         (value) => {
-          last = { value, at: now() };
+          last = { value };
+          next = now() + FRESH_MS;
           return value;
         },
         (err: unknown) => {
+          next = now() + RETRY_MS;
           if (last) return last.value;
+          failure = err;
           throw err;
         },
       )

@@ -1,7 +1,15 @@
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { APP_TOPIC, availableApps, FRESH_MS, GITHUB_API, remembered, searchGitHub } from "../src/apps-list.ts";
+import {
+  APP_TOPIC,
+  availableApps,
+  FRESH_MS,
+  GITHUB_API,
+  RETRY_MS,
+  remembered,
+  searchGitHub,
+} from "../src/apps-list.ts";
 import { appTier, type Claims, claims, connectorTier } from "../src/claims.ts";
 import { describeConfig } from "../src/describe.ts";
 import { resolveConfig } from "../src/index.ts";
@@ -129,15 +137,25 @@ describe("sanoma.apps.list", () => {
     github.use(http.get(`${GITHUB_API}/search/repositories`, () => HttpResponse.error()));
     expect(await availableApps(CLAIMS, search)).toEqual(first);
     github.resetHandlers();
+    now += RETRY_MS - 1;
+    expect(await availableApps(CLAIMS, search)).toEqual(first);
+    expect(searches).toBe(2);
+    now += 1;
     expect(await availableApps(CLAIMS, search)).toEqual(first);
     expect(searches).toBe(3);
   });
 
-  it("lists nothing, and says why, when the first search fails, and searches again on the next call", async () => {
-    const search = remembered(searchGitHub, () => 0);
+  it("lists nothing, and says why, when the first search fails, and searches again a minute later", async () => {
+    let now = 0;
+    const search = remembered(searchGitHub, () => now);
     github.use(http.get(`${GITHUB_API}/search/repositories`, () => new HttpResponse(null, { status: 403 })));
-    expect(await availableApps(CLAIMS, search)).toMatchObject({ apps: [], error: expect.stringMatching(/403/) });
+    const refused = { apps: [], error: "Could not search GitHub: api.github.com answered 403 to /search/repositories" };
+    expect(await availableApps(CLAIMS, search)).toEqual(refused);
     github.resetHandlers();
+    now = RETRY_MS - 1;
+    expect(await availableApps(CLAIMS, search)).toEqual(refused);
+    expect(searches).toBe(0);
+    now = RETRY_MS;
     expect((await availableApps(CLAIMS, search)).apps).toHaveLength(3);
     expect(searches).toBe(1);
   });

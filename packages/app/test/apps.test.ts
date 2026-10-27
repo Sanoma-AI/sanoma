@@ -117,12 +117,10 @@ describe("the Apps page", () => {
       ["example/crm", "community"],
       ["someone/inventory", "community"],
     ]);
+    // Remembered for the process (`FRESH_MS`): GitHub refusing the next search changes nothing.
     github.use(http.get(`${GITHUB_API}/search/repositories`, () => new HttpResponse(null, { status: 403 })));
     try {
-      expect(await testApp.client.call(APPS_LIST, {}, { actor: { id: "ada" } })).toEqual({
-        apps: [],
-        error: "Could not search GitHub: api.github.com answered 403 to /search/repositories",
-      });
+      expect(await testApp.client.call(APPS_LIST, {}, { actor: { id: "ada" } })).toEqual(listed);
     } finally {
       github.resetHandlers();
     }
