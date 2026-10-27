@@ -1,5 +1,5 @@
 import { DBOS } from "@dbos-inc/dbos-sdk";
-import { indexDrivers } from "./config.ts";
+import { indexDrivers, sandboxDrivers } from "./config.ts";
 import { opIdsOf } from "./define.ts";
 import { SanomaError } from "./errors.ts";
 import type { Fake, ResourceFake } from "./fake.ts";
@@ -176,10 +176,9 @@ export async function seedSandbox(run: Run, name: string): Promise<void> {
       }
       const instance = state.instanceFakes;
       const fakes = instance ?? new Map([...state.fakes].map(([vendor, make]) => [vendor, make()]));
-      // The fakes' drivers, and the built-in ones no fake implements (`sanoma.apps.list`).
       const drivers = instance
         ? state.drivers
-        : indexDrivers([...[...fakes.values()].map((f) => f.driver), ...state.sandboxDrivers], state.ops);
+        : indexDrivers([...Array.from(fakes.values(), (f) => f.driver), ...sandboxDrivers], state.ops);
       // What the scenario seeds is checked by `applyGivens`.
       const missing = opIdsOf(state.workflows.get(run.workflow)!).filter((id) => !drivers.has(id));
       if (missing.length) {

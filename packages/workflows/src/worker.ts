@@ -131,7 +131,6 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     app: resolved.appName,
     ops: resolved.ops,
     drivers: resolved.drivers,
-    sandboxDrivers: resolved.sandboxDrivers,
     fakes: resolved.fakes,
     ...(resolved.instanceFakes && { instanceFakes: resolved.instanceFakes }),
     ...(resolved.scenarios && { scenarios: resolved.scenarios }),

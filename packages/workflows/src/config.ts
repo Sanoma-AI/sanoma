@@ -145,12 +145,6 @@ export interface ResolvedConfig {
   /** The drivers' functions, by operation id, each guarded by its driver's `env` (`indexDrivers`). */
   drivers: Map<string, DriverFn>;
   /**
-   * The built-in drivers a sandbox run calls beside its fakes, since no fake implements them: those
-   * that need no credentials and change nothing (`sanoma.apps.list`, GitHub's public search). They
-   * are in `drivers` too.
-   */
-  sandboxDrivers: readonly Driver[];
-  /**
    * The driver each vendor's connector attaches, made once for this resolution, by vendor id in
    * `connectors` order: what `drivers` indexes and the credentials are read from (`credentialsOf`).
    */
@@ -332,8 +326,6 @@ export function resolveConfig(config: SanomaConfig, options: ResolveOptions = {}
     ? new Map([...instanceFakes].map(([vendor, fake]) => [vendor, fake.driver]))
     : new Map([...makersOf(running, "driver")].map(([vendor, make]) => [vendor, make()]));
   const remotes = new Map([...makersOf(config.connectors, "remote")].map(([vendor, make]) => [vendor, make()]));
-  // Built-in, needing no credentials and changing nothing: what a sandbox run calls beside its fakes (sandbox.ts).
-  const sandboxDrivers = [appsListDriver];
   const drivers = indexDrivers(
     [
       ...driversByVendor.values(),
@@ -389,7 +381,6 @@ export function resolveConfig(config: SanomaConfig, options: ResolveOptions = {}
     queueName: `sanoma:${appName}`,
     ops,
     drivers,
-    sandboxDrivers,
     driversByVendor,
     fakes,
     ...(instanceFakes && { instanceFakes }),
@@ -434,6 +425,12 @@ function collectionsOf(config: SanomaConfig): Map<string, Collection> {
   }
   return collections;
 }
+
+/**
+ * The built-in drivers no fake implements that a sandbox run calls beside its fakes (`seedSandbox`):
+ * those that need no credentials and change nothing, as `sanoma.apps.list` (GitHub's public search).
+ */
+export const sandboxDrivers: readonly Driver[] = [appsListDriver];
 
 /**
  * `sanoma.wakeup`, the runtime's own: the type's operations and `sanoma.wakeup.register` (effect

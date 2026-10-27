@@ -288,7 +288,6 @@ const runOn = (ledger: LedgerStore): Run => ({
     app: "acme",
     ops: new Map(),
     drivers: new Map(),
-    sandboxDrivers: [],
     fakes: new Map(),
     types: new Map(),
     collections: new Map(),
