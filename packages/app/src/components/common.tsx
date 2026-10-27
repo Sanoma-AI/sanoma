@@ -331,6 +331,11 @@ const noClock = () => undefined;
  * A time, relative to now in the browser, with the UTC time as its title. The server renders
  * the UTC time, so the page hydrates the same markup whatever the browser's clock and time zone.
  */
+/** A commit by its first 8 characters, the whole id in its tooltip. */
+export function Commit({ sha }: { sha: string }) {
+  return <code title={sha}>{sha.slice(0, 8)}</code>;
+}
+
 export function When({ at }: { at: number }) {
   const clock = useSyncExternalStore(watchClock, readClock, noClock);
   const utc = utcText(at, { seconds: true });

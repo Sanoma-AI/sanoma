@@ -4,16 +4,28 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureBuilt, testDatabaseUrl, waitFor, withFake } from "@sanoma-ai/testing";
 import { type TestApp, useTestApp } from "@sanoma-ai/testing/harness";
-import { defineConnector, defineWorkflow, resolveConfig, type SanomaConfig } from "@sanoma-ai/workflows";
+import {
+  type ApprovalState,
+  defineConnector,
+  defineWorkflow,
+  resolveConfig,
+  type SanomaClient,
+  type SanomaConfig,
+} from "@sanoma-ai/workflows";
 import { describeConfig, type PermissionsGrid, permissionsGrid } from "@sanoma-ai/workflows/describe";
 import { defineFake } from "@sanoma-ai/workflows/fake";
 import { CHANGE_MERGE } from "@sanoma-ai/workflows/shared";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { Pool } from "pg";
+import { createElement, type ReactNode } from "react";
+import { renderToString } from "react-dom/server";
 import { afterAll, beforeAll } from "vitest";
 import { z } from "zod";
 import { type FakeRemote, fakeRemote, memorySource } from "../../../workflows/test/fakes/remote.ts";
 import { ACTOR_COOKIE } from "../../src/api.ts";
 import { type App, startApp } from "../../src/index.ts";
+import type { DraftCard } from "../../src/lib/chat.ts";
 
 // A company with a remote, for the change pages' tests (the Changes section and a change's review)
 // and the lanes that build on them: a worker and the app over C5's fake host (`fakeRemote`) and a
@@ -146,16 +158,81 @@ export function useChangeApp(name: string): ChangeApp {
       repo.checks(id, { ok: true, problems: [], warnings: [], grid: fixture.gridWith(files) });
       const page = new URL(`/changes/${id}`, fixture.app.url).href;
       const runId = await testApp.client.openChange({ id, title, page }, { startedBy });
-      await waitFor(
-        () => testApp.client.approvals(runId),
-        (approvals) => approvals.some((a) => a.status === "pending" && a.covers.includes(CHANGE_MERGE)),
-      );
+      await publishOf(testApp.client, runId);
       return runId;
     },
-    async page(path, as = "ada") {
-      const res = await fetch(new URL(path, fixture.app.url), { headers: { cookie: `${ACTOR_COOKIE}=${as}` } });
-      return { status: res.status, html: (await res.text()).replaceAll("<!-- -->", "") };
-    },
+    page: (path, as) => pageOf(fixture.app, path, as),
   };
   return fixture;
+}
+
+/** Whether `approval` is a change's Publish waiting: pending, covering the merge. */
+const asksPublish = (approval: ApprovalState) =>
+  approval.status === "pending" && approval.covers.includes(CHANGE_MERGE);
+
+/** The change run `runId`'s pending Publish, once it asks (within `timeoutMs`, `waitFor`'s by default). */
+export async function publishOf(client: SanomaClient, runId: string, timeoutMs?: number): Promise<ApprovalState> {
+  return (
+    await waitFor(
+      () => client.approvals(runId),
+      (all) => all.some(asksPublish),
+      timeoutMs,
+    )
+  ).find(asksPublish)!;
+}
+
+/** The change run `runId`'s Publish asked again, once `old` (asked on an earlier head) is withdrawn. */
+export async function publishedAgain(
+  client: SanomaClient,
+  runId: string,
+  old: ApprovalState,
+  timeoutMs?: number,
+): Promise<ApprovalState> {
+  const asked = await waitFor(
+    () => client.approvals(runId),
+    (all) => all.some((a) => a.id === old.id && a.status === "withdrawn") && all.some(asksPublish),
+    timeoutMs,
+  );
+  return asked.find(asksPublish)!;
+}
+
+/** A page of `app` as `as` (ada) sees it, its HTML with React's text separators removed. */
+export async function pageOf(app: App, path: string, as = "ada"): Promise<{ status: number; html: string }> {
+  const res = await fetch(new URL(path, app.url), { headers: { cookie: `${ACTOR_COOKIE}=${as}` } });
+  return { status: res.status, html: (await res.text()).replaceAll("<!-- -->", "") };
+}
+
+/**
+ * A chat's draft card as the server renders it, in a router and over a query cache holding
+ * whether the repository has a remote and the draft's change (null when it has none; unread when
+ * left out), its HTML with React's text separators removed.
+ */
+export async function renderDraftCard(
+  draft: DraftCard,
+  { remote = true, change }: { remote?: boolean; change?: object | null },
+): Promise<string> {
+  // By a path TypeScript does not follow: the components are JSX and DOM, checked by typecheck:ui,
+  // and `queries.ts` defines server functions (see data.test.ts).
+  type Keyed = (id?: string) => { queryKey: readonly unknown[] };
+  const [{ DraftCardView }, { changeQuery, remoteQuery }] = await Promise.all([
+    import(new URL("../../src/components/shell/draft-card.tsx", import.meta.url).href) as Promise<{
+      DraftCardView: (props: { draft: DraftCard }) => ReactNode;
+    }>,
+    import(new URL("../../src/queries.ts", import.meta.url).href) as Promise<{
+      changeQuery: Keyed;
+      remoteQuery: Keyed;
+    }>,
+  ]);
+  const queryClient = new QueryClient();
+  queryClient.setQueryData(remoteQuery().queryKey, remote);
+  if (change !== undefined) queryClient.setQueryData(changeQuery(draft.draft).queryKey, change);
+  const router = createRouter({
+    routeTree: createRootRoute({
+      component: () =>
+        createElement(QueryClientProvider, { client: queryClient }, createElement(DraftCardView, { draft })),
+    }),
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+  });
+  await router.load();
+  return renderToString(createElement(RouterProvider, { router })).replaceAll("<!-- -->", "");
 }

@@ -4,6 +4,7 @@ import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { ChangeDecision } from "#/components/change-decision.tsx";
 import { PullRequestLink } from "#/components/change-glance.tsx";
 import {
+  Commit,
   CrumbHeader,
   FloatHost,
   Notice,
@@ -43,9 +44,9 @@ export const Route = createFileRoute("/changes/$id")({
 
 /**
  * A change's review, in the ops manager's words: under Changes, its title, where it is, and a
- * line for the developer (its branch, its pull request, who opened it when, its run); then one
- * card: why it cannot publish, the runs it would strand, what changed by kind and who may do
- * what, with the decision (`ChangeDecision`) floating over its right.
+ * line for the developer (its branch at the head it last planned, its pull request, who opened it
+ * when, its run); then one card: why it cannot publish, the runs it would strand, what changed by
+ * kind and who may do what, with the decision (`ChangeDecision`) floating over its right.
  */
 function ChangePage() {
   const { id } = Route.useParams();
@@ -62,7 +63,14 @@ function ChangePage() {
         <span className="text-muted-foreground">
           {state.branch && (
             <>
-              <code>{state.branch}</code> ·{" "}
+              <code>{state.branch}</code>
+              {state.head && (
+                <>
+                  {" "}
+                  at <Commit sha={state.head} />
+                </>
+              )}{" "}
+              ·{" "}
             </>
           )}
           {state.pullRequest && (
