@@ -1,5 +1,12 @@
-import { existsSync, statSync } from "node:fs";
+import { existsSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
+
+/**
+ * The path a company is known by: its real path, which on Windows is also in the case the disk has
+ * (`realpathSync.native`), as `C:\Users\a\acme` and `c:\users\a\ACME` are one folder there.
+ */
+export const realPathOf = (dir: string) =>
+  process.platform === "win32" ? realpathSync.native(dir) : realpathSync(dir);
 
 /** A folder holds a company when it has a `sanoma.config.ts`. */
 export const isCompanyFolder = (dir: string) => existsSync(join(dir, "sanoma.config.ts"));
@@ -32,21 +39,48 @@ const inside = (path: string, dir: string) => {
 };
 
 /**
- * Why a company at `path` may break: a folder iCloud syncs (`~/Library/Mobile Documents`, or
- * Desktop and Documents when iCloud keeps them) moves files out from under `node_modules` and git.
+ * Which service syncs `path`, when one does: on a Mac, iCloud (`~/Library/Mobile Documents`, or
+ * Desktop and Documents when iCloud keeps them); on Windows, OneDrive (its folders are in the
+ * environment, and Desktop and Documents are in them when OneDrive keeps those) or iCloud
+ * (`~/iCloudDrive`).
  */
-export function syncedFolderWarning(
+function syncedBy(
   path: string,
   home: string,
-  exists: (path: string) => boolean = existsSync,
+  exists: (path: string) => boolean,
+  platform: NodeJS.Platform,
+  env: NodeJS.ProcessEnv,
 ): string | undefined {
+  if (platform === "win32") {
+    const onedrive = [env.OneDrive, env.OneDriveConsumer, env.OneDriveCommercial];
+    if (onedrive.some((dir) => dir && inside(path, dir))) return "OneDrive";
+    return inside(path, join(home, "iCloudDrive")) ? "iCloud" : undefined;
+  }
   const icloud = join(home, "Library", "Mobile Documents");
   const synced =
     inside(path, icloud) ||
     ["Desktop", "Documents"].some(
       (dir) => inside(path, join(home, dir)) && exists(join(icloud, "com~apple~CloudDocs", dir)),
     );
-  return synced
-    ? `${path} is in a folder iCloud syncs, which can break its packages and its git history: a folder outside iCloud, such as ~/Companies, is safer`
+  return synced ? "iCloud" : undefined;
+}
+
+/**
+ * Why a company at `path` may break: a folder iCloud or OneDrive syncs (`syncedBy`) moves files
+ * out from under `node_modules` and git.
+ */
+export function syncedFolderWarning(
+  path: string,
+  home: string,
+  {
+    exists = existsSync,
+    platform = process.platform,
+    env = process.env,
+  }: { exists?: (path: string) => boolean; platform?: NodeJS.Platform; env?: NodeJS.ProcessEnv } = {},
+): string | undefined {
+  const service = syncedBy(path, home, exists, platform, env);
+  const safer = platform === "win32" ? join(home, "Companies") : "~/Companies";
+  return service
+    ? `${path} is in a folder ${service} syncs, which can break its packages and its git history: a folder outside ${service}, such as ${safer}, is safer`
     : undefined;
 }

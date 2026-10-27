@@ -29,6 +29,7 @@ import {
   setIdentity,
 } from "../src/git.ts";
 import type { SessionOptions } from "../src/session.ts";
+import { shims } from "../src/shims.ts";
 import { fastForward, LOCAL_CHANGES, ownChanges, prepareUpdate } from "../src/update-company.ts";
 
 const fixture = (name: string) => fileURLToPath(new URL(`./fixtures/${name}`, import.meta.url));
@@ -193,7 +194,7 @@ describe("a new company", () => {
     await expect(session.ready).resolves.toBe(`http://localhost:${port}`);
     expect(readFileSync(calls, "utf8")).toBe("dlx sanoma\n");
     expect(existsSync(join(repo, "sanoma.config.ts"))).toBe(true);
-    expect(existsSync(join(bin, "pnpm"))).toBe(true);
+    expect(Object.keys(shims("node", "pnpm")).every((name) => existsSync(join(bin, name)))).toBe(true);
     expect(lines).toContain(`env ${port} 1 ${bin}`);
     expect(progress).toEqual(["Starting a new company with sanoma from npm"]);
     await session.stop();

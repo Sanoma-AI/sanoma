@@ -1,6 +1,5 @@
 // The shell's main process: wiring only. What it runs and how is in the modules it imports, which
 // never import electron and are tested on their own.
-import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
@@ -55,8 +54,8 @@ import {
 import { USAGE_EXIT } from "./launcher.ts";
 import { linkTarget } from "./links.ts";
 import { type CompanyLog, hidePasswords, openLog } from "./logs.ts";
-import { folderArgument, isCompanyFolder, syncedFolderWarning } from "./places.ts";
-import { runtimeOf } from "./runtime.ts";
+import { folderArgument, isCompanyFolder, realPathOf, syncedFolderWarning } from "./places.ts";
+import { archWarnings, runtimeOf } from "./runtime.ts";
 import { type Session, type SessionOptions, startSession } from "./session.ts";
 import { type Newer, readSettings, runCheck, savedNewer } from "./update-check.ts";
 import { fastForward, prepareUpdate } from "./update-company.ts";
@@ -143,12 +142,7 @@ let startWindow: BrowserWindow | undefined;
 let ask: StartState["ask"];
 let notice: StartState["notice"];
 
-const archWarning = () =>
-  app.runningUnderARM64Translation
-    ? [
-        "This is the Intel build of Sanoma on an Apple silicon Mac: download the Apple silicon (arm64) build, which runs faster.",
-      ]
-    : [];
+const archWarning = () => archWarnings(app.runningUnderARM64Translation);
 
 /** Whether the company runs or is starting now. */
 const isLive = (path: string) => running.has(path) || opening.has(path);
@@ -348,7 +342,7 @@ async function openCompany(dir: string) {
   if (!isCompanyFolder(dir)) {
     return tell(`${dir} holds no company (no sanoma.config.ts): open the folder a company was started in.`);
   }
-  const path = realpathSync(dir);
+  const path = realPathOf(dir);
   if (isLive(path)) return showWindow(path);
   await begin(path);
 }
@@ -660,7 +654,7 @@ async function newCompany(): Promise<void> {
     if (response === 0) return newCompany();
   }
   if (!(await gitReady()) || !(await identityReady(dir))) return;
-  await begin(realpathSync(dir), createSession);
+  await begin(realPathOf(dir), createSession);
 }
 
 /**
@@ -686,7 +680,7 @@ async function cloneCompanyFlow(): Promise<void> {
     properties: ["openDirectory", "createDirectory"],
   });
   if (canceled || !filePaths[0]) return;
-  const parent = realpathSync(filePaths[0]);
+  const parent = realPathOf(filePaths[0]);
   const target = cloneTarget(url, parent);
   if ("problem" in target) return tell(target.problem);
   if (!(await identityReady(parent))) return;
@@ -800,9 +794,11 @@ function updateItems(): MenuItemConstructorOptions[] {
 }
 
 function buildMenu() {
+  const isMac = process.platform === "darwin";
   const recent = readCompanies(companiesFile());
   const template: MenuItemConstructorOptions[] = [
-    { role: "appMenu" },
+    // macOS's app menu holds Quit; elsewhere File does.
+    ...(isMac ? [{ role: "appMenu" } as const] : []),
     {
       label: "File",
       submenu: [
@@ -818,6 +814,7 @@ function buildMenu() {
         { type: "separator" },
         { label: "Show Start Window", click: showStart },
         { role: "close", label: "Close Window" },
+        ...(isMac ? [] : [{ type: "separator" } as const, { role: "quit" } as const]),
       ],
     },
     { role: "editMenu" },
@@ -827,7 +824,7 @@ function buildMenu() {
         { label: "Restart", accelerator: "CmdOrCtrl+Shift+R", click: forFocused(restart) },
         { label: "Stop", click: forFocused(stopCompany) },
         { label: "Get Updates", click: forFocused(getUpdates) },
-        { label: "Show in Finder", click: forFocused((path) => shell.openPath(path)) },
+        { label: isMac ? "Show in Finder" : "Show in Folder", click: forFocused((path) => shell.openPath(path)) },
         { label: "Show Log", click: forFocused((path) => shell.openPath(logFile(path))) },
       ],
     },

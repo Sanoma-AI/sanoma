@@ -1,8 +1,8 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 import {
@@ -23,11 +23,14 @@ import { eventOf, listeningUrlOf } from "../src/events.ts";
 import { launch, launcherEnv, launcherOf, type Stream, USAGE_EXIT } from "../src/launcher.ts";
 import { linkTarget } from "../src/links.ts";
 import { hidePasswords, openLog, TAIL_LINES } from "../src/logs.ts";
-import { folderArgument, syncedFolderWarning } from "../src/places.ts";
+import { folderArgument, realPathOf, syncedFolderWarning } from "../src/places.ts";
+import { archWarnings, runtimeOf } from "../src/runtime.ts";
 import { startSession } from "../src/session.ts";
 import { shims, writeShims } from "../src/shims.ts";
 import { DEFAULT_SIZE, windowBounds } from "../src/window-state.ts";
 
+/** Windows has no process groups and no SIGTERM: the shell stops a launcher there by stdin and `taskkill`. */
+const windows = process.platform === "win32";
 const fixture = (name: string) => fileURLToPath(new URL(`./fixtures/${name}`, import.meta.url));
 const temp = () => mkdtempSync(join(tmpdir(), "sanoma-desktop-"));
 
@@ -60,7 +63,7 @@ async function until(check: () => boolean, ms = 5_000) {
 
 function fakeLaunch(mode: string, port: number, extra: { killAfterMs?: number; stdin?: string } = {}) {
   const lines: [Stream, string][] = [];
-  const env = { ...launcherEnv(process.env, "/shims", port), FAKE_MODE: mode, FAKE_STDIN: extra.stdin ?? "" };
+  const env = { ...launcherEnv(process.env, ["/shims"], port), FAKE_MODE: mode, FAKE_STDIN: extra.stdin ?? "" };
   const launched = launch({
     node: process.execPath,
     cli: fixture("launcher.mjs"),
@@ -139,7 +142,15 @@ describe("the process manager", () => {
       cli: fixture("launcher.mjs"),
       cwd,
       port,
-      env: { ...launcherEnv({ PATH: "/usr/bin:/bin" }, "/shims", port), FAKE_MODE: "event" },
+      // Windows' Node needs SystemRoot for its sockets.
+      env: {
+        ...launcherEnv(
+          { SystemRoot: process.env.SystemRoot, PATH: ["/usr/bin", "/bin"].join(delimiter) },
+          ["/shims"],
+          port,
+        ),
+        FAKE_MODE: "event",
+      },
       onLine: (stream, line) => lines.push([stream, line]),
     });
     await launched.ready;
@@ -172,7 +183,24 @@ describe("the process manager", () => {
     await expect(launched.exited).resolves.toEqual({ code: 143, signal: null });
   });
 
-  test("a launcher that dies takes what it left in its group with it", async () => {
+  test.runIf(windows)(
+    "on Windows, stop kills the launcher's tree at the deadline when stdin's end does not stop it",
+    async () => {
+      const port = await freePort();
+      const { launched, pids, lines } = fakeLaunch("stubborn", port, { killAfterMs: 300 });
+      await launched.ready;
+      const [launcher, grandchild] = await pids();
+      await launched.stop();
+      expect(lines).toContainEqual(["stdout", "ignoring the stop"]);
+      await until(() => !alive(grandchild!));
+      expect(alive(launcher!)).toBe(false);
+      // taskkill /F ends a process with exit code 1.
+      await expect(launched.exited).resolves.toEqual({ code: 1, signal: null });
+    },
+  );
+
+  // Windows no longer links what a launcher left to it once it exited (`processTree`).
+  test.skipIf(windows)("a launcher that dies takes what it left in its group with it", async () => {
     const port = await freePort();
     const { launched, pids } = fakeLaunch("crash", port);
     const [, grandchild] = await pids();
@@ -181,12 +209,12 @@ describe("the process manager", () => {
     expect(alive(grandchild!)).toBe(false);
   });
 
-  test("stop kills a launcher that ignores SIGTERM", async () => {
+  test.skipIf(windows)("stop kills a launcher that ignores SIGTERM", async () => {
     const port = await freePort();
     const { launched, lines } = fakeLaunch("stubborn", port, { killAfterMs: 300 });
     await launched.ready;
     await launched.stop();
-    expect(lines).toContainEqual(["stdout", "ignoring SIGTERM"]);
+    expect(lines).toContainEqual(["stdout", "ignoring the stop"]);
     await expect(launched.exited).resolves.toEqual({ code: null, signal: "SIGKILL" });
   });
 
@@ -202,9 +230,25 @@ describe("the process manager", () => {
   });
 
   test("the environment's PATH: shims, the system's, then Homebrew's, once each", () => {
-    const env = launcherEnv({ PATH: "/usr/bin:/opt/homebrew/bin", HOME: "/h" }, "/s/bin", 3100);
+    const env = launcherEnv({ PATH: "/usr/bin:/opt/homebrew/bin", HOME: "/h" }, ["/s/bin"], 3100, "darwin");
     expect(env).toMatchObject({ HOME: "/h", SANOMA_EVENTS: "1", SANOMA_APP_PORT: "3100" });
     expect(env.PATH).toBe("/s/bin:/usr/bin:/opt/homebrew/bin:/usr/local/bin");
+  });
+
+  test("on Windows, PATH under the key it has (Path), with ; and no Homebrew", () => {
+    const system = "C:\\Windows\\system32;C:\\Program Files\\Git\\cmd";
+    const first = ["C:\\Users\\a\\AppData\\Roaming\\Sanoma\\bin", "C:\\Program Files\\Sanoma\\resources\\node"];
+    const env = launcherEnv({ Path: system, SystemRoot: "C:\\Windows" }, first, 3100, "win32");
+    expect(env).toEqual({
+      Path: `${first.join(";")};${system}`,
+      SystemRoot: "C:\\Windows",
+      SANOMA_EVENTS: "1",
+      SANOMA_APP_PORT: "3100",
+    });
+    // One key, whatever case the others were in, with all their entries.
+    const both = launcherEnv({ PATH: "a", Path: "b" }, ["s"], 3100, "win32");
+    expect(Object.keys(both).filter((k) => /^path$/i.test(k))).toEqual(["PATH"]);
+    expect(both.PATH).toBe("s;a;b");
   });
 });
 
@@ -236,14 +280,14 @@ async function run(repo: string, env: NodeJS.ProcessEnv) {
 }
 
 describe("a session", () => {
-  test("installs with the staged pnpm through its shim, then starts the company's own launcher", async () => {
+  test("writes the shims, installs with the staged pnpm, then starts the company's own launcher", async () => {
     const repo = company();
     const calls = join(temp(), "calls");
     const { session, progress, bin } = await run(repo, { FAKE_PNPM_LOG: calls });
     await session.ready;
     expect(readFileSync(calls, "utf8")).toBe("install --prefer-offline\n");
     expect(progress).toEqual(["Installing packages", "Starting the company"]);
-    expect(existsSync(join(bin, "node")) && existsSync(join(bin, "pnpm"))).toBe(true);
+    expect(Object.keys(shims("node", "pnpm")).every((name) => existsSync(join(bin, name)))).toBe(true);
     await session.stop();
     await expect(session.ended).resolves.toMatchObject({ code: 143 });
   });
@@ -264,18 +308,33 @@ describe("a session", () => {
 
 describe("the shims", () => {
   test("run the shipped Node, and pnpm's script with it, quoting their paths", () => {
-    expect(shims("/Apps/Sanoma.app/node/node", "/r/pnpm/bin/pnpm.mjs")).toEqual({
+    expect(shims("/Apps/Sanoma.app/node/node", "/r/pnpm/bin/pnpm.mjs", "darwin")).toEqual({
       node: `#!/bin/sh\nexec '/Apps/Sanoma.app/node/node' "$@"\n`,
       pnpm: `#!/bin/sh\nexec '/Apps/Sanoma.app/node/node' '/r/pnpm/bin/pnpm.mjs' "$@"\n`,
     });
-    expect(shims("/it's/node", "p").node).toBe(`#!/bin/sh\nexec '/it'\\''s/node' "$@"\n`);
+    expect(shims("/it's/node", "p", "darwin").node).toBe(`#!/bin/sh\nexec '/it'\\''s/node' "$@"\n`);
   });
 
-  test("are executable and run", () => {
+  test("on Windows, pnpm.cmd, and the Node's own folder on PATH in place of a node shim", () => {
+    const node = "C:\\Program Files\\Sanoma\\resources\\node\\node.exe";
+    expect(shims(node, "C:\\100%\\pnpm\\bin\\pnpm.mjs", "win32")).toEqual({
+      "pnpm.cmd": `@echo off\r\nchcp 65001 >nul 2>&1\r\n"${node}" "C:\\100%%\\pnpm\\bin\\pnpm.mjs" %*\r\n`,
+    });
     const dir = join(temp(), "bin");
-    writeShims(dir, process.execPath, fixture("pnpm.mjs"));
-    expect(execFileSync(join(dir, "node"), ["-p", "1 + 1"], { encoding: "utf8" })).toBe("2\n");
-    expect(execFileSync(join(dir, "pnpm"), ["install"], { encoding: "utf8" })).toBe("Done in 0.1s\n");
+    expect(writeShims(dir, join("C:", "node", "node.exe"), "p", "win32")).toEqual([dir, join("C:", "node")]);
+    expect(existsSync(join(dir, "pnpm.cmd")) && !existsSync(join(dir, "node"))).toBe(true);
+  });
+
+  test("put this platform's Node first on PATH, and run pnpm's script with it, from a path that is not ASCII", () => {
+    const dir = join(temp(), "José", "bin");
+    const script = join(temp(), "José", "pnpm.mjs");
+    cpSync(fixture("pnpm.mjs"), script);
+    const env = launcherEnv(process.env, writeShims(dir, process.execPath, script), 3100);
+    // What a company's script, or a program without a shell, runs as `node`.
+    expect(execFileSync("node", ["-p", "process.execPath"], { env, encoding: "utf8" }).trim()).toBe(process.execPath);
+    // A .cmd runs only through a shell.
+    const install = windows ? `"${join(dir, "pnpm.cmd")}" install` : `'${join(dir, "pnpm")}' install`;
+    expect(execSync(install, { encoding: "utf8" })).toBe("Done in 0.1s\n");
   });
 });
 
@@ -459,13 +518,57 @@ describe("places", () => {
     expect(folderArgument([app, dir], "/", app)).toBe(dir);
   });
 
+  test.runIf(windows)("on Windows, a folder is known by the case its disk has", () => {
+    const dir = join(temp(), "Acme");
+    mkdirSync(dir);
+    expect(realPathOf(dir.toUpperCase())).toBe(realPathOf(dir));
+    expect(realPathOf(dir).endsWith("Acme")).toBe(true);
+  });
+
   test("warns about folders iCloud syncs", () => {
-    const home = "/Users/a";
-    const syncs = (dir: string) => (path: string) =>
-      path === `${home}/Library/Mobile Documents/com~apple~CloudDocs/${dir}`;
-    expect(syncedFolderWarning(`${home}/Library/Mobile Documents/com~apple~CloudDocs/acme`, home)).toMatch(/iCloud/);
-    expect(syncedFolderWarning(`${home}/Documents/acme`, home, syncs("Documents"))).toMatch(/iCloud/);
-    expect(syncedFolderWarning(`${home}/Documents/acme`, home, syncs("Desktop"))).toBeUndefined();
-    expect(syncedFolderWarning(`${home}/Companies/acme`, home, () => true)).toBeUndefined();
+    const home = join("/", "Users", "a");
+    const icloud = join(home, "Library", "Mobile Documents", "com~apple~CloudDocs");
+    const syncs = (dir: string) => (path: string) => path === join(icloud, dir);
+    const mac = (path: string, exists?: (path: string) => boolean) =>
+      syncedFolderWarning(path, home, { exists, platform: "darwin" });
+    expect(mac(join(icloud, "acme"))).toMatch(/iCloud/);
+    expect(mac(join(home, "Documents", "acme"), syncs("Documents"))).toMatch(/iCloud/);
+    expect(mac(join(home, "Documents", "acme"), syncs("Desktop"))).toBeUndefined();
+    expect(mac(join(home, "Companies", "acme"), () => true)).toBeUndefined();
+  });
+
+  test("on Windows, warns about folders OneDrive or iCloud syncs", () => {
+    const home = join("/", "Users", "a");
+    const env = { OneDrive: join(home, "OneDrive"), OneDriveCommercial: join(home, "OneDrive - Acme") };
+    const onWindows = (path: string) => syncedFolderWarning(path, home, { platform: "win32", env });
+    expect(onWindows(join(home, "OneDrive", "Documents", "acme"))).toMatch(/OneDrive syncs/);
+    expect(onWindows(join(home, "OneDrive - Acme", "acme"))).toMatch(/OneDrive syncs/);
+    expect(onWindows(join(home, "iCloudDrive", "acme"))).toMatch(/iCloud syncs/);
+    // Desktop and Documents sync only when OneDrive keeps them, and then they are in its folder.
+    expect(onWindows(join(home, "Documents", "acme"))).toBeUndefined();
+    expect(onWindows(join(home, "Companies", "acme"))).toBeUndefined();
+  });
+});
+
+describe("the runtime", () => {
+  test("the shipped Node, node.exe on Windows, and the staged pnpm's script", () => {
+    const resources = temp();
+    mkdirSync(join(resources, "pnpm"));
+    writeFileSync(
+      join(resources, "pnpm", "package.json"),
+      JSON.stringify({ bin: { pnpm: "bin/pnpm.mjs", pnpx: "bin/pnpx.mjs" } }),
+    );
+    const where = { packaged: true, appPath: "/app", resourcesPath: resources };
+    expect(runtimeOf(where, "darwin")).toEqual({
+      node: join(resources, "node", "node"),
+      pnpm: join(resources, "pnpm", "bin", "pnpm.mjs"),
+    });
+    expect(runtimeOf(where, "win32").node).toBe(join(resources, "node", "node.exe"));
+  });
+
+  test("an x64 build translated on Arm is told so, in its platform's words", () => {
+    expect(archWarnings(false, "win32")).toEqual([]);
+    expect(archWarnings(true, "darwin")).toEqual([expect.stringMatching(/Apple silicon Mac/)]);
+    expect(archWarnings(true, "win32")).toEqual([expect.stringMatching(/Arm PC/)]);
   });
 });
