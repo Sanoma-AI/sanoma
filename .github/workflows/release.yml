@@ -1,6 +1,7 @@
 name: Release
-# Run by hand on main (README "Release"): it publishes every public package whose version is not yet on npm,
-# then pushes the runtime image for the sanoma version when Docker Hub does not have it yet.
+# Run by hand on release/<version>, a branch at the bump's merge commit, never on main (README "Release"):
+# it publishes every public package whose version is not yet on npm, then pushes the runtime image for the
+# sanoma version when Docker Hub does not have it yet.
 on:
   workflow_dispatch:
 
@@ -22,46 +23,48 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Commit is on main and passed CI
+      - name: Ref is a release branch, its commit on main and passed CI
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          case "$GITHUB_REF" in
+            refs/heads/release/*) ;;
+            *) echo "::error::Run on release/<version> pushed at the bump's merge commit, not $GITHUB_REF (README \"Release\")"; exit 1 ;;
+          esac
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "::error::$GITHUB_SHA is not on main"; exit 1; }
           ci=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$GITHUB_SHA" --branch main --json conclusion -q '.[0].conclusion')
           [ "$ci" = success ] || { echo "::error::CI on $GITHUB_SHA is '${ci:-not run}', not success"; exit 1; }
+          echo "Publishing from \`$GITHUB_SHA\` on \`$GITHUB_REF_NAME\`." >> "$GITHUB_STEP_SUMMARY"
       # Node and pnpm from .mise.toml. No cache: a release never restores another run's cache.
       # pnpm 11 does the npm OIDC exchange itself.
       - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
           cache: false
       - run: pnpm install --frozen-lockfile
-      # Each package left at its public version takes the new versions it depends on.
-      - run: node scripts/release-check.ts
+      # What it refuses is in its header; a release branch moved after a partial run is among it, since a
+      # version public from the first commit then shows source changed since. Prints the versions to publish.
+      - name: Release check
+        run: |
+          node scripts/release-check.ts > "$RUNNER_TEMP/to-publish.txt"
+          cat "$RUNNER_TEMP/to-publish.txt"
+          {
+            echo "## To publish"
+            echo
+            if [ -s "$RUNNER_TEMP/to-publish.txt" ]; then
+              echo '```'
+              cat "$RUNNER_TEMP/to-publish.txt"
+              echo '```'
+            else
+              echo "Nothing: every version is already public."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
       # Packages already public are skipped without running prepack, so their dependents need this
       # build; the packages being published rebuild in their prepack, which keeps the hand path safe.
       - run: pnpm build
       # --no-git-checks: the first step checks the commit instead. The prepack of each
       # @sanoma-ai/bridge-<platform> downloads the provider-bridge release RELEASE pins, and of each
       # @sanoma-ai/postgres-<platform> zonky's jar from Maven Central (unzip and xz on the runner).
-      # --report-summary writes each published version to pnpm-publish-summary.json.
-      - run: pnpm publish -r --no-git-checks --report-summary
-      - name: Published versions
-        run: |
-          jq -r '.publishedPackages[] | "\(.name)@\(.version)"' pnpm-publish-summary.json > published.txt
-          cat published.txt
-          if [ ! -s published.txt ]; then
-            echo "Nothing published: every version is already public." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          {
-            echo "## Published versions"
-            echo
-            echo "From $GITHUB_SHA:"
-            echo
-            echo '```'
-            cat published.txt
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+      - run: pnpm publish -r --no-git-checks
 
   runtime-image:
     needs: publish

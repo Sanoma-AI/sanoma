@@ -33,7 +33,7 @@ export default defineConfig({
     ],
   },
   test: {
-    include: ["packages/*/test/**/*.test.ts", "connectors/*/test/**/*.test.ts"],
+    include: ["packages/*/test/**/*.test.ts", "connectors/*/test/**/*.test.ts", "scripts/*.test.ts"],
     testTimeout: 60_000,
     hookTimeout: 60_000,
     fileParallelism: false,
