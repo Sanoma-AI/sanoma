@@ -88,7 +88,7 @@ describe("sanoma.apps.list", () => {
         },
       ],
     });
-    expect(searched?.searchParams.get("q")).toBe(`topic:${APP_TOPIC}`);
+    expect(searched?.searchParams.get("q")).toBe(`topic:${APP_TOPIC} archived:false`);
     expect(headers?.get("accept")).toBe("application/vnd.github+json");
     expect(headers?.get("authorization")).toBeNull();
   });

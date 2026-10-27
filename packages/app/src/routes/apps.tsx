@@ -139,7 +139,10 @@ function AppItem({ app, children }: { app: RepoApp; children?: ReactNode }) {
 function AvailableRegion({ taken }: { taken: ReadonlySet<string> }) {
   const { actor } = useActor();
   const waiting = <Skeleton className="h-16 w-full" />;
-  if (!actor) return waiting;
+  if (actor === undefined) return waiting;
+  if (actor === null) {
+    return <Nothing title="Nobody signed in">The apps on GitHub are listed for the person on the page.</Nothing>;
+  }
   return (
     <Suspense fallback={waiting}>
       <AvailableList actor={actor} taken={taken} />

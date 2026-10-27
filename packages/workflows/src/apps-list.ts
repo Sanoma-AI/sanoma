@@ -87,20 +87,23 @@ function listed(found: z.infer<typeof Found>, from: Claims): AvailableApp {
 const official = (app: AvailableApp) => Number(app.tier === "official");
 
 /**
- * The repositories GitHub finds with the topic `sanoma-app`, the first hundred, each with what
+ * The repositories GitHub finds with the topic `sanoma-app`, not archived, the first hundred, each with what
  * `from` claims about it (the claims by default), official first, then by name. A repository
  * GitHub describes otherwise than expected is left out. When GitHub cannot be searched the list
  * is empty, and says why.
  */
 export async function availableApps(from: Claims = claims): Promise<AvailableApps> {
-  const url = `${GITHUB_API}/search/repositories?q=${encodeURIComponent(`topic:${APP_TOPIC}`)}&per_page=100`;
+  const url = `${GITHUB_API}/search/repositories?q=${encodeURIComponent(`topic:${APP_TOPIC} archived:false`)}&per_page=100`;
   let items: unknown[];
   try {
     const res = await fetch(url, {
       headers: { accept: "application/vnd.github+json", "user-agent": "sanoma", "x-github-api-version": "2022-11-28" },
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
-    if (!res.ok) throw new Error(`${new URL(url).host} answered ${res.status} to ${new URL(url).pathname}`);
+    if (!res.ok) {
+      await res.body?.cancel();
+      throw new Error(`${new URL(url).host} answered ${res.status} to ${new URL(url).pathname}`);
+    }
     items = Search.parse(await res.json()).items;
   } catch (err) {
     return { apps: [], error: `Could not search GitHub: ${errorMessage(err)}` };
