@@ -477,15 +477,17 @@ async function iconsModule(repo?: string): Promise<string> {
   if (repo === undefined) return "export default new Map();";
   const { siteIcons } = await import("@sanoma-ai/workflows/describe");
   const lucide = dirname(createRequire(import.meta.url).resolve("lucide-react/package.json"));
-  // Lucide's module per icon, `dist/esm/icons/<name>.mjs` (the package has no `exports` map): a
-  // release that moves them fails the build here rather than leaving every site its default.
+  // Lucide's module per icon, `dist/esm/icons/<name>.mjs` (the package has no `exports` map, and
+  // is pinned exactly): a release that moves them fails the build here rather than leaving every
+  // site its default.
   const dir = join(lucide, "dist", "esm", "icons");
   if (!existsSync(dir)) throw new Error(`sanoma: lucide-react has no icons at ${dir}`);
   const file = (name: string) => join(dir, `${name}.mjs`);
   const names = [...new Set(Object.values(siteIcons(repo)))]
     .filter((name) => ICON_NAME.test(name) && existsSync(file(name)))
     .toSorted();
-  const imports = names.map((name, i) => `import icon${i} from ${JSON.stringify(file(name))};\n`);
+  // An absolute path with forward slashes, as Vite writes one on Windows too.
+  const imports = names.map((name, i) => `import icon${i} from ${JSON.stringify(file(name).split(sep).join("/"))};\n`);
   return `${imports.join("")}export default new Map([${names.map((name, i) => `[${JSON.stringify(name)}, icon${i}]`).join(", ")}]);`;
 }
 

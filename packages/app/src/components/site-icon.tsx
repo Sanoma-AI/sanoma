@@ -1,5 +1,6 @@
 import { BrowserIcon } from "@phosphor-icons/react/dist/csr/Browser";
 import { GlobeIcon } from "@phosphor-icons/react/dist/csr/Globe";
+import type { IconName } from "lucide-react/dynamic";
 import ICONS from "virtual:sanoma/icons";
 
 /**
@@ -9,7 +10,7 @@ import ICONS from "virtual:sanoma/icons";
  * that names none, or a name Lucide does not have). Its stroke is Phosphor's regular weight's, as
  * the app's own icons beside it.
  */
-export function SiteIcon({ icon, public: isPublic }: { icon?: string; public: boolean }) {
+export function SiteIcon({ icon, public: isPublic }: { icon?: IconName; public: boolean }) {
   const Icon = icon === undefined ? undefined : ICONS.get(icon);
   if (Icon) return <Icon strokeWidth={1.5} aria-hidden="true" />;
   return isPublic ? <GlobeIcon aria-hidden="true" /> : <BrowserIcon aria-hidden="true" />;
