@@ -74,7 +74,10 @@ function processTree(child: ChildProcess): Tree {
   return {
     term: () => {},
     kill: () => {
-      if (alive()) execFile("taskkill", ["/pid", String(child.pid), "/T", "/F"], { windowsHide: true }, () => {});
+      if (!alive()) return;
+      // By its path, as Path may not have System32; when it cannot, the child alone, so `exited` still resolves.
+      const taskkill = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "taskkill.exe");
+      execFile(taskkill, ["/pid", String(child.pid), "/T", "/F"], { windowsHide: true }, (err) => err && child.kill());
     },
     alive,
   };
@@ -185,7 +188,9 @@ export function launcherEnv(
   const isPath = (name: string) => (windows ? name.toUpperCase() === "PATH" : name === "PATH");
   const key = Object.keys(base).find(isPath) ?? "PATH";
   const rest = Object.fromEntries(Object.entries(base).filter(([name]) => !isPath(name)));
-  const path = [...first, ...(base[key] ?? "").split(delimiter), ...(windows ? [] : EXTRA_PATH)].filter(Boolean);
+  // Each spelling's entries, in order, as an environment copied by hand can carry both PATH and Path.
+  const system = Object.entries(base).flatMap(([name, value]) => (isPath(name) ? (value ?? "").split(delimiter) : []));
+  const path = [...first, ...system, ...(windows ? [] : EXTRA_PATH)].filter(Boolean);
   return { ...rest, SANOMA_EVENTS: "1", SANOMA_APP_PORT: String(port), [key]: [...new Set(path)].join(delimiter) };
 }
 

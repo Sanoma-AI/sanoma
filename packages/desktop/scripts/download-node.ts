@@ -104,7 +104,10 @@ export async function downloadNode(platform: string, out: string): Promise<void>
 if (import.meta.main) {
   const { values } = parseArgs({ options: { platform: { type: "string" }, out: { type: "string" } } });
   const platform = values.platform ?? `${process.platform}-${process.arch}`;
-  const out = values.out ?? fileURLToPath(new URL(`../stage/node-${platform.split("-")[1]}`, import.meta.url));
+  // This platform's goes where stage.ts puts it; another's beside it, never into this one's folder.
+  const host = platform === `${process.platform}-${process.arch}`;
+  const folder = `node-${host ? process.arch : platform}`;
+  const out = values.out ?? fileURLToPath(new URL(`../stage/${folder}`, import.meta.url));
   await downloadNode(platform, out);
   console.log(join(out, archiveOf(platform).binary));
 }

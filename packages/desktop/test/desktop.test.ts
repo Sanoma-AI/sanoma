@@ -245,10 +245,10 @@ describe("the process manager", () => {
       SANOMA_EVENTS: "1",
       SANOMA_APP_PORT: "3100",
     });
-    // One key, whatever case the others were in.
-    expect(
-      Object.keys(launcherEnv({ PATH: "a", Path: "b" }, ["s"], 3100, "win32")).filter((k) => /^path$/i.test(k)),
-    ).toEqual(["PATH"]);
+    // One key, whatever case the others were in, with all their entries.
+    const both = launcherEnv({ PATH: "a", Path: "b" }, ["s"], 3100, "win32");
+    expect(Object.keys(both).filter((k) => /^path$/i.test(k))).toEqual(["PATH"]);
+    expect(both.PATH).toBe("s;a;b");
   });
 });
 
