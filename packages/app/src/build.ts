@@ -271,7 +271,7 @@ function packageConfig(): InlineConfig {
       ),
       tailwindcss(),
       contentPlugin(),
-      localesPlugin(),
+      sitesPlugin(),
       tanstackStart({ importProtection: { behavior: "error", client: { specifiers: [CLIENT_DENIED] } } }),
       react(),
     ],
@@ -355,7 +355,7 @@ function repoConfig(repo: string, runtimeFrom = defaultRuntimeFrom): InlineConfi
       sharedDeps(repo, src),
       runtimeExternal(runtimeFrom),
       contentPlugin(repo),
-      localesPlugin(repo),
+      sitesPlugin(repo),
       tailwindcss(),
       tanstackStart({
         srcDirectory,
@@ -452,36 +452,71 @@ function contentPlugin(repo?: string): Plugin {
 }
 
 const LOCALES = "virtual:sanoma/locales";
+const ICONS = "virtual:sanoma/icons";
 
 /**
  * `virtual:sanoma/locales`'s text: each site's languages (`siteLocales`), its content pages' kinds
  * (`siteContentPages`), and every site's key (`sitesUnder`), which a path is resolved against (`siteOf`).
  */
-async function localesModule(repo: string): Promise<string> {
+async function localesModule(repo?: string): Promise<string> {
+  if (repo === undefined) return "export default {};\nexport const contentPages = {};\nexport const sites = [];";
   const { siteContentPages, siteLocales, sitesUnder } = await import("@sanoma-ai/workflows/describe");
   const sites = sitesUnder(repo).map(({ name }) => name);
   return `export default ${JSON.stringify(siteLocales(repo))};\nexport const contentPages = ${JSON.stringify(siteContentPages(repo))};\nexport const sites = ${JSON.stringify(sites)};`;
 }
 
+/** A Lucide icon's name, kebab-case: so a name in `site.ts` is a file of Lucide's icons folder, and nothing outside it. */
+const ICON_NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+
 /**
- * `virtual:sanoma/locales`, which the router's `lib/locales.ts` imports: each public site's
- * languages from its `site.ts` (`siteLocales`, read and never run), by name, and the kind each
- * content page reads (`siteContentPages`); without a repo, none. Read once for every environment;
- * on the dev server, again when a `site.ts`, a route file or a folder of `sites/<name>/` (or an
- * app's `apps/<app>/sites/<name>/`) or its `routes/` (which make a site) changes, comes or goes,
- * reloaded when they changed.
+ * `virtual:sanoma/icons`'s text: the Lucide icons the sites' `site.ts` name (`siteIcons`), by name,
+ * each imported from its own module in the app's install of `lucide-react`. A name Lucide does not
+ * have is left out, and its site draws the default for its kind.
  */
-function localesPlugin(repo?: string): Plugin {
-  const id = `\0${LOCALES}`;
-  let text: string | undefined;
+async function iconsModule(repo?: string): Promise<string> {
+  if (repo === undefined) return "export default new Map();";
+  const { siteIcons } = await import("@sanoma-ai/workflows/describe");
+  const lucide = dirname(createRequire(import.meta.url).resolve("lucide-react/package.json"));
+  // Lucide's module per icon, `dist/esm/icons/<name>.mjs` (the package has no `exports` map, and
+  // is pinned exactly): a release that moves them fails the build here rather than leaving every
+  // site its default.
+  const dir = join(lucide, "dist", "esm", "icons");
+  if (!existsSync(dir)) throw new Error(`sanoma: lucide-react has no icons at ${dir}`);
+  const file = (name: string) => join(dir, `${name}.mjs`);
+  const names = [...new Set(Object.values(siteIcons(repo)))]
+    .filter((name) => ICON_NAME.test(name) && existsSync(file(name)))
+    .toSorted();
+  // An absolute path with forward slashes, as Vite writes one on Windows too.
+  const imports = names.map((name, i) => `import icon${i} from ${JSON.stringify(file(name).split(sep).join("/"))};\n`);
+  return `${imports.join("")}export default new Map([${names.map((name, i) => `[${JSON.stringify(name)}, icon${i}]`).join(", ")}]);`;
+}
+
+/** The modules the sites' `site.ts` make, by id, each read from the repo (none without one, the package's own build). */
+const SITE_MODULES = new Map([
+  [LOCALES, localesModule],
+  [ICONS, iconsModule],
+]);
+
+/**
+ * What the sites' `site.ts` say, read and never run, for the app's router and bar:
+ * `virtual:sanoma/locales`, which `lib/locales.ts` imports (each public site's languages by name,
+ * and the kind each content page reads), and `virtual:sanoma/icons`, which `SiteIcon` imports (the
+ * icons they name, so only those are bundled, and drawn on the server too). Each is read once for
+ * every environment; on the dev server, again when a `site.ts`, a route file or a folder of
+ * `sites/<name>/` (or an app's `apps/<app>/sites/<name>/`) or its `routes/` (which make a site)
+ * changes, comes or goes, and reloaded when it changed.
+ */
+function sitesPlugin(repo?: string): Plugin {
+  // Each module's text, by its resolved id.
+  const texts = new Map<string, string>();
   return {
-    name: "sanoma:locales",
-    resolveId: (source) => (source === LOCALES ? id : undefined),
-    async load(loaded) {
-      if (loaded !== id) return;
-      if (repo === undefined) return "export default {};\nexport const contentPages = {};\nexport const sites = [];";
-      text ??= await localesModule(repo);
-      return text;
+    name: "sanoma:sites",
+    resolveId: (source) => (SITE_MODULES.has(source) ? `\0${source}` : undefined),
+    async load(id) {
+      const read = id.startsWith("\0") ? SITE_MODULES.get(id.slice(1)) : undefined;
+      if (!read) return;
+      if (!texts.has(id)) texts.set(id, await read(repo));
+      return texts.get(id);
     },
     configureServer(server) {
       if (repo === undefined) return;
@@ -492,17 +527,20 @@ function localesPlugin(repo?: string): Plugin {
         const site = event.endsWith("Dir") && !deeper.length && (routes === undefined || routes === "routes");
         const route = routes === "routes" && /\.tsx?$/.test(file);
         if (!site && !route && !(routes === "site.ts" && !deeper.length)) return;
-        let next: string;
-        try {
-          next = await localesModule(repo);
-        } catch (err) {
-          // A folder gone while it was read: the next event reads again.
-          server.config.logger.warn(`sanoma: reading the sites' languages failed: ${String(err)}`);
-          return;
+        for (const [name, read] of SITE_MODULES) {
+          const id = `\0${name}`;
+          let next: string;
+          try {
+            next = await read(repo);
+          } catch (err) {
+            // A folder gone while it was read: the next event reads again.
+            server.config.logger.warn(`sanoma: reading the sites failed: ${String(err)}`);
+            continue;
+          }
+          if (next === texts.get(id)) continue;
+          texts.set(id, next);
+          reloadFile(server, id);
         }
-        if (next === text) return;
-        text = next;
-        reloadFile(server, id);
       });
     },
   };

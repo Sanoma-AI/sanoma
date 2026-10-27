@@ -11,7 +11,7 @@ declare module "virtual:sanoma/content" {
 
 /**
  * Each public site's languages, by name, the first its default, the content kind of each page
- * whose entries are one's, by path, and every site's key (`siteKey`), as the `sanoma:locales`
+ * whose entries are one's, by path, and every site's key (`siteKey`), as the `sanoma:sites`
  * plugin reads them (`siteLocales`, `siteContentPages`, `sitesUnder`).
  */
 declare module "virtual:sanoma/locales" {
@@ -19,4 +19,10 @@ declare module "virtual:sanoma/locales" {
   export default locales;
   export const contentPages: Record<string, string>;
   export const sites: string[];
+}
+
+/** The Lucide icons the sites' `site.ts` name, by name, as the `sanoma:sites` plugin reads them (`siteIcons`): `SiteIcon` imports it. */
+declare module "virtual:sanoma/icons" {
+  const icons: ReadonlyMap<string, import("lucide-react").LucideIcon>;
+  export default icons;
 }

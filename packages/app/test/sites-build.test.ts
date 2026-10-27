@@ -33,7 +33,7 @@ import { executablePath, launch } from "puppeteer-core";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { ACTOR_COOKIE, ACTOR_HEADER } from "../src/api.ts";
 import { type App, startApp } from "../src/index.ts";
-import { barGroups, barLink } from "./bar-helpers.ts";
+import { barGroups, barLink, barTile } from "./bar-helpers.ts";
 import { loginContexts } from "./fixtures/company-sites/login.ts";
 import fixture from "./fixtures/company-sites/sanoma.config.ts";
 
@@ -328,8 +328,8 @@ describe("a company's app with its sites", () => {
       await page.goto(new URL("/sites/hello/styled", app.url).href, { waitUntil: "networkidle0" });
       const bar = `getComputedStyle(document.querySelector('nav[aria-label="Sections"]').parentElement).display`;
       expect(await page.evaluate(bar)).toBe("flex");
-      // The site's tile draws the Lucide icon its site.ts names once the browser loads it; another
-      // site, which names none, keeps the default for its kind.
+      // The site's tile draws the Lucide icon its site.ts names, in the browser as on the server;
+      // another site, which names none, keeps the default for its kind.
       await page.waitForSelector('nav a[href="/sites/hello"] svg.lucide-life-buoy');
       expect(await page.$('nav a[href="/sites/members"] svg.lucide')).toBeNull();
 
@@ -431,6 +431,22 @@ describe("a company's app with its sites", () => {
     const withoutSites = count((await buildApp(bare)).distDir);
     expect(withoutSites[router]).toBe(1);
     expect(count(result.distDir)).toEqual(withoutSites);
+  });
+
+  it("bundles only the Lucide icons the sites name, and draws a site's on the server", async () => {
+    const html = await (await fetch(new URL("/sites/hello", app.url))).text();
+    expect(barTile(html, "/sites/hello")).toContain("lucide-life-buoy");
+    expect(barTile(html, "/sites/members")).not.toContain("lucide");
+    // Lucide's icons, each its data in a module of its own, which a lazy import by name would make
+    // a chunk each: only the one a site names is in the browser's bundle.
+    const client = join(result.distDir, "client", "assets");
+    const icons = readdirSync(client)
+      .filter((file) => file.endsWith(".js"))
+      .flatMap((file) => [
+        ...readFileSync(join(client, file), "utf8").matchAll(/name:["`]([a-z0-9-]+)["`],size:24,node:/g),
+      ])
+      .map(([, name]) => name);
+    expect(icons).toEqual(["life-buoy"]);
   });
 
   it("imports the runtime by URL from the server bundle, and keeps it out of the browser's", () => {

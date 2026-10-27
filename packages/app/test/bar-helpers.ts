@@ -20,3 +20,7 @@ export const barLabels = (html: string): string[][] => barGroups(html).map((grou
 /** The opening tag of the bar's link to `to`. */
 export const barLink = (html: string, to: string): string | undefined =>
   barOf(html).match(new RegExp(`<a [^>]*href="${to}"[^>]*>`))?.[0];
+
+/** The bar's link to `to`, whole: its tile's icon and label. */
+export const barTile = (html: string, to: string): string | undefined =>
+  barOf(html).match(new RegExp(`<a [^>]*href="${to}"[^>]*>(?:(?!</a>)[\\s\\S])*</a>`))?.[0];
