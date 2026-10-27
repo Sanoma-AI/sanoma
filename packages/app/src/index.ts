@@ -20,7 +20,7 @@ import {
   type Source,
 } from "@sanoma-ai/workflows";
 import { type ConfigDescription, describeConfig, readPeople, type SiteEntry } from "@sanoma-ai/workflows/describe";
-import { siteDir } from "@sanoma-ai/workflows/shared";
+import { isEnded, type RunStatus, siteDir } from "@sanoma-ai/workflows/shared";
 import { NodeRequest, sendNodeResponse } from "srvx/node";
 import type { AppContext, LoginProvider, RequestContext, ServerEntry } from "./context.ts";
 import { admitting } from "./login/admission.ts";
@@ -92,8 +92,14 @@ export interface AppOptions {
    * and again every hour (`reseed`, on the timer `sanoma.demo.reset`), a banner saying who you
    * are and that nothing is saved, and no chat agent and no Go live. The worker that runs its
    * runs must share the instance's fakes: start it in this process with the same `resolved`.
+   * The app listens once the moments' runs wait for their people (or have ended).
+   *
+   * `"copy"`: the same, over a copy of a seeded demo's database (a visitor's session of `sanoma
+   * demo`'s session host): only the fakes are seeded (`reseed`'s `memory`; the copy holds the rest),
+   * never again, and the app listens once none of the copied runs is still queued, which the worker's
+   * recovery of them makes them for a moment, so the visitor's Inbox shows them waiting.
    */
-  demo?: boolean;
+  demo?: boolean | "copy";
   /**
    * The config as the caller resolved it (`resolveConfig(config, options)`), shared with a worker
    * in this process, as a demo's must be; the caller closes its `dataStore`. Default: resolved
@@ -139,7 +145,7 @@ interface Responder {
  */
 export async function startApp(config: SanomaConfig, options: AppOptions = {}): Promise<App> {
   const host = options.host ?? "127.0.0.1";
-  const demo = options.demo === true;
+  const demo = options.demo === true || options.demo === "copy";
   const resolved = options.resolved ?? resolveConfig(config, demo ? { fakes: "instance" } : {});
   if (demo && !resolved.instanceFakes) {
     throw new Error('A demo runs on its connectors\' fakes: resolve its config with `{ fakes: "instance" }`');
@@ -320,7 +326,7 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
     client,
     login,
     source: options.source,
-    ...(demo && { demo: { ...config.demo } }),
+    ...(demo && { demo: { start: config.demo?.start } }),
   };
   // Each public site served, by name, with its own context, whose login is its front door: its
   // login half, if it has one, made once the app listens (`openLogins`). A public site whose
@@ -342,7 +348,7 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   let reset: { stop(): void } | undefined;
   try {
     // Seeded before it listens, so the first visitor finds the moments started.
-    if (demo) reset = await demoReset(client, resolved);
+    if (demo) reset = await demoReset(client, resolved, config, options.demo === "copy");
     await new Promise<void>((done, fail) => {
       server.once("error", fail);
       server.listen(options.port ?? 0, host, () => {
@@ -415,28 +421,65 @@ function closedInDemo(path: string): boolean {
   return DEMO_CLOSED.test(read.replace(/\/{2,}/g, "/"));
 }
 
-/** How often a demo is seeded afresh (`sanoma.demo.reset`): every hour. */
-const DEMO_RESET_MS = 60 * 60 * 1000;
+/** How often a demo is seeded afresh (`sanoma.demo.reset`) unless its config's `demo.reseed` says: every hour. */
+const DEMO_RESET_MINUTES = 60;
+
+/** How long a demo's seed waits for its runs to settle (`settled`) before it listens anyway. */
+const SETTLE_MS = 30_000;
 
 /**
- * A demo's seed (`reseed`): once now, then every hour from now, `sanoma.demo.reset`: a timer in
- * this process, which holds the instance's fakes, not a schedule of the worker's (a demo's Runs
- * do not list it, and a new process starts its hour again). What a seed could not do is logged;
- * so is a later seed that fails, and the next hour tries again. `stop` ends the timer.
+ * A demo's seed (`reseed`): once now, then every `demo.reseed` minutes from now (default an hour),
+ * `sanoma.demo.reset`: a timer in this process, which holds the instance's fakes, not a schedule of
+ * the worker's (a demo's Runs do not list it, and a new process starts its hour again). Each seed
+ * waits for its moments' runs to wait (or end). With `copy` (`AppOptions.demo`'s `"copy"`), the
+ * fakes alone, once, waiting for the copied runs to leave the queue. What a seed could not do is
+ * logged; so is a later seed that fails, and the next one tries again. `stop` ends the timer.
  */
-async function demoReset(client: SanomaClient, resolved: ResolvedConfig): Promise<{ stop(): void }> {
+async function demoReset(
+  client: SanomaClient,
+  resolved: ResolvedConfig,
+  config: SanomaConfig,
+  copy: boolean,
+): Promise<{ stop(): void }> {
   // Loaded only for a demo: it loads Cucumber.
   const { reseed } = await import("@sanoma-ai/workflows/scenarios");
   const seed = async () => {
-    const { problems } = await reseed(client, resolved);
+    const { problems, moments } = await reseed(client, resolved, copy ? { only: "memory" } : {});
     for (const problem of problems) console.warn(`sanoma app: the demo's seed: ${problem}`);
+    await settled(
+      client,
+      moments.map((m) => m.runId),
+    );
   };
   await seed();
+  if (copy) return { stop() {} };
   const timer = setInterval(
     () => void seed().catch((err: unknown) => console.error("sanoma app: sanoma.demo.reset failed:", err)),
-    DEMO_RESET_MS,
+    (config.demo?.reseed ?? DEMO_RESET_MINUTES) * 60_000,
   ).unref();
   return { stop: () => clearInterval(timer) };
+}
+
+/** Whether a run of a moment's has got as far as a seed waits for: waiting for a person, or ended. */
+const settles = (status: RunStatus | undefined) => status === "waiting" || (status !== undefined && isEnded(status));
+
+/**
+ * Until each of `runIds` waits or has ended, and none of the app's runs is queued (a copy's
+ * recovered runs are, until the worker replays them to their wait), for up to `SETTLE_MS`; then
+ * a warning, and on.
+ */
+async function settled(client: SanomaClient, runIds: readonly string[]): Promise<void> {
+  const deadline = Date.now() + SETTLE_MS;
+  for (;;) {
+    const runs = await Promise.all(runIds.map((id) => client.run(id)));
+    if (runs.every((run) => settles(run?.status)) && !(await client.runs({ status: "queued", limit: 1 })).length)
+      return;
+    if (Date.now() > deadline) {
+      console.warn(`sanoma app: the demo's runs had not settled after ${SETTLE_MS / 1000} s: serving it as it is`);
+      return;
+    }
+    await new Promise((done) => setTimeout(done, 100));
+  }
 }
 
 /** A public site's host on this machine. */
