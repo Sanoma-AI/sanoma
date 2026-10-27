@@ -16,6 +16,7 @@ import {
 } from "./api.ts";
 import {
   adopt,
+  appBehind,
   appConfig,
   callApi,
   change,
@@ -169,6 +170,11 @@ export const setSetupTokenFn = createServerFn(CHANGE)
 
 /** The connector packages on npm. */
 export const getAvailableConnectors = createServerFn(READ).handler(() => availableConnectors());
+
+/** How many commits a taken app is behind its source, fetched now; or why that cannot be told. */
+export const getAppBehind = createServerFn(READ)
+  .validator(validate(z.object({ folder: z.string().min(1) })))
+  .handler(({ data, context }) => appBehind(context.app, data.folder));
 
 /** What going live can choose from: GitHub accounts, Supabase organizations and regions, the host. */
 export const getGoLiveChoices = createServerFn(READ).handler(({ context }) => goLiveChoices(context.app));

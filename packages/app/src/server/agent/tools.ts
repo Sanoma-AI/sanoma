@@ -4,6 +4,7 @@ import { dirname, relative, sep } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { promisify } from "node:util";
 import {
+  type AppMerge,
   type Chat,
   type CheckResult,
   type Draft,
@@ -20,8 +21,9 @@ import { checks } from "../drafts.ts";
 import { drafting, mustAllow, openDraft } from "./checkout.ts";
 
 // Our loop's tools: reading the repository, editing the chat's draft (opened by the first edit,
-// committed at each), its checks, and lookups through the policy. No shell: the draft sits in the
-// live checkout until previews exist. Every path goes through the checkout rule (`allowedPath`).
+// committed at each), taking and updating an app there (a git merge of its source), its checks,
+// and lookups through the policy. No shell: the draft sits in the live checkout until previews
+// exist. Every path goes through the checkout rule (`allowedPath`).
 
 /** What the tools act for: the app, the chat (whose `draftId` the first edit sets) and the person. */
 export interface ToolsTurn {
@@ -72,6 +74,17 @@ export function loopTools(turn: ToolsTurn) {
     const { branch } = await draft();
     turn.showDraft({ branch, ...(await source().diff(chat.id)), ...(checked && { checks: checked }) });
   };
+  /**
+   * The turn's writes and checks, one at a time: the model may call several tools at once, and a
+   * merge must never see another edit's file uncommitted, nor an edit or the checks a merge half
+   * done (the reads read the draft's last commit).
+   */
+  let queue: Promise<unknown> = Promise.resolve();
+  const inTurn = <T>(run: () => Promise<T>): Promise<T> => {
+    const done = queue.then(run);
+    queue = done.catch(() => undefined);
+    return done;
+  };
   /** Writes `text` at `path` in the draft and commits it with `message`. */
   const save = async (path: string, text: string, message: string) => {
     const { root, commit } = await draft();
@@ -84,6 +97,22 @@ export function loopTools(turn: ToolsTurn) {
     await showCard();
     return { path: file, committed: committed?.revision ?? "nothing changed" };
   };
+
+  /** An app merged into the draft by `merge`, the card shown, and what the agent does next. */
+  const mergeApp = (merge: (draft: Draft) => Promise<AppMerge> | undefined) =>
+    inTurn(async () => {
+      const merging = merge(await draft());
+      if (!merging) throw new Error("This instance's repository cannot merge an app into a draft");
+      const merged = await merging;
+      checked = undefined;
+      await showCard();
+      const next = merged.conflicts.length
+        ? "Each file in conflicts is committed with git's conflict markers (<<<<<<< the company's, ||||||| the base, ======= the source's, >>>>>>>), a binary one as the company's: resolve each with edit_file, keeping what both sides meant, then run run_checks"
+        : merged.merged
+          ? "Merged clean: run run_checks"
+          : "Nothing new to merge";
+      return { ...merged, next };
+    });
 
   return {
     list_files: tool({
@@ -141,7 +170,7 @@ export function loopTools(turn: ToolsTurn) {
         content: z.string().describe("The file's whole new text"),
         message: z.string().min(1).describe("The commit message: what this change does, in a line"),
       }),
-      execute: ({ path, content, message }) => save(path, content, message),
+      execute: ({ path, content, message }) => inTurn(() => save(path, content, message)),
     }),
     edit_file: tool({
       description:
@@ -152,28 +181,55 @@ export function loopTools(turn: ToolsTurn) {
         new: z.string().describe("Its replacement"),
         message: z.string().min(1).describe("The commit message: what this change does, in a line"),
       }),
-      execute: async ({ path, old, new: replacement, message }) => {
-        const full = await mustAllow((await draft()).root, path);
-        const text = await readFile(full, "utf8");
-        const count = text.split(old).length - 1;
-        if (count !== 1) throw new Error(`${path} has the passage ${count} times, not once: quote more of it, exactly`);
-        return save(
-          path,
-          text.replace(old, () => replacement),
-          message,
-        );
-      },
+      execute: ({ path, old, new: replacement, message }) =>
+        inTurn(async () => {
+          const full = await mustAllow((await draft()).root, path);
+          const text = await readFile(full, "utf8");
+          const count = text.split(old).length - 1;
+          if (count !== 1)
+            throw new Error(`${path} has the passage ${count} times, not once: quote more of it, exactly`);
+          return save(
+            path,
+            text.replace(old, () => replacement),
+            message,
+          );
+        }),
+    }),
+    take_app: tool({
+      description:
+        "Take an app into your draft: merge its source repository (a public company repo holding one apps/<name>/, by https) with its history, as one merge commit. The app arrives as apps/<name>/ and package.json gets the source's beside the company's (its connectors); every other file stays the company's. Then resolve any conflicts and run run_checks.",
+      inputSchema: z.object({
+        url: z.string().describe("The source repository's https URL, such as https://github.com/acme/crm"),
+        ref: z
+          .string()
+          .optional()
+          .describe(
+            "A branch, tag or full commit id of it; its default branch when left out (an update follows the default branch)",
+          ),
+        folder: z
+          .string()
+          .optional()
+          .describe("The app's folder in the source (apps/<folder>/), needed only when it holds more than one"),
+      }),
+      execute: ({ url, ref, folder }) => mergeApp((d) => d.take?.({ url, ref, folder, author: principal.id })),
+    }),
+    update_app: tool({
+      description:
+        "Merge the new commits of an app's source (the repository its apps/<folder>/app.ts names) into your draft, as one merge commit: what they change in apps/<folder>/ and package.json; every other file stays the company's. A line both the company and the source changed conflicts: resolve it, then run run_checks.",
+      inputSchema: z.object({ folder: z.string().describe("The app's folder: apps/<folder>/") }),
+      execute: ({ folder }) => mergeApp((d) => d.update?.({ folder, author: principal.id })),
     }),
     run_checks: tool({
       description:
         "Run `sanoma check` on your draft: types, the workflow lint, the data files and the scenarios. Run it after your edits and fix what it finds.",
       inputSchema: z.object({}),
-      execute: async () => {
-        if (!(await hasDraft())) throw new Error("Nothing is drafted yet: edit a file first");
-        checked = await checks(app, chat.id);
-        await showCard();
-        return checked;
-      },
+      execute: () =>
+        inTurn(async () => {
+          if (!(await hasDraft())) throw new Error("Nothing is drafted yet: edit a file first");
+          checked = await checks(app, chat.id);
+          await showCard();
+          return checked;
+        }),
     }),
     lookup: tool({
       description:

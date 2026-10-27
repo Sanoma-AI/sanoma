@@ -78,7 +78,7 @@ import { defineApp } from "sanoma";
 export default defineApp({ source: "https://github.com/acme/crm" });
 ```
 
-What an app declares is named with its folder, so two apps may both declare `customers`: `apps/crm/resources/data.ts`'s is `crm.customers` (`ctx.data.crm.customers.get(…)`, `api.data.crm.customers.list()`, the Cedar action `data.crm.customers.save`), `apps/crm/workflows/follow-up.ts`'s `follow-up` is `crm.follow-up` (`api.crmFollowUp`, `When crm.follow-up runs`), and `apps/crm/sites/pipeline/` is served at `/sites/crm/pipeline`. The company's own workflows, at the root, may import any app's `resources/data.ts` to join them; `sanoma check` warns of an import from one app's files into another's. See [Apps](../workflows/README.md#apps).
+What an app declares is named with its folder, so two apps may both declare `customers`: `apps/crm/resources/data.ts`'s is `crm.customers` (`ctx.data.crm.customers.get(…)`, `api.data.crm.customers.list()`, the Cedar action `data.crm.customers.save`), `apps/crm/workflows/follow-up.ts`'s `follow-up` is `crm.follow-up` (`api.crmFollowUp`, `When crm.follow-up runs`), and `apps/crm/sites/pipeline/` is served at `/sites/crm/pipeline`. An app is taken and updated by the chat's agent as a git merge into its draft (`take_app`, `update_app`; see [the app's screens](../app/README.md#screens)). The company's own workflows, at the root, may import any app's `resources/data.ts` to join them; `sanoma check` warns of an import from one app's files into another's. See [Apps](../workflows/README.md#apps).
 
 ## People and policies
 
