@@ -20,6 +20,7 @@ import {
   remoteFor,
   type RunSummary,
   type SanomaError,
+  type Source,
 } from "@sanoma-ai/workflows";
 import { apiNameOf, isVisitor } from "@sanoma-ai/workflows/shared";
 import {
@@ -353,11 +354,11 @@ export const changes = ({ client }: AppContext, query: z.output<typeof ChangesQu
 
 /**
  * The change of the draft `id` (`SanomaClient.change`), with the config's workflows whose files
- * it edits (`edits`), or the router's not-found when the draft has none.
+ * it edits (`edits`), or null when the draft has none.
  */
-export async function change({ client, resolved, source }: AppContext, id: string): Promise<ChangeDetail> {
+export async function change({ client, resolved, source }: AppContext, id: string): Promise<ChangeDetail | null> {
   const view = await client.change(id);
-  if (!view) throw notFound();
+  if (!view) return null;
   // As the planner finds them: a workflow's file relative to the repository's root, in `touches`.
   const touched = new Set(view.state.facts?.touches);
   const edits = source
@@ -378,13 +379,20 @@ export function hasRemote({ source }: AppContext): Promise<boolean> {
   // Every page's root loader asks: git is asked at most once a minute per repository.
   const kept = remotes.get(source);
   if (kept && Date.now() - kept.at < 60_000) return kept.has;
-  const has = (async () => (await source.remoteUrl?.()) !== undefined)().catch((err: unknown) => {
-    console.error("sanoma app: reading the repository's remote failed:", err);
-    return false;
-  });
+  const has = remoteUrlOf(source).then((url) => url !== undefined);
   remotes.set(source, { at: Date.now(), has });
   return has;
 }
+
+/** The repository's remote URL (`Source.remoteUrl`); none when git cannot read it, logged. */
+const remoteUrlOf = async (source: Source): Promise<string | undefined> => {
+  try {
+    return await source.remoteUrl?.();
+  } catch (err) {
+    console.error("sanoma app: reading the repository's remote failed:", err);
+    return undefined;
+  }
+};
 
 /** Each repository's last answer to `hasRemote`, and when it was asked. */
 const remotes = new WeakMap<object, { at: number; has: Promise<boolean> }>();
@@ -410,7 +418,7 @@ export async function openChange(
 /**
  * What the repository's host enforces on `main` (`SourceHost.enforcement`), with the host's name:
  * the Permissions page's line. Null without a remote, or when no connector's remote half is for
- * its host; a repository git cannot read has none, logged, as `hasRemote` says. A host that
+ * its host; a repository git cannot read has none (`remoteUrlOf`). A host that
  * cannot be asked is logged, and answered as enforcing nothing, saying why.
  */
 export async function hostEnforcement({
@@ -419,10 +427,7 @@ export async function hostEnforcement({
   resolved,
   source,
 }: Pick<AppContext, "client" | "description" | "resolved" | "source">): Promise<EnforcementResponse> {
-  const url = await source?.remoteUrl?.().catch((err: unknown) => {
-    console.error("sanoma app: reading the repository's remote failed:", err);
-    return undefined;
-  });
+  const url = source && (await remoteUrlOf(source));
   const found = url === undefined ? undefined : remoteFor(resolved.remotes, url);
   if (!found) return null;
   const host = description.vendors[found.vendor]!.title;

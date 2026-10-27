@@ -122,9 +122,10 @@ export async function commitTurn(
   const message = `${title}: ${textOf(messages.at(-1)!, " ").trim().slice(0, 72)}`;
   const committed = (await draft.commit({ paths: ["."], message, author: principal.id })) !== undefined;
   if (!committed) return;
-  await tellCommits(app.client, chat.id, principal);
-  if (signal.aborted) return;
-  const [checked, diff] = await Promise.all([checks(app, chat.id), drafting(app).diff(chat.id)]);
+  // Told even when the turn was stopped: the commit has landed.
+  const told = tellCommits(app.client, chat.id, principal);
+  if (signal.aborted) return told;
+  const [checked, diff] = await Promise.all([checks(app, chat.id), drafting(app).diff(chat.id), told]);
   writer.write({
     type: "data-draft",
     id: "draft",

@@ -107,7 +107,7 @@ export const getChanges = createServerFn(READ)
   .validator(validate(ChangesQuery))
   .handler(({ data, context }) => changes(context.app, data));
 
-/** The change of a draft, by the draft's id, or the router's not-found when it has none. */
+/** The change of a draft, by the draft's id, or null when it has none. */
 export const getChange = createServerFn(READ)
   .validator(validate(z.object({ id: z.string().min(1) })))
   .handler(({ data, context }) => change(context.app, data.id));

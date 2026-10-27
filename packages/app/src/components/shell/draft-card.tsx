@@ -3,7 +3,7 @@ import { GitBranchIcon } from "@phosphor-icons/react/dist/csr/GitBranch";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import { isEnded } from "@sanoma-ai/workflows/shared";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { isNotFound, Link } from "@tanstack/react-router";
+import { Link } from "@tanstack/react-router";
 import { Button } from "#/components/ui/button.tsx";
 import { Card, CardContent, CardFooter, CardHeader } from "#/components/ui/card.tsx";
 import { phaseLabel } from "#/lib/changes.ts";
@@ -80,8 +80,9 @@ export function DraftCardView({ draft }: { draft: DraftCard }) {
 function Review({ draft }: { draft: DraftCard }) {
   const { data: change, error } = useQuery(changeQuery(draft.draft));
   const send = useOpenChange();
-  if (error && !isNotFound(error)) return <>Could not read its change: {error.message}</>;
-  if (!change && !error) return null;
+  if (error) return <>Could not read its change: {error.message}</>;
+  // Still reading it; null when the draft has none.
+  if (change === undefined) return null;
   const why =
     draft.files.length === 0
       ? "Nothing is committed on the draft yet."

@@ -1,6 +1,6 @@
 import { CHANGE_WORKFLOW } from "@sanoma-ai/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { ChangeDecision } from "#/components/change-decision.tsx";
 import { PullRequestLink } from "#/components/change-glance.tsx";
 import {
@@ -28,13 +28,14 @@ export const Route = createFileRoute("/changes/$id")({
       queryClient.query({ ...changeQuery(params.id), staleTime: "static" }),
       queryClient.query({ ...permissionsQuery(), staleTime: "static" }),
     ]);
+    if (!change) throw notFound();
     return { crumb: change.state.title };
   },
   // The review beside its floating decision takes the width there is.
   staticData: { wide: true },
   head: ({ loaderData }) => pageTitle(loaderData?.crumb),
   component: ChangePage,
-  // getChange throws the router's not-found for a draft with no change.
+  // The loader's, for a draft with no change.
   notFoundComponent: () => <Notice variant="destructive">No change {Route.useParams().id}.</Notice>,
 });
 
@@ -47,6 +48,8 @@ export const Route = createFileRoute("/changes/$id")({
 function ChangePage() {
   const { id } = Route.useParams();
   const { data: change, error } = useSuspenseQuery(changeQuery(id));
+  // The loader found it; a change once opened is never gone.
+  if (!change) throw notFound();
   const { state } = change;
   return (
     <>

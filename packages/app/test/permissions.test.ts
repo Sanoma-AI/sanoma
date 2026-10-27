@@ -18,7 +18,7 @@ import { describeConfig, readPeople } from "@sanoma-ai/workflows/describe";
 import { personsOf } from "@sanoma-ai/workflows/shared";
 import { defineFake } from "@sanoma-ai/workflows/fake";
 import { executablePath, launch } from "puppeteer-core";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { fakeRemote } from "../../workflows/test/fakes/remote.ts";
 import people from "../../workflows/test/fixtures/people/sanoma.config.ts";
@@ -93,6 +93,12 @@ const remote = fakeRemote();
 /** The repository's remote, as the app's source reports it: none until a test sets one. */
 let origin: string | undefined;
 const source: Source = { root, commit: () => undefined, head: () => "HEAD", remoteUrl: async () => origin };
+const { enforcement } = remote.host;
+// Each test starts with no remote and the fake host's own answer.
+afterEach(() => {
+  origin = undefined;
+  remote.host.enforcement = enforcement;
+});
 
 const config: SanomaConfig = { workflows: [refund], connectors: [withFake(shop, fake), remote.connector], root };
 // The root's policy, made from policies/refunds.cedar.
@@ -168,21 +174,15 @@ describe("what the host enforces", () => {
       check: false,
       reason: "a fake host enforces nothing",
     });
-    const { enforcement } = remote.host;
     remote.host.enforcement = async () => {
       throw new Error("the host is down");
     };
-    try {
-      expect(await hostEnforcement(context)).toEqual({
-        host: "fakegit",
-        pullRequest: false,
-        check: false,
-        reason: "the host is down",
-      });
-    } finally {
-      remote.host.enforcement = enforcement;
-      origin = undefined;
-    }
+    expect(await hostEnforcement(context)).toEqual({
+      host: "fakegit",
+      pullRequest: false,
+      check: false,
+      reason: "the host is down",
+    });
   });
 });
 
@@ -252,23 +252,17 @@ describe("the Permissions page", () => {
 
   it("says under the grid whether the host requires a merge, and nothing without a remote", async () => {
     expect(await permissionsPage(app)).not.toContain("the sanoma check on main");
-    const { enforcement } = remote.host;
     origin = remote.url;
-    try {
-      expect(await permissionsPage(app)).toContain(
-        "fakegit does not require a pull request or the sanoma check on main. a fake host enforces nothing Until then a push around Sanoma lands in the ledger as a gap.",
-      );
-      // A ruleset requiring the pull request alone: what it lacks.
-      remote.host.enforcement = async () => ({ pullRequest: true, check: false });
-      expect(await permissionsPage(app)).toContain("fakegit does not require the sanoma check on main. Until then");
-      remote.host.enforcement = async () => ({ pullRequest: true, check: true });
-      const html = await permissionsPage(app);
-      expect(html).toContain("fakegit requires a pull request and the sanoma check on main.");
-      expect(html).not.toContain("Until then");
-    } finally {
-      remote.host.enforcement = enforcement;
-      origin = undefined;
-    }
+    expect(await permissionsPage(app)).toContain(
+      "fakegit does not require a pull request or the sanoma check on main. a fake host enforces nothing Until then a push around Sanoma lands in the ledger as a gap.",
+    );
+    // A ruleset requiring the pull request alone: what it lacks.
+    remote.host.enforcement = async () => ({ pullRequest: true, check: false });
+    expect(await permissionsPage(app)).toContain("fakegit does not require the sanoma check on main. Until then");
+    remote.host.enforcement = async () => ({ pullRequest: true, check: true });
+    const html = await permissionsPage(app);
+    expect(html).toContain("fakegit requires a pull request and the sanoma check on main.");
+    expect(html).not.toContain("Until then");
   });
 
   it("picks a declared person, shows their groups, a cell's rule in a sheet, and New run's will-ask line, in Chrome", async (ctx) => {

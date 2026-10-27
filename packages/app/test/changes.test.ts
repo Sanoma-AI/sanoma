@@ -2,7 +2,7 @@ import { waitFor } from "@sanoma-ai/testing";
 import type { CheckResult } from "@sanoma-ai/workflows";
 import { CHANGE_MERGE, changeIdOf } from "@sanoma-ai/workflows/shared";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createMemoryHistory, createRootRoute, createRouter, notFound, RouterProvider } from "@tanstack/react-router";
+import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { createElement, type ReactNode } from "react";
 import { renderToString } from "react-dom/server";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -269,18 +269,13 @@ describe("the draft card", () => {
 
   /**
    * The card as the server renders it, in a router and over a query cache holding whether the
-   * repository has a remote and the draft's change: `none` when it has none (the router's not-found).
+   * repository has a remote and the draft's change (null when it has none; unread when left out).
    */
-  const render = async (draft: DraftCard, { remote = true, change }: { remote?: boolean; change?: unknown }) => {
+  const render = async (draft: DraftCard, { remote = true, change }: { remote?: boolean; change?: object | null }) => {
     const { DraftCardView, changeQuery, remoteQuery } = await load();
     const queryClient = new QueryClient();
     queryClient.setQueryData(remoteQuery().queryKey, remote);
-    const { queryKey } = changeQuery(draft.draft);
-    if (change === "none") {
-      // Settled as the browser's would be once its fetch on mount answers not-found again.
-      queryClient.setQueryDefaults(queryKey, { retryOnMount: false });
-      await queryClient.prefetchQuery({ queryKey, queryFn: () => Promise.reject(notFound()), retry: false });
-    } else if (change) queryClient.setQueryData(queryKey, change);
+    if (change !== undefined) queryClient.setQueryData(changeQuery(draft.draft).queryKey, change);
     const router = createRouter({
       routeTree: createRootRoute({
         component: () =>
@@ -293,20 +288,20 @@ describe("the draft card", () => {
   };
 
   it("offers Send for review once the checks pass, and says why not before", async () => {
-    const unchecked = await render(card(), { change: "none" });
+    const unchecked = await render(card(), { change: null });
     // Disabled, yet focusable, so its tip still shows.
     expect(unchecked).toMatch(
       /<button(?=[^>]*data-disabled="")[^>]*aria-disabled="true"[^>]*>Send for review<\/button>/,
     );
     expect(unchecked).toContain("Run the checks first: ask the agent to check the draft.");
     const failing = await render(card({ ok: false, problems: ["workflows/refund.ts:1:1: no"], warnings: [] }), {
-      change: "none",
+      change: null,
     });
     expect(failing).toMatch(/<button[^>]*aria-disabled="true"[^>]*>Send for review<\/button>/);
     expect(failing).toContain("The checks fail: fix what they find first.");
-    const empty = await render({ ...card(passing), files: [], summary: "" }, { change: "none" });
+    const empty = await render({ ...card(passing), files: [], summary: "" }, { change: null });
     expect(empty).toContain("Nothing is committed on the draft yet.");
-    const ready = await render(card(passing), { change: "none" });
+    const ready = await render(card(passing), { change: null });
     expect(ready).toMatch(/<button[^>]*aria-disabled="false"[^>]*>Send for review<\/button>/);
     expect(ready).not.toContain("Merge the branch to apply it.");
   });

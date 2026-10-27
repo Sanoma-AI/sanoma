@@ -93,9 +93,8 @@ export function loopTools(turn: ToolsTurn) {
     await writeFile(full, text);
     const file = await inRepo(root, full);
     const committed = await commit({ paths: [file], message, author: principal.id });
-    if (committed) await tellCommits(app.client, chat.id, principal);
     checked = undefined;
-    await showCard();
+    await Promise.all([committed && tellCommits(app.client, chat.id, principal), showCard()]);
     return { path: file, committed: committed?.revision ?? "nothing changed" };
   };
 

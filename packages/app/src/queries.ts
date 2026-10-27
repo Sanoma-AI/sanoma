@@ -16,7 +16,7 @@ import {
   type Saved,
 } from "@sanoma-ai/workflows/shared";
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { isNotFound, linkOptions, useNavigate } from "@tanstack/react-router";
+import { linkOptions, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -578,16 +578,14 @@ export const changesQuery = (query: ChangesQuery = {}) =>
   });
 
 /**
- * The change of the draft `id` (`getChange`), under RUNS_KEY, so Publish and Send for review
- * refresh it: polled as `changePoll` says. A draft with no change is the router's not-found,
- * neither tried again nor polled.
+ * The change of the draft `id` (`getChange`), null when it has none, under RUNS_KEY, so Publish
+ * and Send for review refresh it: polled as `changePoll` says, a draft with none not at all.
  */
 export const changeQuery = (id: string) =>
   queryOptions({
     queryKey: [...RUNS_KEY, "change", id],
     queryFn: () => getChange({ data: { id } }),
-    retry: (failures, err) => !isNotFound(err) && failures < 3,
-    refetchInterval: (q) => (q.state.data ? changePoll(q.state.data) : isNotFound(q.state.error) ? false : POLL_MS),
+    refetchInterval: ({ state: { data } }) => (data === null ? false : data ? changePoll(data) : POLL_MS),
   });
 
 /**
