@@ -22,6 +22,8 @@ import { toast } from "sonner";
 import { z } from "zod";
 import {
   type AvailableConnectors,
+  type ChangeDetail,
+  type ChangesQuery,
   type CredentialsResponse,
   pendingApprovals,
   type PreviewQuery,
@@ -34,6 +36,8 @@ import {
 import {
   getActor,
   getAvailableConnectors,
+  getChange,
+  getChanges,
   getChat,
   getChats,
   getConfig,
@@ -44,6 +48,7 @@ import {
   getLastRuns,
   getNextFires,
   getPermissions,
+  getRemote,
   getRun,
   getRuns,
   getScenarios,
@@ -538,6 +543,35 @@ export const runQuery = (id: string) =>
       return !status || isEnded(status) ? false : POLL_MS;
     },
   });
+
+/** True once a change can no longer move: merged or closed. */
+const settled = (change: Pick<ChangeDetail, "state">) =>
+  change.state.phase === "merged" || change.state.phase === "closed";
+
+/**
+ * The changes, newest first (`ChangesQuery`). Under RUNS_KEY, so a decision refreshes them;
+ * polled every `POLL_MS` while one of them can still move, else every 30 s.
+ */
+export const changesQuery = (query: ChangesQuery = {}) =>
+  queryOptions({
+    queryKey: [...RUNS_KEY, "changes", query],
+    queryFn: () => getChanges({ data: query }),
+    refetchInterval: (q) => (q.state.data?.every(settled) ? 30_000 : POLL_MS),
+  });
+
+/** The change of the draft `id` (`getChange`). Under RUNS_KEY, so Publish refreshes it; polled until it is merged or closed. */
+export const changeQuery = (id: string) =>
+  queryOptions({
+    queryKey: [...RUNS_KEY, "change", id],
+    queryFn: () => getChange({ data: { id } }),
+    refetchInterval: (q) => (q.state.data && settled(q.state.data) ? false : POLL_MS),
+  });
+
+/**
+ * Whether the repository has a remote: the bar's Changes. Rarely changes (going live adds one), so
+ * read again once a minute at most.
+ */
+export const remoteQuery = () => queryOptions({ queryKey: ["remote"], queryFn: () => getRemote(), staleTime: 60_000 });
 
 /** Every collection's records are under this key, each collection's under its name after it. */
 export const DATA_KEY = ["data"] as const;

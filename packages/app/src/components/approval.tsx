@@ -24,9 +24,11 @@ import { Textarea } from "#/components/ui/textarea.tsx";
 import { approverLabel, isEnded, OWN_CHANGE } from "@sanoma-ai/workflows/shared";
 import { type DecideRequest, errorBodyOf } from "../api.ts";
 import { asApplyPlan } from "../lib/apply-plan.ts";
+import { asChangeRef } from "../lib/changes.ts";
 import { decideFn } from "../functions.ts";
 import { configQuery, opsById, RUNS_KEY, runLink, runQuery } from "../queries.ts";
 import { ApplyPlanView } from "./apply-plan.tsx";
+import { ChangeGlance } from "./change-glance.tsx";
 import {
   ALONE,
   DecisionNote,
@@ -45,12 +47,20 @@ import {
 
 type Decision = DecideRequest["decision"];
 
+/** What the two decisions are called on their buttons and in the dialog: Approve and Reject, unless a page names them (a change's Publish). */
+export interface Verbs {
+  approve: string;
+  reject: string;
+}
+const VERBS: Verbs = { approve: "Approve", reject: "Reject" };
+
 /** The run an approval belongs to: an approval left pending by a run that ended gets no controls. */
 type ApprovalRun = Pick<RunSummary, "runId" | "status" | "workflow" | "startedBy">;
 
 /**
  * What an approval is for and who may decide, as siblings for a flex column: its facts, its
- * details, its links, the held call's input and the messages it ignored.
+ * details, its links, the held call's input and the messages it ignored. A change's Publish
+ * (`asChangeRef`) links its change and shows it at a glance in place of its details.
  */
 export function ApprovalDetails({
   run,
@@ -62,6 +72,7 @@ export function ApprovalDetails({
   /** The run is a fact too, linked. */
   showRun?: boolean;
 }) {
+  const change = asChangeRef(approval.details);
   return (
     <>
       <Facts>
@@ -75,6 +86,13 @@ export function ApprovalDetails({
         <Fact label="Asked">
           <When at={approval.requestedAt} />
         </Fact>
+        {change && (
+          <Fact label="Change">
+            <Link to="/changes/$id" params={{ id: change.change.id }}>
+              {change.change.title}
+            </Link>
+          </Fact>
+        )}
         {showRun && (
           <Fact label="Run">
             <Link {...runLink(run)}>
@@ -107,7 +125,7 @@ export function ApprovalDetails({
           </Fact>
         )}
       </Facts>
-      <Details details={approval.details} />
+      {change ? <ChangeGlance change={change} /> : <Details details={approval.details} />}
       {approval.links?.length ? (
         <ItemGroup>
           {approval.links.map((href) => (
@@ -158,7 +176,15 @@ function Details({ details }: { details: ApprovalState["details"] }) {
  * A pending approval's Approve and Reject, each opening its dialog, as siblings for a wrapping
  * row; or, once its run has ended, why it can no longer be decided.
  */
-export function ApprovalDecision({ run, approval }: { run: ApprovalRun; approval: ApprovalState }) {
+export function ApprovalDecision({
+  run,
+  approval,
+  verbs = VERBS,
+}: {
+  run: ApprovalRun;
+  approval: ApprovalState;
+  verbs?: Verbs;
+}) {
   // The decision stays put while the dialog animates closed, so its verb and colour do not flip.
   const [decision, setDecision] = useState<Decision>("approve");
   const [deciding, setDeciding] = useState(false);
@@ -177,11 +203,11 @@ export function ApprovalDecision({ run, approval }: { run: ApprovalRun; approval
     <>
       <Button disabled={waiting !== undefined} onClick={() => decide("approve")}>
         <CheckIcon aria-hidden="true" data-icon="inline-start" />
-        Approve
+        {verbs.approve}
       </Button>
       <Button variant="destructive" disabled={waiting !== undefined} onClick={() => decide("reject")}>
         <XIcon aria-hidden="true" data-icon="inline-start" />
-        Reject
+        {verbs.reject}
       </Button>
       {waiting && (
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -195,6 +221,7 @@ export function ApprovalDecision({ run, approval }: { run: ApprovalRun; approval
         approval={approval}
         open={deciding}
         decision={decision}
+        verbs={verbs}
         onClose={() => setDeciding(false)}
         onQueued={(chosen) => setQueued({ decision: chosen, status: run.status })}
       />
@@ -220,12 +247,13 @@ function Covers({ covers }: { covers: string[] }) {
   );
 }
 
-/** Approve or Reject with an optional note. Open to anyone: the server says who may decide. */
+/** Approve or Reject (or the page's `verbs`) with an optional note. Open to anyone: the server says who may decide. */
 function DecideDialog({
   runId,
   approval,
   open,
   decision,
+  verbs = VERBS,
   onClose,
   onQueued,
 }: {
@@ -233,6 +261,7 @@ function DecideDialog({
   approval: ApprovalState;
   open: boolean;
   decision: Decision;
+  verbs?: Verbs;
   onClose: () => void;
   /** The run has not read the decision yet: it stays queued, and the card says so. */
   onQueued: (decision: Decision) => void;
@@ -272,7 +301,7 @@ function DecideDialog({
           ? `You started this run, so someone else in ${approverLabel(body.approver ?? approval.approver)} must decide this`
           : `Only ${approverLabel(body.approver ?? approval.approver)} can decide this`
         : mutation.error.message;
-  const verb = decision === "reject" ? "Reject" : "Approve";
+  const verb = verbs[decision];
 
   return (
     <Dialog

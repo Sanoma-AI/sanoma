@@ -2,6 +2,7 @@ import type {
   ApplyPlan,
   ApplyResult,
   ApprovalState,
+  ChangeView,
   CredentialStatus,
   ErrorCode,
   InputIssue,
@@ -132,6 +133,21 @@ export const RunsQuery = z.object({
   workflow: z.string().min(1).optional(),
 });
 export type RunsQuery = z.input<typeof RunsQuery>;
+
+/** What `getChanges` takes: the open changes (not ended), the done ones, or all; at most `limit` (20), newest first. */
+export const ChangesQuery = z.object({
+  open: z.boolean().optional(),
+  limit: z.coerce.number().int().min(1).max(RUNS_LIMIT.max).optional(),
+});
+export type ChangesQuery = z.input<typeof ChangesQuery>;
+
+/**
+ * A change as `getChange` reads it: the client's `ChangeView`, and the config's workflows whose
+ * files it edits, by name (the workflows its stranded runs are of).
+ */
+export interface ChangeDetail extends ChangeView {
+  edits: string[];
+}
 
 /** One run as `getRun` reads it: the run, its ledger, its approvals and a sandbox run's checks. */
 export interface RunDetail {

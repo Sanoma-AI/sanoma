@@ -1,3 +1,4 @@
+import { CHANGE_WORKFLOW } from "@sanoma-ai/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { PlayIcon } from "@phosphor-icons/react/dist/csr/Play";
@@ -14,6 +15,7 @@ import {
   When,
 } from "#/components/common.tsx";
 import { WorkflowView } from "#/components/workflow-view.tsx";
+import { changeIdOf } from "#/lib/changes.ts";
 import { RUN_TONE } from "#/lib/tone.ts";
 import { runName, starterName } from "#/api.ts";
 import { runLink, runQuery, useWorkflow } from "#/queries.ts";
@@ -42,7 +44,8 @@ export const Route = createFileRoute("/workflows/$name/runs/$id")({
 
 /**
  * One run of the workflow: under the workflow's crumbs, its name, status and who started it when,
- * New run (on the workflow's page), then its `WorkflowView`: the banner of a waiting or failed
+ * New run (on the workflow's page; a change's run has Review, its page, instead: only sending a
+ * draft for review starts one), then its `WorkflowView`: the banner of a waiting or failed
  * run, the graph with the run's facts and approvals floating over it, then Ledger and Code.
  */
 function RunPage() {
@@ -57,17 +60,26 @@ function RunPage() {
   const last = ledger.at(-1);
   const at = last?.type === "sleep.started" && last.until <= dataUpdatedAt ? last.until : 0;
   const reading = useMemo(() => ({ ...data, at }), [data, at]);
+  const change = run.workflow === CHANGE_WORKFLOW ? changeIdOf(run.runId) : undefined;
   return (
     <>
       <CrumbHeader
         action={
-          workflow && (
+          change !== undefined ? (
             <ButtonLink size="sm">
-              <Link to="/workflows/$name" params={{ name: run.workflow }} search={{ new: true }}>
-                <PlayIcon aria-hidden="true" data-icon="inline-start" />
-                New run
+              <Link to="/changes/$id" params={{ id: change }}>
+                Review
               </Link>
             </ButtonLink>
+          ) : (
+            workflow && (
+              <ButtonLink size="sm">
+                <Link to="/workflows/$name" params={{ name: run.workflow }} search={{ new: true }}>
+                  <PlayIcon aria-hidden="true" data-icon="inline-start" />
+                  New run
+                </Link>
+              </ButtonLink>
+            )
           )
         }
       >

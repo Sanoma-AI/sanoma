@@ -9,7 +9,7 @@ import { CHAT_COOKIE, chatPref, type ChatPref } from "#/components/shell/prefs.t
 import { defaultLocaleOf, type PageLanguages, pageLanguages, usePageLanguages } from "#/lib/locales.ts";
 import { alternatesOf } from "#/site-path.ts";
 import { ActorContext, useActorState } from "../actor.ts";
-import { actorQuery, configQuery, waitingRunsQuery } from "../queries.ts";
+import { actorQuery, configQuery, remoteQuery, waitingRunsQuery } from "../queries.ts";
 import { pageHost, siteOrigin } from "../site-url.ts";
 // Phosphor's regular shield-check, the app's icon.
 import favicon from "../favicon.svg?url";
@@ -113,7 +113,8 @@ interface Prefs {
 
 /**
  * Who the server says is asking, in the first render: a deployment's login shows at once. And
- * the config, which every page reads and which cannot change while the app runs. Both stay in
+ * the config, which every page reads and which cannot change while the app runs, and whether the
+ * repository has a remote, which the bar's Changes shows by. They stay in
  * the query client, where the page reads them: a loader returns only what no query holds (here,
  * the `Prefs`), since the page carries loader data too.
  */
@@ -124,6 +125,7 @@ async function appLoader(queryClient: QueryClient): Promise<Prefs> {
   await Promise.all([
     queryClient.query({ ...actorQuery(), staleTime: "static" }),
     queryClient.query({ ...configQuery(), staleTime: "static" }),
+    queryClient.query(remoteQuery()),
   ]);
   return readPrefs();
 }

@@ -1,7 +1,7 @@
 // oxlint-disable-next-line import/no-unassigned-import
 import "@tanstack/react-start/server-only";
 import { readFile, writeFile } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { join, relative, sep } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import {
   type ApprovalState,
@@ -38,6 +38,8 @@ import {
   ApiError,
   type AppConfig,
   type CallRequest,
+  type ChangeDetail,
+  ChangesQuery,
   type ClearCredentialRequest,
   type CredentialsResponse,
   type DecideCall,
@@ -321,6 +323,41 @@ export const listRuns = ({ client }: AppContext, query: z.output<typeof RunsQuer
 export async function lastRuns({ client, description }: AppContext): Promise<Record<string, RunSummary>> {
   const latest = await Promise.all(description.workflows.map((wf) => client.runs({ workflow: wf.name, limit: 1 })));
   return Object.fromEntries(latest.flatMap(([run]) => (run ? [[run.workflow, run]] : [])));
+}
+
+/** The changes, newest first, open or done or all (`SanomaClient.changes`). */
+export const changes = ({ client }: AppContext, query: z.output<typeof ChangesQuery>) => client.changes(query);
+
+/**
+ * The change of the draft `id` (`SanomaClient.change`), with the config's workflows whose files
+ * it edits (`edits`), or the router's not-found when the draft has none.
+ */
+export async function change({ client, resolved, source }: AppContext, id: string): Promise<ChangeDetail> {
+  const view = await client.change(id);
+  if (!view) throw notFound();
+  const root = source?.root ?? resolved.root;
+  const touched = new Set(view.state.facts?.touches);
+  const edits =
+    root === undefined
+      ? []
+      : [...resolved.workflows.values()]
+          .filter((wf) => touched.has(relative(root, wf.file).split(sep).join("/")))
+          .map((wf) => wf.name);
+  return { ...view, edits };
+}
+
+/**
+ * Whether the repository has a remote (`Source.remoteUrl`): where a change is reviewed, so the bar
+ * shows Changes. Not the URL itself, which may carry a token. A repository git cannot read has
+ * none, logged, so every page's bar still renders.
+ */
+export async function hasRemote({ source }: AppContext): Promise<boolean> {
+  try {
+    return (await source?.remoteUrl?.()) !== undefined;
+  } catch (err) {
+    console.error("sanoma app: reading the repository's remote failed:", err);
+    return false;
+  }
 }
 
 /** The report of a drift run once it ends (`SanomaClient.driftReport`). */

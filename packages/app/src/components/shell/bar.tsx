@@ -2,6 +2,7 @@ import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { ClientOnly, Link, trimPathRight, useRouterState } from "@tanstack/react-router";
 import type { Icon as PhosphorIcon } from "@phosphor-icons/react";
 import { CubeIcon } from "@phosphor-icons/react/dist/csr/Cube";
+import { GitPullRequestIcon } from "@phosphor-icons/react/dist/csr/GitPullRequest";
 import { KeyIcon } from "@phosphor-icons/react/dist/csr/Key";
 import { PlugIcon } from "@phosphor-icons/react/dist/csr/Plug";
 import { RocketIcon } from "@phosphor-icons/react/dist/csr/Rocket";
@@ -20,7 +21,7 @@ import { type Site, useSites } from "#/lib/sites.ts";
 import type { Tone } from "#/lib/tone.ts";
 import { cn } from "#/lib/utils.ts";
 import type { AppConfig, Place } from "../../api.ts";
-import { configQuery, pendingOf, waitingRunsQuery } from "../../queries.ts";
+import { configQuery, pendingOf, remoteQuery, waitingRunsQuery } from "../../queries.ts";
 import { Tip, toneBadge } from "../kit.tsx";
 import { SiteIcon } from "../site-icon.tsx";
 import { NavUser } from "./nav-user.tsx";
@@ -32,11 +33,18 @@ import { NavUser } from "./nav-user.tsx";
  * An item in the bar: its page, lit there and on the pages under it (and on the page `also` names),
  * shown only `when` the config has those.
  */
-type Section = { to: string; label: string; icon: PhosphorIcon; when?: "data" | "policy" | "live"; also?: string };
+type Section = {
+  to: string;
+  label: string;
+  icon: PhosphorIcon;
+  when?: "changes" | "data" | "policy" | "live";
+  also?: string;
+};
 
 /** What happens, across the company's apps: Sanoma's own pages. */
 const WORK: Section[] = [
   { to: "/inbox", label: "Inbox", icon: TrayIcon },
+  { to: "/changes", label: "Changes", icon: GitPullRequestIcon, when: "changes" },
   { to: "/workflows", label: "Workflows", icon: TreeStructureIcon },
 ];
 
@@ -75,13 +83,15 @@ const siteTile = ({ title, icon, pages }: Site, isPublic: boolean, lit: boolean)
 /**
  * The bar's groups, split by a short rule: Inbox and Workflows; the company's sites, a group for
  * the root's and then one for each app's, by the app's name (a site with no page it can link to
- * left out); then Setup. Data shows with collections, or with sites, its page leading to theirs;
- * Permissions with a policy; Go live but in a demo.
+ * left out); then Setup. Changes shows when the repository has a remote (a change is reviewed
+ * there); Data with collections, or with sites, its page leading to theirs; Permissions with a
+ * policy; Go live but in a demo.
  */
 function useGroups(): Tile[][] {
   const { data: has } = useSuspenseQuery({ ...configQuery(), select: selectBar });
+  const { data: remote } = useSuspenseQuery(remoteQuery());
   const sites = useSites();
-  const shown = { data: has.data || sites.length > 0, policy: has.policy, live: has.live };
+  const shown = { changes: remote, data: has.data || sites.length > 0, policy: has.policy, live: has.live };
   const path = useRouterState({ select: ({ location }) => trimPathRight(location.pathname) });
   const section = ({ to, label, icon: Icon, also }: Section): Tile => ({
     to,
@@ -95,7 +105,7 @@ function useGroups(): Tile[][] {
     (site) => site.app ?? "",
   );
   return [
-    WORK.map(section),
+    WORK.filter((item) => !item.when || shown[item.when]).map(section),
     ...[...byApp.keys()]
       .toSorted()
       .map((app) =>
