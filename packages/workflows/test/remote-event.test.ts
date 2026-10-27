@@ -1,54 +1,26 @@
 import { useTestApp } from "@sanoma-ai/testing/harness";
 import { fakeHost, testRepository } from "@sanoma-ai/testing/host";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import {
-  type ChangeReport,
-  type Connector,
-  memoryLedger,
-  type RemoteEvent,
-  SanomaClient,
-  type Source,
-} from "../src/index.ts";
+import { type ChangeReport, memoryLedger, type RemoteEvent, SanomaClient } from "../src/index.ts";
 import { fakeRemote, memorySource, sha } from "./fakes/remote.ts";
-import { freshDatabase, pending, rootWith, waitFor } from "./harness.ts";
+import { ALICE, freshDatabase, pending, rootWith, testhostInfra, waitFor } from "./harness.ts";
 
 // Needs Postgres: `pnpm db:up`. `SanomaClient.remoteEvent`, what a host's webhook says happened,
-// over a fake host and a repository in memory: a push to a draft's branch plans its change again,
-// a closed pull request ends it, a push to `main` applies the declared hosts; each once, however
-// often it is delivered.
+// over a fake host and a repository in memory, on the test client, which is given the worker's
+// repository: a push to a draft's branch plans its change again, a closed pull request ends it, a
+// push to `main` applies the declared hosts; each once, however often it is delivered.
 
-const PEOPLE = `import { sanoma } from "sanoma/resources";
-
-export const alice = sanoma.person({ id: "alice" });
-`;
 const repo = { owner: "acme", name: "company" };
 const BY = { by: "host-check" };
 
-/** A test worker on a fresh database over `connectors` and `root`, given `source`, and a client given it too. */
-function useRemoteApp(connectors: Connector<any, any>[], root: string, suffix: string, source: Source) {
-  const app = useTestApp(
-    { workflows: [], connectors, ledger: memoryLedger(), root },
-    { databaseUrl: freshDatabase(suffix), source },
-  );
-  let client: SanomaClient | undefined;
-  beforeAll(async () => {
-    client = await SanomaClient.connect(app.config, { source });
-  });
-  afterAll(() => client?.close());
-  return {
-    app,
-    get client() {
-      return client!;
-    },
-  };
-}
-
 describe("remoteEvent on a change", () => {
-  const root = rootWith({ "resources/people.ts": PEOPLE });
+  const root = rootWith({ "resources/people.ts": ALICE });
   const remote = fakeRemote();
   const source = memorySource({ root, remote });
-  const used = useRemoteApp([remote.connector], root, "remote-event", source.source);
-  const { app } = used;
+  const app = useTestApp(
+    { workflows: [], connectors: [remote.connector], ledger: memoryLedger(), root },
+    { databaseUrl: freshDatabase("remote-event"), source: source.source },
+  );
   afterAll(() => source.remove());
 
   const open = async (id: string) => {
@@ -63,9 +35,9 @@ describe("remoteEvent on a change", () => {
     const head = sha("someone's commit");
     remote.push("draft/pushed", head);
     const event: RemoteEvent = { kind: "pushed", repo, branch: "draft/pushed", head };
-    await used.client.remoteEvent(event, BY);
+    await app.client.remoteEvent(event, BY);
     // Delivered again: the draft holds the head already, so nothing more.
-    await used.client.remoteEvent(event, BY);
+    await app.client.remoteEvent(event, BY);
     expect(source.follows).toEqual([{ url: remote.url, token: expect.any(String), ref: "draft/pushed" }]);
     expect(await source.source.head("draft/pushed")).toBe(head);
 
@@ -91,11 +63,11 @@ describe("remoteEvent on a change", () => {
       { kind: "closed", repo, branch: "draft/none", number: 99, merged: false },
       { kind: "pushed", repo: { owner: "acme", name: "other" }, branch: "main", head: sha("other") },
     ] satisfies RemoteEvent[]) {
-      await used.client.remoteEvent(event, BY);
+      await app.client.remoteEvent(event, BY);
     }
     expect(source.follows.length).toBe(follows);
     // No host is declared: a push to main moves the checkout, and applies nothing.
-    await used.client.remoteEvent({ kind: "pushed", repo, branch: "main", head: sha("main") }, BY);
+    await app.client.remoteEvent({ kind: "pushed", repo, branch: "main", head: sha("main") }, BY);
     expect(source.follows.slice(follows)).toEqual([{ url: remote.url, token: expect.any(String), ref: "main" }]);
     expect(await app.client.runs({ workflow: "apply" }).catch(() => [])).toEqual([]);
     await app.client.decide(runId, { decision: "approve", by: { id: "alice" } });
@@ -114,21 +86,21 @@ describe("remoteEvent on a change", () => {
       merged: true,
       sha: merge,
     };
-    await used.client.remoteEvent(event, BY);
-    await used.client.remoteEvent(event, BY);
+    await app.client.remoteEvent(event, BY);
+    await app.client.remoteEvent(event, BY);
     await app.client.decide(runId, { decision: "approve", by: { id: "alice" } });
     const report = (await app.client.result(runId)) as ChangeReport;
     expect(report).toMatchObject({ outcome: "merged", sha: merge });
     expect(remote.merges.map((m) => m.number)).not.toContain(pr.number);
     // Ended: a late delivery does nothing.
-    await used.client.remoteEvent(event, BY);
+    await app.client.remoteEvent(event, BY);
   });
 
   it("tells a change its pull request closed on the host", async () => {
     const runId = await open("closed");
     const pr = remote.pullOf("draft/closed")!;
     remote.close(pr.number);
-    await used.client.remoteEvent(
+    await app.client.remoteEvent(
       { kind: "closed", repo, branch: "draft/closed", number: pr.number, merged: false },
       BY,
     );
@@ -140,7 +112,12 @@ describe("remoteEvent on a change", () => {
     const runId = await open("sourceless");
     const head = sha("sourceless");
     remote.push("draft/sourceless", head);
-    await app.client.remoteEvent({ kind: "pushed", repo, branch: "draft/sourceless", head }, BY);
+    const sourceless = await SanomaClient.connect(app.config);
+    try {
+      await sourceless.remoteEvent({ kind: "pushed", repo, branch: "draft/sourceless", head }, BY);
+    } finally {
+      await sourceless.close();
+    }
     expect(await source.source.head("draft/sourceless")).not.toBe(head);
     await app.client.changeEvent("sourceless", { kind: "close", by: "alice" }, { by: "alice" });
     await app.client.result(runId);
@@ -149,15 +126,7 @@ describe("remoteEvent on a change", () => {
 
 describe("remoteEvent on a push to main", () => {
   const git = testRepository();
-  const root = rootWith({
-    "resources/people.ts": PEOPLE,
-    "resources/infra.ts": [
-      'import { testhost } from "@sanoma-ai/testing-host/resources";',
-      "",
-      `export const app = testhost.app({ name: "company", source: ${JSON.stringify(git.url)}, ref: "main", port: 0 });`,
-      "",
-    ].join("\n"),
-  });
+  const root = rootWith({ "resources/people.ts": ALICE, "resources/infra.ts": testhostInfra(git.url) });
   // While `held`, the host does not start: an apply of it waits.
   let held: Promise<void> | undefined;
   const host = fakeHost(async () => {
@@ -166,8 +135,10 @@ describe("remoteEvent on a push to main", () => {
   });
   const remote = fakeRemote();
   const source = memorySource({ root, remote });
-  const used = useRemoteApp([host.connector, remote.connector], root, "remote-event-main", source.source);
-  const { app } = used;
+  const app = useTestApp(
+    { workflows: [], connectors: [host.connector, remote.connector], ledger: memoryLedger(), root },
+    { databaseUrl: freshDatabase("remote-event-main"), source: source.source },
+  );
   beforeAll(() => git.commit());
   afterAll(async () => {
     await host.close();
@@ -178,8 +149,8 @@ describe("remoteEvent on a push to main", () => {
   it("applies the declared hosts as the host check, once per pushed head", async () => {
     const head = await git.commit();
     const event: RemoteEvent = { kind: "pushed", repo, branch: "main", head };
-    await used.client.remoteEvent(event, BY);
-    await used.client.remoteEvent(event, BY);
+    await app.client.remoteEvent(event, BY);
+    await app.client.remoteEvent(event, BY);
     const runs = await app.client.runs({ workflow: "apply" });
     expect(runs).toEqual([
       expect.objectContaining({ runId: `deploy:${head}`, startedBy: expect.objectContaining({ id: "host-check" }) }),
@@ -200,7 +171,7 @@ describe("remoteEvent on a push to main", () => {
     await app.client.decide(runId, { decision: "approve", by: { id: "alice" } });
     await waitFor(async () => (await app.client.change("ship"))?.state.phase === "deploying");
     const merge = remote.branches.get("main")!;
-    await used.client.remoteEvent({ kind: "pushed", repo, branch: "main", head: merge }, BY);
+    await app.client.remoteEvent({ kind: "pushed", repo, branch: "main", head: merge }, BY);
     gate.resolve();
     expect(await app.client.result(runId, 60_000)).toMatchObject({
       outcome: "merged",

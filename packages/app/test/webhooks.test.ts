@@ -6,7 +6,7 @@ import { fakeHost, testRepository } from "@sanoma-ai/testing/host";
 import { memoryLedger, type RemoteEvent } from "@sanoma-ai/workflows";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { delivery, FAKE_WEBHOOK_SECRET, fakeRemote, memorySource, sha } from "../../workflows/test/fakes/remote.ts";
-import { freshDatabase, pending, rootWith, waitFor } from "../../workflows/test/harness.ts";
+import { ALICE, freshDatabase, pending, rootWith, testhostInfra, waitFor } from "../../workflows/test/harness.ts";
 import { type App, startApp } from "../src/index.ts";
 import type { AppContext } from "../src/context.ts";
 import { remoteWebhook } from "../src/server/webhooks.ts";
@@ -21,15 +21,7 @@ const SECRET = "webhook-secret-value";
 const repo = { owner: "acme", name: "company" };
 
 const git = testRepository();
-const root = rootWith({
-  "resources/people.ts": `import { sanoma } from "sanoma/resources";\n\nexport const alice = sanoma.person({ id: "alice" });\n`,
-  "resources/infra.ts": [
-    'import { testhost } from "@sanoma-ai/testing-host/resources";',
-    "",
-    `export const app = testhost.app({ name: "company", source: ${JSON.stringify(git.url)}, ref: "main", port: 0 });`,
-    "",
-  ].join("\n"),
-});
+const root = rootWith({ "resources/people.ts": ALICE, "resources/infra.ts": testhostInfra(git.url) });
 const host = fakeHost(async () => ({ url: "http://127.0.0.1:4100", stop: async () => {} }));
 const remote = fakeRemote();
 const source = memorySource({ root, remote });

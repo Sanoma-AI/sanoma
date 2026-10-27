@@ -196,6 +196,26 @@ export async function repositoryOf(
 }
 
 /**
+ * Fast-forwards the checkout to the host's `main` (`Source.follow`), as a deploy does first so the
+ * hosts and what apply reads are main's: the revision after, why it did not, or the error, never
+ * thrown (what is merged is merged; a deploy that cannot follow still applies).
+ */
+export async function followBase(
+  remotes: ReadonlyMap<string, RemoteHalf>,
+  secrets: Secrets,
+  source?: Source,
+): Promise<{ revision: string } | { skipped: string } | { error: string }> {
+  try {
+    const { source: at, url, host } = await repositoryOf(remotes, secrets, source);
+    if (!at.follow) return { skipped: "this repository cannot follow its remote" };
+    const moved = await at.follow({ url, token: await host.token(), ref: BASE });
+    return "revision" in moved ? { revision: moved.revision } : moved;
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+}
+
+/**
  * The driver of a change's operations, over the repository the worker was given (`source`, read
  * from the run) and its host (`remotes`, the connectors' remote halves: `remoteFor` its
  * `origin`, opened once and kept: `repositoryOf`).

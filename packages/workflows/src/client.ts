@@ -29,6 +29,7 @@ import {
   ChangeInput,
   type ChangeReport,
   type ChangeState,
+  followBase,
   initialChangeState,
   repositoryOf,
 } from "./change.ts";
@@ -43,6 +44,7 @@ import {
   parseOrThrow,
   PolicyDeniedError,
   SanomaError,
+  vendorCodeOf,
 } from "./errors.ts";
 import { insertRecord, type LedgerRecord, type OwnedLedger, ownedLedger } from "./ledger.ts";
 import { warn } from "./log.ts";
@@ -938,24 +940,27 @@ export class SanomaClient {
    *   or `closed`, as `by`. The run checks either on the host before it believes it.
    */
   async remoteEvent(event: RemoteEvent, options: { by: Principal | string }): Promise<void> {
+    const main = event.kind === "pushed" && event.branch === BASE;
+    const id = draftOf(event.branch);
+    if (!main && id === undefined) return;
     const repository = await this.repository();
     if (!repository || !sameRepo(repository.repo, event.repo)) return;
-    if (event.kind === "pushed" && event.branch === BASE) return this.deployPush(repository, event.head);
-    const id = draftOf(event.branch);
-    if (id === undefined) return;
-    const change = await this.change(id);
+    if (main) return this.deployPush(repository, event.head);
+    const change = await this.change(id!);
     if (!change || isEnded(change.status)) return;
     let told: ChangeEvent;
+    let key: string;
     if (event.kind === "closed") {
       // A pull request of an earlier change of the draft is not this one's.
       if (event.number !== change.state.pullRequest?.number) return;
       told = event.merged && event.sha !== undefined ? { kind: "merged", sha: event.sha } : { kind: "closed" };
+      key = `${event.number}:${event.sha ?? "closed"}`;
     } else {
       if (change.state.head === event.head || !(await this.fetched(repository, event.branch, event.head))) return;
       told = { kind: "commits" };
+      key = event.head;
     }
-    const key = event.kind === "pushed" ? event.head : `${event.number}:${event.sha ?? "closed"}`;
-    await this.changeEvent(id, told, { by: options.by, key: `${event.kind}:${event.branch}:${key}` }).catch(
+    await this.changeEvent(id!, told, { by: options.by, key: `${event.kind}:${event.branch}:${key}` }).catch(
       (err: unknown) => {
         // Ended, or gone, since it was read: nothing to tell.
         if (!["run_ended", "run_not_found"].includes(errorCode(err) ?? "")) throw err;
@@ -964,18 +969,33 @@ export class SanomaClient {
   }
 
   /** After a push of `head` to `main` (`remoteEvent`): the checkout follows it, then apply on the declared hosts. */
-  private async deployPush({ source, url, host }: Repository, head: string): Promise<void> {
+  private async deployPush({ source }: Repository, head: string): Promise<void> {
     const runId = `deploy:${head}`;
-    if (await this.run(runId)) return;
-    const open = await this.changes({ open: true, limit: 100 });
-    if (open.some(({ state }) => state.phase === "merging" || state.phase === "deploying")) return;
+    const [deployed, phases] = await Promise.all([this.run(runId), this.openChangePhases()]);
+    if (deployed || phases.some((phase) => phase === "merging" || phase === "deploying")) return;
     // First, as a change's deploy does: the hosts, and what apply reads, are then main's.
-    const moved = await (async () => source.follow?.({ url, token: await host.token(), ref: BASE }))().catch(
-      (err: unknown) => ({ skipped: errorMessage(err) }),
-    );
-    if (moved && "skipped" in moved) warn(`the checkout did not follow ${BASE} before its deploy: ${moved.skipped}`);
+    const moved = await followBase(this.config.remotes, this.storedSecrets, source);
+    if (!("revision" in moved)) {
+      warn(
+        `the checkout did not follow ${BASE} before its deploy: ${"skipped" in moved ? moved.skipped : moved.error}`,
+      );
+    }
     const hosts = await this.config.hosts();
     if (hosts.length) await this.apply({ only: hosts }, { startedBy: HOST_CHECK_AGENT, runId });
+  }
+
+  /** Where each open change is (`ChangeState.phase`), read from what its run last published. */
+  private async openChangePhases(): Promise<(ChangeState["phase"] | undefined)[]> {
+    const rows = await this.dbos.listWorkflows({
+      workflowName: CHANGE_WORKFLOW,
+      applicationName: this.config.appName,
+      status: dbosStatusesOf("queued", "running"),
+      loadInput: false,
+      loadOutput: false,
+    });
+    return Promise.all(
+      rows.map(async (r) => (await this.dbos.getEvent<ChangeState>(r.workflowID, CHANGE_EVENT, 0))?.phase),
+    );
   }
 
   /**
@@ -998,8 +1018,7 @@ export class SanomaClient {
     const { source } = this.options;
     if (!source) return undefined;
     return repositoryOf(this.config.remotes, this.storedSecrets, source).catch((err: unknown) => {
-      const code = (err as { vendorCode?: string }).vendorCode;
-      if (code === "no_remote" || code === "no_remote_half") return undefined;
+      if (["no_remote", "no_remote_half"].includes(vendorCodeOf(err) ?? "")) return undefined;
       throw err;
     });
   }

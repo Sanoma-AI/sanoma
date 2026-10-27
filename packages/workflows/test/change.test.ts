@@ -8,7 +8,7 @@ import { z } from "zod";
 import { lintWorkflow } from "../src/lint.ts";
 import { CHANGE_MERGE, type ChangeReport, defineWorkflow, type LedgerRecord, memoryLedger } from "../src/index.ts";
 import { fakeRemote, memorySource } from "./fakes/remote.ts";
-import { freshDatabase, pending, rootWith, waitFor } from "./harness.ts";
+import { freshDatabase, pending, rootWith, testhostInfra, waitFor } from "./harness.ts";
 
 // Needs Postgres: `pnpm db:up`. The change workflow end to end over a fake host and a repository
 // in memory: open, plan, hold, Publish, merge, deploy. The repository's root is this directory,
@@ -347,14 +347,7 @@ describe("the change workflow on a repository with no remote", () => {
 
 describe("the change workflow's deploy on a declared host", () => {
   const source = testRepository();
-  const root = rootWith({
-    "resources/infra.ts": [
-      'import { testhost } from "@sanoma-ai/testing-host/resources";',
-      "",
-      `export const app = testhost.app({ name: "company", source: ${JSON.stringify(source.url)}, ref: "main", port: 0 });`,
-      "",
-    ].join("\n"),
-  });
+  const root = rootWith({ "resources/infra.ts": testhostInfra(source.url) });
   const host = fakeHost(async () => ({ url: "http://127.0.0.1:4100", stop: async () => {} }));
   const remote = fakeRemote();
   const repo = memorySource({ root: here, remote });

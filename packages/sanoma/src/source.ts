@@ -90,7 +90,8 @@ const commitIn =
  */
 export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: string } = {}): Source {
   const git = (args: string[], env?: NodeJS.ProcessEnv) => gitIn(root, args, env);
-  const head = (ref = "HEAD") => git(["rev-parse", "--verify", `${ref}^{commit}`]);
+  /** The commit `ref` names, in the checkout at `cwd` (the root's by default). */
+  const head = (ref = "HEAD", cwd = root) => gitIn(cwd, ["rev-parse", "--verify", `${ref}^{commit}`]);
   /** Where the draft `id`'s checkout is. */
   const draftAt = (id: string) => join(root, ".sanoma", "drafts", draftId(id));
   /** Whether the local branch `branch` exists. */
@@ -104,9 +105,8 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
       entries.flatMap((entry) => {
         const fields = entry.split("\0");
         const path = fields.find((f) => f.startsWith("worktree "))?.slice("worktree ".length);
-        const id = fields
-          .find((f) => f.startsWith("branch refs/heads/draft/"))
-          ?.slice("branch refs/heads/draft/".length);
+        const branch = fields.find((f) => f.startsWith("branch refs/heads/"))?.slice("branch refs/heads/".length);
+        const id = branch === undefined ? undefined : draftOf(branch);
         return id && path === join(at, id) ? [[id, !fields.some((f) => f.startsWith("prunable"))] as const] : [];
       }),
     );
@@ -115,7 +115,7 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
   return {
     root,
     commit: commitIn(root),
-    head,
+    head: (ref) => head(ref),
     async push({ url, token, ref }) {
       await git(["push", "--quiet", "--", url, `refs/heads/${ref}:refs/heads/${ref}`], signedIn(token)).catch(
         withoutToken(`git push to ${url}`, token),
@@ -141,7 +141,7 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
           withoutToken(`git fetch from ${url}`, token),
         );
         // The commit fetched, pinned: anything else may rewrite FETCH_HEAD before the merge.
-        const fetched = await gitHere(["rev-parse", "--verify", "FETCH_HEAD^{commit}"]);
+        const fetched = await head("FETCH_HEAD", cwd);
         if (!(await holds(cwd, ["merge-base", "--is-ancestor", "HEAD", fetched]))) {
           return { skipped: `${ref} has commits ${url} does not` };
         }

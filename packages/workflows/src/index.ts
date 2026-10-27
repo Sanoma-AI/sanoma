@@ -131,6 +131,7 @@ export {
   ApprovalPendingError,
   errorCode,
   type ErrorCode,
+  vendorCodeOf,
   type ErrorInfo,
   type InputIssue,
   invalidInput,

@@ -12,6 +12,7 @@ import {
   type ChangeFacts,
   type ChangeState,
   type ChangeVerified,
+  followBase,
   repositoryOf,
   isRules,
   sourceOfRun,
@@ -237,20 +238,10 @@ export function changeSteps({ remotes, hosts }: ChangeStepsOptions): ChangeSteps
     async deploy() {
       const run = runNow();
       // The checkout moves to the merge first, so the hosts and what apply reads are the merged ones.
-      const follow = await DBOS.runStep(
-        async (): Promise<ChangeDeploy["follow"]> => {
-          try {
-            const { source, url, host } = await repositoryOf(remotes, run.state.secrets);
-            if (!source.follow) return { skipped: "this repository cannot follow its remote" };
-            const moved = await source.follow({ url, token: await host.token(), ref: "main" });
-            return "revision" in moved ? { revision: moved.revision } : moved;
-          } catch (err) {
-            // Merged already: a deploy that fails is the change's to report, not a failed run.
-            return { error: errorMessage(err) };
-          }
-        },
-        { name: "change:follow" },
-      );
+      // Merged already: a deploy that fails is the change's to report, not a failed run.
+      const follow: ChangeDeploy["follow"] = await DBOS.runStep(() => followBase(remotes, run.state.secrets), {
+        name: "change:follow",
+      });
       const declared = run.state.workflows.has(APPLY_WORKFLOW)
         ? await DBOS.runStep(hosts, { name: "change:hosts" })
         : [];
