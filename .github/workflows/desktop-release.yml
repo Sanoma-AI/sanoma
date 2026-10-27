@@ -60,7 +60,7 @@ jobs:
             node_arch=$(lipo -archs "$app/Contents/Resources/node/node")
             [ "$node_arch" = "${pair##*:}" ] || { echo "::error::$app carries a $node_arch Node"; exit 1; }
           done
-      # Forge names the dmg `Sanoma-<version>-<arch>.dmg` and the zip `Sanoma-darwin-<arch>-<version>.zip`:
+      # Forge writes dmg/<arch>/Sanoma-<version>-<arch>.dmg and zip/darwin/<arch>/Sanoma-darwin-<arch>-<version>.zip:
       # both are given the dmg's form, which the README's download steps name.
       - name: Collect the installers
         working-directory: packages/desktop/out/make
@@ -69,7 +69,7 @@ jobs:
         run: |
           mkdir ../release
           for arch in arm64 x64; do
-            cp "Sanoma-$VERSION-$arch.dmg" ../release/
+            cp "dmg/$arch/Sanoma-$VERSION-$arch.dmg" ../release/
             cp "zip/darwin/$arch/Sanoma-darwin-$arch-$VERSION.zip" "../release/Sanoma-$VERSION-$arch.zip"
           done
           ls -l ../release

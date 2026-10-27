@@ -68,7 +68,10 @@ const config: ForgeConfig = {
     new FusesPlugin({
       version: FuseVersion.V1,
       [FuseV1Options.RunAsNode]: false,
-      [FuseV1Options.EnableCookieEncryption]: true,
+      // Off while the app is signed ad hoc: the key lives in a Keychain item tied to the signature,
+      // which changes with every build, so each update would ask for Keychain access (and a denial
+      // signs the user out of every company). Turn it on with the Developer ID; it is one-way.
+      [FuseV1Options.EnableCookieEncryption]: false,
       [FuseV1Options.EnableNodeOptionsEnvironmentVariable]: false,
       [FuseV1Options.EnableNodeCliInspectArguments]: false,
       [FuseV1Options.EnableEmbeddedAsarIntegrityValidation]: true,
