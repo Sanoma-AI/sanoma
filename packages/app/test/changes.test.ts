@@ -161,7 +161,8 @@ describe("the Changes section", () => {
     expect(html).toMatch(/<dt[^>]*>Merged<\/dt>/);
     expect(html).not.toContain("Rejecting closes the change.");
     const done = await fixture.page("/changes?show=done");
-    expect(done.html).toContain('href="/changes/rules"');
+    // One row per draft: its latest run's.
+    expect(done.html.match(/href="\/changes\/rules"/g)).toHaveLength(1);
   });
 
   it("is not found for a draft with no change", async () => {

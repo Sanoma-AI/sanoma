@@ -1,4 +1,4 @@
-import type { ApprovalState, RunStatus, RunSummary } from "@sanoma-ai/workflows";
+import type { ApprovalState, ChangeView, RunStatus, RunSummary } from "@sanoma-ai/workflows";
 import type {
   CollectionEntry,
   ConfigDescription,
@@ -22,7 +22,6 @@ import { toast } from "sonner";
 import { z } from "zod";
 import {
   type AvailableConnectors,
-  type ChangeDetail,
   type ChangesQuery,
   type CredentialsResponse,
   pendingApprovals,
@@ -544,27 +543,29 @@ export const runQuery = (id: string) =>
     },
   });
 
-/** True once a change can no longer move: merged or closed. */
-const settled = (change: Pick<ChangeDetail, "state">) =>
-  change.state.phase === "merged" || change.state.phase === "closed";
-
 /**
- * The changes, newest first (`ChangesQuery`). Under RUNS_KEY, so a decision refreshes them;
- * polled every `POLL_MS` while one of them can still move, else every 30 s.
+ * How often a change is read again: every `POLL_MS` while its run is under way on its own
+ * (opening to deploying), never once its run has ended (merged, closed, or failed), else every
+ * 30 s: waiting on Publish or blocked on an event, it moves when someone acts, and a decision
+ * from this tab refreshes it at once (RUNS_KEY).
  */
+const changePoll = ({ status, state }: Pick<ChangeView, "status" | "state">): number | false =>
+  isEnded(status) ? false : state.phase === "waiting" || state.phase === "blocked" ? 30_000 : POLL_MS;
+
+/** The changes, newest first (`ChangesQuery`), under RUNS_KEY: polled at the pace of the busiest (`changePoll`). */
 export const changesQuery = (query: ChangesQuery = {}) =>
   queryOptions({
     queryKey: [...RUNS_KEY, "changes", query],
     queryFn: () => getChanges({ data: query }),
-    refetchInterval: (q) => (q.state.data?.every(settled) ? 30_000 : POLL_MS),
+    refetchInterval: (q) => Math.min(30_000, ...(q.state.data ?? []).map((c) => changePoll(c) || 30_000)),
   });
 
-/** The change of the draft `id` (`getChange`). Under RUNS_KEY, so Publish refreshes it; polled until it is merged or closed. */
+/** The change of the draft `id` (`getChange`), under RUNS_KEY, so Publish refreshes it: polled as `changePoll` says. */
 export const changeQuery = (id: string) =>
   queryOptions({
     queryKey: [...RUNS_KEY, "change", id],
     queryFn: () => getChange({ data: { id } }),
-    refetchInterval: (q) => (q.state.data && settled(q.state.data) ? false : POLL_MS),
+    refetchInterval: (q) => (q.state.data ? changePoll(q.state.data) : POLL_MS),
   });
 
 /**

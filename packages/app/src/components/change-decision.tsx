@@ -2,7 +2,7 @@ import type { ChangeView } from "@sanoma-ai/workflows";
 import { APPLY_WORKFLOW, CHANGE_MERGE, CHANGE_WORKFLOW, DRIFT_WORKFLOW } from "@sanoma-ai/workflows/shared";
 import { Link } from "@tanstack/react-router";
 import { CardContent, CardFooter, CardHeader } from "#/components/ui/card.tsx";
-import { approverName } from "#/lib/changes.ts";
+import { approverName, isSettled, ruleOf } from "#/lib/changes.ts";
 import { cn } from "#/lib/utils.ts";
 import { runLink } from "../queries.ts";
 import { ApprovalDecision, type Verbs } from "./approval.tsx";
@@ -67,17 +67,16 @@ function Answer({ state }: { state: ChangeView["state"] }) {
   let said: string;
   if (state.phase === "merged") said = "Published";
   else if (state.phase === "closed") said = state.closedBy ? `Closed by ${state.closedBy}` : "Closed";
+  else if (decision?.answer === "deny") said = `Refused: ${decision.reason ?? "the policy denies it"}`;
+  else if (state.phase === "blocked") said = `Blocked: ${state.blocked ?? "it waits for a new commit"}`;
   else if (!decision) said = "The policy has not been asked yet";
-  else if (decision.answer === "deny") said = `Refused: ${decision.reason ?? "the policy denies it"}`;
   else if (decision.answer === "hold") said = `Publish waits for ${approverName(decision.approver!)}`;
   else said = decision.approver ? `Allowed: Publish is for ${approverName(decision.approver)}` : "Allowed";
-  const rule = decision?.title ?? decision?.reasons?.join(", ");
+  const rule = isSettled(state) ? undefined : ruleOf(decision);
   return (
     <div className="flex flex-col gap-0.5">
       <p className="font-medium">{said}</p>
-      {rule && state.phase !== "merged" && state.phase !== "closed" && (
-        <p className="text-sm text-muted-foreground">{rule}</p>
-      )}
+      {rule && <p className="text-sm text-muted-foreground">{rule}</p>}
     </div>
   );
 }

@@ -21,7 +21,7 @@ import { Field, FieldDescription, FieldError, FieldLabel } from "#/components/ui
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "#/components/ui/item.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
 import { Textarea } from "#/components/ui/textarea.tsx";
-import { approverLabel, isEnded, OWN_CHANGE } from "@sanoma-ai/workflows/shared";
+import { approverLabel, CHANGE_WORKFLOW, isEnded, OWN_CHANGE } from "@sanoma-ai/workflows/shared";
 import { type DecideRequest, errorBodyOf } from "../api.ts";
 import { asApplyPlan } from "../lib/apply-plan.ts";
 import { asChangeRef } from "../lib/changes.ts";
@@ -72,7 +72,7 @@ export function ApprovalDetails({
   /** The run is a fact too, linked. */
   showRun?: boolean;
 }) {
-  const change = asChangeRef(approval.details);
+  const change = run.workflow === CHANGE_WORKFLOW ? asChangeRef(approval.details) : undefined;
   return (
     <>
       <Facts>

@@ -11,7 +11,8 @@ import { changeQuery, permissionsQuery } from "../queries.ts";
  */
 export function ChangeGlance({ change }: { change: ChangeRef }) {
   const groups = groupFiles(filesOf(change.facts));
-  const { data: view } = useQuery(changeQuery(change.change.id));
+  // Read once for the grid: the glance does not follow the change as its page does.
+  const { data: view } = useQuery({ ...changeQuery(change.change.id), refetchInterval: false });
   const { data: main } = useQuery(permissionsQuery());
   const branch = view?.state.check?.grid;
   const grid = useMemo(() => (main && branch ? diffSummary(diffGrids(main, branch)) : []), [main, branch]);

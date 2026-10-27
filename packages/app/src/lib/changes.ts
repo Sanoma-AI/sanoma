@@ -19,6 +19,12 @@ export function phaseLabel(state: Pick<ChangeState, "phase" | "decision">): stri
   }
 }
 
+/** The rule behind the policy's answer to a change's merge: its title, else its ids. */
+export const ruleOf = (decision: ChangeState["decision"]) => decision?.title ?? decision?.reasons?.join(", ");
+
+/** True once a change can no longer move: merged or closed. */
+export const isSettled = (state: Pick<ChangeState, "phase">) => state.phase === "merged" || state.phase === "closed";
+
 /** The files a change edits: its `touches` without their parent directories. */
 export const filesOf = (facts: Pick<ChangeFacts, "touches"> | undefined): string[] =>
   facts?.touches.filter((path) => !path.endsWith("/")) ?? [];

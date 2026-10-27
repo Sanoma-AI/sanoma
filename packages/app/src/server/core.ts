@@ -326,7 +326,11 @@ export async function lastRuns({ client, description }: AppContext): Promise<Rec
 }
 
 /** The changes, newest first, open or done or all (`SanomaClient.changes`). */
-export const changes = ({ client }: AppContext, query: z.output<typeof ChangesQuery>) => client.changes(query);
+export async function changes({ client }: AppContext, query: z.output<typeof ChangesQuery>) {
+  // One row per draft, its latest run's: `changes` lists runs, and a draft's later run (`~2`) is the change now.
+  const seen = new Set<string>();
+  return (await client.changes(query)).filter(({ state }) => !seen.has(state.id) && seen.add(state.id));
+}
 
 /**
  * The change of the draft `id` (`SanomaClient.change`), with the config's workflows whose files
@@ -335,14 +339,13 @@ export const changes = ({ client }: AppContext, query: z.output<typeof ChangesQu
 export async function change({ client, resolved, source }: AppContext, id: string): Promise<ChangeDetail> {
   const view = await client.change(id);
   if (!view) throw notFound();
-  const root = source?.root ?? resolved.root;
+  // As the planner finds them: a workflow's file relative to the repository's root, in `touches`.
   const touched = new Set(view.state.facts?.touches);
-  const edits =
-    root === undefined
-      ? []
-      : [...resolved.workflows.values()]
-          .filter((wf) => touched.has(relative(root, wf.file).split(sep).join("/")))
-          .map((wf) => wf.name);
+  const edits = source
+    ? [...resolved.workflows.values()]
+        .filter((wf) => touched.has(relative(source.root, wf.file).split(sep).join("/")))
+        .map((wf) => wf.name)
+    : [];
   return { ...view, edits };
 }
 

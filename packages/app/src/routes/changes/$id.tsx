@@ -14,7 +14,7 @@ import {
   When,
 } from "#/components/common.tsx";
 import { PermissionsDiff } from "#/components/permissions-diff.tsx";
-import { filesOf, groupFiles, phaseLabel } from "#/lib/changes.ts";
+import { filesOf, groupFiles, isSettled, phaseLabel, ruleOf } from "#/lib/changes.ts";
 import { diffGrids } from "#/lib/grid-diff.ts";
 import { CHANGE_TONE } from "#/lib/tone.ts";
 import { type ChangeDetail, runName, starterName } from "#/api.ts";
@@ -84,11 +84,12 @@ function ChangePage() {
   );
 }
 
-/** Why the change cannot publish now: the policy's deny (its rule and reason), else what blocks it. */
+/** Why the change cannot publish now, until it is merged or closed: the policy's deny (its rule and reason), else what blocks it. */
 function Refusal({ change: { state } }: { change: ChangeDetail }) {
   const { decision } = state;
+  if (isSettled(state)) return null;
   if (decision?.answer === "deny") {
-    const rule = decision.title ?? decision.reasons?.join(", ");
+    const rule = ruleOf(decision);
     return (
       <Notice variant="destructive">
         {rule ? `${rule}: ` : ""}
@@ -103,13 +104,14 @@ function Refusal({ change: { state } }: { change: ChangeDetail }) {
 }
 
 /**
- * The waiting runs of the workflows the change edits, which publishing cannot move: "2 runs of
- * Offboarding are waiting, and this change edits Offboarding", each run linked.
+ * Until the change is merged or closed, the waiting runs of the workflows it edits, as its last
+ * plan found them, which publishing cannot move: "2 runs of Offboarding are waiting, and this
+ * change edits Offboarding", each run linked.
  */
 function Stranded({ change }: { change: ChangeDetail }) {
   const { data: titles } = useSuspenseQuery({ ...configQuery(), select: workflowTitles });
   const stranded = change.state.facts?.stranded ?? [];
-  if (stranded.length === 0) return null;
+  if (stranded.length === 0 || isSettled(change.state)) return null;
   const names = new Intl.ListFormat("en", { type: "conjunction" }).format(
     change.edits.map((name) => titles[name] ?? name),
   );
