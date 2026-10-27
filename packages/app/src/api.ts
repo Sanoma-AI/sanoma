@@ -346,7 +346,10 @@ export interface GoLiveRun {
 export interface GoLiveProgress {
   /** `resources/sanoma/infra.ts`, once written. */
   infra: string | null;
-  bound: { repo: boolean; store: boolean; host: boolean };
+  /** What the first apply makes, of what `infra.ts` declares: the repository, its deploy key and the database. */
+  beforeHost: string[];
+  /** Whether those are all bound in the lockfile, and whether the host is. */
+  bound: { beforeHost: boolean; host: boolean };
   /** The latest apply run. */
   run: GoLiveRun | null;
   /** Where the host answers, from the last apply that made or changed it, and whether `/healthz` answers. */

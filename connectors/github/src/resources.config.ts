@@ -7,10 +7,12 @@ import type { ResourcesConfig } from "@sanoma-ai/bridge/tfschema";
  */
 export default {
   provider: "integrations/github",
-  types: ["github_repository", "github_branch_protection", "github_team_membership"],
+  types: ["github_repository", "github_branch_protection", "github_team_membership", "github_repository_deploy_key"],
   // ForceNew in the provider's source: a change replaces the object. The schema has no such flag.
   immutable: {
     github_branch_protection: ["repository_id"],
     github_team_membership: ["team_id", "username"],
+    // GitHub cannot change a deploy key: every attribute is ForceNew.
+    github_repository_deploy_key: ["key", "read_only", "repository", "title"],
   },
 } satisfies ResourcesConfig;

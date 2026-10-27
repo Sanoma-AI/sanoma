@@ -1,8 +1,10 @@
 // oxlint-disable-next-line import/no-unassigned-import
 import "@tanstack/react-start/server-only";
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { generateKeyPair } from "node:crypto";
+import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { findPackageJSON } from "node:module";
 import { dirname, join } from "node:path";
+import { promisify } from "node:util";
 import {
   APPLY_WORKFLOW,
   databaseUrlSecret,
@@ -33,22 +35,31 @@ import { secretValues } from "./secrets.ts";
 import { mintWakeupToken, WAKEUP_URL } from "./setup.ts";
 
 // Going live, steps 2 to 6 (step 1 is connect, in setup.ts): choose where the company goes,
-// write `resources/sanoma/infra.ts`, apply the repository and the database, push the local
-// repository to the new one, apply the host, and wait until it answers. Every change to a vendor
-// is the built-in apply workflow's; what this file calls itself is only reading lists of accounts
-// to choose from, and git. The database, the host and the wakeup are chosen by their contracts
-// (`database`, `host`, `wakeup`) among the config's resource types, never named but to prefer one.
+// write `resources/sanoma/infra.ts`, apply the repository, the deploy key the host clones it with
+// and the database, push the local repository to the new one, apply the host, and wait until it
+// answers. Every change to a vendor is the built-in apply workflow's; what this file calls itself
+// is only reading lists of accounts to choose from, and git. The database, the host and the
+// wakeup are chosen by their contracts (`database`, `host`, `wakeup`) among the config's resource
+// types, never named but to prefer one.
 
 /** What `infra.ts` declares, by export: the lockfile's keys. */
 const KEYS = {
   repo: `${INFRA}#repo`,
+  deployKey: `${INFRA}#deployKey`,
   store: `${INFRA}#store`,
   host: `${INFRA}#host`,
   wakeup: `${INFRA}#wakeup`,
 } as const;
+/**
+ * What the first apply makes (step 3), and what must be bound before the host's, of what `infra`
+ * declares: a file written before deploy keys declares none, and its host clones as it did.
+ */
+const beforeHost = (infra: string) =>
+  /^export const deployKey\b/m.test(infra) ? [KEYS.repo, KEYS.deployKey, KEYS.store] : [KEYS.repo, KEYS.store];
 
-/** The repository type going live declares. */
+/** The repository type going live declares, and its deploy key's. */
 const REPOSITORY = "github.repository";
+const DEPLOY_KEY = "github.repository_deploy_key";
 
 /** The database type going live prefers when the config has it: Neon's, which pauses. */
 const NEON = "neon.project";
@@ -69,6 +80,8 @@ const PUBLISHED_IMAGE = "ghcr.io/sanoma-ai/runtime";
 /** The secret the database's URL is stored in: its `storeUrl` for the export `store`. */
 const DATABASE_URL = databaseUrlSecret("store");
 const SECRETS_KEY = "SANOMA_SECRETS_KEY";
+/** The private half of the `deployKey` going live declares: stored, and given to the host (see `goLive`). */
+const SOURCE_KEY = "SANOMA_SOURCE_KEY";
 
 /**
  * What going live fills in a database type beyond its contract's inputs, by type, from the
@@ -95,11 +108,14 @@ const SUPABASE_API = "https://api.supabase.com";
 const idOf = (type: Resource) => `${type.vendor}.${type.type}`;
 const hasField = (type: Resource, field: string) => field in (type.schema.shape as Record<string, unknown>);
 
-/** What going live declares that the config's connectors do not: the repository type, a database type, a host type. */
+/**
+ * What going live declares that the config's connectors do not: the repository type and its
+ * deploy key's (a GitHub connector of an earlier release has none), a database type, a host type.
+ */
 const missingTypes = ({ resolved }: AppContext) => {
   const types = [...resolved.types.values()];
   return [
-    ...(resolved.types.has(REPOSITORY) ? [] : [REPOSITORY]),
+    ...[REPOSITORY, DEPLOY_KEY].filter((id) => !resolved.types.has(id)),
     ...(types.some((type) => type.database) ? [] : ["a database type"]),
     ...(types.some((type) => type.host) ? [] : ["a host type"]),
   ];
@@ -180,6 +196,35 @@ const githubHeaders = (token: string) => ({
   "x-github-api-version": "2022-11-28",
   "user-agent": "sanoma",
 });
+
+/** RFC 4253's `string`: the bytes after their length, 32 bits big-endian. */
+function sshString(bytes: Buffer) {
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(bytes.length);
+  return Buffer.concat([length, bytes]);
+}
+
+/** RFC 4253's `mpint` of a JWK's integer, unsigned with no leading zero: one first when its top bit is set. */
+function sshMpint(value: string) {
+  const bytes = Buffer.from(value, "base64url");
+  return sshString(bytes[0]! & 0x80 ? Buffer.concat([Buffer.of(0), bytes]) : bytes);
+}
+
+/**
+ * A new deploy key: its private half RSA 3072 in PKCS#1 PEM, which OpenSSH reads as it is (Node
+ * writes no OpenSSH private key, which ed25519 would need), and its public half in OpenSSH's
+ * one-line format, as GitHub takes it: `ssh-rsa`, then the base64 of the strings `ssh-rsa`, `e`
+ * and `n`.
+ */
+export async function sourceKeyPair(): Promise<{ privateKey: string; publicKey: string }> {
+  const { privateKey, publicKey } = await promisify(generateKeyPair)("rsa", { modulusLength: 3072 });
+  const { e, n } = publicKey.export({ format: "jwk" });
+  const wire = Buffer.concat([sshString(Buffer.from("ssh-rsa")), sshMpint(e!), sshMpint(n!)]);
+  return {
+    privateKey: privateKey.export({ type: "pkcs1", format: "pem" }).toString(),
+    publicKey: `ssh-rsa ${wire.toString("base64")}`,
+  };
+}
 
 /**
  * The GitHub connector's remote half over the stored credentials alone: going live lists accounts
@@ -318,13 +363,16 @@ async function sanomaVersion(root: string): Promise<string> {
 }
 
 /**
- * `infra.ts`'s text for the choices: the repository, the database, the host that runs the company
- * from them and, once a wakeup for the host is connected, the wakeup that starts the host again,
- * whose instance token the host is given from the first apply (`hostWakeup`).
+ * `infra.ts`'s text for the choices: the repository and its read-only deploy key (`deployKey`, the
+ * public half of `SANOMA_SOURCE_KEY`, which the host is given to clone with), the database, the
+ * host that runs the company from them and, once a wakeup for the host is connected, the wakeup
+ * that starts the host again, whose instance token the host is given from the first apply
+ * (`hostWakeup`).
  */
 export async function renderInfra(
   app: AppContext,
   { name, organization, region, size, database: shownDatabase, host: shown, port }: Omit<GoLiveRequest, "owner">,
+  deployKey: string,
   chosen?: Awaited<ReturnType<typeof choose>>,
 ) {
   const { database, host, wakeup } = chosen ?? (await choose(app));
@@ -372,6 +420,7 @@ export async function renderInfra(
   setPath(hosted, inputs.secrets, {
     SANOMA_DATABASE_URL: secret(DATABASE_URL),
     SANOMA_SECRETS_KEY: secret(SECRETS_KEY),
+    [SOURCE_KEY]: secret(SOURCE_KEY),
     ...wakeup.secrets,
   });
   setPath(hosted, inputs.port, port);
@@ -383,6 +432,17 @@ export async function renderInfra(
       ),
       exports: [
         { name: "repo", vendor: "github", type: "repository", desired: { name, visibility: "private" } },
+        {
+          name: "deployKey",
+          vendor: "github",
+          type: "repository_deploy_key",
+          desired: {
+            repository: new Reference("repo"),
+            title: "Sanoma host",
+            key: deployKey,
+            read_only: true,
+          },
+        },
         { name: "store", vendor: database.vendor, type: database.type, desired: store },
         { name: "host", vendor: host.vendor, type: host.type, desired: hosted },
         ...(woken
@@ -402,18 +462,17 @@ export async function renderInfra(
 }
 
 /**
- * Step 3 and 4: writes `infra.ts` for the choices and commits it, stores the owner as the GitHub
- * connector's `GITHUB_OWNER`, and starts apply on the repository and the database. Apply creates
- * both, binds them in the lockfile and, once the project is healthy, stores its database URL
- * (its `afterCreate`). Refused once the file is written: going live writes it once.
+ * Step 3 and 4: writes `infra.ts` for the choices with a new deploy key, whose private half it
+ * stores as `SANOMA_SOURCE_KEY`, and commits it, stores the owner as the GitHub connector's
+ * `GITHUB_OWNER`, and starts apply on the repository, its deploy key and the database. Apply
+ * creates them, binds them in the lockfile and, once the project is healthy, stores its database
+ * URL (its `afterCreate`). Refused once the file is written: going live writes it once.
  */
 export async function goLive(app: AppContext, actor: Principal, choices: GoLiveRequest): Promise<{ runId: string }> {
   const { client, resolved, source } = app;
   if (resolved.root === undefined) throw new Error("The config has no root, so its data files cannot be written");
   const path = join(resolved.root, INFRA);
-  if (await exists(path)) {
-    throw new ApiError(409, { error: `${INFRA} is written already: change it in the file, and apply from Resources` });
-  }
+  if (await exists(path)) throw writtenAlready();
   // `SANOMA_SECRETS_KEY` is the host's from this process's environment, where the launcher's
   // `.env` sets it, and where the secrets store reads it first: there is nothing to store.
   if (!process.env[SECRETS_KEY]) throw new ApiError(409, { error: `${SECRETS_KEY} is not set` });
@@ -428,20 +487,36 @@ export async function goLive(app: AppContext, actor: Principal, choices: GoLiveR
   // The database's and the host's vendors connected: their tokens are what apply makes them with.
   const connect = toConnect(chosen);
   if (connect.length) throw new ApiError(409, { error: `Connect ${connect.join(" and ")} first` });
-  const text = await renderInfra(app, choices, chosen);
-  // Once the request is good: a wakeup's token may be the environment's or its connector page's, which mint nothing.
-  if (chosen.wakeup.type) await mintWakeupToken(client, actor);
+  // A new key each time: GitHub takes a key for one repository only, and none declares this one yet.
+  const key = await sourceKeyPair();
+  const text = await renderInfra(app, choices, key.publicKey, chosen);
   await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, text);
+  // Exclusive, before the key is stored: of two requests at once, one writes its public half and
+  // stores its private half, and the other is refused.
+  await writeFile(path, text, { flag: "wx" }).catch((err: NodeJS.ErrnoException) => {
+    throw err.code === "EEXIST" ? writtenAlready() : err;
+  });
+  try {
+    await client.setSecret(SOURCE_KEY, key.privateKey, { by: actor.id });
+    // Once the request is good: a wakeup's token may be the environment's or its connector page's, which mint nothing.
+    if (chosen.wakeup.type) await mintWakeupToken(client, actor);
+  } catch (err) {
+    // Unwritten again, so going live can be tried again.
+    await rm(path, { force: true });
+    throw err;
+  }
   await source?.commit({
     paths: [INFRA],
-    message: "Go live: declare the repository, database and host",
+    message: "Go live: declare the repository, its deploy key, the database and the host",
     author: actor.id,
   });
   await client.setSecret("GITHUB_OWNER", choices.owner, { by: actor.id });
-  const runId = await client.apply({ only: [KEYS.repo, KEYS.store] }, { startedBy: actor });
+  const runId = await client.apply({ only: beforeHost(text) }, { startedBy: actor });
   return { runId };
 }
+
+const writtenAlready = () =>
+  new ApiError(409, { error: `${INFRA} is written already: change it in the file, and apply from Resources` });
 
 /**
  * The token a push to `repo` signs in with, from the GitHub connector's remote half: the stored
@@ -465,13 +540,15 @@ async function pushToken(app: AppContext, repo: RepoRef): Promise<string> {
 /**
  * Steps 5 and 6: pushes the local repository's `main`, with `infra.ts` and the lockfile on top,
  * to the repository apply made, then starts apply on the host (and its wakeup, when declared).
- * Refused until the repository and the database are bound.
+ * Refused until the repository, its deploy key (which the host clones with) and the database are
+ * bound.
  */
 export async function goLiveHost(app: AppContext, actor: Principal): Promise<{ runId: string }> {
   const { client, resolved, source } = app;
   const { bindings } = readLockfile(resolved.root!);
-  if (!bindings[KEYS.repo] || !bindings[KEYS.store]) {
-    throw new ApiError(409, { error: "Apply the repository and the database first" });
+  const infra = await readFile(join(resolved.root!, INFRA), "utf8").catch(() => "");
+  if (beforeHost(infra).some((key) => !bindings[key])) {
+    throw new ApiError(409, { error: "Apply the repository, its deploy key and the database first" });
   }
   if (!source?.push) throw new ApiError(409, { error: "The app has no repository to push from" });
   // The database's `afterCreate` stores it (its `storeUrl`); one bound without it (a hook that failed) cannot run a host.
@@ -485,7 +562,6 @@ export async function goLiveHost(app: AppContext, actor: Principal): Promise<{ r
     throw new ApiError(409, { error: "Check out main, where infra.ts and the lockfile are committed, then push" });
   }
   const owner = (await client.secrets(["GITHUB_OWNER"])).get("GITHUB_OWNER")?.value;
-  const infra = await readFile(join(resolved.root!, INFRA), "utf8");
   // The repository's name as going live wrote it, first in the file.
   const name = REPO_NAME.exec(infra)?.[1];
   if (!owner || !name) throw new ApiError(409, { error: `Cannot tell the repository from ${INFRA} and GITHUB_OWNER` });
@@ -543,7 +619,14 @@ export async function goLiveProgress(app: AppContext): Promise<GoLiveProgress> {
   const root = app.resolved.root;
   const infra = root === undefined ? null : await readFile(join(root, INFRA), "utf8").catch(() => null);
   const bindings = root === undefined ? {} : readLockfile(root).bindings;
-  const bound = { repo: !!bindings[KEYS.repo], store: !!bindings[KEYS.store], host: !!bindings[KEYS.host] };
+  const before = beforeHost(infra ?? "");
+  const bound = { beforeHost: before.every((key) => !!bindings[key]), host: !!bindings[KEYS.host] };
   const run = await latestRun(app);
-  return { infra, bound, run, host: bound.host && run && isEnded(run.status) ? await hostAnswer(app) : null };
+  return {
+    infra,
+    beforeHost: before,
+    bound,
+    run,
+    host: bound.host && run && isEnded(run.status) ? await hostAnswer(app) : null,
+  };
 }

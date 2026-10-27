@@ -570,6 +570,28 @@ export const github_repository = {
   },
 } satisfies TfResourceType;
 
+export const github_repository_deploy_key = {
+  typeName: "github_repository_deploy_key",
+  schemaVersion: 0,
+  schema: z.object({
+    etag: z.string().nullish(),
+    id: z.string().nullish(),
+    key: z.string().describe("A SSH key."),
+    read_only: z.boolean().nullish().describe("A boolean qualifying the key to be either read only or read/write."),
+    repository: z.string().describe("Name of the GitHub repository."),
+    title: z.string().describe("A title."),
+  }),
+  fields: {
+    immutable: ["key", "read_only", "repository", "title"],
+    vendorOwned: ["etag"],
+    writeOnly: [],
+    unordered: [],
+  },
+  shape: {
+    attributes: ["etag", "id", "key", "read_only", "repository", "title"],
+  },
+} satisfies TfResourceType;
+
 export const github_team_membership = {
   typeName: "github_team_membership",
   schemaVersion: 0,
