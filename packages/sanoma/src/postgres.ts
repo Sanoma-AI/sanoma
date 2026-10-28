@@ -402,15 +402,10 @@ async function runPg(bin: string, program: string, cluster: Cluster, args: strin
  * `PROBE_TIMEOUT_MS`; any other failure (a refused password, a user that does not exist) is thrown.
  */
 async function answers(databaseUrl: string): Promise<boolean> {
+  // The URL as given but for its database: its query (`sslmode=require` on a hosted server) stays.
   const url = new URL(databaseUrl);
-  const client = new Client({
-    host: url.hostname.replace(/^\[(.*)\]$/, "$1"),
-    port: Number(url.port || "5432"),
-    user: decodeURIComponent(url.username || "postgres"),
-    password: decodeURIComponent(url.password),
-    database: "postgres",
-    connectionTimeoutMillis: PROBE_TIMEOUT_MS,
-  });
+  url.pathname = "/postgres";
+  const client = new Client({ connectionString: url.toString(), connectionTimeoutMillis: PROBE_TIMEOUT_MS });
   try {
     await client.connect();
     await client.query("SELECT 1");
