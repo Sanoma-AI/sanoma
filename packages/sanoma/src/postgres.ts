@@ -405,8 +405,8 @@ function serverClient(databaseUrl: string): Client {
 }
 
 /**
- * Whether a Postgres server answers at the URL's host and port, as its user: `SELECT 1` on the
- * `postgres` database. False when the connection is refused, unreachable or not answered within
+ * Whether a Postgres server answers at the URL, with all its settings (user, `sslmode` and the
+ * rest of its query): `SELECT 1` on the `postgres` database. False when the connection is refused, unreachable or not answered within
  * `PROBE_TIMEOUT_MS`; any other failure (a refused password, a user that does not exist) is thrown.
  */
 async function answers(databaseUrl: string): Promise<boolean> {
