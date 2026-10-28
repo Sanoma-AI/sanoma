@@ -65,7 +65,7 @@ const page = (
 ) => `import { createFileRoute } from "@tanstack/react-router";
 ${imports}
 
-export const Route = createFileRoute("${path}")({ ${options}component: Page });
+export const Route = createFileRoute("${path}")({ ${options && `${options}, `}component: Page });
 
 function Page() {
   ${body}
@@ -110,7 +110,7 @@ const reading = (path: string, reads: string, from = "sanoma/site") =>
 
 /** A page at `path` whose route is made with `options` too, its loader reading `reads`. */
 const route = (path: string, options: string, reads = "0") =>
-  page(path, 'import { content } from "sanoma/site";', `void (${reads});\n  return null;`, `${options}, `);
+  page(path, 'import { content } from "sanoma/site";', `void (${reads});\n  return null;`, options);
 
 describe("readSites", () => {
   it("reads the fixture's hello site: its title, that it is public, and each RunForm and api call with its file, place and page", () => {
