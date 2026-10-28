@@ -2,11 +2,11 @@
   {
     "method": "POST",
     "path": "/api/v2/projects",
-    "status": 400,
+    "status": 404,
     "body": {
+      "request_id": "00000000-0000-4000-8000-000000000001",
       "code": "",
-      "message": "region aws-mars-1 is not supported",
-      "request_id": "00000000-0000-4000-8000-000000000001"
+      "message": "requested region not found. Not all regions are available to all organizations, and some regions (including Azure) are being deprecated. For Azure-hosted PostgreSQL, see https://learn.microsoft.com/en-us/azure/databricks/oltp/projects/; requested_region:\"aws-mars-1\", available_regions:\"[aws-us-east-2 aws-us-east-1 aws-us-west-2 aws-eu-central-1 aws-eu-west-2 aws-ap-southeast-1 aws-ap-southeast-2 aws-sa-east-1]\""
     }
   }
 ]

@@ -1,9 +1,25 @@
 // The tests are named after the feature files and scenarios.
 /* oxlint-disable vitest/valid-title, vitest/expect-expect */
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { type Connector, memoryLedger, resolveConfig } from "@sanoma-ai/workflows";
-import { featureScenarios, type FeatureTarget, testFeature } from "@sanoma-ai/workflows/scenario";
+import {
+  type CallContext,
+  type Connector,
+  type Driver,
+  type DriverFn,
+  errorMessage,
+  memoryLedger,
+  memorySecrets,
+  resolveConfig,
+} from "@sanoma-ai/workflows";
+import {
+  FEATURE_STEP_MS,
+  featureScenarios,
+  type FeatureTarget,
+  type Scope,
+  testFeature,
+} from "@sanoma-ai/workflows/scenario";
 import { describe, it } from "vitest";
 import { live, replay, type ReplayOptions } from "./replay.ts";
 
@@ -17,6 +33,85 @@ export interface DescribeFeaturesOptions {
    */
   replay: ReplayOptions;
 }
+
+/**
+ * The driver with what a scenario creates noted, to delete after it (live, so nothing stays on
+ * the account; replaying, as recorded): each call of a resource type's `create` that returned an
+ * id, last first, through the type's `delete` with that id, as apply deletes; an `update` that
+ * replaced one under a new id moves its note to that id; one the scenario deleted itself is left
+ * out. Returns what could not be deleted, and why.
+ */
+function deletingAfter(scope: Scope, driver: Driver): { driver: Driver; deleteMade(): Promise<string[]> } {
+  /** Each object made, by its type's `delete` op id and the id its `create` returned. */
+  const made: { del: string; id: string }[] = [];
+  const inFlight = new Set<Promise<unknown>>();
+  const ops: Record<string, DriverFn> = { ...driver.ops };
+  for (const [key, fn] of Object.entries(driver.ops)) {
+    const op = scope.ops.get(`${driver.vendor}.${key}`);
+    if (!op || !scope.types.has(`${op.vendor}.${op.resource}`)) continue;
+    const del = scope.ops.get(`${op.vendor}.${op.resource}.delete`);
+    if (!del) continue;
+    if (op.name === "create") {
+      ops[key] = (input, context) => {
+        const creating = fn(input, context).then((output) => {
+          const id = (output as { id?: unknown } | undefined)?.id;
+          if (typeof id === "string") made.push({ del: del.id, id });
+          return output;
+        });
+        inFlight.add(creating);
+        creating.catch(() => undefined).finally(() => inFlight.delete(creating));
+        return creating;
+      };
+    } else if (op.name === "update") {
+      ops[key] = async (input, context) => {
+        const output = await fn(input, context);
+        const { id } = input as { id?: unknown };
+        const now = (output as { id?: unknown } | undefined)?.id;
+        const noted = made.find((m) => m.del === del.id && m.id === id);
+        if (noted && typeof now === "string") noted.id = now;
+        return output;
+      };
+    } else if (op.name === "delete") {
+      ops[key] = async (input, context) => {
+        const output = await fn(input, context);
+        const { id } = input as { id?: unknown };
+        const at = made.findIndex((m) => m.del === del.id && m.id === id);
+        if (at >= 0) made.splice(at, 1);
+        return output;
+      };
+    }
+  }
+  return {
+    driver: { ...driver, ops },
+    async deleteMade() {
+      // A create the scenario stopped waiting for (a step's timeout) may still be making its object.
+      await Promise.allSettled(inFlight);
+      const left: string[] = [];
+      const secrets = memorySecrets();
+      // A run id of its own, so a vendor that keeps idempotency keys never answers with another cleanup's reply.
+      const runId = `cleanup:${randomUUID()}`;
+      for (const [n, m] of made.splice(0).toReversed().entries()) {
+        const del = scope.ops.get(m.del)!;
+        const context: CallContext = {
+          idempotencyKey: `${runId}:${n}`,
+          runId,
+          opId: del.id,
+          attempt: 1,
+          secrets,
+        };
+        try {
+          await driver.ops[`${del.resource}.${del.name}`]!({ id: m.id }, context);
+        } catch (err) {
+          left.push(`${del.id} ${m.id}: ${errorMessage(err)}`);
+        }
+      }
+      return left;
+    },
+  };
+}
+
+/** How long a scenario may take live: a step's longest (a `Given` seeding an object as apply makes it), then the deletes after it. */
+const LIVE_TIMEOUT = live ? { timeout: FEATURE_STEP_MS + 5 * 60_000 } : {};
 
 /** Tags a scenario that runs on the fake only: no recording of the vendor's replies holds it. */
 const FAKE_ONLY = "@fake-only";
@@ -66,7 +161,7 @@ export async function describeFeatures(
     const { play } = replay(options);
     for (const { file, line, name, tags } of scenarios) {
       const fixture = fixtureOf(name);
-      it.skipIf(tags.includes(FAKE_ONLY))(`${file} › ${name}`, () => {
+      it.skipIf(tags.includes(FAKE_ONLY))(`${file} › ${name}`, LIVE_TIMEOUT, async () => {
         if (!live && !existsSync(new URL(`${fixture}.json`, options.fixtures))) {
           throw new Error(
             `${file}:${line}: no recording ${fixture}.json for "${name}" in ${fileURLToPath(options.fixtures)}; record one with SANOMA_LIVE=1 SANOMA_RECORD=1, or tag the scenario ${FAKE_ONLY}`,
@@ -76,7 +171,21 @@ export async function describeFeatures(
         // A driver of its own, as each run's would be: one that keeps a session starts without one.
         const driver = resolve().driversByVendor.get(vendor);
         if (!driver) throw new Error(`${vendor}'s connector attaches no driver`);
-        return run(file, line, { driver });
+        // What the scenario made is deleted after it, whether it passed or not: live, off the
+        // account; replaying, from the recording, which holds those deletes.
+        const { driver: noting, deleteMade } = deletingAfter(scope, driver);
+        let failed: unknown;
+        try {
+          await run(file, line, { driver: noting, live });
+        } catch (err) {
+          failed = err;
+        }
+        const left = await deleteMade();
+        if (left.length) {
+          const message = `not deleted after the scenario: ${left.join("; ")}`;
+          throw new Error(failed === undefined ? message : `${errorMessage(failed)}\n${message}`);
+        }
+        if (failed !== undefined) throw failed;
       });
     }
   });

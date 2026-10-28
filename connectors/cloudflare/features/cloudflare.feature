@@ -4,7 +4,7 @@ Feature: Cloudflare containers and alarms
   replies written from Cloudflare's API reference (test/fixtures/, named after the scenario),
   unless tagged @fake-only.
 
-  Scenario: Create
+  Scenario: Create a container
     When cloudflare.container.create is called with
       """
       {

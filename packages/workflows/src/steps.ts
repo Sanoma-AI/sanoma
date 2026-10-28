@@ -14,7 +14,9 @@ type AnyOp<I = any, O = any> = Op<string, string, string, I, O>;
  * What a `Given` step sets up before the run: a call through an operation of the run's fake,
  * with the fields of its input to set (the rest is made up), or a fault to inject into its next
  * call. `as` names a call's output, so a later step's table of an operation's own test can use
- * its fields: `$draft.id`.
+ * its fields: `$draft.id`. In an operation's own test, a resource type's `create` seeds the object
+ * as apply makes it: the type's `afterCreate` calls follow, each polled as apply polls it, the
+ * seed's name (else the type's) as the export.
  */
 export type Seed =
   | { op: AnyOp; input: Record<string, unknown>; as?: string }

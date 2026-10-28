@@ -11,10 +11,11 @@
         "compute_time_seconds": 0,
         "active_time_seconds": 0,
         "cpu_used_sec": 0,
-        "id": "spring-example-302709",
+        "id": "icy-recipe-42228552",
         "platform_id": "aws",
         "region_id": "aws-us-east-1",
         "name": "acme-ops",
+        "slug": "icy-recipe-42228552",
         "provisioner": "k8s-neonvm",
         "default_endpoint_settings": {
           "autoscaling_limit_min_cu": 0.25,
@@ -26,84 +27,107 @@
             "ips": [],
             "protected_branches_only": false
           },
-          "enable_logical_replication": false
+          "enable_logical_replication": false,
+          "maintenance_window": {
+            "weekdays": [5],
+            "start_time": "08:00",
+            "end_time": "09:00"
+          },
+          "block_public_connections": false,
+          "block_vpc_connections": false,
+          "hipaa": false
         },
-        "pg_version": 17,
-        "proxy_host": "us-east-1.aws.neon.tech",
+        "pg_version": 18,
+        "proxy_host": "c-13.us-east-1.aws.neon.tech",
         "branch_logical_size_limit": 512,
         "branch_logical_size_limit_bytes": 536870912,
         "store_passwords": true,
         "creation_source": "console",
-        "history_retention_seconds": 86400,
-        "created_at": "2026-10-26T12:00:00Z",
-        "updated_at": "2026-10-26T12:00:00Z",
-        "consumption_period_start": "2026-10-26T12:00:00Z",
-        "consumption_period_end": "2026-11-26T12:00:00Z",
+        "history_retention_seconds": 21600,
+        "created_at": "2026-10-28T00:31:23Z",
+        "updated_at": "2026-10-28T00:31:23Z",
+        "synthetic_storage_size": 0,
+        "consumption_period_start": "0001-01-01T00:00:00Z",
+        "consumption_period_end": "0001-01-01T00:00:00Z",
         "owner_id": "org-recorded-12345678",
         "org_id": "org-recorded-12345678"
       },
       "connection_uris": [
         {
-          "connection_uri": "postgresql://neondb_owner:npg_recordedpassword@ep-silent-smoke-806639.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require",
+          "connection_uri": "postgresql://neondb_owner:npg_recordedpassword@ep-super-sunset-b7bjsyio.c-13.us-east-1.aws.neon.tech/neondb?sslmode=require",
           "connection_parameters": {
             "database": "neondb",
             "password": "npg_recordedpassword",
             "role": "neondb_owner",
-            "host": "ep-silent-smoke-806639.us-east-1.aws.neon.tech",
-            "pooler_host": "ep-silent-smoke-806639-pooler.us-east-1.aws.neon.tech"
+            "host": "ep-super-sunset-b7bjsyio.c-13.us-east-1.aws.neon.tech",
+            "pooler_host": "ep-super-sunset-b7bjsyio-pooler.c-13.us-east-1.aws.neon.tech"
           }
         }
       ],
       "roles": [
         {
-          "branch_id": "br-wispy-meadow-118737",
+          "branch_id": "br-blue-butterfly-b70up2a0",
           "name": "neondb_owner",
           "password": "npg_recordedpassword",
           "protected": false,
-          "created_at": "2026-10-26T12:00:00Z",
-          "updated_at": "2026-10-26T12:00:00Z"
+          "authentication_method": "password",
+          "created_at": "2026-10-28T00:31:23Z",
+          "updated_at": "2026-10-28T00:31:23Z"
         }
       ],
       "databases": [
         {
-          "id": 1234,
-          "branch_id": "br-wispy-meadow-118737",
+          "id": 1014191,
+          "branch_id": "br-blue-butterfly-b70up2a0",
           "name": "neondb",
           "owner_name": "neondb_owner",
-          "created_at": "2026-10-26T12:00:00Z",
-          "updated_at": "2026-10-26T12:00:00Z"
+          "created_at": "2026-10-28T00:31:23Z",
+          "updated_at": "2026-10-28T00:31:23Z"
         }
       ],
       "operations": [
         {
-          "id": "a07f8772-1877-4da9-a939-3a3ae62d1d8d",
-          "project_id": "spring-example-302709",
+          "id": "3d7987b7-2fb7-4560-a7b3-56f8b96baebc",
+          "project_id": "icy-recipe-42228552",
+          "branch_id": "br-blue-butterfly-b70up2a0",
           "action": "create_timeline",
           "status": "running",
           "failures_count": 0,
-          "created_at": "2026-10-26T12:00:00Z",
-          "updated_at": "2026-10-26T12:00:00Z",
+          "created_at": "2026-10-28T00:31:23Z",
+          "updated_at": "2026-10-28T00:31:23Z",
           "total_duration_ms": 0
         },
         {
-          "id": "a07f8772-1877-4da9-a939-3a3ae62d1d8d",
-          "project_id": "spring-example-302709",
+          "id": "a3d695b2-b70d-4cb3-bb00-25e407610451",
+          "project_id": "icy-recipe-42228552",
+          "branch_id": "br-blue-butterfly-b70up2a0",
+          "endpoint_id": "ep-super-sunset-b7bjsyio",
           "action": "start_compute",
           "status": "scheduling",
           "failures_count": 0,
-          "created_at": "2026-10-26T12:00:00Z",
-          "updated_at": "2026-10-26T12:00:00Z",
-          "total_duration_ms": 0,
-          "endpoint_id": "ep-silent-smoke-806639"
+          "created_at": "2026-10-28T00:31:23Z",
+          "updated_at": "2026-10-28T00:31:23Z",
+          "total_duration_ms": 0
+        },
+        {
+          "id": "926c448b-4139-4f94-b7d4-ae3240a6c0f1",
+          "project_id": "icy-recipe-42228552",
+          "action": "epc_sync",
+          "status": "scheduling",
+          "failures_count": 0,
+          "created_at": "2026-10-28T00:31:23Z",
+          "updated_at": "2026-10-28T00:31:23Z",
+          "total_duration_ms": 0
         }
       ],
       "branch": {
-        "id": "br-wispy-meadow-118737",
-        "project_id": "spring-example-302709",
+        "id": "br-blue-butterfly-b70up2a0",
+        "project_id": "icy-recipe-42228552",
         "name": "main",
-        "current_state": "ready",
-        "state_changed_at": "2026-10-26T12:00:00Z",
-        "logical_size": 30785536,
+        "slug": "br-blue-butterfly-b70up2a0",
+        "current_state": "init",
+        "pending_state": "ready",
+        "state_changed_at": "2026-10-28T00:31:23Z",
         "creation_source": "console",
         "primary": true,
         "default": true,
@@ -113,95 +137,78 @@
         "active_time_seconds": 0,
         "written_data_bytes": 0,
         "data_transfer_bytes": 0,
-        "created_at": "2026-10-26T12:00:00Z",
-        "updated_at": "2026-10-26T12:00:00Z",
+        "created_at": "2026-10-28T00:31:23Z",
+        "updated_at": "2026-10-28T00:31:23Z",
         "init_source": "parent-data"
       },
       "endpoints": [
         {
-          "host": "ep-silent-smoke-806639.us-east-1.aws.neon.tech",
-          "id": "ep-silent-smoke-806639",
-          "project_id": "spring-example-302709",
-          "branch_id": "br-wispy-meadow-118737",
+          "host": "ep-super-sunset-b7bjsyio.c-13.us-east-1.aws.neon.tech",
+          "hosts": {
+            "read_write_host": "ep-super-sunset-b7bjsyio.c-13.us-east-1.aws.neon.tech",
+            "read_write_pooled_host": "ep-super-sunset-b7bjsyio-pooler.c-13.us-east-1.aws.neon.tech"
+          },
+          "id": "ep-super-sunset-b7bjsyio",
+          "slug": "ep-super-sunset-b7bjsyio",
+          "branch_slug": "br-blue-butterfly-b70up2a0",
+          "project_slug": "icy-recipe-42228552",
+          "project_id": "icy-recipe-42228552",
+          "branch_id": "br-blue-butterfly-b70up2a0",
           "autoscaling_limit_min_cu": 0.25,
           "autoscaling_limit_max_cu": 0.25,
           "region_id": "aws-us-east-1",
           "type": "read_write",
           "current_state": "init",
+          "pending_state": "active",
+          "group": {
+            "size": {
+              "min": 1,
+              "max": 1
+            },
+            "allow_readable_secondaries": false,
+            "computes": [
+              {
+                "binding_id": "c5z",
+                "current_state": "init",
+                "pending_state": "active",
+                "role": "read_write",
+                "compute_host": "ep-super-sunset-b7bjsyio-c5z.c-13.us-east-1.aws.neon.tech",
+                "compute_pooled_host": "ep-super-sunset-b7bjsyio-c5z-pooler.c-13.us-east-1.aws.neon.tech",
+                "created_at": "2026-10-28T00:31:23Z",
+                "updated_at": "2026-10-28T00:31:23Z"
+              }
+            ]
+          },
           "settings": {},
           "pooler_enabled": false,
           "pooler_mode": "transaction",
           "disabled": false,
           "passwordless_access": true,
           "creation_source": "console",
-          "created_at": "2026-10-26T12:00:00Z",
-          "updated_at": "2026-10-26T12:00:00Z",
-          "proxy_host": "us-east-1.aws.neon.tech",
+          "created_at": "2026-10-28T00:31:23Z",
+          "updated_at": "2026-10-28T00:31:23Z",
+          "proxy_host": "c-13.us-east-1.aws.neon.tech",
           "suspend_timeout_seconds": 0,
-          "provisioner": "k8s-neonvm",
-          "pending_state": "active"
+          "provisioner": "k8s-neonvm"
         }
       ]
     }
   },
   {
     "method": "GET",
-    "path": "/api/v2/projects/spring-example-302709",
-    "status": 200,
-    "body": {
-      "project": {
-        "data_storage_bytes_hour": 0,
-        "data_transfer_bytes": 0,
-        "written_data_bytes": 0,
-        "compute_time_seconds": 0,
-        "active_time_seconds": 0,
-        "cpu_used_sec": 0,
-        "id": "spring-example-302709",
-        "platform_id": "aws",
-        "region_id": "aws-us-east-1",
-        "name": "acme-ops",
-        "provisioner": "k8s-neonvm",
-        "default_endpoint_settings": {
-          "autoscaling_limit_min_cu": 0.25,
-          "autoscaling_limit_max_cu": 0.25,
-          "suspend_timeout_seconds": 0
-        },
-        "settings": {
-          "allowed_ips": {
-            "ips": [],
-            "protected_branches_only": false
-          },
-          "enable_logical_replication": false
-        },
-        "pg_version": 17,
-        "proxy_host": "us-east-1.aws.neon.tech",
-        "branch_logical_size_limit": 512,
-        "branch_logical_size_limit_bytes": 536870912,
-        "store_passwords": true,
-        "creation_source": "console",
-        "history_retention_seconds": 86400,
-        "created_at": "2026-10-26T12:00:00Z",
-        "updated_at": "2026-10-26T12:00:00Z",
-        "consumption_period_start": "2026-10-26T12:00:00Z",
-        "consumption_period_end": "2026-11-26T12:00:00Z",
-        "owner_id": "org-recorded-12345678",
-        "org_id": "org-recorded-12345678"
-      }
-    }
-  },
-  {
-    "method": "GET",
-    "path": "/api/v2/projects/spring-example-302709/branches?limit=10000",
+    "path": "/api/v2/projects/icy-recipe-42228552/branches?limit=10000",
     "status": 200,
     "body": {
       "branches": [
         {
-          "id": "br-wispy-meadow-118737",
-          "project_id": "spring-example-302709",
+          "id": "br-blue-butterfly-b70up2a0",
+          "project_id": "icy-recipe-42228552",
           "name": "main",
-          "current_state": "ready",
-          "state_changed_at": "2026-10-26T12:00:00Z",
-          "logical_size": 30785536,
+          "slug": "br-blue-butterfly-b70up2a0",
+          "project_slug": "icy-recipe-42228552",
+          "current_state": "init",
+          "pending_state": "ready",
+          "state_changed_at": "2026-10-28T00:31:23Z",
           "creation_source": "console",
           "primary": true,
           "default": true,
@@ -211,8 +218,8 @@
           "active_time_seconds": 0,
           "written_data_bytes": 0,
           "data_transfer_bytes": 0,
-          "created_at": "2026-10-26T12:00:00Z",
-          "updated_at": "2026-10-26T12:00:00Z",
+          "created_at": "2026-10-28T00:31:23Z",
+          "updated_at": "2026-10-28T00:31:23Z",
           "init_source": "parent-data"
         }
       ],
@@ -225,33 +232,381 @@
   },
   {
     "method": "GET",
-    "path": "/api/v2/projects/spring-example-302709/endpoints",
+    "path": "/api/v2/projects/icy-recipe-42228552/endpoints",
     "status": 200,
     "body": {
       "endpoints": [
         {
-          "host": "ep-silent-smoke-806639.us-east-1.aws.neon.tech",
-          "id": "ep-silent-smoke-806639",
-          "project_id": "spring-example-302709",
-          "branch_id": "br-wispy-meadow-118737",
+          "host": "ep-super-sunset-b7bjsyio.c-13.us-east-1.aws.neon.tech",
+          "hosts": {
+            "read_write_host": "ep-super-sunset-b7bjsyio.c-13.us-east-1.aws.neon.tech",
+            "read_write_pooled_host": "ep-super-sunset-b7bjsyio-pooler.c-13.us-east-1.aws.neon.tech"
+          },
+          "id": "ep-super-sunset-b7bjsyio",
+          "slug": "ep-super-sunset-b7bjsyio",
+          "branch_slug": "br-blue-butterfly-b70up2a0",
+          "project_slug": "icy-recipe-42228552",
+          "project_id": "icy-recipe-42228552",
+          "branch_id": "br-blue-butterfly-b70up2a0",
           "autoscaling_limit_min_cu": 0.25,
           "autoscaling_limit_max_cu": 0.25,
           "region_id": "aws-us-east-1",
           "type": "read_write",
-          "current_state": "idle",
-          "settings": {},
+          "current_state": "init",
+          "pending_state": "active",
+          "group": {
+            "size": {
+              "min": 1,
+              "max": 1
+            },
+            "allow_readable_secondaries": false,
+            "computes": [
+              {
+                "binding_id": "c5z",
+                "current_state": "init",
+                "pending_state": "active",
+                "role": "read_write",
+                "compute_host": "ep-super-sunset-b7bjsyio-c5z.c-13.us-east-1.aws.neon.tech",
+                "compute_pooled_host": "ep-super-sunset-b7bjsyio-c5z-pooler.c-13.us-east-1.aws.neon.tech",
+                "created_at": "2026-10-28T00:31:23Z",
+                "updated_at": "2026-10-28T00:31:23Z"
+              }
+            ]
+          },
+          "settings": {
+            "pg_settings": {}
+          },
           "pooler_enabled": false,
           "pooler_mode": "transaction",
           "disabled": false,
           "passwordless_access": true,
+          "last_active": "2000-01-01T00:00:00Z",
           "creation_source": "console",
-          "created_at": "2026-10-26T12:00:00Z",
-          "updated_at": "2026-10-26T12:00:00Z",
-          "proxy_host": "us-east-1.aws.neon.tech",
+          "created_at": "2026-10-28T00:31:23Z",
+          "updated_at": "2026-10-28T00:31:23Z",
+          "proxy_host": "c-13.us-east-1.aws.neon.tech",
           "suspend_timeout_seconds": 0,
           "provisioner": "k8s-neonvm"
         }
       ]
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/v2/projects/icy-recipe-42228552/branches?limit=10000",
+    "status": 200,
+    "body": {
+      "branches": [
+        {
+          "id": "br-blue-butterfly-b70up2a0",
+          "project_id": "icy-recipe-42228552",
+          "name": "main",
+          "slug": "br-blue-butterfly-b70up2a0",
+          "project_slug": "icy-recipe-42228552",
+          "current_state": "ready",
+          "state_changed_at": "2026-10-28T00:31:25Z",
+          "creation_source": "console",
+          "primary": true,
+          "default": true,
+          "protected": false,
+          "cpu_used_sec": 0,
+          "compute_time_seconds": 0,
+          "active_time_seconds": 0,
+          "written_data_bytes": 0,
+          "data_transfer_bytes": 0,
+          "created_at": "2026-10-28T00:31:23Z",
+          "updated_at": "2026-10-28T00:31:26Z",
+          "init_source": "parent-data"
+        }
+      ],
+      "annotations": {},
+      "pagination": {
+        "sort_by": "updated_at",
+        "sort_order": "DESC"
+      }
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/v2/projects/icy-recipe-42228552/endpoints",
+    "status": 200,
+    "body": {
+      "endpoints": [
+        {
+          "host": "ep-super-sunset-b7bjsyio.c-13.us-east-1.aws.neon.tech",
+          "hosts": {
+            "read_write_host": "ep-super-sunset-b7bjsyio.c-13.us-east-1.aws.neon.tech",
+            "read_write_pooled_host": "ep-super-sunset-b7bjsyio-pooler.c-13.us-east-1.aws.neon.tech"
+          },
+          "id": "ep-super-sunset-b7bjsyio",
+          "slug": "ep-super-sunset-b7bjsyio",
+          "branch_slug": "br-blue-butterfly-b70up2a0",
+          "project_slug": "icy-recipe-42228552",
+          "project_id": "icy-recipe-42228552",
+          "branch_id": "br-blue-butterfly-b70up2a0",
+          "autoscaling_limit_min_cu": 0.25,
+          "autoscaling_limit_max_cu": 0.25,
+          "region_id": "aws-us-east-1",
+          "type": "read_write",
+          "current_state": "active",
+          "group": {
+            "size": {
+              "min": 1,
+              "max": 1
+            },
+            "allow_readable_secondaries": false,
+            "computes": [
+              {
+                "binding_id": "c5z",
+                "current_state": "active",
+                "role": "read_write",
+                "compute_host": "ep-super-sunset-b7bjsyio-c5z.c-13.us-east-1.aws.neon.tech",
+                "compute_pooled_host": "ep-super-sunset-b7bjsyio-c5z-pooler.c-13.us-east-1.aws.neon.tech",
+                "created_at": "2026-10-28T00:31:23Z",
+                "updated_at": "2026-10-28T00:31:26Z",
+                "started_at": "2026-10-28T00:31:26Z"
+              }
+            ]
+          },
+          "settings": {
+            "pg_settings": {}
+          },
+          "pooler_enabled": false,
+          "pooler_mode": "transaction",
+          "disabled": false,
+          "passwordless_access": true,
+          "last_active": "2000-01-01T00:00:00Z",
+          "creation_source": "console",
+          "created_at": "2026-10-28T00:31:23Z",
+          "updated_at": "2026-10-28T00:31:26Z",
+          "started_at": "2026-10-28T00:31:26Z",
+          "proxy_host": "c-13.us-east-1.aws.neon.tech",
+          "suspend_timeout_seconds": 0,
+          "provisioner": "k8s-neonvm",
+          "compute_release_version": "15557"
+        }
+      ]
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/v2/projects/icy-recipe-42228552/connection_uri?database_name=neondb&role_name=neondb_owner&pooled=false",
+    "status": 200,
+    "body": {
+      "uri": "postgresql://neondb_owner:npg_recordedpassword@ep-super-sunset-b7bjsyio.c-13.us-east-1.aws.neon.tech/neondb?channel_binding=require&sslmode=require"
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/v2/projects/icy-recipe-42228552",
+    "status": 200,
+    "body": {
+      "project": {
+        "data_storage_bytes_hour": 0,
+        "data_transfer_bytes": 0,
+        "written_data_bytes": 0,
+        "compute_time_seconds": 0,
+        "active_time_seconds": 0,
+        "cpu_used_sec": 0,
+        "id": "icy-recipe-42228552",
+        "platform_id": "aws",
+        "region_id": "aws-us-east-1",
+        "name": "acme-ops",
+        "slug": "icy-recipe-42228552",
+        "provisioner": "k8s-neonvm",
+        "default_endpoint_settings": {
+          "autoscaling_limit_min_cu": 0.25,
+          "autoscaling_limit_max_cu": 0.25,
+          "suspend_timeout_seconds": 0
+        },
+        "settings": {
+          "allowed_ips": {
+            "ips": [],
+            "protected_branches_only": false
+          },
+          "enable_logical_replication": false,
+          "maintenance_window": {
+            "weekdays": [5],
+            "start_time": "08:00",
+            "end_time": "09:00"
+          },
+          "block_public_connections": false,
+          "block_vpc_connections": false,
+          "hipaa": false
+        },
+        "pg_version": 18,
+        "proxy_host": "c-13.us-east-1.aws.neon.tech",
+        "branch_logical_size_limit": 512,
+        "branch_logical_size_limit_bytes": 536870912,
+        "store_passwords": true,
+        "creation_source": "console",
+        "history_retention_seconds": 21600,
+        "created_at": "2026-10-28T00:31:23Z",
+        "updated_at": "2026-10-28T00:31:25Z",
+        "synthetic_storage_size": 0,
+        "consumption_period_start": "2026-10-27T22:51:12Z",
+        "consumption_period_end": "2026-11-01T00:00:00Z",
+        "owner_id": "org-recorded-12345678",
+        "owner": {
+          "email": "owner@example.com",
+          "name": "Recorded organization",
+          "branches_limit": 10,
+          "subscription_type": "free_v3"
+        },
+        "org_id": "org-recorded-12345678"
+      }
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/v2/projects/icy-recipe-42228552/branches?limit=10000",
+    "status": 200,
+    "body": {
+      "branches": [
+        {
+          "id": "br-blue-butterfly-b70up2a0",
+          "project_id": "icy-recipe-42228552",
+          "name": "main",
+          "slug": "br-blue-butterfly-b70up2a0",
+          "project_slug": "icy-recipe-42228552",
+          "current_state": "ready",
+          "state_changed_at": "2026-10-28T00:31:25Z",
+          "creation_source": "console",
+          "primary": true,
+          "default": true,
+          "protected": false,
+          "cpu_used_sec": 0,
+          "compute_time_seconds": 0,
+          "active_time_seconds": 0,
+          "written_data_bytes": 0,
+          "data_transfer_bytes": 0,
+          "created_at": "2026-10-28T00:31:23Z",
+          "updated_at": "2026-10-28T00:31:26Z",
+          "init_source": "parent-data"
+        }
+      ],
+      "annotations": {},
+      "pagination": {
+        "sort_by": "updated_at",
+        "sort_order": "DESC"
+      }
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/v2/projects/icy-recipe-42228552/endpoints",
+    "status": 200,
+    "body": {
+      "endpoints": [
+        {
+          "host": "ep-super-sunset-b7bjsyio.c-13.us-east-1.aws.neon.tech",
+          "hosts": {
+            "read_write_host": "ep-super-sunset-b7bjsyio.c-13.us-east-1.aws.neon.tech",
+            "read_write_pooled_host": "ep-super-sunset-b7bjsyio-pooler.c-13.us-east-1.aws.neon.tech"
+          },
+          "id": "ep-super-sunset-b7bjsyio",
+          "slug": "ep-super-sunset-b7bjsyio",
+          "branch_slug": "br-blue-butterfly-b70up2a0",
+          "project_slug": "icy-recipe-42228552",
+          "project_id": "icy-recipe-42228552",
+          "branch_id": "br-blue-butterfly-b70up2a0",
+          "autoscaling_limit_min_cu": 0.25,
+          "autoscaling_limit_max_cu": 0.25,
+          "region_id": "aws-us-east-1",
+          "type": "read_write",
+          "current_state": "active",
+          "group": {
+            "size": {
+              "min": 1,
+              "max": 1
+            },
+            "allow_readable_secondaries": false,
+            "computes": [
+              {
+                "binding_id": "c5z",
+                "current_state": "active",
+                "role": "read_write",
+                "compute_host": "ep-super-sunset-b7bjsyio-c5z.c-13.us-east-1.aws.neon.tech",
+                "compute_pooled_host": "ep-super-sunset-b7bjsyio-c5z-pooler.c-13.us-east-1.aws.neon.tech",
+                "created_at": "2026-10-28T00:31:23Z",
+                "updated_at": "2026-10-28T00:31:26Z",
+                "started_at": "2026-10-28T00:31:26Z"
+              }
+            ]
+          },
+          "settings": {
+            "pg_settings": {}
+          },
+          "pooler_enabled": false,
+          "pooler_mode": "transaction",
+          "disabled": false,
+          "passwordless_access": true,
+          "last_active": "2000-01-01T00:00:00Z",
+          "creation_source": "console",
+          "created_at": "2026-10-28T00:31:23Z",
+          "updated_at": "2026-10-28T00:31:26Z",
+          "started_at": "2026-10-28T00:31:26Z",
+          "proxy_host": "c-13.us-east-1.aws.neon.tech",
+          "suspend_timeout_seconds": 0,
+          "provisioner": "k8s-neonvm",
+          "compute_release_version": "15557"
+        }
+      ]
+    }
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/v2/projects/icy-recipe-42228552",
+    "status": 200,
+    "body": {
+      "project": {
+        "data_storage_bytes_hour": 0,
+        "data_transfer_bytes": 0,
+        "written_data_bytes": 0,
+        "compute_time_seconds": 0,
+        "active_time_seconds": 0,
+        "cpu_used_sec": 0,
+        "id": "icy-recipe-42228552",
+        "platform_id": "aws",
+        "region_id": "aws-us-east-1",
+        "name": "acme-ops",
+        "slug": "icy-recipe-42228552",
+        "provisioner": "k8s-neonvm",
+        "default_endpoint_settings": {
+          "autoscaling_limit_min_cu": 0.25,
+          "autoscaling_limit_max_cu": 0.25,
+          "suspend_timeout_seconds": 0
+        },
+        "settings": {
+          "allowed_ips": {
+            "ips": [],
+            "protected_branches_only": false
+          },
+          "enable_logical_replication": false,
+          "maintenance_window": {
+            "weekdays": [5],
+            "start_time": "08:00",
+            "end_time": "09:00"
+          },
+          "block_public_connections": false,
+          "block_vpc_connections": false,
+          "hipaa": false
+        },
+        "pg_version": 18,
+        "proxy_host": "c-13.us-east-1.aws.neon.tech",
+        "branch_logical_size_limit": 512,
+        "branch_logical_size_limit_bytes": 536870912,
+        "store_passwords": true,
+        "creation_source": "console",
+        "history_retention_seconds": 21600,
+        "created_at": "2026-10-28T00:31:23Z",
+        "updated_at": "2026-10-28T00:31:25Z",
+        "synthetic_storage_size": 0,
+        "consumption_period_start": "0001-01-01T00:00:00Z",
+        "consumption_period_end": "0001-01-01T00:00:00Z",
+        "owner_id": "org-recorded-12345678",
+        "org_id": "org-recorded-12345678"
+      }
     }
   }
 ]

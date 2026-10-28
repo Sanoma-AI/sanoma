@@ -11,10 +11,11 @@
         "compute_time_seconds": 0,
         "active_time_seconds": 0,
         "cpu_used_sec": 0,
-        "id": "spring-example-302709",
+        "id": "restless-wind-42085892",
         "platform_id": "aws",
         "region_id": "aws-us-east-1",
         "name": "acme-ops",
+        "slug": "restless-wind-42085892",
         "provisioner": "k8s-neonvm",
         "default_endpoint_settings": {
           "autoscaling_limit_min_cu": 0.25,
@@ -26,84 +27,107 @@
             "ips": [],
             "protected_branches_only": false
           },
-          "enable_logical_replication": false
+          "enable_logical_replication": false,
+          "maintenance_window": {
+            "weekdays": [3],
+            "start_time": "07:00",
+            "end_time": "08:00"
+          },
+          "block_public_connections": false,
+          "block_vpc_connections": false,
+          "hipaa": false
         },
-        "pg_version": 17,
-        "proxy_host": "us-east-1.aws.neon.tech",
+        "pg_version": 18,
+        "proxy_host": "c-13.us-east-1.aws.neon.tech",
         "branch_logical_size_limit": 512,
         "branch_logical_size_limit_bytes": 536870912,
         "store_passwords": true,
         "creation_source": "console",
-        "history_retention_seconds": 86400,
-        "created_at": "2026-10-26T12:00:00Z",
-        "updated_at": "2026-10-26T12:00:00Z",
-        "consumption_period_start": "2026-10-26T12:00:00Z",
-        "consumption_period_end": "2026-11-26T12:00:00Z",
+        "history_retention_seconds": 21600,
+        "created_at": "2026-10-28T00:31:15Z",
+        "updated_at": "2026-10-28T00:31:15Z",
+        "synthetic_storage_size": 0,
+        "consumption_period_start": "0001-01-01T00:00:00Z",
+        "consumption_period_end": "0001-01-01T00:00:00Z",
         "owner_id": "org-recorded-12345678",
         "org_id": "org-recorded-12345678"
       },
       "connection_uris": [
         {
-          "connection_uri": "postgresql://neondb_owner:npg_recordedpassword@ep-silent-smoke-806639.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require",
+          "connection_uri": "postgresql://neondb_owner:npg_recordedpassword@ep-cold-star-b7bbevm0.c-13.us-east-1.aws.neon.tech/neondb?sslmode=require",
           "connection_parameters": {
             "database": "neondb",
             "password": "npg_recordedpassword",
             "role": "neondb_owner",
-            "host": "ep-silent-smoke-806639.us-east-1.aws.neon.tech",
-            "pooler_host": "ep-silent-smoke-806639-pooler.us-east-1.aws.neon.tech"
+            "host": "ep-cold-star-b7bbevm0.c-13.us-east-1.aws.neon.tech",
+            "pooler_host": "ep-cold-star-b7bbevm0-pooler.c-13.us-east-1.aws.neon.tech"
           }
         }
       ],
       "roles": [
         {
-          "branch_id": "br-wispy-meadow-118737",
+          "branch_id": "br-rough-meadow-b7pv6c3o",
           "name": "neondb_owner",
           "password": "npg_recordedpassword",
           "protected": false,
-          "created_at": "2026-10-26T12:00:00Z",
-          "updated_at": "2026-10-26T12:00:00Z"
+          "authentication_method": "password",
+          "created_at": "2026-10-28T00:31:15Z",
+          "updated_at": "2026-10-28T00:31:15Z"
         }
       ],
       "databases": [
         {
-          "id": 1234,
-          "branch_id": "br-wispy-meadow-118737",
+          "id": 1014189,
+          "branch_id": "br-rough-meadow-b7pv6c3o",
           "name": "neondb",
           "owner_name": "neondb_owner",
-          "created_at": "2026-10-26T12:00:00Z",
-          "updated_at": "2026-10-26T12:00:00Z"
+          "created_at": "2026-10-28T00:31:15Z",
+          "updated_at": "2026-10-28T00:31:15Z"
         }
       ],
       "operations": [
         {
-          "id": "a07f8772-1877-4da9-a939-3a3ae62d1d8d",
-          "project_id": "spring-example-302709",
+          "id": "4cd8ba98-66bf-4e8e-a45b-ce49654440f3",
+          "project_id": "restless-wind-42085892",
+          "branch_id": "br-rough-meadow-b7pv6c3o",
           "action": "create_timeline",
           "status": "running",
           "failures_count": 0,
-          "created_at": "2026-10-26T12:00:00Z",
-          "updated_at": "2026-10-26T12:00:00Z",
+          "created_at": "2026-10-28T00:31:15Z",
+          "updated_at": "2026-10-28T00:31:15Z",
           "total_duration_ms": 0
         },
         {
-          "id": "a07f8772-1877-4da9-a939-3a3ae62d1d8d",
-          "project_id": "spring-example-302709",
+          "id": "5b76501e-4155-47ed-9f53-5ee929f07f02",
+          "project_id": "restless-wind-42085892",
+          "branch_id": "br-rough-meadow-b7pv6c3o",
+          "endpoint_id": "ep-cold-star-b7bbevm0",
           "action": "start_compute",
           "status": "scheduling",
           "failures_count": 0,
-          "created_at": "2026-10-26T12:00:00Z",
-          "updated_at": "2026-10-26T12:00:00Z",
-          "total_duration_ms": 0,
-          "endpoint_id": "ep-silent-smoke-806639"
+          "created_at": "2026-10-28T00:31:15Z",
+          "updated_at": "2026-10-28T00:31:15Z",
+          "total_duration_ms": 0
+        },
+        {
+          "id": "ddfa6f41-97b2-49b3-9df4-0421394b0a3b",
+          "project_id": "restless-wind-42085892",
+          "action": "epc_sync",
+          "status": "scheduling",
+          "failures_count": 0,
+          "created_at": "2026-10-28T00:31:15Z",
+          "updated_at": "2026-10-28T00:31:15Z",
+          "total_duration_ms": 0
         }
       ],
       "branch": {
-        "id": "br-wispy-meadow-118737",
-        "project_id": "spring-example-302709",
+        "id": "br-rough-meadow-b7pv6c3o",
+        "project_id": "restless-wind-42085892",
         "name": "main",
-        "current_state": "ready",
-        "state_changed_at": "2026-10-26T12:00:00Z",
-        "logical_size": 30785536,
+        "slug": "br-rough-meadow-b7pv6c3o",
+        "current_state": "init",
+        "pending_state": "ready",
+        "state_changed_at": "2026-10-28T00:31:15Z",
         "creation_source": "console",
         "primary": true,
         "default": true,
@@ -113,35 +137,116 @@
         "active_time_seconds": 0,
         "written_data_bytes": 0,
         "data_transfer_bytes": 0,
-        "created_at": "2026-10-26T12:00:00Z",
-        "updated_at": "2026-10-26T12:00:00Z",
+        "created_at": "2026-10-28T00:31:15Z",
+        "updated_at": "2026-10-28T00:31:15Z",
         "init_source": "parent-data"
       },
       "endpoints": [
         {
-          "host": "ep-silent-smoke-806639.us-east-1.aws.neon.tech",
-          "id": "ep-silent-smoke-806639",
-          "project_id": "spring-example-302709",
-          "branch_id": "br-wispy-meadow-118737",
+          "host": "ep-cold-star-b7bbevm0.c-13.us-east-1.aws.neon.tech",
+          "hosts": {
+            "read_write_host": "ep-cold-star-b7bbevm0.c-13.us-east-1.aws.neon.tech",
+            "read_write_pooled_host": "ep-cold-star-b7bbevm0-pooler.c-13.us-east-1.aws.neon.tech"
+          },
+          "id": "ep-cold-star-b7bbevm0",
+          "slug": "ep-cold-star-b7bbevm0",
+          "branch_slug": "br-rough-meadow-b7pv6c3o",
+          "project_slug": "restless-wind-42085892",
+          "project_id": "restless-wind-42085892",
+          "branch_id": "br-rough-meadow-b7pv6c3o",
           "autoscaling_limit_min_cu": 0.25,
           "autoscaling_limit_max_cu": 0.25,
           "region_id": "aws-us-east-1",
           "type": "read_write",
           "current_state": "init",
+          "pending_state": "active",
+          "group": {
+            "size": {
+              "min": 1,
+              "max": 1
+            },
+            "allow_readable_secondaries": false,
+            "computes": [
+              {
+                "binding_id": "rx9",
+                "current_state": "init",
+                "pending_state": "active",
+                "role": "read_write",
+                "compute_host": "ep-cold-star-b7bbevm0-rx9.c-13.us-east-1.aws.neon.tech",
+                "compute_pooled_host": "ep-cold-star-b7bbevm0-rx9-pooler.c-13.us-east-1.aws.neon.tech",
+                "created_at": "2026-10-28T00:31:15Z",
+                "updated_at": "2026-10-28T00:31:15Z"
+              }
+            ]
+          },
           "settings": {},
           "pooler_enabled": false,
           "pooler_mode": "transaction",
           "disabled": false,
           "passwordless_access": true,
           "creation_source": "console",
-          "created_at": "2026-10-26T12:00:00Z",
-          "updated_at": "2026-10-26T12:00:00Z",
-          "proxy_host": "us-east-1.aws.neon.tech",
+          "created_at": "2026-10-28T00:31:15Z",
+          "updated_at": "2026-10-28T00:31:15Z",
+          "proxy_host": "c-13.us-east-1.aws.neon.tech",
           "suspend_timeout_seconds": 0,
-          "provisioner": "k8s-neonvm",
-          "pending_state": "active"
+          "provisioner": "k8s-neonvm"
         }
       ]
+    }
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/v2/projects/restless-wind-42085892",
+    "status": 200,
+    "body": {
+      "project": {
+        "data_storage_bytes_hour": 0,
+        "data_transfer_bytes": 0,
+        "written_data_bytes": 0,
+        "compute_time_seconds": 0,
+        "active_time_seconds": 0,
+        "cpu_used_sec": 0,
+        "id": "restless-wind-42085892",
+        "platform_id": "aws",
+        "region_id": "aws-us-east-1",
+        "name": "acme-ops",
+        "slug": "restless-wind-42085892",
+        "provisioner": "k8s-neonvm",
+        "default_endpoint_settings": {
+          "autoscaling_limit_min_cu": 0.25,
+          "autoscaling_limit_max_cu": 0.25,
+          "suspend_timeout_seconds": 0
+        },
+        "settings": {
+          "allowed_ips": {
+            "ips": [],
+            "protected_branches_only": false
+          },
+          "enable_logical_replication": false,
+          "maintenance_window": {
+            "weekdays": [3],
+            "start_time": "07:00",
+            "end_time": "08:00"
+          },
+          "block_public_connections": false,
+          "block_vpc_connections": false,
+          "hipaa": false
+        },
+        "pg_version": 18,
+        "proxy_host": "c-13.us-east-1.aws.neon.tech",
+        "branch_logical_size_limit": 512,
+        "branch_logical_size_limit_bytes": 536870912,
+        "store_passwords": true,
+        "creation_source": "console",
+        "history_retention_seconds": 21600,
+        "created_at": "2026-10-28T00:31:15Z",
+        "updated_at": "2026-10-28T00:31:15Z",
+        "synthetic_storage_size": 0,
+        "consumption_period_start": "0001-01-01T00:00:00Z",
+        "consumption_period_end": "0001-01-01T00:00:00Z",
+        "owner_id": "org-recorded-12345678",
+        "org_id": "org-recorded-12345678"
+      }
     }
   }
 ]

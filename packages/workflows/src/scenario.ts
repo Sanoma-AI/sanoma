@@ -34,7 +34,7 @@ import type { LedgerRecord } from "./ledger.ts";
 import type { Driver, Op } from "./op.ts";
 import { type OutlineNode, outlineWorkflow } from "./outline.ts";
 import { isDirectory, kindDirs, SCENARIOS_DIR } from "./paths.ts";
-import { isObject } from "./resource.ts";
+import { AFTER_CREATE_MS, callAfterCreate, isObject } from "./resource.ts";
 import { admit, type DeclaredPeople, readPeople } from "./resources.ts";
 import { memorySecrets } from "./secret.ts";
 import {
@@ -903,11 +903,19 @@ function viewOf(records: readonly LedgerRecord[]): RunView {
   return { records, calls, seeded, made: (op) => [...seeded(op), ...calls(op)] };
 }
 
+/** How long a step of an operation's own test may take live: a `Given` may seed an object as apply makes it, its `afterCreate` polled. */
+export const FEATURE_STEP_MS = AFTER_CREATE_MS + 60_000;
+
 /** Where an operation's own test makes its calls: an operation's driver, live, replayed or a fake's, and the fake. */
 export interface FeatureTarget {
   driver: Driver;
   /** The fake whose driver it is: a scenario's faults need one. */
   fake?: Fake<any, any>;
+  /**
+   * The driver calls the vendor: a seed's `afterCreate` waits between its calls as apply's do,
+   * and a step may take `FEATURE_STEP_MS`. Replayed or on a fake, the calls answer at once.
+   */
+  live?: boolean;
 }
 
 /** Why no step, or two, match a step's text. */
@@ -1030,12 +1038,13 @@ function checkWorld(built: Built, workflow: string, view: RunView, verdicts: Map
  * A World for an operation's own test: `Given` steps seed through the target, `When` steps call
  * its operations directly (no worker, no policy), and `Then` steps fail when they do not hold.
  */
-function testWorld(built: Built, { driver, fake }: FeatureTarget) {
+function testWorld(built: Built, { driver, fake, live }: FeatureTarget) {
   return (report: Report): SanomaWorld => {
     // What the steps named (`as`), and the calls made, as a run's ledger would hold them.
     const values = new Map<string, unknown>();
     const records: LedgerRecord[] = [];
     let runId = "";
+    let calls = 0;
     // The test's own secrets, in memory: a driver resolves `secret()` markers against them.
     const secrets = memorySecrets();
     /** A record of the test, as a run's ledger would hold it. */
@@ -1051,7 +1060,8 @@ function testWorld(built: Built, { driver, fake }: FeatureTarget) {
       const input = op.input.parse(resolve(given, values));
       const fn = driver.ops[`${op.resource}.${op.name}`];
       if (!fn) throw new Error(`the driver under test does not implement ${id}`);
-      const context = { idempotencyKey: `${runId}:${records.length}`, runId, opId: id, attempt: 1, secrets };
+      // A key of its own per call: a fake answers a repeated key with its remembered reply.
+      const context = { idempotencyKey: `${runId}:${++calls}`, runId, opId: id, attempt: 1, secrets };
       return { op, input, output: () => fn(input, context) };
     };
     return {
@@ -1076,6 +1086,37 @@ function testWorld(built: Built, { driver, fake }: FeatureTarget) {
               const output = await made.output();
               if (item.as !== undefined) values.set(item.as, output);
               seeds.push({ op: item.op, input: made.input, output });
+              // A resource type's create seeds the object as apply makes it: the type's `afterCreate`
+              // calls follow, each polled as apply polls it, the seed's name (else the type's) its export.
+              const type =
+                made.op.name === "create" ? built.scope.types.get(`${made.op.vendor}.${made.op.resource}`) : undefined;
+              const id = (output as { id?: unknown } | undefined)?.id;
+              if (type?.afterCreate?.length && typeof id !== "string") {
+                throw new Error(`"${text}": ${item.op} returned no id for its afterCreate`);
+              }
+              for (const hook of type?.afterCreate ?? []) {
+                // One the target cannot call fails at once: polled, its error would read as not passing yet.
+                const polled = built.scope.ops.get(hook.op);
+                if (!polled || !driver.ops[`${polled.resource}.${polled.name}`]) {
+                  throw new Error(
+                    `"${text}": the driver under test does not implement ${hook.op}, an afterCreate of ${item.op}`,
+                  );
+                }
+                const stuck = await callAfterCreate(
+                  hook,
+                  { id: id as string, export: item.as ?? made.op.resource },
+                  async (op, input) => {
+                    const after = call(op, input);
+                    const out = await after.output();
+                    seeds.push({ op, input: after.input, output: out });
+                    return out;
+                  },
+                  async (seconds) => {
+                    if (live) await delay(seconds * 1000);
+                  },
+                );
+                if (stuck !== undefined) throw new Error(`"${text}": ${stuck}`);
+              }
             }
             if (seeds.length) record({ type: "scenario.seeded", scenario: "", seeds });
             return;
@@ -1442,6 +1483,7 @@ export async function testFeature(scope: Scope, file: string, line: number, targ
     files: [name],
     line,
     isBug,
+    timeoutMs: target.live ? FEATURE_STEP_MS : undefined,
   });
   if (report.parseErrors.length) throw new Error(report.parseErrors.map(parseErrorOf).join("\n"));
   const results = stepResults(report);

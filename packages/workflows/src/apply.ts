@@ -17,7 +17,16 @@ import { isRunControlError } from "./errors.ts";
 import type { HostOutputs } from "./host.ts";
 import type { Binding, Bindings, Rebind } from "./lockfile.ts";
 import type { Op } from "./op.ts";
-import { fieldPathOf, holderOf, type PlanAction, type Resource, valueAt } from "./resource.ts";
+import {
+  AFTER_CREATE_CALLS,
+  AFTER_CREATE_SECONDS,
+  afterCreateStuck,
+  fieldPathOf,
+  holderOf,
+  type PlanAction,
+  type Resource,
+  valueAt,
+} from "./resource.ts";
 import type { ResourceProblem } from "./resources.ts";
 import { type APPLY_WORKFLOW, errorMessage } from "./shared.ts";
 import { SOURCE_RESOLVE } from "./source.ts";
@@ -145,9 +154,6 @@ type DeleteOp = Op<string, string, "delete", { id: string }, { id: string; gone:
 // listed as an import is.
 type ApplyUse = ImportOp | PlanOp | CreateOp | UpdateOp | DeleteOp | ResolveOp | "approval" | "sleep";
 
-/** How long apply waits between calls of an `afterCreate` operation with `until`, and how many calls it makes. */
-const AFTER_CREATE_SECONDS = 5;
-const AFTER_CREATE_CALLS = 120;
 /** An operation as `ctx` gives it, called by its id. */
 type Call = (input: unknown) => Promise<unknown>;
 
@@ -591,7 +597,8 @@ export function applyWorkflow(
           }
           // Bound first, so an object made is kept whatever its `afterCreate` calls do: each by its
           // id, again every few seconds until its output passes `until`; one that never does fails
-          // the step, and the rest are not called.
+          // the step, and the rest are not called. The loop `callAfterCreate` has, inline: a
+          // function defined here may not close over `ctx`.
           let stuck: string | undefined;
           for (const hook of todo === "create" ? (spec?.afterCreate ?? []) : []) {
             if (stuck === undefined) {
@@ -600,6 +607,7 @@ export function applyWorkflow(
               // With `until`, a failure is one more call that did not pass (a new object's vendor may
               // not know it yet); without, it fails the step.
               let output: unknown;
+              let failed: unknown;
               for (
                 let call = 0;
                 call < AFTER_CREATE_CALLS && (call === 0 || (hook.until && !hook.until(output)));
@@ -608,14 +616,14 @@ export function applyWorkflow(
                 if (call > 0) await ctx.sleep({ seconds: AFTER_CREATE_SECONDS });
                 try {
                   output = await (ctx[vendor]![group] as unknown as Record<string, Call>)[name]!(given);
+                  failed = undefined;
                 } catch (err) {
                   if (isRunControlError(err) || !hook.until) throw err;
                   output = undefined;
+                  failed = err;
                 }
               }
-              if (hook.until && !hook.until(output)) {
-                stuck = `${hook.op} did not pass in ${(AFTER_CREATE_CALLS * AFTER_CREATE_SECONDS) / 60} minutes`;
-              }
+              if (hook.until && !hook.until(output)) stuck = afterCreateStuck(hook.op, failed);
             }
           }
           results.push({

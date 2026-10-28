@@ -120,7 +120,7 @@
     "@sanoma-ai/testing": "workspace:*",
     "@sanoma-ai/workflows": "workspace:*",
     "@types/pg": "^8.23.1",
-    "msw": "^3.0.2",
+    "msw": "^3.0.3",
     "pg": "^8.23.1"
   },
   "peerDependencies": {

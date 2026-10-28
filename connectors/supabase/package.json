@@ -62,7 +62,7 @@
   "devDependencies": {
     "@sanoma-ai/bridge": "workspace:*",
     "@sanoma-ai/workflows": "workspace:*",
-    "msw": "^3.0.2",
+    "msw": "^3.0.3",
     "zod": "^4.6.5"
   },
   "peerDependencies": {

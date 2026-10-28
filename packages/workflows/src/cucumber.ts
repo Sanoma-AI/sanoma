@@ -173,7 +173,8 @@ const literal = (path: string) => path.replaceAll(/[*?[\]()+@]/g, "[$&]").replac
  * examples row at that line. `makeWorld` makes each scenario's World, given the report so far
  * (every file and pickle, read before the first scenario starts). A dry run matches the steps
  * and runs none. A step's error that is a bug in code (`isBug`) is rethrown once the run is
- * over, rather than reported as the step's failure.
+ * over, rather than reported as the step's failure. `timeoutMs` is how long a step may take
+ * (Cucumber's 5 s by default).
  */
 export async function runFeatures(
   library: ISupportCodeLibrary,
@@ -184,7 +185,15 @@ export async function runFeatures(
     line,
     dryRun = false,
     isBug,
-  }: { cwd: string; files: string[]; line?: number; dryRun?: boolean; isBug: (err: unknown) => boolean },
+    timeoutMs,
+  }: {
+    cwd: string;
+    files: string[];
+    line?: number;
+    dryRun?: boolean;
+    isBug: (err: unknown) => boolean;
+    timeoutMs?: number;
+  },
 ): Promise<Report> {
   const report: Report = { query: new Query(), texts: new Map(), parseErrors: [] };
   let bug: unknown;
@@ -200,7 +209,11 @@ export async function runFeatures(
   }
   const configuration: IRunOptions = {
     sources: { defaultDialect: "en", paths: files.map(literal), names: [], tagExpression: "", order: "defined" },
-    support: { ...library, World } as ISupportCodeLibrary,
+    support: {
+      ...library,
+      World,
+      ...(timeoutMs !== undefined && { defaultTimeout: timeoutMs }),
+    } as ISupportCodeLibrary,
     runtime: {
       dryRun,
       failFast: false,

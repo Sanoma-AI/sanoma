@@ -70,13 +70,24 @@ Every failure is a `DriverError` keeping Neon's `status` and its error `code` as
 
 ### Testing the driver
 
-`test/driver.test.ts` replays Neon's replies (`test/fixtures`) with [`@sanoma-ai/testing/replay`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/testing/README.md#replaying-a-vendors-api): `pnpm vitest run connectors/neon` needs no account. The fixtures are **written by hand** from Neon's API reference (the OpenAPI spec the SDK bundles, `public-v2-for-users.gen.yaml`), not recorded: no key was at hand. Record them with a test organization's key, which creates and deletes projects there:
+`test/driver.test.ts` and the features replay Neon's replies (`test/fixtures`) with [`@sanoma-ai/testing/replay`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/testing/README.md#replaying-a-vendors-api): `pnpm vitest run connectors/neon` needs no account. The features' fixtures are recorded from a real organization (2026-10-27); the driver tests' own are written by hand from Neon's API reference (the OpenAPI spec the SDK bundles, `public-v2-for-users.gen.yaml`) and checked against those recordings. Record the features again with an organization's key, which creates projects there and deletes them after each scenario:
 
 ```sh
 SANOMA_LIVE=1 SANOMA_RECORD=1 NEON_API_KEY=napi_... pnpm vitest run connectors/neon/test/features.test.ts
 ```
 
-A recording loses passwords, request ids and the organization. The error cases only replay.
+A recording loses passwords, request ids and the organization (its id, name and email). The error cases only replay. Right after a create, Neon's compute is `init` and a branch or a suspend of the project answers 423 until it has started (a few seconds): a scenario's `Given` project is seeded as apply makes it, its `afterCreate` polled, so its compute has started.
+
+### Running it live
+
+`test/live.ts`, run by hand, runs the Database kit (`checkDatabase`) against a real project with the real driver, then times a suspended compute's wake, and deletes the project at the end. It makes a project named `database-check` (`NEON_TEST_NAME` changes it, `NEON_TEST_REGION` its region, `aws-us-east-1` by default) in the key's organization, whose plan's limits apply:
+
+```sh
+pnpm build
+SANOMA_LIVE=1 NEON_API_KEY=napi_... node connectors/neon/test/live.ts
+```
+
+Measured 2026-10-27 on a Free organization, `aws-us-east-1`, Postgres 18, a 0.25 CU compute: the create answers in 0.4 s and its compute is `active` 5 to 12 s later (the `init` apply's `afterCreate` polls through); a suspend reads `idle` 2.5 s after the request, and the first query after it, a worker's connect included, answers in 1.8 s. Every check of the kit passed.
 
 ## Steps and features
 
@@ -91,6 +102,6 @@ The connector carries steps for [scenarios](https://github.com/Sanoma-AI/sanoma/
 
 ## Testing
 
-`@sanoma-ai/connector-neon/fake` is an in-memory Neon, the fake the connector carries: projects in `state.projects`, each with a default branch `main` and its read-write compute, active at once, ids made in order (`fake-project-1`, `br-fake-2`, `ep-fake-3`). A suspend makes a compute `idle` and a start `active`. It refuses what Neon refuses: a region not in `REGIONS` (400), an object it does not have (404), a project's default branch deleted. `test/database.test.ts` runs the `Database` contract's kit (`@sanoma-ai/testing/database`) over it, with a database of the test Postgres standing in for the project's.
+`@sanoma-ai/connector-neon/fake` is an in-memory Neon, the fake the connector carries: projects in `state.projects`, each with a default branch `main` and its read-write compute, active at once, ids made in order (`fake-project-1`, `br-fake-2`, `ep-fake-3`). A suspend makes a compute `idle` and a start `active`. It refuses what Neon refuses: a region not in `REGIONS` (404, as Neon answers), an object it does not have (404), a project's default branch deleted. `test/database.test.ts` runs the `Database` contract's kit (`@sanoma-ai/testing/database`) over it, with a database of the test Postgres standing in for the project's.
 
 License: FSL-1.1-ALv2.

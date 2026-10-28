@@ -11,10 +11,11 @@
         "compute_time_seconds": 0,
         "active_time_seconds": 0,
         "cpu_used_sec": 0,
-        "id": "spring-example-302709",
+        "id": "quiet-violet-98159521",
         "platform_id": "aws",
         "region_id": "aws-us-east-1",
         "name": "acme-ops",
+        "slug": "quiet-violet-98159521",
         "provisioner": "k8s-neonvm",
         "default_endpoint_settings": {
           "autoscaling_limit_min_cu": 0.25,
@@ -26,84 +27,107 @@
             "ips": [],
             "protected_branches_only": false
           },
-          "enable_logical_replication": false
+          "enable_logical_replication": false,
+          "maintenance_window": {
+            "weekdays": [6],
+            "start_time": "08:00",
+            "end_time": "09:00"
+          },
+          "block_public_connections": false,
+          "block_vpc_connections": false,
+          "hipaa": false
         },
-        "pg_version": 17,
-        "proxy_host": "us-east-1.aws.neon.tech",
+        "pg_version": 18,
+        "proxy_host": "c-13.us-east-1.aws.neon.tech",
         "branch_logical_size_limit": 512,
         "branch_logical_size_limit_bytes": 536870912,
         "store_passwords": true,
         "creation_source": "console",
-        "history_retention_seconds": 86400,
-        "created_at": "2026-10-26T12:00:00Z",
-        "updated_at": "2026-10-26T12:00:00Z",
-        "consumption_period_start": "2026-10-26T12:00:00Z",
-        "consumption_period_end": "2026-11-26T12:00:00Z",
+        "history_retention_seconds": 21600,
+        "created_at": "2026-10-28T00:31:30Z",
+        "updated_at": "2026-10-28T00:31:30Z",
+        "synthetic_storage_size": 0,
+        "consumption_period_start": "0001-01-01T00:00:00Z",
+        "consumption_period_end": "0001-01-01T00:00:00Z",
         "owner_id": "org-recorded-12345678",
         "org_id": "org-recorded-12345678"
       },
       "connection_uris": [
         {
-          "connection_uri": "postgresql://neondb_owner:npg_recordedpassword@ep-silent-smoke-806639.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require",
+          "connection_uri": "postgresql://neondb_owner:npg_recordedpassword@ep-wandering-dream-b7jpb963.c-13.us-east-1.aws.neon.tech/neondb?sslmode=require",
           "connection_parameters": {
             "database": "neondb",
             "password": "npg_recordedpassword",
             "role": "neondb_owner",
-            "host": "ep-silent-smoke-806639.us-east-1.aws.neon.tech",
-            "pooler_host": "ep-silent-smoke-806639-pooler.us-east-1.aws.neon.tech"
+            "host": "ep-wandering-dream-b7jpb963.c-13.us-east-1.aws.neon.tech",
+            "pooler_host": "ep-wandering-dream-b7jpb963-pooler.c-13.us-east-1.aws.neon.tech"
           }
         }
       ],
       "roles": [
         {
-          "branch_id": "br-wispy-meadow-118737",
+          "branch_id": "br-rapid-poetry-b73qg5pt",
           "name": "neondb_owner",
           "password": "npg_recordedpassword",
           "protected": false,
-          "created_at": "2026-10-26T12:00:00Z",
-          "updated_at": "2026-10-26T12:00:00Z"
+          "authentication_method": "password",
+          "created_at": "2026-10-28T00:31:31Z",
+          "updated_at": "2026-10-28T00:31:31Z"
         }
       ],
       "databases": [
         {
-          "id": 1234,
-          "branch_id": "br-wispy-meadow-118737",
+          "id": 1014194,
+          "branch_id": "br-rapid-poetry-b73qg5pt",
           "name": "neondb",
           "owner_name": "neondb_owner",
-          "created_at": "2026-10-26T12:00:00Z",
-          "updated_at": "2026-10-26T12:00:00Z"
+          "created_at": "2026-10-28T00:31:31Z",
+          "updated_at": "2026-10-28T00:31:31Z"
         }
       ],
       "operations": [
         {
-          "id": "a07f8772-1877-4da9-a939-3a3ae62d1d8d",
-          "project_id": "spring-example-302709",
+          "id": "d414c1ef-4575-43ec-9f4b-67ad714889d2",
+          "project_id": "quiet-violet-98159521",
+          "branch_id": "br-rapid-poetry-b73qg5pt",
           "action": "create_timeline",
           "status": "running",
           "failures_count": 0,
-          "created_at": "2026-10-26T12:00:00Z",
-          "updated_at": "2026-10-26T12:00:00Z",
+          "created_at": "2026-10-28T00:31:31Z",
+          "updated_at": "2026-10-28T00:31:31Z",
           "total_duration_ms": 0
         },
         {
-          "id": "a07f8772-1877-4da9-a939-3a3ae62d1d8d",
-          "project_id": "spring-example-302709",
+          "id": "2949a692-b311-44b1-996e-1be48268d818",
+          "project_id": "quiet-violet-98159521",
+          "branch_id": "br-rapid-poetry-b73qg5pt",
+          "endpoint_id": "ep-wandering-dream-b7jpb963",
           "action": "start_compute",
           "status": "scheduling",
           "failures_count": 0,
-          "created_at": "2026-10-26T12:00:00Z",
-          "updated_at": "2026-10-26T12:00:00Z",
-          "total_duration_ms": 0,
-          "endpoint_id": "ep-silent-smoke-806639"
+          "created_at": "2026-10-28T00:31:31Z",
+          "updated_at": "2026-10-28T00:31:31Z",
+          "total_duration_ms": 0
+        },
+        {
+          "id": "e32a14ef-8b4a-4de6-be82-0916f4805b47",
+          "project_id": "quiet-violet-98159521",
+          "action": "epc_sync",
+          "status": "scheduling",
+          "failures_count": 0,
+          "created_at": "2026-10-28T00:31:31Z",
+          "updated_at": "2026-10-28T00:31:31Z",
+          "total_duration_ms": 0
         }
       ],
       "branch": {
-        "id": "br-wispy-meadow-118737",
-        "project_id": "spring-example-302709",
+        "id": "br-rapid-poetry-b73qg5pt",
+        "project_id": "quiet-violet-98159521",
         "name": "main",
-        "current_state": "ready",
-        "state_changed_at": "2026-10-26T12:00:00Z",
-        "logical_size": 30785536,
+        "slug": "br-rapid-poetry-b73qg5pt",
+        "current_state": "init",
+        "pending_state": "ready",
+        "state_changed_at": "2026-10-28T00:31:30Z",
         "creation_source": "console",
         "primary": true,
         "default": true,
@@ -113,40 +137,268 @@
         "active_time_seconds": 0,
         "written_data_bytes": 0,
         "data_transfer_bytes": 0,
-        "created_at": "2026-10-26T12:00:00Z",
-        "updated_at": "2026-10-26T12:00:00Z",
+        "created_at": "2026-10-28T00:31:30Z",
+        "updated_at": "2026-10-28T00:31:30Z",
         "init_source": "parent-data"
       },
       "endpoints": [
         {
-          "host": "ep-silent-smoke-806639.us-east-1.aws.neon.tech",
-          "id": "ep-silent-smoke-806639",
-          "project_id": "spring-example-302709",
-          "branch_id": "br-wispy-meadow-118737",
+          "host": "ep-wandering-dream-b7jpb963.c-13.us-east-1.aws.neon.tech",
+          "hosts": {
+            "read_write_host": "ep-wandering-dream-b7jpb963.c-13.us-east-1.aws.neon.tech",
+            "read_write_pooled_host": "ep-wandering-dream-b7jpb963-pooler.c-13.us-east-1.aws.neon.tech"
+          },
+          "id": "ep-wandering-dream-b7jpb963",
+          "slug": "ep-wandering-dream-b7jpb963",
+          "branch_slug": "br-rapid-poetry-b73qg5pt",
+          "project_slug": "quiet-violet-98159521",
+          "project_id": "quiet-violet-98159521",
+          "branch_id": "br-rapid-poetry-b73qg5pt",
           "autoscaling_limit_min_cu": 0.25,
           "autoscaling_limit_max_cu": 0.25,
           "region_id": "aws-us-east-1",
           "type": "read_write",
           "current_state": "init",
+          "pending_state": "active",
+          "group": {
+            "size": {
+              "min": 1,
+              "max": 1
+            },
+            "allow_readable_secondaries": false,
+            "computes": [
+              {
+                "binding_id": "f6b",
+                "current_state": "init",
+                "pending_state": "active",
+                "role": "read_write",
+                "compute_host": "ep-wandering-dream-b7jpb963-f6b.c-13.us-east-1.aws.neon.tech",
+                "compute_pooled_host": "ep-wandering-dream-b7jpb963-f6b-pooler.c-13.us-east-1.aws.neon.tech",
+                "created_at": "2026-10-28T00:31:30Z",
+                "updated_at": "2026-10-28T00:31:30Z"
+              }
+            ]
+          },
           "settings": {},
           "pooler_enabled": false,
           "pooler_mode": "transaction",
           "disabled": false,
           "passwordless_access": true,
           "creation_source": "console",
-          "created_at": "2026-10-26T12:00:00Z",
-          "updated_at": "2026-10-26T12:00:00Z",
-          "proxy_host": "us-east-1.aws.neon.tech",
+          "created_at": "2026-10-28T00:31:30Z",
+          "updated_at": "2026-10-28T00:31:30Z",
+          "proxy_host": "c-13.us-east-1.aws.neon.tech",
           "suspend_timeout_seconds": 0,
-          "provisioner": "k8s-neonvm",
-          "pending_state": "active"
+          "provisioner": "k8s-neonvm"
         }
       ]
     }
   },
   {
+    "method": "GET",
+    "path": "/api/v2/projects/quiet-violet-98159521/branches?limit=10000",
+    "status": 200,
+    "body": {
+      "branches": [
+        {
+          "id": "br-rapid-poetry-b73qg5pt",
+          "project_id": "quiet-violet-98159521",
+          "name": "main",
+          "slug": "br-rapid-poetry-b73qg5pt",
+          "project_slug": "quiet-violet-98159521",
+          "current_state": "init",
+          "pending_state": "ready",
+          "state_changed_at": "2026-10-28T00:31:30Z",
+          "creation_source": "console",
+          "primary": true,
+          "default": true,
+          "protected": false,
+          "cpu_used_sec": 0,
+          "compute_time_seconds": 0,
+          "active_time_seconds": 0,
+          "written_data_bytes": 0,
+          "data_transfer_bytes": 0,
+          "created_at": "2026-10-28T00:31:30Z",
+          "updated_at": "2026-10-28T00:31:30Z",
+          "init_source": "parent-data"
+        }
+      ],
+      "annotations": {},
+      "pagination": {
+        "sort_by": "updated_at",
+        "sort_order": "DESC"
+      }
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/v2/projects/quiet-violet-98159521/endpoints",
+    "status": 200,
+    "body": {
+      "endpoints": [
+        {
+          "host": "ep-wandering-dream-b7jpb963.c-13.us-east-1.aws.neon.tech",
+          "hosts": {
+            "read_write_host": "ep-wandering-dream-b7jpb963.c-13.us-east-1.aws.neon.tech",
+            "read_write_pooled_host": "ep-wandering-dream-b7jpb963-pooler.c-13.us-east-1.aws.neon.tech"
+          },
+          "id": "ep-wandering-dream-b7jpb963",
+          "slug": "ep-wandering-dream-b7jpb963",
+          "branch_slug": "br-rapid-poetry-b73qg5pt",
+          "project_slug": "quiet-violet-98159521",
+          "project_id": "quiet-violet-98159521",
+          "branch_id": "br-rapid-poetry-b73qg5pt",
+          "autoscaling_limit_min_cu": 0.25,
+          "autoscaling_limit_max_cu": 0.25,
+          "region_id": "aws-us-east-1",
+          "type": "read_write",
+          "current_state": "init",
+          "pending_state": "active",
+          "group": {
+            "size": {
+              "min": 1,
+              "max": 1
+            },
+            "allow_readable_secondaries": false,
+            "computes": [
+              {
+                "binding_id": "f6b",
+                "current_state": "init",
+                "pending_state": "active",
+                "role": "read_write",
+                "compute_host": "ep-wandering-dream-b7jpb963-f6b.c-13.us-east-1.aws.neon.tech",
+                "compute_pooled_host": "ep-wandering-dream-b7jpb963-f6b-pooler.c-13.us-east-1.aws.neon.tech",
+                "created_at": "2026-10-28T00:31:30Z",
+                "updated_at": "2026-10-28T00:31:30Z"
+              }
+            ]
+          },
+          "settings": {
+            "pg_settings": {}
+          },
+          "pooler_enabled": false,
+          "pooler_mode": "transaction",
+          "disabled": false,
+          "passwordless_access": true,
+          "last_active": "2000-01-01T00:00:00Z",
+          "creation_source": "console",
+          "created_at": "2026-10-28T00:31:30Z",
+          "updated_at": "2026-10-28T00:31:31Z",
+          "proxy_host": "c-13.us-east-1.aws.neon.tech",
+          "suspend_timeout_seconds": 0,
+          "provisioner": "k8s-neonvm"
+        }
+      ]
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/v2/projects/quiet-violet-98159521/branches?limit=10000",
+    "status": 200,
+    "body": {
+      "branches": [
+        {
+          "id": "br-rapid-poetry-b73qg5pt",
+          "project_id": "quiet-violet-98159521",
+          "name": "main",
+          "slug": "br-rapid-poetry-b73qg5pt",
+          "project_slug": "quiet-violet-98159521",
+          "current_state": "ready",
+          "state_changed_at": "2026-10-28T00:31:33Z",
+          "creation_source": "console",
+          "primary": true,
+          "default": true,
+          "protected": false,
+          "cpu_used_sec": 0,
+          "compute_time_seconds": 0,
+          "active_time_seconds": 0,
+          "written_data_bytes": 0,
+          "data_transfer_bytes": 0,
+          "created_at": "2026-10-28T00:31:30Z",
+          "updated_at": "2026-10-28T00:31:36Z",
+          "init_source": "parent-data"
+        }
+      ],
+      "annotations": {},
+      "pagination": {
+        "sort_by": "updated_at",
+        "sort_order": "DESC"
+      }
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/v2/projects/quiet-violet-98159521/endpoints",
+    "status": 200,
+    "body": {
+      "endpoints": [
+        {
+          "host": "ep-wandering-dream-b7jpb963.c-13.us-east-1.aws.neon.tech",
+          "hosts": {
+            "read_write_host": "ep-wandering-dream-b7jpb963.c-13.us-east-1.aws.neon.tech",
+            "read_write_pooled_host": "ep-wandering-dream-b7jpb963-pooler.c-13.us-east-1.aws.neon.tech"
+          },
+          "id": "ep-wandering-dream-b7jpb963",
+          "slug": "ep-wandering-dream-b7jpb963",
+          "branch_slug": "br-rapid-poetry-b73qg5pt",
+          "project_slug": "quiet-violet-98159521",
+          "project_id": "quiet-violet-98159521",
+          "branch_id": "br-rapid-poetry-b73qg5pt",
+          "autoscaling_limit_min_cu": 0.25,
+          "autoscaling_limit_max_cu": 0.25,
+          "region_id": "aws-us-east-1",
+          "type": "read_write",
+          "current_state": "active",
+          "group": {
+            "size": {
+              "min": 1,
+              "max": 1
+            },
+            "allow_readable_secondaries": false,
+            "computes": [
+              {
+                "binding_id": "f6b",
+                "current_state": "active",
+                "role": "read_write",
+                "compute_host": "ep-wandering-dream-b7jpb963-f6b.c-13.us-east-1.aws.neon.tech",
+                "compute_pooled_host": "ep-wandering-dream-b7jpb963-f6b-pooler.c-13.us-east-1.aws.neon.tech",
+                "created_at": "2026-10-28T00:31:30Z",
+                "updated_at": "2026-10-28T00:31:36Z",
+                "started_at": "2026-10-28T00:31:36Z"
+              }
+            ]
+          },
+          "settings": {
+            "pg_settings": {}
+          },
+          "pooler_enabled": false,
+          "pooler_mode": "transaction",
+          "disabled": false,
+          "passwordless_access": true,
+          "last_active": "2000-01-01T00:00:00Z",
+          "creation_source": "console",
+          "created_at": "2026-10-28T00:31:30Z",
+          "updated_at": "2026-10-28T00:31:36Z",
+          "started_at": "2026-10-28T00:31:36Z",
+          "proxy_host": "c-13.us-east-1.aws.neon.tech",
+          "suspend_timeout_seconds": 0,
+          "provisioner": "k8s-neonvm",
+          "compute_release_version": "15557"
+        }
+      ]
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/v2/projects/quiet-violet-98159521/connection_uri?database_name=neondb&role_name=neondb_owner&pooled=false",
+    "status": 200,
+    "body": {
+      "uri": "postgresql://neondb_owner:npg_recordedpassword@ep-wandering-dream-b7jpb963.c-13.us-east-1.aws.neon.tech/neondb?channel_binding=require&sslmode=require"
+    }
+  },
+  {
     "method": "DELETE",
-    "path": "/api/v2/projects/spring-example-302709",
+    "path": "/api/v2/projects/quiet-violet-98159521",
     "status": 200,
     "body": {
       "project": {
@@ -156,10 +408,11 @@
         "compute_time_seconds": 0,
         "active_time_seconds": 0,
         "cpu_used_sec": 0,
-        "id": "spring-example-302709",
+        "id": "quiet-violet-98159521",
         "platform_id": "aws",
         "region_id": "aws-us-east-1",
         "name": "acme-ops",
+        "slug": "quiet-violet-98159521",
         "provisioner": "k8s-neonvm",
         "default_endpoint_settings": {
           "autoscaling_limit_min_cu": 0.25,
@@ -171,19 +424,28 @@
             "ips": [],
             "protected_branches_only": false
           },
-          "enable_logical_replication": false
+          "enable_logical_replication": false,
+          "maintenance_window": {
+            "weekdays": [6],
+            "start_time": "08:00",
+            "end_time": "09:00"
+          },
+          "block_public_connections": false,
+          "block_vpc_connections": false,
+          "hipaa": false
         },
-        "pg_version": 17,
-        "proxy_host": "us-east-1.aws.neon.tech",
+        "pg_version": 18,
+        "proxy_host": "c-13.us-east-1.aws.neon.tech",
         "branch_logical_size_limit": 512,
         "branch_logical_size_limit_bytes": 536870912,
         "store_passwords": true,
         "creation_source": "console",
-        "history_retention_seconds": 86400,
-        "created_at": "2026-10-26T12:00:00Z",
-        "updated_at": "2026-10-26T12:00:00Z",
-        "consumption_period_start": "2026-10-26T12:00:00Z",
-        "consumption_period_end": "2026-11-26T12:00:00Z",
+        "history_retention_seconds": 21600,
+        "created_at": "2026-10-28T00:31:30Z",
+        "updated_at": "2026-10-28T00:31:33Z",
+        "synthetic_storage_size": 0,
+        "consumption_period_start": "0001-01-01T00:00:00Z",
+        "consumption_period_end": "0001-01-01T00:00:00Z",
         "owner_id": "org-recorded-12345678",
         "org_id": "org-recorded-12345678"
       }
@@ -191,12 +453,12 @@
   },
   {
     "method": "GET",
-    "path": "/api/v2/projects/spring-example-302709",
+    "path": "/api/v2/projects/quiet-violet-98159521",
     "status": 404,
     "body": {
+      "request_id": "00000000-0000-4000-8000-000000000001",
       "code": "",
-      "message": "project not found",
-      "request_id": "00000000-0000-4000-8000-000000000001"
+      "message": "project not found"
     }
   }
 ]

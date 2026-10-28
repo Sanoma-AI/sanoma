@@ -6,8 +6,9 @@ import { project } from "../src/connector.ts";
 import { neonDriver } from "../src/driver.ts";
 import { replayOptions, TEST_KEY } from "./replay.ts";
 
-// Replays test/fixtures, written by hand from Neon's API reference (the SDK's bundled OpenAPI
-// spec), not recorded: the README says how to record them with a key.
+// Replays its own fixtures in test/fixtures (`create.json`, `read.json`, ...), written by hand
+// from Neon's API reference (the SDK's bundled OpenAPI spec) and checked against the features'
+// recordings; the error cases only replay.
 
 const { server, play, fixture, sent } = replay(replayOptions);
 
