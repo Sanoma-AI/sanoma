@@ -109,7 +109,11 @@ export async function seedSandbox(run: Run, name: string): Promise<void> {
         });
       }
       const fakes = new Map([...state.fakes].map(([vendor, make]) => [vendor, make()]));
-      const drivers = indexDrivers([...Array.from(fakes.values(), (f) => f.driver), ...sandboxDrivers], state.ops);
+      // The built-ins first, so a connector's fake that implements one of their operations wins.
+      const drivers = indexDrivers(
+        [...sandboxDrivers(state.ops), ...Array.from(fakes.values(), (f) => f.driver)],
+        state.ops,
+      );
       const uses = opIdsOf(state.workflows.get(run.workflow)!);
       const seeding = scenario.given.flatMap((g) => ("op" in g ? [g.op] : []));
       const missing = [...new Set([...uses, ...seeding])].filter((id) => !drivers.has(id));

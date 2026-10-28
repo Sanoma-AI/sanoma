@@ -1,9 +1,11 @@
+import { createHash } from "node:crypto";
 import { fakeHost, fakeHostType, testRepository } from "@sanoma-ai/testing/host";
 import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { describeConfig } from "../src/describe.ts";
 import { tree } from "./tree.ts";
 import { secret } from "../src/secret.ts";
+import { fakeSourceDriver } from "../src/source.ts";
 import {
   defineConnector,
   defineResource,
@@ -191,6 +193,14 @@ describe("sanoma.source.resolve", () => {
     expect(await resolveRevision(repo.url, "HEAD")).toBe(second);
     expect(await resolveRevision(repo.url, "refs/heads/main")).toBe(second);
     expect(await resolveRevision(repo.url, first)).toBe(first);
+  });
+
+  it("has a fake for sandbox runs: a commit id is itself, any other ref the SHA-1 of the URL and the ref", async () => {
+    const resolve = (ref: string) =>
+      fakeSourceDriver.ops["source.resolve"]!({ url: repo.url, ref }, {} as never) as Promise<{ revision: string }>;
+    const commit = "a".repeat(40);
+    expect(await resolve(commit)).toEqual({ revision: commit });
+    expect(await resolve("main")).toEqual({ revision: createHash("sha1").update(`${repo.url}#main`).digest("hex") });
   });
 
   it("refuses a ref the repository does not have, for good, and a repository it cannot read, to retry", async () => {

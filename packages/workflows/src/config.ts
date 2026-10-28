@@ -41,7 +41,7 @@ import { type CedarPolicySource, policyAt } from "./cedar.ts";
 import type { Policy } from "./policy.ts";
 import { type Resource, resourceTypesOf, withoutWriteOnly } from "./resource.ts";
 import { APPLY_WORKFLOW, BUILT_IN_WORKFLOWS, CALL_WORKFLOW, CHANGE_WORKFLOW, DATA_VENDOR } from "./shared.ts";
-import { type RemoteHalf, sourceDriver, sourceOps } from "./source.ts";
+import { fakeSourceDriver, type RemoteHalf, SOURCE_RESOLVE, sourceDriver, sourceOps } from "./source.ts";
 import { appsListDriver, appsListOps } from "./apps-list.ts";
 import type { Steps } from "./steps.ts";
 import { checkSchedule } from "./schedules.ts";
@@ -299,7 +299,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     [
       ...driversByVendor.values(),
       changeDriver(remotes),
-      ...sandboxDrivers,
+      appsListDriver,
       ...(hostTyped ? [sourceDriver] : []),
       ...(dataStore ? [collectionsDriver(declared, dataStore)] : []),
     ],
@@ -396,10 +396,15 @@ function collectionsOf(config: SanomaConfig): Map<string, Collection> {
 }
 
 /**
- * The built-in drivers no fake implements that a sandbox run calls beside its fakes (`seedSandbox`):
- * those that need no credentials and change nothing, as `sanoma.apps.list` (GitHub's public search).
+ * The built-in drivers a sandbox run calls beside its fakes (`seedSandbox`), for the built-in
+ * operations among `ops` that no fake implements: `sanoma.apps.list`'s own, which needs no
+ * credentials and changes nothing (GitHub's public search), and `sanoma.source.resolve`'s fake
+ * (`fakeSourceDriver`), for a config with a host type.
  */
-export const sandboxDrivers: readonly Driver[] = [appsListDriver];
+export const sandboxDrivers = (ops: ReadonlyMap<string, unknown>): Driver[] => [
+  appsListDriver,
+  ...(ops.has(SOURCE_RESOLVE) ? [fakeSourceDriver] : []),
+];
 
 /**
  * `sanoma.wakeup`, the runtime's own: the type's operations and `sanoma.wakeup.register` (effect
