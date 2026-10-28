@@ -4,6 +4,7 @@
 //   signIn: "terminal" | "url" | "once" | "none" — how it asks to be signed in until `$HOME/.signed-in-<agent>` exists
 //   mode: "work" | "hello" | "die" | "hang" — what a prompt does
 //   code: the code its terminal sign-in takes on stdin; log: where it appends what it saw (JSON lines)
+//   method: its terminal sign-in's id (default "fake-login"); loginFails: what its sign-in prints as it fails at once
 // With `login` among its arguments it is its own terminal sign-in instead.
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
@@ -20,6 +21,10 @@ const signedIn = join(process.env.HOME, `.signed-in-${basename(dirname(configPat
 if (args.includes("login")) {
   // The vendor's sign-in, as a device flow prints it without a terminal: a link, a code, a prompt.
   log({ login: args });
+  if (config.loginFails) {
+    process.stdout.write(`${config.loginFails}\n`);
+    process.exit(1);
+  }
   process.stdout.write("To authenticate, visit https://example.test/login/device and enter code FAKE-0001\n");
   process.stdout.write("Paste code here if prompted > ");
   const lines = createInterface({ input: process.stdin });
@@ -36,7 +41,7 @@ log({ start: args, home: process.env.HOME, env: Object.keys(process.env).toSorte
 
 const authMethods =
   config.signIn === "terminal"
-    ? [{ id: "fake-login", name: "Fake login", type: "terminal", args: ["login"] }]
+    ? [{ id: config.method ?? "fake-login", name: "Fake login", type: "terminal", args: ["login"] }]
     : config.signIn === "url"
       ? [{ id: "fake-device", name: "Fake device code" }]
       : [];

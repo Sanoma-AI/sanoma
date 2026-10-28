@@ -38,6 +38,9 @@ const fake = fileURLToPath(new URL("./fixtures/fake-acp-agent.mjs", import.meta.
 interface FakeConfig {
   signIn: "terminal" | "url" | "once" | "none";
   mode: "work" | "hello" | "die" | "hang";
+  /** Its terminal sign-in's id, and what that sign-in prints as it fails at once. */
+  method?: string;
+  loginFails?: string;
 }
 
 /** The code the fake's terminal sign-in takes. */
@@ -383,6 +386,28 @@ describe("the chat on a person's own agent", () => {
 
   it("answers on Claude Code's own", async () => {
     expect(textOfReply(await send(`claude-${RUN}`, "acp-claude-code", "Hi"))).toBe("Hello.");
+  }, 60_000);
+
+  it("says in words why Claude Code's sign-in did not finish, how it exited only in the server's log", async () => {
+    configure("claude-code", {
+      signIn: "terminal",
+      mode: "hello",
+      method: OWN_AGENTS["claude-code"].signIn.method,
+      loginFails: "Couldn't save your login. If your Mac's keychain is locked, unlock it and log in again.",
+    });
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const id = `claude-unsaved-${RUN}`;
+      expect(cardOf(await send(id, "acp-claude-code", "Hi"))).toEqual({
+        agent: "Claude Code",
+        state: "failed",
+        text: "Claude Code could not save its sign-in on this computer",
+      });
+      expect(errors).toHaveBeenCalledWith(`sanoma app: Claude Code's sign-in in chat ${id} stopped (exit code 1)`);
+    } finally {
+      errors.mockRestore();
+      configure("claude-code", { signIn: "none", mode: "hello" });
+    }
   }, 60_000);
 
   it("is never reached by an agent, which no login admits (the engine refuses one too)", async () => {

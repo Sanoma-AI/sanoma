@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import * as acp from "@agentclientprotocol/sdk";
@@ -119,8 +119,44 @@ const CARD_EVERY = 250;
 /** Why a turn or its sign-in ended early: the person sent another message. */
 const STOPPED = "a new message stopped it";
 
-/** Commands on this machine the agent and what it starts must not reach: a vendor CLI's token, the Keychain, a browser. */
-const SHIMS = ["gh", "security", "open", "xdg-open"];
+/** A shim's refusal: what it says, and its exit. */
+const refusal = (name: string) => `echo "${name} is not available to a person's own agent in Sanoma" >&2\nexit 1\n`;
+
+/** A shim that only refuses. */
+const refusing = (name: string) => `#!/bin/sh\n${refusal(name)}`;
+
+/**
+ * Commands on this machine the agent and what it starts must not reach (a vendor CLI's token, the
+ * Keychain, a browser), each a shim of ours first on its `PATH`. To the agent the Keychain is there
+ * and empty, and takes nothing: `security` answers a lookup or a removal as macOS does for an item
+ * it does not hold (44), and refuses the rest. So Claude Code keeps its sign-in in its own file
+ * under the person's home, as on Linux: a lookup refused (or no `security` at all) is to it a
+ * Keychain it cannot read, and it saves nothing ("Couldn't save your login"). Each script starts
+ * with its shell: `security` is bash's, for its bounded `read` (macOS's sh is bash, Linux's is not).
+ */
+const SHIMS: Record<string, string> = {
+  gh: refusing("gh"),
+  open: refusing("open"),
+  "xdg-open": refusing("xdg-open"),
+  security: `#!/bin/bash
+while [ "$1" = -q ] || [ "$1" = -v ]; do shift; done
+command=$1
+# Its command on stdin (one line, as Claude Code writes it), read before the answer so its writer
+# sees no broken pipe, and for at most 5 s so a writer that waits for a prompt is refused, not hung.
+[ "$1" = -i ] && read -r -t 5 command _ 2>/dev/null
+case "$command" in
+  find-generic-password | delete-generic-password)
+    echo "security: The specified item could not be found in the keychain." >&2
+    exit 44 ;;
+esac
+${refusal("security")}`,
+};
+
+/** What a vendor's sign-in printed as it failed, in words for the card after the agent's name; the first that matches. */
+const SIGN_IN_FAILURES: [said: RegExp, words: string][] = [
+  // Claude Code's: its store refused the token (on macOS, the Keychain through `security`).
+  [/Couldn['’]t save your login/, "could not save its sign-in on this computer"],
+];
 
 /** Each agent's install under way or done, by its directory. */
 const installs = new Map<string, Promise<void>>();
@@ -453,7 +489,14 @@ class AcpTurn {
     pasting.set(this.chatId, waiting);
     try {
       const exit = await this.#waiting(login.exited);
-      if (exit.exitCode !== 0) throw new Error(`it stopped (${exitText(exit)})`);
+      if (exit.exitCode !== 0) {
+        // The card says what happened in words where the vendor's message is known, and how it exited
+        // otherwise; the exit is this machine's log's either way.
+        console.error(`sanoma app: ${this.agent.title}'s sign-in in chat ${this.chatId} stopped (${exitText(exit)})`);
+        const printed = stripVTControlCharacters(login.output());
+        const words = SIGN_IN_FAILURES.find(([said]) => said.test(printed))?.[1];
+        throw new Error(words ? `${this.agent.title} ${words}` : `it stopped (${exitText(exit)})`);
+      }
     } finally {
       clearTimeout(timer);
       // Its own entry only: a later turn of the chat may be waiting for a code by now.
@@ -670,22 +713,33 @@ function untilAborted<T>(promise: Promise<T>, signal: AbortSignal, timeout?: { m
   });
 }
 
-/** The shims' directory, first on the agent's PATH: each of `SHIMS` refuses, so nothing of this machine's user signs the agent in. */
-async function shims(agents: string): Promise<string> {
+/** The shims written by this process, by their directory. */
+const shimmed = new Map<string, Promise<string>>();
+
+/**
+ * The shims' directory (`acp/shims`), first on the agent's PATH: each of `SHIMS`, so nothing of
+ * this machine's user signs the agent in. Written once per process, each aside and then renamed
+ * into place: an earlier process's agent may be running one now.
+ */
+export function shims(agents: string): Promise<string> {
   const dir = join(agents, "shims");
-  await mkdir(dir, { recursive: true });
-  await Promise.all(
-    SHIMS.map((name) =>
-      writeFile(
-        join(dir, name),
-        `#!/bin/sh\necho "${name} is not available to a person's own agent in Sanoma" >&2\nexit 1\n`,
-        {
-          mode: 0o755,
-        },
-      ),
-    ),
-  );
-  return dir;
+  let writing = shimmed.get(dir);
+  if (!writing) {
+    writing = (async () => {
+      await mkdir(dir, { recursive: true });
+      await Promise.all(
+        Object.entries(SHIMS).map(async ([name, script]) => {
+          const aside = join(dir, `.${name}.new`);
+          await writeFile(aside, script, { mode: 0o755 });
+          await rename(aside, join(dir, name));
+        }),
+      );
+      return dir;
+    })();
+    shimmed.set(dir, writing);
+    writing.catch(() => shimmed.delete(dir));
+  }
+  return writing;
 }
 
 /** What `POST /api/sign-in` takes: the chat, and the code its person pastes back to the vendor's sign-in. */
