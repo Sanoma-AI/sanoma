@@ -3,7 +3,7 @@
 import { fileURLToPath } from "node:url";
 import { memoryLedger, type Principal, resolveConfig, type SanomaConfig } from "@sanoma-ai/workflows";
 import { loadScenarios } from "@sanoma-ai/workflows/scenario";
-import { isTest, runScenario } from "@sanoma-ai/workflows/scenarios";
+import { runScenario } from "@sanoma-ai/workflows/scenarios";
 import { describe, expect, it } from "vitest";
 import { useTestApp } from "./harness.ts";
 import type { TestWorkerOptions } from "./index.ts";
@@ -20,8 +20,7 @@ export { runScenario, type RunScenarioOptions } from "@sanoma-ai/workflows/scena
  * `startedBy` (an id, or a principal) starts the runs whose scenario does not say who is acting,
  * and `timeoutMs` is how long each may take (`drive`'s). Cucumber compiles the feature files
  * first, so the test file awaits it at its top level:
- * `await describeScenarios(config, { databaseUrl })`. Worlds and moments that decide nothing
- * are no tests (`isTest`), so none is registered for them.
+ * `await describeScenarios(config, { databaseUrl })`.
  */
 export async function describeScenarios(
   config: SanomaConfig,
@@ -36,13 +35,11 @@ export async function describeScenarios(
         : `describeScenarios found no \`scenarios/\` in ${resolved.root}, nor in an app of it`,
     );
   }
-  const { scenarios: loaded, errors } = await loadScenarios(resolved);
-  const scenarios = loaded.filter(isTest);
+  const { scenarios, errors } = await loadScenarios(resolved);
   // A mistyped directory loads nothing, and a test file that registers no tests would pass.
   if (scenarios.length === 0 && errors.length === 0) {
-    const none = loaded.length ? "no scenarios to run (only worlds, and moments that decide nothing)" : "no scenarios";
     throw new Error(
-      `describeScenarios found ${none} in ${fileURLToPath(resolved.scenarios)}'s scenarios/ or its apps'`,
+      `describeScenarios found no scenarios in ${fileURLToPath(resolved.scenarios)}'s scenarios/ or its apps'`,
     );
   }
   for (const { file, message } of errors) {

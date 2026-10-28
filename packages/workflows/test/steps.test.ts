@@ -61,7 +61,7 @@ describe("the company's scenarios", () => {
     if (!ledger) {
       ledger = (async () => {
         const startedBy = s.workflow === "inspect" ? alice : agent;
-        const runId = await app.client.start(s.workflow!, s.input, { startedBy, sandbox: s.name });
+        const runId = await app.client.start(s.workflow, s.input, { startedBy, sandbox: s.name });
         await drive(app.client, runId, s);
         return app.client.ledger(runId);
       })();

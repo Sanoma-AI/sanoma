@@ -227,12 +227,6 @@ export interface ClientOptions {
    */
   onWrite?: () => void;
   /**
-   * The config as the caller resolved it (`resolveConfig(config, options)`), for a client that
-   * shares its drivers with the caller, as `startWorker`'s `resolved` does. The caller closes its
-   * `dataStore`.
-   */
-  resolved?: ResolvedConfig;
-  /**
    * The company's repository, as the worker is given it: what `remoteEvent` acts for (its
    * `origin`) and fetches a draft's new commits into. Without one, `remoteEvent` does nothing.
    */
@@ -276,7 +270,7 @@ export class SanomaClient {
    * Postgres store on its database when it has none.
    */
   static async connect(config: SanomaConfig, options: ClientOptions = {}): Promise<SanomaClient> {
-    const resolved = options.resolved ?? resolveConfig(config);
+    const resolved = resolveConfig(config);
     const dbos = await dbosClient(resolved.databaseUrl, resolved.appName);
     return new SanomaClient(dbos, resolved, resolved.driversByVendor, options);
   }
@@ -1139,12 +1133,7 @@ export class SanomaClient {
   }
 
   async close() {
-    await Promise.all([
-      this.dbos.destroy(),
-      this.pool.close(),
-      this.audit.close(),
-      this.options.resolved ? undefined : this.config.dataStore?.close(),
-    ]);
+    await Promise.all([this.dbos.destroy(), this.pool.close(), this.audit.close(), this.config.dataStore?.close()]);
   }
 
   /**

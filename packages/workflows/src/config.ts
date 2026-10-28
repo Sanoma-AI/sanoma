@@ -143,18 +143,8 @@ export interface ResolvedConfig {
    * `connectors` order: what `drivers` indexes and the credentials are read from (`credentialsOf`).
    */
   driversByVendor: Map<string, Driver>;
-  /**
-   * The makers of the fakes the connectors attach, by vendor id in `connectors` order: each
-   * sandbox run makes its own. Resolved with `fakes: "instance"`, each gives its vendor's
-   * instance fake (`instanceFakes`).
-   */
+  /** The makers of the fakes the connectors attach, by vendor id in `connectors` order: each sandbox run makes its own. */
   fakes: Map<string, () => Fake<any, any>>;
-  /**
-   * Resolved with `fakes: "instance"` (a demo): each vendor's one fake, by vendor id, made once
-   * for this resolution. Each is its vendor's driver (`driversByVendor`), so live runs, sandbox
-   * runs and direct calls all call it, and the world's Givens seed it (`applyGivens`).
-   */
-  instanceFakes?: ReadonlyMap<string, Fake<any, any>>;
   /** The makers of the login halves the connectors attach, by vendor id in `connectors` order: the app makes one per public site that names it. */
   logins: ReadonlyMap<string, NonNullable<ConnectorSetup["login"]>>;
   /** The makers of the model halves the connectors attach, by vendor id in `connectors` order: the app makes each once for its model registry. */
@@ -251,17 +241,6 @@ export function rootOf(config: Pick<SanomaConfig, "root" | "file">): string | un
       : undefined;
 }
 
-/** What `resolveConfig` is given besides the config. */
-export interface ResolveOptions {
-  /**
-   * `"instance"`: run the whole instance on the connectors' fakes, as a demo does: each vendor's
-   * driver is one fake made for this resolution (`instanceFakes`), which every run and call
-   * shares. The collections stay on the config's database. Refused for a vendor whose connector
-   * attaches a driver and no fake, which would otherwise run live.
-   */
-  fakes?: "instance";
-}
-
 /**
  * Checks a config and derives what the runtime needs from it: the drivers and fakes from the
  * connectors' setups (`withSetup`), the collections' operations, driver and fake, and from
@@ -272,7 +251,7 @@ export interface ResolveOptions {
  * `root`. Each entry point resolves once: the worker and the client when they start, the app at
  * `startApp`, the `sanoma` bin when it loads the config.
  */
-export function resolveConfig(config: SanomaConfig, options: ResolveOptions = {}): ResolvedConfig {
+export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   if (!Array.isArray(config.connectors)) {
     throw new Error("The config needs `connectors`: the connectors its workflows call, as their packages export them");
   }
@@ -314,11 +293,7 @@ export function resolveConfig(config: SanomaConfig, options: ResolveOptions = {}
   ]);
   checkWakeupOps(types, ops);
   checkDatabaseOps(types, ops);
-  const fakes = makersOf(running, "fake");
-  const instanceFakes = options.fakes === "instance" ? instanceFakesOf(running, fakes) : undefined;
-  const driversByVendor = instanceFakes
-    ? new Map([...instanceFakes].map(([vendor, fake]) => [vendor, fake.driver]))
-    : new Map([...makersOf(running, "driver")].map(([vendor, make]) => [vendor, make()]));
+  const driversByVendor = new Map([...makersOf(running, "driver")].map(([vendor, make]) => [vendor, make()]));
   const remotes = new Map([...makersOf(config.connectors, "remote")].map(([vendor, make]) => [vendor, make()]));
   const drivers = indexDrivers(
     [
@@ -330,6 +305,7 @@ export function resolveConfig(config: SanomaConfig, options: ResolveOptions = {}
     ],
     ops,
   );
+  const fakes = makersOf(running, "fake");
   if (dataStore) fakes.set(DATA_VENDOR, () => collectionsFake(declared));
   const names = new Map<string, WorkflowDefinition<any, any>>();
   for (const wf of config.workflows ?? []) {
@@ -377,7 +353,6 @@ export function resolveConfig(config: SanomaConfig, options: ResolveOptions = {}
     drivers,
     driversByVendor,
     fakes,
-    ...(instanceFakes && { instanceFakes }),
     logins: makersOf(config.connectors, "login"),
     models: makersOf(config.connectors, "model"),
     remotes,
@@ -475,25 +450,6 @@ function makersOf<K extends keyof ConnectorSetup>(
     makers.set(vendor, make);
   }
   return makers;
-}
-
-/**
- * Each vendor's one fake, made now, for `resolveConfig`'s `fakes: "instance"`; `fakes` (the
- * makers) then give these. Refuses a connector that attaches a driver and no fake.
- */
-function instanceFakesOf(
-  connectors: readonly Connector<any, any>[],
-  fakes: Map<string, () => Fake<any, any>>,
-): Map<string, Fake<any, any>> {
-  const live = [...makersOf(connectors, "driver").keys()].filter((vendor) => !fakes.has(vendor));
-  if (live.length) {
-    throw new Error(
-      `The instance runs on fakes, but the connector of ${live.join(", ")} attaches no fake, so it would run live; attach one (\`withSetup\`) or leave it out`,
-    );
-  }
-  const made = new Map([...fakes].map(([vendor, make]) => [vendor, make()]));
-  for (const [vendor, fake] of made) fakes.set(vendor, () => fake);
-  return made;
 }
 
 /**

@@ -211,7 +211,7 @@ unless { context has before };
     const ledgers: LedgerRecord[][] = [];
     const runIds: string[] = [];
     for (const scenario of scenarios) {
-      const runId = await app.client.start(scenario.workflow!, scenario.input, {
+      const runId = await app.client.start(scenario.workflow, scenario.input, {
         startedBy: { id: "leon" },
         sandbox: scenario.name,
       });

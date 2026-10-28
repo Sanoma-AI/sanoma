@@ -7,7 +7,6 @@ import {
   DriverError,
   type OpIdOf,
   type Specs,
-  withSetup,
 } from "./op.ts";
 import { fail, type Instance, UNREGISTERED, type WakeupApi, wakeupCalls } from "./wakeup-driver.ts";
 import { INSTANCE_TOKEN, instanceUrl } from "./wakeup-service.ts";
@@ -157,17 +156,6 @@ export function defineFake<V extends string, S extends Specs, T extends Record<s
       return release;
     },
   };
-}
-
-/**
- * `connector` set up with this fake instead of the one its package attaches, for a test or a demo
- * that seeds or reads the fake its runs call: live runs call its driver, and sandbox runs call it
- * too, since its maker gives this very one. A driver swap alone is `withSetup(connector, { driver })`,
- * which keeps the package's fake, so each sandbox run has one of its own. The operations are the
- * same.
- */
-export function withFake<C extends Connector<any, any>>(connector: C, fake: Fake<any, any>): C {
-  return withSetup(connector, { driver: () => fake.driver, fake: () => fake });
 }
 
 // The built-in `sanoma.wakeup`'s fake: an in-memory wakeup service that calls the host's `/wake`.

@@ -1,6 +1,15 @@
-import { memoryLedger, type SanomaConfig, startWorker, type Worker, type WorkerOptions } from "@sanoma-ai/workflows";
+import {
+  type Connector,
+  memoryLedger,
+  type SanomaConfig,
+  startWorker,
+  type Worker,
+  type WorkerOptions,
+  withSetup,
+} from "@sanoma-ai/workflows";
+import type { Fake } from "@sanoma-ai/workflows/fake";
 
-export { type Fake, type FakeCall, type FakeOptions, withFake } from "@sanoma-ai/workflows/fake";
+export type { Fake, FakeCall, FakeOptions } from "@sanoma-ai/workflows/fake";
 export { ensureBuilt, waitFor } from "./build.ts";
 
 /**
@@ -14,6 +23,17 @@ export function testDatabaseUrl(suffix: string): string {
   const url = new URL(base);
   url.pathname = `${url.pathname}_${suffix.replace(/[^a-z0-9_]/gi, "_")}`;
   return url.toString();
+}
+
+/**
+ * `connector` set up with this fake instead of the one its package attaches, for a test that
+ * seeds or reads the fake its runs call: live runs call its driver, and sandbox runs call it too,
+ * since its maker gives this very one. A driver swap alone is `withSetup(connector, { driver })`,
+ * which keeps the package's fake, so each sandbox run has one of its own. The operations are the
+ * same.
+ */
+export function withFake<C extends Connector<any, any>>(connector: C, fake: Fake<any, any>): C {
+  return withSetup(connector, { driver: () => fake.driver, fake: () => fake });
 }
 
 /** `startWorker`'s options, and the database the test runs on. */

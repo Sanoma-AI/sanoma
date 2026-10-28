@@ -46,8 +46,6 @@ export interface WorkerState {
   drivers: Map<string, DriverFn>;
   /** The makers of the config's fake vendors, by vendor id: a sandbox run makes its own of each when it is seeded. */
   fakes: Map<string, () => Fake<any, any>>;
-  /** The instance's fakes, by vendor id, when it runs on them (`fakes: "instance"`): its sandbox runs seed and call these, not fakes of their own. */
-  instanceFakes?: ReadonlyMap<string, Fake<any, any>>;
   /** Where sandbox runs' scenarios are, the resource types their steps may name, and the steps the connectors ship. */
   scenarios?: URL;
   /** The worker's `source`, when it was given one. */

@@ -136,19 +136,7 @@ export interface Scenario {
   file: string;
   /** Its line in the file: its keyword's, or for an outline's row, the row's. */
   line: number;
-  /**
-   * The workflow its `When` runs. Absent for a scenario with no `When`, a *world*: its `Given`
-   * steps alone, which a demo applies to the instance (`applyGivens`) and nothing runs or checks.
-   */
-  workflow?: string;
-  /** Its tags, as written (`@slow`), the feature's and its own. */
-  tags: string[];
-  /**
-   * When it is tagged `@moment(<person>,<path>)` (no space: a Gherkin tag has none): a moment,
-   * which a demo starts as a sandbox run by `person`, a declared person, and leaves waiting, for
-   * a visitor signed in as them to land on at `path`.
-   */
-  moment?: Moment;
+  workflow: string;
   /**
    * The scenario's own lines of its feature file, for display: from its keyword line to the end
    * of its last step (a step's doc string or table included, and an outline's examples), less
@@ -169,12 +157,6 @@ export interface Scenario {
    */
   approvals: string[];
   expect: Expectation[];
-}
-
-/** A moment's visitor and where they land: `@moment(<person>,<path>)`. */
-export interface Moment {
-  person: string;
-  path: string;
 }
 
 /** The result of one expectation against a run's ledger. */
@@ -399,22 +381,6 @@ function builtFor(scope: Scope): Built {
 /** A `Then` step of the generic steps: its expectation, checked against the run's records. */
 const expecting = (expect: CoreExpectation): Then => ({ expect, verify: (run) => detailOf(expect, run.records) });
 
-/**
- * `who`, as a run's start admits them (`admit`): a declared person or agent, or `anonymous`. The
- * people are the root's data files' (`readPeople`, read again only once a file changed): while
- * they declare no one, any id goes.
- */
-function actorNamed(scope: Scope, who: string): string {
-  const declared = readPeople(scope.root);
-  try {
-    return admit({ id: who }, declared).id;
-  } catch (err) {
-    if (errorCode(err) !== "not_admitted" || declared.problems.length) throw err;
-    const ids = [...principalIdsOf(declared.people), ...RUNTIME_AGENTS].join(", ");
-    throw new Error(`${who} is not a declared person or agent; resources/ declares ${ids}`, { cause: err });
-  }
-}
-
 /** The rules a scope has, and the parameter types their expressions use. */
 function rulesOf(scope: Scope): { rules: Rule[]; parameterTypes: ParameterTypeSpec[] } {
   const { types, collections } = scope;
@@ -438,10 +404,20 @@ function rulesOf(scope: Scope): { rules: Rule[]; parameterTypes: ParameterTypeSp
   ];
   const opOf = (id: unknown) => scope.ops.get(id as string)!;
   const workflowOf = (name: unknown) => scope.workflows.get(name as string)!;
-  /**
-   * `group`, a declared group or `agents`, while the people's files have no problems (`readPeople`,
-   * read again only once a file changed): while they declare no one, any group goes.
-   */
+  // The people as the root's data files declare them when a step names one (`readPeople`, read
+  // again only once a file changed): while they declare no one, any id and any group go.
+  /** `who`, as a run's start admits them (`admit`): a declared person or agent, or `anonymous`. */
+  const actorNamed = (who: string) => {
+    const declared = readPeople(scope.root);
+    try {
+      return admit({ id: who }, declared).id;
+    } catch (err) {
+      if (errorCode(err) !== "not_admitted" || declared.problems.length) throw err;
+      const ids = [...principalIdsOf(declared.people), ...RUNTIME_AGENTS].join(", ");
+      throw new Error(`${who} is not a declared person or agent; resources/ declares ${ids}`, { cause: err });
+    }
+  };
+  /** `group`, a declared group or `agents`, while the people's files have no problems. */
   const groupNamed = (group: string) => {
     const { people, problems } = readPeople(scope.root);
     if (problems.length) {
@@ -459,7 +435,7 @@ function rulesOf(scope: Scope): { rules: Rule[]; parameterTypes: ParameterTypeSp
     return { resource: id as string, vendor, type, name: name as string };
   };
   const rules: Rule[] = [
-    { kind: "actor", source: "{who} is acting", read: ([who]) => actorNamed(scope, who as string) },
+    { kind: "actor", source: "{who} is acting", read: ([who]) => actorNamed(who as string) },
     // A visitor of a public site, as a login would vouch for one; `anonymous` is a `{who}`.
     { kind: "actor", source: "a visitor is acting", read: () => visitorPrincipal("scenario", "visitor").id },
     {
@@ -906,7 +882,7 @@ function namesOf(report: Report): Map<string, string> {
 }
 
 /** What one scenario's steps said, as compiling it records them. */
-type Spec = Omit<Scenario, "approvals" | "file" | "line" | "text" | "tags" | "moment">;
+type Spec = Omit<Scenario, "workflow" | "approvals" | "file" | "line" | "text"> & { workflow?: string };
 
 /** The run's records, as a `Then` step reads them. */
 function viewOf(records: readonly LedgerRecord[]): RunView {
@@ -1202,28 +1178,6 @@ function stepError(built: Built, result: StepResult | undefined, step: PickleSte
   }
 }
 
-/**
- * The moment its tags make a scenario (`@moment(<person>,<path>)`), the person admitted as a run's
- * starter is, or undefined for none; throws, at `where`, for a malformed one or a second.
- */
-function momentOf(scope: Scope, tags: readonly string[], where: string): Moment | undefined {
-  const tagged = tags.filter((t) => t === "@moment" || t.startsWith("@moment("));
-  if (tagged.length === 0) return undefined;
-  if (tagged.length > 1) throw new Error(`${where}: ${tagged.join(" and ")}: a moment has one person and one page`);
-  const [, person, path] = /^@moment\(([^,()]+),(\/[^()]*)\)$/.exec(tagged[0]!) ?? [];
-  if (person === undefined || path === undefined) {
-    throw new Error(
-      `${where}: ${tagged[0]} needs a person and a path, as in @moment(alex,/sites/portal/requests), with no space: a tag has none`,
-    );
-  }
-  try {
-    return { person: actorNamed(scope, person), path };
-  } catch (err) {
-    if (isBug(err)) throw err;
-    throw new Error(`${where}: ${tagged[0]}: ${errorMessage(err)}`, { cause: err });
-  }
-}
-
 /** The `.feature` files under `dir`, relative to it, with `/` between directories, in order. */
 function featureFiles(dir: string): string[] {
   return readdirSync(dir, { recursive: true, encoding: "utf8" })
@@ -1253,9 +1207,8 @@ const parseErrorOf = ({ uri, line, message }: Report["parseErrors"][number]) =>
 
 /**
  * Compiles the feature files `files` (relative to `dir`) into scenarios: Cucumber runs each,
- * and its steps record what they say. A file none of whose scenarios has a `When` is of worlds.
- * A file with an error has none of its scenarios: the
- * first error in it (a step that fails or matches no step or two, a scenario with no `When` beside one with,
+ * and its steps record what they say. A file with an error has none of its scenarios: the
+ * first error in it (a step that fails or matches no step or two, a scenario with no `When`,
  * a name used twice, a file Gherkin cannot parse, no scenarios at all) is its error.
  */
 async function compile(scope: Scope, dir: string, files: string[]): Promise<LoadedScenarios> {
@@ -1291,8 +1244,6 @@ async function compile(scope: Scope, dir: string, files: string[]): Promise<Load
       try {
         const list = pickles.get(file) ?? [];
         if (list.length === 0) throw new Error(`${file}: no scenarios; add one with "Scenario: <name>"`);
-        // A feature none of whose scenarios has a When is of worlds; elsewhere a missing When is a mistake.
-        const ofWorlds = list.every((p) => specs.get(p.id)!.workflow === undefined);
         for (const pickle of list) {
           const line = lineOf(report, pickle);
           const scenario = query.findLineageBy(pickle)!.scenario!;
@@ -1301,36 +1252,15 @@ async function compile(scope: Scope, dir: string, files: string[]): Promise<Load
             const error = stepError(built, results.get(step.id), step, whereOf(report, file, step));
             if (error) throw new Error(error);
           }
-          const spec = specs.get(pickle.id)!;
-          const { workflow } = spec;
+          const { workflow, ...spec } = specs.get(pickle.id)!;
           const name = names.get(pickle.id)!;
           if (inFile.some((s) => s.name === name)) {
             throw new Error(`${where}: a second scenario named "${name}"; give each its own name`);
           }
-          const tags = pickle.tags.map((t) => t.name);
-          const moment = momentOf(scope, tags, where);
-          const common = { name, file, line, tags, text: textOf(scenario, report.texts.get(file) ?? "") };
-          if (workflow === undefined && !ofWorlds) {
-            throw new Error(
-              `${where}: scenario "${name}" has no When: say which workflow runs, such as "When <workflow> runs with" (a feature with no When in any scenario is of worlds)`,
-            );
-          }
           if (workflow === undefined) {
-            // A world: its Givens alone, which nothing runs or checks.
-            const runs = moment
-              ? "is a moment, which starts a run"
-              : spec.expect[0]
-                ? `checks a run ("${spec.expect[0].step}")`
-                : spec.decisions[0]
-                  ? `decides an approval ("${spec.decisions[0].step}")`
-                  : undefined;
-            if (runs) {
-              throw new Error(
-                `${where}: scenario "${name}" has no When, so it is a world, Givens only, but it ${runs}: say which workflow runs, such as "When <workflow> runs with"`,
-              );
-            }
-            inFile.push({ ...spec, ...common, approvals: [] });
-            continue;
+            throw new Error(
+              `${where}: scenario "${name}" has no When: say which workflow runs, such as "When <workflow> runs with"`,
+            );
           }
           // A step about a declared resource reads the report of the built-in it is about.
           for (const e of spec.expect) {
@@ -1343,9 +1273,11 @@ async function compile(scope: Scope, dir: string, files: string[]): Promise<Load
           }
           inFile.push({
             ...spec,
-            ...common,
+            name,
+            file,
+            line,
             workflow,
-            ...(moment && { moment }),
+            text: textOf(scenario, report.texts.get(file) ?? ""),
             approvals: approvalsOf(scope.workflows.get(workflow)!),
           });
         }
@@ -1436,11 +1368,10 @@ export async function loadScenarios(scope: Scope): Promise<LoadedScenarios> {
  */
 export async function check(scope: Scope, scenario: Scenario, records: readonly LedgerRecord[]): Promise<Check[]> {
   if (!scope.scenarios) throw new Error(`No scenarios directory to check scenario "${scenario.name}" from`);
-  const { file, line, name, workflow } = scenario;
-  if (workflow === undefined) throw new Error(`Scenario "${name}" is a world: it runs nothing to check`);
   const built = builtFor(scope);
+  const { file, line, name } = scenario;
   const verdicts = new Map<string, string | undefined>();
-  const report = await runFeatures(built.library, checkWorld(built, workflow, viewOf(records), verdicts), {
+  const report = await runFeatures(built.library, checkWorld(built, scenario.workflow, viewOf(records), verdicts), {
     cwd: fileURLToPath(scope.scenarios),
     files: [file],
     line,
