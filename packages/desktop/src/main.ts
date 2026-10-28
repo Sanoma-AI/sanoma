@@ -631,11 +631,10 @@ async function start(path: string, views: CompanyViews, how: Begin) {
     const reopens = reopensAfterEnd(path);
     if (!current()) return;
     setCompanyState(views, { phase: "failed", message: hidePasswords(why), progress: [], reopens });
-    // A company that stops on its own says why on its page. It comes to the front when the window
-    // is hidden or shows no other company; it never takes the window from the one in use, where
-    // its page waits until it is switched to.
-    const other = shownPath !== undefined && shownPath !== path;
-    if (!other || !shellWindow?.window.isVisible()) show(path);
+    // A company that stops on its own says why on its page. The window comes back on it when
+    // hidden, or switches to it from an idle start screen; it never takes the window from another
+    // company or from a form on the start screen: its page waits until it is switched to.
+    if (!shellWindow?.window.isVisible() || (shownPath === undefined && !answer)) show(path);
   });
 }
 
@@ -670,7 +669,8 @@ async function stopCompany(path: string) {
 async function restart(path: string) {
   await opening.get(path);
   await stop(path);
-  await begin(path);
+  // Company → Stop meanwhile took it out of the window: it stays stopped.
+  if (inWindow.has(path)) await begin(path);
 }
 
 /**
@@ -871,7 +871,7 @@ async function getUpdates(path: string): Promise<void> {
       () => undefined,
       (err: unknown) => gitFailure(messageOf(err), "The update did not apply"),
     );
-    await begin(path);
+    if (inWindow.has(path)) await begin(path);
     // Updated, the company starts again in its place, its page showing the start: the window
     // stays on it. Only a fast-forward that failed is said on the start screen.
     if (failed) say(failed, true);
@@ -1088,12 +1088,14 @@ if (squirrelStartup || !app.requestSingleInstanceLock()) {
     if (!appOf(event)) throw new Error("only a company's app, at its own address, lists the companies");
     return desktopCompanies();
   });
+  // Only the app on show switches the window: a hidden one's code never takes it from the person.
+  const isShownApp = (event: Electron.IpcMainInvokeEvent) => !!appOf(event) && appOf(event) === shownViews();
   ipcMain.handle("desktop:switch", (event, id: unknown) => {
     const path = [...inWindow].find(([, views]) => views.id === id)?.[0];
-    if (appOf(event) && path) show(path);
+    if (isShownApp(event) && path) show(path);
   });
   ipcMain.handle("desktop:add", (event) => {
-    if (appOf(event)) showStart();
+    if (isShownApp(event)) showStart();
   });
 
   // Quit waits for each company: those still opening, then every session, stopped. What is open
