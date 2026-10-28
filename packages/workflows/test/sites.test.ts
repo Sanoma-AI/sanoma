@@ -515,44 +515,46 @@ describe("readSites", () => {
     expect(siteContentPages(root)).toEqual({ "/sites/www/blog/$slug": "posts", "/sites/www/guides/$slug": "guides" });
   });
 
-  it("reads a page its route keeps out of the sitemap, written out, and warns of none of its content reads", () => {
+  it("reads a page its routes keep out of the sitemap, each written out", () => {
+    const off = "staticData: { crumb: 'Off', sitemap: false }";
     const root = tree("unlisted", {
       ...site("www", "public: true"),
-      "sites/www/routes/start.tsx": route("/sites/www/start", "staticData: { crumb: 'Start', sitemap: false }"),
-      // Its content read by its parameter the sitemap cannot follow: no warning, since it is left out.
-      "sites/www/routes/notes.$id.tsx": route(
-        "/sites/www/notes/$id",
-        "staticData: { sitemap: false }",
-        "content.notes.get(params.id.toLowerCase())",
-      ),
+      "sites/www/routes/start.tsx": route("/sites/www/start", off),
       "sites/www/routes/blog.$slug.tsx": route(
         "/sites/www/blog/$slug",
         "staticData: { sitemap: false as const }",
         "content.posts.get(params.slug)",
       ),
+      // A layout and its index, one path: off when both say so.
+      "sites/www/routes/docs.tsx": route("/sites/www/docs", off),
+      "sites/www/routes/docs.index.tsx": route("/sites/www/docs/", off),
+      // A pathless layout at the home page's path, which says nothing: the home page is listed.
+      "sites/www/routes/_marketing.tsx": route("/sites/www/_marketing", off),
+      // Its lazy file says nothing, its route file does.
+      "sites/www/routes/lazy.tsx": route("/sites/www/lazy", off),
+      "sites/www/routes/lazy.lazy.tsx": route("/sites/www/lazy", "").replace(/createFileRoute/g, "createLazyFileRoute"),
       // Not written out, or not `false`, or a spread after it, or a lazy route's: listed.
       "sites/www/routes/held.tsx": route("/sites/www/held", "staticData: { sitemap: hidden }"),
       "sites/www/routes/spread.tsx": route("/sites/www/spread", "staticData: { ...unlisted }"),
       "sites/www/routes/after.tsx": route("/sites/www/after", "staticData: { sitemap: false, ...section }"),
-      "sites/www/routes/lazy.lazy.tsx": route("/sites/www/lazy", "staticData: { sitemap: false }").replace(
+      "sites/www/routes/listed.tsx": route("/sites/www/listed", "staticData: { sitemap: true }"),
+      "sites/www/routes/only.lazy.tsx": route("/sites/www/only", off).replace(
         /createFileRoute/g,
         "createLazyFileRoute",
       ),
-      "sites/www/routes/listed.tsx": route("/sites/www/listed", "staticData: { sitemap: true }"),
     });
-    const [www] = describeConfig(config(root)).sites;
-    expect(www!.pages).toEqual([
+    expect(describeConfig(config(root)).sites[0]!.pages).toEqual([
       { path: "/sites/www" },
       { path: "/sites/www/after" },
       { path: "/sites/www/blog/$slug", content: "posts", sitemap: false },
+      { path: "/sites/www/docs", sitemap: false },
       { path: "/sites/www/held" },
-      { path: "/sites/www/lazy" },
+      { path: "/sites/www/lazy", sitemap: false },
       { path: "/sites/www/listed" },
-      { path: "/sites/www/notes/$id", sitemap: false },
+      { path: "/sites/www/only" },
       { path: "/sites/www/spread" },
       { path: "/sites/www/start", sitemap: false },
     ]);
-    expect(www!.warnings).toEqual([]);
   });
 
   it("reads a public site's locales from site.ts, its default first, and makes a problem of what it cannot keep", () => {

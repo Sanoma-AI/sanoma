@@ -64,8 +64,8 @@ export interface SitePage {
    */
   content?: string;
   /**
-   * `false` when its route, or its layout's at the same path, says `staticData: { sitemap: false }`,
-   * written out: the sitemap leaves it out.
+   * `false` when its route says `staticData: { sitemap: false }`, written out, and so does each
+   * other route at its path (its layout's, a pathless one's): the sitemap leaves it out.
    */
   sitemap?: false;
 }
@@ -104,7 +104,6 @@ export interface SiteEntry {
   /**
    * On a public site, each page with one parameter whose file reads content the sitemap cannot
    * tie to it (`SitePage.content`), so the sitemap lists none of its pages: at the first read.
-   * None for a page the sitemap leaves out anyway (`SitePage.sitemap`).
    */
   warnings: (LintProblem & { file: string })[];
 }
@@ -223,23 +222,32 @@ export function readSites(
       ...optionProblems.map((p) => ({ file: siteFile, ...p })),
     ];
     const sorted = [...pages.keys()].toSorted().map((path) => pages.get(path)!);
-    // A page's file it warns of, unless another of its files (a lazy one, its layout) gives its kind or keeps it out.
+    // A page's file it warns of, unless another of its files (a lazy one, its layout) gives its kind.
     const warnings = options.public
-      ? read.flatMap(({ route, warning }) => {
-          if (!warning) return [];
-          const page = pages.get(route!.path);
-          return page?.content || page?.sitemap === false ? [] : [warning];
-        })
+      ? read.flatMap(({ route, warning }) => (warning && !pages.get(route!.path)?.content ? [warning] : []))
       : [];
     return { name, ...(app && { app }), ...options, pages: sorted, calls, problems, warnings };
   });
 }
 
-/** A site's pages, by path, from its files: a layout's and its index's (one path) merged. */
-function pagesOf(read: readonly { route?: SitePage }[]): Map<string, SitePage> {
+/**
+ * A route file's page: `sitemap` is whether its route's options keep it in the sitemap; absent for
+ * a route that has none of its own, a lazy one's.
+ */
+type FileRoute = Omit<SitePage, "sitemap"> & { sitemap?: boolean };
+
+/**
+ * A site's pages, by path, from its files: a layout's and its index's (one path) merged, off the
+ * sitemap only when no route at the path keeps it in.
+ */
+function pagesOf(read: readonly { route?: FileRoute }[]): Map<string, SitePage> {
+  const listed = new Set(read.flatMap(({ route }) => (route?.sitemap ? [route.path] : [])));
   const pages = new Map<string, SitePage>();
   for (const { route } of read) {
-    if (route) pages.set(route.path, { ...pages.get(route.path), ...route });
+    if (!route) continue;
+    const { sitemap, ...page } = route;
+    const off = sitemap === false && !listed.has(page.path);
+    pages.set(page.path, { ...pages.get(page.path), ...page, ...(off && { sitemap: false }) });
   }
   return pages;
 }
@@ -335,7 +343,7 @@ type Written = Omit<SiteCall, "target"> & { name: string };
 function readSiteFile(
   { program, at }: SourceFile,
   file: string,
-): { uses: Written[]; route?: SitePage; warning?: LintProblem & { file: string } } {
+): { uses: Written[]; route?: FileRoute; warning?: LintProblem & { file: string } } {
   const api = importedAs(program, SITE_SOURCES, "api");
   const runForm = importedAs(program, SITE_SOURCES, "RunForm");
   const content = importedAs(program, SITE_SOURCES, "content");
@@ -359,7 +367,9 @@ function readSiteFile(
         if (id !== undefined) page = pageOf(id);
       }
       const maker = callee?.type === "CallExpression" ? unwrap(callee.callee) : undefined;
-      if (maker?.type === "Identifier" && maker.name === "createFileRoute") options ??= node.arguments[0];
+      if (maker?.type === "Identifier" && maker.name === "createFileRoute" && options === undefined) {
+        if (stringValue(callee.arguments[0]) !== undefined) options = node.arguments[0] ?? null;
+      }
       const kind = contentKind(callee, content);
       if (kind !== undefined) gets.push({ kind, arg: unwrap(node.arguments[0]), start: node.start });
     } else if (node.type === "JSXOpeningElement" && node.name.type === "JSXIdentifier" && runForm.has(node.name.name)) {
@@ -375,7 +385,7 @@ function readSiteFile(
   visit(program);
   const uses = found.map((use) => (page === undefined ? use : { ...use, page }));
   if (page === undefined) return { uses };
-  const route: SitePage = { path: page, ...(offSitemap(options) && { sitemap: false }) };
+  const route: FileRoute = { path: page, ...(options !== undefined && { sitemap: !offSitemap(options) }) };
   // The one parameter's name (not a splat's), and the kinds whose `get` is given it (`params.slug`, or `slug` destructured).
   const params = page.split("/").filter((segment) => segment.startsWith("$"));
   if (params.length !== 1 || params[0] === "$") return { uses, route };
