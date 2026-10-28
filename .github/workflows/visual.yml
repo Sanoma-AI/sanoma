@@ -1,0 +1,108 @@
+# A comment on each pull request that touches what the app shows: the README's stills (scripts/readme-shots) taken on
+# the pull request's merge base and on its head, in this one job so both render alike, and for each page
+# that changed, its before, after and a diff with the changed pixels red. The images go to the orphan
+# branch `visual`, where the comment's links read them. No baselines in the repo and no pass or fail:
+# the comment is for the reviewer. Pull requests from forks are skipped (their token cannot push).
+name: Visual
+on:
+  pull_request:
+    paths:
+      - packages/app/**
+      - packages/sanoma/src/**
+      - packages/workflows/src/**
+      - packages/testing/src/**
+      - connectors/ghost/src/**
+      - README.md
+      - scripts/readme-shots/**
+      - .github/workflows/visual.yml
+
+concurrency:
+  group: visual-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  visual:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: dbos
+        ports: ["5433:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 2s --health-retries 15
+    env:
+      PR: ${{ github.event.pull_request.number }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      BASE: ${{ runner.temp }}/base
+      SHOTS: ${{ runner.temp }}/shots
+    steps:
+      # The head itself, not the merge commit, with the history to find the merge base.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        with:
+          cache: true
+      - id: pnpm
+        run: echo "store=$(pnpm store path)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pnpm.outputs.store }}
+          key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+      - run: pnpm install --frozen-lockfile
+      # The base: where the pull request left its branch, so the comment shows only its own changes.
+      # Shot with its own readme-shots, or the head's when it predates `--out`; a failure leaves no
+      # before, and every page shows as new.
+      - name: Stills of the base
+        run: |
+          git worktree add --detach "$BASE" "$(git merge-base "origin/${{ github.base_ref }}" HEAD)"
+          grep -q -- '"--out"' "$BASE/scripts/readme-shots/shots.ts" || cp -R scripts/readme-shots/. "$BASE/scripts/readme-shots/"
+          cd "$BASE"
+          pnpm install --frozen-lockfile
+          node scripts/readme-shots/shots.ts --out "$SHOTS/before" || echo "::warning title=Visual::The base's stills failed; every page shows as new."
+      - name: Stills of the head
+        run: node scripts/readme-shots/shots.ts --out "$SHOTS/after"
+      - name: Compare
+        run: node scripts/readme-shots/compare.ts "$SHOTS/before" "$SHOTS/after" "$SHOTS/diff" "https://raw.githubusercontent.com/${{ github.repository }}/visual/pr-$PR/$HEAD_SHA/"
+      # The changed pages' images on `visual` under pr-<n>/<head sha>/, a retry or two when another
+      # pull request's job pushed first.
+      - name: Publish the images
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls "$SHOTS"/diff/*.png > /dev/null 2>&1 || exit 0
+          git init -q "$RUNNER_TEMP/publish" && cd "$RUNNER_TEMP/publish"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add origin "https://x-access-token:$GH_TOKEN@github.com/${{ github.repository }}.git"
+          # On what `visual` holds, or, before its first push, on nothing: the push names the branch.
+          if git fetch -q --depth 1 origin visual; then git checkout -q FETCH_HEAD; fi
+          mkdir -p "pr-$PR/$HEAD_SHA" && cp "$SHOTS"/diff/*.png "pr-$PR/$HEAD_SHA/"
+          git add .
+          # A re-run on the same head makes the same images: nothing to commit, nothing to push.
+          git diff --cached --quiet && exit 0
+          git commit -q -m "Visual diff of #$PR at $HEAD_SHA"
+          for attempt in 1 2 3; do
+            git push -q origin HEAD:refs/heads/visual && exit 0
+            git fetch -q --depth 1 origin visual && git rebase -q FETCH_HEAD
+          done
+          exit 1
+      # The comment that starts with compare.ts's marker, updated; or a new one.
+      - name: Comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          id=$(gh api --paginate "repos/${{ github.repository }}/issues/$PR/comments" \
+            --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | startswith("<!-- visual-diff -->"))) | .id' | head -n 1)
+          if [ -n "$id" ]; then
+            gh api --method PATCH "repos/${{ github.repository }}/issues/comments/$id" -F "body=@$SHOTS/diff/comment.md" > /dev/null
+          else
+            gh pr comment "$PR" --repo "${{ github.repository }}" --body-file "$SHOTS/diff/comment.md"
+          fi

@@ -1,4 +1,6 @@
 // `pnpm readme:shots`: retakes the README's pictures in .github/assets from a running app. See README.md here.
+// `pnpm readme:shots --out <dir>`: the stills alone, written to <dir> (no GIF, .github/assets untouched), as
+// .github/workflows/visual.yml takes them on a pull request's base and head to compare.
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import {
   closeSync,
@@ -66,6 +68,12 @@ const LEADS = [
   ["Umbrella", "alice@umbrella.test", "researched", "dana", undefined, undefined],
 ] as const;
 
+// `--out <dir>`: where the stills go instead of .github/assets, with no GIF.
+const outAt = process.argv.indexOf("--out");
+const stillsDir = outAt === -1 ? undefined : process.argv[outAt + 1];
+if (outAt !== -1 && !stillsDir) fail("--out needs a directory");
+const STILLS = ["workflow.png", "runs.png", "inbox.png", "run.png", "site.png", "data.png"];
+
 const started = Date.now();
 const say = (line: string) => console.log(`readme:shots ${((Date.now() - started) / 1000).toFixed(0)}s: ${line}`);
 
@@ -106,7 +114,7 @@ for (const signal of SIGNALS) {
 }
 
 try {
-  if (!hasFfmpeg()) fail("ffmpeg is not on PATH; it makes demo.gif (brew install ffmpeg)");
+  if (!stillsDir && !hasFfmpeg()) fail("ffmpeg is not on PATH; it makes demo.gif (brew install ffmpeg)");
   say("building what is stale (pnpm run build in each package whose dist/ is older than its src/)");
   for (const [dir, outputs] of BUILT) ensureBuilt(join(repo, dir), outputs, ["pnpm", "run", "build"]);
   // Loaded once built: @sanoma-ai/testing's index imports @sanoma-ai/workflows from its dist/.
@@ -142,6 +150,7 @@ try {
   mkdirSync(captured);
   // The graph, a step selected and its details floating over it.
   await still(browser, base, "/workflows/announce", join(captured, "workflow.png"), {
+    steady: stillsDir !== undefined,
     chat: false,
     select: "ghost.post.create",
     fullPage: true,
@@ -149,30 +158,47 @@ try {
   // The workflow's Runs tab, the demo's run open over the list.
   const runId = runPath.split("/").at(-1)!;
   await still(browser, base, `/workflows/announce?view=runs&run=${runId}`, join(captured, "runs.png"), {
+    steady: stillsDir !== undefined,
     chat: false,
     height: 720,
   });
   // The chat column open beside the bar, the open approval floating over the list.
-  await still(browser, base, "/inbox", join(captured, "inbox.png"), { chat: true, height: 720 });
+  await still(browser, base, "/inbox", join(captured, "inbox.png"), {
+    steady: stillsDir !== undefined,
+    chat: true,
+    height: 720,
+  });
   await still(browser, base, runPath, join(captured, "run.png"), {
+    steady: stillsDir !== undefined,
     chat: false,
     select: "Review launch copy",
     tab: "Ledger",
     fullPage: true,
   });
-  await still(browser, base, "/sites/launches", join(captured, "site.png"), { chat: false, fullPage: true });
-  // The grid sorted by stage, a record open in the form beside it.
-  await still(browser, base, "/data/outbound?order=stage&record=Initech", join(captured, "data.png"), {
+  await still(browser, base, "/sites/launches", join(captured, "site.png"), {
+    steady: stillsDir !== undefined,
     chat: false,
     fullPage: true,
   });
-  say("stills taken; making demo.gif");
-  stopIfInterrupted();
-  await makeGif(frames, join(captured, "demo.gif"));
-  stopIfInterrupted();
-  const files = ["demo.gif", "workflow.png", "runs.png", "inbox.png", "run.png", "site.png", "data.png"];
-  replaceAssets(captured, files);
-  say(`wrote .github/assets: ${files.join(", ")}`);
+  // The grid sorted by stage, a record open in the form beside it.
+  await still(browser, base, "/data/outbound?order=stage&record=Initech", join(captured, "data.png"), {
+    steady: stillsDir !== undefined,
+    chat: false,
+    fullPage: true,
+  });
+  if (stillsDir) {
+    mkdirSync(stillsDir, { recursive: true });
+    for (const file of STILLS) copyFileSync(join(captured, file), join(stillsDir, file));
+    say(`wrote ${stillsDir}: ${STILLS.join(", ")}`);
+  } else {
+    say("stills taken; making demo.gif");
+    stopIfInterrupted();
+    await makeGif(frames, join(captured, "demo.gif"));
+    stopIfInterrupted();
+    const files = ["demo.gif", ...STILLS];
+    replaceAssets(captured, files);
+    say(`wrote .github/assets: ${files.join(", ")}`);
+  }
 } catch (err) {
   // A signal's handler runs on the event loop: let one that came during a blocking call (a build)
   // run before telling a failure from an interruption. One setImmediate can fire in the same turn,
