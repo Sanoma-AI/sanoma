@@ -1,6 +1,6 @@
 {
   "name": "@sanoma-ai/connector-github",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "GitHub resources (repositories, branch protection, team membership, deploy keys) for Sanoma, read through the OpenTofu provider",
   "keywords": [
     "connector",

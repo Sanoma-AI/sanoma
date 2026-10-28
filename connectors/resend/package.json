@@ -1,6 +1,6 @@
 {
   "name": "@sanoma-ai/connector-resend",
-  "version": "0.4.6",
+  "version": "0.4.7",
   "description": "Resend Broadcasts and email operations for Sanoma workflows",
   "keywords": [
     "connector",

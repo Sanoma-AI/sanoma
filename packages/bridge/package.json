@@ -1,6 +1,6 @@
 {
   "name": "@sanoma-ai/bridge",
-  "version": "0.4.7",
+  "version": "0.4.8",
   "description": "Client for provider-bridge, which serves OpenTofu providers' schema, import, read, plan and apply, a fake that replays recorded replies, and the generator of OpenTofu-backed connectors",
   "keywords": [
     "opentofu",

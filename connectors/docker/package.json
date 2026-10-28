@@ -1,6 +1,6 @@
 {
   "name": "@sanoma-ai/connector-docker",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "description": "The local Docker host for Sanoma: a container that runs the company, through the OpenTofu provider",
   "keywords": [
     "connector",
