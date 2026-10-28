@@ -55,7 +55,6 @@ export {
 } from "./resource.ts";
 export {
   declaredWakeup,
-  type DemoConfig,
   defineConfig,
   resolveConfig,
   resolveDatabaseUrl,

@@ -26,9 +26,7 @@ Runs the repo in the working directory, from its sanoma.config.ts (after its .en
   sanoma demo                         sanoma as a demo, on <database>_demo: every vendor on its fake, anyone signed
                                       in as one of the company's people (?as=<id>), the world and moments of
                                       scenarios/ seeded on start and every hour, nothing kept; SANOMA_DEMO=1 does
-                                      the same on a host, on the database it names. With the config's
-                                      demo.sessions, each visitor gets a copy of the seeded database and a process
-                                      of their own over it, dropped after demo.idle minutes unused
+                                      the same on a host, on the database it names
   sanoma worker                       the worker alone, for a deployment
   sanoma app                          the app alone (built with the sites), for a deployment
   sanoma wakeup                       the wakeup service alone, on the config's database: it calls each instance
@@ -167,10 +165,6 @@ async function load({
   Loaded & { postgres?: EnsuredPostgres }
 > {
   const loaded = await loadConfig();
-  // A process of `sanoma demo`'s session host: on the database the host names, whatever the config's.
-  if (process.env.SANOMA_DEMO === "instance" || process.env.SANOMA_DEMO === "copy") {
-    loaded.config = { ...loaded.config, databaseUrl: process.env.SANOMA_DATABASE_URL };
-  }
   const ensured = postgres && (await withPostgres(namedDatabaseUrl(loaded.config), loaded.root, postgres === "start"));
   const { resolveConfig, resolveDatabaseUrl } = await import("@sanoma-ai/workflows");
   try {
@@ -258,12 +252,6 @@ async function serveCommand(devServer: boolean, { demo = false } = {}): Promise<
   const loaded = await load({ postgres: "start", demo });
   return keep(loaded, async (config, resolved) => {
     (await import("./key.ts")).ensureSecretsKey(process.cwd(), log);
-    // A demo with a session per visitor (`demo.sessions`): the host of those sessions, not an instance.
-    if (process.env.SANOMA_DEMO === "1" && config.demo?.sessions) {
-      const { startDemoHost } = await import("./demo-host.ts");
-      const host = process.env.SANOMA_APP_HOST || undefined;
-      return startDemoHost(config, { port: port(), log, databaseUrl: resolved.databaseUrl, ...(host && { host }) });
-    }
     const { serve } = await import("./serve.ts");
     return serve(config, { port: port(), log, dev: devServer, resolved });
   });
