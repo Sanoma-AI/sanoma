@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { _electron as electron, type ElectronApplication, expect, test } from "@playwright/test";
 import { slugOf } from "../../src/companies.ts";
+import type { DesktopCompany } from "../../src/main.ts";
 import { runtimeOf } from "../../src/runtime.ts";
 
 const pkg = realpathSync(fileURLToPath(new URL("../../", import.meta.url)));
@@ -54,9 +55,6 @@ const apps = (window: Shown | undefined) => window?.views.map((view) => view.url
 
 const startedOf = (company: string) =>
   JSON.parse(readFileSync(join(company, "started.json"), "utf8")) as { port: number; execPath: string; pid: number };
-
-/** A company as its app's account menu gets it (`window.sanomaDesktop`, the app view's preload). */
-type DesktopCompany = { id: string; name: string; shown: boolean };
 
 test("one window: a company from progress to app, a second beside it, switching, Stop, Quit and the next launch", async () => {
   // By real path, as the shell names a company's log after it (macOS's tmpdir is a symlink).

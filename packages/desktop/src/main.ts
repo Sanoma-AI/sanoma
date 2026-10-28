@@ -58,7 +58,7 @@ import { type CompanyLog, hidePasswords, openLog } from "./logs.ts";
 import { folderArgument, isCompanyFolder, realPathOf, syncedFolderWarning } from "./places.ts";
 import { archWarnings, runtimeOf } from "./runtime.ts";
 import { type Session, type SessionOptions, startSession } from "./session.ts";
-import { type Newer, readSettings, runCheck, savedNewer, type Settings, writeSettings } from "./update-check.ts";
+import { type Newer, patchSettings, readSettings, runCheck, savedNewer } from "./update-check.ts";
 import { fastForward, prepareUpdate } from "./update-company.ts";
 import { nextShown, windowBounds } from "./window-state.ts";
 
@@ -77,9 +77,6 @@ const loadShellPage = (contents: Electron.WebContents, page: ShellPage) =>
 /** Changes the entry companies.json has for `path` (`updated`), read and written at once. */
 const patchCompany = (path: string, patch: Partial<Company>) =>
   writeCompanies(companiesFile(), updated(readCompanies(companiesFile()), path, patch));
-/** Changes the shell's settings, read and written at once. */
-const patchSettings = (patch: Partial<Settings>) =>
-  writeSettings(settingsFile(), { ...readSettings(settingsFile()), ...patch });
 
 /** What the start screen shows: the recent companies, marked when they run, and a form. */
 export interface StartState {
@@ -279,7 +276,7 @@ function windowOf(): ShellWindow {
     clearTimeout(saveTimer);
     saveTimer = undefined;
     try {
-      if (!window.isDestroyed()) patchSettings({ bounds: window.getNormalBounds() });
+      if (!window.isDestroyed()) patchSettings(settingsFile(), { bounds: window.getNormalBounds() });
     } catch (err) {
       console.error(`the window's bounds could not be saved: ${messageOf(err)}`);
     }
@@ -296,9 +293,9 @@ function windowOf(): ShellWindow {
   // The View menu acts on the focused page: the one shown.
   window.on("focus", focusShown);
   window.on("close", (event) => {
-    if (!quitting) event.preventDefault();
     saveBounds();
     if (quitting) return;
+    event.preventDefault();
     // Elsewhere than macOS, with nothing to keep (no company, no form waiting on the start screen)
     // or no tray icon to come back from: closing it quits, as before the one window.
     if (process.platform !== "darwin" && ((!inWindow.size && !answer) || !tray)) return app.quit();
@@ -359,11 +356,16 @@ function showWindow() {
   window.focus();
 }
 
+/** After the window's companies, the one shown or a name changed: its layout and every switcher. */
+function windowChanged() {
+  layout();
+  switchersChanged();
+}
+
 /** Shows the company at `path` (one in the window), or the start screen, in the window, shown. */
 function show(path: string | undefined) {
   shownPath = path;
-  layout();
-  switchersChanged();
+  windowChanged();
   if (path === undefined) sendStart();
   showWindow();
   focusShown();
@@ -443,9 +445,8 @@ function viewsFor(path: string): CompanyViews {
   const { contentView } = windowOf().window;
   contentView.addChildView(appView);
   contentView.addChildView(views.shellView);
+  // Shown by `begin`, which lays the window out.
   inWindow.set(path, views);
-  layout();
-  switchersChanged();
   return views;
 }
 
@@ -465,8 +466,7 @@ function removeFromWindow(path: string) {
     view.webContents.close();
   }
   if (shownPath === path) return show(nextShown(order, path));
-  layout();
-  switchersChanged();
+  windowChanged();
 }
 
 /**
@@ -489,8 +489,6 @@ async function openCompany(dir: string) {
   }
   const path = realPathOf(dir);
   if (inWindow.has(path)) show(path);
-  // Stopped a moment ago (Company → Stop): its session is still ending.
-  else await running.get(path)?.session.ended;
   await begin(path);
 }
 
@@ -510,6 +508,9 @@ const beginnings = new Map<string, Begin>();
  * again (Restart, Start again, Get Updates) stays where it is.
  */
 async function begin(path: string, how?: Begin) {
+  // Stopped a moment ago (Company → Stop takes it out of the window at once): its session is ending.
+  const ending = running.get(path);
+  if (ending?.stopping) await ending.session.ended;
   if (isLive(path) || quitting) return;
   if (how) beginnings.set(path, how);
   const added = !inWindow.has(path);
@@ -578,8 +579,7 @@ async function start(path: string, views: CompanyViews, how: Begin) {
   if (moved) log.write("shell", `the remembered port is taken: the app moves to ${port}, and asks who you are again`);
   views.log = log;
   setCompanyState(views, { name: company.name, warnings });
-  layout();
-  switchersChanged();
+  windowChanged();
   /** Whether the company's page shows this start: a later one replaces it, and Stop takes the page away. */
   const current = () => views.log === log && inWindow.get(path) === views;
 

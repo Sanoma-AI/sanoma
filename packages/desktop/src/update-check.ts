@@ -96,6 +96,10 @@ export function writeSettings(file: string, settings: Settings): void {
   renameSync(`${file}.tmp`, file);
 }
 
+/** Changes the settings in `file`, read again and written at once, so no writer drops another's fields. */
+export const patchSettings = (file: string, patch: Partial<Settings>): void =>
+  writeSettings(file, { ...readSettings(file), ...patch });
+
 /** The release the last check found, while it is still later than the app (`current`). */
 export function savedNewer(settings: Settings, current: string): Newer | undefined {
   const saved = settings.newer;
@@ -133,8 +137,7 @@ export async function runCheck(options: {
   if (!asked && !checkDue(saved, now)) return undefined;
   const found = newerRelease(current, await fetchReleases(current, fetchImpl));
   try {
-    // Read again: the window's bounds may have been saved while GitHub answered.
-    writeSettings(file, { ...readSettings(file), updateCheckedAt: new Date(now).toISOString(), newer: found });
+    patchSettings(file, { updateCheckedAt: new Date(now).toISOString(), newer: found });
   } catch (err) {
     console.error("update check: could not save the settings:", err);
     return { found, notify: false };

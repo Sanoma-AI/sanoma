@@ -14,7 +14,7 @@ export const DEFAULT_SIZE = { width: 1280, height: 840 };
 /** How much of a window must be on a display for it to open there. */
 const MIN_VISIBLE = 64;
 
-export const isRect = (value: unknown): value is Rect => {
+const isRect = (value: unknown): value is Rect => {
   const r = value as Rect;
   return (
     typeof r === "object" &&
@@ -62,6 +62,6 @@ export function windowBounds(saved: unknown, workAreas: readonly Rect[]): Partia
  * else the one before, else none (the start screen).
  */
 export function nextShown(order: readonly string[], removed: string): string | undefined {
-  const rest = order.filter((path) => path !== removed);
-  return rest[Math.min(Math.max(order.indexOf(removed), 0), rest.length - 1)];
+  const at = order.indexOf(removed);
+  return order[at + 1] ?? order[at - 1];
 }

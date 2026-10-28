@@ -16,7 +16,7 @@ export function linkTarget(link: string, appUrl: string): LinkTarget {
   } catch {
     return "deny";
   }
-  if (url.origin === app.origin) return "window";
+  if (isAppPage(link, appUrl)) return "window";
   if (url.protocol === app.protocol && url.port === app.port && url.hostname.endsWith(".localhost")) return "window";
   if (url.protocol === "https:" && url.host === "github.com") return "window";
   return ["http:", "https:", "mailto:"].includes(url.protocol) ? "browser" : "deny";
