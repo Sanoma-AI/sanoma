@@ -72,7 +72,7 @@ type Fault =
   | { kind: "hold"; released: Promise<void> };
 
 /**
- * Builds a fake vendor for a connector, for tests and demos. `ops` implements the operations
+ * Builds a fake vendor for a connector, for tests and sandbox runs. `ops` implements the operations
  * against `state`, typed by the connector as `defineDriver` does. The fake adds what a real
  * vendor does around them: a repeated idempotency key gets the first reply and changes
  * nothing. A test can make the next call fail, lose its reply, hit a rate limit or wait.
