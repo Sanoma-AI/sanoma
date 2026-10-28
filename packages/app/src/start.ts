@@ -4,7 +4,7 @@ import { setResponseStatus } from "@tanstack/react-start/server";
 import { actorHeaders } from "./actor.ts";
 import { ApiError } from "./api.ts";
 import type { RequestContext } from "./context.ts";
-import { notInDemo, publicOnly } from "./middleware.ts";
+import { publicOnly } from "./middleware.ts";
 import { actorOf, serverFnFailure } from "./server/core.ts";
 
 declare module "@tanstack/react-router" {
@@ -57,8 +57,7 @@ const apiErrors = createMiddleware({ type: "function" }).server(async ({ next, m
 export const startInstance = createStart(() => ({
   // Defining start.ts turns off Start's default CSRF protection for server functions, so it is added back here.
   requestMiddleware: [createCsrfMiddleware({ filter: (ctx) => ctx.handlerType === "serverFn" }), actor],
-  // `publicOnly` and `notInDemo` inside `apiErrors`, which answers their refusals as every other
-  // (a change's status, a read's not-found).
-  functionMiddleware: [actorHeader, apiErrors, publicOnly, notInDemo],
+  // `publicOnly` inside `apiErrors`, which answers its 404 as every 404 (a change's status, a read's not-found).
+  functionMiddleware: [actorHeader, apiErrors, publicOnly],
   serializationAdapters: [apiErrorTransport],
 }));

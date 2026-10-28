@@ -8,7 +8,7 @@ import { useChatPrompt } from "./shell/chat-prompt.ts";
 
 /**
  * A button opening the chat with `prompt` in its composer (`useChatPrompt`); nothing where there
- * is no chat: in a demo, and on a phone, which has no chat column.
+ * is no chat: outside the chrome, and on a phone, which has no chat column.
  */
 export function ChatButton({
   prompt,

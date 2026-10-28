@@ -6,8 +6,7 @@ import { DensityProvider } from "#/components/density.tsx";
 import { Toaster } from "#/components/ui/sonner.tsx";
 import { TooltipProvider } from "#/components/ui/tooltip.tsx";
 import { ActorContext, useActorState } from "../actor.ts";
-import { actorQuery, configQuery } from "../queries.ts";
-import { DemoBanner } from "./demo-banner.tsx";
+import { actorQuery } from "../queries.ts";
 import { Bar, PhoneBar } from "./shell/bar.tsx";
 import { ChatColumn } from "./shell/chat.tsx";
 import { type ChatPrompt, ChatPromptContext, type Prompt } from "./shell/chat-prompt.ts";
@@ -20,15 +19,13 @@ import { BESIDE_PAGE, CHAT_COOKIE, rememberPref } from "./shell/prefs.ts";
 const WhoAreYou = lazy(() => import("./who-are-you.tsx"));
 
 /**
- * The chrome: the bar, the chat column beside it (while open; never in a demo), then the page on
- * the paper, under a demo's banner, and the dialogs. A page opens the chat with a prompt through
- * `useChatPrompt`, which the chrome provides but in a demo. The bar and the column stay as the page scrolls; on a phone the bar is a sheet
+ * The chrome: the bar, the chat column beside it (while open), then the page on the paper, and
+ * the dialogs. A page opens the chat with a prompt through `useChatPrompt`, which the chrome
+ * provides. The bar and the column stay as the page scrolls; on a phone the bar is a sheet
  * behind a menu button, and there is no column.
  */
 export default function Root() {
   const { data: server } = useSuspenseQuery(actorQuery());
-  // A demo has no chat agent: no Chat in the bar, no column.
-  const { data: demo } = useSuspenseQuery({ ...configQuery(), select: (config) => config.demo });
   const actor = useActorState(server);
   // With the default login, a name chosen here is asked about again: who the server admits it as.
   const queryClient = useQueryClient();
@@ -62,19 +59,16 @@ export default function Root() {
     setChat(!chat);
     setUnset(false);
   };
-  const chatPrompt = useMemo<ChatPrompt | undefined>(
-    () =>
-      demo
-        ? undefined
-        : {
-            open: (text) => {
-              rememberPref(CHAT_COOKIE, "open");
-              setChat(true);
-              setUnset(false);
-              setPrompt({ id: generateId(), text });
-            },
-          },
-    [demo],
+  const chatPrompt = useMemo<ChatPrompt>(
+    () => ({
+      open: (text) => {
+        rememberPref(CHAT_COOKIE, "open");
+        setChat(true);
+        setUnset(false);
+        setPrompt({ id: generateId(), text });
+      },
+    }),
+    [],
   );
   // A page that asks for it (a workflow's, for its graph) takes the full width.
   const wide = useMatches({ select: (matches) => matches.some((match) => match.staticData.wide) });
@@ -85,15 +79,11 @@ export default function Root() {
         <TooltipProvider>
           <DensityProvider defaultCompact={compact}>
             <div className="flex min-h-svh">
-              <Bar
-                chat={demo ? undefined : { open: chat, toggle: toggleChat }}
-                className="sticky top-0 hidden h-svh self-start md:flex"
-              />
+              <Bar chat={{ open: chat, toggle: toggleChat }} className="sticky top-0 hidden h-svh self-start md:flex" />
               {/* A new prompt opens a column of its own, on the prompt's chat. */}
-              {chat && !demo && <ChatColumn key={prompt?.id} besidePageOnly={unset} prompt={prompt} />}
+              {chat && <ChatColumn key={prompt?.id} besidePageOnly={unset} prompt={prompt} />}
               {/* The page: its frame (title row, tabs, one card) is its children, the region gap apart. */}
               <main data-slot="page" className="flex min-w-0 flex-1 flex-col">
-                {demo && <DemoBanner demo={demo} />}
                 <PhoneBar />
                 <div
                   data-wide={wide || undefined}

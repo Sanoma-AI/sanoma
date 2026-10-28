@@ -6,7 +6,7 @@ import { type Check, check, drive, loadScenarios, type Scenario, type Scope } fr
 import { errorMessage } from "./shared.ts";
 import { startWorker } from "./worker.ts";
 
-export { type DemoState, demoState, reseed, type SeedHalf } from "./demo.ts";
+export { type DemoState, demoState, reseed } from "./demo.ts";
 
 /*
  * `@sanoma-ai/workflows/scenarios`: runs a config's scenarios as sandbox runs, with no test

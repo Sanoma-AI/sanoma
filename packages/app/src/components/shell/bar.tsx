@@ -37,7 +37,7 @@ type Section = {
   to: string;
   label: string;
   icon: PhosphorIcon;
-  when?: "changes" | "data" | "policy" | "live";
+  when?: "changes" | "data" | "policy";
   also?: string;
 };
 
@@ -55,17 +55,13 @@ const SETUP: Section[] = [
   { to: "/connectors", label: "Connectors", icon: PlugIcon },
   { to: "/apps", label: "Apps", icon: SquaresFourIcon },
   { to: "/permissions", label: "Permissions", icon: KeyIcon, when: "policy" },
-  { to: "/setup", label: "Go live", icon: RocketIcon, when: "live" },
+  { to: "/setup", label: "Go live", icon: RocketIcon },
 ];
 
-/**
- * What the bar reads from the config: whether it has collections and a policy, which sites are
- * public, and whether it is a demo (which never goes live).
- */
+/** What the bar reads from the config: whether it has collections and a policy, and which sites are public. */
 const selectBar = (config: AppConfig) => ({
   data: config.collections.length > 0,
   policy: config.policy.defined,
-  live: !config.demo,
   public: new Set(config.sites.filter((site) => site.public).map((site) => site.name)),
 });
 
@@ -85,13 +81,13 @@ const siteTile = ({ title, icon, pages }: Site, isPublic: boolean, lit: boolean)
  * the root's and then one for each app's, by the app's name (a site with no page it can link to
  * left out); then Setup. Changes shows when the repository has a remote (a change is reviewed
  * there); Data with collections, or with sites, its page leading to theirs; Permissions with a
- * policy; Go live but in a demo.
+ * policy.
  */
 function useGroups(): Tile[][] {
   const { data: has } = useSuspenseQuery({ ...configQuery(), select: selectBar });
   const { data: remote } = useSuspenseQuery(remoteQuery());
   const sites = useSites();
-  const shown = { changes: remote, data: has.data || sites.length > 0, policy: has.policy, live: has.live };
+  const shown = { changes: remote, data: has.data || sites.length > 0, policy: has.policy };
   const path = useRouterState({ select: ({ location }) => trimPathRight(location.pathname) });
   const section = ({ to, label, icon: Icon, also }: Section): Tile => ({
     to,

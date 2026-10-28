@@ -126,12 +126,11 @@ export const validate =
 export const readStartRun = (data: StartRunRequest): StartRunRequest =>
   parse(startRunSchema(data), data, "The request");
 
-/** What `getConfig` answers (`AppConfig`): the description `withoutSources`, where this instance is, and in a demo its start URL. */
+/** What `getConfig` answers (`AppConfig`): the description `withoutSources`, and where this instance is. */
 export const appConfig = (app: AppContext): AppConfig => ({
   ...withoutSources(app.description),
   place: app.place,
   databaseHost: databaseHost(app.resolved.databaseUrl),
-  ...(app.demo && { demo: app.demo }),
 });
 
 /**

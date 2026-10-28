@@ -16,29 +16,6 @@ export const withPrincipal = createMiddleware({ type: "function" }).server(async
   next({ context: { principal: await requireActor(context as unknown as ActorContext) } }),
 );
 
-/**
- * The server functions a demo refuses (`AppContext.demo`): what would outlast its hourly reseed,
- * a credential or a token stored, a data file adopted, going live. Its runs, decisions and
- * records are the demo itself, and the reseed starts them afresh.
- */
-export const DEMO_REFUSED: ReadonlySet<string> = new Set([
-  "adoptFn",
-  "setCredentialFn",
-  "clearCredentialFn",
-  "setSetupTokenFn",
-  "goLiveFn",
-  "goLiveHostFn",
-  "connectExistingFn",
-]);
-
-/** In a demo, `DEMO_REFUSED` are a 403 saying why. */
-export const notInDemo = createMiddleware({ type: "function" }).server(({ next, context, serverFnMeta }) => {
-  if ((context as unknown as { app: AppContext }).app.demo && DEMO_REFUSED.has(serverFnMeta.name)) {
-    throw new ApiError(403, { error: "This is a demo: nothing done here is kept, so this cannot be done here" });
-  }
-  return next();
-});
-
 /** The server functions a public site's host answers: a site's `api`, and who is asking. */
 export const PUBLIC_FNS: ReadonlySet<string> = new Set(["callFn", "getActor"]);
 

@@ -1,16 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { UsageError } from "../src/config.ts";
-import { appOptions, parseDomains, runApp, runWorker, wakeRoute } from "../src/serve.ts";
+import { appOptions, parseDomains, wakeRoute } from "../src/serve.ts";
 
 /** Sets these variables for the test, and unsets the other launcher variables appOptions reads. */
 function environment(values: Record<string, string>) {
-  const names = [
-    "SANOMA_APP_HOST",
-    "SANOMA_GITHUB_CLIENT_ID",
-    "SANOMA_GITHUB_CLIENT_SECRET",
-    "SANOMA_DOMAINS",
-    "SANOMA_DEMO",
-  ];
+  const names = ["SANOMA_APP_HOST", "SANOMA_GITHUB_CLIENT_ID", "SANOMA_GITHUB_CLIENT_SECRET", "SANOMA_DOMAINS"];
   for (const name of names) vi.stubEnv(name, "");
   for (const [name, value] of Object.entries(values)) vi.stubEnv(name, value);
 }
@@ -56,24 +50,6 @@ describe("parseDomains", () => {
 
 describe("appOptions", () => {
   afterEach(() => vi.unstubAllEnvs());
-
-  it("makes SANOMA_DEMO=1 a demo, on any host, with no GitHub sign-in and no secrets read", async () => {
-    const readSecrets = vi.fn<() => Promise<Map<string, string>>>();
-    environment({ SANOMA_DEMO: "1", SANOMA_APP_HOST: "0.0.0.0", ...GITHUB });
-    expect(await appOptions(readSecrets)).toEqual({ host: "0.0.0.0", demo: true });
-    expect(readSecrets).not.toHaveBeenCalled();
-    environment({ SANOMA_DEMO: "0" });
-    expect(await appOptions()).toEqual({ host: undefined });
-  });
-
-  it("refuses a demo to the worker or the app alone, which would not share its fakes", async () => {
-    environment({ SANOMA_DEMO: "1" });
-    const config = { workflows: [], connectors: [], root: "/nowhere" };
-    await expect(runWorker(config)).rejects.toThrow(
-      "SANOMA_DEMO=1 runs the worker and the app in one process, which holds the demo's fakes: run `sanoma serve` (or `sanoma demo`), not `sanoma worker`",
-    );
-    await expect(runApp(config, { port: 0, log: () => {} })).rejects.toThrow("not `sanoma app`");
-  });
 
   it("takes the public sites' domains from SANOMA_DOMAINS", async () => {
     environment({ SANOMA_DOMAINS: "www=sanoma.example" });
