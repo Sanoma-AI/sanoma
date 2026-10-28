@@ -2,7 +2,7 @@ import { createContext, useContext } from "react";
 
 // What a page asks the agent through the chat: New workflow, New app and an app's Add open the
 // chat column on a new chat with a prompt in its composer, which the person finishes and sends.
-// The chrome (`app-chrome.tsx`) provides it; there is none outside the chrome.
+// The chrome (`app-chrome.tsx`) provides it.
 
 /** The chat, as a page opens it with a prompt (`useChatPrompt`). */
 export interface ChatPrompt {
@@ -16,7 +16,11 @@ export interface Prompt {
   text: string;
 }
 
-export const ChatPromptContext = createContext<ChatPrompt | undefined>(undefined);
+export const ChatPromptContext = createContext<ChatPrompt | null>(null);
 
-/** The chat's prompt handle; undefined outside the chrome, so a page leaves its button out. */
-export const useChatPrompt = (): ChatPrompt | undefined => useContext(ChatPromptContext);
+/** The chat's prompt handle, which the chrome provides to every page. */
+export function useChatPrompt(): ChatPrompt {
+  const chat = useContext(ChatPromptContext);
+  if (!chat) throw new Error("useChatPrompt is used outside the chrome, which provides the chat");
+  return chat;
+}
