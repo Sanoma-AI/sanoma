@@ -54,8 +54,9 @@ const config: ForgeConfig = {
       build: [
         { entry: "src/main.ts", config: "vite.main.config.mts", target: "main" },
         { entry: "src/preload.ts", config: "vite.main.config.mts", target: "preload" },
+        { entry: "src/app-preload.ts", config: "vite.main.config.mts", target: "preload" },
       ],
-      // The shell's own pages (start/): the start window and a company window's progress page.
+      // The shell's own pages (start/): the start screen and a company's progress page.
       renderer: [{ name: "start", config: "vite.renderer.config.mts" }],
     }),
     // Set at package time, before signing. The shell runs companies with the Node it ships, never

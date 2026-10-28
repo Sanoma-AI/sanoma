@@ -21,3 +21,15 @@ export function linkTarget(link: string, appUrl: string): LinkTarget {
   if (url.protocol === "https:" && url.host === "github.com") return "window";
   return ["http:", "https:", "mailto:"].includes(url.protocol) ? "browser" : "deny";
 }
+
+/**
+ * Whether `page` is the app's own, at `appUrl`'s origin: the one page the shell's companies API
+ * (`app-preload.ts`) answers, never GitHub's or a public site's, which the window may show too.
+ */
+export function isAppPage(page: string, appUrl: string): boolean {
+  try {
+    return new URL(page).origin === new URL(appUrl).origin;
+  } catch {
+    return false;
+  }
+}

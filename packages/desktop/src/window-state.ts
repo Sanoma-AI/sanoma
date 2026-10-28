@@ -1,3 +1,5 @@
+// The shell's one window: where it opens, and which company it shows once one leaves.
+
 /** A window's place on the screen, as Electron gives it (`getNormalBounds`) and takes it. */
 export interface Rect {
   x: number;
@@ -6,7 +8,7 @@ export interface Rect {
   height: number;
 }
 
-/** A company window's size the first time, or when its saved place is on no display now. */
+/** The window's size the first time, or when its saved place is on no display now. */
 export const DEFAULT_SIZE = { width: 1280, height: 840 };
 
 /** How much of a window must be on a display for it to open there. */
@@ -32,12 +34,13 @@ const within = (at: number, size: number, start: number, span: number) =>
   Math.min(Math.max(at, start), start + span - size);
 
 /**
- * Where a company's window opens: at its saved bounds while at least `MIN_VISIBLE` pixels of them
- * each way are on one of the displays' `workAreas` now, moved and shrunk to fit that display
- * whole; else (its display unplugged since) at the default size, which Electron centres.
+ * Where the window opens: at its saved bounds while at least `MIN_VISIBLE` pixels of them each
+ * way are on one of the displays' `workAreas` now, moved and shrunk to fit that display whole;
+ * else (none saved, or not a `Rect`, or its display unplugged since) at the default size, which
+ * Electron centres.
  */
-export function windowBounds(saved: Rect | undefined, workAreas: readonly Rect[]): Partial<Rect> & typeof DEFAULT_SIZE {
-  if (!saved) return DEFAULT_SIZE;
+export function windowBounds(saved: unknown, workAreas: readonly Rect[]): Partial<Rect> & typeof DEFAULT_SIZE {
+  if (!isRect(saved)) return DEFAULT_SIZE;
   const area = workAreas.find(
     (a) =>
       overlap(saved.x, saved.width, a.x, a.width) >= MIN_VISIBLE &&
@@ -52,4 +55,13 @@ export function windowBounds(saved: Rect | undefined, workAreas: readonly Rect[]
     width,
     height,
   };
+}
+
+/**
+ * The company the window shows once `removed` leaves its companies' `order`: the one after it,
+ * else the one before, else none (the start screen).
+ */
+export function nextShown(order: readonly string[], removed: string): string | undefined {
+  const rest = order.filter((path) => path !== removed);
+  return rest[Math.min(Math.max(order.indexOf(removed), 0), rest.length - 1)];
 }

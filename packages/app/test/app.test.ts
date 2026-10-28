@@ -1223,6 +1223,74 @@ describe("the page", () => {
     }
   });
 
+  it("lists the desktop shell's companies in the account menu, switches and adds through it, and has none outside the shell, in Chrome", async (test) => {
+    const chrome = process.env.CHROME_PATH ?? (await executablePath("chrome").catch(() => ""));
+    if (!existsSync(chrome)) test.skip("no Chrome: install Google Chrome or set CHROME_PATH");
+    const browser = await launchChrome({ executablePath: chrome, headless: true, defaultViewport: LAPTOP });
+    try {
+      const tab = await browser.newPage();
+      const workflows = new URL("/workflows", app.url).href;
+      await tab.goto(workflows);
+      await tab.evaluate((key) => localStorage.setItem(key, "tester"), ACTOR_KEY);
+      const run = <T>(code: string) => tab.evaluate(code) as Promise<T>;
+      const trigger = '[data-slot="dropdown-menu-trigger"]';
+      const menu = '[data-slot="dropdown-menu-content"]';
+      /** The account menu, opened: its labels, and its companies as radio items (name, checked). */
+      const opened = async () => {
+        await tab.click(trigger);
+        await tab.waitForSelector(menu);
+        return run<{ labels: string[]; companies: [string, string | null][] }>(`({
+          labels: [...document.querySelectorAll('${menu} [data-slot="dropdown-menu-label"]')].map((l) => l.textContent),
+          companies: [...document.querySelectorAll('${menu} [role="menuitemradio"]')]
+            .filter((item) => item.closest('[role="group"]').textContent.startsWith("Companies"))
+            .map((item) => [item.textContent, item.getAttribute("aria-checked")]),
+        })`);
+      };
+      const closed = () => tab.waitForFunction(`!document.querySelector('${menu}')`);
+
+      // In a browser: no Companies.
+      await tab.goto(workflows, { waitUntil: "networkidle0" });
+      expect((await opened()).labels).not.toContain("Companies");
+      await tab.keyboard.press("Escape");
+      await closed();
+
+      // In the desktop shell's window: its preload's object, here a fake that records each call.
+      await tab.evaluateOnNewDocument(`
+        window.calls = [];
+        let listener;
+        window.push = (companies) => listener(companies);
+        window.sanomaDesktop = {
+          companies: async () => [{ id: "a", name: "Acme", shown: true }, { id: "b", name: "Brightside", shown: false }],
+          switch: async (id) => void window.calls.push(["switch", id]),
+          addCompany: async () => void window.calls.push(["add"]),
+          onCompanies: (next) => ((listener = next), () => window.calls.push(["off"])),
+        };
+      `);
+      await tab.reload({ waitUntil: "networkidle0" });
+      const inShell = await opened();
+      expect(inShell.labels).toContain("Companies");
+      expect(inShell.companies).toEqual([
+        ["Acme", "true"],
+        ["Brightside", "false"],
+      ]);
+      // Another company switches the window to it; the shown one switches nothing.
+      await tab.click(`${menu} ::-p-text(Brightside)`);
+      await closed();
+      await opened();
+      await tab.click(`${menu} ::-p-text(Acme)`);
+      await closed();
+      await opened();
+      await tab.click(`${menu} ::-p-text(Add company…)`);
+      await closed();
+      expect(await run("window.calls")).toEqual([["switch", "b"], ["add"]]);
+      // What the shell says changed shows the next time the menu opens: with one company, still listed.
+      await run(`window.push([{ id: "b", name: "Brightside", shown: true }])`);
+      expect((await opened()).companies).toEqual([["Brightside", "true"]]);
+    } finally {
+      await browser.close();
+    }
+  });
+
   it("lists the installed connectors alone when npm cannot be searched, and says so", async () => {
     npmSearchFails(() => HttpResponse.error());
     const { text } = await page("/connectors");

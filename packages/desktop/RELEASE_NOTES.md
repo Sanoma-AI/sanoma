@@ -12,10 +12,10 @@ If "Open Anyway" does not appear, run this in Terminal: `xattr -dr com.apple.qua
 
 ## What it does
 
-- Opens a company: a folder with a `sanoma.config.ts`. You can use Open folder… in the start window, File → Open Company…, Open Recent, or drop a folder on the Dock icon.
+- Opens a company: a folder with a `sanoma.config.ts`. You can use Open folder… on the start screen, File → Open Company…, Open Recent, or drop a folder on the Dock icon.
 - Installs and starts it with the Node 26 and pnpm the app ships, whatever the computer has (`pnpm install`, then the company's launcher).
-- Shows the app in a window per company. Each company gets its own storage and keeps its port, so the app remembers who you are.
-- Stops each company when its window closes or the app quits. Each start is logged to `~/Library/Logs/Sanoma/`.
+- Shows the app in one window. Open several companies and switch between them from the account menu under your initials (or ⌘1…⌘9, the Window menu, the Dock menu); each keeps running, gets its own storage and keeps its port, so the app remembers who you are.
+- Closing the window keeps every company running; Company → Stop stops one, and quitting stops them all. Each start is logged to `~/Library/Logs/Sanoma/`.
 - Checks GitHub Releases once a day for a newer version. Help → Check for a Newer Sanoma checks on demand, and Help links to a newer release when there is one.
 
 ## What it needs

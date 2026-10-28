@@ -2,13 +2,16 @@ import { SignOutIcon } from "@phosphor-icons/react/dist/csr/SignOut";
 import type { Icon as PhosphorIcon } from "@phosphor-icons/react";
 import { ArrowsOutSimpleIcon } from "@phosphor-icons/react/dist/csr/ArrowsOutSimple";
 import { ArrowsInSimpleIcon } from "@phosphor-icons/react/dist/csr/ArrowsInSimple";
+import { BuildingsIcon } from "@phosphor-icons/react/dist/csr/Buildings";
 import { DesktopIcon } from "@phosphor-icons/react/dist/csr/Desktop";
 import { MoonIcon } from "@phosphor-icons/react/dist/csr/Moon";
+import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
 import { SunIcon } from "@phosphor-icons/react/dist/csr/Sun";
 import { UserIcon } from "@phosphor-icons/react/dist/csr/User";
 import { UserCircleGearIcon } from "@phosphor-icons/react/dist/csr/UserCircleGear";
 import { useTheme } from "next-themes";
 import { toast } from "sonner";
+import { desktopShell, useDesktopCompanies } from "#/lib/desktop.ts";
 import { cn } from "#/lib/utils.ts";
 import { Avatar, AvatarFallback } from "#/components/ui/avatar.tsx";
 import {
@@ -28,13 +31,17 @@ import { useDensity } from "../density.tsx";
 /**
  * Who you are, the theme and the density, at the foot of the bar: your initials, your name, your
  * groups (and whom you act for, as an agent) and where the name comes from read out to assistive
- * tech and shown atop the menu, with Sign out when the login has one. The menu renders only once
+ * tech and shown atop the menu, with Sign out when the login has one. In the desktop shell's
+ * window, the companies open there too (`useDesktopCompanies`), this one checked: another switches
+ * the window to it, and Add company… shows the shell's start screen. The menu renders only once
  * opened, in the browser, so the stored theme never reaches the server's markup.
  */
 export function NavUser() {
   const { actor, groups, onBehalfOf, fromServer, error, signOut, setActor } = useActor();
   const { theme, setTheme } = useTheme();
   const { compact, setCompact } = useDensity();
+  const companies = useDesktopCompanies();
+  const shownCompany = companies?.find((company) => company.shown)?.id ?? "";
   const setDensity = (value: string) => setCompact(value === "compact");
   // Under the name: why the deployment could not say, or where the name comes from; nothing
   // when there is no name.
@@ -72,6 +79,21 @@ export function NavUser() {
           </DropdownMenuLabel>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
+        {companies && (
+          <>
+            <Choices
+              label="Companies"
+              value={shownCompany}
+              onValueChange={(id) => id !== shownCompany && void desktopShell()?.switch(id)}
+              choices={companies.map((company) => ({ value: company.id, icon: BuildingsIcon, label: company.name }))}
+            />
+            <DropdownMenuItem onClick={() => void desktopShell()?.addCompany()}>
+              <PlusIcon aria-hidden="true" />
+              Add company…
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+          </>
+        )}
         {!fromServer && (
           <>
             <DropdownMenuItem onClick={() => setActor(null)}>

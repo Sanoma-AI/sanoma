@@ -3,7 +3,6 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { createServer } from "node:net";
 import { basename, dirname, join } from "node:path";
 import { isCompanyFolder } from "./places.ts";
-import { type Rect, isRect } from "./window-state.ts";
 
 /** A company this shell has opened, as `companies.json` remembers it. */
 export interface Company {
@@ -15,12 +14,11 @@ export interface Company {
   /** ISO time of the last open. */
   lastOpened: string;
   /**
-   * Whether it is open: set when it starts, cleared when the person stops it or closes its window
-   * while it does not run, and kept through Quit, so the next launch opens it again (`toReopen`).
+   * Whether it is open: set when it starts, cleared when the person stops it (Company → Stop, or
+   * a failed one's "Don't open it at launch"), and kept through Quit, so the next launch opens it
+   * again (`toReopen`).
    */
   open?: boolean;
-  /** Its window's bounds, as last moved or resized (`windowBounds`). */
-  bounds?: Rect;
 }
 
 /** The first port tried for a new company: clear of the launcher's own default, 3000. */
@@ -38,11 +36,13 @@ const isCompany = (value: unknown): value is Company => {
   );
 };
 
-/** A company as read: what is not one of its fields' kind is dropped, not the company. */
-const cleaned = ({ open, bounds, ...company }: Company): Company => ({
+/**
+ * A company as read: what is not one of its fields' kind is dropped, not the company, as is the
+ * window bounds each company had before the shell had one window (`Settings.bounds` now).
+ */
+const cleaned = ({ open, bounds: _bounds, ...company }: Company & { bounds?: unknown }): Company => ({
   ...company,
   ...(open === true && { open }),
-  ...(isRect(bounds) && { bounds }),
 });
 
 /** The companies `file` remembers, most recently opened first; none when it is missing or unreadable. */
