@@ -46,7 +46,7 @@ importers:
         version: 7.0.2
       vitest:
         specifier: ^5.0.3
-        version: 5.0.3(@types/node@26.6.4)(msw@3.0.2(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1)))(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1))
+        version: 5.0.3(@types/node@26.6.4)(msw@3.0.3(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1)))(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1))
 
   connectors/anthropic:
     dependencies:
@@ -108,8 +108,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/workflows
       msw:
-        specifier: ^3.0.2
-        version: 3.0.2(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1))
+        specifier: ^3.0.3
+        version: 3.0.3(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1))
       zod:
         specifier: ^4.6.5
         version: 4.6.5
@@ -130,8 +130,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/workflows
       msw:
-        specifier: ^3.0.2
-        version: 3.0.2(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1))
+        specifier: ^3.0.3
+        version: 3.0.3(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1))
       zod:
         specifier: ^4.6.5
         version: 4.6.5
@@ -161,8 +161,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/workflows
       msw:
-        specifier: ^3.0.2
-        version: 3.0.2(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1))
+        specifier: ^3.0.3
+        version: 3.0.3(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1))
       zod:
         specifier: ^4.6.5
         version: 4.6.5
@@ -177,8 +177,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/workflows
       msw:
-        specifier: ^3.0.2
-        version: 3.0.2(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1))
+        specifier: ^3.0.3
+        version: 3.0.3(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1))
       zod:
         specifier: ^4.6.5
         version: 4.6.5
@@ -208,8 +208,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/workflows
       msw:
-        specifier: ^3.0.2
-        version: 3.0.2(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1))
+        specifier: ^3.0.3
+        version: 3.0.3(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1))
       zod:
         specifier: ^4.6.5
         version: 4.6.5
@@ -220,8 +220,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/workflows
       msw:
-        specifier: ^3.0.2
-        version: 3.0.2(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1))
+        specifier: ^3.0.3
+        version: 3.0.3(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1))
       zod:
         specifier: ^4.6.5
         version: 4.6.5
@@ -247,8 +247,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/workflows
       msw:
-        specifier: ^3.0.2
-        version: 3.0.2(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1))
+        specifier: ^3.0.3
+        version: 3.0.3(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1))
       zod:
         specifier: ^4.6.5
         version: 4.6.5
@@ -425,8 +425,8 @@ importers:
         specifier: ^8.23.1
         version: 8.23.1
       msw:
-        specifier: ^3.0.2
-        version: 3.0.2(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.3(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1))
+        specifier: ^3.0.3
+        version: 3.0.3(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.3(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1))
       pg:
         specifier: ^8.23.1
         version: 8.23.1
@@ -588,7 +588,7 @@ importers:
         version: 8.23.1
       vitest:
         specifier: ^5
-        version: 5.0.3(@types/node@26.6.4)(msw@3.0.2(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1)))(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1))
+        version: 5.0.3(@types/node@26.6.4)(msw@3.0.3(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1)))(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1))
     devDependencies:
       '@dbos-inc/dbos-sdk':
         specifier: ^5.2.11
@@ -615,8 +615,8 @@ importers:
         specifier: ^8.23.1
         version: 8.23.1
       msw:
-        specifier: ^3.0.2
-        version: 3.0.2(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1))
+        specifier: ^3.0.3
+        version: 3.0.3(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1))
       zod:
         specifier: ^4.6.5
         version: 4.6.5
@@ -670,8 +670,8 @@ importers:
         specifier: ^8.23.1
         version: 8.23.1
       msw:
-        specifier: ^3.0.2
-        version: 3.0.2(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1))
+        specifier: ^3.0.3
+        version: 3.0.3(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1))
       srvx:
         specifier: ^0.11.22
         version: 0.11.22
@@ -1505,8 +1505,8 @@ packages:
   '@msw/url@0.1.2':
     resolution: {integrity: sha512-DdeBLQxQ+ZrtmwEmaj7GQ7lbzPCgbbbyAqOz/I4ulo68hwBpfdNvQJ5bmihJUkAAKOeCmqCIG3OFZGosqFN4mA==}
 
-  '@mswjs/interceptors@0.45.7':
-    resolution: {integrity: sha512-PPZQBiojRuy1jJQoUqbrJhoac47GC1GwRazDrYwwbE70zfqMkOY/5a+Du4hp3vlPUXLt/um4TMcmRabmooAkxw==}
+  '@mswjs/interceptors@0.45.9':
+    resolution: {integrity: sha512-NmEzpWbbiWpudgqKVZtGdSAvQGIYyj7Rf8ea+1hJEo+Dn0YvPHtiz577US7kGg0sCaZtPelrdqV4SfwwGJq1cA==}
     engines: {node: '>=22'}
 
   '@neondatabase/api-client@2.7.3':
@@ -4436,8 +4436,8 @@ packages:
   ms@2.1.3:
     resolution: {integrity: sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==}
 
-  msw@3.0.2:
-    resolution: {integrity: sha512-/74rddlgCmlHvrXUkuYKoUjDJTiP4Nrz2uyIpOTLtxJNCS+2yY+DlLfzzRUc61cvRjCo6Jvi2+vRNZyZQa1j4A==}
+  msw@3.0.3:
+    resolution: {integrity: sha512-hsXUCt2gK12q1IUBY9VmMun+yC60eEpVzegAFN5aGZbXhrGqtgPARVWn2ew4mezYvk1G8yhFha9myGSyRyRGWg==}
     engines: {node: '>=22.12.0'}
     hasBin: true
     peerDependencies:
@@ -7162,7 +7162,7 @@ snapshots:
 
   '@msw/url@0.1.2': {}
 
-  '@mswjs/interceptors@0.45.7(supports-color@11.0.0)':
+  '@mswjs/interceptors@0.45.9(supports-color@11.0.0)':
     dependencies:
       '@open-draft/until': 3.0.1
       '@types/debug': 4.1.13
@@ -8194,14 +8194,14 @@ snapshots:
       '@rolldown/pluginutils': 1.0.1
       vite: 8.3.3(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1)
 
-  '@vitest/mocker@5.0.3(msw@3.0.2(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1)))(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1))':
+  '@vitest/mocker@5.0.3(msw@3.0.3(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1)))(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1))':
     dependencies:
       '@jridgewell/trace-mapping': 0.3.31
       '@vitest/spy': 5.0.3
       estree-walker: 3.0.3
       magic-string: 1.4.3
     optionalDependencies:
-      msw: 3.0.2(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1))
+      msw: 3.0.3(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1))
       vite: 8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1)
 
   '@vitest/spy@5.0.3': {}
@@ -8385,7 +8385,7 @@ snapshots:
       pg: 8.23.1
       react: 19.3.0
       react-dom: 19.3.0(react@19.3.0)
-      vitest: 5.0.3(@types/node@26.6.4)(msw@3.0.2(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1)))(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1))
+      vitest: 5.0.3(@types/node@26.6.4)(msw@3.0.3(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1)))(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1))
     transitivePeerDependencies:
       - '@opentelemetry/api'
 
@@ -9788,11 +9788,11 @@ snapshots:
 
   ms@2.1.3: {}
 
-  msw@3.0.2(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.3(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1)):
+  msw@3.0.3(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.3(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1)):
     dependencies:
       '@inquirer/confirm': 6.3.3(@types/node@26.6.4)
       '@msw/url': 0.1.2
-      '@mswjs/interceptors': 0.45.7(supports-color@11.0.0)
+      '@mswjs/interceptors': 0.45.9(supports-color@11.0.0)
       cookie: 2.0.1
       headers-polyfill: 5.0.1
       is-node-process: 1.2.0
@@ -9809,11 +9809,11 @@ snapshots:
       - '@types/node'
       - supports-color
 
-  msw@3.0.2(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1)):
+  msw@3.0.3(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1)):
     dependencies:
       '@inquirer/confirm': 6.3.3(@types/node@26.6.4)
       '@msw/url': 0.1.2
-      '@mswjs/interceptors': 0.45.7(supports-color@11.0.0)
+      '@mswjs/interceptors': 0.45.9(supports-color@11.0.0)
       cookie: 2.0.1
       headers-polyfill: 5.0.1
       is-node-process: 1.2.0
@@ -10981,10 +10981,10 @@ snapshots:
       vite: 8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1)
     optional: true
 
-  vitest@5.0.3(@types/node@26.6.4)(msw@3.0.2(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1)))(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1)):
+  vitest@5.0.3(@types/node@26.6.4)(msw@3.0.3(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1)))(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1)):
     dependencies:
       '@types/chai': 5.2.3
-      '@vitest/mocker': 5.0.3(msw@3.0.2(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1)))(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1))
+      '@vitest/mocker': 5.0.3(msw@3.0.3(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1)))(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1))
       chai: 6.3.0
       es-module-lexer: 2.3.2
       expect-type: 1.4.0

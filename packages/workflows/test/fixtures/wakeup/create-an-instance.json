@@ -1,0 +1,16 @@
+[
+  {
+    "method": "POST",
+    "path": "/wakeup/instances",
+    "status": 201,
+    "body": {
+      "id": "00000000-0000-4000-8000-000000000001"
+    }
+  },
+  {
+    "method": "DELETE",
+    "path": "/wakeup/instances/00000000-0000-4000-8000-000000000001",
+    "status": 204,
+    "body": null
+  }
+]

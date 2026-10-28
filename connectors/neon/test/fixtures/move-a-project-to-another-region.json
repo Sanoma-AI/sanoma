@@ -11,10 +11,11 @@
         "compute_time_seconds": 0,
         "active_time_seconds": 0,
         "cpu_used_sec": 0,
-        "id": "spring-example-302709",
+        "id": "fancy-truth-53952210",
         "platform_id": "aws",
         "region_id": "aws-us-east-1",
         "name": "acme-ops",
+        "slug": "fancy-truth-53952210",
         "provisioner": "k8s-neonvm",
         "default_endpoint_settings": {
           "autoscaling_limit_min_cu": 0.25,
@@ -26,84 +27,107 @@
             "ips": [],
             "protected_branches_only": false
           },
-          "enable_logical_replication": false
+          "enable_logical_replication": false,
+          "maintenance_window": {
+            "weekdays": [1],
+            "start_time": "04:00",
+            "end_time": "05:00"
+          },
+          "block_public_connections": false,
+          "block_vpc_connections": false,
+          "hipaa": false
         },
-        "pg_version": 17,
-        "proxy_host": "us-east-1.aws.neon.tech",
+        "pg_version": 18,
+        "proxy_host": "c-14.us-east-1.aws.neon.tech",
         "branch_logical_size_limit": 512,
         "branch_logical_size_limit_bytes": 536870912,
         "store_passwords": true,
         "creation_source": "console",
-        "history_retention_seconds": 86400,
-        "created_at": "2026-10-26T12:00:00Z",
-        "updated_at": "2026-10-26T12:00:00Z",
-        "consumption_period_start": "2026-10-26T12:00:00Z",
-        "consumption_period_end": "2026-11-26T12:00:00Z",
+        "history_retention_seconds": 21600,
+        "created_at": "2026-10-28T00:33:47Z",
+        "updated_at": "2026-10-28T00:33:47Z",
+        "synthetic_storage_size": 0,
+        "consumption_period_start": "0001-01-01T00:00:00Z",
+        "consumption_period_end": "0001-01-01T00:00:00Z",
         "owner_id": "org-recorded-12345678",
         "org_id": "org-recorded-12345678"
       },
       "connection_uris": [
         {
-          "connection_uri": "postgresql://neondb_owner:npg_recordedpassword@ep-silent-smoke-806639.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require",
+          "connection_uri": "postgresql://neondb_owner:npg_recordedpassword@ep-bitter-breeze-b8i65955.c-14.us-east-1.aws.neon.tech/neondb?sslmode=require",
           "connection_parameters": {
             "database": "neondb",
             "password": "npg_recordedpassword",
             "role": "neondb_owner",
-            "host": "ep-silent-smoke-806639.us-east-1.aws.neon.tech",
-            "pooler_host": "ep-silent-smoke-806639-pooler.us-east-1.aws.neon.tech"
+            "host": "ep-bitter-breeze-b8i65955.c-14.us-east-1.aws.neon.tech",
+            "pooler_host": "ep-bitter-breeze-b8i65955-pooler.c-14.us-east-1.aws.neon.tech"
           }
         }
       ],
       "roles": [
         {
-          "branch_id": "br-wispy-meadow-118737",
+          "branch_id": "br-damp-shape-b8jm887s",
           "name": "neondb_owner",
           "password": "npg_recordedpassword",
           "protected": false,
-          "created_at": "2026-10-26T12:00:00Z",
-          "updated_at": "2026-10-26T12:00:00Z"
+          "authentication_method": "password",
+          "created_at": "2026-10-28T00:33:47Z",
+          "updated_at": "2026-10-28T00:33:47Z"
         }
       ],
       "databases": [
         {
-          "id": 1234,
-          "branch_id": "br-wispy-meadow-118737",
+          "id": 959116,
+          "branch_id": "br-damp-shape-b8jm887s",
           "name": "neondb",
           "owner_name": "neondb_owner",
-          "created_at": "2026-10-26T12:00:00Z",
-          "updated_at": "2026-10-26T12:00:00Z"
+          "created_at": "2026-10-28T00:33:47Z",
+          "updated_at": "2026-10-28T00:33:47Z"
         }
       ],
       "operations": [
         {
-          "id": "a07f8772-1877-4da9-a939-3a3ae62d1d8d",
-          "project_id": "spring-example-302709",
+          "id": "72d8cb8d-a7d3-4c8b-920c-c52964f6fe4d",
+          "project_id": "fancy-truth-53952210",
+          "branch_id": "br-damp-shape-b8jm887s",
           "action": "create_timeline",
           "status": "running",
           "failures_count": 0,
-          "created_at": "2026-10-26T12:00:00Z",
-          "updated_at": "2026-10-26T12:00:00Z",
+          "created_at": "2026-10-28T00:33:47Z",
+          "updated_at": "2026-10-28T00:33:47Z",
           "total_duration_ms": 0
         },
         {
-          "id": "a07f8772-1877-4da9-a939-3a3ae62d1d8d",
-          "project_id": "spring-example-302709",
+          "id": "a8746914-8fbc-418f-8784-f0b07ab0cda0",
+          "project_id": "fancy-truth-53952210",
+          "branch_id": "br-damp-shape-b8jm887s",
+          "endpoint_id": "ep-bitter-breeze-b8i65955",
           "action": "start_compute",
           "status": "scheduling",
           "failures_count": 0,
-          "created_at": "2026-10-26T12:00:00Z",
-          "updated_at": "2026-10-26T12:00:00Z",
-          "total_duration_ms": 0,
-          "endpoint_id": "ep-silent-smoke-806639"
+          "created_at": "2026-10-28T00:33:47Z",
+          "updated_at": "2026-10-28T00:33:47Z",
+          "total_duration_ms": 0
+        },
+        {
+          "id": "3e538387-9aff-4ab3-a7f7-8feb65b16fcd",
+          "project_id": "fancy-truth-53952210",
+          "action": "epc_sync",
+          "status": "scheduling",
+          "failures_count": 0,
+          "created_at": "2026-10-28T00:33:47Z",
+          "updated_at": "2026-10-28T00:33:47Z",
+          "total_duration_ms": 0
         }
       ],
       "branch": {
-        "id": "br-wispy-meadow-118737",
-        "project_id": "spring-example-302709",
+        "id": "br-damp-shape-b8jm887s",
+        "project_id": "fancy-truth-53952210",
         "name": "main",
-        "current_state": "ready",
-        "state_changed_at": "2026-10-26T12:00:00Z",
-        "logical_size": 30785536,
+        "slug": "br-damp-shape-b8jm887s",
+        "current_state": "init",
+        "pending_state": "ready",
+        "state_changed_at": "2026-10-28T00:33:47Z",
         "creation_source": "console",
         "primary": true,
         "default": true,
@@ -113,95 +137,78 @@
         "active_time_seconds": 0,
         "written_data_bytes": 0,
         "data_transfer_bytes": 0,
-        "created_at": "2026-10-26T12:00:00Z",
-        "updated_at": "2026-10-26T12:00:00Z",
+        "created_at": "2026-10-28T00:33:47Z",
+        "updated_at": "2026-10-28T00:33:47Z",
         "init_source": "parent-data"
       },
       "endpoints": [
         {
-          "host": "ep-silent-smoke-806639.us-east-1.aws.neon.tech",
-          "id": "ep-silent-smoke-806639",
-          "project_id": "spring-example-302709",
-          "branch_id": "br-wispy-meadow-118737",
+          "host": "ep-bitter-breeze-b8i65955.c-14.us-east-1.aws.neon.tech",
+          "hosts": {
+            "read_write_host": "ep-bitter-breeze-b8i65955.c-14.us-east-1.aws.neon.tech",
+            "read_write_pooled_host": "ep-bitter-breeze-b8i65955-pooler.c-14.us-east-1.aws.neon.tech"
+          },
+          "id": "ep-bitter-breeze-b8i65955",
+          "slug": "ep-bitter-breeze-b8i65955",
+          "branch_slug": "br-damp-shape-b8jm887s",
+          "project_slug": "fancy-truth-53952210",
+          "project_id": "fancy-truth-53952210",
+          "branch_id": "br-damp-shape-b8jm887s",
           "autoscaling_limit_min_cu": 0.25,
           "autoscaling_limit_max_cu": 0.25,
           "region_id": "aws-us-east-1",
           "type": "read_write",
           "current_state": "init",
+          "pending_state": "active",
+          "group": {
+            "size": {
+              "min": 1,
+              "max": 1
+            },
+            "allow_readable_secondaries": false,
+            "computes": [
+              {
+                "binding_id": "dl1",
+                "current_state": "init",
+                "pending_state": "active",
+                "role": "read_write",
+                "compute_host": "ep-bitter-breeze-b8i65955-dl1.c-14.us-east-1.aws.neon.tech",
+                "compute_pooled_host": "ep-bitter-breeze-b8i65955-dl1-pooler.c-14.us-east-1.aws.neon.tech",
+                "created_at": "2026-10-28T00:33:47Z",
+                "updated_at": "2026-10-28T00:33:47Z"
+              }
+            ]
+          },
           "settings": {},
           "pooler_enabled": false,
           "pooler_mode": "transaction",
           "disabled": false,
           "passwordless_access": true,
           "creation_source": "console",
-          "created_at": "2026-10-26T12:00:00Z",
-          "updated_at": "2026-10-26T12:00:00Z",
-          "proxy_host": "us-east-1.aws.neon.tech",
+          "created_at": "2026-10-28T00:33:47Z",
+          "updated_at": "2026-10-28T00:33:47Z",
+          "proxy_host": "c-14.us-east-1.aws.neon.tech",
           "suspend_timeout_seconds": 0,
-          "provisioner": "k8s-neonvm",
-          "pending_state": "active"
+          "provisioner": "k8s-neonvm"
         }
       ]
     }
   },
   {
     "method": "GET",
-    "path": "/api/v2/projects/spring-example-302709",
-    "status": 200,
-    "body": {
-      "project": {
-        "data_storage_bytes_hour": 0,
-        "data_transfer_bytes": 0,
-        "written_data_bytes": 0,
-        "compute_time_seconds": 0,
-        "active_time_seconds": 0,
-        "cpu_used_sec": 0,
-        "id": "spring-example-302709",
-        "platform_id": "aws",
-        "region_id": "aws-us-east-1",
-        "name": "acme-ops",
-        "provisioner": "k8s-neonvm",
-        "default_endpoint_settings": {
-          "autoscaling_limit_min_cu": 0.25,
-          "autoscaling_limit_max_cu": 0.25,
-          "suspend_timeout_seconds": 0
-        },
-        "settings": {
-          "allowed_ips": {
-            "ips": [],
-            "protected_branches_only": false
-          },
-          "enable_logical_replication": false
-        },
-        "pg_version": 17,
-        "proxy_host": "us-east-1.aws.neon.tech",
-        "branch_logical_size_limit": 512,
-        "branch_logical_size_limit_bytes": 536870912,
-        "store_passwords": true,
-        "creation_source": "console",
-        "history_retention_seconds": 86400,
-        "created_at": "2026-10-26T12:00:00Z",
-        "updated_at": "2026-10-26T12:00:00Z",
-        "consumption_period_start": "2026-10-26T12:00:00Z",
-        "consumption_period_end": "2026-11-26T12:00:00Z",
-        "owner_id": "org-recorded-12345678",
-        "org_id": "org-recorded-12345678"
-      }
-    }
-  },
-  {
-    "method": "GET",
-    "path": "/api/v2/projects/spring-example-302709/branches?limit=10000",
+    "path": "/api/v2/projects/fancy-truth-53952210/branches?limit=10000",
     "status": 200,
     "body": {
       "branches": [
         {
-          "id": "br-wispy-meadow-118737",
-          "project_id": "spring-example-302709",
+          "id": "br-damp-shape-b8jm887s",
+          "project_id": "fancy-truth-53952210",
           "name": "main",
-          "current_state": "ready",
-          "state_changed_at": "2026-10-26T12:00:00Z",
-          "logical_size": 30785536,
+          "slug": "br-damp-shape-b8jm887s",
+          "project_slug": "fancy-truth-53952210",
+          "current_state": "init",
+          "pending_state": "ready",
+          "state_changed_at": "2026-10-28T00:33:47Z",
           "creation_source": "console",
           "primary": true,
           "default": true,
@@ -211,8 +218,8 @@
           "active_time_seconds": 0,
           "written_data_bytes": 0,
           "data_transfer_bytes": 0,
-          "created_at": "2026-10-26T12:00:00Z",
-          "updated_at": "2026-10-26T12:00:00Z",
+          "created_at": "2026-10-28T00:33:47Z",
+          "updated_at": "2026-10-28T00:33:47Z",
           "init_source": "parent-data"
         }
       ],
@@ -225,33 +232,381 @@
   },
   {
     "method": "GET",
-    "path": "/api/v2/projects/spring-example-302709/endpoints",
+    "path": "/api/v2/projects/fancy-truth-53952210/endpoints",
     "status": 200,
     "body": {
       "endpoints": [
         {
-          "host": "ep-silent-smoke-806639.us-east-1.aws.neon.tech",
-          "id": "ep-silent-smoke-806639",
-          "project_id": "spring-example-302709",
-          "branch_id": "br-wispy-meadow-118737",
+          "host": "ep-bitter-breeze-b8i65955.c-14.us-east-1.aws.neon.tech",
+          "hosts": {
+            "read_write_host": "ep-bitter-breeze-b8i65955.c-14.us-east-1.aws.neon.tech",
+            "read_write_pooled_host": "ep-bitter-breeze-b8i65955-pooler.c-14.us-east-1.aws.neon.tech"
+          },
+          "id": "ep-bitter-breeze-b8i65955",
+          "slug": "ep-bitter-breeze-b8i65955",
+          "branch_slug": "br-damp-shape-b8jm887s",
+          "project_slug": "fancy-truth-53952210",
+          "project_id": "fancy-truth-53952210",
+          "branch_id": "br-damp-shape-b8jm887s",
           "autoscaling_limit_min_cu": 0.25,
           "autoscaling_limit_max_cu": 0.25,
           "region_id": "aws-us-east-1",
           "type": "read_write",
-          "current_state": "idle",
-          "settings": {},
+          "current_state": "init",
+          "pending_state": "active",
+          "group": {
+            "size": {
+              "min": 1,
+              "max": 1
+            },
+            "allow_readable_secondaries": false,
+            "computes": [
+              {
+                "binding_id": "dl1",
+                "current_state": "init",
+                "pending_state": "active",
+                "role": "read_write",
+                "compute_host": "ep-bitter-breeze-b8i65955-dl1.c-14.us-east-1.aws.neon.tech",
+                "compute_pooled_host": "ep-bitter-breeze-b8i65955-dl1-pooler.c-14.us-east-1.aws.neon.tech",
+                "created_at": "2026-10-28T00:33:47Z",
+                "updated_at": "2026-10-28T00:33:47Z"
+              }
+            ]
+          },
+          "settings": {
+            "pg_settings": {}
+          },
           "pooler_enabled": false,
           "pooler_mode": "transaction",
           "disabled": false,
           "passwordless_access": true,
+          "last_active": "2000-01-01T00:00:00Z",
           "creation_source": "console",
-          "created_at": "2026-10-26T12:00:00Z",
-          "updated_at": "2026-10-26T12:00:00Z",
-          "proxy_host": "us-east-1.aws.neon.tech",
+          "created_at": "2026-10-28T00:33:47Z",
+          "updated_at": "2026-10-28T00:33:47Z",
+          "proxy_host": "c-14.us-east-1.aws.neon.tech",
           "suspend_timeout_seconds": 0,
           "provisioner": "k8s-neonvm"
         }
       ]
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/v2/projects/fancy-truth-53952210/branches?limit=10000",
+    "status": 200,
+    "body": {
+      "branches": [
+        {
+          "id": "br-damp-shape-b8jm887s",
+          "project_id": "fancy-truth-53952210",
+          "name": "main",
+          "slug": "br-damp-shape-b8jm887s",
+          "project_slug": "fancy-truth-53952210",
+          "current_state": "ready",
+          "state_changed_at": "2026-10-28T00:33:49Z",
+          "creation_source": "console",
+          "primary": true,
+          "default": true,
+          "protected": false,
+          "cpu_used_sec": 0,
+          "compute_time_seconds": 0,
+          "active_time_seconds": 0,
+          "written_data_bytes": 0,
+          "data_transfer_bytes": 0,
+          "created_at": "2026-10-28T00:33:47Z",
+          "updated_at": "2026-10-28T00:33:50Z",
+          "init_source": "parent-data"
+        }
+      ],
+      "annotations": {},
+      "pagination": {
+        "sort_by": "updated_at",
+        "sort_order": "DESC"
+      }
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/v2/projects/fancy-truth-53952210/endpoints",
+    "status": 200,
+    "body": {
+      "endpoints": [
+        {
+          "host": "ep-bitter-breeze-b8i65955.c-14.us-east-1.aws.neon.tech",
+          "hosts": {
+            "read_write_host": "ep-bitter-breeze-b8i65955.c-14.us-east-1.aws.neon.tech",
+            "read_write_pooled_host": "ep-bitter-breeze-b8i65955-pooler.c-14.us-east-1.aws.neon.tech"
+          },
+          "id": "ep-bitter-breeze-b8i65955",
+          "slug": "ep-bitter-breeze-b8i65955",
+          "branch_slug": "br-damp-shape-b8jm887s",
+          "project_slug": "fancy-truth-53952210",
+          "project_id": "fancy-truth-53952210",
+          "branch_id": "br-damp-shape-b8jm887s",
+          "autoscaling_limit_min_cu": 0.25,
+          "autoscaling_limit_max_cu": 0.25,
+          "region_id": "aws-us-east-1",
+          "type": "read_write",
+          "current_state": "active",
+          "group": {
+            "size": {
+              "min": 1,
+              "max": 1
+            },
+            "allow_readable_secondaries": false,
+            "computes": [
+              {
+                "binding_id": "dl1",
+                "current_state": "active",
+                "role": "read_write",
+                "compute_host": "ep-bitter-breeze-b8i65955-dl1.c-14.us-east-1.aws.neon.tech",
+                "compute_pooled_host": "ep-bitter-breeze-b8i65955-dl1-pooler.c-14.us-east-1.aws.neon.tech",
+                "created_at": "2026-10-28T00:33:47Z",
+                "updated_at": "2026-10-28T00:33:50Z",
+                "started_at": "2026-10-28T00:33:50Z"
+              }
+            ]
+          },
+          "settings": {
+            "pg_settings": {}
+          },
+          "pooler_enabled": false,
+          "pooler_mode": "transaction",
+          "disabled": false,
+          "passwordless_access": true,
+          "last_active": "2000-01-01T00:00:00Z",
+          "creation_source": "console",
+          "created_at": "2026-10-28T00:33:47Z",
+          "updated_at": "2026-10-28T00:33:50Z",
+          "started_at": "2026-10-28T00:33:50Z",
+          "proxy_host": "c-14.us-east-1.aws.neon.tech",
+          "suspend_timeout_seconds": 0,
+          "provisioner": "k8s-neonvm",
+          "compute_release_version": "15557"
+        }
+      ]
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/v2/projects/fancy-truth-53952210/connection_uri?database_name=neondb&role_name=neondb_owner&pooled=false",
+    "status": 200,
+    "body": {
+      "uri": "postgresql://neondb_owner:npg_recordedpassword@ep-bitter-breeze-b8i65955.c-14.us-east-1.aws.neon.tech/neondb?channel_binding=require&sslmode=require"
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/v2/projects/fancy-truth-53952210",
+    "status": 200,
+    "body": {
+      "project": {
+        "data_storage_bytes_hour": 0,
+        "data_transfer_bytes": 0,
+        "written_data_bytes": 0,
+        "compute_time_seconds": 0,
+        "active_time_seconds": 0,
+        "cpu_used_sec": 0,
+        "id": "fancy-truth-53952210",
+        "platform_id": "aws",
+        "region_id": "aws-us-east-1",
+        "name": "acme-ops",
+        "slug": "fancy-truth-53952210",
+        "provisioner": "k8s-neonvm",
+        "default_endpoint_settings": {
+          "autoscaling_limit_min_cu": 0.25,
+          "autoscaling_limit_max_cu": 0.25,
+          "suspend_timeout_seconds": 0
+        },
+        "settings": {
+          "allowed_ips": {
+            "ips": [],
+            "protected_branches_only": false
+          },
+          "enable_logical_replication": false,
+          "maintenance_window": {
+            "weekdays": [1],
+            "start_time": "04:00",
+            "end_time": "05:00"
+          },
+          "block_public_connections": false,
+          "block_vpc_connections": false,
+          "hipaa": false
+        },
+        "pg_version": 18,
+        "proxy_host": "c-14.us-east-1.aws.neon.tech",
+        "branch_logical_size_limit": 512,
+        "branch_logical_size_limit_bytes": 536870912,
+        "store_passwords": true,
+        "creation_source": "console",
+        "history_retention_seconds": 21600,
+        "created_at": "2026-10-28T00:33:47Z",
+        "updated_at": "2026-10-28T00:33:49Z",
+        "synthetic_storage_size": 0,
+        "consumption_period_start": "2026-10-27T22:51:12Z",
+        "consumption_period_end": "2026-11-01T00:00:00Z",
+        "owner_id": "org-recorded-12345678",
+        "owner": {
+          "email": "owner@example.com",
+          "name": "Recorded organization",
+          "branches_limit": 10,
+          "subscription_type": "free_v3"
+        },
+        "org_id": "org-recorded-12345678"
+      }
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/v2/projects/fancy-truth-53952210/branches?limit=10000",
+    "status": 200,
+    "body": {
+      "branches": [
+        {
+          "id": "br-damp-shape-b8jm887s",
+          "project_id": "fancy-truth-53952210",
+          "name": "main",
+          "slug": "br-damp-shape-b8jm887s",
+          "project_slug": "fancy-truth-53952210",
+          "current_state": "ready",
+          "state_changed_at": "2026-10-28T00:33:49Z",
+          "creation_source": "console",
+          "primary": true,
+          "default": true,
+          "protected": false,
+          "cpu_used_sec": 0,
+          "compute_time_seconds": 0,
+          "active_time_seconds": 0,
+          "written_data_bytes": 0,
+          "data_transfer_bytes": 0,
+          "created_at": "2026-10-28T00:33:47Z",
+          "updated_at": "2026-10-28T00:33:50Z",
+          "init_source": "parent-data"
+        }
+      ],
+      "annotations": {},
+      "pagination": {
+        "sort_by": "updated_at",
+        "sort_order": "DESC"
+      }
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/v2/projects/fancy-truth-53952210/endpoints",
+    "status": 200,
+    "body": {
+      "endpoints": [
+        {
+          "host": "ep-bitter-breeze-b8i65955.c-14.us-east-1.aws.neon.tech",
+          "hosts": {
+            "read_write_host": "ep-bitter-breeze-b8i65955.c-14.us-east-1.aws.neon.tech",
+            "read_write_pooled_host": "ep-bitter-breeze-b8i65955-pooler.c-14.us-east-1.aws.neon.tech"
+          },
+          "id": "ep-bitter-breeze-b8i65955",
+          "slug": "ep-bitter-breeze-b8i65955",
+          "branch_slug": "br-damp-shape-b8jm887s",
+          "project_slug": "fancy-truth-53952210",
+          "project_id": "fancy-truth-53952210",
+          "branch_id": "br-damp-shape-b8jm887s",
+          "autoscaling_limit_min_cu": 0.25,
+          "autoscaling_limit_max_cu": 0.25,
+          "region_id": "aws-us-east-1",
+          "type": "read_write",
+          "current_state": "active",
+          "group": {
+            "size": {
+              "min": 1,
+              "max": 1
+            },
+            "allow_readable_secondaries": false,
+            "computes": [
+              {
+                "binding_id": "dl1",
+                "current_state": "active",
+                "role": "read_write",
+                "compute_host": "ep-bitter-breeze-b8i65955-dl1.c-14.us-east-1.aws.neon.tech",
+                "compute_pooled_host": "ep-bitter-breeze-b8i65955-dl1-pooler.c-14.us-east-1.aws.neon.tech",
+                "created_at": "2026-10-28T00:33:47Z",
+                "updated_at": "2026-10-28T00:33:50Z",
+                "started_at": "2026-10-28T00:33:50Z"
+              }
+            ]
+          },
+          "settings": {
+            "pg_settings": {}
+          },
+          "pooler_enabled": false,
+          "pooler_mode": "transaction",
+          "disabled": false,
+          "passwordless_access": true,
+          "last_active": "2000-01-01T00:00:00Z",
+          "creation_source": "console",
+          "created_at": "2026-10-28T00:33:47Z",
+          "updated_at": "2026-10-28T00:33:50Z",
+          "started_at": "2026-10-28T00:33:50Z",
+          "proxy_host": "c-14.us-east-1.aws.neon.tech",
+          "suspend_timeout_seconds": 0,
+          "provisioner": "k8s-neonvm",
+          "compute_release_version": "15557"
+        }
+      ]
+    }
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/v2/projects/fancy-truth-53952210",
+    "status": 200,
+    "body": {
+      "project": {
+        "data_storage_bytes_hour": 0,
+        "data_transfer_bytes": 0,
+        "written_data_bytes": 0,
+        "compute_time_seconds": 0,
+        "active_time_seconds": 0,
+        "cpu_used_sec": 0,
+        "id": "fancy-truth-53952210",
+        "platform_id": "aws",
+        "region_id": "aws-us-east-1",
+        "name": "acme-ops",
+        "slug": "fancy-truth-53952210",
+        "provisioner": "k8s-neonvm",
+        "default_endpoint_settings": {
+          "autoscaling_limit_min_cu": 0.25,
+          "autoscaling_limit_max_cu": 0.25,
+          "suspend_timeout_seconds": 0
+        },
+        "settings": {
+          "allowed_ips": {
+            "ips": [],
+            "protected_branches_only": false
+          },
+          "enable_logical_replication": false,
+          "maintenance_window": {
+            "weekdays": [1],
+            "start_time": "04:00",
+            "end_time": "05:00"
+          },
+          "block_public_connections": false,
+          "block_vpc_connections": false,
+          "hipaa": false
+        },
+        "pg_version": 18,
+        "proxy_host": "c-14.us-east-1.aws.neon.tech",
+        "branch_logical_size_limit": 512,
+        "branch_logical_size_limit_bytes": 536870912,
+        "store_passwords": true,
+        "creation_source": "console",
+        "history_retention_seconds": 21600,
+        "created_at": "2026-10-28T00:33:47Z",
+        "updated_at": "2026-10-28T00:33:49Z",
+        "synthetic_storage_size": 0,
+        "consumption_period_start": "0001-01-01T00:00:00Z",
+        "consumption_period_end": "0001-01-01T00:00:00Z",
+        "owner_id": "org-recorded-12345678",
+        "org_id": "org-recorded-12345678"
+      }
     }
   }
 ]

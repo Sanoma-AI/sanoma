@@ -11,10 +11,11 @@
         "compute_time_seconds": 0,
         "active_time_seconds": 0,
         "cpu_used_sec": 0,
-        "id": "spring-example-302709",
+        "id": "dark-fog-67399785",
         "platform_id": "aws",
         "region_id": "aws-us-east-1",
         "name": "acme-ops",
+        "slug": "dark-fog-67399785",
         "provisioner": "k8s-neonvm",
         "default_endpoint_settings": {
           "autoscaling_limit_min_cu": 0.25,
@@ -26,84 +27,107 @@
             "ips": [],
             "protected_branches_only": false
           },
-          "enable_logical_replication": false
+          "enable_logical_replication": false,
+          "maintenance_window": {
+            "weekdays": [2],
+            "start_time": "07:00",
+            "end_time": "08:00"
+          },
+          "block_public_connections": false,
+          "block_vpc_connections": false,
+          "hipaa": false
         },
-        "pg_version": 17,
-        "proxy_host": "us-east-1.aws.neon.tech",
+        "pg_version": 18,
+        "proxy_host": "c-14.us-east-1.aws.neon.tech",
         "branch_logical_size_limit": 512,
         "branch_logical_size_limit_bytes": 536870912,
         "store_passwords": true,
         "creation_source": "console",
-        "history_retention_seconds": 86400,
-        "created_at": "2026-10-26T12:00:00Z",
-        "updated_at": "2026-10-26T12:00:00Z",
-        "consumption_period_start": "2026-10-26T12:00:00Z",
-        "consumption_period_end": "2026-11-26T12:00:00Z",
+        "history_retention_seconds": 21600,
+        "created_at": "2026-10-28T00:31:08Z",
+        "updated_at": "2026-10-28T00:31:08Z",
+        "synthetic_storage_size": 0,
+        "consumption_period_start": "0001-01-01T00:00:00Z",
+        "consumption_period_end": "0001-01-01T00:00:00Z",
         "owner_id": "org-recorded-12345678",
         "org_id": "org-recorded-12345678"
       },
       "connection_uris": [
         {
-          "connection_uri": "postgresql://neondb_owner:npg_recordedpassword@ep-silent-smoke-806639.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require",
+          "connection_uri": "postgresql://neondb_owner:npg_recordedpassword@ep-fancy-lake-b8u9uyh9.c-14.us-east-1.aws.neon.tech/neondb?sslmode=require",
           "connection_parameters": {
             "database": "neondb",
             "password": "npg_recordedpassword",
             "role": "neondb_owner",
-            "host": "ep-silent-smoke-806639.us-east-1.aws.neon.tech",
-            "pooler_host": "ep-silent-smoke-806639-pooler.us-east-1.aws.neon.tech"
+            "host": "ep-fancy-lake-b8u9uyh9.c-14.us-east-1.aws.neon.tech",
+            "pooler_host": "ep-fancy-lake-b8u9uyh9-pooler.c-14.us-east-1.aws.neon.tech"
           }
         }
       ],
       "roles": [
         {
-          "branch_id": "br-wispy-meadow-118737",
+          "branch_id": "br-blue-tree-b8ar8fc2",
           "name": "neondb_owner",
           "password": "npg_recordedpassword",
           "protected": false,
-          "created_at": "2026-10-26T12:00:00Z",
-          "updated_at": "2026-10-26T12:00:00Z"
+          "authentication_method": "password",
+          "created_at": "2026-10-28T00:31:08Z",
+          "updated_at": "2026-10-28T00:31:08Z"
         }
       ],
       "databases": [
         {
-          "id": 1234,
-          "branch_id": "br-wispy-meadow-118737",
+          "id": 958911,
+          "branch_id": "br-blue-tree-b8ar8fc2",
           "name": "neondb",
           "owner_name": "neondb_owner",
-          "created_at": "2026-10-26T12:00:00Z",
-          "updated_at": "2026-10-26T12:00:00Z"
+          "created_at": "2026-10-28T00:31:08Z",
+          "updated_at": "2026-10-28T00:31:08Z"
         }
       ],
       "operations": [
         {
-          "id": "a07f8772-1877-4da9-a939-3a3ae62d1d8d",
-          "project_id": "spring-example-302709",
+          "id": "bf1f4752-1f12-4df0-9f4a-60cc8065def3",
+          "project_id": "dark-fog-67399785",
+          "branch_id": "br-blue-tree-b8ar8fc2",
           "action": "create_timeline",
           "status": "running",
           "failures_count": 0,
-          "created_at": "2026-10-26T12:00:00Z",
-          "updated_at": "2026-10-26T12:00:00Z",
+          "created_at": "2026-10-28T00:31:08Z",
+          "updated_at": "2026-10-28T00:31:08Z",
           "total_duration_ms": 0
         },
         {
-          "id": "a07f8772-1877-4da9-a939-3a3ae62d1d8d",
-          "project_id": "spring-example-302709",
+          "id": "1e9ed1af-6871-4db1-afe5-0cc79c00d75c",
+          "project_id": "dark-fog-67399785",
+          "branch_id": "br-blue-tree-b8ar8fc2",
+          "endpoint_id": "ep-fancy-lake-b8u9uyh9",
           "action": "start_compute",
           "status": "scheduling",
           "failures_count": 0,
-          "created_at": "2026-10-26T12:00:00Z",
-          "updated_at": "2026-10-26T12:00:00Z",
-          "total_duration_ms": 0,
-          "endpoint_id": "ep-silent-smoke-806639"
+          "created_at": "2026-10-28T00:31:08Z",
+          "updated_at": "2026-10-28T00:31:08Z",
+          "total_duration_ms": 0
+        },
+        {
+          "id": "8f89973f-c145-4e67-b57c-43e33e2ad844",
+          "project_id": "dark-fog-67399785",
+          "action": "epc_sync",
+          "status": "scheduling",
+          "failures_count": 0,
+          "created_at": "2026-10-28T00:31:08Z",
+          "updated_at": "2026-10-28T00:31:08Z",
+          "total_duration_ms": 0
         }
       ],
       "branch": {
-        "id": "br-wispy-meadow-118737",
-        "project_id": "spring-example-302709",
+        "id": "br-blue-tree-b8ar8fc2",
+        "project_id": "dark-fog-67399785",
         "name": "main",
-        "current_state": "ready",
-        "state_changed_at": "2026-10-26T12:00:00Z",
-        "logical_size": 30785536,
+        "slug": "br-blue-tree-b8ar8fc2",
+        "current_state": "init",
+        "pending_state": "ready",
+        "state_changed_at": "2026-10-28T00:31:08Z",
         "creation_source": "console",
         "primary": true,
         "default": true,
@@ -113,48 +137,281 @@
         "active_time_seconds": 0,
         "written_data_bytes": 0,
         "data_transfer_bytes": 0,
-        "created_at": "2026-10-26T12:00:00Z",
-        "updated_at": "2026-10-26T12:00:00Z",
+        "created_at": "2026-10-28T00:31:08Z",
+        "updated_at": "2026-10-28T00:31:08Z",
         "init_source": "parent-data"
       },
       "endpoints": [
         {
-          "host": "ep-silent-smoke-806639.us-east-1.aws.neon.tech",
-          "id": "ep-silent-smoke-806639",
-          "project_id": "spring-example-302709",
-          "branch_id": "br-wispy-meadow-118737",
+          "host": "ep-fancy-lake-b8u9uyh9.c-14.us-east-1.aws.neon.tech",
+          "hosts": {
+            "read_write_host": "ep-fancy-lake-b8u9uyh9.c-14.us-east-1.aws.neon.tech",
+            "read_write_pooled_host": "ep-fancy-lake-b8u9uyh9-pooler.c-14.us-east-1.aws.neon.tech"
+          },
+          "id": "ep-fancy-lake-b8u9uyh9",
+          "slug": "ep-fancy-lake-b8u9uyh9",
+          "branch_slug": "br-blue-tree-b8ar8fc2",
+          "project_slug": "dark-fog-67399785",
+          "project_id": "dark-fog-67399785",
+          "branch_id": "br-blue-tree-b8ar8fc2",
           "autoscaling_limit_min_cu": 0.25,
           "autoscaling_limit_max_cu": 0.25,
           "region_id": "aws-us-east-1",
           "type": "read_write",
           "current_state": "init",
+          "pending_state": "active",
+          "group": {
+            "size": {
+              "min": 1,
+              "max": 1
+            },
+            "allow_readable_secondaries": false,
+            "computes": [
+              {
+                "binding_id": "d14",
+                "current_state": "init",
+                "pending_state": "active",
+                "role": "read_write",
+                "compute_host": "ep-fancy-lake-b8u9uyh9-d14.c-14.us-east-1.aws.neon.tech",
+                "compute_pooled_host": "ep-fancy-lake-b8u9uyh9-d14-pooler.c-14.us-east-1.aws.neon.tech",
+                "created_at": "2026-10-28T00:31:08Z",
+                "updated_at": "2026-10-28T00:31:08Z"
+              }
+            ]
+          },
           "settings": {},
           "pooler_enabled": false,
           "pooler_mode": "transaction",
           "disabled": false,
           "passwordless_access": true,
           "creation_source": "console",
-          "created_at": "2026-10-26T12:00:00Z",
-          "updated_at": "2026-10-26T12:00:00Z",
-          "proxy_host": "us-east-1.aws.neon.tech",
+          "created_at": "2026-10-28T00:31:08Z",
+          "updated_at": "2026-10-28T00:31:08Z",
+          "proxy_host": "c-14.us-east-1.aws.neon.tech",
           "suspend_timeout_seconds": 0,
-          "provisioner": "k8s-neonvm",
-          "pending_state": "active"
+          "provisioner": "k8s-neonvm"
         }
       ]
     }
   },
   {
+    "method": "GET",
+    "path": "/api/v2/projects/dark-fog-67399785/branches?limit=10000",
+    "status": 200,
+    "body": {
+      "branches": [
+        {
+          "id": "br-blue-tree-b8ar8fc2",
+          "project_id": "dark-fog-67399785",
+          "name": "main",
+          "slug": "br-blue-tree-b8ar8fc2",
+          "project_slug": "dark-fog-67399785",
+          "current_state": "init",
+          "pending_state": "ready",
+          "state_changed_at": "2026-10-28T00:31:08Z",
+          "creation_source": "console",
+          "primary": true,
+          "default": true,
+          "protected": false,
+          "cpu_used_sec": 0,
+          "compute_time_seconds": 0,
+          "active_time_seconds": 0,
+          "written_data_bytes": 0,
+          "data_transfer_bytes": 0,
+          "created_at": "2026-10-28T00:31:08Z",
+          "updated_at": "2026-10-28T00:31:08Z",
+          "init_source": "parent-data"
+        }
+      ],
+      "annotations": {},
+      "pagination": {
+        "sort_by": "updated_at",
+        "sort_order": "DESC"
+      }
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/v2/projects/dark-fog-67399785/endpoints",
+    "status": 200,
+    "body": {
+      "endpoints": [
+        {
+          "host": "ep-fancy-lake-b8u9uyh9.c-14.us-east-1.aws.neon.tech",
+          "hosts": {
+            "read_write_host": "ep-fancy-lake-b8u9uyh9.c-14.us-east-1.aws.neon.tech",
+            "read_write_pooled_host": "ep-fancy-lake-b8u9uyh9-pooler.c-14.us-east-1.aws.neon.tech"
+          },
+          "id": "ep-fancy-lake-b8u9uyh9",
+          "slug": "ep-fancy-lake-b8u9uyh9",
+          "branch_slug": "br-blue-tree-b8ar8fc2",
+          "project_slug": "dark-fog-67399785",
+          "project_id": "dark-fog-67399785",
+          "branch_id": "br-blue-tree-b8ar8fc2",
+          "autoscaling_limit_min_cu": 0.25,
+          "autoscaling_limit_max_cu": 0.25,
+          "region_id": "aws-us-east-1",
+          "type": "read_write",
+          "current_state": "init",
+          "pending_state": "active",
+          "group": {
+            "size": {
+              "min": 1,
+              "max": 1
+            },
+            "allow_readable_secondaries": false,
+            "computes": [
+              {
+                "binding_id": "d14",
+                "current_state": "init",
+                "pending_state": "active",
+                "role": "read_write",
+                "compute_host": "ep-fancy-lake-b8u9uyh9-d14.c-14.us-east-1.aws.neon.tech",
+                "compute_pooled_host": "ep-fancy-lake-b8u9uyh9-d14-pooler.c-14.us-east-1.aws.neon.tech",
+                "created_at": "2026-10-28T00:31:08Z",
+                "updated_at": "2026-10-28T00:31:08Z"
+              }
+            ]
+          },
+          "settings": {
+            "pg_settings": {}
+          },
+          "pooler_enabled": false,
+          "pooler_mode": "transaction",
+          "disabled": false,
+          "passwordless_access": true,
+          "last_active": "2000-01-01T00:00:00Z",
+          "creation_source": "console",
+          "created_at": "2026-10-28T00:31:08Z",
+          "updated_at": "2026-10-28T00:31:08Z",
+          "proxy_host": "c-14.us-east-1.aws.neon.tech",
+          "suspend_timeout_seconds": 0,
+          "provisioner": "k8s-neonvm"
+        }
+      ]
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/v2/projects/dark-fog-67399785/branches?limit=10000",
+    "status": 200,
+    "body": {
+      "branches": [
+        {
+          "id": "br-blue-tree-b8ar8fc2",
+          "project_id": "dark-fog-67399785",
+          "name": "main",
+          "slug": "br-blue-tree-b8ar8fc2",
+          "project_slug": "dark-fog-67399785",
+          "current_state": "ready",
+          "state_changed_at": "2026-10-28T00:31:10Z",
+          "creation_source": "console",
+          "primary": true,
+          "default": true,
+          "protected": false,
+          "cpu_used_sec": 0,
+          "compute_time_seconds": 0,
+          "active_time_seconds": 0,
+          "written_data_bytes": 0,
+          "data_transfer_bytes": 0,
+          "created_at": "2026-10-28T00:31:08Z",
+          "updated_at": "2026-10-28T00:31:12Z",
+          "init_source": "parent-data"
+        }
+      ],
+      "annotations": {},
+      "pagination": {
+        "sort_by": "updated_at",
+        "sort_order": "DESC"
+      }
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/v2/projects/dark-fog-67399785/endpoints",
+    "status": 200,
+    "body": {
+      "endpoints": [
+        {
+          "host": "ep-fancy-lake-b8u9uyh9.c-14.us-east-1.aws.neon.tech",
+          "hosts": {
+            "read_write_host": "ep-fancy-lake-b8u9uyh9.c-14.us-east-1.aws.neon.tech",
+            "read_write_pooled_host": "ep-fancy-lake-b8u9uyh9-pooler.c-14.us-east-1.aws.neon.tech"
+          },
+          "id": "ep-fancy-lake-b8u9uyh9",
+          "slug": "ep-fancy-lake-b8u9uyh9",
+          "branch_slug": "br-blue-tree-b8ar8fc2",
+          "project_slug": "dark-fog-67399785",
+          "project_id": "dark-fog-67399785",
+          "branch_id": "br-blue-tree-b8ar8fc2",
+          "autoscaling_limit_min_cu": 0.25,
+          "autoscaling_limit_max_cu": 0.25,
+          "region_id": "aws-us-east-1",
+          "type": "read_write",
+          "current_state": "active",
+          "group": {
+            "size": {
+              "min": 1,
+              "max": 1
+            },
+            "allow_readable_secondaries": false,
+            "computes": [
+              {
+                "binding_id": "d14",
+                "current_state": "active",
+                "role": "read_write",
+                "compute_host": "ep-fancy-lake-b8u9uyh9-d14.c-14.us-east-1.aws.neon.tech",
+                "compute_pooled_host": "ep-fancy-lake-b8u9uyh9-d14-pooler.c-14.us-east-1.aws.neon.tech",
+                "created_at": "2026-10-28T00:31:08Z",
+                "updated_at": "2026-10-28T00:31:12Z",
+                "started_at": "2026-10-28T00:31:12Z"
+              }
+            ]
+          },
+          "settings": {
+            "pg_settings": {}
+          },
+          "pooler_enabled": false,
+          "pooler_mode": "transaction",
+          "disabled": false,
+          "passwordless_access": true,
+          "last_active": "2000-01-01T00:00:00Z",
+          "creation_source": "console",
+          "created_at": "2026-10-28T00:31:08Z",
+          "updated_at": "2026-10-28T00:31:12Z",
+          "started_at": "2026-10-28T00:31:12Z",
+          "proxy_host": "c-14.us-east-1.aws.neon.tech",
+          "suspend_timeout_seconds": 0,
+          "provisioner": "k8s-neonvm",
+          "compute_release_version": "15557"
+        }
+      ]
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/v2/projects/dark-fog-67399785/connection_uri?database_name=neondb&role_name=neondb_owner&pooled=false",
+    "status": 200,
+    "body": {
+      "uri": "postgresql://neondb_owner:npg_recordedpassword@ep-fancy-lake-b8u9uyh9.c-14.us-east-1.aws.neon.tech/neondb?channel_binding=require&sslmode=require"
+    }
+  },
+  {
     "method": "POST",
-    "path": "/api/v2/projects/spring-example-302709/branches",
+    "path": "/api/v2/projects/dark-fog-67399785/branches",
     "status": 201,
     "body": {
       "branch": {
-        "id": "br-aged-salad-637688",
-        "project_id": "spring-example-302709",
+        "id": "br-proud-truth-b8pg3nmn",
+        "project_id": "dark-fog-67399785",
+        "parent_id": "br-blue-tree-b8ar8fc2",
+        "parent_lsn": "0/19C15C0",
         "name": "preview-42",
+        "slug": "br-proud-truth-b8pg3nmn",
+        "project_slug": "dark-fog-67399785",
         "current_state": "init",
-        "state_changed_at": "2026-10-26T12:00:00Z",
+        "pending_state": "ready",
+        "state_changed_at": "2026-10-28T00:31:14Z",
         "creation_source": "console",
         "primary": false,
         "default": false,
@@ -164,95 +421,194 @@
         "active_time_seconds": 0,
         "written_data_bytes": 0,
         "data_transfer_bytes": 0,
-        "created_at": "2026-10-26T12:00:00Z",
-        "updated_at": "2026-10-26T12:00:00Z",
-        "init_source": "parent-data",
-        "parent_id": "br-wispy-meadow-118737",
-        "parent_lsn": "0/1F8B7A0",
-        "pending_state": "ready",
-        "expires_at": "2026-10-27T12:00:00Z"
+        "created_at": "2026-10-28T00:31:14Z",
+        "updated_at": "2026-10-28T00:31:14Z",
+        "init_source": "parent-data"
       },
       "endpoints": [
         {
-          "host": "ep-little-smoke-851426.us-east-1.aws.neon.tech",
-          "id": "ep-little-smoke-851426",
-          "project_id": "spring-example-302709",
-          "branch_id": "br-aged-salad-637688",
+          "host": "ep-steep-field-b80xf003.c-14.us-east-1.aws.neon.tech",
+          "hosts": {
+            "read_write_host": "ep-steep-field-b80xf003.c-14.us-east-1.aws.neon.tech",
+            "read_write_pooled_host": "ep-steep-field-b80xf003-pooler.c-14.us-east-1.aws.neon.tech"
+          },
+          "id": "ep-steep-field-b80xf003",
+          "slug": "ep-steep-field-b80xf003",
+          "branch_slug": "br-proud-truth-b8pg3nmn",
+          "project_slug": "dark-fog-67399785",
+          "project_id": "dark-fog-67399785",
+          "branch_id": "br-proud-truth-b8pg3nmn",
           "autoscaling_limit_min_cu": 0.25,
           "autoscaling_limit_max_cu": 0.25,
           "region_id": "aws-us-east-1",
           "type": "read_write",
           "current_state": "init",
+          "pending_state": "active",
+          "group": {
+            "size": {
+              "min": 1,
+              "max": 1
+            },
+            "allow_readable_secondaries": false,
+            "computes": [
+              {
+                "binding_id": "p63",
+                "current_state": "init",
+                "pending_state": "active",
+                "role": "read_write",
+                "compute_host": "ep-steep-field-b80xf003-p63.c-14.us-east-1.aws.neon.tech",
+                "compute_pooled_host": "ep-steep-field-b80xf003-p63-pooler.c-14.us-east-1.aws.neon.tech",
+                "created_at": "2026-10-28T00:31:14Z",
+                "updated_at": "2026-10-28T00:31:14Z"
+              }
+            ]
+          },
           "settings": {},
           "pooler_enabled": false,
           "pooler_mode": "transaction",
           "disabled": false,
           "passwordless_access": true,
           "creation_source": "console",
-          "created_at": "2026-10-26T12:00:00Z",
-          "updated_at": "2026-10-26T12:00:00Z",
-          "proxy_host": "us-east-1.aws.neon.tech",
+          "created_at": "2026-10-28T00:31:14Z",
+          "updated_at": "2026-10-28T00:31:14Z",
+          "proxy_host": "c-14.us-east-1.aws.neon.tech",
           "suspend_timeout_seconds": 0,
-          "provisioner": "k8s-neonvm",
-          "pending_state": "active"
+          "provisioner": "k8s-neonvm"
         }
       ],
       "operations": [
         {
-          "id": "a07f8772-1877-4da9-a939-3a3ae62d1d8d",
-          "project_id": "spring-example-302709",
+          "id": "c52dd4d6-4f82-4d96-bf6a-d2be6cbe418a",
+          "project_id": "dark-fog-67399785",
+          "branch_id": "br-proud-truth-b8pg3nmn",
           "action": "create_branch",
           "status": "running",
           "failures_count": 0,
-          "created_at": "2026-10-26T12:00:00Z",
-          "updated_at": "2026-10-26T12:00:00Z",
-          "total_duration_ms": 0,
-          "branch_id": "br-aged-salad-637688"
+          "created_at": "2026-10-28T00:31:14Z",
+          "updated_at": "2026-10-28T00:31:14Z",
+          "total_duration_ms": 0
         },
         {
-          "id": "a07f8772-1877-4da9-a939-3a3ae62d1d8d",
-          "project_id": "spring-example-302709",
+          "id": "6d54ef63-86e6-4fad-92d7-32a0383f01bd",
+          "project_id": "dark-fog-67399785",
+          "branch_id": "br-proud-truth-b8pg3nmn",
+          "action": "timeline_update_protected_config",
+          "status": "scheduling",
+          "failures_count": 0,
+          "created_at": "2026-10-28T00:31:14Z",
+          "updated_at": "2026-10-28T00:31:14Z",
+          "total_duration_ms": 0
+        },
+        {
+          "id": "db3fd7bc-c50a-467b-80c1-cc7b80bf7b1a",
+          "project_id": "dark-fog-67399785",
+          "branch_id": "br-proud-truth-b8pg3nmn",
+          "endpoint_id": "ep-steep-field-b80xf003",
           "action": "start_compute",
           "status": "scheduling",
           "failures_count": 0,
-          "created_at": "2026-10-26T12:00:00Z",
-          "updated_at": "2026-10-26T12:00:00Z",
-          "total_duration_ms": 0,
-          "branch_id": "br-aged-salad-637688",
-          "endpoint_id": "ep-little-smoke-851426"
+          "created_at": "2026-10-28T00:31:14Z",
+          "updated_at": "2026-10-28T00:31:14Z",
+          "total_duration_ms": 0
+        },
+        {
+          "id": "c36ec97d-678a-4cb4-b0bb-6fa2d2c1fb46",
+          "project_id": "dark-fog-67399785",
+          "action": "epc_sync",
+          "status": "scheduling",
+          "failures_count": 0,
+          "created_at": "2026-10-28T00:31:14Z",
+          "updated_at": "2026-10-28T00:31:14Z",
+          "total_duration_ms": 0
         }
       ],
       "roles": [
         {
-          "branch_id": "br-aged-salad-637688",
+          "branch_id": "br-proud-truth-b8pg3nmn",
           "name": "neondb_owner",
           "protected": false,
-          "created_at": "2026-10-26T12:00:00Z",
-          "updated_at": "2026-10-26T12:00:00Z"
+          "authentication_method": "password",
+          "created_at": "2026-10-28T00:31:08Z",
+          "updated_at": "2026-10-28T00:31:08Z"
         }
       ],
       "databases": [
         {
-          "id": 1235,
-          "branch_id": "br-aged-salad-637688",
+          "id": 958914,
+          "branch_id": "br-proud-truth-b8pg3nmn",
           "name": "neondb",
           "owner_name": "neondb_owner",
-          "created_at": "2026-10-26T12:00:00Z",
-          "updated_at": "2026-10-26T12:00:00Z"
+          "created_at": "2026-10-28T00:31:08Z",
+          "updated_at": "2026-10-28T00:31:08Z"
         }
       ],
       "connection_uris": [
         {
-          "connection_uri": "postgresql://neondb_owner:npg_recordedpassword@ep-little-smoke-851426.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require",
+          "connection_uri": "postgresql://neondb_owner:npg_recordedpassword@ep-steep-field-b80xf003.c-14.us-east-1.aws.neon.tech/neondb?sslmode=require",
           "connection_parameters": {
             "database": "neondb",
             "password": "npg_recordedpassword",
             "role": "neondb_owner",
-            "host": "ep-little-smoke-851426.us-east-1.aws.neon.tech",
-            "pooler_host": "ep-little-smoke-851426-pooler.us-east-1.aws.neon.tech"
+            "host": "ep-steep-field-b80xf003.c-14.us-east-1.aws.neon.tech",
+            "pooler_host": "ep-steep-field-b80xf003-pooler.c-14.us-east-1.aws.neon.tech"
           }
         }
       ]
+    }
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/v2/projects/dark-fog-67399785",
+    "status": 200,
+    "body": {
+      "project": {
+        "data_storage_bytes_hour": 0,
+        "data_transfer_bytes": 0,
+        "written_data_bytes": 0,
+        "compute_time_seconds": 0,
+        "active_time_seconds": 0,
+        "cpu_used_sec": 0,
+        "id": "dark-fog-67399785",
+        "platform_id": "aws",
+        "region_id": "aws-us-east-1",
+        "name": "acme-ops",
+        "slug": "dark-fog-67399785",
+        "provisioner": "k8s-neonvm",
+        "default_endpoint_settings": {
+          "autoscaling_limit_min_cu": 0.25,
+          "autoscaling_limit_max_cu": 0.25,
+          "suspend_timeout_seconds": 0
+        },
+        "settings": {
+          "allowed_ips": {
+            "ips": [],
+            "protected_branches_only": false
+          },
+          "enable_logical_replication": false,
+          "maintenance_window": {
+            "weekdays": [2],
+            "start_time": "07:00",
+            "end_time": "08:00"
+          },
+          "block_public_connections": false,
+          "block_vpc_connections": false,
+          "hipaa": false
+        },
+        "pg_version": 18,
+        "proxy_host": "c-14.us-east-1.aws.neon.tech",
+        "branch_logical_size_limit": 512,
+        "branch_logical_size_limit_bytes": 536870912,
+        "store_passwords": true,
+        "creation_source": "console",
+        "history_retention_seconds": 21600,
+        "created_at": "2026-10-28T00:31:08Z",
+        "updated_at": "2026-10-28T00:31:10Z",
+        "synthetic_storage_size": 0,
+        "consumption_period_start": "0001-01-01T00:00:00Z",
+        "consumption_period_end": "0001-01-01T00:00:00Z",
+        "owner_id": "org-recorded-12345678",
+        "org_id": "org-recorded-12345678"
+      }
     }
   }
 ]

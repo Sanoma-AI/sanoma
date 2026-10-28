@@ -3,7 +3,7 @@ Feature: sanoma.wakeup
   Each scenario runs on the fake and on the service's recorded replies (test/fixtures/wakeup/,
   named after the scenario), unless tagged @fake-only.
 
-  Scenario: Create
+  Scenario: Create an instance
     When sanoma.wakeup.create is called with
       """
       { "desired": { "host": "https://company.example.test/" } }
@@ -33,7 +33,7 @@ Feature: sanoma.wakeup
       { "action": "update", "replace": [] }
       """
 
-  Scenario: Register
+  Scenario: Register a wake
     Given a sanoma wakeup for "https://company.example.test"
     When sanoma.wakeup.register is called with
       | at | 2099-01-01T00:00:00Z |

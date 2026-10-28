@@ -71,7 +71,10 @@ function fakeApi(state: FakeNeonState): NeonApi {
   return {
     async createProject({ project: body }) {
       if (!(REGIONS as readonly string[]).includes(body.region_id)) {
-        throw fail(400, `region ${body.region_id} is not supported`);
+        throw fail(
+          404,
+          `requested region not found; requested_region:"${body.region_id}", available_regions:"[${REGIONS.join(" ")}]"`,
+        );
       }
       const id = next("fake-project");
       const project = { id, name: body.name, region_id: body.region_id, pg_version: body.pg_version ?? PG_VERSION };

@@ -1,8 +1,10 @@
 import { z } from "zod";
 import { checkDatabase, type DatabaseSpec } from "./database.ts";
+import { isRunControlError } from "./errors.ts";
 import { checkHost, type HostSpec } from "./host.ts";
 import { type Connector, type OpSpec, RESOURCE, VENDOR } from "./op.ts";
 import { isSanomaSecret, isSecret, type Secret } from "./secret.ts";
+import { errorMessage } from "./shared.ts";
 import { checkWakeup, type WakeupSpec } from "./wakeup.ts";
 
 /** Which fields of a resource are flagged, by dotted path (`pages.html_url`; a list's items have no index). */
@@ -121,6 +123,47 @@ export interface AfterCreate {
    * that fails meanwhile is one that did not pass, its output `undefined`.
    */
   until?: (output: any) => boolean;
+}
+
+/** How long apply waits between calls of an `afterCreate` operation with `until`, and how many calls it makes. */
+export const AFTER_CREATE_SECONDS = 5;
+export const AFTER_CREATE_CALLS = 120;
+/** How long an `afterCreate` operation may be polled, in all, in milliseconds. */
+export const AFTER_CREATE_MS = AFTER_CREATE_SECONDS * AFTER_CREATE_CALLS * 1000;
+
+/** Why an `afterCreate` operation with `until` did not pass: the time it was given, and its last call's error if that failed. */
+export const afterCreateStuck = (op: string, failed: unknown): string =>
+  `${op} did not pass in ${AFTER_CREATE_MS / 60_000} minutes` +
+  (failed === undefined ? "" : `; its last call failed: ${errorMessage(failed)}`);
+
+/**
+ * Calls one `afterCreate` operation for a new object as apply does: with `until`, again every
+ * few seconds until its output passes, a call that fails meanwhile being one that did not pass;
+ * without, once, a failure thrown. Returns why it did not pass, if it did not. Apply inlines the
+ * same loop in its `run`, which may not close over its `ctx`; an operation's own test calls this.
+ */
+export async function callAfterCreate(
+  hook: AfterCreate,
+  made: { id: string; export: string },
+  call: (op: string, input: unknown) => Promise<unknown>,
+  sleep: (seconds: number) => Promise<void>,
+): Promise<string | undefined> {
+  const given = hook.input(made);
+  let output: unknown;
+  let failed: unknown;
+  for (let n = 0; n < AFTER_CREATE_CALLS && (n === 0 || (hook.until && !hook.until(output))); n++) {
+    if (n > 0) await sleep(AFTER_CREATE_SECONDS);
+    try {
+      output = await call(hook.op, given);
+      failed = undefined;
+    } catch (err) {
+      if (isRunControlError(err) || !hook.until) throw err;
+      output = undefined;
+      failed = err;
+    }
+  }
+  if (hook.until && !hook.until(output)) return afterCreateStuck(hook.op, failed);
+  return undefined;
 }
 
 /**

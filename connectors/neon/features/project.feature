@@ -1,7 +1,7 @@
 Feature: Neon projects
   A project is created, read, waited for, planned against a new declaration and deleted. Each
-  scenario runs on the fake and on Neon's replies (test/fixtures/, named after the scenario),
-  written by hand from Neon's API reference until a key records them.
+  scenario runs on the fake and on Neon's recorded replies (test/fixtures/, named after the
+  scenario). A Given project is seeded as apply makes it: its compute has started.
 
   Scenario: Create a project
     When neon.project.create is called with
@@ -67,4 +67,4 @@ Feature: Neon projects
       """
       { "desired": { "name": "acme-ops", "region": "aws-mars-1" } }
       """
-    Then it fails with status 400
+    Then it fails with status 404
