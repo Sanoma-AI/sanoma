@@ -274,8 +274,14 @@ export interface Still {
   tab?: string;
   /** Close the overview, fit all of the graph to its card, then select the node whose text includes this. */
   select?: string;
-  /** Fixed text for what differs between two runs of the same code: run ids, times, dates (`steady`). */
-  steady?: boolean;
+}
+
+/** Whether `still` steadies the page first (`steadyStills`). */
+let steadied = false;
+
+/** From now on, each still is steadied first (`steady`): `shots.ts --out`, for visual.yml's comparison. */
+export function steadyStills(): void {
+  steadied = true;
 }
 
 /** A 2x still of `path` as marketing-lead. */
@@ -315,17 +321,16 @@ export async function still(browser: Browser, base: string, path: string, out: s
   // Out of the way of any hover style.
   await page.mouse.move(1, height - 1);
   await wait(800);
-  if (options.steady) await page.evaluate(steady);
+  if (steadied) await page.evaluate(steady);
   await page.screenshot({ path: out as `${string}.png` });
   await page.browserContext().close();
 }
 
 /**
  * Runs in the page: rewrites, in its text, what a second run of the same code shows otherwise, so
- * two runs' stills differ only where the code does (`--out`, for visual.yml's comparison), and
- * keeps rewriting what the app renders again until the screenshot (its clock ticks, a refetch). A
- * run's id, full or short, becomes zeros; "just now" and "5s ago" become "0m ago", a step's "3 ms" or "1.2 s" "0 ms"; a date or time
- * keeps its shape with every digit 0. Shapes stay, so the layout around them does too.
+ * two runs' stills differ only where the code does, and again whenever the app renders until the
+ * screenshot (its clock ticks, a refetch). A run's id, full or short, becomes zeros; "just now" and
+ * "5s ago" become "0m ago", a step's "3 ms" "0 ms"; a date or time keeps its shape with every digit 0.
  */
 function steady(): void {
   const rules: [RegExp, (match: string) => string][] = [
@@ -335,26 +340,15 @@ function steady(): void {
     [/\b\d+(?:\.\d+)? ?(?:ms|s)\b/g, () => "0 ms"],
     [/\b\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?(?:[+-]\d{2}:\d{2}|Z)?)?/g, (match) => match.replace(/\d/g, "0")],
   ];
-  const rewrite = (node: Node) => {
-    let text = node.nodeValue ?? "";
-    for (const [pattern, to] of rules) text = text.replace(pattern, to);
-    // `{durationMs} ms` renders as two text nodes, the number then " ms", with a comment between
-    // them when the server rendered it.
-    let next = node.nextSibling;
-    while (next?.nodeType === Node.COMMENT_NODE) next = next.nextSibling;
-    if (/^\d+$/.test(text) && next?.nodeValue?.startsWith(" ms")) text = "0";
-    if (text !== node.nodeValue) node.nodeValue = text;
-  };
-  const rewriteAll = (root: Node) => {
-    if (root.nodeType === Node.TEXT_NODE) return rewrite(root);
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-    for (let node = walker.nextNode(); node; node = walker.nextNode()) rewrite(node);
-  };
-  rewriteAll(document.body);
-  new MutationObserver((records) => {
-    for (const record of records) {
-      if (record.type === "characterData") rewrite(record.target);
-      else for (const added of record.addedNodes) rewriteAll(added);
+  const rewriteAll = () => {
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      let text = node.nodeValue ?? "";
+      for (const [pattern, to] of rules) text = text.replace(pattern, to);
+      // Only a change is written, so the observer's own writes come to rest.
+      if (text !== node.nodeValue) node.nodeValue = text;
     }
-  }).observe(document.body, { subtree: true, childList: true, characterData: true });
+  };
+  rewriteAll();
+  new MutationObserver(rewriteAll).observe(document.body, { subtree: true, childList: true, characterData: true });
 }

@@ -147,7 +147,7 @@ export const LedgerRow = memo(function LedgerRow({
             <OpName id={record.op} op={ops.get(record.op)} effect={record.effect} />
             <DecisionBadge decision={record.decision} />
             <span className="text-muted-foreground">
-              {record.durationMs} ms{record.attempt && record.attempt > 1 ? `, attempt ${record.attempt}` : ""}
+              {`${record.durationMs} ms${record.attempt && record.attempt > 1 ? `, attempt ${record.attempt}` : ""}`}
             </span>
           </p>
           {record.error && (

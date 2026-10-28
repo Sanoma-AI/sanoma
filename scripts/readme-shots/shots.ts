@@ -1,6 +1,5 @@
 // `pnpm readme:shots`: retakes the README's pictures in .github/assets from a running app. See README.md here.
-// `pnpm readme:shots --out <dir>`: the stills alone, written to <dir> (no GIF, .github/assets untouched), as
-// .github/workflows/visual.yml takes them on a pull request's base and head to compare.
+// With `--out <dir>`, the stills alone, steadied, into <dir>: what .github/workflows/visual.yml compares.
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import {
   closeSync,
@@ -20,10 +19,11 @@ import { createRequire } from "node:module";
 import { constants, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { parseArgs } from "node:util";
 import type { Browser } from "puppeteer-core";
 import { ensureBuilt, waitFor } from "../../packages/testing/src/build.ts";
 import type { SanomaConfig } from "../../packages/workflows/src/index.ts";
-import { launchChrome, recordDemo, ServerFailure, still } from "./capture.ts";
+import { launchChrome, recordDemo, ServerFailure, steadyStills, still } from "./capture.ts";
 
 type Workflows = typeof import("../../packages/workflows/src/index.ts");
 
@@ -68,10 +68,7 @@ const LEADS = [
   ["Umbrella", "alice@umbrella.test", "researched", "dana", undefined, undefined],
 ] as const;
 
-// `--out <dir>`: where the stills go instead of .github/assets, with no GIF.
-const outAt = process.argv.indexOf("--out");
-const stillsDir = outAt === -1 ? undefined : process.argv[outAt + 1];
-if (outAt !== -1 && !stillsDir) fail("--out needs a directory");
+const stillsDir = parseArgs({ options: { out: { type: "string" } } }).values.out;
 const STILLS = ["workflow.png", "runs.png", "inbox.png", "run.png", "site.png", "data.png"];
 
 const started = Date.now();
@@ -141,16 +138,17 @@ try {
   const base = await appUrl(server);
   say(`app at ${base}`);
 
+  // Steadied stills (`--out`): fixed text for what differs from run to run.
+  if (stillsDir) steadyStills();
   const frames = join(work, "frames");
   const runPath = await recordDemo(browser, base, frames);
   say("demo recorded; seeding two more runs that wait on marketing-lead, and the outbound leads");
   await seed(acme);
 
-  const captured = join(work, "assets");
-  mkdirSync(captured);
+  const captured = stillsDir ?? join(work, "assets");
+  mkdirSync(captured, { recursive: true });
   // The graph, a step selected and its details floating over it.
   await still(browser, base, "/workflows/announce", join(captured, "workflow.png"), {
-    steady: stillsDir !== undefined,
     chat: false,
     select: "ghost.post.create",
     fullPage: true,
@@ -158,39 +156,31 @@ try {
   // The workflow's Runs tab, the demo's run open over the list.
   const runId = runPath.split("/").at(-1)!;
   await still(browser, base, `/workflows/announce?view=runs&run=${runId}`, join(captured, "runs.png"), {
-    steady: stillsDir !== undefined,
     chat: false,
     height: 720,
   });
   // The chat column open beside the bar, the open approval floating over the list.
   await still(browser, base, "/inbox", join(captured, "inbox.png"), {
-    steady: stillsDir !== undefined,
     chat: true,
     height: 720,
   });
   await still(browser, base, runPath, join(captured, "run.png"), {
-    steady: stillsDir !== undefined,
     chat: false,
     select: "Review launch copy",
     tab: "Ledger",
     fullPage: true,
   });
   await still(browser, base, "/sites/launches", join(captured, "site.png"), {
-    steady: stillsDir !== undefined,
     chat: false,
     fullPage: true,
   });
   // The grid sorted by stage, a record open in the form beside it.
   await still(browser, base, "/data/outbound?order=stage&record=Initech", join(captured, "data.png"), {
-    steady: stillsDir !== undefined,
     chat: false,
     fullPage: true,
   });
-  if (stillsDir) {
-    mkdirSync(stillsDir, { recursive: true });
-    for (const file of STILLS) copyFileSync(join(captured, file), join(stillsDir, file));
-    say(`wrote ${stillsDir}: ${STILLS.join(", ")}`);
-  } else {
+  if (stillsDir) say(`wrote ${stillsDir}: ${STILLS.join(", ")}`);
+  else {
     say("stills taken; making demo.gif");
     stopIfInterrupted();
     await makeGif(frames, join(captured, "demo.gif"));

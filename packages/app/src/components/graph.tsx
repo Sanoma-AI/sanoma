@@ -233,7 +233,7 @@ function OpNode(props: Props<"op">) {
         {state?.errorCode ? (
           <span className="truncate text-destructive">{state.errorCode}</span>
         ) : (
-          state?.durationMs !== undefined && <span className="text-muted-foreground">{state.durationMs} ms</span>
+          state?.durationMs !== undefined && <span className="text-muted-foreground">{`${state.durationMs} ms`}</span>
         )}
         {state?.scenario?.seeded && <Badge variant="outline">seeded</Badge>}
         {state?.scenario?.fails && <Badge variant="outline">fails</Badge>}
