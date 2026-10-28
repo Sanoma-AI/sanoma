@@ -63,6 +63,12 @@ export interface SitePage {
    * destructured) with `content` from `sanoma/site`.
    */
   content?: string;
+  /**
+   * `false` when its route says `staticData: { sitemap: false }`, written out: the sitemap leaves it
+   * out. Its index route's `sitemap` (`true` or `false`) decides over a layout's at its path; a
+   * pathless or group layout's says nothing.
+   */
+  sitemap?: false;
 }
 
 /** A site, `sites/<name>/` or an app's `apps/<app>/sites/<name>/`, and what it calls. */
@@ -225,12 +231,27 @@ export function readSites(
   });
 }
 
-/** A site's pages, by path, from its files: a layout's and its index's (one path) merged. */
-function pagesOf(read: readonly { route?: SitePage }[]): Map<string, SitePage> {
+/**
+ * What a route made by `createFileRoute(id)({ … })` says of the sitemap, `staticData`'s `sitemap`
+ * written out (a lazy route's options carry no `staticData`), and how much it is its page's own:
+ * an index (2) over a route at its path (1). A pathless or group layout's says nothing.
+ */
+type Says = { listed: boolean; rank: number };
+
+/** A route file's page, with what its route says of the sitemap. */
+type FileRoute = Omit<SitePage, "sitemap"> & { says?: Says };
+
+/** A site's pages, by path, from its files: a layout's and its index's (one path) merged, the most its own route that says deciding `sitemap`. */
+function pagesOf(read: readonly { route?: FileRoute }[]): Map<string, SitePage> {
   const pages = new Map<string, SitePage>();
+  const own = new Map<string, Says>();
   for (const { route } of read) {
-    if (route) pages.set(route.path, { ...pages.get(route.path), ...route });
+    if (!route) continue;
+    const { says, ...page } = route;
+    pages.set(page.path, { ...pages.get(page.path), ...page });
+    if (says && says.rank > (own.get(page.path)?.rank ?? 0)) own.set(page.path, says);
   }
+  for (const [path, { listed }] of own) if (!listed) pages.get(path)!.sitemap = false;
   return pages;
 }
 
@@ -318,13 +339,14 @@ type Written = Omit<SiteCall, "target"> & { name: string };
 
 /**
  * What one file holds: its uses, in its order, and the page it is, from its route's id, with the
- * content kind whose entry its one parameter names (`SitePage.content`). A file under `routes/` is
- * read whole; any other only when it imports `api` or `RunForm`.
+ * content kind whose entry its one parameter names (`SitePage.content`) and whether its route's
+ * options keep it out of the sitemap (`SitePage.sitemap`). A file under `routes/` is read whole;
+ * any other only when it imports `api` or `RunForm`.
  */
 function readSiteFile(
   { program, at }: SourceFile,
   file: string,
-): { uses: Written[]; route?: SitePage; warning?: LintProblem & { file: string } } {
+): { uses: Written[]; route?: FileRoute; warning?: LintProblem & { file: string } } {
   const api = importedAs(program, SITE_SOURCES, "api");
   const runForm = importedAs(program, SITE_SOURCES, "RunForm");
   const content = importedAs(program, SITE_SOURCES, "content");
@@ -333,6 +355,7 @@ function readSiteFile(
   /** Each `content.<kind>.get(arg)`: its kind, its argument and where it is. */
   const gets: { kind: string; arg: Node; start: number }[] = [];
   let page: string | undefined;
+  let says: Says | undefined;
   const visit = (node: Node) => {
     if (!node) return;
     if (node.type === "MemberExpression") {
@@ -341,6 +364,18 @@ function readSiteFile(
       if (named) return void found.push({ ...named, via: "api", file, ...at(node.start) });
     } else if (node.type === "CallExpression") {
       const callee = unwrap(node.callee);
+      // `createFileRoute(id)({ … })`: its page, and what its options say of the sitemap.
+      const maker = callee?.type === "CallExpression" ? unwrap(callee.callee) : undefined;
+      const madeId =
+        maker?.type === "Identifier" && ROUTE_MAKERS.has(maker.name) && page === undefined
+          ? stringValue(callee.arguments[0])
+          : undefined;
+      if (madeId !== undefined) {
+        page = pageOf(madeId);
+        const listed = maker.name === "createFileRoute" ? sitemapOf(node.arguments[0]) : undefined;
+        const rank = madeId.endsWith("/") ? 2 : isPathless(madeId.split("/").at(-1)!) ? 0 : 1;
+        if (listed !== undefined && rank) says = { listed, rank };
+      }
       if (callee?.type === "Identifier" && ROUTE_MAKERS.has(callee.name) && page === undefined) {
         const id = stringValue(node.arguments[0]);
         if (id !== undefined) page = pageOf(id);
@@ -360,9 +395,10 @@ function readSiteFile(
   visit(program);
   const uses = found.map((use) => (page === undefined ? use : { ...use, page }));
   if (page === undefined) return { uses };
+  const route: FileRoute = { path: page, ...(says && { says }) };
   // The one parameter's name (not a splat's), and the kinds whose `get` is given it (`params.slug`, or `slug` destructured).
   const params = page.split("/").filter((segment) => segment.startsWith("$"));
-  if (params.length !== 1 || params[0] === "$") return { uses, route: { path: page } };
+  if (params.length !== 1 || params[0] === "$") return { uses, route };
   const param = params[0]!.slice(1);
   const kinds = new Set(
     gets
@@ -373,15 +409,32 @@ function readSiteFile(
       )
       .map(({ kind }) => kind),
   );
-  if (kinds.size === 1) return { uses, route: { path: page, content: [...kinds][0]! } };
+  if (kinds.size === 1) return { uses, route: { ...route, content: [...kinds][0]! } };
   // A read by the parameter in a form the sitemap does not follow (`params.id.toLowerCase()`, two kinds).
   const unfollowed = gets.find(({ arg }) => mentions(arg, param));
-  if (!unfollowed) return { uses, route: { path: page } };
+  if (!unfollowed) return { uses, route };
   const message =
     `the sitemap lists none of this page's entries: it reads content by the page's parameter in a way it cannot follow. ` +
     `Read one kind by it as written, \`content.<kind>.get(params.${param})\` (or \`${param}\` destructured)`;
-  return { uses, route: { path: page }, warning: { file, ...at(unfollowed.start), message } };
+  return { uses, route, warning: { file, ...at(unfollowed.start), message } };
 }
+
+/** A route's `options`' `staticData: { sitemap }`, each written out, `sitemap` a boolean; undefined for any other. */
+const sitemapOf = (options: Node): boolean | undefined => {
+  const flag = unwrap(valueOf(valueOf(options, "staticData"), "sitemap"));
+  return flag?.type === "Literal" && typeof flag.value === "boolean" ? flag.value : undefined;
+};
+
+/**
+ * The value of an object literal's property `name`, its last, written out; undefined for anything
+ * else, or when a spread or a computed key after it could replace it.
+ */
+const valueOf = (object: Node, name: string): Node => {
+  const o = unwrap(object);
+  const last =
+    o?.type === "ObjectExpression" && o.properties.findLast((p: Node) => !isWritten(p) || keyName(p.key) === name);
+  return last && isWritten(last) ? last.value : undefined;
+};
 
 /** Whether `node` reads the parameter `param` anywhere in it: `params.<param>`, or `param` destructured (not another parameter, nor a property's name, `post.slug` or `{ slug: x }`). */
 const mentions = (node: Node, param: string): boolean => {
@@ -555,9 +608,12 @@ function siteOptionsOf(
 const pageOf = (id: string): string =>
   `/${id
     .split("/")
-    .filter((s) => s && !/^\(.*\)$/.test(s) && !s.startsWith("_"))
+    .filter((s) => s && !isPathless(s))
     .map((s) => s.replace(/_$/, ""))
     .join("/")}`;
+
+/** A route id's segment the router's path leaves out: a `(group)` or a `_pathless` one. */
+const isPathless = (segment: string): boolean => /^\(.*\)$/.test(segment) || segment.startsWith("_");
 
 /** A site's source file: `.ts` or `.tsx`, but a test or a declaration. */
 const isSource = (name: string) => /\.tsx?$/.test(name) && !/\.(test|d)\.tsx?$/.test(name);

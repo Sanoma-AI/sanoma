@@ -57,10 +57,15 @@ const config = (root: string, more: Partial<SanomaConfig> = {}): SanomaConfig =>
 });
 
 /** A page at `path` importing `imports`, whose component renders `body`. */
-const page = (path: string, imports: string, body: string) => `import { createFileRoute } from "@tanstack/react-router";
+const page = (
+  path: string,
+  imports: string,
+  body: string,
+  options = "",
+) => `import { createFileRoute } from "@tanstack/react-router";
 ${imports}
 
-export const Route = createFileRoute("${path}")({ component: Page });
+export const Route = createFileRoute("${path}")({ ${options && `${options}, `}component: Page });
 
 function Page() {
   ${body}
@@ -102,6 +107,10 @@ const pageProblem = (name: string, line: number, message: string) => ({
 /** A page at `path` whose loader reads `reads`, with `content` imported from `from`. */
 const reading = (path: string, reads: string, from = "sanoma/site") =>
   page(path, `import { content } from "${from}";`, `void (${reads});\n  return null;`);
+
+/** A page at `path` whose route is made with `options` too, its loader reading `reads`. */
+const route = (path: string, options: string, reads = "0") =>
+  page(path, 'import { content } from "sanoma/site";', `void (${reads});\n  return null;`, options);
 
 describe("readSites", () => {
   it("reads the fixture's hello site: its title, that it is public, and each RunForm and api call with its file, place and page", () => {
@@ -504,6 +513,55 @@ describe("readSites", () => {
     ]);
     expect(warnings[0]!.message).toMatch(/^the sitemap lists none of this page's entries/);
     expect(siteContentPages(root)).toEqual({ "/sites/www/blog/$slug": "posts", "/sites/www/guides/$slug": "guides" });
+  });
+
+  it("reads a page its route keeps out of the sitemap, written out, its index deciding over its layout", () => {
+    const off = "staticData: { crumb: 'Off', sitemap: false }";
+    const root = tree("unlisted", {
+      ...site("www", "public: true"),
+      "sites/www/routes/start.tsx": route("/sites/www/start", off),
+      "sites/www/routes/blog.$slug.tsx": route(
+        "/sites/www/blog/$slug",
+        "staticData: { sitemap: false as const }",
+        "content.posts.get(params.slug)",
+      ),
+      // A layout and its index, one path: the index decides, when it says.
+      "sites/www/routes/docs.route.tsx": route("/sites/www/docs", ""),
+      "sites/www/routes/docs.index.tsx": route("/sites/www/docs/", off),
+      "sites/www/routes/tools.route.tsx": route("/sites/www/tools", off),
+      "sites/www/routes/tools.index.tsx": route("/sites/www/tools/", ""),
+      "sites/www/routes/guide.route.tsx": route("/sites/www/guide", off),
+      "sites/www/routes/guide.index.tsx": route("/sites/www/guide/", "staticData: { sitemap: true }"),
+      // A pathless layout or a group's at the home page's path says nothing: the home page is listed.
+      "sites/www/routes/_marketing.tsx": route("/sites/www/_marketing", off),
+      "sites/www/routes/(shop)/route.tsx": route("/sites/www/(shop)", off),
+      // Its lazy file says nothing, its route file does.
+      "sites/www/routes/lazy.tsx": route("/sites/www/lazy", off),
+      "sites/www/routes/lazy.lazy.tsx": route("/sites/www/lazy", "").replace(/createFileRoute/g, "createLazyFileRoute"),
+      // Not written out, or not `false`, or a spread after it, or a lazy route's: listed.
+      "sites/www/routes/held.tsx": route("/sites/www/held", "staticData: { sitemap: hidden }"),
+      "sites/www/routes/spread.tsx": route("/sites/www/spread", "staticData: { ...unlisted }"),
+      "sites/www/routes/after.tsx": route("/sites/www/after", "staticData: { sitemap: false, ...section }"),
+      "sites/www/routes/listed.tsx": route("/sites/www/listed", "staticData: { sitemap: true }"),
+      "sites/www/routes/only.lazy.tsx": route("/sites/www/only", off).replace(
+        /createFileRoute/g,
+        "createLazyFileRoute",
+      ),
+    });
+    expect(describeConfig(config(root)).sites[0]!.pages).toEqual([
+      { path: "/sites/www" },
+      { path: "/sites/www/after" },
+      { path: "/sites/www/blog/$slug", content: "posts", sitemap: false },
+      { path: "/sites/www/docs", sitemap: false },
+      { path: "/sites/www/guide" },
+      { path: "/sites/www/held" },
+      { path: "/sites/www/lazy", sitemap: false },
+      { path: "/sites/www/listed" },
+      { path: "/sites/www/only" },
+      { path: "/sites/www/spread" },
+      { path: "/sites/www/start", sitemap: false },
+      { path: "/sites/www/tools", sitemap: false },
+    ]);
   });
 
   it("reads a public site's locales from site.ts, its default first, and makes a problem of what it cannot keep", () => {

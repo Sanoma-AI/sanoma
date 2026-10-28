@@ -51,6 +51,20 @@ describe("sitemapEntries", () => {
     expect(sitemapEntries(site, origin, {})).toEqual([{ loc: `${origin}/`, alternates: [] }]);
   });
 
+  it("leaves out a page that keeps out of the sitemap, with every entry of its kind", () => {
+    const site = {
+      name: "www",
+      pages: [
+        { path: "/sites/www/about" },
+        { path: "/sites/www/blog/$slug", content: "posts", sitemap: false as const },
+        { path: "/sites/www/start", sitemap: false as const },
+      ],
+    };
+    expect(sitemapEntries(site, origin, { posts: [{ slug: "hello" }] })).toEqual([
+      { loc: `${origin}/about`, alternates: [] },
+    ]);
+  });
+
   it("escapes what it writes", () => {
     expect(sitemapXml([{ loc: `${origin}/?a=1&b=2`, alternates: [] }])).toContain(`<loc>${origin}/?a=1&#38;b=2</loc>`);
   });
