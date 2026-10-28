@@ -296,9 +296,10 @@ function windowOf(): ShellWindow {
     saveBounds();
     if (quitting) return;
     event.preventDefault();
-    // Elsewhere than macOS, with nothing to keep (no company, no form waiting on the start screen)
-    // or no tray icon to come back from: closing it quits, as before the one window.
-    if (process.platform !== "darwin" && ((!inWindow.size && !answer) || !tray)) return app.quit();
+    // Elsewhere than macOS, with nothing to keep (no company, no form waiting on the start screen):
+    // closing it quits, as before the one window. Without a tray icon (none on stock GNOME, none
+    // under xvfb), launching Sanoma again brings the hidden window back (`second-instance`).
+    if (process.platform !== "darwin" && !inWindow.size && !answer) return app.quit();
     // Else it hides, and every company goes on, its workflows with it. A full-screen window
     // hidden as it is would leave its Space behind, empty.
     if (!window.isFullScreen()) return window.hide();
