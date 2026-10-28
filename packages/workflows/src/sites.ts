@@ -64,8 +64,9 @@ export interface SitePage {
    */
   content?: string;
   /**
-   * `false` when its own route says `staticData: { sitemap: false }`, written out: the sitemap leaves
-   * it out. Its own is its index route when it has one, never a layout at its path.
+   * `false` when its route says `staticData: { sitemap: false }`, written out: the sitemap leaves it
+   * out. Its index route's `sitemap` (`true` or `false`) decides over a layout's at its path; a
+   * pathless or group layout's says nothing.
    */
   sitemap?: false;
 }
@@ -231,16 +232,16 @@ export function readSites(
 }
 
 /**
- * What a route made by `createFileRoute(id)({ … })` says of the sitemap (a lazy route's options
- * carry no `staticData`): whether it leaves its page out, and how much it is the page's own route,
- * its index (2), a route at its path (1) or a pathless or group layout (0), which says nothing.
+ * What a route made by `createFileRoute(id)({ … })` says of the sitemap, `staticData`'s `sitemap`
+ * written out (a lazy route's options carry no `staticData`), and how much it is its page's own:
+ * an index (2) over a route at its path (1). A pathless or group layout's says nothing.
  */
-type Says = { off: boolean; rank: number };
+type Says = { listed: boolean; rank: number };
 
 /** A route file's page, with what its route says of the sitemap. */
 type FileRoute = Omit<SitePage, "sitemap"> & { says?: Says };
 
-/** A site's pages, by path, from its files: a layout's and its index's (one path) merged, the page's own route deciding `sitemap`. */
+/** A site's pages, by path, from its files: a layout's and its index's (one path) merged, the most its own route that says deciding `sitemap`. */
 function pagesOf(read: readonly { route?: FileRoute }[]): Map<string, SitePage> {
   const pages = new Map<string, SitePage>();
   const own = new Map<string, Says>();
@@ -250,7 +251,7 @@ function pagesOf(read: readonly { route?: FileRoute }[]): Map<string, SitePage> 
     pages.set(page.path, { ...pages.get(page.path), ...page });
     if (says && says.rank > (own.get(page.path)?.rank ?? 0)) own.set(page.path, says);
   }
-  for (const [path, { off }] of own) if (off) pages.get(path)!.sitemap = false;
+  for (const [path, { listed }] of own) if (!listed) pages.get(path)!.sitemap = false;
   return pages;
 }
 
@@ -371,7 +372,9 @@ function readSiteFile(
           : undefined;
       if (madeId !== undefined) {
         page = pageOf(madeId);
-        if (maker.name === "createFileRoute") says = { off: offSitemap(node.arguments[0]), rank: rankOf(madeId) };
+        const listed = maker.name === "createFileRoute" ? sitemapOf(node.arguments[0]) : undefined;
+        const rank = madeId.endsWith("/") ? 2 : isPathless(madeId.split("/").at(-1)!) ? 0 : 1;
+        if (listed !== undefined && rank) says = { listed, rank };
       }
       if (callee?.type === "Identifier" && ROUTE_MAKERS.has(callee.name) && page === undefined) {
         const id = stringValue(node.arguments[0]);
@@ -416,13 +419,10 @@ function readSiteFile(
   return { uses, route, warning: { file, ...at(unfollowed.start), message } };
 }
 
-/** How much the route with `id` is its page's own (`Says.rank`): an index's ends in `/`; a layout's last segment may be pathless. */
-const rankOf = (id: string): number => (id.endsWith("/") ? 2 : /^[_(]/.test(id.split("/").at(-1)!) ? 0 : 1);
-
-/** Whether a route's `options` say `staticData: { sitemap: false }`, each written out. */
-const offSitemap = (options: Node): boolean => {
+/** A route's `options`' `staticData: { sitemap }`, each written out, `sitemap` a boolean; undefined for any other. */
+const sitemapOf = (options: Node): boolean | undefined => {
   const flag = unwrap(valueOf(valueOf(options, "staticData"), "sitemap"));
-  return flag?.type === "Literal" && flag.value === false;
+  return flag?.type === "Literal" && typeof flag.value === "boolean" ? flag.value : undefined;
 };
 
 /**
@@ -608,9 +608,12 @@ function siteOptionsOf(
 const pageOf = (id: string): string =>
   `/${id
     .split("/")
-    .filter((s) => s && !/^\(.*\)$/.test(s) && !s.startsWith("_"))
+    .filter((s) => s && !isPathless(s))
     .map((s) => s.replace(/_$/, ""))
     .join("/")}`;
+
+/** A route id's segment the router's path leaves out: a `(group)` or a `_pathless` one. */
+const isPathless = (segment: string): boolean => /^\(.*\)$/.test(segment) || segment.startsWith("_");
 
 /** A site's source file: `.ts` or `.tsx`, but a test or a declaration. */
 const isSource = (name: string) => /\.tsx?$/.test(name) && !/\.(test|d)\.tsx?$/.test(name);

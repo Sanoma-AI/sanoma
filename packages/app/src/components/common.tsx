@@ -57,8 +57,8 @@ declare module "@tanstack/react-router" {
     crumb?: string;
     /** The page takes the page column's full width, not the reading width the root caps others at. */
     wide?: true;
-    /** A public site's page that its sitemap.xml leaves out: read without running it (`SitePage.sitemap`). */
-    sitemap?: false;
+    /** `false`: a public site's page its sitemap.xml leaves out, read without running it (`SitePage.sitemap`). */
+    sitemap?: boolean;
   }
 }
 

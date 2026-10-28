@@ -515,7 +515,7 @@ describe("readSites", () => {
     expect(siteContentPages(root)).toEqual({ "/sites/www/blog/$slug": "posts", "/sites/www/guides/$slug": "guides" });
   });
 
-  it("reads a page its own route keeps out of the sitemap, written out", () => {
+  it("reads a page its route keeps out of the sitemap, written out, its index deciding over its layout", () => {
     const off = "staticData: { crumb: 'Off', sitemap: false }";
     const root = tree("unlisted", {
       ...site("www", "public: true"),
@@ -525,11 +525,13 @@ describe("readSites", () => {
         "staticData: { sitemap: false as const }",
         "content.posts.get(params.slug)",
       ),
-      // A layout and its index, one path: the index decides.
+      // A layout and its index, one path: the index decides, when it says.
       "sites/www/routes/docs.route.tsx": route("/sites/www/docs", ""),
       "sites/www/routes/docs.index.tsx": route("/sites/www/docs/", off),
+      "sites/www/routes/tools.route.tsx": route("/sites/www/tools", off),
+      "sites/www/routes/tools.index.tsx": route("/sites/www/tools/", ""),
       "sites/www/routes/guide.route.tsx": route("/sites/www/guide", off),
-      "sites/www/routes/guide.index.tsx": route("/sites/www/guide/", ""),
+      "sites/www/routes/guide.index.tsx": route("/sites/www/guide/", "staticData: { sitemap: true }"),
       // A pathless layout or a group's at the home page's path says nothing: the home page is listed.
       "sites/www/routes/_marketing.tsx": route("/sites/www/_marketing", off),
       "sites/www/routes/(shop)/route.tsx": route("/sites/www/(shop)", off),
@@ -558,6 +560,7 @@ describe("readSites", () => {
       { path: "/sites/www/only" },
       { path: "/sites/www/spread" },
       { path: "/sites/www/start", sitemap: false },
+      { path: "/sites/www/tools", sitemap: false },
     ]);
   });
 
