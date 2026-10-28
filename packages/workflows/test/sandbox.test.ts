@@ -1,5 +1,6 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { fakeHostType } from "@sanoma-ai/testing/host";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { describe, expect, it, onTestFinished } from "vitest";
@@ -19,7 +20,7 @@ import { setupOf } from "../src/op.ts";
 import { check, drive, loadScenarios, type Scenario } from "../src/scenario.ts";
 import { runScenario } from "../src/scenarios.ts";
 import announce from "./fixtures/announce.ts";
-import { failure, inSeconds, pending, types, useApp, waitFor } from "./harness.ts";
+import { failure, inSeconds, pending, rootWith, testhostInfra, types, useApp, waitFor } from "./harness.ts";
 
 // Needs Postgres: `pnpm db:up`.
 const alice = { id: "alice", groups: ["marketing"] };
@@ -316,5 +317,56 @@ describe("sandbox runs", () => {
     );
     await c().decide(runId, { decision: "approve", by: { id: "boss" } });
     expect(await c().result(runId)).toBe("reviewed");
+  });
+});
+
+/** An operation drift never calls: it changes nothing. */
+const notCalled = async () => expect.unreachable("drift changes nothing");
+
+describe("a sandbox run with a host declared", () => {
+  // A host type, so the config has the built-in `sanoma.source.resolve`, which drift calls for the
+  // commit the host's branch names: no connector's fake implements it, so the run calls its fake (`fakeSourceDriver`).
+  const REPO = "https://example.com/acme/app.git";
+  const testhost = defineConnector("testhost", { app: fakeHostType }, { package: "@sanoma-ai/testing-host" });
+  // The vendor runs the host at a commit older than the one its branch names.
+  const testhostFake = () =>
+    defineFake(testhost, {
+      initial: () => ({ name: "company", source: REPO, ref: "main", port: 0, revision: "0".repeat(40), running: true }),
+      ops: (state) => {
+        const read = async ({ id }: { id: string }) => ({ id, gone: false, state });
+        return {
+          app: { import: read, read, plan: notCalled, create: notCalled, update: notCalled, delete: notCalled },
+        };
+      },
+    });
+  const root = rootWith({
+    "resources/infra.ts": testhostInfra(REPO),
+    "resources/sanoma.lock.json": JSON.stringify({ "resources/infra.ts#app": { type: "testhost.app", id: "company" } }),
+    "scenarios/drift.feature": [
+      "Feature: Drift of a host",
+      "  Scenario: The host runs behind its branch",
+      "    When drift runs",
+      "    Then resources/infra.ts#app is drifted in revision",
+      "",
+    ].join("\n"),
+  });
+  const app = useApp("sandbox-host", () => ({
+    workflows: [],
+    connectors: [withSetup(testhost, { driver: () => testhostFake().driver, fake: testhostFake })],
+    root,
+  }));
+
+  it("resolves the host's ref with the built-in fake, a revision derived from the URL and the ref", async () => {
+    const scope = resolveConfig(app.config);
+    const { scenarios, errors } = await loadScenarios(scope);
+    expect(errors).toEqual([]);
+    const { run, checks, ledger: records } = await runScenario(scenarios[0]!, { client: app.client, scope });
+    expect(run).toMatchObject({ status: "finished" });
+    const revision = createHash("sha1").update(`${REPO}#main`).digest("hex");
+    expect(records.find((r) => r.type === "op.called" && r.op === "sanoma.source.resolve")).toMatchObject({
+      input: { url: REPO, ref: "main" },
+      output: { revision },
+    });
+    expect(checks.filter((k) => !k.ok)).toEqual([]);
   });
 });

@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { promisify } from "node:util";
 import { z } from "zod";
 import type { PermissionsGrid } from "./grid.ts";
@@ -154,6 +155,19 @@ export const sourceDriver = defineDriver(sourceOps, {
 });
 
 const COMMIT = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
+
+/**
+ * The fake of `sanoma.source.resolve`, which a sandbox run calls (`sandboxDrivers`): no git and no
+ * network, a full commit id is itself as the driver has it, and any other ref the SHA-1 of
+ * `<url>#<ref>`, so a scenario's revisions are the same on every run.
+ */
+export const fakeSourceDriver = defineDriver(sourceOps, {
+  source: {
+    resolve: async ({ url, ref }) => ({
+      revision: COMMIT.test(ref) ? ref : createHash("sha1").update(`${url}#${ref}`).digest("hex"),
+    }),
+  },
+});
 
 /** The commit `ref` (a branch, a tag, `HEAD`, a full ref or a commit id) names in the repository at `url`. */
 export async function resolveRevision(url: string, ref: string): Promise<string> {
