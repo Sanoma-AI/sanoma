@@ -8,6 +8,7 @@ import {
   mkdirSync,
   mkdtempSync,
   openSync,
+  readdirSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -69,7 +70,6 @@ const LEADS = [
 ] as const;
 
 const stillsDir = parseArgs({ options: { out: { type: "string" } } }).values.out;
-const STILLS = ["workflow.png", "runs.png", "inbox.png", "run.png", "site.png", "data.png"];
 
 const started = Date.now();
 const say = (line: string) => console.log(`readme:shots ${((Date.now() - started) / 1000).toFixed(0)}s: ${line}`);
@@ -179,13 +179,14 @@ try {
     chat: false,
     fullPage: true,
   });
-  if (stillsDir) say(`wrote ${stillsDir}: ${STILLS.join(", ")}`);
+  const stills = readdirSync(captured).filter((file) => file.endsWith(".png"));
+  if (stillsDir) say(`wrote ${stillsDir}: ${stills.join(", ")}`);
   else {
     say("stills taken; making demo.gif");
     stopIfInterrupted();
     await makeGif(frames, join(captured, "demo.gif"));
     stopIfInterrupted();
-    const files = ["demo.gif", ...STILLS];
+    const files = ["demo.gif", ...stills];
     replaceAssets(captured, files);
     say(`wrote .github/assets: ${files.join(", ")}`);
   }

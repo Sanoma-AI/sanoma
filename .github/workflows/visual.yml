@@ -3,6 +3,7 @@
 name: Visual
 on:
   pull_request:
+    types: [opened, synchronize, reopened, closed]
     paths:
       - packages/app/**
       - packages/sanoma/src/**
@@ -10,16 +11,17 @@ on:
       - packages/testing/src/**
       - connectors/ghost/src/**
       - README.md
+      - pnpm-lock.yaml
       - scripts/readme-shots/**
       - .github/workflows/visual.yml
 
+# Queued, never cancelled: a run cancelled after its push would leave the comment on images it replaced.
 concurrency:
   group: visual-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
 
 jobs:
   visual:
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -58,12 +60,13 @@ jobs:
       # The base: where the pull request left its branch, so the comment shows only its own changes. A base
       # from before `--out`, or a failed run, leaves no before: every page shows as new.
       - name: Stills of the base
+        continue-on-error: true
         run: |
           git worktree add --detach "$BASE" "$(git merge-base "origin/${{ github.base_ref }}" HEAD)"
           cd "$BASE"
           grep -q steadyStills scripts/readme-shots/shots.ts || exit 0
           pnpm install --frozen-lockfile
-          node scripts/readme-shots/shots.ts --out "$SHOTS/before" || echo "::warning title=Visual::The base's stills failed; every page shows as new."
+          node scripts/readme-shots/shots.ts --out "$SHOTS/before"
       - name: Stills of the head
         run: node scripts/readme-shots/shots.ts --out "$SHOTS/after"
       - name: Compare
@@ -91,3 +94,14 @@ jobs:
           else
             gh pr comment "$PR" --repo "${{ github.repository }}" --body-file "$SHOTS/diff/comment.md"
           fi
+
+  # The pull request's images go with it.
+  cleanup:
+    if: github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api --method DELETE "repos/${{ github.repository }}/git/refs/heads/visual/pr-${{ github.event.pull_request.number }}" || true

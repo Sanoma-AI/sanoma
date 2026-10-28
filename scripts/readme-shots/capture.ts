@@ -15,7 +15,8 @@ export async function launchChrome(): Promise<Browser> {
       channel: "chrome",
       executablePath: process.env.CHROME_PATH,
       headless: true,
-      args: ["--lang=en-US"],
+      // A CI runner (Ubuntu 24.04's AppArmor) may not let Chrome make its sandbox.
+      args: ["--lang=en-US", ...(process.env.CI ? ["--no-sandbox"] : [])],
       env: { ...process.env, LANG: "en_US.UTF-8" },
       handleSIGINT: false,
       handleSIGTERM: false,
@@ -295,6 +296,8 @@ export async function still(browser: Browser, base: string, path: string, out: s
     scale: 2,
   });
   await page.goto(base + path, { waitUntil: "networkidle0" });
+  // Before anything is sized or fitted, so the page's height does not depend on what is rewritten.
+  if (steadied) await page.evaluate(steady);
   if (options.select) await page.waitForSelector(".react-flow__node");
   if (options.tab) await (await page.waitForSelector(`[role="tab"]::-p-text(${JSON.stringify(options.tab)})`))!.click();
   // Grown before the graph is fitted: a resize fits it again, to one end. (A fullPage screenshot
@@ -321,7 +324,6 @@ export async function still(browser: Browser, base: string, path: string, out: s
   // Out of the way of any hover style.
   await page.mouse.move(1, height - 1);
   await wait(800);
-  if (steadied) await page.evaluate(steady);
   await page.screenshot({ path: out as `${string}.png` });
   await page.browserContext().close();
 }
@@ -329,13 +331,13 @@ export async function still(browser: Browser, base: string, path: string, out: s
 /**
  * Runs in the page: rewrites, in its text, what a second run of the same code shows otherwise, so
  * two runs' stills differ only where the code does, and again whenever the app renders until the
- * screenshot (its clock ticks, a refetch). A run's id, full or short, becomes zeros; "just now" and
+ * screenshot (its clock ticks, a refetch). A run's id, in full or as "Run 1a2b3c4d", becomes zeros; "just now" and
  * "5s ago" become "0m ago", a step's "3 ms" "0 ms"; a date or time keeps its shape with every digit 0.
  */
 function steady(): void {
   const rules: [RegExp, (match: string) => string][] = [
     [/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/g, () => "00000000-0000-0000-0000-000000000000"],
-    [/\b[0-9a-f]{8}\b/g, () => "00000000"],
+    [/(?<=\bRun )[0-9a-f]{8}\b/g, () => "00000000"],
     [/\bjust now\b|\b\d+[smhd] ago\b/g, () => "0m ago"],
     [/\b\d+(?:\.\d+)? ?(?:ms|s)\b/g, () => "0 ms"],
     [/\b\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?(?:[+-]\d{2}:\d{2}|Z)?)?/g, (match) => match.replace(/\d/g, "0")],
