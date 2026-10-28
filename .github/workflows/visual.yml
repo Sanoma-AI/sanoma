@@ -37,8 +37,6 @@ jobs:
     env:
       PR: ${{ github.event.pull_request.number }}
       HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-      BASE: ${{ runner.temp }}/base
-      SHOTS: ${{ runner.temp }}/shots
     steps:
       # The head itself, not the merge commit, with the history to find the merge base.
       - uses: actions/checkout@v4
@@ -62,24 +60,24 @@ jobs:
       - name: Stills of the base
         continue-on-error: true
         run: |
-          git worktree add --detach "$BASE" "$(git merge-base "origin/${{ github.base_ref }}" HEAD)"
-          cd "$BASE"
+          git worktree add --detach "$RUNNER_TEMP/base" "$(git merge-base "origin/${{ github.base_ref }}" HEAD)"
+          cd "$RUNNER_TEMP/base"
           grep -q steadyStills scripts/readme-shots/shots.ts || exit 0
           pnpm install --frozen-lockfile
-          node scripts/readme-shots/shots.ts --out "$SHOTS/before"
+          node scripts/readme-shots/shots.ts --out "$RUNNER_TEMP/shots/before"
       - name: Stills of the head
-        run: node scripts/readme-shots/shots.ts --out "$SHOTS/after"
+        run: node scripts/readme-shots/shots.ts --out "$RUNNER_TEMP/shots/after"
       - name: Compare
-        run: node scripts/readme-shots/compare.ts "$SHOTS/before" "$SHOTS/after" "$SHOTS/diff" "https://raw.githubusercontent.com/${{ github.repository }}/refs/heads/visual/pr-$PR/$HEAD_SHA/"
+        run: node scripts/readme-shots/compare.ts "$RUNNER_TEMP/shots/before" "$RUNNER_TEMP/shots/after" "$RUNNER_TEMP/shots/diff" "https://raw.githubusercontent.com/${{ github.repository }}/refs/heads/visual/pr-$PR/$HEAD_SHA/"
       # The changed pages' images, under the head's sha, on a branch of this pull request's own,
       # `visual/pr-<n>`, made afresh each run: one commit, force-pushed.
       - name: Publish the images
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          ls "$SHOTS"/diff/*.png > /dev/null 2>&1 || exit 0
+          ls "$RUNNER_TEMP/shots"/diff/*.png > /dev/null 2>&1 || exit 0
           git init -q "$RUNNER_TEMP/publish" && cd "$RUNNER_TEMP/publish"
-          mkdir "$HEAD_SHA" && cp "$SHOTS"/diff/*.png "$HEAD_SHA/"
+          mkdir "$HEAD_SHA" && cp "$RUNNER_TEMP/shots"/diff/*.png "$HEAD_SHA/"
           git add . && git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -q -m "Visual diff of #$PR at $HEAD_SHA"
           git push -q -f "https://x-access-token:$GH_TOKEN@github.com/${{ github.repository }}.git" "HEAD:refs/heads/visual/pr-$PR"
       # The comment that starts with compare.ts's marker, updated; or a new one.
@@ -90,9 +88,9 @@ jobs:
           id=$(gh api --paginate "repos/${{ github.repository }}/issues/$PR/comments" \
             --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | startswith("<!-- visual-diff -->"))) | .id' | head -n 1)
           if [ -n "$id" ]; then
-            gh api --method PATCH "repos/${{ github.repository }}/issues/comments/$id" -F "body=@$SHOTS/diff/comment.md" > /dev/null
+            gh api --method PATCH "repos/${{ github.repository }}/issues/comments/$id" -F "body=@$RUNNER_TEMP/shots/diff/comment.md" > /dev/null
           else
-            gh pr comment "$PR" --repo "${{ github.repository }}" --body-file "$SHOTS/diff/comment.md"
+            gh pr comment "$PR" --repo "${{ github.repository }}" --body-file "$RUNNER_TEMP/shots/diff/comment.md"
           fi
 
   # The pull request's images go with it.
