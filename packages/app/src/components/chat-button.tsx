@@ -7,8 +7,8 @@ import { useChatPrompt } from "./shell/chat-prompt.ts";
 // on a branch of its own and checks it; you merge it.
 
 /**
- * A button opening the chat with `prompt` in its composer (`useChatPrompt`); nothing where there
- * is no chat: in a demo, and on a phone, which has no chat column.
+ * A button opening the chat with `prompt` in its composer (`useChatPrompt`); hidden on a phone,
+ * which has no chat column.
  */
 export function ChatButton({
   prompt,
@@ -16,6 +16,5 @@ export function ChatButton({
   ...props
 }: Omit<ComponentProps<typeof Button>, "onClick"> & { prompt: string }) {
   const chat = useChatPrompt();
-  if (!chat) return null;
   return <Button size="sm" className={cn("max-md:hidden", className)} {...props} onClick={() => chat.open(prompt)} />;
 }

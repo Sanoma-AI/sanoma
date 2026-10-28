@@ -57,49 +57,6 @@ describe("sanoma serve", () => {
   }, 60_000);
 });
 
-describe("sanoma demo", () => {
-  it("serves the repo as a demo: its people by ?as=, the banner, the moment started as its person", async () => {
-    dir = copyFixture();
-    mkdirSync(join(dir, "resources"));
-    writeFileSync(
-      join(dir, "resources/people.ts"),
-      `import { sanoma } from "sanoma/resources";\n\nexport const ada = sanoma.person({ id: "ada", name: "Ada" });\nexport const bo = sanoma.person({ id: "bo", name: "Bo" });\n`,
-    );
-    writeFileSync(
-      join(dir, "scenarios/hello/demo.feature"),
-      `Feature: The demo\n\n  @moment(bo,/workflows/hello)\n  Scenario: Bo says hello\n    When hello runs with\n      | title | Hi |\n`,
-    );
-    // Ghost's variables unset: every vendor is its fake.
-    const { child, finished, output } = startCli(dir, ["demo"], unconfigured);
-    try {
-      const stdout = await waitFor(
-        () => output().stdout,
-        (out) => /sanoma-fixture at http:\/\/127\.0\.0\.1:\d+/.test(out),
-        30_000,
-      );
-      const url = stdout.match(/at (http:\/\/127\.0\.0\.1:\d+); ctrl-c to stop/)![1]!;
-      const entered = await fetch(`${url}/workflows/hello?as=bo`, { redirect: "manual" });
-      expect(entered.status).toBe(303);
-      const cookie = entered.headers.get("set-cookie")!.split(";")[0]!;
-      const page = (await (await fetch(`${url}/workflows/hello`, { headers: { cookie } })).text()).replaceAll(
-        "<!-- -->",
-        "",
-      );
-      expect(page).toMatch(/You are<button[^>]*>Bo/);
-      expect(page).toContain("nothing you do here is saved");
-      // The moment's run, started as Bo on the fake.
-      expect(page).toContain("Bo says hello");
-    } finally {
-      child.kill("SIGINT");
-    }
-    const done = await Promise.race([
-      finished,
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("did not exit")), 15_000)),
-    ]);
-    expect(done.code, done.stderr).toBe(0);
-  }, 60_000);
-});
-
 describe("sanoma wakeup", () => {
   it("serves the wakeup service's routes and /healthz alone, and stops on SIGINT", async () => {
     dir = copyFixture();

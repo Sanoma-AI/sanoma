@@ -11,7 +11,6 @@ import type {
   PreviewRequest,
   Principal,
   RunSummary,
-  SanomaConfig,
 } from "@sanoma-ai/workflows";
 import type { ConfigDescription, PermissionsGrid, Span } from "@sanoma-ai/workflows/describe";
 import type { Check, Scenario } from "@sanoma-ai/workflows/scenario";
@@ -46,18 +45,9 @@ export type Place = "this-computer" | "live";
 /**
  * What `getConfig` answers: the description, less the workflows' sources, and where this instance
  * is: its `place`, and its database's host (only the host, never the URL; none when it cannot be
- * read), which the bar's badge says as its tip; and, in a demo, what its banner shows.
+ * read), which the bar's badge says as its tip.
  */
-export type AppConfig = ConfigDescription & { place: Place; databaseHost?: string; demo?: DemoInfo };
-
-/** The search parameter a demo's link names whom you are with (`demoLogin`): a moment's URL is `/<path>?as=<person>`. */
-export const DEMO_AS = "as";
-
-/**
- * What a demo's banner reads besides the people (`getConfig`, only when the app runs as one): the
- * config's `demo`, whose `start` is the URL "Start with these apps" opens.
- */
-export type DemoInfo = Pick<NonNullable<SanomaConfig["demo"]>, "start">;
+export type AppConfig = ConfigDescription & { place: Place; databaseHost?: string };
 
 /**
  * Who the server says is asking. With a login provider (`fromServer`), it is whoever signed in,
@@ -184,10 +174,10 @@ export interface RunCheck extends Check {
 }
 
 /**
- * A scenario as the page lists it: what it says, the workflow it runs and the input its run
- * starts with, not how the worker seeds and checks it. Never a world, which runs nothing.
+ * A scenario as the page lists it: what it says and the input its run starts with, not how the
+ * worker seeds and checks it.
  */
-export type ScenarioEntry = Pick<Scenario, "name" | "file" | "text" | "steps" | "input"> & { workflow: string };
+export type ScenarioEntry = Pick<Scenario, "name" | "workflow" | "file" | "text" | "steps" | "input">;
 
 /** Every scenario, and why each feature file that could not be read could not. */
 export interface ScenariosResponse {

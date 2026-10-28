@@ -23,12 +23,6 @@ Runs the repo in the working directory, from its sanoma.config.ts (after its .en
                                       and the repo's sites/, when it has any, from a dev server that shows each
                                       edit as it is saved. In an empty directory, first starts a company there: the
                                       template, .env, an install and a git repository
-  sanoma demo                         sanoma as a demo, on <database>_demo: every vendor on its fake, anyone signed
-                                      in as one of the company's people (?as=<id>), the world and moments of
-                                      scenarios/ seeded on start and every hour, nothing kept; SANOMA_DEMO=1 does
-                                      the same on a host, on the database it names. With the config's
-                                      demo.sessions, each visitor gets a copy of the seeded database and a process
-                                      of their own over it, dropped after demo.idle minutes unused
   sanoma worker                       the worker alone, for a deployment
   sanoma app                          the app alone (built with the sites), for a deployment
   sanoma wakeup                       the wakeup service alone, on the config's database: it calls each instance
@@ -94,10 +88,6 @@ export async function main(argv: string[]): Promise<number> {
       const repo = devRepo(process.cwd(), linked);
       return repo === undefined ? serveCommand(true) : dev(repo, linked);
     }
-    case "demo":
-      // As `sanoma serve` reads it on a host: the app's options take it from the environment.
-      process.env.SANOMA_DEMO = "1";
-      return serveCommand(true, { demo: true });
     case "serve":
       // --dev (hidden): the child dev mode supervises, serving the sites as `sanoma` does.
       return serveCommand(values.dev ?? false);
@@ -156,31 +146,15 @@ const port = (fallback = 3000) => Number(process.env.SANOMA_APP_PORT ?? fallback
  * problem with them is a `UsageError`, so nothing starts on policies that do not hold. Without
  * `policies`, they are left to the caller (`check` reports them). With `postgres`, its database
  * answers first (`withPostgres`: "start" starts the company's own, "find" only finds it running),
- * so the config resolves on it. With `demo` (`sanoma demo`, whose seed empties its database), the
- * config runs on `<database>_demo` beside that one, never on the company's own data.
+ * so the config resolves on it.
  */
-async function load({
-  policies = true,
-  postgres,
-  demo = false,
-}: { policies?: boolean; postgres?: "start" | "find"; demo?: boolean } = {}): Promise<
+async function load({ policies = true, postgres }: { policies?: boolean; postgres?: "start" | "find" } = {}): Promise<
   Loaded & { postgres?: EnsuredPostgres }
 > {
   const loaded = await loadConfig();
-  // A process of `sanoma demo`'s session host: on the database the host names, whatever the config's.
-  if (process.env.SANOMA_DEMO === "instance" || process.env.SANOMA_DEMO === "copy") {
-    loaded.config = { ...loaded.config, databaseUrl: process.env.SANOMA_DATABASE_URL };
-  }
   const ensured = postgres && (await withPostgres(namedDatabaseUrl(loaded.config), loaded.root, postgres === "start"));
-  const { resolveConfig, resolveDatabaseUrl } = await import("@sanoma-ai/workflows");
+  const { resolveConfig } = await import("@sanoma-ai/workflows");
   try {
-    if (demo) {
-      // As `check` runs its scenarios on `_check`: the runtime makes the database when it is not there.
-      const own = new URL(resolveDatabaseUrl(loaded.config));
-      own.pathname = `${own.pathname}_demo`;
-      process.env.SANOMA_DATABASE_URL = own.toString();
-      loaded.config = { ...loaded.config, databaseUrl: own.toString() };
-    }
     const resolved = resolveConfig(loaded.config);
     if (policies && resolved.policyProblems.length) {
       throw new UsageError(`The policies do not hold:\n${resolved.policyProblems.join("\n")}`);
@@ -254,16 +228,10 @@ async function keep(
  * `sanoma serve` (and `sanoma` outside dev mode): Postgres (the company's own unless one is
  * named), then the worker and the app in this process. With `devServer` (`sanoma`), a repo's sites are served from Vite's dev server, not built.
  */
-async function serveCommand(devServer: boolean, { demo = false } = {}): Promise<never> {
-  const loaded = await load({ postgres: "start", demo });
+async function serveCommand(devServer: boolean): Promise<never> {
+  const loaded = await load({ postgres: "start" });
   return keep(loaded, async (config, resolved) => {
     (await import("./key.ts")).ensureSecretsKey(process.cwd(), log);
-    // A demo with a session per visitor (`demo.sessions`): the host of those sessions, not an instance.
-    if (process.env.SANOMA_DEMO === "1" && config.demo?.sessions) {
-      const { startDemoHost } = await import("./demo-host.ts");
-      const host = process.env.SANOMA_APP_HOST || undefined;
-      return startDemoHost(config, { port: port(), log, databaseUrl: resolved.databaseUrl, ...(host && { host }) });
-    }
     const { serve } = await import("./serve.ts");
     return serve(config, { port: port(), log, dev: devServer, resolved });
   });

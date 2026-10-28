@@ -6,13 +6,11 @@ import { type Check, check, drive, loadScenarios, type Scenario, type Scope } fr
 import { errorMessage } from "./shared.ts";
 import { startWorker } from "./worker.ts";
 
-export { type DemoState, demoState, reseed, type SeedHalf } from "./demo.ts";
-
 /*
  * `@sanoma-ai/workflows/scenarios`: runs a config's scenarios as sandbox runs, with no test
  * framework. Server-side only, like `./scenario`: it loads Cucumber and starts a worker.
  * `sanoma check` runs every scenario through `runScenarios`; `@sanoma-ai/testing/scenarios` wraps
- * `runScenario` in a vitest test per scenario. A demo seeds its instance with `reseed`.
+ * `runScenario` in a vitest test per scenario.
  */
 
 export interface RunScenarioOptions {
@@ -32,15 +30,12 @@ export interface RunScenarioOptions {
 /**
  * Runs a scenario as a sandbox run: starts its workflow with its input, as whoever it says is
  * acting, decides its approvals as it says, and checks the run's ledger against it (`check`:
- * Cucumber runs its `Then` steps). Refuses a world, which runs nothing.
+ * Cucumber runs its `Then` steps).
  */
 export async function runScenario(
   scenario: Scenario,
   { client, scope, startedBy = "scenarios", timeoutMs }: RunScenarioOptions,
 ): Promise<{ runId: string; run: RunSummary; ledger: LedgerRecord[]; checks: Check[] }> {
-  if (scenario.workflow === undefined) {
-    throw new Error(`Scenario "${scenario.name}" is a world: it seeds a demo's instance, and runs nothing`);
-  }
   const runId = await client.start(scenario.workflow, scenario.input, {
     startedBy: scenario.startedBy ?? startedBy,
     sandbox: scenario.name,
@@ -70,13 +65,6 @@ export interface RunScenariosOptions {
 }
 
 /**
- * True for a scenario that is a test: one that runs a workflow (not a world), and not a moment
- * that decides nothing, which a demo leaves waiting at its first approval.
- */
-export const isTest = (scenario: Scenario): scenario is Scenario & { workflow: string } =>
-  scenario.workflow !== undefined && !(scenario.moment && scenario.decisions.length === 0);
-
-/**
  * Runs every scenario in `scenarios/` in the config's root, one after another, as sandbox runs
  * on a worker it starts on `databaseUrl` with an in-memory ledger (the config's `ledger` is not
  * written), and stops when done. `passed` names the scenarios whose every check held; `failed`
@@ -84,7 +72,6 @@ export const isTest = (scenario: Scenario): scenario is Scenario & { workflow: s
  * could not be read, with why. A scenario whose run cannot be driven to its end (an approval
  * with no decision, a run still going after `timeoutMs`) fails with that error at its `When`
  * step. A config whose root has no `scenarios/`, or none in it, passes nothing and fails nothing.
- * Worlds and moments that decide nothing are no tests (`isTest`): they are left out, each logged as skipped.
  */
 export async function runScenarios(
   config: SanomaConfig,
@@ -92,9 +79,7 @@ export async function runScenarios(
 ): Promise<{ passed: string[]; failed: ScenarioFailure[] }> {
   const shared: SanomaConfig = { ...config, databaseUrl, ledger: memoryLedger() };
   const resolved = resolveConfig(shared);
-  const { scenarios: loaded, errors } = await loadScenarios(resolved);
-  const scenarios = loaded.filter(isTest);
-  for (const s of loaded) if (!isTest(s)) log?.(`skipped ${s.file} › ${s.name}: ${s.moment ? "a moment" : "a world"}`);
+  const { scenarios, errors } = await loadScenarios(resolved);
   const failed: ScenarioFailure[] = errors.map(({ file, message }) => ({
     scenario: file,
     step: "did not load",

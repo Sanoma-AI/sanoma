@@ -101,7 +101,6 @@ const expecting = (expectations: Scenario["expect"]): Scenario => ({
   file: "s.feature",
   line: 1,
   workflow: "announce",
-  tags: [],
   text: "",
   steps: [],
   given: [],
@@ -535,59 +534,6 @@ describe("parseFeature", () => {
     ).rejects.toThrow(
       'odd.thing.poke: its given phrase "{nope} poked" names {nope}, which is not a field of its input',
     );
-  });
-
-  it("loads a feature with no When as worlds, their Givens alone, and keeps every scenario's tags", async () => {
-    const [world] = await parse(`@demo\nFeature: A\n  Scenario: The blog\n    Given a post titled "Old news" exists\n`);
-    const [tagged] = await parse(`@demo\nFeature: A\n  @slow\n  Scenario: Launch\n    When announce runs\n`);
-    expect(world).toMatchObject({ name: "The blog", tags: ["@demo"], approvals: [], expect: [], decisions: [] });
-    expect(world!.workflow).toBeUndefined();
-    expect(world!.given).toEqual([expect.objectContaining({ op: "ghost.post.create" })]);
-    expect(tagged).toMatchObject({ workflow: "announce", tags: ["@demo", "@slow"] });
-    expect(tagged!.moment).toBeUndefined();
-  });
-
-  it("refuses a scenario with no When in a feature where another has one", async () => {
-    expect(
-      await thrown(
-        `Feature: A\n  Scenario: Runs\n    When announce runs\n\n  Scenario: Forgot\n    Given a post titled "Old news" exists\n`,
-      ),
-    ).toBe(
-      'scenarios/x.feature:5: scenario "Forgot" has no When: say which workflow runs, such as "When <workflow> runs with" (a feature with no When in any scenario is of worlds)',
-    );
-  });
-
-  it("refuses a world that checks a run or decides an approval", async () => {
-    expect(
-      await thrown(
-        `Feature: A\n  Scenario: Idle\n    Given resend.broadcast.create fails once\n    Then the run succeeds\n`,
-      ),
-    ).toBe(
-      'scenarios/x.feature:2: scenario "Idle" has no When, so it is a world, Givens only, but it checks a run ("the run succeeds"): say which workflow runs, such as "When <workflow> runs with"',
-    );
-    expect(
-      await thrown(`Feature: A\n  Scenario: Idle\n    Given "Review launch copy" is approved by marketing-lead\n`),
-    ).toMatch(
-      /^scenarios\/x\.feature:2: scenario "Idle" has no When, so it is a world, Givens only, but it decides an approval/,
-    );
-  });
-
-  it("reads @moment(<person>,<path>) into a moment, and refuses one with no When, a malformed one and a second", async () => {
-    const [moment] = await parse(
-      `Feature: A\n  @moment(leon,/sites/portal/requests)\n  Scenario: Waits\n    When announce runs\n`,
-    );
-    expect(moment).toMatchObject({ workflow: "announce", moment: { person: "leon", path: "/sites/portal/requests" } });
-    expect(
-      await thrown(`Feature: A\n  @moment(leon,/inbox)\n  Scenario: Idle\n    Given a post titled "Old news" exists\n`),
-    ).toMatch(
-      /^scenarios\/x\.feature:3: scenario "Idle" has no When, so it is a world, Givens only, but it is a moment, which starts a run/,
-    );
-    expect(await thrown(`Feature: A\n  @moment(leon)\n  Scenario: S\n    When announce runs\n`)).toBe(
-      "scenarios/x.feature:3: @moment(leon) needs a person and a path, as in @moment(alex,/sites/portal/requests), with no space: a tag has none",
-    );
-    expect(
-      await thrown(`@moment(ada,/inbox)\nFeature: A\n  @moment(leon,/inbox)\n  Scenario: S\n    When announce runs\n`),
-    ).toBe("scenarios/x.feature:4: @moment(ada,/inbox) and @moment(leon,/inbox): a moment has one person and one page");
   });
 
   it("refuses a scenario with no When, a second When, and a doc string that is not JSON", async () => {
@@ -1555,11 +1501,6 @@ describe("people in a scenario: who is acting, held for a group, denied with a r
       }
       throw new Error("expected the feature not to load");
     };
-    const tagged = (tag: string) => parsePeople(`Feature: R\n  ${tag}\n  Scenario: S\n    When refund runs\n`);
-    expect((await tagged("@moment(bo,/inbox)"))[0]!.moment).toEqual({ person: "bo", path: "/inbox" });
-    await expect(tagged("@moment(cy,/inbox)")).rejects.toThrow(
-      "people.feature:3: @moment(cy,/inbox): cy is not a declared person or agent; resources/ declares ada, bo, refund-bot, scenarios, host-check, schedule, wakeup",
-    );
     expect(await thrownBy("    Given cy is acting\n    When refund runs\n")).toBe(
       "scenarios/people.feature:3: cy is not a declared person or agent; resources/ declares ada, bo, refund-bot, scenarios, host-check, schedule, wakeup",
     );

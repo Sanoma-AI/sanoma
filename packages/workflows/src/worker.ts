@@ -93,12 +93,6 @@ export interface WorkerOptions {
    * it off, on a database of its own, so no schedule is applied there to start a live run.
    */
   schedules?: boolean;
-  /**
-   * The config as the caller resolved it (`resolveConfig(config, options)`), for a worker that
-   * shares its drivers with the caller: the instance fakes of `fakes: "instance"`, which a demo's
-   * client and reseed call too. The caller closes its `dataStore`, as it made it.
-   */
-  resolved?: ResolvedConfig;
 }
 
 /**
@@ -110,7 +104,7 @@ export interface WorkerOptions {
  */
 export async function startWorker(config: SanomaConfig, options: WorkerOptions = {}): Promise<Worker> {
   // Check everything before touching the state a running worker reads.
-  const resolved = options.resolved ?? resolveConfig(config);
+  const resolved = resolveConfig(config);
   setLogLevel(options.logLevel);
   // Read once, when it matters: a worker stops itself, registering its next deadline there, only
   // when its caller hears it stop (`onStopped`).
@@ -132,7 +126,6 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     ops: resolved.ops,
     drivers: resolved.drivers,
     fakes: resolved.fakes,
-    ...(resolved.instanceFakes && { instanceFakes: resolved.instanceFakes }),
     ...(resolved.scenarios && { scenarios: resolved.scenarios }),
     ...(options.source && { source: options.source }),
     types: resolved.types,
@@ -174,7 +167,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
           () => credentials.close(),
           () => secrets.close(),
           () => ledger.close(),
-          async () => (options.resolved ? undefined : resolved.dataStore?.close()),
+          async () => resolved.dataStore?.close(),
         ]) {
           await close().catch((error: unknown) => (failed ??= { error }));
         }

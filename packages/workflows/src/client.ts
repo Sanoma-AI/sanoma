@@ -227,12 +227,6 @@ export interface ClientOptions {
    */
   onWrite?: () => void;
   /**
-   * The config as the caller resolved it (`resolveConfig(config, options)`), for a client that
-   * shares its drivers with the caller, as `startWorker`'s `resolved` does. The caller closes its
-   * `dataStore`.
-   */
-  resolved?: ResolvedConfig;
-  /**
    * The company's repository, as the worker is given it: what `remoteEvent` acts for (its
    * `origin`) and fetches a draft's new commits into. Without one, `remoteEvent` does nothing.
    */
@@ -276,7 +270,7 @@ export class SanomaClient {
    * Postgres store on its database when it has none.
    */
   static async connect(config: SanomaConfig, options: ClientOptions = {}): Promise<SanomaClient> {
-    const resolved = options.resolved ?? resolveConfig(config);
+    const resolved = resolveConfig(config);
     const dbos = await dbosClient(resolved.databaseUrl, resolved.appName);
     return new SanomaClient(dbos, resolved, resolved.driversByVendor, options);
   }
@@ -585,21 +579,6 @@ export class SanomaClient {
       loadOutput: true,
     });
     return row ? { runId: row.workflowID, output: row.output, at: row.updatedAt ?? row.createdAt } : null;
-  }
-
-  /**
-   * Cancels every run of the app that has not ended (queued, running or waiting), as a demo's
-   * `reseed` starts afresh: its moments' runs from the last seed would otherwise wait beside the
-   * new ones.
-   */
-  async cancelUnfinished(): Promise<void> {
-    const rows = await this.dbos.listWorkflows({
-      status: dbosStatusesOf("queued", "running"),
-      applicationName: this.config.appName,
-      loadInput: false,
-      loadOutput: false,
-    });
-    if (rows.length) await this.dbos.cancelWorkflows(rows.map((r) => r.workflowID));
   }
 
   /** The run's audit record, in order, from the ledger store. */
@@ -1154,12 +1133,7 @@ export class SanomaClient {
   }
 
   async close() {
-    await Promise.all([
-      this.dbos.destroy(),
-      this.pool.close(),
-      this.audit.close(),
-      this.options.resolved ? undefined : this.config.dataStore?.close(),
-    ]);
+    await Promise.all([this.dbos.destroy(), this.pool.close(), this.audit.close(), this.config.dataStore?.close()]);
   }
 
   /**

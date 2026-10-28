@@ -114,43 +114,6 @@ export interface SanomaConfig {
    * that sets it and declares a wakeup of its own.
    */
   wakeup?: true;
-  /** How this repo runs as a demo (`sanoma demo`, or `SANOMA_DEMO=1` on a host). */
-  demo?: DemoConfig;
-}
-
-/** A demo's settings (`SanomaConfig.demo`). */
-export interface DemoConfig {
-  /**
-   * The URL the banner's "Start with these apps" opens, such as the hosted wizard with the demo's
-   * apps chosen; without one, the banner has no such link.
-   */
-  start?: string;
-  /**
-   * A session per visitor: each visitor gets a copy of the seeded database and a process of their
-   * own over it, so the moments wait for them alone and nothing they type reaches another. At most
-   * this many at once, or with `true` as many as the machine's memory and Postgres's connections
-   * hold; past it, visitors share one demo instance. Without it, every visitor shares that instance.
-   */
-  sessions?: true | number;
-  /** Minutes a visitor's session lives unused before it is dropped. Default 30. */
-  idle?: number;
-  /** Minutes between seeds of the demo afresh (its shared instance, or the sessions' seed). Default 60. */
-  reseed?: number;
-}
-
-/** Refuses a `demo` whose numbers make no demo: `sessions` `true` or a whole number above 0, `idle` and `reseed` minutes above 0. */
-function checkDemo(demo: DemoConfig | undefined): void {
-  const { sessions, idle, reseed } = demo ?? {};
-  if (sessions !== undefined && sessions !== true && !(Number.isInteger(sessions) && sessions > 0)) {
-    throw new Error(
-      `The config's \`demo.sessions\` is \`true\` or how many at once, a whole number above 0, not ${JSON.stringify(sessions)}`,
-    );
-  }
-  for (const [key, minutes] of Object.entries({ idle, reseed })) {
-    if (minutes !== undefined && !(typeof minutes === "number" && minutes > 0)) {
-      throw new Error(`The config's \`demo.${key}\` is minutes, a number above 0, not ${JSON.stringify(minutes)}`);
-    }
-  }
 }
 
 /** A config, checked, with everything a worker, client or app derives from it. */
@@ -180,18 +143,8 @@ export interface ResolvedConfig {
    * `connectors` order: what `drivers` indexes and the credentials are read from (`credentialsOf`).
    */
   driversByVendor: Map<string, Driver>;
-  /**
-   * The makers of the fakes the connectors attach, by vendor id in `connectors` order: each
-   * sandbox run makes its own. Resolved with `fakes: "instance"`, each gives its vendor's
-   * instance fake (`instanceFakes`).
-   */
+  /** The makers of the fakes the connectors attach, by vendor id in `connectors` order: each sandbox run makes its own. */
   fakes: Map<string, () => Fake<any, any>>;
-  /**
-   * Resolved with `fakes: "instance"` (a demo): each vendor's one fake, by vendor id, made once
-   * for this resolution. Each is its vendor's driver (`driversByVendor`), so live runs, sandbox
-   * runs and direct calls all call it, and the world's Givens seed it (`applyGivens`).
-   */
-  instanceFakes?: ReadonlyMap<string, Fake<any, any>>;
   /** The makers of the login halves the connectors attach, by vendor id in `connectors` order: the app makes one per public site that names it. */
   logins: ReadonlyMap<string, NonNullable<ConnectorSetup["login"]>>;
   /** The makers of the model halves the connectors attach, by vendor id in `connectors` order: the app makes each once for its model registry. */
@@ -288,17 +241,6 @@ export function rootOf(config: Pick<SanomaConfig, "root" | "file">): string | un
       : undefined;
 }
 
-/** What `resolveConfig` is given besides the config. */
-export interface ResolveOptions {
-  /**
-   * `"instance"`: run the whole instance on the connectors' fakes, as a demo does: each vendor's
-   * driver is one fake made for this resolution (`instanceFakes`), which every run and call
-   * shares. The collections stay on the config's database. Refused for a vendor whose connector
-   * attaches a driver and no fake, which would otherwise run live.
-   */
-  fakes?: "instance";
-}
-
 /**
  * Checks a config and derives what the runtime needs from it: the drivers and fakes from the
  * connectors' setups (`withSetup`), the collections' operations, driver and fake, and from
@@ -309,7 +251,7 @@ export interface ResolveOptions {
  * `root`. Each entry point resolves once: the worker and the client when they start, the app at
  * `startApp`, the `sanoma` bin when it loads the config.
  */
-export function resolveConfig(config: SanomaConfig, options: ResolveOptions = {}): ResolvedConfig {
+export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   if (!Array.isArray(config.connectors)) {
     throw new Error("The config needs `connectors`: the connectors its workflows call, as their packages export them");
   }
@@ -326,7 +268,6 @@ export function resolveConfig(config: SanomaConfig, options: ResolveOptions = {}
   if (config.policy !== undefined) {
     throw new Error("The config's `policy` is gone: the policy is policies/*.cedar in the root; leave it out");
   }
-  checkDemo(config.demo);
   const collections = collectionsOf(config);
   const ledger = ledgerOf(config);
   const root = rootOf(config);
@@ -352,11 +293,7 @@ export function resolveConfig(config: SanomaConfig, options: ResolveOptions = {}
   ]);
   checkWakeupOps(types, ops);
   checkDatabaseOps(types, ops);
-  const fakes = makersOf(running, "fake");
-  const instanceFakes = options.fakes === "instance" ? instanceFakesOf(running, fakes) : undefined;
-  const driversByVendor = instanceFakes
-    ? new Map([...instanceFakes].map(([vendor, fake]) => [vendor, fake.driver]))
-    : new Map([...makersOf(running, "driver")].map(([vendor, make]) => [vendor, make()]));
+  const driversByVendor = new Map([...makersOf(running, "driver")].map(([vendor, make]) => [vendor, make()]));
   const remotes = new Map([...makersOf(config.connectors, "remote")].map(([vendor, make]) => [vendor, make()]));
   const drivers = indexDrivers(
     [
@@ -368,6 +305,7 @@ export function resolveConfig(config: SanomaConfig, options: ResolveOptions = {}
     ],
     ops,
   );
+  const fakes = makersOf(running, "fake");
   if (dataStore) fakes.set(DATA_VENDOR, () => collectionsFake(declared));
   const names = new Map<string, WorkflowDefinition<any, any>>();
   for (const wf of config.workflows ?? []) {
@@ -415,7 +353,6 @@ export function resolveConfig(config: SanomaConfig, options: ResolveOptions = {}
     drivers,
     driversByVendor,
     fakes,
-    ...(instanceFakes && { instanceFakes }),
     logins: makersOf(config.connectors, "login"),
     models: makersOf(config.connectors, "model"),
     remotes,
@@ -513,25 +450,6 @@ function makersOf<K extends keyof ConnectorSetup>(
     makers.set(vendor, make);
   }
   return makers;
-}
-
-/**
- * Each vendor's one fake, made now, for `resolveConfig`'s `fakes: "instance"`; `fakes` (the
- * makers) then give these. Refuses a connector that attaches a driver and no fake.
- */
-function instanceFakesOf(
-  connectors: readonly Connector<any, any>[],
-  fakes: Map<string, () => Fake<any, any>>,
-): Map<string, Fake<any, any>> {
-  const live = [...makersOf(connectors, "driver").keys()].filter((vendor) => !fakes.has(vendor));
-  if (live.length) {
-    throw new Error(
-      `The instance runs on fakes, but the connector of ${live.join(", ")} attaches no fake, so it would run live; attach one (\`withSetup\`) or leave it out`,
-    );
-  }
-  const made = new Map([...fakes].map(([vendor, make]) => [vendor, make()]));
-  for (const [vendor, fake] of made) fakes.set(vendor, () => fake);
-  return made;
 }
 
 /**

@@ -46,7 +46,6 @@ const workerOptions = (config: SanomaConfig) => ({ promote: true, source: source
  * would start it again (no app hears a write or a wake). `serve` supervises its own.
  */
 export async function runWorker(config: SanomaConfig): Promise<Stoppable> {
-  if (demoAsked()) throw notAlone("worker");
   const worker = await startWorker(config, workerOptions(config));
   return { stop: () => worker.stop() };
 }
@@ -71,26 +70,8 @@ export interface WakeRouteOptions {
 
 /** Starts the app on `port`, with the host and login `appOptions` reads, and the sites built; `url` says where. */
 export async function runApp(config: SanomaConfig, options: ServeOptions): Promise<Served> {
-  if (demoAsked()) throw notAlone("app");
   return served(config, await appStart(config, options), []);
 }
-
-/**
- * `SANOMA_DEMO=1`: the repo runs as a demo (`AppOptions.demo`): the session host, with the config's
- * `demo.sessions` (`sanoma demo`), else one instance. The host's own processes run with
- * `SANOMA_DEMO=instance`, one instance whatever the config says (its seed's, its shared one), and
- * `SANOMA_DEMO=copy`, a visitor's session over a copy of the seed (`AppOptions.demo`'s `"copy"`).
- */
-const demoAsked = () => ["1", "instance", "copy"].includes(process.env.SANOMA_DEMO ?? "");
-
-/**
- * Why `sanoma worker` or `sanoma app` does not run a demo alone: its vendors' fakes live in the
- * process, which the worker and the app must share.
- */
-const notAlone = (command: string) =>
-  new UsageError(
-    `SANOMA_DEMO=1 runs the worker and the app in one process, which holds the demo's fakes: run \`sanoma serve\` (or \`sanoma demo\`), not \`sanoma ${command}\``,
-  );
 
 /**
  * The wakeup's `GET /wake`, a machine route with no login: handed to `onWake` and answered 204,
@@ -168,9 +149,6 @@ async function appSites(
   return { dev: { repo: root } };
 }
 
-/** This bin's file, beside this module: `cli.js` once built, `cli.ts` in a checkout. */
-export const cliFile = () => fileURLToPath(new URL(`./cli${extname(fileURLToPath(import.meta.url))}`, import.meta.url));
-
 /** Where a change cannot reach the config from: the sites, what sanoma writes, the install, git. */
 const NOT_CONFIG = new Set(["sites", ".sanoma", "node_modules", ".git"]);
 
@@ -182,7 +160,7 @@ const NOT_CONFIG = new Set(["sites", ".sanoma", "node_modules", ".git"]);
  * changes while one runs are one more run after it.
  */
 function apiWriter(config: SanomaConfig, log: (line: string) => void): (file: string) => void {
-  const cli = cliFile();
+  const cli = fileURLToPath(new URL(`./cli${extname(fileURLToPath(import.meta.url))}`, import.meta.url));
   // By real path, as the dev server's watcher names files.
   const root = realpathSync(rootOf(config));
   const cwd = config.file ? dirname(config.file) : root;
@@ -244,22 +222,17 @@ export function parseDomains(value: string | undefined): Record<string, string> 
 
 /**
  * The app's host (`SANOMA_APP_HOST`, default 127.0.0.1), the public sites' domains
- * (`SANOMA_DOMAINS`, `parseDomains`) and, with `SANOMA_DEMO=1`, a demo (`AppOptions.demo`), on any
- * host and with no GitHub sign-in; else, when the `SANOMA_GITHUB_*` variables are set, GitHub
+ * (`SANOMA_DOMAINS`, `parseDomains`) and, when the `SANOMA_GITHUB_*` variables are set, GitHub
  * sign-in; both or neither, and any host but this machine needs it. An empty value is the same
  * as unset. On a host beyond this machine, or with one of them set, one the environment leaves
  * unset is read from the stored secrets (`readSecrets`), where creating the GitHub App on the
  * app's connect page put them. A mistake in them is a UsageError.
  */
-export async function appOptions(
-  readSecrets?: ReadSecrets,
-): Promise<Pick<AppOptions, "host" | "login" | "domains" | "demo">> {
+export async function appOptions(readSecrets?: ReadSecrets): Promise<Pick<AppOptions, "host" | "login" | "domains">> {
   const env = process.env;
   const domains = parseDomains(env.SANOMA_DOMAINS);
   const host = env.SANOMA_APP_HOST || undefined;
   const options = { host, ...(domains && { domains }) };
-  // The demo login signs everyone in as the company's people, on any host: no GitHub sign-in.
-  if (demoAsked()) return { ...options, demo: process.env.SANOMA_DEMO === "copy" ? "copy" : true };
   const beyond = host !== undefined && !isLoopback(host);
   const found = new Map<string, string>(GITHUB.flatMap((name) => (env[name] ? [[name, env[name]]] : [])));
   if ((beyond || found.size) && readSecrets && found.size < GITHUB.length) {
@@ -288,8 +261,7 @@ export async function appOptions(
  * The sites' build, the worker under a supervisor (`superviseWorker`), the wakeup service when
  * the config runs it (`wakeup: true`), then the app, serving `/wake` and the service's routes, in
  * this process. A worker that stopped itself starts again on a wake, or on a write from the app
- * (`AppOptions.onWrite`: a run's start, an approval's decision), never on a page read. A demo's
- * (`SANOMA_DEMO=1`) worker and app share the instance's fakes (`fakes: "instance"`). `stop`
+ * (`AppOptions.onWrite`: a run's start, an approval's decision), never on a page read. `stop`
  * stops the app, the service, then the worker.
  */
 export async function serve(config: SanomaConfig, serveOptions: ServeOptions): Promise<Served> {
@@ -299,13 +271,7 @@ export async function serve(config: SanomaConfig, serveOptions: ServeOptions): P
   // An app on this machine alone is not the instance the host runs: its worker never stops
   // itself (its wakeup would wake that instance).
   const here = isLoopback(options.host ?? "127.0.0.1");
-  // A demo's worker and app share one resolution: the instance's fakes, which only this process holds.
-  const shared = options.demo ? resolveConfig(config, { fakes: "instance" }) : undefined;
-  const supervised = await superviseWorker(config, {
-    ...workerOptions(config),
-    selfStop: !here,
-    ...(shared && { resolved: shared }),
-  });
+  const supervised = await superviseWorker(config, { ...workerOptions(config), selfStop: !here });
   let wakeup: WakeupService | undefined;
   let app: Served;
   try {
@@ -314,15 +280,13 @@ export async function serve(config: SanomaConfig, serveOptions: ServeOptions): P
       const { startWakeupService } = await import("@sanoma-ai/workflows/wakeup-service");
       wakeup = await startWakeupService({ databaseUrl, log: { info: log, warn: log } });
     }
-    app = await served(
-      config,
-      { ...options, onWrite: () => void supervised.resume(), ...(shared && { resolved: shared }) },
-      [wakeRoute({ log, onWake: () => supervised.wake() }), ...(wakeup?.routes ?? [])],
-    );
+    app = await served(config, { ...options, onWrite: () => void supervised.resume() }, [
+      wakeRoute({ log, onWake: () => supervised.wake() }),
+      ...(wakeup?.routes ?? []),
+    ]);
   } catch (err) {
     await wakeup?.stop().catch(() => {});
     await supervised.stop().catch(() => {});
-    await shared?.dataStore?.close().catch(() => {});
     throw err;
   }
   return {
@@ -335,11 +299,7 @@ export async function serve(config: SanomaConfig, serveOptions: ServeOptions): P
         try {
           await wakeup?.stop();
         } finally {
-          try {
-            await supervised.stop();
-          } finally {
-            await shared?.dataStore?.close();
-          }
+          await supervised.stop();
         }
       }
     },
