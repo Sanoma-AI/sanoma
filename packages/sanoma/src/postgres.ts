@@ -341,9 +341,7 @@ const freePort = () =>
  * stays up for them, and says so. A cluster that no longer answers is left alone.
  */
 async function stopAlone(bin: string, cluster: Cluster, databaseUrl: string, log: (line: string) => void) {
-  const url = new URL(databaseUrl);
-  url.pathname = "/postgres";
-  const client = new Client({ connectionString: url.toString(), connectionTimeoutMillis: PROBE_TIMEOUT_MS });
+  const client = serverClient(databaseUrl);
   let others: number;
   try {
     await client.connect();
@@ -397,20 +395,22 @@ async function runPg(bin: string, program: string, cluster: Cluster, args: strin
 }
 
 /**
- * Whether a Postgres server answers at the URL's host and port, as its user: `SELECT 1` on the
- * `postgres` database. False when the connection is refused, unreachable or not answered within
+ * A client of the server's `postgres` database: the URL as given but for its database, so its
+ * query (`sslmode=require` on a hosted server) stays. Not connected yet.
+ */
+function serverClient(databaseUrl: string): Client {
+  const url = new URL(databaseUrl);
+  url.pathname = "/postgres";
+  return new Client({ connectionString: url.toString(), connectionTimeoutMillis: PROBE_TIMEOUT_MS });
+}
+
+/**
+ * Whether a Postgres server answers at the URL, with all its settings (user, `sslmode` and the
+ * rest of its query): `SELECT 1` on the `postgres` database. False when the connection is refused, unreachable or not answered within
  * `PROBE_TIMEOUT_MS`; any other failure (a refused password, a user that does not exist) is thrown.
  */
 async function answers(databaseUrl: string): Promise<boolean> {
-  const url = new URL(databaseUrl);
-  const client = new Client({
-    host: url.hostname.replace(/^\[(.*)\]$/, "$1"),
-    port: Number(url.port || "5432"),
-    user: decodeURIComponent(url.username || "postgres"),
-    password: decodeURIComponent(url.password),
-    database: "postgres",
-    connectionTimeoutMillis: PROBE_TIMEOUT_MS,
-  });
+  const client = serverClient(databaseUrl);
   try {
     await client.connect();
     await client.query("SELECT 1");

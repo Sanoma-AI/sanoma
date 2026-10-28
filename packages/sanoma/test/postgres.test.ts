@@ -122,6 +122,16 @@ describe("ensurePostgres with a URL named", () => {
     expect(existsSync(join(dir, ".sanoma"))).toBe(false);
   });
 
+  it("probes the server's postgres database with the URL's own settings, so a hosted server's sslmode holds", async () => {
+    stubPostgres({ up: [5432] });
+    await ensurePostgres("postgresql://u:p@db.example.com:5432/neondb?sslmode=require&channel_binding=require", {
+      root: dir,
+    });
+    expect(vi.mocked(pg.Client).mock.calls.at(-1)?.[0]).toMatchObject({
+      connectionString: "postgresql://u:p@db.example.com:5432/postgres?sslmode=require&channel_binding=require",
+    });
+  });
+
   it("throws when nothing answers, naming it without its password, and starts nothing", async () => {
     stubPostgres();
     await expect(ensurePostgres("postgresql://u:p@10.255.255.1:5432/x", { root: dir, bin: fakeBin() })).rejects.toThrow(
