@@ -274,11 +274,15 @@ function windowOf(): ShellWindow {
   window.contentView.addChildView(startView);
   shellWindow = { window, startView };
   let saveTimer: NodeJS.Timeout | undefined;
-  /** Saves the window's bounds in the settings, for the next launch (`windowBounds`). */
+  /** Saves the window's bounds in the settings, for the next launch (`windowBounds`); a failure only loses them. */
   const saveBounds = () => {
     clearTimeout(saveTimer);
     saveTimer = undefined;
-    if (!window.isDestroyed()) patchSettings({ bounds: window.getNormalBounds() });
+    try {
+      if (!window.isDestroyed()) patchSettings({ bounds: window.getNormalBounds() });
+    } catch (err) {
+      console.error(`the window's bounds could not be saved: ${messageOf(err)}`);
+    }
   };
   const saveSoon = () => {
     clearTimeout(saveTimer);
@@ -292,11 +296,12 @@ function windowOf(): ShellWindow {
   // The View menu acts on the focused page: the one shown.
   window.on("focus", focusShown);
   window.on("close", (event) => {
+    if (!quitting) event.preventDefault();
     saveBounds();
     if (quitting) return;
-    event.preventDefault();
-    // Elsewhere than macOS, with no company to keep and no Dock to come back from: closing it quits.
-    if (process.platform !== "darwin" && !inWindow.size) return app.quit();
+    // Elsewhere than macOS, with nothing to keep (no company, no form waiting on the start screen)
+    // or no tray icon to come back from: closing it quits, as before the one window.
+    if (process.platform !== "darwin" && ((!inWindow.size && !answer) || !tray)) return app.quit();
     // Else it hides, and every company goes on, its workflows with it. A full-screen window
     // hidden as it is would leave its Space behind, empty.
     if (!window.isFullScreen()) return window.hide();
@@ -551,7 +556,9 @@ async function claimPort(path: string) {
     path,
     name: companyName(path),
     port,
-    lastOpened: new Date().toISOString(),
+    // Opened now, unless it was open already (a launch reopening it, Restart, Start again, Get
+    // Updates): the companies reopen in the order they were opened (`toReopen`, oldest first).
+    lastOpened: before?.open ? before.lastOpened : new Date().toISOString(),
     open: true,
   };
   writeCompanies(companiesFile(), remember(companies, company));
@@ -624,8 +631,11 @@ async function start(path: string, views: CompanyViews, how: Begin) {
     const reopens = reopensAfterEnd(path);
     if (!current()) return;
     setCompanyState(views, { phase: "failed", message: hidePasswords(why), progress: [], reopens });
-    // A company that stops on its own comes to the front, the window with it, and says why.
-    show(path);
+    // A company that stops on its own says why on its page. It comes to the front when the window
+    // is hidden or shows no other company; it never takes the window from the one in use, where
+    // its page waits until it is switched to.
+    const other = shownPath !== undefined && shownPath !== path;
+    if (!other || !shellWindow?.window.isVisible()) show(path);
   });
 }
 
@@ -841,8 +851,8 @@ const updating = new Set<string>();
 
 /**
  * Company → Get Updates: GitHub's `main`, fast-forward only, when this computer has nothing of
- * its own (`prepareUpdate` refuses in one line otherwise); then the company starts again, which
- * installs its packages (`startSession`), in its place in the window.
+ * its own (`prepareUpdate` refuses in one line, on the start screen, otherwise); then the company
+ * starts again, which installs its packages (`startSession`), in its place in the window.
  */
 async function getUpdates(path: string): Promise<void> {
   if (updating.has(path)) return;
@@ -862,8 +872,9 @@ async function getUpdates(path: string): Promise<void> {
       (err: unknown) => gitFailure(messageOf(err), "The update did not apply"),
     );
     await begin(path);
+    // Updated, the company starts again in its place, its page showing the start: the window
+    // stays on it. Only a fast-forward that failed is said on the start screen.
     if (failed) say(failed, true);
-    else say(`Got ${plan.behind} new ${plan.behind === 1 ? "change" : "changes"} from GitHub; it is starting again`);
   } catch (err) {
     say(`Sanoma could not get updates: ${messageOf(err)}`, true);
   } finally {
@@ -1073,7 +1084,10 @@ if (squirrelStartup || !app.requestSingleInstanceLock()) {
     const views = [...inWindow.values()].find(({ appView }) => appView.webContents === sender);
     return views && senderFrame === sender.mainFrame && isAppPage(senderFrame.url, views.url) ? views : undefined;
   };
-  ipcMain.handle("desktop:companies", (event) => (appOf(event) ? desktopCompanies() : []));
+  ipcMain.handle("desktop:companies", (event) => {
+    if (!appOf(event)) throw new Error("only a company's app, at its own address, lists the companies");
+    return desktopCompanies();
+  });
   ipcMain.handle("desktop:switch", (event, id: unknown) => {
     const path = [...inWindow].find(([, views]) => views.id === id)?.[0];
     if (appOf(event) && path) show(path);
@@ -1118,7 +1132,7 @@ if (squirrelStartup || !app.requestSingleInstanceLock()) {
       setInterval(() => checkForUpdate(false), 60 * 60 * 1000);
     }
     // The window, at its saved bounds, and in it the companies open at the last Quit, oldest
-    // first, so they keep their order (each start makes it the latest opened) and the latest shows.
+    // first, so they keep their order and the latest opened shows.
     windowOf();
     for (const path of toReopen(readCompanies(companiesFile())).toReversed()) void begin(path);
     const folder = folderArgument(argsOf(process.argv), process.cwd(), ownPath()) ?? dropped.at(-1);

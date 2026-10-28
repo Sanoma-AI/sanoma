@@ -38,7 +38,11 @@ export function useDesktopCompanies(): DesktopCompany[] | undefined {
     if (!desktop) return;
     let live = true;
     const off = desktop.onCompanies(setCompanies);
-    void desktop.companies().then((listed) => live && setCompanies(listed));
+    // Refused (a page the shell does not count as the app's): no Companies, as in a browser.
+    desktop.companies().then(
+      (listed) => live && setCompanies(listed),
+      () => {},
+    );
     return () => {
       live = false;
       off();

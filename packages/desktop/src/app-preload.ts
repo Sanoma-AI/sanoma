@@ -3,13 +3,7 @@
 // lists them, switches to one, and adds one. Nothing else: the page runs the company's own code.
 // The shell answers only the app's own top page (`isAppPage`); ids are opaque, never paths.
 import { contextBridge, type IpcRendererEvent, ipcRenderer } from "electron";
-
-/** A company in the window, as the app sees it. */
-interface DesktopCompany {
-  id: string;
-  name: string;
-  shown: boolean;
-}
+import type { DesktopCompany } from "./main.ts";
 
 contextBridge.exposeInMainWorld("sanomaDesktop", {
   companies: (): Promise<DesktopCompany[]> => ipcRenderer.invoke("desktop:companies"),
