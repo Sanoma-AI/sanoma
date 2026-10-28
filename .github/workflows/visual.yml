@@ -1,0 +1,105 @@
+# Before, after and diff of the README's stills on each pull request that touches what the app shows,
+# as one comment; see scripts/readme-shots/README.md#on-a-pull-request.
+name: Visual
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    paths:
+      - packages/app/**
+      - packages/sanoma/src/**
+      - packages/workflows/src/**
+      - packages/testing/src/**
+      - connectors/ghost/src/**
+      - README.md
+      - pnpm-lock.yaml
+      - scripts/readme-shots/**
+      - .github/workflows/visual.yml
+
+# Queued, never cancelled: a run cancelled after its push would leave the comment on images it replaced.
+concurrency:
+  group: visual-${{ github.event.pull_request.number }}
+
+jobs:
+  visual:
+    if: github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: dbos
+        ports: ["5433:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 2s --health-retries 15
+    env:
+      PR: ${{ github.event.pull_request.number }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      # The head itself, not the merge commit, with the history to find the merge base.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        with:
+          cache: true
+      - id: pnpm
+        run: echo "store=$(pnpm store path)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pnpm.outputs.store }}
+          key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-
+      - run: pnpm install --frozen-lockfile
+      # The base: where the pull request left its branch, so the comment shows only its own changes. A base
+      # from before `--out`, or a failed run, leaves no before: every page shows as new.
+      - name: Stills of the base
+        continue-on-error: true
+        run: |
+          git worktree add --detach "$RUNNER_TEMP/base" "$(git merge-base "origin/${{ github.base_ref }}" HEAD)"
+          cd "$RUNNER_TEMP/base"
+          grep -q steadyStills scripts/readme-shots/shots.ts || exit 0
+          pnpm install --frozen-lockfile
+          node scripts/readme-shots/shots.ts --out "$RUNNER_TEMP/shots/before"
+      - name: Stills of the head
+        run: node scripts/readme-shots/shots.ts --out "$RUNNER_TEMP/shots/after"
+      - name: Compare
+        run: node scripts/readme-shots/compare.ts "$RUNNER_TEMP/shots/before" "$RUNNER_TEMP/shots/after" "$RUNNER_TEMP/shots/diff" "https://raw.githubusercontent.com/${{ github.repository }}/refs/heads/visual/pr-$PR/$HEAD_SHA/"
+      # The changed pages' images, under the head's sha, on a branch of this pull request's own,
+      # `visual/pr-<n>`, made afresh each run: one commit, force-pushed.
+      - name: Publish the images
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls "$RUNNER_TEMP/shots"/diff/*.png > /dev/null 2>&1 || exit 0
+          git init -q "$RUNNER_TEMP/publish" && cd "$RUNNER_TEMP/publish"
+          mkdir "$HEAD_SHA" && cp "$RUNNER_TEMP/shots"/diff/*.png "$HEAD_SHA/"
+          git add . && git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -q -m "Visual diff of #$PR at $HEAD_SHA"
+          git push -q -f "https://x-access-token:$GH_TOKEN@github.com/${{ github.repository }}.git" "HEAD:refs/heads/visual/pr-$PR"
+      # The comment that starts with compare.ts's marker, updated; or a new one.
+      - name: Comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          id=$(gh api --paginate "repos/${{ github.repository }}/issues/$PR/comments" \
+            --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | startswith("<!-- visual-diff -->"))) | .id' | head -n 1)
+          if [ -n "$id" ]; then
+            gh api --method PATCH "repos/${{ github.repository }}/issues/comments/$id" -F "body=@$RUNNER_TEMP/shots/diff/comment.md" > /dev/null
+          else
+            gh pr comment "$PR" --repo "${{ github.repository }}" --body-file "$RUNNER_TEMP/shots/diff/comment.md"
+          fi
+
+  # The pull request's images go with it.
+  cleanup:
+    if: github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api --method DELETE "repos/${{ github.repository }}/git/refs/heads/visual/pr-${{ github.event.pull_request.number }}" || true
