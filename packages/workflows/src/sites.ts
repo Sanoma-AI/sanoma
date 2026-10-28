@@ -64,8 +64,8 @@ export interface SitePage {
    */
   content?: string;
   /**
-   * `false` when its route says `staticData: { sitemap: false }`, written out, and so does each
-   * other route at its path (its layout's, a pathless one's): the sitemap leaves it out.
+   * `false` when its own route says `staticData: { sitemap: false }`, written out: the sitemap leaves
+   * it out. Its own is its index route when it has one, never a layout at its path.
    */
   sitemap?: false;
 }
@@ -231,24 +231,26 @@ export function readSites(
 }
 
 /**
- * A route file's page: `sitemap` is whether its route's options keep it in the sitemap; absent for
- * a route that has none of its own, a lazy one's.
+ * What a route made by `createFileRoute(id)({ … })` says of the sitemap (a lazy route's options
+ * carry no `staticData`): whether it leaves its page out, and how much it is the page's own route,
+ * its index (2), a route at its path (1) or a pathless or group layout (0), which says nothing.
  */
-type FileRoute = Omit<SitePage, "sitemap"> & { sitemap?: boolean };
+type Says = { off: boolean; rank: number };
 
-/**
- * A site's pages, by path, from its files: a layout's and its index's (one path) merged, off the
- * sitemap only when no route at the path keeps it in.
- */
+/** A route file's page, with what its route says of the sitemap. */
+type FileRoute = Omit<SitePage, "sitemap"> & { says?: Says };
+
+/** A site's pages, by path, from its files: a layout's and its index's (one path) merged, the page's own route deciding `sitemap`. */
 function pagesOf(read: readonly { route?: FileRoute }[]): Map<string, SitePage> {
-  const listed = new Set(read.flatMap(({ route }) => (route?.sitemap ? [route.path] : [])));
   const pages = new Map<string, SitePage>();
+  const own = new Map<string, Says>();
   for (const { route } of read) {
     if (!route) continue;
-    const { sitemap, ...page } = route;
-    const off = sitemap === false && !listed.has(page.path);
-    pages.set(page.path, { ...pages.get(page.path), ...page, ...(off && { sitemap: false }) });
+    const { says, ...page } = route;
+    pages.set(page.path, { ...pages.get(page.path), ...page });
+    if (says && says.rank > (own.get(page.path)?.rank ?? 0)) own.set(page.path, says);
   }
+  for (const [path, { off }] of own) if (off) pages.get(path)!.sitemap = false;
   return pages;
 }
 
@@ -352,8 +354,7 @@ function readSiteFile(
   /** Each `content.<kind>.get(arg)`: its kind, its argument and where it is. */
   const gets: { kind: string; arg: Node; start: number }[] = [];
   let page: string | undefined;
-  /** The options of the route it makes, `createFileRoute(id)({ … })` (a lazy route's carry no `staticData`). */
-  let options: Node;
+  let says: Says | undefined;
   const visit = (node: Node) => {
     if (!node) return;
     if (node.type === "MemberExpression") {
@@ -362,13 +363,19 @@ function readSiteFile(
       if (named) return void found.push({ ...named, via: "api", file, ...at(node.start) });
     } else if (node.type === "CallExpression") {
       const callee = unwrap(node.callee);
+      // `createFileRoute(id)({ … })`: its page, and what its options say of the sitemap.
+      const maker = callee?.type === "CallExpression" ? unwrap(callee.callee) : undefined;
+      const madeId =
+        maker?.type === "Identifier" && ROUTE_MAKERS.has(maker.name) && page === undefined
+          ? stringValue(callee.arguments[0])
+          : undefined;
+      if (madeId !== undefined) {
+        page = pageOf(madeId);
+        if (maker.name === "createFileRoute") says = { off: offSitemap(node.arguments[0]), rank: rankOf(madeId) };
+      }
       if (callee?.type === "Identifier" && ROUTE_MAKERS.has(callee.name) && page === undefined) {
         const id = stringValue(node.arguments[0]);
         if (id !== undefined) page = pageOf(id);
-      }
-      const maker = callee?.type === "CallExpression" ? unwrap(callee.callee) : undefined;
-      if (maker?.type === "Identifier" && maker.name === "createFileRoute" && options === undefined) {
-        if (stringValue(callee.arguments[0]) !== undefined) options = node.arguments[0] ?? null;
       }
       const kind = contentKind(callee, content);
       if (kind !== undefined) gets.push({ kind, arg: unwrap(node.arguments[0]), start: node.start });
@@ -385,7 +392,7 @@ function readSiteFile(
   visit(program);
   const uses = found.map((use) => (page === undefined ? use : { ...use, page }));
   if (page === undefined) return { uses };
-  const route: FileRoute = { path: page, ...(options !== undefined && { sitemap: !offSitemap(options) }) };
+  const route: FileRoute = { path: page, ...(says && { says }) };
   // The one parameter's name (not a splat's), and the kinds whose `get` is given it (`params.slug`, or `slug` destructured).
   const params = page.split("/").filter((segment) => segment.startsWith("$"));
   if (params.length !== 1 || params[0] === "$") return { uses, route };
@@ -408,6 +415,9 @@ function readSiteFile(
     `Read one kind by it as written, \`content.<kind>.get(params.${param})\` (or \`${param}\` destructured)`;
   return { uses, route, warning: { file, ...at(unfollowed.start), message } };
 }
+
+/** How much the route with `id` is its page's own (`Says.rank`): an index's ends in `/`; a layout's last segment may be pathless. */
+const rankOf = (id: string): number => (id.endsWith("/") ? 2 : /^[_(]/.test(id.split("/").at(-1)!) ? 0 : 1);
 
 /** Whether a route's `options` say `staticData: { sitemap: false }`, each written out. */
 const offSitemap = (options: Node): boolean => {

@@ -515,7 +515,7 @@ describe("readSites", () => {
     expect(siteContentPages(root)).toEqual({ "/sites/www/blog/$slug": "posts", "/sites/www/guides/$slug": "guides" });
   });
 
-  it("reads a page its routes keep out of the sitemap, each written out", () => {
+  it("reads a page its own route keeps out of the sitemap, written out", () => {
     const off = "staticData: { crumb: 'Off', sitemap: false }";
     const root = tree("unlisted", {
       ...site("www", "public: true"),
@@ -525,11 +525,14 @@ describe("readSites", () => {
         "staticData: { sitemap: false as const }",
         "content.posts.get(params.slug)",
       ),
-      // A layout and its index, one path: off when both say so.
-      "sites/www/routes/docs.tsx": route("/sites/www/docs", off),
+      // A layout and its index, one path: the index decides.
+      "sites/www/routes/docs.route.tsx": route("/sites/www/docs", ""),
       "sites/www/routes/docs.index.tsx": route("/sites/www/docs/", off),
-      // A pathless layout at the home page's path, which says nothing: the home page is listed.
+      "sites/www/routes/guide.route.tsx": route("/sites/www/guide", off),
+      "sites/www/routes/guide.index.tsx": route("/sites/www/guide/", ""),
+      // A pathless layout or a group's at the home page's path says nothing: the home page is listed.
       "sites/www/routes/_marketing.tsx": route("/sites/www/_marketing", off),
+      "sites/www/routes/(shop)/route.tsx": route("/sites/www/(shop)", off),
       // Its lazy file says nothing, its route file does.
       "sites/www/routes/lazy.tsx": route("/sites/www/lazy", off),
       "sites/www/routes/lazy.lazy.tsx": route("/sites/www/lazy", "").replace(/createFileRoute/g, "createLazyFileRoute"),
@@ -548,6 +551,7 @@ describe("readSites", () => {
       { path: "/sites/www/after" },
       { path: "/sites/www/blog/$slug", content: "posts", sitemap: false },
       { path: "/sites/www/docs", sitemap: false },
+      { path: "/sites/www/guide" },
       { path: "/sites/www/held" },
       { path: "/sites/www/lazy", sitemap: false },
       { path: "/sites/www/listed" },
