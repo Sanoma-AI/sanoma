@@ -103,6 +103,10 @@ const pageProblem = (name: string, line: number, message: string) => ({
 const reading = (path: string, reads: string, from = "sanoma/site") =>
   page(path, `import { content } from "${from}";`, `void (${reads});\n  return null;`);
 
+/** A page at `path` whose route is made with `options` too, its loader reading `reads`. */
+const route = (path: string, options: string, reads = "0") =>
+  reading(path, reads).replace("{ component: Page }", `{ ${options}, component: Page }`);
+
 describe("readSites", () => {
   it("reads the fixture's hello site: its title, that it is public, and each RunForm and api call with its file, place and page", () => {
     const root = fileURLToPath(new URL("../../app/test/fixtures/company-sites/", import.meta.url));
@@ -504,6 +508,39 @@ describe("readSites", () => {
     ]);
     expect(warnings[0]!.message).toMatch(/^the sitemap lists none of this page's entries/);
     expect(siteContentPages(root)).toEqual({ "/sites/www/blog/$slug": "posts", "/sites/www/guides/$slug": "guides" });
+  });
+
+  it("reads a page its route keeps out of the sitemap, written out, and warns of none of its content reads", () => {
+    const root = tree("unlisted", {
+      ...site("www", "public: true"),
+      "sites/www/routes/start.tsx": route("/sites/www/start", "staticData: { crumb: 'Start', sitemap: false }"),
+      // Its content read by its parameter the sitemap cannot follow: no warning, since it is left out.
+      "sites/www/routes/notes.$id.tsx": route(
+        "/sites/www/notes/$id",
+        "staticData: { sitemap: false }",
+        "content.notes.get(params.id.toLowerCase())",
+      ),
+      "sites/www/routes/blog.$slug.tsx": route(
+        "/sites/www/blog/$slug",
+        "staticData: { sitemap: false as const }",
+        "content.posts.get(params.slug)",
+      ),
+      // Not written out, or not `false`: listed.
+      "sites/www/routes/held.tsx": route("/sites/www/held", "staticData: { sitemap: hidden }"),
+      "sites/www/routes/spread.tsx": route("/sites/www/spread", "staticData: { ...unlisted }"),
+      "sites/www/routes/listed.tsx": route("/sites/www/listed", "staticData: { sitemap: true }"),
+    });
+    const [www] = describeConfig(config(root)).sites;
+    expect(www!.pages).toEqual([
+      { path: "/sites/www" },
+      { path: "/sites/www/blog/$slug", content: "posts", sitemap: false },
+      { path: "/sites/www/held" },
+      { path: "/sites/www/listed" },
+      { path: "/sites/www/notes/$id", sitemap: false },
+      { path: "/sites/www/spread" },
+      { path: "/sites/www/start", sitemap: false },
+    ]);
+    expect(www!.warnings).toEqual([]);
   });
 
   it("reads a public site's locales from site.ts, its default first, and makes a problem of what it cannot keep", () => {

@@ -42,19 +42,21 @@ export interface SitemapEntry {
 }
 
 /**
- * The site's pages at `origin`, by path (`SiteEntry.pages`): each page with no parameter, and for a
- * page whose one parameter a content kind fills (`SitePage.content`), one per published entry of
- * that kind. A page under `{-$locale}` is there once per language of the site (`locales`, the
- * default unprefixed), each with its URL in every language it is in and `x-default`: a content page
- * in the languages its entry is in as the page reads it, `content.<kind>.get(slug, { locale })`
- * with the URL's `params.locale` (`inLocale`; the default's URL names none).
+ * The site's pages at `origin`, by path (`SiteEntry.pages`), less those that keep out of it
+ * (`SitePage.sitemap`): each page with no parameter, and for a page whose one parameter a content
+ * kind fills (`SitePage.content`), one per published entry of that kind. A page under
+ * `{-$locale}` is there once per language of the site (`locales`, the default unprefixed), each
+ * with its URL in every language it is in and `x-default`: a content page in the languages its
+ * entry is in as the page reads it, `content.<kind>.get(slug, { locale })` with the URL's
+ * `params.locale` (`inLocale`; the default's URL names none).
  */
 export function sitemapEntries(
   site: Pick<SiteEntry, "name" | "pages" | "locales">,
   origin: string,
   published: Published,
 ): SitemapEntry[] {
-  return site.pages.flatMap(({ path, content }) => {
+  return site.pages.flatMap(({ path, content, sitemap }) => {
+    if (sitemap === false) return [];
     const locales = site.locales?.length && isLocalized(site.name, path) ? site.locales : [];
     // The URL's `params.locale` in each of the page's languages, the default's none; one, none, without.
     const params = locales.length ? locales.map((locale, i) => (i === 0 ? undefined : locale)) : [undefined];

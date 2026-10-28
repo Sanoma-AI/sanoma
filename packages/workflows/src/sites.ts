@@ -63,6 +63,8 @@ export interface SitePage {
    * destructured) with `content` from `sanoma/site`.
    */
   content?: string;
+  /** `false` when its route says `staticData: { sitemap: false }`, written out: the sitemap leaves it out. */
+  sitemap?: false;
 }
 
 /** A site, `sites/<name>/` or an app's `apps/<app>/sites/<name>/`, and what it calls. */
@@ -99,6 +101,7 @@ export interface SiteEntry {
   /**
    * On a public site, each page with one parameter whose file reads content the sitemap cannot
    * tie to it (`SitePage.content`), so the sitemap lists none of its pages: at the first read.
+   * None for a page the sitemap leaves out anyway (`SitePage.sitemap`).
    */
   warnings: (LintProblem & { file: string })[];
 }
@@ -217,9 +220,12 @@ export function readSites(
       ...optionProblems.map((p) => ({ file: siteFile, ...p })),
     ];
     const sorted = [...pages.keys()].toSorted().map((path) => pages.get(path)!);
-    // A page's file it warns of, unless another of its files (a lazy one, its layout) gives its kind.
+    // A page's file it warns of, unless another of its files (a lazy one, its layout) gives its kind or keeps it out.
     const warnings = options.public
-      ? read.flatMap(({ route, warning }) => (warning && !pages.get(route!.path)?.content ? [warning] : []))
+      ? read.flatMap(({ route, warning }) => {
+          const page = warning && pages.get(route!.path);
+          return page && !page.content && page.sitemap !== false ? [warning] : [];
+        })
       : [];
     return { name, ...(app && { app }), ...options, pages: sorted, calls, problems, warnings };
   });
@@ -318,8 +324,9 @@ type Written = Omit<SiteCall, "target"> & { name: string };
 
 /**
  * What one file holds: its uses, in its order, and the page it is, from its route's id, with the
- * content kind whose entry its one parameter names (`SitePage.content`). A file under `routes/` is
- * read whole; any other only when it imports `api` or `RunForm`.
+ * content kind whose entry its one parameter names (`SitePage.content`) and whether its route's
+ * options keep it out of the sitemap (`SitePage.sitemap`). A file under `routes/` is read whole;
+ * any other only when it imports `api` or `RunForm`.
  */
 function readSiteFile(
   { program, at }: SourceFile,
@@ -333,6 +340,8 @@ function readSiteFile(
   /** Each `content.<kind>.get(arg)`: its kind, its argument and where it is. */
   const gets: { kind: string; arg: Node; start: number }[] = [];
   let page: string | undefined;
+  /** The options of the route it makes, `createFileRoute(id)({ … })`. */
+  let options: Node;
   const visit = (node: Node) => {
     if (!node) return;
     if (node.type === "MemberExpression") {
@@ -345,6 +354,8 @@ function readSiteFile(
         const id = stringValue(node.arguments[0]);
         if (id !== undefined) page = pageOf(id);
       }
+      const maker = callee?.type === "CallExpression" ? unwrap(callee.callee) : undefined;
+      if (maker?.type === "Identifier" && ROUTE_MAKERS.has(maker.name)) options ??= node.arguments[0];
       const kind = contentKind(callee, content);
       if (kind !== undefined) gets.push({ kind, arg: unwrap(node.arguments[0]), start: node.start });
     } else if (node.type === "JSXOpeningElement" && node.name.type === "JSXIdentifier" && runForm.has(node.name.name)) {
@@ -360,9 +371,10 @@ function readSiteFile(
   visit(program);
   const uses = found.map((use) => (page === undefined ? use : { ...use, page }));
   if (page === undefined) return { uses };
+  const route: SitePage = { path: page, ...(offSitemap(options) && { sitemap: false }) };
   // The one parameter's name (not a splat's), and the kinds whose `get` is given it (`params.slug`, or `slug` destructured).
   const params = page.split("/").filter((segment) => segment.startsWith("$"));
-  if (params.length !== 1 || params[0] === "$") return { uses, route: { path: page } };
+  if (params.length !== 1 || params[0] === "$") return { uses, route };
   const param = params[0]!.slice(1);
   const kinds = new Set(
     gets
@@ -373,15 +385,29 @@ function readSiteFile(
       )
       .map(({ kind }) => kind),
   );
-  if (kinds.size === 1) return { uses, route: { path: page, content: [...kinds][0]! } };
+  if (kinds.size === 1) return { uses, route: { ...route, content: [...kinds][0]! } };
   // A read by the parameter in a form the sitemap does not follow (`params.id.toLowerCase()`, two kinds).
   const unfollowed = gets.find(({ arg }) => mentions(arg, param));
-  if (!unfollowed) return { uses, route: { path: page } };
+  if (!unfollowed) return { uses, route };
   const message =
     `the sitemap lists none of this page's entries: it reads content by the page's parameter in a way it cannot follow. ` +
     `Read one kind by it as written, \`content.<kind>.get(params.${param})\` (or \`${param}\` destructured)`;
-  return { uses, route: { path: page }, warning: { file, ...at(unfollowed.start), message } };
+  return { uses, route, warning: { file, ...at(unfollowed.start), message } };
 }
+
+/** Whether a route's `options` say `staticData: { sitemap: false }`, each written out. */
+const offSitemap = (options: Node): boolean => {
+  const flag = unwrap(valueOf(valueOf(options, "staticData"), "sitemap"));
+  return flag?.type === "Literal" && flag.value === false;
+};
+
+/** The value of an object literal's last written-out property `name`; undefined for anything else. */
+const valueOf = (object: Node, name: string): Node => {
+  const o = unwrap(object);
+  return o?.type === "ObjectExpression"
+    ? o.properties.findLast((p: Node) => isWritten(p) && keyName(p.key) === name)?.value
+    : undefined;
+};
 
 /** Whether `node` reads the parameter `param` anywhere in it: `params.<param>`, or `param` destructured (not another parameter, nor a property's name, `post.slug` or `{ slug: x }`). */
 const mentions = (node: Node, param: string): boolean => {
