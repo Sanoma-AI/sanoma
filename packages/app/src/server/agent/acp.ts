@@ -122,23 +122,27 @@ const STOPPED = "a new message stopped it";
 /** A shim's refusal: what it says, and its exit. */
 const refusal = (name: string) => `echo "${name} is not available to a person's own agent in Sanoma" >&2\nexit 1\n`;
 
+/** A shim that only refuses. */
+const refusing = (name: string) => `#!/bin/sh\n${refusal(name)}`;
+
 /**
  * Commands on this machine the agent and what it starts must not reach (a vendor CLI's token, the
  * Keychain, a browser), each a shim of ours first on its `PATH`. To the agent the Keychain is there
  * and empty, and takes nothing: `security` answers a lookup or a removal as macOS does for an item
  * it does not hold (44), and refuses the rest. So Claude Code keeps its sign-in in its own file
  * under the person's home, as on Linux: a lookup refused (or no `security` at all) is to it a
- * Keychain it cannot read, and it saves nothing ("Couldn't save your login").
+ * Keychain it cannot read, and it saves nothing ("Couldn't save your login"). Each script starts
+ * with its shell: `security` is bash's, for its bounded `read` (macOS's sh is bash, Linux's is not).
  */
 const SHIMS: Record<string, string> = {
-  gh: refusal("gh"),
-  open: refusal("open"),
-  "xdg-open": refusal("xdg-open"),
-  security: `while [ "$1" = -q ] || [ "$1" = -v ]; do shift; done
+  gh: refusing("gh"),
+  open: refusing("open"),
+  "xdg-open": refusing("xdg-open"),
+  security: `#!/bin/bash
+while [ "$1" = -q ] || [ "$1" = -v ]; do shift; done
 command=$1
 # Its command on stdin (one line, as Claude Code writes it), read before the answer so its writer
-# sees no broken pipe, and for at most 5 s so a writer that waits for a prompt is refused, not hung
-# (\`-t\` is bash's; where sh lacks it nothing is read).
+# sees no broken pipe, and for at most 5 s so a writer that waits for a prompt is refused, not hung.
 [ "$1" = -i ] && read -r -t 5 command _ 2>/dev/null
 case "$command" in
   find-generic-password | delete-generic-password)
@@ -726,7 +730,7 @@ export function shims(agents: string): Promise<string> {
       await Promise.all(
         Object.entries(SHIMS).map(async ([name, script]) => {
           const aside = join(dir, `.${name}.new`);
-          await writeFile(aside, `#!/bin/sh\n${script}`, { mode: 0o755 });
+          await writeFile(aside, script, { mode: 0o755 });
           await rename(aside, join(dir, name));
         }),
       );
