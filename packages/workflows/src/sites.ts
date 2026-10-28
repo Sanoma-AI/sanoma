@@ -63,7 +63,10 @@ export interface SitePage {
    * destructured) with `content` from `sanoma/site`.
    */
   content?: string;
-  /** `false` when its route says `staticData: { sitemap: false }`, written out: the sitemap leaves it out. */
+  /**
+   * `false` when its route, or its layout's at the same path, says `staticData: { sitemap: false }`,
+   * written out: the sitemap leaves it out.
+   */
   sitemap?: false;
 }
 
@@ -223,8 +226,9 @@ export function readSites(
     // A page's file it warns of, unless another of its files (a lazy one, its layout) gives its kind or keeps it out.
     const warnings = options.public
       ? read.flatMap(({ route, warning }) => {
-          const page = warning && pages.get(route!.path);
-          return page && !page.content && page.sitemap !== false ? [warning] : [];
+          if (!warning) return [];
+          const page = pages.get(route!.path);
+          return page?.content || page?.sitemap === false ? [] : [warning];
         })
       : [];
     return { name, ...(app && { app }), ...options, pages: sorted, calls, problems, warnings };
@@ -340,7 +344,7 @@ function readSiteFile(
   /** Each `content.<kind>.get(arg)`: its kind, its argument and where it is. */
   const gets: { kind: string; arg: Node; start: number }[] = [];
   let page: string | undefined;
-  /** The options of the route it makes, `createFileRoute(id)({ … })`. */
+  /** The options of the route it makes, `createFileRoute(id)({ … })` (a lazy route's carry no `staticData`). */
   let options: Node;
   const visit = (node: Node) => {
     if (!node) return;
@@ -355,7 +359,7 @@ function readSiteFile(
         if (id !== undefined) page = pageOf(id);
       }
       const maker = callee?.type === "CallExpression" ? unwrap(callee.callee) : undefined;
-      if (maker?.type === "Identifier" && ROUTE_MAKERS.has(maker.name)) options ??= node.arguments[0];
+      if (maker?.type === "Identifier" && maker.name === "createFileRoute") options ??= node.arguments[0];
       const kind = contentKind(callee, content);
       if (kind !== undefined) gets.push({ kind, arg: unwrap(node.arguments[0]), start: node.start });
     } else if (node.type === "JSXOpeningElement" && node.name.type === "JSXIdentifier" && runForm.has(node.name.name)) {
@@ -401,12 +405,15 @@ const offSitemap = (options: Node): boolean => {
   return flag?.type === "Literal" && flag.value === false;
 };
 
-/** The value of an object literal's last written-out property `name`; undefined for anything else. */
+/**
+ * The value of an object literal's property `name`, its last, written out; undefined for anything
+ * else, or when a spread or a computed key after it could replace it.
+ */
 const valueOf = (object: Node, name: string): Node => {
   const o = unwrap(object);
-  return o?.type === "ObjectExpression"
-    ? o.properties.findLast((p: Node) => isWritten(p) && keyName(p.key) === name)?.value
-    : undefined;
+  const last =
+    o?.type === "ObjectExpression" && o.properties.findLast((p: Node) => !isWritten(p) || keyName(p.key) === name);
+  return last && isWritten(last) ? last.value : undefined;
 };
 
 /** Whether `node` reads the parameter `param` anywhere in it: `params.<param>`, or `param` destructured (not another parameter, nor a property's name, `post.slug` or `{ slug: x }`). */

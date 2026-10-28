@@ -57,10 +57,15 @@ const config = (root: string, more: Partial<SanomaConfig> = {}): SanomaConfig =>
 });
 
 /** A page at `path` importing `imports`, whose component renders `body`. */
-const page = (path: string, imports: string, body: string) => `import { createFileRoute } from "@tanstack/react-router";
+const page = (
+  path: string,
+  imports: string,
+  body: string,
+  options = "",
+) => `import { createFileRoute } from "@tanstack/react-router";
 ${imports}
 
-export const Route = createFileRoute("${path}")({ component: Page });
+export const Route = createFileRoute("${path}")({ ${options}component: Page });
 
 function Page() {
   ${body}
@@ -105,7 +110,7 @@ const reading = (path: string, reads: string, from = "sanoma/site") =>
 
 /** A page at `path` whose route is made with `options` too, its loader reading `reads`. */
 const route = (path: string, options: string, reads = "0") =>
-  reading(path, reads).replace("{ component: Page }", `{ ${options}, component: Page }`);
+  page(path, 'import { content } from "sanoma/site";', `void (${reads});\n  return null;`, `${options}, `);
 
 describe("readSites", () => {
   it("reads the fixture's hello site: its title, that it is public, and each RunForm and api call with its file, place and page", () => {
@@ -525,16 +530,23 @@ describe("readSites", () => {
         "staticData: { sitemap: false as const }",
         "content.posts.get(params.slug)",
       ),
-      // Not written out, or not `false`: listed.
+      // Not written out, or not `false`, or a spread after it, or a lazy route's: listed.
       "sites/www/routes/held.tsx": route("/sites/www/held", "staticData: { sitemap: hidden }"),
       "sites/www/routes/spread.tsx": route("/sites/www/spread", "staticData: { ...unlisted }"),
+      "sites/www/routes/after.tsx": route("/sites/www/after", "staticData: { sitemap: false, ...section }"),
+      "sites/www/routes/lazy.lazy.tsx": route("/sites/www/lazy", "staticData: { sitemap: false }").replace(
+        /createFileRoute/g,
+        "createLazyFileRoute",
+      ),
       "sites/www/routes/listed.tsx": route("/sites/www/listed", "staticData: { sitemap: true }"),
     });
     const [www] = describeConfig(config(root)).sites;
     expect(www!.pages).toEqual([
       { path: "/sites/www" },
+      { path: "/sites/www/after" },
       { path: "/sites/www/blog/$slug", content: "posts", sitemap: false },
       { path: "/sites/www/held" },
+      { path: "/sites/www/lazy" },
       { path: "/sites/www/listed" },
       { path: "/sites/www/notes/$id", sitemap: false },
       { path: "/sites/www/spread" },
