@@ -3,6 +3,7 @@
 // links to its page; the person downloads and replaces the app.
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import type { Rect } from "./window-state.ts";
 
 /** The repository's latest releases, a page of 100: the desktop's `desktop-v*` among any others. */
 export const RELEASES_URL = "https://api.github.com/repos/Sanoma-AI/sanoma/releases?per_page=100";
@@ -68,8 +69,10 @@ export async function fetchReleases(current: string, fetchImpl: typeof fetch = f
   return releases as GitHubRelease[];
 }
 
-/** The shell's own settings (`<userData>/settings.json`): only the update check's for now. */
+/** The shell's own settings (`<userData>/settings.json`): the update check's, and the window's place. */
 export interface Settings {
+  /** The window's bounds, as last moved or resized (`windowBounds`, which checks them). */
+  bounds?: Rect;
   /** When GitHub last answered the check (ISO time). */
   updateCheckedAt?: string;
   /** What that check found, kept for the Help menu between checks and notified once per version. */
@@ -92,6 +95,10 @@ export function writeSettings(file: string, settings: Settings): void {
   writeFileSync(`${file}.tmp`, `${JSON.stringify(settings, null, 2)}\n`);
   renameSync(`${file}.tmp`, file);
 }
+
+/** Changes the settings in `file`, read again and written at once, so no writer drops another's fields. */
+export const patchSettings = (file: string, patch: Partial<Settings>): void =>
+  writeSettings(file, { ...readSettings(file), ...patch });
 
 /** The release the last check found, while it is still later than the app (`current`). */
 export function savedNewer(settings: Settings, current: string): Newer | undefined {
@@ -130,7 +137,7 @@ export async function runCheck(options: {
   if (!asked && !checkDue(saved, now)) return undefined;
   const found = newerRelease(current, await fetchReleases(current, fetchImpl));
   try {
-    writeSettings(file, { ...saved, updateCheckedAt: new Date(now).toISOString(), newer: found });
+    patchSettings(file, { updateCheckedAt: new Date(now).toISOString(), newer: found });
   } catch (err) {
     console.error("update check: could not save the settings:", err);
     return { found, notify: false };

@@ -1,6 +1,9 @@
 // The shell opens a fixture company: its `pnpm install` links the fake launcher, which runs on the
-// Node the shell ships; one window shows the start, then the app; closing it leaves the launcher
-// running, opening the folder again shows it, Quit stops it, and the next launch opens it again.
+// Node the shell ships; the one window shows the start, then the app, and nothing else; closing it
+// leaves the launcher running, and opening the folder again shows it. A second company joins the
+// same window, the first kept running and loaded; ⌘1 and the apps' companies API (the account
+// menu's) switch, Company → Stop stops the shown one and shows the other, Quit stops that, and the
+// next launch opens it again.
 import { cpSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { once } from "node:events";
 import { createRequire } from "node:module";
@@ -9,6 +12,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { _electron as electron, type ElectronApplication, expect, test } from "@playwright/test";
 import { slugOf } from "../../src/companies.ts";
+import type { DesktopCompany } from "../../src/main.ts";
 import { runtimeOf } from "../../src/runtime.ts";
 
 const pkg = realpathSync(fileURLToPath(new URL("../../", import.meta.url)));
@@ -26,8 +30,8 @@ const floor = Number(
     })(),
 );
 
-/** The company windows (`BaseWindow`s, not the start window): whether each shows, where, and its views' pages. */
-const companyWindows = (shell: ElectronApplication) =>
+/** The shell's windows (`BaseWindow`s, the app's own windows aside): whether each shows, where, and its views' pages. */
+const shellWindows = (shell: ElectronApplication) =>
   shell.evaluate(({ BaseWindow, BrowserWindow }) =>
     BaseWindow.getAllWindows()
       .filter((window) => !(window instanceof BrowserWindow))
@@ -42,47 +46,66 @@ const companyWindows = (shell: ElectronApplication) =>
       })),
   );
 
-type Shown = Awaited<ReturnType<typeof companyWindows>>[number];
-/** The page a window shows: the shell's own (a file), or the app. */
+type Shown = Awaited<ReturnType<typeof shellWindows>>[number];
+/** The page a window shows: the shell's own (a file), or an app. */
 const showing = (window: Shown | undefined) => window?.views.find((view) => view.visible)?.url;
 const isApp = (url: string | undefined) => url?.startsWith("http://") ?? false;
+/** The app URLs the window holds, shown or not. */
+const apps = (window: Shown | undefined) => window?.views.map((view) => view.url).filter(isApp);
 
-test("opens a company in one window from progress to app, keeps it running when closed, and reopens it after Quit", async () => {
+const startedOf = (company: string) =>
+  JSON.parse(readFileSync(join(company, "started.json"), "utf8")) as { port: number; execPath: string; pid: number };
+
+test("one window: a company from progress to app, a second beside it, switching, Stop, Quit and the next launch", async () => {
   // By real path, as the shell names a company's log after it (macOS's tmpdir is a symlink).
   const work = realpathSync(mkdtempSync(join(tmpdir(), "sanoma-desktop-e2e-")));
-  // Outside the workspace, so its `pnpm install` is the company's own.
+  // Outside the workspace, so their `pnpm install` is the company's own.
   const company = join(work, "fixture");
-  cpSync(fileURLToPath(new URL("../fixtures/company", import.meta.url)), company, { recursive: true });
+  const second = join(work, "second");
+  for (const dir of [company, second]) {
+    cpSync(fileURLToPath(new URL("../fixtures/company", import.meta.url)), dir, { recursive: true });
+  }
   const userData = join(work, "user-data");
   const launchShell = (...args: string[]) =>
     electron.launch({ executablePath, args: [pkg, ...args, `--user-data-dir=${userData}`] });
   let shell: ElectronApplication | undefined;
-  let log: string | undefined;
+  const logs: string[] = [];
+  const windowsNow = () => shellWindows(shell!);
+  const shownNow = async () => showing((await windowsNow())[0]);
+  /** Runs `code` in the page at `url`: an app's, with the shell's companies API. */
+  const inApp = <T>(url: string, code: string) =>
+    shell!.evaluate(
+      ({ webContents }, [page, js]) =>
+        webContents
+          .getAllWebContents()
+          .find((contents) => contents.getURL() === page)!
+          .executeJavaScript(js) as Promise<T>,
+      [url, code] as const,
+    );
+  const companiesIn = (url: string) => inApp<DesktopCompany[]>(url, "window.sanomaDesktop.companies()");
   try {
     shell = await launchShell(company);
     // On macOS the logs folder is outside the user data folder.
-    log = join(await shell.evaluate(({ app }) => app.getPath("logs")), `${slugOf(company)}.log`);
-    // The company's window shows its start: the install and the launcher on their way…
-    await expect
-      .poll(async () => showing((await companyWindows(shell!))[0]), { timeout: 30_000, intervals: [50] })
-      .toMatch(/company\.html$/);
-    const [progress] = await companyWindows(shell);
+    const logsFolder = await shell.evaluate(({ app }) => app.getPath("logs"));
+    logs.push(...[company, second].map((dir) => join(logsFolder, `${slugOf(dir)}.log`)));
+    // The window shows the company's start: the install and the launcher on their way…
+    await expect.poll(shownNow, { timeout: 30_000, intervals: [50] }).toMatch(/company\.html$/);
+    const [progress] = await windowsNow();
     writeFileSync(join(company, "go"), "");
-    // …then the app, in that same window: none other was made, none hidden.
-    await expect
-      .poll(async () => isApp(showing((await companyWindows(shell!))[0])), { timeout: 45_000, intervals: [100] })
-      .toBe(true);
-    const windows = await companyWindows(shell);
+    // …then the app, in that same window, alone: none other was made, and nothing beside it.
+    await expect.poll(async () => isApp(await shownNow()), { timeout: 45_000, intervals: [100] }).toBe(true);
+    const windows = await windowsNow();
     expect(windows.map((w) => [w.id, w.visible])).toEqual([[progress!.id, true]]);
-    expect(windows[0]!.views.map((view) => isApp(view.url))).toEqual([true, false]);
+    expect(windows[0]!.views.filter((view) => view.visible)).toHaveLength(1);
     expect(existsSync(join(userData, "companies.json")), "the shell keeps its state in --user-data-dir").toBe(true);
-    const started = JSON.parse(readFileSync(join(company, "started.json"), "utf8")) as {
-      port: number;
-      execPath: string;
-      pid: number;
-    };
+    const started = startedOf(company);
     // The ready event's URL (SANOMA_EVENTS=1), not the human line's.
-    expect(showing(windows[0])).toBe(`http://127.0.0.1:${started.port}/`);
+    const first = `http://127.0.0.1:${started.port}/`;
+    expect(showing(windows[0])).toBe(first);
+    // The app's account menu lists it, shown, by an id that is no path.
+    const [one] = await companiesIn(first);
+    expect(await companiesIn(first)).toEqual([{ id: expect.any(String), name: "fixture-company", shown: true }]);
+    expect(one!.id).not.toContain(work);
     expect(started.execPath).toBe(runtimeOf({ packaged: false, appPath: pkg, resourcesPath: "" }).node);
     const node = await shell.evaluate(
       ({ webContents }) =>
@@ -95,46 +118,100 @@ test("opens a company in one window from progress to app, keeps it running when 
 
     // As the person does: the window closes, and the company goes on running.
     await shell.evaluate(({ BaseWindow }, id) => BaseWindow.fromId(id)!.close(), progress!.id);
-    await expect.poll(async () => (await companyWindows(shell!))[0]?.visible).toBe(false);
+    await expect.poll(async () => (await windowsNow())[0]?.visible).toBe(false);
     await new Promise((resolve) => setTimeout(resolve, 1_000));
     expect(existsSync(join(company, "stopped")), "closing the window leaves the company running").toBe(false);
     expect(() => process.kill(started.pid, 0)).not.toThrow();
 
-    // Opening its folder again shows that window, on the app, without starting it again.
-    await shell.evaluate(({ app }, dir) => app.emit("open-file", { preventDefault() {} }, dir), company);
-    await expect.poll(async () => (await companyWindows(shell!))[0]?.visible).toBe(true);
-    const again = await companyWindows(shell);
-    expect(again.map((w) => w.id)).toEqual([progress!.id]);
-    expect(isApp(showing(again[0]))).toBe(true);
-    expect(JSON.parse(readFileSync(join(company, "started.json"), "utf8")).pid).toBe(started.pid);
+    // Opening its folder again shows the window, on the app, without starting it again.
+    const open = (dir: string) =>
+      shell!.evaluate(({ app }, folder) => app.emit("open-file", { preventDefault() {} }, folder), dir);
+    await open(company);
+    await expect.poll(async () => (await windowsNow())[0]?.visible).toBe(true);
+    expect((await windowsNow()).map((w) => w.id)).toEqual([progress!.id]);
+    expect(await shownNow()).toBe(first);
+    expect(startedOf(company).pid).toBe(started.pid);
 
-    // Quit stops it, and keeps where its window was and that it was open.
+    // A second company joins the same window, shown; the first runs on, its app loaded.
+    writeFileSync(join(second, "go"), "");
+    await open(second);
+    await expect
+      .poll(async () => isApp(await shownNow()) && (await shownNow()) !== first, { timeout: 45_000, intervals: [100] })
+      .toBe(true);
+    const both = await windowsNow();
+    expect(both.map((w) => w.id)).toEqual([progress!.id]);
+    const secondUrl = `http://127.0.0.1:${startedOf(second).port}/`;
+    expect(showing(both[0])).toBe(secondUrl);
+    expect(apps(both[0])).toEqual([first, secondUrl]);
+    expect(startedOf(company).pid).toBe(started.pid);
+    const listed = await companiesIn(secondUrl);
+    expect(listed.map((c) => [c.id, c.shown])).toEqual([
+      [one!.id, false],
+      [expect.any(String), true],
+    ]);
+    const two = listed[1]!;
+
+    // ⌘1 (the Window menu's first company) switches back, at once: nothing reloads or starts.
+    const click = (id: string) =>
+      shell!.evaluate(({ Menu }, item) => Menu.getApplicationMenu()!.getMenuItemById(item)!.click(), id);
+    await click("company-1");
+    expect(await shownNow()).toBe(first);
+    expect(startedOf(company).pid).toBe(started.pid);
+
+    // The account menu's switch, from either app, and its subscription: the other app hears of it.
+    await inApp(secondUrl, "window.sanomaDesktop.onCompanies((c) => (window.heard = c)), true");
+    await inApp(first, `window.sanomaDesktop.switch(${JSON.stringify(two.id)})`);
+    expect(await shownNow()).toBe(secondUrl);
+    await expect
+      .poll(() => inApp<DesktopCompany[]>(secondUrl, "window.heard"))
+      .toEqual([
+        { ...one, shown: false },
+        { ...two, shown: true },
+      ]);
+    // An id it does not know switches nothing; then back to the first.
+    await inApp(secondUrl, `window.sanomaDesktop.switch("nope")`);
+    expect(await shownNow()).toBe(secondUrl);
+    await inApp(secondUrl, `window.sanomaDesktop.switch(${JSON.stringify(one!.id)})`);
+    expect(await shownNow()).toBe(first);
+
+    // Company → Stop stops the shown company and takes it out: the other shows, alone again.
+    await click("stop");
+    await expect.poll(() => existsSync(join(company, "stopped")), { timeout: 15_000 }).toBe(true);
+    const after = await windowsNow();
+    expect(showing(after[0])).toBe(secondUrl);
+    expect(apps(after[0])).toEqual([secondUrl]);
+    expect(await companiesIn(secondUrl)).toEqual([{ ...two, shown: true }]);
+
+    // Quit stops it, and keeps where the window was and that the company was open.
     const bounds = { x: 120, y: 90, width: 900, height: 700 };
     await shell.evaluate(({ BaseWindow }, [id, to]) => BaseWindow.fromId(id)!.setBounds(to), [
       progress!.id,
       bounds,
     ] as const);
-    const first = shell.process();
+    const quitting = shell.process();
     await shell.close();
     shell = undefined;
     // Its single-instance lock goes with the process: the next launch must not hand its folder to this one.
-    if (first.exitCode === null && first.signalCode === null) await once(first, "exit");
-    expect(existsSync(join(company, "stopped")), "Quit stops the company").toBe(true);
+    if (quitting.exitCode === null && quitting.signalCode === null) await once(quitting, "exit");
+    expect(existsSync(join(second, "stopped")), "Quit stops the company").toBe(true);
 
-    // The next launch, with no folder named, opens it again at those bounds.
+    // The next launch, with no folder named, opens the open one again (not the stopped one) at those bounds.
     shell = await launchShell();
-    await expect
-      .poll(async () => isApp(showing((await companyWindows(shell!))[0])), { timeout: 45_000, intervals: [100] })
-      .toBe(true);
-    expect((await companyWindows(shell))[0]!.bounds).toEqual(bounds);
-    // Its windows only: the app's own folder on the command line is no company to complain about.
+    await expect.poll(async () => isApp(await shownNow()), { timeout: 45_000, intervals: [100] }).toBe(true);
+    const relaunched = await windowsNow();
+    expect(relaunched).toHaveLength(1);
+    expect(relaunched[0]!.bounds).toEqual(bounds);
+    expect(apps(relaunched[0])).toEqual([`http://127.0.0.1:${startedOf(second).port}/`]);
+    // Its window only: the app's own folder on the command line is no company to complain about.
     expect(await shell.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)).toBe(0);
   } catch (err) {
-    if (log && existsSync(log)) console.error(`the shell's log:\n${readFileSync(log, "utf8")}`);
+    for (const log of logs) {
+      if (existsSync(log)) console.error(`the shell's log (${log}):\n${readFileSync(log, "utf8")}`);
+    }
     throw err;
   } finally {
     await shell?.close().catch(() => {});
     rmSync(work, { recursive: true, force: true });
-    if (log) rmSync(log, { force: true });
+    for (const log of logs) rmSync(log, { force: true });
   }
 });

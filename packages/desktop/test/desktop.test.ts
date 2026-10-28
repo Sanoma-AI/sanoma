@@ -21,13 +21,13 @@ import {
 } from "../src/companies.ts";
 import { eventOf, listeningUrlOf } from "../src/events.ts";
 import { launch, launcherEnv, launcherOf, type Stream, USAGE_EXIT } from "../src/launcher.ts";
-import { linkTarget } from "../src/links.ts";
+import { isAppPage, linkTarget } from "../src/links.ts";
 import { hidePasswords, openLog, TAIL_LINES } from "../src/logs.ts";
 import { folderArgument, realPathOf, syncedFolderWarning } from "../src/places.ts";
 import { archWarnings, runtimeOf } from "../src/runtime.ts";
 import { startSession } from "../src/session.ts";
 import { shims, writeShims } from "../src/shims.ts";
-import { DEFAULT_SIZE, windowBounds } from "../src/window-state.ts";
+import { DEFAULT_SIZE, nextShown, windowBounds } from "../src/window-state.ts";
 
 /** Windows has no process groups and no SIGTERM: the shell stops a launcher there by stdin and `taskkill`. */
 const windows = process.platform === "win32";
@@ -365,15 +365,16 @@ describe("companies.json", () => {
     expect(await portFor(list, "/a", isFree)).toEqual({ port: 3103, moved: true });
   });
 
-  test("keeps each window's bounds and whether it is open, dropping either when it is not of its kind", () => {
+  test("keeps whether a company is open, dropping it when it is not a boolean, and the bounds each one had", () => {
     const file = join(temp(), "companies.json");
-    const bounds = { x: 10, y: 20, width: 900, height: 700 };
     let list = [at("/a", 3100, "2"), at("/b", 3101, "1")];
-    list = updated(list, "/a", { bounds, open: true });
+    list = updated(list, "/a", { open: true });
     list = updated(list, "/missing", { open: true });
     writeCompanies(file, list);
-    expect(readCompanies(file)).toEqual([{ ...at("/a", 3100, "2"), bounds, open: true }, at("/b", 3101, "1")]);
-    writeFileSync(file, JSON.stringify([{ ...at("/a", 3100, "2"), bounds: { x: 1 }, open: "yes" }]));
+    expect(readCompanies(file)).toEqual([{ ...at("/a", 3100, "2"), open: true }, at("/b", 3101, "1")]);
+    // Before one window, each company had its window's bounds: the window's are in the settings now.
+    const bounds = { x: 10, y: 20, width: 900, height: 700 };
+    writeFileSync(file, JSON.stringify([{ ...at("/a", 3100, "2"), bounds, open: "yes" }]));
     expect(readCompanies(file)).toEqual([at("/a", 3100, "2")]);
   });
 
@@ -428,8 +429,9 @@ describe("window state", () => {
     expect(windowBounds({ ...saved, x: 1000 }, [screen])).toEqual({ ...saved, x: 540 });
   });
 
-  test("at the default size the first time, or when its display is gone", () => {
+  test("at the default size the first time, when what was saved is no place, or when its display is gone", () => {
     expect(windowBounds(undefined, [screen])).toEqual(DEFAULT_SIZE);
+    expect(windowBounds({ x: 1, width: 900 }, [screen])).toEqual(DEFAULT_SIZE);
     expect(windowBounds({ x: 2000, y: 80, width: 900, height: 700 }, [screen])).toEqual(DEFAULT_SIZE);
     expect(windowBounds({ x: 1400, y: 80, width: 900, height: 700 }, [screen])).toEqual(DEFAULT_SIZE);
   });
@@ -460,6 +462,18 @@ describe("the link rule", () => {
     ["not a url", "deny"],
   ])("%s: %s", (url, target) => {
     expect(linkTarget(url, app)).toBe(target);
+  });
+});
+
+describe("the companies API", () => {
+  test("answers the app's own page only: not its public sites, GitHub, another port, or before it answers", () => {
+    const app = "http://127.0.0.1:3100/";
+    expect(isAppPage("http://127.0.0.1:3100/workflows?x=1", app)).toBe(true);
+    expect(isAppPage("http://www.localhost:3100/", app)).toBe(false);
+    expect(isAppPage("https://github.com/settings/apps/new", app)).toBe(false);
+    expect(isAppPage("http://127.0.0.1:3101/", app)).toBe(false);
+    expect(isAppPage("about:blank", app)).toBe(false);
+    expect(isAppPage("http://127.0.0.1:3100/", "")).toBe(false);
   });
 });
 
@@ -570,5 +584,14 @@ describe("the runtime", () => {
     expect(archWarnings(false, "win32")).toEqual([]);
     expect(archWarnings(true, "darwin")).toEqual([expect.stringMatching(/Apple silicon Mac/)]);
     expect(archWarnings(true, "win32")).toEqual([expect.stringMatching(/Arm PC/)]);
+  });
+});
+
+describe("the window's companies", () => {
+  test("shows the company after the one that leaves, else the one before, else the start screen", () => {
+    expect(nextShown(["/a", "/b", "/c"], "/b")).toBe("/c");
+    expect(nextShown(["/a", "/b", "/c"], "/c")).toBe("/b");
+    expect(nextShown(["/a", "/b"], "/a")).toBe("/b");
+    expect(nextShown(["/a"], "/a")).toBeUndefined();
   });
 });

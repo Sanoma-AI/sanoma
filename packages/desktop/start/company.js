@@ -1,5 +1,5 @@
-// A company window's own page, until its app answers and whenever it stops: the steps, the log's
-// tail, why it stopped, Start again. `window.sanoma` is the preload's bridge (src/preload.ts).
+// A company's own page in the window, until its app answers and whenever it stops: the steps, the
+// log's tail, why it stopped, Start again. `window.sanoma` is the preload's bridge (src/preload.ts).
 const bridge = window.sanoma;
 const $ = (id) => document.getElementById(id);
 

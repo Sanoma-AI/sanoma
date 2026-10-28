@@ -145,6 +145,17 @@ describe("runCheck", () => {
     expect(later).toMatchObject({ found: { version: "0.2.0" }, notify: false });
   });
 
+  test("keeps what was saved while GitHub answered, such as the window's bounds", async () => {
+    const file = setup();
+    const bounds = { x: 10, y: 20, width: 900, height: 700 };
+    const fetchImpl = (async () => {
+      writeFileSync(file, JSON.stringify({ bounds }));
+      return Response.json([release("desktop-v0.2.0")]);
+    }) as unknown as typeof fetch;
+    await runCheck({ file, current: "0.1.0", asked: true, now, fetchImpl });
+    expect(readSettings(file)).toMatchObject({ bounds, updateCheckedAt: new Date(now).toISOString() });
+  });
+
   test("no notification when the settings cannot be saved", async () => {
     // The settings file's folder is a file: nothing can be written there.
     const blocker = setup();

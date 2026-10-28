@@ -1,6 +1,6 @@
-// The bridge of the shell's own pages, the start window and a company window's progress page
-// (Vite builds it as CommonJS, preload.cjs: a sandboxed preload cannot be a module). The app's view
-// in a company window has no preload: the app does not know it runs in the shell.
+// The bridge of the shell's own pages, the start screen and each company's progress page (Vite
+// builds it as CommonJS, preload.cjs: a sandboxed preload cannot be a module). A company's app view
+// has its own, smaller one (app-preload.ts).
 import { contextBridge, ipcRenderer } from "electron";
 
 contextBridge.exposeInMainWorld("sanoma", {
