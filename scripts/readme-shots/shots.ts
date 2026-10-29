@@ -57,6 +57,13 @@ const SITE_TS = `import { defineSite } from "sanoma/site";
 export default defineSite({ title: "Launch desk" });
 `;
 
+// The board still's site: the outbound leads by stage, its page in outbound/ here (`writeRepo`).
+const BOARD_TS = `import { defineSite } from "sanoma/site";
+
+export default defineSite({ title: "Outbound", icon: "kanban" });
+`;
+const BOARD_PAGE = join(repo, "scripts/readme-shots/outbound/routes/index.tsx");
+
 // The data still's collection: the outbound fixture's resources/data.ts (which the launcher
 // imports), importing from sanoma as a company's does; and its records, saved as their owners.
 const DATA_TS = join(repo, "packages/workflows/test/fixtures/outbound/resources/data.ts");
@@ -173,6 +180,11 @@ try {
   await still(browser, base, "/sites/launches", join(captured, "site.png"), {
     chat: false,
     fullPage: true,
+  });
+  // The outbound board: the site built on the collection.
+  await still(browser, base, "/sites/outbound", join(captured, "board.png"), {
+    chat: false,
+    height: 720,
   });
   // The grid sorted by stage, a record open in the form beside it.
   await still(browser, base, "/data/outbound?order=stage&record=Initech", join(captured, "data.png"), {
@@ -318,7 +330,7 @@ async function seed(acme: string): Promise<void> {
   }
 }
 
-/** A company repo named acme: the README's workflow, the config above, the packages/app README's site page, the outbound collection, and `node_modules` reaching this checkout. */
+/** A company repo named acme: the README's workflow, the config above, the packages/app README's site page, the outbound board, the outbound collection, and `node_modules` reaching this checkout. */
 function writeRepo(dir: string): void {
   const readme = readFileSync(join(repo, "README.md"), "utf8").replaceAll("\r\n", "\n");
   const block = /^```ts\n\/\/ workflows\/announce\.ts\n([\s\S]*?)^```$/m.exec(readme);
@@ -333,6 +345,9 @@ function writeRepo(dir: string): void {
   mkdirSync(join(dir, "sites/launches/routes"), { recursive: true });
   writeFileSync(join(dir, "sites/launches/site.ts"), SITE_TS);
   writeFileSync(join(dir, "sites/launches/routes/index.tsx"), page[1]);
+  mkdirSync(join(dir, "sites/outbound/routes"), { recursive: true });
+  writeFileSync(join(dir, "sites/outbound/site.ts"), BOARD_TS);
+  copyFileSync(BOARD_PAGE, join(dir, "sites/outbound/routes/index.tsx"));
   mkdirSync(join(dir, "resources"));
   writeFileSync(
     join(dir, "resources/data.ts"),
