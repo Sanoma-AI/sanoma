@@ -10,8 +10,6 @@ export declare const INACTIVITY_MS: number;
 export declare const NAMESPACE: "SANOMA_INSTANCE";
 /** The name the upload gives the runtime image (`containers[].images`), which the object starts. */
 export declare const IMAGE: "runtime";
-/** The container's size, one of Cloudflare's predefined instance types. */
-export declare const INSTANCE_TYPE: "standard-1";
 
 /** The label naming an image: a digest of it. */
 export declare function imageLabel(image: string): Promise<string>;

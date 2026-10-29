@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import {
   type CallContext,
   DriverError,
@@ -176,26 +177,26 @@ const same = (field: (typeof COMPARED)[number], a: unknown, b: unknown) =>
 /**
  * `{ revision }` when the Worker answers, else why not; with `start`, once its container answers
  * too, which starts it. A read asks without: a stopped host is healthy, and stays stopped. A
- * container that ended is `{ exit }`: the Worker would start it again on the next ask, so a
- * deploy stops asking.
+ * container that ended is `exit`: the Worker would start it again on the next ask, so a deploy
+ * stops asking.
  */
 const health = async (
   cf: CloudflareApi,
   url: string,
   start: boolean,
-): Promise<{ revision: string } | { exit: string } | string> => {
+): Promise<{ revision: string } | { error: string; exit: boolean }> => {
   let res: Response;
   try {
     res = await cf.send(`${url}${HEALTH_PATH}${start ? "?start=1" : ""}`, { method: "GET" });
   } catch (error) {
-    return errorMessage(error);
+    return { error: errorMessage(error), exit: false };
   }
   const body = (await res.json().catch(() => undefined)) as
     | { revision?: unknown; error?: unknown; exit?: unknown }
     | undefined;
   if (res.ok && typeof body?.revision === "string") return { revision: body.revision };
   const error = typeof body?.error === "string" ? body.error : `${HEALTH_PATH} answered ${res.status}`;
-  return typeof body?.exit === "string" ? { exit: error } : error;
+  return { error, exit: typeof body?.exit === "string" };
 };
 
 export interface ContainerOptions {
@@ -235,7 +236,7 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
       port: Number(text.get(TEXT.port) ?? 0),
       ...(served && { domains: domainsOf(served) }),
       url,
-      healthy: checkHealth && app !== undefined && "revision" in Object(await health(cf, url, false)),
+      healthy: checkHealth && app !== undefined && "revision" in (await health(cf, url, false)),
     };
     const secrets = bindings.filter((b) => b.type === "secret_text").map((b) => b.name);
     return { state, secrets };
@@ -270,15 +271,14 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
     const until = Date.now() + startTimeoutMs;
     for (;;) {
       const seen = await health(cf, url, true);
-      if (typeof seen === "object" && "revision" in seen && seen.revision === revision) return;
+      if ("revision" in seen && seen.revision === revision) return;
       // Not a wait: the container started and ended, and asking again would only start it again.
-      if (typeof seen === "object" && "exit" in seen)
-        throw refused(`${script} did not start at ${revision}: ${seen.exit}`);
+      if ("exit" in seen && seen.exit) throw refused(`${script} did not start at ${revision}: ${seen.error}`);
       if (Date.now() >= until) {
-        const why = typeof seen === "object" && "revision" in seen ? `it runs ${seen.revision}` : seen;
+        const why = "revision" in seen ? `it runs ${seen.revision}` : seen.error;
         throw refused(`${script} did not answer at ${revision} in ${Math.round(startTimeoutMs / 1000)} s: ${why}`);
       }
-      await new Promise((resolve) => setTimeout(resolve, pollMs));
+      await delay(pollMs);
     }
   };
 
@@ -296,7 +296,7 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
       }
       if (status === "ready") return;
       if (status === "error") {
-        throw new DriverError(`cloudflare: preparing ${image}: ${reason ?? "it failed"}`, { retryable: false });
+        throw refused(`preparing ${image}: ${reason ?? "it failed"}`);
       }
       if (Date.now() >= until) {
         throw new DriverError(
@@ -304,7 +304,7 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
           { retryable: true },
         );
       }
-      await new Promise((resolve) => setTimeout(resolve, pollMs));
+      await delay(pollMs);
     }
   };
 

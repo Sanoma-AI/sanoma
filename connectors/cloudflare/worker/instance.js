@@ -31,7 +31,7 @@ export const NAMESPACE = "SANOMA_INSTANCE";
 /** The name the upload gives the runtime image (`containers[].images`), which the object starts. */
 export const IMAGE = "runtime";
 /** The container's size, one of the named types `start` takes: ½ vCPU, 4 GiB (`basic`, ¼ vCPU, is refused under this policy). */
-export const INSTANCE_TYPE = "standard-1";
+const INSTANCE_TYPE = "standard-1";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const json = (status, body) =>

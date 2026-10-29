@@ -92,7 +92,7 @@ export async function copyImage(image: string, target: CopyTarget, timeoutMs = 1
   const to = parse(copy);
   const ref = source.reference;
   const refuse = (why: string) => new DriverError(`cloudflare: copying ${image}: ${why}`, { retryable: false });
-  if (copy === image && source.sep === "@") return image;
+  if (accountPinned(image, target.account, target.registry)) return image;
   // Docker Hub is not copied from: its API is on another host, and its pulls are limited.
   if (!/[.:]/.test(source.host) || source.host === "docker.io") {
     throw refuse("name the registry it is in, not Docker Hub: ghcr.io/sanoma-ai/runtime:<version>");

@@ -91,13 +91,16 @@ const stubContainer: StartContainer = async () => {
  * One Durable Object of a Worker, in this process: the `ctx` `worker/instance.js` runs over
  * (`ctx.container` running `start`'s runtime, `ctx.storage` in memory, one alarm on a timer),
  * kept across uploads as Cloudflare keeps an object's storage and container across a deploy.
- * `source` names the image a pinned one was copied from, or nothing when no application runs
- * behind the object.
+ * `images` are the ones the Worker's last upload named, by name; `source` names the image a
+ * pinned one was copied from, or nothing when no application runs behind the object.
  */
-function fakeObject(start: StartContainer, source: (image: string) => string | undefined, started: FakeContainer[]) {
+function fakeObject(
+  start: StartContainer,
+  images: () => Record<string, string>,
+  source: (image: string) => string | undefined,
+  started: FakeContainer[],
+) {
   const storage = new Map<string, unknown>();
-  /** The images the Worker's last upload named, by name. */
-  let images: Record<string, string> = {};
   let running:
     | { runtime: Promise<FakeContainer>; image: string; labels: Record<string, string>; port: number }
     | undefined;
@@ -169,11 +172,11 @@ function fakeObject(start: StartContainer, source: (image: string) => string | u
         return running !== undefined;
       },
       get images() {
-        return { ...images };
+        return { ...images() };
       },
       start({ image, instance: type, env, labels }) {
         if (running) throw new Error("the container is already running");
-        if (!image || !Object.values(images).includes(image)) {
+        if (!image || !Object.values(images()).includes(image)) {
           throw new TypeError(`no image ${image || "(none)"} among the Worker's containers' images`);
         }
         if (!INSTANCE_TYPES.includes(type)) throw new TypeError(`no instance type ${type}`);
@@ -236,10 +239,9 @@ function fakeObject(start: StartContainer, source: (image: string) => string | u
 
   return {
     ctx,
-    /** The object made again from the Worker's code and the images its upload names, as a deploy restarts it. */
-    restart(made: Instance, named: Record<string, string>) {
+    /** The object made again from the Worker's code, as a deploy restarts it. */
+    restart(made: Instance) {
       instance = made;
-      images = { ...named };
     },
     fetch: (request: Request) => active(() => instance!.fetch(request)),
     /** Stops its container, as Cloudflare does once the object is quiet; its storage and alarm stay. */
@@ -360,9 +362,15 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
           images: { ...runs.images },
         };
         const object =
-          objects.get(script) ?? fakeObject(start, (image) => appOf(script) && (state.images[image] ?? image), started);
+          objects.get(script) ??
+          fakeObject(
+            start,
+            () => state.scripts[script]?.images ?? {},
+            (image) => appOf(script) && (state.images[image] ?? image),
+            started,
+          );
         objects.set(script, object);
-        object.restart(new Instance(object.ctx, env), runs.images);
+        object.restart(new Instance(object.ctx, env));
       },
       async enableSubdomain(script) {
         const found = state.scripts[script];

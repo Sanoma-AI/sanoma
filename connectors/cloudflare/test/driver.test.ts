@@ -81,10 +81,13 @@ async function formOf(request: (typeof sent)[number]) {
     headers: { "content-type": request.headers.get("content-type")! },
   }).formData();
 }
+/** An upload form's `metadata` part, the JSON. */
+async function metadataOf(form: FormData) {
+  return JSON.parse(await (form.get("metadata") as File).text());
+}
 /** The metadata of the upload among the requests sent. */
 async function uploaded() {
-  const form = await formOf(sent.find((r) => r.method === "PUT" && r.path.startsWith(API))!);
-  return JSON.parse(await (form.get("metadata") as File).text());
+  return metadataOf(await formOf(sent.find((r) => r.method === "PUT" && r.path.startsWith(API))!));
 }
 
 /** The registry's temporary credentials, as the SDK's `containers.registries.credentials.generate` answers. */
@@ -123,7 +126,7 @@ describe.skipIf(live)("cloudflareDriver", () => {
       ]);
       // Compared, not printed: a failure must not show a live token.
       expect(sent.slice(0, 10).every((r) => r.headers.get("authorization") === "Bearer test-token")).toBe(true);
-      const again = JSON.parse(await ((await formOf(sent[9]!)).get("metadata") as File).text());
+      const again = await metadataOf(await formOf(sent[9]!));
       expect(again.migrations).toBeUndefined();
       expect(sent[2]!.body).toEqual({ image: PINNED });
 
@@ -131,7 +134,7 @@ describe.skipIf(live)("cloudflareDriver", () => {
       expect(upload.headers.get("content-type")).toMatch(/^multipart\/form-data; boundary=/);
       const form = await formOf(upload);
       // One `metadata` part, the JSON, as Cloudflare reads it; the modules as parts named after them.
-      const metadata = JSON.parse(await (form.get("metadata") as File).text());
+      const metadata = await metadataOf(form);
       expect(metadata.main_module).toBe("index.js");
       expect(metadata.compatibility_date).toBe("2026-10-01");
       expect(metadata.migrations).toEqual({ new_tag: "v1", new_sqlite_classes: ["SanomaInstance"] });
