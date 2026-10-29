@@ -1,6 +1,8 @@
 # sanoma
 
-Workflow automation like Zapier or n8n, where every workflow is code. The person who runs it works in an app: they start runs, approve what waits on them, and see each workflow as a graph and each run step by step. Behind the app, each workflow is a plain TypeScript file in the company's own repo rather than a graph stored in a vendor's database, so any developer can read it, review a change to it and take it further. It is built for the moment a workflow outgrows the person who built it and has to be handed over. We call the idea Business as Code. This TypeScript monorepo is its source-available core: the runtime, the app and the connectors, which anyone can read and self-host.
+The back office a small business never had, as code the business owns. You tell the agent how the business works, and it writes the workflows, the site pages and the data behind them as TypeScript in the company's own repo, on a draft you look over and apply. Before every call to a vendor (an email through Resend, a post to Ghost or Bluesky) a policy lets it through, denies it or holds it for a person to approve, and a ledger records what ran. Because it is a plain repo rather than a graph in a vendor's database, any developer can read it, review a change and take it further; we call the idea Business as Code. This TypeScript monorepo is its source-available core: the runtime, the app with its agent, and the connectors, which anyone can read and self-host.
+
+The agent in the app's chat is our own, or a coding agent on your own plan (Claude Code, Codex, Copilot, OpenCode or Pi); whichever it is, it edits only its draft, and the checks run there before you apply it ([the chat](packages/app/README.md)).
 
 Status: early. Workflows run on [DBOS](https://dbos.dev) with Postgres: each vendor call is a durable step, approvals and sleeps survive restarts, and a lint keeps workflow code safe to replay. Before every vendor call and run start a policy, written in [Cedar](https://docs.cedarpolicy.com) in the repo, lets it through, denies it or holds it for an approver, as the people the repo declares, and a ledger records each run: who started it, every call with the policy's decision and the vendor's reply, every approval, and how it ended. Versioning is automatic: each run is stamped with a hash of the workflow code it started on, and only a worker on that version resumes it (`DBOS__APPVERSION` names a version instead; see [Versions](packages/workflows/README.md#versions)). The connectors so far are listed under [Contents](#contents); keeping a company's vendor settings (card limits, time-off policies, access in tools like Mercury, Gusto and Okta) in typed files is where it is headed, not what it does today.
 
@@ -43,11 +45,20 @@ The workflow's page: the graph is drawn from the file, and picking a step says w
 
 ![The Inbox with "Review launch copy" approvals waiting for marketing-lead, the chat column beside it](.github/assets/inbox.png)
 
-The Inbox as marketing-lead: the approvals waiting for them, with the draft's link and what approving lets through. Beside it, the chat column, where the agent will talk with you once it is built.
+The Inbox as marketing-lead: the approvals waiting for them, with the draft's link and what approving lets through. Beside it, the chat column, where you ask the agent for a change and it answers with a draft to apply.
 
 ![A finished run of announce: its graph, the approval and its note, and its ledger](.github/assets/run.png)
 
 A finished run: the graph shows how each step went, and the ledger records each call with the policy's decision and the approval with its note.
+
+## Solved in public
+
+We build Sanoma in the open by taking a problem a small business owner has posted about and solving it with Sanoma: the workflows, the policy and the data, and what still needed a person. Each write-up adds a row here.
+
+| Problem | Who has it | What we built | Write-up |
+| ------- | ---------- | ------------- | -------- |
+
+The first one is in progress.
 
 ## Contents
 
