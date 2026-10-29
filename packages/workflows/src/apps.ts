@@ -21,20 +21,6 @@ export interface AppEntry {
   source?: string;
 }
 
-/** What `app.ts` declares: the source repository's URL, when the app was taken from one. */
-export interface AppDefinition {
-  source?: string;
-}
-
-/**
- * Declares an app in its folder's `app.ts`, read without running it: `defineApp({ source:
- * "https://github.com/acme/crm" })`, the repository it was taken from; `defineApp({})` for an app
- * the company made itself.
- */
-export function defineApp(definition: AppDefinition): AppDefinition {
-  return Object.freeze({ ...definition });
-}
-
 /** What is wrong with a company's apps, at a file relative to the root. */
 export type AppProblem = LintProblem & { file: string };
 

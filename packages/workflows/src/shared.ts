@@ -31,6 +31,8 @@ export type { AvailableApp, AvailableApps } from "./apps-list.ts";
 
 // Sanoma's claims, data (`sanoma/claims` re-exports them).
 export * from "./claims.ts";
+// A site's `site.ts` declares itself with it (`sanoma/site` calls it, typing its icon).
+export { defineSite, type SiteDefinition } from "./definitions.ts";
 
 /**
  * What a `ctx.sleep` without a `{ name }` is called, in its outline node and its ledger record
