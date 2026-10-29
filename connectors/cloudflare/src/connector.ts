@@ -56,7 +56,8 @@ const containerSchema = z.object({
  * on a request and stops it ten minutes after the last (`Host`: stops when quiet, its URL public).
  * What it runs is in the Worker's plain-text bindings, so a read tells its revision with no
  * container running. A deploy uploads the Worker again; a new image is copied into the account's
- * registry (any registry's but Cloudflare's own) and rolls the application out to the copy.
+ * registry (one there by a tag is pinned to its digest) and named by the upload, and the object
+ * starts the container again at it.
  */
 export const container = defineResource({
   vendor: "cloudflare",

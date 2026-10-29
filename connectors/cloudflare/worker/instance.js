@@ -74,6 +74,8 @@ export class Instance {
   #last;
   /** How the container this object started ended, when it did: what `monitor` told. */
   #exit;
+  /** The start whose `monitor` may set `#exit`: an earlier container's end is not this one's. */
+  #started;
 
   constructor(ctx, env) {
     this.ctx = ctx;
@@ -180,11 +182,14 @@ export class Instance {
             labels,
           });
           // `start` returns once its options are checked: a start that fails later, or a container
-          // that exits, is what `monitor` tells, and the next try reports it.
+          // that exits, is what `monitor` tells, and the next try reports it. Only this start's: an
+          // earlier container's monitor may settle after this one started.
           this.#exit = undefined;
+          const started = (this.#started = {});
+          const ended = (how) => void (this.#started === started && (this.#exit = how));
           container.monitor?.().then(
-            () => (this.#exit = "the container exited"),
-            (error) => (this.#exit = `the container failed: ${error?.message ?? error}`),
+            () => ended("the container exited"),
+            (error) => ended(`the container failed: ${error?.message ?? error}`),
           );
         }
         // A try of its own time: a hung one would hold every request past the deadline.

@@ -212,6 +212,50 @@ describe("the Worker's object", () => {
     expect(container.start).toHaveBeenCalledTimes(1);
   });
 
+  it("starts again when the platform has not assigned the application to the namespace yet", async () => {
+    const { ctx, container } = stubCtx();
+    let starts = 0;
+    container.monitor = () => {
+      if (++starts > 1) return new Promise<void>(() => {});
+      container.running = false;
+      return Promise.reject(new Error("There is no container application assigned to this Durable Object namespace"));
+    };
+    const object = new Instance(ctx, ENV);
+    const answer = await object.fetch(new Request("https://x.workers.dev/__sanoma/health?start=1"));
+    expect(answer.status).toBe(200);
+    expect(await answer.json()).toMatchObject({ running: true, ready: true });
+    expect(container.start).toHaveBeenCalledTimes(2);
+  });
+
+  it("ignores how an earlier container ended once another is starting", async () => {
+    let checks = 0;
+    const { ctx, container } = stubCtx({
+      // The second container is not listening at its first check.
+      answer: (request) =>
+        new URL(request.url).pathname === "/healthz" && ++checks === 2
+          ? new Response("starting", { status: 503 })
+          : new Response("ok"),
+    });
+    let endFirst!: (error: Error) => void;
+    let starts = 0;
+    container.monitor = () =>
+      new Promise<void>((_, reject) => {
+        if (++starts === 1) endFirst = reject;
+      });
+    const object = new Instance(ctx, ENV);
+    expect((await object.fetch(new Request("https://x.workers.dev/__sanoma/health?start=1"))).status).toBe(200);
+    // It crashed: the next request starts another, and the first container's end arrives at that start.
+    container.running = false;
+    container.start.mockImplementationOnce(() => {
+      container.running = true;
+      endFirst(new Error("Container exited with unexpected exit code: 137"));
+    });
+    const answer = await object.fetch(new Request("https://x.workers.dev/__sanoma/health?start=1"));
+    expect(answer.status).toBe(200);
+    expect(await answer.json()).toMatchObject({ ready: true });
+    expect(container.start).toHaveBeenCalledTimes(2);
+  });
+
   it("answers its health without starting the container, unless asked to", async () => {
     const { ctx, container } = stubCtx();
     const health = await new Instance(ctx, ENV).fetch(new Request("https://x.workers.dev/__sanoma/health"));

@@ -89,6 +89,8 @@ export interface Upload {
 /** A container application, as the fields read here. */
 export interface Application {
   id: string;
+  /** Its scheduling policy: the object starts the container only under `durable_object`. */
+  policy: string;
 }
 
 /** An image's preparation (`POST …/containers/image-preparations`): `pending` until it is `ready`, or an `error`. */
@@ -284,7 +286,14 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
   const prepared = async (cf: CloudflareApi, image: string) => {
     const until = Date.now() + PREPARE_TIMEOUT_MS;
     for (;;) {
-      const { status, reason } = await cf.prepareImage(image);
+      let status: Preparation["status"] | undefined;
+      let reason: string | undefined;
+      try {
+        ({ status, reason } = await cf.prepareImage(image));
+      } catch (error) {
+        // One failed look (a timeout, a 5xx) is not the preparation failing: the wait asks again.
+        if (!(error instanceof DriverError && error.retryable)) throw error;
+      }
       if (status === "ready") return;
       if (status === "error") {
         throw new DriverError(`cloudflare: preparing ${image}: ${reason ?? "it failed"}`, { retryable: false });
@@ -357,6 +366,14 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
     await cf.upload(script, { ...metadata, ...(current === undefined && { migrations: MIGRATION }) });
     await cf.enableSubdomain(script);
     let app = await cf.application(script);
+    // The policy is fixed once an application is made, and the object starts its container only
+    // under this one: an application of another is not Sanoma's to replace.
+    if (app && app.policy !== "durable_object") {
+      throw refused(
+        `the application ${script} is of the ${app.policy} scheduling policy, under which the object cannot start its container: delete it, then apply again`,
+        "exists",
+      );
+    }
     if (!app) {
       // The application is made for the object's namespace, which the first upload made.
       const namespace = (await cf.bindings(script))?.find((b) => b.name === NAMESPACE)?.namespace_id;

@@ -302,6 +302,23 @@ describe.skipIf(live)("cloudflareDriver", () => {
       expect(sent.some((r) => r.method === "PUT")).toBe(false);
     });
 
+    it("keeps asking whether the image is prepared through one failed look", async () => {
+      play(
+        "prepare-flaky",
+        fixture("create").filter((e) => !e.path.endsWith(PREPARATIONS)),
+      );
+      let looks = 0;
+      server.use(
+        http.post(`*${PREPARATIONS}`, () =>
+          ++looks === 1
+            ? HttpResponse.json(cfError(10000, "internal error"), { status: 503 })
+            : HttpResponse.json(cfResult({ image: PINNED, status: "ready" }), { status: 200 }),
+        ),
+      );
+      expect(await op("container.create", { desired })).toEqual({ id: "company", state });
+      expect(looks).toBe(2);
+    });
+
     it("plans nothing for a ghcr.io image the Worker names, whose copy the application runs", async () => {
       // The Worker's `SANOMA_IMAGE` binding holds the declared image; the application its copy.
       play(
@@ -406,6 +423,23 @@ describe.skipIf(live)("cloudflareDriver", () => {
       });
       await expect(op("container.delete", { id: "company" })).rejects.toMatchObject({ vendorCode: "exists" });
       expect(sent.some((r) => r.method === "PUT" || r.method === "DELETE")).toBe(false);
+    });
+
+    it("refuses to run behind an application of another scheduling policy, making none", async () => {
+      const other = cfResult([
+        { id: "00000000-0000-4000-8000-000000000009", name: "sanoma-company", scheduling_policy: "default" },
+      ]);
+      play("default-policy", [
+        ...only("create", (_, i) => i < 6),
+        reply(apiPath("/containers/applications?name=sanoma-company"), 200, other),
+      ]);
+      await expect(op("container.create", { desired })).rejects.toMatchObject({
+        name: "DriverError",
+        retryable: false,
+        vendorCode: "exists",
+        message: expect.stringContaining("is of the default scheduling policy"),
+      });
+      expect(sent.some((r) => r.method === "POST" && r.path.endsWith("/containers/applications"))).toBe(false);
     });
 
     it("plans an update when the declaration leaves out the domains the Worker serves", async () => {

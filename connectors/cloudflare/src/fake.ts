@@ -47,7 +47,6 @@ export interface FakeCloudflareState extends Record<string, unknown> {
 /** The fake account's id, which its registry's references name: the fixtures' made-up one. */
 const FAKE_ACCOUNT = "0123456789abcdef0123456789abcdef";
 
-/** The instance types `start` takes: Cloudflare's predefined ones. */
 /** The named sizes `start` takes under the policy: `basic` is not one of them (the runtime refuses it, as it did live on 2026-10-28). */
 const INSTANCE_TYPES = ["lite", "standard-1", "standard-2", "standard-3", "standard-4"];
 
@@ -378,7 +377,7 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
       },
       async application(name) {
         const found = appOf(name);
-        return found && { id: found.id };
+        return found && { id: found.id, policy: found.policy };
       },
       async createApplication(name, namespaceId) {
         const namespace = state.scripts[name]?.bindings.find((b) => b.namespace_id)?.namespace_id;
@@ -386,8 +385,8 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
           throw fail(400, 1000, `no Durable Object namespace ${namespaceId}`);
         if (appOf(name)) throw fail(409, 1001, `an application named ${name} exists`);
         const id = `00000000-0000-4000-8000-${String(++state.seq).padStart(12, "0")}`;
-        state.applications[id] = { id, name };
-        return { id };
+        state.applications[id] = { id, name, policy: "durable_object" };
+        return { id, policy: "durable_object" };
       },
       account: FAKE_ACCOUNT,
       async copyImage(image) {
