@@ -1,4 +1,6 @@
 import { configuredSecrets } from "./credentials.ts";
+import { secretsForInput } from "./secret.ts";
+import { isRunControlError } from "./errors.ts";
 import { currentRun } from "./run.ts";
 import {
   connectionCatalog,
@@ -331,6 +333,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
       ...(dataStore ? [collectionsDriver(declared, dataStore)] : []),
     ],
     ops,
+    connections,
   );
   const fakes = makersOf(running, "fake");
   if (dataStore) fakes.set(DATA_VENDOR, () => collectionsFake(declared));
@@ -617,11 +620,11 @@ function indexConnectors(list: Connector<any, any>[]) {
 }
 
 /**
- * The drivers' functions by operation id, refusing one no connector declares. A driver that
- * declares an `env` has each function guarded by it (`guarded`); a fake declares none, so a
- * sandbox run's calls are not.
+ * The drivers' functions by operation id, refusing one no connector declares. Named live
+ * calls resolve authentication here, after policy, inside the driver's execution boundary.
+ * Drivers without named authentication retain their declared environment guard.
  */
-export function indexDrivers(list: Driver[], ops: Map<string, Op>) {
+export function indexDrivers(list: Driver[], ops: Map<string, Op>, connections?: ConnectionRegistry) {
   const map = new Map<string, DriverFn>();
   for (const d of list) {
     for (const [key, fn] of Object.entries(d.ops)) {
@@ -629,7 +632,35 @@ export function indexDrivers(list: Driver[], ops: Map<string, Op>) {
       if (!ops.has(id)) {
         throw new Error(`Driver "${d.vendor}" implements ${id}, which no connector in \`connectors\` declares`);
       }
-      map.set(id, d.env ? guarded(d.vendor, d.env, fn) : fn);
+      const unselected = d.env ? guarded(d.vendor, d.env, fn) : fn;
+      map.set(id, async (input, call) => {
+        if (!call.connection) {
+          if (d.authentication?.length)
+            throw new DriverError("Select a named connection for this driver", { retryable: false });
+          return unselected(input, call);
+        }
+        if (!connections || !call.principal || !d.authentication?.includes(call.connection.method))
+          throw new DriverError("This driver does not support the selected connection", { retryable: false });
+        const authentication = await connections.authenticate(call.connection, call.principal.id);
+        try {
+          return await fn(input, {
+            ...call,
+            connection: structuredClone(call.connection),
+            authentication,
+            secrets: secretsForInput(input, call.secrets),
+          });
+        } catch (error) {
+          if (isRunControlError(error)) throw error;
+          // SDK exceptions can contain the complete request, including authorization headers.
+          // Drivers may come from another installed copy of this package.
+          const failure = error as { code?: unknown; retryable?: unknown; status?: unknown } | null;
+          const status = failure?.code === "driver_failed" ? failure.status : undefined;
+          throw new DriverError(`${d.vendor} operation failed`, {
+            retryable: failure?.code === "driver_failed" && failure.retryable === true,
+            ...(typeof status === "number" && Number.isInteger(status) && status >= 100 && status <= 599 && { status }),
+          });
+        }
+      });
     }
   }
   return map;
@@ -637,12 +668,10 @@ export function indexDrivers(list: Driver[], ops: Map<string, Op>) {
 
 /**
  * `fn`, refused while the environment leaves a variable `env` declares missing or invalid. The
- * worker started without it (`startWorker` only warns), and stored credentials load into the
- * environment as they are set, so the check is made when the function is called, inside the
- * driver step, and nowhere earlier: not at start, and not before the policy's decision or an
- * approval hold, so a credential set on the connector page while a call waits for approval is
- * used when the approver approves. The refusal is the call's own failure, final: recorded as
- * the call's, and never retried.
+ * worker started without it (`startWorker` only warns). This checks only explicitly supplied
+ * process environment; stored credentials are never copied there. The guard runs inside the
+ * driver step after policy and approval. Named connections never use this path. The refusal
+ * is the call's own failure, final: recorded as the call's, and never retried.
  */
 function guarded(vendor: string, env: DriverEnv, fn: DriverFn): DriverFn {
   return async (input, call) => {

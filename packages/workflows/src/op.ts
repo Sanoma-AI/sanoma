@@ -1,5 +1,5 @@
 import type { Principal } from "./define.ts";
-import type { Authentication } from "./authentication.ts";
+import type { Authentication, CallAuthentication } from "./authentication.ts";
 import type { ConnectionSnapshot } from "./connection.ts";
 import type { ProviderV4 } from "@ai-sdk/provider";
 import type { z } from "zod";
@@ -111,7 +111,7 @@ export type Connector<V extends string, S extends Specs> = {
  * and `resolveConfig` reads only a record of its own shape (`checkConnector`): change it with
  * the record, so a build refuses a connector another build made in another shape.
  */
-export const CONNECTOR_FORMAT = 2;
+export const CONNECTOR_FORMAT = 3;
 
 /**
  * A connector's vendor: its id, who it is (`defineConnector`'s third argument, for a UI), its
@@ -243,6 +243,8 @@ export interface CallContext {
   principal?: Principal;
   /** Authorized account metadata. Credential material stays inside the driver boundary. */
   connection?: ConnectionSnapshot;
+  /** Resolved after policy, for this call alone. Never return it from a driver. */
+  authentication?: CallAuthentication;
   idempotencyKey: string;
   runId: string;
   opId: string;
@@ -302,13 +304,15 @@ export function retryableStatus(status: number): boolean {
 export type DriverEnv = z.ZodObject<Record<string, z.ZodType<string | undefined, string | undefined>>>;
 
 /**
- * Implements a vendor's operations, keyed `"resource.name"`. A driver reads its credentials
- * from the environment when it is called, never from the config file; `env` declares them.
+ * Implements a vendor's operations, keyed `"resource.name"`. Named authentication is supplied
+ * in the call context. `env` describes a driver that has not added named-account support.
  */
 export interface Driver {
   readonly vendor: string;
   readonly ops: Readonly<Record<string, DriverFn>>;
   readonly env?: DriverEnv;
+  /** Methods this driver consumes from CallContext.authentication. Others fail closed. */
+  readonly authentication?: readonly string[];
 }
 
 /**
@@ -322,7 +326,7 @@ export interface Driver {
 export interface ConnectorSetup {
   /** Auth methods available to named connections; login identity is separate. */
   authentication?: Readonly<Record<string, Authentication>>;
-  /** Makes the live driver, which reads its credentials from the environment when called: once per resolved config. */
+  /** Makes the live driver once per resolved config; credentials belong to each invocation. */
   driver?: () => Driver;
   /** Makes a fake of the vendor (`defineFake`): once per sandbox run, its own. */
   fake?: () => Fake<any, any>;
@@ -467,7 +471,7 @@ export type OpIdOf<V extends string, S extends Specs> = {
 export function defineDriver<V extends string, S extends Specs>(
   connector: Connector<V, S>,
   impl: DriverImpl<S>,
-  options: { env?: DriverEnv } = {},
+  options: { env?: DriverEnv; authentication?: readonly string[] } = {},
 ): Driver {
   const declared = new Map<string, Op>();
   for (const resource of Object.values(connector as Record<string, Record<string, unknown>>)) {
@@ -489,5 +493,10 @@ export function defineDriver<V extends string, S extends Specs>(
     ...(extra.length ? [`it implements ${extra.join(", ")}, which the connector does not declare`] : []),
   ];
   if (problems.length) throw new Error(`defineDriver("${vendor}"): ${problems.join("; ")}`);
-  return Object.freeze({ vendor, ops: Object.freeze(ops), ...(options.env && { env: options.env }) });
+  return Object.freeze({
+    vendor,
+    ops: Object.freeze(ops),
+    ...(options.env && { env: options.env }),
+    ...(options.authentication && { authentication: Object.freeze([...options.authentication]) }),
+  });
 }

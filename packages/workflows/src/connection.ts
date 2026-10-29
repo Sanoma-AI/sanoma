@@ -1,11 +1,18 @@
 import type { Principal } from "./define.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
-import { checkAuthenticationStore, defineAuthentication, type Authentication } from "./authentication.ts";
+import {
+  checkAuthenticationStore,
+  decodeCredentials,
+  defineAuthentication,
+  type Authentication,
+  type AuthenticationIdentity,
+  type CallAuthentication,
+} from "./authentication.ts";
 import { type Connector, setupOf, VENDOR, defineConnector, defineDriver, type CallContext } from "./op.ts";
 import { isSecret, type Secret } from "./secret.ts";
 import { SanomaError } from "./errors.ts";
-import type { SecretAccess } from "./secret-store.ts";
+import { SecretStoreError, type SecretAccess } from "./secret-store.ts";
 import type { Db } from "./db.ts";
 
 /** Serializable account reference; vendor literal prevents cross-connector selection in typed calls. */
@@ -286,8 +293,50 @@ export class ConnectionRegistry {
   async assertCurrent(selected: ConnectionSnapshot | undefined, actor: string): Promise<void> {
     if (!selected) return;
     const current = await this.select(selected.vendor, { vendor: selected.vendor, $connection: selected.id }, actor);
-    if (!current || current.revision !== selected.revision || current.definition !== selected.definition)
+    if (
+      !current ||
+      current.revision !== selected.revision ||
+      current.definition !== selected.definition ||
+      current.method !== selected.method ||
+      current.account !== selected.account ||
+      current.credentials?.$secret !== selected.credentials?.$secret ||
+      JSON.stringify(current.scopes.toSorted()) !== JSON.stringify(selected.scopes.toSorted())
+    )
       refuse("The connection changed after authorization; start a new call");
+  }
+
+  /** Only called inside an authorized driver boundary. No value escapes into workflow history. */
+  async authenticate(selected: ConnectionSnapshot, actor: string): Promise<CallAuthentication> {
+    await this.assertCurrent(selected, actor);
+    const method = this.catalog.methods.get(selected.vendor)?.[selected.method];
+    if (!method?.verify) throw new SecretStoreError("unsupported");
+    const material: CallAuthentication = { method: selected.method, kind: method.kind };
+    let identity: AuthenticationIdentity;
+    if (method.kind !== "workload-identity") {
+      if (!this.secrets || !selected.credentials) throw new SecretStoreError("unavailable");
+      const bundle = await this.secrets.read(selected.credentials.$secret);
+      if (!bundle) throw new SecretStoreError("unavailable");
+      material.credentials = decodeCredentials(method, bundle.value);
+      material.credentialVersion = bundle.version;
+    }
+    // Verifiers may throw SDK errors containing headers or values. Keep none of their details.
+    try {
+      identity = await method.verify(material.credentials);
+      if (
+        identity.account !== selected.account ||
+        !Array.isArray(identity.scopes) ||
+        identity.scopes.some((scope) => typeof scope !== "string") ||
+        JSON.stringify([...new Set(identity.scopes)].toSorted()) !==
+          JSON.stringify([...new Set(selected.scopes)].toSorted()) ||
+        (identity.expiresAt !== undefined && (!Number.isFinite(identity.expiresAt) || identity.expiresAt <= Date.now()))
+      )
+        throw new Error();
+    } catch {
+      throw new SecretStoreError("denied");
+    }
+    // A disconnect or rebind while verification was in flight revokes this invocation too.
+    await this.assertCurrent(selected, actor);
+    return material;
   }
 
   async bind(
