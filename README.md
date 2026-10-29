@@ -2,7 +2,7 @@
 
 Sanoma runs the everyday admin of a small business: the emails, posts, web pages and records it relies on. You tell it in plain words how your business works, an AI agent writes the code, and you see each change before it goes live. Before Sanoma sends or publishes anything, it checks the rules you set, and anything you marked as needing a yes waits for one. It keeps a record of everything it did.
 
-All of it is ordinary TypeScript in a repo your business owns, so any developer can read it, change it or move it elsewhere. This repo holds the code that runs it, the app you work in, and the integrations with other services, and you can run all of it yourself.
+All of it is ordinary TypeScript in a repo your business owns, so any developer can read it, change it or move it elsewhere. This repo holds the code that runs it, the app you work in, and its integrations with services like Stripe and GitHub, and you can run all of it yourself.
 
 The agent can be ours, or a coding agent you already pay for: Claude Code, Codex, Copilot, OpenCode or Pi. Either way it works on a separate copy, and your business only changes when you accept it ([the chat](packages/app/README.md)).
 
