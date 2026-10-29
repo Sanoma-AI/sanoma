@@ -246,7 +246,7 @@ describe("the Worker's object", () => {
     expect((await object.fetch(new Request("https://x.workers.dev/__sanoma/health?start=1"))).status).toBe(200);
     // It crashed: the next request starts another, and the first container's end arrives at that start.
     container.running = false;
-    container.start.mockImplementationOnce(() => {
+    vi.mocked(container.start).mockImplementationOnce(() => {
       container.running = true;
       endFirst(new Error("Container exited with unexpected exit code: 137"));
     });
