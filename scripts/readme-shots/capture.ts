@@ -91,43 +91,14 @@ async function statusIs(page: Page, status: string, timeout = 120_000): Promise<
   }
 }
 
-const p2 = (n: number) => String(n).padStart(2, "0");
-
-/** `when` as a datetime-local field's value: local time, to the minute. */
-const fieldValue = (when: Date) =>
-  `${when.getFullYear()}-${p2(when.getMonth() + 1)}-${p2(when.getDate())}T${p2(when.getHours())}:${p2(when.getMinutes())}`;
-
 /**
- * Types a datetime-local field's parts, as US English lays them out: month, day, year, then
- * hours, minutes, AM or PM. Checks the field read them so, since another locale orders them otherwise.
+ * demo.gif's storyboard, at 1200×800: dana sends `client`'s invoice from the Clients board, the
+ * owner approves it in the Inbox with a note, the run sends it and waits a week to chase it, and the
+ * board shows it sent. Each frame is a screenshot shown for its own duration; a drawn cursor moves to
+ * what is clicked. Writes the frames and their list for ffmpeg's concat demuxer (`frames.txt`) to
+ * `dir`, and returns the run's path.
  */
-async function typeDateTime(page: Page, selector: string, when: Date, each: () => Promise<void>) {
-  const hours = when.getHours();
-  for (const part of [p2(when.getMonth() + 1), p2(when.getDate()), String(when.getFullYear())]) {
-    await page.keyboard.type(part);
-    await each();
-  }
-  await page.keyboard.press("ArrowRight");
-  for (const part of [p2(hours % 12 || 12), p2(when.getMinutes()), hours >= 12 ? "P" : "A"]) {
-    await page.keyboard.type(part);
-    await each();
-  }
-  const value = await page.$eval(selector, (e) => (e as HTMLInputElement).value);
-  if (value !== fieldValue(when)) {
-    throw new Error(
-      `readme:shots: typed ${fieldValue(when)} as month/day/year, but the field reads "${value}": Chrome lays out dates in another locale's order (on macOS, the system's)`,
-    );
-  }
-}
-
-/**
- * demo.gif's storyboard, at 1200×800: dana starts a run of announce from New run with a launch time
- * about a minute away, marketing-lead approves it in the Inbox with a note, and the run sleeps until
- * the launch, then finishes. Each frame is a screenshot shown for its own duration; a drawn cursor
- * moves to what is clicked. Writes the frames and their list for ffmpeg's concat demuxer
- * (`frames.txt`) to `dir`, and returns the run's path.
- */
-export async function recordDemo(browser: Browser, base: string, dir: string): Promise<string> {
+export async function recordDemo(browser: Browser, base: string, dir: string, client: string): Promise<string> {
   mkdirSync(dir, { recursive: true });
   const page = await open(browser, base, { actor: "dana", chat: false, width: 1200, height: 800, scale: 1 });
   await page.evaluateOnNewDocument(() => {
@@ -182,6 +153,13 @@ export async function recordDemo(browser: Browser, base: string, dir: string): P
     await press();
     await page.mouse.click(x, y);
   };
+  /** Switches who the page acts as: the app's localStorage and its cookie, which the server's render reads. */
+  const actAs = async (actor: string) => {
+    await page.evaluate((name) => localStorage.setItem("sanoma.actor", name), actor);
+    await page
+      .browserContext()
+      .setCookie({ name: "sanoma_actor", value: encodeURIComponent(actor), domain: new URL(base).hostname });
+  };
   const typeIn = async (selector: string, text: string, step: number) => {
     await page.focus(selector);
     for (let i = 0; i < text.length; i += step) {
@@ -190,61 +168,45 @@ export async function recordDemo(browser: Browser, base: string, dir: string): P
     }
   };
 
-  // 1. The workflow's page.
-  await page.goto(`${base}/workflows/announce`, { waitUntil: "networkidle0" });
+  // 1. The Clients board.
+  await page.goto(`${base}/sites/clients`, { waitUntil: "networkidle0" });
   await wait(2000);
-  await shot(2.2);
-  // 2. New run: the form, filled in.
-  await click(await byText(page, "a", "New run"));
-  await wait(900);
-  await shot(0.9);
-  await click(await need(page, "#field-title"));
-  await typeIn("#field-title", "Spring launch", 2);
-  await click(await need(page, "#field-body"));
-  await typeIn("#field-body", "<p>Spring is here: new templates, faster sync and a fresh look.</p>", 6);
-  // The field takes whole minutes: the first minute at least 30 s away, so the run is still
-  // sleeping when the demo comes back to it (about 20 s later) and finishes within 90 s.
-  const launchAt = new Date(Math.ceil((Date.now() + 30_000) / 60_000) * 60_000);
-  const field = await need(page, "#field-launchAt");
-  const box = (await field.boundingBox())!;
-  await click(field, 22 - box.width / 2);
-  await typeDateTime(page, "#field-launchAt", launchAt, () => shot(0.1));
-  await shot(0.8);
-  // 3. Start run: the run's page, waiting on the approval.
-  await click(await byText(page, "button", "Start run"));
+  await shot(2.4);
+  // 2. Send invoice on the client's card: the run's page, waiting on the owner's check.
+  const send = await page.$(
+    `::-p-xpath(//*[@data-slot="card"][.//*[normalize-space()=${JSON.stringify(client)}]]//button)`,
+  );
+  if (!send) throw new Error(`readme:shots: no button on ${client}'s card on ${page.url()}`);
+  await click(send);
   await page.waitForFunction(() => location.pathname.includes("/runs/"));
   await statusIs(page, "waiting");
   await wait(1500);
-  await shot(2.6);
+  await shot(2.8);
   const runPath = new URL(page.url()).pathname;
-  // 4. The Inbox, as marketing-lead.
+  // 3. The Inbox, as the owner.
   await moveTo(await need(page, 'a[href="/inbox"]'));
   await press();
-  await page.evaluate(() => localStorage.setItem("sanoma.actor", "marketing-lead"));
+  await actAs("owner");
   await page.goto(`${base}/inbox`, { waitUntil: "networkidle0" });
   await wait(1500);
-  await shot(2.4);
-  // 5. Approve there, with a note.
+  await shot(2.6);
+  // 4. Approve there, with a note.
   await click(await byText(page, "button", "Approve"));
   await wait(600);
   await shot(0.6);
-  await typeIn('[role="dialog"] textarea', "Copy looks good, ship it", 3);
+  await typeIn('[role="dialog"] textarea', "Looks right, send it", 3);
   await shot(0.6);
   await click(await byText(page, '[role="dialog"] button', "Approve"));
   await wait(1500);
   await shot(1.6);
-  // 6. Back to the run: sleeping until the launch, then finished, then its ledger.
-  // The bar's Workflows.
+  // 5. Back to the run: the invoice sent, the client marked, waiting a week to chase.
   await moveTo(await need(page, 'nav[aria-label="Sections"] a[href="/workflows"]'));
   await press();
   await page.goto(base + runPath, { waitUntil: "networkidle0" });
-  await wait(1800);
-  // Sleeping until the launch, which a run shows as running: a finished one would tell another story.
-  await statusIs(page, "running", 5000);
-  await shot(2.2);
-  await statusIs(page, "finished");
+  // Waiting out the week, which a run shows as running.
+  await statusIs(page, "running", 10_000);
   await wait(2500);
-  await shot(1.8);
+  await shot(2.6);
   for (let i = 1; i <= 6; i++) {
     await page.evaluate((y) => scrollTo(0, y), i * 100);
     await wait(60);
@@ -255,6 +217,11 @@ export async function recordDemo(browser: Browser, base: string, dir: string): P
   );
   await wait(500);
   await moveTo(await byText(page, '[role="tab"]', "Ledger"), 40, 10);
+  await shot(3);
+  // 6. The board again, as dana: the client under Sent.
+  await actAs("dana");
+  await page.goto(`${base}/sites/clients`, { waitUntil: "networkidle0" });
+  await wait(1500);
   await shot(3.5);
   await page.browserContext().close();
 
@@ -286,11 +253,11 @@ export function steadyStills(): void {
   steadied = true;
 }
 
-/** A 2x still of `path` as marketing-lead. */
+/** A 2x still of `path` as the owner. */
 export async function still(browser: Browser, base: string, path: string, out: string, options: Still): Promise<void> {
   let height = options.height ?? 900;
   const page = await open(browser, base, {
-    actor: "marketing-lead",
+    actor: "owner",
     chat: options.chat,
     width: 1440,
     height,

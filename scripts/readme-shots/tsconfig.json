@@ -1,10 +1,11 @@
 {
   // The root's options and paths, plus the DOM's types: the capture runs code in the page through
-  // puppeteer, and the root's lib (es2024 and Node's types) has no DOM. `pnpm typecheck` runs this. outbound/ is a company's site page, typed in the company's build.
+  // puppeteer, and the root's lib (es2024 and Node's types) has no DOM. `pnpm typecheck` runs this.
+  // company/ holds the demo company's own files, typed in its build.
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "lib": ["es2024", "dom", "dom.iterable"]
   },
   "include": ["."],
-  "exclude": ["outbound"]
+  "exclude": ["company"]
 }

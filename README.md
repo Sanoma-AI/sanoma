@@ -8,64 +8,75 @@ Sanoma is customizable admin software for small businesses: invoices and receipt
 
 The invoices, receipts and customers apps aren't out yet. Outbound runs in our own back office today.
 
-![A page built on the business's data: the outbound leads by stage, each with a button to move it on](.github/assets/board.png)
+![The app: dana sends Ada Park's invoice from the Clients board, the owner checks it in the Inbox, the invoice goes out and the run waits a week to chase it](.github/assets/demo.gif)
 
-A page your team works from, built on your data: here, sales leads by stage.
+A dog walker's month-end: dana sends a client's invoice from the board, the owner checks it in the Inbox, and the email goes out. The run then waits a week and chases the invoice if it is still unpaid. For the recording, emails go to Resend's in-memory fake.
 
-![The same leads as a table, one open for editing, and the page that uses them listed below](.github/assets/data.png)
+![A dog walker's Clients board: clients by where their invoice is, with Send invoice and Mark paid buttons](.github/assets/board.png)
+
+A page your team works from, built on your data: here, a dog walker's clients by where their invoice is.
+
+![The same clients as a table, one open for editing, and the page that uses them listed below](.github/assets/data.png)
 
 The data behind it, as a table anyone can edit.
 
-![A workflow's steps: write a post, wait for approval, wait until launch time, publish](.github/assets/workflow.png)
-
-A workflow, step by step: which service each step uses, and where it waits for someone's OK.
-
 Status: early. Workflows run on [DBOS](https://dbos.dev) with Postgres: each vendor call is a durable step, approvals and sleeps survive restarts, and a lint keeps workflow code safe to replay. Before every vendor call and run start a policy, written in [Cedar](https://docs.cedarpolicy.com) in the repo, lets it through, denies it or holds it for an approver, as the people the repo declares, and a ledger records each run: who started it, every call with the policy's decision and the vendor's reply, every approval, and how it ended. Versioning is automatic: each run is stamped with a hash of the workflow code it started on, and only a worker on that version resumes it (`DBOS__APPVERSION` names a version instead; see [Versions](packages/workflows/README.md#versions)). The connectors so far are listed under [Contents](#contents); keeping a company's vendor settings (card limits, time-off policies, access in tools like Mercury, Gusto and Okta) in typed files is where it is headed, not what it does today.
-
-![The app: dana starts a run of announce, marketing-lead approves its launch copy in the Inbox, then the run finishes](.github/assets/demo.gif)
-
-A run of the workflow below: dana starts it, marketing-lead approves the copy, and it sleeps until a launch time a minute away, then publishes. For the recording Ghost is answered by its in-memory fake, though the form still shows Live vendors and "Calls Ghost for real".
 
 ## What a workflow looks like
 
-A company repo holds `sanoma.config.ts` with `workflows/`, `policies/` (Cedar) and `resources/` (its people among them) beside it, and the [`sanoma`](packages/sanoma/README.md) bin runs its workflows and the app. A workflow lists the vendor operations it may call, and can call nothing else. This one drafts a blog post, waits for the marketing lead, sleeps until launch, then publishes:
+A company repo holds `sanoma.config.ts` with `workflows/`, `policies/` (Cedar) and `resources/` (its people and its data among them) beside it, and the [`sanoma`](packages/sanoma/README.md) bin runs its workflows and the app. A workflow lists what it may call, and can call nothing else. This one invoices a client for the month's walks, once the owner has checked it, and chases it a week later if it is unpaid:
 
 ```ts
-// workflows/announce.ts
-import { ghost } from "@sanoma-ai/connector-ghost";
+// workflows/invoice.ts
+import { resend } from "@sanoma-ai/connector-resend";
 import { defineWorkflow, z } from "sanoma";
+import { clients } from "../resources/data.ts";
 
 export default defineWorkflow({
-  name: "announce",
+  name: "invoice",
+  title: "Invoice a client",
   trigger: "manual",
-  input: z.object({ title: z.string(), body: z.string(), launchAt: z.iso.datetime({ offset: true }) }),
-  uses: [ghost.post.create, ghost.post.publish, "approval", "sleep"],
-  run: async (ctx, { title, body, launchAt }) => {
-    const post = await ctx.ghost.post.create({ title, html: body, status: "draft" });
-    await ctx.approval("Review launch copy", {
-      approver: "marketing-lead",
-      covers: [ghost.post.publish],
-      links: [post.url],
-    });
-    await ctx.sleep({ until: launchAt });
-    return ctx.ghost.post.publish({ id: post.id });
+  input: z.object({ client: z.string() }),
+  uses: [clients.get, clients.save, resend.emails.send, "approval", "sleep"],
+  run: async (ctx, { client }) => {
+    const found = await ctx.data.clients.get({ key: client }, { name: "Find the client" });
+    if (found) {
+      const { dog, email, walks, rate } = found.record;
+      const invoice = {
+        to: email,
+        subject: `${dog}'s walks this month`,
+        text: `${walks} walks at $${rate}: $${walks * rate}. Thank you!`,
+      };
+      await ctx.approval("Check the invoice", {
+        approver: "owner",
+        covers: [resend.emails.send],
+        details: invoice.text,
+      });
+      await ctx.resend.emails.send(invoice, { name: "Send the invoice" });
+      await ctx.data.clients.save({ record: { ...found.record, invoice: "sent" } }, { name: "Mark it sent" });
+      await ctx.sleep({ days: 7 }, { name: "Wait a week" });
+      const later = await ctx.data.clients.get({ key: client }, { name: "Check it was paid" });
+      if (later?.record.invoice !== "paid") {
+        await ctx.resend.emails.send({ ...invoice, subject: `Reminder: ${invoice.subject}` }, { name: "Chase it" });
+      }
+    }
   },
 });
 ```
 
 The app draws this file as a graph before it runs, lists the approval in its Inbox, and shows each run's calls, decisions and replies in its ledger. A developer changes the workflow by changing the file. [`@sanoma-ai/workflows`](packages/workflows/README.md) has the whole API.
 
-![The announce workflow's page: its graph, with the ghost.post.create step selected and its details floating over the graph](.github/assets/workflow.png)
+![The invoice workflow's page: its graph, with the Send the invoice step selected and its details floating over the graph](.github/assets/workflow.png)
 
 The workflow's page: the graph is drawn from the file, and picking a step says what it does and finds its lines under Code.
 
-![The Inbox with "Review launch copy" approvals waiting for marketing-lead, the chat column beside it](.github/assets/inbox.png)
+![The Inbox with "Check the invoice" approvals waiting for the owner, the chat column beside it](.github/assets/inbox.png)
 
-The Inbox as marketing-lead: the approvals waiting for them, with the draft's link and what approving lets through. Beside it is the chat, where you ask the agent for a change and it shows you the edit to accept.
+The Inbox as the owner: the invoices waiting for a check, with what approving lets through. Beside it is the chat, where you ask the agent for a change and it shows you the edit to accept.
 
-![A finished run of announce: its graph, the approval and its note, and its ledger](.github/assets/run.png)
+![A run of invoice waiting a week to chase: its graph, the approval and its note, and its ledger](.github/assets/run.png)
 
-A finished run: the graph shows how each step went, and the ledger records each call with the policy's decision and the approval with its note.
+A run, a week from chasing: the graph shows how each step went, and the ledger records each call with the policy's decision and the approval with its note.
 
 ## Solved in public
 

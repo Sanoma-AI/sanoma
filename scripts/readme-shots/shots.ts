@@ -4,6 +4,7 @@ import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import {
   closeSync,
   copyFileSync,
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -34,58 +35,53 @@ const assets = join(repo, ".github/assets");
 // What the preview loads, each from its dist/ (as a company repo would), in dependency order.
 const BUILT: [dir: string, outputs: string[]][] = [
   ["packages/workflows", ["dist/index.js"]],
-  ["connectors/ghost", ["dist/index.js", "dist/fake.js"]],
+  ["connectors/resend", ["dist/index.js", "dist/fake.js"]],
   ["packages/testing", ["dist/index.js"]],
   ["packages/app", ["dist/server/server.js"]],
   ["packages/sanoma", ["dist/cli.js", "dist/index.js"]],
 ];
 
-// The preview's config: the README's workflow, with Ghost answered by its in-memory fake behind the
-// live connector, so the form still shows Live vendors.
-const CONFIG = `import { ghost } from "@sanoma-ai/connector-ghost";
-import { fakeGhost } from "@sanoma-ai/connector-ghost/fake";
+// The preview's config: the README's workflow, with Resend answered by its in-memory fake behind
+// the live connector, so the form still shows Live vendors.
+const CONFIG = `import { resend } from "@sanoma-ai/connector-resend";
+import { fakeResend } from "@sanoma-ai/connector-resend/fake";
 import { withFake } from "@sanoma-ai/testing";
 import { defineConfig } from "sanoma";
-import announce from "./workflows/announce.ts";
+import invoice from "./workflows/invoice.ts";
 
-export default defineConfig({ workflows: [announce], connectors: [withFake(ghost, fakeGhost())] });
+export default defineConfig({ workflows: [invoice], connectors: [withFake(resend, fakeResend())] });
 `;
 
 // The site still's site: its site.ts here, its page the packages/app README's (`writeRepo`).
 const SITE_TS = `import { defineSite } from "sanoma/site";
 
-export default defineSite({ title: "Launch desk" });
+export default defineSite({ title: "Billing", icon: "receipt" });
 `;
 
-// The board still's site: the outbound leads by stage, its page in outbound/ here (`writeRepo`).
-const BOARD_TS = `import { defineSite } from "sanoma/site";
+// The demo company's own files, copied in whole (`writeRepo`): the clients collection in
+// resources/data.ts, and the Clients board, where the demo starts and the board still is.
+const COMPANY = join(repo, "scripts/readme-shots/company");
 
-export default defineSite({ title: "Outbound", icon: "kanban" });
-`;
-const BOARD_PAGE = join(repo, "scripts/readme-shots/outbound/routes/index.tsx");
-
-// The data still's collection: the outbound fixture's resources/data.ts (which the launcher
-// imports), importing from sanoma as a company's does; and its records, saved as their owners.
-const DATA_TS = join(repo, "packages/workflows/test/fixtures/outbound/resources/data.ts");
-const LEADS = [
-  ["Acme Corp", "ada@acme.test", "meeting", "dana", "2027-05-28", 40],
-  ["Globex", "hank@globex.test", "contacted", "dana", "2027-05-20", 12],
-  ["Hooli", "gavin@hooli.test", "won", "marketing-lead", "2027-05-30", 120],
-  ["Initech", "peter@initech.test", "replied", "marketing-lead", "2027-05-26", 25],
-  ["Stark Industries", "pepper@stark.test", "researched", "marketing-lead", undefined, undefined],
-  ["Umbrella", "alice@umbrella.test", "researched", "dana", undefined, undefined],
+// The clients, saved as dana: name, dog, email, walks this month, rate per walk, invoice.
+const CLIENTS = [
+  ["Ada Park", "Biscuit", "ada@example.test", 18, 25, "to send"],
+  ["Ben Ortiz", "Pepper", "ben@example.test", 12, 25, "to send"],
+  ["Cara Nolan", "Mochi", "cara@example.test", 20, 22, "to send"],
+  ["Dev Shah", "Rocket", "dev@example.test", 8, 30, "sent"],
+  ["Eli Brooks", "Juniper", "eli@example.test", 16, 25, "paid"],
+  ["Fay Lin", "Otis", "fay@example.test", 10, 25, "paid"],
 ] as const;
+
+// The demo's client, whose invoice dana sends from the board.
+const DEMO_CLIENT = CLIENTS[0][0];
+
+// The two runs seeded for the Inbox still, as dana: the clients they invoice.
+const SEEDED = ["Ben Ortiz", "Cara Nolan"];
 
 const stillsDir = parseArgs({ options: { out: { type: "string" } } }).values.out;
 
 const started = Date.now();
 const say = (line: string) => console.log(`readme:shots ${((Date.now() - started) / 1000).toFixed(0)}s: ${line}`);
-
-// The two runs seeded for the Inbox still, as dana: title, body and launch time.
-const SEEDED = [
-  ["Summer sale", "<p>Everything is 20% off until Sunday.</p>", new Date(2027, 5, 1, 9)],
-  ["Pricing update", "<p>New plans for teams, from next month.</p>", new Date(2027, 5, 15, 10)],
-] as const;
 
 // The packages' own requires: `pg` and `@sanoma-ai/workflows` (its dist/, as the company repo loads it).
 const fromSanoma = createRequire(join(repo, "packages/sanoma/package.json"));
@@ -148,21 +144,22 @@ try {
   // Steadied stills (`--out`): fixed text for what differs from run to run.
   if (stillsDir) steadyStills();
   const frames = join(work, "frames");
-  const runPath = await recordDemo(browser, base, frames);
-  say("demo recorded; seeding two more runs that wait on marketing-lead, and the outbound leads");
-  await seed(acme);
+  await seedClients(acme);
+  const runPath = await recordDemo(browser, base, frames, DEMO_CLIENT);
+  say("demo recorded; seeding two more runs that wait on the owner");
+  await seedRuns(acme);
 
   const captured = stillsDir ?? join(work, "assets");
   mkdirSync(captured, { recursive: true });
   // The graph, a step selected and its details floating over it.
-  await still(browser, base, "/workflows/announce", join(captured, "workflow.png"), {
+  await still(browser, base, "/workflows/invoice", join(captured, "workflow.png"), {
     chat: false,
-    select: "ghost.post.create",
+    select: "Send the invoice",
     fullPage: true,
   });
   // The workflow's Runs tab, the demo's run open over the list.
   const runId = runPath.split("/").at(-1)!;
-  await still(browser, base, `/workflows/announce?view=runs&run=${runId}`, join(captured, "runs.png"), {
+  await still(browser, base, `/workflows/invoice?view=runs&run=${runId}`, join(captured, "runs.png"), {
     chat: false,
     height: 720,
   });
@@ -173,21 +170,21 @@ try {
   });
   await still(browser, base, runPath, join(captured, "run.png"), {
     chat: false,
-    select: "Review launch copy",
+    select: "Check the invoice",
     tab: "Ledger",
     fullPage: true,
   });
-  await still(browser, base, "/sites/launches", join(captured, "site.png"), {
+  await still(browser, base, "/sites/billing", join(captured, "site.png"), {
     chat: false,
     fullPage: true,
   });
-  // The outbound board: the site built on the collection.
-  await still(browser, base, "/sites/outbound", join(captured, "board.png"), {
+  // The Clients board: the site built on the collection.
+  await still(browser, base, "/sites/clients", join(captured, "board.png"), {
     chat: false,
     height: 720,
   });
-  // The grid sorted by stage, a record open in the form beside it.
-  await still(browser, base, "/data/outbound?order=stage&record=Initech", join(captured, "data.png"), {
+  // The grid sorted by invoice, a record open in the form beside it.
+  await still(browser, base, "/data/clients?order=invoice&record=Ben%20Ortiz", join(captured, "data.png"), {
     chat: false,
     fullPage: true,
   });
@@ -285,33 +282,39 @@ function replaceAssets(dir: string, files: string[]): void {
 }
 
 /**
- * Two more runs of announce from dana, waiting on marketing-lead, for the Inbox still, and the
- * outbound leads for the data still: through the runtime's client, as the app starts a run and
- * saves a record, with acme's config and the collection its resources/data.ts declares (as the
- * launcher adds it).
+ * A client of the runtime (`SanomaClient`), as the app makes one, with acme's config and the
+ * collection its resources/data.ts declares (as the launcher adds it).
  */
-async function seed(acme: string): Promise<void> {
+async function connect(acme: string) {
   const { SanomaClient } = (await import(pathToFileURL(fromSanoma.resolve("@sanoma-ai/workflows")).href)) as Workflows;
   const { default: config } = (await import(pathToFileURL(join(acme, "sanoma.config.ts")).href)) as {
     default: SanomaConfig;
   };
-  const { outbound } = (await import(pathToFileURL(join(acme, "resources/data.ts")).href)) as {
-    outbound: NonNullable<SanomaConfig["collections"]>[number];
+  const { clients } = (await import(pathToFileURL(join(acme, "resources/data.ts")).href)) as {
+    clients: NonNullable<SanomaConfig["collections"]>[number];
   };
-  const client = await SanomaClient.connect({
-    ...config,
-    collections: [outbound],
-    root: acme,
-    databaseUrl: databaseUrl.href,
-  });
+  return SanomaClient.connect({ ...config, collections: [clients], root: acme, databaseUrl: databaseUrl.href });
+}
+
+/** The clients, for the board the demo starts on and the data still: saved as dana, as the app saves a record. */
+async function seedClients(acme: string): Promise<void> {
+  const client = await connect(acme);
   try {
-    for (const [company, contact, stage, owner, lastTouched, seats] of LEADS) {
-      const record = { company, contact, stage, owner, ...(lastTouched && { lastTouched }), ...(seats && { seats }) };
-      await client.call("data.outbound.save", { record }, { actor: { id: owner }, id: crypto.randomUUID() });
+    for (const [name, dog, email, walks, rate, invoice] of CLIENTS) {
+      const record = { client: name, dog, email, walks, rate, invoice };
+      await client.call("data.clients.save", { record }, { actor: { id: "dana" }, id: crypto.randomUUID() });
     }
-    for (const [title, body, launchAt] of SEEDED) {
-      const input = { title, body, launchAt: launchAt.toISOString() };
-      const runId = await client.start("announce", input, { startedBy: { id: "dana" } });
+  } finally {
+    await client.close();
+  }
+}
+
+/** Two more runs of invoice from dana, waiting on the owner, for the Inbox still: started as the app starts one. */
+async function seedRuns(acme: string): Promise<void> {
+  const client = await connect(acme);
+  try {
+    for (const name of SEEDED) {
+      const runId = await client.start("invoice", { client: name }, { startedBy: { id: "dana" } });
       await waitFor(
         async () => (await client.run(runId))?.status,
         (status) => status === "waiting",
@@ -327,33 +330,26 @@ async function seed(acme: string): Promise<void> {
   }
 }
 
-/** A company repo named acme: the README's workflow, the config above, the packages/app README's site page, the outbound board, the outbound collection, and `node_modules` reaching this checkout. */
+/** A company repo named acme: the README's workflow, the config above, the packages/app README's site page, the demo company's files, and `node_modules` reaching this checkout. */
 function writeRepo(dir: string): void {
   const readme = readFileSync(join(repo, "README.md"), "utf8").replaceAll("\r\n", "\n");
-  const block = /^```ts\n\/\/ workflows\/announce\.ts\n([\s\S]*?)^```$/m.exec(readme);
-  if (!block?.[1]) fail("README.md has no ```ts block that starts with `// workflows/announce.ts`");
+  const block = /^```ts\n\/\/ workflows\/invoice\.ts\n([\s\S]*?)^```$/m.exec(readme);
+  if (!block?.[1]) fail("README.md has no ```ts block that starts with `// workflows/invoice.ts`");
+  cpSync(COMPANY, dir, { recursive: true });
   mkdirSync(join(dir, "workflows"), { recursive: true });
-  writeFileSync(join(dir, "workflows/announce.ts"), block[1]);
+  writeFileSync(join(dir, "workflows/invoice.ts"), block[1]);
   writeFileSync(join(dir, "sanoma.config.ts"), CONFIG);
   const appReadme = readFileSync(join(repo, "packages/app/README.md"), "utf8").replaceAll("\r\n", "\n");
-  const page = /^```tsx\n\/\/ sites\/launches\/routes\/index\.tsx\n([\s\S]*?)^```$/m.exec(appReadme);
+  const page = /^```tsx\n\/\/ sites\/billing\/routes\/index\.tsx\n([\s\S]*?)^```$/m.exec(appReadme);
   if (!page?.[1])
-    fail("packages/app/README.md has no ```tsx block that starts with `// sites/launches/routes/index.tsx`");
-  mkdirSync(join(dir, "sites/launches/routes"), { recursive: true });
-  writeFileSync(join(dir, "sites/launches/site.ts"), SITE_TS);
-  writeFileSync(join(dir, "sites/launches/routes/index.tsx"), page[1]);
-  mkdirSync(join(dir, "sites/outbound/routes"), { recursive: true });
-  writeFileSync(join(dir, "sites/outbound/site.ts"), BOARD_TS);
-  copyFileSync(BOARD_PAGE, join(dir, "sites/outbound/routes/index.tsx"));
-  mkdirSync(join(dir, "resources"));
-  writeFileSync(
-    join(dir, "resources/data.ts"),
-    readFileSync(DATA_TS, "utf8").replace('"@sanoma-ai/workflows/data"', '"sanoma/data"'),
-  );
+    fail("packages/app/README.md has no ```tsx block that starts with `// sites/billing/routes/index.tsx`");
+  mkdirSync(join(dir, "sites/billing/routes"), { recursive: true });
+  writeFileSync(join(dir, "sites/billing/site.ts"), SITE_TS);
+  writeFileSync(join(dir, "sites/billing/routes/index.tsx"), page[1]);
   writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "acme", private: true, type: "module" }));
   for (const [name, target] of [
     ["sanoma", "packages/sanoma"],
-    ["@sanoma-ai/connector-ghost", "connectors/ghost"],
+    ["@sanoma-ai/connector-resend", "connectors/resend"],
     ["@sanoma-ai/testing", "packages/testing"],
   ] as const) {
     const at = join(dir, "node_modules", name);

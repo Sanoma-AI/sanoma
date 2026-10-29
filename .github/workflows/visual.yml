@@ -9,7 +9,7 @@ on:
       - packages/sanoma/src/**
       - packages/workflows/src/**
       - packages/testing/src/**
-      - connectors/ghost/src/**
+      - connectors/resend/src/**
       - README.md
       - pnpm-lock.yaml
       - scripts/readme-shots/**
