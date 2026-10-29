@@ -7,6 +7,10 @@ import {
   CallRequest,
   ChangesQuery,
   ClearCredentialRequest,
+  PreviewConnectionRequest,
+  ConnectConnectionRequest,
+  TestConnectionRequest,
+  DisconnectConnectionRequest,
   ConnectExistingRequest,
   DecideCall,
   GoLiveRequest,
@@ -24,6 +28,11 @@ import {
   changes,
   clearCredential,
   credentials,
+  connections,
+  previewConnection,
+  connectConnection,
+  testConnection,
+  disconnectConnection,
   decide,
   driftReport,
   fileSource,
@@ -170,6 +179,26 @@ export const patchFn = createServerFn(CHANGE)
 
 /** Each vendor's credential statuses now: they change as people set them, and with the environment. */
 export const getCredentials = createServerFn(READ).handler(({ context }) => credentials(context.app));
+
+export const getConnections = createServerFn(READ)
+  .middleware([withPrincipal])
+  .handler(({ context }) => connections(context.app, context.principal));
+export const previewConnectionFn = createServerFn(CHANGE)
+  .middleware([withPrincipal])
+  .validator(validate(PreviewConnectionRequest))
+  .handler(({ data, context }) => previewConnection(context.app, context.principal, data));
+export const connectConnectionFn = createServerFn(CHANGE)
+  .middleware([withPrincipal])
+  .validator(validate(ConnectConnectionRequest))
+  .handler(({ data, context }) => connectConnection(context.app, context.principal, data));
+export const testConnectionFn = createServerFn(CHANGE)
+  .middleware([withPrincipal])
+  .validator(validate(TestConnectionRequest))
+  .handler(({ data, context }) => testConnection(context.app, context.principal, data));
+export const disconnectConnectionFn = createServerFn(CHANGE)
+  .middleware([withPrincipal])
+  .validator(validate(DisconnectConnectionRequest))
+  .handler(({ data, context }) => disconnectConnection(context.app, context.principal, data));
 
 export const setCredentialFn = createServerFn(CHANGE)
   .middleware([withPrincipal])

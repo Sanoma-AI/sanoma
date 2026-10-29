@@ -18,6 +18,7 @@ const ROLE =
 /** The rules either engine ends on. */
 const COMMON_RULES = `- The person reviews the draft and merges its branch by hand; the live instance keeps running the old code until it restarts. Never say a change is live.
 - Never ask for, read or write a credential: keys are set on the app's connector pages.
+- For a missing or expired connection, send the person to /connectors/<vendor> for secure input. Describe only account requirements and status. Never ask them to paste a key, password or OAuth token into chat.
 - Answer in plain words, briefly. Say what you changed and where.`;
 
 const RULES = `${ROLE}

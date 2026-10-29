@@ -3,6 +3,10 @@ import type {
   ApplyResult,
   ApprovalState,
   ChangeView,
+  Authentication,
+  ConnectionCard,
+  ConnectionReview,
+  SanomaClient,
   CredentialStatus,
   ErrorCode,
   HostEnforcement,
@@ -200,6 +204,67 @@ export interface ScenariosResponse {
  * when. Never a value.
  */
 export type CredentialsResponse = Record<string, CredentialStatus[]>;
+
+/** Metadata-only account management. Secret values are accepted only by the two intake calls. */
+export interface ConnectionsResponse {
+  cards: ConnectionCard[];
+  rules: { id: string; name: string; vendor: string; method: string; scopes: readonly string[] }[];
+  methods: Record<
+    string,
+    Record<string, { kind: Authentication["kind"]; verifiable: boolean; schema?: Record<string, unknown> }>
+  >;
+  store: Awaited<ReturnType<SanomaClient["secretStoreStatus"]>>;
+}
+const ConnectionReference = z.object({ vendor: z.string().min(1), $connection: z.string().min(1) });
+export const ConnectionTarget = z.union([
+  z.object({ connection: ConnectionReference }),
+  z.object({ rule: z.string().min(1) }),
+]);
+const SecureCredentials = z
+  .unknown()
+  .refine(
+    (value) => value === undefined || JSON.stringify(value).length <= 1_048_576,
+    "The credential bundle is too large",
+  );
+export const PreviewConnectionRequest = z.object({
+  target: ConnectionTarget,
+  requestId: z.string().min(1).max(200),
+  credentials: SecureCredentials.optional(),
+});
+export type PreviewConnectionRequest = z.infer<typeof PreviewConnectionRequest>;
+const ConnectionReviewSchema: z.ZodType<ConnectionReview> = z.object({
+  target: ConnectionTarget,
+  id: z.string(),
+  vendor: z.string(),
+  method: z.string(),
+  definition: z.string(),
+  credential: z.string().optional(),
+  location: z
+    .object({ store: z.string(), namespace: z.string(), path: z.string(), management: z.enum(["sanoma", "external"]) })
+    .optional(),
+  expectedRevision: z.string().nullable(),
+  requiredScopes: z.array(z.string()),
+  expectedAccount: z.string().optional(),
+  previousAccount: z.string().optional(),
+  requestId: z.string().min(1).max(200),
+  authorization: z.string(),
+  account: z.string(),
+  scopes: z.array(z.string()),
+  credentialVersion: z.string().nullable(),
+  expiresAt: z.number().optional(),
+});
+export const ConnectConnectionRequest = z.object({
+  review: ConnectionReviewSchema,
+  credentials: SecureCredentials.optional(),
+});
+export type ConnectConnectionRequest = z.infer<typeof ConnectConnectionRequest>;
+export const TestConnectionRequest = z.object({
+  connection: ConnectionReference,
+  requestId: z.string().min(1).max(200),
+});
+export type TestConnectionRequest = z.infer<typeof TestConnectionRequest>;
+export const DisconnectConnectionRequest = TestConnectionRequest.extend({ expectedRevision: z.string().min(1) });
+export type DisconnectConnectionRequest = z.infer<typeof DisconnectConnectionRequest>;
 
 /**
  * Whether the chat has a model to answer on (`getChatModel`): the connector whose model the loop
