@@ -42,7 +42,7 @@ const session = (res: Response) => `sanoma_session=${setCookies(res).sanoma_sess
 describe("githubLogin", () => {
   let login: LoginProvider;
   beforeEach(() => {
-    vi.stubEnv("SANOMA_SECRETS_KEY", "a test key");
+    vi.stubEnv("SANOMA_SIGNING_KEY", Buffer.alloc(32, 1).toString("base64"));
     login = githubLogin({ clientId: "client-id", clientSecret: "client-secret" });
   });
   afterEach(() => vi.unstubAllEnvs());
@@ -98,7 +98,7 @@ describe("githubLogin", () => {
       expect(await login.resolveActor(request("/", { cookie: bad }))).toBeUndefined();
       expect((await login.handle!(request("/", { cookie: bad })))?.status).toBe(401);
     }
-    vi.stubEnv("SANOMA_SECRETS_KEY", "another key");
+    vi.stubEnv("SANOMA_SIGNING_KEY", Buffer.alloc(32, 2).toString("base64"));
     const other = githubLogin({ clientId: "client-id", clientSecret: "client-secret" });
     expect(await other.resolveActor(request("/", { cookie }))).toBeUndefined();
   });
@@ -137,9 +137,9 @@ describe("githubLogin", () => {
     expect(res.headers.get("set-cookie")).toMatch(/^sanoma_session=; Max-Age=0; Path=\//);
   });
 
-  it("refuses to start without SANOMA_SECRETS_KEY, naming it", () => {
-    vi.stubEnv("SANOMA_SECRETS_KEY", "");
-    expect(() => githubLogin({ clientId: "id", clientSecret: "secret" })).toThrow(/SANOMA_SECRETS_KEY/);
+  it("refuses to start without SANOMA_SIGNING_KEY, naming it", () => {
+    vi.stubEnv("SANOMA_SIGNING_KEY", "");
+    expect(() => githubLogin({ clientId: "id", clientSecret: "secret" })).toThrow(/SANOMA_SIGNING_KEY/);
   });
 
   describe("admitting only declared people", () => {

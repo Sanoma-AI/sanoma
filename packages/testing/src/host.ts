@@ -58,7 +58,13 @@ const hostCheckOps = defineConnector("hostcheck", {
 });
 const hostCheckDriver = defineDriver(
   hostCheckOps,
-  { probe: { digest: async () => ({ digest: credentialDigest(process.env[HOST_CHECK_CREDENTIAL] ?? "") }) } },
+  {
+    probe: {
+      digest: async (_input, call) => ({
+        digest: credentialDigest((await call.secrets.get(HOST_CHECK_CREDENTIAL)) ?? ""),
+      }),
+    },
+  },
   { env: z.object({ [HOST_CHECK_CREDENTIAL]: z.string().describe("Any value: the host check sets it") }) },
 );
 

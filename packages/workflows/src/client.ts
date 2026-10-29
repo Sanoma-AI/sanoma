@@ -1,3 +1,4 @@
+import { connectionDriver, type ConnectionRef, type ConnectionSnapshot } from "./connection.ts";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { type DBOSClient, Error as DBOSErrors, type WorkflowStatusString } from "@dbos-inc/dbos-sdk";
@@ -16,7 +17,7 @@ import { beforeOf, decideCall, decideStart, recorded, startHoldOf } from "./call
 import { type Chats, chatStore } from "./chats.ts";
 import { collectionsDriver } from "./collection.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
-import { deleteCredential, storeCredential, storedCredentials, storedSecrets } from "./credentials.ts";
+import { configuredSecrets } from "./credentials.ts";
 import { dbosClient, lazyPool, type LazyPool } from "./db.ts";
 import { type CredentialStatus, credentialsOf } from "./env.ts";
 import { type ApprovalState, Principal, type WorkflowDefinition } from "./define.ts";
@@ -52,7 +53,7 @@ import type { CallContext, Driver, Op } from "./op.ts";
 import { allowAll, type RecordedDecision } from "./policy.ts";
 import { admit, readPeople } from "./resources.ts";
 import type { RunArgs, StartHold } from "./run.ts";
-import type { Secrets } from "./secret.ts";
+import type { SecretAccess, SecretLocation } from "./secret-store.ts";
 import {
   BUILT_IN_WORKFLOWS,
   CALL_WORKFLOW,
@@ -206,6 +207,7 @@ export interface ChangesFilter {
 
 /** What `SanomaClient.call` takes besides the operation's id and its input. */
 export interface CallOptions {
+  connection?: ConnectionRef;
   /**
    * Who calls, by id, admitted as `startedBy` is: the policy decides as them, a write's record
    * names them, and a save's `updatedBy` is their id.
@@ -243,7 +245,7 @@ export class SanomaClient {
   /** On the config's database, for the runtime's tables (the credentials, the chats): opened on first use. */
   private readonly pool: LazyPool;
   /** What a direct call's driver reads secrets from, as a worker's live driver does. */
-  private readonly storedSecrets: Secrets;
+  private readonly storedSecrets: SecretAccess;
   /** The operator agent's chats: their rows and their transcripts, in the config's database. */
   readonly chats: Chats;
   private readonly options: ClientOptions;
@@ -260,7 +262,7 @@ export class SanomaClient {
     this.options = options;
     this.audit = ownedLedger(config);
     this.pool = lazyPool(config.databaseUrl, "client");
-    this.storedSecrets = storedSecrets(() => this.db(), "sanoma");
+    this.storedSecrets = configuredSecrets(config.secrets, () => this.db());
     this.chats = chatStore(() => this.db());
   }
 
@@ -272,7 +274,14 @@ export class SanomaClient {
   static async connect(config: SanomaConfig, options: ClientOptions = {}): Promise<SanomaClient> {
     const resolved = resolveConfig(config);
     const dbos = await dbosClient(resolved.databaseUrl, resolved.appName);
-    return new SanomaClient(dbos, resolved, resolved.driversByVendor, options);
+    const client = new SanomaClient(dbos, resolved, resolved.driversByVendor, options);
+    try {
+      await client.storedSecrets.validate();
+      return client;
+    } catch (error) {
+      await client.close();
+      throw error;
+    }
   }
 
   /**
@@ -414,14 +423,21 @@ export class SanomaClient {
     const fn = drivers.get(op.id);
     if (!fn) throw new SanomaError("invalid_input", `${op.id} has no driver: the connector package must attach one`);
     const parsed = parseOrThrow(op.input, input, `The input to ${op.id} does not match its schema`, { op: op.id });
+    const connection = await this.config.connections.select(op.vendor, options.connection, actor.id);
+    const selected = connection && {
+      $connection: connection.id,
+      vendor: connection.vendor,
+      revision: connection.revision,
+    };
     const runId = `direct:${actor.id}:${id}`;
     const heldId = `call:${actor.id}:${id}`;
-    const held: RunArgs = { input: { op: op.id, input }, startedBy: actor };
+    const held: RunArgs = { input: { op: op.id, input, ...(selected && { connection: selected }) }, startedBy: actor };
     const logged = recorded(op, parsed);
     const write = op.effect !== "read";
     // Only an id the caller gave can have been used: a write made, or held, with it settles it.
     if (write && options.id !== undefined) {
-      const first = (await this.recordedCall(runId, op.id, logged)) ?? (await this.heldCall(op.id, heldId, held));
+      const first =
+        (await this.recordedCall(runId, op.id, logged, connection)) ?? (await this.heldCall(op.id, heldId, held));
       if (first) return first.output;
     }
     const before = await beforeOf(policy, op, parsed, this.config.collections, (get, key) =>
@@ -431,7 +447,7 @@ export class SanomaClient {
       ),
     );
     const run = { id: runId, workflow: CALL_WORKFLOW, approvals: [] };
-    const decision = decideCall(policy, op, parsed, actor, run, before);
+    const decision = decideCall(policy, op, parsed, actor, run, { ...before, ...(connection && { connection }) });
     if (decision.kind === "deny") throw new PolicyDeniedError(op.id, decision.reason);
     if (decision.kind === "approve") {
       await this.start(CALL_WORKFLOW, held.input, { startedBy: actor, runId: heldId });
@@ -445,7 +461,10 @@ export class SanomaClient {
       attempt: 1,
       secrets: this.storedSecrets,
       by: actor.id,
+      principal: actor,
+      ...(connection && { connection }),
     };
+    await this.config.connections.assertCurrent(connection, actor.id);
     if (!write) return outputOf(op, () => fn(parsed, context));
     return this.directWrite({ op, fn, parsed, logged, actor, decision, context });
   }
@@ -469,13 +488,22 @@ export class SanomaClient {
     const { op, parsed, logged, actor, decision, context } = call;
     const { runId } = context;
     const { dataStore, collections, ledger } = this.config;
-    const conn = op.vendor === DATA_VENDOR && !ledger && dataStore ? await (await dataStore.db()).connect() : undefined;
+    const connectionMutation = op.id.startsWith("sanoma.connection.");
+    const transactionStore = connectionMutation
+      ? this.config.connectionPool
+      : op.vendor === DATA_VENDOR
+        ? dataStore
+        : undefined;
+    const conn = !ledger && transactionStore ? await (await transactionStore.db()).connect() : undefined;
     let broken: Error | undefined;
     try {
       await conn?.query("BEGIN");
-      // On the transaction's connection, the collection's own driver: it has no `env` to guard.
+      // The metadata or collection driver shares the ledger transaction; neither has an env guard.
       const fn = conn
-        ? collectionsDriver([collections.get(op.resource)!], { db: async () => conn }).ops[`${op.resource}.${op.name}`]!
+        ? (connectionMutation
+            ? connectionDriver(this.config.connections.onDatabase(conn))
+            : collectionsDriver([collections.get(op.resource)!], { db: async () => conn })
+          ).ops[`${op.resource}.${op.name}`]!
         : call.fn;
       const at = Date.now();
       const record = (outcome: { output: unknown } | { error: ErrorInfo }): LedgerRecord => ({
@@ -492,6 +520,7 @@ export class SanomaClient {
         effect: op.effect,
         input: logged,
         decision,
+        ...(context.connection && { connection: context.connection }),
         ...outcome,
         durationMs: Date.now() - at,
       });
@@ -513,7 +542,7 @@ export class SanomaClient {
         return output;
       }
       await conn.query("ROLLBACK");
-      return (await this.recordedCall(runId, op.id, logged))!.output;
+      return (await this.recordedCall(runId, op.id, logged, context.connection))!.output;
     } catch (err) {
       await conn?.query("ROLLBACK").catch((e: Error) => (broken = e));
       throw err;
@@ -526,10 +555,19 @@ export class SanomaClient {
    * What the direct write recorded as `runId` returned, when one did: refused (`invalid_input`)
    * when it was of another operation or input, and its failure again (`driver_failed`) when it failed.
    */
-  private async recordedCall(runId: string, opId: string, input: unknown): Promise<{ output: unknown } | undefined> {
+  private async recordedCall(
+    runId: string,
+    opId: string,
+    input: unknown,
+    connection?: ConnectionSnapshot,
+  ): Promise<{ output: unknown } | undefined> {
     const first = (await this.audit.store.read(runId)).find((r) => r.type === "op.called");
     if (!first) return undefined;
-    const differs = [...(first.op === opId ? [] : ["op"]), ...(sameJson(first.input, input) ? [] : ["input"])];
+    const differs = [
+      ...(first.op === opId ? [] : ["op"]),
+      ...(sameJson(first.input, input) ? [] : ["input"]),
+      ...(sameJson(first.connection ?? null, connection ?? null) ? [] : ["connection"]),
+    ];
     if (differs.length) {
       throw new SanomaError(
         "invalid_input",
@@ -1061,7 +1099,8 @@ export class SanomaClient {
         issues: [{ path: ["value"], message: problem, code: "custom" }],
       });
     }
-    await storeCredential(await this.db(), { name, value, setBy });
+    const current = await this.storedSecrets.read(name);
+    await this.storedSecrets.write(name, value, { expectedVersion: current?.version ?? null, by: setBy });
   }
 
   /**
@@ -1072,7 +1111,8 @@ export class SanomaClient {
   async clearCredential(name: string, options: { by: string }): Promise<void> {
     await this.admittedBy(options);
     this.declared(name, () => undefined);
-    await deleteCredential(await this.db(), name);
+    const current = await this.storedSecrets.read(name);
+    if (current) await this.storedSecrets.delete(name, { expectedVersion: current.version, by: options.by });
   }
 
   /**
@@ -1091,7 +1131,8 @@ export class SanomaClient {
       const path = VARIABLE.test(name) ? "value" : "name";
       throw new SanomaError("invalid_input", problem, { issues: [{ path: [path], message: problem, code: "custom" }] });
     }
-    await storeCredential(await this.db(), { name, value, setBy });
+    const current = await this.storedSecrets.read(name);
+    await this.storedSecrets.write(name, value, { expectedVersion: current?.version ?? null, by: setBy });
   }
 
   /**
@@ -1100,40 +1141,51 @@ export class SanomaClient {
    * is left out. For server code: a page is told whether one is set, never its value.
    */
   async secrets(names: readonly string[]): Promise<Map<string, StoredSecret>> {
-    const rows = await storedCredentials(await this.db(), names);
     const found = new Map<string, StoredSecret>();
     for (const name of names) {
-      const env = process.env[name];
-      const row = rows.get(name);
-      if (env && env !== row?.value) found.set(name, { value: env, source: "environment" });
-      else if (row) found.set(name, { ...row, source: "stored" });
+      const row = await this.storedSecrets.read(name);
+      const location = this.storedSecrets.location(name);
+      if (row)
+        found.set(name, {
+          value: row.value,
+          source: location.store === "environment" ? "environment" : "stored",
+          version: row.version,
+          location,
+          ...(row.updatedBy && { setBy: row.updatedBy }),
+          ...(row.updatedAt && { setAt: row.updatedAt }),
+        });
     }
     return found;
   }
 
-  /**
-   * Each vendor's declared variables and their statuses now: from this process's environment,
-   * which wins, else from the stored credentials, with `source` saying which (a value equal to
-   * the stored one, as a worker in this process loads it, is `stored`), and who set a stored one
-   * and when. Never a value.
-   */
+  /** Non-secret statuses for the selected store and declared bindings. */
   async credentials(): Promise<Map<string, CredentialStatus[]>> {
     const names = [...credentialsOf(this.drivers, () => undefined).values()].flat().map((c) => c.name);
-    if (!names.length) return new Map();
-    const rows = await storedCredentials(await this.db(), names);
-    const statuses = credentialsOf(this.drivers, (name) => process.env[name] || rows.get(name)?.value);
-    const sourced = (c: CredentialStatus): CredentialStatus => {
-      const row = rows.get(c.name);
-      const env = process.env[c.name];
-      // A worker in this process loads the stored values into its environment: those are stored.
-      if (env && env !== row?.value) return { ...c, source: "environment" };
-      return row ? { ...c, source: "stored", setBy: row.setBy, setAt: row.setAt } : c;
-    };
-    return new Map([...statuses].map(([vendor, list]) => [vendor, list.map(sourced)]));
+    const rows = await this.secrets(names);
+    const statuses = credentialsOf(this.drivers, (name) => rows.get(name)?.value);
+    return new Map(
+      [...statuses].map(([vendor, list]) => [
+        vendor,
+        list.map((c) => {
+          const row = rows.get(c.name);
+          return {
+            ...c,
+            location: this.storedSecrets.location(c.name),
+            ...(row && { source: row.source, setBy: row.setBy, setAt: row.setAt }),
+          };
+        }),
+      ]),
+    );
   }
 
   async close() {
-    await Promise.all([this.dbos.destroy(), this.pool.close(), this.audit.close(), this.config.dataStore?.close()]);
+    await Promise.all([
+      this.dbos.destroy(),
+      this.pool.close(),
+      this.audit.close(),
+      this.config.dataStore?.close(),
+      this.config.connectionPool.close(),
+    ]);
   }
 
   /**
@@ -1285,6 +1337,8 @@ const sameJson = (a: unknown, b: unknown): boolean => isDeepStrictEqual(asJson(a
 
 /** A secret's value as `SanomaClient.secrets` reads it, and where from. */
 export interface StoredSecret {
+  version?: string;
+  location?: SecretLocation;
   value: string;
   source: "environment" | "stored";
   /** Who stored it (`setSecret`'s `by`), and when, as an ISO 8601 time. */
@@ -1293,7 +1347,7 @@ export interface StoredSecret {
 }
 
 /** What an environment variable's name looks like. */
-const VARIABLE = /^[A-Z_][A-Z0-9_]*$/;
+const VARIABLE = /^[A-Z][A-Z0-9_]*$/;
 
 const alreadyDecided = (runId: string, a: ApprovalState) =>
   new SanomaError(

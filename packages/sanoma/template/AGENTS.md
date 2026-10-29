@@ -14,7 +14,7 @@ resources/people.ts  who may use the app, the agents, and the groups (sanoma.per
 scenarios/           Gherkin: how each workflow should go against the connectors' fakes
 sites/               pages the app serves under /sites/<name>: sites/<name>/routes/ holds TanStack Router file routes (none yet)
 apps/<app>/          an app: app.ts (defineApp, its source repository) and its own workflows/, resources/, policies/, scenarios/ and sites/ (none yet)
-.env                 this machine's settings and secrets, never committed (SANOMA_SECRETS_KEY encrypts stored credentials)
+.env                 this machine's settings and secrets, never committed (SANOMA_SIGNING_KEY signs app state; SANOMA_SECRETS_KEY encrypts stored credentials)
 ```
 
 The app's name is `package.json`'s `name`. `.env.example` (written by `sanoma env`) and `.oxlintrc.json` (written by `sanoma check` when missing) are generated, and so are `sites/__virtual.ts` and `sites/tsconfig.json` once there is a site: commit them, never edit them. `.sanoma/` holds what `sanoma` builds (ignored), `.sanoma/api.ts` among it: the typed `api` for sites, and `.sanoma/schema.cedarschema`, the schema the policies are checked against, both generated from the config by `sanoma check` and at start, never edited.
@@ -68,4 +68,4 @@ export default defineConfig({ connectors: [betterAuth] });
 permit (principal in Sanoma::Group::"visitors", action == Sanoma::Action::"workflow:hello", resource);
 ```
 
-There is no secret to set: the login signs its cookies with a key derived from `SANOMA_SECRETS_KEY`. The site's sign-in and sign-up pages are forms from `sanoma/ui` that `fetch` POST JSON to `/auth/better-auth/sign-in/email` and `/auth/better-auth/sign-up/email`; `useActor()`, from `sanoma/site`, says who signed in (`visitor:better-auth:<id>`, in `visitors`). The connector's README has the routes.
+There is no secret to set: the login signs its cookies with a key derived from `SANOMA_SIGNING_KEY`. The site's sign-in and sign-up pages are forms from `sanoma/ui` that `fetch` POST JSON to `/auth/better-auth/sign-in/email` and `/auth/better-auth/sign-up/email`; `useActor()`, from `sanoma/site`, says who signed in (`visitor:better-auth:<id>`, in `visitors`). The connector's README has the routes.

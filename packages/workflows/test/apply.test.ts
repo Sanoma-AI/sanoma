@@ -391,7 +391,13 @@ describe("the apply workflow on a vendor that replaces", () => {
   const acme = withSetup(acmeTf.connector, { driver: () => acmeTf.driver(bridge, () => ({})) });
   const { source, commits } = recordingSource(root);
   const app = useTestApp(
-    { workflows: [], connectors: [acme], ledger: memoryLedger(), root },
+    {
+      workflows: [],
+      connectors: [acme],
+      ledger: memoryLedger(),
+      root,
+      secrets: { bindings: { ACME_TOKEN: { env: "ACME_TOKEN" } } },
+    },
     { databaseUrl: testDatabaseUrl("apply-acme"), source },
   );
   const web = "resources/acme.ts#web";

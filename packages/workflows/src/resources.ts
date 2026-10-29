@@ -1,3 +1,4 @@
+import type { ConnectionRef } from "./connection.ts";
 import { readFileSync, statSync } from "node:fs";
 import { dirname, relative, resolve, sep } from "node:path";
 import { parsed } from "./ast.ts";
@@ -51,6 +52,7 @@ export interface DeclaredResource {
   span: Span;
   /** Its fields, as its type checked them: each resource it names as that resource's `name`. */
   desired: Record<string, unknown>;
+  connection?: ConnectionRef;
   /**
    * Where it names another declared resource: the field's dotted path (a list item's with its
    * index, `teams.0`) to that resource's id.
@@ -365,8 +367,8 @@ export function readDataFiles(
     const result = build(file, exp);
     visiting.pop();
     if (result?.declared.name !== undefined) {
-      const { vendor, type, name } = result.declared;
-      const key = `${vendor}.${type} ${JSON.stringify(name)}`;
+      const { vendor, type, name, connection } = result.declared;
+      const key = `${vendor}.${type} ${JSON.stringify(name)}${connection ? ` (${connection.$connection})` : ""}`;
       const first = byName.get(key);
       if (first === undefined) byName.set(key, id);
       else {
@@ -412,7 +414,7 @@ export function readDataFiles(
     if (!ok) return undefined;
     try {
       // Checked as running the file would: by the resource type, which allows a resource only where its `fields.references` say.
-      return { declared: resource(fields as never), refs };
+      return { declared: resource(fields as never, { connection: exp.connection }), refs };
     } catch (e) {
       // One line per problem: zod's own spans lines.
       file.problem(exp.start, `export const ${exp.name}: ${(e as Error).message.replaceAll(/\s*\n\s*/g, " ")}`);
@@ -428,14 +430,16 @@ export function readDataFiles(
     const vendor = vendors.get(file)!.get(exp.vendor);
     if (binding === undefined || vendor === undefined) continue;
     const type = `${vendor}.${exp.type}`;
-    const object = `${binding.type} ${binding.id}`;
+    const object = `${binding.type} ${binding.id}${binding.connection ? ` (${binding.connection.$connection})` : ""}`;
     const first = boundBy.get(object);
     const why =
-      binding.type !== type
-        ? `${id} is bound to a ${binding.type} in ${LOCKFILE}, but declares a ${type}`
-        : first !== undefined
-          ? `${id} is bound to the same ${object} as ${first} in ${LOCKFILE}: bind each object once`
-          : undefined;
+      exp.connection !== undefined && binding.connection?.$connection !== exp.connection.$connection
+        ? `${id} changes the connection of a bound resource: explicitly unbind it before selecting another account`
+        : binding.type !== type
+          ? `${id} is bound to a ${binding.type} in ${LOCKFILE}, but declares a ${type}`
+          : first !== undefined
+            ? `${id} is bound to the same ${object} as ${first} in ${LOCKFILE}: bind each object once`
+            : undefined;
     if (why === undefined) boundBy.set(object, id);
     else {
       // Left out, as any declaration with a problem, and so is any that names it.
@@ -463,7 +467,7 @@ export function readDataFiles(
   for (const [id, { file, exp }] of declarations) {
     const result = declare(id);
     if (!result) continue;
-    const { vendor, type, name: identity, desired } = result.declared;
+    const { vendor, type, name: identity, desired, connection } = result.declared;
     const binding = lock.bindings[id]?.id;
     resources.push({
       id,
@@ -475,6 +479,7 @@ export function readDataFiles(
       ...(binding !== undefined && { binding }),
       span: [exp.start, exp.end],
       desired,
+      ...(connection && { connection }),
       refs: result.refs,
     });
   }

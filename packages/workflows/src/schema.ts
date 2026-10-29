@@ -104,6 +104,16 @@ function buildSchema(
       memberOf: [{ id: `effect:${op.effect}` }],
       appliesTo: applies(op.id === CHANGE_MERGE ? CHANGE : "Target", {
         ...input(op.input),
+        connection: optional(
+          record({
+            id: STRING,
+            vendor: STRING,
+            method: STRING,
+            account: STRING,
+            revision: STRING,
+            scopes: { type: "Set", element: STRING },
+          }),
+        ),
         ...(before && { before: optional(before) }),
       }),
     };

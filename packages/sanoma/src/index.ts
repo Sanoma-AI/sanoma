@@ -42,3 +42,22 @@ export {
   type WorkflowDefinition,
 } from "@sanoma-ai/workflows";
 export { z } from "zod";
+export {
+  type SecretConfiguration,
+  type SecretBinding,
+  type SecretStore,
+  type SecretStoreCapabilities,
+  type SecretAddress,
+  type SecretValue,
+  type Authentication,
+  defineAuthentication,
+} from "@sanoma-ai/workflows";
+
+export {
+  defineConnection,
+  defineConnectionRule,
+  connectionRef,
+  type ConnectionRef,
+  type ConnectionDefinition,
+  type ConnectionRule,
+} from "@sanoma-ai/workflows";

@@ -1,3 +1,14 @@
+import { configuredSecrets } from "./credentials.ts";
+import { currentRun } from "./run.ts";
+import {
+  connectionCatalog,
+  ConnectionRegistry,
+  connectionDriver,
+  connectionOps,
+  type ConnectionDefinition,
+  type ConnectionRule,
+} from "./connection.ts";
+import { checkSecretConfiguration, type SecretConfiguration } from "./secret-store.ts";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -81,6 +92,10 @@ export interface SanomaConfig {
    * only, for tests.
    */
   ledger?: LedgerStore;
+  /** Credential storage and explicit bindings. Omitted: encrypted Postgres, no environment fallback. */
+  secrets?: SecretConfiguration;
+  connections?: readonly ConnectionDefinition[];
+  connectionRules?: readonly ConnectionRule[];
   /** Postgres for the runtime. Defaults to `SANOMA_DATABASE_URL`, then `DEFAULT_DATABASE_URL`. */
   databaseUrl?: string;
   /** The file that defined the config, absolute, when known. Set by `defineConfig` from its call site. */
@@ -118,6 +133,9 @@ export interface SanomaConfig {
 
 /** A config, checked, with everything a worker, client or app derives from it. */
 export interface ResolvedConfig {
+  secrets: SecretConfiguration;
+  connections: ConnectionRegistry;
+  connectionPool: LazyPool;
   /**
    * Scopes workflows, queues and versions in the system database: the `name` of
    * `<root>/package.json` when it names one, else "sanoma".
@@ -252,6 +270,7 @@ export function rootOf(config: Pick<SanomaConfig, "root" | "file">): string | un
  * `startApp`, the `sanoma` bin when it loads the config.
  */
 export function resolveConfig(config: SanomaConfig): ResolvedConfig {
+  checkSecretConfiguration(config.secrets ?? {});
   if (!Array.isArray(config.connectors)) {
     throw new Error("The config needs `connectors`: the connectors its workflows call, as their packages export them");
   }
@@ -280,6 +299,12 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   const hostTyped = [...types.values()].some((type) => type.host);
   // Built-in: the collections' operations, `data.<name>.<op>`, on the config's database.
   const databaseUrl = resolveDatabaseUrl(config);
+  const connectionPool = lazyPool(databaseUrl, "connections");
+  const connections = new ConnectionRegistry(
+    connectionCatalog(config.connectors, config.connections, config.connectionRules),
+    () => connectionPool.db(),
+    configuredSecrets(config.secrets ?? {}, () => connectionPool.db()),
+  );
   const declared = [...collections.values()];
   const dataStore = declared.length ? lazyPool(databaseUrl, "data") : undefined;
   // Built-in, in every config: a change's operations, which the template's policy names
@@ -287,6 +312,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   const ops = indexConnectors([
     ...running,
     changeOps,
+    connectionOps,
     appsListOps,
     ...(hostTyped ? [sourceOps] : []),
     ...(dataStore ? [collectionsConnector(declared)] : []),
@@ -299,6 +325,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     [
       ...driversByVendor.values(),
       changeDriver(remotes),
+      connectionDriver(connections),
       appsListDriver,
       ...(hostTyped ? [sourceDriver] : []),
       ...(dataStore ? [collectionsDriver(declared, dataStore)] : []),
@@ -326,7 +353,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   const connectors = connectorsOf(config);
   // The types the data files may declare: the vendors' and the people's, whose resources are left out.
   const declarable = resourceTypesOf(connectors);
-  const read = () => readDeclared(root, connectors, declarable, types);
+  const read = () => readDeclared(root, connectors, declarable, types, connections);
   if (types.size) {
     names.set(
       DRIFT_WORKFLOW,
@@ -343,6 +370,9 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   if (call.uses.length) names.set(CALL_WORKFLOW, call);
   const { policy, policies, problems: policyProblems } = policyAt(root, { ops, workflows: names, collections });
   return {
+    secrets: config.secrets ?? {},
+    connections,
+    connectionPool,
     appName,
     databaseUrl,
     // The built-in's code and operations are part of the app's version, like the config's own.
@@ -523,15 +553,38 @@ async function readDeclared(
   connectors: readonly Connector<any, any>[],
   declarable: ReadonlyMap<string, Resource>,
   types: ReadonlyMap<string, Resource>,
+  connections: ConnectionRegistry,
 ): Promise<Omit<ApplyDeclared, "rebinds">> {
   // Loaded when a run reads the files, not with the worker: the reader parses with oxc-parser.
   const { readDataFiles } = await import("./resources.ts");
   const { resources, bindings, orphans, problems } = readDataFiles(root, connectors, declarable);
+  // Read inside the data-file durable step: every operation of the plan uses one pinned account.
+  const run = currentRun.getStore();
+  if (run && !run.sandbox) {
+    for (const resource of resources.filter((r) => types.has(`${r.vendor}.${r.type}`))) {
+      try {
+        const selected = await connections.select(resource.vendor, resource.connection, run.actor.id);
+        if (selected) {
+          const pinned = { vendor: selected.vendor, $connection: selected.id, revision: selected.revision };
+          const locked = bindings[resource.id]?.connection;
+          if (locked && (locked.$connection !== pinned.$connection || locked.revision !== pinned.revision))
+            throw new Error("The bound resource's account changed; explicitly unbind before using a new account");
+          resource.connection = pinned;
+        }
+      } catch {
+        problems.push({
+          file: resource.file,
+          message: `${resource.id}: its connection is unavailable or changed; reconnect and explicitly rebind`,
+        });
+        resources.splice(resources.indexOf(resource), 1);
+      }
+    }
+  }
   return {
     // Only `types`' resources have a vendor object to check or apply: not the people's (vendorless).
     resources: resources
       .filter((r) => types.has(`${r.vendor}.${r.type}`))
-      .map(({ id, vendor, type, name, identity, binding, desired, refs }) => ({
+      .map(({ id, vendor, type, name, identity, binding, desired, refs, connection }) => ({
         id,
         vendor,
         type,
@@ -540,6 +593,7 @@ async function readDeclared(
         ...(binding !== undefined && { binding }),
         desired: withoutWriteOnly(types.get(`${vendor}.${type}`)!.fields, desired),
         refs,
+        ...(connection && { connection }),
       })),
     bindings,
     orphans,

@@ -60,6 +60,9 @@ describe("the people types", () => {
       "sanoma.change.review",
       "sanoma.change.merge",
       "sanoma.change.close",
+      "sanoma.connection.disconnect",
+      "sanoma.connection.bind",
+      "sanoma.connection.create",
       "sanoma.apps.list",
     ]);
     // No drift or apply: the change workflow, and call for the listing of apps, in every config.

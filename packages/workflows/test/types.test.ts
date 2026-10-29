@@ -26,6 +26,9 @@ export const wf = defineWorkflow({
   input: z.object({ id: z.string() }),
   uses: [shop.order.get, "sleep"],
   run: async (ctx, { id }) => {
+    await ctx.shop.order.get({ id }, { connection: { vendor: "shop", $connection: "shop/production" } });
+    // @ts-expect-error an account of another connector cannot be selected
+    await ctx.shop.order.get({ id }, { connection: { vendor: "mail", $connection: "mail/support" } });
     const order = await ctx.shop.order.get({ id });
     const total: number = order.total;
     await ctx.sleep({ minutes: 5 });

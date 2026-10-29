@@ -439,7 +439,7 @@ describe("the composer and a model", () => {
 
     it("drops the note once the key is set", async () => {
       // Made up, and never sent: the page only asks whether it is set.
-      vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-not-a-key");
+      await client!.setCredential("ANTHROPIC_API_KEY", "sk-ant-not-a-key", { by: "ada" });
       const column = await chatColumn(bare!.url);
       expect(column).not.toContain("Connect a model");
       expect(column).toMatch(/<button(?![^>]*aria-describedby)[^>]*aria-label="Send"/);

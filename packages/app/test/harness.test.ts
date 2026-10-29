@@ -158,7 +158,12 @@ export const ada = sanoma.person({ id: "ada" });
 );
 
 const testApp = useTestApp(
-  { workflows: [], connectors: [anthropic], root },
+  {
+    workflows: [],
+    connectors: [anthropic],
+    root,
+    secrets: { bindings: { ANTHROPIC_API_KEY: { env: "ANTHROPIC_API_KEY" } } },
+  },
   { databaseUrl: testDatabaseUrl("harness") },
 );
 

@@ -16,7 +16,7 @@ import { promisify } from "node:util";
 import { RUNTIME_AGENTS } from "@sanoma-ai/workflows";
 import { readPeople } from "@sanoma-ai/workflows/describe";
 import { groupNamesOf, isVisitor, principalIdsOf } from "@sanoma-ai/workflows/shared";
-import { writeSecretsKey } from "./key.ts";
+import { writeDeploymentKeys } from "./key.ts";
 
 const run = promisify(execFile);
 
@@ -48,7 +48,7 @@ export interface StartOptions {
  * a company there and says so; anywhere else it does nothing and says it did not. Starting copies
  * the template, names the package after the directory, declares whoever starts it as the first
  * person in `resources/people.ts` (so the app admits them), writes `.env` (a new
- * `SANOMA_SECRETS_KEY`, keeping what it already holds; no database URL, so `sanoma` runs the
+ * signing and encryption key, keeping what it already holds; no database URL, so `sanoma` runs the
  * company's own Postgres), commits what it wrote as the first
  * commit of a git repository, as the machine's git user, then installs with the package manager
  * that ran this (`npm_config_user_agent`, else pnpm) and adds the lockfile to that commit. Throws
@@ -89,7 +89,7 @@ export async function startCompany(
   const people = join(cwd, "resources", "people.ts");
   writeFileSync(people, declareFounder(readFileSync(people, "utf8"), await creator()));
 
-  writeSecretsKey(join(cwd, ".env"));
+  writeDeploymentKeys(join(cwd, ".env"));
 
   const packageManager = packageManagerOf(process.env.npm_config_user_agent);
   if (packageManager !== "pnpm") rmSync(join(cwd, "pnpm-workspace.yaml"));

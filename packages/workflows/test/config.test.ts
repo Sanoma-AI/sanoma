@@ -85,7 +85,10 @@ describe("a connector made by another copy of the package", () => {
 
   it("is refused, saying so, when another build made it in another shape", () => {
     const build = "install the sanoma packages and connectors from one build";
-    const later = { ...ghost, [VENDOR]: { ...ghost[VENDOR], format: 2 } } as unknown as Connector<any, any>;
+    const later = {
+      ...ghost,
+      [VENDOR]: { ...ghost[VENDOR], format: ghost[VENDOR].format + 1 },
+    } as unknown as Connector<any, any>;
     expect(() => resolveConfig(config({ connectors: [later] }))).toThrow(
       `The "ghost" connector was made by another build of @sanoma-ai/workflows: ${build}`,
     );
@@ -176,7 +179,13 @@ describe("a change's operations, built in", () => {
     const resolved = resolveConfig({ workflows: [], connectors: [] });
     const ids = ["sanoma.change.open", "sanoma.change.review", "sanoma.change.merge", "sanoma.change.close"];
     // Beside the listing of apps, also built in.
-    expect([...resolved.ops.keys()]).toEqual([...ids, "sanoma.apps.list"]);
+    expect([...resolved.ops.keys()]).toEqual([
+      ...ids,
+      "sanoma.connection.disconnect",
+      "sanoma.connection.bind",
+      "sanoma.connection.create",
+      "sanoma.apps.list",
+    ]);
     expect(ids.map((id) => resolved.ops.get(id)!.effect)).toEqual(["write", "write", "write", "write"]);
     expect(resolved.ops.get("sanoma.change.merge")!.target!({ id: "c1" })).toBe("change:c1");
     await expect(resolved.drivers.get("sanoma.change.merge")!({}, {} as never)).rejects.toThrow(

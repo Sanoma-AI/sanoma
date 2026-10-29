@@ -1,3 +1,4 @@
+import type { ConnectionRef } from "./connection.ts";
 import { basename, dirname, join, relative } from "node:path";
 import type { Node } from "./ast.ts";
 import { inside, nearestDir, RELATIVE } from "./paths.ts";
@@ -64,6 +65,7 @@ export interface DataFileExport {
   vendor: string;
   type: string;
   desired: { [field: string]: DataValue };
+  connection?: ConnectionRef;
   /** The `export const` statement. */
   start: number;
   end: number;
@@ -350,14 +352,39 @@ export function readDataFile(
       );
       return;
     }
-    const [arg] = init.arguments;
-    if (init.arguments.length !== 1 || arg.type !== "ObjectExpression") {
-      fail(init, `${vendor}.${type} takes one object literal: \`${vendor}.${type}({ … })\``);
+    const [arg, options] = init.arguments;
+    if (init.arguments.length < 1 || init.arguments.length > 2 || arg.type !== "ObjectExpression") {
+      fail(init, `${vendor}.${type} takes desired fields and optional { connection: { vendor, $connection } }`);
       return;
+    }
+    let connection: ConnectionRef | undefined;
+    if (options) {
+      const parsed = value(options) as { connection?: ConnectionRef } | undefined;
+      const ref = parsed?.connection;
+      if (
+        !parsed ||
+        Object.keys(parsed).length !== 1 ||
+        !ref ||
+        typeof ref.vendor !== "string" ||
+        typeof ref.$connection !== "string" ||
+        Object.keys(ref).some((k) => k !== "vendor" && k !== "$connection")
+      ) {
+        fail(options, 'Write { connection: { vendor: "vendor", $connection: "vendor/name" } } with literal values');
+        return;
+      }
+      connection = ref;
     }
     const desired = value(arg);
     if (desired !== undefined) {
-      exports.push({ name, vendor, type, desired: desired as DataFileExport["desired"], start: s.start, end: s.end });
+      exports.push({
+        name,
+        vendor,
+        type,
+        desired: desired as DataFileExport["desired"],
+        ...(connection && { connection }),
+        start: s.start,
+        end: s.end,
+      });
     }
   }
 

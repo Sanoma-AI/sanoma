@@ -53,9 +53,9 @@ export const shop = withSetup(defineConnector("shop", specs, info), {
 
 `withSetup` lays what it is given over what the connector already carries, and keeps it on the connector's vendor record, so a spread copy of the connector keeps it too. A config that needs a driver made otherwise (another bridge, other options) swaps the driver and keeps the fake: `withSetup(github, { driver: () => githubDriver({ bridge }) })`. It is for connector packages and configs, not for workflows, which the lint does not let import it. Both are optional: a connector without a driver declares its operations and implements none, so a workflow using one is refused; a connector without a fake has none for sandbox runs, which the app's connector page says.
 
-A connector that signs visitors in to a public site attaches a login half too, as `login`: `withSetup(connector, { login: (context) => half })`. The app calls it once per public site whose `site.ts` names the connector (`defineSite({ public: true, login: "<vendor>" })`), when it starts, with a `LoginContext` (the database, a key of its own derived from `SANOMA_SECRETS_KEY` to sign its cookies with, a vendor's secrets, the site's origins); a login that keeps tables in the database migrates them there, serialized and idempotent. The `LoginHalf` it makes (see its type) answers the provider's stable subject for a request, never a principal: the app makes the visitor's principal from it, so a connector cannot set a visitor's groups. A visitor's address, for rate limits, is the `CLIENT_IP_HEADER` header the app sets, never `X-Forwarded-For`. One vendor's connectors attach one `login`, as for a driver. [`@sanoma-ai/connector-better-auth`](https://www.npmjs.com/package/@sanoma-ai/connector-better-auth) is one, email and password on the company's database. The app makes it as it starts and sends it every request to the site's own host ([public sites](https://www.npmjs.com/package/@sanoma-ai/app#public-sites)).
+A connector that signs visitors in to a public site attaches a login half too, as `login`: `withSetup(connector, { login: (context) => half })`. The app calls it once per public site whose `site.ts` names the connector (`defineSite({ public: true, login: "<vendor>" })`), when it starts, with a `LoginContext` (the database, a key of its own derived from `SANOMA_SIGNING_KEY` to sign its cookies with, a vendor's secrets, the site's origins); a login that keeps tables in the database migrates them there, serialized and idempotent. The `LoginHalf` it makes (see its type) answers the provider's stable subject for a request, never a principal: the app makes the visitor's principal from it, so a connector cannot set a visitor's groups. A visitor's address, for rate limits, is the `CLIENT_IP_HEADER` header the app sets, never `X-Forwarded-For`. One vendor's connectors attach one `login`, as for a driver. [`@sanoma-ai/connector-better-auth`](https://www.npmjs.com/package/@sanoma-ai/connector-better-auth) is one, email and password on the company's database. The app makes it as it starts and sends it every request to the site's own host ([public sites](https://www.npmjs.com/package/@sanoma-ai/app#public-sites)).
 
-A model connector attaches a model half, as `model`: `withSetup(connector, { model: (context) => provider })`, an AI SDK provider (`ProviderV4` from `@ai-sdk/provider`) with the vendor's adapter as the transport. The app makes it for its model registry, once per resolved config and client (again after one that throws), where its models are `<vendor>/<model-id>`; it answers `languageModel("default")` with the connector's own default. Its `ModelContext` gives it the secrets as a login's does (the environment's, then the stored credentials), which it reads when a model is called, so a key set on the connector page is used without a restart (unless the environment sets one, which wins); its driver declares the key in `env`, with no operations if it needs none. One vendor's connectors attach one `model`. [`@sanoma-ai/connector-anthropic`](https://www.npmjs.com/package/@sanoma-ai/connector-anthropic) is one.
+A model connector attaches a model half, as `model`: `withSetup(connector, { model: (context) => provider })`, an AI SDK provider (`ProviderV4` from `@ai-sdk/provider`) with the vendor's adapter as the transport. The app makes it for its model registry, once per resolved config and client (again after one that throws), where its models are `<vendor>/<model-id>`; it answers `languageModel("default")` with the connector's own default. Its `ModelContext` gives it the secrets as a login's does (the selected store and explicit bindings), which it reads when a model is called; its driver declares the key in `env`, with no operations if it needs none. One vendor's connectors attach one `model`. [`@sanoma-ai/connector-anthropic`](https://www.npmjs.com/package/@sanoma-ai/connector-anthropic) is one.
 
 A git host's connector attaches a remote half, as `remote`: `withSetup(connector, { remote: () => half })`, a `RemoteHalf` made once per resolved config and kept in `ResolvedConfig.remotes` by vendor; `remoteFor(remotes, url)` finds the one whose `matches` reads a clone URL, with the repository. `open(repo, { secrets })` gives a `SourceHost`: the repository's pull requests (find, open, squash-merge at a head, close), the `sanoma` commit status, and `enforcement(base)`, whether the host refuses a change to the branch that is not a merge (`HostEnforcement`); its `token(prefer)` is what a push signs in with. `webhook(request, { secrets })` verifies a delivery and says what happened (`RemoteEvent`: a branch pushed, a pull request closed). It reads its tokens through `secrets` when called, as a model half does. One vendor's connectors attach one `remote`. [`@sanoma-ai/connector-github`](https://www.npmjs.com/package/@sanoma-ai/connector-github#remote-half) is one.
 
@@ -78,7 +78,7 @@ That is the whole config; the rest is convention, from its `root` (`defineConfig
 - **The [scenarios](#scenarios-and-sandbox-runs)** are the `.feature` files of `<root>/scenarios/` and of each [app's](#apps) `scenarios/`, named by their path from the root (`scenarios/x.feature`, `apps/crm/scenarios/y.feature`); without any such directory the config has none.
 - **The [policy](#policies)** is `<root>/policies/**/*.cedar` and each [app's](#apps) `policies/**/*.cedar`, decided as the [people](#people) the data files declare; without any, every call and start is allowed (`allowAll`).
 
-The [data files](#data-files) are `resources/` in the root and in each [app](#apps). `ledger` and `databaseUrl` are the only other fields. `drivers`, `fakes`, `appName`, `scenarios` and `policy` are typed `never` on `SanomaConfig`, each deprecated with where it went, so the compiler and the editor say so; an untyped config that still names `drivers` or `fakes` is refused at run time rather than run live on what it no longer reads, and one that names `policy` rather than run allowing everything.
+The [data files](#data-files) are `resources/` in the root and in each [app](#apps). `ledger` and `databaseUrl` configure persistence; `secrets`, `connections` and `connectionRules` configure [credential storage and account identity](#credentials). `drivers`, `fakes`, `appName`, `scenarios` and `policy` are typed `never` on `SanomaConfig`, each deprecated with where it went, so the compiler and the editor say so; an untyped config that still names `drivers` or `fakes` is refused at run time rather than run live on what it no longer reads, and one that names `policy` rather than run allowing everything.
 
 The audit record goes to the ledger, by default `postgresLedger(databaseUrl)` on the config's database (see [Ledger](#ledger)); `ledger: jsonlLedger(dir)` keeps it in files instead, and `memoryLedger()` in this process only, for tests. `resolveConfig(config)` checks a config and derives what the runtime uses from it: the app name, database, version and queue (`sanoma:<appName>`, for every run, [sandbox runs](#scenarios-and-sandbox-runs) included), the operations by id, the driver each vendor's connector attaches, made once for the resolution (`driversByVendor`, in `connectors` order, and their functions by operation id, `drivers`), the makers of their fakes (`fakes`, by vendor), the scenarios directory, the policy (`policy`, the policies it is made from as `policies`, and what is wrong in them as `policyProblems`), and the config's `ledger` when it gives one; it opens nothing and reads no file outside the root: its `package.json`, whether `scenarios/` is a directory, and the policies with the people files. It throws, with one message, whatever the worker would refuse: a workflow or driver naming an operation the `connectors` don't declare, a workflow redeclaring an operation with another effect, an operation with no driver (`` `shop.order.refund` has no driver: the connector package must attach one ``), two different drivers or fakes for one vendor, two workflows with one name, a `ledger` that is not a store, a `drivers`, `fakes` or `policy` an untyped config still names. `startWorker`, `SanomaClient.connect` and `describeConfig` all call it, so they fail the same way. It adds the built-in [`drift`](#drift) and [`apply`](#apply) workflows when the connectors declare resource types, and [`call`](#direct-calls) when an operation may be called directly. The worker takes each operation's effect, schemas and retry setting from `connectors`, never from the workflow.
 
@@ -237,17 +237,132 @@ Every call is a step with a name, which a test and the graph name it by: `ctx.gi
 
 ### Drivers
 
-A driver implements a connector's operations with `defineDriver(connector, { resource: { name: (input, call) => … } })`, typed by the connector's schemas, and its package attaches it to the connector it exports (`withSetup`). `call` carries `idempotencyKey`, the same on every retry and replay of one call: pass it to the vendor (or dedupe on it) so a crash between the vendor's reply and the checkpoint does not repeat the side effect. It carries `secrets` too, the store `secret()` markers name (see [Secrets](#secrets)), and `by`, who the call is made as (`run:<id>` inside a run). A driver reads its credentials when it is called, never from the config, and declares them (see [Credentials](#credentials)).
+A driver implements a connector's operations with `defineDriver(connector, { resource: { name: (input, call) => … } })`, typed by the connector's schemas, and its package attaches it to the connector it exports (`withSetup`). `call` carries `idempotencyKey`, the same on every retry and replay of one call: pass it to the vendor (or dedupe on it) so a crash between the vendor's reply and the checkpoint does not repeat the side effect. It carries the authenticated `principal` and selected `connection` metadata, and `secrets` too, the store `secret()` markers name (see [Secrets](#secrets)), and `by`, who the call is made as (`run:<id>` inside a run). A driver reads its credentials when it is called, never from the config, and declares them (see [Credentials](#credentials)).
 
 When the vendor says no, throw a `DriverError(message, { retryable, status?, vendorCode? })`. An operation declared `idempotent` is tried up to three times (after 1 and 2 seconds) unless the error says `retryable: false` or the reply fails the output schema; any other operation is tried once. When the tries run out, the run fails with the last try's error, not a wrapper: for a `DriverError`, `errorCode(err)` is `"driver_failed"` and the ledger records the vendor's message, status and code. Anything else a driver throws (a `TypeError`, a plain `Error`) fails the run as it is, with no code.
 
 ### Credentials
 
-A driver reads its credentials from the environment when it is called, and declares them in `defineDriver`'s third argument: `defineDriver(acme, impl, { env: z.object({ ACME_API_KEY: z.string().describe("an API key, from Settings, API keys"), ACME_REGION: z.enum(["us", "eu"]).optional().describe("the region; default us") }) })`. Each key is a variable's name, its `.describe()` the one-line manual, `.optional()` marks one that may be unset. The driver reads the raw environment, so `.default()` and `.transform()` are not applied to what it reads (use `.optional()` and name the default in `.describe()`), and a `.refine()` or `.superRefine()` on the `z.object` is not evaluated, only its fields. Only the declared names are read, an empty value counts as unset, and a value is never kept: each variable is set, missing or invalid, with the schema's reason.
+The runtime separates a secret's storage, a connector's authentication method, and the named account used by a call. `secret("NAME")` remains a logical reference. `SanomaConfig.secrets` selects the store and maps names to locations; `connections` and `connectionRules` declare account requirements. Credential values stay outside code, workflow inputs, durable steps, descriptions and ledger records.
 
-The environment stays the only interface a driver sees, but a value need not come from a file. Locally, set values live in the `sanoma_credentials` table in the config's database (`databaseUrl`), which the runtime creates on first use, encrypted with AES-256-GCM under `SANOMA_SECRETS_KEY`, bound to its name (a value moved to another row does not decrypt) (32 random bytes, base64; `sanoma` writes one to `.env` when there is none): storing a value without the key fails, naming it. A value stored before encryption is read as it is, and encrypted on its next write. Set one from the app's connector page, or with `client.setCredential("GHOST_ADMIN_API_KEY", value, { by: "alice" })`, and delete it with `client.clearCredential(name, { by })`; `client.credentials()` gives each vendor's statuses, each with its `source` (`environment` or `stored`) and, for a stored one, who set it and when. A name no driver declares, or a value its schema refuses, is refused with the reason, never the value. `client.setSecret(name, value, { by })` stores a value under any variable's name, declared or not (a data file's `secret()`, or the app's own, such as its GitHub App's keys), checking a declared one as `setCredential` does, and `client.secrets(names)` reads values back for server code, the environment's first, with their `source` and who stored them. `startWorker` loads the stored values of the declared variables its environment leaves unset into `process.env` and listens for changes, so a value set or cleared is live without a restart: drivers read `process.env` when they are called. A worker whose listener drops reconnects and loads them again. A variable the process environment sets wins over a stored one, always. The worker starts whether or not every variable is there: it prints one line naming each vendor with a variable missing (and not optional) or invalid, `sanoma: 2 of 5 connectors not configured yet: ghost, resend; set their variables on the connector pages or in the environment` (`unconfigured` names them too; `quiet: true` prints nothing, as `runScenarios` does, its runs calling only the fakes). A call to that vendor then fails, as the call's own failure: a `DriverError` that is not retried, saying why, `<vendor> is not configured: <NAME> (<description>), <NAME> is invalid: <why>; set it on the connector page` (or `set in the environment`, when an invalid value is there: the environment wins over a stored value), checked against the environment at the moment of the call, so a value set on the connector page (or in `process.env`) takes effect on the next call, with no restart. The call's `op.called` record carries it, and the run fails with it like any other final driver failure. `startApp` starts the same way, and its connector pages show and set them.
+The store resolver is used by the worker's `call.secrets`, resource secret resolution, `SanomaClient` reads and mutations, and the app's login/model/remote secret lookup. It does not copy values into `process.env` or fall back to another store. Some shipped connector drivers still declare an `env` schema and read process variables themselves; migrating those drivers and their SDK/bridge sessions to connection-scoped authentication is a separate step. Registering a named connection does not by itself migrate such a driver.
 
-The values are plain text in the local database: the same exposure as a `.env` file on the same disk. Keep `.env` (`node --env-file-if-exists=.env`) for the bootstrap values a worker needs before it can read the database: the database URL, the bridge binary, the port. A value never reaches the ledger or the description; see [Secrets](#secrets) for why one must never be an input either.
+`client.setCredential(name, value, { by })` validates a driver-declared name and writes through the configured binding. `client.setSecret(name, value, { by })` also accepts undeclared logical names. `client.clearCredential(name, { by })` conditionally deletes a declared value. These operations refuse an externally managed binding or a read-only store. `client.credentials()` returns statuses, storage location, ownership and available change metadata without values; `client.secrets(names)` returns values to trusted server code only. The provider is validated when the client or worker starts; missing connector credentials can still be entered later.
+
+#### Secret store configuration
+
+```ts
+// sanoma.config.ts
+import { defineConfig, type SecretConfiguration } from "sanoma";
+
+const secrets = {
+  namespace: "local",
+  bindings: {
+    SUPPORT_AUTH: { path: "mail/support", management: "sanoma" },
+    FINANCE_AUTH: { path: "mail/finance", management: "external" },
+    BUILD_TOKEN: { env: "CI_BUILD_TOKEN" },
+    SANOMA_SIGNING_KEY: { bootstrap: "SANOMA_SIGNING_KEY" },
+    SANOMA_SECRETS_KEY: { bootstrap: "SANOMA_SECRETS_KEY" },
+  },
+} satisfies SecretConfiguration;
+
+export default defineConfig({ connectors: [], secrets });
+```
+
+Without `store`, the runtime uses its encrypted Postgres adapter. Without `namespace`, it uses `default`. An unbound name resolves to the same path in that namespace, managed by Sanoma. A `{ path, management: "external" }` binding is read-only to Sanoma even when its store can write. An `{ env }` binding reads that exact variable, is read-only, and does not fall back when absent. A `{ bootstrap }` binding explicitly exposes one deployment key to trusted host-secret resolution; it reads the corresponding environment or mounted-file input and never stores the key in Postgres. Bootstrap keys and recovery are described [below](#bootstrap-keys).
+
+An external adapter is a `SecretStore` instance supplied as `secrets.store`. It authenticates to one deployment's authorized storage before Sanoma can read values. Prefer a scoped workload identity where the adapter supports it; otherwise deliver its bootstrap credential through the host. Do not make that credential depend on reading the same store it unlocks. AWS Secrets Manager, Supabase Vault, HashiCorp Vault, Cloudflare Secrets Store, managed KMS storage and transfer tooling are not shipped by this foundation.
+
+Keep deployment composition in config code, outside workflows. For example, given an adapter instance already authenticated as `liveStore`:
+
+```ts
+import type { SecretConfiguration, SecretStore } from "sanoma";
+
+export function stores(liveStore: SecretStore) {
+  return {
+    local: { namespace: "local" },
+    preview: {
+      namespace: "preview",
+      bindings: { SUPPORT_AUTH: { env: "PREVIEW_MAIL_AUTH" } },
+    },
+    live: {
+      store: liveStore,
+      namespace: "live",
+      bindings: { SUPPORT_AUTH: { path: "mail/support", management: "external" } },
+    },
+  } satisfies Record<"local" | "preview" | "live", SecretConfiguration>;
+}
+```
+
+Pass exactly the selected configuration to `defineConfig`. A namespace is a routing boundary, not authorization: preview identities must be unable to read production values, and a built-in preview should have its own database and encryption key. Cloning the code grants no storage access. The config description exposes store ID, namespace and bindings, never the provider object or its credentials.
+
+The adapter contract uses `read({ namespace, path })`, `write(address, value, { expectedVersion, by })`, `delete(address, { expectedVersion, by })` and `validate(namespace)`. A read returns an opaque version beside the value; `expectedVersion: null` creates only when absent, and a version replaces or deletes only that version. `ensure` uses create-if-absent and reads the winner of a concurrent creation. Providers advertise writable access, a byte limit, conditional-write guarantees (`atomic`, `coordinated` or `none`), deletion behavior and change detection. `coordinated` covers cooperating Sanoma writers only; it cannot promise safety against external writers. Unsupported conditional writes are refused, not emulated with an unsafe read followed by a write.
+
+The built-in adapter stores one encrypted value or credential bundle per namespace/path, with a fresh version on each write. AES-256-GCM authenticates the complete namespace/path identity. It rejects plaintext rows and ciphertext moved to another address. `SecretStoreError` returns fixed codes without provider responses or secret values. Connector authentication declares its own versioned schema with `defineAuthentication`: `api-key`, `fields`, `oauth2` or `signed`, with storage requirements; `workload-identity` needs no persisted credential bundle. Connector authors use `checkAuthenticationStore`, `encodeCredentials` and `decodeCredentials` inside trusted code. These contracts do not implement OAuth consent, refresh or vendor account verification.
+
+Adapter authors can run `checkSecretStore(store, disposableNamespace)` from `@sanoma-ai/workflows`. It checks missing values, ownership, contention, stale versions, namespace separation, size limits and the advertised deletion behavior. It mutates test records; use a scoped test identity and clean up retained versions according to the provider. `memorySecretStore()` is the in-process reference implementation, not persistent deployment storage.
+
+#### Named connections
+
+A connector declares authentication methods in `withSetup(connector, { authentication: { methodName: definition } })`. Code then declares each account independently, sharing the connector and its driver factory. For a connector `mail` that declares an `apiKey` method:
+
+```ts
+import { defineConfig, defineConnection, defineConnectionRule } from "sanoma";
+import { secret } from "sanoma/resources";
+import { mail } from "@acme/mail";
+
+const support = defineConnection(mail, {
+  name: "support",
+  method: "apiKey",
+  credentials: secret("SUPPORT_AUTH"),
+  scopes: ["messages:read"],
+  account: "support@example.test",
+});
+const sales = defineConnection(mail, {
+  name: "sales",
+  method: "apiKey",
+  credentials: secret("SALES_AUTH"),
+  scopes: ["messages:read"],
+});
+const customer = defineConnectionRule(mail, {
+  name: "customer",
+  method: "apiKey",
+  createBy: [{ group: "visitors" }],
+  scopes: ["messages:read"],
+});
+
+export default defineConfig({
+  connectors: [mail],
+  connections: [support, sales],
+  connectionRules: [customer],
+});
+```
+
+`@acme/mail` is an illustrative connector, not a shipped package. `support` is also a typed `ConnectionRef<"mail">`, with ID `mail/support`. A workflow selects it in operation options, for example `ctx.mail.message.read({ id: "one" }, { connection: { vendor: "mail", $connection: "mail/support" } })`; a server-side direct call passes `connection: support` alongside its `actor`. A connector with authentication methods requires a selector unless exactly one declaration is marked `default: true`; one connected account alone is not an implicit default. Existing business-resource targets remain unchanged. Cedar sees optional `context.connection` metadata: ID, vendor, method, account, scopes and revision.
+
+Connection creation rules accept principal IDs or `{ group: "visitors" }` for authenticated customer sign-ups. The runtime uses admitted groups and owns each dynamic connection by the initiating principal. Disconnect invalidates the account revision and blocks new selection; vendor revocation and credential retirement are separate lifecycle work. Visitors also need a Cedar permit for the relevant operation; a creation rule does not bypass policy.
+
+`sanoma.connection.bind` is a policy-controlled access operation. Its input contains a declared reference, the granted account and scopes, and `expectedRevision` (`null` for an initial binding). It persists metadata and a new revision, never credential values. `sanoma.connection.create` takes a declared rule ID, account and scopes; the actor must be in `createBy`. It creates an owner-scoped dynamic ID without a repository commit. Trusted code can make a typed reference with `connectionRef(rule, id)`, but the runtime still verifies the stored owner and declaration on use. These metadata operations are not proof of vendor consent; connector intake must verify the account before binding it.
+
+A durable call pins its account revision before policy evaluation. A held direct call carries the same pin into its durable continuation. The runtime checks that the binding and definition still match before execution; rebinding or changing requirements requires a fresh call and authorization. Policy approvals cannot silently authorize a different account. The ledger records connection metadata, not its credential bundle. This changes the durable step layout; old runs are not replayed against the new layout.
+
+Resource declarations use the same identity as a literal option, read statically with the rest of the data file:
+
+```ts
+import { mail } from "@acme/mail/resources";
+
+export const inbox = mail.inbox({ name: "support" }, { connection: { vendor: "mail", $connection: "mail/support" } });
+```
+
+The resource type must belong to that connector. Apply and drift pin the selected revision when they read declarations, then carry it through imports, plans and effects. The resource lockfile records the connection alongside the vendor object ID. Changing the account of a bound resource requires an explicit unbind/rebind; a default change or a same-name account replacement cannot redirect a later apply. Named sandbox account state and the connection-management UI remain follow-up work.
+
+#### Bootstrap keys
+
+`SANOMA_SIGNING_KEY` signs application sessions and authorization state. `SANOMA_SECRETS_KEY` encrypts rows only for the built-in Postgres store. They are independent 32-byte random values encoded as base64. Each accepts exactly one source: the variable itself or its `_FILE` counterpart, whose file holds that base64 value. Conflicting sources, unreadable files and malformed values fail without printing the key. The launcher creates missing local keys in ignored `.env`; newly created files have mode `0600`. With an external store, it creates only the signing key.
+
+For a host deployment, deliver signing material, database authentication and the adapter's bootstrap through that host's secret delivery mechanism; include the encryption key only for the built-in store. A mount path is local to the process reading it: do not send a laptop's `_FILE` path to a remote container. Explicit bootstrap bindings let a host resource receive the key value through its secret channel while code keeps only the reference.
+
+Back up ciphertext, its namespace/path and version metadata, and the matching encryption key separately. A database-only backup cannot recover encrypted values. Preserve the signing key across ordinary restarts; replacing it invalidates sessions and pending signed authorization state. Changing a vendor token updates a stored value and its version; it does not rotate the row-encryption key. Replacing the encryption key without re-encrypting every retained value makes those values unreadable. Automated encryption-key rotation, external-store migration and OAuth reauthorization tooling are not included here.
 
 ### Resources
 
@@ -458,7 +573,7 @@ A database is a resource type that holds the company's database (a Neon project,
 
 Never put a secret in a workflow's input or an operation's input or output. They are persisted verbatim: DBOS keeps every step's input and output in Postgres, the ledger records each call's input and output, an approval a policy asks for carries the held call's input, and the app shows all of it to anyone who can reach it. A driver reads its credentials when it is called (from the environment or a secret store), and an operation that creates a secret (an API key, a password reset link) returns a reference to where it is stored, not the secret.
 
-A secret a resource needs is named, never written. A data file gives `secret("NAME")` (from `sanoma/resources`; `NAME` upper case, as a variable's; sanoma's own, `SANOMA_…`, only in a host's `secrets`) at a write-only field (or an entry of a write-only map), and `secret("NAME", { generate: true })` for one apply makes when none is stored: `database_password: secret("SUPABASE_DB_PASSWORD", { generate: true })`. Declarations, checkpoints and the ledger hold its marker, `{ "$secret": "NAME", "generate": true }`; the resource type refuses one at any other field, and its schema does not judge it. The driver resolves the markers just before the vendor call, `await resolveSecrets(input, call.secrets)`: each is replaced by the stored value, a `generate` one with none stored first made (32 random bytes, base64url) and stored, and one with nothing stored fails the call for good. `call.secrets` is `{ get(name), ensure(name, make) }`: the environment wins, else the `sanoma_credentials` table (see [Credentials](#credentials)); a fake's and a sandbox run's are in memory (`memorySecrets()`, which a driver's tests use too).
+A secret a resource needs is named, never written. A data file gives `secret("NAME")` (from `sanoma/resources`; `NAME` upper case, as a variable's; sanoma's own, `SANOMA_…`, only in a host's `secrets`) at a write-only field (or an entry of a write-only map), and `secret("NAME", { generate: true })` for one apply makes when none is stored: `database_password: secret("SUPABASE_DB_PASSWORD", { generate: true })`. Declarations, checkpoints and the ledger hold its marker, `{ "$secret": "NAME", "generate": true }`; the resource type refuses one at any other field, and its schema does not judge it. The driver resolves the markers just before the vendor call, `await resolveSecrets(input, call.secrets)`: each is replaced by the stored value, a `generate` one with none stored first made (32 random bytes, base64url) and stored, and one with nothing stored fails the call for good. `call.secrets` is `{ get(name), ensure(name, make) }`, resolved through the configured store and explicit bindings (see [Credentials](#credentials)); a fake's and a sandbox run's are in memory (`memorySecrets()`, which a driver's tests use too).
 
 ### Versions
 

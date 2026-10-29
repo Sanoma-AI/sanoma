@@ -261,3 +261,39 @@ export { defineDriver, type DriverImpl, type OpIdOf } from "./op.ts";
 // Steps for Gherkin tests, as data; Cucumber runs them from `@sanoma-ai/workflows/scenario`.
 export { defineSteps, type Expect, type RunView, type Seed, type Steps } from "./steps.ts";
 // defineFake lives at `@sanoma-ai/workflows/fake`: test tooling, not runtime.
+export {
+  SecretAccess,
+  SecretStoreError,
+  checkSecretConfiguration,
+  memorySecretStore,
+  type SecretAddress,
+  type SecretBinding,
+  type SecretConfiguration,
+  type SecretLocation,
+  type SecretStore,
+  type SecretStoreCapabilities,
+  type SecretStoreErrorCode,
+  type SecretValue,
+} from "./secret-store.ts";
+export {
+  defineAuthentication,
+  checkAuthenticationStore,
+  encodeCredentials,
+  decodeCredentials,
+  type Authentication,
+} from "./authentication.ts";
+export { checkSecretStore, type SecretStoreCheck } from "./secret-store-check.ts";
+
+export { postgresSecretStore } from "./credentials.ts";
+export { deploymentKey } from "./deployment-key.ts";
+
+export {
+  defineConnection,
+  defineConnectionRule,
+  connectionRef,
+  connectionOps,
+  type ConnectionRef,
+  type ConnectionDefinition,
+  type ConnectionRule,
+  type ConnectionSnapshot,
+} from "./connection.ts";

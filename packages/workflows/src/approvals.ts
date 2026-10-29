@@ -82,6 +82,7 @@ export interface HeldCall {
   op: string;
   seq?: number;
   input: unknown;
+  connection?: string;
   reasons?: string[] | undefined;
 }
 
@@ -109,7 +110,12 @@ export async function awaitApproval(
     ...(req.details === undefined ? {} : { details: req.details }),
     requestedBy: held ? "policy" : "workflow",
     covers,
-    ...(held && { op: held.op, ...heldOf(held), input: held.input }),
+    ...(held && {
+      op: held.op,
+      ...heldOf(held),
+      input: held.input,
+      ...(held.connection && { connection: held.connection }),
+    }),
     status: "pending",
     requestedAt: 0,
     refused: [],

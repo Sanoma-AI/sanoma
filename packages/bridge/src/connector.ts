@@ -391,7 +391,10 @@ export function tfConnector<
       const configOf = async (desired: Record<string, unknown>, ctx: CallContext, dryRun = false) => {
         const { secrets } = ctx;
         const view = dryRun
-          ? { ...secrets, ensure: async (name: string, make: () => string) => (await secrets.get(name)) ?? make() }
+          ? {
+              get: (name: string) => secrets.get(name),
+              ensure: async (name: string, make: () => string) => (await secrets.get(name)) ?? make(),
+            }
           : secrets;
         const resolved = await resolveSecrets(desired, view);
         return JSON.stringify(
@@ -490,7 +493,23 @@ export function tfConnector<
           }),
       });
     }
-    return defineDriver(connector, impl as never);
+    // Named accounts require provider sessions isolated by connection (B1). Never ignore a selector.
+    const isolated = Object.fromEntries(
+      Object.entries(impl).map(([group, functions]) => [
+        group,
+        Object.fromEntries(
+          Object.entries(functions).map(([name, fn]) => [
+            name,
+            (input: unknown, ctx: CallContext) => {
+              if (ctx.connection)
+                throw new DriverError("Named connections require isolated provider sessions", { retryable: false });
+              return (fn as (input: unknown, ctx: CallContext) => unknown)(input, ctx);
+            },
+          ]),
+        ),
+      ]),
+    );
+    return defineDriver(connector, isolated as never);
   }
 
   return {

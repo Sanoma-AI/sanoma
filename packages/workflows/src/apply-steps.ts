@@ -69,11 +69,14 @@ export function applySteps(
       DBOS.runStep(
         async (): Promise<Approver | undefined> => {
           const run = runNow();
-          for (const { op: id, input } of calls) {
+          for (const { op: id, input, connection } of calls) {
             const op = run.state.ops.get(id)!;
             // Parsed as the call will be, so the policy sees the same input with its defaults.
             const parsed = op.input.safeParse(input);
-            const decision = await decide(run, op, parsed.success ? parsed.data : input);
+            const selected = run.sandbox
+              ? undefined
+              : await run.state.connections?.select(op.vendor, connection, run.actor.id);
+            const decision = await decide(run, op, parsed.success ? parsed.data : input, selected);
             if (decision.kind === "approve") return decision.approver;
           }
           return undefined;

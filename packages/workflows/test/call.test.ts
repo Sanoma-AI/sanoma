@@ -826,7 +826,7 @@ forbid (principal, action == Sanoma::Action::"ghost.post.publish", resource);
 
     expect(queuedFailed.map(errorCode)).toEqual(["run_ended"]);
     expect(await c().approvals(runId)).toEqual([]);
-    expect(await steps(runId)).toEqual(["policy:ghost.post.publish"]);
+    expect(await steps(runId)).toEqual(["connection:ghost.post.publish", "policy:ghost.post.publish"]);
     expect(types(await c().ledger(runId))).toEqual(["run.started", "op.called ghost.post.publish", "run.failed"]);
   });
 
@@ -837,7 +837,7 @@ forbid (principal, action == Sanoma::Action::"ghost.post.publish", resource);
     await new Promise((r) => setTimeout(r, 300));
 
     expect(queuedFailed.map(errorCode)).toEqual(["run_ended"]);
-    expect(await steps(runId)).toEqual(["policy:ghost.post.publish"]);
+    expect(await steps(runId)).toEqual(["connection:ghost.post.publish", "policy:ghost.post.publish"]);
     expect(types(await c().ledger(runId))).toEqual(["run.started", "op.called ghost.post.publish", "run.failed"]);
   });
 });

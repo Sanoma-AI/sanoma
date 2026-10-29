@@ -40,6 +40,9 @@ export default defineConfig({
     // Every spy is undone before the next test, so a test needs no try/finally to put one back.
     restoreMocks: true,
     // The key stored credentials are encrypted with: made up for each run.
-    env: { SANOMA_SECRETS_KEY: randomBytes(32).toString("base64") },
+    env: {
+      SANOMA_SECRETS_KEY: randomBytes(32).toString("base64"),
+      SANOMA_SIGNING_KEY: randomBytes(32).toString("base64"),
+    },
   },
 });

@@ -403,7 +403,20 @@ export function cedarPolicy(
       call.actor,
       call.op.id,
       call.target,
-      { input: call.input, ...(call.before !== undefined && { before: call.before }) },
+      {
+        input: call.input,
+        ...(call.before !== undefined && { before: call.before }),
+        ...(call.connection && {
+          connection: {
+            id: call.connection.id,
+            vendor: call.connection.vendor,
+            method: call.connection.method,
+            account: call.connection.account,
+            revision: call.connection.revision,
+            scopes: call.connection.scopes,
+          },
+        }),
+      },
       call.run.approvals,
       call.run.workflow === CALL_WORKFLOW,
       call.entity,

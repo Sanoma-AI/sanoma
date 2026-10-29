@@ -1,3 +1,4 @@
+import type { ConnectionRef } from "./connection.ts";
 import { fileURLToPath } from "node:url";
 import { getCallSites } from "node:util";
 import { z } from "zod";
@@ -77,6 +78,8 @@ export const ApprovalRequestSchema = z.object(
 
 /** One approval in a run, as the run sees it. Published as the run's "approvals" event. */
 export interface ApprovalState extends Omit<ApprovalRequest, "covers"> {
+  /** Connection binding revision approved by this policy hold. */
+  connection?: string;
   id: string;
   title: string;
   /** Who asked: the workflow (`ctx.approval`), or the policy holding an operation call. */
@@ -179,7 +182,7 @@ type VendorCtx<O extends Op, V> = {
       O,
       { vendor: V; resource: R; name: N }
     > extends Op<any, any, any, infer I, infer Out>
-      ? (input: I, options?: StepOptions) => Promise<Out>
+      ? (input: I, options?: StepOptions & { connection?: ConnectionRef<Extract<V, string>> }) => Promise<Out>
       : never;
   };
 };

@@ -100,6 +100,12 @@ beforeAll(async () => {
 
 const githubFake = fakeGithub();
 const config: SanomaConfig = {
+  secrets: {
+    bindings: {
+      SANOMA_SECRETS_KEY: { bootstrap: "SANOMA_SECRETS_KEY" },
+      SANOMA_SIGNING_KEY: { bootstrap: "SANOMA_SIGNING_KEY" },
+    },
+  },
   workflows: [],
   connectors: [withFake(github, githubFake), withFake(supabase, fakeSupabase()), host.connector],
   ledger: memoryLedger(),
@@ -260,6 +266,7 @@ describe("going live", () => {
         `  ref: "main",`,
         `  secrets: {`,
         `    SANOMA_DATABASE_URL: secret("SANOMA_DATABASE_URL_STORE"),`,
+        `    SANOMA_SIGNING_KEY: secret("SANOMA_SIGNING_KEY"),`,
         `    SANOMA_SECRETS_KEY: secret("SANOMA_SECRETS_KEY"),`,
         `    SANOMA_SOURCE_KEY: secret("SANOMA_SOURCE_KEY"),`,
         `  },`,
@@ -391,6 +398,7 @@ describe("going live", () => {
         revision: head,
         secrets: {
           SANOMA_DATABASE_URL: url,
+          SANOMA_SIGNING_KEY: process.env.SANOMA_SIGNING_KEY,
           SANOMA_SECRETS_KEY: process.env.SANOMA_SECRETS_KEY,
           SANOMA_SOURCE_KEY: sourceKey,
           SANOMA_WAKEUP_TOKEN: token,

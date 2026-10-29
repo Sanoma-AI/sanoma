@@ -17,6 +17,11 @@ interface CompanyApi {
   call: WorkflowFn<{
     op: string;
     input: unknown;
+    connection?: {
+      $connection: string;
+      vendor: string;
+      revision?: string;
+    };
   }, unknown>;
   /** Publish a change: the workflow `change`, built in. */
   change: WorkflowFn<{
@@ -75,6 +80,34 @@ interface CompanyApi {
        * `sanoma.apps.list`, a read.
        */
       list: OpFn<{}, unknown>;
+    };
+    connection: {
+      /** `sanoma.connection.bind`, a access. */
+      bind: OpFn<{
+        connection: {
+          $connection: string;
+          vendor: string;
+          revision?: string;
+        };
+        account: string;
+        scopes: string[];
+        expectedRevision: string | null;
+      }, unknown>;
+      /** `sanoma.connection.create`, a access. */
+      create: OpFn<{
+        rule: string;
+        account: string;
+        scopes: string[];
+      }, unknown>;
+      /** `sanoma.connection.disconnect`, a access. */
+      disconnect: OpFn<{
+        connection: {
+          $connection: string;
+          vendor: string;
+          revision?: string;
+        };
+        expectedRevision: string;
+      }, unknown>;
     };
   };
   /** The company's collections. */

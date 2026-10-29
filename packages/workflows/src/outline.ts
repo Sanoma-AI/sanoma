@@ -391,12 +391,25 @@ export function outlineBody(
    * A step's name as the call gives it, in `{ name: "…" }` after the call's input: a string
    * literal or a top-level const, not an operation's id or `Sleep`, which unnamed calls are called.
    */
-  const nameIn = (options: Node | undefined): string | undefined => {
+  const nameIn = (options: Node | undefined, connection = false): string | undefined => {
     if (options === undefined) return undefined;
     const literal = unwrap(options);
-    const property =
-      literal?.type === "ObjectExpression" && literal.properties.length === 1 ? literal.properties[0] : undefined;
-    const key = property?.type === "Property" && !property.computed ? (property.key.name ?? property.key.value) : "";
+    if (
+      literal?.type !== "ObjectExpression" ||
+      literal.properties.some(
+        (p: Node) =>
+          p.type !== "Property" ||
+          p.computed ||
+          !(connection ? ["name", "connection"] : ["name"]).includes(p.key.name ?? p.key.value),
+      )
+    ) {
+      problem(options, NAME);
+      return undefined;
+    }
+    const property = literal.properties.find((p: Node) => (p.key.name ?? p.key.value) === "name");
+    if (!property && literal.properties.some((p: Node) => (p.key.name ?? p.key.value) === "connection"))
+      return undefined;
+    const key = property?.key.name ?? property?.key.value;
     const name = key === "name" ? literalOf(property.value, consts) : undefined;
     if (name === undefined || !/\S/.test(name)) problem(options, NAME);
     else if (name === DEFAULT_SLEEP_NAME || OP_ID.test(name)) problem(options, DEFAULT_LIKE(name));
@@ -428,7 +441,7 @@ export function outlineBody(
         default:
           if (isOpPath(members)) {
             // A computed id's own name is the operation it calls, known only in a run.
-            const name = nameIn(args[1]) ?? (id.includes("*") ? undefined : id);
+            const name = nameIn(args[1], true) ?? (id.includes("*") ? undefined : id);
             return [
               ...walk(args, at),
               { kind: "op", path, id, span: span(node), ...(name === undefined ? {} : { name }) },

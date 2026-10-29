@@ -1,3 +1,4 @@
+import type { ConnectionSnapshot } from "./connection.ts";
 import { type ApprovalState, type Approver, type Principal, sameApprover } from "./define.ts";
 import type { Effect, Op } from "./op.ts";
 import { CALL_WORKFLOW, isVisitor } from "./shared.ts";
@@ -16,6 +17,7 @@ export const policyOpOf = ({ id, vendor, resource, name, effect }: Op): PolicyOp
 
 /** What a policy sees for each operation a run calls: plain data. */
 export interface PolicyCall {
+  connection?: ConnectionSnapshot;
   op: PolicyOp;
   /** The same as `op.effect`. */
   effect: Effect;

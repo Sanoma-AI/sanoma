@@ -205,6 +205,19 @@ export interface CollectionEntry {
  * browser, so the UI shows exactly what the worker enforces. Never written by hand.
  */
 export interface ConfigDescription {
+  secrets?: {
+    store: string;
+    namespace: string;
+    bindings: Record<string, { path: string; management: "sanoma" | "external"; store: string }>;
+  };
+  connections?: {
+    id: string;
+    vendor: string;
+    method: string;
+    scopes: readonly string[];
+    account?: string;
+    default: boolean;
+  }[];
   appName: string;
   /** The application version runs started now are stamped with. */
   version: string;
@@ -344,6 +357,28 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
   );
 
   return {
+    secrets: {
+      store: resolved.secrets.store?.id ?? "postgres",
+      namespace: resolved.secrets.namespace ?? "default",
+      bindings: Object.fromEntries(
+        Object.entries(resolved.secrets.bindings ?? {}).map(([name, b]) => [
+          name,
+          {
+            path: b.bootstrap ?? b.env ?? b.path!,
+            management: b.management ?? (b.env || b.bootstrap ? "external" : "sanoma"),
+            store: b.bootstrap ? "bootstrap" : b.env ? "environment" : (resolved.secrets.store?.id ?? "postgres"),
+          },
+        ]),
+      ),
+    },
+    connections: [...resolved.connections.catalog.definitions.values()].map((d) => ({
+      id: d.$connection,
+      vendor: d.vendor,
+      method: d.method,
+      scopes: d.scopes,
+      ...(d.account && { account: d.account }),
+      default: d.default,
+    })),
     appName: resolved.appName,
     version: resolved.version,
     workflows,

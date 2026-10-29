@@ -399,7 +399,7 @@ function publicHosts(description: ConfigDescription, domains: Record<string, str
  * Makes each public site's login half (`ConnectorSetup.login`), all at once, settling the promise
  * its front door waits on: the ones made, by site name. One that fails is logged, and its site is
  * then served on no host (503): the app starts, so the connector's page, or the environment
- * (`SANOMA_SECRETS_KEY`, which each login's key is derived from), can give what it lacks.
+ * (`SANOMA_SIGNING_KEY`, which each login's key is derived from), can give what it lacks.
  */
 async function openLogins(
   resolved: ResolvedConfig,

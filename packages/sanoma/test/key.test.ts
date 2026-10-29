@@ -1,56 +1,78 @@
+import { randomBytes } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { parseEnv } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ensureSecretsKey, writeSecretsKey } from "../src/key.ts";
+import { deploymentKey } from "@sanoma-ai/workflows";
+import { ensureDeploymentKeys, writeDeploymentKeys } from "../src/key.ts";
 
-let dir = "";
+const dirs: string[] = [];
+const directory = () => {
+  const dir = mkdtempSync(join(tmpdir(), "sanoma-key-"));
+  dirs.push(dir);
+  return dir;
+};
 afterEach(() => {
   vi.unstubAllEnvs();
-  rmSync(dir, { recursive: true, force: true });
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
+const clear = () => {
+  for (const key of ["SANOMA_SECRETS_KEY", "SANOMA_SIGNING_KEY", "SANOMA_SECRETS_KEY_FILE", "SANOMA_SIGNING_KEY_FILE"])
+    vi.stubEnv(key, undefined);
+};
 
-describe("ensureSecretsKey", () => {
-  it("makes a key when none is set, into a new .env readable by its owner alone, and says so in one line", () => {
-    dir = mkdtempSync(join(tmpdir(), "sanoma-key-"));
-    vi.stubEnv("SANOMA_SECRETS_KEY", undefined);
+describe("deployment bootstrap", () => {
+  it("creates independent keys in a protected local file, then keeps them on restart", () => {
+    clear();
+    const dir = directory();
     const log = vi.fn<(line: string) => void>();
-    ensureSecretsKey(dir, log);
-    const key = process.env.SANOMA_SECRETS_KEY!;
-    expect(Buffer.from(key, "base64")).toHaveLength(32);
-    expect(readFileSync(join(dir, ".env"), "utf8")).toBe(`SANOMA_SECRETS_KEY=${key}\n`);
-    expect(statSync(join(dir, ".env")).mode & 0o777).toBe(0o600);
-    expect(log.mock.calls).toEqual([[expect.stringMatching(/^created SANOMA_SECRETS_KEY in .*\.env: it encrypts/)]]);
-    // Set now, so a second call leaves everything as it is.
-    ensureSecretsKey(dir, log);
-    expect(log).toHaveBeenCalledTimes(1);
-    expect(readFileSync(join(dir, ".env"), "utf8")).toBe(`SANOMA_SECRETS_KEY=${key}\n`);
+    ensureDeploymentKeys(dir, log);
+    const file = join(dir, ".env");
+    const text = readFileSync(file, "utf8");
+    expect(deploymentKey("SANOMA_SIGNING_KEY")).not.toEqual(deploymentKey("SANOMA_SECRETS_KEY"));
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+    clear();
+    ensureDeploymentKeys(dir, log);
+    expect(readFileSync(file, "utf8")).toBe(text);
+    expect(log).toHaveBeenCalledTimes(2);
   });
-
-  it("appends to an existing .env on a line of its own, and leaves one alone when the key is set", () => {
-    dir = mkdtempSync(join(tmpdir(), "sanoma-key-"));
-    writeFileSync(join(dir, ".env"), "GHOST_ADMIN_URL=https://ghost.example.test");
-    ensureSecretsKey(dir, () => undefined);
-    expect(readFileSync(join(dir, ".env"), "utf8")).toBe("GHOST_ADMIN_URL=https://ghost.example.test");
-
-    vi.stubEnv("SANOMA_SECRETS_KEY", "");
-    ensureSecretsKey(dir, () => undefined);
-    expect(readFileSync(join(dir, ".env"), "utf8")).toBe(
-      `GHOST_ADMIN_URL=https://ghost.example.test\nSANOMA_SECRETS_KEY=${process.env.SANOMA_SECRETS_KEY}\n`,
+  it("external stores only require app signing bootstrap", () => {
+    clear();
+    const dir = directory();
+    ensureDeploymentKeys(dir, () => {}, { externalStore: true });
+    expect(Object.keys(parseEnv(readFileSync(join(dir, ".env"), "utf8")))).toEqual(["SANOMA_SIGNING_KEY"]);
+    expect(process.env.SANOMA_SECRETS_KEY).toBeUndefined();
+  });
+  it("respects mounted keys and refuses env/file ambiguity", () => {
+    clear();
+    const dir = directory();
+    const file = join(dir, "key");
+    const key = randomBytes(32);
+    writeFileSync(file, key.toString("base64") + "\n", { mode: 0o600 });
+    vi.stubEnv("SANOMA_SECRETS_KEY_FILE", file);
+    ensureDeploymentKeys(dir, () => {});
+    expect(deploymentKey("SANOMA_SECRETS_KEY")).toEqual(key);
+    expect(process.env.SANOMA_SECRETS_KEY).toBeUndefined();
+    vi.stubEnv("SANOMA_SECRETS_KEY", key.toString("base64"));
+    expect(() => deploymentKey("SANOMA_SECRETS_KEY")).toThrow("Set only one");
+    expect(() => ensureDeploymentKeys(dir, () => {})).toThrow("Set only one");
+  });
+  it("reports missing/unreadable/malformed keys without repeating their contents", () => {
+    expect(() => deploymentKey("SANOMA_SECRETS_KEY", {})).toThrow("32 random bytes");
+    expect(() => deploymentKey("SANOMA_SECRETS_KEY", { SANOMA_SECRETS_KEY_FILE: "/no-such-key" })).toThrow(
+      "could not be read",
+    );
+    expect(() => deploymentKey("SANOMA_SECRETS_KEY", { SANOMA_SECRETS_KEY: "secret-invalid" })).toThrow(
+      "32 random bytes",
     );
   });
-});
-
-describe("writeSecretsKey", () => {
-  it("keeps a key the file already sets, and replaces an empty one", () => {
-    dir = mkdtempSync(join(tmpdir(), "sanoma-key-"));
-    const file = join(dir, ".env");
-    writeFileSync(file, "SANOMA_SECRETS_KEY=kept\n");
-    expect(writeSecretsKey(file)).toBeUndefined();
-    expect(readFileSync(file, "utf8")).toBe("SANOMA_SECRETS_KEY=kept\n");
-
-    writeFileSync(file, "SANOMA_SECRETS_KEY=\n");
-    const key = writeSecretsKey(file);
-    expect(readFileSync(file, "utf8")).toBe(`SANOMA_SECRETS_KEY=\nSANOMA_SECRETS_KEY=${key}\n`);
+  it("initializes a new company without replacing existing file inputs", () => {
+    const file = join(directory(), ".env");
+    writeDeploymentKeys(file);
+    const first = readFileSync(file, "utf8");
+    writeDeploymentKeys(file);
+    expect(readFileSync(file, "utf8")).toBe(first);
+    expect(Object.keys(parseEnv(first)).toSorted()).toEqual(["SANOMA_SECRETS_KEY", "SANOMA_SIGNING_KEY"]);
   });
 });

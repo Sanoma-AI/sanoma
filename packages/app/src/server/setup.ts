@@ -1,3 +1,4 @@
+import { deploymentKey } from "@sanoma-ai/workflows";
 // oxlint-disable-next-line import/no-unassigned-import
 import "@tanstack/react-start/server-only";
 import { execFile } from "node:child_process";
@@ -257,10 +258,9 @@ function toConnect(github: "connected" | "expired" | "failed" | "bad-org" | "nob
   return new Response(null, { status: 303, headers });
 }
 
-/** Signs the state under a key derived from `SANOMA_SECRETS_KEY`, which storing the App's keys needs anyway. */
+/** Signs setup state with the independent app-signing key. */
 function stateSigner() {
-  const secretsKey = process.env.SANOMA_SECRETS_KEY;
-  if (!secretsKey) throw new Error("Connecting GitHub needs SANOMA_SECRETS_KEY, which encrypts the App's keys");
+  const secretsKey = deploymentKey("SANOMA_SIGNING_KEY").toString("base64");
   return signer(secretsKey, "sanoma setup state");
 }
 

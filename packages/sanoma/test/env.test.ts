@@ -38,16 +38,19 @@ const config: SanomaConfig = {
 const loaded = (cfg: SanomaConfig, root = "") => ({ config: cfg, root, resolved: resolveConfig(cfg) });
 
 const expected = `# Copy to .env (ignored by git; \`sanoma\` loads it before reading the config). Never commit values.
-# The first block is what sanoma needs before anything runs. The vendor variables below it can
-# also be set on the app's connector pages (stored in the database and loaded by the worker); a
-# value set here wins over a stored one and cannot be changed from the page. An empty value is
-# the same as unset.
+# The first block bootstraps the runtime. Secret references use the configured store; to read
+# an environment value through that store, declare an explicit env binding in sanoma.config.ts.
+# Connector driver migration to named per-call authentication is tracked separately.
 
 # Optional. Postgres for the worker and the app; default the company's own in .sanoma/postgres.
 # SANOMA_DATABASE_URL=
-# Optional. Encrypts the stored credentials, and signs GitHub sign-in's cookie: 32 random bytes,
-# base64. \`sanoma\` writes one here when none is set; keep it with the database.
+# Built-in encrypted store only: 32 random bytes, base64. Keep separately from database backups.
 # SANOMA_SECRETS_KEY=
+# SANOMA_SECRETS_KEY_FILE=
+# App signing: an independent 32-byte base64 key. Changing it invalidates signed sessions.
+# For each key, use its value OR its _FILE path. First local start generates missing keys.
+# SANOMA_SIGNING_KEY=
+# SANOMA_SIGNING_KEY_FILE=
 # Optional. The app's port; default 3000.
 # SANOMA_APP_PORT=
 # Optional. The address the app listens on; default 127.0.0.1. Any other needs GitHub sign-in.

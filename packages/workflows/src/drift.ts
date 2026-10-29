@@ -65,7 +65,10 @@ export const DriftInput = z.object({}).strict();
  * write-only values, and the problems.
  */
 export interface DriftDeclared {
-  resources: Pick<DeclaredResource, "id" | "vendor" | "type" | "name" | "identity" | "binding" | "desired" | "refs">[];
+  resources: Pick<
+    DeclaredResource,
+    "id" | "vendor" | "type" | "name" | "identity" | "binding" | "desired" | "refs" | "connection"
+  >[];
   problems: ResourceProblem[];
 }
 
@@ -210,7 +213,12 @@ export function driftWorkflow(
         if (!("id" in by)) found.set(resource.id, by);
         else {
           try {
-            found.set(resource.id, observed(await ctx[resource.vendor]![resource.type]!.import({ id: by.id })));
+            found.set(
+              resource.id,
+              observed(
+                await ctx[resource.vendor]![resource.type]!.import({ id: by.id }, { connection: resource.connection }),
+              ),
+            );
           } catch (err) {
             if (isRunControlError(err)) throw err;
             found.set(resource.id, { error: errorMessage(err) });

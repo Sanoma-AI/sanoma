@@ -82,7 +82,7 @@ describe("startCompany", () => {
     // pnpm's alone.
     expect(existsSync(join(dir, "pnpm-workspace.yaml"))).toBe(false);
     // No database URL: `sanoma` runs the company's own Postgres.
-    expect(Object.keys(parseEnv(read(".env")))).toEqual(["SANOMA_SECRETS_KEY"]);
+    expect(Object.keys(parseEnv(read(".env"))).toSorted()).toEqual(["SANOMA_SECRETS_KEY", "SANOMA_SIGNING_KEY"]);
     // Its creator is its first person, so the app admits them.
     expect(read("resources/people.ts")).toContain(
       'export const founder = sanoma.person({ id: "ada", name: "Ada Ortiz", github: "ada-ortiz" });',
@@ -109,7 +109,7 @@ describe("startCompany", () => {
     expect(read(".gitignore")).toMatch(/^\/scratch\n\n# Secrets must never be committed.*\n\.env\n/s);
     const env = parseEnv(read(".env"));
     expect(env.SANOMA_DATABASE_URL).toBe("postgresql://elsewhere/acme");
-    expect(Object.keys(env)).toEqual(["SANOMA_DATABASE_URL", "SANOMA_SECRETS_KEY"]);
+    expect(Object.keys(env).toSorted()).toEqual(["SANOMA_DATABASE_URL", "SANOMA_SECRETS_KEY", "SANOMA_SIGNING_KEY"]);
     const tracked = git("ls-files").split("\n");
     expect(tracked).toContain("pnpm-lock.yaml");
     expect(tracked).toContain("pnpm-workspace.yaml");

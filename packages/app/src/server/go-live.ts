@@ -233,7 +233,7 @@ export async function sourceKeyPair(): Promise<{ privateKey: string; publicKey: 
  */
 const githubOf = (app: AppContext) => ({
   remote: app.resolved.remotes.get("github"),
-  context: { secrets: secretValues(app.client, { environment: false }) },
+  context: { secrets: secretValues(app.client) },
 });
 
 /**
@@ -419,7 +419,8 @@ export async function renderInfra(
   setPath(hosted, inputs.ref, "main");
   setPath(hosted, inputs.secrets, {
     SANOMA_DATABASE_URL: secret(DATABASE_URL),
-    SANOMA_SECRETS_KEY: secret(SECRETS_KEY),
+    SANOMA_SIGNING_KEY: secret("SANOMA_SIGNING_KEY"),
+    ...(!app.resolved.secrets.store && { SANOMA_SECRETS_KEY: secret(SECRETS_KEY) }),
     [SOURCE_KEY]: secret(SOURCE_KEY),
     ...wakeup.secrets,
   });

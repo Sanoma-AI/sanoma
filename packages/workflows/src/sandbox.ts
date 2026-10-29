@@ -1,5 +1,6 @@
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import { indexDrivers, sandboxDrivers } from "./config.ts";
+import { CALL_WORKFLOW, CallInput } from "./call-workflow.ts";
 import { opIdsOf } from "./define.ts";
 import { SanomaError } from "./errors.ts";
 import type { Fake, ResourceFake } from "./fake.ts";
@@ -88,7 +89,7 @@ export function seedResource(
  * run whose seeding is replayed from it has none, and fails, since a sandbox run does not
  * survive a worker restart.
  */
-export async function seedSandbox(run: Run, name: string): Promise<void> {
+export async function seedSandbox(run: Run, name: string, input: unknown): Promise<void> {
   const { state } = run;
   let copies: Map<string, DriverFn> | undefined;
   // The run's secrets, in memory as its fakes are: seeding and its calls share them.
@@ -114,7 +115,10 @@ export async function seedSandbox(run: Run, name: string): Promise<void> {
         [...sandboxDrivers(state.ops), ...Array.from(fakes.values(), (f) => f.driver)],
         state.ops,
       );
-      const uses = opIdsOf(state.workflows.get(run.workflow)!);
+      // The built-in call workflow selects exactly one operation. Other direct operations
+      // (including live connection mutations) need no fake unless this scenario calls them.
+      const uses =
+        run.workflow === CALL_WORKFLOW ? [CallInput.parse(input).op] : opIdsOf(state.workflows.get(run.workflow)!);
       const seeding = scenario.given.flatMap((g) => ("op" in g ? [g.op] : []));
       const missing = [...new Set([...uses, ...seeding])].filter((id) => !drivers.has(id));
       if (missing.length) {
