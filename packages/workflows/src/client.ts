@@ -1135,6 +1135,19 @@ export class SanomaClient {
     await this.storedSecrets.write(name, value, { expectedVersion: current?.version ?? null, by: setBy });
   }
 
+  /** Removes a logical secret from the selected store; external bindings remain read-only. */
+  async clearSecret(name: string, options: { by: string }): Promise<void> {
+    const by = await this.admittedBy(options);
+    if (!VARIABLE.test(name)) {
+      const message = "That is not a variable name";
+      throw new SanomaError("invalid_input", message, {
+        issues: [{ path: ["name"], message, code: "custom" }],
+      });
+    }
+    const current = await this.storedSecrets.read(name);
+    if (current) await this.storedSecrets.delete(name, { expectedVersion: current.version, by });
+  }
+
   /**
    * The values of these secrets, as a driver's `secrets.get` reads them: this process's
    * environment, which wins, else the stored value, with who set it and when. A name with neither

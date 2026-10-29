@@ -72,7 +72,7 @@ const startedBy = { id: "database-check" };
 /**
  * Runs the conformance checks against a database, in order, each on its own (one failing goes
  * on to the next, but once no worker starts the rest fail at once): DBOS's tables migrate and a
- * worker starts on its URL, `LISTEN` hears a credential change, and a queued run drains. A
+ * worker starts on its URL, the next store read sees a credential change, and a queued run drains. A
  * database that `pauses` is also checked for a run queued after a `suspend`: the client's
  * query wakes it, and the worker, reconnecting, drains it. Stops the worker it started, and
  * clears its check's credential.
@@ -106,9 +106,11 @@ export async function checkDatabase(db: DatabaseUnderTest): Promise<DatabaseChec
       // Its launch migrates DBOS's tables; a client's first call makes the runtime's.
       worker = await startWorker(databaseCheckConfig(await db.url()), { quiet: true });
       // A value an earlier check left, under another key, would fail the probe.
-      await client.clearCredential(HOST_CHECK_CREDENTIAL, { by: startedBy.id });
+      await client.clearSecret(HOST_CHECK_CREDENTIAL, { by: startedBy.id });
     });
-    await check("LISTEN hears a credential change", () => credentialHeard(client, credential, startedBy, timeoutMs));
+    await check("the next store read sees a credential change", () =>
+      credentialHeard(client, credential, startedBy, timeoutMs),
+    );
     await check("a queued run drains", drains);
     if (spec.capabilities.pauses) {
       await check("a queued run drains after a suspend and a wake", async () => {
@@ -119,7 +121,7 @@ export async function checkDatabase(db: DatabaseUnderTest): Promise<DatabaseChec
       });
     }
   } finally {
-    if (worker) await client.clearCredential(HOST_CHECK_CREDENTIAL, { by: startedBy.id }).catch(() => undefined);
+    if (worker) await client.clearSecret(HOST_CHECK_CREDENTIAL, { by: startedBy.id }).catch(() => undefined);
     await worker?.stop();
   }
   return results;

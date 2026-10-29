@@ -39,7 +39,7 @@ import { testWorkerConfig } from "./index.ts";
 
 type State = Record<string, unknown>;
 
-/** The variable the credential check sets: the host's worker must hear the change over `LISTEN`. */
+/** The logical secret the credential check sets: the worker must read the current stored value. */
 export const HOST_CHECK_CREDENTIAL = "HOST_CHECK_TOKEN";
 
 /** A digest of a credential's value, which the probe reports instead of the value. */
@@ -56,17 +56,13 @@ const hostCheckOps = defineConnector("hostcheck", {
     },
   },
 });
-const hostCheckDriver = defineDriver(
-  hostCheckOps,
-  {
-    probe: {
-      digest: async (_input, call) => ({
-        digest: credentialDigest((await call.secrets.get(HOST_CHECK_CREDENTIAL)) ?? ""),
-      }),
-    },
+const hostCheckDriver = defineDriver(hostCheckOps, {
+  probe: {
+    digest: async (_input, call) => ({
+      digest: credentialDigest((await call.secrets.get(HOST_CHECK_CREDENTIAL)) ?? ""),
+    }),
   },
-  { env: z.object({ [HOST_CHECK_CREDENTIAL]: z.string().describe("Any value: the host check sets it") }) },
-);
+});
 
 /**
  * The connector the credential check calls, for the host's config: `hostcheck.probe.digest`, a
@@ -145,9 +141,8 @@ export const runEnded = (client: SanomaClient, runId: string, timeoutMs: number)
   );
 
 /**
- * Sets the check's credential to `credential` and waits until a probe run reads it: the worker,
- * which loads the value when it hears the change over `LISTEN`, holds it (until then a probe
- * fails, or reads the old one). The host and database kits' check.
+ * Sets the check's credential to `credential` and waits until a probe run reads it through
+ * the selected store. The host and database kits' check.
  */
 export async function credentialHeard(
   client: SanomaClient,
@@ -155,7 +150,7 @@ export async function credentialHeard(
   by: { id: string },
   timeoutMs: number,
 ): Promise<void> {
-  await client.setCredential(HOST_CHECK_CREDENTIAL, credential, { by: by.id });
+  await client.setSecret(HOST_CHECK_CREDENTIAL, credential, { by: by.id });
   await waitFor(
     async () => {
       const runId = await client.start("host-check-credential", {}, { startedBy: by });
@@ -169,7 +164,7 @@ export async function credentialHeard(
 
 /**
  * Runs the conformance checks against a host, in order, each on its own (one failing goes on to
- * the next): the app answers on its port, a queued run drains, `LISTEN` hears a credential
+ * the next): the app answers on its port, a queued run drains, the next store read sees a credential
  * change, a sleep survives a restart, a new commit shows as drift that apply clears, and no
  * secret is in the ledger. A host that stops (`stops-when-quiet`) is also checked
  * for what a request to its URL starts again (`suspend`, then a `/wake`): a run queued while it
@@ -201,7 +196,7 @@ export async function checkHost(host: HostUnderTest): Promise<HostCheck[]> {
   };
 
   // A value an earlier check left, under another key, would stop the host's worker from starting.
-  await client.clearCredential(HOST_CHECK_CREDENTIAL, { by: startedBy.id });
+  await client.clearSecret(HOST_CHECK_CREDENTIAL, { by: startedBy.id });
   await check("the app answers on its port", async () => {
     const outputs = spec.outputs(await apply());
     if (!outputs.healthy) throw new Error("its state says it is not healthy");
@@ -211,7 +206,9 @@ export async function checkHost(host: HostUnderTest): Promise<HostCheck[]> {
   await check("a queued run drains", async () => {
     await finish(await client.start("host-check-drain", {}, { startedBy }));
   });
-  await check("LISTEN hears a credential change", () => credentialHeard(client, credential, startedBy, timeoutMs));
+  await check("the next store read sees a credential change", () =>
+    credentialHeard(client, credential, startedBy, timeoutMs),
+  );
   await check("a sleep survives a restart", async () => {
     const runId = await client.start("host-check-sleep", { seconds: 2 }, { startedBy });
     await waitFor(async () => (await client.ledger(runId)).some((r) => r.type === "sleep.started"), Boolean, timeoutMs);
@@ -273,7 +270,7 @@ export async function checkHost(host: HostUnderTest): Promise<HostCheck[]> {
     });
     if (leaks.length) throw new Error(`a secret is in the ledger of ${leaks.join(", ")}`);
   });
-  await client.clearCredential(HOST_CHECK_CREDENTIAL, { by: startedBy.id });
+  await client.clearSecret(HOST_CHECK_CREDENTIAL, { by: startedBy.id });
   return results;
 }
 

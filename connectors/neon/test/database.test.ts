@@ -64,7 +64,7 @@ describe("neon.project meets the Database contract", () => {
     const results = await checkDatabase({ type: project, apply, url: db.url, suspend, client, timeoutMs: 30_000 });
     expect(results).toEqual([
       { name: "DBOS's tables migrate and a worker starts on the url", ok: true },
-      { name: "LISTEN hears a credential change", ok: true },
+      { name: "the next store read sees a credential change", ok: true },
       { name: "a queued run drains", ok: true },
       { name: "a queued run drains after a suspend and a wake", ok: true },
     ]);

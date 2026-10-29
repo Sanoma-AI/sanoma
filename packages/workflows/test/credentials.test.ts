@@ -135,6 +135,13 @@ describe("runtime uses the selected store", () => {
         (await db.query("SELECT name FROM sanoma_credentials WHERE namespace=$1", [config.secrets.namespace])).rows,
       ).toEqual([]);
       expect(JSON.stringify(await client.ledger(run))).not.toContain("stored-key");
+      await client.clearSecret("API_KEY", { by: "tester" });
+      expect((await client.secrets(["API_KEY"])).size).toBe(0);
+      expect(await client.call("acme.thing.get", {}, { actor: { id: "tester" } })).toEqual({ configured: false });
+      await client.clearSecret("API_KEY", { by: "tester" });
+      await expect(client.clearSecret("invalid/path", { by: "tester" })).rejects.toMatchObject({
+        code: "invalid_input",
+      });
     } finally {
       await worker?.stop();
       await client.close();
@@ -188,6 +195,7 @@ describe("runtime uses the selected store", () => {
         code: "read_only",
       });
       await expect(client.clearCredential("API_KEY", { by: "tester" })).rejects.toMatchObject({ code: "read_only" });
+      await expect(client.clearSecret("API_KEY", { by: "tester" })).rejects.toMatchObject({ code: "read_only" });
       const statuses = await client.credentials();
       expect(statuses.get("acme")?.[0]).toMatchObject({
         status: "set",
