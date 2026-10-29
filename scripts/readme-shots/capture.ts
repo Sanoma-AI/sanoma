@@ -45,11 +45,12 @@ interface Scene {
  */
 async function open(browser: Browser, base: string, scene: Scene): Promise<Page> {
   const context = await browser.createBrowserContext();
-  await context.setCookie({
-    name: "sanoma_chat",
-    value: scene.chat ? "open" : "closed",
-    domain: new URL(base).hostname,
-  });
+  // The actor's cookie as the app mirrors it, so a page whose loader calls `api` renders as them.
+  const domain = new URL(base).hostname;
+  await context.setCookie(
+    { name: "sanoma_chat", value: scene.chat ? "open" : "closed", domain },
+    { name: "sanoma_actor", value: encodeURIComponent(scene.actor), domain },
+  );
   const page = await context.newPage();
   await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "light" }]);
   // The app keeps the actor in localStorage; set only once, so a scene can switch it.

@@ -1,10 +1,24 @@
 # sanoma
 
-Sanoma runs the everyday admin of a small business: the emails, posts, web pages and records it relies on. You tell it in plain words how your business works, an AI agent writes the code, and you see each change before it goes live. Before Sanoma sends or publishes anything, it checks the rules you set, and anything you marked as needing a yes waits for one. It keeps a record of everything it did.
+Sanoma is admin software for small businesses: invoices and receipts, customers, outbound. Each business gets its own copy, as code it owns.
 
-All of it is ordinary TypeScript in a repo your business owns, so any developer can read it, change it or move it elsewhere. This repo holds the code that runs it, the app you work in, and its integrations with services like Stripe and GitHub, and you can run all of it yourself.
+**For non-developers:** ask the agent in the app for a change, check it, and accept it. Sanoma checks your rules before it sends or publishes anything, and waits for your OK where you asked for one.
 
-The agent can be ours, or a coding agent you already pay for: Claude Code, Codex, Copilot, OpenCode or Pi. Either way it works on a separate copy, and your business only changes when you accept it ([the chat](packages/app/README.md)).
+**For developers:** it's plain TypeScript in your repo. Whatever you add shows up in the app, so the rest of the team can use it without you. You can use your own coding agent: Claude Code, Codex, Copilot, OpenCode or Pi ([the chat](packages/app/README.md)).
+
+The invoices, receipts and customers apps aren't out yet. Outbound runs in our own back office today.
+
+![A page built on the business's data: the outbound leads by stage, each with a button to move it on](.github/assets/board.png)
+
+A page your team works from, built on your data: here, sales leads by stage.
+
+![The same leads as a table, one open for editing, and the page that uses them listed below](.github/assets/data.png)
+
+The data behind it, as a table anyone can edit.
+
+![A workflow's steps: write a post, wait for approval, wait until launch time, publish](.github/assets/workflow.png)
+
+A workflow, step by step: which service each step uses, and where it waits for someone's OK.
 
 Status: early. Workflows run on [DBOS](https://dbos.dev) with Postgres: each vendor call is a durable step, approvals and sleeps survive restarts, and a lint keeps workflow code safe to replay. Before every vendor call and run start a policy, written in [Cedar](https://docs.cedarpolicy.com) in the repo, lets it through, denies it or holds it for an approver, as the people the repo declares, and a ledger records each run: who started it, every call with the policy's decision and the vendor's reply, every approval, and how it ended. Versioning is automatic: each run is stamped with a hash of the workflow code it started on, and only a worker on that version resumes it (`DBOS__APPVERSION` names a version instead; see [Versions](packages/workflows/README.md#versions)). The connectors so far are listed under [Contents](#contents); keeping a company's vendor settings (card limits, time-off policies, access in tools like Mercury, Gusto and Okta) in typed files is where it is headed, not what it does today.
 
