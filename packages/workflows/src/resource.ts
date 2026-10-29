@@ -174,7 +174,7 @@ export async function callAfterCreate(
  */
 export const DECLARED: unique symbol = Symbol.for("sanoma.declared");
 
-/** A resource a data file declares: `github.repository({ name: "sanoma" })`. */
+/** A resource a data file declares: `github.repository({ owner: "acme", name: "sanoma" })`. */
 export interface Declared<Id extends string = string, T = State> {
   readonly [DECLARED]: Id;
   readonly vendor: string;

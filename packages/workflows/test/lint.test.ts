@@ -486,7 +486,7 @@ import { github } from "@sanoma-ai/connector-github/resources";
 import { secret } from "sanoma/resources";
 import { team } from "./people/team.ts";
 export const leads = collection({ name: "leads", key: "id", fields: { id: "text" } });
-export const site = github.repository({ name: "site" });
+export const site = github.repository({ owner: "acme", name: "site" });
 export const odd = collection({ name: "odd", key: "id", fields: { id: leads }, extra: 1 });
 export default [leads];
 `,
@@ -540,15 +540,15 @@ export const more = collection({ name: "more", key: "id", fields: { id: "text" }
 import { docs } from "./docs.ts";
 export { docs };
 export * from "./docs.ts";
-export const a = github.repository({ name: "a" }), b = github.repository({ name: "b" });
-export const { c } = github.repository({ name: "c" });
+export const a = github.repository({ owner: "acme", name: "a" }), b = github.repository({ owner: "acme", name: "b" });
+export const { c } = github.repository({ owner: "acme", name: "c" });
 export const d = github?.repository({ name: "d" });
-export const e = github.repository({ name: "e" }, {});
+export const e = github.repository({ owner: "acme", name: "e" }, {});
 export const f = github.repository("f");
 export const g = docs.repository({ name: "g" });
-export const h = github.branch_protection({ repository_id: github.repository({ name: "h" }), pattern: "main" });
-export const i = github.repository({ name: "i", get wiki() { return true; }, topics: [1, , 2], name: "j" });
-export const k = github.repository({ name: "k", pattern: /x/, size: 1n, has_wiki: !0, team: github });
+export const h = github.branch_protection({ repository_id: github.repository({ owner: "acme", name: "h" }), pattern: "main" });
+export const i = github.repository({ owner: "acme", name: "i", get wiki() { return true; }, topics: [1, , 2], name: "j" });
+export const k = github.repository({ owner: "acme", name: "k", pattern: /x/, size: 1n, has_wiki: !0, team: github });
 export default [a, ...docs];
 `),
     ).toEqual([
@@ -561,19 +561,19 @@ export default [a, ...docs];
       "9:18 github.repository takes desired fields and optional { connection: { vendor, $connection } }",
       "10:18 docs is not a connector's resource constructors: import it from the connector's resources entry, `import { docs } from \"@sanoma-ai/connector-docs/resources\"`",
       "11:60 a resource is declared at the top of a data file: give it its own `export const` and name it here",
-      "12:49 a method or accessor is not allowed in a data file: a field holds a value",
-      "12:86 an empty array slot is not allowed in a data file: write null",
-      "12:96 name is given twice: give each field once",
-      "13:58 a regular expression is not allowed in a data file: write it as a string",
-      "13:69 a bigint is not allowed in a data file: write a number, or a string",
-      "13:83 `!` is not allowed in a data file: write the value out",
-      "13:93 github is a connector's resource constructors, not a resource: name a declared resource",
+      "12:64 a method or accessor is not allowed in a data file: a field holds a value",
+      "12:101 an empty array slot is not allowed in a data file: write null",
+      "12:111 name is given twice: give each field once",
+      "13:73 a regular expression is not allowed in a data file: write it as a string",
+      "13:84 a bigint is not allowed in a data file: write a number, or a string",
+      "13:98 `!` is not allowed in a data file: write the value out",
+      "13:108 github is a connector's resource constructors, not a resource: name a declared resource",
       "14:20 export default must list this file's resources by name: `export default [a, b]`",
     ]);
   });
 
   it("reports a syntax error", () => {
-    expect(dataFile(`export const a = github.repository({ name: "a" ;`)).toEqual([
+    expect(dataFile(`export const a = github.repository({ owner: "acme", name: "a" ;`)).toEqual([
       expect.stringMatching(/^1:\d+ syntax: /),
     ]);
   });

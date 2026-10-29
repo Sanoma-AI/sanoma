@@ -354,7 +354,7 @@ export const ConnectExistingRequest = z
     repository: z
       .string()
       .trim()
-      .regex(/^([\w-]+\/)?(?!\.\.?$)[\w.-]+$/, "Enter a repository as owner/name")
+      .regex(/^[\w-]+\/(?!\.\.?$)[\w.-]+$/, "Enter a repository as owner/name")
       .optional(),
     project: z
       .string()

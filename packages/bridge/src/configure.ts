@@ -8,6 +8,8 @@ interface Configured {
   config?: string;
   /** The configure steps for this release, one after another. */
   queue: Promise<void>;
+  /** The config the latest calls run under, when they may start, and those running. */
+  turn?: { config: string; ready: Promise<void>; running: Set<Promise<unknown>> };
 }
 
 const configured = new WeakMap<ProviderClient, Map<string, Configured>>();
@@ -47,9 +49,11 @@ const notConfigured = (e: BridgeError) => e.code === "failed_precondition" && / 
 /**
  * Makes sure the provider `ref` names is configured on `bridge` with `configJson`, then runs
  * `call`, if given. The provider is configured on first use, and closed and configured again
- * when the config changes (a new token): the bridge refuses a second config. The configure
- * steps for one bridge and release run one at a time, so concurrent calls, and drivers sharing
- * a bridge, configure once.
+ * when the config changes (a new token, another owner): the bridge refuses a second config. The
+ * configure steps for one bridge and release run one at a time, so concurrent calls, and drivers
+ * sharing a bridge, configure once. Calls under one config run together; a call under another
+ * waits until they are done, so closing the provider never cuts one off or answers it for the
+ * other config.
  *
  * When `call` (or the configure) finds the provider gone (`unavailable`: it exited, or the
  * bridge did), the error is rethrown and the next call configures it again. When the bridge
@@ -64,6 +68,35 @@ export async function ensureConfigured<T>(
   call: () => Promise<T>,
 ): Promise<T>;
 export async function ensureConfigured<T>(
+  bridge: ProviderClient,
+  ref: ProviderRef,
+  configJson: string,
+  call?: () => Promise<T>,
+): Promise<T | void> {
+  const state = stateOf(bridge, ref);
+  let turn = state.turn;
+  if (turn?.config !== configJson) {
+    const before = turn;
+    turn = state.turn = {
+      config: configJson,
+      ready: before
+        ? before.ready.then(() => Promise.allSettled(before.running)).then(() => undefined)
+        : Promise.resolve(),
+      running: new Set(),
+    };
+  }
+  const { ready, running } = turn;
+  const mine = ready.then(() => configureAndCall(bridge, ref, configJson, call));
+  running.add(mine);
+  try {
+    return await mine;
+  } finally {
+    running.delete(mine);
+  }
+}
+
+/** Configures the provider unless it has `configJson`, and runs `call`: again once when the bridge had forgotten it. */
+async function configureAndCall<T>(
   bridge: ProviderClient,
   ref: ProviderRef,
   configJson: string,

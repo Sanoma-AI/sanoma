@@ -46,17 +46,31 @@ describe("readResources", () => {
     expect(resources.map((r) => [r.id, r.vendor, r.type, r.name, r.identity, r.binding])).toEqual([
       ["resources/billing/stripe.ts#pro", "stripe", "product", "pro", undefined, "prod_SanomaFixturePro"],
       ["resources/billing/stripe.ts#events", "stripe", "webhook_endpoint", "events", undefined, undefined],
-      ["resources/identity/github.ts#website", "github", "repository", "website", "website", "R_website"],
-      ["resources/identity/github.ts#docs", "github", "repository", "docs", "docs", "R_docs"],
+      [
+        "resources/identity/github.ts#website",
+        "github",
+        "repository",
+        "Sanoma-AI/website",
+        "Sanoma-AI/website",
+        "R_website",
+      ],
+      ["resources/identity/github.ts#docs", "github", "repository", "Sanoma-AI/docs", "Sanoma-AI/docs", "R_docs"],
       [
         "resources/identity/github.ts#websiteMain",
         "github",
         "branch_protection",
-        "website:main",
-        "website:main",
+        "Sanoma-AI/website:main",
+        "Sanoma-AI/website:main",
         "BPR_website:main",
       ],
-      ["resources/identity/rules.ts#docsMain", "github", "branch_protection", "docs:main", "docs:main", undefined],
+      [
+        "resources/identity/rules.ts#docsMain",
+        "github",
+        "branch_protection",
+        "Sanoma-AI/docs:main",
+        "Sanoma-AI/docs:main",
+        undefined,
+      ],
     ]);
     const website = resources.find((r) => r.id === "resources/identity/github.ts#website")!;
     expect(website).toEqual({
@@ -64,11 +78,12 @@ describe("readResources", () => {
       file: "resources/identity/github.ts",
       vendor: "github",
       type: "repository",
-      name: "website",
-      identity: "website",
+      name: "Sanoma-AI/website",
+      identity: "Sanoma-AI/website",
       binding: "R_website",
       span: [expect.any(Number), expect.any(Number)],
       desired: {
+        owner: "Sanoma-AI",
         name: "website",
         description: "The company website",
         visibility: "public",
@@ -90,7 +105,7 @@ describe("readResources", () => {
     const byId = new Map(readResources(company).map((r) => [r.id, r]));
     const rule = byId.get("resources/identity/github.ts#websiteMain")!;
     expect(rule.desired).toEqual({
-      repository_id: "website",
+      repository_id: "Sanoma-AI/website",
       pattern: "main",
       enforce_admins: true,
       required_pull_request_reviews: [{ required_approving_review_count: 1, dismiss_stale_reviews: true }],
@@ -102,8 +117,8 @@ describe("readResources", () => {
     expect(normalize({ ...desired, allows_deletions: false }, desired)).toEqual(normalize(desired, desired));
     // Across files: the import is the reference.
     expect(byId.get("resources/identity/rules.ts#docsMain")).toMatchObject({
-      name: "docs:main",
-      desired: { repository_id: "docs" },
+      name: "Sanoma-AI/docs:main",
+      desired: { repository_id: "Sanoma-AI/docs" },
       refs: { repository_id: "resources/identity/github.ts#docs" },
     });
   });
@@ -165,34 +180,34 @@ describe("readResources", () => {
     it("what the resource type refuses, as calling it would", () => {
       expect(
         problems({
-          "a.ts": `${GH}export const a = github.repository({ name: "a", wiki: true });
-export const b = github.repository({ name: "b", html_url: "https://github.com/x/b" });
-export const c = github.repository({ name: "c", has_wiki: "yes" });
+          "a.ts": `${GH}export const a = github.repository({ owner: "acme", name: "a", wiki: true });
+export const b = github.repository({ owner: "acme", name: "b", html_url: "https://github.com/x/b" });
+export const c = github.repository({ owner: "acme", name: "c", has_wiki: "yes" });
 `,
           "b.ts": `import { stripe } from "@sanoma-ai/connector-stripe/resources";\nexport const p = stripe.product({ id: "prod_1", name: "Pro" });\n`,
-          "c.ts": `${GH}export const r = github.repository({ name: "" });\n`,
+          "c.ts": `${GH}export const r = github.repository({ owner: "acme", name: "" });\n`,
         }),
       ).toEqual([
         "resources/a.ts:2:1: export const a: github.repository: no field wiki",
         "resources/a.ts:3:1: export const b: github.repository: leave out html_url: the vendor sets it",
         "resources/a.ts:4:1: export const c: github.repository: ✖ Invalid input: expected boolean, received string → at has_wiki",
         "resources/b.ts:2:1: export const p: stripe.product: leave out id: the vendor sets it",
-        "resources/c.ts:2:1: export const r: github.repository: its name is missing",
+        "resources/c.ts:2:1: export const r: github.repository: its owner/name is missing",
       ]);
     });
 
     it("a reference where the type takes none, or to a resource of another type", () => {
       expect(
         problems({
-          "a.ts": `${GH}export const web = github.repository({ name: "web" });
-export const copy = github.repository({ name: web });
+          "a.ts": `${GH}export const web = github.repository({ owner: "acme", name: "web" });
+export const copy = github.repository({ owner: "acme", name: web });
 export const main = github.branch_protection({ repository_id: web, pattern: "main" });
 export const rule = github.branch_protection({ repository_id: main, pattern: "next" });
 `,
         }),
       ).toEqual([
-        "resources/a.ts:3:1: export const copy: github.repository: name takes a value, not a resource (github.repository web)",
-        "resources/a.ts:5:1: export const rule: github.branch_protection: repository_id names a resource of type github.repository, not github.branch_protection (web:main)",
+        "resources/a.ts:3:1: export const copy: github.repository: name takes a value, not a resource (github.repository acme/web)",
+        "resources/a.ts:5:1: export const rule: github.branch_protection: repository_id names a resource of type github.repository, not github.branch_protection (acme/web:main)",
       ]);
     });
 
@@ -200,7 +215,7 @@ export const rule = github.branch_protection({ repository_id: main, pattern: "ne
       expect(
         problems({
           "a.ts": `${GH}import { site } from "./b.ts";\nimport { x } from "./c.ts";\nexport const m = github.branch_protection({ repository_id: site, pattern: "main" });\nexport const n = github.branch_protection({ repository_id: x, pattern: "main" });\n`,
-          "b.ts": `${GH}export const web = github.repository({ name: "web" });\n`,
+          "b.ts": `${GH}export const web = github.repository({ owner: "acme", name: "web" });\n`,
         }),
       ).toEqual([
         "resources/a.ts:2:10: site is not a resource resources/b.ts declares",
@@ -212,9 +227,9 @@ export const rule = github.branch_protection({ repository_id: main, pattern: "ne
       expect(
         problems({
           "a.ts": `${GH}import { web } from "./b.ts";\nexport const m = github.branch_protection({ repository_id: web, pattern: "main" });\n`,
-          "b.ts": `${GH}export const web = github.repository({ name: process.env.NAME });\n`,
+          "b.ts": `${GH}export const web = github.repository({ owner: "acme", name: process.env.NAME });\n`,
         }),
-      ).toEqual([expect.stringMatching(/^resources\/b\.ts:2:46: process is not allowed in a data file/)]);
+      ).toEqual([expect.stringMatching(/^resources\/b\.ts:2:61: process is not allowed in a data file/)]);
     });
 
     it("a reference cycle", () => {
@@ -231,11 +246,11 @@ export const rule = github.branch_protection({ repository_id: main, pattern: "ne
     it("two resources of one type with one identity, but not two without one", () => {
       expect(
         problems({
-          "a.ts": `${GH}export const site = github.repository({ name: "web" });\n`,
-          "b/c.ts": `${GH}export const web = github.repository({ name: "web", has_wiki: false });\n`,
+          "a.ts": `${GH}export const site = github.repository({ owner: "acme", name: "web" });\n`,
+          "b/c.ts": `${GH}export const web = github.repository({ owner: "acme", name: "web", has_wiki: false });\n`,
         }),
       ).toEqual([
-        'resources/b/c.ts:2:1: github.repository "web" is declared twice, also as resources/a.ts#site: declare each resource once, and import it where it is used',
+        'resources/b/c.ts:2:1: github.repository "acme/web" is declared twice, also as resources/a.ts#site: declare each resource once, and import it where it is used',
       ]);
       const STRIPE = `import { stripe } from "@sanoma-ai/connector-stripe/resources";\n`;
       dir = project({
@@ -247,7 +262,10 @@ export const rule = github.branch_protection({ repository_id: main, pattern: "ne
 
     it("a lockfile that is not JSON, or not bindings", () => {
       expect(
-        problems({ "a.ts": `${GH}export const r = github.repository({ name: "x" });\n`, "sanoma.lock.json": "{" }),
+        problems({
+          "a.ts": `${GH}export const r = github.repository({ owner: "acme", name: "x" });\n`,
+          "sanoma.lock.json": "{",
+        }),
       ).toEqual([expect.stringMatching(/^resources\/sanoma\.lock\.json: not JSON: /)]);
       expect(
         problems({
@@ -261,8 +279,8 @@ export const rule = github.branch_protection({ repository_id: main, pattern: "ne
     it("a binding of another type than its declaration's, and two declarations bound to one object", () => {
       expect(
         problems({
-          "a.ts": `${GH}export const web = github.repository({ name: "web" });
-export const docs = github.repository({ name: "docs" });
+          "a.ts": `${GH}export const web = github.repository({ owner: "acme", name: "web" });
+export const docs = github.repository({ owner: "acme", name: "docs" });
 export const main = github.branch_protection({ repository_id: web, pattern: "main" });
 `,
           "sanoma.lock.json": JSON.stringify({
@@ -278,7 +296,7 @@ export const main = github.branch_protection({ repository_id: web, pattern: "mai
     });
 
     it("a syntax error", () => {
-      expect(problems({ "a.ts": `${GH}export const r = github.repository({ name: "x" ;\n` })).toEqual([
+      expect(problems({ "a.ts": `${GH}export const r = github.repository({ owner: "acme", name: "x" ;\n` })).toEqual([
         expect.stringMatching(/^resources\/a\.ts:2:\d+: syntax: /),
       ]);
     });
@@ -303,7 +321,7 @@ export const main = github.branch_protection({ repository_id: web, pattern: "mai
     ]);
     // A declaration whose value is refused is still declared: its binding is no orphan.
     const dir = project({
-      "a.ts": `import { github } from "@sanoma-ai/connector-github/resources";\nexport const web = github.repository({ name: process.env.NAME });\n`,
+      "a.ts": `import { github } from "@sanoma-ai/connector-github/resources";\nexport const web = github.repository({ owner: "acme", name: process.env.NAME });\n`,
       "sanoma.lock.json": JSON.stringify({ "resources/a.ts#web": { type: "github.repository", id: "R_1" } }),
     });
     try {
@@ -383,7 +401,7 @@ export const leads = collection({ name: "leads", key: "id", title: \`Leads \${"x
   it("are listed where they are declared, beside the resources, matched to no connector, type or lockfile", () => {
     const dir = project({
       "data.ts": DATA,
-      "identity/github.ts": `import { github } from "@sanoma-ai/connector-github/resources";\nexport const site = github.repository({ name: "site" });\n`,
+      "identity/github.ts": `import { github } from "@sanoma-ai/connector-github/resources";\nexport const site = github.repository({ owner: "acme", name: "site" });\n`,
     });
     try {
       const read = readDataFiles(dir, base.connectors);
@@ -405,7 +423,7 @@ export const leads = collection({ name: "leads", key: "id", title: \`Leads \${"x
   it("are no resource another data file names", () => {
     const dir = project({
       "data.ts": DATA,
-      "identity/github.ts": `import { github } from "@sanoma-ai/connector-github/resources";\nimport { leads } from "../data.ts";\nexport const site = github.repository({ name: leads });\n`,
+      "identity/github.ts": `import { github } from "@sanoma-ai/connector-github/resources";\nimport { leads } from "../data.ts";\nexport const site = github.repository({ owner: "acme", name: leads });\n`,
     });
     try {
       expect(readDataFiles(dir, base.connectors).problems).toEqual([
@@ -459,8 +477,8 @@ describe("secret()", () => {
 describe("describeConfig's problems", () => {
   it("are data: the resources read without one are listed beside them", () => {
     const dir = project({
-      "good.ts": `import { github } from "@sanoma-ai/connector-github/resources";\nexport const web = github.repository({ name: "web" });\n`,
-      "bad.ts": `import { github } from "@sanoma-ai/connector-github/resources";\nimport { web } from "./good.ts";\nexport const docs = github.repository({ name: "docs", description: process.env.X });\nexport const main = github.branch_protection({ repository_id: web, pattern: "main" });\n`,
+      "good.ts": `import { github } from "@sanoma-ai/connector-github/resources";\nexport const web = github.repository({ owner: "acme", name: "web" });\n`,
+      "bad.ts": `import { github } from "@sanoma-ai/connector-github/resources";\nimport { web } from "./good.ts";\nexport const docs = github.repository({ owner: "acme", name: "docs", description: process.env.X });\nexport const main = github.branch_protection({ repository_id: web, pattern: "main" });\n`,
     });
     try {
       const { resources, problems } = describeConfig({ ...base, root: dir });
@@ -469,7 +487,7 @@ describe("describeConfig's problems", () => {
         {
           file: "resources/bad.ts",
           line: 3,
-          column: 68,
+          column: 83,
           message: expect.stringMatching(/^process is not allowed in a data file/),
         },
       ]);

@@ -49,7 +49,7 @@ const context = (): AppContext => ({
 
 const git = (...args: string[]) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
 /** The fake's recorded repository and project, as GitHub and Supabase name them. */
-const REPO = "sanoma";
+const REPO = "Sanoma-AI/sanoma";
 const REF = "sanomatestprojectref";
 const id = { repo: `${INFRA}#repo`, store: `${INFRA}#store` };
 
@@ -90,6 +90,7 @@ describe("connecting an existing repository and database", () => {
       import { secret } from "sanoma/resources";
 
       export const repo = github.repository({
+        owner: "Sanoma-AI",
         name: "sanoma",
         description:
           "Open core: schema, planner, Cedar policies, ledger format, MCP server, local studio, CLI, first-party connectors, modules",
@@ -148,10 +149,10 @@ describe("connecting an existing repository and database", () => {
     expect(git("ls-tree", "-r", "--name-only", "main")).toBe("README.md");
   });
 
-  it("refuses a file already there, a branch already there, an owner the connector does not read, and nothing found", async () => {
-    expect(await refused({ repository: "someone-else/sanoma" })).toMatchObject({
+  it("refuses a file already there, a branch already there, and nothing found", async () => {
+    expect(await refused({ repository: "Sanoma-AI/never-recorded" })).toMatchObject({
       status: 400,
-      message: expect.stringContaining("not someone-else/sanoma: set GITHUB_OWNER to someone-else"),
+      message: "There is no github.repository Sanoma-AI/never-recorded to connect",
     });
     expect(await refused({ project: "sanomamissingproject" })).toMatchObject({
       status: 400,

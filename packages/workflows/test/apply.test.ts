@@ -89,7 +89,7 @@ describe("the apply workflow on the company's resources", () => {
     writeFileSync(
       join(root, "resources/identity/blog.ts"),
       `import { github } from "@sanoma-ai/connector-github/resources";\n\n` +
-        `export const blog = github.repository({ name: "blog", visibility: "private" });\n\nexport default [blog];\n`,
+        `export const blog = github.repository({ owner: "acme", name: "blog", visibility: "private" });\n\nexport default [blog];\n`,
     );
     fakes.seed();
     commits.length = 0;
@@ -155,7 +155,7 @@ describe("the apply workflow on the company's resources", () => {
     // One change call, through the policy, with no approval asked: this policy holds nothing of alice's.
     const records = await app.client.ledger(runId);
     expect(ops(records).filter(([op]) => !op.endsWith(".import") && !op.endsWith(".plan"))).toEqual([
-      ["github.repository.create", { desired: { name: "blog", visibility: "private" } }],
+      ["github.repository.create", { desired: { owner: "acme", name: "blog", visibility: "private" } }],
     ]);
     expect(records.some((r) => r.type === "approval.requested")).toBe(false);
     // The binding is written in the step right after the create, before anything else is called.

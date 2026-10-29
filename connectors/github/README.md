@@ -10,14 +10,14 @@ npm install @sanoma-ai/connector-github
 
 Each resource type has two operations, both effect `read` and idempotent, with the id as the policy's `target`; a repository and a deploy key are writable, so they have the change operations too, which only apply calls:
 
-| Type                    | Operations                                                                                   | Identity                   | Binding id                     |
-| ----------------------- | -------------------------------------------------------------------------------------------- | -------------------------- | ------------------------------ |
-| `repository`            | `github.repository.read`, `.import`, and `.plan`, `.create`, `.update`, `.delete`            | `name`                     | `node_id`                      |
-| `branch_protection`     | `github.branch_protection.read`, `github.branch_protection.import`                           | `repository_id:pattern`    | `id` (its node id, `BPR_…`)    |
-| `team_membership`       | `github.team_membership.read`, `github.team_membership.import`                               | `team_id:username`         | `id` (`team_id:username`)      |
-| `repository_deploy_key` | `github.repository_deploy_key.read`, `.import`, and `.plan`, `.create`, `.update`, `.delete` | none: found by its binding | `id` (`<repository>:<key id>`) |
+| Type                    | Operations                                                                                   | Identity                                                | Binding id                             |
+| ----------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------- | -------------------------------------- |
+| `repository`            | `github.repository.read`, `.import`, and `.plan`, `.create`, `.update`, `.delete`            | `owner/name`                                            | `node_id`                              |
+| `branch_protection`     | `github.branch_protection.read`, `github.branch_protection.import`                           | `repository_id:pattern` (the repository's `owner/name`) | `id` (its node id, `BPR_…`)            |
+| `team_membership`       | `github.team_membership.read`, `github.team_membership.import`                               | `owner/team_id:username`                                | `id` (`<owner>/<team_id>:<username>`)  |
+| `repository_deploy_key` | `github.repository_deploy_key.read`, `.import`, and `.plan`, `.create`, `.update`, `.delete` | none: found by its binding                              | `id` (`<owner>/<repository>:<key id>`) |
 
-`import` takes `{ id }`, an identity or a binding id (what the [lockfile](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#bindings) keeps, which a rename does not change), and returns the object's `state`. The provider imports a repository by its name and a rule by `repository:pattern`, so the driver resolves a node id (`R_…`, `BPR_…`) to those first, with one GraphQL `node(id)` query, and refuses one in a repository of another owner than `GITHUB_OWNER` (default: the token's user); a node id GitHub does not know is gone. The fake finds an object by its binding id too, with no query; `read` takes a state an earlier call returned (`{ id, state, handle }`), or just `{ id }`, and returns its fresh `state`, or `gone: true` when it no longer exists. See [Resources](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#resources).
+`import` takes `{ id }`, an identity or a binding id (what the [lockfile](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#bindings) keeps, which a rename does not change), and returns the object's `state`. Which organization or user owns a repository is a fact about it, so it is in the resource, never in the environment: a repository and a team membership have an `owner` field, which a data file declares, and every name of a repository the connector shows is `<owner>/<name>`, GitHub's `full_name` (a repository's identity, a rule's repository, a deploy key's repository and binding id). The provider takes the owner as its configuration and a name without it, so the driver configures it, on each call, for the owner the call names: by its declaration's `owner` (or its repository's), its state's, or its id's `<owner>/`. A node id (`R_…`, `BPR_…`, any binding id of a repository or a rule without an owner) is resolved first, with one GraphQL `node(id)` query, to its owner and the name the provider imports by (a repository's name, a rule's `repository:pattern`); a node id GitHub does not know is gone. A call that names no owner is refused, as is one that names two (a declaration's `owner` against its binding's: a repository moves owner at GitHub, not here): nothing is read under the token's own user by default. Calls for a second owner work: the provider is configured for each owner in turn, a call for one waiting for those running for the other. The fake finds an object by its binding id too, with no query; `read` takes a state an earlier call returned (`{ id, state, handle }`), or just `{ id }`, and returns its fresh `state`, or `gone: true` when it no longer exists. See [Resources](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#resources).
 
 A deploy key is an SSH key that may fetch one repository (read-only unless `read_only: false`), what going live gives the company's host to clone the private repository with ([Cloning a private repository](https://github.com/Sanoma-AI/sanoma/blob/main/packages/sanoma/README.md#cloning-a-private-repository)). GitHub changes no field of one, so a change to any is a replace (`update` deletes the old key and makes a new one), and GitHub reads `key` back without its comment, so declare it as `<type> <base64>`.
 
@@ -28,7 +28,12 @@ A data file declares resources with the constructors in `@sanoma-ai/connector-gi
 ```ts
 import { github } from "@sanoma-ai/connector-github/resources";
 
-export const site = github.repository({ name: "website", delete_branch_on_merge: true, has_wiki: false });
+export const site = github.repository({
+  owner: "acme",
+  name: "website",
+  delete_branch_on_merge: true,
+  has_wiki: false,
+});
 export const siteMain = github.branch_protection({ repository_id: site, pattern: "main", enforce_admins: true });
 export const siteKey = github.repository_deploy_key({
   repository: site,
@@ -38,9 +43,9 @@ export const siteKey = github.repository_deploy_key({
 });
 ```
 
-A branch protection rule names its repository by the declared repository itself (`repository_id: site`), which stands for its name: the rule is `website:main`; a deploy key's `repository` the same way. Only those take a resource, and only a repository; see [Data files](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#data-files).
+A branch protection rule names its repository by the declared repository itself (`repository_id: site`), which stands for its identity, `acme/website`: the rule is `acme/website:main`, and takes its owner from the repository; a deploy key's `repository` the same way, so a data file states the owner once per repository. Only those take a resource, and only a repository; see [Data files](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#data-files).
 
-The fields are the provider's attributes, by their names. A list block of at most one item (`pages`, `security_and_analysis`, `template`) is one object. Only declared fields are compared for drift; sets (`topics`, and five lists in a branch protection rule) are compared in any order.
+The fields are the provider's attributes, by their names, and `owner` (required) on a repository and a team membership. A list block of at most one item (`pages`, `security_and_analysis`, `template`) is one object. Only declared fields are compared for drift; sets (`topics`, and five lists in a branch protection rule) are compared in any order.
 
 The logo is GitHub's mark from [Octicons](https://primer.style/octicons/) (`mark-github`, MIT), there only to identify the service an operation calls.
 
@@ -87,18 +92,17 @@ export default defineConfig({ workflows, connectors: [github], policy });
 
 `./driver` (`githubDriver`; `githubDriver({ bridge })` reads through a bridge of your own) and `./fake` (`fakeGithub`) are internal entries, for tests.
 
-Without `bridge`, it reads through the process's `defaultBridge()` from `@sanoma-ai/bridge`, started on the first call with the binary `startBridge` finds; `bridge` is any `ProviderClient` (a `Bridge` from `startBridge()`, or `stateBridge` in tests). It configures the provider on the first call with `{ owner, token }` from the environment, and again when either changes (closing it first: the bridge refuses a second config), when the provider has exited, or when the bridge has forgotten it (`ensureConfigured`). `read` without a state (or with one that has no `id`) imports, which reads the object too. States leave the driver in the resource's shape, with sensitive attributes set to `null`; the provider's private data and state version travel in the opaque `handle`.
+Without `bridge`, it reads through the process's `defaultBridge()` from `@sanoma-ai/bridge`, started on the first call with the binary `startBridge` finds; `bridge` is any `ProviderClient` (a `Bridge` from `startBridge()`, or `stateBridge` in tests). It configures the provider on the first call with `{ owner, token }`, the owner the call names and the token from the environment, and again when either changes (closing it first: the bridge refuses a second config), when the provider has exited, or when the bridge has forgotten it (`ensureConfigured`). `read` without a state (or with one that has no `id`) imports, which reads the object too. States leave the driver in the resource's shape, with sensitive attributes set to `null`; the provider's private data and state version travel in the opaque `handle`.
 
 ### Environment
 
 Read on every call, never when the config loads:
 
-| Variable       | What it is                                                                                                    |
-| -------------- | ------------------------------------------------------------------------------------------------------------- |
-| `GITHUB_TOKEN` | A GitHub token that can read the repositories, rules and teams named.                                         |
-| `GITHUB_OWNER` | Optional: the organization or user whose repositories the data files describe. Default: the token's own user. |
+| Variable       | What it is                                                            |
+| -------------- | --------------------------------------------------------------------- |
+| `GITHUB_TOKEN` | A GitHub token that can read the repositories, rules and teams named. |
 
-When the token is unset, a call fails, not retryable, naming it; the worker starts regardless, and the app's connector page shows and sets both. The bridge passes the token and the owner to the provider through its config only, never through the provider's environment. The default bridge's binary comes with `@sanoma-ai/bridge` or from `SANOMA_BRIDGE_BIN` (see [the bridge](https://www.npmjs.com/package/@sanoma-ai/bridge#the-binary)), not a credential of the connector.
+When the token is unset, a call fails, not retryable, naming it; the worker starts regardless, and the app's connector page shows and sets it. The bridge passes the token and the owner to the provider through its config only, never through the provider's environment. The default bridge's binary comes with `@sanoma-ai/bridge` or from `SANOMA_BRIDGE_BIN` (see [the bridge](https://www.npmjs.com/package/@sanoma-ai/bridge#the-binary)), not a credential of the connector.
 
 ### Errors and retries
 
@@ -106,7 +110,7 @@ The bridge's errors become `DriverError`s whose `vendorCode` is the bridge's cod
 
 ## Testing
 
-`@sanoma-ai/connector-github/fake` is GitHub as it was when the replies in `@sanoma-ai/bridge`'s `testdata/replies` were recorded (the `Sanoma-AI/sanoma` and `Sanoma-AI/provider-bridge` repositories; `provider-bridge:main` has no branch protection), served through the real driver over a `stateBridge` of them (`tfFake`). It needs no token and reaches nothing.
+`@sanoma-ai/connector-github/fake` is GitHub as it was when the replies in `@sanoma-ai/bridge`'s `testdata/replies` were recorded (the `Sanoma-AI/sanoma` and `Sanoma-AI/provider-bridge` repositories; `provider-bridge:main` has no branch protection), served through the real driver over a `stateBridge` of them (`tfFake`). It needs no token and reaches nothing. Its calls name owners as the driver's do (`Sanoma-AI/sanoma`), but it holds its objects by the provider's import ids (`sanoma`, `sanoma:main`), what `put`, `override` and `remove` take, and not by owner: a repository's `owner` is its `full_name`'s, else the call's.
 
 ```ts
 import { withSetup } from "@sanoma-ai/workflows";

@@ -6,6 +6,7 @@ Feature: Drift in the company's resources
 
   Scenario: A repository setting changed at GitHub
     Given github.repository "website" has
+      | full_name   | Sanoma-AI/website    |
       | name        | website              |
       | node_id     | R_website            |
       | description | The company website  |
@@ -22,6 +23,7 @@ Feature: Drift in the company's resources
 
   Scenario: A repository and a product as declared
     Given github.repository "docs" has
+      | full_name   | Sanoma-AI/docs        |
       | name        | docs                  |
       | node_id     | R_docs                |
       | description | Product documentation |

@@ -1,7 +1,8 @@
 import { defaultBridge, type ProviderClient } from "@sanoma-ai/bridge";
-import { DriverError, retryableStatus } from "@sanoma-ai/workflows";
+import { type Driver, DriverError, retryableStatus } from "@sanoma-ai/workflows";
 import { z } from "zod";
 import { githubTf } from "./connector.ts";
+import { owned } from "./owner.ts";
 
 export interface GithubDriverOptions {
   /**
@@ -19,28 +20,13 @@ const env = z.object({
     .describe(
       "a fine-grained token with read-only repository permissions, limited to the repositories the data files declare",
     ),
-  GITHUB_OWNER: z
-    .string()
-    .min(1)
-    .optional()
-    .describe("the organization or user whose repositories the data files describe; default: the token's own user"),
 });
-
-/**
- * The node ids a binding keeps that the provider cannot import by, by type: a repository's (`R_kgD…`, not `R_` alone, which begins names too,
- * or the legacy base64 of `010:Repository…`) and a branch protection rule's (`BPR_…`).
- */
-const NODE_IDS: Readonly<Record<string, RegExp>> = {
-  repository: /^(R_kgD[\w-]+|MDEwOlJlcG9zaXRvcnk[\w+/=]+)$/,
-  branch_protection: /^BPR_[\w-]+$/,
-};
 
 const NODE_QUERY = `query($id: ID!) {
   node(id: $id) {
     ... on Repository { name owner { login } }
     ... on BranchProtectionRule { pattern repository { name owner { login } } }
   }
-  viewer { login }
 }`;
 
 const Repo = z.object({ name: z.string(), owner: z.object({ login: z.string() }) });
@@ -48,7 +34,6 @@ const NodeReply = z.object({
   data: z
     .object({
       node: Repo.partial().extend({ pattern: z.string().optional(), repository: Repo.optional() }).nullable(),
-      viewer: z.object({ login: z.string() }),
     })
     .nullish(),
   errors: z.array(z.object({ type: z.string().optional(), message: z.string() })).optional(),
@@ -56,12 +41,10 @@ const NodeReply = z.object({
 });
 
 /**
- * The provider's import id for a node id, from one GraphQL `node(id)` query: a repository's
- * name, a rule's `repository:pattern`. Refused when the repository is not the provider's owner's
- * (`GITHUB_OWNER`, else the token's user). The id itself when GitHub has no such node, so the
- * import says it is gone.
+ * A node id's repository owner and the provider's import id, from one GraphQL `node(id)` query:
+ * a repository's name, a rule's `repository:pattern`. Undefined when GitHub has no such node.
  */
-async function importIdOf(id: string, { token, owner }: { token: string; owner: string | null }) {
+async function resolveNode(id: string, token: string) {
   let status: number;
   let json: unknown;
   try {
@@ -89,35 +72,35 @@ async function importIdOf(id: string, { token, owner }: { token: string; owner: 
       },
     );
   }
-  const { node, viewer } = reply.data;
+  const { node } = reply.data;
   const repo = node?.repository ?? (node?.name && node.owner ? { name: node.name, owner: node.owner } : undefined);
-  if (!repo) return id;
-  const expected = owner ?? viewer.login;
-  if (repo.owner.login.toLowerCase() !== expected.toLowerCase()) {
-    throw new DriverError(`github: ${id} is in ${repo.owner.login}/${repo.name}, not a repository of ${expected}`, {
-      retryable: false,
-    });
-  }
-  return node?.pattern === undefined ? repo.name : `${repo.name}:${node.pattern}`;
+  if (!repo) return undefined;
+  return { owner: repo.owner.login, id: node?.pattern === undefined ? repo.name : `${repo.name}:${node.pattern}` };
 }
 
-/** The provider's config, from the environment, read on every call. */
-function config() {
-  const token = process.env.GITHUB_TOKEN;
-  if (!token) throw new DriverError("github: GITHUB_TOKEN is not set", { retryable: false });
-  return { owner: process.env.GITHUB_OWNER || null, token };
+/** The token, from the environment, read on every call. */
+function readToken() {
+  const value = process.env.GITHUB_TOKEN;
+  if (!value) throw new DriverError("github: GITHUB_TOKEN is not set", { retryable: false });
+  return value;
 }
 
 /**
  * Reads GitHub resources through the `integrations/github` OpenTofu provider on `bridge` (the
- * default bridge when none is given), with the token in `GITHUB_TOKEN` and the owner in
- * `GITHUB_OWNER`, read on every call. The provider is configured on the first call, and again
- * when the token or the owner changes or the provider has exited. A repository's or a rule's
- * import takes its node id (its binding id) too, resolved first (`importIdOf`).
+ * default bridge when none is given), with the token in `GITHUB_TOKEN`, read on every call, for
+ * the owner each call names (`owned`): the provider is configured with `{ owner, token }` on the
+ * first call, and again when either changes or the provider has exited; a call for another owner
+ * waits for those running for the one configured. A repository's or a rule's node id (its
+ * binding id) is resolved first, by GraphQL (`resolveNode`).
  */
 export function githubDriver({ bridge = defaultBridge() }: GithubDriverOptions = {}) {
-  const driver = githubTf.driver(bridge, config, (type, id) =>
-    NODE_IDS[type]?.test(id) ? importIdOf(id, config()) : id,
-  );
+  const drivers = new Map<string, Driver>();
+  const driverFor = (owner: string | undefined) => {
+    const key = owner?.toLowerCase() ?? "";
+    let driver = drivers.get(key);
+    if (!driver) drivers.set(key, (driver = githubTf.driver(bridge, () => ({ owner, token: readToken() }))));
+    return driver;
+  };
+  const driver = owned(driverFor, (_, id) => resolveNode(id, readToken()));
   return Object.freeze({ ...driver, env });
 }

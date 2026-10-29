@@ -111,7 +111,7 @@ describe("the drift workflow", () => {
         id: "resources/identity/github.ts#website",
         vendor: "github",
         type: "repository",
-        name: "website",
+        name: "Sanoma-AI/website",
         binding: "R_website",
         status: "drifted",
         fields: [{ path: "has_wiki", desired: false, actual: true }],
@@ -165,7 +165,7 @@ describe("the drift workflow", () => {
     const { report } = await drift();
     expect(byId(report)["resources/identity/github.ts#websiteMain"]).toMatchObject({
       status: "drifted",
-      fields: [{ path: "repository_id", desired: "website", actual: nodeIdOf("docs") }],
+      fields: [{ path: "repository_id", desired: "Sanoma-AI/website", actual: nodeIdOf("docs") }],
     });
     // The name, which the import id holds too, is the same repository.
     github.override("branch_protection", "website:main", { repository_id: "website" });

@@ -1786,7 +1786,9 @@ describe("resources and drift", () => {
     const website = { runId: driftRun, id: `${github}#website`, paths: ["has_wiki"] };
     expect(await adopt(adopting, alice, website)).toEqual({ file: github, revision: "0123456789abcdef" });
     expect(readFileSync(join(root, github), "utf8")).toBe(before.replace("has_wiki: false", "has_wiki: true"));
-    expect(commits).toEqual([{ paths: [github], message: "Adopt has_wiki of website from github", author: "alice" }]);
+    expect(commits).toEqual([
+      { paths: [github], message: "Adopt has_wiki of Sanoma-AI/website from github", author: "alice" },
+    ]);
 
     // Without a source, the file is written and nothing committed.
     const stripe = "resources/billing/stripe.ts";
@@ -2002,8 +2004,14 @@ describe("an app configured otherwise", () => {
     mkdirSync(join(dir, "resources"));
     // The same app ("sanoma", as no package.json names it), on its own root: its data files are these.
     const GH = `import { github } from "@sanoma-ai/connector-github/resources";\n`;
-    writeFileSync(join(dir, "resources", "good.ts"), `${GH}export const web = github.repository({ name: "web" });\n`);
-    writeFileSync(join(dir, "resources", "bad.ts"), `${GH}export const docs = github.repository({ name: 1 });\n`);
+    writeFileSync(
+      join(dir, "resources", "good.ts"),
+      `${GH}export const web = github.repository({ owner: "acme", name: "web" });\n`,
+    );
+    writeFileSync(
+      join(dir, "resources", "bad.ts"),
+      `${GH}export const docs = github.repository({ owner: "acme", name: 1 });\n`,
+    );
     // A directory nothing has written to yet: the worker keeps its records in memory.
     const otherConfig = { ...config, ledger: jsonlLedger(join(dir, "ledger")), root: dir };
     const warn = vi.spyOn(console, "warn").mockImplementation((...args: unknown[]) => void warned.push(args.join(" ")));
