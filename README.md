@@ -1,6 +1,6 @@
 # sanoma
 
-Sanoma is admin software for small businesses: invoices and receipts, customers, outbound. Each business gets its own copy, as code it owns.
+Sanoma is customizable admin software for small businesses: invoices and receipts, customers, outbound. Each business gets its own copy, as code it owns.
 
 **For non-developers:** ask the agent in the app for a change, check it, and accept it. Sanoma checks your rules before it sends or publishes anything, and waits for your OK where you asked for one.
 

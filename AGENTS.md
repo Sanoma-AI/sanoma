@@ -2,7 +2,7 @@
 
 Read this file, then only the package guidance relevant to the task. The [README](README.md) owns product context and [development setup](README.md#develop).
 
-Describe Sanoma the way the [README's opening](README.md#sanoma) does (admin software for small businesses, kept as code each business owns), and claim only what exists today.
+Describe Sanoma the way the [README's opening](README.md#sanoma) does (customizable admin software for small businesses, kept as code each business owns), and claim only what exists today.
 
 ## Package map
 
