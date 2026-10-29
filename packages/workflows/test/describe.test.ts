@@ -100,9 +100,13 @@ describe("describeConfig", () => {
       "sanoma.change.merge",
       "sanoma.change.open",
       "sanoma.change.review",
+      "sanoma.connection.activate",
       "sanoma.connection.bind",
+      "sanoma.connection.configure",
       "sanoma.connection.create",
       "sanoma.connection.disconnect",
+      "sanoma.connection.prepare",
+      "sanoma.connection.test",
     ]);
     const publish = ops.find((o) => o.id === "ghost.post.publish")!;
     expect(publish).toMatchObject({

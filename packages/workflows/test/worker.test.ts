@@ -134,9 +134,13 @@ describe("startWorker, resolveConfig and describeConfig", () => {
       "sanoma.change.merge",
       "sanoma.change.open",
       "sanoma.change.review",
+      "sanoma.connection.activate",
       "sanoma.connection.bind",
+      "sanoma.connection.configure",
       "sanoma.connection.create",
       "sanoma.connection.disconnect",
+      "sanoma.connection.prepare",
+      "sanoma.connection.test",
     ]);
     expect([...resolved.drivers.keys()].toSorted()).toEqual([...resolved.ops.keys()].toSorted());
     expect(resolved.ledger).toBe(ledger);

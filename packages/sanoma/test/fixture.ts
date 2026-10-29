@@ -50,9 +50,16 @@ export const FIXTURE_GRID = {
       ],
     },
   ],
-  ops: ["sanoma.apps.list", "sanoma.connection.bind", "sanoma.connection.create", "sanoma.connection.disconnect"].map(
-    (id) => ({ id, cells: [allow, allow] }),
-  ),
+  ops: [
+    "sanoma.apps.list",
+    "sanoma.connection.activate",
+    "sanoma.connection.bind",
+    "sanoma.connection.configure",
+    "sanoma.connection.create",
+    "sanoma.connection.disconnect",
+    "sanoma.connection.prepare",
+    "sanoma.connection.test",
+  ].map((id) => ({ id, cells: [allow, allow] })),
 };
 
 /**
