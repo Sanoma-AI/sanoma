@@ -10,7 +10,7 @@ Feature: Cloudflare containers and alarms
       {
         "desired": {
           "name": "company",
-          "image": "registry.cloudflare.com/0123456789abcdef0123456789abcdef/sanoma-ai-runtime:0.7.0",
+          "image": "registry.cloudflare.com/0123456789abcdef0123456789abcdef/sanoma-ai-runtime@sha256:7777777777777777777777777777777777777777777777777777777777777777",
           "source": "https://github.com/acme/company.git",
           "ref": "main",
           "revision": "abc123",
@@ -33,7 +33,7 @@ Feature: Cloudflare containers and alarms
         "gone": false,
         "state": {
           "name": "company",
-          "image": "registry.cloudflare.com/0123456789abcdef0123456789abcdef/sanoma-ai-runtime:0.7.0",
+          "image": "registry.cloudflare.com/0123456789abcdef0123456789abcdef/sanoma-ai-runtime@sha256:7777777777777777777777777777777777777777777777777777777777777777",
           "source": "https://github.com/acme/company.git",
           "ref": "main",
           "revision": "abc123",
@@ -51,7 +51,7 @@ Feature: Cloudflare containers and alarms
         "id": "company",
         "desired": {
           "name": "company",
-          "image": "registry.cloudflare.com/0123456789abcdef0123456789abcdef/sanoma-ai-runtime:0.8.0",
+          "image": "registry.cloudflare.com/0123456789abcdef0123456789abcdef/sanoma-ai-runtime@sha256:8888888888888888888888888888888888888888888888888888888888888888",
           "source": "https://github.com/acme/company.git",
           "ref": "main",
           "revision": "abc123",
@@ -62,7 +62,7 @@ Feature: Cloudflare containers and alarms
       """
     Then it returns
       """
-      { "action": "update", "replace": [], "planned": { "image": "registry.cloudflare.com/0123456789abcdef0123456789abcdef/sanoma-ai-runtime:0.8.0" } }
+      { "action": "update", "replace": [], "planned": { "image": "registry.cloudflare.com/0123456789abcdef0123456789abcdef/sanoma-ai-runtime@sha256:8888888888888888888888888888888888888888888888888888888888888888" } }
       """
 
   Scenario: Delete

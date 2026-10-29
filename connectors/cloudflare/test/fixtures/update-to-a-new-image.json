@@ -33,7 +33,7 @@
           {
             "type": "plain_text",
             "name": "SANOMA_IMAGE",
-            "text": "registry.cloudflare.com/0123456789abcdef0123456789abcdef/sanoma-ai-runtime:0.7.0"
+            "text": "registry.cloudflare.com/0123456789abcdef0123456789abcdef/sanoma-ai-runtime@sha256:7777777777777777777777777777777777777777777777777777777777777777"
           },
           {
             "type": "plain_text",
@@ -69,16 +69,9 @@
           "id": "00000000-0000-4000-8000-000000000001",
           "account_id": "0123456789abcdef0123456789abcdef",
           "name": "sanoma-company",
-          "scheduling_policy": "default",
-          "instances": 0,
-          "max_instances": 1,
-          "version": 1,
+          "scheduling_policy": "durable_object",
           "created_at": "2026-10-26T12:00:00Z",
           "updated_at": "2026-10-26T12:00:00Z",
-          "configuration": {
-            "image": "registry.cloudflare.com/0123456789abcdef0123456789abcdef/sanoma-ai-runtime:0.7.0",
-            "instance_type": "basic"
-          },
           "durable_objects": {
             "namespace_id": "0123456789abcdef0123456789abcde0"
           }
@@ -134,7 +127,7 @@
           {
             "type": "plain_text",
             "name": "SANOMA_IMAGE",
-            "text": "registry.cloudflare.com/0123456789abcdef0123456789abcdef/sanoma-ai-runtime:0.7.0"
+            "text": "registry.cloudflare.com/0123456789abcdef0123456789abcdef/sanoma-ai-runtime@sha256:7777777777777777777777777777777777777777777777777777777777777777"
           },
           {
             "type": "plain_text",
@@ -154,6 +147,21 @@
         "compatibility_date": "2026-10-01",
         "compatibility_flags": [],
         "usage_model": "standard"
+      }
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/client/v4/accounts/0123456789abcdef0123456789abcdef/containers/image-preparations",
+    "status": 200,
+    "body": {
+      "success": true,
+      "errors": [],
+      "messages": [],
+      "result": {
+        "image": "registry.cloudflare.com/0123456789abcdef0123456789abcdef/sanoma-ai-runtime@sha256:8888888888888888888888888888888888888888888888888888888888888888",
+        "status": "ready",
+        "artifact_digest": "sha256:a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8"
       }
     }
   },
@@ -203,43 +211,15 @@
           "id": "00000000-0000-4000-8000-000000000001",
           "account_id": "0123456789abcdef0123456789abcdef",
           "name": "sanoma-company",
-          "scheduling_policy": "default",
-          "instances": 0,
-          "max_instances": 1,
-          "version": 1,
+          "scheduling_policy": "durable_object",
           "created_at": "2026-10-26T12:00:00Z",
           "updated_at": "2026-10-26T12:00:00Z",
-          "configuration": {
-            "image": "registry.cloudflare.com/0123456789abcdef0123456789abcdef/sanoma-ai-runtime:0.7.0",
-            "instance_type": "basic"
-          },
           "durable_objects": {
             "namespace_id": "0123456789abcdef0123456789abcde0"
           }
         }
       ],
       "result_info": {}
-    }
-  },
-  {
-    "method": "POST",
-    "path": "/client/v4/accounts/0123456789abcdef0123456789abcdef/containers/applications/00000000-0000-4000-8000-000000000001/rollouts",
-    "status": 201,
-    "body": {
-      "success": true,
-      "errors": [],
-      "messages": [],
-      "result": {
-        "id": "00000000-0000-4000-8000-000000000002",
-        "description": "Sanoma: registry.cloudflare.com/0123456789abcdef0123456789abcdef/sanoma-ai-runtime:0.8.0",
-        "status": "progressing",
-        "kind": "full_auto",
-        "strategy": "rolling",
-        "created_at": "2026-10-26T12:05:00Z",
-        "last_updated_at": "2026-10-26T12:05:00Z",
-        "current_version": 1,
-        "target_version": 2
-      }
     }
   },
   {

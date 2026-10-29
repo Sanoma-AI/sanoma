@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { accountImage, copyImage } from "../src/registry.ts";
+import { accountImage, accountPinned, copyImage } from "../src/registry.ts";
 import { TEST_ACCOUNT as ACCOUNT } from "./replay.ts";
 
 // The image's copy against two small OCI registries in this process: a source that hands out an
@@ -111,8 +111,11 @@ describe("copyImage", () => {
   const image = () => `${source.host}/sanoma-ai/runtime:0.8.1`;
   const to = () => ({ account: ACCOUNT, username: "user", password: "pass", registry: target.host });
 
-  it("streams the blobs the account lacks, then puts the manifest unchanged", async () => {
-    await copyImage(image(), to(), 5_000);
+  /** The copy in the target, pinned by the source manifest's digest: what `copyImage` returns. */
+  const pinned = () => `${target.host}/${ACCOUNT}/sanoma-ai-runtime@${sha(manifest)}`;
+
+  it("streams the blobs the account lacks, then puts the manifest unchanged, and returns the copy pinned", async () => {
+    expect(await copyImage(image(), to(), 5_000)).toBe(pinned());
     const name = `/v2/${ACCOUNT}/sanoma-ai-runtime`;
     expect(target.manifests.get(`${ACCOUNT}/sanoma-ai-runtime:0.8.1`)).toEqual({ type: OCI, bytes: manifest });
     for (const blob of [config, ...layers]) expect(target.blobs.get(sha(blob))).toEqual(blob);
@@ -126,10 +129,24 @@ describe("copyImage", () => {
   });
 
   it("copies nothing when the account's manifest for the tag has the source's digest", async () => {
-    await copyImage(image(), to(), 5_000);
+    expect(await copyImage(image(), to(), 5_000)).toBe(pinned());
     const name = `/v2/${ACCOUNT}/sanoma-ai-runtime`;
     expect(target.seen.filter((r) => r !== "GET /v2/")).toEqual([`HEAD ${name}/manifests/0.8.1`]);
     expect(source.seen.filter((r) => r.includes("/blobs/"))).toEqual([]);
+  });
+
+  it("pins an image of the account's by a tag to its manifest's digest, asking only the account's registry", async () => {
+    const there = `${target.host}/${ACCOUNT}/sanoma-ai-runtime:0.8.1`;
+    expect(await copyImage(there, to(), 5_000)).toBe(pinned());
+    expect(target.seen.filter((r) => r !== "GET /v2/")).toEqual([
+      `HEAD /v2/${ACCOUNT}/sanoma-ai-runtime/manifests/0.8.1`,
+    ]);
+    expect(source.seen).toEqual([]);
+  });
+
+  it("returns an image of the account's pinned by digest as it is, asking nothing", async () => {
+    expect(await copyImage(pinned(), to(), 5_000)).toBe(pinned());
+    expect([...source.seen, ...target.seen]).toEqual([]);
   });
 
   it("fails without retrying for an image the source does not have, and names no credential", async () => {
@@ -153,5 +170,12 @@ describe("accountImage", () => {
     );
     const there = `registry.cloudflare.com/${ACCOUNT}/sanoma-ai-runtime:0.8.1`;
     expect(accountImage(there, ACCOUNT)).toBe(there);
+  });
+
+  it("takes only an image of the account's registry pinned by digest as one to run as it is", () => {
+    const repository = `registry.cloudflare.com/${ACCOUNT}/sanoma-ai-runtime`;
+    expect(accountPinned(`${repository}@sha256:${"a".repeat(64)}`, ACCOUNT)).toBe(true);
+    expect(accountPinned(`${repository}:0.8.1`, ACCOUNT)).toBe(false);
+    expect(accountPinned(`ghcr.io/sanoma-ai/runtime@sha256:${"a".repeat(64)}`, ACCOUNT)).toBe(false);
   });
 });
