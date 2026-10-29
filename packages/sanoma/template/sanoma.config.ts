@@ -8,4 +8,11 @@ import { defineConfig } from "sanoma";
 
 export default defineConfig({
   connectors: [anthropic, ghost],
+  // Host deployment may deliver these bootstrap keys; they are never stored in the database.
+  secrets: {
+    bindings: {
+      SANOMA_SIGNING_KEY: { bootstrap: "SANOMA_SIGNING_KEY" },
+      SANOMA_SECRETS_KEY: { bootstrap: "SANOMA_SECRETS_KEY" },
+    },
+  },
 });

@@ -62,7 +62,11 @@ const callWith = (secrets: Secrets = memorySecrets()): CallContext => ({
   runId: "run-1",
   opId: "sanoma.wakeup",
   attempt: 1,
-  secrets,
+  secrets: {
+    get: async (name) =>
+      ["SANOMA_WAKEUP_URL", "SANOMA_WAKEUP_ACCOUNT_TOKEN"].includes(name) ? process.env[name] : secrets.get(name),
+    ensure: (name, make) => secrets.ensure(name, make),
+  },
 });
 
 const op = (name: string, input: object, call = callWith(), driver = sanomaWakeupDriver()) =>

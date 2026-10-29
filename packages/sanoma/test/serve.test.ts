@@ -72,22 +72,22 @@ describe("appOptions", () => {
   });
 
   it("signs in with GitHub when both are set", async () => {
-    environment({ ...GITHUB, SANOMA_APP_HOST: "0.0.0.0", SANOMA_SECRETS_KEY: "key" });
+    environment({ ...GITHUB, SANOMA_APP_HOST: "0.0.0.0", SANOMA_SIGNING_KEY: Buffer.alloc(32, 1).toString("base64") });
     const { host, login } = await appOptions();
     expect(host).toBe("0.0.0.0");
     expect(login?.name).toBe("github");
   });
 
   it("names the GitHub variables missing when only some are set", async () => {
-    environment({ SANOMA_GITHUB_CLIENT_ID: "id", SANOMA_SECRETS_KEY: "key" });
+    environment({ SANOMA_GITHUB_CLIENT_ID: "id", SANOMA_SIGNING_KEY: Buffer.alloc(32, 1).toString("base64") });
     await expect(appOptions()).rejects.toThrow(UsageError);
     await expect(appOptions()).rejects.toThrow(/: SANOMA_GITHUB_CLIENT_SECRET not set$/);
   });
 
-  it("names SANOMA_SECRETS_KEY when GitHub sign-in has no key to sign with", async () => {
-    environment({ ...GITHUB, SANOMA_SECRETS_KEY: "" });
+  it("names SANOMA_SIGNING_KEY when GitHub sign-in has no key to sign with", async () => {
+    environment({ ...GITHUB, SANOMA_SIGNING_KEY: "" });
     await expect(appOptions()).rejects.toThrow(UsageError);
-    await expect(appOptions()).rejects.toThrow(/SANOMA_SECRETS_KEY/);
+    await expect(appOptions()).rejects.toThrow(/SANOMA_SIGNING_KEY/);
   });
 
   it("reads the client id and secret the GitHub App stored on a host beyond this machine, or with one set", async () => {
@@ -99,7 +99,7 @@ describe("appOptions", () => {
         ["SANOMA_GITHUB_CLIENT_SECRET", "stored-secret"],
       ]);
     };
-    environment({ SANOMA_APP_HOST: "0.0.0.0", SANOMA_SECRETS_KEY: "key" });
+    environment({ SANOMA_APP_HOST: "0.0.0.0", SANOMA_SIGNING_KEY: Buffer.alloc(32, 1).toString("base64") });
     expect((await appOptions(stored)).login?.name).toBe("github");
     expect(asked).toEqual([["SANOMA_GITHUB_CLIENT_ID", "SANOMA_GITHUB_CLIENT_SECRET"]]);
     // Nothing stored: the same refusal as before, naming what is missing.
@@ -111,7 +111,7 @@ describe("appOptions", () => {
       /^GitHub sign-in could not read the stored client id and secret: no database$/,
     );
     // One set on this machine: the other is read, and the environment's wins.
-    environment({ SANOMA_GITHUB_CLIENT_ID: "id", SANOMA_SECRETS_KEY: "key" });
+    environment({ SANOMA_GITHUB_CLIENT_ID: "id", SANOMA_SIGNING_KEY: Buffer.alloc(32, 1).toString("base64") });
     expect((await appOptions(stored)).login?.name).toBe("github");
     expect(asked).toHaveLength(2);
     // On this machine with neither set, nothing is read: no login.

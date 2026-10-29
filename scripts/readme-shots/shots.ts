@@ -279,6 +279,9 @@ function replaceAssets(dir: string, files: string[]): void {
  * launcher adds it).
  */
 async function seed(acme: string): Promise<void> {
+  // The launcher generated bootstrap keys in this disposable repo; the seed client needs the same keys.
+  const envFile = join(acme, ".env");
+  if (existsSync(envFile)) process.loadEnvFile(envFile);
   const { SanomaClient } = (await import(pathToFileURL(fromSanoma.resolve("@sanoma-ai/workflows")).href)) as Workflows;
   const { default: config } = (await import(pathToFileURL(join(acme, "sanoma.config.ts")).href)) as {
     default: SanomaConfig;

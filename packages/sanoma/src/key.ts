@@ -1,9 +1,10 @@
 import { randomBytes } from "node:crypto";
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseEnv } from "node:util";
 
 const KEY = "SANOMA_SECRETS_KEY";
+const SIGNING_KEY = "SANOMA_SIGNING_KEY";
 
 /**
  * Adds each variable `file` (a `.env`) does not set yet, an empty value counting as unset, and
@@ -16,28 +17,41 @@ export function addToEnv(file: string, values: Record<string, string>): string[]
   if (!added.length) return added;
   const gap = text === "" || text.endsWith("\n") ? "" : "\n";
   appendFileSync(file, gap + added.map((name) => `${name}=${values[name]}\n`).join(""), { mode: 0o600 });
+  chmodSync(file, 0o600);
   return added;
 }
 
-/**
- * The one writer of `SANOMA_SECRETS_KEY`, which encrypts the stored credentials: unless `file`
- * already sets it, makes one (32 random bytes, base64) and adds it (`addToEnv`). Returns the key
- * it made, or undefined when it kept the file's.
- */
-export function writeSecretsKey(file: string): string | undefined {
-  const key = randomBytes(32).toString("base64");
-  return addToEnv(file, { [KEY]: key }).length ? key : undefined;
+/** Creates independent local bootstrap keys; external stores need only signing. */
+export function ensureDeploymentKeys(
+  dir: string,
+  log: (line: string) => void,
+  options: { externalStore?: boolean } = {},
+): void {
+  const file = join(dir, ".env");
+  for (const name of [SIGNING_KEY, ...(options.externalStore ? [] : [KEY])]) {
+    if (process.env[name] && process.env[`${name}_FILE`]) throw new Error(`Set only one of ${name} and ${name}_FILE`);
+    if (process.env[name] || process.env[`${name}_FILE`]) continue;
+    const current = existsSync(file) ? parseEnv(readFileSync(file, "utf8")) : {};
+    if (current[name] && current[`${name}_FILE`]) throw new Error(`Set only one of ${name} and ${name}_FILE`);
+    if (current[name] || current[`${name}_FILE`]) {
+      if (current[name]) process.env[name] = current[name];
+      if (current[`${name}_FILE`]) process.env[`${name}_FILE`] = current[`${name}_FILE`];
+      continue;
+    }
+    const key = randomBytes(32).toString("base64");
+    addToEnv(file, { [name]: key });
+    process.env[name] = key;
+    log(`created ${name} in ${file}`);
+  }
 }
 
-/**
- * Makes sure `SANOMA_SECRETS_KEY` is set: when the environment (with `<dir>/.env` loaded) has
- * none, writes one to `<dir>/.env` (`writeSecretsKey`), sets it here, and logs one line.
- */
-export function ensureSecretsKey(dir: string, log: (line: string) => void): void {
-  if (process.env[KEY]) return;
-  const file = join(dir, ".env");
-  const key = writeSecretsKey(file);
-  if (key === undefined) return;
-  process.env[KEY] = key;
-  log(`created ${KEY} in ${file}: it encrypts the stored credentials, so keep it with the database`);
+/** New local company bootstrap: signing and row encryption have independent random keys. */
+export function writeDeploymentKeys(file: string): void {
+  const current = existsSync(file) ? parseEnv(readFileSync(file, "utf8")) : {};
+  const values: Record<string, string> = {};
+  for (const name of [SIGNING_KEY, KEY]) {
+    if (current[name] && current[`${name}_FILE`]) throw new Error(`Set only one of ${name} and ${name}_FILE`);
+    if (!current[name] && !current[`${name}_FILE`]) values[name] = randomBytes(32).toString("base64");
+  }
+  addToEnv(file, values);
 }

@@ -108,7 +108,7 @@ describe("cloudflare.container meets the Host contract on the fake", () => {
     expect(results).toEqual([
       { name: "the app answers on its port", ok: true },
       { name: "a queued run drains", ok: true },
-      { name: "LISTEN hears a credential change", ok: true },
+      { name: "the next store read sees a credential change", ok: true },
       { name: "a sleep survives a restart", ok: true },
       { name: "a queued run drains after a stop and a wake", ok: true },
       { name: "a sleep that ends while stopped continues after a wake", ok: true },

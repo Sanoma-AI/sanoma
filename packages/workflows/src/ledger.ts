@@ -1,3 +1,4 @@
+import type { ConnectionSnapshot } from "./connection.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { appendFile, mkdir, readFile, truncate } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -42,6 +43,7 @@ export type LedgerRecord = {
     }
   | {
       type: "op.called";
+      connection?: ConnectionSnapshot;
       op: string;
       /**
        * The outline node of the call that made it (`OutlineNode.path`): where the step is in the
@@ -210,7 +212,7 @@ function serialize(record: LedgerRecord): string {
 /** The line `jsonlLedger` writes for a record: its JSON and a newline. */
 const lineOf = (record: LedgerRecord) => `${serialize(record)}\n`;
 
-const COMPARED = ["type", "input", "decision", "error", "output"] as const;
+const COMPARED = ["type", "input", "decision", "error", "output", "connection"] as const;
 
 /**
  * The first record with an id stands. Says so when a later one with that id differs where it

@@ -1,3 +1,4 @@
+import { connectionRefSchema, type ConnectionRef } from "./connection.ts";
 import { z } from "zod";
 import { defineWorkflow, type WorkflowDefinition } from "./define.ts";
 import { isDirect } from "./direct.ts";
@@ -12,10 +13,10 @@ export { CALL_WORKFLOW } from "./shared.ts";
 // held to the same lint: the call goes through `ctx`, under the policy, in the ledger.
 
 /** An operation on `ctx`. */
-type OpCall = (input: unknown) => Promise<unknown>;
+type OpCall = (input: unknown, options?: { connection?: ConnectionRef }) => Promise<unknown>;
 
 /** The call workflow's input: the operation's id, and its input. */
-export const CallInput = z.object({ op: z.string(), input: z.unknown() });
+export const CallInput = z.object({ op: z.string(), input: z.unknown(), connection: connectionRefSchema.optional() });
 
 /**
  * The call workflow for a config: it `uses` every operation that may be called directly and has
@@ -43,10 +44,10 @@ export function callWorkflow(
       // Four segments for an app's collection: `data.<app>.<collection>.<op>`.
       const [vendor = "", a = "", b = "", c] = input.op.split(".");
       return c === undefined
-        ? ctx[vendor]![a]![b]!(input.input)
+        ? ctx[vendor]![a]![b]!(input.input, { connection: input.connection })
         : (ctx as unknown as Record<string, Record<string, Record<string, Record<string, OpCall>>>>)[vendor]![a]![b]![
             c
-          ]!(input.input);
+          ]!(input.input, { connection: input.connection });
     },
   });
 }

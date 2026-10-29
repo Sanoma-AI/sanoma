@@ -1,3 +1,4 @@
+import type { ConnectionRef } from "./connection.ts";
 import { z } from "zod";
 import { type Approver, defineWorkflow, type WorkflowDefinition } from "./define.ts";
 import {
@@ -63,7 +64,7 @@ export type ApplyInput = z.infer<typeof ApplyInput>;
  * object its identity `found` or the input `given`, ask about a `gone` object or an `orphan`ed
  * binding (unless `answer`ed), or `none`.
  */
-export type PlanStep = { id: string; vendor: string; type: string } & (
+export type PlanStep = { id: string; vendor: string; type: string; connection?: ConnectionRef } & (
   | { action: "create"; planned: Record<string, unknown>; unknown: string[] }
   | { action: "update" | "replace"; binding: string; fields: DriftField[]; replace: string[] }
   | { action: "bind"; binding: string; source: "found" | "given" }
@@ -114,6 +115,7 @@ export interface ApplyDeclared extends DriftDeclared {
 export interface PlannedCall {
   op: string;
   input: unknown;
+  connection?: ConnectionRef;
 }
 
 /** What apply does that is no vendor call, each a step of its own (`apply-steps.ts`). */
@@ -155,7 +157,7 @@ type DeleteOp = Op<string, string, "delete", { id: string }, { id: string; gone:
 type ApplyUse = ImportOp | PlanOp | CreateOp | UpdateOp | DeleteOp | ResolveOp | "approval" | "sleep";
 
 /** An operation as `ctx` gives it, called by its id. */
-type Call = (input: unknown) => Promise<unknown>;
+type Call = (input: unknown, options?: { connection?: ConnectionRef }) => Promise<unknown>;
 
 /** What a step's resource is called in a problem: its file, and its export. */
 const problemOf = (id: string, message: string): ResourceProblem => ({
@@ -369,13 +371,24 @@ function writesOf(
       const made = { id: `new:${at}`, export: exportOf(keyOf(step)) };
       const after = (types.get(at)?.afterCreate ?? [])
         .filter((hook) => ops.get(hook.op)?.effect === "write")
-        .map((hook) => ({ op: hook.op, input: hook.input(made) }));
-      return [{ op: `${at}.create`, input: { desired: desired.get(step.id) } }, ...after];
+        .map((hook) => ({
+          op: hook.op,
+          input: hook.input(made),
+          ...(hook.op.startsWith(`${step.vendor}.`) && step.connection && { connection: step.connection }),
+        }));
+      return [{ op: `${at}.create`, connection: step.connection, input: { desired: desired.get(step.id) } }, ...after];
     }
-    if (run === "delete" && "binding" in step) return [{ op: `${at}.delete`, input: { id: step.binding } }];
+    if (run === "delete" && "binding" in step)
+      return [{ op: `${at}.delete`, connection: step.connection, input: { id: step.binding } }];
     if (run !== "update" || (step.action !== "update" && step.action !== "replace")) return [];
     const expect = { action: step.action, replace: step.replace };
-    return [{ op: `${at}.update`, input: { id: step.binding, desired: desired.get(step.id), expect } }];
+    return [
+      {
+        op: `${at}.update`,
+        connection: step.connection,
+        input: { id: step.binding, desired: desired.get(step.id), expect },
+      },
+    ];
   });
 }
 
@@ -474,7 +487,12 @@ export function applyWorkflow(
         if (!("id" in by)) found.set(resource.id, by);
         else {
           try {
-            found.set(resource.id, observed(await ctx[resource.vendor]![resource.type]!.import({ id: by.id })));
+            found.set(
+              resource.id,
+              observed(
+                await ctx[resource.vendor]![resource.type]!.import({ id: by.id }, { connection: resource.connection }),
+              ),
+            );
           } catch (err) {
             if (isRunControlError(err)) throw err;
             found.set(resource.id, { error: errorMessage(err) });
@@ -529,7 +547,11 @@ export function applyWorkflow(
             : decide(resource, result, found.get(resource.id)!, input, desired.get(resource.id)!, types, usable);
         if (next.ask !== undefined) {
           try {
-            const answer = fromPlan(resource, result, await ctx[resource.vendor]![resource.type]!.plan(next.ask));
+            const answer = fromPlan(
+              resource,
+              result,
+              await ctx[resource.vendor]![resource.type]!.plan(next.ask, { connection: resource.connection }),
+            );
             if (answer.step) planned.push(answer.step);
             if (answer.problem) problems.push(answer.problem);
           } catch (err) {
@@ -547,6 +569,8 @@ export function applyWorkflow(
         steps: [...planned, ...orphaned.steps],
       };
 
+      for (const step of plan.steps)
+        step.connection = declarations.get(step.id)?.connection ?? locked[keyOf(step)]?.connection;
       const writes = writesOf(plan, desired, types, ops);
       const approver = writes.length ? await steps.holds(writes) : undefined;
       if (approver !== undefined) {
@@ -569,24 +593,31 @@ export function applyWorkflow(
         let state: State | undefined;
         try {
           if (todo === "create") {
-            const made = await ctx[step.vendor]![step.type]!.create({
-              desired: desiredOf(declared!, types, bindings, hosts, urls),
-            });
-            bindings[key] = { type, id: made.id };
+            const made = await ctx[step.vendor]![step.type]!.create(
+              {
+                desired: desiredOf(declared!, types, bindings, hosts, urls),
+              },
+              { connection: step.connection },
+            );
+            bindings[key] = { type, id: made.id, ...(step.connection && { connection: step.connection }) };
             state = made.state;
           } else if (todo === "update" && (step.action === "update" || step.action === "replace")) {
             const expect = { action: step.action, replace: step.replace };
-            const changed = await ctx[step.vendor]![step.type]!.update({
-              id: binding,
-              desired: desiredOf(declared!, types, bindings, hosts, urls),
-              expect,
-            });
-            bindings[key] = { type, id: changed.id };
+            const changed = await ctx[step.vendor]![step.type]!.update(
+              {
+                id: binding,
+                desired: desiredOf(declared!, types, bindings, hosts, urls),
+                expect,
+              },
+              { connection: step.connection },
+            );
+            bindings[key] = { type, id: changed.id, ...(step.connection && { connection: step.connection }) };
             state = changed.state;
           } else if (todo === "delete") {
-            await ctx[step.vendor]![step.type]!.delete({ id: binding });
+            await ctx[step.vendor]![step.type]!.delete({ id: binding }, { connection: step.connection });
             delete bindings[key];
-          } else if (todo === "bind") bindings[key] = { type, id: binding };
+          } else if (todo === "bind")
+            bindings[key] = { type, id: binding, ...(step.connection && { connection: step.connection }) };
           else if (todo === "forget") delete bindings[key];
           if (state && declared) answersAt(declared, state);
           const after = bindings[key];
@@ -615,7 +646,9 @@ export function applyWorkflow(
               ) {
                 if (call > 0) await ctx.sleep({ seconds: AFTER_CREATE_SECONDS });
                 try {
-                  output = await (ctx[vendor]![group] as unknown as Record<string, Call>)[name]!(given);
+                  output = await (ctx[vendor]![group] as unknown as Record<string, Call>)[name]!(given, {
+                    connection: vendor === step.vendor ? step.connection : undefined,
+                  });
                   failed = undefined;
                 } catch (err) {
                   if (isRunControlError(err) || !hook.until) throw err;

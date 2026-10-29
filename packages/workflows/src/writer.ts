@@ -21,7 +21,7 @@ import { isSecret } from "./secret.ts";
 /** A whole data file to render: its imports and its resources, in order. */
 export interface DataFileContent {
   imports: readonly Pick<DataFileImport, "source" | "imported" | "local">[];
-  exports: readonly Pick<DataFileExport, "name" | "vendor" | "type" | "desired">[];
+  exports: readonly Pick<DataFileExport, "name" | "vendor" | "type" | "desired" | "connection">[];
 }
 
 /**
@@ -95,9 +95,9 @@ export async function renderDataFile({ imports, exports }: DataFileContent, opti
   const parts = [
     [...names].map(([source, list]) => `import { ${list.join(", ")} } from ${JSON.stringify(source)};`).join("\n"),
     // The top-level object on lines of its own, so oxfmt keeps it expanded as people write it.
-    ...exports.map(({ name, vendor, type, desired }) => {
+    ...exports.map(({ name, vendor, type, desired, connection }) => {
       const body = Object.entries(desired).map(([key, value]) => `${keyOf(key)}: ${literal(value)},\n`);
-      return `export const ${name} = ${vendor}.${type}({${body.length ? `\n${body.join("")}` : ""}});`;
+      return `export const ${name} = ${vendor}.${type}({${body.length ? `\n${body.join("")}` : ""}}${connection ? `, ${JSON.stringify({ connection })}` : ""});`;
     }),
     `export default [${exports.map((e) => e.name).join(", ")}];`,
   ];

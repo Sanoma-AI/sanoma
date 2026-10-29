@@ -5,6 +5,7 @@ import { type LedgerRecord, memoryLedger } from "./ledger.ts";
 import { type Check, check, drive, loadScenarios, type Scenario, type Scope } from "./scenario.ts";
 import { errorMessage } from "./shared.ts";
 import { startWorker } from "./worker.ts";
+import { memorySecretStore } from "./secret-store.ts";
 
 /*
  * `@sanoma-ai/workflows/scenarios`: runs a config's scenarios as sandbox runs, with no test
@@ -77,7 +78,12 @@ export async function runScenarios(
   config: SanomaConfig,
   { databaseUrl, startedBy, timeoutMs, log }: RunScenariosOptions,
 ): Promise<{ passed: string[]; failed: ScenarioFailure[] }> {
-  const shared: SanomaConfig = { ...config, databaseUrl, ledger: memoryLedger() };
+  const shared: SanomaConfig = {
+    ...config,
+    databaseUrl,
+    ledger: memoryLedger(),
+    secrets: { store: memorySecretStore(), namespace: "scenarios" },
+  };
   const resolved = resolveConfig(shared);
   const { scenarios, errors } = await loadScenarios(resolved);
   const failed: ScenarioFailure[] = errors.map(({ file, message }) => ({

@@ -66,34 +66,24 @@ describe("encrypt and decrypt", () => {
 
   it("refuses a value moved to another name's row, and a malformed one, naming the row", () => {
     const sealed = encrypt("PASSWORD", "hunter2");
-    expect(() => decrypt("OTHER", sealed)).toThrow(/^the stored OTHER cannot be decrypted/);
-    expect(() => decrypt("PASSWORD", "v1:x:y")).toThrow(/^the stored PASSWORD cannot be decrypted/);
+    expect(() => decrypt("OTHER", sealed)).toThrow(/invalid_value/);
+    expect(() => decrypt("PASSWORD", "v1:x:y")).toThrow(/invalid_value/);
   });
 
-  it("reads a value stored before encryption as it is, with or without a key", () => {
-    expect(decrypt("PASSWORD", "plain-old")).toBe("plain-old");
-    vi.stubEnv("SANOMA_SECRETS_KEY", undefined);
-    try {
-      expect(decrypt("PASSWORD", "plain-old")).toBe("plain-old");
-    } finally {
-      vi.unstubAllEnvs();
-    }
+  it("refuses plaintext values", () => {
+    expect(() => decrypt("PASSWORD", "plain-old")).toThrow("invalid_value");
   });
 
   it("refuses without a key, a key of the wrong length, and a value stored under another key, naming the variable", () => {
     const sealed = encrypt("PASSWORD", "hunter2");
     try {
       vi.stubEnv("SANOMA_SECRETS_KEY", undefined);
-      expect(() => encrypt("PASSWORD", "x")).toThrow(
-        /^SANOMA_SECRETS_KEY is not set: it encrypts the stored credentials/,
-      );
-      expect(() => decrypt("PASSWORD", sealed)).toThrow(/^SANOMA_SECRETS_KEY is not set/);
+      expect(() => encrypt("PASSWORD", "x")).toThrow(/SANOMA_SECRETS_KEY must be 32 random bytes/);
+      expect(() => decrypt("PASSWORD", sealed)).toThrow(/SANOMA_SECRETS_KEY must be 32 random bytes/);
       vi.stubEnv("SANOMA_SECRETS_KEY", randomBytes(16).toString("base64"));
-      expect(() => encrypt("PASSWORD", "x")).toThrow("SANOMA_SECRETS_KEY must be 32 bytes, base64; it is 16 bytes");
+      expect(() => encrypt("PASSWORD", "x")).toThrow("SANOMA_SECRETS_KEY must be 32 random bytes");
       vi.stubEnv("SANOMA_SECRETS_KEY", randomBytes(32).toString("base64"));
-      expect(() => decrypt("PASSWORD", sealed)).toThrow(
-        "the stored PASSWORD cannot be decrypted: SANOMA_SECRETS_KEY is not the key it was stored with",
-      );
+      expect(() => decrypt("PASSWORD", sealed)).toThrow("invalid_value");
     } finally {
       vi.unstubAllEnvs();
     }

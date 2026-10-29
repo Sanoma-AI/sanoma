@@ -1,3 +1,4 @@
+import type { ConnectionRegistry } from "./connection.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Collection } from "./collection.ts";
 import type { DeadlineRegistry } from "./deadlines.ts";
@@ -38,6 +39,7 @@ export interface StartHold {
  * from a stopped worker never reads a newer worker's drivers or policy.
  */
 export interface WorkerState {
+  connections?: ConnectionRegistry;
   /** The config's `appName`, recorded on every ledger record. */
   app: string;
   /** The operations as the config's connectors declare them, by id. */

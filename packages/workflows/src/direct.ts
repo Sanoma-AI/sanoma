@@ -16,4 +16,7 @@ export const isDirect = (
 ): boolean =>
   op.vendor === DATA_VENDOR ||
   op.id === APPS_LIST ||
+  op.id === "sanoma.connection.disconnect" ||
+  op.id === "sanoma.connection.bind" ||
+  op.id === "sanoma.connection.create" ||
   (op.effect === "read" && op.vendor !== "sanoma" && !isResourceOp(op, types));

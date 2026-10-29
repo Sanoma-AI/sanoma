@@ -29,7 +29,7 @@ describe("the database conformance kit", () => {
     const results = await checkDatabase({ ...db, suspend, client, timeoutMs: 30_000 });
     expect(results).toEqual([
       { name: "DBOS's tables migrate and a worker starts on the url", ok: true },
-      { name: "LISTEN hears a credential change", ok: true },
+      { name: "the next store read sees a credential change", ok: true },
       { name: "a queued run drains", ok: true },
       { name: "a queued run drains after a suspend and a wake", ok: true },
     ]);
@@ -41,7 +41,7 @@ describe("the database conformance kit", () => {
     const results = await checkDatabase({ ...db, apply: async () => ({}), client, timeoutMs: 1_000 });
     expect(results.map((r) => [r.name, r.ok])).toEqual([
       ["DBOS's tables migrate and a worker starts on the url", false],
-      ["LISTEN hears a credential change", false],
+      ["the next store read sees a credential change", false],
       ["a queued run drains", false],
       ["a queued run drains after a suspend and a wake", false],
     ]);

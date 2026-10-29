@@ -1,3 +1,4 @@
+import type { ConnectionRef, ConnectionSnapshot } from "./connection.ts";
 import { DBOS, DBOSWorkflowConflictError, Error as DBOSErrors } from "@dbos-inc/dbos-sdk";
 import { awaitApproval, type CheckedApproval } from "./approvals.ts";
 import { offsetOf } from "./ast.ts";
@@ -161,8 +162,10 @@ export function buildCtx(wf: WorkflowDefinition<any, any>, run: Run): any {
       .split(".")
       .slice(0, -1)
       .reduce<Record<string, any>>((at, key) => (at[key] ??= {}), members);
-    group[op.name] = placed(op.id, (node, input) =>
-      serial(run, () => callOp(run, op.id, input, { node: node.path, name: named(node) ?? op.id })),
+    group[op.name] = placed(op.id, (node, input, options?: { connection?: ConnectionRef }) =>
+      serial(run, () =>
+        callOp(run, op.id, input, { node: node.path, name: named(node) ?? op.id }, options?.connection),
+      ),
     );
   }
   members.runId = run.id;
@@ -284,8 +287,19 @@ function targetOf(op: Op, input: unknown): { target?: string } {
  * the running instance's people): while it holds or denies, the company's policy is not asked.
  * Runs inside a step, so it must have no side effects of its own.
  */
-export async function decide(run: Run, op: Op, input: unknown): Promise<RecordedDecision> {
-  const seen = { id: run.id, workflow: run.workflow, approvals: structuredClone(run.approvals) };
+export async function decide(
+  run: Run,
+  op: Op,
+  input: unknown,
+  connection?: ConnectionSnapshot,
+): Promise<RecordedDecision> {
+  const seen = {
+    id: run.id,
+    workflow: run.workflow,
+    approvals: structuredClone(run.approvals).filter(
+      (a) => a.requestedBy !== "policy" || a.connection === connection?.revision,
+    ),
+  };
   // Only a merge is the rule's: no other call reads the people's files.
   const held =
     op.id === CHANGE_MERGE ? runtimeHold(op.id, input, seen.approvals, readPeople(run.state.root).people) : undefined;
@@ -298,7 +312,7 @@ export async function decide(run: Run, op: Op, input: unknown): Promise<Recorded
       { idempotencyKey: `${run.id}:${run.seq}:before`, runId: run.id, opId: get, attempt: 1, secrets: secretsOf(run) },
     ),
   );
-  const call = { ...callOf(op, input, run.actor, seen), ...before };
+  const call = { ...callOf(op, input, run.actor, seen), ...before, ...(connection && { connection }) };
   return ask(policy, op.id, () => policy(call), run.state);
 }
 
@@ -357,7 +371,7 @@ export function decideCall(
   input: unknown,
   actor: Principal,
   run: PolicyCall["run"],
-  before: Pick<PolicyCall, "before"> = {},
+  before: Pick<PolicyCall, "before" | "connection"> = {},
 ): RecordedDecision {
   const call = { ...callOf(op, input, actor, run), ...before };
   return ask(policy, op.id, () => policy(call));
@@ -411,7 +425,7 @@ function ask(
   return policy.version === undefined ? decision : { ...decision, policyVersion: policy.version };
 }
 
-async function callOp(run: Run, id: string, input: unknown, place: Placed) {
+async function callOp(run: Run, id: string, input: unknown, place: Placed, ref?: ConnectionRef) {
   // The worker's declaration, never the workflow's: its effect, schemas and retry setting.
   const op = run.state.ops.get(id);
   // A sandbox run calls its own fakes, never a vendor.
@@ -441,10 +455,36 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed) {
   // The decision is recorded as a step, so a replay reuses it instead of asking a policy
   // that may have changed since. The policy must still be deterministic: a run that fails
   // before the step is recorded asks again.
-  const decideStep = () => DBOS.runStep(() => decide(run, op, parsed), { name: `policy:${op.id}` });
+  const connection = await DBOS.runStep(
+    async () => {
+      if (run.sandbox !== undefined) {
+        if (ref)
+          throw new SanomaError("invalid_input", "Named sandbox connections require explicit fake account state");
+        return undefined;
+      }
+      return run.state.connections?.select(op.vendor, ref, run.actor.id);
+    },
+    { name: `connection:${op.id}` },
+  );
+  const decideStep = () =>
+    DBOS.runStep(
+      async () => {
+        await run.state.connections?.assertCurrent(connection, run.actor.id);
+        return decide(run, op, parsed, connection);
+      },
+      { name: `policy:${op.id}` },
+    );
   let decision = await decideStep();
   const logged = recorded(op, parsed);
-  const call = { type: "op.called", op: op.id, ...place, effect: op.effect, input: logged, decision } as const;
+  const call = {
+    type: "op.called",
+    op: op.id,
+    ...place,
+    effect: op.effect,
+    input: logged,
+    decision,
+    ...(connection && { connection }),
+  } as const;
 
   // Each hold is lifted in turn: once one is approved, the policy is asked again, with it.
   for (;;) {
@@ -462,6 +502,7 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed) {
         seq,
         input: logged,
         reasons: decision.reasons,
+        connection: connection?.revision,
       });
     } catch (err) {
       // A rejection or a withdrawal stops the call: it is recorded as failed, naming the approval.
@@ -486,6 +527,7 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed) {
       async () => {
         const at = Date.now();
         attempt = DBOS.stepStatus?.currentAttempt ?? 1;
+        await run.state.connections?.assertCurrent(connection, run.actor.id);
         const secrets = secretsOf(run);
         const context: CallContext = {
           idempotencyKey: `${run.id}:${seq}`,
@@ -493,6 +535,8 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed) {
           opId: op.id,
           attempt,
           secrets,
+          principal: run.actor,
+          ...(connection && { connection }),
           // A call run is the person's direct call held for an approval: made as them, as it would have been.
           by: run.workflow === CALL_WORKFLOW ? run.actor.id : `run:${run.id}`,
         };

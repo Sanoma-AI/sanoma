@@ -1,3 +1,6 @@
+import type { Principal } from "./define.ts";
+import type { Authentication } from "./authentication.ts";
+import type { ConnectionSnapshot } from "./connection.ts";
 import type { ProviderV4 } from "@ai-sdk/provider";
 import type { z } from "zod";
 import type { Fake } from "./fake.ts";
@@ -108,7 +111,7 @@ export type Connector<V extends string, S extends Specs> = {
  * and `resolveConfig` reads only a record of its own shape (`checkConnector`): change it with
  * the record, so a build refuses a connector another build made in another shape.
  */
-export const CONNECTOR_FORMAT = 1;
+export const CONNECTOR_FORMAT = 2;
 
 /**
  * A connector's vendor: its id, who it is (`defineConnector`'s third argument, for a UI), its
@@ -236,6 +239,10 @@ export function defineConnector<const V extends string, const S extends Specs>(
  * not repeat the side effect.
  */
 export interface CallContext {
+  /** Authenticated initiating principal; never supplied by operation input. */
+  principal?: Principal;
+  /** Authorized account metadata. Credential material stays inside the driver boundary. */
+  connection?: ConnectionSnapshot;
   idempotencyKey: string;
   runId: string;
   opId: string;
@@ -313,6 +320,8 @@ export interface Driver {
  * no repository a change is reviewed on.
  */
 export interface ConnectorSetup {
+  /** Auth methods available to named connections; login identity is separate. */
+  authentication?: Readonly<Record<string, Authentication>>;
   /** Makes the live driver, which reads its credentials from the environment when called: once per resolved config. */
   driver?: () => Driver;
   /** Makes a fake of the vendor (`defineFake`): once per sandbox run, its own. */

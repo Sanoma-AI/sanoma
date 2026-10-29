@@ -110,7 +110,7 @@ describe.each<[HostLifetime, string]>([
     expect(results).toEqual([
       { name: "the app answers on its port", ok: true },
       { name: "a queued run drains", ok: true },
-      { name: "LISTEN hears a credential change", ok: true },
+      { name: "the next store read sees a credential change", ok: true },
       { name: "a sleep survives a restart", ok: true },
       ...(lifetime === "long-lived"
         ? []

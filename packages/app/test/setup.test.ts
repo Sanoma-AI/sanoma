@@ -76,7 +76,7 @@ let client: SanomaClient;
 let ctx: AppContext;
 
 beforeAll(async () => {
-  vi.stubEnv("SANOMA_SECRETS_KEY", KEY);
+  vi.stubEnv("SANOMA_SIGNING_KEY", KEY);
   for (const name of NAMES) vi.stubEnv(name, "");
   github.listen({ onUnhandledFrame: "bypass" });
   ensureBuilt(appDir, ["dist/server/server.js"], ["pnpm", "exec", "vite", "build"]);
@@ -215,10 +215,14 @@ describe("creating the GitHub App", () => {
     expect(stored.get(GITHUB_APP.client_secret)).toMatchObject({ value: KEYS.client_secret, setBy: "alice" });
     expect(stored.get(GITHUB_APP.id)?.value).toBe("4242");
     expect(stored.get(GITHUB_APP.pem)?.value).toBe(KEYS.pem);
-    // Encrypted: under another key, nothing reads.
+    // Signing-key rotation does not alter credential encryption.
+    vi.stubEnv("SANOMA_SIGNING_KEY", randomBytes(32).toString("base64"));
+    expect((await client.secrets([GITHUB_APP.pem])).get(GITHUB_APP.pem)?.value).toBe(KEYS.pem);
+    const encryptionKey = process.env.SANOMA_SECRETS_KEY;
     vi.stubEnv("SANOMA_SECRETS_KEY", randomBytes(32).toString("base64"));
-    await expect(client.secrets([GITHUB_APP.pem])).rejects.toThrow(/cannot be decrypted/);
-    vi.stubEnv("SANOMA_SECRETS_KEY", KEY);
+    await expect(client.secrets([GITHUB_APP.pem])).rejects.toThrow("Secret store: invalid_value");
+    vi.stubEnv("SANOMA_SECRETS_KEY", encryptionKey);
+    vi.stubEnv("SANOMA_SIGNING_KEY", KEY);
   });
 });
 
@@ -298,7 +302,7 @@ describe("Connect a wakeup service", () => {
       // The driver's own checks: an account's token starts swa_.
       await expect(
         setSetupToken(ops, { id: "alice" }, { name: "SANOMA_WAKEUP_ACCOUNT_TOKEN", value: "not-a-token" }),
-      ).rejects.toThrow(/swa_/);
+      ).rejects.toThrow(/does not match the required format/);
       expect((await opsClient.secrets(["SANOMA_WAKEUP_TOKEN"])).size).toBe(0);
 
       const account = `swa_${"a".repeat(43)}`;

@@ -79,7 +79,7 @@ describe("modelRegistry", () => {
 });
 
 describe("secretValues", () => {
-  it("takes the environment's value first, and reads the stored ones only for the names it leaves unset", async () => {
+  it("uses the client's selected bindings for every name, ignoring unrelated environment values", async () => {
     // Made-up names and values: nothing here is a credential.
     vi.stubEnv("SANOMA_TEST_ENV_KEY", "from-env");
     vi.stubEnv("SANOMA_TEST_STORED_KEY", "");
@@ -89,13 +89,14 @@ describe("secretValues", () => {
     const secrets = secretValues({ secrets: stored } as unknown as SanomaClient);
     expect(await secrets(["SANOMA_TEST_ENV_KEY", "SANOMA_TEST_STORED_KEY"])).toEqual(
       new Map([
-        ["SANOMA_TEST_ENV_KEY", "from-env"],
+        ["SANOMA_TEST_ENV_KEY", "stored"],
         ["SANOMA_TEST_STORED_KEY", "stored"],
       ]),
     );
-    expect(stored).toHaveBeenCalledExactlyOnceWith(["SANOMA_TEST_STORED_KEY"]);
+    expect(stored).toHaveBeenCalledExactlyOnceWith(["SANOMA_TEST_ENV_KEY", "SANOMA_TEST_STORED_KEY"]);
     await secrets(["SANOMA_TEST_ENV_KEY"]);
-    expect(stored).toHaveBeenCalledOnce();
+    expect(stored).toHaveBeenCalledTimes(2);
+    expect(stored).toHaveBeenLastCalledWith(["SANOMA_TEST_ENV_KEY"]);
     vi.unstubAllEnvs();
   });
 });

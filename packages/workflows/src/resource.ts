@@ -1,3 +1,4 @@
+import type { ConnectionRef } from "./connection.ts";
 import { z } from "zod";
 import { checkDatabase, type DatabaseSpec } from "./database.ts";
 import { isRunControlError } from "./errors.ts";
@@ -185,6 +186,7 @@ export interface Declared<Id extends string = string, T = State> {
    * checked, and what a drift check compares.
    */
   readonly desired: T;
+  readonly connection?: ConnectionRef;
   /**
    * Where it names another resource: the field's dotted path (a list item's with its index,
    * `teams.0`) to that resource's `<vendor>.<type>:<name>`.
@@ -331,7 +333,10 @@ export interface Resource<
       >
     >,
     Readonly<Pick<ResourceSpec<S>, "identity" | "find" | "host" | "wakeup" | "database" | "afterCreate">> {
-  (desired: Declaring<z.input<S>, R>): Declared<Id, z.input<S>>;
+  (
+    desired: Declaring<z.input<S>, R>,
+    options?: { connection?: ConnectionRef<Id extends `${infer V}.${string}` ? V : string> },
+  ): Declared<Id, z.input<S>>;
   /** `read` and `import`, each effect `read`, idempotent, with the id as `target`; for a writable type, the change operations too. */
   readonly ops: ResourceOps<S, W>;
   /** True when apply may change its objects: it has the change operations. */
@@ -663,7 +668,17 @@ export function defineResource<
   const owned = new Set(fields.vendorOwned.filter((path) => !named.has(path)));
   const references: References = fields.references ?? {};
   const writeOnly = new Set(fields.writeOnly);
-  const declare = (given: Declaring<z.input<S>, R>): Declared<`${V}.${T}`, z.input<S>> => {
+  const declare = (
+    given: Declaring<z.input<S>, R>,
+    options?: { connection?: ConnectionRef },
+  ): Declared<`${V}.${T}`, z.input<S>> => {
+    const connection = options?.connection;
+    if (
+      connection &&
+      (connection.vendor !== vendor || !new RegExp(`^${vendor}/[a-z][a-z0-9-]{0,63}$`).test(connection.$connection))
+    ) {
+      throw new Error(`${what}: select a declared connection of this connector`);
+    }
     const refs: Record<string, string> = {};
     // Where a secret is given, with list items' indexes: the schema does not judge its marker.
     const secrets = new Set<string>();
@@ -723,6 +738,7 @@ export function defineResource<
       ...(name !== undefined && { name }),
       desired,
       refs: Object.freeze(refs),
+      ...(connection && { connection: Object.freeze({ ...connection }) }),
     });
   };
   const resource = Object.assign(declare, {

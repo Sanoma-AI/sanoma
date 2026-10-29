@@ -1,3 +1,4 @@
+import type { SecretLocation } from "./secret-store.ts";
 import type { z } from "zod";
 import type { Driver, DriverEnv } from "./op.ts";
 import { credentialReady } from "./shared.ts";
@@ -7,6 +8,7 @@ import { credentialReady } from "./shared.ts";
 
 /** One environment variable a driver declares in `env`, and whether its value lets the driver run: never the value. */
 export interface CredentialStatus {
+  location?: SecretLocation;
   /** The variable's name, such as `GHOST_ADMIN_API_KEY`. */
   name: string;
   /** Its one-line manual, from its schema's `.describe()`. */
@@ -108,9 +110,9 @@ function credentialStatus(
 function check(schema: z.ZodType, value: string | undefined): { success: boolean; problem?: string } {
   try {
     const { success, error } = schema.safeParse(value);
-    return { success, ...(error && { problem: error.issues[0]!.message }) };
+    return { success, ...(error && { problem: "does not match the required format" }) };
   } catch {
-    return { success: false, problem: "its check threw" };
+    return { success: false, problem: "does not match the required format" };
   }
 }
 

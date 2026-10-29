@@ -350,7 +350,11 @@ describe("the built-in drift workflow in a config", () => {
     // Without drivers they are there all the same, and use nothing: each resource reports the missing driver.
     expect(describeConfig(bare).workflows).toMatchObject([
       { name: "apply", builtin: true, ops: [] },
-      { name: "call", builtin: true, ops: ["sanoma.apps.list"] },
+      {
+        name: "call",
+        builtin: true,
+        ops: ["sanoma.apps.list", "sanoma.connection.bind", "sanoma.connection.create", "sanoma.connection.disconnect"],
+      },
       { name: "change", builtin: true },
       { name: "drift", builtin: true, ops: [] },
     ]);

@@ -2274,11 +2274,11 @@ describe("an app whose drivers declare environment variables", () => {
       withSetup(config.connectors[0]!, { driver: () => ({ ...blog.driver, env }) }),
       ...config.connectors.slice(1),
     ];
-    declaring = await startApp({ ...config, connectors }, { port: 0 });
-    declaringCtx = await contextOf({ ...config, connectors });
+    const bound = { ...config, connectors, secrets: { bindings: { [URL_VAR]: { env: URL_VAR } } } };
+    declaring = await startApp(bound, { port: 0 });
+    declaringCtx = await contextOf(bound);
     // The table outlives a run of the tests.
     await clear({ name: KEY_VAR });
-    await clear({ name: URL_VAR });
   });
   afterAll(async () => {
     vi.unstubAllEnvs();
@@ -2312,8 +2312,21 @@ describe("an app whose drivers declare environment variables", () => {
     const found = await statuses();
     expect(Object.keys(found)).toEqual(["ghost"]);
     expect(found.ghost).toEqual([
-      { name: URL_VAR, description: "the made-up site's URL", optional: false, status: "set", source: "environment" },
-      { name: KEY_VAR, description: "a made-up key", optional: false, status: "missing" },
+      {
+        name: URL_VAR,
+        description: "the made-up site's URL",
+        optional: false,
+        status: "set",
+        source: "environment",
+        location: { store: "environment", namespace: "", path: URL_VAR, management: "external" },
+      },
+      {
+        name: KEY_VAR,
+        description: "a made-up key",
+        optional: false,
+        status: "missing",
+        location: { store: "postgres", namespace: "default", path: KEY_VAR, management: "sanoma" },
+      },
     ]);
     expect(JSON.stringify([body, found])).not.toContain(SITE);
   });
@@ -2364,6 +2377,7 @@ describe("an app whose drivers declare environment variables", () => {
       description: "a made-up key",
       optional: false,
       status: "missing",
+      location: { store: "postgres", namespace: "default", path: KEY_VAR, management: "sanoma" },
     });
   });
 });

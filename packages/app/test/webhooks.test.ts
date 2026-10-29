@@ -26,7 +26,13 @@ const host = fakeHost(async () => ({ url: "http://127.0.0.1:4100", stop: async (
 const remote = fakeRemote();
 const source = memorySource({ root, remote });
 const testApp = useTestApp(
-  { workflows: [], connectors: [host.connector, remote.connector], ledger: memoryLedger(), root },
+  {
+    workflows: [],
+    connectors: [host.connector, remote.connector],
+    ledger: memoryLedger(),
+    root,
+    secrets: { bindings: { [FAKE_WEBHOOK_SECRET]: { env: FAKE_WEBHOOK_SECRET } } },
+  },
   { databaseUrl: freshDatabase("webhooks"), source: source.source },
 );
 let app: App;

@@ -139,8 +139,10 @@ describe("sandbox runs", () => {
     // clock (the last DBOS.now) and goes straight on to publishing.
     expect(await steps(runId)).toEqual([
       "sandbox:seed",
+      "connection:ghost.post.create",
       "policy:ghost.post.create",
       "ghost.post.create",
+      "connection:resend.broadcast.create",
       "policy:resend.broadcast.create",
       "resend.broadcast.create",
       "DBOS.now",
@@ -151,10 +153,13 @@ describe("sandbox runs", () => {
       "DBOS.setEvent",
       "DBOS.setEvent",
       "DBOS.now",
+      "connection:ghost.post.publish",
       "policy:ghost.post.publish",
       "ghost.post.publish",
+      "connection:resend.broadcast.send",
       "policy:resend.broadcast.send",
       "resend.broadcast.send",
+      "connection:bluesky.post.create",
       "policy:bluesky.post.create",
       "bluesky.post.create",
     ]);
@@ -232,6 +237,21 @@ describe("sandbox runs", () => {
     });
     expect(checks.filter((k) => !k.ok)).toEqual([]);
     expect(live).toEqual([]);
+  });
+
+  it("refuses connection mutations in a direct sandbox call without fake account state", async () => {
+    const run = await c().start(
+      "call",
+      {
+        op: "sanoma.connection.create",
+        input: { rule: "mail", account: "alice", scopes: [] },
+      },
+      { startedBy: alice, sandbox: "Apps listed directly" },
+    );
+    const err = await failure(c().result(run));
+    expect(errorCode(err)).toBe("invalid_input");
+    expect((err as Error).message).toContain("no fake for sanoma.connection.create");
+    expect(types(await ledger(run))).toEqual(["run.started", "run.failed"]);
   });
 
   it("refuses a workflow that uses an operation with no fake, and parses the input before seeding", async () => {

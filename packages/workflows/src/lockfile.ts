@@ -1,3 +1,4 @@
+import { connectionRefSchema, type ConnectionRef } from "./connection.ts";
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
@@ -13,6 +14,7 @@ export const LOCKFILE = "resources/sanoma.lock.json";
 export interface Binding {
   type: string;
   id: string;
+  connection?: ConnectionRef;
 }
 
 /** The lockfile's content: by declaration key, `<file>#<export>` (the file relative to the config's root, with `/`). */
@@ -20,7 +22,11 @@ export type Bindings = Record<string, Binding>;
 
 const lockfile = z.record(
   z.string().regex(/^resources\/[^#]+#[^#]+$/),
-  z.strictObject({ type: z.string().regex(/^[^.\s]+\.[^.\s]+$/), id: z.string().min(1) }),
+  z.strictObject({
+    type: z.string().regex(/^[^.\s]+\.[^.\s]+$/),
+    id: z.string().min(1),
+    connection: connectionRefSchema.optional(),
+  }),
 );
 
 /**
@@ -51,7 +57,7 @@ export function readLockfile(root: string): { bindings: Bindings; problems: Reso
 export function serializeLockfile(bindings: Bindings): string {
   const sorted = Object.entries(bindings)
     .toSorted(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-    .map(([key, { type, id }]) => [key, { type, id }]);
+    .map(([key, { type, id, connection }]) => [key, { type, id, ...(connection && { connection }) }]);
   return `${JSON.stringify(Object.fromEntries(sorted), null, 2)}\n`;
 }
 
@@ -89,7 +95,8 @@ export function diffLockfiles(before: Bindings, after: Bindings): Rebind[] {
     const now = after[key];
     if (!now) return was ? [{ key, type: was.type, kind: "unbind", from: was.id }] : [];
     if (!was) return [{ key, type: now.type, kind: "bind", to: now.id }];
-    if (was.id === now.id && was.type === now.type) return [];
+    if (was.id === now.id && was.type === now.type && JSON.stringify(was.connection) === JSON.stringify(now.connection))
+      return [];
     return [{ key, type: now.type, kind: "rebind", from: was.id, to: now.id }];
   });
 }

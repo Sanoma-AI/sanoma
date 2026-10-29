@@ -1,3 +1,4 @@
+import { deploymentKey } from "@sanoma-ai/workflows";
 import { randomBytes } from "node:crypto";
 import { parse, serialize } from "cookie-es";
 import type { LoginProvider } from "../context.ts";
@@ -39,13 +40,12 @@ const API = "https://api.github.com";
  * Signs people in with GitHub: `resolveActor` returns `{ github: <their login>, email }`, their
  * public email (one GitHub has verified) when they show one, which the app matches to a declared
  * person (`admitting`). The session lives in a cookie signed with a key
- * derived from `SANOMA_SECRETS_KEY`, which must be set. Routes: `/auth/github/start`,
+ * derived from `SANOMA_SIGNING_KEY`, which must be set. Routes: `/auth/github/start`,
  * `/auth/github/callback`, and `/auth/github/signout` (POST); any other request without a session
  * gets the sign-in page (a 401).
  */
 export function githubLogin({ clientId, clientSecret }: GithubLoginOptions): LoginProvider {
-  const secretsKey = process.env.SANOMA_SECRETS_KEY;
-  if (!secretsKey) throw new Error("GitHub sign-in needs SANOMA_SECRETS_KEY, which signs its session cookie");
+  const secretsKey = deploymentKey("SANOMA_SIGNING_KEY").toString("base64");
   const { sign: mac, verify } = signer(secretsKey, "sanoma session cookie");
 
   /** The user a request's session cookie names: signed here and not expired. */

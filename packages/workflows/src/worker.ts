@@ -3,7 +3,7 @@ import { awaitApproval } from "./approvals.ts";
 import { buildCtx, decideStart, isInfrastructureError, startHoldOf } from "./call.ts";
 import { dbosStatusesOf } from "./client.ts";
 import { declaredWakeup, type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
-import { storedSecrets, watchCredentials } from "./credentials.ts";
+import { configuredSecrets } from "./credentials.ts";
 import { type Db, DBOS_DATABASE_OPTIONS, lazyPool, prepareDatabase, stampVersion } from "./db.ts";
 import { deadlineRegistry, type Deadlines, idle, onOwnQueue, type SelfStop, stopWhenIdle } from "./deadlines.ts";
 import type { WorkflowDefinition } from "./define.ts";
@@ -123,6 +123,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
   const horizonMs = options.idleHorizonMs ?? 60_000;
   const state: WorkerState = {
     app: resolved.appName,
+    connections: resolved.connections,
     ops: resolved.ops,
     drivers: resolved.drivers,
     fakes: resolved.fakes,
@@ -134,7 +135,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     policy: resolved.policy,
     ...(resolved.root !== undefined && { root: resolved.root }),
     ledger: ledger.store,
-    secrets: storedSecrets(() => secrets.db(), "sanoma"),
+    secrets: configuredSecrets(resolved.secrets, () => secrets.db()),
     workflows: resolved.workflows,
     outlines: new Map([...resolved.workflows].map(([name, wf]) => [name, outlineOf(wf)])),
     // `registered` is filled below, before any run starts: every name of this config's is registered then.
@@ -146,7 +147,6 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     stopped: false,
     deadlines: deadlineRegistry(),
   };
-  const credentials = await watchCredentials(resolved.databaseUrl, resolved.driversByVendor);
   const worker: Worker = {
     unconfigured: [...credentialsOf(resolved.driversByVendor, (name) => process.env[name])]
       .filter(([vendor, statuses]) => unconfigured(vendor, statuses))
@@ -164,8 +164,8 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
         let failed: { error: unknown } | undefined;
         for (const close of [
           () => DBOS.shutdown(),
-          () => credentials.close(),
           () => secrets.close(),
+          () => resolved.connectionPool.close(),
           () => ledger.close(),
           async () => resolved.dataStore?.close(),
         ]) {
@@ -184,6 +184,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
   const previous = current;
   let launched = false;
   try {
+    await configuredSecrets(resolved.secrets, () => secrets.db()).validate();
     for (const name of resolved.workflows.keys()) {
       if (!registered.has(name)) registered.set(name, register(name));
     }
@@ -252,9 +253,12 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     let stopFailed: { error: unknown } | undefined;
     if (launched) await worker.stop().catch((error: unknown) => (stopFailed = { error }));
     else {
-      await credentials
-        .close()
-        .catch((e: unknown) => warn(`closing the credentials listener failed: ${errorMessage(e)}`));
+      await Promise.all([
+        secrets.close(),
+        ledger.close(),
+        resolved.dataStore?.close(),
+        resolved.connectionPool.close(),
+      ]);
     }
     current = previous;
     if (stopFailed) {
@@ -438,7 +442,7 @@ async function runOn(state: WorkerState, name: string, start: RunArgs | Date): P
       if (sandbox !== undefined) {
         // Imported here, so a live worker never loads the Gherkin parser or faker.
         const { seedSandbox } = await import("./sandbox.ts");
-        await seedSandbox(run, sandbox);
+        await seedSandbox(run, sandbox, parsed);
       }
       output = await currentRun.run(run, () => wf.run(buildCtx(wf, run), parsed));
     } finally {

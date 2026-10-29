@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { afterAll, describe, expect, it, onTestFinished, vi } from "vitest";
-import { memoryLedger, type SanomaConfig } from "../src/index.ts";
+import { memoryLedger, memorySecretStore, type SanomaConfig } from "../src/index.ts";
 import { runScenarios } from "../src/scenarios.ts";
 import announce from "./fixtures/announce.ts";
 import peopleConfig from "./fixtures/people/sanoma.config.ts";
@@ -48,7 +48,18 @@ describe("runScenarios", () => {
     onTestFinished(() => rmSync(join(dir, "rejected.feature")));
     const printed = [vi.spyOn(console, "warn"), vi.spyOn(console, "error"), vi.spyOn(console, "log")];
     const log: string[] = [];
-    const result = await runScenarios(config, { databaseUrl, log: (l) => log.push(l) });
+    const validate = vi.fn<() => Promise<void>>(async () => {
+      throw new Error("production store must not be contacted by scenarios");
+    });
+    vi.stubEnv("SANOMA_SECRETS_KEY", undefined);
+    onTestFinished(() => {
+      vi.unstubAllEnvs();
+    });
+    const result = await runScenarios(
+      { ...config, secrets: { store: { ...memorySecretStore(), validate } } },
+      { databaseUrl, log: (l) => log.push(l) },
+    );
+    expect(validate).not.toHaveBeenCalled();
     expect(result).toEqual({
       passed: [
         "Launch on time",

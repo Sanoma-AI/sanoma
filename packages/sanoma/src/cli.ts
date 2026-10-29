@@ -231,7 +231,9 @@ async function keep(
 async function serveCommand(devServer: boolean): Promise<never> {
   const loaded = await load({ postgres: "start" });
   return keep(loaded, async (config, resolved) => {
-    (await import("./key.ts")).ensureSecretsKey(process.cwd(), log);
+    (await import("./key.ts")).ensureDeploymentKeys(process.cwd(), log, {
+      externalStore: config.secrets?.store !== undefined,
+    });
     const { serve } = await import("./serve.ts");
     return serve(config, { port: port(), log, dev: devServer, resolved });
   });

@@ -154,8 +154,11 @@ const env = z.object({
 });
 
 /** The variable `name`, read when an operation is called, or the driver's refusal. */
-function required(name: "SANOMA_WAKEUP_URL" | "SANOMA_WAKEUP_ACCOUNT_TOKEN"): string {
-  const value = process.env[name];
+function required(
+  values: Record<string, string | undefined>,
+  name: "SANOMA_WAKEUP_URL" | "SANOMA_WAKEUP_ACCOUNT_TOKEN",
+): string {
+  const value = values[name];
   if (!value) throw refused(`${name} is not set (${env.shape[name].description})`);
   return value;
 }
@@ -167,10 +170,10 @@ const Problem = z.object({ error: z.string() });
 const instance = (id: string) => `/wakeup/instances/${encodeURIComponent(id)}`;
 
 /** The service at `SANOMA_WAKEUP_URL`, read when an operation is called: each request's failure a `DriverError`. */
-function serviceApi(timeoutMs: number): WakeupApi {
-  const base = required("SANOMA_WAKEUP_URL").replace(/\/+$/, "");
+function serviceApi(timeoutMs: number, values: Record<string, string | undefined>): WakeupApi {
+  const base = required(values, "SANOMA_WAKEUP_URL").replace(/\/+$/, "");
   if (!URL.canParse(base)) throw refused("SANOMA_WAKEUP_URL is not a URL");
-  const account = () => required("SANOMA_WAKEUP_ACCOUNT_TOKEN");
+  const account = () => required(values, "SANOMA_WAKEUP_ACCOUNT_TOKEN");
   /**
    * One request: its reply parsed by `reply` (none: not read), a 404 `undefined` where `absent`
    * says it means no such instance, and any other answer but a 2xx a `DriverError`.
@@ -257,7 +260,20 @@ function serviceApi(timeoutMs: number): WakeupApi {
  * `register` send). `timeoutMs` is how long one request may take: 10 s by default.
  */
 export function sanomaWakeupDriver({ timeoutMs = 10_000 }: { timeoutMs?: number } = {}) {
-  return defineDriver(wakeupOps, { wakeup: wakeupCalls(() => serviceApi(timeoutMs)) }, { env });
+  const call = async (name: keyof ReturnType<typeof wakeupCalls>, input: unknown, context: CallContext) => {
+    const values = Object.fromEntries(
+      await Promise.all(Object.keys(env.shape).map(async (key) => [key, await context.secrets.get(key)])),
+    );
+    const methods = wakeupCalls(() => serviceApi(timeoutMs, values));
+    return (methods[name] as (input: unknown, context: CallContext) => Promise<unknown>)(input, context);
+  };
+  const methods = Object.fromEntries(
+    ["import", "read", "plan", "create", "update", "delete", "register"].map((name) => [
+      name,
+      (input: unknown, context: CallContext) => call(name as keyof ReturnType<typeof wakeupCalls>, input, context),
+    ]),
+  );
+  return defineDriver(wakeupOps, { wakeup: methods } as never, { env });
 }
 
 /** The wakeup's step for Gherkin tests: an instance at the service before the run, named `wakeup` (`$wakeup.id`). */
