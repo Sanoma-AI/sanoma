@@ -92,6 +92,10 @@ describe("githubDriver", () => {
       message: "github: repository_deploy_key sanoma:1 names no owner: write it <owner>/…",
       retryable: false,
     });
+    // A name that is not a node id is not taken for one.
+    await expect(call(driver, "repository.import", { id: "sanoma" })).rejects.toMatchObject({
+      message: "github: repository sanoma names no owner: write it <owner>/…",
+    });
     await expect(
       call(driver, "repository.plan", { desired: { name: "sanoma", visibility: "public" } }),
     ).rejects.toMatchObject({ message: "github: repository.plan: the declaration names no owner" });
@@ -100,7 +104,7 @@ describe("githubDriver", () => {
         id: "Sanoma-AI/sanoma:1",
         desired: { repository: "someone-else/sanoma", title: "t", key: "ssh-ed25519 AAAA", read_only: true },
       }),
-    ).rejects.toMatchObject({ message: expect.stringContaining("names two owners, Sanoma-AI and someone-else") });
+    ).rejects.toMatchObject({ message: expect.stringContaining("names two owners, someone-else and Sanoma-AI") });
     expect(calls()).toEqual([]);
   });
 

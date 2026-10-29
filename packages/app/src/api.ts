@@ -346,8 +346,8 @@ export interface GoLiveProgress {
   host: { url: string; healthy: boolean } | null;
 }
 /**
- * What `connectExistingFn` takes: a GitHub repository (`owner/name`, or a name of the connector's
- * owner) and a Supabase project's ref, either or both.
+ * What `connectExistingFn` takes: a GitHub repository (`owner/name`: the owner is always written)
+ * and a Supabase project's ref, either or both.
  */
 export const ConnectExistingRequest = z
   .object({

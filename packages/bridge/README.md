@@ -87,8 +87,8 @@ export const githubTf = tfConnector({
   info: vendorInfo(import.meta.url),
 });
 githubTf.connector; // the operations: github.repository.read, github.repository.import
-githubTf.resources; // the data-file constructors: githubTf.resources.repository({ name: "sanoma" })
-githubTf.driver(bridge, () => ({ token: process.env.GITHUB_TOKEN })); // the driver; the config is read per call
+githubTf.resources; // the data-file constructors: githubTf.resources.repository({ owner: "acme", name: "sanoma" })
+githubTf.driver(bridge, () => ({ owner: "acme", token: process.env.GITHUB_TOKEN })); // the driver; the config is read per call
 // A third argument, `importId(type, id)`, turns an id the provider cannot import by (GitHub's node id) into one it can.
 ```
 

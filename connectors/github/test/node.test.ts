@@ -81,9 +81,19 @@ describe("githubDriver, given a node id", () => {
     expect(err).toMatchObject({
       retryable: false,
       message:
-        "github: repository.update names two owners, Sanoma-AI and someone-else: a repository moves owner at GitHub, not here",
+        "github: repository.update names two owners, someone-else and Sanoma-AI: a repository moves owner at GitHub, not here",
     });
     expect(imports()).toEqual([]);
+  });
+
+  it("reads by a state that names its owner, with no query", async () => {
+    play("node-repository");
+    const driver = githubDriver({ bridge });
+    const imported = await call(driver, "repository.import", { id: "R_kgDOU0BoZg" });
+    expect(sent).toHaveLength(1);
+    const read = await call(driver, "repository.read", imported);
+    expect(read).toMatchObject({ id: "R_kgDOU0BoZg", gone: false, state: { owner: "Sanoma-AI", name: "sanoma" } });
+    expect(sent).toHaveLength(1);
   });
 
   it("is retryable when GitHub fails, and imports a name without a query", async () => {

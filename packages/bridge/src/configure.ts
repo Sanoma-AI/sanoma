@@ -8,15 +8,19 @@ interface Configured {
   config?: string;
   /** The configure steps for this release, one after another. */
   queue: Promise<void>;
-  /** The config the latest calls run under, when they may start, and those running. */
-  turn?: { config: string; ready: Promise<void>; running: Set<Promise<unknown>> };
+  /**
+   * The config the latest calls run under, when they may start, and those running. Later: one
+   * provider instance per config, once the bridge can hold two, and no waiting.
+   */
+  turn?: { config: string; ready: Promise<unknown>; running: Set<Promise<unknown>> };
 }
 
 const configured = new WeakMap<ProviderClient, Map<string, Configured>>();
 
 /** Forgets what `bridge` was configured with: its next call configures each provider afresh, as a new bridge needs. */
 export function forgetConfigured(bridge: ProviderClient): void {
-  configured.delete(bridge);
+  // The config only: calls still waiting on a turn keep waiting, so none runs under another's.
+  for (const state of configured.get(bridge)?.values() ?? []) state.config = undefined;
 }
 
 function stateOf(bridge: ProviderClient, ref: ProviderRef): Configured {
@@ -79,9 +83,7 @@ export async function ensureConfigured<T>(
     const before = turn;
     turn = state.turn = {
       config: configJson,
-      ready: before
-        ? before.ready.then(() => Promise.allSettled(before.running)).then(() => undefined)
-        : Promise.resolve(),
+      ready: before ? before.ready.then(() => Promise.allSettled(before.running)) : Promise.resolve(),
       running: new Set(),
     };
   }

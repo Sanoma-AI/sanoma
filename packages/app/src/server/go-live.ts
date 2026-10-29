@@ -102,7 +102,7 @@ const GITHUB_API = "https://api.github.com";
 /** The wakeup's declaration in `infra.ts`, as `renderInfra` writes it. */
 const WAKEUP_LINE = /^export const wakeup = /m;
 /** The repository's owner and name in `infra.ts` as `renderInfra` writes them. */
-const REPO_NAME = /export const repo = github\.repository\(\{\s*owner: "([^"]+)",\s*name: "([^"]+)"/;
+const REPO = /export const repo = github\.repository\(\{\s*owner: "([^"]+)",\s*name: "([^"]+)"/;
 const SUPABASE_API = "https://api.supabase.com";
 
 const idOf = (type: Resource) => `${type.vendor}.${type.type}`;
@@ -562,7 +562,7 @@ export async function goLiveHost(app: AppContext, actor: Principal): Promise<{ r
     throw new ApiError(409, { error: "Check out main, where infra.ts and the lockfile are committed, then push" });
   }
   // The repository's owner and name as going live wrote them, first in the file.
-  const [, owner, name] = REPO_NAME.exec(infra) ?? [];
+  const [, owner, name] = REPO.exec(infra) ?? [];
   if (!owner || !name) throw new ApiError(409, { error: `Cannot tell the repository from ${INFRA}` });
   try {
     await source.push({

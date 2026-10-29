@@ -342,7 +342,7 @@ async function connectNow(
   );
   const exports = [];
   const bind: Record<string, string> = {};
-  for (const [i, { given: _given, ...at }] of wanted.entries()) {
+  for (const [i, at] of wanted.entries()) {
     const state = states[i]!;
     const read = at.fields.flatMap((f) => (state[f] == null || state[f] === "" ? [] : [[f, state[f] as DataValue]]));
     exports.push({ ...at, desired: { ...Object.fromEntries(read), ...at.set } });
