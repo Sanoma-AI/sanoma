@@ -22,20 +22,29 @@ export function addToEnv(file: string, values: Record<string, string>): string[]
 }
 
 /** Creates independent local bootstrap keys; external stores need only signing. */
-export function ensureDeploymentKeys(
+export async function ensureDeploymentKeys(
   dir: string,
   log: (line: string) => void,
   options: { externalStore?: boolean } = {},
-): void {
+): Promise<void> {
+  // Keep init's key generation independent of loading the runtime. Startup uses its one
+  // decoder so direct and mounted values have identical validation everywhere.
+  const { deploymentKey } = await import("@sanoma-ai/workflows");
   const file = join(dir, ".env");
-  for (const name of [SIGNING_KEY, ...(options.externalStore ? [] : [KEY])]) {
+  const names: (typeof SIGNING_KEY | typeof KEY)[] = [SIGNING_KEY];
+  if (!options.externalStore) names.push(KEY);
+  for (const name of names) {
     if (process.env[name] && process.env[`${name}_FILE`]) throw new Error(`Set only one of ${name} and ${name}_FILE`);
-    if (process.env[name] || process.env[`${name}_FILE`]) continue;
+    if (process.env[name] || process.env[`${name}_FILE`]) {
+      deploymentKey(name);
+      continue;
+    }
     const current = existsSync(file) ? parseEnv(readFileSync(file, "utf8")) : {};
     if (current[name] && current[`${name}_FILE`]) throw new Error(`Set only one of ${name} and ${name}_FILE`);
     if (current[name] || current[`${name}_FILE`]) {
       if (current[name]) process.env[name] = current[name];
       if (current[`${name}_FILE`]) process.env[`${name}_FILE`] = current[`${name}_FILE`];
+      deploymentKey(name);
       continue;
     }
     const key = randomBytes(32).toString("base64");

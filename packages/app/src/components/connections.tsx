@@ -1,4 +1,4 @@
-import type { ConnectionCard, ConnectionReview, ConnectionTarget } from "@sanoma-ai/workflows";
+import type { ConnectionCard, ConnectionReview, ConnectionTarget, SecretLocation } from "@sanoma-ai/workflows";
 import { CALL_WORKFLOW } from "@sanoma-ai/workflows/shared";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
@@ -24,20 +24,20 @@ import { secureFields, secureInput } from "../form/secure-fields.ts";
 import { ItemHeading, Notice, Region, ToneBadge, When } from "./common.tsx";
 
 /** Accounts and secure input are scoped to the current actor, including the query cache. */
-export function Connections({ vendor }: { vendor: string }) {
+export function Connections({ vendor }: { vendor?: string }) {
   const { actor } = useActor();
   if (!actor) return <Notice>Sign in to manage connections.</Notice>;
   return <ConnectionList key={actor} vendor={vendor} actor={actor} />;
 }
 
-function ConnectionList({ vendor, actor }: { vendor: string; actor: string }) {
+function ConnectionList({ vendor, actor }: { vendor?: string; actor: string }) {
   const query = useQuery({ ...connectionsQuery(), queryKey: ["connections", actor] });
   const [creating, setCreating] = useState<string>();
   if (query.error) return <ConnectionFailure error={query.error} />;
   if (!query.data) return <Notice>Loading connections…</Notice>;
   const data = query.data;
-  const cards = data.cards.filter((card) => card.vendor === vendor);
-  const rules = data.rules.filter((rule) => rule.vendor === vendor);
+  const cards = data.cards.filter((card) => !vendor || card.vendor === vendor);
+  const rules = data.rules.filter((rule) => !vendor || rule.vendor === vendor);
   if (!cards.length && !rules.length) return null;
   return (
     <Region title="Connections">
@@ -51,14 +51,24 @@ function ConnectionList({ vendor, actor }: { vendor: string; actor: string }) {
       </ItemGroup>
       {rules.map((rule) => (
         <div key={rule.id}>
-          <Button variant="outline" onClick={() => setCreating(rule.id)}>
+          <Button
+            variant="outline"
+            disabled={!canWrite(data.store) && data.methods[rule.vendor]?.[rule.method]?.kind !== "workload-identity"}
+            onClick={() => setCreating(rule.id)}
+          >
             Connect account · {rule.name}
           </Button>
+          {!canWrite(data.store) && data.methods[rule.vendor]?.[rule.method]?.kind !== "workload-identity" && (
+            <p className="text-sm text-muted-foreground">
+              This store cannot safely create account credentials. Declare a named connection with an external binding
+              to review an existing account.
+            </p>
+          )}
           {creating === rule.id && (
             <ConnectionDialog
               name={rule.name}
               target={{ rule: rule.id }}
-              method={data.methods[vendor]?.[rule.method]}
+              method={data.methods[rule.vendor]?.[rule.method]}
               store={data.store}
               onClose={() => setCreating(undefined)}
             />
@@ -98,6 +108,18 @@ export function SecretStorage() {
         </p>
       )}
       {query.error && <ConnectionFailure error={query.error} />}
+      {query.data && (
+        <ul className="text-sm text-muted-foreground">
+          {query.data.bootstrap.map((key) => (
+            <li key={key.name}>
+              <code>{key.name}</code>:{" "}
+              {key.ready
+                ? `ready · ${key.delivery}`
+                : `needs configuration · supply either ${key.name} or ${key.name}_FILE`}
+            </li>
+          ))}
+        </ul>
+      )}
       {!actor && <Notice>Sign in to check store access.</Notice>}
       {selected.store === "postgres" && (
         <p className="text-sm text-muted-foreground">
@@ -123,8 +145,10 @@ export function SecretStorage() {
 }
 
 type Method = ConnectionsResponse["methods"][string][string] | undefined;
+const canWrite = (store: ConnectionsResponse["store"]) =>
+  store.capabilities.writable && store.capabilities.conditionalWrites !== "none";
 
-function ConnectionRow({ card, data }: { card: ConnectionCard; data: ConnectionsResponse }) {
+function ConnectionRow({ card, data }: { card: ConnectionsResponse["cards"][number]; data: ConnectionsResponse }) {
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>();
@@ -134,6 +158,9 @@ function ConnectionRow({ card, data }: { card: ConnectionCard; data: Connections
   const disconnect = useServerFn(disconnectConnectionFn);
   const method = data.methods[card.vendor]?.[card.method];
   const external = card.location?.management === "external" || !data.store.capabilities.writable;
+  const oauth = method?.kind === "oauth2";
+  const identity = method?.kind === "workload-identity";
+  const unsupportedWrite = !external && !identity && !canWrite(data.store);
   const state = card.status === "connected" ? (card.health?.state ?? "connected") : card.status;
   async function act(action: "test" | "disconnect") {
     setBusy(true);
@@ -173,10 +200,20 @@ function ConnectionRow({ card, data }: { card: ConnectionCard; data: Connections
             {external ? "Managed externally" : "Managed by Sanoma"}
           </ItemDescription>
         )}
+        {card.boundLocation && changedLocation(card.boundLocation, card.location) && (
+          <ItemDescription className="line-clamp-none">
+            Previously bound to {locationLabel(card.boundLocation)}. Review the new destination before reconnecting.
+          </ItemDescription>
+        )}
         {external && (
-          <ItemDescription>
+          <ItemDescription className="line-clamp-none">
             Replace or renew credentials at the management location above, then Test. Disconnect does not delete the
             external value.
+          </ItemDescription>
+        )}
+        {oauth && !external && (
+          <ItemDescription>
+            OAuth Connect and Reconnect require this connector’s consent capability, which is not available yet.
           </ItemDescription>
         )}
         {card.health && (
@@ -185,20 +222,54 @@ function ConnectionRow({ card, data }: { card: ConnectionCard; data: Connections
             {card.health.externallyRenewed && " · Externally renewed"}
           </ItemDescription>
         )}
+        {unsupportedWrite && (
+          <ItemDescription className="line-clamp-none">
+            This store lacks conditional writes. Use an external binding or select a store that supports safe credential
+            replacement.
+          </ItemDescription>
+        )}
         {card.updatedBy && card.updatedAt && (
           <ItemDescription>
             Changed by {card.updatedBy} · <When at={Date.parse(card.updatedAt)} />
           </ItemDescription>
         )}
+        <div className="text-sm text-muted-foreground">
+          {card.workflows.length ? (
+            <>
+              <span>Workflows: </span>
+              {card.workflows.map((workflow, index) => (
+                <span key={workflow.name}>
+                  {index > 0 && ", "}
+                  <Link to="/workflows/$name" params={{ name: workflow.name }} className="underline">
+                    {workflow.title}
+                  </Link>
+                  {workflow.selection === "possible" && " (account chosen at runtime)"}
+                </span>
+              ))}
+            </>
+          ) : (
+            "No workflow dependencies found in code."
+          )}
+        </div>
         {error !== undefined && <ConnectionFailure error={error} />}
       </ItemContent>
       <ItemActions>
         <Button
           variant="outline"
-          disabled={busy || !method?.verifiable || !data.store.ready}
+          disabled={busy || !method?.verifiable || !data.store.ready || (oauth && !external) || unsupportedWrite}
           onClick={() => setEditing(true)}
         >
-          {external ? "Review connection" : card.account ? "Replace credentials" : "Connect"}
+          {identity
+            ? "Verify identity"
+            : external
+              ? "Review connection"
+              : oauth
+                ? card.account
+                  ? "Reconnect"
+                  : "Connect account"
+                : card.account
+                  ? "Replace credentials"
+                  : "Connect"}
         </Button>
         {method?.verifiable && (
           <Button variant="outline" disabled={busy} onClick={() => void act("test")}>
@@ -351,6 +422,12 @@ function ConnectionDialog({
                   ? `${review.location.store} · ${review.location.namespace} · ${review.location.path}`
                   : "Deployment identity; no stored credential"}
               </p>
+              {review.previousLocation && changedLocation(review.previousLocation, review.location) && (
+                <Notice>
+                  Changes storage from {locationLabel(review.previousLocation)} to {locationLabel(review.location)}. The
+                  previous stored value is retained; this action does not transfer or delete it.
+                </Notice>
+              )}
               <p>
                 {external
                   ? "Uses the existing value; Sanoma will not replace or delete it."
@@ -380,6 +457,13 @@ function ConnectionDialog({
     </Dialog>
   );
 }
+
+const locationLabel = (location?: SecretLocation) =>
+  location
+    ? `${location.store} · ${location.namespace} · ${location.path} · ${location.management === "external" ? "managed externally" : "managed by Sanoma"}`
+    : "deployment identity";
+const changedLocation = (before: SecretLocation, after?: SecretLocation) =>
+  !after || (["store", "namespace", "path", "management"] as const).some((key) => before[key] !== after[key]);
 
 function ConnectionFailure({ error }: { error: unknown }) {
   const body = errorBodyOf(error);

@@ -1240,12 +1240,18 @@ export class SanomaClient {
     if (!isDeepStrictEqual(authorized, setup))
       throw new SanomaError("invalid_input", "The connection changed; start a new review");
     const method = this.config.connections.catalog.methods.get(setup.vendor)![setup.method]!;
-    const existing = setup.credential ? await this.storedSecrets.read(setup.credential) : undefined;
     const external =
       method.kind !== "workload-identity" &&
       (setup.location?.management === "external" || !this.storedSecrets.store.capabilities.writable);
+    if (
+      !external &&
+      method.kind !== "workload-identity" &&
+      this.storedSecrets.store.capabilities.conditionalWrites === "none"
+    )
+      throw new SecretStoreError("unsupported");
     if (credentials !== undefined && (external || method.kind === "workload-identity"))
       throw new SecretStoreError("read_only");
+    const existing = setup.credential ? await this.storedSecrets.read(setup.credential) : undefined;
     if (external && !existing) throw new SecretStoreError("unavailable");
     const encoded =
       method.kind === "workload-identity"
@@ -1302,6 +1308,12 @@ export class SanomaClient {
     const external =
       method.kind !== "workload-identity" &&
       (setup.location?.management === "external" || !this.storedSecrets.store.capabilities.writable);
+    if (
+      !external &&
+      method.kind !== "workload-identity" &&
+      this.storedSecrets.store.capabilities.conditionalWrites === "none"
+    )
+      throw new SecretStoreError("unsupported");
     if (credentials !== undefined && (external || method.kind === "workload-identity"))
       throw new SecretStoreError("read_only");
     const existing = setup.credential ? await this.storedSecrets.read(setup.credential) : undefined;

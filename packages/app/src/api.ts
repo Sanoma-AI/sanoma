@@ -207,13 +207,20 @@ export type CredentialsResponse = Record<string, CredentialStatus[]>;
 
 /** Metadata-only account management. Secret values are accepted only by the two intake calls. */
 export interface ConnectionsResponse {
-  cards: ConnectionCard[];
+  cards: (ConnectionCard & {
+    workflows: { name: string; title: string; selection: "default" | "selected" | "possible" }[];
+  })[];
   rules: { id: string; name: string; vendor: string; method: string; scopes: readonly string[] }[];
   methods: Record<
     string,
     Record<string, { kind: Authentication["kind"]; verifiable: boolean; schema?: Record<string, unknown> }>
   >;
   store: Awaited<ReturnType<SanomaClient["secretStoreStatus"]>>;
+  bootstrap: {
+    name: "SANOMA_SIGNING_KEY" | "SANOMA_SECRETS_KEY";
+    ready: boolean;
+    delivery: "environment" | "mounted-file" | "missing";
+  }[];
 }
 const ConnectionReference = z.object({ vendor: z.string().min(1), $connection: z.string().min(1) });
 export const ConnectionTarget = z.union([
@@ -246,6 +253,9 @@ const ConnectionReviewSchema: z.ZodType<ConnectionReview> = z.object({
   requiredScopes: z.array(z.string()),
   expectedAccount: z.string().optional(),
   previousAccount: z.string().optional(),
+  previousLocation: z
+    .object({ store: z.string(), namespace: z.string(), path: z.string(), management: z.enum(["sanoma", "external"]) })
+    .optional(),
   requestId: z.string().min(1).max(200),
   authorization: z.string(),
   account: z.string(),

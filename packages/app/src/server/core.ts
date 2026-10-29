@@ -8,6 +8,7 @@ import {
   ADMIN,
   type ApprovalState,
   type DriftReport,
+  deploymentKey,
   errorCode,
   errorMessage,
   type InputIssue,
@@ -27,7 +28,7 @@ import {
   type SanomaError,
   type Source,
 } from "@sanoma-ai/workflows";
-import { apiNameOf, isVisitor } from "@sanoma-ai/workflows/shared";
+import { apiNameOf, isVisitor, flatten } from "@sanoma-ai/workflows/shared";
 import {
   type ConfigDescription,
   type DataValue,
@@ -700,8 +701,38 @@ export const credentials = async ({ client }: AppContext): Promise<CredentialsRe
   Object.fromEntries(await client.credentials());
 
 /** No credential reads. Account visibility and creation choices are checked by the runtime. */
-export async function connections({ client, resolved }: AppContext, actor: Principal): Promise<ConnectionsResponse> {
-  const cards = await client.connections({ actor });
+export async function connections(
+  { client, resolved, description }: AppContext,
+  actor: Principal,
+): Promise<ConnectionsResponse> {
+  const cards = (await client.connections({ actor })).map((card) => {
+    const isDefault = resolved.connections.catalog.definitions.get(card.id)?.default === true;
+    const workflows = description.workflows
+      .filter((workflow) => !workflow.builtin)
+      .flatMap((workflow) => {
+        if (!("nodes" in workflow.outline)) {
+          return workflow.ops.some((id) => id.startsWith(`${card.vendor}.`))
+            ? [{ name: workflow.name, title: workflow.title ?? workflow.name, selection: "possible" as const }]
+            : [];
+        }
+        const calls = flatten(workflow.outline.nodes).filter(
+          (node) => node.kind === "op" && (node.ops ?? [node.id]).some((id) => id.split(".")[0] === card.vendor),
+        );
+        const selections = calls.flatMap((call) => {
+          if (call.kind !== "op") return [];
+          if (!call.connection) return isDefault ? ["default" as const] : [];
+          if ("dynamic" in call.connection) return ["possible" as const];
+          return call.connection.id === card.id ? ["selected" as const] : [];
+        });
+        const selection = selections.includes("selected")
+          ? "selected"
+          : selections.includes("default")
+            ? "default"
+            : selections[0];
+        return selection ? [{ name: workflow.name, title: workflow.title ?? workflow.name, selection }] : [];
+      });
+    return { ...card, workflows };
+  });
   const rules = (await client.connectionRules({ actor })).map(({ id, rule }) => ({
     id,
     name: rule.name,
@@ -727,7 +758,23 @@ export async function connections({ client, resolved }: AppContext, actor: Princ
       }),
     );
   }
-  return { cards, rules, methods, store: await client.secretStoreStatus({ actor }) };
+  const names: ("SANOMA_SIGNING_KEY" | "SANOMA_SECRETS_KEY")[] = ["SANOMA_SIGNING_KEY"];
+  if (!resolved.secrets.store) names.push("SANOMA_SECRETS_KEY");
+  const bootstrap: ConnectionsResponse["bootstrap"] = names.map((name) => {
+    let ready = false;
+    try {
+      deploymentKey(name);
+      ready = true;
+    } catch {
+      /* Only readiness is public. */
+    }
+    return {
+      name,
+      ready,
+      delivery: process.env[`${name}_FILE`] ? "mounted-file" : process.env[name] ? "environment" : "missing",
+    };
+  });
+  return { cards, rules, methods, store: await client.secretStoreStatus({ actor }), bootstrap };
 }
 
 /** Secure form intake, outside workflow arguments and approval records. */

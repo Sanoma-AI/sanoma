@@ -228,7 +228,9 @@ export const getAppBehind = createServerFn(READ)
   .handler(({ data, context }) => appBehind(context.app, data.folder));
 
 /** What going live can choose from: GitHub accounts, Supabase organizations and regions, the host. */
-export const getGoLiveChoices = createServerFn(READ).handler(({ context }) => goLiveChoices(context.app));
+export const getGoLiveChoices = createServerFn(READ).handler(async ({ context }) =>
+  goLiveChoices(context.app, await context.actor()),
+);
 
 /** How far going live is: `infra.ts`, the bindings, the latest apply run, the host. */
 export const getGoLiveProgress = createServerFn(READ).handler(({ context }) => goLiveProgress(context.app));

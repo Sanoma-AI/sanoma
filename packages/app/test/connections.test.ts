@@ -11,6 +11,8 @@ import {
   defineConnectionRule,
   defineConnector,
   defineDriver,
+  defineWorkflow,
+  encodeCredentials,
   memorySecretStore,
   resolveConfig,
   SanomaClient,
@@ -51,9 +53,41 @@ const mail = withSetup(ops, {
   authentication: { password: authentication },
   driver: () => defineDriver(ops, { messages: { list: async () => ({}) } }, { authentication: ["password"] }),
 });
-const support = defineConnection(mail, { name: "support", method: "password", credentials: secret("SUPPORT") });
+const support = defineConnection(mail, {
+  name: "support",
+  method: "password",
+  credentials: secret("SUPPORT"),
+  default: true,
+});
 const sales = defineConnection(mail, { name: "sales", method: "password", credentials: secret("SALES") });
 const personal = defineConnectionRule(mail, { name: "personal", method: "password", createBy: ["alice"] });
+const selected = defineWorkflow({
+  name: "selected-account",
+  trigger: "manual",
+  input: z.object({}),
+  uses: [mail.messages.list],
+  run: async (ctx) => {
+    await ctx.mail.messages.list({}, { connection: { vendor: "mail", $connection: "mail/sales" } });
+  },
+});
+const defaulted = defineWorkflow({
+  name: "default-account",
+  trigger: "manual",
+  input: z.object({}),
+  uses: [mail.messages.list],
+  run: async (ctx) => {
+    await ctx.mail.messages.list({});
+  },
+});
+const computed = defineWorkflow({
+  name: "computed-account",
+  trigger: "manual",
+  input: z.object({ account: z.string() }),
+  uses: [mail.messages.list],
+  run: async (ctx, input) => {
+    await ctx.mail.messages.list({}, { connection: { vendor: "mail", $connection: input.account } });
+  },
+});
 const databaseUrl = testDatabaseUrl("app_connections");
 const pool = lazyPool(databaseUrl, "app-connections-tests");
 let app: AppContext;
@@ -63,7 +97,7 @@ beforeEach(async () => {
   store = memorySecretStore();
   const cfg = {
     databaseUrl,
-    workflows: [],
+    workflows: [selected, defaulted, computed],
     connectors: [mail],
     connections: [support, sales],
     connectionRules: [personal],
@@ -144,6 +178,110 @@ describe("connection server boundary", () => {
     }
   }, 120_000);
 
+  it("reviews external credentials without input controls and shows policy refusals for Test and Disconnect", async (ctx) => {
+    const chrome = process.env.CHROME_PATH ?? (await executablePath("chrome").catch(() => ""));
+    if (!existsSync(chrome)) ctx.skip("no Chrome: install Google Chrome or set CHROME_PATH");
+    ensureBuilt(
+      fileURLToPath(new URL("..", import.meta.url)),
+      ["dist/server/server.js"],
+      ["pnpm", "exec", "vite", "build"],
+    );
+    const address = { namespace: "default", path: "external/support" };
+    const value = await store.write(address, encodeCredentials(authentication, credentials), {
+      expectedVersion: null,
+      by: "owner",
+    });
+    const write = vi.spyOn(store, "write");
+    const remove = vi.spyOn(store, "delete");
+    const read = vi.spyOn(store, "read");
+    const server = await startApp(
+      {
+        ...config,
+        connections: [support],
+        secrets: {
+          store: { ...store, capabilities: { ...store.capabilities, writable: false } },
+          bindings: { SUPPORT: { path: address.path, management: "external" } },
+        },
+        root: tree(`external-ui-${randomUUID()}`, {
+          "policies/connection.cedar": `forbid(principal, action in [Sanoma::Action::"sanoma.connection.test", Sanoma::Action::"sanoma.connection.disconnect"], resource);`,
+        }),
+      },
+      { port: 0 },
+    );
+    const browser = await launch({ executablePath: chrome, headless: true });
+    try {
+      const page = await browser.newPage();
+      await page.evaluateOnNewDocument(() => localStorage.setItem("sanoma.actor", "alice"));
+      await page.goto(new URL("/connectors/mail", server.url).href);
+      await page.waitForSelector("button::-p-text(Review connection)");
+      expect(await page.content()).toContain("external/support");
+      expect(
+        await page.evaluate(
+          `Array.from(document.querySelectorAll('button')).find(b => b.textContent.includes('Connect account · personal'))?.disabled`,
+        ),
+      ).toBe(true);
+      expect(
+        await page.evaluate(
+          `Array.from(document.querySelectorAll('button')).some(b => b.textContent === 'Replace credentials')`,
+        ),
+      ).toBe(false);
+      await page.click("button::-p-text(Review connection)");
+      await page.waitForSelector('[role="dialog"]');
+      expect(await page.evaluate(`document.querySelectorAll('[role="dialog"] input').length`)).toBe(0);
+      await page.click('[role="dialog"] button[type="submit"]');
+      await page.waitForSelector('[role="dialog"] button::-p-text(Save connection)');
+      expect(await page.evaluate(`document.querySelector('[role="dialog"]').textContent`)).toContain(credentials.user);
+      await page.click('[role="dialog"] button[type="submit"]');
+      await page.waitForSelector('[role="dialog"]', { hidden: true });
+      await page.waitForSelector("button::-p-text(Disconnect)");
+      read.mockClear();
+      for (const action of ["Test", "Disconnect"]) {
+        await page.click(`button::-p-text(${action})`);
+        await page.waitForSelector('[role="alert"]');
+        await page.waitForFunction(
+          `Array.from(document.querySelectorAll('button')).find(b => b.textContent === ${JSON.stringify(action)})?.disabled === false`,
+        );
+      }
+      expect(read).not.toHaveBeenCalled();
+      expect(write).not.toHaveBeenCalled();
+      expect(remove).not.toHaveBeenCalled();
+      expect(await store.read(address)).toEqual(value);
+      expect(
+        (await (await pool.db()).query("SELECT status FROM sanoma_connections WHERE id=$1", [support.$connection]))
+          .rows,
+      ).toEqual([{ status: "connected" }]);
+      expect(await page.content()).not.toContain(credentials.password);
+      await page.screenshot({ path: "/tmp/connection-management-external.png", fullPage: true });
+    } finally {
+      await browser.close();
+      await server.close();
+    }
+  }, 120_000);
+
+  it("offers dynamic-only account creation during onboarding", async (ctx) => {
+    const chrome = process.env.CHROME_PATH ?? (await executablePath("chrome").catch(() => ""));
+    if (!existsSync(chrome)) ctx.skip("no Chrome: install Google Chrome or set CHROME_PATH");
+    ensureBuilt(
+      fileURLToPath(new URL("..", import.meta.url)),
+      ["dist/server/server.js"],
+      ["pnpm", "exec", "vite", "build"],
+    );
+    const server = await startApp({ ...config, connections: [] }, { port: 0 });
+    const browser = await launch({ executablePath: chrome, headless: true });
+    try {
+      const page = await browser.newPage();
+      await page.evaluateOnNewDocument(() => localStorage.setItem("sanoma.actor", "alice"));
+      await page.goto(new URL("/setup/connect", server.url).href);
+      await page.waitForSelector("button::-p-text(Connect account · personal)");
+      await page.click("button::-p-text(Connect account · personal)");
+      await page.waitForSelector('#connection-user[type="password"]');
+      expect(await page.evaluate(`document.querySelectorAll('[role="dialog"] input[type="password"]').length`)).toBe(2);
+    } finally {
+      await browser.close();
+      await server.close();
+    }
+  }, 120_000);
+
   it("returns two declared accounts and authorized creation choices without reading credentials", async () => {
     const read = vi.spyOn(store, "read");
     const result = await connections(app, actor);
@@ -157,6 +295,14 @@ describe("connection server boundary", () => {
       schema: { type: "object" },
     });
     expect(read).not.toHaveBeenCalled();
+    expect(result.cards[0]?.workflows.map(({ name, selection }) => ({ name, selection }))).toEqual([
+      { name: "computed-account", selection: "possible" },
+      { name: "default-account", selection: "default" },
+    ]);
+    expect(result.cards[1]?.workflows.map(({ name, selection }) => ({ name, selection }))).toEqual([
+      { name: "computed-account", selection: "possible" },
+      { name: "selected-account", selection: "selected" },
+    ]);
   });
   it("verifies, reviews, saves, tests and disconnects through the same actor-scoped calls as the page", async () => {
     const review = await previewConnection(
@@ -187,6 +333,23 @@ describe("connection server boundary", () => {
     const result = await connections(app, actor);
     expect(result.store).toMatchObject({ ready: false, problem: "unavailable" });
     expect(JSON.stringify(result)).not.toContain("sensitive-provider-request");
+  });
+  it("reports missing bootstrap without exposing material or file paths, and refuses an unbootstrapped built-in store", async () => {
+    vi.stubEnv("SANOMA_SIGNING_KEY", undefined);
+    vi.stubEnv("SANOMA_SIGNING_KEY_FILE", "/not-present/private-bootstrap-file");
+    vi.stubEnv("SANOMA_SECRETS_KEY", undefined);
+    vi.stubEnv("SANOMA_SECRETS_KEY_FILE", undefined);
+    try {
+      const result = await connections(app, actor);
+      expect(result.bootstrap).toEqual([{ name: "SANOMA_SIGNING_KEY", ready: false, delivery: "mounted-file" }]);
+      expect(JSON.stringify(result)).not.toContain("private-bootstrap-file");
+      await expect(SanomaClient.connect({ ...config, secrets: {} })).rejects.toMatchObject({
+        name: "SecretStoreError",
+        code: "unavailable",
+      });
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
   it("discards provider messages even on known authentication/store errors", () => {
     expect(

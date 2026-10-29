@@ -64,6 +64,7 @@ export interface ConnectionCard {
   owner?: string;
   status: "missing" | "connected" | "disconnected" | "pending" | "uncertain" | "configuration_changed";
   location?: SecretLocation;
+  boundLocation?: SecretLocation;
   updatedBy?: string;
   updatedAt?: string;
   health?: ConnectionHealth;
@@ -92,6 +93,7 @@ export interface ConnectionSetup {
   requiredScopes: readonly string[];
   expectedAccount?: string;
   previousAccount?: string;
+  previousLocation?: SecretLocation;
 }
 const idPart = /^[a-z][a-z0-9-]{0,63}$/;
 function refuse(message: string): never {
@@ -130,6 +132,9 @@ const setupSchema = z.object({
   requiredScopes: z.array(z.string()),
   expectedAccount: z.string().optional(),
   previousAccount: z.string().optional(),
+  previousLocation: z
+    .object({ store: z.string(), namespace: z.string(), path: z.string(), management: z.enum(["sanoma", "external"]) })
+    .optional(),
 });
 
 export function defineConnection<C extends Connector<any, any>>(
@@ -261,6 +266,7 @@ type ConnectionRow = {
   revision: string;
   definition: string;
   credential: string | null;
+  location?: SecretLocation | null;
   status: "connected" | "disconnected" | "pending" | "uncertain";
   updated_by?: string;
   updated_at?: Date;
@@ -340,6 +346,7 @@ export class ConnectionRegistry {
             ? "configuration_changed"
             : row.status,
         ...(credential && this.secrets && { location: this.secrets.location(credential) }),
+        ...(row?.location && { boundLocation: row.location }),
         ...(row?.updated_by && { updatedBy: row.updated_by }),
         ...(row?.updated_at && { updatedAt: row.updated_at.toISOString() }),
         ...(row?.health &&
@@ -400,6 +407,7 @@ export class ConnectionRegistry {
       requiredScopes: declaration.scopes,
       ...("account" in declaration && declaration.account && { expectedAccount: declaration.account }),
       ...(row && { previousAccount: row.account }),
+      ...(row?.location && { previousLocation: row.location }),
     };
   }
 
@@ -777,11 +785,12 @@ export class ConnectionRegistry {
       row.credential,
       actor,
       row.status,
+      row.credential && this.secrets ? JSON.stringify(this.secrets.location(row.credential)) : null,
     ];
     const query =
       expected === null
-        ? "INSERT INTO sanoma_connections (id,vendor,method,owner,rule,account,scopes,revision,definition,credential,updated_by,status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT(id) DO NOTHING RETURNING id"
-        : "UPDATE sanoma_connections SET vendor=$2,method=$3,owner=$4,rule=$5,account=$6,scopes=$7,revision=$8,definition=$9,credential=$10,updated_by=$11,updated_at=now(),status=$12 WHERE id=$1 AND revision=$13 RETURNING id";
+        ? "INSERT INTO sanoma_connections (id,vendor,method,owner,rule,account,scopes,revision,definition,credential,updated_by,status,location) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT(id) DO NOTHING RETURNING id"
+        : "UPDATE sanoma_connections SET vendor=$2,method=$3,owner=$4,rule=$5,account=$6,scopes=$7,revision=$8,definition=$9,credential=$10,updated_by=$11,updated_at=now(),status=$12,location=$13 WHERE id=$1 AND revision=$14 RETURNING id";
     const result = await (await this.db()).query(query, [...values, ...(expected === null ? [] : [expected])]);
     if (!result.rowCount) refuse("The connection changed; reload before binding it");
   }

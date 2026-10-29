@@ -90,6 +90,73 @@ beforeAll(async () => {
 });
 
 describe("secure connection setup", () => {
+  it("refuses non-conditional managed writes before intake or pausing a connected account", async () => {
+    const cfg = config();
+    const original = await SanomaClient.connect(cfg);
+    const review = await original.previewConnection(target, value("support"), { actor: "alice", id: randomUUID() });
+    await original.connectConnection(review, value("support"), { actor: "alice" });
+    const replacement = await original.previewConnection(target, value("replacement"), {
+      actor: "alice",
+      id: randomUUID(),
+    });
+    await original.close();
+    const read = vi.spyOn(cfg.secrets.store, "read");
+    const write = vi.spyOn(cfg.secrets.store, "write");
+    const client = await SanomaClient.connect({
+      ...cfg,
+      secrets: {
+        store: { ...cfg.secrets.store, capabilities: { ...cfg.secrets.store.capabilities, conditionalWrites: "none" } },
+      },
+    });
+    try {
+      await expect(
+        client.previewConnection(target, value("replacement"), { actor: "alice", id: randomUUID() }),
+      ).rejects.toMatchObject({ code: "unsupported" });
+      await expect(
+        client.connectConnection(replacement, value("replacement"), { actor: "alice" }),
+      ).rejects.toMatchObject({ code: "unsupported" });
+      expect((await client.connections({ actor: "alice" }))[0]).toMatchObject({
+        status: "connected",
+        account: "support",
+      });
+      expect(read).not.toHaveBeenCalled();
+      expect(write).not.toHaveBeenCalled();
+    } finally {
+      await client.close();
+    }
+  });
+  it("reviews the previous account and destination before rebinding storage, without moving the old value", async () => {
+    const cfg = config();
+    const original = await SanomaClient.connect(cfg);
+    const review = await original.previewConnection(target, value("old-account"), { actor: "alice", id: randomUUID() });
+    await original.connectConnection(review, value("old-account"), { actor: "alice" });
+    await original.close();
+    const moved = await SanomaClient.connect({ ...cfg, secrets: { ...cfg.secrets, namespace: "destination" } });
+    try {
+      const card = (await moved.connections({ actor: "alice" }))[0]!;
+      expect(card).toMatchObject({
+        status: "configuration_changed",
+        location: { namespace: "destination" },
+        boundLocation: { namespace: "default" },
+      });
+      const next = await moved.previewConnection(target, value("new-account"), { actor: "alice", id: randomUUID() });
+      expect(next).toMatchObject({
+        previousAccount: "old-account",
+        account: "new-account",
+        previousLocation: { namespace: "default", path: "SUPPORT" },
+        location: { namespace: "destination" },
+      });
+      await moved.connectConnection(next, value("new-account"), { actor: "alice" });
+      expect((await moved.connections({ actor: "alice" }))[0]?.boundLocation?.namespace).toBe("destination");
+      expect((await cfg.secrets.store.read({ namespace: "default", path: "SUPPORT" }))?.value).toContain("old-account");
+      expect((await cfg.secrets.store.read({ namespace: "destination", path: "SUPPORT" }))?.value).toContain(
+        "new-account",
+      );
+    } finally {
+      await moved.close();
+    }
+  });
+
   it("lets only one competing review reserve and write an account", async () => {
     const cfg = config();
     const write = vi.spyOn(cfg.secrets.store, "write");
