@@ -1,8 +1,10 @@
 # sanoma
 
-The back office a small business never had, as code the business owns. You tell the agent how the business works, and it writes the workflows, the site pages and the data behind them as TypeScript in the company's own repo, on a draft you look over and apply. Before every call to a vendor (an email through Resend, a post to Ghost or Bluesky) a policy lets it through, denies it or holds it for a person to approve, and a ledger records what ran. Because it is a plain repo rather than a graph in a vendor's database, any developer can read it, review a change and take it further; we call the idea Business as Code. This TypeScript monorepo is its source-available core: the runtime, the app with its agent, and the connectors, which anyone can read and self-host.
+Sanoma runs the everyday admin of a small business: the emails, posts, web pages and records it relies on. You tell it in plain words how your business works, an AI agent writes the code, and you see each change before it goes live. Before Sanoma sends or publishes anything, it checks the rules you set, and anything you marked as needing a yes waits for one. It keeps a record of everything it did.
 
-The agent in the app's chat is our own, or a coding agent on your own plan (Claude Code, Codex, Copilot, OpenCode or Pi); whichever it is, it edits only its draft, and the checks run there before you apply it ([the chat](packages/app/README.md)).
+All of it is ordinary TypeScript in a repo your business owns, so any developer can read it, change it or move it elsewhere. This repo holds the code that runs it, the app you work in, and the integrations with other services, and you can run all of it yourself.
+
+The agent can be ours, or a coding agent you already pay for: Claude Code, Codex, Copilot, OpenCode or Pi. Either way it works on a separate copy, and your business only changes when you accept it ([the chat](packages/app/README.md)).
 
 Status: early. Workflows run on [DBOS](https://dbos.dev) with Postgres: each vendor call is a durable step, approvals and sleeps survive restarts, and a lint keeps workflow code safe to replay. Before every vendor call and run start a policy, written in [Cedar](https://docs.cedarpolicy.com) in the repo, lets it through, denies it or holds it for an approver, as the people the repo declares, and a ledger records each run: who started it, every call with the policy's decision and the vendor's reply, every approval, and how it ended. Versioning is automatic: each run is stamped with a hash of the workflow code it started on, and only a worker on that version resumes it (`DBOS__APPVERSION` names a version instead; see [Versions](packages/workflows/README.md#versions)). The connectors so far are listed under [Contents](#contents); keeping a company's vendor settings (card limits, time-off policies, access in tools like Mercury, Gusto and Okta) in typed files is where it is headed, not what it does today.
 
@@ -45,7 +47,7 @@ The workflow's page: the graph is drawn from the file, and picking a step says w
 
 ![The Inbox with "Review launch copy" approvals waiting for marketing-lead, the chat column beside it](.github/assets/inbox.png)
 
-The Inbox as marketing-lead: the approvals waiting for them, with the draft's link and what approving lets through. Beside it, the chat column, where you ask the agent for a change and it answers with a draft to apply.
+The Inbox as marketing-lead: the approvals waiting for them, with the draft's link and what approving lets through. Beside it is the chat, where you ask the agent for a change and it shows you the edit to accept.
 
 ![A finished run of announce: its graph, the approval and its note, and its ledger](.github/assets/run.png)
 
@@ -53,7 +55,7 @@ A finished run: the graph shows how each step went, and the ledger records each 
 
 ## Solved in public
 
-We build Sanoma in the open by taking a problem a small business owner has posted about and solving it with Sanoma: the workflows, the policy and the data, and what still needed a person. Each write-up adds a row here.
+We're building Sanoma in public. Each time, we take a problem a small business owner posted about online and solve it with Sanoma, showing the code, the rules we set and what still needed a person. Each write-up gets a row here.
 
 | Problem | Who has it | What we built | Write-up |
 | ------- | ---------- | ------------- | -------- |
