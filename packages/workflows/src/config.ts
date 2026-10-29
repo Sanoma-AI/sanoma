@@ -333,7 +333,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
       ...(dataStore ? [collectionsDriver(declared, dataStore)] : []),
     ],
     ops,
-    connections,
+    { connections },
   );
   const fakes = makersOf(running, "fake");
   if (dataStore) fakes.set(DATA_VENDOR, () => collectionsFake(declared));
@@ -624,7 +624,11 @@ function indexConnectors(list: Connector<any, any>[]) {
  * calls resolve authentication here, after policy, inside the driver's execution boundary.
  * Drivers without named authentication retain their declared environment guard.
  */
-export function indexDrivers(list: Driver[], ops: Map<string, Op>, connections?: ConnectionRegistry) {
+export function indexDrivers(
+  list: Driver[],
+  ops: Map<string, Op>,
+  options: { connections?: ConnectionRegistry; sandbox?: boolean } = {},
+) {
   const map = new Map<string, DriverFn>();
   for (const d of list) {
     for (const [key, fn] of Object.entries(d.ops)) {
@@ -634,14 +638,15 @@ export function indexDrivers(list: Driver[], ops: Map<string, Op>, connections?:
       }
       const unselected = d.env ? guarded(d.vendor, d.env, fn) : fn;
       map.set(id, async (input, call) => {
+        if (options.sandbox) return fn(input, call);
         if (!call.connection) {
           if (d.authentication?.length)
             throw new DriverError("Select a named connection for this driver", { retryable: false });
           return unselected(input, call);
         }
-        if (!connections || !call.principal || !d.authentication?.includes(call.connection.method))
+        if (!options.connections || !call.principal || !d.authentication?.includes(call.connection.method))
           throw new DriverError("This driver does not support the selected connection", { retryable: false });
-        const authentication = await connections.authenticate(call.connection, call.principal.id);
+        const authentication = await options.connections.authenticate(call.connection, call.principal.id);
         try {
           return await fn(input, {
             ...call,

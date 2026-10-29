@@ -358,7 +358,9 @@ import { mail } from "@acme/mail/resources";
 export const inbox = mail.inbox({ name: "support" }, { connection: { vendor: "mail", $connection: "mail/support" } });
 ```
 
-The resource type must belong to that connector. Apply and drift pin the selected revision when they read declarations, then carry it through imports, plans and effects. The resource lockfile records the connection alongside the vendor object ID. Changing the account of a bound resource requires an explicit unbind/rebind; a default change or a same-name account replacement cannot redirect a later apply. Named sandbox account state and the connection-management UI remain follow-up work.
+The resource type must belong to that connector. Apply and drift pin the selected revision when they read declarations, then carry it through imports, plans and effects. The resource lockfile records the connection alongside the vendor object ID. Changing the account of a bound resource requires an explicit unbind/rebind; a default change or a same-name account replacement cannot redirect a later apply. The connection-management UI remains follow-up work.
+
+Sandbox runs use synthetic identities for declared static connections, with separate fake state, faults and remembered replies for each account and run. They never read production connection records, invoke authentication verifiers or read production credentials. A production revision or an undeclared dynamic account is refused. Scenario steps can select an account in their returned seed, such as `{ op: mail.message.create, input: { title }, connection: support }`; absent a selector, only an explicitly declared default is used. Fault seeds accept the same `connection` field. Standalone driver tests can use `connectionFakes(makeFake)` from `@sanoma-ai/workflows/fake`: its `driver` requires `call.connection`, `account(ref)` exposes just that account's fake for seeding and fault injection, and `calls` is the combined log with connection IDs. Rebinding a reference to a different vendor account starts fresh fake state.
 
 #### Bootstrap keys
 
