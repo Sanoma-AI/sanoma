@@ -327,9 +327,13 @@ describe("the built-in call workflow in a config", () => {
       "data.outbound.list",
       "data.outbound.save",
       "sanoma.apps.list",
+      "sanoma.connection.activate",
       "sanoma.connection.bind",
+      "sanoma.connection.configure",
       "sanoma.connection.create",
       "sanoma.connection.disconnect",
+      "sanoma.connection.prepare",
+      "sanoma.connection.test",
     ]);
     expect(description.ops.filter((op) => op.direct).map((op) => op.id)).toEqual(entry?.ops);
     expect(description.ops.find((op) => op.id === "acme.customer.rename")).toMatchObject({ direct: false });
@@ -344,9 +348,13 @@ describe("the built-in call workflow in a config", () => {
         ?.uses.map((op: { id: string }) => op.id),
     ).toEqual([
       "sanoma.apps.list",
+      "sanoma.connection.activate",
       "sanoma.connection.bind",
+      "sanoma.connection.configure",
       "sanoma.connection.create",
       "sanoma.connection.disconnect",
+      "sanoma.connection.prepare",
+      "sanoma.connection.test",
     ]);
     const named = defineWorkflow({
       name: "call",

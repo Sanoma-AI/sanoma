@@ -11,6 +11,7 @@ export interface AuthenticationIdentity {
 }
 
 export type AuthenticationProblem =
+  | "missing"
   | "expired"
   | "revoked"
   | "rejected"
@@ -34,6 +35,7 @@ export class AuthenticationError extends Error {
 }
 
 const authenticationProblems = new Set<AuthenticationProblem>([
+  "missing",
   "expired",
   "revoked",
   "rejected",
@@ -43,6 +45,13 @@ const authenticationProblems = new Set<AuthenticationProblem>([
   "unavailable",
   "unsupported",
 ]);
+
+export function authenticationProblem(error: unknown): AuthenticationProblem | undefined {
+  const failure = error as Partial<AuthenticationError> | null;
+  return failure?.name === "AuthenticationError" && authenticationProblems.has(failure.problem!)
+    ? failure.problem
+    : undefined;
+}
 
 /** Shared by credential intake and execution; unknown provider failures never imply revocation. */
 export async function verifyAuthentication(
@@ -69,12 +78,7 @@ export async function verifyAuthentication(
   } catch (error) {
     // Structural recognition works across installed copies. Rebuild even recognized errors so
     // an SDK message, stack or cause attached by a verifier cannot cross this boundary.
-    const failure = error as Partial<AuthenticationError> | null;
-    const problem =
-      failure?.name === "AuthenticationError" && authenticationProblems.has(failure.problem!)
-        ? failure.problem!
-        : "unavailable";
-    throw new AuthenticationError(problem);
+    throw new AuthenticationError(authenticationProblem(error) ?? "unavailable");
   }
 }
 

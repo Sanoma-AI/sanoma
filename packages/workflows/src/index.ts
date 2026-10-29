@@ -214,6 +214,7 @@ export {
   type ChangesFilter,
   type ChangeView,
   type ClientOptions,
+  type ConnectionReview,
   SanomaClient,
   type RunsFilter,
   type RunSummary,
@@ -307,4 +308,8 @@ export {
   type ConnectionDefinition,
   type ConnectionRule,
   type ConnectionSnapshot,
+  type ConnectionCard,
+  type ConnectionHealth,
+  type ConnectionTarget,
+  type ConnectionSetup,
 } from "./connection.ts";
