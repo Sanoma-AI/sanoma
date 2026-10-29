@@ -26,6 +26,24 @@ describe("ensureConfigured", () => {
     expect(b.methods()).toEqual(["configure", "close", "configure"]);
   });
 
+  it("closes the provider for another config only once the calls under the one it has are done", async () => {
+    const b = bridge();
+    let finish!: () => void;
+    const held = new Promise<void>((resolve) => (finish = resolve));
+    const first = ensureConfigured(b, ref, config("a"), async () => {
+      await held;
+      return b.import(ref, "github_repository", "sanoma");
+    });
+    const second = ensureConfigured(b, ref, config("b"), () => b.import(ref, "github_repository", "sanoma"));
+    // Both calls under the new config wait for the one under the old, then share one configure.
+    const third = ensureConfigured(b, ref, config("b"), () => b.import(ref, "github_repository", "provider-bridge"));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(b.methods()).toEqual(["configure"]);
+    finish();
+    await Promise.all([first, second, third]);
+    expect(b.methods()).toEqual(["configure", "import", "close", "configure", "import", "import"]);
+  });
+
   it("configures again after the provider has gone, rethrowing the error", async () => {
     const b = bridge();
     await ensureConfigured(b, ref, config("a"));

@@ -5,10 +5,7 @@
     "status": 200,
     "body": {
       "data": {
-        "node": null,
-        "viewer": {
-          "login": "someone"
-        }
+        "node": null
       },
       "errors": [
         {

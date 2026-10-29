@@ -3,6 +3,7 @@ import { github } from "@sanoma-ai/connector-github/resources";
 // The company's public repositories, and the rule that guards the website's main branch.
 
 export const website = github.repository({
+  owner: "Sanoma-AI",
   name: "website",
   description: "The company website",
   visibility: "public",
@@ -11,6 +12,7 @@ export const website = github.repository({
 });
 
 export const docs = github.repository({
+  owner: "Sanoma-AI",
   name: "docs",
   description: `Product documentation`,
   visibility: "public",

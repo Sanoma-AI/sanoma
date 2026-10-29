@@ -29,14 +29,17 @@ export function companyFakes() {
     stripe.reset();
     for (const { vendor, type, name, binding, desired } of declared) {
       const key = `${vendor}.${type}`;
+      // The fake holds GitHub's objects by the provider's import ids, the names without their owner.
       if (key === "github.repository") {
-        github.put("repository", name, { ...desired, node_id: nodeIdOf(name) }, { from: "sanoma" });
+        const { owner: _owner, ...fields } = desired as { owner: string; name: string };
+        github.put("repository", fields.name, { ...fields, node_id: nodeIdOf(fields.name) }, { from: "sanoma" });
       } else if (key === "github.branch_protection") {
-        const { repository_id } = desired as { repository_id: string };
-        github.put("branch_protection", name, {
+        const { repository_id, pattern } = desired as { repository_id: string; pattern: string };
+        const repository = repository_id.slice(repository_id.indexOf("/") + 1);
+        github.put("branch_protection", `${repository}:${pattern}`, {
           ...desired,
-          id: `BPR_${name}`,
-          repository_id: nodeIdOf(repository_id),
+          id: `BPR_${repository}:${pattern}`,
+          repository_id: nodeIdOf(repository),
         });
       } else if (key === "stripe.product") {
         stripe.put("product", binding ?? name, desired, { from: "prod_SanomaTest0001" });

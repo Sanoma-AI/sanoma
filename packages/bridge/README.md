@@ -44,7 +44,7 @@ A `ProviderRef` is `{ source, version, sha256? }`; `readPins()` returns the pinn
 
 A failed call throws a `BridgeError` with `code` (Connect's, spelled `invalid_argument`, `failed_precondition`, `unavailable`, `not_found`, ...) and `diagnostics` (the provider's error diagnostics: `{ severity, summary, detail, attributePath }`). `unavailable` means the provider exited, or the bridge's socket is missing, refused or reset: configure again.
 
-`ensureConfigured(bridge, ref, configJson, call?)` is the configure lifecycle a driver needs: it configures the provider on first use, closes and configures it again when the config changes (a new token), runs `call`, configures again on the next call after `unavailable`, and when the bridge says the provider is not configured (a restarted bridge, another client's `close`) configures it and retries `call` once. Its configure steps run one at a time per bridge and release, so concurrent calls and drivers sharing a bridge configure once. It takes any `ProviderClient` (a `Bridge` without `schema` and `stop`).
+`ensureConfigured(bridge, ref, configJson, call?)` is the configure lifecycle a driver needs: it configures the provider on first use, closes and configures it again when the config changes (a new token, another owner), runs `call`, configures again on the next call after `unavailable`, and when the bridge says the provider is not configured (a restarted bridge, another client's `close`) configures it and retries `call` once. Its configure steps run one at a time per bridge and release, so concurrent calls and drivers sharing a bridge configure once. Calls under one config run together; a call under another waits until they are done, so closing the provider never cuts one off or answers it under the other config. It takes any `ProviderClient` (a `Bridge` without `schema` and `stop`).
 
 ## The fake
 
@@ -87,8 +87,8 @@ export const githubTf = tfConnector({
   info: vendorInfo(import.meta.url),
 });
 githubTf.connector; // the operations: github.repository.read, github.repository.import
-githubTf.resources; // the data-file constructors: githubTf.resources.repository({ name: "sanoma" })
-githubTf.driver(bridge, () => ({ token: process.env.GITHUB_TOKEN })); // the driver; the config is read per call
+githubTf.resources; // the data-file constructors: githubTf.resources.repository({ owner: "acme", name: "sanoma" })
+githubTf.driver(bridge, () => ({ owner: "acme", token: process.env.GITHUB_TOKEN })); // the driver; the config is read per call
 // A third argument, `importId(type, id)`, turns an id the provider cannot import by (GitHub's node id) into one it can.
 ```
 

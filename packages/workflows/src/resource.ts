@@ -174,7 +174,7 @@ export async function callAfterCreate(
  */
 export const DECLARED: unique symbol = Symbol.for("sanoma.declared");
 
-/** A resource a data file declares: `github.repository({ name: "sanoma" })`. */
+/** A resource a data file declares: `github.repository({ owner: "acme", name: "sanoma" })`. */
 export interface Declared<Id extends string = string, T = State> {
   readonly [DECLARED]: Id;
   readonly vendor: string;
@@ -582,8 +582,8 @@ function pathsIn(value: unknown, paths: ReadonlySet<string>, prefix = ""): strin
  *
  * The ledger records a `handle` as `"<handle>"`, never its bytes (the operations' `opaque`).
  *
- * Calling the result declares one resource, for a data file: `repository({ name: "sanoma" })`
- * is a `Declared`, `{ vendor, type, name: "sanoma", desired, refs: {} }`. It refuses fields the
+ * Calling the result declares one resource, for a data file: `repository({ owner: "acme", name: "sanoma" })`
+ * is a `Declared`, `{ vendor, type, name: "acme/sanoma", desired, refs: {} }`. It refuses fields the
  * schema does not have, fields the vendor owns (unless the identity names them), values the
  * schema rejects, and an empty identity. Where `fields.references` allows it, a field may name
  * another declared resource of that type (`repository_id: site`): `desired` holds, and the

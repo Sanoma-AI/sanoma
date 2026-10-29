@@ -101,8 +101,8 @@ const DATABASE_EXTRAS: Record<string, (choices: { organization?: string }) => Re
 const GITHUB_API = "https://api.github.com";
 /** The wakeup's declaration in `infra.ts`, as `renderInfra` writes it. */
 const WAKEUP_LINE = /^export const wakeup = /m;
-/** The repository's name in `infra.ts` as `renderInfra` writes it. */
-const REPO_NAME = /export const repo = github\.repository\(\{\s*name: "([^"]+)"/;
+/** The repository's owner and name in `infra.ts` as `renderInfra` writes them. */
+const REPO = /export const repo = github\.repository\(\{\s*owner: "([^"]+)",\s*name: "([^"]+)"/;
 const SUPABASE_API = "https://api.supabase.com";
 
 const idOf = (type: Resource) => `${type.vendor}.${type.type}`;
@@ -363,15 +363,15 @@ async function sanomaVersion(root: string): Promise<string> {
 }
 
 /**
- * `infra.ts`'s text for the choices: the repository and its read-only deploy key (`deployKey`, the
- * public half of `SANOMA_SOURCE_KEY`, which the host is given to clone with), the database, the
- * host that runs the company from them and, once a wakeup for the host is connected, the wakeup
- * that starts the host again, whose instance token the host is given from the first apply
- * (`hostWakeup`).
+ * `infra.ts`'s text for the choices: the repository, with the owner chosen, and its read-only
+ * deploy key (`deployKey`, the public half of `SANOMA_SOURCE_KEY`, which the host is given to
+ * clone with), the database, the host that runs the company from them and, once a wakeup for
+ * the host is connected, the wakeup that starts the host again, whose instance token the host is
+ * given from the first apply (`hostWakeup`).
  */
 export async function renderInfra(
   app: AppContext,
-  { name, organization, region, size, database: shownDatabase, host: shown, port }: Omit<GoLiveRequest, "owner">,
+  { owner, name, organization, region, size, database: shownDatabase, host: shown, port }: GoLiveRequest,
   deployKey: string,
   chosen?: Awaited<ReturnType<typeof choose>>,
 ) {
@@ -432,7 +432,7 @@ export async function renderInfra(
         constructors,
       ),
       exports: [
-        { name: "repo", vendor: "github", type: "repository", desired: { name, visibility: "private" } },
+        { name: "repo", vendor: "github", type: "repository", desired: { owner, name, visibility: "private" } },
         {
           name: "deployKey",
           vendor: "github",
@@ -463,11 +463,11 @@ export async function renderInfra(
 }
 
 /**
- * Step 3 and 4: writes `infra.ts` for the choices with a new deploy key, whose private half it
- * stores as `SANOMA_SOURCE_KEY`, and commits it, stores the owner as the GitHub connector's
- * `GITHUB_OWNER`, and starts apply on the repository, its deploy key and the database. Apply
- * creates them, binds them in the lockfile and, once the project is healthy, stores its database
- * URL (its `afterCreate`). Refused once the file is written: going live writes it once.
+ * Step 3 and 4: writes `infra.ts` for the choices (the repository with its owner) with a new
+ * deploy key, whose private half it stores as `SANOMA_SOURCE_KEY`, commits it, and starts apply
+ * on the repository, its deploy key and the database. Apply creates them, binds them in the
+ * lockfile and, once the project is healthy, stores its database URL (its `afterCreate`).
+ * Refused once the file is written: going live writes it once.
  */
 export async function goLive(app: AppContext, actor: Principal, choices: GoLiveRequest): Promise<{ runId: string }> {
   const { client, resolved, source } = app;
@@ -511,7 +511,6 @@ export async function goLive(app: AppContext, actor: Principal, choices: GoLiveR
     message: "Go live: declare the repository, its deploy key, the database and the host",
     author: actor.id,
   });
-  await client.setSecret("GITHUB_OWNER", choices.owner, { by: actor.id });
   const runId = await client.apply({ only: beforeHost(text) }, { startedBy: actor });
   return { runId };
 }
@@ -562,10 +561,9 @@ export async function goLiveHost(app: AppContext, actor: Principal): Promise<{ r
   if ((await source.head()) !== (await Promise.resolve(source.head("main")).catch(() => undefined))) {
     throw new ApiError(409, { error: "Check out main, where infra.ts and the lockfile are committed, then push" });
   }
-  const owner = (await client.secrets(["GITHUB_OWNER"])).get("GITHUB_OWNER")?.value;
-  // The repository's name as going live wrote it, first in the file.
-  const name = REPO_NAME.exec(infra)?.[1];
-  if (!owner || !name) throw new ApiError(409, { error: `Cannot tell the repository from ${INFRA} and GITHUB_OWNER` });
+  // The repository's owner and name as going live wrote them, first in the file.
+  const [, owner, name] = REPO.exec(infra) ?? [];
+  if (!owner || !name) throw new ApiError(409, { error: `Cannot tell the repository from ${INFRA}` });
   try {
     await source.push({
       url: `https://github.com/${owner}/${name}.git`,

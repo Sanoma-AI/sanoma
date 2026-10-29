@@ -133,7 +133,7 @@ export interface TfConnector<V extends string, T extends Record<string, z.ZodObj
   readonly provider: TfProvider;
   /** The connector, with each resource type's `read` and `import`, for `defineConfig` and workflows. */
   readonly connector: Connector<V, TfResources<V, T, R>>;
-  /** The resource types, which declare resources in data files: `resources.repository({ name: "sanoma" })`. */
+  /** The resource types, which declare resources in data files: `resources.repository({ owner: "acme", name: "sanoma" })`. */
   readonly resources: TfResources<V, T, R>;
   /** The provider's types, from `resources.gen.ts`, by name: a `TfMapped` type's is the one it is stored as. */
   readonly types: { readonly [K in keyof T]: TfResourceType };

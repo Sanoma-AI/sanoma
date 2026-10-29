@@ -123,7 +123,6 @@ const api = setupServer(
 /** The secrets going live stores or reads, which the worker loads into this process's environment. */
 const NAMES = [
   "GITHUB_TOKEN",
-  "GITHUB_OWNER",
   "SUPABASE_ACCESS_TOKEN",
   "SUPABASE_DB_PASSWORD",
   "SANOMA_DATABASE_URL_STORE",
@@ -242,6 +241,7 @@ describe("going live", () => {
         `import { secret } from "sanoma/resources";`,
         ``,
         `export const repo = github.repository({`,
+        `  owner: "acme",`,
         `  name: "acme-ops",`,
         `  visibility: "private",`,
         `});`,
@@ -329,7 +329,7 @@ describe("going live", () => {
   });
 
   it("goes from the choices to a host answering at its URL", async () => {
-    // Steps 3 and 4: infra.ts committed, the owner stored, apply on the repository, its deploy key and the database.
+    // Steps 3 and 4: infra.ts committed, with the owner, apply on the repository, its deploy key and the database.
     await goLive(ctx, alice, choices());
     const sourceKey = (await app.client.secrets(["SANOMA_SOURCE_KEY"])).get("SANOMA_SOURCE_KEY")!.value;
     expect(sourceKey).toMatch(/^-----BEGIN RSA PRIVATE KEY-----\n/);
@@ -337,7 +337,6 @@ describe("going live", () => {
     expect(git("log", "-1", "--format=%an|%s", "--", INFRA)).toBe(
       "alice via Sanoma|Go live: declare the repository, its deploy key, the database and the host",
     );
-    expect((await app.client.secrets(["GITHUB_OWNER"])).get("GITHUB_OWNER")?.value).toBe("acme");
     let progress = await settled();
     expect(progress.infra).toBe(readFileSync(join(root, INFRA), "utf8"));
     expect(progress.run).toMatchObject({ status: "waiting", pending: { plan: { problems: [] } } });
@@ -365,6 +364,7 @@ describe("going live", () => {
     const { bindings } = readLockfile(root);
     githubFake.put("repository", bindings[`${INFRA}#repo`]!.id, {
       name: "acme-ops",
+      full_name: "acme/acme-ops",
       node_id: bindings[`${INFRA}#repo`]!.id,
       visibility: "private",
       http_clone_url: "https://github.com/acme/acme-ops.git",

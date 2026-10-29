@@ -7,6 +7,7 @@ import { github } from "@sanoma-ai/connector-github/resources";
 // org has no teams, so no `github.team_membership`.
 
 export const providerBridge = github.repository({
+  owner: "Sanoma-AI",
   name: "provider-bridge",
   description:
     "Go sidecar loading Terraform/OpenTofu providers (Okta, Stripe, Google Workspace) over the plugin protocol and serving them to the Sanoma planner",
@@ -24,6 +25,7 @@ export const providerBridge = github.repository({
 });
 
 export const sanoma = github.repository({
+  owner: "Sanoma-AI",
   name: "sanoma",
   description:
     "Open core: schema, planner, Cedar policies, ledger format, MCP server, local studio, CLI, first-party connectors, modules",

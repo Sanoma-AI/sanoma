@@ -83,10 +83,10 @@ describe("setFields", () => {
 
   it("keeps the bytes around the declaration, even where the file is not formatted, and counts offsets in UTF-16", async () => {
     const text =
-      'import {github} from "@sanoma-ai/connector-github/resources"\n// é 🙂 not formatted\nexport const a = github.repository({ name: "a",   has_wiki: false })  // after\nexport const   b = github.repository({name: "b"})\n';
+      'import {github} from "@sanoma-ai/connector-github/resources"\n// é 🙂 not formatted\nexport const a = github.repository({ owner: "acme", name: "a",   has_wiki: false })  // after\nexport const   b = github.repository({name: "b"})\n';
     const out = await setFields(text, "a", { has_wiki: true }, options);
     expect(out).toBe(
-      'import {github} from "@sanoma-ai/connector-github/resources"\n// é 🙂 not formatted\nexport const a = github.repository({ name: "a", has_wiki: true });  // after\nexport const   b = github.repository({name: "b"})\n',
+      'import {github} from "@sanoma-ai/connector-github/resources"\n// é 🙂 not formatted\nexport const a = github.repository({ owner: "acme", name: "a", has_wiki: true });  // after\nexport const   b = github.repository({name: "b"})\n',
     );
   });
 

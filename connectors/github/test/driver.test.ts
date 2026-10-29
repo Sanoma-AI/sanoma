@@ -25,24 +25,27 @@ describe("githubDriver", () => {
   const calls = () => bridge.calls.map(({ method, typeName, id }: BridgeCall) => [method, typeName, id]);
   beforeEach(() => {
     vi.stubEnv("GITHUB_TOKEN", "ghx_test");
-    vi.stubEnv("GITHUB_OWNER", "Sanoma-AI");
     state = loadReplies(fixturesDir, provider);
     bridge = stateBridge(state);
   });
 
   it("imports when given no state: the import reads the object too", async () => {
-    const read = await call(githubDriver({ bridge }), "repository.read", { id: "sanoma" });
+    const read = await call(githubDriver({ bridge }), "repository.read", { id: "Sanoma-AI/sanoma" });
     expect(calls()).toEqual([
       ["configure", undefined, undefined],
       ["import", "github_repository", "sanoma"],
     ]);
-    expect(read).toMatchObject({ id: "sanoma", gone: false, handle: expect.stringMatching(/^1:./) });
-    expect(github.repository.read.output.parse(read).state).toMatchObject({ name: "sanoma", has_issues: true });
+    expect(read).toMatchObject({ id: "Sanoma-AI/sanoma", gone: false, handle: expect.stringMatching(/^1:./) });
+    expect(github.repository.read.output.parse(read).state).toMatchObject({
+      owner: "Sanoma-AI",
+      name: "sanoma",
+      has_issues: true,
+    });
   });
 
   it("configures the provider once, and reads a state it was given without importing", async () => {
     const driver = githubDriver({ bridge });
-    const imported = await call(driver, "repository.import", { id: "provider-bridge" });
+    const imported = await call(driver, "repository.import", { id: "Sanoma-AI/provider-bridge" });
     expect(github.repository.import.output.parse(imported).state).toMatchObject({ name: "provider-bridge" });
     await call(driver, "repository.read", imported);
     expect(calls().map(([method]) => method)).toEqual(["configure", "import", "read"]);
@@ -50,48 +53,73 @@ describe("githubDriver", () => {
 
   it("imports a state it cannot read back, one without an id", async () => {
     const driver = githubDriver({ bridge });
-    const imported = await call(driver, "repository.import", { id: "sanoma" });
+    const imported = await call(driver, "repository.import", { id: "Sanoma-AI/sanoma" });
     const read = await call(driver, "repository.read", { ...imported, state: { ...imported.state, id: null } });
-    expect(read).toMatchObject({ id: "sanoma", gone: false, state: { id: "sanoma" } });
+    expect(read).toMatchObject({ id: "Sanoma-AI/sanoma", gone: false, state: { id: "sanoma" } });
     expect(calls().map(([method]) => method)).toEqual(["configure", "import", "import"]);
   });
 
-  it("configures the provider with the owner and the token, read on every call", async () => {
+  it("configures the provider for the owner each call names, with the token read on every call", async () => {
     const configure = vi.spyOn(bridge, "configure");
     const close = vi.spyOn(bridge, "close");
     const driver = githubDriver({ bridge });
-    await call(driver, "repository.import", { id: "sanoma" });
+    await call(driver, "repository.import", { id: "Sanoma-AI/sanoma" });
     expect(configure).toHaveBeenLastCalledWith(
       expect.objectContaining({ source: "integrations/github", version: "6.13.0" }),
       JSON.stringify({ owner: "Sanoma-AI", token: "ghx_test" }),
     );
-    // No owner: the token's own user, which the provider takes as null.
-    vi.stubEnv("GITHUB_OWNER", "");
-    await call(driver, "repository.import", { id: "sanoma" });
-    expect(configure).toHaveBeenLastCalledWith(expect.anything(), JSON.stringify({ owner: null, token: "ghx_test" }));
-    vi.stubEnv("GITHUB_OWNER", "Sanoma-AI");
+    // Another owner: the provider is configured for it, then for the first again.
+    await call(driver, "repository.import", { id: "someone-else/sanoma" });
+    expect(configure).toHaveBeenLastCalledWith(
+      expect.anything(),
+      JSON.stringify({ owner: "someone-else", token: "ghx_test" }),
+    );
+    await call(driver, "repository.import", { id: "Sanoma-AI/sanoma" });
     // A new token: the bridge refuses another config until the provider is closed. Two calls at
     // once configure once.
     vi.stubEnv("GITHUB_TOKEN", "ghx_other");
     await Promise.all([
-      call(driver, "repository.import", { id: "sanoma" }),
-      call(driver, "repository.import", { id: "provider-bridge" }),
+      call(driver, "repository.import", { id: "Sanoma-AI/sanoma" }),
+      call(driver, "repository.import", { id: "Sanoma-AI/provider-bridge" }),
     ]);
-    expect(close).toHaveBeenCalledTimes(2);
-    expect(configure).toHaveBeenCalledTimes(3);
+    expect(close).toHaveBeenCalledTimes(3);
+    expect(configure).toHaveBeenCalledTimes(4);
   });
 
-  it("reads through the process's default bridge when given none, and declares the token's and the owner's variables", () => {
+  it("refuses a call that names no owner, or two, and calls nothing", async () => {
+    const driver = githubDriver({ bridge });
+    await expect(call(driver, "repository_deploy_key.import", { id: "sanoma:1" })).rejects.toMatchObject({
+      message: "github: repository_deploy_key sanoma:1 names no owner: write it <owner>/…",
+      retryable: false,
+    });
+    // A name that is not a node id is not taken for one.
+    await expect(call(driver, "repository.import", { id: "sanoma" })).rejects.toMatchObject({
+      message: "github: repository sanoma names no owner: write it <owner>/…",
+    });
+    await expect(
+      call(driver, "repository.plan", { desired: { name: "sanoma", visibility: "public" } }),
+    ).rejects.toMatchObject({ message: "github: repository.plan: the declaration names no owner" });
+    await expect(
+      call(driver, "repository_deploy_key.update", {
+        id: "Sanoma-AI/sanoma:1",
+        desired: { repository: "someone-else/sanoma", title: "t", key: "ssh-ed25519 AAAA", read_only: true },
+      }),
+    ).rejects.toMatchObject({ message: expect.stringContaining("names two owners, someone-else and Sanoma-AI") });
+    expect(calls()).toEqual([]);
+  });
+
+  it("reads through the process's default bridge when given none, and declares the token's variable alone", () => {
     const driver = githubDriver();
-    expect(Object.keys(driver.env!.shape)).toEqual(["GITHUB_TOKEN", "GITHUB_OWNER"]);
-    expect(driver.env!.shape.GITHUB_OWNER!.safeParse(undefined).success).toBe(true);
+    expect(Object.keys(driver.env!.shape)).toEqual(["GITHUB_TOKEN"]);
     expect(driver.env!.shape.GITHUB_TOKEN!.safeParse(undefined).success).toBe(false);
     expect(Object.keys(driver.ops)).toContain("repository.read");
   });
 
   it("fails, not retryable, without GITHUB_TOKEN, and calls nothing", async () => {
     vi.stubEnv("GITHUB_TOKEN", "");
-    const err = await call(githubDriver({ bridge }), "repository.read", { id: "sanoma" }).catch((e: unknown) => e);
+    const err = await call(githubDriver({ bridge }), "repository.read", { id: "Sanoma-AI/sanoma" }).catch(
+      (e: unknown) => e,
+    );
     expect(err).toBeInstanceOf(DriverError);
     expect(err).toMatchObject({ message: "github: GITHUB_TOKEN is not set", retryable: false });
     expect(calls()).toEqual([]);
@@ -100,8 +128,8 @@ describe("githubDriver", () => {
   it("answers gone when GitHub has no such object, which its provider reports as failed_precondition", async () => {
     const driver = githubDriver({ bridge });
     for (const op of ["branch_protection.import", "branch_protection.read"]) {
-      expect(await call(driver, op, { id: "provider-bridge:main" })).toEqual({
-        id: "provider-bridge:main",
+      expect(await call(driver, op, { id: "Sanoma-AI/provider-bridge:main" })).toEqual({
+        id: "Sanoma-AI/provider-bridge:main",
         gone: true,
       });
     }
@@ -109,19 +137,21 @@ describe("githubDriver", () => {
 
   it("is retryable when the provider has exited, and configures it again", async () => {
     const driver = githubDriver({ bridge });
-    await call(driver, "repository.import", { id: "sanoma" });
+    await call(driver, "repository.import", { id: "Sanoma-AI/sanoma" });
     vi.spyOn(bridge, "import").mockRejectedValueOnce(new BridgeError("unavailable", "provider exited"));
-    const err = await call(driver, "repository.import", { id: "sanoma" }).catch((e: unknown) => e);
+    const err = await call(driver, "repository.import", { id: "Sanoma-AI/sanoma" }).catch((e: unknown) => e);
     expect(err).toMatchObject({ retryable: true, vendorCode: "unavailable" });
-    await call(driver, "repository.import", { id: "sanoma" });
+    await call(driver, "repository.import", { id: "Sanoma-AI/sanoma" });
     expect(calls().filter(([method]) => method === "configure")).toHaveLength(2);
   });
 
   it("configures again, and retries, when the bridge has forgotten the provider", async () => {
     const driver = githubDriver({ bridge });
-    await call(driver, "repository.import", { id: "sanoma" });
+    await call(driver, "repository.import", { id: "Sanoma-AI/sanoma" });
     await bridge.close(); // a restarted bridge
-    expect(await call(driver, "repository.import", { id: "sanoma" })).toMatchObject({ id: "sanoma" });
+    expect(await call(driver, "repository.import", { id: "Sanoma-AI/sanoma" })).toMatchObject({
+      id: "Sanoma-AI/sanoma",
+    });
     expect(calls().map(([method]) => method)).toEqual([
       "configure",
       "import",
@@ -134,14 +164,14 @@ describe("githubDriver", () => {
 
   it("says a repository that no longer exists is gone", async () => {
     const driver = githubDriver({ bridge });
-    const imported = await call(driver, "repository.import", { id: "sanoma" });
+    const imported = await call(driver, "repository.import", { id: "Sanoma-AI/sanoma" });
     delete state.objects["github_repository/sanoma"];
-    expect(await call(driver, "repository.read", imported)).toEqual({ id: "sanoma", gone: true });
+    expect(await call(driver, "repository.read", imported)).toEqual({ id: "Sanoma-AI/sanoma", gone: true });
   });
 
   it("refuses a handle it did not make", async () => {
     const driver = githubDriver({ bridge });
-    const imported = await call(driver, "repository.import", { id: "sanoma" });
+    const imported = await call(driver, "repository.import", { id: "Sanoma-AI/sanoma" });
     await expect(call(driver, "repository.read", { ...imported, handle: "nope" })).rejects.toMatchObject({
       message: "github: repository.read was given a handle it did not make",
       retryable: false,
@@ -153,14 +183,14 @@ describe("fakeGithub", () => {
   it("answers with the recorded repositories through the driver, with GITHUB_TOKEN unset", async () => {
     vi.stubEnv("GITHUB_TOKEN", "");
     const fake = fakeGithub();
-    const read = await call(fake.driver, "repository.read", { id: "provider-bridge" });
+    const read = await call(fake.driver, "repository.read", { id: "Sanoma-AI/provider-bridge" });
     expect(read).toMatchObject({ gone: false, state: { name: "provider-bridge", delete_branch_on_merge: false } });
     expect(fake.calls.map((c) => c.op)).toEqual(["github.repository.read"]);
   });
 
   it("returns fields a test overrides, in the resource's shape, as if someone changed them at GitHub", async () => {
     const fake = fakeGithub();
-    const before = await call(fake.driver, "repository.import", { id: "sanoma" });
+    const before = await call(fake.driver, "repository.import", { id: "Sanoma-AI/sanoma" });
     const pages = { build_type: "workflow", cname: null, source: null };
     fake.override("repository", "sanoma", { delete_branch_on_merge: true, pages });
     const after = await call(fake.driver, "repository.read", before);
@@ -176,9 +206,9 @@ describe("fakeGithub", () => {
 
   it("says a removed object is gone, and removing one that is not there is nothing", async () => {
     const fake = fakeGithub();
-    const imported = await call(fake.driver, "repository.import", { id: "sanoma" });
+    const imported = await call(fake.driver, "repository.import", { id: "Sanoma-AI/sanoma" });
     fake.remove("repository", "sanoma");
-    expect(await call(fake.driver, "repository.read", imported)).toEqual({ id: "sanoma", gone: true });
+    expect(await call(fake.driver, "repository.read", imported)).toEqual({ id: "Sanoma-AI/sanoma", gone: true });
     expect(() => fake.override("repository", "sanoma", {})).toThrow("fake github: no object github_repository/sanoma");
     const before = structuredClone(fake.state);
     fake.remove("repository", "sanoma");
@@ -188,12 +218,12 @@ describe("fakeGithub", () => {
 
   it("puts over the object already there, keeping its other fields, and a bare one where there is none", async () => {
     const fake = fakeGithub();
-    const { state: recorded } = await call(fake.driver, "repository.import", { id: "sanoma" });
+    const { state: recorded } = await call(fake.driver, "repository.import", { id: "Sanoma-AI/sanoma" });
     fake.put("repository", "sanoma", { description: "Edited at GitHub" });
-    const edited = await call(fake.driver, "repository.import", { id: "sanoma" });
+    const edited = await call(fake.driver, "repository.import", { id: "Sanoma-AI/sanoma" });
     expect(edited.state).toEqual({ ...recorded, description: "Edited at GitHub" });
     fake.put("repository", "fresh-start", { description: "New" });
-    const bare = await call(fake.driver, "repository.import", { id: "fresh-start" });
+    const bare = await call(fake.driver, "repository.import", { id: "Sanoma-AI/fresh-start" });
     expect(bare).toMatchObject({ gone: false, state: { id: "fresh-start", description: "New", full_name: null } });
   });
 
@@ -201,13 +231,19 @@ describe("fakeGithub", () => {
     const [fake, copy] = [fakeGithub(), fakeGithub()];
     copy.remove("repository", "sanoma");
     copy.put("repository", "docs", { description: "Docs" });
-    expect(await call(copy.driver, "repository.import", { id: "sanoma" })).toEqual({ id: "sanoma", gone: true });
-    expect(await call(copy.driver, "repository.import", { id: "docs" })).toMatchObject({
+    expect(await call(copy.driver, "repository.import", { id: "Sanoma-AI/sanoma" })).toEqual({
+      id: "Sanoma-AI/sanoma",
+      gone: true,
+    });
+    expect(await call(copy.driver, "repository.import", { id: "Sanoma-AI/docs" })).toMatchObject({
       state: { description: "Docs" },
     });
     // The other has what was recorded, and none of this one's calls.
-    expect(await call(fake.driver, "repository.import", { id: "sanoma" })).toMatchObject({ gone: false });
-    expect(await call(fake.driver, "repository.import", { id: "docs" })).toEqual({ id: "docs", gone: true });
+    expect(await call(fake.driver, "repository.import", { id: "Sanoma-AI/sanoma" })).toMatchObject({ gone: false });
+    expect(await call(fake.driver, "repository.import", { id: "Sanoma-AI/docs" })).toEqual({
+      id: "Sanoma-AI/docs",
+      gone: true,
+    });
     expect(fake.calls).toHaveLength(2);
     // `missingReply` is the package's: a rule removed answers an import as the provider does.
     copy.put("branch_protection", "sanoma:main", { repository_id: "R_sanoma", pattern: "main" });

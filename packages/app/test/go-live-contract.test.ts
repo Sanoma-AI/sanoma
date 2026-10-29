@@ -155,7 +155,7 @@ function contextOf(connectors: Connector<any, any>[], stored: Record<string, str
   } as AppContext;
 }
 
-const choices = { name: "acme-ops", region: "aws-eu-central-1", size: "0.25", port: 8080 };
+const choices = { owner: "acme", name: "acme-ops", region: "aws-eu-central-1", size: "0.25", port: 8080 };
 /** The choices for a database that takes no size, as the page sends them. */
 const { size: _, ...unsized } = choices;
 // Every config with a host type has the runtime's own wakeup, sanoma.wakeup, too.
