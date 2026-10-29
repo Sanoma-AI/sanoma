@@ -31,7 +31,21 @@ export interface FakeCall {
 
 /** A factory per named account: state, faults and idempotent replies never cross connections. */
 export function connectionFakes<F extends Fake<unknown>>(make: () => F) {
-  const first = make();
+  const seen = new WeakSet<object>();
+  const fresh = () => {
+    const fake = make();
+    const parts = [
+      fake,
+      fake.driver,
+      fake.driver.ops,
+      ...(fake.state && typeof fake.state === "object" ? [fake.state] : []),
+    ];
+    if (parts.some((part) => seen.has(part)))
+      throw new Error("A named fake factory must create separate state for each connection");
+    for (const part of parts) seen.add(part);
+    return fake;
+  };
+  const first = fresh();
   const { vendor } = first.driver;
   let unused: F | undefined = first;
   const accounts = new Map<string, { fake: F; identity?: string }>();
@@ -41,7 +55,7 @@ export function connectionFakes<F extends Fake<unknown>>(make: () => F) {
       throw new Error(`fake ${vendor}: select a connection of this connector`);
     let entry = accounts.get(ref.$connection);
     if (!entry) {
-      entry = { fake: unused ?? make() };
+      entry = { fake: unused ?? fresh() };
       unused = undefined;
       accounts.set(ref.$connection, entry);
     }
@@ -58,7 +72,7 @@ export function connectionFakes<F extends Fake<unknown>>(make: () => F) {
       let entry = accounts.get(selected.id)!;
       // Rebinding to another vendor account gets fresh state. Rotation within an account does not.
       if (entry.identity !== undefined && entry.identity !== selected.account) {
-        entry = { fake: make() };
+        entry = { fake: fresh() };
         accounts.set(selected.id, entry);
       }
       entry.identity = selected.account;

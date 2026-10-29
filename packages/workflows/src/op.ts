@@ -41,6 +41,8 @@ export interface OpSpec<I extends z.ZodType = z.ZodType, O extends z.ZodType = z
    * (a resource type's `handle`): the ledger records each as `"<name>"`, never its value.
    */
   opaque?: readonly string[];
+  /** Logical destinations this operation may create with Secrets.ensure, derived from its authorized input. */
+  createsSecrets?: (input: any) => readonly string[];
 }
 
 /** One vendor operation, such as `ghost.post.publish`. Declares the contract only; drivers implement it. */
@@ -59,6 +61,7 @@ export interface Op<V extends string = string, R extends string = string, N exte
   readonly phrases?: { readonly given?: string; readonly expect?: string };
   /** From the spec: fields the ledger records by name only. */
   readonly opaque?: readonly string[];
+  readonly createsSecrets?: (input: any) => readonly string[];
   readonly input: z.ZodType<any, I>;
   readonly output: z.ZodType<O>;
 }
@@ -212,6 +215,7 @@ export function defineConnector<const V extends string, const S extends Specs>(
         target: spec.target,
         phrases: spec.phrases,
         ...(spec.opaque?.length ? { opaque: spec.opaque } : {}),
+        ...(spec.createsSecrets && { createsSecrets: spec.createsSecrets }),
         input: spec.input,
         output: spec.output,
       } satisfies Op);
@@ -470,7 +474,7 @@ export type OpIdOf<V extends string, S extends Specs> = {
  */
 export function defineDriver<V extends string, S extends Specs>(
   connector: Connector<V, S>,
-  impl: DriverImpl<S>,
+  impl: DriverImpl<S> | ((call: CallContext) => DriverImpl<S>),
   options: { env?: DriverEnv; authentication?: readonly string[] } = {},
 ): Driver {
   const declared = new Map<string, Op>();
@@ -479,6 +483,18 @@ export function defineDriver<V extends string, S extends Specs>(
   }
   const vendor = connector[VENDOR].id;
   const ops: Record<string, DriverFn> = {};
+  if (typeof impl === "function") {
+    // Build clients only once the runtime has authorized and authenticated this invocation.
+    for (const key of declared.keys()) {
+      ops[key] = async (input, call) => defineDriver(connector, impl(call), options).ops[key]!(input, call);
+    }
+    return Object.freeze({
+      vendor,
+      ops: Object.freeze(ops),
+      ...(options.env && { env: options.env }),
+      ...(options.authentication && { authentication: Object.freeze([...options.authentication]) }),
+    });
+  }
   const extra: string[] = [];
   for (const [resource, fns] of Object.entries(impl as Record<string, Record<string, unknown>>)) {
     for (const [name, fn] of Object.entries(fns ?? {})) {

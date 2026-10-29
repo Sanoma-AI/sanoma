@@ -47,8 +47,12 @@ export interface Secrets {
 }
 
 /** A named call can resolve only the auxiliary secret markers present in its authorized input. */
-export function secretsForInput(input: unknown, secrets: Secrets): Secrets {
+export function secretsForInput(input: unknown, secrets: Secrets, creates: readonly string[] = []): Secrets {
   const allowed = new Map<string, boolean>();
+  for (const name of creates) {
+    if (!SECRET_NAME.test(name)) throw new DriverError("Invalid operation secret destination", { retryable: false });
+    allowed.set(name, true);
+  }
   const visit = (value: unknown) => {
     if (isSecret(value)) allowed.set(value.$secret, allowed.get(value.$secret) === true || value.generate === true);
     else if (Array.isArray(value)) value.forEach(visit);

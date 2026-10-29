@@ -19,6 +19,12 @@ const call = (idempotencyKey: string, attempt = 1): CallContext => ({
 const draft = { title: "Hello world", html: "<p>Hi</p>", status: "draft" as const };
 
 describe("fakes", () => {
+  it("refuses a named factory that would share one fake between accounts", () => {
+    const shared = fakeGhost();
+    const fakes = connectionFakes(() => shared);
+    fakes.account({ vendor: "ghost", $connection: "ghost/support" });
+    expect(() => fakes.account({ vendor: "ghost", $connection: "ghost/sales" })).toThrow("separate state");
+  });
   it("isolates named accounts' state, faults and replies even when idempotency keys overlap", async () => {
     const fakes = connectionFakes(fakeGhost);
     const support = { vendor: "ghost", $connection: "ghost/support" };

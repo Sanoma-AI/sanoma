@@ -2,7 +2,7 @@
 
 Follow the shared [connector conventions](../AGENTS.md).
 
-- [README](README.md): the project resource and the `Database` contract, `storeUrl`, branches and computes, the environment, errors.
+- [README](README.md): the project resource and the `Database` contract, `storeUrl`, branches and computes, named API-key connections, errors.
 - [Source map](src/AGENTS.md): the resource type and its operations, the operations shared by the driver and the fake, the driver, the fake, the steps.
 - [Test map](test/AGENTS.md): replies written from Neon's API reference, the features, the Database kit over the fake.
 

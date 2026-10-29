@@ -652,7 +652,7 @@ export function indexDrivers(
             ...call,
             connection: structuredClone(call.connection),
             authentication,
-            secrets: secretsForInput(input, call.secrets),
+            secrets: secretsForInput(input, call.secrets, ops.get(id)!.createsSecrets?.(input)),
           });
         } catch (error) {
           if (isRunControlError(error)) throw error;
