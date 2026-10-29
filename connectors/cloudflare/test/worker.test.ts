@@ -26,21 +26,33 @@ const ENV = {
   PORT: "3000",
   SANOMA_WAKEUP_TOKEN: TOKEN,
 };
+/** The copy the upload names (`containers[].images`), pinned in the account's registry. */
+const PINNED = `registry.cloudflare.com/0123456789abcdef0123456789abcdef/sanoma-ai-runtime@sha256:${"7".repeat(64)}`;
 /** The image's label, as the object starts a container with it. */
-const IMAGE = await imageLabel(ENV.SANOMA_IMAGE);
+const IMAGE = await imageLabel(PINNED);
 
 /** A `ctx` that records what the object does: its container answers `answer` once started. */
 function stubCtx({
   running = false,
   labels = { revision: "r2", image: IMAGE },
+  images = { runtime: PINNED },
   answer = () => new Response("ok"),
-}: { running?: boolean; labels?: Record<string, string>; answer?: (request: Request) => Response } = {}) {
+  exits,
+}: {
+  running?: boolean;
+  labels?: Record<string, string>;
+  images?: Record<string, string>;
+  answer?: (request: Request) => Response;
+  /** A container that ends as soon as it starts: how, as `monitor` rejects. */
+  exits?: string;
+} = {}) {
   const storage = new Map<string, unknown>();
   const calls: string[] = [];
   const sent: Request[] = [];
   let alarm: number | null = null;
   const container: Omit<ObjectState["container"], "running"> & { running: boolean } = {
     running,
+    images,
     start: vi.fn<ObjectState["container"]["start"]>((options) => {
       calls.push(`start ${options.labels.revision}`);
       container.running = true;
@@ -61,6 +73,11 @@ function stubCtx({
     setInactivityTimeout: vi.fn<ObjectState["container"]["setInactivityTimeout"]>(
       async (ms) => void calls.push(`timeout ${ms}`),
     ),
+    monitor: () => {
+      if (exits === undefined) return new Promise<void>(() => {});
+      container.running = false;
+      return Promise.reject(new Error(exits));
+    },
   };
   const ctx: ObjectState = {
     container,
@@ -119,7 +136,10 @@ describe("the Worker's object", () => {
     expect(await Promise.all(answers.map((a) => a.text()))).toEqual(["/api/x ok", "/api/x ok"]);
     expect(calls).toEqual(["start r2", `timeout ${INACTIVITY_MS}`]);
     const [options] = vi.mocked(ctx.container.start).mock.calls[0]!;
+    // The image its upload names, at the instance type the object sets: the policy has the object say both.
     expect(options).toEqual({
+      image: PINNED,
+      instance: "standard-1",
       env: {
         SANOMA_REVISION: "r2",
         SANOMA_IMAGE: "ghcr.io/sanoma-ai/runtime:0.7.0",
@@ -131,8 +151,12 @@ describe("the Worker's object", () => {
       labels: { revision: "r2", image: IMAGE },
     });
     const proxied = sent.filter((r) => new URL(r.url).pathname === "/api/x");
-    expect(proxied.map((r) => r.url)).toEqual(["http://container/api/x?y=1", "http://container/api/x?y=1"]);
-    expect(proxied[0]!.headers.get("host")).toBeNull();
+    // At the host asked for, so the company serves the site declared on it, and told it was https.
+    expect(proxied.map((r) => r.url)).toEqual([
+      "http://sanoma-company.acme.workers.dev/api/x?y=1",
+      "http://sanoma-company.acme.workers.dev/api/x?y=1",
+    ]);
+    expect(proxied[0]!.headers.get("x-forwarded-proto")).toBe("https");
     expect(vi.mocked(ctx.container.getTcpPort).mock.calls.every(([port]) => port === 3000)).toBe(true);
   });
 
@@ -145,8 +169,16 @@ describe("the Worker's object", () => {
     // The object restarted with its container running: the timeout is set again.
     expect(calls).toEqual([`timeout ${INACTIVITY_MS}`]);
     const health = await object.fetch(new Request("https://sanoma-company.acme.workers.dev/__sanoma/health?start=1"));
-    expect(await health.json()).toEqual({ revision: "r2", running: true });
+    expect(await health.json()).toEqual({ revision: "r2", running: true, ready: true });
     expect(calls).toEqual([`timeout ${INACTIVITY_MS}`, "destroy", "start r2", `timeout ${INACTIVITY_MS}`]);
+  });
+
+  it("answers 503 without starting a container when the Worker names no image", async () => {
+    const { ctx, container } = stubCtx({ images: {} });
+    const answer = await new Instance(ctx, ENV).fetch(new Request("https://x.workers.dev/api/x"));
+    expect(answer.status).toBe(503);
+    expect(await answer.json()).toEqual({ error: expect.stringContaining('names no "runtime" image') });
+    expect(container.start).not.toHaveBeenCalled();
   });
 
   it("answers 503 when the container stops under a request, and checks it again on the next", async () => {
@@ -166,10 +198,24 @@ describe("the Worker's object", () => {
     expect(sent.filter((r) => new URL(r.url).pathname === "/healthz")).toHaveLength(2);
   });
 
+  it("gives up a start when the container ends, and says how in the refusal", async () => {
+    const { ctx, container } = stubCtx({ exits: "Container exited with unexpected exit code: 1" });
+    const object = new Instance(ctx, ENV);
+    const answer = await object.fetch(new Request("https://x.workers.dev/__sanoma/health?start=1"));
+    expect(answer.status).toBe(503);
+    expect(await answer.json()).toEqual({
+      error: expect.stringContaining(
+        "the container failed: Container exited with unexpected exit code: 1 before answering /healthz on port 3000",
+      ),
+      exit: "the container failed: Container exited with unexpected exit code: 1",
+    });
+    expect(container.start).toHaveBeenCalledTimes(1);
+  });
+
   it("answers its health without starting the container, unless asked to", async () => {
     const { ctx, container } = stubCtx();
     const health = await new Instance(ctx, ENV).fetch(new Request("https://x.workers.dev/__sanoma/health"));
-    expect(await health.json()).toEqual({ revision: "r2", running: false });
+    expect(await health.json()).toEqual({ revision: "r2", running: false, ready: false });
     expect(container.start).not.toHaveBeenCalled();
   });
 

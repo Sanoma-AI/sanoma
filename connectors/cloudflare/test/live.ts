@@ -6,6 +6,7 @@
 //   pnpm build
 //   SANOMA_LIVE=1 CLOUDFLARE_API_TOKEN=... CLOUDFLARE_ACCOUNT_ID=... \
 //     CLOUDFLARE_TEST_CHECKOUT=~/src/host-check-company CLOUDFLARE_TEST_DATABASE_URL=postgresql://... \
+//     CLOUDFLARE_TEST_SOURCE_KEY_FILE=~/.ssh/host-check-company_ed25519 \
 //     node connectors/cloudflare/test/live.ts
 
 import { execFileSync } from "node:child_process";
@@ -39,6 +40,10 @@ if (process.env.SANOMA_LIVE !== "1" || missing.length) {
 
 const checkout = process.env.CLOUDFLARE_TEST_CHECKOUT!;
 const companyDb = process.env.CLOUDFLARE_TEST_DATABASE_URL!;
+/** The private half of a read-only deploy key on the company repository, for a private one: the host clones with it, as go-live gives it. */
+const sourceKey = process.env.CLOUDFLARE_TEST_SOURCE_KEY_FILE
+  ? readFileSync(process.env.CLOUDFLARE_TEST_SOURCE_KEY_FILE, "utf8")
+  : undefined;
 const git = (...args: string[]) => execFileSync("git", ["-C", checkout, ...args], { encoding: "utf8" }).trim();
 const { version } = JSON.parse(readFileSync(new URL("../../../packages/sanoma/package.json", import.meta.url), "utf8"));
 const NAME = process.env.CLOUDFLARE_TEST_NAME ?? "host-check";
@@ -47,6 +52,8 @@ const ID = "resources/hosts.ts#host";
 /** Pinned on both sides, so the kits' client and the container's worker agree on the runs' version. */
 const APP_VERSION = `cloudflare-live-${Date.now()}`;
 process.env.DBOS__APPVERSION = APP_VERSION;
+// The operator stores the host's secrets encrypted with the key a worker has.
+process.env.SANOMA_SECRETS_KEY ??= randomBytes(32).toString("base64");
 
 const ref = git("rev-parse", "--abbrev-ref", "HEAD");
 const declared = {
@@ -64,6 +71,7 @@ const secrets = {
   HOST_GITHUB_CLIENT_SECRET: "host-check-github-client-secret",
   HOST_APP_VERSION: APP_VERSION,
   HOST_WAKEUP_TOKEN: token,
+  ...(sourceKey ? { HOST_SOURCE_KEY: sourceKey } : {}),
 };
 const hostSecrets = {
   SANOMA_DATABASE_URL: "HOST_DATABASE_URL",
@@ -72,6 +80,7 @@ const hostSecrets = {
   SANOMA_GITHUB_CLIENT_SECRET: "HOST_GITHUB_CLIENT_SECRET",
   DBOS__APPVERSION: "HOST_APP_VERSION",
   SANOMA_WAKEUP_TOKEN: "HOST_WAKEUP_TOKEN",
+  ...(sourceKey ? { SANOMA_SOURCE_KEY: "HOST_SOURCE_KEY" } : {}),
 };
 
 const minutes = (ms: number) => `${(ms / 60_000).toFixed(1)} min`;
@@ -156,6 +165,8 @@ try {
     timeoutMs: 15 * 60_000,
   });
   report("host", hostResults);
+
+  if (!url) throw new Error("the host was not made: the wakeup checks and the cold wake need it");
 
   // The wakes the object rang, as the alarm's `rang` shows each: polled, since they happen at Cloudflare.
   const wakes: Wake[] = [];

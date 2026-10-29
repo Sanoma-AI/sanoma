@@ -3,8 +3,9 @@
 // a stubbed `ctx`, so both kits check this code. No imports, so Node loads it as it is.
 //
 // The object runs the company's container (`ctx.container`): it starts it on a request, at the
-// revision and image the Worker's `SANOMA_REVISION` and `SANOMA_IMAGE` name (a running one at
-// another is destroyed and started again: a deploy), waits for `/healthz`, and proxies every
+// Worker's `SANOMA_REVISION` and the image its upload names (`ctx.container.images.runtime`, as
+// the `durable_object` scheduling policy has it: the object says what runs), a running one at
+// another destroyed and started again (a deploy); it waits for `/healthz`, and proxies every
 // request to it. It answers `/__sanoma/health` without starting it (with `?start=1`, once it
 // runs), and holds the company's one wake (`/__sanoma/wake`) as an alarm, which starts the
 // container at `at` and calls its `/wake`.
@@ -27,11 +28,16 @@ const MAX_POLL_MS = 1_000;
 const WAKE_KEY = "wake";
 /** The binding that names the object, in the Worker's env. */
 export const NAMESPACE = "SANOMA_INSTANCE";
+/** The name the upload gives the runtime image (`containers[].images`), which the object starts. */
+export const IMAGE = "runtime";
+/** The container's size, one of the named types `start` takes: ½ vCPU, 4 GiB (`basic`, ¼ vCPU, is refused under this policy). */
+export const INSTANCE_TYPE = "standard-1";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const json = (status, body) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
-const problem = (status, error) => json(status, { error });
+/** A refusal; with `exit`, how the container ended: a deploy stops waiting on it. */
+const problem = (status, error, exit) => json(status, { error, ...(exit !== undefined && { exit }) });
 
 /** The Worker's text bindings (plain text and secrets): the container's environment. */
 function containerEnv(env) {
@@ -64,6 +70,10 @@ export class Instance {
   #starting;
   /** True once a container this object started (or found) answered `/healthz`. */
   #ready = false;
+  /** What the last try of a start saw, for the health route while the container is not ready. */
+  #last;
+  /** How the container this object started ended, when it did: what `monitor` told. */
+  #exit;
 
   constructor(ctx, env) {
     this.ctx = ctx;
@@ -86,13 +96,15 @@ export class Instance {
     try {
       await this.ensureRunning();
     } catch (error) {
-      return problem(503, `the company's container did not start: ${error?.message ?? error}`);
+      return problem(503, `the company's container did not start: ${error?.message ?? error}`, this.#exit);
     }
     if (health) return this.health();
     const headers = new Headers(request.headers);
-    headers.delete("host");
+    // The port's fetch reaches the container whatever the URL's host, which becomes the request's
+    // Host header: the one asked for, so the company serves the public site declared on it.
+    headers.set("x-forwarded-proto", url.protocol.slice(0, -1));
     const body = request.method === "GET" || request.method === "HEAD" ? undefined : request.body;
-    const forwarded = new Request(new URL(url.pathname + url.search, "http://container"), {
+    const forwarded = new Request(new URL(url.pathname + url.search, `http://${url.host}`), {
       method: request.method,
       headers,
       body,
@@ -110,7 +122,13 @@ export class Instance {
 
   /** What the Worker runs, and whether its container does. */
   health() {
-    return json(200, { revision: this.env.SANOMA_REVISION ?? "", running: this.ctx.container.running });
+    return json(200, {
+      revision: this.env.SANOMA_REVISION ?? "",
+      running: this.ctx.container.running,
+      ready: this.#ready,
+      ...(this.#last !== undefined && !this.#ready && { last: this.#last }),
+      ...(this.#exit !== undefined && { exit: this.#exit }),
+    });
   }
 
   /** Starts the container at the Worker's revision and image unless it runs them and answered; one start at a time. */
@@ -122,13 +140,29 @@ export class Instance {
 
   async #start() {
     this.#ready = false;
+    this.#exit = undefined;
     const container = this.ctx.container;
-    const labels = { revision: this.env.SANOMA_REVISION ?? "", image: await imageLabel(this.env.SANOMA_IMAGE ?? "") };
+    const image = container.images?.[IMAGE];
+    // Not one to retry: the Worker was uploaded without its image.
+    if (!image) throw new Error(`the Worker names no "${IMAGE}" image among its containers' images`);
+    const labels = { revision: this.env.SANOMA_REVISION ?? "", image: await imageLabel(image) };
     const until = Date.now() + START_TIMEOUT_MS;
     let last;
+    const saw = (what) => (last = this.#last = what);
     let wait = POLL_MS;
     let checked = false;
     while (Date.now() < until) {
+      if (this.#exit) {
+        // Right after the application is made, the platform may not have assigned it to the
+        // namespace yet: that start fails and is tried again. Any other end is the answer, as a
+        // container that ended is not started again and again. Outside the try: a try's failure
+        // is what one try saw, and would otherwise swallow this.
+        if (!this.#exit.includes("no container application assigned")) {
+          throw new Error(`${this.#exit} before answering /healthz on port ${this.port} (${last})`);
+        }
+        saw(this.#exit);
+        this.#exit = undefined;
+      }
       try {
         if (!checked && container.running) {
           // One running from before: kept only if it says it started at these (a deploy otherwise).
@@ -138,7 +172,20 @@ export class Instance {
         }
         checked = true;
         if (!container.running) {
-          container.start({ env: containerEnv(this.env), enableInternet: true, labels });
+          container.start({
+            image,
+            instance: INSTANCE_TYPE,
+            env: containerEnv(this.env),
+            enableInternet: true,
+            labels,
+          });
+          // `start` returns once its options are checked: a start that fails later, or a container
+          // that exits, is what `monitor` tells, and the next try reports it.
+          this.#exit = undefined;
+          container.monitor?.().then(
+            () => (this.#exit = "the container exited"),
+            (error) => (this.#exit = `the container failed: ${error?.message ?? error}`),
+          );
         }
         // A try of its own time: a hung one would hold every request past the deadline.
         const res = await container
@@ -150,16 +197,17 @@ export class Instance {
           this.#ready = true;
           return;
         }
-        last = `/healthz answered ${res.status}`;
+        saw(`/healthz answered ${res.status}`);
       } catch (error) {
         // Not listening yet, or not yet free to start again after a destroy.
-        last = error?.message ?? String(error);
+        saw(error?.message ?? String(error));
       }
-      // Doubling to a second: a container that crashes as it starts is not started four times a second.
+      // Doubling to a second: a container that is slow to listen is not asked four times a second.
       await sleep(wait);
       wait = Math.min(wait * 2, MAX_POLL_MS);
     }
-    throw new Error(`no answer from /healthz on port ${this.port} in ${START_TIMEOUT_MS / 1000} s (${last})`);
+    const ended = this.#exit ? `; ${this.#exit}` : "";
+    throw new Error(`no answer from /healthz on port ${this.port} in ${START_TIMEOUT_MS / 1000} s (${last}${ended})`);
   }
 
   /** `/__sanoma/wake`, with the company's `SANOMA_WAKEUP_TOKEN`: the wake this object holds. */

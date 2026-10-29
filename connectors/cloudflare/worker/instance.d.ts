@@ -8,6 +8,10 @@ export declare const HEALTH_PATH: "/__sanoma/health";
 export declare const INACTIVITY_MS: number;
 /** The binding that names the object, in the Worker's env. */
 export declare const NAMESPACE: "SANOMA_INSTANCE";
+/** The name the upload gives the runtime image (`containers[].images`), which the object starts. */
+export declare const IMAGE: "runtime";
+/** The container's size, one of Cloudflare's predefined instance types. */
+export declare const INSTANCE_TYPE: "standard-1";
 
 /** The label naming an image: a digest of it. */
 export declare function imageLabel(image: string): Promise<string>;
@@ -16,11 +20,21 @@ export declare function imageLabel(image: string): Promise<string>;
 export interface ObjectState {
   container: {
     readonly running: boolean;
-    start(options: { env: Record<string, string>; enableInternet: boolean; labels: Record<string, string> }): void;
-    inspect(): Promise<{ labels: Record<string, string> } | null>;
+    /** The images the Worker's upload names (`containers[].images`), by name. */
+    readonly images: Record<string, string>;
+    start(options: {
+      image: string;
+      instance: string;
+      env: Record<string, string>;
+      enableInternet: boolean;
+      labels: Record<string, string>;
+    }): void;
+    inspect(): Promise<{ image?: string; labels: Record<string, string> } | null>;
     destroy(reason?: string): Promise<void>;
     getTcpPort(port: number): { fetch(input: string | Request, init?: RequestInit): Promise<Response> };
     setInactivityTimeout(ms: number): Promise<void>;
+    /** Settles when the container started last ends: resolved on exit 0, rejected on any other. */
+    monitor?(): Promise<void>;
   };
   storage: {
     get<T>(key: string): Promise<T | undefined>;

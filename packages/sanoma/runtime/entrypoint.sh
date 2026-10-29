@@ -5,6 +5,8 @@
 # variables) and PORT. `sanoma serve` builds a repo with sites/ there, at start, into the
 # clone's .sanoma/app/.
 set -eu
+# No prompt: a fetch that would ask for a password fails instead, so a bad credential is an exit, not a hang.
+export GIT_TERMINAL_PROMPT=0
 
 : "${SANOMA_SOURCE:?set SANOMA_SOURCE to the clone URL of the company repository}"
 : "${SANOMA_REVISION:?set SANOMA_REVISION to the commit to run}"
@@ -31,7 +33,7 @@ if [ -n "${SANOMA_SOURCE_KEY:-}" ]; then
     echo "sanoma-runtime: api.github.com did not list GitHub's host keys: trusting the image's copy" >&2
     cp /usr/local/share/sanoma/github_known_hosts "$keys/known_hosts"
   fi
-  ssh="ssh -F /dev/null -i $keys/key -o IdentitiesOnly=yes -o UserKnownHostsFile=$keys/known_hosts -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=yes"
+  ssh="ssh -F /dev/null -i $keys/key -o IdentitiesOnly=yes -o BatchMode=yes -o UserKnownHostsFile=$keys/known_hosts -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=yes"
   git_() { git -c "url.ssh://git@ssh.github.com:443/.insteadOf=https://github.com/" -c "core.sshCommand=$ssh" -C "$dir" "$@"; }
 elif [ -n "${SANOMA_SOURCE_TOKEN:-}" ]; then
   auth="http.extraHeader=Authorization: Basic $(printf 'x-access-token:%s' "$SANOMA_SOURCE_TOKEN" | base64 | tr -d '\n')"
@@ -50,6 +52,8 @@ git -C "$dir" checkout -q --detach "$SANOMA_REVISION"
 rm -rf "${keys:-}"
 
 cd "$dir"
-pnpm install --frozen-lockfile
+# Build scripts stay off, as pnpm leaves them unless the repo allows them; only the exit that pnpm 11
+# adds for unreviewed ones is off, as a deploy has no one to review them: the repository was.
+pnpm install --frozen-lockfile --config.strict-dep-builds=false
 export SANOMA_APP_PORT="${SANOMA_APP_PORT:-$PORT}"
 exec pnpm exec sanoma serve

@@ -3,10 +3,11 @@ import { DriverError, errorMessage, retryableStatus } from "@sanoma-ai/workflows
 
 /*
  * The runtime image copied into the account's registry, registry to registry over the OCI
- * distribution API with `fetch`, no Docker: a container application runs an image of its own
- * account's registry, which Cloudflare pulls without a limit and caches. The source is pulled
- * anonymously (`ghcr.io/sanoma-ai/runtime`, public), the target pushed to with the temporary
- * credentials the driver gets from Cloudflare.
+ * distribution API with `fetch`, no Docker: a container application of the `durable_object`
+ * scheduling policy runs only an image of its own account's registry, pinned by digest, which
+ * Cloudflare pulls without a limit and caches. The source is pulled anonymously
+ * (`ghcr.io/sanoma-ai/runtime`, public), the target pushed to with the temporary credentials the
+ * driver gets from Cloudflare.
  */
 
 /** Cloudflare's registry. An image already in the account's runs as declared; any other is copied in. */
@@ -49,6 +50,20 @@ export function accountImage(image: string, account: string, registry = CLOUDFLA
   return `${registry}/${account}/${name.replaceAll("/", "-")}${sep}${reference}`;
 }
 
+/**
+ * True when `image` is in the account's registry and pinned by digest: what the application runs
+ * as it is, with nothing to copy or ask.
+ */
+export function accountPinned(image: string, account: string, registry = CLOUDFLARE_REGISTRY): boolean {
+  return image.startsWith(`${registry}/${account}/`) && parse(image).sep === "@";
+}
+
+/** `image`'s repository at `digest`: `<registry>/<path>@sha256:…`, the one reference the application takes. */
+export function pinImage(image: string, digest: string): string {
+  const { host, name } = parse(image);
+  return `${host}/${name}@${digest}`;
+}
+
 /** Where a copy goes: the account's registry, and the temporary credentials that push to it. */
 export interface CopyTarget {
   account: string;
@@ -63,16 +78,21 @@ const origin = (host: string) => `${/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(hos
 
 /**
  * Copies `image` into the account's registry as `accountImage(image)`, unless the target's
- * manifest by that tag has the source's digest already. Each blob the target lacks is streamed
- * from the source; the manifest goes last, its bytes and media type unchanged, so its digest is
- * the source's. Each request may take `timeoutMs` (default ten minutes: a layer streams through).
- * A failure is a `DriverError`, retryable as its status is; the credentials are in no message.
+ * manifest by that tag has the source's digest already, and returns the copy pinned by that
+ * digest (`pinImage`). Each blob the target lacks is streamed from the source; the manifest goes
+ * last, its bytes and media type unchanged, so its digest is the source's. An image in the
+ * account's registry already is not copied: pinned by digest it is returned as it is, by a tag
+ * its manifest's digest is asked for. Each request may take `timeoutMs` (default ten minutes: a
+ * layer streams through). A failure is a `DriverError`, retryable as its status is; the
+ * credentials are in no message.
  */
-export async function copyImage(image: string, target: CopyTarget, timeoutMs = 10 * 60_000): Promise<void> {
+export async function copyImage(image: string, target: CopyTarget, timeoutMs = 10 * 60_000): Promise<string> {
   const source = parse(image);
-  const to = parse(accountImage(image, target.account, target.registry));
+  const copy = accountImage(image, target.account, target.registry);
+  const to = parse(copy);
   const ref = source.reference;
   const refuse = (why: string) => new DriverError(`cloudflare: copying ${image}: ${why}`, { retryable: false });
+  if (copy === image && source.sep === "@") return image;
   // Docker Hub is not copied from: its API is on another host, and its pulls are limited.
   if (!/[.:]/.test(source.host) || source.host === "docker.io") {
     throw refuse("name the registry it is in, not Docker Hub: ghcr.io/sanoma-ai/runtime:<version>");
@@ -130,6 +150,20 @@ export async function copyImage(image: string, target: CopyTarget, timeoutMs = 1
     return { authorization: `Bearer ${token ?? access_token}` };
   };
 
+  const basic = `Basic ${Buffer.from(`${target.username}:${target.password}`).toString("base64")}`;
+  const into = `${origin(to.host)}/v2/${to.name}`;
+  if (copy === image) {
+    // In the account by a tag (pushed by hand): only its digest is asked for.
+    const auth = await authorize(to.host, `repository:${to.name}:pull`, basic);
+    const there = await ask(`${into}/manifests/${ref}`, {
+      method: "HEAD",
+      headers: { ...auth, accept: MANIFESTS.join(", ") },
+    });
+    const digest = there.headers.get("docker-content-digest");
+    if (!digest?.startsWith("sha256:")) throw refuse("the account's registry named no digest for it");
+    return pinImage(image, digest);
+  }
+
   const pull = await authorize(source.host, `repository:${source.name}:pull`);
   const from = `${origin(source.host)}/v2/${source.name}`;
   const got = await send(`${from}/manifests/${ref}`, { headers: { ...pull, accept: MANIFESTS.join(", ") } });
@@ -139,15 +173,13 @@ export async function copyImage(image: string, target: CopyTarget, timeoutMs = 1
   const digest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
   if (source.sep === "@" && digest !== ref) throw refuse(`its registry answered a manifest of digest ${digest}`);
 
-  const basic = `Basic ${Buffer.from(`${target.username}:${target.password}`).toString("base64")}`;
   const push = await authorize(to.host, `repository:${to.name}:pull,push`, basic);
-  const into = `${origin(to.host)}/v2/${to.name}`;
   const there = await ask(
     `${into}/manifests/${ref}`,
     { method: "HEAD", headers: { ...push, accept: mediaType } },
     [404],
   );
-  if (there.ok && there.headers.get("docker-content-digest") === digest) return;
+  if (there.ok && there.headers.get("docker-content-digest") === digest) return pinImage(copy, digest);
 
   const manifest = JSON.parse(new TextDecoder().decode(bytes)) as {
     config: { digest: string; size: number };
@@ -176,4 +208,5 @@ export async function copyImage(image: string, target: CopyTarget, timeoutMs = 1
     headers: { ...push, "content-type": mediaType },
     body: bytes,
   });
+  return pinImage(copy, digest);
 }
