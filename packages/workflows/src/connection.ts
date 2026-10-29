@@ -5,8 +5,9 @@ import {
   checkAuthenticationStore,
   decodeCredentials,
   defineAuthentication,
+  verifyAuthentication,
+  AuthenticationError,
   type Authentication,
-  type AuthenticationIdentity,
   type CallAuthentication,
 } from "./authentication.ts";
 import { type Connector, setupOf, VENDOR, defineConnector, defineDriver, type CallContext } from "./op.ts";
@@ -309,9 +310,8 @@ export class ConnectionRegistry {
   async authenticate(selected: ConnectionSnapshot, actor: string): Promise<CallAuthentication> {
     await this.assertCurrent(selected, actor);
     const method = this.catalog.methods.get(selected.vendor)?.[selected.method];
-    if (!method?.verify) throw new SecretStoreError("unsupported");
+    if (!method?.verify) throw new AuthenticationError("unsupported");
     const material: CallAuthentication = { method: selected.method, kind: method.kind };
-    let identity: AuthenticationIdentity;
     if (method.kind !== "workload-identity") {
       if (!this.secrets || !selected.credentials) throw new SecretStoreError("unavailable");
       const bundle = await this.secrets.read(selected.credentials.$secret);
@@ -319,21 +319,10 @@ export class ConnectionRegistry {
       material.credentials = decodeCredentials(method, bundle.value);
       material.credentialVersion = bundle.version;
     }
-    // Verifiers may throw SDK errors containing headers or values. Keep none of their details.
-    try {
-      identity = await method.verify(material.credentials);
-      if (
-        identity.account !== selected.account ||
-        !Array.isArray(identity.scopes) ||
-        identity.scopes.some((scope) => typeof scope !== "string") ||
-        JSON.stringify([...new Set(identity.scopes)].toSorted()) !==
-          JSON.stringify([...new Set(selected.scopes)].toSorted()) ||
-        (identity.expiresAt !== undefined && (!Number.isFinite(identity.expiresAt) || identity.expiresAt <= Date.now()))
-      )
-        throw new Error();
-    } catch {
-      throw new SecretStoreError("denied");
-    }
+    const identity = await verifyAuthentication(method, material.credentials);
+    if (identity.account !== selected.account) throw new AuthenticationError("wrong_account");
+    if (JSON.stringify(identity.scopes) !== JSON.stringify([...new Set(selected.scopes)].toSorted()))
+      throw new AuthenticationError("scope_changed");
     // A disconnect or rebind while verification was in flight revokes this invocation too.
     await this.assertCurrent(selected, actor);
     return material;
