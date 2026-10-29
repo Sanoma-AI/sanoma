@@ -428,23 +428,6 @@ describe.skipIf(live)("cloudflareDriver", () => {
       expect(sent.some((r) => r.method === "PUT" || r.method === "DELETE")).toBe(false);
     });
 
-    it("refuses to run behind an application of another scheduling policy, making none", async () => {
-      const other = cfResult([
-        { id: "00000000-0000-4000-8000-000000000009", name: "sanoma-company", scheduling_policy: "default" },
-      ]);
-      play("default-policy", [
-        ...only("create", (_, i) => i < 6),
-        reply(apiPath("/containers/applications?name=sanoma-company"), 200, other),
-      ]);
-      await expect(op("container.create", { desired })).rejects.toMatchObject({
-        name: "DriverError",
-        retryable: false,
-        vendorCode: "exists",
-        message: expect.stringContaining("is of the default scheduling policy"),
-      });
-      expect(sent.some((r) => r.method === "POST" && r.path.endsWith("/containers/applications"))).toBe(false);
-    });
-
     it("plans an update when the declaration leaves out the domains the Worker serves", async () => {
       const [settings, ...rest] = only("update-to-a-new-image", (_, i) => i < 3);
       const body = structuredClone(settings!.body) as { result: { bindings: object[] } };

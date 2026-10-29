@@ -182,11 +182,13 @@ export class Instance {
             labels,
           });
           // `start` returns once its options are checked: a start that fails later, or a container
-          // that exits, is what `monitor` tells, and the next try reports it. Only this start's: an
-          // earlier container's monitor may settle after this one started.
+          // that exits, is what `monitor` tells, and the next try reports it. Only this start's, and
+          // only until it answered: an earlier container's monitor may settle after this one started,
+          // and one that answered and then stopped (Cloudflare's own stop, a crash) is started again
+          // by the next request, not reported as a start that failed.
           this.#exit = undefined;
           const started = (this.#started = {});
-          const ended = (how) => void (this.#started === started && (this.#exit = how));
+          const ended = (how) => void (this.#started === started && !this.#ready && (this.#exit = how));
           container.monitor?.().then(
             () => ended("the container exited"),
             (error) => ended(`the container failed: ${error?.message ?? error}`),

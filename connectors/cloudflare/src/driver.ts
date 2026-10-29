@@ -145,7 +145,7 @@ function accountApi(timeoutMs: number, subdomains: Map<string, Promise<string>>)
       calling(`GET containers/applications?name=${name}`, async (cf) => {
         const page = await cf.containers.applications.list({ account_id, name });
         const app = page.result.find((a) => a.name === name);
-        return app && { id: app.id, policy: app.scheduling_policy ?? "" };
+        return app && { id: app.id };
       }),
     createApplication: (name, namespace_id) =>
       calling("POST containers/applications", async (cf) => {
@@ -153,7 +153,7 @@ function accountApi(timeoutMs: number, subdomains: Map<string, Promise<string>>)
         // account cannot create applications with the "default" scheduling policy", found live
         // 2026-10-28). The object starts the container with its image and instance type, so the
         // body names neither.
-        const { id, scheduling_policy } = await cf.containers.applications.create({
+        const { id } = await cf.containers.applications.create({
           account_id,
           name,
           scheduling_policy: "durable_object",
@@ -162,7 +162,7 @@ function accountApi(timeoutMs: number, subdomains: Map<string, Promise<string>>)
           // was doing is readable there, and nowhere else.
           observability: { logs: { enabled: true } },
         });
-        return { id, policy: scheduling_policy ?? "durable_object" };
+        return { id };
       }),
     async prepareImage(image) {
       const { status, reason } = await calling("POST containers/image-preparations", (cf) =>

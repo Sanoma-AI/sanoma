@@ -385,7 +385,7 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
       },
       async application(name) {
         const found = appOf(name);
-        return found && { id: found.id, policy: found.policy };
+        return found && { id: found.id };
       },
       async createApplication(name, namespaceId) {
         const namespace = state.scripts[name]?.bindings.find((b) => b.namespace_id)?.namespace_id;
@@ -393,8 +393,8 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
           throw fail(400, 1000, `no Durable Object namespace ${namespaceId}`);
         if (appOf(name)) throw fail(409, 1001, `an application named ${name} exists`);
         const id = `00000000-0000-4000-8000-${String(++state.seq).padStart(12, "0")}`;
-        state.applications[id] = { id, name, policy: "durable_object" };
-        return { id, policy: "durable_object" };
+        state.applications[id] = { id, name };
+        return { id };
       },
       account: FAKE_ACCOUNT,
       async copyImage(image) {

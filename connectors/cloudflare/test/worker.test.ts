@@ -256,6 +256,23 @@ describe("the Worker's object", () => {
     expect(container.start).toHaveBeenCalledTimes(2);
   });
 
+  it("does not count a container that answered and then stopped as a start that failed", async () => {
+    const { ctx, container } = stubCtx();
+    let stop!: () => void;
+    container.monitor = () => new Promise<void>((resolve) => (stop = resolve));
+    const object = new Instance(ctx, ENV);
+    expect((await object.fetch(new Request("https://x.workers.dev/__sanoma/health?start=1"))).status).toBe(200);
+    // Cloudflare stopped it after ten quiet minutes.
+    container.running = false;
+    stop();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(await (await object.fetch(new Request("https://x.workers.dev/__sanoma/health"))).json()).toEqual({
+      revision: "r2",
+      running: false,
+      ready: true,
+    });
+  });
+
   it("answers its health without starting the container, unless asked to", async () => {
     const { ctx, container } = stubCtx();
     const health = await new Instance(ctx, ENV).fetch(new Request("https://x.workers.dev/__sanoma/health"));
