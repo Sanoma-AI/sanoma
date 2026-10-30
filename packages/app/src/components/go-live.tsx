@@ -1,18 +1,26 @@
-import { type QueryClient, useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
+import {
+  type QueryClient,
+  useMutation,
+  useQuery,
+  useQueryClient,
+  useQueryErrorResetBoundary,
+  useSuspenseQuery,
+} from "@tanstack/react-query";
+import { CatchBoundary, type ErrorComponentProps, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { APPLY_WORKFLOW, isEnded } from "@sanoma-ai/workflows/shared";
+import { APPLY_WORKFLOW, errorMessage, isEnded } from "@sanoma-ai/workflows/shared";
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/csr/ArrowSquareOut";
 import { PlayIcon } from "@phosphor-icons/react/dist/csr/Play";
 import { RocketIcon } from "@phosphor-icons/react/dist/csr/Rocket";
 import { UploadIcon } from "@phosphor-icons/react/dist/csr/Upload";
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "#/components/ui/button.tsx";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "#/components/ui/field.tsx";
 import { Input } from "#/components/ui/input.tsx";
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup } from "#/components/ui/item.tsx";
 import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
+import { Skeleton } from "#/components/ui/skeleton.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
 import { errorBodyOf, INFRA, type GoLiveChoices, type GoLiveRequest, type GoLiveRun, SETUP_VENDORS } from "../api.ts";
 import { goLiveFn, goLiveHostFn } from "../functions.ts";
@@ -28,11 +36,14 @@ import {
 import { ApplyPlanView } from "./apply-plan.tsx";
 import { ButtonLink, ItemHeading, Notice, Region, ToneBadge } from "./common.tsx";
 
-/** What `GoLive` reads, into the query client: for the loader of the page that shows it. */
+/**
+ * What `GoLive` reads, into the query client: for the loader of the page that shows it. A query
+ * that fails is left failed, for `GoLive` to say, never the page.
+ */
 export const loadGoLive = (queryClient: QueryClient) =>
   Promise.all([
-    queryClient.query({ ...setupStatusQuery(), staleTime: "static" }),
-    queryClient.query({ ...goLiveProgressQuery(), staleTime: "static" }),
+    queryClient.prefetchQuery({ ...setupStatusQuery(), staleTime: "static" }),
+    queryClient.prefetchQuery({ ...goLiveProgressQuery(), staleTime: "static" }),
   ]);
 
 /**
@@ -40,9 +51,40 @@ export const loadGoLive = (queryClient: QueryClient) =>
  * bound until its host is: connect GitHub and the config's vendors, choose where the company goes,
  * then apply the repository and the database, push this repository to the new one, and apply the
  * host. Each step shows once the one before is done; it reads how far it is from the files, the
- * lockfile and the runs, so it picks up where it was.
+ * lockfile and the runs, so it picks up where it was. What it cannot read fails it alone, said in
+ * its place, with the rest of the page as it is.
  */
 export function GoLive() {
+  return (
+    <CatchBoundary getResetKey={() => "go-live"} errorComponent={GoLiveFailed}>
+      <Suspense fallback={<Skeleton className="h-48 w-full" />}>
+        <GoLiveSteps />
+      </Suspense>
+    </CatchBoundary>
+  );
+}
+
+/** Going live's place when how far it is could not be read. */
+function GoLiveFailed({ error, reset }: ErrorComponentProps) {
+  const { reset: refetch } = useQueryErrorResetBoundary();
+  return (
+    <Notice variant="destructive">
+      Could not read how far going live is: {errorMessage(error)}{" "}
+      <Button
+        variant="outline"
+        size="xs"
+        onClick={() => {
+          refetch();
+          reset();
+        }}
+      >
+        Try again
+      </Button>
+    </Notice>
+  );
+}
+
+function GoLiveSteps() {
   const { data: status } = useSuspenseQuery(setupStatusQuery());
   const { data: progress } = useSuspenseQuery(goLiveProgressQuery());
   const isSet = (name: string) => status.tokens.some((t) => t.name === name && t.status === "set");

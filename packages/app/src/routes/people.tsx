@@ -2,6 +2,7 @@ import type { ConfigDescription, DeclaredResource } from "@sanoma-ai/workflows/d
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
+import { AGENTS } from "@sanoma-ai/workflows/shared";
 import type { ReactNode } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
 import { CardAction, CardContent, CardDescription, CardHeader } from "#/components/ui/card.tsx";
@@ -100,12 +101,12 @@ function PeoplePage() {
           Declared in data files under <code>resources/</code>. Signing in admits these people and nobody else; a change
           to them waits for someone in <code>admin</code>.
         </p>
-        {rows.length === 0 ? (
+        {rows.length === 0 && (show !== "groups" || data.views.agents.length === 0) ? (
           <Nothing className="border-0" title={`No ${show} declared`}>
             {EMPTY[show]}
           </Nothing>
         ) : show === "groups" ? (
-          <GroupsTable groups={rows} open={open?.id} />
+          <GroupsTable groups={rows} agents={data.views.agents} open={open?.id} />
         ) : (
           <PeopleTable rows={rows} show={show} groupsOf={data.groupsOf} open={open?.id} />
         )}
@@ -164,9 +165,9 @@ const DeclaredIn = ({ resource }: { resource: DeclaredResource }) => (
   </Link>
 );
 
-/** Names as badges, or a muted line when there are none. */
-function Names({ names, none }: { names: string[]; none: string }) {
-  if (names.length === 0) return <span className="text-muted-foreground">{none}</span>;
+/** Names as badges, then `builtIn` (groups the runtime gives, declared nowhere) muted; a muted line when there are none. */
+function Names({ names, builtIn = [], none }: { names: string[]; builtIn?: string[]; none: string }) {
+  if (names.length === 0 && builtIn.length === 0) return <span className="text-muted-foreground">{none}</span>;
   return (
     <span className="flex flex-wrap gap-1">
       {names.map((name) => (
@@ -174,9 +175,22 @@ function Names({ names, none }: { names: string[]; none: string }) {
           {name}
         </Badge>
       ))}
+      {builtIn.map((name) => (
+        <BuiltIn key={name} name={name} />
+      ))}
     </span>
   );
 }
+
+/** A group the runtime gives every agent, which no file declares. */
+const BuiltIn = ({ name }: { name: string }) => (
+  <Badge variant="outline" className="text-muted-foreground" title="The runtime puts every agent in it">
+    {name} (built in)
+  </Badge>
+);
+
+/** The groups the runtime gives a principal of this type, beside those declared: `agents` to every agent. */
+const builtInGroups = (type: string): string[] => (type === "agent" ? [AGENTS] : []);
 
 /** How a person signs in, by what their declaration gives a sign-in to match: their GitHub login, their email. */
 function signsIn(person: DeclaredResource): string[] {
@@ -231,7 +245,7 @@ function PeopleTable({
               )}
             </TableCell>
             <TableCell>
-              <Names names={groupsOf.get(row.name) ?? []} none="none" />
+              <Names names={groupsOf.get(row.name) ?? []} builtIn={builtInGroups(row.type)} none="none" />
             </TableCell>
             <TableCell>
               <DeclaredIn resource={row} />
@@ -255,8 +269,16 @@ function SignsIn({ person }: { person: DeclaredResource }) {
   );
 }
 
-/** The groups' table: name, members, declaration. */
-function GroupsTable({ groups, open }: { groups: DeclaredResource[]; open: string | undefined }) {
+/** The groups' table: name, members, declaration; last, while there are agents, the `agents` group the runtime gives them. */
+function GroupsTable({
+  groups,
+  agents,
+  open,
+}: {
+  groups: DeclaredResource[];
+  agents: DeclaredResource[];
+  open: string | undefined;
+}) {
   return (
     <Table>
       <TableHeader>
@@ -280,6 +302,17 @@ function GroupsTable({ groups, open }: { groups: DeclaredResource[]; open: strin
             </TableCell>
           </TableRow>
         ))}
+        {agents.length > 0 && (
+          <TableRow>
+            <TableCell>
+              <BuiltIn name={AGENTS} />
+            </TableCell>
+            <TableCell className="whitespace-normal">
+              <Names names={agents.map((agent) => agent.name)} none="nobody" />
+            </TableCell>
+            <TableCell className="text-xs text-muted-foreground">the runtime: every agent</TableCell>
+          </TableRow>
+        )}
       </TableBody>
     </Table>
   );
@@ -315,7 +348,7 @@ function Opened({ resource, show, people }: { resource: DeclaredResource; show: 
           <div className="flex flex-col gap-1">
             <Facts>
               <Fact label="Groups">
-                <Names names={groups} none="none" />
+                <Names names={groups} builtIn={builtInGroups(resource.type)} none="none" />
               </Fact>
             </Facts>
             <p className="text-sm text-muted-foreground">Written on each group: open it under Groups to change it.</p>

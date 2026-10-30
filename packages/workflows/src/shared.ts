@@ -89,6 +89,15 @@ export const SITE_NAME = /^[a-z][a-z0-9-]*$/;
  */
 export const APP_NAME = /^[a-z][a-z0-9]*$/;
 
+/** Where a company's apps are, under its root: `apps/<app>/`. */
+export const APPS_DIR = "apps";
+
+/** The app a path relative to a company's root is in: `<app>` under `apps/<app>/`; undefined for any other. */
+export function appOfPath(rel: string): string | undefined {
+  const [top, app, ...rest] = rel.split("/");
+  return top === APPS_DIR && app !== undefined && rest.length && APP_NAME.test(app) ? app : undefined;
+}
+
 /** A name declared under `apps/<app>/` as the runtime has it, `<app>.<name>`; one declared at the root as it is. */
 export const qualified = (app: string | undefined, name: string): string =>
   app === undefined ? name : `${app}.${name}`;

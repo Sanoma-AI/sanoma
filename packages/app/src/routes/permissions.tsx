@@ -1,9 +1,9 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { CatchBoundary, createFileRoute, type ErrorComponentProps } from "@tanstack/react-router";
+import { CatchBoundary, createFileRoute, type ErrorComponentProps, Link } from "@tanstack/react-router";
 import type { PreviewAnswer } from "@sanoma-ai/workflows";
-import type { Span } from "@sanoma-ai/workflows/describe";
-import { ANONYMOUS, approverLabel, errorMessage } from "@sanoma-ai/workflows/shared";
-import { Suspense, useRef, useState } from "react";
+import type { ConfigDescription, Span } from "@sanoma-ai/workflows/describe";
+import { ANONYMOUS, appOfPath, approverLabel, errorMessage } from "@sanoma-ai/workflows/shared";
+import { Fragment, Suspense, useRef, useState } from "react";
 import { Button } from "#/components/ui/button.tsx";
 import { Card, CardHeader } from "#/components/ui/card.tsx";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "#/components/ui/sheet.tsx";
@@ -23,9 +23,11 @@ import {
   plural,
   StatusDot,
 } from "../components/common.tsx";
-import { hostEnforcementQuery, permissionsQuery } from "../queries.ts";
+import { AppGroupTitle, AppTabs, appGroupsOf, pickGroup } from "../components/app-scope.tsx";
+import { AppSearch, configQuery, hostEnforcementQuery, permissionsQuery, ROOT_APP } from "../queries.ts";
 
 export const Route = createFileRoute("/permissions")({
+  validateSearch: AppSearch,
   staticData: { crumb: "Permissions" },
   head: ({ match }) => pageTitle(match.staticData.crumb),
   loader: ({ context: { queryClient } }) => {
@@ -36,6 +38,23 @@ export const Route = createFileRoute("/permissions")({
   },
   component: PermissionsPage,
 });
+
+/**
+ * The grid's rows in one folder (`app`, none for the root): its workflows, and the operations
+ * called directly of its collections (the vendors' at the root, which no app holds).
+ */
+function rowsIn(data: PermissionsResponse, config: ConfigDescription, app: string | undefined) {
+  const workflowApp = new Map(config.workflows.map((wf) => [wf.name, wf.app]));
+  const collectionApp = new Map(config.collections.map((c) => [c.name, c.app]));
+  const opApp = (id: string) => {
+    const collection = /^data\.(.+)\.[^.]+$/.exec(id)?.[1];
+    return collection === undefined ? undefined : collectionApp.get(collection);
+  };
+  return {
+    workflows: data.workflows.filter((row) => workflowApp.get(row.id) === app),
+    ops: data.ops.filter((row) => opApp(row.id) === app),
+  };
+}
 
 /** Whom a column is about, in words. */
 const someoneIn = (group: Group) => (group === ANONYMOUS ? "anonymous" : `someone in ${group ?? "no group"}`);
@@ -48,15 +67,23 @@ type Chosen = { kind: Kind; row: PermissionsRow; under?: PermissionsRow; group: 
  * `visitors`) and `anonymous`, across, for each workflow's start with each operation it uses under it, and each operation a
  * person may call directly, down, the input unknown. A cell with a rule behind it opens the rule
  * in a sheet, whose Show the rule marks its lines in the policy's files, shown read-only under the
- * grid. Nothing here is edited: the policy is `policies/*.cedar`, written by the agent.
+ * grid. While the files are in more than one folder (the root's `policies/`, an app's), the tabs
+ * All and one per folder (`?app=`) pick a folder's files and the grid's rows in it, the files
+ * under a heading per folder. Nothing here is edited: the policy is `policies/*.cedar`, written by the agent.
  */
 function PermissionsPage() {
+  const { app } = Route.useSearch();
   const { data } = useSuspenseQuery(permissionsQuery());
+  const { data: config } = useSuspenseQuery(configQuery());
+  // The policy files by the folder they are in, `?app=` picking one: its files, and the grid's rows in it.
+  const groups = appGroupsOf(config.apps, data.files, (f) => appOfPath(f.file));
+  const { tab, shown, headed } = pickGroup(groups, app);
+  const rows = tab === undefined ? data : rowsIn(data, config, tab === ROOT_APP ? undefined : tab);
   // The cell shown, kept while the sheet closes so its content stays through the animation.
   const [chosen, setChosen] = useState<Chosen>();
   const [open, setOpen] = useState(false);
   // The rule whose lines the code marks, by id; `showing` while the sheet closes to show it.
-  const [shown, setShown] = useState<string>();
+  const [marked, setMarked] = useState<string>();
   const showing = useRef(false);
   const choose = (cell: Chosen) => {
     setChosen(cell);
@@ -64,12 +91,12 @@ function PermissionsPage() {
   };
   const rule = chosen?.cell.rule;
   // The chosen cell's rule, when its file is shown: Show the rule.
-  const showable = rule && data.files.some((f) => f.file === rule.file) ? rule : undefined;
+  const showable = rule && shown.some((group) => group.items.some((f) => f.file === rule.file)) ? rule : undefined;
   // Once the sheet has closed: before, its closing would put the page back where it was. The card
   // comes into view, then the code centres the rule's lines (`Code`'s highlight).
   const showRule = () => {
     showing.current = false;
-    setShown(showable!.id);
+    setMarked(showable!.id);
     document.getElementById(showable!.file)?.scrollIntoView({ block: "nearest" });
   };
   return (
@@ -82,11 +109,12 @@ function PermissionsPage() {
       ) : (
         <>
           {data.policy.problems && <PolicyProblems />}
+          <AppTabs groups={groups} tab={tab} link={(key) => <Link to="/permissions" search={{ app: key }} />} />
           <Card className="gap-0 py-0">
             <PermissionsTable<PermissionsRow & { ops?: PermissionsRow[] }>
               groups={data.groups}
-              workflows={data.workflows}
-              ops={data.ops}
+              workflows={rows.workflows}
+              ops={rows.ops}
               cell={(row, i, under, kind) => {
                 const group = data.groups[i]!;
                 const cell = row.cells[i]!;
@@ -105,8 +133,17 @@ function PermissionsPage() {
               <HostEnforcementLine />
             </Suspense>
           </CatchBoundary>
-          {data.files.map(({ file, text, policies }) => (
-            <PolicyCode key={file} file={file} text={text} span={policies.find((p) => p.id === shown)?.span} />
+          {shown.map((group) => (
+            <Fragment key={group.key}>
+              {headed && (
+                <h2 className="text-sm font-medium">
+                  <AppGroupTitle group={group} />
+                </h2>
+              )}
+              {group.items.map(({ file, text, policies }) => (
+                <PolicyCode key={file} file={file} text={text} span={policies.find((p) => p.id === marked)?.span} />
+              ))}
+            </Fragment>
           ))}
         </>
       )}

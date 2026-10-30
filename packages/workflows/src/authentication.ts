@@ -10,6 +10,78 @@ export interface AuthenticationIdentity {
   expiresAt?: number;
 }
 
+export type AuthenticationProblem =
+  | "missing"
+  | "expired"
+  | "revoked"
+  | "rejected"
+  | "wrong_account"
+  | "scope_changed"
+  | "uncertain"
+  | "unavailable"
+  | "unsupported";
+
+/** Safe lifecycle information only: never a provider response, cause or credential. */
+export class AuthenticationError extends Error {
+  readonly code = "authentication_failed";
+  readonly retryable: boolean;
+  readonly problem: AuthenticationProblem;
+  constructor(problem: AuthenticationProblem) {
+    super(`Authentication: ${problem}`);
+    this.problem = problem;
+    this.name = "AuthenticationError";
+    this.retryable = problem === "unavailable";
+  }
+}
+
+const authenticationProblems = new Set<AuthenticationProblem>([
+  "missing",
+  "expired",
+  "revoked",
+  "rejected",
+  "wrong_account",
+  "scope_changed",
+  "uncertain",
+  "unavailable",
+  "unsupported",
+]);
+
+export function authenticationProblem(error: unknown): AuthenticationProblem | undefined {
+  const failure = error as Partial<AuthenticationError> | null;
+  return failure?.name === "AuthenticationError" && authenticationProblems.has(failure.problem!)
+    ? failure.problem
+    : undefined;
+}
+
+/** Shared by credential intake and execution; unknown provider failures never imply revocation. */
+export async function verifyAuthentication(
+  method: Authentication,
+  credentials?: unknown,
+): Promise<AuthenticationIdentity> {
+  if (!method.verify) throw new AuthenticationError("unsupported");
+  try {
+    const identity = await method.verify(credentials);
+    if (
+      typeof identity?.account !== "string" ||
+      !identity.account.trim() ||
+      !Array.isArray(identity.scopes) ||
+      identity.scopes.some((scope) => typeof scope !== "string") ||
+      (identity.expiresAt !== undefined && !Number.isFinite(identity.expiresAt))
+    )
+      throw new AuthenticationError("unavailable");
+    if (identity.expiresAt !== undefined && identity.expiresAt <= Date.now()) throw new AuthenticationError("expired");
+    return {
+      account: identity.account,
+      scopes: [...new Set(identity.scopes)].toSorted(),
+      ...(identity.expiresAt !== undefined && { expiresAt: identity.expiresAt }),
+    };
+  } catch (error) {
+    // Structural recognition works across installed copies. Rebuild even recognized errors so
+    // an SDK message, stack or cause attached by a verifier cannot cross this boundary.
+    throw new AuthenticationError(authenticationProblem(error) ?? "unavailable");
+  }
+}
+
 /** Ephemeral material for one authorized driver invocation; never checkpoint this object. */
 export interface CallAuthentication {
   method: string;

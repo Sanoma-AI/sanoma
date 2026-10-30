@@ -16,6 +16,7 @@ import {
   When,
 } from "../../components/common.tsx";
 import { CredentialRow, type CredentialStore } from "../../components/credentials.tsx";
+import { Connections, SecretStorage } from "../../components/connections.tsx";
 import { SETUP_VENDORS } from "../../api.ts";
 import { setSetupTokenFn } from "../../functions.ts";
 import { ConnectSearch, setupStatusQuery } from "../../queries.ts";
@@ -58,6 +59,8 @@ function ConnectPage() {
   return (
     <>
       <CrumbHeader />
+      <SecretStorage />
+      <Connections />
       {github && <Notice variant={github === "connected" ? "default" : "destructive"}>{OUTCOME[github]}</Notice>}
       <Region title="GitHub">
         <ItemGroup>

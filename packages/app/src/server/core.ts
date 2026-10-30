@@ -8,6 +8,7 @@ import {
   ADMIN,
   type ApprovalState,
   type DriftReport,
+  deploymentKey,
   errorCode,
   errorMessage,
   type InputIssue,
@@ -27,7 +28,7 @@ import {
   type SanomaError,
   type Source,
 } from "@sanoma-ai/workflows";
-import { apiNameOf, isVisitor } from "@sanoma-ai/workflows/shared";
+import { apiNameOf, isVisitor, flatten } from "@sanoma-ai/workflows/shared";
 import {
   type ConfigDescription,
   type DataValue,
@@ -50,6 +51,11 @@ import {
   ChangesQuery,
   type ClearCredentialRequest,
   type CredentialsResponse,
+  type ConnectionsResponse,
+  type PreviewConnectionRequest,
+  type ConnectConnectionRequest,
+  type TestConnectionRequest,
+  type DisconnectConnectionRequest,
   type DecideCall,
   type EnforcementResponse,
   type ErrorResponse,
@@ -648,21 +654,27 @@ export function preview(
   return policy.preview(requests.map((request) => ({ ...request, principal: actor })));
 }
 
-/** Each app's grid, by its resolved config: built from the policy and the description, both read once as the app starts. */
+/** Each grid, by the description it was built from: again once the files change (the people, their groups). */
 const grids = new WeakMap<object, PermissionsResponse>();
+
+/** The policy's files by the resolved config, as the first grid read them: the text of the policy it enforces, read once as the app starts. */
+const policyFiles = new WeakMap<object, PermissionsResponse["files"]>();
 
 /**
  * The Permissions page's grid (`getPermissions`): the policy, its grid (`permissionsGrid`, the
- * one `sanoma check` reports too: nobody's own answer, the actor asking is not used), then the
- * policy's files as the description read them as the app started (`policy.files`, `sourcesOf`).
+ * one `sanoma check` reports too: nobody's own answer, the actor asking is not used) over the
+ * people as the files declare them now, then the policy's files as the policy was read (`sourcesOf`):
+ * a `.cedar` file edited since shows once the app restarts, as its rules apply.
  */
 export function permissions(app: Pick<AppContext, "resolved" | "description">): PermissionsResponse {
-  let grid = grids.get(app.resolved);
+  const { resolved, description } = app;
+  let grid = grids.get(description);
   if (!grid) {
-    const { resolved, description } = app;
-    const { files, ...policy } = description.policy;
-    grid = { policy, ...permissionsGrid(resolved, description), files: sourcesOf(files) };
-    grids.set(resolved, grid);
+    const { files: read, ...policy } = description.policy;
+    let files = policyFiles.get(resolved);
+    if (!files) policyFiles.set(resolved, (files = sourcesOf(read)));
+    grid = { policy, ...permissionsGrid(resolved, description), files };
+    grids.set(description, grid);
   }
   return grid;
 }
@@ -694,6 +706,99 @@ function sourcesOf(read: { file: string; text: string }[]): PermissionsResponse[
 export const credentials = async ({ client }: AppContext): Promise<CredentialsResponse> =>
   Object.fromEntries(await client.credentials());
 
+/** No credential reads. Account visibility and creation choices are checked by the runtime. */
+export async function connections(
+  { client, resolved, description }: AppContext,
+  actor: Principal,
+): Promise<ConnectionsResponse> {
+  const cards = (await client.connections({ actor })).map((card) => {
+    const isDefault = resolved.connections.catalog.definitions.get(card.id)?.default === true;
+    const workflows = description.workflows
+      .filter((workflow) => !workflow.builtin)
+      .flatMap((workflow) => {
+        if (!("nodes" in workflow.outline)) {
+          return workflow.ops.some((id) => id.startsWith(`${card.vendor}.`))
+            ? [{ name: workflow.name, title: workflow.title ?? workflow.name, selection: "possible" as const }]
+            : [];
+        }
+        const calls = flatten(workflow.outline.nodes).filter(
+          (node) => node.kind === "op" && (node.ops ?? [node.id]).some((id) => id.split(".")[0] === card.vendor),
+        );
+        const selections = calls.flatMap((call) => {
+          if (call.kind !== "op") return [];
+          if (!call.connection) return isDefault ? ["default" as const] : [];
+          if ("dynamic" in call.connection) return ["possible" as const];
+          return call.connection.id === card.id ? ["selected" as const] : [];
+        });
+        const selection = selections.includes("selected")
+          ? "selected"
+          : selections.includes("default")
+            ? "default"
+            : selections[0];
+        return selection ? [{ name: workflow.name, title: workflow.title ?? workflow.name, selection }] : [];
+      });
+    return { ...card, workflows };
+  });
+  const rules = (await client.connectionRules({ actor })).map(({ id, rule }) => ({
+    id,
+    name: rule.name,
+    vendor: rule.vendor,
+    method: rule.method,
+    scopes: rule.scopes,
+  }));
+  const methods: ConnectionsResponse["methods"] = {};
+  for (const [vendor, definitions] of resolved.connections.catalog.methods) {
+    methods[vendor] = Object.fromEntries(
+      Object.entries(definitions).map(([name, method]) => {
+        let schema: Record<string, unknown> | undefined;
+        if (method.schema) {
+          // Input fields describe the contract. Do not seed sensitive inputs with schema defaults.
+          schema = JSON.parse(
+            JSON.stringify(
+              z.toJSONSchema(method.schema, { io: "input", unrepresentable: "any" }),
+              (key, value: unknown) => (["default", "examples"].includes(key) ? undefined : value),
+            ),
+          ) as Record<string, unknown>;
+        }
+        return [name, { kind: method.kind, verifiable: !!method.verify, ...(schema && { schema }) }];
+      }),
+    );
+  }
+  const names: ("SANOMA_SIGNING_KEY" | "SANOMA_SECRETS_KEY")[] = ["SANOMA_SIGNING_KEY"];
+  if (!resolved.secrets.store) names.push("SANOMA_SECRETS_KEY");
+  const bootstrap: ConnectionsResponse["bootstrap"] = names.map((name) => {
+    let ready = false;
+    try {
+      deploymentKey(name);
+      ready = true;
+    } catch {
+      /* Only readiness is public. */
+    }
+    return {
+      name,
+      ready,
+      delivery: process.env[`${name}_FILE`] ? "mounted-file" : process.env[name] ? "environment" : "missing",
+    };
+  });
+  return { cards, rules, methods, store: await client.secretStoreStatus({ actor }), bootstrap };
+}
+
+/** Secure form intake, outside workflow arguments and approval records. */
+export const previewConnection = ({ client }: AppContext, actor: Principal, data: PreviewConnectionRequest) =>
+  client.previewConnection(data.target, data.credentials, { actor, id: data.requestId });
+export const connectConnection = ({ client }: AppContext, actor: Principal, data: ConnectConnectionRequest) =>
+  client.connectConnection(data.review, data.credentials, { actor });
+export const testConnection = (
+  { client }: AppContext,
+  actor: Principal,
+  { connection, requestId }: TestConnectionRequest,
+) => client.call("sanoma.connection.test", { connection }, { actor, id: requestId });
+export const disconnectConnection = (
+  { client }: AppContext,
+  actor: Principal,
+  { connection, expectedRevision, requestId }: DisconnectConnectionRequest,
+) => client.call("sanoma.connection.disconnect", { connection, expectedRevision }, { actor, id: requestId });
+
 /** Stores the variable's value as the actor; refused, with the reason and never the value, as `SanomaClient.setCredential` refuses it. */
 export const setCredential = ({ client }: AppContext, actor: Principal, { name, value }: SetCredentialRequest) =>
   client.setCredential(name, value, { by: actor.id });
@@ -720,13 +825,13 @@ const RunsLimit = RunsQuery.pick({ limit: true });
  * only the result of a run it started: its other reads are `policy_denied`.
  */
 export async function callApi(app: AppContext, actor: Principal, { name, input, id }: CallRequest): Promise<unknown> {
-  const { client, description, resolved } = app;
+  const { client, resolved } = app;
   if (resolved.ops.has(name)) {
     return client.call(name, input ?? {}, { actor, ...(id === undefined ? {} : { id }) });
   }
   const [api, method = "start", ...rest] = name.split(".");
   // Two workflows of one api name (a problem describeConfig reports) are neither.
-  const named = rest.length ? [] : description.workflows.filter((wf) => apiNameOf(wf.name) === api);
+  const named = rest.length ? [] : app.description.workflows.filter((wf) => apiNameOf(wf.name) === api);
   const entry = named.length === 1 ? named[0] : undefined;
   const visitor = isVisitor(actor);
   if (!entry || (visitor && entry.builtin)) throw notCallable(name);
@@ -812,6 +917,38 @@ const STATUS: Partial<Record<NonNullable<ErrorResponse["code"]>, number>> = {
  */
 export function asApiError(err: unknown): ApiError {
   if (err instanceof ApiError) return err;
+  const failure = err as { name?: string; code?: string; problem?: string } | null;
+  // These two boundaries deliberately discard provider errors. Reconstruct their safe reason
+  // rather than forwarding a message/cause that could include submitted authentication data.
+  if (failure?.name === "AuthenticationError") {
+    const problems = [
+      "missing",
+      "expired",
+      "revoked",
+      "rejected",
+      "wrong_account",
+      "scope_changed",
+      "uncertain",
+      "unavailable",
+      "unsupported",
+    ];
+    const problem = problems.includes(failure.problem ?? "") ? failure.problem! : "unavailable";
+    return new ApiError(400, { error: `Authentication: ${problem.replaceAll("_", " ")}` });
+  }
+  if (failure?.name === "SecretStoreError") {
+    const codes = [
+      "invalid_configuration",
+      "unavailable",
+      "denied",
+      "conflict",
+      "read_only",
+      "unsupported",
+      "too_large",
+      "invalid_value",
+    ];
+    const reason = codes.includes(failure.code ?? "") ? failure.code! : "unavailable";
+    return new ApiError(reason === "conflict" ? 409 : 400, { error: `Secret store: ${reason.replaceAll("_", " ")}` });
+  }
   const code = errorCode(err);
   const status = (code && STATUS[code]) || 500;
   if (status === 500) return new ApiError(500, { error: "Something went wrong", ...(code ? { code } : {}) });

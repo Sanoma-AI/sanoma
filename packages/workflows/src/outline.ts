@@ -44,7 +44,7 @@ export type OutlineNode = { path: string; span: Span } &
    */
   /** `name`: the one the call gives (`ctx.x.y.z(input, { name: "…" })`), else the id when no segment is computed. */
   (
-    | { kind: "op"; id: string; ops?: string[]; name?: string }
+    | { kind: "op"; id: string; ops?: string[]; name?: string; connection?: { id: string } | { dynamic: true } }
     /**
      * `ctx.approval(...)`, with its title, and the title as its `name`, when the first argument is
      * a string literal or a top-level `const` holding one.
@@ -417,6 +417,31 @@ export function outlineBody(
     return undefined;
   };
 
+  // Dependency information only. Execution still resolves and authorizes the actual reference.
+  // An imported/computed reference stays unknown rather than being guessed from its variable name.
+  const connectionIn = (options: Node | undefined): { id: string } | { dynamic: true } | undefined => {
+    if (!options) return undefined;
+    const object = options && unwrap(options);
+    if (object?.type !== "ObjectExpression") return { dynamic: true };
+    if (object.properties.some((p: Node) => p.type !== "Property" || p.computed)) return { dynamic: true };
+    const property =
+      object?.type === "ObjectExpression" &&
+      object.properties.findLast(
+        (p: Node) => p.type === "Property" && !p.computed && (p.key.name ?? p.key.value) === "connection",
+      );
+    if (!property) return undefined;
+    const ref = unwrap(property.value);
+    if (ref?.type !== "ObjectExpression") return { dynamic: true };
+    if (ref.properties.some((p: Node) => p.type !== "Property" || p.computed)) return { dynamic: true };
+    const key =
+      ref?.type === "ObjectExpression" &&
+      ref.properties.findLast(
+        (p: Node) => p.type === "Property" && !p.computed && (p.key.name ?? p.key.value) === "$connection",
+      );
+    const id = key && literalOf(key.value, consts);
+    return typeof id === "string" ? { id } : { dynamic: true };
+  };
+
   // The arguments are evaluated before the call is made, so their calls come first.
   const call = (node: Node, at: Where): OutlineNode[] => {
     const args: Node[] = node.arguments;
@@ -442,9 +467,17 @@ export function outlineBody(
           if (isOpPath(members)) {
             // A computed id's own name is the operation it calls, known only in a run.
             const name = nameIn(args[1], true) ?? (id.includes("*") ? undefined : id);
+            const connection = connectionIn(args[1]);
             return [
               ...walk(args, at),
-              { kind: "op", path, id, span: span(node), ...(name === undefined ? {} : { name }) },
+              {
+                kind: "op",
+                path,
+                id,
+                span: span(node),
+                ...(name === undefined ? {} : { name }),
+                ...(connection && { connection }),
+              },
             ];
           }
           return READS.has(id) ? walk(args, at) : [...walk(args, at), ...problem(node, CTX_CALL(id))];

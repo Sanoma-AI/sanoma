@@ -18,6 +18,7 @@ const ROLE =
 /** The rules either engine ends on. */
 const COMMON_RULES = `- The person reviews the draft and merges its branch by hand; the live instance keeps running the old code until it restarts. Never say a change is live.
 - Never ask for, read or write a credential: keys are set on the app's connector pages.
+- For a missing or expired connection, send the person to /connectors/<vendor> for secure input. Describe only account requirements and status. Never ask them to paste a key, password or OAuth token into chat.
 - Answer in plain words, briefly. Say what you changed and where.`;
 
 const RULES = `${ROLE}
@@ -42,15 +43,15 @@ How you work:
 ${COMMON_RULES}`;
 
 /** Who the agent acts for, in which company and chat. */
-const actingFor = ({ description }: AppContext, principal: Principal, chat: Chat) =>
-  `The company: ${description.appName}. You act for ${principal.id}. This chat is ${chat.id}.`;
+const actingFor = (appName: string, principal: Principal, chat: Chat) =>
+  `The company: ${appName}. You act for ${principal.id}. This chat is ${chat.id}.`;
 
 /**
  * A coding agent's instructions for `principal`'s turn in `chat`: the rules, who it acts for, and
  * the chat's earlier messages (`history`, their text), since each turn starts a new session of it.
  */
 export function harnessInstructions(app: AppContext, principal: Principal, chat: Chat, history: ChatMessage[]): string {
-  const sections = [HARNESS_RULES, actingFor(app, principal, chat)];
+  const sections = [HARNESS_RULES, actingFor(app.description.appName, principal, chat)];
   // Whole messages, the latest first, until the limit (the latest one always).
   const said: string[] = [];
   let size = 0;
@@ -75,7 +76,7 @@ function spoken(message: ChatMessage): string {
 /** The loop's instructions for `principal`'s turn in `chat`. */
 export async function instructions(app: AppContext, principal: Principal, chat: Chat): Promise<string> {
   const { description } = app;
-  const sections = [RULES, actingFor(app, principal, chat)];
+  const sections = [RULES, actingFor(description.appName, principal, chat)];
   const [guide, drafts] = await Promise.all([companyGuide(app), openDrafts(app, principal)]);
   if (guide) sections.push(`The company's AGENTS.md:\n\n${guide}`);
   const byVendor = Map.groupBy(description.ops, (op) => op.vendor);

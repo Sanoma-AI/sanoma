@@ -18,6 +18,7 @@ import {
   VendorLogo,
 } from "../../components/common.tsx";
 import { Credentials } from "../../components/credentials.tsx";
+import { Connections } from "../../components/connections.tsx";
 import { ScenarioErrors } from "../../components/scenario.tsx";
 import { type ScenarioRoles, scenarioRoles } from "../../graph/scenario-graph.ts";
 import { configQuery, connectorNamed, credentialsQuery, scenariosNaming, scenariosQuery } from "../../queries.ts";
@@ -72,6 +73,7 @@ function ConnectorPage() {
       )}
       <ScenarioErrors errors={scenarios.errors} />
       <Credentials vendor={id} />
+      <Connections vendor={id} />
       <Region title="Operations">
         {ops.length === 0 ? (
           <None />

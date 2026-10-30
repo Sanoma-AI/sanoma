@@ -11,7 +11,7 @@ import { ApiError, type PatchRequest, type PatchResponse } from "../api.ts";
 import { buildInput, type Field, fieldsOf, initialValues } from "../form/schema.ts";
 import { errorsOf, FieldView, FormFoot, type SubmitErrors, useSchemaForm } from "../form/start-form.tsx";
 import { patchFn } from "../functions.ts";
-import { isPeople, sourceQuery } from "../queries.ts";
+import { isPeople, refreshWritten } from "../queries.ts";
 import { Notice } from "./kit.tsx";
 
 // A declaration's form: its literal fields, drawn from its type's JSON Schema as a record form is
@@ -108,7 +108,7 @@ function SchemaDeclarationForm({
       const answer = await patch({ data: { at, fields: changed as PatchRequest["fields"] } });
       setDeclared((prev) => ({ ...prev, ...changed }));
       setSaved(answer);
-      if ("file" in answer) await queryClient.invalidateQueries({ queryKey: sourceQuery(file).queryKey });
+      if ("file" in answer) await refreshWritten(queryClient, file);
       return undefined;
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {

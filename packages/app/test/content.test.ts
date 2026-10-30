@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { tree } from "../../workflows/test/tree.ts";
-import { CONTENT_TYPES, contentTypes, readContent } from "../src/content-files.ts";
+import { CONTENT_TYPES, contentFields, contentTypes, readContent } from "../src/content-files.ts";
 
 // The repo's content: `readContent`, what the build hands a site's `content`, and `contentTypes`,
 // the `.sanoma/content.ts` that types it, type-checked as a site's tsconfig would.
@@ -182,6 +182,23 @@ describe("readContent", () => {
       { file: "content/posts/list.md", line: 2, column: 1, message: "front matter is a mapping of names to values" },
       { file: "content/posts/open.md", line: 1, column: 1, message: "front matter: no closing `---` line" },
     ]);
+  });
+});
+
+describe("contentFields", () => {
+  it("is each kind's front matter keys, kept until a file or folder under content/ changes", () => {
+    const repo = tree("fields", { "content/posts/a.md": "---\ntitle: A\n---\n" });
+    const first = contentFields(repo);
+    expect(first).toEqual([{ kind: "posts", fields: ["title"] }]);
+    expect(contentFields(repo)).toBe(first);
+    // A file edited, then one added, then a kind.
+    writeFileSync(join(repo, "content/posts/a.md"), "---\ntitle: A\ndate: 2026-10-30\n---\n");
+    expect(contentFields(repo)).toEqual([{ kind: "posts", fields: ["title", "date"] }]);
+    writeFileSync(join(repo, "content/posts/b.md"), "---\nauthor: Ada\n---\n");
+    expect(contentFields(repo)).toEqual([{ kind: "posts", fields: ["title", "date", "author"] }]);
+    mkdirSync(join(repo, "content/notes"));
+    writeFileSync(join(repo, "content/notes/n.md"), "---\nsummary: S\n---\n");
+    expect(contentFields(repo).map((k) => k.kind)).toEqual(["notes", "posts"]);
   });
 });
 

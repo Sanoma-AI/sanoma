@@ -94,7 +94,12 @@ const setupTokens = ({ resolved }: AppContext) => {
   const vendors = new Set([...resolved.types.values()].map((type) => type.vendor));
   return Object.keys(SETUP_TOKENS).filter((name) => {
     const vendor = vendorOf(name);
-    return vendor === undefined || vendors.has(vendor);
+    // A connector with authentication methods is configured through named account intake.
+    // Never offer its former global token field as a second way to connect it.
+    return (
+      vendor === undefined ||
+      (vendors.has(vendor) && !Object.keys(resolved.connections.catalog.methods.get(vendor) ?? {}).length)
+    );
   });
 };
 
