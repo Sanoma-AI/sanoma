@@ -8,13 +8,12 @@
 #
 #   docker build -t sanoma-runtime packages/sanoma/runtime
 #
-# provider-bridge is built from source at BRIDGE_COMMIT until it publishes releases; then
-# `--build-arg BRIDGE_FROM=release --build-arg BRIDGE_VERSION=0.1.0` downloads the release
-# archive instead, checked against the release's SHA256SUMS.
+# The bridge release matches @sanoma-ai/bridge's isolated-session protocol. Source builds
+# remain available with --build-arg BRIDGE_FROM=source at the same release's commit.
 
-ARG BRIDGE_FROM=source
-ARG BRIDGE_COMMIT=0ae215dccaa6d175bc14d3685c67fcb8c74d7233
-ARG BRIDGE_VERSION=""
+ARG BRIDGE_FROM=release
+ARG BRIDGE_COMMIT=0f6659a8931ae9b565acc1ada621d981e944a066
+ARG BRIDGE_VERSION=0.2.0
 
 FROM golang:1.26-bookworm AS bridge-source
 ARG BRIDGE_COMMIT
@@ -33,8 +32,13 @@ WORKDIR /download
 RUN test -n "$BRIDGE_VERSION" || { echo "BRIDGE_FROM=release needs BRIDGE_VERSION" >&2; exit 1; } \
  && archive="provider-bridge_${BRIDGE_VERSION}_${TARGETOS}_${TARGETARCH}.tar.gz" \
  && base="https://github.com/Sanoma-AI/provider-bridge/releases/download/v${BRIDGE_VERSION}" \
- && curl -fsSLO "$base/$archive" && curl -fsSLO "$base/SHA256SUMS" \
- && grep " $archive\$" SHA256SUMS | sha256sum -c - \
+ && curl -fsSLO "$base/$archive" \
+ && case "$TARGETARCH" in \
+      amd64) checksum=3a4161434bb20e1516938616084c40c78e4c657e75f791cd10cba8a6e8f67e0c ;; \
+      arm64) checksum=1d62ea033fa197d87baf10010445b275591575fec5c8aa049c48b20f014ffc47 ;; \
+      *) echo "Unsupported bridge architecture: $TARGETARCH" >&2; exit 1 ;; \
+    esac \
+ && echo "$checksum  $archive" | sha256sum -c - \
  && mkdir /out && tar -xzf "$archive" -C /out provider-bridge
 
 FROM bridge-${BRIDGE_FROM} AS bridge
@@ -44,6 +48,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
  && rm -rf /var/lib/apt/lists/* \
  && npm install -g pnpm@11 && npm cache clean --force
 COPY --from=bridge /out/provider-bridge /usr/local/bin/provider-bridge
+# Exercise the actual image binary before CI or a release can ship it. The check's downloaded
+# provider and cache are temporary; no company configuration or credentials are involved.
+RUN --mount=type=bind,source=check-bridge.mjs,target=/tmp/check-bridge.mjs \
+    node /tmp/check-bridge.mjs /usr/local/bin/provider-bridge
 # GitHub's SSH host keys, read at start, and the copy committed beside it for when GitHub's API cannot answer.
 COPY github-known-hosts.mjs github_known_hosts /usr/local/share/sanoma/
 COPY --chmod=755 entrypoint.sh /usr/local/bin/sanoma-runtime
