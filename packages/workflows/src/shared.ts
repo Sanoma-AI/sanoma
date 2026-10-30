@@ -19,6 +19,12 @@ export type {
   ResourceSpec,
 } from "./resource.ts";
 export type { DeclaredResource, ResourceProblem } from "./resources.ts";
+
+/** Where a declaration is: its file, relative to the root with `/`, and the export that holds it (`default` for a default export). */
+export interface At {
+  file: string;
+  export: string;
+}
 export type { DriftField, DriftReport, DriftResult, DriftStatus } from "./drift.ts";
 export type { ApplyPlan, ApplyReport, ApplyResult, PlanAnswer, PlanStep } from "./apply.ts";
 export type { CredentialStatus } from "./env.ts";
@@ -492,17 +498,39 @@ export function flatten(nodes: readonly OutlineNode[]): OutlineNode[] {
   return nodes.flatMap((node) => [node, ...flatten(childLists(node).flat())]);
 }
 
-/** Where a data-file problem is, `file:line:column`; undefined for one that is the config's, with no file. */
-export const problemAt = (p: ResourceProblem): string | undefined =>
-  p.file === undefined ? undefined : `${p.file}:${p.line}:${p.column}`;
+/**
+ * Where a problem is, `file:line:column`, `file#export` or `file`; undefined for one that is the
+ * config's, with no file.
+ */
+export const problemAt = (p: ResourceProblem): string | undefined => {
+  if (p.file === undefined) return undefined;
+  if (p.line !== undefined) return `${p.file}:${p.line}:${p.column ?? 1}`;
+  return p.export === undefined ? p.file : `${p.file}#${p.export}`;
+};
 
 /**
- * A problem as one line: `file:line:column: message`, or `file: message` without a position, or
- * the message alone without a file.
+ * A problem as one line: `file:line:column: message`, `file#export: message` or `file: message`
+ * without a position, or the message alone without a file.
  */
-export function problemLine(p: { file?: string; line?: number; column?: number; message: string }): string {
-  if (p.file === undefined) return p.message;
-  return p.line === undefined ? `${p.file}: ${p.message}` : `${p.file}:${p.line}:${p.column ?? 1}: ${p.message}`;
+export function problemLine(p: ResourceProblem): string {
+  const at = problemAt(p);
+  return at === undefined ? p.message : `${at}: ${p.message}`;
+}
+
+/**
+ * Where the export `name` (`default` for the default export) is in a file's text, as UTF-16
+ * offsets: from its `export` to the next `export`, `import` or `const` at the start of a line, or
+ * the end, less trailing blank space. Read from the text alone, for highlighting it; undefined
+ * when no line starts it.
+ */
+export function exportSpan(text: string, name: string): [number, number] | undefined {
+  const declared = name === "default" ? "default" : `const\\s+${name.replaceAll("$", "\\$")}`;
+  const start = new RegExp(`^export\\s+${declared}(?![\\w$])`, "m").exec(text);
+  if (!start) return undefined;
+  const after = start.index + start[0].length;
+  const next = /^(?:export|import|const)\b/m.exec(text.slice(after));
+  const end = next ? after + next.index : text.length;
+  return [start.index, start.index + text.slice(start.index, end).trimEnd().length];
 }
 
 /** A warning as one line, as `problemLine` with `warning: ` before its message: what is worth fixing but not wrong. */

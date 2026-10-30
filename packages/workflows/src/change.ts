@@ -320,6 +320,13 @@ export const ADMIN = "admin";
  */
 export const isRules = (path: string) =>
   path === "policies/" || path === "resources/people.ts" || /^apps\/[^/]+\/policies\/$/.test(path);
+/**
+ * Whether a data file's text imports the runtime's constructors, `sanoma` (by any local name): a
+ * file that may declare a person, agent or group, which `readPeople` loads and a change to which
+ * is a change to the rules. Read from the text, so a draft's file is told without running it.
+ */
+export const mayDeclarePeople = (text: string): boolean =>
+  /\{[^}]*\bsanoma\b[^}]*\}\s*from\s*["'](?:sanoma|@sanoma-ai\/workflows)\/resources["']/.test(text);
 /** The runtime rule's id, as a hold's `reasons` name it. */
 const RULES_WAIT_FOR_ADMIN = "sanoma:rules-wait-for-admin";
 

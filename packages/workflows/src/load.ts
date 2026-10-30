@@ -60,8 +60,8 @@ interface Generation {
   virtual: Map<string, Record<string, unknown>>;
   /** Each company file it resolved or was asked for, and each one's directory, by its size and modification time. */
   stamps: Map<string, string>;
-  /** How many values its files have made. */
-  count: number;
+  /** Every value its files have made, in the order made. */
+  made: object[];
   /** What loading each file gave, by its path relative to the root: an entry's, or a file an error is placed in. */
   loaded: Map<string, Loaded>;
   /** Each error reported, to the file it is reported in. */
@@ -158,8 +158,16 @@ export function loadModules(
     result.set(rel, { exports });
   }
   byPaths.set(key, result);
+  answerGenerations.set(result, gen);
   return result;
 }
+
+/** The generation each answer is of. */
+const answerGenerations = new WeakMap<Map<string, Loaded>, Generation>();
+
+/** Every value the files of `answer` (a `loadModules` answer) made, exported or not, in the order made. */
+export const madeWith = (answer: Map<string, Loaded>): object[] =>
+  (answerGenerations.get(answer)?.made ?? []).filter((value) => answer.has(madeOf(value)!.file));
 
 /** One file of a generation, required once; an error placed at its own file, and reported there once. */
 function loadOne(gen: Generation, file: string, rel: string): Loaded {
@@ -247,7 +255,7 @@ function generationOf(
     typesKey,
     virtual: new Map(),
     stamps: new Map(),
-    count: 0,
+    made: [],
     loaded: new Map(),
     reported: new Map(),
     answers: new WeakMap(),
@@ -277,12 +285,21 @@ function runtimeModules(
       record(gen, callerFile(), (resource as (f: unknown, o: unknown) => Declared)(fields, options), refersIn(fields));
     byVendor.set(resource.vendor, constructors);
   }
+  // A type the vendor does not declare is refused where it is called for, as `<vendor>.<type>`.
+  const constructorsOf = (vendor: string) =>
+    new Proxy(byVendor.get(vendor) ?? {}, {
+      get(target, key) {
+        if (typeof key !== "string" || Object.hasOwn(target, key)) return Reflect.get(target, key);
+        const known = Object.keys(target);
+        throw new TypeError(`${vendor} has no resource type ${key}: its types are ${known.join(", ") || "none"}`);
+      },
+    });
   const modules = new Map<string, Record<string, unknown>>();
   for (const connector of connectors) {
     const { id, info } = connector[VENDOR];
-    if (info?.package) modules.set(`${info.package}/resources`, { [id]: byVendor.get(id) ?? {} });
+    if (info?.package) modules.set(`${info.package}/resources`, { [id]: constructorsOf(id) });
   }
-  for (const entry of SECRET_ENTRIES) modules.set(entry, { sanoma: byVendor.get("sanoma") ?? {}, secret });
+  for (const entry of SECRET_ENTRIES) modules.set(entry, { sanoma: constructorsOf("sanoma"), secret });
   const collection = (declaration: Parameters<typeof collectionIn>[1]) => {
     const file = callerFile();
     return record(gen, file, collectionIn(file === undefined ? undefined : appIn(gen, file), declaration));
@@ -297,7 +314,8 @@ function runtimeModules(
 
 /** Records where `value` was made, and returns it. */
 function record<T extends object>(gen: Generation, file: string | undefined, value: T, refers = {}): T {
-  registry.made.set(value, { file: file === undefined ? "" : relOf(gen, file), seq: ++gen.count, refers });
+  gen.made.push(value);
+  registry.made.set(value, { file: file === undefined ? "" : relOf(gen, file), seq: gen.made.length, refers });
   return value;
 }
 

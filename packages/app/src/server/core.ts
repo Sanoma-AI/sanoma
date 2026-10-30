@@ -162,8 +162,8 @@ export const withoutSources = (description: ConfigDescription): ConfigDescriptio
 
 /**
  * A file the description names, as it is now: a workflow's file (its outline's `file`, read
- * as the outline read it, with `\n` line endings) or a data file (a resource's, a collection's
- * or a problem's `file`, relative to the config's root). Never a path the request makes up. `null` when the
+ * as the outline read it, with `\n` line endings) or a company file (a resource's, a collection's,
+ * a site's or an app's, or a problem's `file`, relative to the config's root). Never a path the request makes up. `null` when the
  * description names no such file, or it can no longer be read: not a 404, which a page's
  * loader would take for its own page not being found.
  */
@@ -176,6 +176,8 @@ export async function fileSource(
     resolved.root !== undefined &&
     (description.resources.some((r) => r.file === file) ||
       description.collections.some((c) => c.declared?.file === file) ||
+      description.sites.some((site) => site.at?.file === file) ||
+      description.apps.some((app) => app.at?.file === file) ||
       description.problems.some((p) => p.file === file));
   if (!workflowFile && !dataFile) return { source: null };
   try {

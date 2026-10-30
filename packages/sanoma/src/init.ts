@@ -11,11 +11,9 @@ import {
 } from "node:fs";
 import { userInfo } from "node:os";
 import { basename, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { RUNTIME_AGENTS } from "@sanoma-ai/workflows";
-import { readPeople } from "@sanoma-ai/workflows/describe";
-import { groupNamesOf, isVisitor, principalIdsOf } from "@sanoma-ai/workflows/shared";
+import { AGENTS, RUNTIME_AGENTS, VISITORS } from "@sanoma-ai/workflows";
+import { isVisitor } from "@sanoma-ai/workflows/shared";
 import { writeDeploymentKeys } from "./key.ts";
 
 const run = promisify(execFile);
@@ -132,12 +130,23 @@ const output = (cmd: string, args: string[]) =>
   );
 
 /**
+ * The ids and group names the template's `resources/people.ts` declares, read from its text: the
+ * template is inside the installed package, under `node_modules`, where Node strips no types, so
+ * it cannot be loaded there.
+ */
+export function templatePeopleIds(): string[] {
+  const text = readFileSync(new URL("resources/people.ts", TEMPLATE), "utf8");
+  return [...text.matchAll(/\.(?:person|agent)\(\{[^}]*?\bid:\s*"([^"]+)"|\.group\(\{[^}]*?\bname:\s*"([^"]+)"/g)].map(
+    (m) => m[1] ?? m[2]!,
+  );
+}
+
+/**
  * `id`, unless it is empty or taken, by a person, agent or group the template declares, by one
  * of the runtime's own agents or by the visitors (`isVisitor`): then "founder".
  */
 function free(id: string): string {
-  const { people } = readPeople(fileURLToPath(TEMPLATE));
-  const taken = [...principalIdsOf(people), ...groupNamesOf(people), ...RUNTIME_AGENTS];
+  const taken = [...templatePeopleIds(), AGENTS, VISITORS, ...RUNTIME_AGENTS];
   return id && !taken.includes(id) && !isVisitor({ id }) ? id : "founder";
 }
 

@@ -1,10 +1,12 @@
 import { existsSync, readdirSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
-import { childrenOf, type LintProblem, type Node, readSource } from "./ast.ts";
-import { keyName } from "./datafile.ts";
-import { stringValue, unwrap } from "./outline.ts";
+import { z } from "zod";
+import { childrenOf, type Node, readSource } from "./ast.ts";
+import { type Loaded, loadModules } from "./load.ts";
+import { stringValue } from "./outline.ts";
 import { APPS_DIR, filesUnder, inside, isDirectory, RELATIVE } from "./paths.ts";
-import { APP_NAME } from "./shared.ts";
+import type { ResourceProblem } from "./resources.ts";
+import { APP_NAME, type At } from "./shared.ts";
 
 // A company's apps: each folder of `apps/` holds the kinds the root does (workflows, resources,
 // policies, scenarios, sites), merged from a source repository whose URL its `app.ts` names, or
@@ -19,86 +21,88 @@ export interface AppEntry {
   dir: string;
   /** `defineApp({ source })` in its `app.ts`: the repository it was taken from; absent for the company's own app. */
   source?: string;
+  /** Its `app.ts`'s default export, when it has the file. */
+  at?: At;
 }
 
 /** What is wrong with a company's apps, at a file relative to the root. */
-export type AppProblem = LintProblem & { file: string };
+export type AppProblem = ResourceProblem & { file: string };
 
 /** The apps under `root` (`appsAt`), without what is wrong with them. */
 export const readApps = (root: string | undefined): AppEntry[] => appsAt(root).apps;
 
 /**
  * The apps under `root`: each folder of `apps/` whose name is an `APP_NAME`, sorted, with what is
- * wrong in its `app.ts` and each folder refused for its name as `problems`. `app.ts` is read
- * with oxc, never run: its default export must be `defineApp({ … })`, from `sanoma`, written out,
- * and `source` a string.
+ * wrong in its `app.ts` and each folder refused for its name as `problems`. Each `app.ts` is
+ * loaded (`loadModules`, `defineApp` served from `sanoma`): its default export is
+ * `defineApp({ source })`, `source` a string when given.
  */
 export function appsAt(root: string | undefined): { apps: AppEntry[]; problems: AppProblem[] } {
   const dir = root === undefined ? undefined : join(root, APPS_DIR);
-  if (dir === undefined || !isDirectory(dir)) return { apps: [], problems: [] };
+  if (root === undefined || dir === undefined || !isDirectory(dir)) return { apps: [], problems: [] };
   const apps: AppEntry[] = [];
   const problems: AppProblem[] = [];
   const folders = readdirSync(dir, { withFileTypes: true })
     .filter((d) => d.isDirectory())
     .map((d) => d.name)
     .toSorted();
-  for (const name of folders) {
+  const named = folders.filter((folder) => APP_NAME.test(folder));
+  for (const name of folders.filter((folder) => !APP_NAME.test(folder))) {
     const at = `${APPS_DIR}/${name}`;
-    if (!APP_NAME.test(name)) {
-      problems.push({
-        file: at,
-        line: 1,
-        column: 1,
-        message: `${at} is not an app: an app's folder name is a lowercase letter, then lowercase letters and digits`,
-      });
-      continue;
-    }
-    const read = appOptionsOf(join(dir, name, "app.ts"));
-    problems.push(...read.problems.map((p) => ({ file: `${at}/app.ts`, ...p })));
-    apps.push({ name, dir: at, ...(read.source !== undefined && { source: read.source }) });
+    problems.push({
+      file: at,
+      line: 1,
+      column: 1,
+      message: `${at} is not an app: an app's folder name is a lowercase letter, then lowercase letters and digits`,
+    });
   }
+  const files = named.map((name) => join(dir, name, "app.ts")).filter((path) => existsSync(path));
+  const loaded = files.length ? loadModules(root, files, []) : new Map<string, Loaded>();
+  for (const name of named) {
+    const file = `${APPS_DIR}/${name}/app.ts`;
+    const read = appDefinitionOf(file, loaded);
+    problems.push(...read.problems);
+    apps.push({
+      name,
+      dir: `${APPS_DIR}/${name}`,
+      ...(read.source !== undefined && { source: read.source }),
+      ...(loaded.has(file) && { at: { file, export: "default" } }),
+    });
+  }
+  problems.sort((a, b) => a.file.localeCompare(b.file));
   return { apps, problems };
 }
 
-/** Where `defineApp` comes from in `app.ts`. */
-const APP_SOURCES: ReadonlySet<string> = new Set(["sanoma", "@sanoma-ai/workflows"]);
+/** What `app.ts`'s default export, `defineApp({ … })`, may say. */
+const AppDefinitionSchema = z.strictObject({ source: z.string().optional() });
 
-/** `app.ts`'s `source`, read without running it, and what is wrong there; nothing for no file. */
-function appOptionsOf(path: string): { source?: string; problems: LintProblem[] } {
-  if (!existsSync(path)) return { problems: [] };
-  const file = readSource(path);
-  if (typeof file === "string") return { problems: [{ line: 1, column: 1, message: file }] };
-  const problems: LintProblem[] = [...file.problems];
-  const problem = (at: Node, message: string) => problems.push({ ...file.at(at.start), message });
-  const unread =
-    'app.ts is read without running it: its default export is `defineApp({ source })` from "sanoma", written out';
-  const exported = file.program.body.find((s: Node) => s.type === "ExportDefaultDeclaration");
-  const call = unwrap(exported?.declaration);
-  const callee = unwrap(call?.callee);
-  const options = unwrap(call?.arguments?.[0]);
-  const defineApps = new Set<string>();
-  for (const statement of file.program.body) {
-    if (statement.type !== "ImportDeclaration" || !APP_SOURCES.has(statement.source.value)) continue;
-    for (const s of statement.specifiers) {
-      if (s.type === "ImportSpecifier" && keyName(s.imported) === "defineApp") defineApps.add(s.local.name);
-    }
+/** `app.ts`'s `source`, as loading it gave, and what is wrong there; nothing for no file. */
+function appDefinitionOf(file: string, answer: Map<string, Loaded>): { source?: string; problems: AppProblem[] } {
+  const loaded = answer.get(file);
+  if (loaded === undefined) return { problems: [] };
+  // A helper it imports threw: said at the helper.
+  if ("failedIn" in loaded) return appDefinitionOf(loaded.failedIn, answer);
+  if ("error" in loaded) {
+    const { error, line, column } = loaded;
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      problems: [
+        {
+          file,
+          ...(line !== undefined && { line, column: column ?? 1 }),
+          message: message.replaceAll(/\s*\n\s*/g, " "),
+        },
+      ],
+    };
   }
-  const written =
-    call?.type === "CallExpression" &&
-    callee?.type === "Identifier" &&
-    defineApps.has(callee.name) &&
-    (options === undefined || options.type === "ObjectExpression");
-  if (!written) {
-    problem(exported ?? file.program, unread);
-    return { problems };
+  const value = loaded.exports.find(([name]) => name === "default")?.[1];
+  const parsed = AppDefinitionSchema.safeParse(value);
+  if (!parsed.success) {
+    const why = z.prettifyError(parsed.error).replaceAll(/\s*\n\s*/g, " ");
+    const message = `its default export is \`defineApp({ source })\` from "sanoma", \`source\` a string: ${why}`;
+    return { problems: [{ file, export: "default", message }] };
   }
-  const property = options?.properties.findLast(
-    (p: Node) => p.type === "Property" && !p.computed && keyName(p.key) === "source",
-  );
-  const source = property && stringValue(property.value);
-  if (property && source === undefined)
-    problem(property, "`source` is read without running app.ts: write it as a string");
-  return { ...(source !== undefined && { source }), problems };
+  return { ...(parsed.data.source !== undefined && { source: parsed.data.source }), problems: [] };
 }
 
 /** A source file under an app: `.ts` or `.tsx`, but a declaration. */

@@ -1,4 +1,3 @@
-import { join } from "node:path";
 import type { z } from "zod";
 import { type AppEntry, appsAt } from "./apps.ts";
 import { type LintProblem, readSource, type SourceFile } from "./ast.ts";
@@ -16,7 +15,7 @@ import {
   type DeclaredCollection,
   type DeclaredResource,
   inAppPeople,
-  readDataFiles,
+  loadDataFiles,
   type ResourceProblem,
 } from "./resources.ts";
 import { apiNameProblem } from "./sdk.ts";
@@ -25,11 +24,10 @@ import { readSites, type SiteEntry } from "./sites.ts";
 
 // `@sanoma-ai/workflows/describe`: what a UI renders from, apart from the main entry.
 export { outlineWorkflow, type Outline, type OutlineNode, type Span } from "./outline.ts";
-// The reader parses data files with oxc-parser too.
 export type { LintProblem } from "./ast.ts";
 export {
   admit,
-  readDataFiles,
+  loadDataFiles,
   readPeople,
   type DataFiles,
   type DeclaredCollection,
@@ -42,12 +40,12 @@ export { formatOptions, renderDataFile, setFields, type DataFileContent } from "
 export { Reference, type DataValue } from "./datafile.ts";
 
 /**
- * The resources the config's data files declare, read without importing or running them; throws
- * one error listing every problem, each at `file:line:column`, for a test or CI to fail on.
+ * The resources the config's data files declare, as loading them makes them (`loadDataFiles`);
+ * throws one error listing every problem, one per line, for a test or CI to fail on.
  * `describeConfig` lists the same, with the problems beside them instead.
  */
 export function readResources(config: SanomaConfig): DeclaredResource[] {
-  const { resources, problems } = readDataFiles(rootOf(config), connectorsOf(config));
+  const { resources, problems } = loadDataFiles(rootOf(config), connectorsOf(config));
   if (problems.length) {
     const lines = problems.map((p) => `  ${problemLine(p)}`);
     throw new Error(`The resources' data files have problems:\n${lines.join("\n")}`);
@@ -64,7 +62,7 @@ export {
   type Bindings,
   type Rebind,
 } from "./lockfile.ts";
-// The apps under `apps/`, read without running their `app.ts`.
+// The apps under `apps/`, with what their `app.ts` declares.
 export { crossAppImports, readApps, type AppEntry } from "./apps.ts";
 // What the sites call, read from their source: a workflow's Used by.
 export {
@@ -234,12 +232,12 @@ export interface ConfigDescription {
    * less any with a problem and any that names one.
    */
   resources: DeclaredResource[];
-  /** Each binding in the lockfile (`LOCKFILE`) whose key no data file declares, as `readDataFiles` reports it. */
+  /** Each binding in the lockfile (`LOCKFILE`) whose key no data file declares, as `loadDataFiles` reports it. */
   orphans: DataFiles["orphans"];
   /**
-   * What is wrong in the data files (`readDataFiles`) and the apps (a folder of `apps/` that is no
+   * What is wrong in the data files (`loadDataFiles`) and the apps (a folder of `apps/` that is no
    * app, an `app.ts` that cannot be read, a collection or site at the root named as an app is),
-   * each at its file, relative to the root, line and column. A workflow's are on its entry.
+   * each at its file, relative to the root, and its line and column or its export. A workflow's are on its entry.
    */
   problems: ResourceProblem[];
   /** The apps under `apps/` (`readApps`), by name. Each workflow, collection and site an app declares names it (`app`). */
@@ -291,7 +289,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     }))
     .toSorted((a, b) => a.id.localeCompare(b.id));
 
-  const dataFiles = readDataFiles(resolved.root, connectorsOf(config), resources);
+  const dataFiles = loadDataFiles(resolved.root, connectorsOf(config), resources);
   const declared = new Map(dataFiles.collections.map((d) => [d.name, d]));
   const collections: CollectionEntry[] = [...resolved.collections.values()]
     .map((c) => ({
@@ -393,7 +391,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
       ...dataFiles.problems,
       ...appProblems,
       ...appClashes(apps, collections, sites),
-      ...domainProblems(resolved.root, dataFiles.resources, resources, sites, read),
+      ...domainProblems(dataFiles.resources, resources, sites),
     ],
     apps,
     policy: {
@@ -439,11 +437,9 @@ function appClashes(
  * only a public site at a domain, and one site at each.
  */
 function domainProblems(
-  root: string | undefined,
   declared: readonly DeclaredResource[],
   types: ReadonlyMap<string, Resource>,
   sites: readonly SiteEntry[],
-  read: (path: string) => SourceFile | string,
 ): ResourceProblem[] {
   const isPublic = new Set(sites.filter((site) => site.public).map((site) => site.name));
   const problems: ResourceProblem[] = [];
@@ -461,20 +457,9 @@ function domainProblems(
       const others = `${names.length === 2 ? "both " : ""}${names.slice(0, -1).join(", ")}`;
       messages.push(`${domain} is the domain of ${others} and ${names.at(-1)}`);
     }
-    if (root !== undefined) problems.push(...messages.map((message) => problemAt(root, resource, read, message)));
+    problems.push(...messages.map((message) => ({ ...resource.at, message })));
   }
   return problems;
-}
-
-/** `message` at a declaration's `export const`. */
-function problemAt(
-  root: string,
-  resource: DeclaredResource,
-  read: (path: string) => SourceFile | string,
-  message: string,
-): ResourceProblem {
-  const file = read(join(root, resource.file));
-  return { file: resource.file, ...(typeof file === "string" ? {} : file.at(resource.span[0])), message };
 }
 
 /**

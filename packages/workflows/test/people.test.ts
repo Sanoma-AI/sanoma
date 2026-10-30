@@ -17,6 +17,7 @@ import {
   type SanomaConfig,
   visitorPrincipal,
 } from "../src/index.ts";
+import { problemLine } from "../src/shared.ts";
 import { failure, waitFor } from "./harness.ts";
 
 // People, agents and groups: vendorless resource types of the runtime's own vendor, declared in
@@ -150,18 +151,30 @@ describe("people in a data file", () => {
     expect(description.resourceTypes.map((t) => t.id)).toEqual(["sanoma.agent", "sanoma.group", "sanoma.person"]);
   });
 
-  it("are read from the files that import their constructors alone, by any name, beside a vendor's resources", () => {
+  it("are loaded from the files that import their constructors alone, by any name, beside a vendor's resources", () => {
     const mixed = mkdtempSync(join(tmpdir(), "sanoma-people-mixed-"));
     mkdirSync(join(mixed, "resources"));
     writeFileSync(
       join(mixed, "resources", "team.ts"),
-      `import { acme } from "@acme/sanoma-connector/resources";\nimport { sanoma as s } from "sanoma/resources";\nexport const ada = s.person({ id: "ada" });\nexport const repo = acme.repo({ name: "site" });\n`,
+      `import { sanoma as s } from "sanoma/resources";\nexport const ada = s.person({ id: "ada" });\n`,
+    );
+    // Neither a vendor's resources nor a broken file without the people's constructors is loaded.
+    writeFileSync(
+      join(mixed, "resources", "repos.ts"),
+      `import { acme } from "@acme/sanoma-connector/resources";\nexport const repo = acme.repo({ name: "site" });\n`,
     );
     writeFileSync(join(mixed, "resources", "infra.ts"), `export const broken = nope({});\n`);
+    // A wakeup beside its host's connector, which the people's load does not serve: left unread.
+    writeFileSync(
+      join(mixed, "resources", "hosting.ts"),
+      `import { acme } from "@acme/sanoma-connector/resources";\nimport { sanoma } from "sanoma/resources";\nexport const host = acme.app({ name: "x" });\nexport const wakeup = sanoma.wakeup({ host });\n`,
+    );
     try {
       const { people: read, problems } = readPeople(mixed);
       expect(problems).toEqual([]);
       expect(read.map((r) => r.name)).toEqual(["ada"]);
+      // Loaded once while no file changes: the same answer.
+      expect(readPeople(mixed)).toBe(readPeople(mixed));
     } finally {
       rmSync(mixed, { recursive: true, force: true });
     }
@@ -176,14 +189,21 @@ describe("people in a data file", () => {
     mkdirSync(join(broken, "resources"));
     writeFileSync(
       join(broken, "resources", "people.ts"),
-      `import { sanoma } from "sanoma/resources";\nexport const ada = sanoma.person({ id: "ada" });\nexport const twin = sanoma.agent({ id: "ada" });\nexport const odd = sanoma.person({ id: "two words" });\nexport const bots = sanoma.group({ name: "agents", members: [ada] });\n`,
+      `import { sanoma } from "sanoma/resources";\nexport const ada = sanoma.person({ id: "ada" });\nexport const twin = sanoma.agent({ id: "ada" });\nexport const bots = sanoma.group({ name: "agents", members: [ada] });\n`,
+    );
+    // A value the type refuses stops its file, where it is thrown.
+    writeFileSync(
+      join(broken, "resources", "odd.ts"),
+      `import { sanoma } from "sanoma/resources";\nexport const odd = sanoma.person({ id: "two words" });\n`,
     );
     try {
       const read = readPeople(broken);
-      expect(read.problems.map((p) => p.message)).toEqual([
-        expect.stringContaining("one word"),
-        expect.stringContaining("ada"),
-        expect.stringContaining("the group every agent is in"),
+      expect(read.problems.map(problemLine)).toEqual([
+        expect.stringMatching(/^resources\/odd\.ts:2:27: sanoma\.person: .*one word/),
+        expect.stringMatching(
+          /^resources\/people\.ts#twin: resources\/people\.ts#twin has the id "ada", which resources\/people\.ts#ada has/,
+        ),
+        expect.stringMatching(/^resources\/people\.ts#bots: .*the group every agent is in/),
       ]);
       // Nobody is admitted while they stand, but the runtime's own agents, which no file declares.
       expect(() => admit({ id: "ada" }, read)).toThrow("cannot be admitted while the people's files have problems");

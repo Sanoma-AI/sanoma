@@ -81,11 +81,13 @@ describe("apps", () => {
       problems: [
         {
           file: "apps/crm/resources/people.ts",
+          export: "eve",
           message:
             "apps/crm/resources/people.ts#eve declares a person in an app: the people are the company's, declared in resources/ at the root",
         },
         {
           file: "apps/crm/resources/people.ts",
+          export: "sales",
           message:
             "apps/crm/resources/people.ts#sales declares a group in an app: the people are the company's, declared in resources/ at the root",
         },
@@ -107,17 +109,25 @@ describe("apps", () => {
     ]);
   });
 
-  it("reads each app's app.ts without running it, and refuses a folder that is no app's name", () => {
+  it("loads each app's app.ts, and refuses a folder that is no app's name and a definition its schema refuses", () => {
     expect(readApps(root)).toEqual([
-      { name: "crm", dir: "apps/crm", source: "https://github.com/example/crm" },
-      { name: "shop", dir: "apps/shop" },
+      {
+        name: "crm",
+        dir: "apps/crm",
+        source: "https://github.com/example/crm",
+        at: { file: "apps/crm/app.ts", export: "default" },
+      },
+      { name: "shop", dir: "apps/shop", at: { file: "apps/shop/app.ts", export: "default" } },
     ]);
     const other = rootWith({
       "sanoma.config.ts": "",
       "apps/My-CRM/app.ts": "",
+      // Computed values are loaded as any: only what they come to is held to the schema.
       "apps/ops/app.ts":
-        'import { defineApp } from "sanoma";\nconst source = "x";\nexport default defineApp({ source });\n',
+        'import { defineApp } from "sanoma";\nconst source = ["https://github.com", "acme", "ops"].join("/");\nexport default defineApp({ source });\n',
+      "apps/shop/app.ts": 'import { defineApp } from "sanoma";\nexport default defineApp({ source: 1, owner: "x" });\n',
     });
+    expect(readApps(other).find((app) => app.name === "ops")?.source).toBe("https://github.com/acme/ops");
     const { problems } = describeConfig({ connectors: [], root: other });
     expect(problems).toEqual([
       {
@@ -128,10 +138,11 @@ describe("apps", () => {
           "apps/My-CRM is not an app: an app's folder name is a lowercase letter, then lowercase letters and digits",
       },
       {
-        file: "apps/ops/app.ts",
-        line: 3,
-        column: 28,
-        message: "`source` is read without running app.ts: write it as a string",
+        file: "apps/shop/app.ts",
+        export: "default",
+        message: expect.stringMatching(
+          /^its default export is `defineApp\(\{ source \}\)` from "sanoma", `source` a string: .*owner.*source/,
+        ),
       },
     ]);
   });

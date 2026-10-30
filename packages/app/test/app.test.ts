@@ -2026,7 +2026,7 @@ describe("an app configured otherwise", () => {
 
   it("boots with broken data files: lists the resources it could read, and the problems", async () => {
     expect(warned).toEqual([
-      expect.stringMatching(/^sanoma app: the config's files have problems.*\n {2}resources\/bad\.ts:2:1: /s),
+      expect.stringMatching(/^sanoma app: the config's files have problems.*\n {2}resources\/bad\.ts:2:28: /s),
     ]);
     const body = withoutSources(otherCtx.description);
     expect(body.resources.map((r) => r.id)).toEqual(["resources/good.ts#web"]);
@@ -2034,8 +2034,8 @@ describe("an app configured otherwise", () => {
       {
         file: "resources/bad.ts",
         line: 2,
-        column: 1,
-        message: expect.stringMatching(/^export const docs: github\.repository: /),
+        column: 28,
+        message: expect.stringMatching(/^github\.repository: /),
       },
     ]);
   });
@@ -2070,7 +2070,7 @@ describe("an app configured otherwise", () => {
     const resources = await page("/resources", other.url);
     expect(resources.status).toBe(200);
     expect(resources.text).toContain("1 problem in the data files: their resources are left out");
-    expect(resources.text).toMatch(/<code>resources\/bad\.ts:2:1<\/code> export const docs: github\.repository: /);
+    expect(resources.text).toMatch(/<code>resources\/bad\.ts:2:28<\/code> github\.repository: /);
     expect(resources.text).toContain("resources/good.ts#web");
   });
 

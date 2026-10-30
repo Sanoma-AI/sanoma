@@ -15,6 +15,7 @@ import {
   followBase,
   repositoryOf,
   isRules,
+  mayDeclarePeople,
   sourceOfRun,
   touchesOf,
 } from "./change.ts";
@@ -23,7 +24,6 @@ import type { DriftReport } from "./drift.ts";
 import { isRunControlError } from "./errors.ts";
 import { warn } from "./log.ts";
 import { inside } from "./paths.ts";
-import { DECLARES_PEOPLE } from "./resources.ts";
 import { currentRun, type Run } from "./run.ts";
 import {
   AGENTS,
@@ -48,8 +48,8 @@ const runNow = (): Run => {
   return run;
 };
 
-/** True when the file at `path` is a people file (`DECLARES_PEOPLE`), one `readPeople` would read; false when there is none. */
-const fileDeclaresPeople = async (path: string) => DECLARES_PEOPLE.test(await readFile(path, "utf8").catch(() => ""));
+/** True when the file at `path` is a people file (`mayDeclarePeople`), one `readPeople` would load; false when there is none. */
+const fileDeclaresPeople = async (path: string) => mayDeclarePeople(await readFile(path, "utf8").catch(() => ""));
 
 /** Which events win when several wait: one that ends the change over one that plans it again. */
 const WEIGHT: Record<ChangeEvent["kind"], number> = { commits: 0, close: 1, closed: 2, merged: 3 };

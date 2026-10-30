@@ -14,7 +14,7 @@ import { testDatabaseUrl, waitFor, withFake } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
 import { fakeHost } from "@sanoma-ai/testing/host";
 import { isEnded, memoryLedger, resolveConfig, type SanomaConfig } from "@sanoma-ai/workflows";
-import { describeConfig, readDataFiles, readLockfile, readResources } from "@sanoma-ai/workflows/describe";
+import { describeConfig, loadDataFiles, readLockfile, readResources } from "@sanoma-ai/workflows/describe";
 import { startWakeupService, type WakeupService } from "@sanoma-ai/workflows/wakeup-service";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
@@ -282,7 +282,7 @@ describe("going live", () => {
     try {
       mkdirSync(join(other, "resources", "sanoma"), { recursive: true });
       writeFileSync(join(other, INFRA), text);
-      const read = readDataFiles(other, config.connectors);
+      const read = loadDataFiles(other, config.connectors);
       expect(read.problems).toEqual([]);
       expect(read.resources.map((r) => [r.id, `${r.vendor}.${r.type}`, r.refs])).toEqual([
         [`${INFRA}#repo`, "github.repository", {}],
