@@ -3,7 +3,7 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import { z } from "zod";
 import { childrenOf, type Node, readSource } from "./ast.ts";
 import type { AppEntry } from "./description.ts";
-import { type Loaded, loadModules } from "./load.ts";
+import { exportsOf, type Loaded, loadModules } from "./load.ts";
 import { stringValue } from "./outline.ts";
 import { APPS_DIR, filesUnder, inside, isDirectory, RELATIVE } from "./paths.ts";
 import type { ResourceProblem } from "./resources.ts";
@@ -69,23 +69,10 @@ const AppDefinitionSchema = z.strictObject({ source: z.string().optional() });
 
 /** `app.ts`'s `source`, as loading it gave, and what is wrong there; nothing for no file. */
 function appDefinitionOf(file: string, answer: Map<string, Loaded>): { source?: string; problems: AppProblem[] } {
-  const loaded = answer.get(file);
-  if (loaded === undefined) return { problems: [] };
   // A helper it imports threw: said at the helper.
-  if ("failedIn" in loaded) return appDefinitionOf(loaded.failedIn, answer);
-  if ("error" in loaded) {
-    const { error, line, column } = loaded;
-    const message = error instanceof Error ? error.message : String(error);
-    return {
-      problems: [
-        {
-          file,
-          ...(line !== undefined && { line, column: column ?? 1 }),
-          message: message.replaceAll(/\s*\n\s*/g, " "),
-        },
-      ],
-    };
-  }
+  const loaded = exportsOf(answer, file);
+  if (loaded === undefined) return { problems: [] };
+  if ("problem" in loaded) return { problems: [loaded.problem] };
   const value = loaded.exports.find(([name]) => name === "default")?.[1];
   const parsed = AppDefinitionSchema.safeParse(value);
   if (!parsed.success) {

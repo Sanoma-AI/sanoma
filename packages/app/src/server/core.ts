@@ -584,12 +584,15 @@ async function patchNow(
     const id = `ui-${randomUUID().slice(0, 8)}`;
     const draft = await source.draft(id);
     const inDraft = join(draft.root, relative(source.root, root));
-    const { text } = await edited(inDraft).catch(async (err: unknown) => {
+    try {
+      const { text } = await edited(inDraft);
+      await writeFile(join(inDraft, at.file), text);
+      await draft.commit({ paths: [relative(draft.root, join(inDraft, at.file))], message, author: actor.id });
+    } catch (err) {
+      // No change will open on it: the draft would be left behind with nothing to close it.
       await source.closeDraft?.(id);
       throw err;
-    });
-    await writeFile(join(inDraft, at.file), text);
-    await draft.commit({ paths: [relative(draft.root, join(inDraft, at.file))], message, author: actor.id });
+    }
     const page = origin && new URL(`/changes/${encodeURIComponent(id)}`, origin).href;
     return { change: await client.openChange({ id, title: message, ...(page && { page }) }, { startedBy: actor }) };
   }

@@ -11,6 +11,8 @@ import { APP_NAME } from "./shared.ts";
  * (its people: `sanoma.person`, `.agent`, `.group`): what the loader serves for them.
  */
 export const SECRET_ENTRIES: ReadonlySet<string> = new Set(["sanoma/resources", "@sanoma-ai/workflows/resources"]);
+/** Where a site imports `api`, `RunForm` and `defineSite` from: `sanoma/site`, which re-exports the app's. The loader serves `defineSite`. */
+export const SITE_ENTRIES: ReadonlySet<string> = new Set(["sanoma/site", "@sanoma-ai/app/site"]);
 /** Where `resources/data.ts` imports `collection` from: what the loader serves for it. */
 export const DATA_ENTRIES: ReadonlySet<string> = new Set(["sanoma/data", "@sanoma-ai/workflows/data"]);
 /**

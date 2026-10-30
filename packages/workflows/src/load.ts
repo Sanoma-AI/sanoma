@@ -6,7 +6,7 @@ import { collectionIn } from "./collection.ts";
 import { callerFile } from "./define.ts";
 import { defineApp, defineSite } from "./definitions.ts";
 import { type Connector, VENDOR } from "./op.ts";
-import { APPS_DIR, DATA_ENTRIES, inside, SECRET_ENTRIES } from "./paths.ts";
+import { APPS_DIR, DATA_ENTRIES, inside, SECRET_ENTRIES, SITE_ENTRIES } from "./paths.ts";
 import { DECLARED, type Declared, isObject, joinPath, type Resource, resourceTypesOf } from "./resource.ts";
 import { secret } from "./secret.ts";
 import { APP_NAME } from "./shared.ts";
@@ -95,8 +95,6 @@ export const madeOf = (value: unknown): Made | undefined =>
 
 /** Where `defineApp` comes from, served only to an app's `app.ts`. */
 const APP_ENTRIES: ReadonlySet<string> = new Set(["sanoma", "@sanoma-ai/workflows"]);
-/** Where `defineSite` comes from. */
-const SITE_ENTRIES: ReadonlySet<string> = new Set(["sanoma/site", "@sanoma-ai/app/site"]);
 
 /**
  * Loads `paths` (absolute, under `root`) as the generation of `root` and the constructors of
@@ -161,6 +159,27 @@ export function loadModules(
   return result;
 }
 
+/**
+ * What `answer` (a `loadModules` answer) gave for `file`: its exports, or the error it threw (or a
+ * helper it imports threw) as a problem on one line, at the file that threw it; undefined when the
+ * answer does not have the file.
+ */
+export function exportsOf(
+  answer: Map<string, Loaded>,
+  file: string,
+):
+  | { exports: [name: string, value: unknown][] }
+  | { problem: { file: string; line?: number; column?: number; message: string } }
+  | undefined {
+  const loaded = answer.get(file);
+  if (loaded === undefined) return undefined;
+  if ("failedIn" in loaded) return exportsOf(answer, loaded.failedIn);
+  if ("exports" in loaded) return loaded;
+  const { error, line, column } = loaded;
+  const message = (error instanceof Error ? error.message : String(error)).replaceAll(/\s*\n\s*/g, " ");
+  return { problem: { file, ...(line !== undefined && { line, column: column ?? 1 }), message } };
+}
+
 /** The generation each answer is of. */
 const answerGenerations = new WeakMap<Map<string, Loaded>, Generation>();
 
@@ -181,7 +200,10 @@ function loadOne(gen: Generation, file: string, rel: string): Loaded {
     const at = typeof error === "object" ? gen.reported.get(error) : undefined;
     if (at !== undefined) loaded = { failedIn: at };
     else {
-      const { file: own = rel, line, column } = placeOf(gen, error) ?? {};
+      const placed = placeOf(gen, error);
+      // Never over a file that loaded (a stack cut short at `Error.stackTraceLimit`): then it is this file's.
+      const there = placed && gen.loaded.get(placed.file);
+      const { file: own = rel, line, column } = there && "exports" in there ? {} : (placed ?? {});
       if (typeof error === "object") gen.reported.set(error, own);
       const report = { error, ...(line !== undefined && { line }), ...(column !== undefined && { column }) };
       gen.loaded.set(own, report);
@@ -196,15 +218,18 @@ function loadOne(gen: Generation, file: string, rel: string): Loaded {
 const TAGGED_FRAME = new RegExp(`(file://[^\\s()?]*)\\?${QUERY}=([\\w-]+):(\\d+):(\\d+)`, "g");
 
 /**
- * Where an error belongs: the first frame of its stack in one of the generation's files; for a
- * syntax error, the file and line its stack starts with (the caret's column); none for an error
+ * Where an error belongs: the last (outermost) frame of its stack in one of the generation's
+ * files, the top level of the file that was running, not a helper it called in another file; for
+ * a syntax error, the file and line its stack starts with (the caret's column); none for an error
  * thrown before any file ran (top-level `await`, an import Node cannot find).
  */
 function placeOf(gen: Generation, error: unknown): { file: string; line?: number; column?: number } | undefined {
   const stack = isObject(error) && typeof error.stack === "string" ? error.stack : undefined;
   if (stack === undefined) return undefined;
-  for (const [, url, tag, line, column] of stack.matchAll(TAGGED_FRAME)) {
-    if (tag === gen.id) return { file: relOf(gen, fileURLToPath(url!)), line: Number(line), column: Number(column) };
+  const frame = [...stack.matchAll(TAGGED_FRAME)].findLast(([, , tag]) => tag === gen.id);
+  if (frame) {
+    const [, url, , line, column] = frame;
+    return { file: relOf(gen, fileURLToPath(url!)), line: Number(line), column: Number(column) };
   }
   // A syntax error's stack starts `<path or URL>:<line>`, then the source and a caret under the column.
   const [first = "", ...lines] = stack.split("\n");

@@ -182,23 +182,19 @@ export function admit(
  * `<file>#<export>`; a binding no export declares is an orphan, unless its file failed to load.
  * Problems: the lockfile's, a binding of another type than its declaration's, two declarations
  * bound to one object, and several wakeups.
- *
- * `only` loads part of the files: those whose text it passes; in them, a resource of a type
- * outside `types` is left out rather than reported.
  */
 export function loadDataFiles(
   root: string | undefined,
   connectors: readonly Connector<any, any>[],
   types: ReadonlyMap<string, Resource> = resourceTypesOf(connectors),
-  only?: (text: string) => boolean,
 ): DataFiles {
   if (root === undefined) {
     const message =
       "The config has no root, so its data files cannot be found: make it with defineConfig, which records its file, or set its `root`";
     return { resources: [], bindings: {}, orphans: [], collections: [], problems: [{ message }] };
   }
-  const loaded = loadModules(root, dataFilesOf(root), connectors, { types, ...(only && { only }) });
-  return declarationsOf(root, loaded, types, readLockfile(root), only !== undefined);
+  const loaded = loadModules(root, dataFilesOf(root), connectors, { types });
+  return declarationsOf(root, loaded, types, readLockfile(root), false);
 }
 
 /** What the loaded data files declare, joined to the lockfile's bindings. */

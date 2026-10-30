@@ -199,6 +199,20 @@ describe("loadModules", () => {
     });
   });
 
+  it("places an error a helper throws at the file whose top level called it, keeping the helper's file", () => {
+    const root = company({
+      "resources/lib.ts": `${ACME}export const make = (name: unknown) => acme.widget({ name } as never);\nexport const good = make("good");\n`,
+      "resources/bad.ts": `import { make } from "./lib.ts";\n\nexport const bad = make(1);\n`,
+    });
+    const loaded = load(root, ["resources/bad.ts", "resources/lib.ts"]);
+    expect(loaded.get("resources/bad.ts")).toEqual({
+      error: expect.objectContaining({ message: expect.stringContaining("acme.widget") }),
+      line: 3,
+      column: 20,
+    });
+    expect(Object.keys(exportsOf(loaded, "resources/lib.ts"))).toEqual(["good", "make"]);
+  });
+
   it("places a syntax error at its line and column", () => {
     const root = company({ "resources/syntax.ts": `export const a = 1;\nexport const b = ;\n` });
     expect(load(root, ["resources/syntax.ts"]).get("resources/syntax.ts")).toEqual({

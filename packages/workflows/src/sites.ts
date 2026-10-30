@@ -5,8 +5,8 @@ import { childrenOf, keyName, type LintProblem, type Node, readSource, type Sour
 import { type CedarPolicySource, visitorPermits } from "./cedar.ts";
 import type { ConfigDescription, SiteCall, SiteEntry, SitePage } from "./description.ts";
 import { stringValue, unwrap } from "./outline.ts";
-import { loadModules } from "./load.ts";
-import { APPS_DIR, appFolders, filesUnder, isDirectory } from "./paths.ts";
+import { exportsOf, loadModules } from "./load.ts";
+import { APPS_DIR, appFolders, filesUnder, isDirectory, SITE_ENTRIES } from "./paths.ts";
 import type { ResourceProblem } from "./resources.ts";
 import { START } from "./schema.ts";
 import {
@@ -29,8 +29,6 @@ export type { SiteCall, SiteEntry, SitePage };
 
 /** Where a site's code is: its pages and its components. */
 const SITE_DIRS = ["routes", "components"];
-/** Where `api`, `RunForm` and `defineSite` come from: `sanoma/site`, which re-exports the app's. */
-const SITE_SOURCES: ReadonlySet<string> = new Set(["sanoma/site", "@sanoma-ai/app/site"]);
 const KIND_NAMES = { workflow: "workflow", collection: "collection", op: "operation" } as const;
 /** What a route's loader and head name its path's parameters by. */
 const PARAMS: ReadonlySet<string> = new Set(["params"]);
@@ -264,9 +262,9 @@ function readSiteFile(
   { program, at }: SourceFile,
   file: string,
 ): { uses: Written[]; route?: FileRoute; warning?: LintProblem & { file: string } } {
-  const api = importedAs(program, SITE_SOURCES, "api");
-  const runForm = importedAs(program, SITE_SOURCES, "RunForm");
-  const content = importedAs(program, SITE_SOURCES, "content");
+  const api = importedAs(program, SITE_ENTRIES, "api");
+  const runForm = importedAs(program, SITE_ENTRIES, "RunForm");
+  const content = importedAs(program, SITE_ENTRIES, "content");
   if (!api.size && !runForm.size && !file.includes("/routes/")) return { uses: [] };
   const found: Omit<Written, "page">[] = [];
   /** Each `content.<kind>.get(arg)`: its kind, its argument and where it is. */
@@ -447,17 +445,10 @@ function siteDefinitionOf(
 } {
   const file = `${dir}/site.ts`;
   if (!existsSync(join(root, file))) return { problems: [] };
-  const answer = loadModules(root, [join(root, file)], []);
-  let loaded = answer.get(file)!;
   // A helper it imports threw: said at the helper.
-  const at = "failedIn" in loaded ? loaded.failedIn : file;
-  if ("failedIn" in loaded) loaded = answer.get(loaded.failedIn)!;
-  if ("error" in loaded) {
-    const { error, line, column } = loaded;
-    const message = (error instanceof Error ? error.message : String(error)).replaceAll(/\s*\n\s*/g, " ");
-    return { problems: [{ file: at, ...(line !== undefined && { line, column: column ?? 1 }), message }] };
-  }
-  if (!("exports" in loaded)) return { problems: [] };
+  const loaded = exportsOf(loadModules(root, [join(root, file)], []), file);
+  if (loaded === undefined) return { problems: [] };
+  if ("problem" in loaded) return { problems: [loaded.problem] };
   const value = loaded.exports.find(([name]) => name === "default")?.[1];
   if (value === undefined) return { problems: [] };
   const problem = (message: string) => ({ file, export: "default", message });
