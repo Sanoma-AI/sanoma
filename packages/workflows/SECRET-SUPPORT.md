@@ -1,6 +1,6 @@
 # Secret storage and named-account support
 
-Support in the `sanoma` / `@sanoma-ai/workflows` 0.10 release line, with `@sanoma-ai/bridge` 0.5, its matching platform packages, and `@sanoma-ai/connector-neon` 0.2. Check installed package versions before relying on these capabilities. The client pins [provider-bridge v0.2.0](https://github.com/Sanoma-AI/provider-bridge/releases/tag/v0.2.0); the Go binary release alone does not update installed npm packages. Release and consumer verification are tracked in [#471](https://github.com/Sanoma-AI/sanoma/issues/471).
+Release checkpoint: `sanoma`, `@sanoma-ai/workflows` and `@sanoma-ai/app` **0.10.1**, `@sanoma-ai/connector-supabase` **0.4.9**, `@sanoma-ai/bridge` **0.5** with its matching platform packages, and `@sanoma-ai/connector-neon` **0.2**. Publication and consumer verification remain pending in [#471](https://github.com/Sanoma-AI/sanoma/issues/471); check installed versions before relying on these capabilities. The client pins [provider-bridge v0.2.0](https://github.com/Sanoma-AI/provider-bridge/releases/tag/v0.2.0); the Go binary release alone does not update installed npm packages. GCP provisioning and D1 runtime identity are separate work, outside this 0.10.1 checkpoint.
 
 ## Support matrix
 
