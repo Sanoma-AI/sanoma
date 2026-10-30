@@ -1,7 +1,7 @@
-import type { ApprovalState, Builtin, Effect, LedgerRecord, RecordedDecision } from "@sanoma-ai/workflows";
+import type { ApprovalState, Builtin, Effect, LedgerRecord, RecordedDecision, RunSummary } from "@sanoma-ai/workflows";
 import type { ResourceProblem } from "@sanoma-ai/workflows/describe";
 import { problemAt } from "@sanoma-ai/workflows/shared";
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useMatches, useRouter } from "@tanstack/react-router";
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/csr/ArrowSquareOut";
 import { CaretRightIcon } from "@phosphor-icons/react/dist/csr/CaretRight";
@@ -13,6 +13,7 @@ import { UserCheckIcon } from "@phosphor-icons/react/dist/csr/UserCheck";
 import {
   type ComponentProps,
   lazy,
+  type MouseEvent,
   type ReactElement,
   type ReactNode,
   type RefObject,
@@ -38,10 +39,10 @@ import { hasOneUrl } from "#/site-path.ts";
 import { useSites } from "#/lib/sites.ts";
 import { utcText } from "#/lib/time.ts";
 import { cn, plural } from "#/lib/utils.ts";
-import { APPROVAL_TONE, DECISION_TONE, type Tone } from "#/lib/tone.ts";
-import type { OpEntry } from "@sanoma-ai/workflows/describe";
+import { APPROVAL_TONE, DECISION_TONE, RUN_TONE, type Tone } from "#/lib/tone.ts";
+import type { OpEntry, SiteEntry } from "@sanoma-ai/workflows/describe";
 import { approverLabel, type Tier } from "@sanoma-ai/workflows/shared";
-import { configQuery, type SiteCaller } from "../queries.ts";
+import { appBehindQuery, configQuery, type SiteCaller } from "../queries.ts";
 import type { CodeProps } from "./code.tsx";
 import type { GraphProps } from "./graph.tsx";
 import { ButtonLink, effectBadge, Notice, PageHeader, type PageHeaderProps, Region, Tip, ToneBadge } from "./kit.tsx";
@@ -345,6 +346,27 @@ export function When({ at }: { at: number }) {
     <time dateTime={new Date(at).toISOString()} title={utc}>
       {clock === undefined ? utc : ago(at, clock)}
     </time>
+  );
+}
+
+/** A workflow's latest run: its status and how long ago it started, or `none` when it has never run. */
+export function LastRun({
+  run,
+  none = "-",
+}: {
+  run: Pick<RunSummary, "status" | "createdAt"> | undefined;
+  none?: string;
+}) {
+  if (!run) return <span className="text-muted-foreground">{none}</span>;
+  return (
+    <span className="flex items-center gap-2">
+      <ToneBadge tone={RUN_TONE[run.status]} dot>
+        {run.status}
+      </ToneBadge>
+      <span className="text-muted-foreground">
+        <When at={run.createdAt} />
+      </span>
+    </span>
   );
 }
 
@@ -681,6 +703,55 @@ export function UsedByList({ workflows = [], sites = [] }: UsedByProps) {
         );
       })}
     </ItemGroup>
+  );
+}
+
+/**
+ * A site by its title (its name when it has none), linking to its first page this build serves
+ * with one URL; plain text when there is none (a build without the site's routes, a site whose
+ * every page has a path parameter).
+ */
+export function SiteLink({
+  site,
+  onClick,
+}: {
+  site: Pick<SiteEntry, "name" | "title" | "pages">;
+  /** For a link in a row that opens something else: `stopPropagation`. */
+  onClick?: (event: MouseEvent) => void;
+}) {
+  const { routesByPath } = useRouter();
+  const page = site.pages.find(({ path }) => hasOneUrl(path) && path in routesByPath);
+  const title = site.title ?? site.name;
+  return page ? (
+    <Link to={page.path} onClick={onClick}>
+      {title}
+    </Link>
+  ) : (
+    <>{title}</>
+  );
+}
+
+/**
+ * How many commits a taken app's source has that the repo lacks: a fetch, read by the page after
+ * it shows (never on the server's render), so a slow or unreachable source holds nothing up.
+ */
+export function AppBehind({ folder }: { folder: string }) {
+  const { data } = useQuery(appBehindQuery(folder));
+  if (data === undefined) return <Skeleton className="h-5 w-24" />;
+  if ("error" in data) {
+    // A failed fetch's message can run long: a line of it, the rest on hover.
+    return (
+      <span className="max-w-72 truncate text-sm text-muted-foreground" title={data.error}>
+        {data.error}
+      </span>
+    );
+  }
+  return data.behind === 0 ? (
+    <span className="text-sm text-muted-foreground">Up to date</span>
+  ) : (
+    <ToneBadge tone="waiting" dot>
+      {plural(data.behind, "commit")} behind
+    </ToneBadge>
   );
 }
 

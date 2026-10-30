@@ -13,11 +13,11 @@ import { Input } from "#/components/ui/input.tsx";
 import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/components/ui/table.tsx";
 import { countByWorkflow, usePending } from "#/lib/inbox.ts";
-import { RUN_TONE } from "#/lib/tone.ts";
 import { RUNS_LIMIT } from "../../api.ts";
 import {
   ButtonLink,
   CrumbHeader,
+  LastRun,
   LinkTab,
   LinkTabs,
   Nothing,
@@ -26,7 +26,6 @@ import {
   plural,
   ToneBadge,
   VendorLogo,
-  When,
 } from "../../components/common.tsx";
 import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
 import { ChatButton } from "../../components/chat-button.tsx";
@@ -313,18 +312,7 @@ const WorkflowRow = memo(function WorkflowRow({
         </div>
       </TableCell>
       <TableCell>
-        {last ? (
-          <span className="flex items-center gap-2">
-            <ToneBadge tone={RUN_TONE[last.status]} dot>
-              {last.status}
-            </ToneBadge>
-            <span className="text-muted-foreground">
-              <When at={last.createdAt} />
-            </span>
-          </span>
-        ) : (
-          <span className="text-muted-foreground">-</span>
-        )}
+        <LastRun run={last} />
       </TableCell>
       <TableCell className="text-right">
         {waiting > 0 ? (

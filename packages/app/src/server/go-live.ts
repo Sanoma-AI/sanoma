@@ -516,7 +516,7 @@ export async function goLive(app: AppContext, actor: Principal, choices: GoLiveR
 }
 
 const writtenAlready = () =>
-  new ApiError(409, { error: `${INFRA} is written already: change it in the file, and apply from Resources` });
+  new ApiError(409, { error: `${INFRA} is written already: change it in the file, and apply from Hosting` });
 
 /**
  * The token a push to `repo` signs in with, from the GitHub connector's remote half: the stored

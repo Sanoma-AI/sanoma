@@ -1,16 +1,16 @@
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { ClientOnly, Link, trimPathRight, useRouterState } from "@tanstack/react-router";
 import type { Icon as PhosphorIcon } from "@phosphor-icons/react";
-import { CubeIcon } from "@phosphor-icons/react/dist/csr/Cube";
+import { CloudIcon } from "@phosphor-icons/react/dist/csr/Cloud";
 import { GitPullRequestIcon } from "@phosphor-icons/react/dist/csr/GitPullRequest";
 import { KeyIcon } from "@phosphor-icons/react/dist/csr/Key";
 import { PlugIcon } from "@phosphor-icons/react/dist/csr/Plug";
-import { RocketIcon } from "@phosphor-icons/react/dist/csr/Rocket";
 import { SparkleIcon } from "@phosphor-icons/react/dist/csr/Sparkle";
 import { SquaresFourIcon } from "@phosphor-icons/react/dist/csr/SquaresFour";
 import { TableIcon } from "@phosphor-icons/react/dist/csr/Table";
 import { TrayIcon } from "@phosphor-icons/react/dist/csr/Tray";
 import { TreeStructureIcon } from "@phosphor-icons/react/dist/csr/TreeStructure";
+import { UsersIcon } from "@phosphor-icons/react/dist/csr/Users";
 import { ListIcon } from "@phosphor-icons/react/dist/csr/List";
 import { Fragment, type ReactNode, useState } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
@@ -48,14 +48,17 @@ const WORK: Section[] = [
   { to: "/workflows", label: "Workflows", icon: TreeStructureIcon },
 ];
 
-/** How the company is set up. Data's page leads to the Sites page too, and is lit there. */
+/**
+ * How the company is set up, by purpose. Data's page leads to the Sites page too, and is lit
+ * there; Hosting is where it runs, and going live while it runs nowhere yet.
+ */
 const SETUP: Section[] = [
   { to: "/data", label: "Data", icon: TableIcon, when: "data", also: "/sites" },
-  { to: "/resources", label: "Resources", icon: CubeIcon },
+  { to: "/people", label: "People", icon: UsersIcon },
+  { to: "/hosting", label: "Hosting", icon: CloudIcon },
   { to: "/connectors", label: "Connectors", icon: PlugIcon },
   { to: "/apps", label: "Apps", icon: SquaresFourIcon },
   { to: "/permissions", label: "Permissions", icon: KeyIcon, when: "policy" },
-  { to: "/setup", label: "Go live", icon: RocketIcon },
 ];
 
 /** What the bar reads from the config: whether it has collections and a policy, and which sites are public. */

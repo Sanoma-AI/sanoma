@@ -1,8 +1,9 @@
 import { randomBytes } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { github as githubConnector } from "@sanoma-ai/connector-github";
 import { supabase } from "@sanoma-ai/connector-supabase";
 import { ensureBuilt, testDatabaseUrl } from "@sanoma-ai/testing";
 import { fakeHost } from "@sanoma-ai/testing/host";
@@ -17,9 +18,10 @@ import { type App, startApp } from "../src/index.ts";
 import type { AppContext } from "../src/context.ts";
 import { loopbackLogin } from "../src/loopback.ts";
 import { admitting } from "../src/login/admission.ts";
+import { barLink } from "./bar-helpers.ts";
 import { GITHUB_APP, githubManifest, mintWakeupToken, setSetupToken, setupStatus } from "../src/server/setup.ts";
 
-// Connecting GitHub and the vendors (/setup/connect): the GitHub App's manifest page, its callback
+// Connecting GitHub and the vendors (/hosting/connect): the GitHub App's manifest page, its callback
 // against a GitHub of msw handlers, the keys stored encrypted, and the status the page shows.
 // Needs Postgres and the built app, as app.test.ts does.
 
@@ -169,11 +171,11 @@ describe("creating the GitHub App", () => {
     expect(`${action.origin}${action.pathname}`).toBe("https://github.com/organizations/acme-co/settings/apps/new");
     const bad = await get("/setup/github/manifest?org=acme%2F..");
     expect(bad.status).toBe(303);
-    expect(bad.headers.get("location")).toBe("/setup/connect?github=bad-org");
+    expect(bad.headers.get("location")).toBe("/hosting/connect?github=bad-org");
     // Nobody asking: the keys could be stored as no one, so GitHub is not asked.
     const nobody = await get("/setup/github/manifest");
     expect(nobody.status).toBe(303);
-    expect(nobody.headers.get("location")).toBe("/setup/connect?github=nobody");
+    expect(nobody.headers.get("location")).toBe("/hosting/connect?github=nobody");
   });
 
   it("refuses a callback whose state is not the cookie's, or whose cookie is not signed here, asking GitHub nothing", async () => {
@@ -187,7 +189,7 @@ describe("creating the GitHub App", () => {
     ] as const) {
       const res = await get(`/setup/github/callback?${query}`, sent);
       expect(res.status).toBe(303);
-      expect(res.headers.get("location")).toBe("/setup/connect?github=expired");
+      expect(res.headers.get("location")).toBe("/hosting/connect?github=expired");
     }
     expect(conversions).toEqual([]);
     expect((await setupStatus(ctx)).githubApp).toBeNull();
@@ -197,7 +199,7 @@ describe("creating the GitHub App", () => {
     const cookie = stateCookie(await get("/setup/github/manifest", AS_ALICE));
     const state = cookie.split("=")[1]!.split(".")[0]!;
     const res = await get(`/setup/github/callback?code=stale&state=${state}`, cookie);
-    expect(res.headers.get("location")).toBe("/setup/connect?github=failed");
+    expect(res.headers.get("location")).toBe("/hosting/connect?github=failed");
     expect(conversions).toEqual(["stale"]);
   });
 
@@ -206,7 +208,7 @@ describe("creating the GitHub App", () => {
     const state = cookie.split("=")[1]!.split(".")[0]!;
     const res = await get(`/setup/github/callback?code=good&state=${state}`, cookie);
     expect(res.status).toBe(303);
-    expect(res.headers.get("location")).toBe("/setup/connect?github=connected");
+    expect(res.headers.get("location")).toBe("/hosting/connect?github=connected");
     // The state cookie is used once.
     expect(stateCookie(res)).toBe("sanoma_setup_state=");
 
@@ -242,17 +244,19 @@ describe("the connect page", () => {
     const { tokens } = await setupStatus(ctx);
     expect(tokens[1]).toMatchObject({ name: "SUPABASE_ACCESS_TOKEN", status: "set", source: "stored", setBy: "alice" });
 
-    const page = await (await get("/setup/connect?github=connected")).text();
+    // An old link to /setup/connect goes on to Hosting's Connect page.
+    expect((await get("/setup/connect?github=connected")).headers.get("location")).toBe(
+      "/hosting/connect?github=connected",
+    );
+    const page = await (await get("/hosting/connect?github=connected")).text();
     const text = page.replaceAll("<!-- -->", "");
     expect(text).toContain("<code>sanoma-acme</code>");
     expect(text).toContain(`href="https://github.com/apps/sanoma-acme/installations/new"`);
     expect(text).toContain("The GitHub App is created and its keys are stored.");
     expect(text).toMatch(/<code>SUPABASE_ACCESS_TOKEN<\/code>.*?>set<.*?set by alice/);
     expect(text).toMatch(/<code>GITHUB_TOKEN<\/code>.*?>missing</);
-    // Go live, in the bar, leads to the Go live page, whose first step this is.
-    expect(page).toMatch(
-      /<nav aria-label="Sections"[^>]*>(?:(?!<\/nav>)[\s\S])*<a [^>]*href="\/setup"[^>]*>(?:(?!<\/a>)[\s\S])*Go live<\/a>/,
-    );
+    // Hosting, in the bar, is lit: going live is its state while nothing is declared to run on.
+    expect(barLink(page, "/hosting")).toContain('data-active="true"');
     for (const value of ["sbp_madeup", KEYS.client_secret, KEYS.webhook_secret, "made-up"]) {
       expect(page).not.toContain(value);
     }
@@ -366,5 +370,93 @@ describe("Connect Cloudflare and Neon", () => {
     await expect(setSetupToken(ctx, { id: "alice" }, { name: "NEON_API_KEY", value: "napi_madeup" })).rejects.toThrow(
       /not a setup token/,
     );
+  });
+});
+
+/** A page of an app, as the browser gets it from the server: React's text separators left out. */
+const html = async (path: string, url = app.url) =>
+  (await (await fetch(new URL(path, url))).text()).replaceAll("<!-- -->", "");
+
+describe("Hosting", () => {
+  it("shows going live's steps while no host and no database are declared, and none of the people", async () => {
+    const page = await html("/hosting");
+    expect(page).toMatch(/<h1[^>]*>Hosting<\/h1>/);
+    expect(page).toContain(">1. Connect</h2>");
+    expect(page).toContain(">2. Choose where it goes</h2>");
+    expect(page).toContain('href="/hosting/connect"');
+    // alice is on People, not here; nothing else is declared.
+    expect(page).not.toContain("resources%2Fpeople.ts%23alice");
+    expect(page).not.toContain(">Other resources</h2>");
+    expect(barLink(page, "/hosting")).toContain('aria-current="page"');
+    const people = await html("/people");
+    expect(people).toMatch(/<h1[^>]*>People<span[^>]*>1<\/span><\/h1>/);
+    expect(people).toContain('href="/hosting?resource=resources%2Fpeople.ts%23alice"');
+  });
+
+  it("puts the repository the host clones, the database and the host in cards, every other resource under Other resources, and going live again until the host is applied", async () => {
+    const live = mkdtempSync(join(tmpdir(), "sanoma-hosting-"));
+    mkdirSync(join(live, "resources", "sanoma"), { recursive: true });
+    writeFileSync(
+      join(live, "resources", "sanoma", "infra.ts"),
+      `import { github } from "@sanoma-ai/connector-github/resources";
+import { supabase } from "@sanoma-ai/connector-supabase/resources";
+import { testhost } from "@sanoma-ai/testing-host/resources";
+import { secret } from "sanoma/resources";
+
+export const docs = github.repository({ owner: "acme", name: "acme-docs" });
+export const repo = github.repository({ owner: "acme", name: "acme-ops", visibility: "private" });
+export const store = supabase.project({
+  name: "acme-ops",
+  region: "eu-west-1",
+  organization_id: "acme-org",
+  database_password: secret("SUPABASE_DB_PASSWORD", { generate: true }),
+});
+export const host = testhost.app({ name: "acme-ops", source: repo, ref: "main", port: 8080 });
+`,
+    );
+    writeFileSync(join(live, "resources", "people.ts"), readFileSync(join(root, "resources", "people.ts")));
+    const host = fakeHost(() => Promise.reject(new Error("not started here")));
+    const hosted = await startApp(
+      defineConfig({ ...config, connectors: [githubConnector, supabase, host.connector], root: live }),
+      { port: 0 },
+    );
+    try {
+      const page = await html("/hosting", hosted.url);
+      /** A slot's card: from its heading to the next card's. */
+      const card = (title: string) => page.match(new RegExp(`<h2>${title}</h2>(?:(?!<h2>)[\\s\\S])*`))?.[0];
+      // The repository is the one the host clones, not the first declared.
+      expect(card("Repository")).toContain(">acme/acme-ops<");
+      expect(card("Repository")).toContain("github.repository");
+      expect(card("Repository")).toMatch(/>visibility<.*?>private</s);
+      expect(card("Database")).toContain("supabase.project");
+      expect(card("Database")).toMatch(/>region<.*?>eu-west-1</s);
+      expect(card("Host")).toContain("testhost.app");
+      expect(card("Host")).toMatch(/>port<.*?>8080</s);
+      // The other repository under Other resources; no people, and no going live.
+      expect(page).toContain(">Other resources</h2>");
+      expect(page).toContain('href="/hosting?resource=resources%2Fsanoma%2Finfra.ts%23docs"');
+      expect(page).not.toContain("resources%2Fpeople.ts%23alice");
+      expect(page).not.toContain(">1. Connect</h2>");
+    } finally {
+      await hosted.close();
+    }
+    // Going live part-way, its repository applied and its host not yet (a restart in between):
+    // its steps show again, since only they push the repository and apply the host.
+    writeFileSync(
+      join(live, "resources", "sanoma.lock.json"),
+      JSON.stringify({ "resources/sanoma/infra.ts#repo": { type: "github.repository", id: "R_kgDOrepo0001" } }),
+    );
+    const resumed = await startApp(
+      defineConfig({ ...config, connectors: [githubConnector, supabase, host.connector], root: live }),
+      { port: 0 },
+    );
+    try {
+      const page = await html("/hosting", resumed.url);
+      expect(page).toContain(">1. Connect</h2>");
+      expect(page).toContain("<h2>Repository</h2>");
+    } finally {
+      await resumed.close();
+      rmSync(live, { recursive: true, force: true });
+    }
   });
 });
