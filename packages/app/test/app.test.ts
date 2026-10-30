@@ -36,6 +36,7 @@ import {
   ACTOR_HEADER,
   ACTOR_KEY,
   ApiError,
+  AppConfigSchema,
   ClearCredentialRequest,
   DecideCall,
   type ErrorResponse,
@@ -459,7 +460,13 @@ describe("the server functions", () => {
     expect(JSON.stringify(body)).not.toContain(ctx.resolved.databaseUrl);
     expect(body.appName).toBe("sanoma");
     expect(body.version).toMatch(/^sanoma@/);
-    expect(body.policy).toEqual({ defined: true, version: expect.stringMatching(/^[0-9a-f]{12}$/) });
+    expect(body.policy).toEqual({
+      defined: true,
+      version: expect.stringMatching(/^[0-9a-f]{12}$/),
+      files: [expect.objectContaining({ file: expect.stringMatching(/\.cedar$/) })],
+    });
+    // What the page reads holds to the schema it is typed by.
+    expect(AppConfigSchema.parse(body)).toEqual(body);
     const wf = body.workflows.find((w) => w.name === "announce");
     expect(wf?.ops).toHaveLength(5);
     expect(wf?.ops).toEqual(expect.arrayContaining(["ghost.post.publish", "resend.broadcast.send"]));
@@ -2314,9 +2321,12 @@ describe("an app whose drivers declare environment variables", () => {
     expect((await page("/connectors/resend", declaring.url)).html).not.toMatch(/>Credentials</);
   });
 
-  it("carries the statuses in getCredentials, not the config's description, never a value", async () => {
+  it("carries the statuses in getCredentials; the config's description names the variables alone; never a value", async () => {
     const body = withoutSources(declaringCtx.description);
-    expect(body.vendors.ghost).not.toHaveProperty("credentials");
+    expect(body.vendors.ghost?.credentials).toEqual([
+      { name: URL_VAR, description: "the made-up site's URL" },
+      { name: KEY_VAR, description: "a made-up key" },
+    ]);
     const found = await statuses();
     expect(Object.keys(found)).toEqual(["ghost"]);
     expect(found.ghost).toEqual([

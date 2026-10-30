@@ -58,6 +58,7 @@ import {
   startRunSchema,
 } from "../api.ts";
 import type { AppContext } from "../context.ts";
+import { contentFields } from "../content-files.ts";
 import { databaseHost, LOOPBACK } from "../loopback.ts";
 import { secretValues } from "./secrets.ts";
 
@@ -126,11 +127,15 @@ export const validate =
 export const readStartRun = (data: StartRunRequest): StartRunRequest =>
   parse(startRunSchema(data), data, "The request");
 
-/** What `getConfig` answers (`AppConfig`): the description `withoutSources`, and where this instance is. */
+/**
+ * What `getConfig` answers (`AppConfig`): the description `withoutSources`, where this instance
+ * is, and the content kinds as they are now (`contentFields`).
+ */
 export const appConfig = (app: AppContext): AppConfig => ({
   ...withoutSources(app.description),
   place: app.place,
   databaseHost: databaseHost(app.resolved.databaseUrl),
+  content: app.resolved.root === undefined ? [] : contentFields(app.resolved.root),
 });
 
 /**
@@ -529,17 +534,14 @@ const grids = new WeakMap<object, PermissionsResponse>();
 /**
  * The Permissions page's grid (`getPermissions`): the policy, its grid (`permissionsGrid`, the
  * one `sanoma check` reports too: nobody's own answer, the actor asking is not used), then the
- * policy's files as the app read them when it started (`sourcesOf`).
+ * policy's files as the description read them as the app started (`policy.files`, `sourcesOf`).
  */
-export function permissions(app: Pick<AppContext, "resolved" | "description" | "policyFiles">): PermissionsResponse {
+export function permissions(app: Pick<AppContext, "resolved" | "description">): PermissionsResponse {
   let grid = grids.get(app.resolved);
   if (!grid) {
-    const { resolved, description, policyFiles } = app;
-    grid = {
-      policy: description.policy,
-      ...permissionsGrid(resolved, description),
-      files: sourcesOf(policyFiles ?? []),
-    };
+    const { resolved, description } = app;
+    const { files, ...policy } = description.policy;
+    grid = { policy, ...permissionsGrid(resolved, description), files: sourcesOf(files) };
     grids.set(resolved, grid);
   }
   return grid;

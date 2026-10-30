@@ -1,4 +1,4 @@
-import type { ConnectionRef } from "./connection.ts";
+import type { DeclaredCollection, DeclaredResource, ResourceProblem } from "./description.ts";
 import { readFileSync } from "node:fs";
 import { relative, sep } from "node:path";
 import { mayDeclarePeople } from "./change.ts";
@@ -28,66 +28,7 @@ import {
   VISITORS,
 } from "./shared.ts";
 
-/** A resource a data file declares, as loading the file made it. */
-export interface DeclaredResource {
-  /** `<file>#<export>`, the file relative to the config's root, with `/`: `resources/identity/github.ts#website`. */
-  id: string;
-  /** The data file it is declared in, as `id` names it: `resources/identity/github.ts`. */
-  file: string;
-  vendor: string;
-  type: string;
-  /** What people call it: its identity, else its export's name. */
-  name: string;
-  /** The import id that finds it unbound: what its type's `find` makes of its fields; absent when the type has none. */
-  identity?: string;
-  /** The vendor's id of the object the lockfile binds it to (`LOCKFILE`); absent when unbound. */
-  binding?: string;
-  /** Its file and export. */
-  at: At;
-  /** Its fields, as its type checked them: each resource it names as that resource's `name`. */
-  desired: Record<string, unknown>;
-  connection?: ConnectionRef;
-  /**
-   * Where it names another declared resource: the field's dotted path (a list item's with its
-   * index, `teams.0`) to that resource's id.
-   */
-  refs: Record<string, string>;
-}
-
-/**
- * A collection `resources/data.ts` declares: where it is, for the Resources page. Its fields are
- * the collection's own (`describeConfig`'s `collections`), from the same file, which the runtime
- * imports.
- */
-export interface DeclaredCollection {
-  /** `<file>#<export>`, as a resource's: `resources/data.ts#outbound`. */
-  id: string;
-  /** `resources/data.ts`, or an app's `apps/<app>/resources/data.ts`. */
-  file: string;
-  /** The collection's name, its operations' middle segments (`data.<name>.get`): an app's with its app, `crm.contacts`. */
-  name: string;
-  /** Its file and export. */
-  at: At;
-}
-
-/**
- * Something wrong in a company's files (a data file, an app's `app.ts`, a site's `site.ts`), or in
- * finding them: at a place in the file when an error's stack gives one, else at an export.
- */
-export interface ResourceProblem {
-  /**
-   * The file, relative to the config's root, with `/`: `resources/identity/github.ts`. Absent
-   * when the problem is the config's: it has no root.
-   */
-  file?: string;
-  /** The export it is about: `website`, or `default`. */
-  export?: string;
-  /** From 1. */
-  line?: number;
-  /** From 1, in UTF-16 code units. */
-  column?: number;
-  message: string;
-}
+export type { DeclaredCollection, DeclaredResource, ResourceProblem };
 
 /** What the data files declare: each resource read without problems, the lockfile's bindings, and the problems. */
 export interface DataFiles {

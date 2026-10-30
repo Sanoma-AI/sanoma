@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { parseSync, visitorKeys } from "oxc-parser";
+import type { LintProblem } from "./description.ts";
 import { errorMessage } from "./shared.ts";
 
 // What the lints, the outline and the data-file reader share: one way to parse a file, walk it
@@ -68,12 +69,7 @@ export function offsetOf(lineStarts: readonly number[], line: number, column: nu
   return offset < next - 1 ? offset : undefined;
 }
 
-/** Something wrong in a file, at a line and column from 1. */
-export interface LintProblem {
-  line: number;
-  column: number;
-  message: string;
-}
+export type { LintProblem };
 
 /** A file parsed, its syntax errors as problems, and offsets as lines and columns from 1. */
 export function parsed(source: string, filename: string) {

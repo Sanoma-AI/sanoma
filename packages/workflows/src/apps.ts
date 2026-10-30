@@ -2,28 +2,19 @@ import { existsSync, readdirSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { z } from "zod";
 import { childrenOf, type Node, readSource } from "./ast.ts";
+import type { AppEntry } from "./description.ts";
 import { type Loaded, loadModules } from "./load.ts";
 import { stringValue } from "./outline.ts";
 import { APPS_DIR, filesUnder, inside, isDirectory, RELATIVE } from "./paths.ts";
 import type { ResourceProblem } from "./resources.ts";
-import { APP_NAME, type At } from "./shared.ts";
+import { APP_NAME } from "./shared.ts";
 
 // A company's apps: each folder of `apps/` holds the kinds the root does (workflows, resources,
 // policies, scenarios, sites), merged from a source repository whose URL its `app.ts` names, or
 // made here. What a folder declares is named with the folder (`qualified`): never written, read
 // from where the declaration's file is (`appOfFile`).
 
-/** An app: a folder of `apps/`, by its name, and the source repository its `app.ts` names. */
-export interface AppEntry {
-  /** The folder's name, which prefixes what it declares (`crm.contacts`) and is the app's title. */
-  name: string;
-  /** The folder, relative to the root, with `/`: `apps/crm`. */
-  dir: string;
-  /** `defineApp({ source })` in its `app.ts`: the repository it was taken from; absent for the company's own app. */
-  source?: string;
-  /** Its `app.ts`'s default export, when it has the file. */
-  at?: At;
-}
+export type { AppEntry };
 
 /** What is wrong with a company's apps, at a file relative to the root. */
 export type AppProblem = ResourceProblem & { file: string };

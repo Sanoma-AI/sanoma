@@ -20,11 +20,7 @@ export type {
 } from "./resource.ts";
 export type { DeclaredResource, ResourceProblem } from "./resources.ts";
 
-/** Where a declaration is: its file, relative to the root with `/`, and the export that holds it (`default` for a default export). */
-export interface At {
-  file: string;
-  export: string;
-}
+export type { At } from "./description.ts";
 export type { DriftField, DriftReport, DriftResult, DriftStatus } from "./drift.ts";
 export type { ApplyPlan, ApplyReport, ApplyResult, PlanAnswer, PlanStep } from "./apply.ts";
 export type { CredentialStatus } from "./env.ts";

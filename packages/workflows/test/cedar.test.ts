@@ -800,13 +800,13 @@ export const finance = sanoma.group({ name: "finance", members: [ada] });
     expect(policyProblems).toEqual([]);
     expect(cedar.version).toMatch(/^[0-9a-f]{12}$/);
     expect(await cedar(refundCall(2_000_000, "bo"))).toMatchObject({ kind: "approve", approver: { group: "finance" } });
-    expect(describeConfig(at(root)).policy).toEqual({ defined: true, version: cedar.version });
+    expect(describeConfig(at(root)).policy).toEqual({ defined: true, version: cedar.version, files: [FILES[0]] });
   });
 
   it("is allowAll for a root with no policies, which describeConfig says it has not", () => {
     const root = rootWith({ "resources/people.ts": peopleFile });
     expect(resolveConfig(at(root))).toMatchObject({ policy: allowAll, policyProblems: [] });
-    expect(describeConfig(at(root)).policy).toEqual({ defined: false });
+    expect(describeConfig(at(root)).policy).toEqual({ defined: false, files: [] });
   });
 
   it("refuses every call, start and preview while the policies have a problem, naming the first", async () => {
@@ -823,7 +823,7 @@ when { context.input.amont > 5 };
     expect(await refusing(refundCall(5, "ada"))).toEqual({ kind: "deny", reason });
     expect(refusing.start({ id: "ada" }, "refund", { amount: 5 })).toEqual({ kind: "deny", reason });
     expect(refusing.preview([ask("ada", "shop.refunds.create")])).toEqual([{ answer: "deny" }]);
-    expect(describeConfig(at(root)).policy).toEqual({ defined: true, problems: policyProblems });
+    expect(describeConfig(at(root)).policy).toMatchObject({ defined: true, problems: policyProblems });
     // A worker on it starts, and says why it refuses everything.
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {

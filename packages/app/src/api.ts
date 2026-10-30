@@ -13,6 +13,7 @@ import type {
   RunSummary,
 } from "@sanoma-ai/workflows";
 import type { ConfigDescription, PermissionsGrid, Span } from "@sanoma-ai/workflows/describe";
+import { ConfigDescriptionSchema } from "@sanoma-ai/workflows/description";
 import type { Check, Scenario } from "@sanoma-ai/workflows/scenario";
 import { EFFECTS, RUN_STATUSES } from "@sanoma-ai/workflows/shared";
 import { z } from "zod";
@@ -21,7 +22,8 @@ import { z } from "zod";
  * The shapes the app's server functions take and return. The page imports this file too, so
  * the server and the browser agree on them. Only types come from
  * `@sanoma-ai/workflows`, so the browser bundle never loads the runtime; values the page shares
- * with the runtime come from `@sanoma-ai/workflows/shared`.
+ * with the runtime come from `@sanoma-ai/workflows/shared`, and the description's schema from
+ * `@sanoma-ai/workflows/description`.
  */
 
 /**
@@ -39,15 +41,22 @@ export const ACTOR_COOKIE = "sanoma_actor";
 /** Where the page keeps the name in this browser's storage, which the header is sent from. */
 export const ACTOR_KEY = "sanoma.actor";
 
+const PlaceSchema = z.enum(["this-computer", "live"]);
 /** What the open window is, from what this instance connects to; never a flag (`placeOf`). */
-export type Place = "this-computer" | "live";
+export type Place = z.infer<typeof PlaceSchema>;
 
 /**
  * What `getConfig` answers: the description, less the workflows' sources, and where this instance
  * is: its `place`, and its database's host (only the host, never the URL; none when it cannot be
- * read), which the bar's badge says as its tip.
+ * read), which the bar's badge says as its tip; and the repo's content kinds, each with the front
+ * matter keys its files hold (`contentFields`).
  */
-export type AppConfig = ConfigDescription & { place: Place; databaseHost?: string };
+export const AppConfigSchema = ConfigDescriptionSchema.extend({
+  place: PlaceSchema,
+  databaseHost: z.string().optional(),
+  content: z.array(z.strictObject({ kind: z.string(), fields: z.array(z.string()) })),
+});
+export type AppConfig = z.infer<typeof AppConfigSchema>;
 
 /**
  * Who the server says is asking. With a login provider (`fromServer`), it is whoever signed in,
@@ -444,7 +453,7 @@ export type { PermissionsRow } from "@sanoma-ai/workflows/describe";
  * files, its source.
  */
 export interface PermissionsResponse extends PermissionsGrid {
-  policy: ConfigDescription["policy"];
+  policy: Omit<ConfigDescription["policy"], "files">;
   /**
    * Each `policies/**\/*.cedar` file by path, its text with `\n` line endings, and each policy in
    * it (a rule's `id`) with its `span` in that text; none when the root has no policies.

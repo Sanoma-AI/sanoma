@@ -47,10 +47,10 @@ const EXTERNAL = [...RUNTIME, ...OWN];
 const isIn = (names: string[], id: string) => names.some((name) => id === name || id.startsWith(`${name}/`));
 
 // The browser bundle may import only types from the runtime (DBOS, Postgres), and the values of
-// `@sanoma-ai/workflows/shared`. `import type` is erased before resolution, so anything else of
-// these reaching the client is a mistake: fail, in dev as in the build. (Start adds these to its
-// own denials, and to the modules marked server-only, such as server/core.ts.)
-const CLIENT_DENIED = /^(@sanoma-ai\/(workflows(?!\/shared$)|bridge|connector-|testing)|@dbos-inc\/|pg$)/;
+// `@sanoma-ai/workflows/shared` and `/description` (zod alone). `import type` is erased before
+// resolution, so anything else of these reaching the client is a mistake: fail, in dev as in the
+// build. (Start adds these to its own denials, and to the modules marked server-only, such as server/core.ts.)
+const CLIENT_DENIED = /^(@sanoma-ai\/(workflows(?!\/(shared|description)$)|bridge|connector-|testing)|@dbos-inc\/|pg$)/;
 
 /** What a company file may import without the company depending on it: the app's own copy, so there is one. */
 const SHARED = /^(react|react-dom|@tanstack\/[^/]+|@sanoma-ai\/app)(\/.*)?$/;

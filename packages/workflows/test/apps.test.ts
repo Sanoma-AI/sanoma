@@ -180,7 +180,9 @@ describe("apps", () => {
         problems: [],
       },
     ]);
-    expect(description.policy).toEqual({ defined: true, version: expect.any(String) });
+    expect(description.policy).toEqual({ defined: true, version: expect.any(String), files: expect.any(Array) });
+    // An app's policy files are the description's too, as read: the Permissions page and the app's page show them.
+    expect(description.policy.files.map(({ file }) => file)).toEqual(["apps/crm/policies/crm.cedar"]);
     expect(description.problems).toEqual([]);
   });
 

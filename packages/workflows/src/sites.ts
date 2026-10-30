@@ -4,7 +4,7 @@ import { z } from "zod";
 import { childrenOf, type LintProblem, type Node, readSource, type SourceFile } from "./ast.ts";
 import { type CedarPolicySource, visitorPermits } from "./cedar.ts";
 import { keyName } from "./datafile.ts";
-import type { ConfigDescription } from "./describe.ts";
+import type { ConfigDescription, SiteCall, SiteEntry, SitePage } from "./description.ts";
 import { stringValue, unwrap } from "./outline.ts";
 import { loadModules } from "./load.ts";
 import { APPS_DIR, appFolders, filesUnder, isDirectory } from "./paths.ts";
@@ -12,7 +12,6 @@ import type { ResourceProblem } from "./resources.ts";
 import { START } from "./schema.ts";
 import {
   ANONYMOUS,
-  type At,
   apiNameOf,
   BUILT_IN_WORKFLOWS,
   DATA_VENDOR,
@@ -27,94 +26,7 @@ import {
 // browser code, the site's outline): the reverse index a workflow's page shows as Used by, and
 // the names `sanoma check` holds to the config. A site's `site.ts` is loaded.
 
-/** A call a site makes, as written in its source. */
-export interface SiteCall {
-  /** What it calls: a workflow, a collection (`api.data.<name>.<op>`) or an operation (`api.<vendor>.<resource>.<op>`). */
-  kind: "workflow" | "collection" | "op";
-  /**
-   * The workflow's name (`RunForm`'s `workflow`, or the workflow whose `apiNameOf` is the name
-   * `api` gives; that name itself when none is), the collection's name, or the operation's id.
-   */
-  target: string;
-  /**
-   * What it calls of the workflow (`start`, or a read of its runs: `result`, `latest`, …) or the
-   * collection (`list`, `save`, …), as written; absent for a workflow called as itself or by
-   * `RunForm`, which starts it, and for an operation.
-   */
-  method?: string;
-  /** `<RunForm workflow="…" />` or a call on `api`, from `sanoma/site`. */
-  via: "RunForm" | "api";
-  /** The file, relative to the config's root, with `/`: `sites/sales/routes/index.tsx`. */
-  file: string;
-  /** From 1. */
-  line: number;
-  /** From 1, in UTF-16 code units. */
-  column: number;
-  /**
-   * The path of the page the file is, from its `createFileRoute` (or `createLazyFileRoute`) id: groups and pathless
-   * segments left out, no trailing slash (`/sites/sales`). Absent for a file that is no page,
-   * such as a component's.
-   */
-  page?: string;
-}
-
-/** A page of a site: a route file's path, and for a page per content entry the kind it reads. */
-export interface SitePage {
-  /** As `SiteCall.page` has it: `/sites/www`, `/sites/www/blog/$slug`. */
-  path: string;
-  /**
-   * For a path with one parameter (`$slug`), the content kind whose entries are its pages: the one
-   * kind its file reads by that parameter, `content.<kind>.get(params.slug)` (or `slug`,
-   * destructured) with `content` from `sanoma/site`.
-   */
-  content?: string;
-  /**
-   * `false` when its route says `staticData: { sitemap: false }`, written out: the sitemap leaves it
-   * out. Its index route's `sitemap` (`true` or `false`) decides over a layout's at its path; a
-   * pathless or group layout's says nothing.
-   */
-  sitemap?: false;
-}
-
-/** A site, `sites/<name>/` or an app's `apps/<app>/sites/<name>/`, and what it calls. */
-export interface SiteEntry {
-  /** Its folder's name, `<app>/<name>` for an app's (`siteKey`): where it is mounted, `/sites/<name>`. */
-  name: string;
-  /** The app whose folder holds it (`apps/<app>/sites/`); absent for one at the root. */
-  app?: string;
-  /** Its `site.ts`'s default export, when it has the file. */
-  at?: At;
-  /** `defineSite({ title })` in its `site.ts`. */
-  title?: string;
-  /** `defineSite({ icon })` in its `site.ts`: a Lucide icon's name, as written. */
-  icon?: string;
-  /** `defineSite({ public: true })`: served to visitors, not people. */
-  public?: true;
-  /** `defineSite({ login })`, the connector whose login half signs visitors in: one that names none is among `problems`. */
-  login?: string;
-  /**
-   * `defineSite({ locales })`, a public site's languages, the first its default: kept only when
-   * every one is a `LOCALE`, written once, on a public site with no login; else a problem.
-   */
-  locales?: string[];
-  /** The host a public site answers on: set by `startApp` from its `domains`, never by `readSites`. */
-  domain?: string;
-  /** Its pages, by path: one for each path its `routes/` files give (a layout and its index are one). */
-  pages: SitePage[];
-  /** Its calls, by file and then in the file's order. */
-  calls: SiteCall[];
-  /**
-   * Each call to a workflow, a collection or an operation the config does not have, or to an
-   * operation a page may not call directly, or, on a public site, that no policy lets a visitor
-   * make, at its file; then what is wrong in its `site.ts`.
-   */
-  problems: (ResourceProblem & { file: string })[];
-  /**
-   * On a public site, each page with one parameter whose file reads content the sitemap cannot
-   * tie to it (`SitePage.content`), so the sitemap lists none of its pages: at the first read.
-   */
-  warnings: (LintProblem & { file: string })[];
-}
+export type { SiteCall, SiteEntry, SitePage };
 
 /** Where a site's code is: its pages and its components. */
 const SITE_DIRS = ["routes", "components"];
