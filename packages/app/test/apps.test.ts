@@ -89,12 +89,77 @@ describe("the Apps page", () => {
     expect(yours).toContain("apps/shop");
     expect(yours).toContain("1 workflow · 1 collection · 0 sites");
     expect(yours).not.toContain(">crm<");
-    // crm: taken, with its source.
-    expect(taken).toContain(">crm<");
+    // crm: taken, with its source; each name opens the app's page, where Update is.
+    expect(taken).toMatch(/<a [^>]*href="\/apps\/crm"[^>]*>crm<\/a>/);
+    expect(yours).toMatch(/<a [^>]*href="\/apps\/shop"[^>]*>shop<\/a>/);
     expect(taken).toContain("From <code>https://github.com/example/crm</code>");
     expect(taken).toContain('href="https://github.com/example/crm"');
-    expect(taken).toContain(">Update<");
+    expect(taken).not.toContain(">Update<");
     expect(shown).toContain(">New app<");
+  });
+
+  it("shows an app's parts in one card, its sites, collections, workflows, policies and scenarios, never its people", async () => {
+    const { status, html, shown } = await page("/apps/crm");
+    expect(status).toBe(200);
+    expect(html).toContain("<title>crm · Sanoma</title>");
+    expect(html).toMatch(/<nav aria-label="Breadcrumb"[^>]*><ol[^>]*><li[^>]*><a [^>]*href="\/apps"[^>]*>Apps<\/a>/);
+    expect(html).toMatch(/<h1[^>]*>crm<\/h1>/);
+    // Apps stays lit on an app's page.
+    expect(barLink(html, "/apps")).toContain('aria-current="page"');
+    // Taken: its source and Update in the header.
+    const header = shown.match(/<header[\s\S]*?<\/header>/)?.[0];
+    expect(header).toContain('href="https://github.com/example/crm"');
+    expect(header).toContain(">Update<");
+    expect(shown).toContain("Taken from");
+    const section = (title: string) =>
+      shown.match(new RegExp(`<section aria-label="${title}"[\\s\\S]*?</section>`))?.[0];
+    expect(shown).toMatch(
+      /aria-label="Sites"[\s\S]*aria-label="Collections"[\s\S]*aria-label="Workflows"[\s\S]*aria-label="Policies"[\s\S]*aria-label="Scenarios"/,
+    );
+    // Its site, with what it calls (this build serves no site's pages, so its title is no link).
+    expect(section("Sites")).toContain(">Pipeline<");
+    expect(section("Sites")).toContain("/sites/crm/pipeline");
+    expect(section("Sites")).toContain(">crm.customers</code>");
+    // Its collection, opening the grid; never the shop's of the same name.
+    expect(section("Collections")).toMatch(/<a [^>]*href="\/data\/crm\.customers"[^>]*>Customers<\/a>/);
+    expect(section("Collections")).toContain("email, name, followedUp");
+    expect(section("Collections")).not.toContain("shop.customers");
+    // Its workflow, what it may call and its last run (never run here), and nothing of the root's.
+    const workflows = section("Workflows")!;
+    expect(workflows).toMatch(/<a [^>]*href="\/workflows\/crm\.follow-up"[^>]*>Follow up<\/a>/);
+    expect(workflows).toContain(">data.crm.customers.save</code>");
+    expect(workflows).toContain("Never run");
+    expect(workflows).toContain('href="/workflows/crm.follow-up?view=runs"');
+    expect(workflows).not.toContain("introduce");
+    // Its policy file, with its rule's reason.
+    const policies = section("Policies")!;
+    expect(policies).toContain(">apps/crm/policies/crm.cedar</code>");
+    expect(policies).toContain("1 rule");
+    expect(policies).toContain("The CRM keeps every customer");
+    // Its scenarios, by feature file.
+    const scenarios = section("Scenarios")!;
+    expect(scenarios).toContain(">apps/crm/scenarios/follow-up.feature</code>");
+    expect(scenarios).toContain("2 scenarios");
+    expect(scenarios).toContain('href="/workflows/crm.follow-up?view=scenarios"');
+    // People are the root's.
+    expect(shown).toContain("People are never inside an app");
+  });
+
+  it("shows the company's own app without a source or Update, and says so for what it lacks", async () => {
+    const { status, shown } = await page("/apps/shop");
+    expect(status).toBe(200);
+    const header = shown.match(/<header[\s\S]*?<\/header>/)?.[0];
+    expect(header).not.toContain(">Update<");
+    expect(shown).toContain("The company&#x27;s own app");
+    expect(shown).toMatch(/aria-label="Sites"[\s\S]*?None\./);
+    expect(shown).toMatch(/aria-label="Policies"[\s\S]*?None\./);
+    expect(shown).toMatch(/<a [^>]*href="\/workflows\/shop\.follow-up"[^>]*>Thank a customer<\/a>/);
+  });
+
+  it("says when no app has the name", async () => {
+    const { status, html } = await page("/apps/nope");
+    expect(status).toBe(404);
+    expect(html).toContain("No app nope.");
   });
 
   it("tells how far a taken app is behind its source, or why it cannot", async () => {
@@ -117,6 +182,50 @@ describe("the Apps page", () => {
       ["example/crm", "community"],
       ["someone/inventory", "community"],
     ]);
+  });
+});
+
+describe("Data by app", () => {
+  it("groups the collections by the folder that declares them, with a tab each", async () => {
+    const { status, html } = await page("/data");
+    expect(status).toBe(200);
+    expect(html).toMatch(/<h1[^>]*>Data<span[^>]*>2<\/span><\/h1>/);
+    // All, then each app with collections (the root declares none here).
+    const tabs = html.match(/<div[^>]*role="tablist"[^>]*aria-label="Show"[\s\S]*?<\/div>/)?.[0];
+    expect(tabs).toMatch(/href="\/data"[^>]*>All<span[^>]*>2<\/span>/);
+    expect(tabs).toMatch(/href="\/data\?app=crm"[^>]*>crm<span[^>]*>1<\/span>/);
+    expect(tabs).toMatch(/href="\/data\?app=shop"[^>]*>shop<span[^>]*>1<\/span>/);
+    expect(tabs).not.toContain("Yours");
+    // A heading per app, in the apps' order, a taken one with its source; each row under its own.
+    expect(html).toMatch(
+      /scope="colgroup"[^>]*>crm <span[^>]*>· apps\/crm, from https:\/\/github.com\/example\/crm<\/span>[\s\S]*href="\/data\/crm\.customers"[\s\S]*scope="colgroup"[^>]*>shop <span[^>]*>· apps\/shop<\/span>[\s\S]*href="\/data\/shop\.customers"/,
+    );
+    const row = (name: string) =>
+      html.match(
+        new RegExp(`<tr[^>]*><td[^>]*><div[^>]*><a [^>]*href="/data/${name}"[^>]*>(?:(?!</tr>)[\\s\\S])*</tr>`),
+      )?.[0];
+    // Written by: the workflows that save it (the root's introduce saves the CRM's), Shown on: the
+    // sites that call it, Declared in: its file.
+    const crm = row("crm\\.customers")!;
+    expect(crm).toMatch(/href="\/workflows\/crm\.follow-up"[^>]*>Follow up<\/a>/);
+    expect(crm).toMatch(/href="\/workflows\/introduce"[^>]*>Introduce a shop customer to the CRM<\/a>/);
+    expect(crm).toContain(">Pipeline<");
+    expect(crm).toContain(">apps/crm/resources/data.ts</a>");
+    const shop = row("shop\\.customers")!;
+    expect(shop).not.toContain('href="/workflows/');
+    expect(shop).toContain(">apps/shop/resources/data.ts</a>");
+  });
+
+  it("shows one app's collections under its tab, without headings", async () => {
+    const { html } = await page("/data?app=shop");
+    expect(html).toMatch(
+      /aria-selected="true"[^>]*href="\/data\?app=shop"|href="\/data\?app=shop"[^>]*aria-selected="true"/,
+    );
+    expect(html).toContain('href="/data/shop.customers"');
+    expect(html).not.toContain('href="/data/crm.customers"');
+    expect(html).not.toContain('scope="colgroup"');
+    // An app with no collections shows them all.
+    expect((await page("/data?app=nope")).html).toContain('href="/data/crm.customers"');
   });
 });
 
@@ -178,8 +287,9 @@ describe("a prompt in the chat", () => {
       );
       await lands(takeAppPrompt("https://github.com/someone/inventory"));
 
-      // Update on the app taken: how far behind it is (this instance's repository cannot fetch, so
-      // why not), then a new chat asking the agent to update it.
+      // Update on the app taken's page: how far behind it is (this instance's repository cannot
+      // fetch, so why not), then a new chat asking the agent to update it.
+      await tab.goto(new URL("/apps/crm", app.url).href, { waitUntil: "networkidle0" });
       await tab.waitForFunction(`document.querySelector("main").textContent.includes("cannot fetch an app's source")`);
       await click("Update");
       await lands(updateAppPrompt("crm"));

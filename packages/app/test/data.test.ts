@@ -160,8 +160,15 @@ describe("the Data section", () => {
     )?.[0];
     expect(row).toContain(">Outbound</a>");
     expect(row).toContain(">data.outbound</code>");
-    expect(row).toMatch(/<td[^>]*>6<\/td><td[^>]*><code>company<\/code><\/td>/);
-    expect(row).toContain(">resources/data.ts#outbound</code>");
+    // Its key, its fields by name, the workflow that saves it, no site, and its file (to its declaration on Hosting).
+    expect(row).toMatch(/<td[^>]*><code>company<\/code><\/td><td[^>]*>company, contact, stage, owner/);
+    expect(row).toMatch(/<a [^>]*href="\/workflows\/outbound-next"[^>]*>Move a lead on<\/a>/);
+    expect(row).toMatch(
+      /<a [^>]*href="\/hosting\?resource=resources%2Fdata\.ts%23outbound"[^>]*>resources\/data\.ts<\/a>/,
+    );
+    // The root's alone: no tabs, no heading for its folder.
+    expect(html).not.toContain('role="tablist"');
+    expect(html).not.toContain('scope="colgroup"');
   });
 
   it("renders a collection's grid with its records as the person, sorted, filtered and limited as the search says", async () => {

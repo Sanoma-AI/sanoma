@@ -1,36 +1,33 @@
 import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
 import type { AppEntry, ConfigDescription } from "@sanoma-ai/workflows/describe";
 import type { AvailableApp } from "@sanoma-ai/workflows/shared";
-import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { useSuspenseQuery } from "@tanstack/react-query";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { type ReactNode, Suspense } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup } from "#/components/ui/item.tsx";
 import { Skeleton } from "#/components/ui/skeleton.tsx";
-import { takeAppPrompt, updateAppPrompt } from "#/lib/apps.ts";
+import { takeAppPrompt } from "#/lib/apps.ts";
 import { plural } from "#/lib/utils.ts";
-import { useActor } from "../actor.ts";
-import { ChatButton } from "../components/chat-button.tsx";
+import { useActor } from "../../actor.ts";
+import { ChatButton } from "../../components/chat-button.tsx";
 import {
+  AppBehind,
   CrumbHeader,
   ExternalLink,
   ItemHeading,
   Nothing,
   Notice,
-  pageTitle,
   Region,
   TierBadge,
-} from "../components/common.tsx";
-import { appBehindQuery, availableAppsQuery, configQuery } from "../queries.ts";
+} from "../../components/common.tsx";
+import { availableAppsQuery, configQuery } from "../../queries.ts";
 
 // `/apps`, in the bar's Setup group: where the company's apps are made and taken. An app is a
 // folder of `apps/`, made here (no source) or merged from a source repository (`app.ts`'s
-// `source`); what it holds is used everywhere else, its sites from the bar.
-export const Route = createFileRoute("/apps")({
-  staticData: { crumb: "Apps" },
-  head: ({ match }) => pageTitle(match.staticData.crumb),
-  component: AppsPage,
-});
+// `source`); what it holds is used everywhere else, its sites from the bar, and listed on its own
+// page (`$name.tsx`), where a taken one is updated.
+export const Route = createFileRoute("/apps/")({ component: AppsPage });
 
 /** An app of the repo, with how much it holds: for the page's rows. */
 type RepoApp = AppEntry & { holds: string };
@@ -56,8 +53,9 @@ const sameRepo = (url: string) =>
 
 /**
  * The company's apps, then those on GitHub: its own (no source), those taken from a source, each
- * with its source, how far behind it is and Update, and the available ones, each with its README, a
- * solution's demo holding it and Add. New app, Add and Update open the chat with what to ask the agent.
+ * with its source and how far behind it is, each linking to its page (where Update is), and the
+ * available ones, each with its README, a solution's demo holding it and Add. New app and Add open
+ * the chat with what to ask the agent.
  */
 function AppsPage() {
   const { data: apps } = useSuspenseQuery({ ...configQuery(), select: selectApps });
@@ -95,11 +93,8 @@ function AppsPage() {
           <ItemGroup>
             {taken.map((app) => (
               <AppItem key={app.name} app={app}>
-                <Behind folder={app.name} />
+                <AppBehind folder={app.name} />
                 <ExternalLink href={app.source!}>Source</ExternalLink>
-                <ChatButton variant="secondary" prompt={updateAppPrompt(app.name)}>
-                  Update
-                </ChatButton>
               </AppItem>
             ))}
           </ItemGroup>
@@ -112,13 +107,15 @@ function AppsPage() {
   );
 }
 
-/** An app of the repo: its name, folder and source, what it holds, and `children` as its actions. */
+/** An app of the repo: its name (to its page), folder and source, what it holds, and `children` as its actions. */
 function AppItem({ app, children }: { app: RepoApp; children?: ReactNode }) {
   return (
     <Item role="listitem" variant="outline">
       <ItemContent>
         <ItemHeading>
-          {app.name}
+          <Link to="/apps/$name" params={{ name: app.name }}>
+            {app.name}
+          </Link>
           <code className="font-normal text-muted-foreground">{app.dir}</code>
         </ItemHeading>
         <ItemDescription>
@@ -132,28 +129,6 @@ function AppItem({ app, children }: { app: RepoApp; children?: ReactNode }) {
       </ItemContent>
       {children && <ItemActions>{children}</ItemActions>}
     </Item>
-  );
-}
-
-/**
- * How many commits a taken app's source has that the repo lacks: a fetch, read by the page after
- * it shows (never on the server's render), so a slow or unreachable source holds nothing up.
- */
-function Behind({ folder }: { folder: string }) {
-  const { data } = useQuery(appBehindQuery(folder));
-  if (data === undefined) return <Skeleton className="h-5 w-24" />;
-  if ("error" in data) {
-    // A failed fetch's message can run long: a line of it, the rest on hover.
-    return (
-      <span className="max-w-72 truncate text-sm text-muted-foreground" title={data.error}>
-        {data.error}
-      </span>
-    );
-  }
-  return (
-    <span className="text-sm text-muted-foreground">
-      {data.behind === 0 ? "Up to date" : `${plural(data.behind, "commit")} behind`}
-    </span>
   );
 }
 

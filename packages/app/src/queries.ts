@@ -653,6 +653,17 @@ export const DataSearch = z.object({
 });
 export type DataSearch = z.infer<typeof DataSearch>;
 
+/**
+ * The Data page's tab (`/data?app=`): an app's name, or `ROOT_APP` for the collections the root
+ * declares; none for All.
+ */
+export const DataListSearch = z.object({
+  app: z.string().min(1).optional().catch(undefined),
+});
+
+/** The root as the Data page's `?app=`: `.`, a folder no app can be named (`APP_NAME`). */
+export const ROOT_APP = ".";
+
 /** The runtime's own types for who may act (`sanoma.person`, `.agent`, `.group`): on People, never on Hosting. */
 const PEOPLE_TYPES = new Set(["person", "agent", "group"]);
 export const isPeople = (r: { vendor: string; type: string }) => r.vendor === "sanoma" && PEOPLE_TYPES.has(r.type);
