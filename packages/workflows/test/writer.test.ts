@@ -199,7 +199,7 @@ export default [named, spread];
 });
 
 describe("renderDataFile", () => {
-  it("renders a file readDataFile reads back as given, formatted", async () => {
+  it("renders a file that loads back as given, formatted", async () => {
     const content: DataFileContent = {
       imports: [
         { source: "@sanoma-ai/connector-github/resources", imported: "github", local: "github" },

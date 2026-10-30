@@ -498,7 +498,7 @@ const SITE_MODULES = new Map([
 ]);
 
 /**
- * What the sites' `site.ts` say, read and never run, for the app's router and bar:
+ * What the sites' `site.ts` say (loaded) and their route files (parsed, never run), for the app's router and bar:
  * `virtual:sanoma/locales`, which `lib/locales.ts` imports (each public site's languages by name,
  * and the kind each content page reads), and `virtual:sanoma/icons`, which `SiteIcon` imports (the
  * icons they name, so only those are bundled, and drawn on the server too). Each is read once for
