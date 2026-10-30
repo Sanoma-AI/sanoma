@@ -94,6 +94,7 @@
                   "@sanoma-ai/connector-*/fake",
                   "@sanoma-ai/connector-*/driver",
                   "@sanoma-ai/connector-*/remote",
+                  "@sanoma-ai/connector-*/vault",
                   "@sanoma-ai/workflows/describe",
                   "@sanoma-ai/workflows/fake",
                   "@sanoma-ai/workflows/plugin",
