@@ -1,9 +1,6 @@
-import { readDataFile } from "./datafile.ts";
-
-// An oxlint JS plugin with two rules, on the trees oxlint has already parsed, which the package's
-// `oxlint.json` turns on: `sanoma/data-file` for `resources/**`, the data-file subset
-// `readResources` reads, the same check as `lintResources`; and `sanoma/date` for `workflows/**`,
-// `Date` reading the clock. Typed here by the little they use, so the package needs no oxlint types.
+// An oxlint JS plugin with one rule, on the trees oxlint has already parsed, which the package's
+// `oxlint.json` turns on for `workflows/**`: `sanoma/date`, `Date` reading the clock. Typed here by
+// the little it uses, so the package needs no oxlint types.
 
 interface Context {
   filename: string;
@@ -65,24 +62,6 @@ function readsNoClock(node: Node): boolean {
 const plugin = {
   meta: { name: "sanoma" },
   rules: {
-    "data-file": {
-      meta: {
-        type: "problem",
-        docs: {
-          description:
-            "A data file under resources/ holds only imports, `export const <name> = <vendor>.<type>({ … })` with literal fields, and `export default [ … ]`; resources/data.ts holds only collections, `collection({ … })` from sanoma/data",
-        },
-      },
-      create(context: Context) {
-        return {
-          Program(program: unknown) {
-            for (const { start, end, message } of readDataFile(program, context.filename).problems) {
-              context.report({ message, node: { range: [start, end] } });
-            }
-          },
-        };
-      },
-    },
     // `Date` reads the clock in `Date.now()`, `new Date()` and `Date()`, which a replay would read
     // again; a workflow reads it with `ctx.now()`, recorded. Every other use of `Date` is pure:
     // `new Date(value)` (of `await ctx.now()`, or of a date the workflow has), `Date.parse`, `Date.UTC`.
