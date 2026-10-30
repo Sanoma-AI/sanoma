@@ -14,7 +14,10 @@ A data file declares the project; apply creates it, waits for its compute, and s
 // resources/sanoma/infra.ts
 import { neon } from "@sanoma-ai/connector-neon/resources";
 
-export const store = neon.project({ name: "acme-ops", region: "aws-us-east-1" });
+export const store = neon.project(
+  { name: "acme-ops", region: "aws-us-east-1" },
+  { connection: { vendor: "neon", $connection: "neon/infrastructure" } },
+);
 ```
 
 | Field        | What it is                                                                                                                                                                                                                                                                                                                                             |
@@ -44,29 +47,36 @@ The logo the app shows beside these operations is Neon's logomark from its [bran
 
 ## Driver
 
-`@sanoma-ai/connector-neon/driver` calls Neon. The `neon` connector the package root exports carries it, and its fake (`withSetup` from `@sanoma-ai/workflows`), so a config names the connector alone:
+`@sanoma-ai/connector-neon/driver` calls Neon. Declare each organization as a named connection and register it with the connector:
 
 ```ts
 import { neon } from "@sanoma-ai/connector-neon";
+import { defineConfig, defineConnection } from "sanoma";
+import { secret } from "sanoma/resources";
 
-export default defineConfig({ workflows, connectors: [neon], policy });
+const infrastructure = defineConnection(neon, {
+  name: "infrastructure",
+  method: "apiKey",
+  credentials: secret("NEON_INFRASTRUCTURE_AUTH"),
+  account: "org-your-organization-id",
+});
+
+export default defineConfig({ workflows, connectors: [neon], connections: [infrastructure] });
 ```
 
 `./driver` (`neonDriver`; `neonDriver({ timeoutMs })`, 30 s by default) and `./fake` (`fakeNeon`) are internal entries, for tests. The SDK (and axios with it) loads at the first call, so a worker that never calls Neon does not load it.
 
-### Environment
+### Authentication
 
-It reads this on every call, never when the config loads:
+The `apiKey` method uses one versioned bundle shaped `{ apiKey: string }`. Create an organization key in **Neon → Organization settings → API keys**. `NEON_INFRASTRUCTURE_AUTH` names the bundle in the deployment's selected store; no key value belongs in company code. Trusted setup code validates and serializes it with the exported `neonApiKey` definition and `encodeCredentials`, stores it through `SanomaClient.setSecret`, and binds the verified organization through `sanoma.connection.bind`. The generated connection-management UI is a separate delivery step.
 
-| Variable       | What it is                                                                                              |
-| -------------- | ------------------------------------------------------------------------------------------------------- |
-| `NEON_API_KEY` | An organization API key, from console.neon.tech, Organization settings, API keys. `/setup` asks for it. |
+After policy allows a call, the runtime reads that connection's bundle and verifies its organization with [Neon's authenticated organizations endpoint](https://api-docs.neon.tech/reference/getcurrentuserorganizations). A response naming zero or multiple organizations is refused. The returned organization ID must match the bound account. This endpoint does not attest individual key permissions or expiry, so the connector reports no scopes; Neon still enforces the key's permissions on every operation.
 
-When it is unset, a call fails, not retryable, naming it, before any request. The driver declares it in its `env` ([Credentials](https://www.npmjs.com/package/@sanoma-ai/workflows#credentials)).
+Each invocation builds its own SDK client from the verified material. Replacing a key affects subsequent calls while an in-flight call keeps its original client. Missing authentication is refused; the driver does not read `process.env.NEON_API_KEY`. Additional organizations use separate declarations and bundles while sharing the same operation definitions. `project.storeUrl` additionally receives access to its declared `SANOMA_DATABASE_URL_<EXPORT>` destination, derived from the authorized input, to store the generated database URL.
 
 ### Errors and retries
 
-Every failure is a `DriverError` keeping Neon's `status` and its error `code` as `vendorCode`. A 408, a 423 (the project's earlier operations, such as a new compute's start, still run), a 429, a 5xx, a timeout or no reply is retryable; any other 4xx is not. A 404 with Neon's error body reads a project as gone, and deletes a project or branch as done; one without it fails. An error never carries axios's, whose request headers hold the key.
+The driver maps failures to `DriverError` internally. The named runtime boundary retains retryability and HTTP status, with a fixed message and no provider cause or error body. A 408, a 423 (the project's earlier operations, such as a new compute's start, still run), a 429, a 5xx, a timeout or no reply is retryable; any other 4xx is not. A 404 with Neon's error body reads a project as gone, and deletes a project or branch as done; one without it fails. An error never carries axios's, whose request headers hold the key. Authentication verification failures stop before invoking the operation.
 
 ### Testing the driver
 
@@ -77,6 +87,8 @@ SANOMA_LIVE=1 SANOMA_RECORD=1 NEON_API_KEY=napi_... pnpm vitest run connectors/n
 ```
 
 A recording loses passwords, request ids and the organization (its id, name and email). The error cases only replay. Right after a create, Neon's compute is `init` and a branch or a suspend of the project answers 423 until it has started (a few seconds): a scenario's `Given` project is seeded as apply makes it, its `afterCreate` polled, so its compute has started.
+
+Transport tests supply their test key explicitly in `CallContext.authentication`; the opt-in live scripts read `NEON_API_KEY` only to construct that test context. `test/connections.test.ts` additionally exercises the runtime's real policy/authentication/driver boundary against protocol doubles: two organizations, overlapping calls, rotation during a request, refusal of a replacement account, and the scoped database-URL destination. No live vendor mutation is part of that test.
 
 ### Running it live
 

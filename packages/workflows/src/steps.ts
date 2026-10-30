@@ -1,5 +1,6 @@
 import type { LedgerRecord } from "./ledger.ts";
 import type { Op } from "./op.ts";
+import type { ConnectionRef } from "./connection.ts";
 
 /*
  * Steps a connector (or a company) ships for its Gherkin tests, as plain data: expressions and
@@ -19,8 +20,8 @@ type AnyOp<I = any, O = any> = Op<string, string, string, I, O>;
  * seed's name (else the type's) as the export.
  */
 export type Seed =
-  | { op: AnyOp; input: Record<string, unknown>; as?: string }
-  | { op: AnyOp; fault: "failNext" | "rateLimit" | "loseReply" };
+  | { op: AnyOp; input: Record<string, unknown>; as?: string; connection?: ConnectionRef }
+  | { op: AnyOp; fault: "failNext" | "rateLimit" | "loseReply"; connection?: ConnectionRef };
 
 /** A call through an operation: what it was given, and what it returned. */
 export interface Call<I, O> {

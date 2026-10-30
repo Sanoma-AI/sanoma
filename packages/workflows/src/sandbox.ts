@@ -3,7 +3,8 @@ import { indexDrivers, sandboxDrivers } from "./config.ts";
 import { CALL_WORKFLOW, CallInput } from "./call-workflow.ts";
 import { opIdsOf } from "./define.ts";
 import { SanomaError } from "./errors.ts";
-import type { Fake, ResourceFake } from "./fake.ts";
+import { connectionFakes, type Fake, type ResourceFake } from "./fake.ts";
+import type { ConnectionCatalog, ConnectionRef, ConnectionSnapshot } from "./connection.ts";
 import { entry, type LedgerRecord, write } from "./ledger.ts";
 import type { DriverFn } from "./op.ts";
 import type { Run } from "./run.ts";
@@ -19,6 +20,30 @@ import { errorMessage } from "./shared.ts";
 /** True for a fake that holds resources (`ResourceFake`, as `@sanoma-ai/bridge`'s `tfFake` is). */
 const holdsResources = (fake: Fake<unknown>): fake is Fake<unknown> & ResourceFake =>
   "override" in fake && "put" in fake && "remove" in fake;
+
+/** Declared accounts get synthetic identities in each run; no production metadata or secrets are read. */
+export function sandboxConnection(catalog: ConnectionCatalog, runId: string) {
+  return (vendor: string, ref?: ConnectionRef): ConnectionSnapshot | undefined => {
+    const definitions = [...catalog.definitions.values()].filter((d) => d.vendor === vendor);
+    const selected = ref ?? definitions.find((d) => d.default);
+    if (!selected && !Object.keys(catalog.methods.get(vendor) ?? {}).length) return undefined;
+    const definition = selected && catalog.definitions.get(selected.$connection);
+    if (!definition || selected?.vendor !== vendor || definition.vendor !== vendor)
+      throw new SanomaError("invalid_input", "Select an explicitly declared sandbox connection");
+    const revision = `sandbox:${runId}:${definition.$connection}`;
+    if (selected.revision !== undefined && selected.revision !== revision)
+      throw new SanomaError("invalid_input", "A sandbox cannot use a production connection revision");
+    return {
+      id: definition.$connection,
+      vendor,
+      method: definition.method,
+      account: definition.account ?? `fake:${definition.$connection}`,
+      scopes: [...definition.scopes],
+      revision,
+      definition: revision,
+    };
+  };
+}
 
 /**
  * The error a sandbox run of the scenario fails with when it seeds a resource of a vendor whose
@@ -110,10 +135,18 @@ export async function seedSandbox(run: Run, name: string, input: unknown): Promi
         });
       }
       const fakes = new Map([...state.fakes].map(([vendor, make]) => [vendor, make()]));
+      const named = new Map(
+        [...state.fakes]
+          .filter(([vendor]) => Object.keys(state.connections!.catalog.methods.get(vendor) ?? {}).length)
+          .map(([vendor, make]) => [vendor, connectionFakes(make)]),
+      );
+      const select = sandboxConnection(state.connections!.catalog, run.id);
+      run.fakeConnection = select;
       // The built-ins first, so a connector's fake that implements one of their operations wins.
       const drivers = indexDrivers(
-        [...sandboxDrivers(state.ops), ...Array.from(fakes.values(), (f) => f.driver)],
+        [...sandboxDrivers(state.ops), ...Array.from(fakes, ([vendor, f]) => named.get(vendor)?.driver ?? f.driver)],
         state.ops,
+        { sandbox: true },
       );
       // The built-in call workflow selects exactly one operation. Other direct operations
       // (including live connection mutations) need no fake unless this scenario calls them.
@@ -134,16 +167,33 @@ export async function seedSandbox(run: Run, name: string, input: unknown): Promi
       for (const [i, given] of scenario.given.entries()) {
         if ("fault" in given) continue;
         if ("op" in given) {
-          const call = { idempotencyKey: `${run.id}:seed:${i}`, runId: run.id, opId: given.op, attempt: 1, secrets };
+          const connection = select(state.ops.get(given.op)!.vendor, given.connection);
+          const call = {
+            idempotencyKey: `${run.id}:seed:${i}`,
+            runId: run.id,
+            opId: given.op,
+            attempt: 1,
+            secrets,
+            connection,
+          };
           const output = await drivers.get(given.op)!(given.input, call);
           seeded.push({ op: given.op, input: given.input, output });
           continue;
         }
         // Checked above: the vendor's fake holds resources.
-        seeded.push(seedResource(name, fakes.get(given.vendor) as Fake<unknown> & ResourceFake, given));
+        const selected = select(given.vendor, given.connection);
+        const fake = selected
+          ? named.get(given.vendor)!.account({ vendor: given.vendor, $connection: selected.id })
+          : fakes.get(given.vendor)!;
+        seeded.push(seedResource(name, fake as Fake<unknown> & ResourceFake, given));
       }
       for (const given of scenario.given) {
-        if ("fault" in given) fakes.get(state.ops.get(given.op)!.vendor)![given.fault](given.op);
+        if ("fault" in given) {
+          const vendor = state.ops.get(given.op)!.vendor;
+          const selected = select(vendor, given.connection);
+          const fake = selected ? named.get(vendor)!.account({ vendor, $connection: selected.id }) : fakes.get(vendor)!;
+          fake[given.fault](given.op);
+        }
       }
       copies = drivers;
       return { seeds: seeded };

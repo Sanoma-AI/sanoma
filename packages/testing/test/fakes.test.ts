@@ -6,6 +6,7 @@ import { fakeGithub } from "@sanoma-ai/connector-github/fake";
 import { fakeResend } from "@sanoma-ai/connector-resend/fake";
 import { fakeStripe } from "@sanoma-ai/connector-stripe/fake";
 import type { FakeCall } from "../src/index.ts";
+import { connectionFakes } from "@sanoma-ai/workflows/fake";
 
 // No database: the fakes are called the way the runtime calls a driver.
 const call = (idempotencyKey: string, attempt = 1): CallContext => ({
@@ -18,6 +19,63 @@ const call = (idempotencyKey: string, attempt = 1): CallContext => ({
 const draft = { title: "Hello world", html: "<p>Hi</p>", status: "draft" as const };
 
 describe("fakes", () => {
+  it("refuses a named factory that would share one fake between accounts", () => {
+    const shared = fakeGhost();
+    const fakes = connectionFakes(() => shared);
+    fakes.account({ vendor: "ghost", $connection: "ghost/support" });
+    expect(() => fakes.account({ vendor: "ghost", $connection: "ghost/sales" })).toThrow("separate state");
+  });
+  it("isolates named accounts' state, faults and replies even when idempotency keys overlap", async () => {
+    const fakes = connectionFakes(fakeGhost);
+    const support = { vendor: "ghost", $connection: "ghost/support" };
+    const sales = { vendor: "ghost", $connection: "ghost/sales" };
+    const context = (ref: typeof support, id = "shared", account = ref.$connection): CallContext => ({
+      ...call(id),
+      connection: {
+        id: ref.$connection,
+        vendor: ref.vendor,
+        method: "key",
+        account,
+        scopes: [],
+        revision: "one",
+        definition: "test",
+      },
+    });
+    const release = fakes.account(support).hold("ghost.post.create");
+    const held = fakes.driver.ops["post.create"]!({ ...draft, title: "Support" }, context(support));
+    try {
+      const other = await fakes.driver.ops["post.create"]!({ ...draft, title: "Sales" }, context(sales));
+      expect(other).toMatchObject({ id: "post_0001", slug: "sales" });
+      expect(Object.values(fakes.account(support).state.posts)).toEqual([]);
+      release();
+      expect(await held).toMatchObject({ id: "post_0001", slug: "support" });
+      expect(await fakes.driver.ops["post.create"]!(draft, context(sales))).toEqual(other);
+      expect(Object.values(fakes.account(support).state.posts).map((p) => p.title)).toEqual(["Support"]);
+      expect(Object.values(fakes.account(sales).state.posts).map((p) => p.title)).toEqual(["Sales"]);
+      fakes.account(support).failNext("ghost.post.create");
+      await expect(fakes.driver.ops["post.create"]!(draft, context(support, "next"))).rejects.toThrow("failed");
+      await expect(fakes.driver.ops["post.create"]!(draft, context(sales, "next"))).resolves.toMatchObject({
+        id: "post_0002",
+      });
+      expect(fakes.calls.map((c) => c.connection)).toEqual([
+        support.$connection,
+        sales.$connection,
+        sales.$connection,
+        support.$connection,
+        sales.$connection,
+      ]);
+      // Rebinding keeps the reference but changes the actual vendor account: it gets fresh state.
+      await fakes.driver.ops["post.create"]!(
+        { ...draft, title: "Replacement" },
+        context(support, "shared", "replacement"),
+      );
+      expect(Object.values(fakes.account(support).state.posts).map((p) => p.title)).toEqual(["Replacement"]);
+      await expect(fakes.driver.ops["post.create"]!(draft, call("unnamed"))).rejects.toThrow("named connection");
+    } finally {
+      release();
+      await held;
+    }
+  });
   it("keep the fields the connector declares", async () => {
     const resend = fakeResend();
     const { id } = (await resend.driver.ops["broadcast.create"]!(

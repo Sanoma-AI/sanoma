@@ -458,9 +458,8 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed, ref?:
   const connection = await DBOS.runStep(
     async () => {
       if (run.sandbox !== undefined) {
-        if (ref)
-          throw new SanomaError("invalid_input", "Named sandbox connections require explicit fake account state");
-        return undefined;
+        if (!run.fakeConnection) throw new SanomaError("invalid_input", "Sandbox account state is unavailable");
+        return run.fakeConnection(op.vendor, ref);
       }
       return run.state.connections?.select(op.vendor, ref, run.actor.id);
     },
@@ -469,7 +468,7 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed, ref?:
   const decideStep = () =>
     DBOS.runStep(
       async () => {
-        await run.state.connections?.assertCurrent(connection, run.actor.id);
+        if (run.sandbox === undefined) await run.state.connections?.assertCurrent(connection, run.actor.id);
         return decide(run, op, parsed, connection);
       },
       { name: `policy:${op.id}` },
@@ -527,7 +526,7 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed, ref?:
       async () => {
         const at = Date.now();
         attempt = DBOS.stepStatus?.currentAttempt ?? 1;
-        await run.state.connections?.assertCurrent(connection, run.actor.id);
+        if (run.sandbox === undefined) await run.state.connections?.assertCurrent(connection, run.actor.id);
         const secrets = secretsOf(run);
         const context: CallContext = {
           idempotencyKey: `${run.id}:${seq}`,
