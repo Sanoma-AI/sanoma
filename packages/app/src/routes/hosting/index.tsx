@@ -1,11 +1,18 @@
 import type { DriftReport, DriftResult, RunSummary } from "@sanoma-ai/workflows";
-import type { ConfigDescription, DeclaredResource, ResourceProblem } from "@sanoma-ai/workflows/describe";
+import type {
+  ConfigDescription,
+  DeclaredResource,
+  ResourceProblem,
+  ResourceTypeEntry,
+} from "@sanoma-ai/workflows/describe";
 import { APPLY_WORKFLOW, DRIFT_WORKFLOW, exportSpan, isEnded, problemAt } from "@sanoma-ai/workflows/shared";
 import { type QueryClient, useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { PlayIcon } from "@phosphor-icons/react/dist/csr/Play";
+import { NotePencilIcon } from "@phosphor-icons/react/dist/csr/NotePencil";
 import { ScanIcon } from "@phosphor-icons/react/dist/csr/Scan";
+import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import { type ReactNode, useMemo } from "react";
 import { toast } from "sonner";
 import { Button } from "#/components/ui/button.tsx";
@@ -16,6 +23,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#
 import { DRIFT_TONE } from "#/lib/tone.ts";
 import { errorBodyOf, INFRA } from "../../api.ts";
 import {
+  ButtonLink,
   CardHeading,
   CodePanel,
   CrumbHeader,
@@ -34,6 +42,7 @@ import {
   VendorLogo,
   When,
 } from "../../components/common.tsx";
+import { DeclarationForm } from "../../components/declaration-form.tsx";
 import { type Adopt, FieldDiff } from "../../components/field-diff.tsx";
 import { GoLive, loadGoLive } from "../../components/go-live.tsx";
 import { startRunFn } from "../../functions.ts";
@@ -205,7 +214,7 @@ function Hosting({
   action?: ReactNode;
   children: ReactNode;
 }) {
-  const { resource: selected } = Route.useSearch();
+  const { resource: selected, edit } = Route.useSearch();
   const slots = useMemo(() => slotsOf(config), [config]);
   const results = useMemo(() => new Map(report?.resources.map((r) => [r.id, r])), [report]);
   const rows = useMemo(() => {
@@ -214,9 +223,8 @@ function Hosting({
   }, [config.resources, report, slots]);
   const problems = useMemo(() => problemsOf(config.problems, report), [config.problems, report]);
   const titles = useMemo(() => new Map(config.resourceTypes.map((t) => [t.id, t.title])), [config.resourceTypes]);
-  const chosen =
-    config.resources.find((r) => r.id === selected) ??
-    config.collections.find((c) => c.declared?.id === selected)?.declared;
+  const declared = config.resources.find((r) => r.id === selected);
+  const chosen = declared ?? config.collections.find((c) => c.declared?.id === selected)?.declared;
 
   return (
     <>
@@ -276,7 +284,19 @@ function Hosting({
       )}
       {config.orphans.length > 0 && <Orphans orphans={config.orphans} titles={titles} />}
       {problems.length > 0 && <Problems problems={problems} />}
-      {chosen && <Declaration key={chosen.id} resource={chosen} />}
+      {chosen && (
+        <Declaration
+          key={chosen.id}
+          resource={chosen}
+          editable={
+            declared && {
+              resource: declared,
+              type: config.resourceTypes.find((t) => t.id === `${declared.vendor}.${declared.type}`),
+            }
+          }
+          editing={edit === true}
+        />
+      )}
     </>
   );
 }
@@ -597,8 +617,20 @@ function DriftBadge({ result }: { result: DriftResult | undefined }) {
   );
 }
 
-/** A declaration's export in its data file, marked as its text gives it (`exportSpan`): a resource's or a collection's. */
-function Declaration({ resource: { file, at } }: { resource: Pick<DeclaredResource, "file" | "at"> }) {
+/**
+ * A declaration's export in its data file, marked as its text gives it (`exportSpan`): a
+ * resource's or a collection's. A resource's (`editable`) has Edit, which opens its form above the
+ * file (`?edit`): its literal fields, saved into the file as a change, or committed without a remote.
+ */
+function Declaration({
+  resource: { file, at },
+  editable,
+  editing,
+}: {
+  resource: Pick<DeclaredResource, "file" | "at">;
+  editable?: { resource: DeclaredResource; type: ResourceTypeEntry | undefined } | undefined;
+  editing: boolean;
+}) {
   const { data, error } = useQuery(sourceQuery(file));
   const source = data?.source;
   const highlight = useMemo(() => {
@@ -607,9 +639,37 @@ function Declaration({ resource: { file, at } }: { resource: Pick<DeclaredResour
   }, [source, at.export]);
   return (
     <section className="flex flex-col gap-2">
-      <SectionTitle>
-        <code>{file}</code>
-      </SectionTitle>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <SectionTitle>
+          <code>{file}</code>
+        </SectionTitle>
+        {editable && !editing && (
+          <ButtonLink variant="outline" size="sm">
+            <Link to="/hosting" search={(prev) => ({ ...prev, edit: true })} replace resetScroll={false}>
+              <NotePencilIcon aria-hidden="true" data-icon="inline-start" />
+              Edit
+            </Link>
+          </ButtonLink>
+        )}
+      </div>
+      {editable && editing && (
+        <Card role="region" aria-label={`Edit ${editable.resource.name}`}>
+          <CardHeader>
+            <CardHeading className="self-center">Edit {editable.resource.name}</CardHeading>
+            <CardAction>
+              <ButtonLink variant="ghost" size="icon-sm">
+                <Link to="/hosting" search={(prev) => ({ ...prev, edit: undefined })} replace resetScroll={false}>
+                  <XIcon aria-hidden="true" />
+                  <span className="sr-only">Close</span>
+                </Link>
+              </ButtonLink>
+            </CardAction>
+          </CardHeader>
+          <CardContent>
+            <DeclarationForm resource={editable.resource} type={editable.type} />
+          </CardContent>
+        </Card>
+      )}
       {error ? (
         <Notice variant="destructive">
           Could not read {file}: {error.message}

@@ -585,8 +585,9 @@ async function patchNow(
       const before = await readFile(join(dir, at.file), "utf8");
       return { before, text: await setFields(before, at.export, fields, formatOptions(root)) };
     } catch (err) {
-      const error = err instanceof NotLiteral ? err.reason : `Could not write ${at.file}: ${errorMessage(err)}`;
-      throw new ApiError(409, { error });
+      if (err instanceof NotLiteral)
+        throw new ApiError(409, { error: err.reason, ...(err.field && { field: err.field }) });
+      throw new ApiError(409, { error: `Could not write ${at.file}: ${errorMessage(err)}` });
     }
   };
   if (source?.draft && (await reviewsChanges(app))) {

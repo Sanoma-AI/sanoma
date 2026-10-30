@@ -498,6 +498,8 @@ export interface ErrorResponse {
   reason?: string;
   /** For `approval_pending`: the run of the built-in `call` workflow the call waits in; for `run_running`, the run. */
   runId?: string;
+  /** For a form's Save refused with a 409 (`patchFn`): the field its file computes, by dotted path, which only the code changes. */
+  field?: string;
 }
 
 /**

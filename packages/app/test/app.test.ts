@@ -1866,7 +1866,10 @@ describe("resources and drift", () => {
     // A field the file computes, or a declaration the description does not name, is refused.
     await expect(
       patch(patching, alice, { at: { file: github, export: "websiteMain" }, fields: { repository_id: "R_1" } }),
-    ).rejects.toMatchObject({ status: 409, body: { error: "the value of repository_id is computed in the file" } });
+    ).rejects.toMatchObject({
+      status: 409,
+      body: { error: "the value of repository_id is computed in the file", field: "repository_id" },
+    });
     await expect(
       patch(patching, alice, { at: { file: github, export: "nope" }, fields: { name: "x" } }),
     ).rejects.toMatchObject({ status: 404 });

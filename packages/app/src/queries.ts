@@ -657,8 +657,24 @@ export type DataSearch = z.infer<typeof DataSearch>;
 const PEOPLE_TYPES = new Set(["person", "agent", "group"]);
 export const isPeople = (r: { vendor: string; type: string }) => r.vendor === "sanoma" && PEOPLE_TYPES.has(r.type);
 
-/** Hosting's search (`/hosting`, and `/resources`, which redirects there): `?resource=`, the declaration whose file the page shows. */
-export const HostingSearch = z.object({ resource: z.string().optional() });
+/**
+ * Hosting's search (`/hosting`, and `/resources`, which redirects there): `?resource=`, the
+ * declaration whose file the page shows, and `?edit`, its form open above it.
+ */
+export const HostingSearch = z.object({
+  resource: z.string().optional(),
+  edit: z.boolean().optional().catch(undefined),
+});
+
+/** People's views (`?show=`): the people, the groups, the agents. */
+export const PEOPLE_VIEWS = ["people", "groups", "agents"] as const;
+export type PeopleView = (typeof PEOPLE_VIEWS)[number];
+
+/** People's search: the view (`?show=`, the people by default), and `?person=`, the one open, by its name (an id, or a group's name). */
+export const PeopleSearch = z.object({
+  show: z.enum(PEOPLE_VIEWS).optional().catch(undefined),
+  person: z.string().min(1).optional().catch(undefined),
+});
 
 /** Going live's Connect page's search (`/hosting/connect`, and `/setup/connect`): how creating the GitHub App went, as its callback comes back. */
 export const ConnectSearch = z.object({

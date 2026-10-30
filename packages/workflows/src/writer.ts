@@ -45,10 +45,13 @@ export type DataValue =
  */
 export class NotLiteral extends Error {
   readonly reason: string;
-  constructor(reason: string) {
+  /** The field the file computes, by dotted path; absent when the declaration itself is no object literal. */
+  readonly field: string | undefined;
+  constructor(reason: string, field?: string) {
     super(reason);
     this.name = "NotLiteral";
     this.reason = reason;
+    this.field = field;
   }
 }
 
@@ -229,7 +232,7 @@ function editAt(object: Node, path: string, value: DataValue): { start: number; 
 }
 
 /** The refusal of a field whose value the file computes. */
-const computedAt = (field: string) => new NotLiteral(`the value of ${field} is computed in the file`);
+const computedAt = (field: string) => new NotLiteral(`the value of ${field} is computed in the file`, field);
 
 const isSpread = (node: Node) => node?.type === "SpreadElement";
 
