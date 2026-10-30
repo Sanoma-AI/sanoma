@@ -92,7 +92,6 @@
   },
   "dependencies": {
     "@ai-sdk/provider": "4.0.34",
-    "@aws-sdk/client-kms": "^3.1159.0",
     "@cedar-policy/cedar-wasm": "4.14.0",
     "@cucumber/cucumber": "13.3.0",
     "@cucumber/cucumber-expressions": "^20.1.0",
@@ -100,7 +99,9 @@
     "@cucumber/query": "16.1.1",
     "@dbos-inc/dbos-sdk": "^5.2.11",
     "@faker-js/faker": "^10.6.0",
+    "@google-cloud/kms": "^6.3.0",
     "ai": "7.0.153",
+    "fast-crc32c": "^2.0.0",
     "oxc-parser": "^0.153.0",
     "oxfmt": "^0.72.0",
     "pg": "^8.23.1",
@@ -108,6 +109,7 @@
     "zod-schema-faker": "^2.1.2"
   },
   "devDependencies": {
+    "@types/fast-crc32c": "^2.0.3",
     "@types/pg": "^8.23.1",
     "msw": "^3.0.3",
     "srvx": "^0.11.22",

@@ -783,4 +783,4 @@ TODO: redact fields a schema marks `.meta({ sensitive: true })` from the ledger,
 
 License: FSL-1.1-ALv2.
 
-The server-only [KMS credential store](KMS-SECRETS.md) is a managed-backend option with explicit company-scoped bootstrap. It requires reviewed IAM/database isolation and does not provision Cloud infrastructure.
+The server-only [GCP KMS credential store](KMS-SECRETS.md) is a managed-backend option with explicit company-scoped bootstrap. It requires reviewed IAM/database isolation and does not provision Cloud infrastructure.

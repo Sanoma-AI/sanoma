@@ -1,66 +1,78 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { KMSClient } from "@aws-sdk/client-kms";
+import crc32c from "fast-crc32c";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { lazyPool } from "../src/db.ts";
 import { checkSecretStore } from "../src/secret-store-check.ts";
-import { KMS_SECRETS_SQL, kmsPostgresStore } from "../src/kms-secrets.ts";
+import { KMS_SECRETS_SQL, kmsPostgresStore, type GcpKmsClient } from "../src/kms-secrets.ts";
 
-const KEY = "arn:aws:kms:us-east-1:123456789012:key/11111111-1111-1111-1111-111111111111";
-const NEXT_KEY = "arn:aws:kms:us-east-1:123456789012:key/22222222-2222-2222-2222-222222222222";
-const fail = (name: string): never => {
-  throw Object.assign(new Error("synthetic sensitive provider detail"), { name });
+const KEY = "projects/test-project/locations/us-central1/keyRings/production/cryptoKeys/acme";
+const NEXT_KEY = "projects/test-project/locations/us-central1/keyRings/production/cryptoKeys/acme-next";
+const OTHER_KEY = "projects/test-project/locations/us-central1/keyRings/production/cryptoKeys/other-company";
+const fail = (code: number): never => {
+  throw Object.assign(new Error("synthetic sensitive provider detail"), { code });
 };
+const b = (value: Uint8Array | string | null | undefined) =>
+  typeof value === "string" ? Buffer.from(value, "base64") : Buffer.from(value ?? []);
+const wrappedKeys = new Map<string, { bytes: Buffer; aad: Buffer; key: string; version: number }>();
 
-/** Simulates KMS transport/identity, not AES: payload encryption uses the actual implementation. */
-function fakeKms(company: string) {
-  const client = new KMSClient({
-    region: "us-east-1",
-    credentials: { accessKeyId: "synthetic", secretAccessKey: "synthetic" },
-  });
-  const keys = new Map<string, { bytes: Buffer; context: string; key: string }>();
+/** Models per-CryptoKey IAM and version retention; payload AES and Postgres remain real. AAD is not IAM. */
+function fakeKms(allowed: string[]) {
   const returned: Uint8Array[] = [];
-  const state = { denied: false, broad: false, calls: 0 };
-  client.middlewareStack.add(
-    () => async (args) => {
-      state.calls++;
-      const input = args.input as {
-        EncryptionContext: Record<string, string>;
-        KeyId: string;
-        CiphertextBlob?: Uint8Array;
-      };
-      if (state.denied || (!state.broad && input.EncryptionContext.company !== company)) fail("AccessDeniedException");
-      const context = JSON.stringify(input.EncryptionContext);
-      if (!input.CiphertextBlob) {
-        const wrapped = randomBytes(32),
-          plain = randomBytes(32);
-        keys.set(wrapped.toString("base64"), { bytes: Buffer.from(plain), context, key: input.KeyId });
-        returned.push(plain);
-        return {
-          response: {},
-          output: { $metadata: {}, KeyId: input.KeyId, Plaintext: plain, CiphertextBlob: wrapped },
-        };
-      }
-      const stored = keys.get(Buffer.from(input.CiphertextBlob).toString("base64"));
-      if (!stored || stored.context !== context || stored.key !== input.KeyId) fail("InvalidCiphertextException");
-      const plain = Buffer.from(stored!.bytes);
-      returned.push(plain);
-      return { response: {}, output: { $metadata: {}, KeyId: input.KeyId, Plaintext: plain } };
+  const state = {
+    denied: false,
+    primary: 1,
+    disabledVersions: new Set<number>(),
+    badEncryptCrc: false,
+    badDecryptCrc: false,
+    unverified: false,
+    wrongName: false,
+  };
+  const client: GcpKmsClient = {
+    async encrypt(input) {
+      if (state.denied || !allowed.includes(input.name!)) fail(7);
+      const plain = b(input.plaintext),
+        aad = b(input.additionalAuthenticatedData);
+      expect(Number(input.plaintextCrc32c?.value)).toBe(crc32c.calculate(plain));
+      expect(Number(input.additionalAuthenticatedDataCrc32c?.value)).toBe(crc32c.calculate(aad));
+      returned.push(input.plaintext as Uint8Array);
+      const wrapped = randomBytes(32);
+      wrappedKeys.set(wrapped.toString("base64"), { bytes: plain, aad, key: input.name!, version: state.primary });
+      return [
+        {
+          name: `${state.wrongName ? OTHER_KEY : input.name}/cryptoKeyVersions/${state.primary}`,
+          ciphertext: wrapped,
+          ciphertextCrc32c: { value: state.badEncryptCrc ? -1 : crc32c.calculate(wrapped) },
+          verifiedPlaintextCrc32c: !state.unverified,
+          verifiedAdditionalAuthenticatedDataCrc32c: !state.unverified,
+        },
+      ];
     },
-    { step: "initialize", name: "fakeKms" },
-  );
+    async decrypt(input) {
+      if (state.denied || !allowed.includes(input.name!)) fail(7);
+      const wrapped = b(input.ciphertext),
+        aad = b(input.additionalAuthenticatedData);
+      expect(Number(input.ciphertextCrc32c?.value)).toBe(crc32c.calculate(wrapped));
+      expect(Number(input.additionalAuthenticatedDataCrc32c?.value)).toBe(crc32c.calculate(aad));
+      const stored = wrappedKeys.get(wrapped.toString("base64"));
+      if (!stored || !stored.aad.equals(aad) || stored.key !== input.name) return fail(3);
+      if (state.disabledVersions.has(stored.version)) fail(9);
+      const plain = Buffer.from(stored.bytes);
+      returned.push(plain);
+      return [{ plaintext: plain, plaintextCrc32c: { value: state.badDecryptCrc ? -1 : crc32c.calculate(plain) } }];
+    },
+  };
   return { client, state, returned };
 }
 const pool = lazyPool(testDatabaseUrl("kms_secrets"), "kms-tests");
-const kms = fakeKms("acme");
-const store = (keyArn = KEY, decryptKeyArns: string[] = []) =>
-  kmsPostgresStore({ company: "acme", keyArn, decryptKeyArns, kms: kms.client, database: () => pool.db() });
+const kms = fakeKms([KEY, NEXT_KEY]);
+const store = (keyName = KEY, decryptKeyNames: string[] = []) =>
+  kmsPostgresStore({ company: "acme", keyName, decryptKeyNames, kms: kms.client, database: () => pool.db() });
 const address = () => ({ namespace: "testing", path: randomUUID() });
 beforeAll(async () => {
   await (await pool.db()).query(KMS_SECRETS_SQL);
 });
 afterAll(async () => {
-  kms.client.destroy();
   await pool.close();
 });
 
@@ -68,13 +80,7 @@ describe("KMS encrypted Postgres", () => {
   it("passes atomic store conformance using real Postgres and scoped KMS transport", async () => {
     expect((await checkSecretStore(store(), randomUUID())).filter((c) => !c.ok)).toEqual([]);
   });
-  it("rejects a fleet-wide identity at validation and surfaces denied access without provider payloads", async () => {
-    kms.state.broad = true;
-    try {
-      await expect(store().validate("testing")).rejects.toMatchObject({ code: "invalid_configuration" });
-    } finally {
-      kms.state.broad = false;
-    }
+  it("surfaces denied access without provider payloads", async () => {
     kms.state.denied = true;
     try {
       await expect(store().validate("testing")).rejects.toMatchObject({
@@ -92,7 +98,7 @@ describe("KMS encrypted Postgres", () => {
     const row = await (await pool.db()).query("SELECT * FROM sanoma_kms.secrets WHERE path=$1", [at.path]);
     expect(JSON.stringify(row.rows)).not.toContain("synthetic-private-token");
     expect((await store().read(at))?.value).toBe("synthetic-private-token");
-    expect(kms.returned.every((b) => b.every((byte) => byte === 0))).toBe(true);
+    expect(kms.returned.every((key) => key.every((byte) => byte === 0))).toBe(true);
     kms.state.denied = true;
     try {
       await expect(s.read(at)).rejects.toMatchObject({ code: "denied" });
@@ -100,18 +106,25 @@ describe("KMS encrypted Postgres", () => {
       kms.state.denied = false;
     }
   });
-  it.each(["ciphertext", "nonce", "tag", "wrapped", "format", "key"])("rejects tampered %s", async (field) => {
-    const at = address();
-    await store().write(at, "value", { expectedVersion: null, by: "alice" });
-    await (
-      await pool.db()
-    ).query("UPDATE sanoma_kms.secrets SET envelope=jsonb_set(envelope,ARRAY[$2],to_jsonb($3::text)) WHERE path=$1", [
-      at.path,
-      field,
-      field === "format" ? "v99" : Buffer.alloc(16, 9).toString("base64"),
-    ]);
-    await expect(store().read(at)).rejects.toMatchObject({ code: "invalid_value" });
-  });
+  it.each(["ciphertext", "nonce", "tag", "wrapped", "format", "key", "keyVersion"])(
+    "rejects tampered %s",
+    async (field) => {
+      const at = address();
+      await store().write(at, "value", { expectedVersion: null, by: "alice" });
+      await (
+        await pool.db()
+      ).query("UPDATE sanoma_kms.secrets SET envelope=jsonb_set(envelope,ARRAY[$2],to_jsonb($3::text)) WHERE path=$1", [
+        at.path,
+        field,
+        field === "format"
+          ? "v99"
+          : field === "keyVersion"
+            ? `${KEY}/cryptoKeyVersions/2`
+            : Buffer.alloc(16, 9).toString("base64"),
+      ]);
+      await expect(store().read(at)).rejects.toMatchObject({ code: "invalid_value" });
+    },
+  );
   it("authenticates path, namespace, company and row version", async () => {
     for (const field of ["path", "namespace", "company", "version"] as const) {
       const at = address();
@@ -120,7 +133,7 @@ describe("KMS encrypted Postgres", () => {
       await (await pool.db()).query(`UPDATE sanoma_kms.secrets SET ${field}=$2 WHERE path=$1`, [at.path, changed]);
       const reading =
         field === "company"
-          ? kmsPostgresStore({ company: changed, keyArn: KEY, kms: kms.client, database: () => pool.db() })
+          ? kmsPostgresStore({ company: changed, keyName: KEY, kms: kms.client, database: () => pool.db() })
           : store();
       const target = {
         ...at,
@@ -128,7 +141,7 @@ describe("KMS encrypted Postgres", () => {
         ...(field === "namespace" ? { namespace: changed } : {}),
       };
       await expect(reading.read(target)).rejects.toMatchObject({
-        code: field === "company" ? "denied" : "invalid_value",
+        code: "invalid_value",
       });
     }
   });
@@ -145,9 +158,14 @@ describe("KMS encrypted Postgres", () => {
       code: "conflict",
     });
   });
-  it("never truncates bundles and rejects aliases or undeclared keys", async () => {
+  it("never truncates bundles and rejects malformed or version-specific key configuration", async () => {
     expect(() =>
-      kmsPostgresStore({ company: "acme", keyArn: "alias/latest", kms: kms.client, database: () => pool.db() }),
+      kmsPostgresStore({
+        company: "acme",
+        keyName: `${KEY}/cryptoKeyVersions/1`,
+        kms: kms.client,
+        database: () => pool.db(),
+      }),
     ).toThrow("invalid_configuration");
     await expect(
       store().write(address(), "x".repeat(65537), { expectedVersion: null, by: "alice" }),
@@ -156,5 +174,97 @@ describe("KMS encrypted Postgres", () => {
       value = "x".repeat(65536);
     await store().write(at, value, { expectedVersion: null, by: "alice" });
     expect((await store().read(at))?.value).toBe(value);
+  });
+  it("denies another company's valid wrapped key even with its correct AAD", async () => {
+    const other = fakeKms([OTHER_KEY]);
+    const plaintext = randomBytes(32),
+      aad = Buffer.from("known other-company context");
+    const [encrypted] = await other.client.encrypt({
+      name: OTHER_KEY,
+      plaintext,
+      plaintextCrc32c: { value: crc32c.calculate(plaintext) },
+      additionalAuthenticatedData: aad,
+      additionalAuthenticatedDataCrc32c: { value: crc32c.calculate(aad) },
+    });
+    plaintext.fill(0);
+    await expect(
+      kms.client.decrypt({
+        name: OTHER_KEY,
+        ciphertext: encrypted.ciphertext,
+        ciphertextCrc32c: encrypted.ciphertextCrc32c,
+        additionalAuthenticatedData: aad,
+        additionalAuthenticatedDataCrc32c: { value: crc32c.calculate(aad) },
+      }),
+    ).rejects.toMatchObject({ code: 7 });
+    await expect(
+      kmsPostgresStore({ company: "other", keyName: OTHER_KEY, kms: kms.client, database: () => pool.db() }).validate(
+        "test",
+      ),
+    ).rejects.toMatchObject({ code: "denied" });
+  });
+  it("does not claim AAD or a successful validate proves company isolation", async () => {
+    // The same identity can use its permitted key with arbitrary AAD, including another company ID.
+    // Provisioning must not grant multiple companies access to one key in this direct-runtime model.
+    await expect(
+      kmsPostgresStore({ company: "other", keyName: KEY, kms: kms.client, database: () => pool.db() }).validate("test"),
+    ).resolves.toBeUndefined();
+  });
+  it("survives primary-version rotation and requires old versions for old rows/backups", async () => {
+    const at = address();
+    const first = await store().write(at, "before rotation", { expectedVersion: null, by: "alice" });
+    const {
+      rows: [backup],
+    } = await (await pool.db()).query("SELECT * FROM sanoma_kms.secrets WHERE path=$1", [at.path]);
+    kms.state.primary = 2;
+    try {
+      expect((await store().read(at))?.value).toBe("before rotation");
+      await store().write(at, "after rotation", { expectedVersion: first.version, by: "alice" });
+      const {
+        rows: [current],
+      } = await (await pool.db()).query("SELECT envelope FROM sanoma_kms.secrets WHERE path=$1", [at.path]);
+      expect(current.envelope.keyVersion).toBe(`${KEY}/cryptoKeyVersions/2`);
+      kms.state.disabledVersions.add(1);
+      expect((await store().read(at))?.value).toBe("after rotation");
+      await (
+        await pool.db()
+      ).query("UPDATE sanoma_kms.secrets SET envelope=$2,version=$3 WHERE path=$1", [
+        at.path,
+        backup.envelope,
+        backup.version,
+      ]);
+      await expect(store().read(at)).rejects.toMatchObject({ code: "invalid_configuration" });
+      kms.state.disabledVersions.clear();
+      expect((await store().read(at))?.value).toBe("before rotation");
+    } finally {
+      kms.state.primary = 1;
+      kms.state.disabledVersions.clear();
+    }
+  });
+  it.each(["badEncryptCrc", "unverified", "wrongName"] as const)(
+    "refuses to persist an invalid KMS encryption response: %s",
+    async (flag) => {
+      const at = address();
+      kms.state[flag] = true;
+      try {
+        await expect(store().write(at, "value", { expectedVersion: null, by: "alice" })).rejects.toMatchObject({
+          code: "invalid_value",
+        });
+        expect(await store().read(at)).toBeUndefined();
+        expect(kms.returned.every((key) => key.every((v) => v === 0))).toBe(true);
+      } finally {
+        kms.state[flag] = false;
+      }
+    },
+  );
+  it("rejects corrupt returned plaintext data keys and clears their buffers", async () => {
+    const at = address();
+    await store().write(at, "value", { expectedVersion: null, by: "alice" });
+    kms.state.badDecryptCrc = true;
+    try {
+      await expect(store().read(at)).rejects.toMatchObject({ code: "invalid_value" });
+      expect(kms.returned.every((key) => key.every((v) => v === 0))).toBe(true);
+    } finally {
+      kms.state.badDecryptCrc = false;
+    }
   });
 });

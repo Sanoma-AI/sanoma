@@ -1,5 +1,6 @@
 import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from "node:crypto";
-import { DecryptCommand, GenerateDataKeyCommand, type KMSClient } from "@aws-sdk/client-kms";
+import type { protos } from "@google-cloud/kms";
+import crc32c from "fast-crc32c";
 import type { Db } from "./db.ts";
 import { SecretStoreError, type SecretAddress, type SecretStore, type SecretValue } from "./secret-store.ts";
 
@@ -27,22 +28,33 @@ END;
 $revoke$;
 `;
 
+/** Promise interface implemented by Google's KeyManagementServiceClient. */
+export interface GcpKmsClient {
+  encrypt(
+    request: protos.google.cloud.kms.v1.IEncryptRequest,
+  ): Promise<[protos.google.cloud.kms.v1.IEncryptResponse, ...unknown[]]>;
+  decrypt(
+    request: protos.google.cloud.kms.v1.IDecryptRequest,
+  ): Promise<[protos.google.cloud.kms.v1.IDecryptResponse, ...unknown[]]>;
+}
+
 export interface KmsPostgresOptions {
-  /** Fixed by trusted deployment bootstrap. IAM must independently enforce this company context. */
+  /** Fixed by trusted deployment bootstrap. IAM must independently restrict the runtime to this company’s CryptoKeys. */
   company: string;
-  /** Immutable key ARN for new writes; aliases are deliberately unsupported. */
-  keyArn: string;
-  /** Retained key ARNs allowed for reads during key replacement/backup recovery. */
-  decryptKeyArns?: readonly string[];
+  /** Full GCP CryptoKey resource name for new writes, using its primary version. */
+  keyName: string;
+  /** Retained CryptoKey names allowed for reads during key replacement/backup recovery. */
+  decryptKeyNames?: readonly string[];
   /** Explicit client under a company-scoped IAM identity, never fleet credentials. Caller owns its lifecycle. */
-  kms: Pick<KMSClient, "send">;
+  kms: GcpKmsClient;
   /** Company-scoped database access. Caller owns connection lifecycle; never shared admin authority. */
   database: () => Promise<Db>;
 }
 
 interface Envelope {
-  format: "sanoma-kms-v1";
+  format: "sanoma-gcp-kms-v1";
   key: string;
+  keyVersion: string;
   wrapped: string;
   nonce: string;
   ciphertext: string;
@@ -54,20 +66,21 @@ interface Row {
   updated_by: string;
   updated_at: Date;
 }
-const FORMAT = "sanoma-kms-v1";
+const FORMAT = "sanoma-gcp-kms-v1";
 const MAX_BYTES = 65_536;
-const keyArn = /^arn:(aws|aws-us-gov|aws-cn):kms:[a-z0-9-]+:\d{12}:key\/[a-zA-Z0-9-]+$/;
-const nonempty = (v: string) => typeof v === "string" && v.length > 0 && v.length <= 1024 && !v.includes("\0");
+const keyName =
+  /^projects\/[a-zA-Z0-9-]+\/locations\/[a-z0-9-]+\/keyRings\/[a-zA-Z0-9_-]+\/cryptoKeys\/[a-zA-Z0-9_-]+$/;
+const nonempty = (v: string) =>
+  typeof v === "string" && v.length > 0 && Buffer.byteLength(v, "utf8") <= 1024 && !v.includes("\0");
 const failed = (error: unknown): never => {
   if (error instanceof SecretStoreError) throw error;
-  const name = (error as { name?: string } | null)?.name;
-  const code = (error as { code?: string } | null)?.code;
+  const code = (error as { code?: string | number } | null)?.code;
   throw new SecretStoreError(
-    name === "AccessDeniedException" || code === "42501"
+    code === 7 || code === 16 || code === "42501"
       ? "denied"
-      : name === "InvalidCiphertextException" || name === "IncorrectKeyException"
+      : code === 3
         ? "invalid_value"
-        : name === "NotFoundException" || name === "DisabledException" || code === "42P01"
+        : code === 5 || code === 9 || code === "42P01"
           ? "invalid_configuration"
           : "unavailable",
   );
@@ -91,43 +104,67 @@ const bytes = (v: string, length?: number, max = MAX_BYTES): Buffer => {
   return b;
 };
 
+const versionOf = (name: unknown, key: string): name is string =>
+  typeof name === "string" &&
+  name.startsWith(`${key}/cryptoKeyVersions/`) &&
+  /^[1-9][0-9]{0,19}$/.test(name.slice(`${key}/cryptoKeyVersions/`.length));
+const checksum = (value: Uint8Array) => crc32c.calculate(Buffer.from(value.buffer, value.byteOffset, value.byteLength));
+
 /** Versioned envelope encryption; no plaintext/data-key cache, no SANOMA_SECRETS_KEY and no Secrets Manager. */
 export function kmsPostgresStore(options: KmsPostgresOptions): SecretStore {
-  const { company, keyArn: writeKey, kms, database } = options;
-  const keys = new Set([writeKey, ...(options.decryptKeyArns ?? [])]);
-  if (!nonempty(company) || [...keys].some((k) => !keyArn.test(k))) throw new SecretStoreError("invalid_configuration");
+  const { company, keyName: writeKey, kms, database } = options;
+  const keys = new Set([writeKey, ...(options.decryptKeyNames ?? [])]);
+  if (!nonempty(company) || [...keys].some((k) => !nonempty(k) || !keyName.test(k)))
+    throw new SecretStoreError("invalid_configuration");
   const context = (address: SecretAddress, version: string) => {
     if (!nonempty(address.namespace) || !nonempty(address.path)) throw new SecretStoreError("invalid_configuration");
     return { company, namespace: address.namespace, path: address.path, version, format: FORMAT };
   };
   const seal = async (address: SecretAddress, value: string, version: string): Promise<Envelope> => {
     const bound = context(address, version);
-    const generated = await kms.send(
-      new GenerateDataKeyCommand({ KeyId: writeKey, KeySpec: "AES_256", EncryptionContext: bound }),
-    );
+    const aad = Buffer.from(JSON.stringify(bound));
+    const dataKey = randomBytes(32);
     try {
-      if (generated.KeyId !== writeKey || generated.Plaintext?.length !== 32 || !generated.CiphertextBlob?.length)
+      const [encrypted] = await kms.encrypt({
+        name: writeKey,
+        plaintext: dataKey,
+        plaintextCrc32c: { value: checksum(dataKey) },
+        additionalAuthenticatedData: aad,
+        additionalAuthenticatedDataCrc32c: { value: checksum(aad) },
+      });
+      const wrapped =
+        typeof encrypted.ciphertext === "string" ? bytes(encrypted.ciphertext, undefined, 6144) : encrypted.ciphertext;
+      if (
+        !versionOf(encrypted.name, writeKey) ||
+        !wrapped?.length ||
+        wrapped.length > 6144 ||
+        !encrypted.verifiedPlaintextCrc32c ||
+        !encrypted.verifiedAdditionalAuthenticatedDataCrc32c ||
+        Number(encrypted.ciphertextCrc32c?.value ?? NaN) !== checksum(wrapped)
+      )
         throw new SecretStoreError("invalid_value");
       const nonce = randomBytes(12);
-      const cipher = createCipheriv("aes-256-gcm", generated.Plaintext, nonce).setAAD(
-        Buffer.from(JSON.stringify(bound)),
+      const cipher = createCipheriv("aes-256-gcm", dataKey, nonce).setAAD(
+        Buffer.from(JSON.stringify({ ...bound, keyVersion: encrypted.name })),
       );
       const ciphertext = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
       return {
         format: FORMAT,
         key: writeKey,
-        wrapped: Buffer.from(generated.CiphertextBlob).toString("base64"),
+        keyVersion: encrypted.name,
+        wrapped: Buffer.from(wrapped).toString("base64"),
         nonce: nonce.toString("base64"),
         ciphertext: ciphertext.toString("base64"),
         tag: cipher.getAuthTag().toString("base64"),
       };
     } finally {
-      generated.Plaintext?.fill(0);
+      dataKey.fill(0);
     }
   };
   const open = async (address: SecretAddress, row: Row): Promise<SecretValue> => {
     const e = row.envelope;
-    if (!e || e.format !== FORMAT || !keys.has(e.key)) throw new SecretStoreError("invalid_value");
+    if (!e || e.format !== FORMAT || !keys.has(e.key) || !versionOf(e.keyVersion, e.key))
+      throw new SecretStoreError("invalid_value");
     const nonce = bytes(e.nonce, 12),
       tag = bytes(e.tag, 16),
       ciphertext = bytes(e.ciphertext),
@@ -135,18 +172,20 @@ export function kmsPostgresStore(options: KmsPostgresOptions): SecretStore {
     if (ciphertext.length > MAX_BYTES || !wrapped.length || wrapped.length > 6144)
       throw new SecretStoreError("invalid_value");
     const bound = context(address, row.version);
-    const decrypted = await kms.send(
-      new DecryptCommand({
-        KeyId: e.key,
-        CiphertextBlob: wrapped,
-        EncryptionContext: bound,
-        EncryptionAlgorithm: "SYMMETRIC_DEFAULT",
-      }),
-    );
+    const aad = Buffer.from(JSON.stringify(bound));
+    const [decrypted] = await kms.decrypt({
+      name: e.key,
+      ciphertext: wrapped,
+      ciphertextCrc32c: { value: checksum(wrapped) },
+      additionalAuthenticatedData: aad,
+      additionalAuthenticatedDataCrc32c: { value: checksum(aad) },
+    });
+    const dataKey = typeof decrypted.plaintext === "string" ? bytes(decrypted.plaintext, 32) : decrypted.plaintext;
     try {
-      if (decrypted.KeyId !== e.key || decrypted.Plaintext?.length !== 32) throw new SecretStoreError("invalid_value");
-      const decipher = createDecipheriv("aes-256-gcm", decrypted.Plaintext, nonce)
-        .setAAD(Buffer.from(JSON.stringify(bound)))
+      if (dataKey?.length !== 32 || Number(decrypted.plaintextCrc32c?.value ?? NaN) !== checksum(dataKey))
+        throw new SecretStoreError("invalid_value");
+      const decipher = createDecipheriv("aes-256-gcm", dataKey, nonce)
+        .setAAD(Buffer.from(JSON.stringify({ ...bound, keyVersion: e.keyVersion })))
         .setAuthTag(tag);
       let plaintext: Buffer;
       try {
@@ -165,7 +204,7 @@ export function kmsPostgresStore(options: KmsPostgresOptions): SecretStore {
         plaintext.fill(0);
       }
     } finally {
-      decrypted.Plaintext?.fill(0);
+      dataKey?.fill(0);
     }
   };
   return {
@@ -184,21 +223,7 @@ export function kmsPostgresStore(options: KmsPostgresOptions): SecretStore {
         const envelope = await seal(address, "validation", version);
         await open(address, { envelope, version, updated_by: "validation", updated_at: new Date() });
         await (await database()).query("SELECT version FROM sanoma_kms.secrets WHERE company=$1 LIMIT 0", [company]);
-        // Fail a positive scope check closed: a deployment identity must not mint data keys for another company.
-        try {
-          const probe = await kms.send(
-            new GenerateDataKeyCommand({
-              KeyId: writeKey,
-              KeySpec: "AES_256",
-              EncryptionContext: { ...context(address, version), company: `scope-probe-${randomUUID()}` },
-            }),
-          );
-          probe.Plaintext?.fill(0);
-        } catch (error) {
-          if ((error as { name?: string } | null)?.name === "AccessDeniedException") return;
-          throw error;
-        }
-        throw new SecretStoreError("invalid_configuration");
+        // Own-key usability only. Cross-company authorization requires live IAM proof with another existing key.
       }),
     read: (address) =>
       safe(async () => {
