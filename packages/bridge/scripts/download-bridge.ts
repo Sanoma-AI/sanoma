@@ -39,12 +39,12 @@ export interface Release {
 export const RELEASE: Release = {
   owner: "Sanoma-AI",
   repo: "provider-bridge",
-  version: "0.1.0",
+  version: "0.2.0",
   sha256: {
-    "darwin-arm64": "d175ed2141d1bc37e2f98b9e809d32467f710aa3520a793de485781ae46b4dc0",
-    "darwin-x64": "d0f978f8483b01959bc04938b75154a0af64946d7333c0aafd186c55c83ff342",
-    "linux-arm64": "86d902ae7c4fd6e4aa27fe955cecb648eb0b4beda0e9f3fcf4d429169cb58fb5",
-    "linux-x64": "e675dfea90db75899216e4f3bc39615cb41ecd47546ca9fdf53b5a7a73d69daf",
+    "darwin-arm64": "9f75bc1857476a0a48fcc8b0733c699d706574e5815155d2955f18e090c4f0e8",
+    "darwin-x64": "c85e202e12c94d5371f87cd6d2b8584a5e62b935ce390f992ea61301c75d1baf",
+    "linux-arm64": "1d62ea033fa197d87baf10010445b275591575fec5c8aa049c48b20f014ffc47",
+    "linux-x64": "3a4161434bb20e1516938616084c40c78e4c657e75f791cd10cba8a6e8f67e0c",
   },
 };
 

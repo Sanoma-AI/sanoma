@@ -121,7 +121,7 @@ The provider's private data and state version travel in the operation's opaque `
 
 ## The binary
 
-The session-protocol-1 Go binary must be released and `scripts/download-bridge.ts` plus platform archive pins updated before this client can ship. That release/pin update is not completed by this session change; do not assume the currently pinned binary supports it. A locally built matching binary can be selected through `SANOMA_BRIDGE_BIN`.
+The session-protocol-1 binary is published as [provider-bridge v0.2.0](https://github.com/Sanoma-AI/provider-bridge/releases/tag/v0.2.0). `scripts/download-bridge.ts` pins that release and all four platform archive checksums from its published `SHA256SUMS`. Publication of the updated Sanoma client and platform packages to npm remains pending; the Go release does not publish those packages. A locally built matching binary can also be selected through `SANOMA_BRIDGE_BIN`.
 
 `startBridge` runs `bin`, else `SANOMA_BRIDGE_BIN`, else the `bin/provider-bridge` of `@sanoma-ai/bridge-<platform>` for this process's `${process.platform}-${process.arch}` (`darwin-arm64`, `darwin-x64`, `linux-arm64`, `linux-x64`), an optional dependency of this package, so npm installs only the one that matches; otherwise it fails, saying how to get one. Each platform package holds the binary of the provider-bridge release that `RELEASE` in [`scripts/download-bridge.ts`](scripts/download-bridge.ts) pins, downloaded from its GitHub release and checked against the archive's pinned sha256 when the package is packed (its `prepack`), with the archive's license texts in `licenses/`. A package manager that omits optional dependencies leaves the binary out; set `SANOMA_BRIDGE_BIN` then.
 
