@@ -528,9 +528,9 @@ export async function declaredWakeup(config: SanomaConfig): Promise<DeclaredWake
   const connectors = connectorsOf(config);
   const types = resourceTypesOf(connectors);
   if (![...types.values()].some((type) => type.wakeup)) return undefined;
-  // Loaded when it is needed, not with the worker: the reader parses with oxc-parser.
-  const { readDataFiles } = await import("./resources.ts");
-  const { resources } = readDataFiles(rootOf(config), connectors, types);
+  // Loaded when it is needed, not with the worker.
+  const { loadDataFiles } = await import("./resources.ts");
+  const { resources } = loadDataFiles(rootOf(config), connectors, types);
   const typeOf = (r: DeclaredResource) => types.get(`${r.vendor}.${r.type}`)!;
   const declared = resources.find((r) => typeOf(r).wakeup);
   if (!declared) return undefined;
@@ -558,9 +558,9 @@ async function readDeclared(
   types: ReadonlyMap<string, Resource>,
   connections: ConnectionRegistry,
 ): Promise<Omit<ApplyDeclared, "rebinds">> {
-  // Loaded when a run reads the files, not with the worker: the reader parses with oxc-parser.
-  const { readDataFiles } = await import("./resources.ts");
-  const { resources, bindings, orphans, problems } = readDataFiles(root, connectors, declarable);
+  // Loaded when a run reads the files, not with the worker.
+  const { loadDataFiles } = await import("./resources.ts");
+  const { resources, bindings, orphans, problems } = loadDataFiles(root, connectors, declarable);
   // Read inside the data-file durable step: every operation of the plan uses one pinned account.
   const run = currentRun.getStore();
   if (run && !run.sandbox) {

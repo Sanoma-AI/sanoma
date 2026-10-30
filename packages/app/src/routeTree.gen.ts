@@ -10,23 +10,30 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as AppsRouteImport } from './routes/apps'
+import { Route as AppsRouteRouteImport } from './routes/apps/route'
 import { Route as ChangesRouteRouteImport } from './routes/changes/route'
 import { Route as ConnectorsRouteRouteImport } from './routes/connectors/route'
 import { Route as DataRouteRouteImport } from './routes/data/route'
+import { Route as HostingRouteRouteImport } from './routes/hosting/route'
 import { Route as InboxRouteImport } from './routes/inbox'
+import { Route as PeopleRouteImport } from './routes/people'
 import { Route as PermissionsRouteImport } from './routes/permissions'
 import { Route as ResourcesRouteImport } from './routes/resources'
 import { Route as StartRouteImport } from './routes/start'
 import { Route as WorkflowsRouteRouteImport } from './routes/workflows/route'
 import { Route as ApiChatRouteImport } from './routes/api/chat'
 import { Route as ApiSignInRouteImport } from './routes/api/sign-in'
+import { Route as AppsIndexRouteImport } from './routes/apps/index'
+import { Route as AppsNameRouteImport } from './routes/apps/$name'
 import { Route as ChangesIndexRouteImport } from './routes/changes/index'
 import { Route as ChangesIdRouteImport } from './routes/changes/$id'
 import { Route as ConnectorsIndexRouteImport } from './routes/connectors/index'
 import { Route as ConnectorsVendorRouteImport } from './routes/connectors/$vendor'
 import { Route as DataIndexRouteImport } from './routes/data/index'
 import { Route as DataNameRouteImport } from './routes/data/$name'
+import { Route as HostingIndexRouteImport } from './routes/hosting/index'
+import { Route as HostingConnectRouteImport } from './routes/hosting/connect'
+import { Route as HostingExistingRouteImport } from './routes/hosting/existing'
 import { Route as RunsIndexRouteImport } from './routes/runs/index'
 import { Route as RunsIdRouteImport } from './routes/runs/$id'
 import { Route as SetupIndexRouteImport } from './routes/setup/index'
@@ -46,7 +53,7 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AppsRoute = AppsRouteImport.update({
+const AppsRouteRoute = AppsRouteRouteImport.update({
   id: '/apps',
   path: '/apps',
   getParentRoute: () => rootRouteImport,
@@ -66,9 +73,19 @@ const DataRouteRoute = DataRouteRouteImport.update({
   path: '/data',
   getParentRoute: () => rootRouteImport,
 } as any)
+const HostingRouteRoute = HostingRouteRouteImport.update({
+  id: '/hosting',
+  path: '/hosting',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const InboxRoute = InboxRouteImport.update({
   id: '/inbox',
   path: '/inbox',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PeopleRoute = PeopleRouteImport.update({
+  id: '/people',
+  path: '/people',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PermissionsRoute = PermissionsRouteImport.update({
@@ -101,6 +118,16 @@ const ApiSignInRoute = ApiSignInRouteImport.update({
   path: '/api/sign-in',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AppsIndexRoute = AppsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppsRouteRoute,
+} as any)
+const AppsNameRoute = AppsNameRouteImport.update({
+  id: '/$name',
+  path: '/$name',
+  getParentRoute: () => AppsRouteRoute,
+} as any)
 const ChangesIndexRoute = ChangesIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -130,6 +157,21 @@ const DataNameRoute = DataNameRouteImport.update({
   id: '/$name',
   path: '/$name',
   getParentRoute: () => DataRouteRoute,
+} as any)
+const HostingIndexRoute = HostingIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => HostingRouteRoute,
+} as any)
+const HostingConnectRoute = HostingConnectRouteImport.update({
+  id: '/connect',
+  path: '/connect',
+  getParentRoute: () => HostingRouteRoute,
+} as any)
+const HostingExistingRoute = HostingExistingRouteImport.update({
+  id: '/existing',
+  path: '/existing',
+  getParentRoute: () => HostingRouteRoute,
 } as any)
 const RunsIndexRoute = RunsIndexRouteImport.update({
   id: '/runs/',
@@ -199,27 +241,34 @@ const WorkflowsNameRunsIdRoute = WorkflowsNameRunsIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/apps': typeof AppsRouteRouteWithChildren
   '/changes': typeof ChangesRouteRouteWithChildren
   '/connectors': typeof ConnectorsRouteRouteWithChildren
   '/data': typeof DataRouteRouteWithChildren
+  '/hosting': typeof HostingRouteRouteWithChildren
   '/workflows': typeof WorkflowsRouteRouteWithChildren
-  '/apps': typeof AppsRoute
   '/inbox': typeof InboxRoute
+  '/people': typeof PeopleRoute
   '/permissions': typeof PermissionsRoute
   '/resources': typeof ResourcesRoute
   '/start': typeof StartRoute
   '/workflows/$name': typeof WorkflowsNameRouteRouteWithChildren
   '/api/chat': typeof ApiChatRoute
   '/api/sign-in': typeof ApiSignInRoute
+  '/apps/$name': typeof AppsNameRoute
   '/changes/$id': typeof ChangesIdRoute
   '/connectors/$vendor': typeof ConnectorsVendorRoute
   '/data/$name': typeof DataNameRoute
+  '/hosting/connect': typeof HostingConnectRoute
+  '/hosting/existing': typeof HostingExistingRoute
   '/runs/$id': typeof RunsIdRoute
   '/setup/connect': typeof SetupConnectRoute
   '/setup/existing': typeof SetupExistingRoute
+  '/apps/': typeof AppsIndexRoute
   '/changes/': typeof ChangesIndexRoute
   '/connectors/': typeof ConnectorsIndexRoute
   '/data/': typeof DataIndexRoute
+  '/hosting/': typeof HostingIndexRoute
   '/runs/': typeof RunsIndexRoute
   '/setup/': typeof SetupIndexRoute
   '/sites/': typeof SitesIndexRoute
@@ -232,22 +281,27 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/apps': typeof AppsRoute
   '/inbox': typeof InboxRoute
+  '/people': typeof PeopleRoute
   '/permissions': typeof PermissionsRoute
   '/resources': typeof ResourcesRoute
   '/start': typeof StartRoute
   '/api/chat': typeof ApiChatRoute
   '/api/sign-in': typeof ApiSignInRoute
+  '/apps/$name': typeof AppsNameRoute
   '/changes/$id': typeof ChangesIdRoute
   '/connectors/$vendor': typeof ConnectorsVendorRoute
   '/data/$name': typeof DataNameRoute
+  '/hosting/connect': typeof HostingConnectRoute
+  '/hosting/existing': typeof HostingExistingRoute
   '/runs/$id': typeof RunsIdRoute
   '/setup/connect': typeof SetupConnectRoute
   '/setup/existing': typeof SetupExistingRoute
+  '/apps': typeof AppsIndexRoute
   '/changes': typeof ChangesIndexRoute
   '/connectors': typeof ConnectorsIndexRoute
   '/data': typeof DataIndexRoute
+  '/hosting': typeof HostingIndexRoute
   '/runs': typeof RunsIndexRoute
   '/setup': typeof SetupIndexRoute
   '/sites': typeof SitesIndexRoute
@@ -261,27 +315,34 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/apps': typeof AppsRouteRouteWithChildren
   '/changes': typeof ChangesRouteRouteWithChildren
   '/connectors': typeof ConnectorsRouteRouteWithChildren
   '/data': typeof DataRouteRouteWithChildren
+  '/hosting': typeof HostingRouteRouteWithChildren
   '/workflows': typeof WorkflowsRouteRouteWithChildren
-  '/apps': typeof AppsRoute
   '/inbox': typeof InboxRoute
+  '/people': typeof PeopleRoute
   '/permissions': typeof PermissionsRoute
   '/resources': typeof ResourcesRoute
   '/start': typeof StartRoute
   '/workflows/$name': typeof WorkflowsNameRouteRouteWithChildren
   '/api/chat': typeof ApiChatRoute
   '/api/sign-in': typeof ApiSignInRoute
+  '/apps/$name': typeof AppsNameRoute
   '/changes/$id': typeof ChangesIdRoute
   '/connectors/$vendor': typeof ConnectorsVendorRoute
   '/data/$name': typeof DataNameRoute
+  '/hosting/connect': typeof HostingConnectRoute
+  '/hosting/existing': typeof HostingExistingRoute
   '/runs/$id': typeof RunsIdRoute
   '/setup/connect': typeof SetupConnectRoute
   '/setup/existing': typeof SetupExistingRoute
+  '/apps/': typeof AppsIndexRoute
   '/changes/': typeof ChangesIndexRoute
   '/connectors/': typeof ConnectorsIndexRoute
   '/data/': typeof DataIndexRoute
+  '/hosting/': typeof HostingIndexRoute
   '/runs/': typeof RunsIndexRoute
   '/setup/': typeof SetupIndexRoute
   '/sites/': typeof SitesIndexRoute
@@ -296,27 +357,34 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/apps'
     | '/changes'
     | '/connectors'
     | '/data'
+    | '/hosting'
     | '/workflows'
-    | '/apps'
     | '/inbox'
+    | '/people'
     | '/permissions'
     | '/resources'
     | '/start'
     | '/workflows/$name'
     | '/api/chat'
     | '/api/sign-in'
+    | '/apps/$name'
     | '/changes/$id'
     | '/connectors/$vendor'
     | '/data/$name'
+    | '/hosting/connect'
+    | '/hosting/existing'
     | '/runs/$id'
     | '/setup/connect'
     | '/setup/existing'
+    | '/apps/'
     | '/changes/'
     | '/connectors/'
     | '/data/'
+    | '/hosting/'
     | '/runs/'
     | '/setup/'
     | '/sites/'
@@ -329,22 +397,27 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/apps'
     | '/inbox'
+    | '/people'
     | '/permissions'
     | '/resources'
     | '/start'
     | '/api/chat'
     | '/api/sign-in'
+    | '/apps/$name'
     | '/changes/$id'
     | '/connectors/$vendor'
     | '/data/$name'
+    | '/hosting/connect'
+    | '/hosting/existing'
     | '/runs/$id'
     | '/setup/connect'
     | '/setup/existing'
+    | '/apps'
     | '/changes'
     | '/connectors'
     | '/data'
+    | '/hosting'
     | '/runs'
     | '/setup'
     | '/sites'
@@ -357,27 +430,34 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/apps'
     | '/changes'
     | '/connectors'
     | '/data'
+    | '/hosting'
     | '/workflows'
-    | '/apps'
     | '/inbox'
+    | '/people'
     | '/permissions'
     | '/resources'
     | '/start'
     | '/workflows/$name'
     | '/api/chat'
     | '/api/sign-in'
+    | '/apps/$name'
     | '/changes/$id'
     | '/connectors/$vendor'
     | '/data/$name'
+    | '/hosting/connect'
+    | '/hosting/existing'
     | '/runs/$id'
     | '/setup/connect'
     | '/setup/existing'
+    | '/apps/'
     | '/changes/'
     | '/connectors/'
     | '/data/'
+    | '/hosting/'
     | '/runs/'
     | '/setup/'
     | '/sites/'
@@ -391,12 +471,14 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AppsRouteRoute: typeof AppsRouteRouteWithChildren
   ChangesRouteRoute: typeof ChangesRouteRouteWithChildren
   ConnectorsRouteRoute: typeof ConnectorsRouteRouteWithChildren
   DataRouteRoute: typeof DataRouteRouteWithChildren
+  HostingRouteRoute: typeof HostingRouteRouteWithChildren
   WorkflowsRouteRoute: typeof WorkflowsRouteRouteWithChildren
-  AppsRoute: typeof AppsRoute
   InboxRoute: typeof InboxRoute
+  PeopleRoute: typeof PeopleRoute
   PermissionsRoute: typeof PermissionsRoute
   ResourcesRoute: typeof ResourcesRoute
   StartRoute: typeof StartRoute
@@ -425,7 +507,7 @@ declare module '@tanstack/react-router' {
       id: '/apps'
       path: '/apps'
       fullPath: '/apps'
-      preLoaderRoute: typeof AppsRouteImport
+      preLoaderRoute: typeof AppsRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/changes': {
@@ -449,11 +531,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DataRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/hosting': {
+      id: '/hosting'
+      path: '/hosting'
+      fullPath: '/hosting'
+      preLoaderRoute: typeof HostingRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/inbox': {
       id: '/inbox'
       path: '/inbox'
       fullPath: '/inbox'
       preLoaderRoute: typeof InboxRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/people': {
+      id: '/people'
+      path: '/people'
+      fullPath: '/people'
+      preLoaderRoute: typeof PeopleRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/permissions': {
@@ -498,6 +594,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiSignInRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/apps/': {
+      id: '/apps/'
+      path: '/'
+      fullPath: '/apps/'
+      preLoaderRoute: typeof AppsIndexRouteImport
+      parentRoute: typeof AppsRouteRoute
+    }
+    '/apps/$name': {
+      id: '/apps/$name'
+      path: '/$name'
+      fullPath: '/apps/$name'
+      preLoaderRoute: typeof AppsNameRouteImport
+      parentRoute: typeof AppsRouteRoute
+    }
     '/changes/': {
       id: '/changes/'
       path: '/'
@@ -539,6 +649,27 @@ declare module '@tanstack/react-router' {
       fullPath: '/data/$name'
       preLoaderRoute: typeof DataNameRouteImport
       parentRoute: typeof DataRouteRoute
+    }
+    '/hosting/': {
+      id: '/hosting/'
+      path: '/'
+      fullPath: '/hosting/'
+      preLoaderRoute: typeof HostingIndexRouteImport
+      parentRoute: typeof HostingRouteRoute
+    }
+    '/hosting/connect': {
+      id: '/hosting/connect'
+      path: '/connect'
+      fullPath: '/hosting/connect'
+      preLoaderRoute: typeof HostingConnectRouteImport
+      parentRoute: typeof HostingRouteRoute
+    }
+    '/hosting/existing': {
+      id: '/hosting/existing'
+      path: '/existing'
+      fullPath: '/hosting/existing'
+      preLoaderRoute: typeof HostingExistingRouteImport
+      parentRoute: typeof HostingRouteRoute
     }
     '/runs/': {
       id: '/runs/'
@@ -634,6 +765,20 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface AppsRouteRouteChildren {
+  AppsNameRoute: typeof AppsNameRoute
+  AppsIndexRoute: typeof AppsIndexRoute
+}
+
+const AppsRouteRouteChildren: AppsRouteRouteChildren = {
+  AppsNameRoute: AppsNameRoute,
+  AppsIndexRoute: AppsIndexRoute,
+}
+
+const AppsRouteRouteWithChildren = AppsRouteRoute._addFileChildren(
+  AppsRouteRouteChildren,
+)
+
 interface ChangesRouteRouteChildren {
   ChangesIdRoute: typeof ChangesIdRoute
   ChangesIndexRoute: typeof ChangesIndexRoute
@@ -676,6 +821,22 @@ const DataRouteRouteWithChildren = DataRouteRoute._addFileChildren(
   DataRouteRouteChildren,
 )
 
+interface HostingRouteRouteChildren {
+  HostingConnectRoute: typeof HostingConnectRoute
+  HostingExistingRoute: typeof HostingExistingRoute
+  HostingIndexRoute: typeof HostingIndexRoute
+}
+
+const HostingRouteRouteChildren: HostingRouteRouteChildren = {
+  HostingConnectRoute: HostingConnectRoute,
+  HostingExistingRoute: HostingExistingRoute,
+  HostingIndexRoute: HostingIndexRoute,
+}
+
+const HostingRouteRouteWithChildren = HostingRouteRoute._addFileChildren(
+  HostingRouteRouteChildren,
+)
+
 interface WorkflowsNameRouteRouteChildren {
   WorkflowsNameNewRoute: typeof WorkflowsNameNewRoute
   WorkflowsNameIndexRoute: typeof WorkflowsNameIndexRoute
@@ -707,12 +868,14 @@ const WorkflowsRouteRouteWithChildren = WorkflowsRouteRoute._addFileChildren(
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AppsRouteRoute: AppsRouteRouteWithChildren,
   ChangesRouteRoute: ChangesRouteRouteWithChildren,
   ConnectorsRouteRoute: ConnectorsRouteRouteWithChildren,
   DataRouteRoute: DataRouteRouteWithChildren,
+  HostingRouteRoute: HostingRouteRouteWithChildren,
   WorkflowsRouteRoute: WorkflowsRouteRouteWithChildren,
-  AppsRoute: AppsRoute,
   InboxRoute: InboxRoute,
+  PeopleRoute: PeopleRoute,
   PermissionsRoute: PermissionsRoute,
   ResourcesRoute: ResourcesRoute,
   StartRoute: StartRoute,

@@ -1,6 +1,6 @@
 # packages/app/src/form
 
-The start form: it turns a workflow's input JSON Schema into form fields and renders them, empty for a live run or filled read-only with a scenario's input for a sandbox run. The server still validates the input, so the form only shapes entry. `RunForm` is the same form for a site, by the workflow's name, and a collection's record form (`components/record-form.tsx`) is drawn by its pieces.
+The start form: it turns a workflow's input JSON Schema into form fields and renders them, empty for a live run or filled read-only with a scenario's input for a sandbox run. The server still validates the input, so the form only shapes entry. `RunForm` is the same form for a site, by the workflow's name, and a collection's record form (`components/record-form.tsx`) and a declaration's (`components/declaration-form.tsx`) are drawn by its pieces.
 
 ## Contents
 

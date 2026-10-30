@@ -21,7 +21,7 @@ const root = rootWith(
   {
     "policies/policy.cedar": `@reason("secret repositories stay private")
 forbid (principal, action == Sanoma::Action::"github.repository.import", resource)
-when { context.input.id like "secret*" };
+when { context.input.id like "*/secret*" };
 
 @hold("finance")
 @title("Read a product")
@@ -103,7 +103,10 @@ describe("the company's scenarios", () => {
     expect(record(gone, "scenario.seeded").seeds).toEqual([
       { resource: "github.repository", name: "sanoma", gone: true },
     ]);
-    expect(record(gone, "op.called", "github.repository.import").output).toEqual({ id: "sanoma", gone: true });
+    expect(record(gone, "op.called", "github.repository.import").output).toEqual({
+      id: "Sanoma-AI/sanoma",
+      gone: true,
+    });
     expect(gone.at(-1)).toMatchObject({ type: "run.finished", output: { repository: null, product: null } });
     expect(github.state.objects["github_repository/sanoma"]).toEqual(recorded);
     // Nothing reached the drivers' fakes: each run called its own.

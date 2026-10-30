@@ -79,7 +79,7 @@ describe("check", () => {
         /^workflows\/hello\.ts:17:18: Workflows are replayed, so a workflow reads the clock with `await ctx\.now\(\)`/,
       ),
       // describeConfig: the data file, then the workflow's file.
-      "resources/shop.ts:2:1: ghost has no resource type post: its types are ",
+      "resources/shop.ts:2:24: ghost has no resource type post: its types are none",
       expect.stringMatching(
         /^workflows\/hello\.ts:16:30: import "node:fs" is not allowed in a workflow: import only from `sanoma`/,
       ),

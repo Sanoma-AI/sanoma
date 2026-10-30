@@ -19,13 +19,13 @@ const recorded = (path: string) => {
 describe("the generated GitHub resource types", () => {
   it.each(["sanoma", "provider-bridge"])("parse the recorded read of the %s repository", (name) => {
     const state = fromTfState(TYPES.repository.shape, recorded(`github_repository/${name}/read.json`));
-    const parsed = TYPES.repository.schema.parse(state);
+    const parsed = TYPES.repository.schema.parse({ ...state, owner: "Sanoma-AI" });
     expect(parsed).toMatchObject({ name, full_name: `Sanoma-AI/${name}`, fork: "false", pages: null });
     // `security_and_analysis` is a list of at most one in the provider's state: one object here.
     expect(parsed.security_and_analysis).toMatchObject({ secret_scanning: { status: "disabled" } });
   });
 
-  it("parse the recorded read of a deploy key, bound by `<repository>:<key id>`", () => {
+  it("parse the recorded read of a deploy key, by `<repository>:<key id>` at the provider", () => {
     const state = TYPES.repository_deploy_key.schema.parse(
       fromTfState(
         TYPES.repository_deploy_key.shape,
@@ -57,9 +57,9 @@ describe("the generated GitHub resource types", () => {
 
 describe("the github connector", () => {
   it.each([
-    ["repository", "name"],
+    ["repository", "owner/name"],
     ["branch_protection", "repository_id:pattern"],
-    ["team_membership", "team_id:username"],
+    ["team_membership", "owner/team_id:username"],
   ] as const)("reads and imports %s, effect read, by its %s", (type, identity) => {
     for (const op of [github[type].read, github[type].import]) {
       expect(op).toMatchObject({ vendor: "github", resource: type, effect: "read", idempotent: true });
@@ -79,25 +79,31 @@ describe("the github connector", () => {
   });
 
   it("declares resources for data files, named by their import ids, without what GitHub sets", () => {
-    expect(() => declare.repository({ name: "sanoma", html_url: "https://github.com/x" })).toThrow(
+    expect(() => declare.repository({ owner: "acme", name: "sanoma", html_url: "https://github.com/x" })).toThrow(
       "github.repository: leave out html_url: the vendor sets it",
     );
-    expect(declare.repository({ name: "sanoma", delete_branch_on_merge: true })).toMatchObject({
+    // @ts-expect-error the owner is a fact about the repository: a data file states it
+    expect(() => declare.repository({ name: "sanoma" })).toThrow(/owner/);
+    expect(declare.repository({ owner: "acme", name: "sanoma", delete_branch_on_merge: true })).toMatchObject({
       vendor: "github",
       type: "repository",
-      name: "sanoma",
+      name: "acme/sanoma",
     });
-    expect(declare.branch_protection({ repository_id: "sanoma", pattern: "main" }).name).toBe("sanoma:main");
-    // A rule names its repository: the declared repository stands for its name.
-    const site = declare.repository({ name: "website" });
+    expect(declare.branch_protection({ repository_id: "acme/sanoma", pattern: "main" }).name).toBe("acme/sanoma:main");
+    // A rule names its repository: the declared repository stands for `<owner>/<name>`, its owner with it.
+    const site = declare.repository({ owner: "acme", name: "website" });
     expect(declare.branch_protection({ repository_id: site, pattern: "main" })).toMatchObject({
-      name: "website:main",
-      desired: { repository_id: "website", pattern: "main" },
-      refs: { repository_id: "github.repository:website" },
+      name: "acme/website:main",
+      desired: { repository_id: "acme/website", pattern: "main" },
+      refs: { repository_id: "github.repository:acme/website" },
     });
     // @ts-expect-error only a repository
-    expect(() => declare.team_membership({ team_id: site, username: "octocat" })).toThrow(/team_id takes a value/);
-    expect(declare.team_membership({ team_id: "core", username: "octocat" }).name).toBe("core:octocat");
+    expect(() => declare.team_membership({ owner: "acme", team_id: site, username: "octocat" })).toThrow(
+      /team_id takes a value/,
+    );
+    expect(declare.team_membership({ owner: "acme", team_id: "core", username: "octocat" }).name).toBe(
+      "acme/core:octocat",
+    );
     // A deploy key names its repository the same way, and is found by its binding alone.
     const key = declare.repository_deploy_key({
       repository: site,
@@ -106,16 +112,16 @@ describe("the github connector", () => {
       read_only: true,
     });
     expect(key).toMatchObject({
-      desired: { repository: "website" },
-      refs: { repository: "github.repository:website" },
+      desired: { repository: "acme/website" },
+      refs: { repository: "github.repository:acme/website" },
     });
     expect(declare.repository_deploy_key.identity).toBeUndefined();
   });
 
   it("compares a repository's topics, a set, in any order, and only declared fields", () => {
-    const state = { name: "sanoma", topics: ["b", "a"], etag: 'W/"1"', has_wiki: true };
-    const desired = { name: "sanoma", topics: ["a", "b"] };
-    expect(declare.repository.normalize(state, desired)).toEqual({ name: "sanoma", topics: ["a", "b"] });
+    const state = { owner: "acme", name: "sanoma", topics: ["b", "a"], etag: 'W/"1"', has_wiki: true };
+    const desired = { owner: "acme", name: "sanoma", topics: ["a", "b"] };
+    expect(declare.repository.normalize(state, desired)).toEqual({ owner: "acme", name: "sanoma", topics: ["a", "b"] });
     expect(declare.repository.normalize(state, desired)).toEqual(declare.repository.normalize(desired, desired));
     // A branch protection rule's status checks are a set too, inside a block.
     const rule = { repository_id: "sanoma", pattern: "main", required_status_checks: [{ contexts: ["b", "a"] }] };

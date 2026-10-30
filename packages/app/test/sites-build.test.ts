@@ -282,11 +282,11 @@ describe("a company's app with its sites", () => {
       ],
       [
         ["/data", "Data"],
-        ["/resources", "Resources"],
+        ["/people", "People"],
+        ["/hosting", "Hosting"],
         ["/connectors", "Connectors"],
         ["/apps", "Apps"],
         ["/permissions", "Permissions"],
-        ["/setup", "Go live"],
       ],
     ]);
     expect(barLink(html, "/sites/hello")).toContain('aria-current="page"');

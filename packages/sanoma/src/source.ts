@@ -349,7 +349,11 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
           });
         },
         update: async ({ folder, author }) => {
-          const url = sourceOf(at, folder);
+          // Main's `app.ts`, never the draft's: a draft's files are never loaded.
+          if (!readApps(root).some((app) => app.name === folder) && existsSync(join(at, "apps", folder))) {
+            throw new Error(`apps/${folder}/ is only in this draft: publish the take first, then update it`);
+          }
+          const url = sourceOf(root, folder);
           const from = await fetchSource(at, url);
           return serial(async () => {
             await mustShareHistory(at, from, folder, url);

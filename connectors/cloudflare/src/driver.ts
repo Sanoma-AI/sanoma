@@ -2,7 +2,7 @@ import { defineDriver, DriverError, retryableStatus } from "@sanoma-ai/workflows
 import type { Cloudflare } from "cloudflare";
 import { z } from "zod";
 import { cloudflareOps } from "./connector.ts";
-import { alarmOps, type Application, type CloudflareApi, containerOps, type ReadBinding, refused } from "./ops.ts";
+import { alarmOps, type CloudflareApi, containerOps, type ReadBinding, refused } from "./ops.ts";
 import { CLOUDFLARE_REGISTRY, copyImage } from "./registry.ts";
 
 /*
@@ -64,12 +64,6 @@ const isStatus = (error: unknown, status: number) => error instanceof DriverErro
 const sender = (timeoutMs: number) => (url: string, init: RequestInit) =>
   fetch(url, { ...init, redirect: "manual", signal: AbortSignal.timeout(timeoutMs) });
 
-/** An application as the operations read it: its image, as its configuration names it. */
-const application = (app: { id: string }): Application => ({
-  id: app.id,
-  image: (app as { configuration?: { image?: string } }).configuration?.image ?? "",
-});
-
 /**
  * The account at `CLOUDFLARE_ACCOUNT_ID` with `CLOUDFLARE_API_TOKEN`, read when an operation is
  * called. `subdomains` keeps each account's workers.dev subdomain once read, for the driver's life.
@@ -124,23 +118,17 @@ function accountApi(timeoutMs: number, subdomains: Map<string, Promise<string>>)
       }),
     async upload(script, { modules, ...metadata }) {
       await calling(`PUT workers/scripts/${script}`, async (cf) => {
-        const { toFile } = await sdk();
-        const files = await Promise.all(
-          modules.map(({ name, content }) =>
-            toFile(Buffer.from(content), name, { type: "application/javascript+module" }),
-          ),
-        );
-        // The SDK sends `application/javascript` over the form: without it, `fetch` names the form's boundary.
-        // `containers` is Wrangler's, which the SDK's type does not have yet.
-        await cf.workers.scripts.update(
-          script,
-          {
-            account_id,
-            metadata: metadata as Parameters<Cloudflare["workers"]["scripts"]["update"]>[1]["metadata"],
-            files,
-          },
-          { headers: { "content-type": null } },
-        );
+        // The form as Cloudflare reads it (and Wrangler sends it): one part `metadata`, the JSON, and
+        // one part per module, named after it. The SDK's `workers.scripts.update` flattens the
+        // metadata into `metadata[main_module]` parts instead, which Cloudflare refuses ("Could not
+        // read content for part 'metadata'", found live 2026-10-28). `containers` is Wrangler's,
+        // which the SDK's type does not have yet.
+        const form = new FormData();
+        form.append("metadata", new Blob([JSON.stringify(metadata)], { type: "application/json" }), "metadata.json");
+        for (const { name, content } of modules) {
+          form.append(name, new Blob([content], { type: "application/javascript+module" }), name);
+        }
+        await cf.put(`/accounts/${account_id}/workers/scripts/${script}`, { body: form });
       });
     },
     async enableSubdomain(script) {
@@ -157,34 +145,30 @@ function accountApi(timeoutMs: number, subdomains: Map<string, Promise<string>>)
       calling(`GET containers/applications?name=${name}`, async (cf) => {
         const page = await cf.containers.applications.list({ account_id, name });
         const app = page.result.find((a) => a.name === name);
-        return app && application(app);
+        return app && { id: app.id };
       }),
-    createApplication: (name, image, namespace_id) =>
-      calling("POST containers/applications", async (cf) =>
-        application(
-          await cf.containers.applications.create({
-            account_id,
-            name,
-            scheduling_policy: "default",
-            // The Worker's object starts the one instance on a request: none runs until then.
-            instances: 0,
-            max_instances: 1,
-            configuration: { image, instance_type: "basic" },
-            durable_objects: { namespace_id },
-          }),
-        ),
-      ),
-    async rollout(id, image) {
-      await calling(`POST containers/applications/${id}/rollouts`, (cf) =>
-        cf.containers.applications.rollouts.create(id, {
+    createApplication: (name, namespace_id) =>
+      calling("POST containers/applications", async (cf) => {
+        // The `durable_object` policy, the one for new applications (`default` is refused: "This
+        // account cannot create applications with the "default" scheduling policy", found live
+        // 2026-10-28). The object starts the container with its image and instance type, so the
+        // body names neither.
+        const { id } = await cf.containers.applications.create({
           account_id,
-          description: `Sanoma: ${image}`,
-          strategy: "rolling",
-          kind: "full_auto",
-          step_percentage: 100,
-          target_configuration: { image, instance_type: "basic" },
-        }),
+          name,
+          scheduling_policy: "durable_object",
+          durable_objects: { namespace_id },
+          // The container's output goes to the account's logs: what a start that never answers
+          // was doing is readable there, and nowhere else.
+          observability: { logs: { enabled: true } },
+        });
+        return { id };
+      }),
+    async prepareImage(image) {
+      const { status, reason } = await calling("POST containers/image-preparations", (cf) =>
+        cf.containers.images.prepare({ account_id, image }),
       );
+      return { status, ...(reason && { reason }) };
     },
     account: account_id,
     async copyImage(image) {
@@ -198,7 +182,7 @@ function accountApi(timeoutMs: number, subdomains: Map<string, Promise<string>>)
             expiration_minutes: 60,
           }),
       );
-      await copyImage(image, { account: account_id, username, password });
+      return copyImage(image, { account: account_id, username, password });
     },
     async deleteApplication(id) {
       await found(`DELETE containers/applications/${id}`, (cf) =>

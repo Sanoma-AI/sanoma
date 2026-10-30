@@ -36,6 +36,7 @@ import {
   ACTOR_HEADER,
   ACTOR_KEY,
   ApiError,
+  AppConfigSchema,
   ClearCredentialRequest,
   DecideCall,
   type ErrorResponse,
@@ -62,6 +63,7 @@ import {
   listRuns,
   nextFires,
   parse,
+  patch,
   readStartRun,
   requireActor,
   runDetail,
@@ -459,7 +461,13 @@ describe("the server functions", () => {
     expect(JSON.stringify(body)).not.toContain(ctx.resolved.databaseUrl);
     expect(body.appName).toBe("sanoma");
     expect(body.version).toMatch(/^sanoma@/);
-    expect(body.policy).toEqual({ defined: true, version: expect.stringMatching(/^[0-9a-f]{12}$/) });
+    expect(body.policy).toEqual({
+      defined: true,
+      version: expect.stringMatching(/^[0-9a-f]{12}$/),
+      files: [expect.objectContaining({ file: expect.stringMatching(/\.cedar$/) })],
+    });
+    // What the page reads holds to the schema it is typed by.
+    expect(AppConfigSchema.parse(body)).toEqual(body);
     const wf = body.workflows.find((w) => w.name === "announce");
     expect(wf?.ops).toHaveLength(5);
     expect(wf?.ops).toEqual(expect.arrayContaining(["ghost.post.publish", "resend.broadcast.send"]));
@@ -860,7 +868,7 @@ describe("the page", () => {
     // the current lit.
     expect(barLabels(html)).toEqual([
       ["Inbox", "Workflows"],
-      ["Data", "Resources", "Connectors", "Apps", "Permissions", "Go live"],
+      ["Data", "People", "Hosting", "Connectors", "Apps", "Permissions"],
     ]);
     expect(barLink(html, "/apps")).toBeDefined();
     expect(barLink(html, "/workflows")).toMatch(/data-active="true"[^>]*aria-current="page"/);
@@ -1467,7 +1475,7 @@ describe("the page", () => {
     expect(barLink(folded.html, "/inbox")).not.toContain("aria-current");
     // Open, said so or by default: anything else in the cookie reads as open.
     for (const cookie of ["sanoma_chat=open", "sanoma_chat=nonsense"]) {
-      const open = await page("/resources", app.url, { headers: { cookie } });
+      const open = await page("/hosting", app.url, { headers: { cookie } });
       expect(chatOpen(open.html), cookie).toBe(true);
       expect(open.html, cookie).toContain('<aside id="chat" aria-label="Chat"');
     }
@@ -1786,7 +1794,9 @@ describe("resources and drift", () => {
     const website = { runId: driftRun, id: `${github}#website`, paths: ["has_wiki"] };
     expect(await adopt(adopting, alice, website)).toEqual({ file: github, revision: "0123456789abcdef" });
     expect(readFileSync(join(root, github), "utf8")).toBe(before.replace("has_wiki: false", "has_wiki: true"));
-    expect(commits).toEqual([{ paths: [github], message: "Adopt has_wiki of website from github", author: "alice" }]);
+    expect(commits).toEqual([
+      { paths: [github], message: "Adopt has_wiki of Sanoma-AI/website from github", author: "alice" },
+    ]);
 
     // Without a source, the file is written and nothing committed.
     const stripe = "resources/billing/stripe.ts";
@@ -1821,22 +1831,80 @@ describe("resources and drift", () => {
     expect(commits).toHaveLength(1);
   });
 
-  it("renders each resource with its drift badge, the fields that differ, and a link to the run", async () => {
-    const resources = await page("/resources");
+  it("patches a declaration's literal fields without a remote: written and committed, the rules by admin only", async () => {
+    // A root of its own, as Adopt's test has, and a source that commits and drafts nowhere.
+    const root = mkdtempSync(join(tmpdir(), "sanoma-patch-"));
+    cpSync(join(appRoot, "resources"), join(root, "resources"), { recursive: true });
+    const commits: unknown[] = [];
+    const source: Source = {
+      root,
+      commit: (made) => {
+        commits.push(made);
+        return { revision: "fedcba9876543210" };
+      },
+      head: () => "fedcba9876543210",
+    };
+    const patching: AppContext = { ...ctx, resolved: { ...ctx.resolved, root }, source };
+    const alice = { id: "alice" };
+    const github = "resources/identity/github.ts";
+    const before = readFileSync(join(root, github), "utf8");
+    const website = { file: github, export: "website" };
+    expect(await patch(patching, alice, { at: website, fields: { description: "Our site" } })).toEqual({
+      file: github,
+      revision: "fedcba9876543210",
+    });
+    expect(readFileSync(join(root, github), "utf8")).toBe(
+      before.replace('description: "The company website"', 'description: "Our site"'),
+    );
+    expect(commits).toEqual([{ paths: [github], message: "Change description of website", author: "alice" }]);
+
+    // A collection, where data.ts declares it.
+    const data = "resources/data.ts";
+    await patch(patching, alice, { at: { file: data, export: "outbound" }, fields: { title: "Pipeline" } });
+    expect(readFileSync(join(root, data), "utf8")).toContain('title: "Pipeline",');
+
+    // A field the file computes, or a declaration the description does not name, is refused.
+    await expect(
+      patch(patching, alice, { at: { file: github, export: "websiteMain" }, fields: { repository_id: "R_1" } }),
+    ).rejects.toMatchObject({
+      status: 409,
+      body: { error: "the value of repository_id is computed in the file", field: "repository_id" },
+    });
+    await expect(
+      patch(patching, alice, { at: { file: github, export: "nope" }, fields: { name: "x" } }),
+    ).rejects.toMatchObject({ status: 404 });
+
+    // The people are the rules: with no remote to review on, only someone in admin writes them.
+    const people = "resources/people.ts";
+    const peopleBefore = readFileSync(join(root, people), "utf8");
+    const p0 = { at: { file: people, export: "p0" }, fields: { name: "Alice A." } };
+    await expect(patch(patching, alice, p0)).rejects.toMatchObject({
+      status: 403,
+      body: { error: `A change to ${people} waits for an admin, and this company has no remote to review on` },
+    });
+    expect(readFileSync(join(root, people), "utf8")).toBe(peopleBefore);
+    expect(await patch(patching, { id: "ada", groups: ["admin"] }, p0)).toMatchObject({ file: people });
+    expect(readFileSync(join(root, people), "utf8")).toContain('sanoma.person({ id: "alice", name: "Alice A." })');
+    expect(commits).toHaveLength(3);
+  });
+
+  it("renders each resource on Hosting with its drift badge, the fields that differ, and a link to the run", async () => {
+    const resources = await page("/hosting");
     expect(resources.status).toBe(200);
-    expect(resources.html).toMatch(/<h1[^>]*>Resources<\/h1>/);
-    expect(resources.text).toContain("<title>Resources · Sanoma</title>");
+    expect(resources.html).toMatch(/<h1[^>]*>Hosting<\/h1>/);
+    expect(resources.text).toContain("<title>Hosting · Sanoma</title>");
     expect(resources.text).toContain(`href="/workflows/drift/runs/${driftRun}"`);
-    expect(resources.text).toContain('href="/resources?resource=resources%2Fidentity%2Fgithub.ts%23website"');
+    expect(resources.text).toContain('href="/hosting?resource=resources%2Fidentity%2Fgithub.ts%23website"');
     expect(resources.text.match(/>drifted: 1 field</g)).toHaveLength(2);
     expect(resources.text.match(/>gone</g)).toHaveLength(1);
     expect(resources.text.match(/>clean</g)).toHaveLength(1);
     expect(resources.text.match(/>absent</g)).toHaveLength(1);
     expect(resources.text.match(/>absent: found unbound</g)).toHaveLength(1);
     expect(resources.text).toContain("2 drifted");
-    // The collections, each linked to its declaration.
-    expect(resources.text).toContain(">Collections<");
-    expect(resources.text).toContain('href="/resources?resource=resources%2Fdata.ts%23outbound"');
+    // The rest under Other resources; the collections are on Data and the people on People, not here.
+    expect(resources.text).toContain(">Other resources</h2>");
+    expect(resources.text).not.toContain(">Collections<");
+    expect(resources.text).not.toContain("resources%2Fpeople.ts");
     // A button to adopt each drifted field.
     expect(resources.text.match(/>Adopt</g)).toHaveLength(2);
     // Each drifted field, as declared and as the vendor holds it.
@@ -1844,10 +1912,16 @@ describe("resources and drift", () => {
     expect(resources.text).toMatch(
       /<code>name<\/code>.*?<code>&quot;Sanoma Pro&quot;<\/code>.*?<code>&quot;Sanoma Professional&quot;<\/code>/s,
     );
-    expect(resources.html).toContain('href="/resources"');
+    expect(barLink(resources.html, "/hosting")).toContain('aria-current="page"');
     // A resource's declaration in its file, from the search: as plain text on the server.
-    const chosen = await page("/resources?resource=resources%2Fidentity%2Fgithub.ts%23website");
+    const chosen = await page("/hosting?resource=resources%2Fidentity%2Fgithub.ts%23website");
     expect(chosen.text).toMatch(/<h2[^>]*><code>resources\/identity\/github\.ts<\/code><\/h2>/);
+    // The old address goes to Hosting, with the declaration it named.
+    const old = await fetch(new URL("/resources?resource=resources%2Fidentity%2Fgithub.ts%23website", app.url), {
+      redirect: "manual",
+    });
+    expect(old.status).toBe(307);
+    expect(old.headers.get("location")).toBe("/hosting?resource=resources%2Fidentity%2Fgithub.ts%23website");
   });
 
   it("lists the built-in drift workflow like any other, labelled built-in, and starts it from its page", async () => {
@@ -1910,8 +1984,8 @@ describe("resources and drift", () => {
     expect(at(second!)).toBeGreaterThan(at(first!));
     for (const never of ["apply", "call"]) expect(at(never), never).toBeGreaterThan(at(second!));
     expect(text).not.toContain("waiting on you</span>");
-    // Only the overview finds: not Resources.
-    expect((await page("/resources")).html).not.toContain('aria-label="Find a workflow"');
+    // Only the overview finds: not Hosting.
+    expect((await page("/hosting")).html).not.toContain('aria-label="Find a workflow"');
   });
 
   it("lists every run under All runs, linking each to its page, sandbox runs badged, and filters them by ?status= as getRuns does", async () => {
@@ -2002,8 +2076,14 @@ describe("an app configured otherwise", () => {
     mkdirSync(join(dir, "resources"));
     // The same app ("sanoma", as no package.json names it), on its own root: its data files are these.
     const GH = `import { github } from "@sanoma-ai/connector-github/resources";\n`;
-    writeFileSync(join(dir, "resources", "good.ts"), `${GH}export const web = github.repository({ name: "web" });\n`);
-    writeFileSync(join(dir, "resources", "bad.ts"), `${GH}export const docs = github.repository({ name: 1 });\n`);
+    writeFileSync(
+      join(dir, "resources", "good.ts"),
+      `${GH}export const web = github.repository({ owner: "acme", name: "web" });\n`,
+    );
+    writeFileSync(
+      join(dir, "resources", "bad.ts"),
+      `${GH}export const docs = github.repository({ owner: "acme", name: 1 });\n`,
+    );
     // A directory nothing has written to yet: the worker keeps its records in memory.
     const otherConfig = { ...config, ledger: jsonlLedger(join(dir, "ledger")), root: dir };
     const warn = vi.spyOn(console, "warn").mockImplementation((...args: unknown[]) => void warned.push(args.join(" ")));
@@ -2018,7 +2098,7 @@ describe("an app configured otherwise", () => {
 
   it("boots with broken data files: lists the resources it could read, and the problems", async () => {
     expect(warned).toEqual([
-      expect.stringMatching(/^sanoma app: the config's files have problems.*\n {2}resources\/bad\.ts:2:1: /s),
+      expect.stringMatching(/^sanoma app: the config's files have problems.*\n {2}resources\/bad\.ts:2:28: /s),
     ]);
     const body = withoutSources(otherCtx.description);
     expect(body.resources.map((r) => r.id)).toEqual(["resources/good.ts#web"]);
@@ -2026,8 +2106,8 @@ describe("an app configured otherwise", () => {
       {
         file: "resources/bad.ts",
         line: 2,
-        column: 1,
-        message: expect.stringMatching(/^export const docs: github\.repository: /),
+        column: 28,
+        message: expect.stringMatching(/^github\.repository: /),
       },
     ]);
   });
@@ -2058,11 +2138,11 @@ describe("an app configured otherwise", () => {
     }
   });
 
-  it("shows the data files' problems on the resources page, and the resources it could read", async () => {
-    const resources = await page("/resources", other.url);
+  it("shows the data files' problems on Hosting, and the resources it could read", async () => {
+    const resources = await page("/hosting", other.url);
     expect(resources.status).toBe(200);
     expect(resources.text).toContain("1 problem in the data files: their resources are left out");
-    expect(resources.text).toMatch(/<code>resources\/bad\.ts:2:1<\/code> export const docs: github\.repository: /);
+    expect(resources.text).toMatch(/<code>resources\/bad\.ts:2:28<\/code> github\.repository: /);
     expect(resources.text).toContain("resources/good.ts#web");
   });
 
@@ -2306,9 +2386,12 @@ describe("an app whose drivers declare environment variables", () => {
     expect((await page("/connectors/resend", declaring.url)).html).not.toMatch(/>Credentials</);
   });
 
-  it("carries the statuses in getCredentials, not the config's description, never a value", async () => {
+  it("carries the statuses in getCredentials; the config's description names the variables alone; never a value", async () => {
     const body = withoutSources(declaringCtx.description);
-    expect(body.vendors.ghost).not.toHaveProperty("credentials");
+    expect(body.vendors.ghost?.credentials).toEqual([
+      { name: URL_VAR, description: "the made-up site's URL" },
+      { name: KEY_VAR, description: "a made-up key" },
+    ]);
     const found = await statuses();
     expect(Object.keys(found)).toEqual(["ghost"]);
     expect(found.ghost).toEqual([

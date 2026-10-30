@@ -99,7 +99,7 @@ const setupTokens = ({ resolved }: AppContext) => {
 };
 
 const CALLBACK = "/setup/github/callback";
-const CONNECT = "/setup/connect";
+const CONNECT = "/hosting/connect";
 /** The state cookie, sent only to the manifest and callback routes. */
 const STATE = "sanoma_setup_state";
 const STATE_PATH = "/setup/github";
@@ -282,7 +282,7 @@ const EXISTING = {
     vendor: "github",
     type: "repository",
     source: "@sanoma-ai/connector-github/resources",
-    fields: ["name", "description", "visibility"],
+    fields: ["owner", "name", "description", "visibility"],
     set: {},
   },
   // Supabase never reads the password back: declared generated, it is set by the next apply that
@@ -336,20 +336,14 @@ async function connectNow(
     const given = request[what];
     return given ? [{ ...EXISTING[what], given }] : [];
   });
+  // A repository is imported by `<owner>/<name>`, a project by its ref: each by what was given.
   const states = await Promise.all(
-    wanted.map(({ vendor, type, given }) => imported(resolved, `${vendor}.${type}`, given.split("/").at(-1)!, given)),
+    wanted.map(({ vendor, type, given }) => imported(resolved, `${vendor}.${type}`, given)),
   );
   const exports = [];
   const bind: Record<string, string> = {};
-  for (const [i, { given, ...at }] of wanted.entries()) {
+  for (const [i, at] of wanted.entries()) {
     const state = states[i]!;
-    const owner = given.includes("/") ? given.slice(0, given.indexOf("/")) : undefined;
-    // The connector reads one owner's repositories (`GITHUB_OWNER`, else the token's user).
-    if (owner && String(state.full_name).toLowerCase() !== given.toLowerCase()) {
-      throw new ApiError(400, {
-        error: `The GitHub connector reads ${String(state.full_name)}, not ${given}: set GITHUB_OWNER to ${owner}`,
-      });
-    }
     const read = at.fields.flatMap((f) => (state[f] == null || state[f] === "" ? [] : [[f, state[f] as DataValue]]));
     exports.push({ ...at, desired: { ...Object.fromEntries(read), ...at.set } });
     bind[`${INFRA}#${at.name}`] = resolved.types.get(`${at.vendor}.${at.type}`)!.bindingId(state);
@@ -386,17 +380,17 @@ async function connectNow(
   const diff = branch && commit ? await git!("show", "--format=", commit.revision) : undefined;
   const runId = await client.apply({ only: Object.keys(bind), bind }, { startedBy: actor }).catch((err: unknown) => {
     throw new ApiError(500, {
-      error: `Committed ${INFRA}, but could not start the apply that binds it: ${errorMessage(err)}. Apply it from Resources.`,
+      error: `Committed ${INFRA}, but could not start the apply that binds it: ${errorMessage(err)}. Apply it from Hosting.`,
     });
   });
   return { file: INFRA, text, runId, ...commit, ...(branch && { branch }), ...(diff && { diff }) };
 }
 
 /**
- * The state of the object `id` names (`given` by the person), read through its type's import; a 400 when the config
- * has no driver for it, or the vendor has no such object, or the read fails.
+ * The state of the object `id` names, read through its type's import; a 400 when the config has
+ * no driver for it, or the vendor has no such object, or the read fails.
  */
-async function imported(resolved: AppContext["resolved"], type: string, id: string, given = id) {
+async function imported(resolved: AppContext["resolved"], type: string, id: string) {
   const opId = `${type}.import`;
   const driver = resolved.drivers.get(opId);
   if (!driver) {
@@ -411,14 +405,9 @@ async function imported(resolved: AppContext["resolved"], type: string, id: stri
   try {
     found = (await driver({ id }, call)) as typeof found;
   } catch (err) {
-    throw new ApiError(400, { error: `Could not read the ${type} ${given}: ${errorMessage(err)}` });
+    throw new ApiError(400, { error: `Could not read the ${type} ${id}: ${errorMessage(err)}` });
   }
-  if (found.gone || !found.state) {
-    // A repository is read by its name, among the connector's owner's (`GITHUB_OWNER`, else the token's user).
-    const owner =
-      given === id ? "" : " among the GitHub connector's owner's repositories: set GITHUB_OWNER to its owner";
-    throw new ApiError(400, { error: `There is no ${type} ${given} to connect${owner}` });
-  }
+  if (found.gone || !found.state) throw new ApiError(400, { error: `There is no ${type} ${id} to connect` });
   return found.state;
 }
 

@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import {
   type CallContext,
   DriverError,
@@ -10,9 +11,10 @@ import {
 import { domainsOf, domainsText } from "@sanoma-ai/workflows/shared";
 import { instanceUrl, mintInstanceToken, WAKEUP_TOKEN } from "@sanoma-ai/workflows/wakeup-service";
 import { alarm, container } from "./connector.ts";
-import { accountImage } from "./registry.ts";
+import { accountPinned } from "./registry.ts";
 import {
   HEALTH_PATH,
+  IMAGE,
   MAIN_MODULE,
   NAMESPACE,
   OBJECT_CLASS,
@@ -34,6 +36,8 @@ export const MIGRATION = { new_tag: "v1", new_sqlite_classes: [OBJECT_CLASS] };
  * `alarm.register` sends the wake, as the registration names no host.
  */
 export const HOST_URL = "SANOMA_HOST_URL";
+/** How long the account may take to prepare an image to run, as Wrangler waits for it. */
+const PREPARE_TIMEOUT_MS = 15 * 60_000;
 
 /** The plain-text bindings that say what the Worker runs: a read reads them back. */
 const TEXT = {
@@ -71,17 +75,28 @@ export interface Upload {
   main_module: string;
   compatibility_date: string;
   bindings: Binding[];
-  /** The object classes that run a container: the namespace is container-enabled. */
-  containers: { class_name: string }[];
+  /**
+   * The object classes that run a container (the namespace is container-enabled), each with its
+   * application's name and the images its object may start, by name, pinned by digest.
+   */
+  containers: { name: string; class_name: string; images: Record<string, string> }[];
   /** On the first upload only. */
   migrations?: typeof MIGRATION;
+  /** The Worker's own logs (what its object saw of a start), kept by Cloudflare for seven days. */
+  observability: { enabled: boolean };
   modules: WorkerModule[];
 }
 
 /** A container application, as the fields read here. */
 export interface Application {
   id: string;
-  image: string;
+}
+
+/** An image's preparation (`POST …/containers/image-preparations`): `pending` until it is `ready`, or an `error`. */
+export interface Preparation {
+  status: "pending" | "ready" | "error";
+  /** Why it is still pending, or failed. */
+  reason?: string;
 }
 
 /** Cloudflare, as the operations use it. Each call fails with a `DriverError`, except `send`. */
@@ -96,16 +111,23 @@ export interface CloudflareApi {
   enableSubdomain(script: string): Promise<void>;
   /** The account's id, which its registry's references name (`accountImage`). */
   account: string;
-  /** Copies an image of another registry into the account's, as `accountImage(image, account)`. */
-  copyImage(image: string): Promise<void>;
+  /**
+   * Copies an image of another registry into the account's, as `accountImage(image, account)`,
+   * and returns the copy pinned by digest: what the object starts (one in the account's registry
+   * by a tag is only pinned).
+   */
+  copyImage(image: string): Promise<string>;
+  /** Asks the account to prepare a pinned image to run, once more (idempotent): where it is. */
+  prepareImage(image: string): Promise<Preparation>;
   /** Deletes the Worker, its object's storage with it; nothing when there is none. */
   deleteScript(script: string): Promise<void>;
   /** The container application of that name, if any (`GET …/containers/applications?name=`). */
   application(name: string): Promise<Application | undefined>;
-  /** Makes the application behind the Worker's object: `default` policy, `basic`, one instance at most. */
-  createApplication(name: string, image: string, namespaceId: string): Promise<Application>;
-  /** Rolls the application out to a new image (`POST …/applications/{id}/rollouts`). */
-  rollout(id: string, image: string): Promise<void>;
+  /**
+   * Makes the application behind the Worker's object, of the `durable_object` scheduling policy:
+   * the object starts its container, at the image the upload names, so it holds no image itself.
+   */
+  createApplication(name: string, namespaceId: string): Promise<Application>;
   /** Deletes the application; nothing when there is none. */
   deleteApplication(id: string): Promise<void>;
   /** A request to a Worker: its answer, or a throw when there is none. */
@@ -152,18 +174,27 @@ const same = (field: (typeof COMPARED)[number], a: unknown, b: unknown) =>
 
 /**
  * `{ revision }` when the Worker answers, else why not; with `start`, once its container answers
- * too, which starts it. A read asks without: a stopped host is healthy, and stays stopped.
+ * too, which starts it. A read asks without: a stopped host is healthy, and stays stopped. A
+ * container that ended is `exit`: the Worker would start it again on the next ask, so a deploy
+ * stops asking.
  */
-const health = async (cf: CloudflareApi, url: string, start: boolean): Promise<{ revision: string } | string> => {
+const health = async (
+  cf: CloudflareApi,
+  url: string,
+  start: boolean,
+): Promise<{ revision: string } | { error: string; exit: boolean }> => {
   let res: Response;
   try {
     res = await cf.send(`${url}${HEALTH_PATH}${start ? "?start=1" : ""}`, { method: "GET" });
   } catch (error) {
-    return errorMessage(error);
+    return { error: errorMessage(error), exit: false };
   }
-  const body = (await res.json().catch(() => undefined)) as { revision?: unknown; error?: unknown } | undefined;
+  const body = (await res.json().catch(() => undefined)) as
+    | { revision?: unknown; error?: unknown; exit?: unknown }
+    | undefined;
   if (res.ok && typeof body?.revision === "string") return { revision: body.revision };
-  return typeof body?.error === "string" ? body.error : `${HEALTH_PATH} answered ${res.status}`;
+  const error = typeof body?.error === "string" ? body.error : `${HEALTH_PATH} answered ${res.status}`;
+  return { error, exit: typeof body?.exit === "string" };
 };
 
 export interface ContainerOptions {
@@ -175,9 +206,11 @@ export interface ContainerOptions {
 
 /**
  * `cloudflare.container`'s operations over `api()`, made on each call. A create and an update
- * are one upsert: the Worker uploaded with the declared bindings (the migration on its first
- * upload), its workers.dev URL turned on, the application made or rolled out to a new image, and
- * then a wait until the Worker answers at the new revision, which starts the container.
+ * are one upsert, in Wrangler's order: the image copied and pinned, then prepared, the Worker
+ * uploaded with the declared bindings and that image (the migration on its first upload), its
+ * workers.dev URL turned on, the application made when there is none, and then a wait until the
+ * Worker answers at the new revision, which starts the container. A new image is a new upload:
+ * the object destroys a container started at another and starts it again.
  */
 export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs }: ContainerOptions) {
   /** The Worker `name` runs, from its bindings and its application; `checkHealth` asks it too. None for a Worker that is not Sanoma's. */
@@ -193,15 +226,15 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
     const state: ContainerState = {
       id: app?.id ?? null,
       name,
-      // The declared image is the Worker's binding; the application runs its copy (`accountImage`).
-      image: text.get(TEXT.image) ?? app?.image ?? "",
+      // The declared image is the Worker's binding; the object starts its copy (`accountImage`).
+      image: text.get(TEXT.image) ?? "",
       source: text.get(TEXT.source) ?? "",
       ref: text.get(TEXT.ref) ?? "",
       revision: text.get(TEXT.revision) ?? null,
       port: Number(text.get(TEXT.port) ?? 0),
       ...(served && { domains: domainsOf(served) }),
       url,
-      healthy: checkHealth && app !== undefined && typeof (await health(cf, url, false)) === "object",
+      healthy: checkHealth && app !== undefined && "revision" in (await health(cf, url, false)),
     };
     const secrets = bindings.filter((b) => b.type === "secret_text").map((b) => b.name);
     return { state, secrets };
@@ -236,12 +269,40 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
     const until = Date.now() + startTimeoutMs;
     for (;;) {
       const seen = await health(cf, url, true);
-      if (typeof seen === "object" && seen.revision === revision) return;
+      if ("revision" in seen && seen.revision === revision) return;
+      // Not a wait: the container started and ended, and asking again would only start it again.
+      if ("exit" in seen && seen.exit) throw refused(`${script} did not start at ${revision}: ${seen.error}`);
       if (Date.now() >= until) {
-        const why = typeof seen === "object" ? `it runs ${seen.revision}` : seen;
+        const why = "revision" in seen ? `it runs ${seen.revision}` : seen.error;
         throw refused(`${script} did not answer at ${revision} in ${Math.round(startTimeoutMs / 1000)} s: ${why}`);
       }
-      await new Promise((resolve) => setTimeout(resolve, pollMs));
+      await delay(pollMs);
+    }
+  };
+
+  /** Waits until the account prepared `image` to run, as Wrangler does before an upload. */
+  const prepared = async (cf: CloudflareApi, image: string) => {
+    const until = Date.now() + PREPARE_TIMEOUT_MS;
+    for (;;) {
+      let status: Preparation["status"] | undefined;
+      let reason: string | undefined;
+      try {
+        ({ status, reason } = await cf.prepareImage(image));
+      } catch (error) {
+        // One failed look (a timeout, a 5xx) is not the preparation failing: the wait asks again.
+        if (!(error instanceof DriverError && error.retryable)) throw error;
+      }
+      if (status === "ready") return;
+      if (status === "error") {
+        throw refused(`preparing ${image}: ${reason ?? "it failed"}`);
+      }
+      if (Date.now() >= until) {
+        throw new DriverError(
+          `cloudflare: preparing ${image}: not ready in ${PREPARE_TIMEOUT_MS / 60_000} min${reason ? ` (${reason})` : ""}`,
+          { retryable: true },
+        );
+      }
+      await delay(pollMs);
     }
   };
 
@@ -268,10 +329,11 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
         "exists",
       );
     }
-    // Copied before anything changes, so a copy that fails leaves the Worker as it was. Each apply
-    // asks again, which costs a manifest's HEAD once the copy is there, and puts back one gone.
-    const runs = accountImage(image, cf.account);
-    if (runs !== image) await cf.copyImage(image);
+    // Copied and prepared before anything changes, so a copy or a preparation that fails leaves
+    // the Worker as it was. Each apply asks again, which costs a manifest's HEAD once the copy is
+    // there, and puts back one gone; the object starts only a pinned image of the account's.
+    const runs = accountPinned(image, cf.account) ? image : await cf.copyImage(image);
+    await prepared(cf, runs);
     const served = domains ? domainsText(domains) : undefined;
     const text = {
       [TEXT.source]: source,
@@ -291,22 +353,28 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
         text: value,
       })),
     ];
-    await cf.upload(script, {
+    const metadata = {
       main_module: MAIN_MODULE,
       compatibility_date: COMPATIBILITY_DATE,
       bindings,
-      containers: [{ class_name: OBJECT_CLASS }],
-      ...(current === undefined && { migrations: MIGRATION }),
+      containers: [{ name: script, class_name: OBJECT_CLASS, images: { [IMAGE]: runs } }],
+      observability: { enabled: true },
       modules: await workerModules(),
-    });
+    };
+    await cf.upload(script, { ...metadata, ...(current === undefined && { migrations: MIGRATION }) });
     await cf.enableSubdomain(script);
     let app = await cf.application(script);
     if (!app) {
       // The application is made for the object's namespace, which the first upload made.
       const namespace = (await cf.bindings(script))?.find((b) => b.name === NAMESPACE)?.namespace_id;
       if (!namespace) throw refused(`${script}: Cloudflare names no namespace for its ${NAMESPACE} binding`);
-      app = await cf.createApplication(script, runs, namespace);
-    } else if (app.image !== runs) await cf.rollout(app.id, runs);
+      app = await cf.createApplication(script, namespace);
+      // The object learns which application backs its namespace from a deployment made after
+      // the application exists: without this second upload every start answers "There is no
+      // container application assigned to this Durable Object namespace", for good (found live
+      // 2026-10-29; a Worker deployed again after the application started at once).
+      await cf.upload(script, metadata);
+    }
     await started(cf, script, url, revision);
     const state: ContainerState = {
       id: app.id,

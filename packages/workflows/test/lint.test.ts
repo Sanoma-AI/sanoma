@@ -4,8 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { lintResources, lintWorkflow } from "../src/lint.ts";
-import { BAD_DATA_FILES } from "./bad-data-files.ts";
+import { lintWorkflow } from "../src/lint.ts";
 import { ensureBuilt } from "./build.ts";
 
 const messages = (src: string, filename?: string) => lintWorkflow(src, filename).map((p) => p.message);
@@ -420,165 +419,6 @@ describe("lintWorkflow on run, which the worker holds to the outline", () => {
   });
 });
 
-const fixture = (path: string) => fileURLToPath(new URL(`./fixtures/company/${path}`, import.meta.url));
-const GOOD = ["resources/identity/github.ts", "resources/identity/rules.ts", "resources/billing/stripe.ts"];
-
-/** The lines, columns and messages lintResources gives a data file. */
-const dataFile = (src: string, filename = "/repo/resources/area/file.ts") =>
-  lintResources(src, filename).map((p) => `${p.line}:${p.column} ${p.message}`);
-
-describe("lintResources", () => {
-  it.each(GOOD)("passes %s", (path) => {
-    expect(lintResources(readFileSync(fixture(path), "utf8"), fixture(path))).toEqual([]);
-  });
-
-  it.each(BAD_DATA_FILES)("refuses %s at %s, saying what to write instead", (name, source, at, message) => {
-    const problems = lintResources(source, `/repo/resources/bad/${name}.ts`);
-    expect(problems.map((p) => `${p.line}:${p.column}`)).toEqual([at]);
-    expect(problems[0]?.message).toMatch(message);
-  });
-
-  it("reads every import first, as they are hoisted", () => {
-    expect(
-      dataFile(`export const rule = github.branch_protection({ repository_id: site, pattern: "main" });
-import { github } from "@sanoma-ai/connector-github/resources";
-import { site } from "./site.ts";
-`),
-    ).toEqual([]);
-  });
-
-  it("refuses an import of anything but constructors and data files", () => {
-    expect(
-      dataFile(`import * as gh from "@sanoma-ai/connector-github/resources";
-import site from "./site.ts";
-import "./setup.ts";
-import type { Declared } from "@sanoma-ai/workflows";
-import { docs } from "./docs";
-import { team } from "../../people/team.ts";
-`),
-    ).toEqual([
-      '1:8 import * as gh is not allowed in a data file: import the names you use, `import { name } from "@sanoma-ai/connector-github/resources"`',
-      '2:8 import site is not allowed in a data file: import the names you use, `import { name } from "./site.ts"`',
-      '3:1 import "./setup.ts" is not allowed in a data file: it imports nothing, and a data file runs no code',
-      "4:1 `import type` is not allowed in a data file: it holds values only, and the constructors type them",
-      '5:22 import "./docs" is not allowed in a data file: name the data file with its `.ts` extension',
-      '6:22 import "../../people/team.ts" is not allowed in a data file: it reaches outside resources/; import only other data files',
-    ]);
-    // Inside resources/, a sibling area is a data file like any other.
-    expect(
-      dataFile(`import { team } from "../people/team.ts";
-export default [];
-`),
-    ).toEqual([]);
-  });
-
-  it("holds resources/data.ts to collections, imported from sanoma/data, and refuses them in any other data file", () => {
-    const data = "/repo/resources/data.ts";
-    const outbound = fileURLToPath(new URL("./fixtures/outbound/resources/data.ts", import.meta.url));
-    expect(dataFile(readFileSync(outbound, "utf8"), data)).toEqual([]);
-    const ONLY =
-      'resources/data.ts holds collections only, since workflows and the runtime import it: `import { collection } from "sanoma/data"` and `export const <name> = collection({ name: "…", key: "…", fields: { … } })`; declare a connector\'s resources in another data file';
-    // Any import but sanoma/data, a connector's constructors among them, and anything but a collection.
-    expect(
-      dataFile(
-        `import { collection, z } from "sanoma/data";
-import { github } from "@sanoma-ai/connector-github/resources";
-import { secret } from "sanoma/resources";
-import { team } from "./people/team.ts";
-export const leads = collection({ name: "leads", key: "id", fields: { id: "text" } });
-export const site = github.repository({ name: "site" });
-export const odd = collection({ name: "odd", key: "id", fields: { id: leads }, extra: 1 });
-export default [leads];
-`,
-        data,
-      ),
-    ).toEqual([
-      '1:22 a data file imports only `collection` from "sanoma/data": `import { collection } from "sanoma/data"`',
-      `2:24 import "@sanoma-ai/connector-github/resources" is not allowed in resources/data.ts: ${ONLY}`,
-      `3:24 import "sanoma/resources" is not allowed in resources/data.ts: ${ONLY}`,
-      `4:22 import "./people/team.ts" is not allowed in resources/data.ts: ${ONLY}`,
-      expect.stringMatching(/^7:31 collection\(\) takes `\{ name, key, fields, title\? \}`, its values written out: /),
-      `8:1 export default is not allowed in resources/data.ts: ${ONLY}`,
-    ]);
-    expect(dataFile(`export const n = 1;\n`, data)).toEqual([`1:18 export const n must be a collection: ${ONLY}`]);
-    // What collection() refuses, as it says it; and the advice for an unexported const is a collection's.
-    expect(
-      dataFile(
-        `import { collection } from "sanoma/data";
-export const leads = collection({ name: "Leads", key: "id", fields: { id: "text" } });
-export const deals = collection({ name: "deals", key: "won", fields: { id: "string", won: "boolean" } });
-export const owners = collection({ name: "owners", key: "won", fields: { id: "text", won: "boolean" } });
-const stages = ["new", "won"];
-`,
-        data,
-      ),
-    ).toEqual([
-      '2:33 collection("Leads"): the name must be a lowercase letter, then letters and digits, such as "outbound"',
-      '3:33 collection("deals"): the field "id" is "string"; a field is one of "text", "number", "boolean", "date", "person", { type, optional: true } or { enum: [...] }',
-      '4:34 collection("owners"): the key "won" must be one of its fields, a required "text" one',
-      "5:1 `const stages` is not allowed in a data file: export it as a collection, `export const stages = collection({ … })`, or write its value where it is used",
-    ]);
-    // Anywhere else, a collection is refused where it is imported, and resources/data.ts is no data file to import from.
-    expect(
-      dataFile(`import { collection } from "sanoma/data";
-import { leads } from "../data.ts";
-export const more = collection({ name: "more", key: "id", fields: { id: "text" } });
-`),
-    ).toEqual([
-      '1:28 import "sanoma/data" is not allowed here: collections are declared in resources/data.ts, the one data file workflows and the runtime import; move it there',
-      '2:23 import "../data.ts" is not allowed in a data file: resources/data.ts holds collections, which no resource names; import resources from other data files',
-    ]);
-    // Only the file directly under resources/ is the collections'.
-    expect(dataFile(`import { collection } from "sanoma/data";\n`, "/repo/resources/area/data.ts")).toEqual([
-      expect.stringMatching(/^1:28 import "sanoma\/data" is not allowed here/),
-    ]);
-  });
-
-  it("refuses exports that are not one resource each", () => {
-    expect(
-      dataFile(`import { github } from "@sanoma-ai/connector-github/resources";
-import { docs } from "./docs.ts";
-export { docs };
-export * from "./docs.ts";
-export const a = github.repository({ name: "a" }), b = github.repository({ name: "b" });
-export const { c } = github.repository({ name: "c" });
-export const d = github?.repository({ name: "d" });
-export const e = github.repository({ name: "e" }, {});
-export const f = github.repository("f");
-export const g = docs.repository({ name: "g" });
-export const h = github.branch_protection({ repository_id: github.repository({ name: "h" }), pattern: "main" });
-export const i = github.repository({ name: "i", get wiki() { return true; }, topics: [1, , 2], name: "j" });
-export const k = github.repository({ name: "k", pattern: /x/, size: 1n, has_wiki: !0, team: github });
-export default [a, ...docs];
-`),
-    ).toEqual([
-      "3:1 export { … } is not allowed in a data file: export each resource where it is declared, `export const name = <vendor>.<type>({ … })`",
-      "4:1 export * is not allowed in a data file: a data file holds only imports, `export const <name> = <vendor>.<type>({ … })` and `export default [ … ]`",
-      "5:1 declare one resource per `export const`",
-      "6:14 an `export const` names one resource: `export const name = <vendor>.<type>({ … })`",
-      "7:18 export const d must be a resource constructor call, `<vendor>.<type>({ … })`, with <vendor> imported from a connector's resources entry",
-      '8:51 Write { connection: { vendor: "vendor", $connection: "vendor/name" } } with literal values',
-      "9:18 github.repository takes desired fields and optional { connection: { vendor, $connection } }",
-      "10:18 docs is not a connector's resource constructors: import it from the connector's resources entry, `import { docs } from \"@sanoma-ai/connector-docs/resources\"`",
-      "11:60 a resource is declared at the top of a data file: give it its own `export const` and name it here",
-      "12:49 a method or accessor is not allowed in a data file: a field holds a value",
-      "12:86 an empty array slot is not allowed in a data file: write null",
-      "12:96 name is given twice: give each field once",
-      "13:58 a regular expression is not allowed in a data file: write it as a string",
-      "13:69 a bigint is not allowed in a data file: write a number, or a string",
-      "13:83 `!` is not allowed in a data file: write the value out",
-      "13:93 github is a connector's resource constructors, not a resource: name a declared resource",
-      "14:20 export default must list this file's resources by name: `export default [a, b]`",
-    ]);
-  });
-
-  it("reports a syntax error", () => {
-    expect(dataFile(`export const a = github.repository({ name: "a" ;`)).toEqual([
-      expect.stringMatching(/^1:\d+ syntax: /),
-    ]);
-  });
-});
-
 /**
  * A workflow that does everything the checks refuse, one thing per line, so each diagnostic
  * names its line. Some lines are refused by oxlint, some by lintWorkflow, some by both.
@@ -647,7 +487,7 @@ describe("oxlint.json", () => {
   };
 
   beforeAll(() => {
-    // The fragment loads the data-file rule from dist/, as an installed package does.
+    // The fragment loads the date rule from dist/, as an installed package does.
     ensureBuilt();
     dir = mkdtempSync(join(tmpdir(), "sanoma-oxlint-"));
     write(".oxlintrc.json", JSON.stringify({ extends: [fragment] }));
@@ -695,10 +535,6 @@ export type Both = [Ctx<[]>, SanomaClient, typeof errorCode];
     }
     // Outside workflows/, nothing is restricted.
     write("lib/clock.ts", `export const now = () => Date.now() + Math.random();\n`);
-    for (const path of GOOD) write(path, readFileSync(fixture(path), "utf8"));
-    // The collections' file: the rule finds nothing in it.
-    write("resources/data.ts", readFileSync(new URL("./fixtures/outbound/resources/data.ts", import.meta.url), "utf8"));
-    for (const [name, source] of BAD_DATA_FILES) write(`resources/bad/${name}.ts`, source);
     found = lint();
   });
   afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -727,7 +563,6 @@ export type Both = [Ctx<[]>, SanomaClient, typeof errorCode];
 
   it("reports the clock, randomness, the network, timers, the environment, globals and the bypass imports", () => {
     const problems = found
-      .filter((d) => !d.file.startsWith("resources/"))
       .map(({ file, line, rule, text }) => ({ file, line, rule, text }))
       .toSorted((a, b) => a.file.localeCompare(b.file) || a.line! - b.line!);
     expect(problems).toEqual([
@@ -767,23 +602,5 @@ export type Both = [Ctx<[]>, SanomaClient, typeof errorCode];
         text: expect.stringMatching(/@sanoma-ai\/workflows\/scenario.*through ctx/),
       },
     ]);
-  });
-
-  it("holds files under resources/ to the data-file subset, with the plugin from dist/", () => {
-    const rule = "sanoma(data-file)";
-    expect(
-      found
-        .filter((d) => d.rule === rule)
-        .toSorted((a, b) => a.file.localeCompare(b.file))
-        .map((d) => [d.file, `${d.line}:${d.column}`, d.rule, d.text]),
-    ).toEqual(
-      // A name declared twice oxlint reports itself, as a syntax error, before any rule runs.
-      BAD_DATA_FILES.filter(([name]) => name !== "twice").map(([name, , at, message]) => [
-        `resources/bad/${name}.ts`,
-        at,
-        rule,
-        expect.stringMatching(message),
-      ]),
-    );
   });
 });

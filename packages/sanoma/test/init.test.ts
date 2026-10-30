@@ -11,8 +11,12 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
+import { AGENTS, VISITORS } from "@sanoma-ai/workflows";
+import { readPeople } from "@sanoma-ai/workflows/describe";
+import { groupNamesOf, principalIdsOf } from "@sanoma-ai/workflows/shared";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   declareFounder,
@@ -21,6 +25,7 @@ import {
   packageName,
   startCompany,
   TEMPLATE,
+  templatePeopleIds,
   whoIsStarting,
 } from "../src/init.ts";
 import { copyFixture, ensureBuilt, linkConnector, runCli } from "./fixture.ts";
@@ -162,6 +167,15 @@ describe("whoIsStarting", () => {
       signedIn(taken);
       expect(await whoIsStarting()).toMatchObject({ id: "founder", github: taken });
     }
+  });
+});
+
+describe("templatePeopleIds", () => {
+  it("reads from the template's text the ids and group names loading it declares", () => {
+    const { people, problems } = readPeople(fileURLToPath(TEMPLATE));
+    expect(problems).toEqual([]);
+    const declared = [...principalIdsOf(people), ...groupNamesOf(people).filter((g) => g !== AGENTS && g !== VISITORS)];
+    expect(templatePeopleIds().toSorted()).toEqual(declared.toSorted());
   });
 });
 

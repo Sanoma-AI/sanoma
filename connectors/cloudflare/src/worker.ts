@@ -34,6 +34,7 @@ export function workerModules(): Promise<WorkerModule[]> {
 
 export {
   HEALTH_PATH,
+  IMAGE,
   INACTIVITY_MS,
   Instance,
   NAMESPACE,

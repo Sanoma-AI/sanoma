@@ -1531,7 +1531,7 @@ describe("people in a scenario: who is acting, held for a group, denied with a r
     await expect(
       parseFeature(scenarioOf("    Given ada is acting\n    When refund runs\n"), "scenarios/x.feature", broken),
     ).rejects.toThrow(
-      /^scenarios\/x\.feature:3: ada cannot be admitted while the people's files have problems: resources\/people\.ts:4:1: sanoma\.person "ada" is declared twice/,
+      /^scenarios\/x\.feature:3: ada cannot be admitted while the people's files have problems: resources\/people\.ts#other: sanoma\.person "ada" is declared twice/,
     );
     await expect(
       parseFeature(scenarioOf("    Given scenarios is acting\n    When refund runs\n"), "scenarios/x.feature", broken),

@@ -12,8 +12,12 @@ import { API, replayOptions, TEST_ACCOUNT } from "./replay.ts";
 
 const { server, play, fixture, sent } = replay(replayOptions);
 
-/** The runtime image in the fixtures' account's registry: what its application runs. */
+/** The runtime image's repository in the fixtures' account's registry. */
 const RUNS = `registry.cloudflare.com/${TEST_ACCOUNT}/sanoma-ai-runtime`;
+/** Its 0.7.0 and 0.8.0, pinned by digest as the object starts them: the fixtures' made-up digests. */
+const PINNED = `${RUNS}@sha256:${"7".repeat(64)}`;
+const PINNED_NEXT = `${RUNS}@sha256:${"8".repeat(64)}`;
+const PREPARATIONS = "/containers/image-preparations";
 
 const TOKEN = "swi_the-company-token";
 const URL_OF = "https://sanoma-company.example.workers.dev";
@@ -34,7 +38,7 @@ const op = (name: string, input: object, call = callWith({ SANOMA_WAKEUP_TOKEN: 
 
 const desired = {
   name: "company",
-  image: `${RUNS}:0.7.0`,
+  image: PINNED,
   source: "https://github.com/acme/company.git",
   ref: "main",
   revision: "abc123",
@@ -44,7 +48,7 @@ const desired = {
 const state = {
   id: "00000000-0000-4000-8000-000000000001",
   name: "company",
-  image: `${RUNS}:0.7.0`,
+  image: PINNED,
   source: "https://github.com/acme/company.git",
   ref: "main",
   revision: "abc123",
@@ -63,6 +67,7 @@ const reply = (path: string, status: number, body: unknown, method = "GET"): Exc
   body,
 });
 const wake = (status: number, body: unknown, method = "GET") => reply("/__sanoma/wake", status, body, method);
+const cfResult = (result: unknown) => ({ success: true, errors: [], messages: [], result });
 const cfError = (code: number, message: string) => ({
   success: false,
   errors: [{ code, message }],
@@ -76,36 +81,68 @@ async function formOf(request: (typeof sent)[number]) {
     headers: { "content-type": request.headers.get("content-type")! },
   }).formData();
 }
+/** An upload form's `metadata` part, the JSON. */
+async function metadataOf(form: FormData) {
+  return JSON.parse(await (form.get("metadata") as File).text());
+}
+/** The metadata of the upload among the requests sent. */
+async function uploaded() {
+  return metadataOf(await formOf(sent.find((r) => r.method === "PUT" && r.path.startsWith(API))!));
+}
+
+/** The registry's temporary credentials, as the SDK's `containers.registries.credentials.generate` answers. */
+const registryCredentials = reply(
+  apiPath("/containers/registries/registry.cloudflare.com/credentials"),
+  200,
+  cfResult({
+    account_id: TEST_ACCOUNT,
+    registry_host: "registry.cloudflare.com",
+    username: "v1",
+    password: "temporary",
+  }),
+  "POST",
+);
 
 describe.skipIf(live)("cloudflareDriver", () => {
   describe("cloudflare.container", () => {
-    it("uploads the Worker with its bindings and migration, turns its URL on, makes its application and waits for it", async () => {
+    it("prepares the image, uploads the Worker with its bindings, image and migration, turns its URL on, makes its application and waits for it", async () => {
       play("create");
       const made = await op("container.create", { desired });
       expect(made).toEqual({ id: "company", state });
       expect(sent.map((r) => `${r.method} ${r.path.replace(API, "")}`)).toEqual([
         "GET /workers/subdomain",
         "GET /workers/scripts/sanoma-company/settings",
+        // Pending, then ready: polled before anything changes.
+        `POST ${PREPARATIONS}`,
+        `POST ${PREPARATIONS}`,
         "PUT /workers/scripts/sanoma-company",
         "POST /workers/scripts/sanoma-company/subdomain",
         "GET /containers/applications?name=sanoma-company",
         "GET /workers/scripts/sanoma-company/settings",
         "POST /containers/applications",
+        // Again, once the application exists: the object's namespace learns it from this deployment.
+        "PUT /workers/scripts/sanoma-company",
         "GET /__sanoma/health?start=1",
       ]);
       // Compared, not printed: a failure must not show a live token.
-      expect(sent.slice(0, 7).every((r) => r.headers.get("authorization") === "Bearer test-token")).toBe(true);
+      expect(sent.slice(0, 10).every((r) => r.headers.get("authorization") === "Bearer test-token")).toBe(true);
+      const again = await metadataOf(await formOf(sent[9]!));
+      expect(again.migrations).toBeUndefined();
+      expect(sent[2]!.body).toEqual({ image: PINNED });
 
-      const upload = sent[2]!;
+      const upload = sent[4]!;
       expect(upload.headers.get("content-type")).toMatch(/^multipart\/form-data; boundary=/);
       const form = await formOf(upload);
-      expect(form.get("metadata[main_module]")).toBe("index.js");
-      expect(form.get("metadata[compatibility_date]")).toBe("2026-10-01");
-      expect(form.get("metadata[migrations][new_tag]")).toBe("v1");
-      expect(form.getAll("metadata[migrations][new_sqlite_classes][]")).toEqual(["SanomaInstance"]);
-      // Its object runs a container: without this, it has no `ctx.container`.
-      expect(form.getAll("metadata[containers][][class_name]")).toEqual(["SanomaInstance"]);
-      expect(form.getAll("metadata[bindings][][name]")).toEqual([
+      // One `metadata` part, the JSON, as Cloudflare reads it; the modules as parts named after them.
+      const metadata = await metadataOf(form);
+      expect(metadata.main_module).toBe("index.js");
+      expect(metadata.compatibility_date).toBe("2026-10-01");
+      expect(metadata.migrations).toEqual({ new_tag: "v1", new_sqlite_classes: ["SanomaInstance"] });
+      // Its object runs a container (without this, it has no `ctx.container`), at the pinned image it names.
+      expect(metadata.containers).toEqual([
+        { name: "sanoma-company", class_name: "SanomaInstance", images: { runtime: PINNED } },
+      ]);
+      expect(metadata.bindings.map((b: { name: string }) => b.name)).toEqual([
         "SANOMA_INSTANCE",
         "SANOMA_SOURCE",
         "SANOMA_REF",
@@ -115,37 +152,32 @@ describe.skipIf(live)("cloudflareDriver", () => {
         "SANOMA_HOST_URL",
         "SANOMA_WAKEUP_TOKEN",
       ]);
-      expect(form.getAll("metadata[bindings][][text]")).toContain(URL_OF);
+      expect(metadata.bindings.map((b: { text?: string }) => b.text)).toContain(URL_OF);
       // The secret goes as a secret binding, resolved at the call.
-      expect(form.getAll("metadata[bindings][][type]").at(-1)).toBe("secret_text");
-      expect(form.getAll("metadata[bindings][][text]").at(-1)).toBe(TOKEN);
-      const files = form.getAll("files[]") as File[];
+      expect(metadata.bindings.at(-1)).toMatchObject({ type: "secret_text", text: TOKEN });
+      const files = ["index.js", "instance.js"].map((name) => form.get(name) as File);
       expect(files.map((f) => [f.name, f.type])).toEqual([
         ["index.js", "application/javascript+module"],
         ["instance.js", "application/javascript+module"],
       ]);
       expect(await files[0]!.text()).toContain('from "cloudflare:workers"');
 
-      expect(sent[3]!.body).toEqual({ enabled: true });
-      expect(sent[6]!.body).toEqual({
+      expect(sent[5]!.body).toEqual({ enabled: true });
+      // The policy's whole body: the image and the instance type are the object's.
+      expect(sent[8]!.body).toEqual({
         name: "sanoma-company",
-        scheduling_policy: "default",
-        instances: 0,
-        max_instances: 1,
-        configuration: {
-          image: `${RUNS}:0.7.0`,
-          instance_type: "basic",
-        },
+        scheduling_policy: "durable_object",
         // The namespace the upload made, as the Worker's settings name it.
         durable_objects: { namespace_id: "0123456789abcdef0123456789abcde0" },
+        observability: { logs: { enabled: true } },
       });
     });
 
-    it("rolls a new image out without the migration, and polls until the Worker answers at the new revision", async () => {
+    it("uploads a new image without the migration, and polls until the Worker answers at the new revision", async () => {
       play("update-to-a-new-image");
       const next = {
         ...desired,
-        image: `${RUNS}:0.8.0`,
+        image: PINNED_NEXT,
         revision: "def456",
       };
       const done = await op("container.update", {
@@ -154,22 +186,16 @@ describe.skipIf(live)("cloudflareDriver", () => {
         expect: { action: "update", replace: [] },
       });
       expect(done).toEqual({ id: "company", state: { ...state, image: next.image, revision: "def456" } });
-      const form = await formOf(sent.find((r) => r.method === "PUT")!);
-      expect(form.get("metadata[migrations][new_tag]")).toBeNull();
-      expect(sent.find((r) => r.path.endsWith("/rollouts"))!.body).toEqual({
-        description: `Sanoma: ${RUNS}:0.8.0`,
-        strategy: "rolling",
-        kind: "full_auto",
-        step_percentage: 100,
-        target_configuration: {
-          image: `${RUNS}:0.8.0`,
-          instance_type: "basic",
-        },
-      });
+      const metadata = await uploaded();
+      expect(metadata.migrations).toBeUndefined();
+      // A new image is a new upload naming it: the application is left as it is.
+      expect(metadata.containers[0].images).toEqual({ runtime: PINNED_NEXT });
+      expect(sent.find((r) => r.path.endsWith(PREPARATIONS))!.body).toEqual({ image: PINNED_NEXT });
+      expect(sent.some((r) => r.method === "POST" && r.path.includes("/containers/applications"))).toBe(false);
       expect(sent.filter((r) => r.path === "/__sanoma/health?start=1")).toHaveLength(2);
     });
 
-    it("copies a ghcr.io image into the account's registry first, with credentials Cloudflare makes, and runs the copy", async () => {
+    it("copies a ghcr.io image into the account's registry first, with credentials Cloudflare makes, and runs the copy pinned", async () => {
       // The distribution API's replies (OCI distribution spec) and the credentials' (the SDK's
       // `containers.registries.credentials.generate`), written by hand. The copy is in the account
       // already, so nothing more is pushed: registry.test.ts copies blobs against registries here.
@@ -181,22 +207,7 @@ describe.skipIf(live)("cloudflareDriver", () => {
       play("copy-an-image", [
         subdomain!,
         settings!,
-        reply(
-          apiPath("/containers/registries/registry.cloudflare.com/credentials"),
-          200,
-          {
-            success: true,
-            errors: [],
-            messages: [],
-            result: {
-              account_id: TEST_ACCOUNT,
-              registry_host: "registry.cloudflare.com",
-              username: "v1",
-              password: "temporary",
-            },
-          },
-          "POST",
-        ),
+        registryCredentials,
         {
           method: "GET",
           path: "/v2/",
@@ -225,9 +236,90 @@ describe.skipIf(live)("cloudflareDriver", () => {
       ).toBe("Bearer anonymous");
       const head = sent.find((r) => r.method === "HEAD")!;
       expect(head.headers.get("authorization")).toBe(`Basic ${Buffer.from("v1:temporary").toString("base64")}`);
-      expect(sent.find((r) => r.path.endsWith("/containers/applications") && r.method === "POST")!.body).toMatchObject({
-        configuration: { image: state.image },
+      // The copy, pinned by the manifest's digest, is what is prepared and what the object starts.
+      expect(sent.find((r) => r.path.endsWith(PREPARATIONS))!.body).toEqual({ image: `${RUNS}@${digest}` });
+      expect((await uploaded()).containers[0].images).toEqual({ runtime: `${RUNS}@${digest}` });
+    });
+
+    it("pins an image in the account's registry by a tag to its manifest's digest, copying nothing", async () => {
+      const [subdomain, settings, ...rest] = fixture("create");
+      const manifest = `/v2/${TEST_ACCOUNT}/sanoma-ai-runtime/manifests/0.7.0`;
+      const digest = PINNED.split("@")[1]!;
+      play("pin-a-tag", [
+        subdomain!,
+        settings!,
+        registryCredentials,
+        reply("/v2/", 200, null),
+        { method: "HEAD", path: manifest, status: 200, headers: { "docker-content-digest": digest }, body: null },
+        ...rest,
+      ]);
+      const made = await op("container.create", { desired: { ...desired, image: `${RUNS}:0.7.0` } });
+      expect(made).toEqual({ id: "company", state: { ...state, image: `${RUNS}:0.7.0` } });
+      expect(sent.filter((r) => r.path.startsWith("/v2/")).map((r) => `${r.method} ${r.path}`)).toEqual([
+        "GET /v2/",
+        `HEAD ${manifest}`,
+      ]);
+      expect((await uploaded()).containers[0].images).toEqual({ runtime: PINNED });
+    });
+
+    it("fails, without retrying and before uploading, when Cloudflare cannot prepare the image", async () => {
+      const [subdomain, settings] = fixture("create");
+      play("prepare-failed", [
+        subdomain!,
+        settings!,
+        reply(
+          apiPath(PREPARATIONS),
+          200,
+          cfResult({ image: PINNED, status: "error", reason: "the image is not for linux/amd64" }),
+          "POST",
+        ),
+      ]);
+      await expect(op("container.create", { desired })).rejects.toMatchObject({
+        name: "DriverError",
+        retryable: false,
+        message: `cloudflare: preparing ${PINNED}: the image is not for linux/amd64`,
       });
+      expect(sent.some((r) => r.method === "PUT")).toBe(false);
+    });
+
+    it("fails as retryable when the image is still not prepared after fifteen minutes", async () => {
+      const [subdomain, settings] = fixture("create");
+      play("prepare-slow", [subdomain!, settings!]);
+      server.use(
+        http.post(`*${PREPARATIONS}`, () =>
+          HttpResponse.json(cfResult({ image: PINNED, status: "pending", reason: "pulling" }), { status: 202 }),
+        ),
+      );
+      // A minute passes at each look at the clock.
+      let now = Date.now();
+      const clock = vi.spyOn(Date, "now").mockImplementation(() => (now += 60_000));
+      try {
+        await expect(op("container.create", { desired })).rejects.toMatchObject({
+          name: "DriverError",
+          retryable: true,
+          message: `cloudflare: preparing ${PINNED}: not ready in 15 min (pulling)`,
+        });
+      } finally {
+        clock.mockRestore();
+      }
+      expect(sent.some((r) => r.method === "PUT")).toBe(false);
+    });
+
+    it("keeps asking whether the image is prepared through one failed look", async () => {
+      play(
+        "prepare-flaky",
+        fixture("create").filter((e) => !e.path.endsWith(PREPARATIONS)),
+      );
+      let looks = 0;
+      server.use(
+        http.post(`*${PREPARATIONS}`, () =>
+          ++looks === 1
+            ? HttpResponse.json(cfError(10000, "internal error"), { status: 503 })
+            : HttpResponse.json(cfResult({ image: PINNED, status: "ready" }), { status: 200 }),
+        ),
+      );
+      expect(await op("container.create", { desired })).toEqual({ id: "company", state });
+      expect(looks).toBe(2);
     });
 
     it("plans nothing for a ghcr.io image the Worker names, whose copy the application runs", async () => {
@@ -236,7 +328,7 @@ describe.skipIf(live)("cloudflareDriver", () => {
         "plan-the-copy",
         only("update-to-a-new-image", (_, i) => i < 3).map((exchange) =>
           JSON.parse(
-            JSON.stringify(exchange).replaceAll(`"text":"${RUNS}:0.7.0"`, '"text":"ghcr.io/sanoma-ai/runtime:0.7.0"'),
+            JSON.stringify(exchange).replaceAll(`"text":"${PINNED}"`, '"text":"ghcr.io/sanoma-ai/runtime:0.7.0"'),
           ),
         ),
       );
@@ -307,7 +399,7 @@ describe.skipIf(live)("cloudflareDriver", () => {
     it("deletes the application, then the Worker with its object's storage", async () => {
       play(
         "delete-only",
-        only("delete", (_, i) => i >= 8 && i < 12),
+        only("delete", (_, i) => i >= 10 && i < 14),
       );
       expect(await op("container.delete", { id: "company" })).toEqual({ id: "company", gone: true });
       expect(sent.map((r) => `${r.method} ${r.path.replace(API, "")}`)).toEqual([
@@ -370,6 +462,36 @@ describe.skipIf(live)("cloudflareDriver", () => {
         retryable: false,
         message: expect.stringContaining("did not answer at abc123 in 0 s: it runs older"),
       });
+    });
+
+    it("stops waiting when the Worker says its container ended, as asking again would start it again", async () => {
+      const patient = cloudflareDriver({ timeoutMs: 200, startTimeoutMs: 60_000, pollMs: 5 });
+      play(
+        "stale",
+        only("create", (e) => !e.path.startsWith("/__sanoma/health")),
+      );
+      server.use(
+        http.get("*/__sanoma/health", () =>
+          HttpResponse.json(
+            {
+              error: "the company's container did not start: the container failed: exit code 1",
+              exit: "the container failed: exit code 1",
+            },
+            { status: 503 },
+          ),
+        ),
+      );
+      const t0 = Date.now();
+      await expect(
+        patient.ops["container.create"]!({ desired }, callWith({ SANOMA_WAKEUP_TOKEN: TOKEN })),
+      ).rejects.toMatchObject({
+        name: "DriverError",
+        retryable: false,
+        message: expect.stringContaining(
+          "did not start at abc123: the company's container did not start: the container failed: exit code 1",
+        ),
+      });
+      expect(Date.now() - t0).toBeLessThan(10_000);
     });
 
     it.each([

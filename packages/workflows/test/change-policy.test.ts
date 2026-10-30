@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { decide } from "../src/call.ts";
-import { type ChangeFacts, changeOps, runtimeHold, touchesOf } from "../src/change.ts";
+import { type ChangeFacts, changeOps, mayDeclarePeople, runtimeHold, touchesOf } from "../src/change.ts";
 import { sanoma } from "../src/constructors.ts";
 import type { ApprovalState } from "../src/define.ts";
 import { allowAll, resolveConfig } from "../src/index.ts";
@@ -57,6 +57,17 @@ describe("touchesOf", () => {
       "resources/people.ts",
     ]);
     expect(touchesOf([])).toEqual([]);
+  });
+});
+
+describe("mayDeclarePeople", () => {
+  it("is a file that imports `sanoma` by any name, or the whole entry, and no other", () => {
+    expect(mayDeclarePeople(`import { sanoma } from "sanoma/resources";`)).toBe(true);
+    expect(mayDeclarePeople(`import { secret, sanoma as rt } from "@sanoma-ai/workflows/resources";`)).toBe(true);
+    expect(mayDeclarePeople(`import * as rt from "sanoma/resources";`)).toBe(true);
+    expect(mayDeclarePeople(`export * from "sanoma/resources";`)).toBe(true);
+    expect(mayDeclarePeople(`import { secret } from "sanoma/resources";`)).toBe(false);
+    expect(mayDeclarePeople(`import { github } from "@sanoma-ai/github/resources";`)).toBe(false);
   });
 });
 

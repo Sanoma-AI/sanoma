@@ -2,7 +2,15 @@ import { DBOS } from "@dbos-inc/dbos-sdk";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { Pool } from "pg";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { createTable, lazyPool, pgCode, prepareDatabase, WAKEUP_TABLE } from "../src/db.ts";
+import {
+  connectMaking,
+  createTable,
+  CREDENTIALS_TABLE,
+  lazyPool,
+  pgCode,
+  prepareDatabase,
+  WAKEUP_TABLE,
+} from "../src/db.ts";
 
 const databaseUrl = testDatabaseUrl("db");
 const pool = new Pool({ connectionString: databaseUrl });
@@ -65,6 +73,47 @@ describe("prepareDatabase", () => {
     try {
       expect((await conn.query("SHOW idle_in_transaction_session_timeout")).rows).toEqual([
         { idle_in_transaction_session_timeout: "1min" },
+      ]);
+    } finally {
+      await conn.end();
+    }
+  });
+});
+
+describe("sanoma_credentials", () => {
+  it("replaces a table from before 0.10.0, whose rows nothing can read, with the one keyed by namespace", async () => {
+    const url = testDatabaseUrl("db_credentials");
+    const conn = await connectMaking(url);
+    try {
+      await conn.query(`DROP TABLE IF EXISTS ${CREDENTIALS_TABLE}`);
+      await conn.query(
+        `CREATE TABLE ${CREDENTIALS_TABLE} (name text PRIMARY KEY, value text NOT NULL, set_by text NOT NULL, set_at timestamptz NOT NULL DEFAULT now())`,
+      );
+      await conn.query(`INSERT INTO ${CREDENTIALS_TABLE} (name, value, set_by) VALUES ('X', 'sealed', 'leon')`);
+      await prepareDatabase(url);
+      const table = await conn.query(`SELECT * FROM ${CREDENTIALS_TABLE}`);
+      expect(table.fields.map((f) => f.name)).toEqual(["namespace", "name", "value", "version", "set_by", "set_at"]);
+      expect(table.rows).toEqual([]);
+    } finally {
+      await conn.end();
+    }
+  });
+
+  it("keeps the table keyed by namespace, and its rows", async () => {
+    const url = testDatabaseUrl("db_credentials_kept");
+    const conn = await connectMaking(url);
+    try {
+      await conn.query(`DROP TABLE IF EXISTS ${CREDENTIALS_TABLE}`);
+      await conn.query(
+        `CREATE TABLE ${CREDENTIALS_TABLE} (namespace text NOT NULL, name text NOT NULL, value text NOT NULL, ` +
+          "version text NOT NULL, set_by text NOT NULL, set_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(namespace, name))",
+      );
+      await conn.query(
+        `INSERT INTO ${CREDENTIALS_TABLE} (namespace, name, value, version, set_by) VALUES ('default', 'X', 'sealed', '1', 'leon')`,
+      );
+      await prepareDatabase(url);
+      expect((await conn.query(`SELECT namespace, name FROM ${CREDENTIALS_TABLE}`)).rows).toEqual([
+        { namespace: "default", name: "X" },
       ]);
     } finally {
       await conn.end();

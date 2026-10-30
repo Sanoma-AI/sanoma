@@ -3,8 +3,9 @@ import { cloudflareOps } from "./connector.ts";
 
 const { create } = cloudflareOps.container;
 
-/** The runtime image the steps' containers name: one already in Cloudflare's registry, so nothing copies it. */
-const IMAGE = "registry.cloudflare.com/0123456789abcdef0123456789abcdef/sanoma-ai-runtime:0.7.0";
+/** The runtime image the steps' containers name: one already in the account's registry, pinned by digest, so nothing copies or asks for it. */
+const IMAGE =
+  "registry.cloudflare.com/0123456789abcdef0123456789abcdef/sanoma-ai-runtime@sha256:7777777777777777777777777777777777777777777777777777777777777777";
 
 /**
  * Cloudflare's steps for Gherkin tests: a company's container before the run (named `host`, so

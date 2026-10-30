@@ -12,7 +12,6 @@ import {
   type LoginHalf,
   problemLine,
   warningLine,
-  readPolicyFiles,
   type ResolvedConfig,
   resolveConfig,
   SanomaClient,
@@ -119,7 +118,7 @@ interface Responder {
  * each workflow. Reads the same config the worker runs, through Postgres and the
  * config's ledger store; it runs no workflows itself. Refuses, at once, a config the worker
  * would refuse; missing credentials refuse nothing, and the connector pages show and set them;
- * data files with problems it warns about and leaves out (the Resources page lists them).
+ * data files with problems it warns about and leaves out (the Hosting page lists them).
  */
 export async function startApp(config: SanomaConfig, options: AppOptions = {}): Promise<App> {
   const host = options.host ?? "127.0.0.1";
@@ -129,11 +128,9 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
     throw new Error(`The dev server listens on this machine only, not ${host}: serve a build there`);
   }
   const resolved = resolveConfig(config);
-  // Read right after the policy made from them, so the Permissions page shows what decides.
-  const policyFiles = resolved.root === undefined ? [] : readPolicyFiles(resolved.root);
   const login = admitting(given, () => readPeople(resolved.root));
   const description = describeConfig(config);
-  // Problems in the files do not stop the app: a data file's resources are left out (the Resources
+  // Problems in the files do not stop the app: a data file's resources are left out (the Hosting
   // page lists the problems), a workflow the worker will refuse is shown with its outline's error,
   // and a site's call to what the config lacks fails when it is made.
   const lines = new Set([
@@ -281,7 +278,6 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   const app: AppContext = {
     resolved,
     description,
-    policyFiles,
     place: placeOf(resolved.databaseUrl),
     client,
     login,
