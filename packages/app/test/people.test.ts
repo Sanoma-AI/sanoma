@@ -135,14 +135,22 @@ describe("People", () => {
     );
   });
 
-  it("lists the groups with their members, and the agents with whom they act for", async () => {
-    expect(rows((await page("/people?show=groups")).html)).toEqual([
+  it("lists the groups with their members, and the agents with whom they act for, agents built in", async () => {
+    const groups = (await page("/people?show=groups")).html;
+    expect(rows(groups)).toEqual([
       ["admin", "ada", "resources/people.ts#admin"],
       ["ops", "ada bo refund-bot", "resources/people.ts#ops"],
+      // The group the runtime puts every agent in, declared nowhere.
+      ["agents (built in)", "refund-bot", "the runtime: every agent"],
     ]);
-    expect(rows((await page("/people?show=agents")).html)).toEqual([
-      ["refund-bot", "refund-bot", "bo", "ops", "resources/people.ts#refundBot"],
+    // The tab counts the groups declared.
+    expect(groups).toMatch(/href="\/people\?show=groups"[^>]*>Groups<span[^>]*>2<\/span>/);
+    const agents = (await page("/people?show=agents&person=refund-bot")).html;
+    expect(rows(agents)).toEqual([
+      ["refund-bot", "refund-bot", "bo", "ops agents (built in)", "resources/people.ts#refundBot"],
     ]);
+    // Muted, beside the declared ones, in the table and on the open card.
+    expect(agents.match(/title="The runtime puts every agent in it"/g)).toHaveLength(2);
   });
 
   it("opens a row's declaration form over the list: its fields as declared, its identity and references read-only", async () => {
