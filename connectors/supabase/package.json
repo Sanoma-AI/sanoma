@@ -25,7 +25,8 @@
     "testdata/replies",
     "logo.svg",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "sql"
   ],
   "type": "module",
   "sideEffects": false,
@@ -47,6 +48,10 @@
     "./fake": {
       "types": "./dist/fake.d.ts",
       "default": "./dist/fake.js"
+    },
+    "./vault": {
+      "types": "./dist/vault.d.ts",
+      "default": "./dist/vault.js"
     }
   },
   "publishConfig": {
@@ -59,9 +64,13 @@
     "prepack": "pnpm run clean && pnpm run build",
     "watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput"
   },
+  "dependencies": {
+    "pg": "^8.23.1"
+  },
   "devDependencies": {
     "@sanoma-ai/bridge": "workspace:*",
     "@sanoma-ai/workflows": "workspace:*",
+    "@types/pg": "^8.23.1",
     "msw": "^3.0.3",
     "zod": "^4.6.5"
   },

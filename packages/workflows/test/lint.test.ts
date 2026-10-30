@@ -47,6 +47,7 @@ describe("lintWorkflow", () => {
       import { startTestWorker } from "@sanoma-ai/testing";
       import { fakeGhost } from "@sanoma-ai/connector-ghost/fake";
       import { ghostDriver } from "@sanoma-ai/connector-ghost/driver";
+      import { supabaseVault } from "@sanoma-ai/connector-supabase/vault";
       import { githubRemote } from "@sanoma-ai/connector-github/remote";
       import { startApp } from "@sanoma-ai/app";
       import config from "../sanoma.config.ts";
@@ -57,6 +58,7 @@ describe("lintWorkflow", () => {
       expect.stringMatching(/^import "@sanoma-ai\/testing" .*through ctx, so the policy sees every call/),
       expect.stringMatching(/^import "@sanoma-ai\/connector-ghost\/fake" .*through ctx, so the policy sees every call/),
       expect.stringMatching(/^import "@sanoma-ai\/connector-ghost\/driver" .*through ctx/),
+      expect.stringMatching(/^import "@sanoma-ai\/connector-supabase\/vault" .*through ctx/),
       expect.stringMatching(/^import "@sanoma-ai\/connector-github\/remote" .*through ctx/),
       expect.stringMatching(/^import "@sanoma-ai\/app" .*approve itself/),
       expect.stringMatching(/^import "\.\.\/sanoma\.config\.ts" .*outside workflows\/.*through ctx/),

@@ -116,3 +116,72 @@ SANOMA_LIVE=1 SANOMA_RECORD=1 SUPABASE_TEST_PROJECT_REF=<ref> pnpm vitest run co
 ```
 
 License: FSL-1.1-ALv2.
+
+## Supabase Vault as the secret store
+
+Import the server-only `@sanoma-ai/connector-supabase/vault` entry in deployment config. This stores credentials in **Supabase Vault**, separate from Sanoma's built-in encrypted Postgres table. Company code still uses logical secret names and named connections. The example config fragment is:
+
+```ts
+import { supabaseVault } from "@sanoma-ai/connector-supabase/vault";
+
+const secrets = {
+  store: supabaseVault(),
+  namespace: "production",
+  bindings: {
+    STRIPE_API_KEY: { path: "customer-stripe", management: "external" as const },
+  },
+};
+// Pass `secrets` to defineConfig alongside connectors/workflows.
+```
+
+### Provision the database boundary
+
+Install `sql/vault.sql` from this package **once**, as the project administrator in a project with the Vault extension enabled. The installer creates a private `sanoma_vault` schema; it does not create a runtime login or grant access to any namespace. Never add that schema or `vault` to Data API exposed schemas, or grant their tables/views to browser roles. The gateway removes default grants to `PUBLIC`, `anon`, `authenticated` and `service_role` on its own objects.
+
+Create a dedicated login with no memberships or administrative privileges (not `postgres`, `service_role`, or a role with access to `vault`). Set its password through your administrator's protected credential flow. Grant only the gateway access and the intended namespace:
+
+```sql
+-- `sanoma_runtime` is the dedicated LOGIN created by your administrator.
+GRANT USAGE ON SCHEMA sanoma_vault TO sanoma_runtime;
+GRANT EXECUTE ON FUNCTION sanoma_vault.access(text,text,text,text,text,text)
+  TO sanoma_runtime;
+INSERT INTO sanoma_vault.namespaces(login, namespace, writable)
+  VALUES ('sanoma_runtime', 'production', true);
+```
+
+Each login/namespace gets a random prefix for Sanoma-managed Vault names. Namespace strings alone do not authorize anything: the gateway checks the database's `session_user`. It rejects logins with direct Vault schema access. Use a distinct login and namespace grant per deployment/company, and a database connection that preserves that login (not a shared admin connection with `SET ROLE`). The private schema must stay owned by an administrator; the runtime cannot modify its grants or functions.
+
+To reference an existing Vault secret, an administrator maps its UUID without moving its value:
+
+```sql
+INSERT INTO sanoma_vault.external_secrets(login, namespace, path, secret_id)
+  VALUES ('sanoma_runtime', 'production', 'customer-stripe', '<existing-secret-uuid>');
+```
+
+Declare that path with `management: "external"`. The gateway independently refuses writes/deletes to external mappings even if code incorrectly claims ownership. External rotation is detected on the next read. Deleting the underlying customer secret makes it missing; Sanoma does not recreate it.
+
+### Supabase plus Cloudflare
+
+Supply the scoped login's Postgres URL as `SUPABASE_VAULT_DATABASE_URL` to the **Sanoma Node runtime**, with TLS certificate verification enabled for remote connections. `databaseUrlEnv` selects another bootstrap variable. Supply `SANOMA_SIGNING_KEY` independently, plus the application's database URL. Vault values do **not** need `SANOMA_SECRETS_KEY`. With a Cloudflare Container host, configure its Worker deployment secrets and explicitly pass the required values to the container; a Worker secret is not automatically a container environment variable. This adapter uses `pg` in the container, not a browser or bare Worker binding.
+
+The adapter opens at most four connections lazily, releases idle connections after one second, and exposes `close()` for tools/tests. Keep SQL statement/parameter logging and tracing configured to exclude credential values; the adapter uses bound parameters and sanitized errors, but database administrators control database logs. Never log the bootstrap URL.
+
+### Semantics and recovery
+
+- Maximum value: 65,536 UTF-8 bytes, including a serialized credential bundle. NUL is unsupported by Postgres text.
+- Creates and compare-and-set replacements/deletes are atomic through the gateway. Advisory locks serialize absent-row creation; row locks coordinate ordinary Vault updates. Versions include encrypted-row state and a random revision, never a plaintext password hash. No plaintext cache is kept.
+- Deletion removes the active row. Database backups/PITR may retain older encrypted data according to the project's retention policy. It is not cryptographic erasure.
+- The gateway detects ordinary direct Vault updates, but project administrators remain trusted: they control grants, functions, metadata, and encryption custody. Runtime scope is not protection against a compromised project administrator.
+- Supabase manages the project encryption key. Preserve the gateway grant/mapping/revision tables with database backups. A raw dump moved to another project may not be decryptable without the original Vault key; use Supabase's documented restore/key-transfer route or an authorized decrypt-and-reencrypt migration. Sanoma's cross-store migration is tracked separately in #468; this adapter does not export root keys or perform migration automatically.
+
+See [Vault APIs and recovery](https://supabase.com/docs/guides/database/vault) and [Supabase's privilege constraints](https://supabase.com/kb/troubleshooting/revoking-privileges-on-storage-pg_cron-vault-and-extension-objects-has-no-effect). Tested with the actual Vault extension in `supabase/postgres:17.6.1.136`; hosted-project permissions still depend on the project's installed grants/version.
+
+### Verification
+
+Normal tests mock the transport and never contact Supabase. The opt-in SQL proof creates and drops an isolated database and a generated login, using only synthetic values. Point `SANOMA_VAULT_TEST_DATABASE_URL` at a disposable administrator instance with the Vault extension available and permission to create databases/logins, then run:
+
+```sh
+pnpm vitest run connectors/supabase/test/vault-live.test.ts
+```
+
+It tests conformance, independent concurrent writers, external ownership/rotation, administrator/direct-view refusal, cross-namespace denial, ciphertext at rest and stale replacement after a direct Vault update. Do not point the opt-in administrator URL at a production project.
