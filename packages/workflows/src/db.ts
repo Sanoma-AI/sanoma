@@ -41,7 +41,18 @@ const TABLES: readonly [what: string, ddl: string][] = [
   ],
   [
     "credentials",
-    `CREATE TABLE IF NOT EXISTS ${CREDENTIALS_TABLE} (namespace text NOT NULL, name text NOT NULL, value text NOT NULL, ` +
+    // A table from before 0.10.0 (one row per name, each value sealed to its name alone) holds
+    // nothing 0.10.0 can read: it goes, and its credentials are set again.
+    // One table for the look and the drop: the one the name resolves to.
+    `DO $$ BEGIN
+      IF to_regclass('${CREDENTIALS_TABLE}') IS NOT NULL AND NOT EXISTS (
+        SELECT FROM pg_attribute
+        WHERE attrelid = to_regclass('${CREDENTIALS_TABLE}') AND attname = 'namespace' AND NOT attisdropped
+      ) THEN
+        DROP TABLE ${CREDENTIALS_TABLE};
+      END IF;
+    END $$; ` +
+      `CREATE TABLE IF NOT EXISTS ${CREDENTIALS_TABLE} (namespace text NOT NULL, name text NOT NULL, value text NOT NULL, ` +
       "version text NOT NULL, set_by text NOT NULL, set_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(namespace, name))",
   ],
   [
