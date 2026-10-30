@@ -101,7 +101,7 @@
     "@faker-js/faker": "^10.6.0",
     "@google-cloud/kms": "^6.3.0",
     "ai": "7.0.153",
-    "fast-crc32c": "^2.0.0",
+    "crc-32": "^1.2.2",
     "oxc-parser": "^0.153.0",
     "oxfmt": "^0.72.0",
     "pg": "^8.23.1",
@@ -109,7 +109,6 @@
     "zod-schema-faker": "^2.1.2"
   },
   "devDependencies": {
-    "@types/fast-crc32c": "^2.0.3",
     "@types/pg": "^8.23.1",
     "msw": "^3.0.3",
     "srvx": "^0.11.22",

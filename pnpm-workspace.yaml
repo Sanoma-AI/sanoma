@@ -4,7 +4,6 @@ packages:
   - packages/postgres-bin/*
   - connectors/*
 allowBuilds:
-  sse4_crc32: false # fast-crc32c uses its portable JavaScript fallback.
   # The desktop shell's Electron binary (~100 MB): `pnpm --filter @sanoma-ai/desktop start` downloads it when missing.
   electron: false
   # The desktop makers (packages/desktop/forge.config.mts): the dmg's Finder metadata, and the

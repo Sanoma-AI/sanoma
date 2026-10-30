@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from "node:crypto";
 import type { protos } from "@google-cloud/kms";
-import crc32c from "fast-crc32c";
+import crc32c from "crc-32/crc32c.js";
 import type { Db } from "./db.ts";
 import { SecretStoreError, type SecretAddress, type SecretStore, type SecretValue } from "./secret-store.ts";
 
@@ -108,7 +108,7 @@ const versionOf = (name: unknown, key: string): name is string =>
   typeof name === "string" &&
   name.startsWith(`${key}/cryptoKeyVersions/`) &&
   /^[1-9][0-9]{0,19}$/.test(name.slice(`${key}/cryptoKeyVersions/`.length));
-const checksum = (value: Uint8Array) => crc32c.calculate(Buffer.from(value.buffer, value.byteOffset, value.byteLength));
+const checksum = (value: Uint8Array) => crc32c.buf(value) >>> 0;
 
 /** Versioned envelope encryption; no plaintext/data-key cache, no SANOMA_SECRETS_KEY and no Secrets Manager. */
 export function kmsPostgresStore(options: KmsPostgresOptions): SecretStore {

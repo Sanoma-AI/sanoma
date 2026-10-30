@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import crc32c from "fast-crc32c";
+import crc32c from "crc-32/crc32c.js";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { lazyPool } from "../src/db.ts";
@@ -33,8 +33,8 @@ function fakeKms(allowed: string[]) {
       if (state.denied || !allowed.includes(input.name!)) fail(7);
       const plain = b(input.plaintext),
         aad = b(input.additionalAuthenticatedData);
-      expect(Number(input.plaintextCrc32c?.value)).toBe(crc32c.calculate(plain));
-      expect(Number(input.additionalAuthenticatedDataCrc32c?.value)).toBe(crc32c.calculate(aad));
+      expect(Number(input.plaintextCrc32c?.value)).toBe(crc32c.buf(plain) >>> 0);
+      expect(Number(input.additionalAuthenticatedDataCrc32c?.value)).toBe(crc32c.buf(aad) >>> 0);
       returned.push(input.plaintext as Uint8Array);
       const wrapped = randomBytes(32);
       wrappedKeys.set(wrapped.toString("base64"), { bytes: plain, aad, key: input.name!, version: state.primary });
@@ -42,7 +42,7 @@ function fakeKms(allowed: string[]) {
         {
           name: `${state.wrongName ? OTHER_KEY : input.name}/cryptoKeyVersions/${state.primary}`,
           ciphertext: wrapped,
-          ciphertextCrc32c: { value: state.badEncryptCrc ? -1 : crc32c.calculate(wrapped) },
+          ciphertextCrc32c: { value: state.badEncryptCrc ? -1 : crc32c.buf(wrapped) >>> 0 },
           verifiedPlaintextCrc32c: !state.unverified,
           verifiedAdditionalAuthenticatedDataCrc32c: !state.unverified,
         },
@@ -52,14 +52,14 @@ function fakeKms(allowed: string[]) {
       if (state.denied || !allowed.includes(input.name!)) fail(7);
       const wrapped = b(input.ciphertext),
         aad = b(input.additionalAuthenticatedData);
-      expect(Number(input.ciphertextCrc32c?.value)).toBe(crc32c.calculate(wrapped));
-      expect(Number(input.additionalAuthenticatedDataCrc32c?.value)).toBe(crc32c.calculate(aad));
+      expect(Number(input.ciphertextCrc32c?.value)).toBe(crc32c.buf(wrapped) >>> 0);
+      expect(Number(input.additionalAuthenticatedDataCrc32c?.value)).toBe(crc32c.buf(aad) >>> 0);
       const stored = wrappedKeys.get(wrapped.toString("base64"));
       if (!stored || !stored.aad.equals(aad) || stored.key !== input.name) return fail(3);
       if (state.disabledVersions.has(stored.version)) fail(9);
       const plain = Buffer.from(stored.bytes);
       returned.push(plain);
-      return [{ plaintext: plain, plaintextCrc32c: { value: state.badDecryptCrc ? -1 : crc32c.calculate(plain) } }];
+      return [{ plaintext: plain, plaintextCrc32c: { value: state.badDecryptCrc ? -1 : crc32c.buf(plain) >>> 0 } }];
     },
   };
   return { client, state, returned };
@@ -77,6 +77,9 @@ afterAll(async () => {
 });
 
 describe("KMS encrypted Postgres", () => {
+  it("uses unsigned Castagnoli checksums matching the published check vector", () => {
+    expect(crc32c.buf(Buffer.from("123456789")) >>> 0).toBe(0xe3069283);
+  });
   it("passes atomic store conformance using real Postgres and scoped KMS transport", async () => {
     expect((await checkSecretStore(store(), randomUUID())).filter((c) => !c.ok)).toEqual([]);
   });
@@ -182,9 +185,9 @@ describe("KMS encrypted Postgres", () => {
     const [encrypted] = await other.client.encrypt({
       name: OTHER_KEY,
       plaintext,
-      plaintextCrc32c: { value: crc32c.calculate(plaintext) },
+      plaintextCrc32c: { value: crc32c.buf(plaintext) >>> 0 },
       additionalAuthenticatedData: aad,
-      additionalAuthenticatedDataCrc32c: { value: crc32c.calculate(aad) },
+      additionalAuthenticatedDataCrc32c: { value: crc32c.buf(aad) >>> 0 },
     });
     plaintext.fill(0);
     await expect(
@@ -193,7 +196,7 @@ describe("KMS encrypted Postgres", () => {
         ciphertext: encrypted.ciphertext,
         ciphertextCrc32c: encrypted.ciphertextCrc32c,
         additionalAuthenticatedData: aad,
-        additionalAuthenticatedDataCrc32c: { value: crc32c.calculate(aad) },
+        additionalAuthenticatedDataCrc32c: { value: crc32c.buf(aad) >>> 0 },
       }),
     ).rejects.toMatchObject({ code: 7 });
     await expect(

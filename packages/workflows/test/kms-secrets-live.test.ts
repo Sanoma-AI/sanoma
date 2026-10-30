@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { KeyManagementServiceClient } from "@google-cloud/kms";
-import crc32c from "fast-crc32c";
+import crc32c from "crc-32/crc32c.js";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { lazyPool } from "../src/db.ts";
@@ -58,9 +58,9 @@ describe.runIf(enabled)("GCP KMS IAM proof", () => {
       const request = {
         name: key,
         plaintext: plain,
-        plaintextCrc32c: { value: crc32c.calculate(plain) },
+        plaintextCrc32c: { value: crc32c.buf(plain) >>> 0 },
         additionalAuthenticatedData: aad,
-        additionalAuthenticatedDataCrc32c: { value: crc32c.calculate(aad) },
+        additionalAuthenticatedDataCrc32c: { value: crc32c.buf(aad) >>> 0 },
       };
       try {
         const [encrypted] = await rpc(owner.encrypt(request));
