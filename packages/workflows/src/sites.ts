@@ -7,6 +7,7 @@ import type { ConfigDescription, SiteCall, SiteEntry, SitePage } from "./descrip
 import { stringValue, unwrap } from "./outline.ts";
 import { exportsOf, loadModules } from "./load.ts";
 import { APPS_DIR, appFolders, filesUnder, isDirectory, relPath, SITE_ENTRIES } from "./paths.ts";
+import { isObject } from "./resource.ts";
 import type { ResourceProblem } from "./resources.ts";
 import { START } from "./schema.ts";
 import {
@@ -452,13 +453,23 @@ function siteDefinitionOf(
   const value = loaded.exports.find(([name]) => name === "default")?.[1];
   if (value === undefined) return { problems: [] };
   const problem = (message: string) => ({ file, export: "default", message });
-  const parsed = SiteDefinitionSchema.safeParse(value);
+  const problems: (ResourceProblem & { file: string })[] = [];
+  let parsed = SiteDefinitionSchema.safeParse(value);
   if (!parsed.success) {
     const why = z.prettifyError(parsed.error).replaceAll(/\s*\n\s*/g, " ");
-    return { problems: [problem(`its default export is \`defineSite({ … })\` from "sanoma/site": ${why}`)] };
+    problems.push(problem(`its default export is \`defineSite({ … })\` from "sanoma/site": ${why}`));
+    // The fields it names wrongly (and the keys it does not know) left out, the rest still read:
+    // a bad icon keeps a site's `public`, `login` and `locales`.
+    const wrong = new Set(
+      parsed.error.issues.flatMap((i) => (i.code === "unrecognized_keys" ? i.keys : i.path.slice(0, 1))),
+    );
+    if (!isObject(value) || !wrong.size) return { problems };
+    parsed = SiteDefinitionSchema.safeParse(
+      Object.fromEntries(Object.entries(value).filter(([key]) => !wrong.has(key))),
+    );
+    if (!parsed.success) return { problems };
   }
   const { title, icon, public: isPublic, login, locales } = parsed.data;
-  const problems: (ResourceProblem & { file: string })[] = [];
   const loginProblem = (): string | undefined => {
     if (!isPublic) return "a login is for a public site: add `public: true`, or remove `login`";
     if (!connectors.vendors.has(login!)) return `login names "${login}", which is not a connector in sanoma.config.ts`;

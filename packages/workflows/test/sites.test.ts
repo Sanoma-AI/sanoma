@@ -393,16 +393,16 @@ describe("readSites", () => {
         problems: [],
         warnings: [],
       },
-      // A value its schema refuses: nothing it says is kept.
+      // A value its schema refuses: that field is left out, the rest read (here a login, on a site not public).
       {
         name: "quoted",
+        at: atSite("quoted"),
         pages: [{ path: "/sites/quoted" }],
         calls: [],
+        login: "auth0",
         problems: [
-          problemAt(
-            "quoted",
-            expect.stringMatching(/^its default export is `defineSite\(\{ … \}\)` from "sanoma\/site": .* at public$/),
-          ),
+          problemAt("quoted", schema("public")),
+          problemAt("quoted", "a login is for a public site: add `public: true`, or remove `login`"),
         ],
         warnings: [],
       },
@@ -563,6 +563,25 @@ describe("readSites", () => {
     ]);
   });
 
+  it("keeps a public site's public, login and locales when a field only for show is wrong or a key is unknown", () => {
+    const root = tree("cosmetic", {
+      ...site("www", "icon: 3", 'colour: "red"', "public: true", 'locales: ["en", "fr"]'),
+    });
+    const [www] = describeConfig(config(root)).sites;
+    expect(www).toEqual({
+      name: "www",
+      at: atSite("www"),
+      public: true,
+      locales: ["en", "fr"],
+      pages: [{ path: "/sites/www" }],
+      calls: [],
+      problems: [problemAt("www", expect.stringMatching(/Unrecognized key: "colour".* at icon$/))],
+      warnings: [],
+    });
+    expect(siteLocales(root)).toEqual({ www: ["en", "fr"] });
+    expect(siteIcons(root)).toEqual({});
+  });
+
   it("reads a public site's locales from site.ts, its default first, and makes a problem of what it cannot keep", () => {
     const root = tree("locales", {
       ...site("www", "public: true", 'locales: ["en", "fr", "pt-BR"]'),
@@ -600,8 +619,11 @@ describe("readSites", () => {
       members: [["default", loginless]],
       staff: [["default", loginless]],
       twice: [["default", '"en" is in `locales` twice']],
-      // Said once, by the schema.
-      unread: [["default", schema("public")]],
+      // The schema's, then what follows from `public` left out.
+      unread: [
+        ["default", schema("public")],
+        ["default", loginless],
+      ],
       www: [],
     });
     // Kept only without a problem.

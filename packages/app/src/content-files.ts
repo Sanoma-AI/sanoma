@@ -2,7 +2,7 @@
 // read with `yaml` and their bodies rendered with `marked`, for the `sanoma:content` plugin
 // (`build.ts`), and their types, `.sanoma/content.ts`, for the sites' tsc. Neither library
 // reaches the browser: the build hands it the files as data.
-import { type Dirent, existsSync, readdirSync, readFileSync } from "node:fs";
+import { type Dirent, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { LOCALE, SITE_NAME } from "@sanoma-ai/workflows/shared";
 import { marked } from "marked";
@@ -30,15 +30,46 @@ export const publishedOf = (repo: string): Published =>
     ]),
   );
 
+/** Each repo's `contentFields`, kept with the stamp of the files it was read from. */
+const fieldsRead = new Map<string, { stamp: string; fields: { kind: string; fields: string[] }[] }>();
+
 /**
  * Each content kind of `repo` (`readContent`, drafts kept), with the front matter keys its files
- * hold, in the order they first appear: what `getConfig` says of `content/`.
+ * hold, in the order they first appear: what `getConfig` says of `content/`. Read again only once
+ * a folder or file under `content/` changed (by size and modification time, one `stat` each), so
+ * a page's request renders no Markdown.
  */
-export const contentFields = (repo: string): { kind: string; fields: string[] }[] =>
-  Object.entries(readContent(repo, { drafts: true }).kinds).map(([kind, entries]) => ({
+export function contentFields(repo: string): { kind: string; fields: string[] }[] {
+  const stamp = contentStamp(repo);
+  const kept = fieldsRead.get(repo);
+  if (kept?.stamp === stamp) return kept.fields;
+  const fields = Object.entries(readContent(repo, { drafts: true }).kinds).map(([kind, entries]) => ({
     kind,
     fields: [...new Set(entries.flatMap((entry) => Object.keys(entry.data)))],
   }));
+  fieldsRead.set(repo, { stamp, fields });
+  return fields;
+}
+
+/** A path, its size and its modification time, or that it is gone. */
+function stampOf(path: string): string {
+  const stat = statSync(path, { bigint: true, throwIfNoEntry: false });
+  return stat ? `${path} ${stat.size} ${stat.mtimeNs}` : `${path} gone`;
+}
+
+/** `content/`, each folder directly in it and each file directly in those, by size and modification time. */
+function contentStamp(repo: string): string {
+  const root = join(repo, "content");
+  return [
+    root,
+    ...folder(root, (e) => e.isDirectory()).flatMap((kind) => {
+      const dir = join(root, kind);
+      return [dir, ...folder(dir, (e) => e.isFile()).map((name) => join(dir, name))];
+    }),
+  ]
+    .map(stampOf)
+    .join("\n");
+}
 
 /** What is wrong with a file or folder under `content/`, at its place. */
 export interface ContentProblem {
