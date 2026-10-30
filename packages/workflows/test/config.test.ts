@@ -181,6 +181,10 @@ describe("a change's operations, built in", () => {
     // Beside the listing of apps, also built in.
     expect([...resolved.ops.keys()]).toEqual([
       ...ids,
+      "sanoma.connection.test",
+      "sanoma.connection.prepare",
+      "sanoma.connection.configure",
+      "sanoma.connection.activate",
       "sanoma.connection.disconnect",
       "sanoma.connection.bind",
       "sanoma.connection.create",

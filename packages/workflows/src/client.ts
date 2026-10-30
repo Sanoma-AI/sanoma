@@ -1,5 +1,16 @@
-import { connectionDriver, type ConnectionRef, type ConnectionSnapshot } from "./connection.ts";
-import { randomUUID } from "node:crypto";
+import {
+  connectionDriver,
+  connectionTargetSchema,
+  type ConnectionRef,
+  type ConnectionSnapshot,
+  type ConnectionTarget,
+  type ConnectionSetup,
+  type ConnectionCard,
+  type ConnectionRule,
+} from "./connection.ts";
+import { encodeCredentials, decodeCredentials, verifyAuthentication, AuthenticationError } from "./authentication.ts";
+
+import { createHash, randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { type DBOSClient, Error as DBOSErrors, type WorkflowStatusString } from "@dbos-inc/dbos-sdk";
 import type { Pool } from "pg";
@@ -53,7 +64,7 @@ import type { CallContext, Driver, Op } from "./op.ts";
 import { allowAll, type RecordedDecision } from "./policy.ts";
 import { admit, readPeople } from "./resources.ts";
 import type { RunArgs, StartHold } from "./run.ts";
-import type { SecretAccess, SecretLocation } from "./secret-store.ts";
+import { SecretStoreError, type SecretAccess, type SecretLocation } from "./secret-store.ts";
 import {
   BUILT_IN_WORKFLOWS,
   CALL_WORKFLOW,
@@ -220,6 +231,15 @@ export interface CallOptions {
   id?: string;
 }
 
+/** A credential-free review shown before the user saves a connection. */
+export interface ConnectionReview extends ConnectionSetup {
+  authorization: string;
+  requestId: string;
+  account: string;
+  scopes: string[];
+  credentialVersion: string | null;
+  expiresAt?: number;
+}
 /** What `SanomaClient.connect` is given besides the config. */
 export interface ClientOptions {
   /**
@@ -1148,10 +1168,224 @@ export class SanomaClient {
     if (current) await this.storedSecrets.delete(name, { expectedVersion: current.version, by });
   }
 
+  private connectionAuthorization(): string {
+    return createHash("sha256")
+      .update(
+        JSON.stringify({
+          version: this.config.version,
+          policies: this.config.policies,
+          problems: this.config.policyProblems,
+        }),
+      )
+      .digest("hex");
+  }
+
+  /** Safe account cards, scoped to the admitted principal. No provider or secret reads. */
+  async connections(options: { actor: Principal | string }): Promise<ConnectionCard[]> {
+    const actor = await this.admitted(parseOrThrow(PrincipalOrId, options.actor, "Name the principal"));
+    return this.config.connections.cards(actor.id);
+  }
+
+  /** Creation choices are scoped by code to the admitted person's current groups. */
+  async connectionRules(options: { actor: Principal | string }): Promise<{ id: string; rule: ConnectionRule }[]> {
+    const actor = await this.admitted(parseOrThrow(PrincipalOrId, options.actor, "Name the principal"));
+    return [...this.config.connections.catalog.rules]
+      .filter(([, rule]) =>
+        rule.createBy.some((by) => (typeof by === "string" ? by === actor.id : actor.groups?.includes(by.group))),
+      )
+      .map(([id, rule]) => ({ id, rule }));
+  }
+
+  /** Readiness only, without reading or listing any credential. The adapter's bootstrap
+   * authority is checked by validate; provider details never escape this boundary. */
+  async secretStoreStatus(options: { actor: Principal | string }) {
+    await this.admitted(parseOrThrow(PrincipalOrId, options.actor, "Name the principal"));
+    const { store, namespace } = this.storedSecrets;
+    let problem: string | undefined;
+    try {
+      await this.storedSecrets.validate();
+    } catch (error) {
+      problem = (error as SecretStoreError).code;
+    }
+    return {
+      store: store.id,
+      namespace,
+      capabilities: { ...store.capabilities },
+      ready: !problem,
+      ...(problem && { problem }),
+    };
+  }
+
+  /** Secure intake endpoint, never a workflow operation. Only its metadata-only prepare gate
+   * enters policy/approval history; callers keep the value in a password form while reviewing. */
+  async previewConnection(
+    target: ConnectionTarget,
+    credentials: unknown,
+    options: { actor: Principal | string; id: string },
+  ): Promise<ConnectionReview> {
+    const actor = await this.admitted(parseOrThrow(PrincipalOrId, options.actor, "Name the principal"));
+    const id = parseOrThrow(z.string().min(1).max(200), options.id, "Name the setup request");
+    target = parseOrThrow(connectionTargetSchema, target, "Select a declared connection or creation rule");
+    const setup = await this.config.connections.setup(target, actor, id);
+    const authorized = (await this.call(
+      "sanoma.connection.prepare",
+      {
+        target,
+        requestId: id,
+        definition: setup.definition,
+        authorization: this.connectionAuthorization(),
+      },
+      { actor, id: `connection-prepare:${id}` },
+    )) as ConnectionSetup;
+    if (!isDeepStrictEqual(authorized, setup))
+      throw new SanomaError("invalid_input", "The connection changed; start a new review");
+    const method = this.config.connections.catalog.methods.get(setup.vendor)![setup.method]!;
+    const external =
+      method.kind !== "workload-identity" &&
+      (setup.location?.management === "external" || !this.storedSecrets.store.capabilities.writable);
+    if (
+      !external &&
+      method.kind !== "workload-identity" &&
+      this.storedSecrets.store.capabilities.conditionalWrites === "none"
+    )
+      throw new SecretStoreError("unsupported");
+    if (credentials !== undefined && (external || method.kind === "workload-identity"))
+      throw new SecretStoreError("read_only");
+    const existing = setup.credential ? await this.storedSecrets.read(setup.credential) : undefined;
+    if (external && !existing) throw new SecretStoreError("unavailable");
+    const encoded =
+      method.kind === "workload-identity"
+        ? undefined
+        : external
+          ? existing!.value
+          : encodeCredentials(method, credentials);
+    const identity = await verifyAuthentication(
+      method,
+      encoded === undefined ? undefined : decodeCredentials(method, encoded),
+    );
+    if (setup.expectedAccount && setup.expectedAccount !== identity.account)
+      throw new AuthenticationError("wrong_account");
+    if (setup.requiredScopes.some((scope) => !identity.scopes.includes(scope)))
+      throw new AuthenticationError("scope_changed");
+    return {
+      ...setup,
+      requestId: id,
+      authorization: this.connectionAuthorization(),
+      account: identity.account,
+      scopes: [...identity.scopes],
+      credentialVersion: existing?.version ?? null,
+      ...(identity.expiresAt !== undefined && { expiresAt: identity.expiresAt }),
+    };
+  }
+
+  /** Reverify the reviewed authority, reserve its metadata under policy, then write the bundle
+   * outside durable execution. Activation has its own policy gate and verifies what was saved. */
+  async connectConnection(
+    review: ConnectionReview,
+    credentials: unknown,
+    options: { actor: Principal | string },
+  ): Promise<ConnectionSnapshot> {
+    const actor = await this.admitted(parseOrThrow(PrincipalOrId, options.actor, "Name the principal"));
+    if (review.authorization !== this.connectionAuthorization())
+      throw new SanomaError("invalid_input", "The policy changed; start a new connection review");
+    const setup = await this.config.connections.setup(review.target, actor, review.requestId);
+    for (const field of ["id", "vendor", "method", "definition", "credential", "location"] as const) {
+      if (!isDeepStrictEqual(setup[field], review[field]))
+        throw new SanomaError("invalid_input", "The destination changed; review it again before saving");
+    }
+    // Reuse only the metadata gate, never a cached credential or verification result.
+    await this.call(
+      "sanoma.connection.prepare",
+      {
+        target: review.target,
+        requestId: review.requestId,
+        definition: setup.definition,
+        authorization: review.authorization,
+      },
+      { actor, id: `connection-prepare:${review.requestId}` },
+    );
+    const method = this.config.connections.catalog.methods.get(setup.vendor)![setup.method]!;
+    const external =
+      method.kind !== "workload-identity" &&
+      (setup.location?.management === "external" || !this.storedSecrets.store.capabilities.writable);
+    if (
+      !external &&
+      method.kind !== "workload-identity" &&
+      this.storedSecrets.store.capabilities.conditionalWrites === "none"
+    )
+      throw new SecretStoreError("unsupported");
+    if (credentials !== undefined && (external || method.kind === "workload-identity"))
+      throw new SecretStoreError("read_only");
+    const existing = setup.credential ? await this.storedSecrets.read(setup.credential) : undefined;
+    if (external && (!existing || existing.version !== review.credentialVersion))
+      throw new SecretStoreError("conflict");
+    if (setup.expectedRevision === review.expectedRevision && (existing?.version ?? null) !== review.credentialVersion)
+      throw new SecretStoreError("conflict");
+    const encoded =
+      method.kind === "workload-identity"
+        ? undefined
+        : external
+          ? existing!.value
+          : encodeCredentials(method, credentials);
+    const identity = await verifyAuthentication(
+      method,
+      encoded === undefined ? undefined : decodeCredentials(method, encoded),
+    );
+    if (identity.account !== review.account) throw new AuthenticationError("wrong_account");
+    if (JSON.stringify(identity.scopes) !== JSON.stringify([...new Set(review.scopes)].toSorted()))
+      throw new AuthenticationError("scope_changed");
+    const selected = (await this.call(
+      "sanoma.connection.configure",
+      {
+        target: review.target,
+        requestId: review.requestId,
+        expectedRevision: review.expectedRevision,
+        definition: review.definition,
+        account: identity.account,
+        scopes: [...identity.scopes],
+      },
+      { actor, id: `connection-configure:${review.requestId}` },
+    )) as ConnectionSnapshot;
+    const ref = { vendor: selected.vendor, $connection: selected.id };
+    if (
+      (await this.config.connections.setupState(selected, actor)) === "pending" &&
+      !external &&
+      encoded !== undefined
+    ) {
+      let written = false;
+      try {
+        const receipt = await this.config.connections.storedVersion(selected.id, selected.revision);
+        if (receipt) {
+          if (existing?.version !== receipt || existing.value !== encoded) throw new SecretStoreError("conflict");
+        } else {
+          const stored = await this.storedSecrets.write(setup.credential!, encoded, {
+            expectedVersion: review.credentialVersion,
+            by: actor.id,
+          });
+          written = true;
+          await this.config.connections.recordStoredVersion(selected.id, selected.revision, stored.version);
+        }
+      } catch (error) {
+        if (written || (error as { code?: string })?.code === "unavailable")
+          await this.config.connections.uncertain(ref, selected.revision, actor.id);
+        throw error;
+      }
+    }
+    const connected = (await this.call(
+      "sanoma.connection.activate",
+      {
+        connection: ref,
+        expectedRevision: selected.revision,
+      },
+      { actor, id: `connection-activate:${review.requestId}` },
+    )) as ConnectionSnapshot;
+    await this.config.connections.assertCurrent(connected, actor.id);
+    return connected;
+  }
+
   /**
-   * The values of these secrets, as a driver's `secrets.get` reads them: this process's
-   * environment, which wins, else the stored value, with who set it and when. A name with neither
-   * is left out. For server code: a page is told whether one is set, never its value.
+   * Values resolved through the selected store and explicit bindings, with version and change
+   * metadata. Missing names are left out. Server code only; pages receive status, never values.
    */
   async secrets(names: readonly string[]): Promise<Map<string, StoredSecret>> {
     const found = new Map<string, StoredSecret>();

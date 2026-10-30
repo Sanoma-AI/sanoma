@@ -57,6 +57,8 @@ const METHODS: Record<string, BridgeCall["method"]> = {
   Close: "close",
 };
 
+const session = (ref: ProviderRef) => `${releaseName(ref)}/${ref.sessionId ?? ""}`;
+
 /** A Connect interceptor that logs each call, on the real transport and the in-memory one alike. */
 function logCalls(calls: BridgeCall[]): Interceptor {
   return (next) => (req) => {
@@ -69,7 +71,7 @@ function logCalls(calls: BridgeCall[]): Interceptor {
       priorStateJson?: string;
     };
     if (method) {
-      const { source = "", version = "", sha256 = "" } = msg.provider ?? {};
+      const { source = "", version = "", sha256 = "", sessionId = "" } = msg.provider ?? {};
       let id = msg.id || undefined;
       const state = method === "read" ? msg.stateJson : msg.priorStateJson;
       if (state) {
@@ -81,7 +83,7 @@ function logCalls(calls: BridgeCall[]): Interceptor {
       }
       calls.push({
         method,
-        ...(source && { ref: { source, version, ...(sha256 && { sha256 }) } }),
+        ...(source && { ref: { source, version, ...(sha256 && { sha256 }), ...(sessionId && { sessionId }) } }),
         ...(msg.typeName && { typeName: msg.typeName }),
         ...(id !== undefined && { id }),
       });
@@ -232,7 +234,7 @@ function replayService(dir: string): ServiceImpl<typeof BridgeService> {
           : `refusing release: ${source} ${version}: SHA256SUMS sha256 is ${sha256}, pinned ${provider.sha256}`,
       );
     }
-    return { source, version, sha256: sha256 ?? "" };
+    return { source, version, sha256: sha256 ?? "", sessionId: provider.sessionId };
   }
 
   function schemaOf(ref: ProviderRef) {
@@ -246,7 +248,7 @@ function replayService(dir: string): ServiceImpl<typeof BridgeService> {
   /** A configured release and the resource type's schema, or the bridge's error. */
   function configuredType(provider: ProviderRefMessage | undefined, typeName: string) {
     const ref = release(provider);
-    if (!configured.has(releaseName(ref))) {
+    if (!configured.has(session(ref))) {
       throw fail(Code.FailedPrecondition, `${releaseName(ref)} is not configured; call Configure first`);
     }
     if (!schemaOf(ref).doc.resources[typeName]) {
@@ -314,7 +316,7 @@ function replayService(dir: string): ServiceImpl<typeof BridgeService> {
     getSchema(req) {
       const ref = release(req.provider);
       const { json, doc } = schemaOf(ref);
-      return { schemaJson: json, protocol: doc.protocol, sha256: ref.sha256 };
+      return { schemaJson: json, protocol: doc.protocol, sha256: ref.sha256, sessionProtocol: 1 };
     },
     configure(req) {
       const ref = release(req.provider);
@@ -329,7 +331,7 @@ function replayService(dir: string): ServiceImpl<typeof BridgeService> {
         throw fail(Code.InvalidArgument, `config_json: ${(error as Error).message}`);
       }
       if (!isObject(config)) throw fail(Code.InvalidArgument, "config_json must be a JSON object");
-      const name = releaseName(ref);
+      const name = session(ref);
       const canonical = JSON.stringify(config);
       const before = configured.get(name);
       if (before !== undefined && before !== canonical) {
@@ -380,7 +382,7 @@ function replayService(dir: string): ServiceImpl<typeof BridgeService> {
       return replay(changeFixture("apply", req), ApplyResponseSchema);
     },
     close(req) {
-      if (req.provider?.source) configured.delete(releaseName(release(req.provider)));
+      if (req.provider?.source) configured.delete(session(release(req.provider)));
       else configured.clear();
       return {};
     },

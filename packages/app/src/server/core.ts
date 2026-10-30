@@ -8,6 +8,7 @@ import {
   ADMIN,
   type ApprovalState,
   type DriftReport,
+  deploymentKey,
   errorCode,
   errorMessage,
   type InputIssue,
@@ -27,7 +28,7 @@ import {
   type SanomaError,
   type Source,
 } from "@sanoma-ai/workflows";
-import { apiNameOf, isVisitor } from "@sanoma-ai/workflows/shared";
+import { apiNameOf, isVisitor, flatten } from "@sanoma-ai/workflows/shared";
 import {
   type ConfigDescription,
   type DataValue,
@@ -50,6 +51,11 @@ import {
   ChangesQuery,
   type ClearCredentialRequest,
   type CredentialsResponse,
+  type ConnectionsResponse,
+  type PreviewConnectionRequest,
+  type ConnectConnectionRequest,
+  type TestConnectionRequest,
+  type DisconnectConnectionRequest,
   type DecideCall,
   type EnforcementResponse,
   type ErrorResponse,
@@ -700,6 +706,99 @@ function sourcesOf(read: { file: string; text: string }[]): PermissionsResponse[
 export const credentials = async ({ client }: AppContext): Promise<CredentialsResponse> =>
   Object.fromEntries(await client.credentials());
 
+/** No credential reads. Account visibility and creation choices are checked by the runtime. */
+export async function connections(
+  { client, resolved, description }: AppContext,
+  actor: Principal,
+): Promise<ConnectionsResponse> {
+  const cards = (await client.connections({ actor })).map((card) => {
+    const isDefault = resolved.connections.catalog.definitions.get(card.id)?.default === true;
+    const workflows = description.workflows
+      .filter((workflow) => !workflow.builtin)
+      .flatMap((workflow) => {
+        if (!("nodes" in workflow.outline)) {
+          return workflow.ops.some((id) => id.startsWith(`${card.vendor}.`))
+            ? [{ name: workflow.name, title: workflow.title ?? workflow.name, selection: "possible" as const }]
+            : [];
+        }
+        const calls = flatten(workflow.outline.nodes).filter(
+          (node) => node.kind === "op" && (node.ops ?? [node.id]).some((id) => id.split(".")[0] === card.vendor),
+        );
+        const selections = calls.flatMap((call) => {
+          if (call.kind !== "op") return [];
+          if (!call.connection) return isDefault ? ["default" as const] : [];
+          if ("dynamic" in call.connection) return ["possible" as const];
+          return call.connection.id === card.id ? ["selected" as const] : [];
+        });
+        const selection = selections.includes("selected")
+          ? "selected"
+          : selections.includes("default")
+            ? "default"
+            : selections[0];
+        return selection ? [{ name: workflow.name, title: workflow.title ?? workflow.name, selection }] : [];
+      });
+    return { ...card, workflows };
+  });
+  const rules = (await client.connectionRules({ actor })).map(({ id, rule }) => ({
+    id,
+    name: rule.name,
+    vendor: rule.vendor,
+    method: rule.method,
+    scopes: rule.scopes,
+  }));
+  const methods: ConnectionsResponse["methods"] = {};
+  for (const [vendor, definitions] of resolved.connections.catalog.methods) {
+    methods[vendor] = Object.fromEntries(
+      Object.entries(definitions).map(([name, method]) => {
+        let schema: Record<string, unknown> | undefined;
+        if (method.schema) {
+          // Input fields describe the contract. Do not seed sensitive inputs with schema defaults.
+          schema = JSON.parse(
+            JSON.stringify(
+              z.toJSONSchema(method.schema, { io: "input", unrepresentable: "any" }),
+              (key, value: unknown) => (["default", "examples"].includes(key) ? undefined : value),
+            ),
+          ) as Record<string, unknown>;
+        }
+        return [name, { kind: method.kind, verifiable: !!method.verify, ...(schema && { schema }) }];
+      }),
+    );
+  }
+  const names: ("SANOMA_SIGNING_KEY" | "SANOMA_SECRETS_KEY")[] = ["SANOMA_SIGNING_KEY"];
+  if (!resolved.secrets.store) names.push("SANOMA_SECRETS_KEY");
+  const bootstrap: ConnectionsResponse["bootstrap"] = names.map((name) => {
+    let ready = false;
+    try {
+      deploymentKey(name);
+      ready = true;
+    } catch {
+      /* Only readiness is public. */
+    }
+    return {
+      name,
+      ready,
+      delivery: process.env[`${name}_FILE`] ? "mounted-file" : process.env[name] ? "environment" : "missing",
+    };
+  });
+  return { cards, rules, methods, store: await client.secretStoreStatus({ actor }), bootstrap };
+}
+
+/** Secure form intake, outside workflow arguments and approval records. */
+export const previewConnection = ({ client }: AppContext, actor: Principal, data: PreviewConnectionRequest) =>
+  client.previewConnection(data.target, data.credentials, { actor, id: data.requestId });
+export const connectConnection = ({ client }: AppContext, actor: Principal, data: ConnectConnectionRequest) =>
+  client.connectConnection(data.review, data.credentials, { actor });
+export const testConnection = (
+  { client }: AppContext,
+  actor: Principal,
+  { connection, requestId }: TestConnectionRequest,
+) => client.call("sanoma.connection.test", { connection }, { actor, id: requestId });
+export const disconnectConnection = (
+  { client }: AppContext,
+  actor: Principal,
+  { connection, expectedRevision, requestId }: DisconnectConnectionRequest,
+) => client.call("sanoma.connection.disconnect", { connection, expectedRevision }, { actor, id: requestId });
+
 /** Stores the variable's value as the actor; refused, with the reason and never the value, as `SanomaClient.setCredential` refuses it. */
 export const setCredential = ({ client }: AppContext, actor: Principal, { name, value }: SetCredentialRequest) =>
   client.setCredential(name, value, { by: actor.id });
@@ -818,6 +917,38 @@ const STATUS: Partial<Record<NonNullable<ErrorResponse["code"]>, number>> = {
  */
 export function asApiError(err: unknown): ApiError {
   if (err instanceof ApiError) return err;
+  const failure = err as { name?: string; code?: string; problem?: string } | null;
+  // These two boundaries deliberately discard provider errors. Reconstruct their safe reason
+  // rather than forwarding a message/cause that could include submitted authentication data.
+  if (failure?.name === "AuthenticationError") {
+    const problems = [
+      "missing",
+      "expired",
+      "revoked",
+      "rejected",
+      "wrong_account",
+      "scope_changed",
+      "uncertain",
+      "unavailable",
+      "unsupported",
+    ];
+    const problem = problems.includes(failure.problem ?? "") ? failure.problem! : "unavailable";
+    return new ApiError(400, { error: `Authentication: ${problem.replaceAll("_", " ")}` });
+  }
+  if (failure?.name === "SecretStoreError") {
+    const codes = [
+      "invalid_configuration",
+      "unavailable",
+      "denied",
+      "conflict",
+      "read_only",
+      "unsupported",
+      "too_large",
+      "invalid_value",
+    ];
+    const reason = codes.includes(failure.code ?? "") ? failure.code! : "unavailable";
+    return new ApiError(reason === "conflict" ? 409 : 400, { error: `Secret store: ${reason.replaceAll("_", " ")}` });
+  }
   const code = errorCode(err);
   const status = (code && STATUS[code]) || 500;
   if (status === 500) return new ApiError(500, { error: "Something went wrong", ...(code ? { code } : {}) });

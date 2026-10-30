@@ -33,6 +33,7 @@ describe("stripeDriver", () => {
     expect(calls()).toEqual([
       ["configure", undefined, undefined],
       ["import", "stripe_product", "prod_SanomaTest0001"],
+      ["close", undefined, undefined],
     ]);
     expect(configure).toHaveBeenCalledWith(
       expect.objectContaining({ source: "stripe/stripe", version: "0.3.0" }),

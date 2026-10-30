@@ -134,13 +134,16 @@ describe("named connection identity", () => {
     const client = await SanomaClient.connect({ ...config(), connectors: [connector] });
     try {
       await bind(client);
-      for (const key of ["expired-private-key", "exception-private-key"]) {
+      for (const [key, problem] of [
+        ["expired-private-key", "expired"],
+        ["exception-private-key", "unavailable"],
+      ] as const) {
         await client.setSecret("SUPPORT", encodeCredentials(auth, key), { by: "alice" });
         const error = await client
           .call("mail.message.read", { id: "one" }, { actor: "alice", connection: support })
           .catch((e: unknown) => e);
-        expect(error).toMatchObject({ message: expect.stringContaining("Secret store: denied") });
-        expect((error as Error).cause).toMatchObject({ name: "SecretStoreError" });
+        expect(error).toMatchObject({ message: expect.stringContaining(`Authentication: ${problem}`) });
+        expect((error as Error).cause).toMatchObject({ name: "AuthenticationError" });
         expect((error as Error).cause).not.toHaveProperty("cause");
         expect(JSON.stringify(error)).not.toContain("private-key");
       }
@@ -244,11 +247,14 @@ describe("named connection identity", () => {
     const client = await SanomaClient.connect({ ...config(), connectors: [mailWith(invoked)] });
     try {
       await bind(client);
-      for (const key of ["sales@example.test|read|private", "support@example.test|write|private"]) {
+      for (const [key, problem] of [
+        ["sales@example.test|read|private", "wrong_account"],
+        ["support@example.test|write|private", "scope_changed"],
+      ] as const) {
         await client.setSecret("SUPPORT", encodeCredentials(auth, key), { by: "alice" });
         await expect(
           client.call("mail.message.read", { id: "one" }, { actor: "alice", connection: support }),
-        ).rejects.toThrow("Secret store: denied");
+        ).rejects.toThrow(`Authentication: ${problem}`);
       }
       expect(invoked).not.toHaveBeenCalled();
     } finally {

@@ -8,12 +8,16 @@ import {
   type Connector,
   defineConnector,
   defineResource,
+  defineAuthentication,
+  defineConnection,
+  withSetup,
   type HostLifetime,
   resolveConfig,
   type SanomaConfig,
 } from "@sanoma-ai/workflows";
 import { describeConfig } from "@sanoma-ai/workflows/describe";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
+import { secret } from "@sanoma-ai/workflows/resources";
 import { z } from "zod";
 import type { AppContext } from "../src/context.ts";
 import { goLiveChoices, renderInfra, sourceKeyPair } from "../src/server/go-live.ts";
@@ -167,6 +171,78 @@ const SERVICE = {
 };
 
 describe("going live by contract", () => {
+  it("uses a healthy explicit default account for named authentication and never reads the old token", async () => {
+    const named = withSetup(neon, {
+      authentication: {
+        key: defineAuthentication({
+          kind: "api-key",
+          version: 1,
+          schema: z.object({ key: z.string() }),
+          storage: { writable: false, conditionalWrites: false, maxBytes: 1024 },
+          verify: async () => ({ account: "org-one", scopes: [] }),
+        }),
+      },
+    });
+    const primary = defineConnection(named, {
+      name: "infra",
+      method: "key",
+      credentials: secret("INFRA_NEON"),
+      default: true,
+    });
+    const config = { workflows: [], connectors: [github, named, docker], connections: [primary], root };
+    const app = contextOf(config.connectors);
+    app.resolved = resolveConfig(config);
+    app.description = describeConfig(config);
+    const read = vi.spyOn(app.client, "secrets");
+    const cards = vi.fn<AppContext["client"]["connections"]>().mockResolvedValue([
+      {
+        id: primary.$connection,
+        vendor: "neon",
+        name: "infra",
+        method: "key",
+        account: "org-one",
+        scopes: [],
+        requiredScopes: [],
+        status: "connected",
+      },
+    ]);
+    app.client.connections = cards;
+    expect((await goLiveChoices(app)).connect).toEqual(["neon's declared default connection"]);
+    expect(cards).not.toHaveBeenCalled();
+    expect((await goLiveChoices(app, { id: "alice" })).connect).toEqual([]);
+    expect(cards).toHaveBeenCalledWith({ actor: { id: "alice" } });
+    expect(read.mock.calls.every(([names]) => !names.includes("NEON_API_KEY"))).toBe(true);
+    cards.mockResolvedValue([
+      {
+        id: primary.$connection,
+        vendor: "neon",
+        name: "infra",
+        method: "key",
+        scopes: [],
+        requiredScopes: [],
+        status: "disconnected",
+      },
+    ]);
+    expect((await goLiveChoices(app, { id: "alice" })).connect).toEqual(["neon's declared default connection"]);
+    const noDefault = {
+      ...config,
+      connections: [defineConnection(named, { name: "infra", method: "key", credentials: secret("INFRA_NEON") })],
+    };
+    app.resolved = resolveConfig(noDefault);
+    cards.mockResolvedValue([
+      {
+        id: primary.$connection,
+        vendor: "neon",
+        name: "infra",
+        method: "key",
+        scopes: [],
+        requiredScopes: [],
+        status: "connected",
+      },
+    ]);
+    expect((await goLiveChoices(app, { id: "alice" })).connect).toEqual(["neon's declared default connection"]);
+  });
+
   it("chooses Neon's database over Supabase's, with its regions and a size, and Docker's host before Cloudflare is connected", async () => {
     const app = contextOf(ALL);
     expect(await goLiveChoices(app)).toMatchObject({

@@ -28,7 +28,7 @@ const ALLOWED_PACKAGE = new RegExp(`^(${[...AUTHOR_PACKAGES, "@sanoma-ai/connect
 const REFUSED_PACKAGES: [RegExp, string][] = [
   [/^@sanoma-ai\/testing(\/|$)/, `fakes and test helpers belong in tests; ${THROUGH_CTX}`],
   [/^@sanoma-ai\/app(\/|$)/, "the app starts runs and decides approvals, so a workflow could approve itself"],
-  [/^@sanoma-ai\/connector-[^/]+\/(fake|driver|remote)(\/|$)/, `${THROUGH_CTX}; import the connector itself`],
+  [/^@sanoma-ai\/connector-[^/]+\/(fake|driver|remote|vault)(\/|$)/, `${THROUGH_CTX}; import the connector itself`],
   [/^sanoma\//, "`sanoma` has no entry points for a workflow: import its names from `sanoma` itself"],
 ];
 

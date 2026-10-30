@@ -1,6 +1,6 @@
 import { Code, ConnectError, createClient, createRouterTransport } from "@connectrpc/connect";
 import { describe, expect, it, vi } from "vitest";
-import { BridgeError, startBridge } from "@sanoma-ai/bridge";
+import { BridgeError, startBridge, withProviderSession } from "@sanoma-ai/bridge";
 import { bridgeClient } from "../src/bridge.ts";
 import { BridgeService, Diagnostic_Severity, DiagnosticSchema } from "../src/gen/bridge/v1/bridge_pb.ts";
 
@@ -90,4 +90,22 @@ describe("startBridge", () => {
       /provider-bridge did not start: it exited \(code 1\)/,
     );
   });
+});
+
+it("rejects an older bridge before configuring or closing its shared provider", async () => {
+  const configure = vi.fn<() => object>(() => ({})),
+    close = vi.fn<() => object>(() => ({}));
+  const transport = createRouterTransport(({ service }) =>
+    service(BridgeService, {
+      getSchema: () => ({ sessionProtocol: 0 }),
+      configure,
+      close,
+    }),
+  );
+  const bridge = bridgeClient(createClient(BridgeService, transport), async () => {});
+  const mutation = vi.fn<() => Promise<string>>(async () => "created");
+  await expect(withProviderSession(bridge, ref, "{}", mutation)).rejects.toMatchObject({ code: "failed_precondition" });
+  expect(configure).not.toHaveBeenCalled();
+  expect(close).not.toHaveBeenCalled();
+  expect(mutation).not.toHaveBeenCalled();
 });

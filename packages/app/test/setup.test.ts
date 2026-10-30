@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { github as githubConnector } from "@sanoma-ai/connector-github";
 import { supabase } from "@sanoma-ai/connector-supabase";
+import { neon } from "@sanoma-ai/connector-neon";
 import { ensureBuilt, testDatabaseUrl } from "@sanoma-ai/testing";
 import { fakeHost } from "@sanoma-ai/testing/host";
 import { defineConfig, defineConnector, defineResource, resolveConfig, SanomaClient } from "@sanoma-ai/workflows";
@@ -359,6 +360,15 @@ const typeOf = (vendor: string, type: string) =>
   );
 
 describe("Connect Cloudflare and Neon", () => {
+  it("does not offer or accept a global token for a connector with named authentication", async () => {
+    const declared = { ...config, connectors: [neon] };
+    const named = { ...ctx, resolved: resolveConfig(declared) };
+    expect((await setupStatus(named)).tokens.some((token) => token.name === "NEON_API_KEY")).toBe(false);
+    await expect(setSetupToken(named, { id: "alice" }, { name: "NEON_API_KEY", value: "synthetic" })).rejects.toThrow(
+      "not a setup token",
+    );
+  });
+
   it("asks for their tokens only when the config declares a type of the vendor", async () => {
     const declared = defineConfig({
       ...config,

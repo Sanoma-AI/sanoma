@@ -44,6 +44,7 @@ import {
   getChats,
   getConfig,
   getCredentials,
+  getConnections,
   getDriftReport,
   getGoLiveChoices,
   getGoLiveProgress,
@@ -249,6 +250,9 @@ export const scenariosNaming =
  */
 export const credentialsQuery = () =>
   queryOptions({ queryKey: ["credentials"], queryFn: () => getCredentials(), staleTime: 5_000 });
+
+export const connectionsQuery = () =>
+  queryOptions({ queryKey: ["connections"], queryFn: () => getConnections(), staleTime: 5_000 });
 
 /** What is connected for going live (the connect page): under the credentials' key, so setting one refreshes both. */
 export const setupStatusQuery = () =>

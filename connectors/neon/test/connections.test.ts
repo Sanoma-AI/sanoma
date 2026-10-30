@@ -141,7 +141,7 @@ it("uses separate Neon organization clients through the authorized runtime, incl
     // Replacing the bundle with another organization's valid key is rejected before its operation.
     await client.setSecret("NEON_SUPPORT", encodeCredentials(neonApiKey, { apiKey: "sales-v1" }), { by: "alice" });
     const before = requests.filter((r) => r.path.endsWith("/branches")).length;
-    await expect(checkHealth("support")).rejects.toThrow("Secret store: denied");
+    await expect(checkHealth("support")).rejects.toThrow("Authentication: wrong_account");
     expect(requests.filter((r) => r.path.endsWith("/branches"))).toHaveLength(before);
   } finally {
     release.resolve();

@@ -80,6 +80,37 @@ const busy = defineWorkflow({
 const tally = (c: unknown) => c;
 
 describe("outlineWorkflow", () => {
+  it("reports uncertain connection selection for computed or spread references", () => {
+    const wf = defineWorkflow({
+      name: "account-dependencies",
+      trigger: "manual",
+      input: z.object({ account: z.string(), reference: z.object({ $connection: z.string().optional() }) }),
+      uses: [forum.comments.list],
+      run: async (ctx, input) => {
+        await ctx.forum.comments.list({ thread: "default" });
+        await ctx.forum.comments.list(
+          { thread: "selected" },
+          { connection: { vendor: "forum", $connection: "forum/support" } },
+        );
+        await ctx.forum.comments.list(
+          { thread: "computed" },
+          { connection: { vendor: "forum", $connection: input.account } },
+        );
+        await ctx.forum.comments.list(
+          { thread: "spread-reference" },
+          { connection: { vendor: "forum", $connection: "forum/support", ...input.reference } },
+        );
+      },
+    });
+    const nodes = outlined(wf).nodes;
+    expect(nodes.map((node) => node.kind === "op" && node.connection)).toEqual([
+      undefined,
+      { id: "forum/support" },
+      { dynamic: true },
+      { dynamic: true },
+    ]);
+  });
+
   it("outlines the fan-out fixture: two ctx.all around a sleep", () => {
     expect(outlineWorkflow(fanout)).toMatchObject({
       nodes: [

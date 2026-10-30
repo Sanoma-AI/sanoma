@@ -7,9 +7,9 @@ import { fakeBridge } from "./fake-bridge.ts";
 
 const testdata = fileURLToPath(new URL("../testdata/", import.meta.url));
 const pins = readPins();
-const github = pins["integrations/github"]!;
-const stripe = pins["stripe/stripe"]!;
-const nullProvider = pins["hashicorp/null"]!;
+const github = { ...pins["integrations/github"]!, sessionId: "00000000-0000-0000-0000-000000000001" };
+const stripe = { ...pins["stripe/stripe"]!, sessionId: "00000000-0000-0000-0000-000000000001" };
+const nullProvider = { ...pins["hashicorp/null"]!, sessionId: "00000000-0000-0000-0000-000000000001" };
 const config = JSON.stringify({ owner: "Sanoma-AI", token: "not-a-real-token" });
 const triggers = (v: string) => JSON.stringify({ id: null, triggers: { v } });
 
@@ -44,7 +44,7 @@ describe("readPins", () => {
       "stripe/stripe",
       "supabase/supabase",
     ]);
-    expect(github).toEqual({
+    expect(pins["integrations/github"]).toEqual({
       source: "integrations/github",
       version: "6.13.0",
       sha256: "2d688e8383ff669297bbb6461f7eb05168f53fe76d3233fdb431e318efedb98f",
@@ -92,11 +92,12 @@ describe("fakeBridge", () => {
     expect(JSON.parse(read.resource!.stateJson)).toMatchObject({ id: "provider-bridge", default_branch: "main" });
 
     expect(bridge.calls.map((c) => [c.method, c.id])).toEqual([
+      ["schema", undefined],
       ["configure", undefined],
       ["import", "provider-bridge"],
       ["read", "provider-bridge"],
     ]);
-    expect(bridge.calls[1]).toEqual({
+    expect(bridge.calls[2]).toEqual({
       method: "import",
       ref: github,
       typeName: "github_repository",
