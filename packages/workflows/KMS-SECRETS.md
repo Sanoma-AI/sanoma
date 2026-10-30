@@ -8,7 +8,7 @@ One company runs in one process with its own database authority and **GCP identi
 
 The proposed default is one symmetric SOFTWARE CryptoKey per company and environment, with keys grouped in a shared environment key ring/project. HSM protection is an independent provisioning choice, with different pricing; per-company software keys do not imply HSM protection. Separate production and test identities, keys and databases.
 
-This adapter is not a deployed Cloud boundary. D1 still needs reviewed workload identity issuance and positive/negative IAM proof on the intended host. A Cloudflare deployment does not automatically have a Google identity. Workload Identity Federation or another approved refreshable credential route must bind the authenticated workload to its company; tenant code cannot select or impersonate other companies. The adapter provisions no identities, keys, database grants or shared service.
+This adapter is not a deployed Cloud boundary. D1 implementation is tracked in [#492](https://github.com/Sanoma-AI/sanoma/issues/492) and [draft PR #496](https://github.com/Sanoma-AI/sanoma/pull/496); deployment and positive/negative IAM proof on the intended host remain required. A Cloudflare deployment does not automatically have a Google identity. Workload Identity Federation or another approved refreshable credential route must bind the authenticated workload to its company; tenant code cannot select or impersonate other companies. The adapter provisions no identities, keys, database grants or shared service.
 
 ```ts
 import { KeyManagementServiceClient } from "@google-cloud/kms";
@@ -18,8 +18,9 @@ import { KMS_SECRETS_SQL, kmsPostgresStore } from "@sanoma-ai/workflows/kms-secr
 await adminDb.query(KMS_SECRETS_SQL);
 // Grant runtime USAGE on sanoma_kms and SELECT/INSERT/UPDATE/DELETE on sanoma_kms.secrets.
 
-// ADC must represent this company's scoped workload, never the fleet administrator.
-const kms = new KeyManagementServiceClient();
+// Supply the company-scoped refreshable auth client from trusted bootstrap.
+// D1 provides cloudIdentityAuth in the separate /cloud-identity entry once released.
+const kms = new KeyManagementServiceClient({ authClient: companyAuthClient });
 const store = kmsPostgresStore({
   company: companyIdFromTrustedBootstrap,
   keyName: "projects/cloud-project/locations/us-central1/keyRings/production/cryptoKeys/company-id",
