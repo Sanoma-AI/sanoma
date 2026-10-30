@@ -129,7 +129,7 @@ describe("the change view in the app", () => {
   });
 
   it("shows each resource's binding, the orphaned ones, and Apply", async () => {
-    const resources = await page("/resources");
+    const resources = await page("/hosting");
     expect(resources.status).toBe(200);
     expect(resources.text).toContain(">Bound to</th>");
     expect(resources.text).toContain('title="R_website">R_website</code>');

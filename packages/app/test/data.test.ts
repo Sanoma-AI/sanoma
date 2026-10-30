@@ -160,8 +160,15 @@ describe("the Data section", () => {
     )?.[0];
     expect(row).toContain(">Outbound</a>");
     expect(row).toContain(">data.outbound</code>");
-    expect(row).toMatch(/<td[^>]*>6<\/td><td[^>]*><code>company<\/code><\/td>/);
-    expect(row).toContain(">resources/data.ts#outbound</code>");
+    // Its key, its fields by name, the workflow that saves it, no site, and its file (to its declaration on Hosting).
+    expect(row).toMatch(/<td[^>]*><code>company<\/code><\/td><td[^>]*>company, contact, stage, owner/);
+    expect(row).toMatch(/<a [^>]*href="\/workflows\/outbound-next"[^>]*>Move a lead on<\/a>/);
+    expect(row).toMatch(
+      /<a [^>]*href="\/hosting\?resource=resources%2Fdata\.ts%23outbound"[^>]*>resources\/data\.ts<\/a>/,
+    );
+    // The root's alone: no tabs, no heading for its folder.
+    expect(html).not.toContain('role="tablist"');
+    expect(html).not.toContain('scope="colgroup"');
   });
 
   it("renders a collection's grid with its records as the person, sorted, filtered and limited as the search says", async () => {
@@ -177,7 +184,7 @@ describe("the Data section", () => {
       /<nav aria-label="Breadcrumb"[^>]*><ol[^>]*><li[^>]*><a [^>]*href="\/data"[^>]*>Data<\/a>/,
     );
     expect(grid.html).toMatch(/<h1[^>]*>Outbound/);
-    expect(grid.html).toMatch(/Declared in <a [^>]*href="\/resources\?resource=resources%2Fdata\.ts%23outbound"/);
+    expect(grid.html).toMatch(/Declared in <a [^>]*href="\/hosting\?resource=resources%2Fdata\.ts%23outbound"/);
 
     expect(rowKeys((await page(`/data/outbound${searchOf({ order: "-company" })}`)).html)).toEqual([
       "Initech",
@@ -310,10 +317,10 @@ describe("the Data section", () => {
     expect((await page("/workflows/outbound-next?new=true")).html).not.toContain("for real");
   });
 
-  it("lists the collections on the Resources page, each linking to its grid", async () => {
-    const { html } = await page("/resources");
-    expect(html).toContain(">Collections</h2>");
-    expect(html).toMatch(/<a [^>]*href="\/data\/outbound"[^>]*>Outbound<\/a>/);
+  it("shows a collection's declaration on Hosting, which lists collections no longer: they are on Data", async () => {
+    const { html } = await page("/hosting?resource=resources%2Fdata.ts%23outbound");
+    expect(html).not.toContain(">Collections</h2>");
+    expect(html).toMatch(/<h2[^>]*><code>resources\/data\.ts<\/code><\/h2>/);
   });
 
   it("adds, edits, holds, refuses and deletes a record from the grid in Chrome, as the person", async (ctx) => {

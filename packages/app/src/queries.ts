@@ -653,6 +653,45 @@ export const DataSearch = z.object({
 });
 export type DataSearch = z.infer<typeof DataSearch>;
 
+/**
+ * The Data page's tab (`/data?app=`): an app's name, or `ROOT_APP` for the collections the root
+ * declares; none for All.
+ */
+export const DataListSearch = z.object({
+  app: z.string().min(1).optional().catch(undefined),
+});
+
+/** The root as the Data page's `?app=`: `.`, a folder no app can be named (`APP_NAME`). */
+export const ROOT_APP = ".";
+
+/** The runtime's own types for who may act (`sanoma.person`, `.agent`, `.group`): on People, never on Hosting. */
+const PEOPLE_TYPES = new Set(["person", "agent", "group"]);
+export const isPeople = (r: { vendor: string; type: string }) => r.vendor === "sanoma" && PEOPLE_TYPES.has(r.type);
+
+/**
+ * Hosting's search (`/hosting`, and `/resources`, which redirects there): `?resource=`, the
+ * declaration whose file the page shows, and `?edit`, its form open above it.
+ */
+export const HostingSearch = z.object({
+  resource: z.string().optional().catch(undefined),
+  edit: z.boolean().optional().catch(undefined),
+});
+
+/** People's views (`?show=`): the people, the groups, the agents. */
+export const PEOPLE_VIEWS = ["people", "groups", "agents"] as const;
+export type PeopleView = (typeof PEOPLE_VIEWS)[number];
+
+/** People's search: the view (`?show=`, the people by default), and `?person=`, the one open, by its name (an id, or a group's name). */
+export const PeopleSearch = z.object({
+  show: z.enum(PEOPLE_VIEWS).optional().catch(undefined),
+  person: z.string().min(1).optional().catch(undefined),
+});
+
+/** Going live's Connect page's search (`/hosting/connect`, and `/setup/connect`): how creating the GitHub App went, as its callback comes back. */
+export const ConnectSearch = z.object({
+  github: z.enum(["connected", "expired", "failed", "bad-org", "nobody"]).optional(),
+});
+
 /** The grid's search with no record open in the form: for a link's or `navigate`'s `search`. */
 export const closeRecord = (prev: DataSearch): DataSearch => ({ ...prev, record: undefined, new: undefined });
 

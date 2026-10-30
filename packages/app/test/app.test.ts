@@ -868,7 +868,7 @@ describe("the page", () => {
     // the current lit.
     expect(barLabels(html)).toEqual([
       ["Inbox", "Workflows"],
-      ["Data", "Resources", "Connectors", "Apps", "Permissions", "Go live"],
+      ["Data", "People", "Hosting", "Connectors", "Apps", "Permissions"],
     ]);
     expect(barLink(html, "/apps")).toBeDefined();
     expect(barLink(html, "/workflows")).toMatch(/data-active="true"[^>]*aria-current="page"/);
@@ -1475,7 +1475,7 @@ describe("the page", () => {
     expect(barLink(folded.html, "/inbox")).not.toContain("aria-current");
     // Open, said so or by default: anything else in the cookie reads as open.
     for (const cookie of ["sanoma_chat=open", "sanoma_chat=nonsense"]) {
-      const open = await page("/resources", app.url, { headers: { cookie } });
+      const open = await page("/hosting", app.url, { headers: { cookie } });
       expect(chatOpen(open.html), cookie).toBe(true);
       expect(open.html, cookie).toContain('<aside id="chat" aria-label="Chat"');
     }
@@ -1866,7 +1866,10 @@ describe("resources and drift", () => {
     // A field the file computes, or a declaration the description does not name, is refused.
     await expect(
       patch(patching, alice, { at: { file: github, export: "websiteMain" }, fields: { repository_id: "R_1" } }),
-    ).rejects.toMatchObject({ status: 409, body: { error: "the value of repository_id is computed in the file" } });
+    ).rejects.toMatchObject({
+      status: 409,
+      body: { error: "the value of repository_id is computed in the file", field: "repository_id" },
+    });
     await expect(
       patch(patching, alice, { at: { file: github, export: "nope" }, fields: { name: "x" } }),
     ).rejects.toMatchObject({ status: 404 });
@@ -1885,22 +1888,23 @@ describe("resources and drift", () => {
     expect(commits).toHaveLength(3);
   });
 
-  it("renders each resource with its drift badge, the fields that differ, and a link to the run", async () => {
-    const resources = await page("/resources");
+  it("renders each resource on Hosting with its drift badge, the fields that differ, and a link to the run", async () => {
+    const resources = await page("/hosting");
     expect(resources.status).toBe(200);
-    expect(resources.html).toMatch(/<h1[^>]*>Resources<\/h1>/);
-    expect(resources.text).toContain("<title>Resources · Sanoma</title>");
+    expect(resources.html).toMatch(/<h1[^>]*>Hosting<\/h1>/);
+    expect(resources.text).toContain("<title>Hosting · Sanoma</title>");
     expect(resources.text).toContain(`href="/workflows/drift/runs/${driftRun}"`);
-    expect(resources.text).toContain('href="/resources?resource=resources%2Fidentity%2Fgithub.ts%23website"');
+    expect(resources.text).toContain('href="/hosting?resource=resources%2Fidentity%2Fgithub.ts%23website"');
     expect(resources.text.match(/>drifted: 1 field</g)).toHaveLength(2);
     expect(resources.text.match(/>gone</g)).toHaveLength(1);
     expect(resources.text.match(/>clean</g)).toHaveLength(1);
     expect(resources.text.match(/>absent</g)).toHaveLength(1);
     expect(resources.text.match(/>absent: found unbound</g)).toHaveLength(1);
     expect(resources.text).toContain("2 drifted");
-    // The collections, each linked to its declaration.
-    expect(resources.text).toContain(">Collections<");
-    expect(resources.text).toContain('href="/resources?resource=resources%2Fdata.ts%23outbound"');
+    // The rest under Other resources; the collections are on Data and the people on People, not here.
+    expect(resources.text).toContain(">Other resources</h2>");
+    expect(resources.text).not.toContain(">Collections<");
+    expect(resources.text).not.toContain("resources%2Fpeople.ts");
     // A button to adopt each drifted field.
     expect(resources.text.match(/>Adopt</g)).toHaveLength(2);
     // Each drifted field, as declared and as the vendor holds it.
@@ -1908,10 +1912,16 @@ describe("resources and drift", () => {
     expect(resources.text).toMatch(
       /<code>name<\/code>.*?<code>&quot;Sanoma Pro&quot;<\/code>.*?<code>&quot;Sanoma Professional&quot;<\/code>/s,
     );
-    expect(resources.html).toContain('href="/resources"');
+    expect(barLink(resources.html, "/hosting")).toContain('aria-current="page"');
     // A resource's declaration in its file, from the search: as plain text on the server.
-    const chosen = await page("/resources?resource=resources%2Fidentity%2Fgithub.ts%23website");
+    const chosen = await page("/hosting?resource=resources%2Fidentity%2Fgithub.ts%23website");
     expect(chosen.text).toMatch(/<h2[^>]*><code>resources\/identity\/github\.ts<\/code><\/h2>/);
+    // The old address goes to Hosting, with the declaration it named.
+    const old = await fetch(new URL("/resources?resource=resources%2Fidentity%2Fgithub.ts%23website", app.url), {
+      redirect: "manual",
+    });
+    expect(old.status).toBe(307);
+    expect(old.headers.get("location")).toBe("/hosting?resource=resources%2Fidentity%2Fgithub.ts%23website");
   });
 
   it("lists the built-in drift workflow like any other, labelled built-in, and starts it from its page", async () => {
@@ -1974,8 +1984,8 @@ describe("resources and drift", () => {
     expect(at(second!)).toBeGreaterThan(at(first!));
     for (const never of ["apply", "call"]) expect(at(never), never).toBeGreaterThan(at(second!));
     expect(text).not.toContain("waiting on you</span>");
-    // Only the overview finds: not Resources.
-    expect((await page("/resources")).html).not.toContain('aria-label="Find a workflow"');
+    // Only the overview finds: not Hosting.
+    expect((await page("/hosting")).html).not.toContain('aria-label="Find a workflow"');
   });
 
   it("lists every run under All runs, linking each to its page, sandbox runs badged, and filters them by ?status= as getRuns does", async () => {
@@ -2128,8 +2138,8 @@ describe("an app configured otherwise", () => {
     }
   });
 
-  it("shows the data files' problems on the resources page, and the resources it could read", async () => {
-    const resources = await page("/resources", other.url);
+  it("shows the data files' problems on Hosting, and the resources it could read", async () => {
+    const resources = await page("/hosting", other.url);
     expect(resources.status).toBe(200);
     expect(resources.text).toContain("1 problem in the data files: their resources are left out");
     expect(resources.text).toMatch(/<code>resources\/bad\.ts:2:28<\/code> github\.repository: /);

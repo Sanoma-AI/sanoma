@@ -99,7 +99,7 @@ describe("setFields", () => {
     const company = readFileSync(new URL("./fixtures/company/resources/identity/github.ts", import.meta.url), "utf8");
     await expect(setFields(company, "nope", { name: "x" })).rejects.toThrow("declares no resource nope");
     await expect(setFields(company, "websiteMain", { repository_id: "R_1" })).rejects.toThrow(
-      new NotLiteral("the value of repository_id is computed in the file"),
+      new NotLiteral("the value of repository_id is computed in the file", "repository_id"),
     );
     await expect(setFields(company, "website", { "name.first": "x" })).rejects.toThrow(
       "Cannot set name.first: name is not an object or a list with item first",
@@ -171,6 +171,8 @@ export default [named, spread];
       const err = await refused(exportName, fields);
       expect(err, `${exportName} ${JSON.stringify(fields)}`).toBeInstanceOf(NotLiteral);
       expect(err.reason).toBe(reason);
+      // The field, for the form that asked to lock it; none when the declaration is not a literal.
+      expect(err.field).toBe(/^the value of (\S+) is computed/.exec(reason)?.[1]);
     }
     // A literal beside them is written, and a secret's call is a literal.
     expect(await setFields(text, "named", { "meta2.x": 1 })).toContain("meta2: { x: 1 }");
