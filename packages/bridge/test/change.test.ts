@@ -1,5 +1,5 @@
-import { type Driver, DriverError, memorySecrets, type Op, type Secrets } from "@sanoma-ai/workflows";
-import { beforeEach, describe, expect, it } from "vitest";
+import { type CallContext, type Driver, DriverError, memorySecrets, type Op, type Secrets } from "@sanoma-ai/workflows";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { readPins } from "@sanoma-ai/bridge";
 import { fixturesDir } from "@sanoma-ai/bridge/fake";
@@ -39,7 +39,7 @@ const call = (driver: Driver, op: string, input: unknown, secrets: Secrets = mem
 describe("a writable type's change operations, over hashicorp/null's recorded plans and applies", () => {
   let bridge: ReturnType<typeof changeReplay>;
   let driver: Driver;
-  const methods = () => bridge.calls.map((c) => c.action ?? c.method).filter((m) => m !== "configure");
+  const methods = () => bridge.calls.map((c) => c.action ?? c.method).filter((m) => m !== "configure" && m !== "close");
   beforeEach(() => {
     bridge = changeReplay(fixturesDir, provider);
     driver = connector().driver(bridge, () => ({}));
@@ -115,19 +115,21 @@ describe("a writable type's change operations, over hashicorp/null's recorded pl
     expect(await call(driver, "thing.plan", { ...replaced })).toEqual({ action: "none", unknown: [], replace: [] });
   });
 
-  it("only creates when a replace is tried again after its delete (the bridge restarted between the applies)", async () => {
+  it("does not replay a partial replace when its provider session disappears", async () => {
     const created = await call(driver, "thing.create", { desired: { triggers: { v: "1" } } });
     const { apply } = bridge;
     let applies = 0;
     bridge.apply = async (...args) => {
-      // The create half of the replace: the provider is not configured, and `ensureConfigured` tries again.
+      // The delete succeeded; losing the session must not replay this mutation.
       if (++applies === 2) throw new BridgeError("failed_precondition", "hashicorp/null 3.3.2 is not configured");
       return apply(...args);
     };
     bridge.calls.length = 0;
-    const replaced = await call(driver, "thing.update", { ...created, desired: { triggers: { v: "2" } } });
-    expect(replaced).toMatchObject({ id: SECOND, state: { id: SECOND, triggers: { v: "2" } } });
-    expect(methods()).toEqual(["read", "replace", "apply", "apply"]);
+    await expect(call(driver, "thing.update", { ...created, desired: { triggers: { v: "2" } } })).rejects.toMatchObject(
+      { vendorCode: "failed_precondition" },
+    );
+    expect(applies).toBe(2);
+    expect(methods()).toEqual(["read", "replace", "apply"]);
   });
 
   it("refuses an update whose fresh plan is not the one expected, changing nothing", async () => {
@@ -194,4 +196,63 @@ describe("resourcePath", () => {
     expect(resourcePath(shape, 'tags["env"]')).toBe("tags.env");
     expect(resourcePath(shape, 'tags["a.\\"b"]')).toBe('tags.a."b');
   });
+});
+
+it("passes each named connection's current authentication to its own provider session", async () => {
+  const bridge = changeReplay(fixturesDir, provider);
+  const configured = vi.spyOn(bridge, "configure");
+  const config = vi.fn<(ctx: CallContext) => Record<string, unknown>>((ctx) => ({
+    token: ctx.authentication!.credentials,
+  }));
+  const driver = connector().driver(bridge, config, undefined, undefined, { authentication: ["token"] });
+  const invoke = (id: string, revision: string, token: string) =>
+    driver.ops["thing.plan"]!(
+      { desired: { triggers: { v: "1" } } },
+      {
+        idempotencyKey: id,
+        runId: "run",
+        opId: "nulls.thing.plan",
+        attempt: 1,
+        secrets: memorySecrets(),
+        connection: { id, vendor: "nulls", method: "token", account: id, scopes: [], revision, definition: "v1" },
+        authentication: { method: "token", kind: "api-key", credentialVersion: revision, credentials: token },
+      },
+    );
+  await Promise.all([
+    invoke("support", "v1", "synthetic-old"),
+    invoke("sales", "v1", "synthetic-sales"),
+    invoke("support", "v2", "synthetic-new"),
+  ]);
+  expect(configured.mock.calls.map(([, json]) => JSON.parse(json).token).toSorted()).toEqual([
+    "synthetic-new",
+    "synthetic-old",
+    "synthetic-sales",
+  ]);
+  expect(new Set(configured.mock.calls.map(([ref]) => ref.sessionId)).size).toBe(3);
+  expect(bridge.calls.filter((c) => c.method === "close")).toHaveLength(3);
+  expect(driver.authentication).toEqual(["token"]);
+  const unsupported = connector().driver(bridge, config);
+  config.mockClear();
+  await expect(
+    unsupported.ops["thing.plan"]!(
+      {},
+      {
+        idempotencyKey: "x",
+        runId: "run",
+        opId: "nulls.thing.plan",
+        attempt: 1,
+        secrets: memorySecrets(),
+        connection: {
+          id: "support",
+          vendor: "nulls",
+          method: "token",
+          account: "support",
+          scopes: [],
+          revision: "v1",
+          definition: "v1",
+        },
+      },
+    ),
+  ).rejects.toThrow("does not support");
+  expect(config).not.toHaveBeenCalled();
 });

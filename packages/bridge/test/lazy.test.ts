@@ -4,7 +4,7 @@ import {
   type Bridge,
   BridgeError,
   defaultBridge,
-  ensureConfigured,
+  withProviderSession,
   lazyBridge,
   type StartBridgeOptions,
 } from "@sanoma-ai/bridge";
@@ -25,6 +25,7 @@ function stub(): Bridge {
       requiresReplace: [],
       planned: new Uint8Array(),
       plannedPrivate: new Uint8Array(),
+      planToken: new Uint8Array(),
       warnings: [],
     })),
     apply: vi.fn<Bridge["apply"]>(async () => ({ errors: [], warnings: [] })),
@@ -98,7 +99,9 @@ describe("lazyBridge", () => {
             : lazy.read(ref, "github_repository", "{}");
       await call();
       const [first] = bridges;
-      vi.mocked(first![method]).mockRejectedValueOnce(new BridgeError("unavailable", "bridge exited"));
+      vi.mocked(first![method]).mockRejectedValueOnce(
+        BridgeError.from(Object.assign(new Error("bridge exited"), { code: "ECONNRESET" })),
+      );
       vi.mocked(first!.stop).mockRejectedValueOnce(new Error("already gone"));
       await expect(call()).rejects.toMatchObject({ code: "unavailable" });
       expect(first!.stop).toHaveBeenCalledTimes(1);
@@ -114,22 +117,23 @@ describe("lazyBridge", () => {
     },
   );
 
-  it("starts the next bridge unconfigured, as ensureConfigured sees it", async () => {
+  it("configures a fresh session on each call, including after a bridge restart", async () => {
     const { start, bridges } = starter();
     const lazy = lazyBridge({ start });
-    await ensureConfigured(lazy, ref, "{}", () => lazy.import(ref, "github_repository", "sanoma"));
-    await ensureConfigured(lazy, ref, "{}", () => lazy.import(ref, "github_repository", "sanoma"));
-    expect(bridges[0]!.configure).toHaveBeenCalledTimes(1);
-    // The read, not the configure, finds the bridge gone: ensureConfigured did not see it.
-    vi.mocked(bridges[0]!.read).mockRejectedValueOnce(new BridgeError("unavailable", "bridge exited"));
+    const run = () =>
+      withProviderSession(lazy, ref, "{}", (session) => lazy.import(session, "github_repository", "sanoma"));
+    await run();
+    await run();
+    expect(bridges[0]!.configure).toHaveBeenCalledTimes(2);
+    vi.mocked(bridges[0]!.read).mockRejectedValueOnce(
+      BridgeError.from(Object.assign(new Error("bridge exited"), { code: "ECONNRESET" })),
+    );
     await expect(lazy.read(ref, "github_repository", "{}")).rejects.toMatchObject({ code: "unavailable" });
-    await ensureConfigured(lazy, ref, "{}", () => lazy.import(ref, "github_repository", "sanoma"));
+    await run();
     expect(start).toHaveBeenCalledTimes(2);
     expect(bridges[1]!.configure).toHaveBeenCalledTimes(1);
-    expect(bridges[1]!.import).toHaveBeenCalledTimes(1);
-    // So does one stopped by hand.
     await lazy.stop();
-    await ensureConfigured(lazy, ref, "{}");
+    await run();
     expect(bridges[2]!.configure).toHaveBeenCalledTimes(1);
   });
 
@@ -158,4 +162,16 @@ describe("defaultBridge", () => {
     expect(defaultBridge()).toBe(bridge);
     expect(typeof bridge.stop).toBe("function");
   });
+});
+
+it("does not stop other sessions when only one provider fails", async () => {
+  const { start, bridges } = starter();
+  const lazy = lazyBridge({ start });
+  await lazy.configure(ref, "{}");
+  const first = bridges[0]!;
+  vi.mocked(first.import).mockRejectedValueOnce(new BridgeError("unavailable", "provider exited"));
+  await expect(lazy.import(ref, "github_repository", "sanoma")).rejects.toMatchObject({ code: "unavailable" });
+  await lazy.read({ ...ref, sessionId: "00000000-0000-0000-0000-000000000002" }, "github_repository", "{}");
+  expect(first.stop).not.toHaveBeenCalled();
+  expect(start).toHaveBeenCalledTimes(1);
 });

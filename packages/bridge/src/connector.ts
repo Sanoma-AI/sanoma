@@ -26,8 +26,9 @@ import {
   type PlanInput,
   type PlanResult,
   type ResourceState,
+  type ProviderRef,
 } from "./bridge.ts";
-import { ensureConfigured, type ProviderClient } from "./configure.ts";
+import { withProviderSession, type ProviderClient } from "./configure.ts";
 import { fromTfState, toTfState } from "./tfschema/state.ts";
 import type { TfBlockShape, TfProvider, TfResourceType, TfShape } from "./tfschema/types.ts";
 
@@ -144,7 +145,13 @@ export interface TfConnector<V extends string, T extends Record<string, z.ZodObj
    * by, such as GitHub's node id) into the provider's import id, by the connector's type name.
    * `observe`, given, completes each state an import returns.
    */
-  driver(bridge: ProviderClient, config: () => Record<string, unknown>, importId?: ImportId, observe?: Observe): Driver;
+  driver(
+    bridge: ProviderClient,
+    config: (call: CallContext) => Record<string, unknown>,
+    importId?: ImportId,
+    observe?: Observe,
+    options?: { authentication: readonly string[] },
+  ): Driver;
 }
 
 /** The provider's import id for the id an import is given, by the connector's type name. */
@@ -307,25 +314,26 @@ export function tfConnector<
   );
   const connector = defineConnector(vendor, resources, spec.info);
 
-  function driver(
+  /** Runs `fn` on a configured provider, with the bridge's errors as `DriverError`s. */
+  async function call<R>(op: string, fn: () => Promise<R>): Promise<R> {
+    try {
+      return await fn();
+    } catch (e) {
+      if (!(e instanceof BridgeError)) throw e;
+      throw new DriverError(`${vendor}: ${op} failed (${e.code}): ${said(e.diagnostics) || e.message}`, {
+        retryable: e.code === "unavailable",
+        vendorCode: e.code,
+        cause: e,
+      });
+    }
+  }
+
+  function rawDriver(
     bridge: ProviderClient,
-    config: () => Record<string, unknown>,
+    sessionRef: ProviderRef,
     importId: ImportId = (_, id) => id,
     observe?: Observe,
   ): Driver {
-    /** Runs `fn` on a configured provider, with the bridge's errors as `DriverError`s. */
-    async function call<R>(op: string, fn: () => Promise<R>): Promise<R> {
-      try {
-        return await ensureConfigured(bridge, provider, JSON.stringify(config()), fn);
-      } catch (e) {
-        if (!(e instanceof BridgeError)) throw e;
-        throw new DriverError(`${vendor}: ${op} failed (${e.code}): ${said(e.diagnostics) || e.message}`, {
-          retryable: e.code === "unavailable",
-          vendorCode: e.code,
-          cause: e,
-        });
-      }
-    }
     const impl: Record<string, Record<string, DriverFn<any, any>>> = {};
     for (const [type, typeSpec] of Object.entries(types)) {
       const { exists, writable } = typeSpec;
@@ -340,7 +348,7 @@ export function tfConnector<
       const out = (r: ResourceState) => ({ state: stateOf(r.stateJson), handle: handleOf(r) });
       /** The object as the provider has it now, or undefined when there is none (or one `exists` refuses). */
       const importRaw = async (id: string) => {
-        const { resources: found } = await bridge.import(provider, tf.typeName, await importId(type, id));
+        const { resources: found } = await bridge.import(sessionRef, tf.typeName, await importId(type, id));
         const at = found.find((f) => f.typeName === tf.typeName);
         const r =
           at && observe
@@ -363,7 +371,7 @@ export function tfConnector<
             throw new DriverError(`${vendor}: ${op} was given a handle it did not make`, { retryable: false });
           }
           const reply = await bridge.read(
-            provider,
+            sessionRef,
             tf.typeName,
             JSON.stringify(state),
             handle ? Buffer.from(handle[2]!, "base64") : undefined,
@@ -403,13 +411,13 @@ export function tfConnector<
       };
       const paths = (list: readonly string[]) => list.map((path) => resourcePath(tf.shape, path));
       const plan = (prior: ResourceState | undefined, configJson?: string) =>
-        bridge.plan(provider, tf.typeName, {
+        bridge.plan(sessionRef, tf.typeName, {
           ...(prior && priorOf(prior)),
           ...(configJson !== undefined && { configJson }),
         });
       /** Applies `request`; `replaced`, the id of the object a replace already deleted, for the error. */
       const apply = async (op: string, request: ApplyInput, replaced?: string) => {
-        const reply = await bridge.apply(provider, tf.typeName, request);
+        const reply = await bridge.apply(sessionRef, tf.typeName, request);
         if (!reply.errors.length) return reply.resource;
         const left = reply.resource && bindingId(stateOf(reply.resource.stateJson));
         const notes = [replaced && `${replaced} was deleted to replace it`, left && `the provider left ${left}`];
@@ -427,7 +435,14 @@ export function tfConnector<
       };
       /** Creates the object a create plan (or a replace's) describes. */
       const create = async (op: string, configJson: string, p: PlanResult, replaced?: string) =>
-        changed(op, await apply(op, { configJson, planned: p.planned, plannedPrivate: p.plannedPrivate }, replaced));
+        changed(
+          op,
+          await apply(
+            op,
+            { configJson, planned: p.planned, plannedPrivate: p.plannedPrivate, planToken: p.planToken },
+            replaced,
+          ),
+        );
 
       Object.assign(impl[type], {
         plan: (input: Known & { id?: string; desired?: Record<string, unknown> }, ctx: CallContext) =>
@@ -452,10 +467,7 @@ export function tfConnector<
           ctx: CallContext,
         ) => {
           const op = `${type}.update`;
-          // A replace whose delete went through, for a second try (the bridge restarted): it only creates.
-          let deleted: { configJson: string; plan: PlanResult } | undefined;
           return call(op, async () => {
-            if (deleted) return create(op, deleted.configJson, deleted.plan, input.id);
             const prior = await fresh(op, input);
             if (!prior)
               throw new DriverError(`${vendor}: ${op}: ${input.id} is gone`, { retryable: false, vendorCode: "gone" });
@@ -472,12 +484,14 @@ export function tfConnector<
             }
             if (p.action === "none") return { id: input.id, ...out(prior) };
             if (p.action !== "replace") {
-              const { planned, plannedPrivate } = p;
-              return changed(op, await apply(op, { ...priorOf(prior), configJson, planned, plannedPrivate }));
+              const { planned, plannedPrivate, planToken } = p;
+              return changed(
+                op,
+                await apply(op, { ...priorOf(prior), configJson, planned, plannedPrivate, planToken }),
+              );
             }
             // A replace: the old object deleted, then the plan's new one created.
-            await apply(op, priorOf(prior));
-            deleted = { configJson, plan: p };
+            await apply(op, { ...priorOf(prior), planToken: p.planToken });
             return create(op, configJson, p, input.id);
           });
         },
@@ -486,30 +500,51 @@ export function tfConnector<
             const op = `${type}.delete`;
             const prior = await fresh(op, input);
             if (prior) {
-              await plan(prior);
-              await apply(op, priorOf(prior));
+              const p = await plan(prior);
+              await apply(op, { ...priorOf(prior), planToken: p.planToken });
             }
             return { id: input.id, gone: true };
           }),
       });
     }
-    // Named accounts require provider sessions isolated by connection (B1). Never ignore a selector.
-    const isolated = Object.fromEntries(
-      Object.entries(impl).map(([group, functions]) => [
-        group,
-        Object.fromEntries(
-          Object.entries(functions).map(([name, fn]) => [
-            name,
-            (input: unknown, ctx: CallContext) => {
-              if (ctx.connection)
-                throw new DriverError("Named connections require isolated provider sessions", { retryable: false });
-              return (fn as (input: unknown, ctx: CallContext) => unknown)(input, ctx);
-            },
-          ]),
-        ),
-      ]),
-    );
-    return defineDriver(connector, isolated as never);
+    return defineDriver(connector, impl as never);
+  }
+
+  function driver(
+    bridge: ProviderClient,
+    config: (call: CallContext) => Record<string, unknown>,
+    importId?: ImportId,
+    observe?: Observe,
+    options?: { authentication: readonly string[] },
+  ): Driver {
+    const shape = rawDriver(bridge, provider, importId, observe);
+    return {
+      vendor,
+      ...(options && { authentication: Object.freeze([...options.authentication]) }),
+      ops: Object.fromEntries(
+        Object.keys(shape.ops).map((key) => [
+          key,
+          async (input: unknown, ctx: CallContext) => {
+            if (ctx.connection && !options?.authentication.includes(ctx.authentication?.method ?? ""))
+              throw new DriverError("This provider driver does not support the selected authentication", {
+                retryable: false,
+              });
+            try {
+              return await withProviderSession(bridge, provider, JSON.stringify(config(ctx)), async (session) =>
+                rawDriver(bridge, session, importId, observe).ops[key]!(input, ctx),
+              );
+            } catch (e) {
+              if (!(e instanceof BridgeError)) throw e;
+              throw new DriverError(`${vendor}: ${key} failed (${e.code}): ${said(e.diagnostics) || e.message}`, {
+                retryable: e.code === "unavailable",
+                vendorCode: e.code,
+                cause: e,
+              });
+            }
+          },
+        ]),
+      ),
+    };
   }
 
   return {

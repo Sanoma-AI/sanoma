@@ -111,6 +111,7 @@ export function changeReplay(fixtures: string | URL, ref: ProviderRef): Provider
         requiresReplace: (r.requiresReplace as string[] | undefined) ?? [],
         planned: bytes(r.planned),
         plannedPrivate: bytes(r.plannedPrivate),
+        planToken: new Uint8Array(),
         warnings: [],
       };
     },

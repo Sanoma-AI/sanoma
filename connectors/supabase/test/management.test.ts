@@ -138,12 +138,12 @@ describe.skipIf(live)("supabase.project's create and delete", () => {
       id: "sanomaapplytestrefab",
       state: { id: "sanomaapplytestrefab", name: "sanoma-apply-test", database_password: null },
     });
-    expect(bridge.calls.map((c) => c.action ?? c.method)).toEqual(["configure", "create", "apply"]);
+    expect(bridge.calls.map((c) => c.action ?? c.method)).toEqual(["configure", "create", "apply", "close"]);
 
     // The provider reads a project by importing its ref: here, the one the create applied.
     bridge.import = async () => ({ resources: [createdProject], warnings: [] });
     expect(await call(driver, "project.delete", created, scrubbedPassword())).toEqual({ id: created.id, gone: true });
-    expect(bridge.calls.slice(3).map((c) => c.action ?? c.method)).toEqual(["delete", "apply"]);
+    expect(bridge.calls.slice(4).map((c) => c.action ?? c.method)).toEqual(["configure", "delete", "apply", "close"]);
   });
 
   it("refuses to create a project whose name the organization has, before the provider sees it", async () => {

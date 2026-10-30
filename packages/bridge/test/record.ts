@@ -12,6 +12,7 @@ import {
   type ApplyResponse,
   ApplyResponseSchema,
   type ConfigureRequest,
+  type CloseRequest,
   DiagnosticSchema,
   type GetSchemaRequest,
   type GetSchemaResponse,
@@ -31,6 +32,8 @@ import {
 } from "../src/gen/bridge/v1/bridge_pb.ts";
 import { blockOf, isObject as isJsonObject, type JsonObject as Json } from "../src/json.ts";
 import { type Block, parseSchema, type SchemaDocument } from "../src/schema.ts";
+
+const sessionKey = (ref: ProviderRef) => `${releaseName(ref)}/${ref.sessionId}`;
 
 /** An import ID as a directory name: `repo:main` becomes `repo_main`. */
 const slug = (id: string) => id.replaceAll(/[^A-Za-z0-9._-]+/g, "_");
@@ -100,8 +103,9 @@ const applyKey = (typeName: string, priorStateJson: string, configJson: string) 
  */
 export function recorder(dir: string): Interceptor {
   const releases = new Map<string, Release>();
+  const sessions = new Map<string, Release>();
   const releaseOf = (ref: ProviderRef | undefined) => {
-    const release = ref && releases.get(releaseName(ref));
+    const release = ref && sessions.get(sessionKey(ref));
     if (!ref || !release)
       throw new Error(`recording: ${ref ? releaseName(ref) : "a call"} needs schema and configure first`);
     return { ref, release };
@@ -142,7 +146,7 @@ export function recorder(dir: string): Interceptor {
 
   /** Refuses a change the recorder could not write scrubbed before it reaches the provider, so nothing is changed unrecorded. */
   function refuseSensitive({ provider, typeName, priorStateJson, configJson }: Change) {
-    const release = provider && releases.get(releaseName(provider));
+    const release = provider && sessions.get(sessionKey(provider));
     if (!release) return;
     const hits = new Set<string>();
     try {
@@ -197,8 +201,20 @@ export function recorder(dir: string): Interceptor {
       }
       case "Configure": {
         const msg = req.message as ConfigureRequest;
-        const { release } = releaseOf(msg.provider);
-        release.config = configValues(JSON.parse(msg.configJson), release.schema.providerConfig);
+        const release = msg.provider && releases.get(releaseName(msg.provider));
+        if (!msg.provider || !release) throw new Error("recording: configure needs a schema first");
+        sessions.set(sessionKey(msg.provider), {
+          ...release,
+          config: configValues(JSON.parse(msg.configJson), release.schema.providerConfig),
+          reads: new Map(),
+          applies: new Map(),
+        });
+        break;
+      }
+      case "Close": {
+        const { provider } = req.message as CloseRequest;
+        if (provider) sessions.delete(sessionKey(provider));
+        else sessions.clear();
         break;
       }
       case "Import": {
@@ -293,8 +309,13 @@ function readFile(dir: string, ref: ProviderRef, release: Release, msg: ReadRequ
   return release.reads.get(readKey(msg.typeName, id)) ?? join(replyDir(dir, ref, msg.typeName, id), "read.json");
 }
 
-const message = <Desc extends DescMessage>(schema: Desc, msg: MessageShape<Desc>) =>
-  toJson(schema, msg) as Record<string, unknown>;
+const message = <Desc extends DescMessage>(schema: Desc, msg: MessageShape<Desc>) => {
+  const json = toJson(schema, msg) as Record<string, unknown>;
+  // Session identity and authorization proofs are ephemeral, never fixture data.
+  if (json.provider && typeof json.provider === "object") delete (json.provider as Record<string, unknown>).sessionId;
+  delete json.planToken;
+  return json;
+};
 
 function errorJson(error: unknown): Fixture["response"] {
   const e = ConnectError.from(error);
