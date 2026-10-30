@@ -191,7 +191,7 @@ describe("Data by app", () => {
     expect(status).toBe(200);
     expect(html).toMatch(/<h1[^>]*>Data<span[^>]*>2<\/span><\/h1>/);
     // All, then each app with collections (the root declares none here).
-    const tabs = html.match(/<div[^>]*role="tablist"[^>]*aria-label="Show"[\s\S]*?<\/div>/)?.[0];
+    const tabs = html.match(/<div[^>]*role="tablist"[^>]*aria-label="App"[\s\S]*?<\/div>/)?.[0];
     expect(tabs).toMatch(/href="\/data"[^>]*>All<span[^>]*>2<\/span>/);
     expect(tabs).toMatch(/href="\/data\?app=crm"[^>]*>crm<span[^>]*>1<\/span>/);
     expect(tabs).toMatch(/href="\/data\?app=shop"[^>]*>shop<span[^>]*>1<\/span>/);
@@ -226,6 +226,44 @@ describe("Data by app", () => {
     expect(html).not.toContain('scope="colgroup"');
     // An app with no collections shows them all.
     expect((await page("/data?app=nope")).html).toContain('href="/data/crm.customers"');
+  });
+});
+
+describe("Workflows and Permissions by app", () => {
+  it("groups the workflows by their folder, the root's first, with a tab each beside the filters", async () => {
+    const { html } = await page("/workflows");
+    const tabs = html.match(/<div[^>]*role="tablist"[^>]*aria-label="App"[\s\S]*?<\/div>/)?.[0];
+    expect(tabs).toMatch(/href="\/workflows"[^>]*>All<span[^>]*>5<\/span>/);
+    // The root holds introduce and the built-ins.
+    expect(tabs).toMatch(/href="\/workflows\?app=\."[^>]*>Yours<span[^>]*>3<\/span>/);
+    expect(tabs).toMatch(/href="\/workflows\?app=crm"[^>]*>crm<span[^>]*>1<\/span>/);
+    expect(tabs).toMatch(/href="\/workflows\?app=shop"[^>]*>shop<span[^>]*>1<\/span>/);
+    expect(html).toMatch(
+      /scope="colgroup"[^>]*>Yours <span[^>]*>· the root<\/span>[\s\S]*href="\/workflows\/introduce"[\s\S]*scope="colgroup"[^>]*>crm <span[^>]*>· apps\/crm, from https:\/\/github.com\/example\/crm<\/span>[\s\S]*href="\/workflows\/crm\.follow-up"[\s\S]*scope="colgroup"[^>]*>shop [\s\S]*href="\/workflows\/shop\.follow-up"/,
+    );
+    // One app's, without headings; the filters count within it and keep it.
+    const crm = (await page("/workflows?app=crm")).shown;
+    expect(crm).toContain('href="/workflows/crm.follow-up"');
+    expect(crm).not.toContain('href="/workflows/introduce"');
+    expect(crm).not.toContain('scope="colgroup"');
+    expect(crm).toMatch(/href="\/workflows\?filter=builtin&amp;app=crm"[^>]*>Built-in<span[^>]*>0<\/span>/);
+    // An app of no workflows shows them all.
+    expect((await page("/workflows?app=nope")).html).toContain('href="/workflows/introduce"');
+  });
+
+  it("scopes the policy's files and the grid's rows to an app's folder", async () => {
+    // One folder holds policy files here, the CRM's: no tabs, no headings.
+    const all = (await page("/permissions")).shown;
+    expect(all).not.toMatch(/role="tablist"[^>]*aria-label="App"/);
+    expect(all).toContain(">apps/crm/policies/crm.cedar<");
+    expect(all).toContain('href="/workflows/introduce"');
+    // The CRM's: its workflows and its collections' operations, not the root's or the shop's.
+    const crm = (await page("/permissions?app=crm")).shown;
+    expect(crm).toContain(">apps/crm/policies/crm.cedar<");
+    expect(crm).toContain('href="/workflows/crm.follow-up"');
+    expect(crm).not.toContain('href="/workflows/introduce"');
+    expect(crm).not.toContain('href="/workflows/shop.follow-up"');
+    expect(crm).not.toContain("data.shop.customers");
   });
 });
 

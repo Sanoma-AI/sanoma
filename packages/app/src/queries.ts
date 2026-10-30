@@ -654,14 +654,14 @@ export const DataSearch = z.object({
 export type DataSearch = z.infer<typeof DataSearch>;
 
 /**
- * The Data page's tab (`/data?app=`): an app's name, or `ROOT_APP` for the collections the root
- * declares; none for All.
+ * A list's app tab (`?app=` on Data, Workflows and Permissions, `components/app-scope.tsx`): an
+ * app's name, or `ROOT_APP` for what the root holds; none for All.
  */
-export const DataListSearch = z.object({
+export const AppSearch = z.object({
   app: z.string().min(1).optional().catch(undefined),
 });
 
-/** The root as the Data page's `?app=`: `.`, a folder no app can be named (`APP_NAME`). */
+/** The root as a list's `?app=`: `.`, a folder no app can be named (`APP_NAME`). */
 export const ROOT_APP = ".";
 
 /** The runtime's own types for who may act (`sanoma.person`, `.agent`, `.group`): on People, never on Hosting. */

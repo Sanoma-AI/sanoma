@@ -4,12 +4,13 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { Fragment, type MouseEvent, type ReactElement } from "react";
 import { Card } from "#/components/ui/card.tsx";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/components/ui/table.tsx";
-import { ButtonLink, CrumbHeader, LinkTab, LinkTabs, Nothing, SiteLink } from "../../components/common.tsx";
+import { type AppGroup, AppGroupRow, AppTabs, appGroupsOf, pickGroup } from "../../components/app-scope.tsx";
+import { ButtonLink, CrumbHeader, Nothing, SiteLink } from "../../components/common.tsx";
 import { LinkRow } from "../../components/runs-table.tsx";
 import { useSites } from "#/lib/sites.ts";
-import { configQuery, DataListSearch, ROOT_APP } from "../../queries.ts";
+import { configQuery, AppSearch } from "../../queries.ts";
 
-export const Route = createFileRoute("/data/")({ validateSearch: DataListSearch, component: DataPage });
+export const Route = createFileRoute("/data/")({ validateSearch: AppSearch, component: DataPage });
 
 /** A collection's row: the collection, the workflows that save to it and the sites that call it. */
 interface Row {
@@ -18,22 +19,12 @@ interface Row {
   shownOn: SiteEntry[];
 }
 
-/** The collections one folder declares: the root's (`ROOT_APP`) or an app's, with where it is. */
-interface Group {
-  key: string;
-  title: string;
-  /** The folder, and for a taken app its source. */
-  detail: string;
-  rows: Row[];
-}
-
 /**
- * The config's collections grouped by the folder that declares them, the root's first ("Yours"),
- * then each app's in the apps' order; a folder with none is left out. Each row with the workflows
- * whose `uses` save to it (`data.<name>.save`, the built-ins left out) and the sites whose calls
- * name it.
+ * The config's collections grouped by the folder that declares them (`appGroupsOf`), each row with
+ * the workflows whose `uses` save to it (`data.<name>.save`, the built-ins left out) and the sites
+ * whose calls name it.
  */
-function groupsOf(config: ConfigDescription): Group[] {
+function groupsOf(config: ConfigDescription): AppGroup<Row>[] {
   const rowOf = (collection: CollectionEntry): Row => {
     const save = `data.${collection.name}.save`;
     return {
@@ -44,16 +35,7 @@ function groupsOf(config: ConfigDescription): Group[] {
       ),
     };
   };
-  const rows = (app: string | undefined) => config.collections.filter((c) => c.app === app).map(rowOf);
-  return [
-    { key: ROOT_APP, title: "Yours", detail: "the root", rows: rows(undefined) },
-    ...config.apps.map((app) => ({
-      key: app.name,
-      title: app.name,
-      detail: app.source ? `${app.dir}, from ${app.source}` : app.dir,
-      rows: rows(app.name),
-    })),
-  ].filter((group) => group.rows.length > 0);
+  return appGroupsOf(config.apps, config.collections.map(rowOf), (row) => row.collection.app);
 }
 
 /** A link inside a row that opens the grid: its own page, not the row's. */
@@ -69,11 +51,8 @@ function DataPage() {
   const { app } = Route.useSearch();
   const { data: groups } = useSuspenseQuery({ ...configQuery(), select: groupsOf });
   const sites = useSites().length > 0;
-  const total = groups.reduce((n, group) => n + group.rows.length, 0);
-  // An app with no collections, or none of that name, shows them all.
-  const tab = groups.some((group) => group.key === app) ? app : undefined;
-  const shown = tab === undefined ? groups : groups.filter((group) => group.key === tab);
-  const headed = shown.length > 1;
+  const total = groups.reduce((n, group) => n + group.items.length, 0);
+  const { tab, shown, headed } = pickGroup(groups, app);
   return (
     <>
       <CrumbHeader
@@ -86,23 +65,11 @@ function DataPage() {
           )
         }
       />
-      {groups.length > 1 && (
-        <LinkTabs label="Show" value={tab ?? "all"}>
-          <LinkTab value="all" link={<Link to="/data" search={{}} />} count={total}>
-            All
-          </LinkTab>
-          {groups.map((group) => (
-            <LinkTab
-              key={group.key}
-              value={group.key}
-              link={<Link to="/data" search={{ app: group.key }} />}
-              count={group.rows.length}
-            >
-              {group.title}
-            </LinkTab>
-          ))}
-        </LinkTabs>
-      )}
+      <AppTabs
+        groups={groups}
+        tab={tab}
+        link={(key) => <Link to="/data" search={key === undefined ? {} : { app: key }} />}
+      />
       <Card className="gap-0 py-0">
         {total === 0 ? (
           <Nothing className="border-0" title="This config has no collections">
@@ -129,14 +96,8 @@ function DataPage() {
               <TableBody>
                 {shown.map((group) => (
                   <Fragment key={group.key}>
-                    {headed && (
-                      <TableRow className="bg-muted/50 hover:bg-muted/50">
-                        <TableHead colSpan={6} scope="colgroup" className="h-8 text-xs text-foreground">
-                          {group.title} <span className="font-normal text-muted-foreground">· {group.detail}</span>
-                        </TableHead>
-                      </TableRow>
-                    )}
-                    {group.rows.map((row) => (
+                    {headed && <AppGroupRow group={group} columns={6} />}
+                    {group.items.map((row) => (
                       <CollectionRow key={row.collection.name} row={row} />
                     ))}
                   </Fragment>
