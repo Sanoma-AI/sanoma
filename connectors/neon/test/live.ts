@@ -26,6 +26,7 @@ const COMPUTE_TIMEOUT_MS = 5 * 60_000;
 
 // The kit's credential check stores one, encrypted with the key a worker has.
 process.env.SANOMA_SECRETS_KEY ??= randomBytes(32).toString("base64");
+process.env.SANOMA_SIGNING_KEY ??= randomBytes(32).toString("base64");
 
 const driver = neonDriver();
 const secrets = memorySecrets();
@@ -37,6 +38,12 @@ const op = (name: string, input: object) =>
     opId: `neon.${name}`,
     attempt: 1,
     secrets,
+    authentication: {
+      kind: "api-key",
+      method: "apiKey",
+      credentialVersion: "live-test",
+      credentials: { apiKey: process.env.NEON_API_KEY },
+    },
   } satisfies CallContext) as Promise<any>;
 const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
 

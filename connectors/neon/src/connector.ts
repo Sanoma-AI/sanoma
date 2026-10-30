@@ -1,5 +1,6 @@
 import {
   compareDeclared,
+  databaseUrlSecret,
   type Connector,
   defineConnector,
   defineResource,
@@ -126,6 +127,7 @@ const projectSpecs = {
     target: ({ id }: { id: string }) => id,
   },
   storeUrl: {
+    createsSecrets: ({ export: name }: { export: string }) => [databaseUrlSecret(name)],
     effect: "write",
     idempotent: true,
     description:
