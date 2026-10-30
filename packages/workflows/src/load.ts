@@ -61,6 +61,8 @@ interface Generation {
   stamps: Map<string, string>;
   /** Every value its files have made, in the order made. */
   made: object[];
+  /** Each company file its files imported, directly or not, by its path relative to the root. */
+  imported: Set<string>;
   /** What loading each file gave, by its path relative to the root: an entry's, or a file an error is placed in. */
   loaded: Map<string, Loaded>;
   /** Each error reported, to the file it is reported in. */
@@ -121,6 +123,8 @@ export function loadModules(
     types = resourceTypesOf(connectors),
   }: { only?: (text: string) => boolean; types?: ReadonlyMap<string, Resource> } = {},
 ): Map<string, Loaded> {
+  // Nothing to load, and a root that may not be there yet (a company not made): nothing to resolve.
+  if (!paths.length) return new Map();
   hook();
   const real = realpathSync(root);
   const gen = generationOf(real, connectors, types);
@@ -186,6 +190,14 @@ const answerGenerations = new WeakMap<Map<string, Loaded>, Generation>();
 /** Every value the files of `answer` (a `loadModules` answer) made, exported or not, in the order made. */
 export const madeWith = (answer: Map<string, Loaded>): object[] =>
   (answerGenerations.get(answer)?.made ?? []).filter((value) => answer.has(madeOf(value)!.file));
+
+/**
+ * The company files `answer` (a `loadModules` answer) was read from, by path relative to the root:
+ * its files and every company file they import, directly or not (or that another answer of its
+ * generation imported: never fewer).
+ */
+export const filesRead = (answer: Map<string, Loaded>): ReadonlySet<string> =>
+  new Set([...answer.keys(), ...(answerGenerations.get(answer)?.imported ?? [])]);
 
 /** One file of a generation, required once; an error placed at its own file, and reported there once. */
 function loadOne(gen: Generation, file: string, rel: string): Loaded {
@@ -278,6 +290,7 @@ function generationOf(
     virtual: new Map(),
     stamps: new Map(),
     made: [],
+    imported: new Set(),
     loaded: new Map(),
     reported: new Map(),
     answers: new WeakMap(),
@@ -307,11 +320,12 @@ function runtimeModules(
       record(gen, callerFile(), (resource as (f: unknown, o: unknown) => Declared)(fields, options), refersIn(fields));
     byVendor.set(resource.vendor, constructors);
   }
-  // A type the vendor does not declare is refused where it is called for, as `<vendor>.<type>`.
+  // A type the vendor does not declare is refused where it is called for, as `<vendor>.<type>`;
+  // an object's own names (`toString`, `toJSON`) are not types, so printing the vendor still works.
   const constructorsOf = (vendor: string) =>
     new Proxy(byVendor.get(vendor) ?? {}, {
       get(target, key) {
-        if (typeof key !== "string" || Object.hasOwn(target, key)) return Reflect.get(target, key);
+        if (typeof key !== "string" || key in target || key === "toJSON") return Reflect.get(target, key);
         const known = Object.keys(target);
         throw new TypeError(`${vendor} has no resource type ${key}: its types are ${known.join(", ") || "none"}`);
       },
@@ -395,6 +409,7 @@ function hook() {
       const file = fileURLToPath(url);
       if (!inside(gen.root, file) || file.split(sep).includes("node_modules")) return resolved;
       touch(gen, file);
+      gen.imported.add(relPath(gen.root, file));
       url.searchParams.set(QUERY, gen.id);
       return { ...resolved, url: url.href };
     },

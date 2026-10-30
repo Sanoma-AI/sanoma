@@ -513,8 +513,8 @@ export function problemLine(p: ResourceProblem): string {
 
 /**
  * Where the export `name` (`default` for the default export) is in a file's text, as UTF-16
- * offsets: from its `export` to the next `export`, `import` or `const` at the start of a line, or
- * the end, less trailing blank space. Read from the text alone, for highlighting it; undefined
+ * offsets: from its `export` to the next `export`, `import`, `const` or comment at the start of a
+ * line, or the end, less trailing blank space. Read from the text alone, for highlighting it; undefined
  * when no line starts it.
  */
 export function exportSpan(text: string, name: string): [number, number] | undefined {
@@ -522,7 +522,8 @@ export function exportSpan(text: string, name: string): [number, number] | undef
   const start = new RegExp(`^export\\s+${declared}(?![\\w$])`, "m").exec(text);
   if (!start) return undefined;
   const after = start.index + start[0].length;
-  const next = /^(?:export|import|const)\b/m.exec(text.slice(after));
+  // A comment at the start of a line is the next declaration's.
+  const next = /^(?:(?:export|import|const)\b|\/[/*])/m.exec(text.slice(after));
   const end = next ? after + next.index : text.length;
   return [start.index, start.index + text.slice(start.index, end).trimEnd().length];
 }

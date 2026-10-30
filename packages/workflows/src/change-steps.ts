@@ -24,6 +24,7 @@ import type { DriftReport } from "./drift.ts";
 import { isRunControlError } from "./errors.ts";
 import { warn } from "./log.ts";
 import { inside } from "./paths.ts";
+import { peopleSources } from "./resources.ts";
 import { currentRun, type Run } from "./run.ts";
 import {
   AGENTS,
@@ -188,12 +189,14 @@ export function changeSteps({ remotes, hosts }: ChangeStepsOptions): ChangeSteps
               .filter((file) => file.startsWith("resources/"))
               .flatMap((file) => [join(source.root, file), join(draft.root, file)].map(fileDeclaresPeople)),
           );
+          const sources = peopleSources(source.root);
           return {
             touches,
             strandedRuns: stranded.length,
             stranded,
             checksOk: check.ok,
-            rules: people.includes(true) || touches.some(isRules),
+            // Or a file main's people are read from: a helper a people file imports.
+            rules: people.includes(true) || touches.some(isRules) || files.some((file) => sources.has(file)),
           };
         },
         { name: "change:plan" },

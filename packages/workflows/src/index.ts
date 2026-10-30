@@ -106,6 +106,7 @@ export {
 } from "./drift.ts";
 // readResources, which parses data files, is at `@sanoma-ai/workflows/describe`.
 export type { DeclaredResource, ResourceProblem } from "./resources.ts";
+export { peopleSources } from "./resources.ts";
 export {
   allow,
   allowAll,

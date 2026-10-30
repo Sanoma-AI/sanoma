@@ -17,6 +17,7 @@ import {
   type LedgerRecord,
   loadPolicies,
   mayDeclarePeople,
+  peopleSources,
   nextFire,
   PolicyDeniedError,
   type PreviewAnswer,
@@ -597,16 +598,19 @@ async function patchNow(
       const { text } = await edited(inDraft);
       await writeFile(join(inDraft, at.file), text);
       await draft.commit({ paths: [relative(draft.root, join(inDraft, at.file))], message, author: actor.id });
+      const page = origin && changePage(id, origin);
+      return { change: await client.openChange({ id, title: message, ...(page && { page }) }, { startedBy: actor }) };
     } catch (err) {
-      // No change will open on it: the draft would be left behind with nothing to close it.
+      // No change opened on it (a policy refusing the change, say): the draft would be left behind with nothing to close it.
       await source.closeDraft?.(id);
       throw err;
     }
-    const page = origin && changePage(id, origin);
-    return { change: await client.openChange({ id, title: message, ...(page && { page }) }, { startedBy: actor }) };
   }
   const { before, text } = await edited(root);
-  if ((isRules(at.file) || mayDeclarePeople(before)) && !actor.groups?.includes(ADMIN)) {
+  if (
+    (isRules(at.file) || mayDeclarePeople(before) || peopleSources(root).has(at.file)) &&
+    !actor.groups?.includes(ADMIN)
+  ) {
     throw new ApiError(403, {
       error: `A change to ${at.file} waits for an admin, and this company has no remote to review on`,
       code: "not_approver",

@@ -11,6 +11,7 @@ import {
   approverOf,
   declaresPeople,
   defineWorkflow,
+  peopleSources,
   personOf,
   principalOf,
   resolveConfig,
@@ -177,6 +178,51 @@ describe("people in a data file", () => {
       expect(readPeople(mixed)).toBe(readPeople(mixed));
     } finally {
       rmSync(mixed, { recursive: true, force: true });
+    }
+  });
+
+  it("are read beside a wakeup whose host's connector is installed, which the people's load does not serve", () => {
+    const installed = mkdtempSync(join(tmpdir(), "sanoma-people-installed-"));
+    const pkg = join(installed, "node_modules", "@acme", "sanoma-connector");
+    mkdirSync(join(installed, "resources"));
+    mkdirSync(pkg, { recursive: true });
+    writeFileSync(
+      join(pkg, "package.json"),
+      JSON.stringify({ name: "@acme/sanoma-connector", type: "module", exports: { "./resources": "./resources.js" } }),
+    );
+    // The connector's own constructor: a declared resource the people's load did not make.
+    writeFileSync(
+      join(pkg, "resources.js"),
+      `export const acme = { container: (f) => ({ [Symbol.for("sanoma.declared")]: "cloudflare.container", vendor: "cloudflare", type: "container", name: f.name, desired: f }) };\n`,
+    );
+    writeFileSync(
+      join(installed, "resources", "hosting.ts"),
+      `import { acme } from "@acme/sanoma-connector/resources";\nimport { sanoma } from "sanoma/resources";\nexport const ada = sanoma.person({ id: "ada" });\nexport const host = acme.container({ name: "x" });\nexport const wakeup = sanoma.wakeup({ host });\n`,
+    );
+    try {
+      const { people: read, problems } = readPeople(installed);
+      expect(problems).toEqual([]);
+      expect(read.map((r) => r.name)).toEqual(["ada"]);
+    } finally {
+      rmSync(installed, { recursive: true, force: true });
+    }
+  });
+
+  it("are read from their files and every company file those import, a change to which is a change to the rules", () => {
+    const company = mkdtempSync(join(tmpdir(), "sanoma-people-sources-"));
+    mkdirSync(join(company, "resources"));
+    mkdirSync(join(company, "lib"));
+    writeFileSync(join(company, "lib", "emails.ts"), `export const emails = { ada: "ada@acme.test" };\n`);
+    writeFileSync(
+      join(company, "resources", "people.ts"),
+      `import { sanoma } from "sanoma/resources";\nimport { emails } from "../lib/emails.ts";\nexport const ada = sanoma.person({ id: "ada", email: emails.ada });\n`,
+    );
+    writeFileSync(join(company, "resources", "github.ts"), `export const owner = "acme";\n`);
+    try {
+      expect(readPeople(company).people.map((r) => r.desired)).toEqual([{ id: "ada", email: "ada@acme.test" }]);
+      expect([...peopleSources(company)].toSorted()).toEqual(["lib/emails.ts", "resources/people.ts"]);
+    } finally {
+      rmSync(company, { recursive: true, force: true });
     }
   });
 

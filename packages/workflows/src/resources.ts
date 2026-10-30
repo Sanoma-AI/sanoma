@@ -2,7 +2,7 @@ import type { DeclaredCollection, DeclaredResource, ResourceProblem } from "./de
 import { readFileSync } from "node:fs";
 import { mayDeclarePeople } from "./change.ts";
 import { isCollection } from "./collection.ts";
-import { type Loaded, loadModules, madeOf, madeWith } from "./load.ts";
+import { filesRead, type Loaded, loadModules, madeOf, madeWith } from "./load.ts";
 import { type Binding, type Bindings, LOCKFILE, readLockfile } from "./lockfile.ts";
 import type { Connector } from "./op.ts";
 import { APPS_DIR, COLLECTIONS_FILE, filesUnder, kindDirs, relPath } from "./paths.ts";
@@ -70,6 +70,18 @@ const RESERVED_GROUPS: ReadonlyMap<string, string> = new Map([
 export const inAppPeople = (r: DeclaredResource): boolean =>
   r.vendor === "sanoma" && Object.hasOwn(sanoma, r.type) && r.file.startsWith(`${APPS_DIR}/`);
 
+const PEOPLE_CONNECTORS = [peopleConnector, wakeupOps];
+const PEOPLE_TYPES = resourceTypesOf(PEOPLE_CONNECTORS);
+const peopleLoad = (root: string) =>
+  loadModules(root, dataFilesOf(root), PEOPLE_CONNECTORS, { only: mayDeclarePeople, types: PEOPLE_TYPES });
+
+/**
+ * The company files the people under `root` are read from (`readPeople`), by path relative to the
+ * root: each file that may declare them and every company file it imports, so an edit to a helper
+ * a people file reads its emails from is a change to the rules too.
+ */
+export const peopleSources = (root: string): ReadonlySet<string> => filesRead(peopleLoad(root));
+
 /**
  * The people, agents and groups the data files under `root` declare (`sanoma.person`, `.agent`,
  * `.group`), as `principalOf` takes them, with what is wrong in their files; none without a root.
@@ -80,13 +92,11 @@ export const inAppPeople = (r: DeclaredResource): boolean =>
  */
 export function readPeople(root: string | undefined): DeclaredPeople {
   if (root === undefined) return { people: [], problems: [] };
-  const connectors = [peopleConnector, wakeupOps];
-  const types = resourceTypesOf(connectors);
-  const loaded = loadModules(root, dataFilesOf(root), connectors, { only: mayDeclarePeople, types });
+  const loaded = peopleLoad(root);
   const cached = peopleRead.get(loaded);
   if (cached) return cached;
   // The people are never bound, so the lockfile is not read.
-  const read = declarationsOf(root, loaded, types, { bindings: {}, problems: [] }, true);
+  const read = declarationsOf(root, loaded, PEOPLE_TYPES, { bindings: {}, problems: [] }, true);
   const ofPeople = read.resources.filter((r) => Object.hasOwn(sanoma, r.type));
   const people = ofPeople.filter((r) => !inAppPeople(r));
   const own = read.problems;
@@ -298,6 +308,8 @@ function declarationsOf(
     const refs: Record<string, string> = {};
     for (const [path, target] of Object.entries(madeOf(value)!.refers)) {
       const targetId = idOf.get(target);
+      // A partial load serves only some types: a resource of another (a wakeup's host) is not its to judge.
+      if (targetId === undefined && partial && !types.has(target[DECLARED])) continue;
       if (targetId === undefined) {
         leaveOut(
           id,
