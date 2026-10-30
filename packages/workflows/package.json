@@ -25,6 +25,7 @@
     "oxlint.json",
     "README.md",
     "LICENSE",
+    "SECRET-SUPPORT.md",
     "CLOUD-IDENTITY.md"
   ],
   "type": "module",
