@@ -12,6 +12,7 @@
     "paths": {
       "@sanoma-ai/workflows": ["./packages/workflows/src/index.ts"],
       "@sanoma-ai/workflows/data": ["./packages/workflows/src/data.ts"],
+      "@sanoma-ai/workflows/cloud-identity": ["./packages/workflows/src/cloud-identity.ts"],
       "@sanoma-ai/workflows/describe": ["./packages/workflows/src/describe.ts"],
       "@sanoma-ai/workflows/description": ["./packages/workflows/src/description.ts"],
       "@sanoma-ai/workflows/fake": ["./packages/workflows/src/fake.ts"],

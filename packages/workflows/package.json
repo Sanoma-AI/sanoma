@@ -1,6 +1,6 @@
 {
   "name": "@sanoma-ai/workflows",
-  "version": "0.10.0",
+  "version": "0.10.2",
   "description": "Business processes as TypeScript functions, run durably on DBOS",
   "keywords": [
     "approvals",
@@ -24,7 +24,8 @@
     "!src/AGENTS.md",
     "oxlint.json",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "CLOUD-IDENTITY.md"
   ],
   "type": "module",
   "sideEffects": false,
@@ -74,6 +75,10 @@
     "./wakeup-service": {
       "types": "./dist/wakeup-service.d.ts",
       "default": "./dist/wakeup-service.js"
+    },
+    "./cloud-identity": {
+      "types": "./dist/cloud-identity.d.ts",
+      "default": "./dist/cloud-identity.js"
     }
   },
   "publishConfig": {
@@ -95,6 +100,7 @@
     "@dbos-inc/dbos-sdk": "^5.2.11",
     "@faker-js/faker": "^10.6.0",
     "ai": "7.0.153",
+    "google-auth-library": "^10.5.0",
     "oxc-parser": "^0.153.0",
     "oxfmt": "^0.72.0",
     "pg": "^8.23.1",

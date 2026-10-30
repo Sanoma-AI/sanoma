@@ -388,6 +388,8 @@ Call `sanoma.connection.test` with `{ connection }` to verify the current bundle
 
 For a host deployment, deliver signing material, database authentication and the adapter's bootstrap through that host's secret delivery mechanism; include the encryption key only for the built-in store. A mount path is local to the process reading it: do not send a laptop's `_FILE` path to a remote container. Explicit bootstrap bindings let a host resource receive the key value through its secret channel while code keeps only the reference.
 
+The managed Cloud [runtime identity broker](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/CLOUD-IDENTITY.md) supplies refreshable, deployment-bound Google access tokens; its enrollment, bootstrap and rollout requirements are separate from credential storage and provisioning identity.
+
 Back up ciphertext, its namespace/path and version metadata, and the matching encryption key separately. A database-only backup cannot recover encrypted values. Preserve the signing key across ordinary restarts; replacing it invalidates sessions and pending signed authorization state. Changing a vendor token updates a stored value and its version; it does not rotate the row-encryption key. Replacing the encryption key without re-encrypting every retained value makes those values unreadable. Automated encryption-key rotation, external-store migration and OAuth reauthorization tooling are not included here.
 
 ### Resources
