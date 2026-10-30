@@ -44,17 +44,31 @@ describe("readResources", () => {
     expect(resources.map((r) => [r.id, r.vendor, r.type, r.name, r.identity, r.binding])).toEqual([
       ["resources/billing/stripe.ts#pro", "stripe", "product", "pro", undefined, "prod_SanomaFixturePro"],
       ["resources/billing/stripe.ts#events", "stripe", "webhook_endpoint", "events", undefined, undefined],
-      ["resources/identity/github.ts#website", "github", "repository", "website", "website", "R_website"],
-      ["resources/identity/github.ts#docs", "github", "repository", "docs", "docs", "R_docs"],
+      [
+        "resources/identity/github.ts#website",
+        "github",
+        "repository",
+        "Sanoma-AI/website",
+        "Sanoma-AI/website",
+        "R_website",
+      ],
+      ["resources/identity/github.ts#docs", "github", "repository", "Sanoma-AI/docs", "Sanoma-AI/docs", "R_docs"],
       [
         "resources/identity/github.ts#websiteMain",
         "github",
         "branch_protection",
-        "website:main",
-        "website:main",
+        "Sanoma-AI/website:main",
+        "Sanoma-AI/website:main",
         "BPR_website:main",
       ],
-      ["resources/identity/rules.ts#docsMain", "github", "branch_protection", "docs:main", "docs:main", undefined],
+      [
+        "resources/identity/rules.ts#docsMain",
+        "github",
+        "branch_protection",
+        "Sanoma-AI/docs:main",
+        "Sanoma-AI/docs:main",
+        undefined,
+      ],
     ]);
     const website = resources.find((r) => r.id === "resources/identity/github.ts#website")!;
     expect(website).toEqual({
@@ -62,11 +76,12 @@ describe("readResources", () => {
       file: "resources/identity/github.ts",
       vendor: "github",
       type: "repository",
-      name: "website",
-      identity: "website",
+      name: "Sanoma-AI/website",
+      identity: "Sanoma-AI/website",
       binding: "R_website",
       at: { file: "resources/identity/github.ts", export: "website" },
       desired: {
+        owner: "Sanoma-AI",
         name: "website",
         description: "The company website",
         visibility: "public",
@@ -88,7 +103,7 @@ describe("readResources", () => {
     const byId = new Map(readResources(company).map((r) => [r.id, r]));
     const rule = byId.get("resources/identity/github.ts#websiteMain")!;
     expect(rule.desired).toEqual({
-      repository_id: "website",
+      repository_id: "Sanoma-AI/website",
       pattern: "main",
       enforce_admins: true,
       required_pull_request_reviews: [{ required_approving_review_count: 1, dismiss_stale_reviews: true }],
@@ -100,8 +115,8 @@ describe("readResources", () => {
     expect(normalize({ ...desired, allows_deletions: false }, desired)).toEqual(normalize(desired, desired));
     // Across files: the import is the reference.
     expect(byId.get("resources/identity/rules.ts#docsMain")).toMatchObject({
-      name: "docs:main",
-      desired: { repository_id: "docs" },
+      name: "Sanoma-AI/docs:main",
+      desired: { repository_id: "Sanoma-AI/docs" },
       refs: { repository_id: "resources/identity/github.ts#docs" },
     });
   });
@@ -170,11 +185,11 @@ describe("readResources", () => {
       expect(
         problems({
           "a.ts": `${GH}import { web } from "./b.ts";\nexport const main = github.branch_protection({ repository_id: web, pattern: "main" });\n`,
-          "b.ts": `${GH}export const web = github.repository({ name: "web", description: secret("X") });\n`,
-          "c.ts": `${GH}export const web = github.repository({ name: "c" });\nexport const web = github.repository({ name: "d" });\n`,
+          "b.ts": `${GH}export const web = github.repository({ owner: "acme", name: "web", description: secret("X") });\n`,
+          "c.ts": `${GH}export const web = github.repository({ owner: "acme", name: "c" });\nexport const web = github.repository({ owner: "acme", name: "d" });\n`,
         }),
       ).toEqual([
-        "resources/b.ts:2:66: secret is not defined",
+        "resources/b.ts:2:81: secret is not defined",
         "resources/c.ts: Identifier 'web' has already been declared",
       ]);
     });
@@ -188,35 +203,35 @@ describe("readResources", () => {
     it("what the resource type refuses, as calling it does: the first in each file, which stops it", () => {
       expect(
         problems({
-          "a.ts": `${GH}export const a = github.repository({ name: "a", wiki: true });\nexport const b = github.repository({ name: "b" });\n`,
-          "b.ts": `${GH}export const b = github.repository({ name: "b", html_url: "https://github.com/x/b" });\n`,
-          "c.ts": `${GH}export const c = github.repository({ name: "c", has_wiki: "yes" });\n`,
+          "a.ts": `${GH}export const a = github.repository({ owner: "acme", name: "a", wiki: true });\nexport const b = github.repository({ owner: "acme", name: "b" });\n`,
+          "b.ts": `${GH}export const b = github.repository({ owner: "acme", name: "b", html_url: "https://github.com/x/b" });\n`,
+          "c.ts": `${GH}export const c = github.repository({ owner: "acme", name: "c", has_wiki: "yes" });\n`,
           "d.ts": `import { stripe } from "@sanoma-ai/connector-stripe/resources";\nexport const p = stripe.product({ id: "prod_1", name: "Pro" });\n`,
-          "e.ts": `${GH}export const r = github.repository({ name: process.env.NO_SUCH_NAME ?? "" });\n`,
+          "e.ts": `${GH}export const r = github.repository({ owner: "acme", name: process.env.NO_SUCH_NAME ?? "" });\n`,
         }),
       ).toEqual([
         "resources/a.ts:2:25: github.repository: no field wiki",
         "resources/b.ts:2:25: github.repository: leave out html_url: the vendor sets it",
         "resources/c.ts:2:25: github.repository: ✖ Invalid input: expected boolean, received string → at has_wiki",
         "resources/d.ts:2:25: stripe.product: leave out id: the vendor sets it",
-        "resources/e.ts:2:25: github.repository: its name is missing",
+        "resources/e.ts:2:25: github.repository: its owner/name is missing",
       ]);
     });
 
     it("a reference where the type takes none, or to a resource of another type", () => {
       expect(
         problems({
-          "a.ts": `${GH}export const web = github.repository({ name: "web" });
-export const copy = github.repository({ name: web });
+          "a.ts": `${GH}export const web = github.repository({ owner: "acme", name: "web" });
+export const copy = github.repository({ owner: "acme", name: web });
 `,
-          "b.ts": `${GH}export const site = github.repository({ name: "site" });
+          "b.ts": `${GH}export const site = github.repository({ owner: "acme", name: "site" });
 export const main = github.branch_protection({ repository_id: site, pattern: "main" });
 export const rule = github.branch_protection({ repository_id: main, pattern: "next" });
 `,
         }),
       ).toEqual([
-        "resources/a.ts:3:28: github.repository: name takes a value, not a resource (github.repository web)",
-        "resources/b.ts:4:28: github.branch_protection: repository_id names a resource of type github.repository, not github.branch_protection (site:main)",
+        "resources/a.ts:3:28: github.repository: name takes a value, not a resource (github.repository acme/web)",
+        "resources/b.ts:4:28: github.branch_protection: repository_id names a resource of type github.repository, not github.branch_protection (acme/site:main)",
       ]);
     });
 
@@ -225,17 +240,17 @@ export const rule = github.branch_protection({ repository_id: main, pattern: "ne
         problems(
           {
             "a.ts": `${GH}import { site } from "../lib/site.ts";\nexport const m = github.branch_protection({ repository_id: site, pattern: "main" });\n`,
-            "b.ts": `${GH}github.repository({ name: "loose" });\nexport const web = github.repository({ name: "web" });\nexport const site = web;\n`,
+            "b.ts": `${GH}github.repository({ owner: "acme", name: "loose" });\nexport const web = github.repository({ owner: "acme", name: "web" });\nexport const site = web;\n`,
           },
           {},
           {
-            "lib/site.ts": `import { github } from "@sanoma-ai/connector-github/resources";\nexport const site = github.repository({ name: "site" });\n`,
+            "lib/site.ts": `import { github } from "@sanoma-ai/connector-github/resources";\nexport const site = github.repository({ owner: "acme", name: "site" });\n`,
           },
         ),
       ).toEqual([
-        'resources/a.ts#m: repository_id names a github.repository "site" that no data file exports: export it from a data file and import it here',
+        'resources/a.ts#m: repository_id names a github.repository "acme/site" that no data file exports: export it from a data file and import it here',
         "resources/b.ts#web: resources/b.ts#web and resources/b.ts#site are one github.repository: export each resource under one name",
-        'resources/b.ts: a github.repository "loose" is made here but not exported: declare each resource as its own `export const <name> = <vendor>.<type>({ … })`',
+        'resources/b.ts: a github.repository "acme/loose" is made here but not exported: declare each resource as its own `export const <name> = <vendor>.<type>({ … })`',
       ]);
     });
 
@@ -243,7 +258,7 @@ export const rule = github.branch_protection({ repository_id: main, pattern: "ne
       expect(
         problems({
           "a.ts": `${GH}import { web } from "./b.ts";\nexport const m = github.branch_protection({ repository_id: web, pattern: "main" });\n`,
-          "b.ts": `${GH}export const web = github.repository({ name: process.env.NO_SUCH_NAME });\n`,
+          "b.ts": `${GH}export const web = github.repository({ owner: "acme", name: process.env.NO_SUCH_NAME });\n`,
         }),
       ).toEqual([
         "resources/b.ts:2:27: github.repository: ✖ Invalid input: expected string, received undefined → at name",
@@ -262,11 +277,11 @@ export const rule = github.branch_protection({ repository_id: main, pattern: "ne
     it("two resources of one type with one identity, but not two without one", () => {
       expect(
         problems({
-          "a.ts": `${GH}export const site = github.repository({ name: "web" });\n`,
-          "b/c.ts": `${GH}export const web = github.repository({ name: "web", has_wiki: false });\n`,
+          "a.ts": `${GH}export const site = github.repository({ owner: "acme", name: "web" });\n`,
+          "b/c.ts": `${GH}export const web = github.repository({ owner: "acme", name: "web", has_wiki: false });\n`,
         }),
       ).toEqual([
-        'resources/b/c.ts#web: github.repository "web" is declared twice, also as resources/a.ts#site: declare each resource once, and import it where it is used',
+        'resources/b/c.ts#web: github.repository "acme/web" is declared twice, also as resources/a.ts#site: declare each resource once, and import it where it is used',
       ]);
       const STRIPE = `import { stripe } from "@sanoma-ai/connector-stripe/resources";\n`;
       dir = project({
@@ -278,7 +293,10 @@ export const rule = github.branch_protection({ repository_id: main, pattern: "ne
 
     it("a lockfile that is not JSON, or not bindings", () => {
       expect(
-        problems({ "a.ts": `${GH}export const r = github.repository({ name: "x" });\n`, "sanoma.lock.json": "{" }),
+        problems({
+          "a.ts": `${GH}export const r = github.repository({ owner: "acme", name: "x" });\n`,
+          "sanoma.lock.json": "{",
+        }),
       ).toEqual([expect.stringMatching(/^resources\/sanoma\.lock\.json: not JSON: /)]);
       expect(
         problems({
@@ -292,8 +310,8 @@ export const rule = github.branch_protection({ repository_id: main, pattern: "ne
     it("a binding of another type than its declaration's, and two declarations bound to one object", () => {
       expect(
         problems({
-          "a.ts": `${GH}export const web = github.repository({ name: "web" });
-export const docs = github.repository({ name: "docs" });
+          "a.ts": `${GH}export const web = github.repository({ owner: "acme", name: "web" });
+export const docs = github.repository({ owner: "acme", name: "docs" });
 export const main = github.branch_protection({ repository_id: web, pattern: "main" });
 `,
           "sanoma.lock.json": JSON.stringify({
@@ -309,8 +327,8 @@ export const main = github.branch_protection({ repository_id: web, pattern: "mai
     });
 
     it("a syntax error", () => {
-      expect(problems({ "a.ts": `${GH}export const r = github.repository({ name: "x" ;\n` })).toEqual([
-        "resources/a.ts:2:48: Expected ',', got ';'",
+      expect(problems({ "a.ts": `${GH}export const r = github.repository({ owner: "acme", name: "x" ;\n` })).toEqual([
+        "resources/a.ts:2:63: Expected ',', got ';'",
       ]);
     });
 
@@ -334,7 +352,7 @@ export const main = github.branch_protection({ repository_id: web, pattern: "mai
     ]);
     // A binding under a file that fails to load is no orphan: what the file declares is not known.
     const dir = project({
-      "a.ts": `import { github } from "@sanoma-ai/connector-github/resources";\nexport const web = github.repository({ name: process.env.NO_SUCH_NAME });\n`,
+      "a.ts": `import { github } from "@sanoma-ai/connector-github/resources";\nexport const web = github.repository({ owner: "acme", name: process.env.NO_SUCH_NAME });\n`,
       "sanoma.lock.json": JSON.stringify({ "resources/a.ts#web": { type: "github.repository", id: "R_1" } }),
     });
     try {
@@ -385,7 +403,7 @@ export const leads = collection({
   it("are listed where they are declared, beside the resources, matched to no connector, type or lockfile", () => {
     const dir = project({
       "data.ts": DATA,
-      "identity/github.ts": `import { github } from "@sanoma-ai/connector-github/resources";\nexport const site = github.repository({ name: "site" });\n`,
+      "identity/github.ts": `import { github } from "@sanoma-ai/connector-github/resources";\nexport const site = github.repository({ owner: "acme", name: "site" });\n`,
     });
     try {
       const read = loadDataFiles(dir, base.connectors);
@@ -406,11 +424,12 @@ export const leads = collection({
 
   it("are declared in resources/data.ts only, and are no resource another data file names", () => {
     const dir = project({
-      "data.ts": `${DATA}export const MAX = 3;\nexport const site = github.repository({ name: "site" });\n`.replace(
-        'import { collection } from "sanoma/data";',
-        'import { collection } from "sanoma/data";\nimport { github } from "@sanoma-ai/connector-github/resources";',
-      ),
-      "identity/github.ts": `import { github } from "@sanoma-ai/connector-github/resources";\nimport { collection } from "sanoma/data";\nimport { leads } from "../data.ts";\nexport const web = github.repository({ name: leads });\nexport const notes = collection({ name: "notes", key: "id", fields: { id: "text" } });\n`,
+      "data.ts":
+        `${DATA}export const MAX = 3;\nexport const site = github.repository({ owner: "acme", name: "site" });\n`.replace(
+          'import { collection } from "sanoma/data";',
+          'import { collection } from "sanoma/data";\nimport { github } from "@sanoma-ai/connector-github/resources";',
+        ),
+      "identity/github.ts": `import { github } from "@sanoma-ai/connector-github/resources";\nimport { collection } from "sanoma/data";\nimport { leads } from "../data.ts";\nexport const web = github.repository({ owner: "acme", name: leads });\nexport const notes = collection({ name: "notes", key: "id", fields: { id: "text" } });\n`,
     });
     try {
       expect(loadDataFiles(dir, base.connectors).problems.map(problemLine)).toEqual([
@@ -459,8 +478,8 @@ describe("secret()", () => {
 describe("describeConfig's problems", () => {
   it("are data: the resources read without one are listed beside them", () => {
     const dir = project({
-      "good.ts": `import { github } from "@sanoma-ai/connector-github/resources";\nexport const web = github.repository({ name: "web" });\n`,
-      "bad.ts": `import { github } from "@sanoma-ai/connector-github/resources";\nexport const docs = github.repository({ name: "docs", has_wiki: "yes" });\n`,
+      "good.ts": `import { github } from "@sanoma-ai/connector-github/resources";\nexport const web = github.repository({ owner: "acme", name: "web" });\n`,
+      "bad.ts": `import { github } from "@sanoma-ai/connector-github/resources";\nexport const docs = github.repository({ owner: "acme", name: "docs", has_wiki: "yes" });\n`,
       "more.ts": `import { github } from "@sanoma-ai/connector-github/resources";\nimport { web } from "./good.ts";\nexport const main = github.branch_protection({ repository_id: web, pattern: "main" });\n`,
     });
     try {
