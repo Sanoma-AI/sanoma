@@ -38,6 +38,8 @@ This package owns workflow declarations, durable execution, policy and approval 
 - Connection selection is account authority: keep its revision pinned through policy, approvals, driver execution and ledger records. Resource plans pin a selection when reading their declarations and carry it in the lockfile. `src/connection.ts` persists metadata only; authentication values stay in the trusted store boundary. A connector's existing `env` driver guard is not connection-scoped authentication and must not be used as a compatibility path for named accounts.
 - Named authentication is resolved by `indexDrivers` inside the authorized invocation, shared by direct and durable calls. Keep verifier and SDK errors sanitized, and limit auxiliary secrets to input markers and declared `createsSecrets` destinations. Sandbox selection is synthetic and run-local; it must never read production connection records or credential stores.
 
+- Keep `previewConnection` / `connectConnection` credential intake outside durable operations. Only metadata enters the prepare/configure/activate gates. Preserve pending/uncertain refusal, expected versions and stored-version receipts when changing retries; card reads are metadata-only and health is last-tested, never a live promise. See [Connecting and managing accounts](README.md#connecting-and-managing-accounts).
+
 ## Checks
 
 Run `pnpm vitest run packages/workflows` with Postgres from `pnpm db:up`, plus `pnpm typecheck` for the type-level tests. Build this package with `pnpm --filter @sanoma-ai/workflows build` before building consumers.

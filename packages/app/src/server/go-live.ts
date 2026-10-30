@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import {
   APPLY_WORKFLOW,
   databaseUrlSecret,
+  deploymentKey,
   errorMessage,
   isEnded,
   type Principal,
@@ -125,8 +126,32 @@ const missingTypes = ({ resolved }: AppContext) => {
  * The secrets going live reads: GitHub's and Supabase's tokens (for the lists the page offers),
  * and those that say which vendors are connected (`SETUP_VENDORS`' tokens).
  */
-const connections = ({ client }: AppContext) =>
-  client.secrets([...new Set(["GITHUB_TOKEN", "SUPABASE_ACCESS_TOKEN", ...SETUP_VENDORS.flatMap((v) => v.tokens)])]);
+const connections = async ({ client, resolved }: AppContext, actor?: Principal) => {
+  const named = new Map<string, boolean>(
+    [...resolved.connections.catalog.methods]
+      .filter(([, methods]) => Object.keys(methods).length > 0)
+      .map(([vendor]) => [vendor, false]),
+  );
+  // Read account metadata only for an admitted person. Generating infrastructure uses the
+  // explicit default in code; one configured account does not become an implicit default.
+  if (named.size && actor) {
+    const cards = await client.connections({ actor });
+    for (const definition of resolved.connections.catalog.definitions.values()) {
+      if (!definition.default) continue;
+      const card = cards.find((entry) => entry.id === definition.$connection);
+      named.set(definition.vendor, card?.status === "connected" && (!card.health || card.health.state === "connected"));
+    }
+  }
+  const names = [
+    ...new Set(["GITHUB_TOKEN", "SUPABASE_ACCESS_TOKEN", ...SETUP_VENDORS.flatMap((v) => v.tokens)]),
+  ].filter(
+    (name) =>
+      !named.has(
+        name === "GITHUB_TOKEN" ? "github" : (SETUP_VENDORS.find((v) => v.tokens.includes(name))?.vendor ?? ""),
+      ),
+  );
+  return { tokens: await client.secrets(names), named };
+};
 type Connections = Awaited<ReturnType<typeof connections>>;
 
 /**
@@ -135,8 +160,9 @@ type Connections = Awaited<ReturnType<typeof connections>>;
  * unless `strictly`: then only a `/setup` vendor can be, for what going live may leave out (a wakeup).
  */
 const isConnected = (stored: Connections, vendor: string, strictly = false) => {
+  if (stored.named.has(vendor)) return stored.named.get(vendor)!;
   const setup = SETUP_VENDORS.find((v) => v.vendor === vendor);
-  return setup ? setup.tokens.every((name) => stored.has(name)) : !strictly;
+  return setup ? setup.tokens.every((name) => stored.tokens.has(name)) : !strictly;
 };
 
 /**
@@ -153,15 +179,21 @@ function pick(app: AppContext, stored: Connections, meets: (type: Resource) => u
 /** The titles of the vendors to connect before going live: the chosen database's and host's, when not connected. */
 const toConnect = ({ stored, database, host }: Awaited<ReturnType<typeof choose>>) =>
   [database, host].flatMap((type) =>
-    type && !isConnected(stored, type.vendor) ? [SETUP_VENDORS.find((v) => v.vendor === type.vendor)!.title] : [],
+    type && !isConnected(stored, type.vendor)
+      ? [
+          stored.named.has(type.vendor)
+            ? `${type.vendor}'s declared default connection`
+            : (SETUP_VENDORS.find((v) => v.vendor === type.vendor)?.title ?? type.vendor),
+        ]
+      : [],
   );
 
 /**
  * What going live chooses now, from what is connected: the database (Neon's first), the host
  * (Cloudflare's first, then Docker's) and its wakeup.
  */
-async function choose(app: AppContext) {
-  const stored = await connections(app);
+async function choose(app: AppContext, actor?: Principal) {
+  const stored = await connections(app, actor);
   const database = pick(app, stored, (type) => type.database, [NEON]);
   const host = pick(app, stored, (type) => type.host, [CLOUDFLARE, DOCKER]);
   return { stored, database, host, wakeup: host ? hostWakeup(app, host, stored) : {} };
@@ -242,10 +274,15 @@ const githubOf = (app: AppContext) => ({
  * Supabase organizations the token sees when it is Supabase's, and the host type. A list that
  * cannot be read is empty, and says why.
  */
-export async function goLiveChoices(app: AppContext): Promise<GoLiveChoices> {
+export async function goLiveChoices(app: AppContext, actor?: Principal): Promise<GoLiveChoices> {
   const errors: string[] = [];
-  const chosen = await choose(app);
-  const { stored: tokens, database, host, wakeup } = chosen;
+  const chosen = await choose(app, actor);
+  const {
+    stored: { tokens },
+    database,
+    host,
+    wakeup,
+  } = chosen;
   const listed = async <T>(what: string, list: () => Promise<T[]>): Promise<T[]> => {
     try {
       return await list();
@@ -474,13 +511,21 @@ export async function goLive(app: AppContext, actor: Principal, choices: GoLiveR
   if (resolved.root === undefined) throw new Error("The config has no root, so its data files cannot be written");
   const path = join(resolved.root, INFRA);
   if (await exists(path)) throw writtenAlready();
-  // `SANOMA_SECRETS_KEY` is the host's from this process's environment, where the launcher's
-  // `.env` sets it, and where the secrets store reads it first: there is nothing to store.
-  if (!process.env[SECRETS_KEY]) throw new ApiError(409, { error: `${SECRETS_KEY} is not set` });
+  // Host bootstrap follows the same direct-or-mounted-file rules as the runtime. An external
+  // store has its own authority and does not need the built-in store's encryption key.
+  const bootstrap: ("SANOMA_SIGNING_KEY" | "SANOMA_SECRETS_KEY")[] = ["SANOMA_SIGNING_KEY"];
+  if (!resolved.secrets.store) bootstrap.push(SECRETS_KEY);
+  for (const name of bootstrap) {
+    try {
+      deploymentKey(name);
+    } catch {
+      throw new ApiError(409, { error: `Configure ${name} or ${name}_FILE before going live` });
+    }
+  }
   // The GitHub connector makes the repository with a token of the person's own: an App's
   // installation alone cannot yet.
-  const chosen = await choose(app);
-  if (!chosen.stored.has("GITHUB_TOKEN")) {
+  const chosen = await choose(app, actor);
+  if (!chosen.stored.tokens.has("GITHUB_TOKEN")) {
     throw new ApiError(409, {
       error: "The GitHub connector creates the repository with GITHUB_TOKEN: connect a token",
     });

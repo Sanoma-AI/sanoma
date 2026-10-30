@@ -231,6 +231,8 @@ export default defineWorkflow({
   }, 180_000);
 
   it("lints sites/ when there is one", async () => {
+    // Independent of earlier tests creating this directory.
+    mkdirSync(join(dir, "resources"), { recursive: true });
     mkdirSync(join(dir, "sites/x/routes"), { recursive: true });
     writeFileSync(join(dir, "sites/x/routes/index.ts"), "export const key = process.env.KEY;\n");
     const log: string[] = [];
