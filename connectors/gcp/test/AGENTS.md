@@ -1,0 +1,10 @@
+# connectors/gcp/test
+
+| Path                                                                                                 | What it checks                                                                                                                                                              |
+| ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`authentication.test.ts`](authentication.test.ts)                                                   | Synthetic STS and IAM impersonation for separate selected connections, missing mappings, rejected key/executable configs, wrong targets and sanitized denied impersonation. |
+| [`driver.test.ts`](driver.test.ts)                                                                   | Provider state double: per-account sessions and cleanup, project/account refusals, KMS symmetric/retention guards, OIDC trust condition, sanitized failures and fake state. |
+| [`../testdata/pins.json`](../testdata/pins.json)                                                     | Provider version, checksum and schema provenance.                                                                                                                           |
+| [`../testdata/schemas/hashicorp_google_8.7.0.json`](../testdata/schemas/hashicorp_google_8.7.0.json) | Recorded provider configuration and seven selected resource schemas, used for generation.                                                                                   |
+
+Run `pnpm vitest run connectors/gcp`. These are synthetic protocol tests, not live Google authorization or token-renewal proof. Keep tokens/config files temporary and values synthetic. Do not enable billing or run provisioning as part of ordinary tests; the current live-verification blocker is documented in the [README](../README.md#testing-and-current-evidence).
