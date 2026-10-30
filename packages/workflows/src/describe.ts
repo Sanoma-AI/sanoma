@@ -118,8 +118,14 @@ export function liveDescription(config: SanomaConfig): () => ConfigDescription {
     return { description, stamps: new Map([...extra, ...stampsOf(root)]) };
   };
   let now = described();
+  // The workflows as the config imported them, which the worker runs: their outlines and sources
+  // from the first description, never a file edited since.
+  const { workflows } = now.description;
   return () => {
-    if (!fresh(now.stamps)) now = described(now.description);
+    if (!fresh(now.stamps)) {
+      now = described(now.description);
+      now.description.workflows = workflows;
+    }
     return now.description;
   };
 }
