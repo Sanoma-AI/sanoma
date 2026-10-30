@@ -354,7 +354,9 @@ export const isObject = (v: unknown): v is State => typeof v === "object" && v !
 /** `path.name`, or `name` at the top: a field's dotted path. */
 export const joinPath = (path: string, name: string) => (path ? `${path}.${name}` : name);
 
-const isDeclared = (v: unknown): v is Declared => isObject(v) && typeof (v as Partial<Declared>)[DECLARED] === "string";
+/** A declared resource: what a constructor returns, made by any copy of this package. */
+export const isDeclared = (v: unknown): v is Declared =>
+  isObject(v) && typeof (v as Partial<Declared>)[DECLARED] === "string";
 
 /** One order for a list compared as a multiset: by each item's JSON. */
 const canonical = (items: unknown[]) =>

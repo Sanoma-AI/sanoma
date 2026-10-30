@@ -10,6 +10,7 @@ import {
   ConnectExistingRequest,
   DecideCall,
   GoLiveRequest,
+  PatchRequest,
   PreviewQuery,
   RunsQuery,
   SetCredentialRequest,
@@ -32,6 +33,7 @@ import {
   listRuns,
   nextFires,
   openChange,
+  patch,
   permissions,
   preview,
   readStartRun,
@@ -156,6 +158,15 @@ export const adoptFn = createServerFn(CHANGE)
   .middleware([withPrincipal])
   .validator(validate(AdoptRequest))
   .handler(({ data, context }) => adopt(context.app, context.principal, data));
+
+/**
+ * A form's Save: sets fields of a declaration in its file, landed as a change for review when the
+ * repository has a remote, else written and committed (`patch`).
+ */
+export const patchFn = createServerFn(CHANGE)
+  .middleware([withPrincipal])
+  .validator(validate(PatchRequest))
+  .handler(({ data, context }) => patch(context.app, context.principal, data, context.origin));
 
 /** Each vendor's credential statuses now: they change as people set them, and with the environment. */
 export const getCredentials = createServerFn(READ).handler(({ context }) => credentials(context.app));

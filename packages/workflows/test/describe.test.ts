@@ -12,11 +12,22 @@ import { withFake } from "@sanoma-ai/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { defineConfig, defineConnector, defineWorkflow, memoryLedger, vendorInfo } from "../src/index.ts";
-import { describeConfig, outlineWorkflow } from "../src/describe.ts";
+import { readPolicyFiles } from "../src/cedar.ts";
+import { rootOf } from "../src/config.ts";
+import { ConfigDescriptionSchema, describeConfig, outlineWorkflow } from "../src/describe.ts";
 import { defineFake } from "../src/fake.ts";
 import { VENDOR } from "../src/op.ts";
 import { apiNameOf, problemLine } from "../src/shared.ts";
 import announce from "./fixtures/announce.ts";
+import company from "./fixtures/company/sanoma.config.ts";
+import companyApps from "./fixtures/company-apps/sanoma.config.ts";
+import { customers as crmCustomers } from "./fixtures/company-apps/apps/crm/resources/data.ts";
+import { customers as shopCustomers } from "./fixtures/company-apps/apps/shop/resources/data.ts";
+import followUp from "./fixtures/company-apps/apps/crm/workflows/follow-up.ts";
+import thank from "./fixtures/company-apps/apps/shop/workflows/follow-up.ts";
+import introduce from "./fixtures/company-apps/workflows/introduce.ts";
+import outbound from "./fixtures/outbound/sanoma.config.ts";
+import people from "./fixtures/people/sanoma.config.ts";
 
 // On the connectors as their packages export them, with their own drivers and fakes.
 const base = defineConfig({
@@ -230,7 +241,7 @@ describe("describeConfig", () => {
   it("says the policy is undefined without policies/*.cedar, and names the app and version", () => {
     const plain = describeConfig(base);
     // The root's policies, when it has any, are cedar.test.ts's.
-    expect(plain.policy).toEqual({ defined: false });
+    expect(plain.policy).toEqual({ defined: false, files: [] });
     // No package.json in the directory of this file, which defined the config: the app is "sanoma".
     expect(plain.appName).toBe("sanoma");
     expect(plain.version).toMatch(/^sanoma@[0-9a-f]{64}$/);
@@ -399,5 +410,55 @@ describe("problemLine", () => {
     expect(problemLine({ file: "w.ts", line: 2, column: 3, message: "m" })).toBe("w.ts:2:3: m");
     expect(problemLine({ file: "w.ts", message: "m" })).toBe("w.ts: m");
     expect(problemLine({ message: "m" })).toBe("m");
+  });
+});
+
+describe("ConfigDescriptionSchema", () => {
+  // company-apps as the launcher finds its workflows and collections (`loadConfig`, in the sanoma package).
+  const apps = {
+    ...companyApps,
+    workflows: [followUp, thank, introduce],
+    collections: [crmCustomers, shopCustomers],
+  };
+
+  it.each(Object.entries({ base, company, "company-apps": apps, outbound, people }))(
+    "holds the description of the %s fixture, as it is",
+    (_name, config) => {
+      const description = describeConfig(config);
+      expect(ConfigDescriptionSchema.parse(description)).toEqual(description);
+    },
+  );
+
+  it("refuses a description with a key it does not know, or without one it needs", () => {
+    const description = describeConfig(base);
+    expect(ConfigDescriptionSchema.safeParse({ ...description, extra: 1 }).success).toBe(false);
+    const { policy: _, ...rest } = description;
+    expect(ConfigDescriptionSchema.safeParse(rest).success).toBe(false);
+  });
+
+  it("says which contracts each resource type meets: a host, a database, and the repository a host's source names", () => {
+    const { resourceTypes } = describeConfig({ ...base, workflows: [], connectors: [github, docker, supabase] });
+    const capabilities = Object.fromEntries(resourceTypes.map((t) => [t.id, t.capabilities]));
+    expect(capabilities).toMatchObject({
+      "docker.container": ["host"],
+      "supabase.project": ["database"],
+      "github.repository": ["source"],
+    });
+    expect(capabilities["github.team"]).toBeUndefined();
+  });
+
+  it("names each variable a vendor's driver declares, with its manual, never a value or a status", () => {
+    const { vendors } = describeConfig(base);
+    expect(vendors.ghost?.credentials).toEqual([
+      { name: "GHOST_ADMIN_URL", description: "the site's admin URL, such as https://example.ghost.io" },
+      { name: "GHOST_ADMIN_API_KEY", description: "a custom integration's Admin API key, <id>:<secret>" },
+    ]);
+  });
+
+  it("carries the policy's files as read, the root's then each app's, and none without a root", () => {
+    const description = describeConfig(people);
+    expect(description.policy.files).toEqual(readPolicyFiles(rootOf(people)!));
+    expect(description.policy.files.map((f) => f.file)).toEqual(["policies/refunds.cedar", "policies/visitors.cedar"]);
+    expect(describeConfig(base).policy.files).toEqual([]);
   });
 });

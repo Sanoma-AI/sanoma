@@ -20,7 +20,7 @@ import { loopbackLogin } from "../src/loopback.ts";
 import { admitting } from "../src/login/admission.ts";
 import { CONNECT_BRANCH, connectExisting } from "../src/server/setup.ts";
 
-// Connecting an existing repository or database (/setup/existing) in a git repository of its
+// Connecting an existing repository or database (/hosting/existing) in a git repository of its
 // own, with and without a remote, on the GitHub and Supabase fakes: the file rendered from what
 // each import read, where it is committed, and the apply that only binds. Needs Postgres and the
 // built app, as app.test.ts does.
@@ -192,11 +192,20 @@ describe("the page", () => {
   it("takes a repository and a project's ref, and the connect page links to it", async () => {
     ensureBuilt(appDir, ["dist/server/server.js"], ["pnpm", "exec", "vite", "build"]);
     app = await startApp(test.config, { port: 0, source });
-    const page = await (await fetch(new URL("/setup/existing", app.url))).text();
+    const page = await (await fetch(new URL("/hosting/existing", app.url))).text();
     expect(page).toContain("Connect an existing repository or database");
     expect(page).toContain('placeholder="owner/name"');
     expect(page).toContain('placeholder="project ref"');
-    const connectPage = await (await fetch(new URL("/setup/connect", app.url))).text();
-    expect(connectPage).toContain('href="/setup/existing"');
+    const connectPage = await (await fetch(new URL("/hosting/connect", app.url))).text();
+    expect(connectPage).toContain('href="/hosting/existing"');
+    // The old addresses go to their pages under Hosting.
+    for (const [old, now] of [
+      ["/setup", "/hosting"],
+      ["/setup/existing", "/hosting/existing"],
+      ["/setup/connect?github=connected", "/hosting/connect?github=connected"],
+    ]) {
+      const res = await fetch(new URL(old!, app.url), { redirect: "manual" });
+      expect(res.headers.get("location"), old).toBe(now);
+    }
   });
 });

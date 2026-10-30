@@ -1,53 +1,54 @@
-import { join } from "node:path";
 import type { z } from "zod";
 import { type AppEntry, appsAt } from "./apps.ts";
-import { type LintProblem, readSource, type SourceFile } from "./ast.ts";
-import { type Field, recordSchemaOf } from "./collection.ts";
+import { readSource, type SourceFile } from "./ast.ts";
+import { readPolicyFiles } from "./cedar.ts";
+import { recordSchemaOf } from "./collection.ts";
 import { connectorsOf, resolveConfig, rootOf, type SanomaConfig } from "./config.ts";
-import { type Builtin, jsonSchemaOf, opIdsOf, type Trigger, type Use } from "./define.ts";
-import { isDirect } from "./direct.ts";
-import { lintWorkflow } from "./lint.ts";
-import { type Effect, VENDOR, type VendorInfo } from "./op.ts";
-import { type Outline, outlineWithSource } from "./outline.ts";
-import { allowAll, policyOpOf } from "./policy.ts";
-import { type Resource, type ResourceFields, resourceTypesOf, valueAt } from "./resource.ts";
+import { type Builtin, jsonSchemaOf, opIdsOf, type Use } from "./define.ts";
 import {
-  type DataFiles,
-  type DeclaredCollection,
-  type DeclaredResource,
-  inAppPeople,
-  readDataFiles,
-  type ResourceProblem,
-} from "./resources.ts";
+  CAPABILITIES,
+  type CollectionEntry,
+  type ConfigDescription,
+  type OpEntry,
+  type ResourceTypeEntry,
+  type VendorEntry,
+  type WorkflowEntry,
+} from "./description.ts";
+import { isDirect } from "./direct.ts";
+import { type CredentialStatus, credentialsOf } from "./env.ts";
+import { lintWorkflow } from "./lint.ts";
+import { VENDOR, type VendorInfo } from "./op.ts";
+import { outlineWithSource } from "./outline.ts";
+import { allowAll, policyOpOf } from "./policy.ts";
+import { type Resource, resourceTypesOf, valueAt } from "./resource.ts";
+import { type DeclaredResource, inAppPeople, loadDataFiles, type ResourceProblem } from "./resources.ts";
 import { apiNameProblem } from "./sdk.ts";
 import { apiNameOf, BUILT_IN_WORKFLOWS, DATA_VENDOR, problemLine } from "./shared.ts";
 import { readSites, type SiteEntry } from "./sites.ts";
 
 // `@sanoma-ai/workflows/describe`: what a UI renders from, apart from the main entry.
+// What `describeConfig` answers, as zod schemas and the types they infer (`./description`).
+export * from "./description.ts";
 export { outlineWorkflow, type Outline, type OutlineNode, type Span } from "./outline.ts";
-// The reader parses data files with oxc-parser too.
-export type { LintProblem } from "./ast.ts";
-export {
-  admit,
-  readDataFiles,
-  readPeople,
-  type DataFiles,
-  type DeclaredCollection,
-  type DeclaredPeople,
-  type DeclaredResource,
-  type ResourceProblem,
-} from "./resources.ts";
+export { admit, loadDataFiles, readPeople, type DataFiles, type DeclaredPeople } from "./resources.ts";
 // The writer: setting a resource's fields in its data file, and rendering a new one.
-export { formatOptions, renderDataFile, setFields, type DataFileContent } from "./writer.ts";
-export { Reference, type DataValue } from "./datafile.ts";
+export {
+  type DataFileContent,
+  type DataValue,
+  formatOptions,
+  NotLiteral,
+  Reference,
+  renderDataFile,
+  setFields,
+} from "./writer.ts";
 
 /**
- * The resources the config's data files declare, read without importing or running them; throws
- * one error listing every problem, each at `file:line:column`, for a test or CI to fail on.
+ * The resources the config's data files declare, as loading them makes them (`loadDataFiles`);
+ * throws one error listing every problem, one per line, for a test or CI to fail on.
  * `describeConfig` lists the same, with the problems beside them instead.
  */
 export function readResources(config: SanomaConfig): DeclaredResource[] {
-  const { resources, problems } = readDataFiles(rootOf(config), connectorsOf(config));
+  const { resources, problems } = loadDataFiles(rootOf(config), connectorsOf(config));
   if (problems.length) {
     const lines = problems.map((p) => `  ${problemLine(p)}`);
     throw new Error(`The resources' data files have problems:\n${lines.join("\n")}`);
@@ -64,19 +65,10 @@ export {
   type Bindings,
   type Rebind,
 } from "./lockfile.ts";
-// The apps under `apps/`, read without running their `app.ts`.
-export { crossAppImports, readApps, type AppEntry } from "./apps.ts";
+// The apps under `apps/`, with what their `app.ts` declares.
+export { crossAppImports, readApps } from "./apps.ts";
 // What the sites call, read from their source: a workflow's Used by.
-export {
-  readSites,
-  type SiteCall,
-  type SiteEntry,
-  type SitePage,
-  siteContentPages,
-  siteIcons,
-  siteLocales,
-  sitesUnder,
-} from "./sites.ts";
+export { readSites, siteContentPages, siteIcons, siteLocales, sitesUnder } from "./sites.ts";
 // The generated SDK, `.sanoma/api.ts`: a site's `api` typed from this description.
 export { API_FILE, generateApi, writeApi, writeGenerated } from "./sdk.ts";
 // The Cedar schema, `.sanoma/schema.cedarschema`: what a company's policies are validated and decided against.
@@ -86,175 +78,6 @@ export { columnPrincipal, permissionsGrid, type PermissionsGrid, type Permission
 export { previewRequests } from "./shared.ts";
 // The apply workflow's plan and report, which the app renders.
 export type { ApplyInput, ApplyPlan, ApplyReport, ApplyResult, PlanAnswer, PlanStep } from "./apply.ts";
-
-/** What a workflow is, read from its definition: enough to draw a start form and show what it may call. */
-export interface WorkflowEntry {
-  /** Its name: `<app>.<name>` for one an app's folder defines. */
-  name: string;
-  /** The app whose folder defines it (`apps/<app>/workflows/`); absent for one at the root. */
-  app?: string;
-  title?: string;
-  /** `manual`, or the schedule it starts on (`defineWorkflow`'s `trigger`). */
-  trigger: Trigger;
-  /**
-   * Set for a workflow the runtime adds itself, `drift`, `apply` or `call`, rather than the config: a label. It
-   * starts like any other.
-   */
-  builtin?: true;
-  /** The input, as JSON Schema (draft 2020-12), from the zod schema. */
-  input: Record<string, unknown>;
-  /** Operation ids the workflow may call, in the order declared. */
-  ops: string[];
-  /** Built-ins the workflow may call. */
-  builtins: Builtin[];
-  /** The file that defined it, absolute. */
-  file: string;
-  /** What its `run` calls, in order, read from its file (`outlineWorkflow`), which the worker holds its runs to. */
-  outline: Outline;
-  /**
-   * What is wrong in its file, by position: what `lintWorkflow` finds (syntax, an import a
-   * workflow may not make, `instanceof` against the runtime's error classes, what the outline
-   * cannot draw in each `run`), read the one way the outline is, so a check sees what the
-   * worker refuses; and, at 1:1, an outline error that is the file's (it cannot be read, or holds
-   * no workflow of this name). A file defining several workflows gives each its problems. Empty
-   * for the built-in `drift`, which the package's tests hold to the lint.
-   */
-  problems: LintProblem[];
-  /**
-   * The text the outline's spans index into: the workflow's file, with `\n` line endings.
-   * Absent only when the outline is `{ error }`. Whole files: a server may keep it from clients.
-   */
-  source?: string;
-}
-
-/** What an operation is, read from its connector: enough to badge it and show its contract. */
-export interface OpEntry {
-  id: string;
-  vendor: string;
-  resource: string;
-  name: string;
-  effect: Effect;
-  idempotent: boolean;
-  description?: string;
-  /** How a scenario's steps name it: Cucumber expressions over its input's fields. */
-  phrases?: { given?: string; expect?: string };
-  /** Whether it may be called directly, outside a run (`isDirect`): the one rule, read here, never derived again. */
-  direct: boolean;
-  /** What a call sends, as JSON Schema (`io: "input"`: fields with defaults are optional). */
-  input: Record<string, unknown>;
-  /** What a call returns once its schema has parsed the vendor's reply (`io: "output"`). */
-  output: Record<string, unknown>;
-}
-
-/** Who a vendor is, from its connector's `VendorInfo`: enough to name it, show its logo and link to its connector. */
-export interface VendorEntry {
-  /** The connector's `title`, else the vendor's id. */
-  title: string;
-  /** The logo as `data:image/svg+xml` URLs, for an `<img>`: `dark` is for dark backgrounds. */
-  logo?: { src: string; dark?: string };
-  /** The connector's npm package name. */
-  package?: string;
-  /** The connector package's `homepage` from its package.json: where its code and README are, as an https URL. */
-  homepage?: string;
-  /** Whether the vendor's connector attaches a fake (`withSetup`), for sandbox runs. */
-  fake: boolean;
-}
-
-/** A resource type a connector declares with `defineResource`. */
-export interface ResourceTypeEntry {
-  /** `<vendor>.<type>`, such as `github.repository`. */
-  id: string;
-  vendor: string;
-  type: string;
-  title: string;
-  /** How a declared resource's identity is made, such as `name` or `repository_id:pattern`; absent when it is found only by its binding. */
-  identity?: string;
-  /** Its flagged fields, by dotted path. */
-  fields: ResourceFields;
-  /**
-   * Its state, as a read returns it, as JSON Schema (`io: "output"`), with `$id`
-   * `sanoma:resource-type/<id>`: the operations' contracts `$ref` it instead of repeating it.
-   */
-  schema: Record<string, unknown>;
-  /** Its operations' ids, sorted: `<id>.import` and `<id>.read`, and for a writable type its change operations. */
-  ops: string[];
-}
-
-/** A collection the config declares (`collection()`). */
-export interface CollectionEntry {
-  /** Its name: `<app>.<name>` for one an app's `resources/data.ts` declares. */
-  name: string;
-  /** The app whose folder declares it (`apps/<app>/resources/data.ts`); absent for one at the root. */
-  app?: string;
-  title?: string;
-  /** The field each record is found by. */
-  key: string;
-  /** Its fields as declared. */
-  fields: Record<string, Field>;
-  /** What `save` accepts, as JSON Schema, with `$id` `sanoma:collection/<name>`. */
-  record: Record<string, unknown>;
-  /** Its operations' ids: `data.<name>.get`, `.list`, `.save` and `.delete`. */
-  ops: string[];
-  /** Where `resources/data.ts` declares it, read as the data files are; absent for one declared elsewhere. */
-  declared?: DeclaredCollection;
-}
-
-/**
- * A plain-JSON description of what a config can do: its workflows, the operations they call,
- * and whether a policy gates them. The app server builds it from the config and sends it to the
- * browser, so the UI shows exactly what the worker enforces. Never written by hand.
- */
-export interface ConfigDescription {
-  secrets?: {
-    store: string;
-    namespace: string;
-    bindings: Record<string, { path: string; management: "sanoma" | "external"; store: string }>;
-  };
-  connections?: {
-    id: string;
-    vendor: string;
-    method: string;
-    scopes: readonly string[];
-    account?: string;
-    default: boolean;
-  }[];
-  appName: string;
-  /** The application version runs started now are stamped with. */
-  version: string;
-  workflows: WorkflowEntry[];
-  ops: OpEntry[];
-  /** Every vendor the operations are from, by its id (an `OpEntry`'s `vendor`). */
-  vendors: Record<string, VendorEntry>;
-  /** The resource types the connectors declare, by `id`. */
-  resourceTypes: ResourceTypeEntry[];
-  /** The config's collections, by name. */
-  collections: CollectionEntry[];
-  /**
-   * The resources the data files under `resources/` declare, by file and then in file order,
-   * less any with a problem and any that names one.
-   */
-  resources: DeclaredResource[];
-  /** Each binding in the lockfile (`LOCKFILE`) whose key no data file declares, as `readDataFiles` reports it. */
-  orphans: DataFiles["orphans"];
-  /**
-   * What is wrong in the data files (`readDataFiles`) and the apps (a folder of `apps/` that is no
-   * app, an `app.ts` that cannot be read, a collection or site at the root named as an app is),
-   * each at its file, relative to the root, line and column. A workflow's are on its entry.
-   */
-  problems: ResourceProblem[];
-  /** The apps under `apps/` (`readApps`), by name. Each workflow, collection and site an app declares names it (`app`). */
-  apps: AppEntry[];
-  /**
-   * `defined` when the root has `policies/**\/*.cedar` (else the policy is `allowAll`), with their
-   * `version`, or while they have `problems` (`policyProblems`), none: then every call and start is refused.
-   */
-  policy: { defined: boolean; version?: string; problems?: string[] };
-  /**
-   * The sites under `sites/`, by name, with what each calls (`readSites`), and its calls to what
-   * the config does not have as its problems; none when the root has no `sites/`.
-   */
-  sites: SiteEntry[];
-}
 
 /**
  * Describes a config. Throws what `startWorker` would refuse (see `resolveConfig`), except missing
@@ -267,31 +90,45 @@ export interface ConfigDescription {
 export function describeConfig(config: SanomaConfig): ConfigDescription {
   const resolved = resolveConfig(config);
   const vendors: Record<string, VendorEntry> = {};
+  // The variables each driver declares, without a value: their names and manuals alone.
+  const env = credentialsOf(resolved.driversByVendor, () => undefined);
   // A vendor whose operations are split over several connectors is named by the first; its
   // resource types are every connector's.
   for (const connector of config.connectors) {
     const { id, info } = connector[VENDOR];
-    vendors[id] ??= vendorEntry(id, info, resolved.fakes.has(id));
+    vendors[id] ??= vendorEntry(id, info, resolved.fakes.has(id), env.get(id));
   }
   const resources = resourceTypesOf(connectorsOf(config));
+  // The types a host's `source` names: the repositories a host clones.
+  const sources = new Set(
+    [...resources.values()].flatMap(({ host, fields }) => {
+      const named = host && fields.references?.[host.inputs.source]?.type;
+      return named === undefined ? [] : [named].flat();
+    }),
+  );
   // Each resource type's state is described once, on its entry, and referenced from its operations.
   const refs = new Map<z.ZodType, string>([...resources].map(([id, r]) => [r.schema, resourceTypeUri(id)]));
   const resourceTypes: ResourceTypeEntry[] = [...resources]
-    .map(([id, { vendor, type, title, identity, fields, schema, ops }]) => ({
-      id,
-      vendor,
-      type,
-      title,
-      identity,
-      fields,
-      schema: { $id: resourceTypeUri(id), ...toJsonSchema(schema, `${id} state`, "output") },
-      ops: Object.keys(ops)
-        .map((name) => `${id}.${name}`)
-        .toSorted(),
-    }))
+    .map(([id, spec]) => {
+      const { vendor, type, title, identity, fields, schema, ops } = spec;
+      const capabilities = CAPABILITIES.filter((c) => (c === "source" ? sources.has(id) : spec[c] !== undefined));
+      return {
+        id,
+        vendor,
+        type,
+        title,
+        identity,
+        fields,
+        schema: { $id: resourceTypeUri(id), ...toJsonSchema(schema, `${id} state`, "output") },
+        ops: Object.keys(ops)
+          .map((name) => `${id}.${name}`)
+          .toSorted(),
+        ...(capabilities.length ? { capabilities } : {}),
+      };
+    })
     .toSorted((a, b) => a.id.localeCompare(b.id));
 
-  const dataFiles = readDataFiles(resolved.root, connectorsOf(config), resources);
+  const dataFiles = loadDataFiles(resolved.root, connectorsOf(config), resources);
   const declared = new Map(dataFiles.collections.map((d) => [d.name, d]));
   const collections: CollectionEntry[] = [...resolved.collections.values()]
     .map((c) => ({
@@ -393,13 +230,14 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
       ...dataFiles.problems,
       ...appProblems,
       ...appClashes(apps, collections, sites),
-      ...domainProblems(resolved.root, dataFiles.resources, resources, sites, read),
+      ...domainProblems(dataFiles.resources, resources, sites),
     ],
     apps,
     policy: {
       defined: resolved.policy !== allowAll,
       ...(resolved.policy.version === undefined ? {} : { version: resolved.policy.version }),
       ...(resolved.policyProblems.length ? { problems: resolved.policyProblems } : {}),
+      files: resolved.root === undefined ? [] : readPolicyFiles(resolved.root),
     },
     sites,
   };
@@ -439,11 +277,9 @@ function appClashes(
  * only a public site at a domain, and one site at each.
  */
 function domainProblems(
-  root: string | undefined,
   declared: readonly DeclaredResource[],
   types: ReadonlyMap<string, Resource>,
   sites: readonly SiteEntry[],
-  read: (path: string) => SourceFile | string,
 ): ResourceProblem[] {
   const isPublic = new Set(sites.filter((site) => site.public).map((site) => site.name));
   const problems: ResourceProblem[] = [];
@@ -461,20 +297,9 @@ function domainProblems(
       const others = `${names.length === 2 ? "both " : ""}${names.slice(0, -1).join(", ")}`;
       messages.push(`${domain} is the domain of ${others} and ${names.at(-1)}`);
     }
-    if (root !== undefined) problems.push(...messages.map((message) => problemAt(root, resource, read, message)));
+    problems.push(...messages.map((message) => ({ ...resource.at, message })));
   }
   return problems;
-}
-
-/** `message` at a declaration's `export const`. */
-function problemAt(
-  root: string,
-  resource: DeclaredResource,
-  read: (path: string) => SourceFile | string,
-  message: string,
-): ResourceProblem {
-  const file = read(join(root, resource.file));
-  return { file: resource.file, ...(typeof file === "string" ? {} : file.at(resource.span[0])), message };
 }
 
 /**
@@ -512,7 +337,12 @@ function memoised<A, R>(fn: (arg: A) => R): (arg: A) => R {
 /** A logo's SVG markup as a `data:` URL, for an `<img>`. */
 export const svgDataUrl = (svg: string) => `data:image/svg+xml,${encodeURIComponent(svg.trim())}`;
 
-const vendorEntry = (id: string, info: VendorInfo | undefined, fake: boolean): VendorEntry => ({
+const vendorEntry = (
+  id: string,
+  info: VendorInfo | undefined,
+  fake: boolean,
+  env: readonly CredentialStatus[] | undefined,
+): VendorEntry => ({
   title: info?.title ?? id,
   ...(info?.logo && {
     logo: { src: svgDataUrl(info.logo.svg), ...(info.logo.dark && { dark: svgDataUrl(info.logo.dark) }) },
@@ -520,6 +350,13 @@ const vendorEntry = (id: string, info: VendorInfo | undefined, fake: boolean): V
   ...(info?.package && { package: info.package }),
   ...(info?.homepage && { homepage: info.homepage }),
   fake,
+  ...(env && {
+    credentials: env.map(({ name, description, optional }) => ({
+      name,
+      ...(description !== undefined && { description }),
+      ...(optional && { optional }),
+    })),
+  }),
 });
 
 /** Where a resource type's state schema is, for a `$ref`. */

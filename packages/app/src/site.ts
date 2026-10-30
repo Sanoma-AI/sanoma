@@ -3,6 +3,7 @@
 // router. Source, loaded only by Vite in a company's build; browser code, nothing server-side. A
 // route file still imports `createFileRoute` from `@tanstack/react-router` itself: the route
 // generator rewrites its path there, and only there.
+import { defineSite as declareSite } from "@sanoma-ai/workflows/shared";
 import type { IconName } from "lucide-react/dynamic";
 import { usePageLanguages } from "./lib/locales.ts";
 
@@ -111,26 +112,26 @@ export function useMessages<M>(messages: Messages<M>): M {
 
 /**
  * A site's `sites/<name>/site.ts` (optional; an app's `apps/<app>/sites/<name>/site.ts`): how the
- * app's bar and Sites page name it, whether it is public, and in which languages. `sanoma` reads
- * `title`, `icon`, `public`, `login` and `locales` without running the file.
+ * app's bar and Sites page name it, whether it is public, and in which languages. `sanoma` loads
+ * the file to read them, where `sanoma/site` gives `defineSite` alone: it imports that and its own
+ * relative files, and no top-level `await`.
  */
 export interface SiteDefinition {
   /** The site's name on the Sites page and in its crumb; the folder's name when not given. */
   title?: string;
   /**
    * Its tile's icon in the bar, and beside its title: a [Lucide](https://lucide.dev/icons) icon's
-   * name (`"calendar-days"`), a literal, read without running site.ts; left out, a globe for a
-   * public site and a window for one in the app.
+   * name (`"calendar-days"`); left out, a globe for a public site and a window for one in the app.
    */
   icon?: IconName;
-  /** Served at the root of its own domain to visitors, not people (a literal: read without running site.ts). */
+  /** Served at the root of its own domain to visitors, not people. */
   public?: boolean;
   /** The connector in sanoma.config.ts whose login half signs visitors in; left out, every page runs as `anonymous`. */
   login?: string;
   /**
    * A public site's languages, with no login: language tags (`"en"`, `"fr"`, `"pt-BR"`), the first
    * its default. Its pages under `routes/{-$locale}/` answer at `/…` in the default and at
-   * `/<locale>/…` in each other (a literal: read without running site.ts).
+   * `/<locale>/…` in each other.
    */
   locales?: readonly [string, ...string[]];
 }
@@ -144,6 +145,5 @@ export interface SiteDefinition {
 export function defineSite<const L extends readonly [string, ...string[]] = never>(
   site: SiteDefinition & { locales?: L },
 ): Readonly<SiteDefinition> & ([L] extends [never] ? unknown : { readonly locales: L }) {
-  return Object.freeze({ ...site }) as Readonly<SiteDefinition> &
-    ([L] extends [never] ? unknown : { readonly locales: L });
+  return declareSite(site) as Readonly<SiteDefinition> & ([L] extends [never] ? unknown : { readonly locales: L });
 }

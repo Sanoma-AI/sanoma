@@ -62,7 +62,8 @@ export {
   type SanomaConfig,
 } from "./config.ts";
 // An app's `app.ts` (`defineApp`), and where the launcher finds an app's workflows and data file.
-export { type AppDefinition, type AppEntry, defineApp, readApps } from "./apps.ts";
+export { type AppEntry, readApps } from "./apps.ts";
+export { type AppDefinition, defineApp } from "./definitions.ts";
 export { appFolders, APPS_DIR, filesUnder, kindDirs } from "./paths.ts";
 // `sanoma` itself (the people types' constructors) is at `@sanoma-ai/workflows/resources`, for data files.
 // `collection()` itself is at `@sanoma-ai/workflows/data`, for `resources/data.ts`; this tells one apart, as the launcher does.
@@ -79,6 +80,7 @@ export {
 } from "./apply.ts";
 export { CALL_WORKFLOW, CallInput } from "./call-workflow.ts";
 export {
+  ADMIN,
   type ChangeDecision,
   type ChangeDeploy,
   type ChangeEvent,
@@ -88,6 +90,8 @@ export {
   type ChangeReport,
   type ChangeState,
   type ChangeVerified,
+  isRules,
+  mayDeclarePeople,
   runtimeHold,
   touchesOf,
 } from "./change.ts";
@@ -102,6 +106,7 @@ export {
 } from "./drift.ts";
 // readResources, which parses data files, is at `@sanoma-ai/workflows/describe`.
 export type { DeclaredResource, ResourceProblem } from "./resources.ts";
+export { peopleSources } from "./resources.ts";
 export {
   allow,
   allowAll,

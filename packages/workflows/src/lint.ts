@@ -1,9 +1,8 @@
 import { realpathSync } from "node:fs";
 import { basename, dirname, join, relative, sep } from "node:path";
 import { byPosition, childrenOf, type LintProblem, type Node, parsed, type SourceFile } from "./ast.ts";
-import { COLLECTIONS_FILE, readDataFile } from "./datafile.ts";
 import { constsOf, outlineBody, workflowLiterals } from "./outline.ts";
-import { APPS_DIR, inside, nearestDir, RELATIVE } from "./paths.ts";
+import { APPS_DIR, COLLECTIONS_FILE, inside, nearestDir, RELATIVE } from "./paths.ts";
 // From src/ and from dist/ alike, the package's own oxlint.json: the one list of allowed names.
 import oxlint from "../oxlint.json" with { type: "json" };
 
@@ -168,20 +167,6 @@ export function lintWorkflow(input: string | SourceFile, path?: string): LintPro
   const outlined = { consts: constsOf(program), source: typeof input === "string" ? input : input.source };
   for (const { run } of workflowLiterals(program))
     for (const { start, message } of outlineBody(run, outlined).problems) problems.push({ ...at(start), message });
-  return byPosition(problems);
-}
-
-/**
- * Checks a data file under `resources/`: only named imports (a connector's constructors from its
- * `…/resources` entry, and resources from other data files inside the same `resources/`
- * directory), `export const <name> = <vendor>.<type>({ … })` with literal fields and names of
- * declared resources, and `export default [ … ]`. Each message says what to write instead.
- * It is the subset `readResources` reads (`readDataFile`), without the config: whether the
- * connector, the type and the values are known is the reader's to say.
- */
-export function lintResources(source: string, filename: string): LintProblem[] {
-  const { program, problems, at } = parsed(source, filename);
-  for (const p of readDataFile(program, filename).problems) problems.push({ ...at(p.start), message: p.message });
   return byPosition(problems);
 }
 

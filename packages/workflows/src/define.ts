@@ -1,4 +1,5 @@
 import type { ConnectionRef } from "./connection.ts";
+import type { WorkflowEntry } from "./description.ts";
 import { fileURLToPath } from "node:url";
 import { getCallSites } from "node:util";
 import { z } from "zod";
@@ -25,7 +26,8 @@ export const Principal: z.ZodType<Principal> = z.object({
   onBehalfOf: z.string().regex(/\S/, "onBehalfOf must not be blank").optional(),
 });
 
-export type Builtin = "approval" | "sleep" | "all";
+/** A built-in a workflow may call, as its description lists them. */
+export type Builtin = WorkflowEntry["builtins"][number];
 export type Use = Op | Builtin;
 
 /** Who may decide an approval: one person, by `Principal.id`, or anyone in a group, by `Principal.groups`. */

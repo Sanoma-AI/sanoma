@@ -30,6 +30,16 @@ export const publishedOf = (repo: string): Published =>
     ]),
   );
 
+/**
+ * Each content kind of `repo` (`readContent`, drafts kept), with the front matter keys its files
+ * hold, in the order they first appear: what `getConfig` says of `content/`.
+ */
+export const contentFields = (repo: string): { kind: string; fields: string[] }[] =>
+  Object.entries(readContent(repo, { drafts: true }).kinds).map(([kind, entries]) => ({
+    kind,
+    fields: [...new Set(entries.flatMap((entry) => Object.keys(entry.data)))],
+  }));
+
 /** What is wrong with a file or folder under `content/`, at its place. */
 export interface ContentProblem {
   /** From the repo's root, with `/`. */

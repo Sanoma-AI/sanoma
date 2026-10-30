@@ -108,11 +108,6 @@
           }
         ]
       }
-    },
-    {
-      "files": ["resources/**", "apps/*/resources/**"],
-      "jsPlugins": ["./dist/plugin.js"],
-      "rules": { "sanoma/data-file": "error" }
     }
   ]
 }

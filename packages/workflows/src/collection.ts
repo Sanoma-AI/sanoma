@@ -99,10 +99,18 @@ export function collection<
   const F extends Record<string, Field>,
   const K extends RequiredTextKeys<F>,
 >(declaration: { name: N; key: K; fields: F; title?: string }): Collection<N, F, K> {
+  // Frame 2 of `callerFile` is this function's caller: the data file.
+  return collectionIn(appOfFile(callerFile()), declaration);
+}
+
+/** `collection()` in the app `app` names (none for the root's): what the loader's `collection` calls, knowing the file itself. */
+export function collectionIn<
+  const N extends string,
+  const F extends Record<string, Field>,
+  const K extends RequiredTextKeys<F>,
+>(app: string | undefined, declaration: { name: N; key: K; fields: F; title?: string }): Collection<N, F, K> {
   checkCollection(declaration);
   const { key, fields, title } = declaration;
-  // Frame 2 of `callerFile` is this function's caller: the data file.
-  const app = appOfFile(callerFile());
   const name = qualified(app, declaration.name);
   const record = z.strictObject(
     Object.fromEntries(

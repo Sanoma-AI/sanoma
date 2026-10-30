@@ -95,7 +95,7 @@ function CollectionPage() {
           <span className="text-sm text-muted-foreground">
             Declared in{" "}
             <Link
-              to="/resources"
+              to="/hosting"
               search={{ resource: collection.declared.id }}
               className="font-mono text-xs underline-offset-4 hover:underline"
             >
