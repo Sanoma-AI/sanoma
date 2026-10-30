@@ -30,6 +30,12 @@ describe.runIf(Boolean(url))("Supabase Vault SQL boundary (actual extension)", (
     db = new Client({ connectionString: target.toString() });
     await db.connect();
     await db.query("CREATE EXTENSION IF NOT EXISTS supabase_vault CASCADE");
+    // A superuser would hide hosted Supabase privilege failures (notably FOR UPDATE).
+    const privileges = await db.query(
+      "SELECT rolsuper, has_table_privilege(current_user, 'vault.secrets', 'UPDATE') AS can_update FROM pg_roles WHERE rolname = current_user",
+    );
+    if (privileges.rows[0]?.rolsuper !== false || privileges.rows[0]?.can_update !== false)
+      throw new Error("Vault proof requires the standard non-superuser Supabase administrator without direct UPDATE");
     await db.query(readFileSync(new URL("../sql/vault.sql", import.meta.url), "utf8"));
     // Test-only generated identifiers and password; no customer material is interpolated.
     await db.query(`CREATE ROLE ${login} LOGIN PASSWORD '${password}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT`);
@@ -130,5 +136,34 @@ describe.runIf(Boolean(url))("Supabase Vault SQL boundary (actual extension)", (
     });
     expect((await store.read(address))?.value).toBe("outside");
     expect((await store.read(address))?.updatedBy).toBeUndefined();
+  });
+  it("waits for an ordinary Vault writer and rejects the version it replaced", async () => {
+    const address = { namespace: "check", path: "OUTSIDE_CONCURRENT" };
+    const first = await store.write(address, "before", { expectedVersion: null, by: "test" });
+    await db.query("BEGIN");
+    let attempted: Promise<unknown> | undefined;
+    try {
+      await db.query(
+        "SELECT vault.update_secret(id, 'outside concurrent') FROM vault.secrets WHERE name LIKE '%/OUTSIDE_CONCURRENT'",
+      );
+      // Attach the rejection handler immediately; the caller waits on Vault's table lock.
+      attempted = second
+        .write(address, "stale", { expectedVersion: first.version, by: "test" })
+        .catch((error: unknown) => error);
+      await expect
+        .poll(async () => {
+          const locks = await db.query(
+            "SELECT 1 FROM pg_locks WHERE database = (SELECT oid FROM pg_database WHERE datname = current_database()) AND relation = 'vault.secrets'::regclass AND NOT granted",
+          );
+          return locks.rowCount;
+        })
+        .toBe(1);
+      await db.query("COMMIT");
+      expect(await attempted).toMatchObject({ code: "conflict" });
+      expect((await store.read(address))?.value).toBe("outside concurrent");
+    } finally {
+      await db.query("ROLLBACK");
+      await attempted;
+    }
   });
 });

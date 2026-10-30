@@ -61,13 +61,20 @@ BEGIN
     RAISE EXCEPTION 'read only' USING ERRCODE = 'SV001';
   END IF;
   target_name := 'sanoma/' || scope.prefix::text || '/' || path;
-  -- Serialize absent-row creation as well as replacement across gateway clients.
-  -- Row locking below also coordinates with Vault's ordinary update/delete statements.
-  PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(target_name, 0));
-  IF external_id IS NOT NULL THEN
-    SELECT * INTO item FROM vault.secrets WHERE id = external_id FOR UPDATE;
+  -- Supabase's project administrator can DELETE but cannot UPDATE vault.secrets,
+  -- so SELECT FOR UPDATE is unavailable. Table locks use the existing DELETE
+  -- grant and also coordinate ordinary Vault writers outside this gateway.
+  -- Readers share a stable snapshot across the metadata and plaintext queries;
+  -- writers serialize absent-row creation and compare-and-set replacement.
+  IF operation = 'read' THEN
+    LOCK TABLE vault.secrets IN SHARE MODE;
   ELSE
-    SELECT * INTO item FROM vault.secrets WHERE name = target_name FOR UPDATE;
+    LOCK TABLE vault.secrets IN SHARE ROW EXCLUSIVE MODE;
+  END IF;
+  IF external_id IS NOT NULL THEN
+    SELECT * INTO item FROM vault.secrets WHERE id = external_id;
+  ELSE
+    SELECT * INTO item FROM vault.secrets WHERE name = target_name;
   END IF;
   IF item.id IS NOT NULL THEN
     current_row_state := encode(sha256(convert_to(item.secret || item.nonce::text || item.updated_at::text, 'UTF8')), 'hex');
