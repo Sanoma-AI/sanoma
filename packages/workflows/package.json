@@ -24,6 +24,7 @@
     "!src/AGENTS.md",
     "oxlint.json",
     "README.md",
+    "SECRET-SUPPORT.md",
     "LICENSE"
   ],
   "type": "module",
