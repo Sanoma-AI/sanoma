@@ -393,7 +393,7 @@ describe("Hosting", () => {
     expect(people).toContain('href="/hosting?resource=resources%2Fpeople.ts%23alice"');
   });
 
-  it("puts the repository the host clones, the database and the host in cards, every other resource under Other resources", async () => {
+  it("puts the repository the host clones, the database and the host in cards, every other resource under Other resources, and going live again until the host is applied", async () => {
     const live = mkdtempSync(join(tmpdir(), "sanoma-hosting-"));
     mkdirSync(join(live, "resources", "sanoma"), { recursive: true });
     writeFileSync(
@@ -439,6 +439,23 @@ export const host = testhost.app({ name: "acme-ops", source: repo, ref: "main", 
       expect(page).not.toContain(">1. Connect</h2>");
     } finally {
       await hosted.close();
+    }
+    // Going live part-way, its repository applied and its host not yet (a restart in between):
+    // its steps show again, since only they push the repository and apply the host.
+    writeFileSync(
+      join(live, "resources", "sanoma.lock.json"),
+      JSON.stringify({ "resources/sanoma/infra.ts#repo": { type: "github.repository", id: "R_kgDOrepo0001" } }),
+    );
+    const resumed = await startApp(
+      defineConfig({ ...config, connectors: [githubConnector, supabase, host.connector], root: live }),
+      { port: 0 },
+    );
+    try {
+      const page = await html("/hosting", resumed.url);
+      expect(page).toContain(">1. Connect</h2>");
+      expect(page).toContain("<h2>Repository</h2>");
+    } finally {
+      await resumed.close();
       rmSync(live, { recursive: true, force: true });
     }
   });

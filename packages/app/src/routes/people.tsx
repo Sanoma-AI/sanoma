@@ -293,17 +293,12 @@ function GroupsTable({ groups, open }: { groups: DeclaredResource[]; open: strin
   );
 }
 
-/** Why the form leaves who someone is to the file: the policy and the groups name them by it. */
-const IDENTITY = "Who it is to the policy and to the groups: change it in the file.";
-
 /**
  * The one open, over the list: its name, its file and export, its groups (written on each group,
- * not here), and its declaration's form, its identity read-only.
+ * not here), and its declaration's form (its identity read-only: `DeclarationForm`).
  */
 function Opened({ resource, show, people }: { resource: DeclaredResource; show: PeopleView; people: Directory }) {
   const type = people.types.find((t) => t.type === resource.type);
-  // The field `find` reads it by: `id`, or a group's `name`.
-  const identity = type?.identity?.split(":")[0];
   const groups = people.groupsOf.get(resource.name) ?? [];
   return (
     <FloatingCard role="region" aria-label={resource.name} className={cn(FLOAT, "order-first")}>
@@ -334,7 +329,7 @@ function Opened({ resource, show, people }: { resource: DeclaredResource; show: 
             <p className="text-sm text-muted-foreground">Written on each group: open it under Groups to change it.</p>
           </div>
         )}
-        <DeclarationForm resource={resource} type={type} fixed={identity ? { [identity]: IDENTITY } : undefined} />
+        <DeclarationForm resource={resource} type={type} />
       </CardContent>
     </FloatingCard>
   );

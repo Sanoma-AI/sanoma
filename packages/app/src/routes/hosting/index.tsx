@@ -65,7 +65,10 @@ export const Route = createFileRoute("/hosting/")({
     if (!import.meta.env.SSR) void loadCode();
     const config = await queryClient.query({ ...configQuery(), staleTime: "static" });
     const drift = driftOf(config);
-    await Promise.all([drift && loadLastCheck(queryClient, drift), !slotsOf(config).live && loadGoLive(queryClient)]);
+    await Promise.all([
+      drift && loadLastCheck(queryClient, drift),
+      slotsOf(config).goingLive && loadGoLive(queryClient),
+    ]);
   },
   component: HostingPage,
 });
@@ -82,7 +85,8 @@ type Slot = (typeof SLOTS)[number];
 /**
  * Which declared resource fills each slot: the first whose type meets its contract, the
  * repository being the one the host names (its `refs`) when the host names one. Whether the
- * company is declared live: a host or a database is.
+ * company is declared live (a host or a database is), and whether going live's steps show: while
+ * it is not, and while going live is between its first apply and its host's.
  */
 function slotsOf(config: ConfigDescription) {
   const capabilities = new Map(config.resourceTypes.map((t) => [t.id, t.capabilities ?? []]));
@@ -97,7 +101,14 @@ function slotsOf(config: ConfigDescription) {
       first(slot.capability);
     return resource ? [{ ...slot, resource }] : [];
   });
-  return { filled, live: host !== undefined || first("database") !== undefined };
+  const live = host !== undefined || first("database") !== undefined;
+  // Going live past its first apply (its repository bound, its host not yet): the push and the
+  // host's apply are still to do, and only going live's steps do them.
+  const byId = (id: string) => config.resources.find((r) => r.id === id);
+  const infraHost = byId(`${INFRA}#host`);
+  const pushing =
+    infraHost !== undefined && infraHost.binding === undefined && byId(`${INFRA}#repo`)?.binding !== undefined;
+  return { filled, live, goingLive: !live || pushing };
 }
 
 /** The built-in drift workflow's name, when the config has it: its connectors declare resource types. */
@@ -166,7 +177,7 @@ function problemsOf(problems: ResourceProblem[], report: DriftReport | undefined
  * database, host and wakeup on top, each with the latest drift check's verdict; then every other
  * resource (people are on People, collections on Data), the lockfile's orphans and what is wrong
  * in the files; and the declaration itself in its file. While no host and no database are
- * declared, going live's steps show first.
+ * declared, or going live has bound the repository but not yet the host, going live's steps show first.
  */
 function HostingPage() {
   const { data: config } = useSuspenseQuery(configQuery());
@@ -230,7 +241,7 @@ function Hosting({
     <>
       <CrumbHeader action={action} />
       {children}
-      {!slots.live && <GoLive />}
+      {slots.goingLive && <GoLive />}
       {slots.filled.length > 0 && (
         <div className="grid gap-(--gap-region) md:grid-cols-2 2xl:grid-cols-4">
           {slots.filled.map(({ title, capability, resource }) => (

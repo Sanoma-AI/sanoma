@@ -36,10 +36,11 @@ export const loadGoLive = (queryClient: QueryClient) =>
   ]);
 
 /**
- * Going live, Hosting's state while no host and no database are declared: connect GitHub and the
- * config's vendors, choose where the company goes, then apply the repository and the database,
- * push this repository to the new one, and apply the host. Each step shows once the one before is
- * done; it reads how far it is from the files, the lockfile and the runs, so it picks up where it was.
+ * Going live, on Hosting while no host and no database are declared, or once its repository is
+ * bound until its host is: connect GitHub and the config's vendors, choose where the company goes,
+ * then apply the repository and the database, push this repository to the new one, and apply the
+ * host. Each step shows once the one before is done; it reads how far it is from the files, the
+ * lockfile and the runs, so it picks up where it was.
  */
 export function GoLive() {
   const { data: status } = useSuspenseQuery(setupStatusQuery());

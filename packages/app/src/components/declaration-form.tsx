@@ -11,14 +11,15 @@ import { ApiError, type PatchRequest, type PatchResponse } from "../api.ts";
 import { buildInput, type Field, fieldsOf, initialValues } from "../form/schema.ts";
 import { errorsOf, FieldView, FormFoot, type SubmitErrors, useSchemaForm } from "../form/start-form.tsx";
 import { patchFn } from "../functions.ts";
-import { sourceQuery } from "../queries.ts";
+import { isPeople, sourceQuery } from "../queries.ts";
 import { Notice } from "./kit.tsx";
 
 // A declaration's form: its literal fields, drawn from its type's JSON Schema as a record form is
 // from a collection's, prefilled with what its data file declares, and Save writing the fields it
 // changed into the file (`patchFn`): a change for review with a remote, a commit without one. The
 // writer refuses a field the file computes (409, with its reason): that field turns read-only,
-// with the reason under it, and stays the code's to change.
+// with the reason under it, and stays the code's to change. A person's, agent's or group's
+// identity is read-only wherever the form shows (People, Hosting's Edit).
 
 /** The fields a form sets of a resource of `type`: its schema's, less those only the vendor sets or never reads back. */
 export function declarationFields(type: ResourceTypeEntry | undefined): Field[] | undefined {
@@ -32,58 +33,59 @@ export function declarationFields(type: ResourceTypeEntry | undefined): Field[] 
 const fieldAt = (fields: Field[], path: string) =>
   fields.find((f) => f.key === path || path.startsWith(`${f.key}.`))?.key;
 
-const NONE: Record<string, string> = {};
-
 /** Why a field that names another declared resource is not the form's to change. */
 const NAMES_A_RESOURCE = "Names another declared resource: change it in the file.";
 
+/** Why the form leaves who someone is to the file: the policy and the groups name them by it. */
+const IDENTITY = "Who it is to the policy and to the groups: change it in the file.";
+
 /**
- * The form over `resource`'s literal fields, by its `type`'s schema: `fixed` names fields shown
- * but not set here, each with why. Save sends only the fields that differ from what the file
- * declares; what it answers shows under the form, a change linking to its review.
+ * The form over `resource`'s literal fields, by its `type`'s schema, a person's, agent's or
+ * group's identity (the field `find` reads it by: `id`, or a group's `name`) shown but not set
+ * here. Save sends only the fields that differ from what the file declares; what it answers shows
+ * under the form, a change linking to its review.
  */
 export function DeclarationForm({
   resource,
   type,
-  fixed = NONE,
 }: {
-  resource: Pick<DeclaredResource, "at" | "file" | "desired" | "refs">;
+  resource: Pick<DeclaredResource, "at" | "file" | "desired" | "refs" | "vendor" | "type">;
   type: ResourceTypeEntry | undefined;
-  /** Fields shown read-only, by key, each with the line that says why. */
-  fixed?: Record<string, string>;
 }) {
   const fields = useMemo(() => declarationFields(type), [type]);
   if (!fields?.length) {
     return <Notice>Its type has no fields this form can show: change it in its file.</Notice>;
   }
-  return <SchemaDeclarationForm resource={resource} fields={fields} fixed={fixed} />;
+  const identity = isPeople(resource) ? type?.identity?.split(":")[0] : undefined;
+  return <SchemaDeclarationForm resource={resource} fields={fields} identity={identity} />;
 }
 
 function SchemaDeclarationForm({
   resource: { at, file, desired, refs },
   fields,
-  fixed,
+  identity,
 }: {
   resource: Pick<DeclaredResource, "at" | "file" | "desired" | "refs">;
   fields: Field[];
-  fixed: Record<string, string>;
+  /** The field shown read-only as who the resource is. */
+  identity: string | undefined;
 }) {
   const queryClient = useQueryClient();
   const patch = useServerFn(patchFn);
   const defaultValues = useMemo(() => initialValues(fields, desired), [fields, desired]);
   /** What the file declares, as the form reads its fields: what a Save compares against, moved on by each one. */
   const [declared, setDeclared] = useState(() => buildInput(fields, defaultValues).input);
-  /** The fields the writer refused, by key, each with its reason; or the whole declaration's. */
-  const [refused, setRefused] = useState<{ fields: Record<string, string>; whole?: string }>({ fields: {} });
+  /** The fields the writer refused, by key, each with its reason. */
+  const [refused, setRefused] = useState<Record<string, string>>({});
   const [saved, setSaved] = useState<PatchResponse>();
   const readOnly = useMemo(() => {
-    const why: Record<string, string> = { ...fixed };
+    const why: Record<string, string> = identity ? { [identity]: IDENTITY } : {};
     for (const path of Object.keys(refs)) {
       const key = fieldAt(fields, path);
       if (key) why[key] ??= NAMES_A_RESOURCE;
     }
-    return { ...why, ...refused.fields };
-  }, [fixed, refs, fields, refused.fields]);
+    return { ...why, ...refused };
+  }, [identity, refs, fields, refused]);
 
   const form = useSchemaForm(defaultValues, async (values): Promise<SubmitErrors> => {
     setSaved(undefined);
@@ -111,12 +113,10 @@ function SchemaDeclarationForm({
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         const key = err.body.field === undefined ? undefined : fieldAt(fields, err.body.field);
-        if (!key) {
-          setRefused((prev) => ({ ...prev, whole: err.body.error }));
-          return { form: err.body.error, fields: {} };
-        }
+        // Not a field's (the declaration, or the file not read or written this time): said, and Save stays.
+        if (!key) return { form: err.body.error, fields: {} };
         // Read-only from now on, with the reason under it, and back to what the file declares.
-        setRefused((prev) => ({ ...prev, fields: { ...prev.fields, [key]: err.body.error } }));
+        setRefused((prev) => ({ ...prev, [key]: err.body.error }));
         form.setFieldValue(key, defaultValues[key]);
         return { form: `Not saved: ${err.body.error}.`, fields: {} };
       }
@@ -127,8 +127,8 @@ function SchemaDeclarationForm({
     }
   });
 
-  // The whole declaration refused, or nothing in it the form's to set (a group: its name and its members).
-  const locked = refused.whole !== undefined || fields.every((f) => f.key in readOnly);
+  // Nothing in it the form's to set (a group: its name and its members).
+  const locked = fields.every((f) => f.key in readOnly);
   return (
     <form
       noValidate
