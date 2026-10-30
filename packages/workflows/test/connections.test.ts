@@ -2,10 +2,12 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
 import {
   defineAuthentication,
+  encodeCredentials,
+  authenticationCredentials,
   defineConnection,
   defineConnectionRule,
   defineConnector,
@@ -19,6 +21,7 @@ import {
   startWorker,
   withSetup,
   type ConnectionSnapshot,
+  type DriverFn,
 } from "../src/index.ts";
 import { connectionCatalog, ConnectionRegistry } from "../src/connection.ts";
 import { secret } from "../src/secret.ts";
@@ -31,6 +34,10 @@ const auth = defineAuthentication({
   version: 1,
   schema: z.string(),
   storage: { writable: false, maxBytes: 256, conditionalWrites: false },
+  verify: async (value) => {
+    const [account, scope] = value.split("|");
+    return { account: account!, scopes: scope ? [scope] : [] };
+  },
 });
 const ops = defineConnector("mail", {
   message: {
@@ -45,7 +52,11 @@ const ops = defineConnector("mail", {
 const mail = withSetup(ops, {
   authentication: { key: auth },
   driver: () =>
-    defineDriver(ops, { message: { read: async (_input, call) => ({ account: call.connection!.account }) } }),
+    defineDriver(
+      ops,
+      { message: { read: async (_input, call) => ({ account: call.connection!.account }) } },
+      { authentication: ["key"] },
+    ),
 });
 const support = defineConnection(mail, {
   name: "support",
@@ -83,6 +94,8 @@ const config = () => ({
   ledger: memoryLedger(),
   workflows: [probe],
 });
+const mailWith = (read: DriverFn<{ id: string }, { account: string }>) =>
+  withSetup(mail, { driver: () => defineDriver(ops, { message: { read } }, { authentication: ["key"] }) });
 
 async function bind(
   client: SanomaClient,
@@ -90,6 +103,9 @@ async function bind(
   account = "support@example.test",
   expectedRevision: string | null = null,
 ) {
+  await client.setSecret(connection.credentials!.$secret, encodeCredentials(auth, `${account}|read|private-key`), {
+    by: "alice",
+  });
   return (await client.call(
     "sanoma.connection.bind",
     { connection, account, scopes: ["read"], expectedRevision },
@@ -98,6 +114,213 @@ async function bind(
 }
 
 describe("named connection identity", () => {
+  it("rejects expiry and verifier exceptions without revealing their credential values", async () => {
+    await clear();
+    const invoked = vi.fn<DriverFn<{ id: string }, { account: string }>>(async () => ({ account: "should-not-run" }));
+    const connector = withSetup(mailWith(invoked), {
+      authentication: {
+        key: defineAuthentication({
+          kind: "api-key",
+          version: 1,
+          schema: z.string(),
+          storage: { writable: false, maxBytes: 256, conditionalWrites: false },
+          verify: async (key) => {
+            if (key.includes("exception")) throw new Error(`SDK verifier: ${key}`);
+            return { account: "support@example.test", scopes: ["read"], expiresAt: Date.now() - 1 };
+          },
+        }),
+      },
+    });
+    const client = await SanomaClient.connect({ ...config(), connectors: [connector] });
+    try {
+      await bind(client);
+      for (const key of ["expired-private-key", "exception-private-key"]) {
+        await client.setSecret("SUPPORT", encodeCredentials(auth, key), { by: "alice" });
+        const error = await client
+          .call("mail.message.read", { id: "one" }, { actor: "alice", connection: support })
+          .catch((e: unknown) => e);
+        expect(error).toMatchObject({ message: expect.stringContaining("Secret store: denied") });
+        expect((error as Error).cause).toMatchObject({ name: "SecretStoreError" });
+        expect((error as Error).cause).not.toHaveProperty("cause");
+        expect(JSON.stringify(error)).not.toContain("private-key");
+      }
+      expect(invoked).not.toHaveBeenCalled();
+    } finally {
+      await client.close();
+    }
+  });
+  it("rechecks disconnection after a slow credential verification", async () => {
+    await clear();
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const invoked = vi.fn<DriverFn<{ id: string }, { account: string }>>(async () => ({ account: "should-not-run" }));
+    const connector = withSetup(mailWith(invoked), {
+      authentication: {
+        key: defineAuthentication({
+          kind: "api-key",
+          version: 1,
+          schema: z.string(),
+          storage: { writable: false, maxBytes: 256, conditionalWrites: false },
+          verify: async () => {
+            entered.resolve();
+            await release.promise;
+            return { account: "support@example.test", scopes: ["read"] };
+          },
+        }),
+      },
+    });
+    const client = await SanomaClient.connect({ ...config(), connectors: [connector] });
+    let pending: Promise<unknown> | undefined;
+    try {
+      const bound = await bind(client);
+      pending = client.call("mail.message.read", { id: "one" }, { actor: "alice", connection: support });
+      const rejected = pending.catch((error: unknown) => error);
+      await entered.promise;
+      await client.call(
+        "sanoma.connection.disconnect",
+        { connection: support, expectedRevision: bound.revision },
+        { actor: "alice" },
+      );
+      release.resolve();
+      expect(await rejected).toMatchObject({ message: expect.stringContaining("disconnected") });
+      expect(invoked).not.toHaveBeenCalled();
+    } finally {
+      release.resolve();
+      await pending?.catch(() => undefined);
+      await client.close();
+    }
+  });
+  it("isolates concurrent account calls and lets an in-flight call finish on its original version", async () => {
+    await clear();
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const seen: { id: string; key: string; version: string | undefined }[] = [];
+    const connector = mailWith(async (input, call) => {
+      const key = authenticationCredentials("key", auth, call);
+      seen.push({ id: input.id, key, version: call.authentication?.credentialVersion });
+      if (input.id === "held") {
+        entered.resolve();
+        await release.promise;
+      }
+      expect(authenticationCredentials("key", auth, call)).toBe(key);
+      return { account: key.split("|")[0]! };
+    });
+    const client = await SanomaClient.connect({ ...config(), connectors: [connector] });
+    let held: Promise<unknown> | undefined;
+    try {
+      await bind(client);
+      await bind(client, sales, "sales@example.test");
+      held = client.call("mail.message.read", { id: "held" }, { actor: "alice", connection: support });
+      await entered.promise;
+      await client.setSecret("SUPPORT", encodeCredentials(auth, "support@example.test|read|rotated-private"), {
+        by: "alice",
+      });
+      expect(
+        await Promise.all(
+          [support, sales].map((connection) =>
+            client.call("mail.message.read", { id: "next" }, { actor: "alice", connection }),
+          ),
+        ),
+      ).toEqual([{ account: "support@example.test" }, { account: "sales@example.test" }]);
+      release.resolve();
+      expect(await held).toEqual({ account: "support@example.test" });
+      expect(seen.map((s) => s.key)).toEqual(
+        expect.arrayContaining([
+          "support@example.test|read|private-key",
+          "support@example.test|read|rotated-private",
+          "sales@example.test|read|private-key",
+        ]),
+      );
+      expect(seen.find((s) => s.id === "held")!.version).not.toBe(seen.find((s) => s.key.includes("rotated"))!.version);
+    } finally {
+      release.resolve();
+      await held?.catch(() => undefined);
+      await client.close();
+    }
+  });
+  it("refuses replacement credentials for a different account or different grants", async () => {
+    await clear();
+    const invoked = vi.fn<DriverFn<{ id: string }, { account: string }>>(async () => ({ account: "should-not-run" }));
+    const client = await SanomaClient.connect({ ...config(), connectors: [mailWith(invoked)] });
+    try {
+      await bind(client);
+      for (const key of ["sales@example.test|read|private", "support@example.test|write|private"]) {
+        await client.setSecret("SUPPORT", encodeCredentials(auth, key), { by: "alice" });
+        await expect(
+          client.call("mail.message.read", { id: "one" }, { actor: "alice", connection: support }),
+        ).rejects.toThrow("Secret store: denied");
+      }
+      expect(invoked).not.toHaveBeenCalled();
+    } finally {
+      await client.close();
+    }
+  });
+  it("reads no credential before policy allows the call, and reads only the selected bundle afterwards", async () => {
+    await clear();
+    const cfg = config();
+    const read = vi.spyOn(cfg.secrets.store, "read");
+    const root = tree(`connection-reads-${randomUUID()}`, {
+      "policies/accounts.cedar": `forbid(principal, action == Sanoma::Action::"mail.message.read", resource) when { context has connection && context.connection.account == "sales@example.test" };`,
+    });
+    const client = await SanomaClient.connect({ ...cfg, root });
+    try {
+      await bind(client);
+      await bind(client, sales, "sales@example.test");
+      read.mockClear();
+      await expect(
+        client.call("mail.message.read", { id: "one" }, { actor: "alice", connection: sales }),
+      ).rejects.toMatchObject({ code: "policy_denied" });
+      expect(read).not.toHaveBeenCalled();
+      await client.call("mail.message.read", { id: "one" }, { actor: "alice", connection: support });
+      expect(read.mock.calls.map(([address]) => address.path)).toEqual(["SUPPORT"]);
+    } finally {
+      await client.close();
+    }
+  });
+  it("rejects unmigrated drivers without reading credentials or using their environment", async () => {
+    await clear();
+    const cfg = config();
+    const read = vi.spyOn(cfg.secrets.store, "read");
+    const invoked = vi.fn<DriverFn<{ id: string }, { account: string }>>(async () => ({ account: "wrong" }));
+    const unsupported = withSetup(mail, { driver: () => defineDriver(ops, { message: { read: invoked } }) });
+    const client = await SanomaClient.connect({ ...cfg, connectors: [unsupported] });
+    try {
+      await bind(client);
+      read.mockClear();
+      await expect(
+        client.call("mail.message.read", { id: "one" }, { actor: "alice", connection: support }),
+      ).rejects.toThrow("does not support");
+      expect(read).not.toHaveBeenCalled();
+      expect(invoked).not.toHaveBeenCalled();
+    } finally {
+      await client.close();
+    }
+  });
+  it("withholds other accounts' secrets and removes credentials from driver exceptions", async () => {
+    await clear();
+    const cfg = config();
+    const read = vi.spyOn(cfg.secrets.store, "read");
+    const connector = mailWith(async (input, call) => {
+      if (input.id === "another") await call.secrets.get("SALES");
+      throw new Error(`SDK request: ${authenticationCredentials("key", auth, call)}`);
+    });
+    const client = await SanomaClient.connect({ ...cfg, connectors: [connector] });
+    try {
+      await bind(client);
+      read.mockClear();
+      for (const id of ["another", "exception"]) {
+        const error = await client
+          .call("mail.message.read", { id }, { actor: "alice", connection: support })
+          .catch((e: unknown) => e);
+        expect(error).toMatchObject({ message: "mail operation failed" });
+        expect(error).not.toHaveProperty("cause");
+        expect(JSON.stringify(error)).not.toContain("private-key");
+      }
+      expect(read.mock.calls.map(([address]) => address.path)).toEqual(["SUPPORT", "SUPPORT"]);
+    } finally {
+      await client.close();
+    }
+  });
   it("rejects duplicate names/defaults, wrong methods and wrong account/scope constraints", async () => {
     expect(() => connectionCatalog([mail], [support, support])).toThrow("duplicate");
     expect(() =>
@@ -221,6 +444,9 @@ describe("named connection identity", () => {
         { actor },
       )) as ConnectionSnapshot;
       const ref = { $connection: created.id, vendor: "mail" };
+      await client.setSecret(created.credentials!.$secret, encodeCredentials(auth, "customer-account||private-key"), {
+        by: "alice",
+      });
       expect(await client.call("mail.message.read", { id: "one" }, { actor, connection: ref })).toEqual({
         account: "customer-account",
       });
@@ -268,6 +494,9 @@ describe("named connection identity", () => {
     await clear();
     const r = registry();
     const first = await r.bind(support, "one", ["read"], null, "alice");
+    await expect(
+      r.assertCurrent({ ...first, account: "two", credentials: { $secret: "SALES" } }, "alice"),
+    ).rejects.toThrow("changed after authorization");
     await r.bind(support, "two", ["read"], first.revision, "alice");
     await expect(r.assertCurrent(first, "alice")).rejects.toThrow("changed after authorization");
     await expect(r.bind(support, "three", ["read"], first.revision, "alice")).rejects.toThrow("reload");
@@ -308,6 +537,12 @@ describe("named connection identity", () => {
       expect((await client.ledger(run)).find((r) => r.type === "op.called")).toMatchObject({
         connection: { id: "mail/support", account: "support@example.test" },
       });
+      const checkpoints = await (
+        await pool.db()
+      ).query("SELECT to_jsonb(o) AS record FROM dbos.operation_outputs o WHERE workflow_uuid=$1", [run]);
+      expect(checkpoints.rowCount).toBeGreaterThan(0);
+      expect(JSON.stringify(checkpoints.rows)).not.toContain("private-key");
+      expect(JSON.stringify(await client.ledger(run))).not.toContain("private-key");
     } finally {
       await worker?.stop();
       await client.close();
@@ -359,23 +594,27 @@ describe("resource account selection", () => {
     });
     const operations = defineConnector("accounts", { box }, { package: "@test/accounts" });
     const created: string[] = [];
-    const driver = defineDriver(operations, {
-      box: {
-        import: async (input, call) => ({
-          id: input.id,
-          gone: !created.includes(call.connection!.account),
-          ...(created.includes(call.connection!.account) && { state: { name: "same", id: "object" } }),
-        }),
-        read: async (input) => ({ id: input.id, gone: true }),
-        plan: async () => ({ action: "create" as const, planned: { name: "same" }, unknown: [], replace: [] }),
-        create: async (input, call) => {
-          created.push(call.connection!.account);
-          return { id: "object", state: { name: String(input.desired.name), id: "object" } };
+    const driver = defineDriver(
+      operations,
+      {
+        box: {
+          import: async (input, call) => ({
+            id: input.id,
+            gone: !created.includes(call.connection!.account),
+            ...(created.includes(call.connection!.account) && { state: { name: "same", id: "object" } }),
+          }),
+          read: async (input) => ({ id: input.id, gone: true }),
+          plan: async () => ({ action: "create" as const, planned: { name: "same" }, unknown: [], replace: [] }),
+          create: async (input, call) => {
+            created.push(call.connection!.account);
+            return { id: "object", state: { name: String(input.desired.name), id: "object" } };
+          },
+          update: async (input) => ({ id: input.id, state: { name: String(input.desired.name) } }),
+          delete: async (input) => ({ id: input.id, gone: true as const }),
         },
-        update: async (input) => ({ id: input.id, state: { name: String(input.desired.name) } }),
-        delete: async (input) => ({ id: input.id, gone: true as const }),
       },
-    });
+      { authentication: ["key"] },
+    );
     const connector = withSetup(operations, { authentication: { key: auth }, driver: () => driver });
     const a = defineConnection(connector, { name: "one", method: "key", credentials: secret("FIRST") });
     const b = defineConnection(connector, { name: "two", method: "key", credentials: secret("SECOND") });
@@ -398,6 +637,8 @@ describe("resource account selection", () => {
     const client = await SanomaClient.connect(cfg);
     let worker: Awaited<ReturnType<typeof startWorker>> | undefined;
     try {
+      await client.setSecret("FIRST", encodeCredentials(auth, "one||private-key"), { by: "alice" });
+      await client.setSecret("SECOND", encodeCredentials(auth, "two||private-key"), { by: "alice" });
       const first = (await client.call(
         "sanoma.connection.bind",
         { connection: a, account: "one", scopes: [], expectedRevision: null },

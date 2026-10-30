@@ -32,6 +32,8 @@ export interface DescribeFeaturesOptions {
    * characters a `-` (`Publish draft` plays `publish-draft.json`).
    */
   replay: ReplayOptions;
+  /** Explicit test credentials for the transport under test, supplied afresh for each call and never recorded. */
+  driverContext?: () => Pick<CallContext, "authentication" | "connection">;
 }
 
 /**
@@ -135,7 +137,7 @@ const fixtureOf = (name: string) =>
  */
 export async function describeFeatures(
   connector: Connector<any, any>,
-  { features, replay: options }: DescribeFeaturesOptions,
+  { features, replay: options, driverContext }: DescribeFeaturesOptions,
 ) {
   const resolve = () => resolveConfig({ workflows: [], connectors: [connector], ledger: memoryLedger() });
   // One scope, so Cucumber's library is built once; each test makes its own fake, or driver.
@@ -169,8 +171,19 @@ export async function describeFeatures(
         }
         play(fixture);
         // A driver of its own, as each run's would be: one that keeps a session starts without one.
-        const driver = resolve().driversByVendor.get(vendor);
-        if (!driver) throw new Error(`${vendor}'s connector attaches no driver`);
+        const original = resolve().driversByVendor.get(vendor);
+        if (!original) throw new Error(`${vendor}'s connector attaches no driver`);
+        const driver = driverContext
+          ? {
+              ...original,
+              ops: Object.fromEntries(
+                Object.entries(original.ops).map(([key, fn]) => [
+                  key,
+                  (input: unknown, call: CallContext) => fn(input, { ...call, ...driverContext() }),
+                ]),
+              ),
+            }
+          : original;
         // What the scenario made is deleted after it, whether it passed or not: live, off the
         // account; replaying, from the recording, which holds those deletes.
         const { driver: noting, deleteMade } = deletingAfter(scope, driver);

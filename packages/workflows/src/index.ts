@@ -285,7 +285,10 @@ export {
   checkAuthenticationStore,
   encodeCredentials,
   decodeCredentials,
+  authenticationCredentials,
   type Authentication,
+  type AuthenticationIdentity,
+  type CallAuthentication,
 } from "./authentication.ts";
 export { checkSecretStore, type SecretStoreCheck } from "./secret-store-check.ts";
 

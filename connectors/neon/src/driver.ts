@@ -1,21 +1,14 @@
-import { defineDriver, DriverError, errorMessage } from "@sanoma-ai/workflows";
+import { authenticationCredentials, defineDriver, DriverError, errorMessage } from "@sanoma-ai/workflows";
 import type { Api, BranchCreateRequest } from "@neondatabase/api-client";
 import { z } from "zod";
 import { neonOps } from "./connector.ts";
-import { type NeonApi, neonOperations, refused, retryable } from "./operations.ts";
+import { type NeonApi, neonOperations, retryable } from "./operations.ts";
+import { neonApiKey } from "./authentication.ts";
 
 export interface NeonDriverOptions {
   /** How long one request to Neon may take, in milliseconds. Default 30 000. */
   timeoutMs?: number;
 }
-
-/** The environment variable the driver reads, on every call. */
-const env = z.object({
-  NEON_API_KEY: z
-    .string()
-    .min(1)
-    .describe("an organization API key, from console.neon.tech, Organization settings, API keys"),
-});
 
 /**
  * `@neondatabase/api-client`, loaded at the first call: a worker that never calls Neon (or the
@@ -66,16 +59,12 @@ function failure(where: string, error: unknown, timeoutMs: number): DriverError 
 const isAbsent = (error: unknown) =>
   isAxiosFailure(error) && error.response?.status === 404 && Problem.safeParse(error.response.data).success;
 
-/** Neon's API through the SDK with the key in `NEON_API_KEY`, read on each call: each failure a `DriverError`. */
-function sdkApi(timeoutMs: number): NeonApi {
-  /** The client for the last key read, made again only when `NEON_API_KEY` changes. */
-  let client: { key: string; api: Api<unknown> } | undefined;
+/** One invocation's SDK client: no key, client or session is shared with another call. */
+function sdkApi(timeoutMs: number, key: string): NeonApi {
+  let client: Promise<Api<unknown>> | undefined;
   const connect = async () => {
-    const key = process.env.NEON_API_KEY;
-    if (!key) throw refused(`NEON_API_KEY is not set (${env.shape.NEON_API_KEY.description})`);
-    const { createApiClient } = await sdk();
-    if (client?.key !== key) client = { key, api: createApiClient({ apiKey: key, timeout: timeoutMs }) };
-    return client.api;
+    client ??= sdk().then(({ createApiClient }) => createApiClient({ apiKey: key, timeout: timeoutMs }));
+    return client;
   };
   /** One request: its reply's `data`, every failure a `DriverError`. */
   const send = async <T>(where: string, request: (api: Api<unknown>) => Promise<{ data: T }>): Promise<T> => {
@@ -146,9 +135,13 @@ function sdkApi(timeoutMs: number): NeonApi {
 
 /**
  * Neon's projects, branches and computes through `@neondatabase/api-client`, Neon's own SDK, with
- * the organization API key in `NEON_API_KEY`, read on every call. See the README.
+ * the selected named connection's organization key. See the README.
  */
 export function neonDriver(options: NeonDriverOptions = {}) {
   const timeoutMs = options.timeoutMs ?? 30_000;
-  return defineDriver(neonOps, neonOperations(sdkApi(timeoutMs)), { env });
+  return defineDriver(
+    neonOps,
+    (call) => neonOperations(sdkApi(timeoutMs, authenticationCredentials("apiKey", neonApiKey, call).apiKey)),
+    { authentication: ["apiKey"] },
+  );
 }

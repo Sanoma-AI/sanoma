@@ -1,6 +1,6 @@
 {
   "name": "@sanoma-ai/connector-neon",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Neon serverless Postgres for Sanoma: a project as the company's database, which pauses and branches",
   "keywords": [
     "connector",
