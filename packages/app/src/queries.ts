@@ -15,7 +15,7 @@ import {
   type ListQuery,
   type Saved,
 } from "@sanoma-ai/workflows/shared";
-import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { type QueryClient, queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { linkOptions, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -74,7 +74,10 @@ export const api: Api = createApi((request) => callFn({ data: request }));
 /** How often the runs and a run's detail refresh while a page shows them. */
 export const POLL_MS = 2_000;
 
-/** The config cannot change while the app runs. The root route loads it for every page. */
+/**
+ * The config, as the app describes the files when asked (`AppContext.description`). The root
+ * route loads it for every page; a page that writes a file refetches it (`refreshWritten`).
+ */
 export const configQuery = () =>
   queryOptions({ queryKey: ["config"], queryFn: () => getConfig(), staleTime: Number.POSITIVE_INFINITY });
 
@@ -88,6 +91,12 @@ export const sourceQuery = (file: string) =>
     queryFn: () => getSource({ data: { file } }),
     staleTime: Number.POSITIVE_INFINITY,
   });
+
+/** After `file` is written in the checkout: refetches it, and the description the app makes again from it. */
+export const refreshWritten = (queryClient: QueryClient, file: string) =>
+  Promise.all(
+    [sourceQuery(file).queryKey, configQuery().queryKey].map((queryKey) => queryClient.invalidateQueries({ queryKey })),
+  );
 
 /** The file a workflow's outline was read from; none when it was read from `run`'s text, or not at all. */
 export const workflowFile = (workflow: Pick<WorkflowEntry, "outline">): string | undefined =>

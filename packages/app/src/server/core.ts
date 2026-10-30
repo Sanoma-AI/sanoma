@@ -726,13 +726,13 @@ const RunsLimit = RunsQuery.pick({ limit: true });
  * only the result of a run it started: its other reads are `policy_denied`.
  */
 export async function callApi(app: AppContext, actor: Principal, { name, input, id }: CallRequest): Promise<unknown> {
-  const { client, description, resolved } = app;
+  const { client, resolved } = app;
   if (resolved.ops.has(name)) {
     return client.call(name, input ?? {}, { actor, ...(id === undefined ? {} : { id }) });
   }
   const [api, method = "start", ...rest] = name.split(".");
   // Two workflows of one api name (a problem describeConfig reports) are neither.
-  const named = rest.length ? [] : description.workflows.filter((wf) => apiNameOf(wf.name) === api);
+  const named = rest.length ? [] : app.description.workflows.filter((wf) => apiNameOf(wf.name) === api);
   const entry = named.length === 1 ? named[0] : undefined;
   const visitor = isVisitor(actor);
   if (!entry || (visitor && entry.builtin)) throw notCallable(name);

@@ -2,7 +2,7 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { CatchBoundary, createFileRoute, type ErrorComponentProps, Link } from "@tanstack/react-router";
 import type { PreviewAnswer } from "@sanoma-ai/workflows";
 import type { ConfigDescription, Span } from "@sanoma-ai/workflows/describe";
-import { ANONYMOUS, approverLabel, errorMessage } from "@sanoma-ai/workflows/shared";
+import { ANONYMOUS, appOfPath, approverLabel, errorMessage } from "@sanoma-ai/workflows/shared";
 import { Fragment, Suspense, useRef, useState } from "react";
 import { Button } from "#/components/ui/button.tsx";
 import { Card, CardHeader } from "#/components/ui/card.tsx";
@@ -38,9 +38,6 @@ export const Route = createFileRoute("/permissions")({
   },
   component: PermissionsPage,
 });
-
-/** The app a policy file is in: `<app>` under `apps/<app>/`, none at the root. */
-const appOfFile = (file: string) => /^apps\/([^/]+)\//.exec(file)?.[1];
 
 /**
  * The grid's rows in one folder (`app`, none for the root): its workflows, and the operations
@@ -79,7 +76,7 @@ function PermissionsPage() {
   const { data } = useSuspenseQuery(permissionsQuery());
   const { data: config } = useSuspenseQuery(configQuery());
   // The policy files by the folder they are in, `?app=` picking one: its files, and the grid's rows in it.
-  const groups = appGroupsOf(config.apps, data.files, (f) => appOfFile(f.file));
+  const groups = appGroupsOf(config.apps, data.files, (f) => appOfPath(f.file));
   const { tab, shown, headed } = pickGroup(groups, app);
   const rows = tab === undefined ? data : rowsIn(data, config, tab === ROOT_APP ? undefined : tab);
   // The cell shown, kept while the sheet closes so its content stays through the animation.

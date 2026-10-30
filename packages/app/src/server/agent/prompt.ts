@@ -42,15 +42,15 @@ How you work:
 ${COMMON_RULES}`;
 
 /** Who the agent acts for, in which company and chat. */
-const actingFor = ({ description }: AppContext, principal: Principal, chat: Chat) =>
-  `The company: ${description.appName}. You act for ${principal.id}. This chat is ${chat.id}.`;
+const actingFor = (appName: string, principal: Principal, chat: Chat) =>
+  `The company: ${appName}. You act for ${principal.id}. This chat is ${chat.id}.`;
 
 /**
  * A coding agent's instructions for `principal`'s turn in `chat`: the rules, who it acts for, and
  * the chat's earlier messages (`history`, their text), since each turn starts a new session of it.
  */
 export function harnessInstructions(app: AppContext, principal: Principal, chat: Chat, history: ChatMessage[]): string {
-  const sections = [HARNESS_RULES, actingFor(app, principal, chat)];
+  const sections = [HARNESS_RULES, actingFor(app.description.appName, principal, chat)];
   // Whole messages, the latest first, until the limit (the latest one always).
   const said: string[] = [];
   let size = 0;
@@ -75,7 +75,7 @@ function spoken(message: ChatMessage): string {
 /** The loop's instructions for `principal`'s turn in `chat`. */
 export async function instructions(app: AppContext, principal: Principal, chat: Chat): Promise<string> {
   const { description } = app;
-  const sections = [RULES, actingFor(app, principal, chat)];
+  const sections = [RULES, actingFor(description.appName, principal, chat)];
   const [guide, drafts] = await Promise.all([companyGuide(app), openDrafts(app, principal)]);
   if (guide) sections.push(`The company's AGENTS.md:\n\n${guide}`);
   const byVendor = Map.groupBy(description.ops, (op) => op.vendor);

@@ -18,7 +18,7 @@ import {
 import { isDirect } from "./direct.ts";
 import { type CredentialStatus, credentialsOf } from "./env.ts";
 import { lintWorkflow } from "./lint.ts";
-import { stampOf, stampsOf } from "./load.ts";
+import { fresh, stampOf, stampsOf } from "./load.ts";
 import { LOCKFILE } from "./lockfile.ts";
 import { VENDOR, type VendorInfo } from "./op.ts";
 import { outlineWithSource } from "./outline.ts";
@@ -92,16 +92,19 @@ export type { ApplyInput, ApplyPlan, ApplyReport, ApplyResult, PlanAnswer, PlanS
  */
 export function liveDescription(config: SanomaConfig): () => ConfigDescription {
   const root = rootOf(config);
+  if (root === undefined) {
+    const description = describeConfig(config);
+    return () => description;
+  }
   /** The description and what it read; `last`, kept (and said) when describing again throws. */
   const described = (last?: ConfigDescription) => {
     // The folders and the lockfile as they are before describing, so a change while it reads is seen after.
-    const extra =
-      root === undefined
-        ? []
-        : [LOCKFILE, APPS_DIR, ...kindDirs(root, "sites"), ...kindDirs(root, "resources")].map((path) => {
-            const at = resolve(root, path);
-            return [at, stampOf(at)] as const;
-          });
+    const extra = [
+      resolve(root, LOCKFILE),
+      resolve(root, APPS_DIR),
+      ...kindDirs(root, "sites"),
+      ...kindDirs(root, "resources"),
+    ].map((path) => [path, stampOf(path)] as const);
     let description: ConfigDescription;
     try {
       description = describeConfig(config);
@@ -112,11 +115,11 @@ export function liveDescription(config: SanomaConfig): () => ConfigDescription {
       );
       description = last;
     }
-    return { description, stamps: new Map([...extra, ...(root === undefined ? [] : stampsOf(root))]) };
+    return { description, stamps: new Map([...extra, ...stampsOf(root)]) };
   };
   let now = described();
   return () => {
-    if (![...now.stamps].every(([path, stamp]) => stampOf(path) === stamp)) now = described(now.description);
+    if (!fresh(now.stamps)) now = described(now.description);
     return now.description;
   };
 }

@@ -154,15 +154,11 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   // Each public site's domain, as `publicHosts` set it on the description made at boot: set again
   // on each one made after, which `readSites` makes without it.
   const domains = new Map(description.sites.flatMap((site) => (site.domain ? [[site.name, site.domain]] : [])));
-  let withDomains = description;
   const current = (): ConfigDescription => {
     const now = describe();
-    if (now !== withDomains) {
-      for (const site of now.sites) {
-        const domain = domains.get(site.name);
-        if (domain !== undefined) site.domain = domain;
-      }
-      withDomains = now;
+    for (const site of now.sites) {
+      const domain = domains.get(site.name);
+      if (domain !== undefined) site.domain = domain;
     }
     return now;
   };
@@ -293,15 +289,14 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   }
   const responder = loaded.value;
   const client = connected.value;
+  // What every context shares; each defines its own `description` getter, which a spread would read once.
+  const shared = { resolved, place: placeOf(resolved.databaseUrl), client, source: options.source };
   const app: AppContext = {
-    resolved,
+    ...shared,
     get description() {
       return current();
     },
-    place: placeOf(resolved.databaseUrl),
-    client,
     login,
-    source: options.source,
   };
   // Each public site served, by name, with its own context, whose login is its front door: its
   // login half, if it has one, made once the app listens (`openLogins`). A public site whose
@@ -318,7 +313,7 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
     const half = site.login === undefined ? undefined : Promise.withResolvers<LoginHalf>();
     if (half) halves.set(site, half);
     sites.set(site.name, {
-      ...app,
+      ...shared,
       get description() {
         return current();
       },

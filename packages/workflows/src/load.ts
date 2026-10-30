@@ -279,12 +279,22 @@ export function stampOf(path: string): string {
   return stat ? `${stat.size} ${stat.mtimeNs}` : "gone";
 }
 
+/** True while each path's stamp (`stampOf`) is still the one kept. */
+export function fresh(stamps: ReadonlyMap<string, string>): boolean {
+  for (const [path, stamp] of stamps) if (stampOf(path) !== stamp) return false;
+  return true;
+}
+
 /** Records a file of the generation, and its directory, as they are now: before it is read, so an edit after is seen. */
 function touch(gen: Generation, file: string) {
   for (const path of [file, dirname(file)]) if (!gen.stamps.has(path)) gen.stamps.set(path, stampOf(path));
 }
 
-/** The generation of `root` and these constructors: the current one while nothing it stamped changed, else a new one. */
+/**
+ * The generation of `root` and these constructors: the current one while nothing it stamped
+ * changed, else a new one. A generation of `root` whose files changed goes, whatever its
+ * constructors, so `stampsOf` never keeps the stamps of one no load will make again.
+ */
 function generationOf(
   root: string,
   connectors: readonly Connector<any, any>[],
@@ -295,11 +305,13 @@ function generationOf(
     return info?.package ? [`${info.package}/resources`, id] : [];
   });
   const typesKey = [...packages, ...[...types.values()].map(idOf)].join(" ");
+  let current: Generation | undefined;
   for (const gen of registry.generations.values()) {
-    if (gen.root !== root || gen.typesKey !== typesKey) continue;
-    if ([...gen.stamps].every(([path, stamp]) => stampOf(path) === stamp)) return gen;
-    registry.generations.delete(gen.id);
+    if (gen.root !== root) continue;
+    if (!fresh(gen.stamps)) registry.generations.delete(gen.id);
+    else if (gen.typesKey === typesKey) current = gen;
   }
+  if (current !== undefined) return current;
   const gen: Generation = {
     id: String(++registry.seq),
     root,
