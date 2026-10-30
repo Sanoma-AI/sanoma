@@ -429,6 +429,9 @@ const SiteDefinitionSchema = z.strictObject({
   locales: z.array(z.string()).optional(),
 });
 
+/** What `site.ts` says of who may see a site: read together or not at all. */
+const ACCESS = ["public", "login", "locales"];
+
 /**
  * What the site in `dir` (relative to `root`) says of itself in its `site.ts`, loaded
  * (`loadModules`, `defineSite` served from `sanoma/site`), and what is wrong there: its default
@@ -459,10 +462,12 @@ function siteDefinitionOf(
     const why = z.prettifyError(parsed.error).replaceAll(/\s*\n\s*/g, " ");
     problems.push(problem(`its default export is \`defineSite({ … })\` from "sanoma/site": ${why}`));
     // The fields it names wrongly (and the keys it does not know) left out, the rest still read:
-    // a bad icon keeps a site's `public`, `login` and `locales`.
+    // a bad icon keeps a site's `public`, `login` and `locales`. Those three say who may see it,
+    // so a wrong one leaves out all three: never a site read as public without its login.
     const wrong = new Set(
       parsed.error.issues.flatMap((i) => (i.code === "unrecognized_keys" ? i.keys : i.path.slice(0, 1))),
     );
+    if (ACCESS.some((key) => wrong.has(key))) for (const key of ACCESS) wrong.add(key);
     if (!isObject(value) || !wrong.size) return { problems };
     parsed = SiteDefinitionSchema.safeParse(
       Object.fromEntries(Object.entries(value).filter(([key]) => !wrong.has(key))),

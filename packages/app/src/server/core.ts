@@ -648,20 +648,26 @@ export function preview(
   return policy.preview(requests.map((request) => ({ ...request, principal: actor })));
 }
 
-/** Each grid, by the description it was built from (and the policy, read once as the app starts): again once the files change. */
+/** Each grid, by the description it was built from: again once the files change (the people, their groups). */
 const grids = new WeakMap<object, PermissionsResponse>();
+
+/** The policy's files by the resolved config, as the first grid read them: the text of the policy it enforces, read once as the app starts. */
+const policyFiles = new WeakMap<object, PermissionsResponse["files"]>();
 
 /**
  * The Permissions page's grid (`getPermissions`): the policy, its grid (`permissionsGrid`, the
- * one `sanoma check` reports too: nobody's own answer, the actor asking is not used), then the
- * policy's files as the description read them (`policy.files`, `sourcesOf`).
+ * one `sanoma check` reports too: nobody's own answer, the actor asking is not used) over the
+ * people as the files declare them now, then the policy's files as the policy was read (`sourcesOf`):
+ * a `.cedar` file edited since shows once the app restarts, as its rules apply.
  */
 export function permissions(app: Pick<AppContext, "resolved" | "description">): PermissionsResponse {
   const { resolved, description } = app;
   let grid = grids.get(description);
   if (!grid) {
-    const { files, ...policy } = description.policy;
-    grid = { policy, ...permissionsGrid(resolved, description), files: sourcesOf(files) };
+    const { files: read, ...policy } = description.policy;
+    let files = policyFiles.get(resolved);
+    if (!files) policyFiles.set(resolved, (files = sourcesOf(read)));
+    grid = { policy, ...permissionsGrid(resolved, description), files };
     grids.set(description, grid);
   }
   return grid;

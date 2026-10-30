@@ -27,7 +27,7 @@ import { allowAll, policyOpOf } from "./policy.ts";
 import { type Resource, resourceTypesOf, valueAt } from "./resource.ts";
 import { type DeclaredResource, inAppPeople, loadDataFiles, type ResourceProblem } from "./resources.ts";
 import { apiNameProblem } from "./sdk.ts";
-import { apiNameOf, BUILT_IN_WORKFLOWS, DATA_VENDOR, problemLine } from "./shared.ts";
+import { apiNameOf, BUILT_IN_WORKFLOWS, DATA_VENDOR, errorMessage, problemLine } from "./shared.ts";
 import { readSites, type SiteEntry } from "./sites.ts";
 
 // `@sanoma-ai/workflows/describe`: what a UI renders from, apart from the main entry.
@@ -87,25 +87,36 @@ export type { ApplyInput, ApplyPlan, ApplyReport, ApplyResult, PlanAnswer, PlanS
  * `describeConfig(config)`, kept and made again only once the files it loaded have changed: each
  * company file a load read and its folder (`stampsOf`), the lockfile, and the folders a new data
  * file, app or site would appear in, one `stat` each per call. What the config imports (its
- * workflows, connectors and policies) is read once, as the worker reads it.
+ * workflows, connectors and policies) is read once, as the worker reads it. When describing again
+ * throws, the last description stands until the files change again.
  */
 export function liveDescription(config: SanomaConfig): () => ConfigDescription {
   const root = rootOf(config);
-  const described = () => {
+  /** The description and what it read; `last`, kept (and said) when describing again throws. */
+  const described = (last?: ConfigDescription) => {
     // The folders and the lockfile as they are before describing, so a change while it reads is seen after.
     const extra =
       root === undefined
         ? []
-        : [LOCKFILE, APPS_DIR, "sites", ...kindDirs(root, "resources")].map((path) => {
+        : [LOCKFILE, APPS_DIR, ...kindDirs(root, "sites"), ...kindDirs(root, "resources")].map((path) => {
             const at = resolve(root, path);
             return [at, stampOf(at)] as const;
           });
-    const description = describeConfig(config);
+    let description: ConfigDescription;
+    try {
+      description = describeConfig(config);
+    } catch (err) {
+      if (last === undefined) throw err;
+      console.warn(
+        `sanoma: the files could not be described again, so the last description stands: ${errorMessage(err)}`,
+      );
+      description = last;
+    }
     return { description, stamps: new Map([...extra, ...(root === undefined ? [] : stampsOf(root))]) };
   };
   let now = described();
   return () => {
-    if (![...now.stamps].every(([path, stamp]) => stampOf(path) === stamp)) now = described();
+    if (![...now.stamps].every(([path, stamp]) => stampOf(path) === stamp)) now = described(now.description);
     return now.description;
   };
 }

@@ -151,6 +151,21 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   if (warnings.length)
     console.warn(`sanoma app: warnings in the sites (\`sanoma check\` lists them):\n${warnings.join("\n")}`);
   const hosts = publicHosts(description, options.domains ?? {});
+  // Each public site's domain, as `publicHosts` set it on the description made at boot: set again
+  // on each one made after, which `readSites` makes without it.
+  const domains = new Map(description.sites.flatMap((site) => (site.domain ? [[site.name, site.domain]] : [])));
+  let withDomains = description;
+  const current = (): ConfigDescription => {
+    const now = describe();
+    if (now !== withDomains) {
+      for (const site of now.sites) {
+        const domain = domains.get(site.name);
+        if (domain !== undefined) site.domain = domain;
+      }
+      withDomains = now;
+    }
+    return now;
+  };
   const ingress = new Map<string, IngressRoute>();
   // A git host's webhooks, answered once the app is made.
   const webhooks: IngressRoute[] = [...resolved.remotes]
@@ -281,7 +296,7 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   const app: AppContext = {
     resolved,
     get description() {
-      return describe();
+      return current();
     },
     place: placeOf(resolved.databaseUrl),
     client,
@@ -305,7 +320,7 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
     sites.set(site.name, {
       ...app,
       get description() {
-        return describe();
+        return current();
       },
       site: site.name,
       login: publicFront(site, half?.promise),

@@ -393,17 +393,13 @@ describe("readSites", () => {
         problems: [],
         warnings: [],
       },
-      // A value its schema refuses: that field is left out, the rest read (here a login, on a site not public).
+      // A value its schema refuses in who may see it: public, login and locales all left out.
       {
         name: "quoted",
         at: atSite("quoted"),
         pages: [{ path: "/sites/quoted" }],
         calls: [],
-        login: "auth0",
-        problems: [
-          problemAt("quoted", schema("public")),
-          problemAt("quoted", "a login is for a public site: add `public: true`, or remove `login`"),
-        ],
+        problems: [problemAt("quoted", schema("public"))],
         warnings: [],
       },
       {
@@ -619,11 +615,8 @@ describe("readSites", () => {
       members: [["default", loginless]],
       staff: [["default", loginless]],
       twice: [["default", '"en" is in `locales` twice']],
-      // The schema's, then what follows from `public` left out.
-      unread: [
-        ["default", schema("public")],
-        ["default", loginless],
-      ],
+      // Said once, by the schema: its locales are left out with its `public`.
+      unread: [["default", schema("public")]],
       www: [],
     });
     // Kept only without a problem.
