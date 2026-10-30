@@ -780,3 +780,5 @@ Status: early (0.x). The API may change between minor versions.
 TODO: redact fields a schema marks `.meta({ sensitive: true })` from the ledger, the approvals event and DBOS's step records, so a secret passed by mistake is not kept.
 
 License: FSL-1.1-ALv2.
+
+The server-only [KMS credential store](KMS-SECRETS.md) is a managed-backend option with explicit company-scoped bootstrap. It requires reviewed IAM/database isolation and does not provision Cloud infrastructure.

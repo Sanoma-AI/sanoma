@@ -24,7 +24,8 @@
     "!src/AGENTS.md",
     "oxlint.json",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "KMS-SECRETS.md"
   ],
   "type": "module",
   "sideEffects": false,
@@ -70,6 +71,10 @@
     "./wakeup-service": {
       "types": "./dist/wakeup-service.d.ts",
       "default": "./dist/wakeup-service.js"
+    },
+    "./kms-secrets": {
+      "types": "./dist/kms-secrets.d.ts",
+      "default": "./dist/kms-secrets.js"
     }
   },
   "publishConfig": {
@@ -83,6 +88,7 @@
   },
   "dependencies": {
     "@ai-sdk/provider": "4.0.34",
+    "@aws-sdk/client-kms": "^3.1159.0",
     "@cedar-policy/cedar-wasm": "4.14.0",
     "@cucumber/cucumber": "13.3.0",
     "@cucumber/cucumber-expressions": "^20.1.0",

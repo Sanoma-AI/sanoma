@@ -63,6 +63,12 @@ describe("lintWorkflow", () => {
     ]);
   });
 
+  it("refuses the KMS store entry in workflows", () => {
+    expect(messages('import { kmsPostgresStore } from "@sanoma-ai/workflows/kms-secrets";')).toEqual([
+      expect.stringMatching(/import .*kms-secrets.*not allowed/),
+    ]);
+  });
+
   it("allows relative imports that stay inside the file's workflows/ tree", () => {
     const src = `
       import { a } from "./shared.ts";
