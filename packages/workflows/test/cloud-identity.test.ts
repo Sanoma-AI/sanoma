@@ -169,6 +169,24 @@ describe("trusted identity issuer", () => {
 });
 
 describe("runtime Google SDK auth", () => {
+  it("accepts an empty POST stream through HTTP transport and refuses actual body bytes", async () => {
+    const f = fixture();
+    const server = setupServer(http.post(endpoint, ({ request }) => f.broker(request)));
+    server.listen({ onUnhandledFrame: "error" });
+    try {
+      const auth = cloudIdentityAuth({ endpoint, credential: async () => f.a.credential });
+      expect((await auth.getAccessToken()).token).toContain("company-a-production");
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${f.a.credential}` },
+        body: "{}",
+      });
+      expect(response.status).toBe(400);
+      expect(f.issue).toHaveBeenCalledTimes(1);
+    } finally {
+      server.close();
+    }
+  });
   it("coalesces cold-start requests, renews before expiry with rotated bootstrap and separates instances", async () => {
     const f = fixture();
     vi.stubGlobal(

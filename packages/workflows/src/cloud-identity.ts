@@ -123,6 +123,26 @@ const reply = (status: number, body: unknown) =>
     headers: { "Cache-Control": "no-store", Pragma: "no-cache" },
   });
 
+// Node/edge adapters can represent an empty POST as a stream. Reject actual bytes,
+// without buffering attacker-controlled input or waiting indefinitely for its end.
+async function hasBody(request: Request): Promise<boolean> {
+  if (!request.body) return false;
+  const reader = request.body.getReader();
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const first = await Promise.race([
+      reader.read(),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new CloudIdentityError()), 5_000);
+      }),
+    ]);
+    return !first.done;
+  } finally {
+    clearTimeout(timeout);
+    void reader.cancel().catch(() => {});
+  }
+}
+
 /** POST /token with a deployment bearer credential and no query or body. No enrollment endpoint. */
 export function identityBroker(options: IdentityBrokerOptions): (request: Request) => Promise<Response> {
   return async (request) => {
@@ -130,7 +150,7 @@ export function identityBroker(options: IdentityBrokerOptions): (request: Reques
     try {
       const url = new URL(request.url);
       if (url.pathname !== "/token" || request.method !== "POST") return reply(404, { error: "not_found" });
-      if (url.search || request.body !== null) return reply(400, { error: "invalid_request" });
+      if (url.search || (await hasBody(request))) return reply(400, { error: "invalid_request" });
       const authorization = request.headers.get("authorization") ?? "";
       const credential = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
       const hash = CREDENTIAL.test(credential) ? credentialHash(credential) : undefined;
