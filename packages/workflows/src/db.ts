@@ -44,11 +44,11 @@ const TABLES: readonly [what: string, ddl: string][] = [
     // A table from before 0.10.0 (one row per name, each value sealed to its name alone) holds
     // nothing 0.10.0 can read: it goes, and its credentials are set again.
     `DO $$ BEGIN
-      IF to_regclass('${CREDENTIALS_TABLE}') IS NOT NULL AND NOT EXISTS (
+      IF NOT EXISTS (
         SELECT FROM information_schema.columns
         WHERE table_schema = current_schema() AND table_name = '${CREDENTIALS_TABLE}' AND column_name = 'namespace'
       ) THEN
-        DROP TABLE ${CREDENTIALS_TABLE};
+        DROP TABLE IF EXISTS ${CREDENTIALS_TABLE};
       END IF;
     END $$; ` +
       `CREATE TABLE IF NOT EXISTS ${CREDENTIALS_TABLE} (namespace text NOT NULL, name text NOT NULL, value text NOT NULL, ` +

@@ -82,7 +82,7 @@ describe("prepareDatabase", () => {
 
 describe("sanoma_credentials", () => {
   it("replaces a table from before 0.10.0, whose rows nothing can read, with the one keyed by namespace", async () => {
-    const url = testDatabaseUrl("db-credentials");
+    const url = testDatabaseUrl("db_credentials");
     const conn = await connectMaking(url);
     try {
       await conn.query(`DROP TABLE IF EXISTS ${CREDENTIALS_TABLE}`);
@@ -91,19 +91,9 @@ describe("sanoma_credentials", () => {
       );
       await conn.query(`INSERT INTO ${CREDENTIALS_TABLE} (name, value, set_by) VALUES ('X', 'sealed', 'leon')`);
       await prepareDatabase(url);
-      const columns = await conn.query<{ column_name: string }>(
-        "SELECT column_name FROM information_schema.columns WHERE table_name = $1 ORDER BY ordinal_position",
-        [CREDENTIALS_TABLE],
-      );
-      expect(columns.rows.map((r) => r.column_name)).toEqual([
-        "namespace",
-        "name",
-        "value",
-        "version",
-        "set_by",
-        "set_at",
-      ]);
-      expect((await conn.query(`SELECT count(*)::int AS n FROM ${CREDENTIALS_TABLE}`)).rows).toEqual([{ n: 0 }]);
+      const table = await conn.query(`SELECT * FROM ${CREDENTIALS_TABLE}`);
+      expect(table.fields.map((f) => f.name)).toEqual(["namespace", "name", "value", "version", "set_by", "set_at"]);
+      expect(table.rows).toEqual([]);
     } finally {
       await conn.end();
     }
