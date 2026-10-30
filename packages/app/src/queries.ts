@@ -689,7 +689,7 @@ export const PeopleSearch = z.object({
 
 /** Going live's Connect page's search (`/hosting/connect`, and `/setup/connect`): how creating the GitHub App went, as its callback comes back. */
 export const ConnectSearch = z.object({
-  github: z.enum(["connected", "expired", "failed", "bad-org", "nobody"]).optional(),
+  github: z.enum(["connected", "expired", "failed", "bad-org", "nobody"]).optional().catch(undefined),
 });
 
 /** The grid's search with no record open in the form: for a link's or `navigate`'s `search`. */
