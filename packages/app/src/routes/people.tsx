@@ -23,7 +23,7 @@ import {
   Problems,
 } from "../components/common.tsx";
 import { DeclarationForm } from "../components/declaration-form.tsx";
-import { configQuery, isPeople, PeopleSearch, type PeopleView } from "../queries.ts";
+import { configQuery, isPeople, PEOPLE_VIEWS, PeopleSearch, type PeopleView } from "../queries.ts";
 
 export const Route = createFileRoute("/people")({
   validateSearch: PeopleSearch,
@@ -83,27 +83,16 @@ function PeoplePage() {
     <>
       <CrumbHeader count={data.views.people.length} />
       <LinkTabs label="Show" value={show}>
-        <LinkTab
-          value="people"
-          link={<Link to="/people" search={{ show: "people" }} />}
-          count={data.views.people.length}
-        >
-          People
-        </LinkTab>
-        <LinkTab
-          value="groups"
-          link={<Link to="/people" search={{ show: "groups" }} />}
-          count={data.views.groups.length}
-        >
-          Groups
-        </LinkTab>
-        <LinkTab
-          value="agents"
-          link={<Link to="/people" search={{ show: "agents" }} />}
-          count={data.views.agents.length}
-        >
-          Agents
-        </LinkTab>
+        {PEOPLE_VIEWS.map((view) => (
+          <LinkTab
+            key={view}
+            value={view}
+            link={<Link to="/people" search={{ show: view }} />}
+            count={data.views[view].length}
+          >
+            {VIEW_LABEL[view]}
+          </LinkTab>
+        ))}
       </LinkTabs>
       {data.problems.length > 0 && <Problems problems={data.problems} />}
       <FloatHost float={open && <Opened key={open.id} resource={open} show={show} people={data} />}>
@@ -124,6 +113,9 @@ function PeoplePage() {
     </>
   );
 }
+
+/** Each view's tab. */
+const VIEW_LABEL: Record<PeopleView, string> = { people: "People", groups: "Groups", agents: "Agents" };
 
 /** What an empty view says to do. */
 const EMPTY: Record<PeopleView, ReactNode> = {

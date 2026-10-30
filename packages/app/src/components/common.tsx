@@ -1,4 +1,4 @@
-import type { ApprovalState, Builtin, Effect, LedgerRecord, RecordedDecision } from "@sanoma-ai/workflows";
+import type { ApprovalState, Builtin, Effect, LedgerRecord, RecordedDecision, RunSummary } from "@sanoma-ai/workflows";
 import type { ResourceProblem } from "@sanoma-ai/workflows/describe";
 import { problemAt } from "@sanoma-ai/workflows/shared";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
@@ -39,7 +39,7 @@ import { hasOneUrl } from "#/site-path.ts";
 import { useSites } from "#/lib/sites.ts";
 import { utcText } from "#/lib/time.ts";
 import { cn, plural } from "#/lib/utils.ts";
-import { APPROVAL_TONE, DECISION_TONE, type Tone } from "#/lib/tone.ts";
+import { APPROVAL_TONE, DECISION_TONE, RUN_TONE, type Tone } from "#/lib/tone.ts";
 import type { OpEntry, SiteEntry } from "@sanoma-ai/workflows/describe";
 import { approverLabel, type Tier } from "@sanoma-ai/workflows/shared";
 import { appBehindQuery, configQuery, type SiteCaller } from "../queries.ts";
@@ -346,6 +346,27 @@ export function When({ at }: { at: number }) {
     <time dateTime={new Date(at).toISOString()} title={utc}>
       {clock === undefined ? utc : ago(at, clock)}
     </time>
+  );
+}
+
+/** A workflow's latest run: its status and how long ago it started, or `none` when it has never run. */
+export function LastRun({
+  run,
+  none = "-",
+}: {
+  run: Pick<RunSummary, "status" | "createdAt"> | undefined;
+  none?: string;
+}) {
+  if (!run) return <span className="text-muted-foreground">{none}</span>;
+  return (
+    <span className="flex items-center gap-2">
+      <ToneBadge tone={RUN_TONE[run.status]} dot>
+        {run.status}
+      </ToneBadge>
+      <span className="text-muted-foreground">
+        <When at={run.createdAt} />
+      </span>
+    </span>
   );
 }
 

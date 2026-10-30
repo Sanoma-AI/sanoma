@@ -6,20 +6,18 @@ import { Badge } from "#/components/ui/badge.tsx";
 import { Card } from "#/components/ui/card.tsx";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/components/ui/table.tsx";
 import { updateAppPrompt } from "#/lib/apps.ts";
-import { RUN_TONE } from "#/lib/tone.ts";
 import type { ScenariosResponse } from "../../api.ts";
 import { ChatButton } from "../../components/chat-button.tsx";
 import {
   AppBehind,
   CrumbHeader,
   ExternalLink,
+  LastRun,
   Notice,
   OpName,
   pageTitle,
   plural,
   SiteLink,
-  ToneBadge,
-  When,
 } from "../../components/common.tsx";
 import { configQuery, lastRunsQuery, opsById, scenariosQuery } from "../../queries.ts";
 
@@ -294,53 +292,39 @@ function Workflows({ workflows, ops }: { workflows: ConfigDescription["workflows
         </TableRow>
       </TableHeader>
       <TableBody>
-        {workflows.map((wf) => {
-          const run = last[wf.name];
-          return (
-            <TableRow key={wf.name}>
-              <TableCell className="font-medium">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Link to="/workflows/$name" params={{ name: wf.name }}>
-                    {wf.title ?? wf.name}
-                  </Link>
-                  <code className="text-xs font-normal text-muted-foreground">{wf.name}</code>
-                </div>
-              </TableCell>
-              <TableCell className="whitespace-normal">
-                {wf.ops.length === 0 ? (
-                  <span className="text-muted-foreground">-</span>
-                ) : (
-                  <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                    {wf.ops.map((id) => (
-                      <span key={id} className="inline-flex items-center gap-1.5 text-xs">
-                        <OpName id={id} op={ops.get(id)} />
-                      </span>
-                    ))}
-                  </span>
-                )}
-              </TableCell>
-              <TableCell>
-                {run ? (
-                  <span className="flex items-center gap-2">
-                    <ToneBadge tone={RUN_TONE[run.status]} dot>
-                      {run.status}
-                    </ToneBadge>
-                    <span className="text-muted-foreground">
-                      <When at={run.createdAt} />
-                    </span>
-                  </span>
-                ) : (
-                  <span className="text-muted-foreground">Never run</span>
-                )}
-              </TableCell>
-              <TableCell className="text-right">
-                <Link to="/workflows/$name" params={{ name: wf.name }} search={{ view: "runs" }}>
-                  Runs
+        {workflows.map((wf) => (
+          <TableRow key={wf.name}>
+            <TableCell className="font-medium">
+              <div className="flex flex-wrap items-center gap-2">
+                <Link to="/workflows/$name" params={{ name: wf.name }}>
+                  {wf.title ?? wf.name}
                 </Link>
-              </TableCell>
-            </TableRow>
-          );
-        })}
+                <code className="text-xs font-normal text-muted-foreground">{wf.name}</code>
+              </div>
+            </TableCell>
+            <TableCell className="whitespace-normal">
+              {wf.ops.length === 0 ? (
+                <span className="text-muted-foreground">-</span>
+              ) : (
+                <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  {wf.ops.map((id) => (
+                    <span key={id} className="inline-flex items-center gap-1.5 text-xs">
+                      <OpName id={id} op={ops.get(id)} />
+                    </span>
+                  ))}
+                </span>
+              )}
+            </TableCell>
+            <TableCell>
+              <LastRun run={last[wf.name]} none="Never run" />
+            </TableCell>
+            <TableCell className="text-right">
+              <Link to="/workflows/$name" params={{ name: wf.name }} search={{ view: "runs" }}>
+                Runs
+              </Link>
+            </TableCell>
+          </TableRow>
+        ))}
       </TableBody>
     </Table>
   );
