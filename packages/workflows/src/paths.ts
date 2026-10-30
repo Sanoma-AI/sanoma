@@ -6,6 +6,19 @@ import { APP_NAME } from "./shared.ts";
 // the directories and the one walk down (`filesUnder`). Node's `path` and `fs` only, no parser:
 // the oxlint plugin loads it.
 
+/**
+ * Where a data file imports `secret` from, and `sanoma`, the runtime's own resource constructors
+ * (its people: `sanoma.person`, `.agent`, `.group`): what the loader serves for them.
+ */
+export const SECRET_ENTRIES: ReadonlySet<string> = new Set(["sanoma/resources", "@sanoma-ai/workflows/resources"]);
+/** Where `resources/data.ts` imports `collection` from: what the loader serves for it. */
+export const DATA_ENTRIES: ReadonlySet<string> = new Set(["sanoma/data", "@sanoma-ai/workflows/data"]);
+/**
+ * The one data file that holds collections, relative to `resources/`. Workflows and the runtime
+ * import it, so it holds collections only.
+ */
+export const COLLECTIONS_FILE = "data.ts";
+
 /** A relative import specifier: `./x.ts`, `../y.ts`. */
 export const RELATIVE = /^\.\.?\//;
 

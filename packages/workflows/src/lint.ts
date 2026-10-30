@@ -1,9 +1,8 @@
 import { realpathSync } from "node:fs";
 import { basename, dirname, join, relative, sep } from "node:path";
 import { byPosition, childrenOf, type LintProblem, type Node, parsed, type SourceFile } from "./ast.ts";
-import { COLLECTIONS_FILE } from "./datafile.ts";
 import { constsOf, outlineBody, workflowLiterals } from "./outline.ts";
-import { APPS_DIR, inside, nearestDir, RELATIVE } from "./paths.ts";
+import { APPS_DIR, COLLECTIONS_FILE, inside, nearestDir, RELATIVE } from "./paths.ts";
 // From src/ and from dist/ alike, the package's own oxlint.json: the one list of allowed names.
 import oxlint from "../oxlint.json" with { type: "json" };
 

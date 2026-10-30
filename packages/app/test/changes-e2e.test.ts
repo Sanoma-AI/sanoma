@@ -13,6 +13,7 @@ import {
   type SanomaConfig,
   type Worker,
 } from "@sanoma-ai/workflows";
+import { describeConfig } from "@sanoma-ai/workflows/describe";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { localGitSource } from "../../sanoma/src/source.ts";
@@ -23,7 +24,7 @@ import { freshDatabase } from "../../workflows/test/harness.ts";
 import type { AppContext } from "../src/context.ts";
 import { type App, startApp } from "../src/index.ts";
 import { tellCommits } from "../src/server/agent/checkout.ts";
-import { change, hasRemote, openChange } from "../src/server/core.ts";
+import { change, hasRemote, openChange, patch } from "../src/server/core.ts";
 import { checks } from "../src/server/drafts.ts";
 import { PEOPLE, pageOf, publishedAgain, publishOf, renderDraftCard } from "./fixtures/change.ts";
 
@@ -265,5 +266,40 @@ describe("a change, from a chat's draft to main", { timeout: 2 * ROUND_MS }, () 
     const { html } = await pageOf(app, "/changes/notes");
     expect(html).toContain("Closed by alice");
     expect(remote.merges).toHaveLength(1);
+  });
+
+  it("lands a form's Save as a change: a draft of its own, committed, sent for review and held for admin", async () => {
+    const main = git("rev-parse", "main");
+    const context = {
+      client,
+      resolved: resolveConfig(config),
+      source,
+      description: describeConfig(config),
+    } as unknown as AppContext;
+    const at = { file: "resources/people.ts", export: "alice" };
+    const landed = await patch(context, { id: "alice" }, { at, fields: { name: "Alice Liddell" } }, app.url);
+    expect(landed).toEqual({ change: expect.stringMatching(/^change:ui-[\da-f]{8}$/) });
+    const saved = (landed as { change: string }).change;
+    const id = saved.slice("change:".length);
+    await publishOf(client, saved, ROUND_MS);
+    // The draft's one commit, as alice, on main as it was; the checkout untouched.
+    expect(git("log", "--format=%an %s", `main..draft/${id}`)).toBe("alice via Sanoma Change name of alice");
+    expect(git("show", `draft/${id}:resources/people.ts`)).toContain(
+      'export const alice = sanoma.person({ id: "alice", name: "Alice Liddell" });',
+    );
+    expect(git("rev-parse", "main")).toBe(main);
+    expect(readFileSync(join(dir, "resources/people.ts"), "utf8")).not.toContain("Alice Liddell");
+    // Reviewed on the host, and held: the people are the rules.
+    const pr = remote.pullOf(`draft/${id}`)!;
+    expect(pr).toMatchObject({ state: "open", base: "main", title: "Change name of alice" });
+    expect(remote.statuses.at(-1)).toMatchObject({
+      sha: pr.head,
+      state: "pending",
+      description: "A change to the rules waits for admin",
+      targetUrl: new URL(`/changes/${id}`, app.url).href,
+    });
+    // Closed by admin, so no run waits as the worker stops.
+    await client.changeEvent(id, { kind: "close", by: "ada" }, { by: { id: "ada" } });
+    expect(await client.result(saved)).toMatchObject({ outcome: "closed" });
   });
 });

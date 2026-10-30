@@ -1,9 +1,8 @@
 import { existsSync, readdirSync } from "node:fs";
 import { basename, join, relative, sep } from "node:path";
 import { z } from "zod";
-import { childrenOf, type LintProblem, type Node, readSource, type SourceFile } from "./ast.ts";
+import { childrenOf, keyName, type LintProblem, type Node, readSource, type SourceFile } from "./ast.ts";
 import { type CedarPolicySource, visitorPermits } from "./cedar.ts";
-import { keyName } from "./datafile.ts";
 import type { ConfigDescription, SiteCall, SiteEntry, SitePage } from "./description.ts";
 import { stringValue, unwrap } from "./outline.ts";
 import { loadModules } from "./load.ts";

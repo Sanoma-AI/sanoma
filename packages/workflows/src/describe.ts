@@ -32,8 +32,15 @@ export * from "./description.ts";
 export { outlineWorkflow, type Outline, type OutlineNode, type Span } from "./outline.ts";
 export { admit, loadDataFiles, readPeople, type DataFiles, type DeclaredPeople } from "./resources.ts";
 // The writer: setting a resource's fields in its data file, and rendering a new one.
-export { formatOptions, renderDataFile, setFields, type DataFileContent } from "./writer.ts";
-export { Reference, type DataValue } from "./datafile.ts";
+export {
+  type DataFileContent,
+  type DataValue,
+  formatOptions,
+  NotLiteral,
+  Reference,
+  renderDataFile,
+  setFields,
+} from "./writer.ts";
 
 /**
  * The resources the config's data files declare, as loading them makes them (`loadDataFiles`);

@@ -63,6 +63,7 @@ import {
   listRuns,
   nextFires,
   parse,
+  patch,
   readStartRun,
   requireActor,
   runDetail,
@@ -1828,6 +1829,60 @@ describe("resources and drift", () => {
       body: { error: `Could not adopt into ${github}: The data file declares no resource website` },
     });
     expect(commits).toHaveLength(1);
+  });
+
+  it("patches a declaration's literal fields without a remote: written and committed, the rules by admin only", async () => {
+    // A root of its own, as Adopt's test has, and a source that commits and drafts nowhere.
+    const root = mkdtempSync(join(tmpdir(), "sanoma-patch-"));
+    cpSync(join(appRoot, "resources"), join(root, "resources"), { recursive: true });
+    const commits: unknown[] = [];
+    const source: Source = {
+      root,
+      commit: (made) => {
+        commits.push(made);
+        return { revision: "fedcba9876543210" };
+      },
+      head: () => "fedcba9876543210",
+    };
+    const patching: AppContext = { ...ctx, resolved: { ...ctx.resolved, root }, source };
+    const alice = { id: "alice" };
+    const github = "resources/identity/github.ts";
+    const before = readFileSync(join(root, github), "utf8");
+    const website = { file: github, export: "website" };
+    expect(await patch(patching, alice, { at: website, fields: { description: "Our site" } })).toEqual({
+      file: github,
+      revision: "fedcba9876543210",
+    });
+    expect(readFileSync(join(root, github), "utf8")).toBe(
+      before.replace('description: "The company website"', 'description: "Our site"'),
+    );
+    expect(commits).toEqual([{ paths: [github], message: "Change description of website", author: "alice" }]);
+
+    // A collection, where data.ts declares it.
+    const data = "resources/data.ts";
+    await patch(patching, alice, { at: { file: data, export: "outbound" }, fields: { title: "Pipeline" } });
+    expect(readFileSync(join(root, data), "utf8")).toContain('title: "Pipeline",');
+
+    // A field the file computes, or a declaration the description does not name, is refused.
+    await expect(
+      patch(patching, alice, { at: { file: github, export: "websiteMain" }, fields: { repository_id: "R_1" } }),
+    ).rejects.toMatchObject({ status: 409, body: { error: "the value of repository_id is computed in the file" } });
+    await expect(
+      patch(patching, alice, { at: { file: github, export: "nope" }, fields: { name: "x" } }),
+    ).rejects.toMatchObject({ status: 404 });
+
+    // The people are the rules: with no remote to review on, only someone in admin writes them.
+    const people = "resources/people.ts";
+    const peopleBefore = readFileSync(join(root, people), "utf8");
+    const p0 = { at: { file: people, export: "p0" }, fields: { name: "Alice A." } };
+    await expect(patch(patching, alice, p0)).rejects.toMatchObject({
+      status: 403,
+      body: { error: `A change to ${people} waits for an admin, and this company has no remote to review on` },
+    });
+    expect(readFileSync(join(root, people), "utf8")).toBe(peopleBefore);
+    expect(await patch(patching, { id: "ada", groups: ["admin"] }, p0)).toMatchObject({ file: people });
+    expect(readFileSync(join(root, people), "utf8")).toContain('sanoma.person({ id: "alice", name: "Alice A." })');
+    expect(commits).toHaveLength(3);
   });
 
   it("renders each resource with its drift badge, the fields that differ, and a link to the run", async () => {

@@ -13,7 +13,7 @@ import type {
   RunSummary,
 } from "@sanoma-ai/workflows";
 import type { ConfigDescription, PermissionsGrid, Span } from "@sanoma-ai/workflows/describe";
-import { ConfigDescriptionSchema } from "@sanoma-ai/workflows/description";
+import { AtSchema, ConfigDescriptionSchema } from "@sanoma-ai/workflows/description";
 import type { Check, Scenario } from "@sanoma-ai/workflows/scenario";
 import { EFFECTS, RUN_STATUSES } from "@sanoma-ai/workflows/shared";
 import { z } from "zod";
@@ -414,6 +414,23 @@ export interface AdoptResponse {
   file: string;
   revision?: string;
 }
+
+/**
+ * What `patchFn` takes: a declaration the description names (a resource, a collection, a site or
+ * an app, by its `at`), and the fields to set in it, by dotted path as `setFields` takes them, each
+ * to a JSON value.
+ */
+export const PatchRequest = z.object({
+  at: AtSchema,
+  fields: z.record(z.string().min(1), z.json()).refine((fields) => Object.keys(fields).length > 0, "Set a field"),
+});
+export type PatchRequest = z.infer<typeof PatchRequest>;
+
+/**
+ * What `patchFn` answers: the change it opened for review (its run id), when the repository has a
+ * remote; otherwise the file it wrote, relative to the root, and the commit, when the app has a source.
+ */
+export type PatchResponse = { change: string } | { file: string; revision?: string };
 
 /**
  * What `callFn` takes, as a site's `api` sends it: an operation's id (`data.outbound.list`), a

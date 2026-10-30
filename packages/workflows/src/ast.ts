@@ -31,6 +31,10 @@ const CODE_KEYS = new Map(
   Object.entries(visitorKeys).map(([type, keys]) => [type, keys.filter((key) => !TYPE_KEYS.has(key))]),
 );
 
+/** A property's name: an identifier's, or a literal's as a string; undefined for any other key. */
+export const keyName = (key: Node): string | undefined =>
+  key.type === "Identifier" ? key.name : key.type === "Literal" ? String(key.value) : undefined;
+
 /** A node's children in source order, by oxc-parser's `visitorKeys`, without its types. A hole in a list is `null`. */
 export const childrenOf = (node: Node): Node[] => (CODE_KEYS.get(node.type) ?? []).flatMap((key) => node[key] ?? []);
 

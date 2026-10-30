@@ -80,6 +80,7 @@ export {
 } from "./apply.ts";
 export { CALL_WORKFLOW, CallInput } from "./call-workflow.ts";
 export {
+  ADMIN,
   type ChangeDecision,
   type ChangeDeploy,
   type ChangeEvent,
@@ -89,6 +90,8 @@ export {
   type ChangeReport,
   type ChangeState,
   type ChangeVerified,
+  isRules,
+  mayDeclarePeople,
   runtimeHold,
   touchesOf,
 } from "./change.ts";
