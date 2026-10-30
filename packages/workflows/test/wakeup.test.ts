@@ -186,14 +186,12 @@ describe("declaredWakeup", () => {
     expect(describeConfig(configAt(root)).problems).toEqual([
       {
         file: "resources/infra.ts",
-        line: 4,
-        column: 1,
+        export: "one",
         message: "an instance has one wakeup: leave out this one or resources/infra.ts#two",
       },
       {
         file: "resources/infra.ts",
-        line: 5,
-        column: 1,
+        export: "two",
         message: "an instance has one wakeup: leave out this one or resources/infra.ts#one",
       },
     ]);

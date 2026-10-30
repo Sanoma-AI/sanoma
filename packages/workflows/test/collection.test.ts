@@ -1,11 +1,10 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import { collection, collectionsFake, recordIssues } from "../src/collection.ts";
 import { describeConfig } from "../src/describe.ts";
-import { lintResources } from "../src/lint.ts";
 import { defineConnector, memorySecrets, type Op, resolveConfig } from "../src/index.ts";
 import { loadScenarios } from "../src/scenario.ts";
 import config from "./fixtures/outbound/sanoma.config.ts";
@@ -295,7 +294,12 @@ describe("a config's collections", () => {
           additionalProperties: false,
         }),
         ops: ["data.outbound.get", "data.outbound.list", "data.outbound.save", "data.outbound.delete"],
-        declared: { id: "resources/data.ts#outbound", file: "resources/data.ts", name: "outbound", span: [134, 498] },
+        declared: {
+          id: "resources/data.ts#outbound",
+          file: "resources/data.ts",
+          name: "outbound",
+          at: { file: "resources/data.ts", export: "outbound" },
+        },
       },
     ]);
     expect(collections[0]!.record.properties).toMatchObject({
@@ -312,9 +316,7 @@ describe("a config's collections", () => {
     ]);
   });
 
-  it("pass what `sanoma check` holds them to: the data-file lint, the reader, and the workflow importing them", () => {
-    const data = fileURLToPath(new URL("./fixtures/outbound/resources/data.ts", import.meta.url));
-    expect(lintResources(readFileSync(data, "utf8"), data)).toEqual([]);
+  it("pass what `sanoma check` holds them to: the loader, and the workflow importing them", () => {
     const { problems, resources, workflows } = describeConfig(config);
     expect(problems).toEqual([]);
     expect(resources).toEqual([]);

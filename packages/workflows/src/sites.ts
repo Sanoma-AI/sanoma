@@ -1,11 +1,13 @@
 import { existsSync, readdirSync } from "node:fs";
-import { basename, join, relative, sep } from "node:path";
-import { childrenOf, type LintProblem, type Node, readSource, type SourceFile } from "./ast.ts";
+import { basename, join } from "node:path";
+import { z } from "zod";
+import { childrenOf, keyName, type LintProblem, type Node, readSource, type SourceFile } from "./ast.ts";
 import { type CedarPolicySource, visitorPermits } from "./cedar.ts";
-import { keyName } from "./datafile.ts";
-import type { ConfigDescription } from "./describe.ts";
+import type { ConfigDescription, SiteCall, SiteEntry, SitePage } from "./description.ts";
 import { stringValue, unwrap } from "./outline.ts";
-import { APPS_DIR, appFolders, filesUnder, isDirectory } from "./paths.ts";
+import { exportsOf, loadModules } from "./load.ts";
+import { APPS_DIR, appFolders, filesUnder, isDirectory, relPath, SITE_ENTRIES } from "./paths.ts";
+import type { ResourceProblem } from "./resources.ts";
 import { START } from "./schema.ts";
 import {
   ANONYMOUS,
@@ -19,100 +21,14 @@ import {
   WORKFLOW_ACTION,
 } from "./shared.ts";
 
-// What a company's sites call, read from their source with oxc and never run: the reverse index
-// a workflow's page shows as Used by, and the names `sanoma check` holds to the config.
+// What a company's sites call, read from their source with oxc and never run (their pages are
+// browser code, the site's outline): the reverse index a workflow's page shows as Used by, and
+// the names `sanoma check` holds to the config. A site's `site.ts` is loaded.
 
-/** A call a site makes, as written in its source. */
-export interface SiteCall {
-  /** What it calls: a workflow, a collection (`api.data.<name>.<op>`) or an operation (`api.<vendor>.<resource>.<op>`). */
-  kind: "workflow" | "collection" | "op";
-  /**
-   * The workflow's name (`RunForm`'s `workflow`, or the workflow whose `apiNameOf` is the name
-   * `api` gives; that name itself when none is), the collection's name, or the operation's id.
-   */
-  target: string;
-  /**
-   * What it calls of the workflow (`start`, or a read of its runs: `result`, `latest`, …) or the
-   * collection (`list`, `save`, …), as written; absent for a workflow called as itself or by
-   * `RunForm`, which starts it, and for an operation.
-   */
-  method?: string;
-  /** `<RunForm workflow="…" />` or a call on `api`, from `sanoma/site`. */
-  via: "RunForm" | "api";
-  /** The file, relative to the config's root, with `/`: `sites/sales/routes/index.tsx`. */
-  file: string;
-  /** From 1. */
-  line: number;
-  /** From 1, in UTF-16 code units. */
-  column: number;
-  /**
-   * The path of the page the file is, from its `createFileRoute` (or `createLazyFileRoute`) id: groups and pathless
-   * segments left out, no trailing slash (`/sites/sales`). Absent for a file that is no page,
-   * such as a component's.
-   */
-  page?: string;
-}
-
-/** A page of a site: a route file's path, and for a page per content entry the kind it reads. */
-export interface SitePage {
-  /** As `SiteCall.page` has it: `/sites/www`, `/sites/www/blog/$slug`. */
-  path: string;
-  /**
-   * For a path with one parameter (`$slug`), the content kind whose entries are its pages: the one
-   * kind its file reads by that parameter, `content.<kind>.get(params.slug)` (or `slug`,
-   * destructured) with `content` from `sanoma/site`.
-   */
-  content?: string;
-  /**
-   * `false` when its route says `staticData: { sitemap: false }`, written out: the sitemap leaves it
-   * out. Its index route's `sitemap` (`true` or `false`) decides over a layout's at its path; a
-   * pathless or group layout's says nothing.
-   */
-  sitemap?: false;
-}
-
-/** A site, `sites/<name>/` or an app's `apps/<app>/sites/<name>/`, and what it calls. */
-export interface SiteEntry {
-  /** Its folder's name, `<app>/<name>` for an app's (`siteKey`): where it is mounted, `/sites/<name>`. */
-  name: string;
-  /** The app whose folder holds it (`apps/<app>/sites/`); absent for one at the root. */
-  app?: string;
-  /** `defineSite({ title })` in its `site.ts`, when that is a string literal. */
-  title?: string;
-  /** `defineSite({ icon })` in its `site.ts`: a Lucide icon's name, as written. */
-  icon?: string;
-  /** `defineSite({ public: true })`: served to visitors, not people. */
-  public?: true;
-  /** `defineSite({ login })`, the connector whose login half signs visitors in, as written: one that names none is among `problems`. */
-  login?: string;
-  /**
-   * `defineSite({ locales })`, a public site's languages, the first its default: kept only when
-   * every one is a `LOCALE`, written once, on a public site with no login; else a problem.
-   */
-  locales?: string[];
-  /** The host a public site answers on: set by `startApp` from its `domains`, never by `readSites`. */
-  domain?: string;
-  /** Its pages, by path: one for each path its `routes/` files give (a layout and its index are one). */
-  pages: SitePage[];
-  /** Its calls, by file and then in the file's order. */
-  calls: SiteCall[];
-  /**
-   * Each call to a workflow, a collection or an operation the config does not have, or to an
-   * operation a page may not call directly, or, on a public site, that no policy lets a visitor
-   * make, at its file; then what is wrong in its `site.ts`.
-   */
-  problems: (LintProblem & { file: string })[];
-  /**
-   * On a public site, each page with one parameter whose file reads content the sitemap cannot
-   * tie to it (`SitePage.content`), so the sitemap lists none of its pages: at the first read.
-   */
-  warnings: (LintProblem & { file: string })[];
-}
+export type { SiteCall, SiteEntry, SitePage };
 
 /** Where a site's code is: its pages and its components. */
 const SITE_DIRS = ["routes", "components"];
-/** Where `api`, `RunForm` and `defineSite` come from: `sanoma/site`, which re-exports the app's. */
-const SITE_SOURCES: ReadonlySet<string> = new Set(["sanoma/site", "@sanoma-ai/app/site"]);
 const KIND_NAMES = { workflow: "workflow", collection: "collection", op: "operation" } as const;
 /** What a route's loader and head name its path's parameters by. */
 const PARAMS: ReadonlySet<string> = new Set(["params"]);
@@ -212,15 +128,14 @@ export function readSites(
     const read = readSiteFiles(root, dir);
     const resolved = read.flatMap(({ uses }) => uses.filter((use) => !isAppCollection(use)).map(resolve));
     const pages = pagesOf(read);
-    const siteFile = `${dir}/site.ts`;
-    const { problems: optionProblems, ...options } = siteOptionsOf(join(root, siteFile), connectors);
+    const { problems: optionProblems, ...options } = siteDefinitionOf(root, dir, connectors);
     const calls = resolved.map((r) => r.call);
     const problems = [
       ...resolved.flatMap(({ call, problem }) => {
         const message = problem ?? (options.public ? refused(call, options.login) : undefined);
         return message === undefined ? [] : [{ file: call.file, line: call.line, column: call.column, message }];
       }),
-      ...optionProblems.map((p) => ({ file: siteFile, ...p })),
+      ...optionProblems,
     ];
     const sorted = [...pages.keys()].toSorted().map((path) => pages.get(path)!);
     // A page's file it warns of, unless another of its files (a lazy one, its layout) gives its kind.
@@ -261,7 +176,7 @@ const readSiteFiles = (root: string, dir: string) =>
     .toSorted()
     .flatMap((path) => {
       const file = readSource(path);
-      return typeof file === "string" ? [] : [readSiteFile(file, relative(root, path).split(sep).join("/"))];
+      return typeof file === "string" ? [] : [readSiteFile(file, relPath(root, path))];
     });
 
 /**
@@ -282,13 +197,13 @@ export function siteContentPages(root: string): Record<string, string> {
 /**
  * Each site's languages (`defineSite({ locales })`, the first its default) under `root`, by name,
  * for the sites whose `site.ts` gives them without a problem there: what the app's build gives
- * its router (`virtual:sanoma/locales`). Read as `readSites` reads them, never run.
+ * its router (`virtual:sanoma/locales`). Loaded as `readSites` loads them.
  */
 export function siteLocales(root: string): Record<string, string[]> {
   const none = new Set<string>();
   return Object.fromEntries(
     sitesUnder(root).flatMap(({ name, dir }) => {
-      const { locales } = siteOptionsOf(join(root, dir, "site.ts"), { vendors: none, logins: none });
+      const { locales } = siteDefinitionOf(root, dir, { vendors: none, logins: none });
       return locales ? [[name, locales]] : [];
     }),
   );
@@ -297,13 +212,13 @@ export function siteLocales(root: string): Record<string, string[]> {
 /**
  * Each site's icon (`defineSite({ icon })`, a Lucide icon's name as written) under `root`, by name,
  * for the sites whose `site.ts` gives one: the icons the app's build bundles (`virtual:sanoma/icons`).
- * Read as `readSites` reads it, never run.
+ * Loaded as `readSites` loads it.
  */
 export function siteIcons(root: string): Record<string, string> {
   const none = new Set<string>();
   return Object.fromEntries(
     sitesUnder(root).flatMap(({ name, dir }) => {
-      const { icon } = siteOptionsOf(join(root, dir, "site.ts"), { vendors: none, logins: none });
+      const { icon } = siteDefinitionOf(root, dir, { vendors: none, logins: none });
       return icon === undefined ? [] : [[name, icon]];
     }),
   );
@@ -347,9 +262,9 @@ function readSiteFile(
   { program, at }: SourceFile,
   file: string,
 ): { uses: Written[]; route?: FileRoute; warning?: LintProblem & { file: string } } {
-  const api = importedAs(program, SITE_SOURCES, "api");
-  const runForm = importedAs(program, SITE_SOURCES, "RunForm");
-  const content = importedAs(program, SITE_SOURCES, "content");
+  const api = importedAs(program, SITE_ENTRIES, "api");
+  const runForm = importedAs(program, SITE_ENTRIES, "RunForm");
+  const content = importedAs(program, SITE_ENTRIES, "content");
   if (!api.size && !runForm.size && !file.includes("/routes/")) return { uses: [] };
   const found: Omit<Written, "page">[] = [];
   /** Each `content.<kind>.get(arg)`: its kind, its argument and where it is. */
@@ -504,99 +419,74 @@ type SiteConnectors = { vendors: ReadonlySet<string>; logins: ReadonlySet<string
 /** A property of an object literal that is written out: not a spread, its name not computed. */
 const isWritten = (p: Node) => p.type === "Property" && !p.computed;
 
-/** What `site.ts` that `sanoma` cannot read without running it is told. */
-const unread = (what: string, as: string) => `${what} is read without running site.ts: write it as ${as}`;
+/** What `site.ts`'s default export, `defineSite({ … })`, may say. */
+const SiteDefinitionSchema = z.strictObject({
+  title: z.string().optional(),
+  icon: z.string().optional(),
+  public: z.boolean().optional(),
+  login: z.string().optional(),
+  locales: z.array(z.string()).optional(),
+});
 
 /**
- * What `site.ts` says of its site, read without running it, and what is wrong there: its default
- * export must be `defineSite({ … })` written out, so it can be read at all; then `title` when it is
- * a string, `icon`, `public`, `login` and `locales`, which must be literals. `login` is kept as written; one on a
- * site that is not public, or naming no connector of the config with a login half, is a problem.
- * `locales` is kept only when it has no problem.
+ * What the site in `dir` (relative to `root`) says of itself in its `site.ts`, loaded
+ * (`loadModules`, `defineSite` served from `sanoma/site`), and what is wrong there: its default
+ * export, `defineSite({ … })`, held to its schema; then a `login` on a site that is not public, or
+ * naming no connector of the config with a login half, and `locales` that are not a public site's
+ * (with no login) language tags, each once. `locales` is kept only when it has no problem. Nothing
+ * for no file, or no default export.
  */
-function siteOptionsOf(
-  path: string,
+function siteDefinitionOf(
+  root: string,
+  dir: string,
   connectors: SiteConnectors,
-): Pick<SiteEntry, "title" | "icon" | "public" | "login" | "locales"> & { problems: LintProblem[] } {
-  const file = readSource(path);
-  if (typeof file === "string") return { problems: [] };
-  const problems: LintProblem[] = [...file.problems];
-  const problem = (at: Node, message: string) => void problems.push({ ...file.at(at.start), message });
-  const exported = file.program.body.find((s: Node) => s.type === "ExportDefaultDeclaration");
-  if (!exported) return { problems };
-  const call = unwrap(exported.declaration);
-  const callee = unwrap(call?.callee);
-  const options = unwrap(call?.arguments?.[0]);
-  const defineSite = importedAs(file.program, SITE_SOURCES, "defineSite");
-  // Anything not written out (a variable, a spread, a computed key) could make the site public unseen.
-  const written =
-    call?.type === "CallExpression" &&
-    callee?.type === "Identifier" &&
-    defineSite.has(callee.name) &&
-    (options === undefined || options.type === "ObjectExpression");
-  if (!written) {
-    problem(
-      exported,
-      unread("its default export", '`defineSite({ … })` from "sanoma/site", its options an object literal'),
-    );
-    return { problems };
+): Pick<SiteEntry, "at" | "title" | "icon" | "public" | "login" | "locales"> & {
+  problems: (ResourceProblem & { file: string })[];
+} {
+  const file = `${dir}/site.ts`;
+  if (!existsSync(join(root, file))) return { problems: [] };
+  // A helper it imports threw: said at the helper.
+  const loaded = exportsOf(loadModules(root, [join(root, file)], []), file);
+  if (loaded === undefined) return { problems: [] };
+  if ("problem" in loaded) return { problems: [loaded.problem] };
+  const value = loaded.exports.find(([name]) => name === "default")?.[1];
+  if (value === undefined) return { problems: [] };
+  const problem = (message: string) => ({ file, export: "default", message });
+  const parsed = SiteDefinitionSchema.safeParse(value);
+  if (!parsed.success) {
+    const why = z.prettifyError(parsed.error).replaceAll(/\s*\n\s*/g, " ");
+    return { problems: [problem(`its default export is \`defineSite({ … })\` from "sanoma/site": ${why}`)] };
   }
-  for (const p of options?.properties ?? []) {
-    if (!isWritten(p)) problem(p, unread("each of `defineSite`'s options", "a property with its name"));
-  }
-  // The last of a name, as the object it makes has.
-  const property = (name: string): Node =>
-    options?.properties.findLast((p: Node) => isWritten(p) && keyName(p.key) === name);
-
-  const title = stringValue(property("title")?.value);
-  // Cosmetic: one that is not a string (tsc refuses it) is shown as none, never a problem that stops a site.
-  const icon = stringValue(property("icon")?.value);
-  const publicAt = property("public");
-  const flag = unwrap(publicAt?.value);
-  const isPublic = flag?.type === "Literal" && flag.value === true;
-  const publicUnread = publicAt !== undefined && !(flag?.type === "Literal" && typeof flag.value === "boolean");
-  if (publicUnread) problem(publicAt, unread("`public`", "`true` or `false`"));
-
-  const loginAt = property("login");
-  const login = stringValue(loginAt?.value);
+  const { title, icon, public: isPublic, login, locales } = parsed.data;
+  const problems: (ResourceProblem & { file: string })[] = [];
   const loginProblem = (): string | undefined => {
-    if (login === undefined) return unread("`login`", "a string");
-    // When `public` is what is wrong, it is said there.
-    if (!isPublic && !publicUnread) return "a login is for a public site: add `public: true`, or remove `login`";
-    if (!connectors.vendors.has(login)) return `login names "${login}", which is not a connector in sanoma.config.ts`;
-    if (!connectors.logins.has(login)) return `login names "${login}", whose connector has no login half`;
+    if (!isPublic) return "a login is for a public site: add `public: true`, or remove `login`";
+    if (!connectors.vendors.has(login!)) return `login names "${login}", which is not a connector in sanoma.config.ts`;
+    if (!connectors.logins.has(login!)) return `login names "${login}", whose connector has no login half`;
     return undefined;
   };
-  const message = loginAt && loginProblem();
-  if (message) problem(loginAt, message);
-
-  const localesAt = property("locales");
-  const list = unwrap(localesAt?.value);
-  // A hole or a spread is no string.
-  const tags: (string | undefined)[] | undefined =
-    list?.type === "ArrayExpression" ? list.elements.map((e: Node) => stringValue(e)) : undefined;
-  const locales = tags?.every((tag): tag is string => tag !== undefined) ? tags : undefined;
-  const localesProblem = (): string | undefined => {
-    if (locales === undefined) return unread("`locales`", "an array of strings");
-    if (!locales.length) return "`locales` names a site's languages, its default first: give one or more, or remove it";
-    const bad = locales.find((locale) => !LOCALE.test(locale));
+  const loginMessage = login !== undefined ? loginProblem() : undefined;
+  if (loginMessage) problems.push(problem(loginMessage));
+  const localesProblem = (list: string[]): string | undefined => {
+    if (!list.length) return "`locales` names a site's languages, its default first: give one or more, or remove it";
+    const bad = list.find((locale) => !LOCALE.test(locale));
     if (bad !== undefined) return `"${bad}" is not a language tag such as "en", "fr" or "pt-BR"`;
-    const twice = locales.find((locale, i) => locales.indexOf(locale) !== i);
+    const twice = list.find((locale, i) => list.indexOf(locale) !== i);
     if (twice !== undefined) return `"${twice}" is in \`locales\` twice`;
-    // When `public` is what is wrong, it is said there.
-    if ((!isPublic && !publicUnread) || loginAt) {
+    if (!isPublic || login !== undefined) {
       return "`locales` are for a public site with no login: add `public: true`, or remove `locales`";
     }
     return undefined;
   };
-  const localesMessage = localesAt && localesProblem();
-  if (localesMessage) problem(localesAt, localesMessage);
+  const localesMessage = locales && localesProblem(locales);
+  if (localesMessage) problems.push(problem(localesMessage));
   return {
+    at: { file, export: "default" },
     ...(title !== undefined && { title }),
     ...(icon !== undefined && { icon }),
     ...(isPublic && { public: true as const }),
     ...(login !== undefined && { login }),
-    ...(localesAt && !localesMessage && isPublic && !loginAt && { locales }),
+    ...(locales && !localesMessage && { locales }),
     problems,
   };
 }

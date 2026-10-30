@@ -6,6 +6,21 @@ import { APP_NAME } from "./shared.ts";
 // the directories and the one walk down (`filesUnder`). Node's `path` and `fs` only, no parser:
 // the oxlint plugin loads it.
 
+/**
+ * Where a data file imports `secret` from, and `sanoma`, the runtime's own resource constructors
+ * (its people: `sanoma.person`, `.agent`, `.group`): what the loader serves for them.
+ */
+export const SECRET_ENTRIES: ReadonlySet<string> = new Set(["sanoma/resources", "@sanoma-ai/workflows/resources"]);
+/** Where a site imports `api`, `RunForm` and `defineSite` from: `sanoma/site`, which re-exports the app's. The loader serves `defineSite`. */
+export const SITE_ENTRIES: ReadonlySet<string> = new Set(["sanoma/site", "@sanoma-ai/app/site"]);
+/** Where `resources/data.ts` imports `collection` from: what the loader serves for it. */
+export const DATA_ENTRIES: ReadonlySet<string> = new Set(["sanoma/data", "@sanoma-ai/workflows/data"]);
+/**
+ * The one data file that holds collections, relative to `resources/`. Workflows and the runtime
+ * import it, so it holds collections only.
+ */
+export const COLLECTIONS_FILE = "data.ts";
+
 /** A relative import specifier: `./x.ts`, `../y.ts`. */
 export const RELATIVE = /^\.\.?\//;
 
@@ -33,6 +48,9 @@ export function inside(dir: string, path: string): boolean {
   const rel = relative(dir, path);
   return rel === "" || (rel.split(sep)[0] !== ".." && !isAbsolute(rel));
 }
+
+/** `path`, under `root`, relative to it with `/`: `resources/github.ts`. */
+export const relPath = (root: string, path: string): string => relative(root, path).split(sep).join("/");
 
 /** True when `path` is a directory. */
 export const isDirectory = (path: string): boolean => statSync(path, { throwIfNoEntry: false })?.isDirectory() ?? false;
@@ -77,8 +95,12 @@ export function appOfFile(file: string | undefined): string | undefined {
     // Found roots only: a directory that is no company's yet may become one (`sanoma` in an empty folder).
     if (root !== null) roots.set(dir, root);
   }
-  if (root === null) return undefined;
-  const [top, app, ...rest] = relative(root, file).split(sep);
+  return root === null ? undefined : appOfPath(relPath(root, file));
+}
+
+/** The app a path relative to a company's root is in: `<app>` under `apps/<app>/`; undefined for any other. */
+export function appOfPath(rel: string): string | undefined {
+  const [top, app, ...rest] = rel.split("/");
   return top === APPS_DIR && app !== undefined && rest.length && APP_NAME.test(app) ? app : undefined;
 }
 

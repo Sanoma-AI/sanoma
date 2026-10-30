@@ -1,27 +1,69 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { FormatConfig } from "oxfmt";
-import { type Node, parse } from "./ast.ts";
-import {
-  type DataFileExport,
-  type DataFileImport,
-  type DataValue,
-  isReference,
-  keyName,
-  readDataFile,
-  SECRET_ENTRIES,
-} from "./datafile.ts";
-import { isSecret } from "./secret.ts";
+import { keyName, type Node, parse } from "./ast.ts";
+import type { ConnectionRef } from "./connection.ts";
+import { SECRET_ENTRIES } from "./paths.ts";
+import { isSecret, type Secret } from "./secret.ts";
 
-// The data-file writer: what the app's Adopt, and setting up a company, write into the files
-// `datafile.ts` reads. A file is changed in place, one declaration at a time, and everything
+// The data-file writer: what the app's Adopt and its forms' Save, and setting up a company, write
+// into a company's files. A file is changed in place, one declaration at a time, and everything
 // outside that declaration is kept byte for byte; what is written is formatted with oxfmt, under
-// the repository's own options, so it reads as if a person had written it and formatted it.
+// the repository's own options, so it reads as if a person had written it and formatted it. Files
+// are read by loading them; the writer parses, and changes only what is written out as a literal.
+
+/** A name in a data file that refers to a declared resource: one imported from a data file, or exported by this one. */
+export class Reference {
+  readonly name: string;
+  constructor(name: string) {
+    this.name = name;
+  }
+}
+
+const REFERENCE = Symbol.for("sanoma.reference");
+Object.defineProperty(Reference.prototype, REFERENCE, { value: true });
+
+/** True for a `Reference`, made by any copy of this package: read by a registered symbol, not `instanceof`. */
+export const isReference = (value: unknown): value is Reference =>
+  typeof value === "object" && value !== null && REFERENCE in value;
+
+/** A value the writer writes: a literal, a reference to a declared resource, or a secret's marker (`secret("NAME")`). */
+export type DataValue =
+  | null
+  | boolean
+  | number
+  | string
+  | Reference
+  | Secret
+  | DataValue[]
+  | { [field: string]: DataValue };
+
+/**
+ * Why `setFields` will not write a field: the file computes what is there (a name, a call, a
+ * spread), or the declaration is not an object literal, so only a person editing the code can
+ * change it. `reason` says which, for the form that asked.
+ */
+export class NotLiteral extends Error {
+  readonly reason: string;
+  constructor(reason: string) {
+    super(reason);
+    this.name = "NotLiteral";
+    this.reason = reason;
+  }
+}
 
 /** A whole data file to render: its imports and its resources, in order. */
 export interface DataFileContent {
-  imports: readonly Pick<DataFileImport, "source" | "imported" | "local">[];
-  exports: readonly Pick<DataFileExport, "name" | "vendor" | "type" | "desired" | "connection">[];
+  /** Each `import { imported as local } from "source"`. */
+  imports: readonly { source: string; imported: string; local: string }[];
+  /** Each `export const name = vendor.type({ ...desired }, { connection })`. */
+  exports: readonly {
+    name: string;
+    vendor: string;
+    type: string;
+    desired: { [field: string]: DataValue };
+    connection?: ConnectionRef;
+  }[];
 }
 
 /**
@@ -41,19 +83,22 @@ export function formatOptions(root: string): FormatConfig {
 }
 
 /**
- * `source`, a data file's text, with fields of its resource `exportName` set to new values:
+ * `source`, a company file's text, with fields of its declaration `exportName` set to new values:
  * `fields` by dotted path, a list item's with its index, as a drift report names them
- * (`required_pull_request_reviews.0.dismiss_stale_reviews`). A field the declaration does not
- * have is added at the end of the object that should hold it. Only that `export const` changes:
- * it is formatted with oxfmt under `options` (`formatOptions`), and every other byte of the file
- * stays as it was.
+ * (`required_pull_request_reviews.0.dismiss_stale_reviews`). The declaration is the object
+ * literal of `export const <exportName> = …` (or `export default …` for `"default"`): the object
+ * itself, or the first argument of the call it is (`github.repository({ … })`,
+ * `defineSite({ … })`). A field the declaration does not have is added at the end of the object
+ * that should hold it. Only that statement changes: it is formatted with oxfmt under `options`
+ * (`formatOptions`), and every other byte of the file stays as it was.
  *
  * A value naming a secret adds `import { secret } from "sanoma/resources"` after the file's
  * imports when it has none.
  *
- * Throws when the file does not parse, declares no such resource, or a path cannot be set: it
- * runs through a value that is not an object or a list, or ends at a reference to another
- * resource (a person changes a reference; a vendor's value never replaces one).
+ * Throws `NotLiteral` when the declaration is not an object literal, or a path reaches a value the
+ * file computes (a name, such as a reference to another resource, a call, a spread): a person
+ * changes those in the code. Throws an `Error` when the file does not parse, has no such export,
+ * or a path runs through a literal that is not an object or a list.
  */
 export async function setFields(
   source: string,
@@ -74,14 +119,13 @@ export async function setFields(
   return text.slice(0, start) + formatted.trimEnd() + text.slice(end);
 }
 
-/** What a data file imports `secret` from when it names one (`readDataFile` lists no such import). */
+/** What a data file imports `secret` from when it names one. */
 const SECRET_IMPORT = { source: "sanoma/resources", imported: "secret", local: "secret" };
 
 /**
  * A whole data file: the imports, one per source, then each resource as `export const`, then
- * `export default` naming them all, formatted with oxfmt under `options`. `readDataFile` reads it
- * back as it was given: what `readDataFile` returns renders the file again. A file whose values
- * name a secret also imports `secret` from "sanoma/resources".
+ * `export default` naming them all, formatted with oxfmt under `options`: loaded, it declares
+ * what it was given. A file whose values name a secret also imports `secret` from "sanoma/resources".
  */
 export async function renderDataFile({ imports, exports }: DataFileContent, options: FormatConfig = {}) {
   const names = new Map<string, string[]>();
@@ -118,16 +162,34 @@ function withSecretImport(text: string): string {
   return at ? `${text.slice(0, at)}\n${line}${text.slice(at)}` : `${line}\n${text}`;
 }
 
-/** The `export const` of the resource `name` in `text`, and the object literal its constructor takes. */
+/**
+ * The statement that exports `name` in `text` (`export const <name> = …`, or `export default …`
+ * for `"default"`), and the object literal it declares: the value itself, or the first argument
+ * of the call it is.
+ */
 function declarationOf(text: string, name: string): { statement: Node; object: Node } {
-  // The name is never resolved, and a relative import is checked against the file's own directory.
-  const filename = "/data-file.ts";
-  const { program, errors } = parse(filename, text);
+  const { program, errors } = parse("/data-file.ts", text);
   if (errors.length) throw new Error(`The data file does not parse: ${errors[0]!.message}`);
-  const found = readDataFile(program, filename).exports.find((e) => e.name === name);
-  if (!found) throw new Error(`The data file declares no resource ${name}`);
-  const statement: Node = program.body.find((s) => s.start === found.start);
-  return { statement, object: statement.declaration.declarations[0].init.arguments[0] };
+  for (const statement of program.body) {
+    const value = exportedValue(statement, name);
+    if (value === undefined) continue;
+    const object = value?.type === "CallExpression" ? value.arguments[0] : value;
+    if (object?.type !== "ObjectExpression") throw new NotLiteral(`${name} is not an object literal: edit it in code`);
+    return { statement, object };
+  }
+  throw new Error(`The data file declares no resource ${name}`);
+}
+
+/** The value `statement` exports as `name` (null for `export let x;`), or undefined when it exports no such name. */
+function exportedValue(statement: Node, name: string): Node | null | undefined {
+  if (name === "default") return statement.type === "ExportDefaultDeclaration" ? statement.declaration : undefined;
+  if (statement.type !== "ExportNamedDeclaration" || statement.declaration?.type !== "VariableDeclaration") {
+    return undefined;
+  }
+  const declarator = statement.declaration.declarations.find(
+    (d: Node) => d.id.type === "Identifier" && d.id.name === name,
+  );
+  return declarator && declarator.init;
 }
 
 /**
@@ -139,38 +201,62 @@ function editAt(object: Node, path: string, value: DataValue): { start: number; 
   const keys = path.split(".");
   let node = object;
   for (let i = 0; i < keys.length;) {
-    if (node.type === "ObjectExpression") {
+    // A spread may hold the field, or move the list's items: what is there is the code's.
+    if (node.type === "ObjectExpression" && !node.properties.some(isSpread)) {
       const names = new Map<string, Node>(node.properties.map((p: Node) => [fieldName(p), p]));
       let j = keys.length;
       while (j > i && !names.has(keys.slice(i, j).join("."))) j--;
       if (j === i) return added(node, keys.slice(i), path, value);
       node = names.get(keys.slice(i, j).join("."))!.value;
       i = j;
-    } else if (node.type === "ArrayExpression" && /^\d+$/.test(keys[i]!) && node.elements[Number(keys[i])]) {
+    } else if (
+      node.type === "ArrayExpression" &&
+      !node.elements.some(isSpread) &&
+      /^\d+$/.test(keys[i]!) &&
+      node.elements[Number(keys[i])]
+    ) {
       node = node.elements[Number(keys[i])];
       i++;
+    } else if (computed(node)) {
+      throw computedAt(keys.slice(0, Math.max(i, 1)).join("."));
     } else {
       const at = keys.slice(0, i).join(".");
       throw new Error(`Cannot set ${path}: ${at} is not an object or a list with item ${keys[i]}`);
     }
   }
-  const named = referenceIn(node);
-  if (named) {
-    throw new Error(`Cannot set ${path}: it names the resource ${named}; change a reference in the file itself`);
-  }
+  if (computed(node)) throw computedAt(path);
   return { start: node.start, end: node.end, replacement: literal(value) };
 }
 
-/** The first resource a value names, itself or anywhere inside it: a vendor's value never replaces one. */
-function referenceIn(node: Node): string | undefined {
-  if (node.type === "Identifier") return node.name;
-  const items =
-    node.type === "ArrayExpression" ? node.elements : node.type === "ObjectExpression" ? node.properties : [];
-  for (const item of items) {
-    const named = item && referenceIn(item.type === "Property" ? item.value : item);
-    if (named) return named;
+/** The refusal of a field whose value the file computes. */
+const computedAt = (field: string) => new NotLiteral(`the value of ${field} is computed in the file`);
+
+const isSpread = (node: Node) => node?.type === "SpreadElement";
+
+/**
+ * True when a value is (or holds) code rather than a literal: a name (a reference to another
+ * resource, a constant), a call other than `secret(…)`, a spread, a template with expressions.
+ * A person changes those in the file; a form's or a vendor's value never replaces one.
+ */
+function computed(node: Node): boolean {
+  switch (node.type) {
+    case "Literal":
+      return false;
+    case "TemplateLiteral":
+      return node.expressions.length > 0;
+    case "UnaryExpression":
+      return !["-", "+"].includes(node.operator) || node.argument.type !== "Literal";
+    case "ArrayExpression":
+      return node.elements.some((item: Node) => item === null || computed(item));
+    case "ObjectExpression":
+      return node.properties.some(
+        (p: Node) => p.type !== "Property" || p.computed || p.kind !== "init" || p.method || computed(p.value),
+      );
+    case "CallExpression":
+      return !(node.callee.type === "Identifier" && node.callee.name === "secret" && !node.arguments.some(computed));
+    default:
+      return true;
   }
-  return undefined;
 }
 
 /**
@@ -188,7 +274,7 @@ function added(object: Node, [key, ...under]: string[], path: string, value: Dat
     : { start: object.start, end: object.end, replacement: `{ ${field} }` };
 }
 
-/** A property's name, as `readDataFile` reads it. */
+/** A property's name: undefined for a computed key or a spread. */
 const fieldName = (p: Node): string | undefined => (p.type === "Property" && !p.computed ? keyName(p.key) : undefined);
 
 /** A field's name in source: bare when it can be, else a string. */
@@ -199,7 +285,7 @@ const holdsSecret = (value: DataValue): boolean =>
   isSecret(value) ||
   (typeof value === "object" && value !== null && !isReference(value) && Object.values(value).some(holdsSecret));
 
-/** A value in the data-file subset, as source, on one line: oxfmt lays it out. */
+/** A value as source, on one line: oxfmt lays it out. */
 function literal(value: DataValue): string {
   if (isReference(value)) return value.name;
   if (isSecret(value)) return `secret(${JSON.stringify(value.$secret)}${value.generate ? ", { generate: true }" : ""})`;

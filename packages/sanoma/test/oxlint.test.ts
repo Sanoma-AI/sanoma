@@ -22,6 +22,7 @@ import { main } from "sanoma/dist/cli.js";
 export const all = [defineWorkflow, z, defineConfig, main, Date.now()] as [unknown, unknown, Ctx<[]>, unknown, number];
 `,
   );
+  // A data file is loaded, not linted: a computed value is fine.
   mkdirSync(join(dir, "resources"));
   writeFileSync(
     join(dir, "resources/shop.ts"),
@@ -111,15 +112,9 @@ describe("the shipped oxlint.json", () => {
     expect(names("sanoma")).toContain("z");
   });
 
-  it("refuses what a workflow may not import from sanoma, the clock, and a data file outside the subset", () => {
+  it("refuses what a workflow may not import from sanoma and the clock, and nothing in a data file", () => {
     const imports = "eslint(no-restricted-imports)";
     expect(found.filter((f) => !f.file.startsWith("sites/"))).toEqual([
-      {
-        file: "resources/shop.ts",
-        line: 2,
-        rule: "sanoma(data-file)",
-        text: expect.stringMatching(/^a call is not allowed in a data file/),
-      },
       {
         file: "workflows/via-sanoma.ts",
         line: 1,

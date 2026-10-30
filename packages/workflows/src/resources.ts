@@ -1,94 +1,32 @@
-import type { ConnectionRef } from "./connection.ts";
-import { readFileSync, statSync } from "node:fs";
-import { dirname, relative, resolve, sep } from "node:path";
-import { parsed } from "./ast.ts";
-import {
-  type DataFile,
-  type DataFileExport,
-  type DataValue,
-  readDataFile,
-  Reference,
-  SECRET_ENTRIES,
-} from "./datafile.ts";
+import type { DeclaredCollection, DeclaredResource, ResourceProblem } from "./description.ts";
+import { readFileSync } from "node:fs";
+import { mayDeclarePeople } from "./change.ts";
+import { isCollection } from "./collection.ts";
+import { filesRead, type Loaded, loadModules, madeOf, madeWith } from "./load.ts";
 import { type Binding, type Bindings, LOCKFILE, readLockfile } from "./lockfile.ts";
-import { type Connector, VENDOR } from "./op.ts";
-import { APPS_DIR, filesUnder, kindDirs } from "./paths.ts";
+import type { Connector } from "./op.ts";
+import { APPS_DIR, COLLECTIONS_FILE, filesUnder, kindDirs, relPath } from "./paths.ts";
 import { peopleConnector, sanoma } from "./person.ts";
 import { wakeupOps } from "./wakeup-type.ts";
-import type { Span } from "./outline.ts";
-import { type Declared, type Resource, resourceTypesOf } from "./resource.ts";
+import { DECLARED, type Declared, isDeclared, isObject, type Resource, resourceTypesOf } from "./resource.ts";
 import { Principal } from "./define.ts";
 import { NotAdmittedError } from "./errors.ts";
 import {
   AGENTS,
   ANONYMOUS,
   ANONYMOUS_PRINCIPAL,
+  type At,
   declaresPeople,
   isVisitor,
   type PeopleResource,
   personOf,
   principalOf,
   problemLine,
-  qualified,
   RUNTIME_AGENTS,
   VISITORS,
 } from "./shared.ts";
 
-/** A resource a data file declares, as read from the file without running it. */
-export interface DeclaredResource {
-  /** `<file>#<export>`, the file relative to the config's root, with `/`: `resources/identity/github.ts#website`. */
-  id: string;
-  /** The data file it is declared in, as `id` names it: `resources/identity/github.ts`. */
-  file: string;
-  vendor: string;
-  type: string;
-  /** What people call it: its identity, else its export's name. */
-  name: string;
-  /** The import id that finds it unbound: what its type's `find` makes of its fields; absent when the type has none. */
-  identity?: string;
-  /** The vendor's id of the object the lockfile binds it to (`LOCKFILE`); absent when unbound. */
-  binding?: string;
-  /** Its `export const` statement, as UTF-16 offsets into the file's text. */
-  span: Span;
-  /** Its fields, as its type checked them: each resource it names as that resource's `name`. */
-  desired: Record<string, unknown>;
-  connection?: ConnectionRef;
-  /**
-   * Where it names another declared resource: the field's dotted path (a list item's with its
-   * index, `teams.0`) to that resource's id.
-   */
-  refs: Record<string, string>;
-}
-
-/**
- * A collection `resources/data.ts` declares, as read without running it: where it is, for the
- * Resources page. Its fields are the collection's own (`describeConfig`'s `collections`), from
- * the same file, which the runtime imports.
- */
-export interface DeclaredCollection {
-  /** `<file>#<export>`, as a resource's: `resources/data.ts#outbound`. */
-  id: string;
-  /** `resources/data.ts`, or an app's `apps/<app>/resources/data.ts`. */
-  file: string;
-  /** The collection's name, its operations' middle segments (`data.<name>.get`): an app's with its app, `crm.contacts`. */
-  name: string;
-  /** Its `export const` statement, as UTF-16 offsets into the file's text. */
-  span: Span;
-}
-
-/** Something wrong in the data files, or in finding them. */
-export interface ResourceProblem {
-  /**
-   * The data file, relative to the config's root, with `/`: `resources/identity/github.ts`.
-   * Absent, with `line` and `column`, when the problem is the config's: it has no root.
-   */
-  file?: string;
-  /** From 1. */
-  line?: number;
-  /** From 1, in UTF-16 code units. */
-  column?: number;
-  message: string;
-}
+export type { DeclaredCollection, DeclaredResource, ResourceProblem };
 
 /** What the data files declare: each resource read without problems, the lockfile's bindings, and the problems. */
 export interface DataFiles {
@@ -100,7 +38,7 @@ export interface DataFiles {
   orphans: (Binding & { key: string })[];
   /** The collections `resources/data.ts` declares, in file order. */
   collections: DeclaredCollection[];
-  /** By file, line and column. */
+  /** By file, then line and column. */
   problems: ResourceProblem[];
 }
 
@@ -115,21 +53,8 @@ export interface DeclaredPeople {
   problems: ResourceProblem[];
 }
 
-/** A file that imports the runtime's constructors, `sanoma` (by any local name): the files `readPeople` reads. */
-export const DECLARES_PEOPLE = /\{[^}]*\bsanoma\b[^}]*\}\s*from\s*["'](?:sanoma|@sanoma-ai\/workflows)\/resources["']/;
-/** The last read of the people under each root, by what its data files were then (`filesStamp`). */
-const peopleRead = new Map<string, { stamp: string; read: DeclaredPeople }>();
-
-/** Each data file under `root` with its size and modification time: unchanged while the files are. */
-const filesStamp = (root: string) =>
-  kindDirs(root, "resources")
-    .flatMap(dataFilesUnder)
-    .map((path) => {
-      // Gone since it was listed (an editor's save by rename): stamped as such, and read next time.
-      const stat = statSync(path, { bigint: true, throwIfNoEntry: false });
-      return `${path} ${stat?.size} ${stat?.mtimeNs}`;
-    })
-    .join("\n");
+/** The people each load of the people's files declares: the same answer while none of them changed. */
+const peopleRead = new WeakMap<Map<string, Loaded>, DeclaredPeople>();
 
 /** The names no data file may give a group: what each is already. */
 const RESERVED_GROUPS: ReadonlyMap<string, string> = new Map([
@@ -145,26 +70,39 @@ const RESERVED_GROUPS: ReadonlyMap<string, string> = new Map([
 export const inAppPeople = (r: DeclaredResource): boolean =>
   r.vendor === "sanoma" && Object.hasOwn(sanoma, r.type) && r.file.startsWith(`${APPS_DIR}/`);
 
+const PEOPLE_CONNECTORS = [peopleConnector, wakeupOps];
+const PEOPLE_TYPES = resourceTypesOf(PEOPLE_CONNECTORS);
+const peopleLoad = (root: string) =>
+  loadModules(root, dataFilesOf(root), PEOPLE_CONNECTORS, { only: mayDeclarePeople, types: PEOPLE_TYPES });
+
+/**
+ * The company files the people under `root` are read from (`readPeople`), by path relative to the
+ * root: each file that may declare them and every company file it imports, so an edit to a helper
+ * a people file reads its emails from is a change to the rules too.
+ */
+export const peopleSources = (root: string): ReadonlySet<string> => filesRead(peopleLoad(root));
+
 /**
  * The people, agents and groups the data files under `root` declare (`sanoma.person`, `.agent`,
- * `.group`), read without running them, as `principalOf` takes them, with what is wrong in their
- * files; none without a root. Read again only when a data file changed (by its size and time),
- * so a new colleague is admitted once their file is saved, and a request costs a `stat` per file.
+ * `.group`), as `principalOf` takes them, with what is wrong in their files; none without a root.
+ * Only the files that may declare them (`mayDeclarePeople`) are loaded, with the people's and the
+ * wakeup's constructors, which the same `sanoma` declares; loaded again only when one of them
+ * changed (by its size and time), so a new colleague is admitted once their file is saved, and a
+ * request costs a `stat` per file.
  */
 export function readPeople(root: string | undefined): DeclaredPeople {
   if (root === undefined) return { people: [], problems: [] };
-  const stamp = filesStamp(root);
-  const cached = peopleRead.get(root);
-  if (cached?.stamp === stamp) return cached.read;
-  // With the wakeup's type, which the same constructors declare: read, and only the people's kept.
-  const read = readDataFiles(root, [peopleConnector, wakeupOps], undefined, (source) => DECLARES_PEOPLE.test(source));
+  const loaded = peopleLoad(root);
+  const cached = peopleRead.get(loaded);
+  if (cached) return cached;
+  // The people are never bound, so the lockfile is not read.
+  const read = declarationsOf(root, loaded, PEOPLE_TYPES, { bindings: {}, problems: [] }, true);
   const ofPeople = read.resources.filter((r) => Object.hasOwn(sanoma, r.type));
   const people = ofPeople.filter((r) => !inAppPeople(r));
-  // The people are never bound, so the lockfile's problems are not theirs.
-  const own = read.problems.filter((p) => p.file !== LOCKFILE);
+  const own = read.problems;
   for (const r of ofPeople.filter(inAppPeople)) {
     own.push({
-      file: r.file,
+      ...r.at,
       message: `${r.id} declares a ${r.type} in an app: the people are the company's, declared in resources/ at the root`,
     });
   }
@@ -172,15 +110,14 @@ export function readPeople(root: string | undefined): DeclaredPeople {
   for (const r of people) {
     if (r.type === "group") {
       const reserved = RESERVED_GROUPS.get(r.name);
-      if (reserved)
-        own.push({ file: r.file, message: `${r.id} is named "${r.name}", ${reserved}: give it another name` });
+      if (reserved) own.push({ ...r.at, message: `${r.id} is named "${r.name}", ${reserved}: give it another name` });
       continue;
     }
     const id = r.name;
     const other = ids.get(id);
     if (other || RUNTIME_AGENTS.includes(id) || isVisitor({ id })) {
       own.push({
-        file: r.file,
+        ...r.at,
         message: other
           ? `${r.id} has the id "${id}", which ${other.id} has: give each person and agent their own`
           : isVisitor({ id })
@@ -191,7 +128,7 @@ export function readPeople(root: string | undefined): DeclaredPeople {
     ids.set(id, r);
   }
   const declared = { people, problems: own };
-  peopleRead.set(root, { stamp, read: declared });
+  peopleRead.set(loaded, declared);
   return declared;
 }
 
@@ -232,272 +169,275 @@ export function admit(
   throw new NotAdmittedError(who);
 }
 
-interface FileEntry {
-  /** Relative to the config's root, with `/`. */
-  rel: string;
-  data: DataFile;
-  /** Records a problem at an offset into the file. */
-  problem: (offset: number, message: string) => void;
-}
-
 /**
- * Reads `resources/` under `root`, the config's directory: each `.ts` file in it but
- * `*.test.ts`, `*.d.ts` and `node_modules`, parsed with oxc and held to the data-file subset
- * (`readDataFile`). A constructor import (`@sanoma-ai/connector-github/resources`) is matched to the
- * connector whose `info.package` it names, never imported; each resource is checked by calling
- * its type, as running the file would, with each resource it names given as that resource.
+ * Loads `resources/` under `root`, the config's directory, and each app's: each `.ts` file in it
+ * but `*.test.ts`, `*.d.ts` and `node_modules` (`loadModules`), its constructor imports (a
+ * connector's `<info.package>/resources`, `sanoma/resources`) served the constructors of
+ * `types`. Each export whose value a constructor made is a declaration, `<file>#<export>`, in the
+ * file that made it (its non-default name when the file gives two); each resource it names is the
+ * declaration that holds that very object.
  *
- * Problems: anything outside the subset, a constructor or data file the config does not know, a
- * type the connector does not declare, a value the type refuses (a reference where its type
- * takes none among them), a reference cycle, and two resources of one type with one identity.
+ * Problems: a file that throws as it loads (a value its type refuses, a type its vendor does not
+ * declare, an import of what the config does not serve), at the place its error's stack gives; a
+ * resource made but not exported, or exported under two names; one naming a resource no data file
+ * exports; a type that is not the config's; and two resources of one type with one identity (and
+ * connection). A declaration with a problem is left out, and so is any that names one.
  *
- * The collections `resources/data.ts` declares are listed as they are read (`collections`),
- * never matched to a connector, a resource type or the lockfile: the runtime imports that file.
+ * The collections `resources/data.ts` declares (`collection()`) are listed by their exports
+ * (`collections`), matched to no connector, resource type or lockfile: the runtime imports that
+ * file. A collection in another file, or anything else exported from `data.ts`, is a problem.
  *
  * Each declaration is joined to its binding in the lockfile (`readLockfile`) by its key,
- * `<file>#<export>`; a binding no export declares is an orphan. Problems: the lockfile's, a
- * binding of another type than its declaration's, and two declarations bound to one object.
- *
- * `partial` reads part of the files: only those whose source it passes, and in them, an import of
- * a connector not in `connectors`, or of a file left out, is left unread rather than reported.
+ * `<file>#<export>`; a binding no export declares is an orphan, unless its file failed to load.
+ * Problems: the lockfile's, a binding of another type than its declaration's, two declarations
+ * bound to one object, and several wakeups.
  */
-export function readDataFiles(
+export function loadDataFiles(
   root: string | undefined,
   connectors: readonly Connector<any, any>[],
   types: ReadonlyMap<string, Resource> = resourceTypesOf(connectors),
-  partial?: (source: string) => boolean,
 ): DataFiles {
-  const problems: ResourceProblem[] = [];
   if (root === undefined) {
-    problems.push({
-      message:
-        "The config has no root, so its data files cannot be found: make it with defineConfig, which records its file, or set its `root`",
-    });
-    return { resources: [], bindings: {}, orphans: [], collections: [], problems };
+    const message =
+      "The config has no root, so its data files cannot be found: make it with defineConfig, which records its file, or set its `root`";
+    return { resources: [], bindings: {}, orphans: [], collections: [], problems: [{ message }] };
   }
-  const lock = readLockfile(root);
-  problems.push(...lock.problems);
+  const loaded = loadModules(root, dataFilesOf(root), connectors, { types });
+  return declarationsOf(root, loaded, types, readLockfile(root), false);
+}
 
-  const files = new Map<string, FileEntry>();
-  const left = new Set<string>();
-  // The root's, then each app's: a data file imports only from its own `resources/`.
-  for (const [dir, path] of kindDirs(root, "resources").flatMap((d) => dataFilesUnder(d).map((p) => [d, p] as const))) {
-    const rel = relative(root, path).split(sep).join("/");
-    const source = readFileSync(path, "utf8");
-    if (partial && !partial(source)) {
-      left.add(path);
+/** What the loaded data files declare, joined to the lockfile's bindings. */
+function declarationsOf(
+  root: string,
+  loaded: Map<string, Loaded>,
+  types: ReadonlyMap<string, Resource>,
+  lock: { bindings: Bindings; problems: ResourceProblem[] },
+  partial: boolean,
+): DataFiles {
+  const problems: ResourceProblem[] = [...lock.problems];
+  const failed = new Set<string>();
+  const collectionsFiles = new Set(
+    kindDirs(root, "resources").map((dir) => relPath(root, `${dir}/${COLLECTIONS_FILE}`)),
+  );
+  const COLLECTIONS_ONLY =
+    "resources/data.ts holds collections only, since workflows and the runtime import it: declare a connector's resources in another data file";
+
+  // Each exported value, by identity, to the names it is exported under.
+  const names = new Map<Declared, At[]>();
+  const exported = new Set<Declared>();
+  const collections: DeclaredCollection[] = [];
+  for (const [file, l] of loaded) {
+    if ("failedIn" in l) {
+      failed.add(file);
       continue;
     }
-    const { program, problems: syntax, at } = parsed(source, path);
-    const data = readDataFile(program, path, dir);
-    const problem = (offset: number, message: string) => problems.push({ file: rel, ...at(offset), message });
-    for (const p of syntax) problems.push({ file: rel, ...p });
-    for (const p of data.problems) problem(p.start, p.message);
-    files.set(path, { rel, data, problem });
-  }
-
-  // Each connector's constructors entry, `<info.package>/resources`, to its vendor.
-  const entries = new Map<string, string>();
-  for (const connector of connectors) {
-    const { id, info } = connector[VENDOR];
-    if (info?.package) entries.set(`${info.package}/resources`, id);
-  }
-  // The runtime's own (`peopleConnector`, package `sanoma`) is imported from either name of its entry.
-  if (entries.get("sanoma/resources") === "sanoma") for (const entry of SECRET_ENTRIES) entries.set(entry, "sanoma");
-
-  // What each file's names stand for, and every resource read by its id.
-  const vendors = new Map<FileEntry, Map<string, string>>();
-  const named = new Map<FileEntry, Map<string, string>>();
-  const declarations = new Map<string, { file: FileEntry; exp: DataFileExport }>();
-  for (const [path, file] of files) {
-    const fileVendors = new Map<string, string>();
-    const fileNamed = new Map<string, string>();
-    for (const imp of file.data.imports) {
-      if (imp.kind === "constructors") {
-        const vendor = entries.get(imp.source);
-        if (vendor === undefined && partial) continue;
-        if (vendor === undefined) {
-          file.problem(
-            imp.start,
-            `"${imp.source}" is not the resources entry of a connector in the config's \`connectors\`: add the connector, and import from its package's \`/resources\``,
-          );
-        } else if (imp.imported !== vendor) {
-          file.problem(
-            imp.start,
-            `"${imp.source}" exports its constructors as ${vendor}: \`import { ${vendor} } from "${imp.source}"\``,
-          );
+    if ("error" in l) {
+      failed.add(file);
+      const message = loadProblem(l.error, root, file, partial);
+      if (message !== undefined)
+        problems.push({ file, ...(l.line !== undefined && { line: l.line, column: l.column ?? 1 }), message });
+      continue;
+    }
+    for (const [name, value] of l.exports) {
+      const at = { file, export: name };
+      if (isCollection(value)) {
+        if (!collectionsFiles.has(file)) {
+          problems.push({
+            ...at,
+            message: `a collection is declared in resources/data.ts, which workflows and the runtime import: move ${name} there`,
+          });
         } else {
-          fileVendors.set(imp.local, vendor);
+          collections.push({ id: `${file}#${name}`, file, name: value.name, at });
         }
-        continue;
+      } else if (isDeclared(value)) {
+        exported.add(value);
+        if (collectionsFiles.has(file)) problems.push({ ...at, message: COLLECTIONS_ONLY });
+        else names.set(value, [...(names.get(value) ?? []), at]);
       }
-      const target = resolve(dirname(path), imp.source);
-      const other = files.get(target);
-      if (!other && left.has(target)) continue;
-      if (!other) {
-        file.problem(imp.start, `"${imp.source}" is not a data file under resources/`);
-      } else if (!other.data.declared.includes(imp.imported)) {
-        file.problem(imp.start, `${imp.imported} is not a resource ${other.rel} declares`);
-      } else if (other.data.exports.some((e) => e.name === imp.imported)) {
-        fileNamed.set(imp.local, `${other.rel}#${imp.imported}`);
-      }
-      // Else its value was refused, and reported in its file: a reference to it fails quietly.
     }
-    for (const exp of file.data.exports) {
-      const id = `${file.rel}#${exp.name}`;
-      fileNamed.set(exp.name, id);
-      declarations.set(id, { file, exp });
-    }
-    vendors.set(file, fileVendors);
-    named.set(file, fileNamed);
   }
 
-  // Each resource after the ones it names, which it is given as they are declared.
-  const done = new Map<string, { declared: Declared; refs: Record<string, string> } | undefined>();
-  const visiting: string[] = [];
-  const byName = new Map<string, string>();
-  function declare(id: string) {
-    if (done.has(id)) return done.get(id);
-    const { file, exp } = declarations.get(id)!;
-    if (visiting.includes(id)) {
-      file.problem(exp.start, `${id} refers to itself: ${[...visiting.slice(visiting.indexOf(id)), id].join(" → ")}`);
-      return undefined;
+  // Each declaration: one name per object, a non-default one over `default`.
+  const declarations = new Map<string, { value: Declared; at: At }>();
+  const idOf = new Map<Declared, string>();
+  for (const [value, ats] of names) {
+    const named = ats.filter((at) => at.export !== "default");
+    const kept = named.length ? named : ats;
+    if (kept.length > 1) {
+      const [first, ...rest] = kept.map((at) => `${at.file}#${at.export}`);
+      problems.push({
+        ...kept[1]!,
+        message: `${rest.join(", ")} and ${first} are one ${value[DECLARED]}: export each resource under one name`,
+      });
+      continue;
     }
-    visiting.push(id);
-    const result = build(file, exp);
-    visiting.pop();
-    if (result?.declared.name !== undefined) {
-      const { vendor, type, name, connection } = result.declared;
-      const key = `${vendor}.${type} ${JSON.stringify(name)}${connection ? ` (${connection.$connection})` : ""}`;
-      const first = byName.get(key);
-      if (first === undefined) byName.set(key, id);
-      else {
-        file.problem(
-          exp.start,
-          `${key} is declared twice, also as ${first}: declare each resource once, and import it where it is used`,
+    const at = kept[0]!;
+    const type = types.get(value[DECLARED]);
+    if (type === undefined || madeOf(value) === undefined) {
+      if (!partial)
+        problems.push({
+          ...at,
+          message: `${value[DECLARED]} is not a resource type of a connector in the config's \`connectors\`: add the connector, and import from its package's \`/resources\``,
+        });
+      continue;
+    }
+    const id = `${at.file}#${at.export}`;
+    declarations.set(id, { value, at });
+    idOf.set(value, id);
+  }
+  // A resource made and never exported is declared nowhere: a typo'd export, or one written inline.
+  for (const value of madeWith(loaded)) {
+    const made = madeOf(value)!;
+    if (!isDeclared(value) || exported.has(value) || failed.has(made.file)) continue;
+    problems.push({
+      file: made.file,
+      message: `${aResource(value)} is made here but not exported: declare each resource as its own \`export const <name> = <vendor>.<type>({ … })\``,
+    });
+  }
+
+  // Each declaration after the ones it names; one with a problem is left out, and so is any that names it.
+  const done = new Map<string, Record<string, string> | undefined>();
+  const byName = new Map<string, string>();
+  const leaveOut = (id: string, message?: string) => {
+    if (message !== undefined) problems.push({ ...declarations.get(id)!.at, message });
+    done.set(id, undefined);
+  };
+  function declare(id: string): Record<string, string> | undefined {
+    if (done.has(id)) return done.get(id);
+    const { value } = declarations.get(id)!;
+    const refs: Record<string, string> = {};
+    for (const [path, target] of Object.entries(madeOf(value)!.refers)) {
+      const targetId = idOf.get(target);
+      // A partial load serves only some types: a resource of another (a wakeup's host) is not its to judge.
+      if (targetId === undefined && partial && !types.has(target[DECLARED])) continue;
+      if (targetId === undefined) {
+        leaveOut(
+          id,
+          `${path} names ${aResource(target)} that no data file exports: export it from a data file and import it here`,
         );
-        done.set(id, undefined);
         return undefined;
       }
+      if (!declare(targetId)) return void done.set(id, undefined);
+      refs[path] = targetId;
     }
-    done.set(id, result);
-    return result;
-  }
-
-  function build(file: FileEntry, exp: DataFileExport) {
-    // An unknown constructors import was reported with the import.
-    const vendor = vendors.get(file)!.get(exp.vendor);
-    if (vendor === undefined) return undefined;
-    const resource = types.get(`${vendor}.${exp.type}`);
-    if (!resource) {
-      const known = [...types.values()].filter((r) => r.vendor === vendor).map((r) => r.type);
-      file.problem(exp.start, `${vendor} has no resource type ${exp.type}: its types are ${known.join(", ")}`);
-      return undefined;
-    }
-    const refs: Record<string, string> = {};
-    let ok = true;
-    // The fields with each name of a resource as that resource, and where each is named.
-    const given = (v: DataValue, at: string): unknown => {
-      if (v instanceof Reference) {
-        // A name that did not resolve was reported where it is bound.
-        const target = named.get(file)!.get(v.name);
-        const declared = target === undefined ? undefined : declare(target)?.declared;
-        if (!declared) ok = false;
-        else refs[at] = target!;
-        return declared;
+    if (value.name !== undefined) {
+      const key = `${value[DECLARED]} ${JSON.stringify(value.name)}${value.connection ? ` (${value.connection.$connection})` : ""}`;
+      const first = byName.get(key);
+      if (first !== undefined) {
+        leaveOut(
+          id,
+          `${key} is declared twice, also as ${first}: declare each resource once, and import it where it is used`,
+        );
+        return undefined;
       }
-      if (Array.isArray(v)) return v.map((item, i) => given(item, `${at}.${i}`));
-      if (v === null || typeof v !== "object") return v;
-      return Object.fromEntries(Object.entries(v).map(([k, item]) => [k, given(item, at ? `${at}.${k}` : k)]));
-    };
-    const fields = given(exp.desired, "");
-    if (!ok) return undefined;
-    try {
-      // Checked as running the file would: by the resource type, which allows a resource only where its `fields.references` say.
-      return { declared: resource(fields as never, { connection: exp.connection }), refs };
-    } catch (e) {
-      // One line per problem: zod's own spans lines.
-      file.problem(exp.start, `export const ${exp.name}: ${(e as Error).message.replaceAll(/\s*\n\s*/g, " ")}`);
-      return undefined;
+      byName.set(key, id);
     }
+    done.set(id, refs);
+    return refs;
   }
 
   // Each binding against its declaration: of its type, and the only one bound to its object.
   const boundBy = new Map<string, string>();
-  for (const [id, { file, exp }] of declarations) {
+  for (const [id, { value }] of declarations) {
     const binding = lock.bindings[id];
-    // An unknown constructors import was reported with the import.
-    const vendor = vendors.get(file)!.get(exp.vendor);
-    if (binding === undefined || vendor === undefined) continue;
-    const type = `${vendor}.${exp.type}`;
+    if (binding === undefined) continue;
     const object = `${binding.type} ${binding.id}${binding.connection ? ` (${binding.connection.$connection})` : ""}`;
     const first = boundBy.get(object);
     const why =
-      exp.connection !== undefined && binding.connection?.$connection !== exp.connection.$connection
+      value.connection !== undefined && binding.connection?.$connection !== value.connection.$connection
         ? `${id} changes the connection of a bound resource: explicitly unbind it before selecting another account`
-        : binding.type !== type
-          ? `${id} is bound to a ${binding.type} in ${LOCKFILE}, but declares a ${type}`
+        : binding.type !== value[DECLARED]
+          ? `${id} is bound to a ${binding.type} in ${LOCKFILE}, but declares a ${value[DECLARED]}`
           : first !== undefined
             ? `${id} is bound to the same ${object} as ${first} in ${LOCKFILE}: bind each object once`
             : undefined;
     if (why === undefined) boundBy.set(object, id);
-    else {
-      // Left out, as any declaration with a problem, and so is any that names it.
-      file.problem(exp.start, why);
-      done.set(id, undefined);
-    }
+    else leaveOut(id, why);
   }
   // An instance registers with one wakeup: several are each a problem, and left out, as is any that names one.
-  const wakeups = [...declarations].filter(
-    ([, { file, exp }]) => types.get(`${vendors.get(file)!.get(exp.vendor)}.${exp.type}`)?.wakeup,
-  );
+  const wakeups = [...declarations.keys()].filter((id) => types.get(declarations.get(id)!.value[DECLARED])?.wakeup);
   if (wakeups.length > 1) {
-    for (const [id, { file, exp }] of wakeups) {
-      const others = wakeups.filter(([other]) => other !== id).map(([other]) => other);
-      file.problem(exp.start, `an instance has one wakeup: leave out this one or ${others.join(", ")}`);
-      done.set(id, undefined);
+    for (const id of wakeups) {
+      leaveOut(
+        id,
+        `an instance has one wakeup: leave out this one or ${wakeups.filter((other) => other !== id).join(", ")}`,
+      );
     }
   }
-  const keys = new Set([...files.values()].flatMap((f) => f.data.declared.map((name) => `${f.rel}#${name}`)));
+  // A binding under a file that failed to load is no orphan: what it declares is not known.
   const orphans = Object.entries(lock.bindings)
-    .filter(([key]) => !keys.has(key))
+    .filter(([key]) => !declarations.has(key) && !failed.has(key.slice(0, key.lastIndexOf("#"))))
     .map(([key, binding]) => ({ key, ...binding }));
 
   const resources: DeclaredResource[] = [];
-  for (const [id, { file, exp }] of declarations) {
-    const result = declare(id);
-    if (!result) continue;
-    const { vendor, type, name: identity, desired, connection } = result.declared;
+  for (const [id, { value, at }] of declarations) {
+    const refs = declare(id);
+    if (!refs) continue;
+    const { vendor, type, name: identity, desired, connection } = value;
     const binding = lock.bindings[id]?.id;
     resources.push({
       id,
-      file: file.rel,
+      file: at.file,
       vendor,
       type,
-      name: identity ?? exp.name,
+      name: identity ?? at.export,
       ...(identity !== undefined && { identity }),
       ...(binding !== undefined && { binding }),
-      span: [exp.start, exp.end],
-      desired,
-      ...(connection && { connection }),
-      refs: result.refs,
+      at,
+      // A copy: the loaded value is the generation's, read again while no file changes.
+      desired: structuredClone(desired) as Record<string, unknown>,
+      ...(connection && { connection: { ...connection } }),
+      refs,
     });
   }
-  const collections = [...files.values()].flatMap(({ rel, data }) =>
-    data.collections.map((c) => ({
-      id: `${rel}#${c.export}`,
-      file: rel,
-      // An app's, `apps/<app>/resources/data.ts`, is named with its app, as `collection()` names it.
-      name: qualified(rel.startsWith(`${APPS_DIR}/`) ? rel.split("/")[1] : undefined, c.name),
-      span: [c.start, c.end] as Span,
-    })),
-  );
   problems.sort(
     (a, b) =>
       (a.file ?? "").localeCompare(b.file ?? "") || (a.line ?? 0) - (b.line ?? 0) || (a.column ?? 0) - (b.column ?? 0),
   );
   return { resources, bindings: lock.bindings, orphans, collections, problems };
 }
+
+/** A resource as a problem names it: `a github.repository "website"`, or without its identity when it has none. */
+const aResource = (value: Declared) => `a ${value[DECLARED]}${value.name === undefined ? "" : ` "${value.name}"`}`;
+
+/**
+ * What a data file that failed to load is told, on one line: an import Node could not find (a
+ * connector the config does not have, a file that is not there), top-level `await`, or the
+ * error's own message (a constructor's refusal: `github.repository: no field wiki`). Nothing, when
+ * `partial`, for a connector's constructors left out of the load in a file that declares no
+ * person, agent or group (`sanoma.wakeup` beside its host's connector).
+ */
+function loadProblem(error: unknown, root: string, file: string, partial: boolean): string | undefined {
+  const { code, message } = isObject(error) ? (error as { code?: unknown; message?: unknown }) : {};
+  const text = typeof message === "string" ? message : String(error);
+  if (code === "ERR_REQUIRE_ASYNC_MODULE")
+    return "a data file is loaded synchronously: leave out top-level `await`, and compute values where they are used";
+  if (code === "ERR_MODULE_NOT_FOUND") {
+    const missing = /^Cannot find (?:package|module) '([^']+)'/.exec(text)?.[1];
+    const source = readFileSync(`${root}/${file}`, "utf8");
+    // The specifier as written: Node names a package by its name, a file by its path.
+    const written =
+      missing &&
+      [...source.matchAll(/from\s*["']([^"']+)["']/g)]
+        .map((m) => m[1]!)
+        .find(
+          (spec) =>
+            spec === missing ||
+            spec.startsWith(`${missing}/`) ||
+            (missing.startsWith("/") && missing.endsWith(`/${spec.replace(/^(?:\.\.?\/)+/, "")}`)),
+        );
+    if (written?.endsWith("/resources") && partial && !/\.\s*(?:person|agent|group)\s*\(/.test(source))
+      return undefined;
+    if (written?.endsWith("/resources"))
+      return `"${written}" is not the resources entry of a connector in the config's \`connectors\`: add the connector, and import from its package's \`/resources\``;
+    if (written !== undefined)
+      return `"${written}" cannot be found: import a file that is there, or a package the company has`;
+  }
+  return text.replaceAll(/\s*\n\s*/g, " ");
+}
+
+/** The data files under `root`: the root's `resources/`, then each app's, each sorted. */
+const dataFilesOf = (root: string): string[] => kindDirs(root, "resources").flatMap(dataFilesUnder);
 
 /** The data files under `dir`, sorted: regular `.ts` files, less tests, declarations and `node_modules`. */
 const dataFilesUnder = (dir: string): string[] =>

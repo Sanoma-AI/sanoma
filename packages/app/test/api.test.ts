@@ -19,12 +19,13 @@ import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { outbound } from "../../workflows/test/fixtures/outbound/resources/data.ts";
 import outboundNext from "../../workflows/test/fixtures/outbound/workflows/outbound-next.ts";
-import { ACTOR_HEADER, ApiError, CallRequest, type ErrorResponse } from "../src/api.ts";
+import { ACTOR_HEADER, ApiError, AppConfigSchema, CallRequest, type ErrorResponse } from "../src/api.ts";
 import { createApi } from "../src/api-client.ts";
 import type { AppContext } from "../src/context.ts";
 import { loopbackLogin } from "../src/loopback.ts";
 import { admitting } from "../src/login/admission.ts";
-import { actorOf, callApi, requireActor, serverFnFailure, validate } from "../src/server/core.ts";
+import { actorOf, appConfig, callApi, requireActor, serverFnFailure, validate } from "../src/server/core.ts";
+import companySites from "./fixtures/company-sites/sanoma.config.ts";
 
 // Needs Postgres (`pnpm db:up`). A site's `api`: `callFn` through the server core, as its server
 // function calls it (`withPrincipal`, its validator, `callApi`), for every form of name; and
@@ -344,5 +345,21 @@ describe("createApi", () => {
     expect(api.data.then).toBeUndefined();
     expect(typeof (await api.data)).toBe("function");
     expect(sent).toEqual([]);
+  });
+});
+
+describe("getConfig", () => {
+  it("holds to AppConfigSchema, on the outbound copy and the company-sites fixture, with each content kind's front matter keys", () => {
+    const outboundConfig = appConfig(appContext());
+    expect(AppConfigSchema.parse(outboundConfig)).toEqual(outboundConfig);
+    expect(outboundConfig.content).toEqual([]);
+    const sites = appConfig({
+      ...appContext(),
+      resolved: resolveConfig(companySites),
+      description: describeConfig(companySites),
+    });
+    expect(AppConfigSchema.parse(sites)).toEqual(sites);
+    // Drafts kept, translations laid over their originals: every key a file holds.
+    expect(sites.content).toEqual([{ kind: "posts", fields: ["title", "description", "draft", "publishedAt"] }]);
   });
 });

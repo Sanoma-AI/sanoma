@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { parseSync, visitorKeys } from "oxc-parser";
+import type { LintProblem } from "./description.ts";
 import { errorMessage } from "./shared.ts";
 
 // What the lints, the outline and the data-file reader share: one way to parse a file, walk it
@@ -29,6 +30,10 @@ const TYPE_KEYS = new Set([
 const CODE_KEYS = new Map(
   Object.entries(visitorKeys).map(([type, keys]) => [type, keys.filter((key) => !TYPE_KEYS.has(key))]),
 );
+
+/** A property's name: an identifier's, or a literal's as a string; undefined for any other key. */
+export const keyName = (key: Node): string | undefined =>
+  key.type === "Identifier" ? key.name : key.type === "Literal" ? String(key.value) : undefined;
 
 /** A node's children in source order, by oxc-parser's `visitorKeys`, without its types. A hole in a list is `null`. */
 export const childrenOf = (node: Node): Node[] => (CODE_KEYS.get(node.type) ?? []).flatMap((key) => node[key] ?? []);
@@ -68,12 +73,7 @@ export function offsetOf(lineStarts: readonly number[], line: number, column: nu
   return offset < next - 1 ? offset : undefined;
 }
 
-/** Something wrong in a file, at a line and column from 1. */
-export interface LintProblem {
-  line: number;
-  column: number;
-  message: string;
-}
+export type { LintProblem };
 
 /** A file parsed, its syntax errors as problems, and offsets as lines and columns from 1. */
 export function parsed(source: string, filename: string) {

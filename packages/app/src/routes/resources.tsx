@@ -5,7 +5,7 @@ import type {
   DeclaredResource,
   ResourceProblem,
 } from "@sanoma-ai/workflows/describe";
-import { APPLY_WORKFLOW, DRIFT_WORKFLOW, isEnded, problemAt } from "@sanoma-ai/workflows/shared";
+import { APPLY_WORKFLOW, DRIFT_WORKFLOW, exportSpan, isEnded, problemAt } from "@sanoma-ai/workflows/shared";
 import { type QueryClient, useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
@@ -490,10 +490,14 @@ function DriftBadge({ result }: { result: DriftResult | undefined }) {
   );
 }
 
-/** A declaration's `export const` in its data file, marked: a resource's or a collection's. */
-function Declaration({ resource: { file, span } }: { resource: Pick<DeclaredResource, "file" | "span"> }) {
+/** A declaration's export in its data file, marked as its text gives it (`exportSpan`): a resource's or a collection's. */
+function Declaration({ resource: { file, at } }: { resource: Pick<DeclaredResource, "file" | "at"> }) {
   const { data, error } = useQuery(sourceQuery(file));
-  const highlight = useMemo(() => [span], [span]);
+  const source = data?.source;
+  const highlight = useMemo(() => {
+    const span = source ? exportSpan(source, at.export) : undefined;
+    return span ? [span] : [];
+  }, [source, at.export]);
   return (
     <section className="flex flex-col gap-2">
       <SectionTitle>

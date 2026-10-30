@@ -78,13 +78,17 @@ const site = (name: string, ...options: string[]) => ({
   [`sites/${name}/site.ts`]: `import { defineSite } from "sanoma/site";\n\nexport default defineSite({\n  ${options.join(",\n  ")},\n});\n`,
 });
 
-/** A problem in site `name`'s site.ts, at the property on `line`. */
-const problemAt = (name: string, line: number, message: string) => ({
-  file: `sites/${name}/site.ts`,
-  line,
-  column: 3,
-  message,
-});
+/** A problem in site `name`'s site.ts, at its default export. */
+const problemAt = (name: string, message: string) => ({ file: `sites/${name}/site.ts`, export: "default", message });
+
+/** What site.ts's schema says of the value at `at` (a regex's source). */
+const schema = (at: string) =>
+  expect.stringMatching(
+    new RegExp(`^its default export is \`defineSite\\(\\{ … \\}\\)\` from "sanoma/site": .* at ${at}$`),
+  );
+
+/** Where site `name`'s `defineSite` is. */
+const atSite = (name: string) => ({ file: `sites/${name}/site.ts`, export: "default" });
 
 /** Site `name` with `site.ts` passing `options` and one page making `calls`, one a line from line 7, column 8. */
 const calling = (name: string, options: string[], calls: string[]) => ({
@@ -120,6 +124,7 @@ describe("readSites", () => {
     expect(sites.filter((entry) => entry.name === "hello")).toEqual([
       {
         name: "hello",
+        at: { file: "sites/hello/site.ts", export: "default" },
         title: "Hello desk",
         icon: "life-buoy",
         public: true,
@@ -255,6 +260,7 @@ describe("readSites", () => {
     expect(sites).toEqual([
       {
         name: "desk",
+        at: atSite("desk"),
         title: "Front desk",
         pages: [{ path: "/sites/desk" }, { path: "/sites/desk/later" }, { path: "/sites/desk/settings" }],
         calls: [
@@ -318,12 +324,13 @@ describe("readSites", () => {
     ]);
   });
 
-  it("reads public and login from site.ts, and makes a problem of each it cannot keep, at its property", () => {
+  it("loads public and login from site.ts, and makes a problem of each it cannot keep", () => {
     const root = tree("public", {
       ...site("www", 'title: "Website"', "public: true", 'login: "auth0"'),
       ...site("open", "public: true as const"),
       ...site("off", "public: false"),
-      ...site("dynamic", 'title: "Dynamic"', "public: process.env.PUBLIC === '1'", "login: `${process.env.LOGIN}`"),
+      // Computed values are loaded as any: only what they come to is held.
+      ...site("dynamic", 'title: "Dynamic"', "public: [1].length === 1", 'login: ["auth", "0"].join("")'),
       ...site("staff", 'title: "Staff"', "public: false", 'login: "auth0"'),
       ...site("missing", 'title: "Missing"', "public: true", 'login: "okta"'),
       ...site("loginless", 'title: "Loginless"', "public: true", 'login: "acme"'),
@@ -333,10 +340,6 @@ describe("readSites", () => {
       "sites/broken/routes/index.tsx": page("/sites/broken/", "", "return null;"),
       "sites/broken/site.ts":
         'import { defineSite } from "sanoma/site";\n\nexport default defineSite({ public: true \n',
-      // Options not written out: a variable.
-      "sites/hidden/routes/index.tsx": page("/sites/hidden/", "", "return null;"),
-      "sites/hidden/site.ts":
-        'import { defineSite } from "sanoma/site";\n\nconst options = { public: true };\nexport default defineSite(options);\n',
     });
     const sites = describeConfig(config(root, { connectors: [acme, auth0] })).sites;
     expect(sites).toEqual([
@@ -344,92 +347,88 @@ describe("readSites", () => {
         name: "broken",
         pages: [{ path: "/sites/broken" }],
         calls: [],
-        problems: [expect.objectContaining({ file: "sites/broken/site.ts", line: 4 })],
+        problems: [expect.objectContaining({ file: "sites/broken/site.ts", line: 3 })],
         warnings: [],
       },
       {
         name: "dynamic",
+        at: atSite("dynamic"),
         pages: [{ path: "/sites/dynamic" }],
         calls: [],
         title: "Dynamic",
-        problems: [
-          problemAt("dynamic", 5, "`public` is read without running site.ts: write it as `true` or `false`"),
-          problemAt("dynamic", 6, "`login` is read without running site.ts: write it as a string"),
-        ],
-        warnings: [],
-      },
-      {
-        name: "hidden",
-        pages: [{ path: "/sites/hidden" }],
-        calls: [],
-        problems: [
-          {
-            file: "sites/hidden/site.ts",
-            line: 4,
-            column: 1,
-            message:
-              'its default export is read without running site.ts: write it as `defineSite({ … })` from "sanoma/site", its options an object literal',
-          },
-        ],
+        public: true,
+        login: "auth0",
+        problems: [],
         warnings: [],
       },
       {
         name: "loginless",
+        at: atSite("loginless"),
         pages: [{ path: "/sites/loginless" }],
         calls: [],
         title: "Loginless",
         public: true,
         login: "acme",
-        problems: [problemAt("loginless", 6, 'login names "acme", whose connector has no login half')],
+        problems: [problemAt("loginless", 'login names "acme", whose connector has no login half')],
         warnings: [],
       },
       {
         name: "missing",
+        at: atSite("missing"),
         pages: [{ path: "/sites/missing" }],
         calls: [],
         title: "Missing",
         public: true,
         login: "okta",
-        problems: [problemAt("missing", 6, 'login names "okta", which is not a connector in sanoma.config.ts')],
+        problems: [problemAt("missing", 'login names "okta", which is not a connector in sanoma.config.ts')],
         warnings: [],
       },
-      { name: "off", pages: [{ path: "/sites/off" }], calls: [], problems: [], warnings: [] },
-      { name: "open", public: true, pages: [{ path: "/sites/open" }], calls: [], problems: [], warnings: [] },
-      // Its login, a connector with a login half, is fine; what is wrong is `public`.
+      { name: "off", at: atSite("off"), pages: [{ path: "/sites/off" }], calls: [], problems: [], warnings: [] },
+      {
+        name: "open",
+        at: atSite("open"),
+        public: true,
+        pages: [{ path: "/sites/open" }],
+        calls: [],
+        problems: [],
+        warnings: [],
+      },
+      // A value its schema refuses: nothing it says is kept.
       {
         name: "quoted",
         pages: [{ path: "/sites/quoted" }],
         calls: [],
-        login: "auth0",
-        problems: [problemAt("quoted", 4, "`public` is read without running site.ts: write it as `true` or `false`")],
-        warnings: [],
-      },
-      // What is written is read; a spread could make it public.
-      {
-        name: "spread",
-        pages: [{ path: "/sites/spread" }],
-        calls: [],
-        title: "Spread",
         problems: [
           problemAt(
-            "spread",
-            5,
-            "each of `defineSite`'s options is read without running site.ts: write it as a property with its name",
+            "quoted",
+            expect.stringMatching(/^its default export is `defineSite\(\{ … \}\)` from "sanoma\/site": .* at public$/),
           ),
         ],
         warnings: [],
       },
       {
+        name: "spread",
+        at: atSite("spread"),
+        pages: [{ path: "/sites/spread" }],
+        calls: [],
+        title: "Spread",
+        public: true,
+        problems: [],
+        warnings: [],
+      },
+      {
         name: "staff",
+        at: atSite("staff"),
         pages: [{ path: "/sites/staff" }],
         calls: [],
         title: "Staff",
         login: "auth0",
-        problems: [problemAt("staff", 6, "a login is for a public site: add `public: true`, or remove `login`")],
+        problems: [problemAt("staff", "a login is for a public site: add `public: true`, or remove `login`")],
         warnings: [],
       },
       {
         name: "www",
+        at: atSite("www"),
         title: "Website",
         public: true,
         login: "auth0",
@@ -568,19 +567,20 @@ describe("readSites", () => {
     const root = tree("locales", {
       ...site("www", "public: true", 'locales: ["en", "fr", "pt-BR"]'),
       ...site("empty", "public: true", "locales: []"),
-      ...site("dynamic", "public: true", "locales: process.env.LOCALES"),
-      ...site("held", "public: true", "locales: [LANG]"),
+      ...site("dynamic", "public: true", 'locales: "en,fr".split(",")'),
+      ...site("held", "public: true", "locales: [1]"),
       ...site("bad", "public: true", 'locales: ["en", "French"]'),
       ...site("blank", "public: true", 'locales: ["en", ""]'),
       ...site("twice", "public: true", 'locales: ["en", "fr", "en"]'),
       ...site("staff", 'locales: ["en", "fr"]'),
-      ...site("unread", "public: isProd", 'locales: ["en", "fr"]'),
+      ...site("unread", 'public: "yes"', 'locales: ["en", "fr"]'),
       ...site("members", "public: true", 'login: "auth0"', 'locales: ["en", "fr"]'),
     });
     const sites = describeConfig(config(root, { connectors: [auth0] })).sites;
     const languages = (name: string) => sites.find((s) => s.name === name);
     expect(languages("www")).toEqual({
       name: "www",
+      at: atSite("www"),
       public: true,
       locales: ["en", "fr", "pt-BR"],
       pages: [{ path: "/sites/www" }],
@@ -588,26 +588,25 @@ describe("readSites", () => {
       problems: [],
       warnings: [],
     });
-    // Each at its `locales`, the line after `public: true` (and `login`), or the first.
-    const problems = Object.fromEntries(sites.map((s) => [s.name, s.problems.map((p) => [p.line, p.message])]));
-    const unreadLocales = "`locales` is read without running site.ts: write it as an array of strings";
+    // Each at the default export.
+    const problems = Object.fromEntries(sites.map((s) => [s.name, s.problems.map((p) => [p.export, p.message])]));
     const loginless = "`locales` are for a public site with no login: add `public: true`, or remove `locales`";
     expect(problems).toEqual({
-      bad: [[5, '"French" is not a language tag such as "en", "fr" or "pt-BR"']],
-      blank: [[5, '"" is not a language tag such as "en", "fr" or "pt-BR"']],
-      dynamic: [[5, unreadLocales]],
-      empty: [[5, "`locales` names a site's languages, its default first: give one or more, or remove it"]],
-      held: [[5, unreadLocales]],
-      members: [[6, loginless]],
-      staff: [[4, loginless]],
-      twice: [[5, '"en" is in `locales` twice']],
-      // Said once, at `public`.
-      unread: [[4, "`public` is read without running site.ts: write it as `true` or `false`"]],
+      bad: [["default", '"French" is not a language tag such as "en", "fr" or "pt-BR"']],
+      blank: [["default", '"" is not a language tag such as "en", "fr" or "pt-BR"']],
+      dynamic: [],
+      empty: [["default", "`locales` names a site's languages, its default first: give one or more, or remove it"]],
+      held: [["default", schema("locales\\[0\\]")]],
+      members: [["default", loginless]],
+      staff: [["default", loginless]],
+      twice: [["default", '"en" is in `locales` twice']],
+      // Said once, by the schema.
+      unread: [["default", schema("public")]],
       www: [],
     });
     // Kept only without a problem.
-    expect(sites.filter((s) => s.locales).map((s) => s.name)).toEqual(["www"]);
-    expect(siteLocales(root)).toEqual({ www: ["en", "fr", "pt-BR"] });
+    expect(sites.filter((s) => s.locales).map((s) => s.name)).toEqual(["dynamic", "www"]);
+    expect(siteLocales(root)).toEqual({ dynamic: ["en", "fr"], www: ["en", "fr", "pt-BR"] });
   });
 
   it("makes a problem of a public site's start or direct call that no permit could let a visitor make, its conditions aside", () => {
