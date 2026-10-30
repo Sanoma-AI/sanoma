@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
+import { KeyManagementServiceClient } from "@google-cloud/kms";
 import {
   cloudIdentityAuth,
   createDeploymentCredential,
@@ -169,6 +170,36 @@ describe("trusted identity issuer", () => {
 });
 
 describe("runtime Google SDK auth", () => {
+  it("supplies the real KMS SDK with broker identity and refuses renewal after revocation", async () => {
+    const f = fixture();
+    const headers: string[] = [];
+    const name = "projects/identity-project/locations/global/keyRings/companies/cryptoKeys/company-a";
+    const server = setupServer(
+      http.post(endpoint, ({ request }) => f.broker(request)),
+      http.post(new RegExp(`^https://cloudkms\\.googleapis\\.com/v1/${name}:encrypt$`), ({ request }) => {
+        headers.push(request.headers.get("authorization")!);
+        return HttpResponse.json({ name: `${name}/cryptoKeyVersions/1`, ciphertext: "c3ludGhldGlj" });
+      }),
+    );
+    server.listen({ onUnhandledFrame: "error" });
+    const authClient = cloudIdentityAuth({ endpoint, credential: async () => f.a.credential });
+    const kms = new KeyManagementServiceClient({ authClient, fallback: true, projectId: "identity-project" });
+    try {
+      const [result] = await kms.encrypt({ name, plaintext: Buffer.from("synthetic") }, { timeout: 5000, retry: null });
+      expect(Buffer.from(result.ciphertext as Uint8Array).toString()).toBe("synthetic");
+      expect(headers).toEqual([`Bearer synthetic:${enrollment("company-a").serviceAccount}`]);
+      authClient.setCredentials({ access_token: "expired", expiry_date: Date.now() - 1 });
+      f.rows.delete(f.a.hash);
+      await expect(
+        kms.encrypt({ name, plaintext: Buffer.from("synthetic") }, { timeout: 5000, retry: null }),
+      ).rejects.toThrow("Cloud identity unavailable");
+      expect(headers).toHaveLength(1);
+      expect(f.issue).toHaveBeenCalledTimes(1);
+    } finally {
+      await kms.close();
+      server.close();
+    }
+  });
   it("accepts an empty POST stream through HTTP transport and refuses actual body bytes", async () => {
     const f = fixture();
     const server = setupServer(http.post(endpoint, ({ request }) => f.broker(request)));

@@ -101,7 +101,7 @@
     "@dbos-inc/dbos-sdk": "^5.2.11",
     "@faker-js/faker": "^10.6.0",
     "ai": "7.0.153",
-    "google-auth-library": "^10.5.0",
+    "google-auth-library": "^11.3.2",
     "oxc-parser": "^0.153.0",
     "oxfmt": "^0.72.0",
     "pg": "^8.23.1",
@@ -109,6 +109,7 @@
     "zod-schema-faker": "^2.1.2"
   },
   "devDependencies": {
+    "@google-cloud/kms": "^6.3.0",
     "@types/pg": "^8.23.1",
     "msw": "^3.0.3",
     "srvx": "^0.11.22",
