@@ -1,11 +1,11 @@
 import { existsSync, readdirSync } from "node:fs";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { z } from "zod";
 import { childrenOf, type Node, readSource } from "./ast.ts";
 import type { AppEntry } from "./description.ts";
 import { exportsOf, type Loaded, loadModules } from "./load.ts";
 import { stringValue } from "./outline.ts";
-import { APPS_DIR, filesUnder, inside, isDirectory, RELATIVE } from "./paths.ts";
+import { APPS_DIR, filesUnder, inside, isDirectory, RELATIVE, relPath } from "./paths.ts";
 import type { ResourceProblem } from "./resources.ts";
 import { APP_NAME } from "./shared.ts";
 
@@ -29,8 +29,9 @@ export const readApps = (root: string | undefined): AppEntry[] => appsAt(root).a
  * `defineApp({ source })`, `source` a string when given.
  */
 export function appsAt(root: string | undefined): { apps: AppEntry[]; problems: AppProblem[] } {
-  const dir = root === undefined ? undefined : join(root, APPS_DIR);
-  if (root === undefined || dir === undefined || !isDirectory(dir)) return { apps: [], problems: [] };
+  if (root === undefined) return { apps: [], problems: [] };
+  const dir = join(root, APPS_DIR);
+  if (!isDirectory(dir)) return { apps: [], problems: [] };
   const apps: AppEntry[] = [];
   const problems: AppProblem[] = [];
   const folders = readdirSync(dir, { withFileTypes: true })
@@ -99,7 +100,7 @@ export function crossAppImports(root: string | undefined, apps: readonly AppEntr
     for (const path of filesUnder(own, isSource)) {
       const file = readSource(path);
       if (typeof file === "string") continue;
-      const rel = relative(root, path).split(sep).join("/");
+      const rel = relPath(root, path);
       const visit = (node: Node) => {
         if (!node) return;
         const specifier =

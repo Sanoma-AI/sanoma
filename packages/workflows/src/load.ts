@@ -6,10 +6,10 @@ import { collectionIn } from "./collection.ts";
 import { callerFile } from "./define.ts";
 import { defineApp, defineSite } from "./definitions.ts";
 import { type Connector, VENDOR } from "./op.ts";
-import { APPS_DIR, DATA_ENTRIES, inside, SECRET_ENTRIES, SITE_ENTRIES } from "./paths.ts";
-import { DECLARED, type Declared, isObject, joinPath, type Resource, resourceTypesOf } from "./resource.ts";
+import { APPS_DIR, appOfPath, DATA_ENTRIES, inside, relPath, SECRET_ENTRIES, SITE_ENTRIES } from "./paths.ts";
+import { type Declared, isDeclared, isObject, joinPath, type Resource, resourceTypesOf } from "./resource.ts";
 import { secret } from "./secret.ts";
-import { APP_NAME } from "./shared.ts";
+import { errorMessage } from "./shared.ts";
 
 // A company's files, loaded: synchronously (`require` of an ES module, Node's type stripping and
 // `module.registerHooks`), since what reads them is (`describeConfig`, `readPeople`). Each load
@@ -135,7 +135,7 @@ export function loadModules(
   for (const file of files) {
     touch(gen, file);
     if (only && !only(readFileSync(file, "utf8"))) continue;
-    const rel = relOf(gen, file);
+    const rel = relPath(gen.root, file);
     const loaded = loadOne(gen, file, rel);
     answer.set(rel, loaded);
     if ("failedIn" in loaded) answer.set(loaded.failedIn, gen.loaded.get(loaded.failedIn)!);
@@ -176,7 +176,7 @@ export function exportsOf(
   if ("failedIn" in loaded) return exportsOf(answer, loaded.failedIn);
   if ("exports" in loaded) return loaded;
   const { error, line, column } = loaded;
-  const message = (error instanceof Error ? error.message : String(error)).replaceAll(/\s*\n\s*/g, " ");
+  const message = errorMessage(error).replaceAll(/\s*\n\s*/g, " ");
   return { problem: { file, ...(line !== undefined && { line, column: column ?? 1 }), message } };
 }
 
@@ -229,7 +229,7 @@ function placeOf(gen: Generation, error: unknown): { file: string; line?: number
   const frame = [...stack.matchAll(TAGGED_FRAME)].findLast(([, , tag]) => tag === gen.id);
   if (frame) {
     const [, url, , line, column] = frame;
-    return { file: relOf(gen, fileURLToPath(url!)), line: Number(line), column: Number(column) };
+    return { file: relPath(gen.root, fileURLToPath(url!)), line: Number(line), column: Number(column) };
   }
   // A syntax error's stack starts `<path or URL>:<line>`, then the source and a caret under the column.
   const [first = "", ...lines] = stack.split("\n");
@@ -237,14 +237,12 @@ function placeOf(gen: Generation, error: unknown): { file: string; line?: number
   const path = syntax && (syntax[1]!.startsWith("file:") ? fileURLToPath(syntax[1]!) : syntax[1]!);
   if (syntax && path && isAbsolute(path) && inside(gen.root, path)) {
     const caret = lines.slice(0, lines.indexOf("")).findLast((line) => /^\s*\^+\s*$/.test(line));
-    return { file: relOf(gen, path), line: Number(syntax[2]), ...(caret && { column: caret.indexOf("^") + 1 }) };
+    return { file: relPath(gen.root, path), line: Number(syntax[2]), ...(caret && { column: caret.indexOf("^") + 1 }) };
   }
   return undefined;
 }
 
 const byOrder = <T extends string | number>(a: T, b: T) => (a < b ? -1 : a > b ? 1 : 0);
-
-const relOf = (gen: Generation, file: string) => relative(gen.root, file).split(sep).join("/");
 
 /** A file's size and modification time, or that it is gone. */
 function stampOf(path: string): string {
@@ -326,7 +324,11 @@ function runtimeModules(
   for (const entry of SECRET_ENTRIES) modules.set(entry, { sanoma: constructorsOf("sanoma"), secret });
   const collection = (declaration: Parameters<typeof collectionIn>[1]) => {
     const file = callerFile();
-    return record(gen, file, collectionIn(file === undefined ? undefined : appIn(gen, file), declaration));
+    return record(
+      gen,
+      file,
+      collectionIn(file === undefined ? undefined : appOfPath(relPath(gen.root, file)), declaration),
+    );
   };
   for (const entry of DATA_ENTRIES) modules.set(entry, { collection });
   const site = (definition: Parameters<typeof defineSite>[0]) => record(gen, callerFile(), defineSite(definition));
@@ -339,29 +341,22 @@ function runtimeModules(
 /** Records where `value` was made, and returns it. */
 function record<T extends object>(gen: Generation, file: string | undefined, value: T, refers = {}): T {
   gen.made.push(value);
-  registry.made.set(value, { file: file === undefined ? "" : relOf(gen, file), seq: gen.made.length, refers });
+  registry.made.set(value, { file: file === undefined ? "" : relPath(gen.root, file), seq: gen.made.length, refers });
   return value;
 }
 
 /** Each declared resource in a constructor's fields, by its dotted path, as the constructor walks them. */
 function refersIn(value: unknown, at = "", into: Record<string, Declared> = {}): Record<string, Declared> {
-  if (isObject(value) && typeof (value as Partial<Declared>)[DECLARED] === "string")
-    into[at] = value as unknown as Declared;
+  if (isDeclared(value)) into[at] = value;
   else if (Array.isArray(value)) value.forEach((item, i) => refersIn(item, joinPath(at, String(i)), into));
   else if (isObject(value))
     for (const [field, item] of Object.entries(value)) refersIn(item, joinPath(at, field), into);
   return into;
 }
 
-/** The app a file of the generation is in: `<app>` under `apps/<app>/`, as `appOfFile` names it from the company's root. */
-function appIn(gen: Generation, file: string): string | undefined {
-  const [top, app, ...rest] = relOf(gen, file).split("/");
-  return top === APPS_DIR && app !== undefined && rest.length && APP_NAME.test(app) ? app : undefined;
-}
-
 /** True for an app's `apps/<app>/app.ts`, by URL. */
 const isAppFile = (gen: Generation, url: string) => {
-  const [top, app, file, ...rest] = relOf(gen, fileURLToPath(url)).split("/");
+  const [top, app, file, ...rest] = relPath(gen.root, fileURLToPath(url)).split("/");
   return top === APPS_DIR && app !== undefined && file === "app.ts" && !rest.length;
 };
 

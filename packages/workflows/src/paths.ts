@@ -49,6 +49,9 @@ export function inside(dir: string, path: string): boolean {
   return rel === "" || (rel.split(sep)[0] !== ".." && !isAbsolute(rel));
 }
 
+/** `path`, under `root`, relative to it with `/`: `resources/github.ts`. */
+export const relPath = (root: string, path: string): string => relative(root, path).split(sep).join("/");
+
 /** True when `path` is a directory. */
 export const isDirectory = (path: string): boolean => statSync(path, { throwIfNoEntry: false })?.isDirectory() ?? false;
 
@@ -92,8 +95,12 @@ export function appOfFile(file: string | undefined): string | undefined {
     // Found roots only: a directory that is no company's yet may become one (`sanoma` in an empty folder).
     if (root !== null) roots.set(dir, root);
   }
-  if (root === null) return undefined;
-  const [top, app, ...rest] = relative(root, file).split(sep);
+  return root === null ? undefined : appOfPath(relPath(root, file));
+}
+
+/** The app a path relative to a company's root is in: `<app>` under `apps/<app>/`; undefined for any other. */
+export function appOfPath(rel: string): string | undefined {
+  const [top, app, ...rest] = rel.split("/");
   return top === APPS_DIR && app !== undefined && rest.length && APP_NAME.test(app) ? app : undefined;
 }
 

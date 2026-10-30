@@ -1,15 +1,14 @@
 import type { DeclaredCollection, DeclaredResource, ResourceProblem } from "./description.ts";
 import { readFileSync } from "node:fs";
-import { relative, sep } from "node:path";
 import { mayDeclarePeople } from "./change.ts";
 import { isCollection } from "./collection.ts";
 import { type Loaded, loadModules, madeOf, madeWith } from "./load.ts";
 import { type Binding, type Bindings, LOCKFILE, readLockfile } from "./lockfile.ts";
 import type { Connector } from "./op.ts";
-import { APPS_DIR, COLLECTIONS_FILE, filesUnder, kindDirs } from "./paths.ts";
+import { APPS_DIR, COLLECTIONS_FILE, filesUnder, kindDirs, relPath } from "./paths.ts";
 import { peopleConnector, sanoma } from "./person.ts";
 import { wakeupOps } from "./wakeup-type.ts";
-import { DECLARED, type Declared, isObject, type Resource, resourceTypesOf } from "./resource.ts";
+import { DECLARED, type Declared, isDeclared, isObject, type Resource, resourceTypesOf } from "./resource.ts";
 import { Principal } from "./define.ts";
 import { NotAdmittedError } from "./errors.ts";
 import {
@@ -207,7 +206,9 @@ function declarationsOf(
 ): DataFiles {
   const problems: ResourceProblem[] = [...lock.problems];
   const failed = new Set<string>();
-  const collectionsFiles = new Set(kindDirs(root, "resources").map((dir) => relOf(root, `${dir}/${COLLECTIONS_FILE}`)));
+  const collectionsFiles = new Set(
+    kindDirs(root, "resources").map((dir) => relPath(root, `${dir}/${COLLECTIONS_FILE}`)),
+  );
   const COLLECTIONS_ONLY =
     "resources/data.ts holds collections only, since workflows and the runtime import it: declare a connector's resources in another data file";
 
@@ -238,7 +239,7 @@ function declarationsOf(
         } else {
           collections.push({ id: `${file}#${name}`, file, name: value.name, at });
         }
-      } else if (isDeclaredValue(value)) {
+      } else if (isDeclared(value)) {
         exported.add(value);
         if (collectionsFiles.has(file)) problems.push({ ...at, message: COLLECTIONS_ONLY });
         else names.set(value, [...(names.get(value) ?? []), at]);
@@ -277,10 +278,10 @@ function declarationsOf(
   // A resource made and never exported is declared nowhere: a typo'd export, or one written inline.
   for (const value of madeWith(loaded)) {
     const made = madeOf(value)!;
-    if (!isDeclaredValue(value) || exported.has(value) || failed.has(made.file)) continue;
+    if (!isDeclared(value) || exported.has(value) || failed.has(made.file)) continue;
     problems.push({
       file: made.file,
-      message: `a ${value[DECLARED]}${value.name === undefined ? "" : ` "${value.name}"`} is made here but not exported: declare each resource as its own \`export const <name> = <vendor>.<type>({ … })\``,
+      message: `${aResource(value)} is made here but not exported: declare each resource as its own \`export const <name> = <vendor>.<type>({ … })\``,
     });
   }
 
@@ -300,7 +301,7 @@ function declarationsOf(
       if (targetId === undefined) {
         leaveOut(
           id,
-          `${path} names a ${target[DECLARED]}${target.name === undefined ? "" : ` "${target.name}"`} that no data file exports: export it from a data file and import it here`,
+          `${path} names ${aResource(target)} that no data file exports: export it from a data file and import it here`,
         );
         return undefined;
       }
@@ -384,9 +385,8 @@ function declarationsOf(
   return { resources, bindings: lock.bindings, orphans, collections, problems };
 }
 
-/** A declared resource: what a constructor returns. */
-const isDeclaredValue = (value: unknown): value is Declared =>
-  isObject(value) && typeof (value as Partial<Declared>)[DECLARED] === "string";
+/** A resource as a problem names it: `a github.repository "website"`, or without its identity when it has none. */
+const aResource = (value: Declared) => `a ${value[DECLARED]}${value.name === undefined ? "" : ` "${value.name}"`}`;
 
 /**
  * What a data file that failed to load is told, on one line: an import Node could not find (a
@@ -423,9 +423,6 @@ function loadProblem(error: unknown, root: string, file: string, partial: boolea
   }
   return text.replaceAll(/\s*\n\s*/g, " ");
 }
-
-/** A path under `root`, relative to it with `/`. */
-const relOf = (root: string, path: string) => relative(root, path).split(sep).join("/");
 
 /** The data files under `root`: the root's `resources/`, then each app's, each sorted. */
 const dataFilesOf = (root: string): string[] => kindDirs(root, "resources").flatMap(dataFilesUnder);

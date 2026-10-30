@@ -409,6 +409,15 @@ const remoteUrlOf = async (source: Source): Promise<string | undefined> => {
   }
 };
 
+/** The connector whose remote half is for the repository's remote (`remoteFor`); none without a remote, or without such a connector. */
+const remoteOf = async ({ resolved, source }: Pick<AppContext, "resolved" | "source">) => {
+  const url = source && (await remoteUrlOf(source));
+  return url === undefined ? undefined : remoteFor(resolved.remotes, url);
+};
+
+/** A change's page in this app at `origin`, which its pull request's status links. */
+const changePage = (id: string, origin: string) => new URL(`/changes/${encodeURIComponent(id)}`, origin).href;
+
 /** Each repository's last answer to `hasRemote`, and when it was asked. */
 const remotes = new WeakMap<object, { at: number; has: Promise<boolean> }>();
 
@@ -426,8 +435,9 @@ export async function openChange(
 ): Promise<{ runId: string }> {
   const chat = await client.chats.get(id);
   if (chat?.person !== actor.id) throw new ApiError(404, { error: `No chat ${id}` });
-  const page = new URL(`/changes/${encodeURIComponent(id)}`, origin).href;
-  return { runId: await client.openChange({ id, title: chat.title, page }, { startedBy: actor }) };
+  return {
+    runId: await client.openChange({ id, title: chat.title, page: changePage(id, origin) }, { startedBy: actor }),
+  };
 }
 
 /**
@@ -442,8 +452,7 @@ export async function hostEnforcement({
   resolved,
   source,
 }: Pick<AppContext, "client" | "description" | "resolved" | "source">): Promise<EnforcementResponse> {
-  const url = source && (await remoteUrlOf(source));
-  const found = url === undefined ? undefined : remoteFor(resolved.remotes, url);
+  const found = await remoteOf({ resolved, source });
   if (!found) return null;
   const host = description.vendors[found.vendor]!.title;
   try {
@@ -593,7 +602,7 @@ async function patchNow(
       await source.closeDraft?.(id);
       throw err;
     }
-    const page = origin && new URL(`/changes/${encodeURIComponent(id)}`, origin).href;
+    const page = origin && changePage(id, origin);
     return { change: await client.openChange({ id, title: message, ...(page && { page }) }, { startedBy: actor }) };
   }
   const { before, text } = await edited(root);
@@ -610,10 +619,8 @@ async function patchNow(
  * Whether a change can be reviewed: the repository drafts and has a remote that a connector's
  * remote half is for (`remoteFor`), as opening a change needs.
  */
-async function reviewsChanges({ resolved, source }: AppContext): Promise<boolean> {
-  if (!source?.draft || !source.diff) return false;
-  const url = await remoteUrlOf(source);
-  return url !== undefined && remoteFor(resolved.remotes, url) !== undefined;
+async function reviewsChanges(app: AppContext): Promise<boolean> {
+  return !!app.source?.draft && !!app.source.diff && (await remoteOf(app)) !== undefined;
 }
 
 /**

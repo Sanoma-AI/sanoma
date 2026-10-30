@@ -1,12 +1,12 @@
 import { existsSync, readdirSync } from "node:fs";
-import { basename, join, relative, sep } from "node:path";
+import { basename, join } from "node:path";
 import { z } from "zod";
 import { childrenOf, keyName, type LintProblem, type Node, readSource, type SourceFile } from "./ast.ts";
 import { type CedarPolicySource, visitorPermits } from "./cedar.ts";
 import type { ConfigDescription, SiteCall, SiteEntry, SitePage } from "./description.ts";
 import { stringValue, unwrap } from "./outline.ts";
 import { exportsOf, loadModules } from "./load.ts";
-import { APPS_DIR, appFolders, filesUnder, isDirectory, SITE_ENTRIES } from "./paths.ts";
+import { APPS_DIR, appFolders, filesUnder, isDirectory, relPath, SITE_ENTRIES } from "./paths.ts";
 import type { ResourceProblem } from "./resources.ts";
 import { START } from "./schema.ts";
 import {
@@ -176,7 +176,7 @@ const readSiteFiles = (root: string, dir: string) =>
     .toSorted()
     .flatMap((path) => {
       const file = readSource(path);
-      return typeof file === "string" ? [] : [readSiteFile(file, relative(root, path).split(sep).join("/"))];
+      return typeof file === "string" ? [] : [readSiteFile(file, relPath(root, path))];
     });
 
 /**

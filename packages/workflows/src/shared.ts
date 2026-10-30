@@ -5,7 +5,7 @@ import type { OpEntry, WorkflowEntry } from "./describe.ts";
 import type { LedgerRecord } from "./ledger.ts";
 import type { Effect } from "./op.ts";
 import type { PreviewRequest } from "./policy.ts";
-import type { DeclaredResource, ResourceProblem } from "./resources.ts";
+import type { DeclaredResource, ResourceProblem } from "./description.ts";
 import type { OutlineNode } from "./outline.ts";
 
 // Types only: resource types as a UI reads them. Erased from the bundle.
@@ -18,9 +18,7 @@ export type {
   ResourceFields,
   ResourceSpec,
 } from "./resource.ts";
-export type { DeclaredResource, ResourceProblem } from "./resources.ts";
-
-export type { At } from "./description.ts";
+export type { At, DeclaredResource, ResourceProblem } from "./description.ts";
 export type { DriftField, DriftReport, DriftResult, DriftStatus } from "./drift.ts";
 export type { ApplyPlan, ApplyReport, ApplyResult, PlanAnswer, PlanStep } from "./apply.ts";
 export type { CredentialStatus } from "./env.ts";
