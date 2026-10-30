@@ -18,7 +18,7 @@ import {
   type SanomaConfig,
   type Source,
 } from "@sanoma-ai/workflows";
-import { type ConfigDescription, describeConfig, readPeople, type SiteEntry } from "@sanoma-ai/workflows/describe";
+import { type ConfigDescription, liveDescription, readPeople, type SiteEntry } from "@sanoma-ai/workflows/describe";
 import { siteDir } from "@sanoma-ai/workflows/shared";
 import { NodeRequest, sendNodeResponse } from "srvx/node";
 import type { AppContext, LoginProvider, RequestContext, ServerEntry } from "./context.ts";
@@ -129,7 +129,10 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   }
   const resolved = resolveConfig(config);
   const login = admitting(given, () => readPeople(resolved.root));
-  const description = describeConfig(config);
+  // Made again on a request once a file it loaded has changed (a form's Save, say); what is said
+  // here, the public sites' hosts and their logins, stay as the app started.
+  const describe = liveDescription(config);
+  const description = describe();
   // Problems in the files do not stop the app: a data file's resources are left out (the Hosting
   // page lists the problems), a workflow the worker will refuse is shown with its outline's error,
   // and a site's call to what the config lacks fails when it is made.
@@ -277,7 +280,9 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   const client = connected.value;
   const app: AppContext = {
     resolved,
-    description,
+    get description() {
+      return describe();
+    },
     place: placeOf(resolved.databaseUrl),
     client,
     login,
@@ -297,7 +302,14 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
     }
     const half = site.login === undefined ? undefined : Promise.withResolvers<LoginHalf>();
     if (half) halves.set(site, half);
-    sites.set(site.name, { ...app, site: site.name, login: publicFront(site, half?.promise) });
+    sites.set(site.name, {
+      ...app,
+      get description() {
+        return describe();
+      },
+      site: site.name,
+      login: publicFront(site, half?.promise),
+    });
   }
 
   try {

@@ -1,4 +1,4 @@
-import { readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { createRequire, registerHooks } from "node:module";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -254,10 +254,27 @@ function placeOf(gen: Generation, error: unknown): { file: string; line?: number
   return undefined;
 }
 
+/**
+ * Each company file under `root` a load has read, and each one's folder, with its stamp
+ * (`stampOf`) as it was before the file was read: the latest generation's for a file several
+ * read. Taken after a load, it still says what the load read, so a file changed while it read is
+ * found changed after.
+ */
+export function stampsOf(root: string): Map<string, string> {
+  const stamps = new Map<string, string>();
+  if (!existsSync(root)) return stamps;
+  const real = realpathSync(root);
+  // In the order made: a later generation's stamp is the newer.
+  for (const gen of registry.generations.values()) {
+    if (gen.root === real) for (const [path, stamp] of gen.stamps) stamps.set(path, stamp);
+  }
+  return stamps;
+}
+
 const byOrder = <T extends string | number>(a: T, b: T) => (a < b ? -1 : a > b ? 1 : 0);
 
-/** A file's size and modification time, or that it is gone. */
-function stampOf(path: string): string {
+/** A file's size and modification time, or that it is gone: what a generation keeps of each file it read. */
+export function stampOf(path: string): string {
   const stat = statSync(path, { bigint: true, throwIfNoEntry: false });
   return stat ? `${stat.size} ${stat.mtimeNs}` : "gone";
 }

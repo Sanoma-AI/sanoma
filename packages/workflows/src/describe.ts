@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import type { z } from "zod";
 import { type AppEntry, appsAt } from "./apps.ts";
 import { readSource, type SourceFile } from "./ast.ts";
@@ -17,8 +18,11 @@ import {
 import { isDirect } from "./direct.ts";
 import { type CredentialStatus, credentialsOf } from "./env.ts";
 import { lintWorkflow } from "./lint.ts";
+import { stampOf, stampsOf } from "./load.ts";
+import { LOCKFILE } from "./lockfile.ts";
 import { VENDOR, type VendorInfo } from "./op.ts";
 import { outlineWithSource } from "./outline.ts";
+import { APPS_DIR, kindDirs } from "./paths.ts";
 import { allowAll, policyOpOf } from "./policy.ts";
 import { type Resource, resourceTypesOf, valueAt } from "./resource.ts";
 import { type DeclaredResource, inAppPeople, loadDataFiles, type ResourceProblem } from "./resources.ts";
@@ -78,6 +82,33 @@ export { columnPrincipal, permissionsGrid, type PermissionsGrid, type Permission
 export { previewRequests } from "./shared.ts";
 // The apply workflow's plan and report, which the app renders.
 export type { ApplyInput, ApplyPlan, ApplyReport, ApplyResult, PlanAnswer, PlanStep } from "./apply.ts";
+
+/**
+ * `describeConfig(config)`, kept and made again only once the files it loaded have changed: each
+ * company file a load read and its folder (`stampsOf`), the lockfile, and the folders a new data
+ * file, app or site would appear in, one `stat` each per call. What the config imports (its
+ * workflows, connectors and policies) is read once, as the worker reads it.
+ */
+export function liveDescription(config: SanomaConfig): () => ConfigDescription {
+  const root = rootOf(config);
+  const described = () => {
+    // The folders and the lockfile as they are before describing, so a change while it reads is seen after.
+    const extra =
+      root === undefined
+        ? []
+        : [LOCKFILE, APPS_DIR, "sites", ...kindDirs(root, "resources")].map((path) => {
+            const at = resolve(root, path);
+            return [at, stampOf(at)] as const;
+          });
+    const description = describeConfig(config);
+    return { description, stamps: new Map([...extra, ...(root === undefined ? [] : stampsOf(root))]) };
+  };
+  let now = described();
+  return () => {
+    if (![...now.stamps].every(([path, stamp]) => stampOf(path) === stamp)) now = described();
+    return now.description;
+  };
+}
 
 /**
  * Describes a config. Throws what `startWorker` would refuse (see `resolveConfig`), except missing

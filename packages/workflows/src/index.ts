@@ -62,7 +62,7 @@ export {
   type SanomaConfig,
 } from "./config.ts";
 // An app's `app.ts` (`defineApp`), and where the launcher finds an app's workflows and data file.
-export { type AppEntry, readApps } from "./apps.ts";
+export { type AppEntry, appSourceOf, readApps } from "./apps.ts";
 export { type AppDefinition, defineApp } from "./definitions.ts";
 export { appFolders, APPS_DIR, filesUnder, kindDirs } from "./paths.ts";
 // `sanoma` itself (the people types' constructors) is at `@sanoma-ai/workflows/resources`, for data files.

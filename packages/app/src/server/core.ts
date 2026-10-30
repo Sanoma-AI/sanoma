@@ -648,21 +648,21 @@ export function preview(
   return policy.preview(requests.map((request) => ({ ...request, principal: actor })));
 }
 
-/** Each app's grid, by its resolved config: built from the policy and the description, both read once as the app starts. */
+/** Each grid, by the description it was built from (and the policy, read once as the app starts): again once the files change. */
 const grids = new WeakMap<object, PermissionsResponse>();
 
 /**
  * The Permissions page's grid (`getPermissions`): the policy, its grid (`permissionsGrid`, the
  * one `sanoma check` reports too: nobody's own answer, the actor asking is not used), then the
- * policy's files as the description read them as the app started (`policy.files`, `sourcesOf`).
+ * policy's files as the description read them (`policy.files`, `sourcesOf`).
  */
 export function permissions(app: Pick<AppContext, "resolved" | "description">): PermissionsResponse {
-  let grid = grids.get(app.resolved);
+  const { resolved, description } = app;
+  let grid = grids.get(description);
   if (!grid) {
-    const { resolved, description } = app;
     const { files, ...policy } = description.policy;
     grid = { policy, ...permissionsGrid(resolved, description), files: sourcesOf(files) };
-    grids.set(resolved, grid);
+    grids.set(description, grid);
   }
   return grid;
 }

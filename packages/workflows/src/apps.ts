@@ -7,7 +7,7 @@ import { exportsOf, type Loaded, loadModules } from "./load.ts";
 import { stringValue } from "./outline.ts";
 import { APPS_DIR, filesUnder, inside, isDirectory, RELATIVE, relPath } from "./paths.ts";
 import type { ResourceProblem } from "./resources.ts";
-import { APP_NAME } from "./shared.ts";
+import { APP_NAME, problemLine } from "./shared.ts";
 
 // A company's apps: each folder of `apps/` holds the kinds the root does (workflows, resources,
 // policies, scenarios, sites), merged from a source repository whose URL its `app.ts` names, or
@@ -63,6 +63,22 @@ export function appsAt(root: string | undefined): { apps: AppEntry[]; problems: 
   }
   problems.sort((a, b) => a.file.localeCompare(b.file));
   return { apps, problems };
+}
+
+/**
+ * The source URL the app `folder` under `root` is taken from, as its `app.ts` names it; an error
+ * saying why there is none: no such app, its `app.ts` does not load or is not `defineApp({ source })`
+ * (what is wrong, where), or it names none (the company's own app).
+ */
+export function appSourceOf(root: string, folder: string): string {
+  if (!APP_NAME.test(folder) || !isDirectory(join(root, APPS_DIR, folder)))
+    throw new Error(`There is no app ${APPS_DIR}/${folder}/`);
+  const file = `${APPS_DIR}/${folder}/app.ts`;
+  const path = join(root, file);
+  const read = existsSync(path) ? appDefinitionOf(file, loadModules(root, [path], [])) : { problems: [] };
+  if (read.problems.length) throw new Error(read.problems.map(problemLine).join("; "));
+  if (read.source === undefined) throw new Error(`${file} names no source: the app is the company's own`);
+  return read.source;
 }
 
 /** What `app.ts`'s default export, `defineApp({ … })`, may say. */

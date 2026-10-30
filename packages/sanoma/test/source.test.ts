@@ -551,6 +551,7 @@ describe("localGitSource's apps", () => {
       {
         "apps/own/app.ts": 'import { defineApp } from "sanoma";\n\nexport default defineApp({});\n',
         "apps/stray/app.ts": APP_TS.replace("<url>", two.url),
+        "apps/broken/app.ts": 'throw new Error("no source here");\n',
       },
       "Own apps",
     );
@@ -565,6 +566,8 @@ describe("localGitSource's apps", () => {
     rmSync(join(draft.root, "apps/fresh"), { recursive: true, force: true });
     await expect(update("own")).rejects.toThrow("apps/own/app.ts names no source: the app is the company's own");
     await expect(update("gone")).rejects.toThrow("There is no app apps/gone/");
+    // One whose app.ts does not load says why, where.
+    await expect(update("broken")).rejects.toThrow("apps/broken/app.ts: no source here");
     // Its source is a's, merged above: a has history with it, stray is merely named so.
     expect((await update("stray")).merged).toBe(0);
     const other = source({ "apps/stray/app.ts": APP_TS });
