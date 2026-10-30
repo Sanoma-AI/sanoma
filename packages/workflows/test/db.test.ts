@@ -2,7 +2,15 @@ import { DBOS } from "@dbos-inc/dbos-sdk";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { Pool } from "pg";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { createTable, lazyPool, pgCode, prepareDatabase, WAKEUP_TABLE } from "../src/db.ts";
+import {
+  connectMaking,
+  createTable,
+  CREDENTIALS_TABLE,
+  lazyPool,
+  pgCode,
+  prepareDatabase,
+  WAKEUP_TABLE,
+} from "../src/db.ts";
 
 const databaseUrl = testDatabaseUrl("db");
 const pool = new Pool({ connectionString: databaseUrl });
@@ -66,6 +74,36 @@ describe("prepareDatabase", () => {
       expect((await conn.query("SHOW idle_in_transaction_session_timeout")).rows).toEqual([
         { idle_in_transaction_session_timeout: "1min" },
       ]);
+    } finally {
+      await conn.end();
+    }
+  });
+});
+
+describe("sanoma_credentials", () => {
+  it("replaces a table from before 0.10.0, whose rows nothing can read, with the one keyed by namespace", async () => {
+    const url = testDatabaseUrl("db-credentials");
+    const conn = await connectMaking(url);
+    try {
+      await conn.query(`DROP TABLE IF EXISTS ${CREDENTIALS_TABLE}`);
+      await conn.query(
+        `CREATE TABLE ${CREDENTIALS_TABLE} (name text PRIMARY KEY, value text NOT NULL, set_by text NOT NULL, set_at timestamptz NOT NULL DEFAULT now())`,
+      );
+      await conn.query(`INSERT INTO ${CREDENTIALS_TABLE} (name, value, set_by) VALUES ('X', 'sealed', 'leon')`);
+      await prepareDatabase(url);
+      const columns = await conn.query<{ column_name: string }>(
+        "SELECT column_name FROM information_schema.columns WHERE table_name = $1 ORDER BY ordinal_position",
+        [CREDENTIALS_TABLE],
+      );
+      expect(columns.rows.map((r) => r.column_name)).toEqual([
+        "namespace",
+        "name",
+        "value",
+        "version",
+        "set_by",
+        "set_at",
+      ]);
+      expect((await conn.query(`SELECT count(*)::int AS n FROM ${CREDENTIALS_TABLE}`)).rows).toEqual([{ n: 0 }]);
     } finally {
       await conn.end();
     }
