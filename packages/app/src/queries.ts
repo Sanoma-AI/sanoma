@@ -673,7 +673,7 @@ export const isPeople = (r: { vendor: string; type: string }) => r.vendor === "s
  * declaration whose file the page shows, and `?edit`, its form open above it.
  */
 export const HostingSearch = z.object({
-  resource: z.string().optional(),
+  resource: z.string().optional().catch(undefined),
   edit: z.boolean().optional().catch(undefined),
 });
 

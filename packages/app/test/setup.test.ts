@@ -171,11 +171,11 @@ describe("creating the GitHub App", () => {
     expect(`${action.origin}${action.pathname}`).toBe("https://github.com/organizations/acme-co/settings/apps/new");
     const bad = await get("/setup/github/manifest?org=acme%2F..");
     expect(bad.status).toBe(303);
-    expect(bad.headers.get("location")).toBe("/setup/connect?github=bad-org");
+    expect(bad.headers.get("location")).toBe("/hosting/connect?github=bad-org");
     // Nobody asking: the keys could be stored as no one, so GitHub is not asked.
     const nobody = await get("/setup/github/manifest");
     expect(nobody.status).toBe(303);
-    expect(nobody.headers.get("location")).toBe("/setup/connect?github=nobody");
+    expect(nobody.headers.get("location")).toBe("/hosting/connect?github=nobody");
   });
 
   it("refuses a callback whose state is not the cookie's, or whose cookie is not signed here, asking GitHub nothing", async () => {
@@ -189,7 +189,7 @@ describe("creating the GitHub App", () => {
     ] as const) {
       const res = await get(`/setup/github/callback?${query}`, sent);
       expect(res.status).toBe(303);
-      expect(res.headers.get("location")).toBe("/setup/connect?github=expired");
+      expect(res.headers.get("location")).toBe("/hosting/connect?github=expired");
     }
     expect(conversions).toEqual([]);
     expect((await setupStatus(ctx)).githubApp).toBeNull();
@@ -199,7 +199,7 @@ describe("creating the GitHub App", () => {
     const cookie = stateCookie(await get("/setup/github/manifest", AS_ALICE));
     const state = cookie.split("=")[1]!.split(".")[0]!;
     const res = await get(`/setup/github/callback?code=stale&state=${state}`, cookie);
-    expect(res.headers.get("location")).toBe("/setup/connect?github=failed");
+    expect(res.headers.get("location")).toBe("/hosting/connect?github=failed");
     expect(conversions).toEqual(["stale"]);
   });
 
@@ -208,7 +208,7 @@ describe("creating the GitHub App", () => {
     const state = cookie.split("=")[1]!.split(".")[0]!;
     const res = await get(`/setup/github/callback?code=good&state=${state}`, cookie);
     expect(res.status).toBe(303);
-    expect(res.headers.get("location")).toBe("/setup/connect?github=connected");
+    expect(res.headers.get("location")).toBe("/hosting/connect?github=connected");
     // The state cookie is used once.
     expect(stateCookie(res)).toBe("sanoma_setup_state=");
 
@@ -244,7 +244,7 @@ describe("the connect page", () => {
     const { tokens } = await setupStatus(ctx);
     expect(tokens[1]).toMatchObject({ name: "SUPABASE_ACCESS_TOKEN", status: "set", source: "stored", setBy: "alice" });
 
-    // The App's callback still comes back to /setup/connect, which goes on to Hosting's Connect page.
+    // An old link to /setup/connect goes on to Hosting's Connect page.
     expect((await get("/setup/connect?github=connected")).headers.get("location")).toBe(
       "/hosting/connect?github=connected",
     );

@@ -99,7 +99,7 @@ const setupTokens = ({ resolved }: AppContext) => {
 };
 
 const CALLBACK = "/setup/github/callback";
-const CONNECT = "/setup/connect";
+const CONNECT = "/hosting/connect";
 /** The state cookie, sent only to the manifest and callback routes. */
 const STATE = "sanoma_setup_state";
 const STATE_PATH = "/setup/github";
