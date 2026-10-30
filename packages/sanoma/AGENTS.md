@@ -28,6 +28,8 @@ This package owns the `sanoma` bin a company repo runs, checks and exports itsel
 
 - Keep signing bootstrap independent of row encryption. `key.ts` respects direct and mounted-file inputs; local generation creates no encryption key when `config.secrets.store` supplies an external provider. Public behavior and recovery belong in [Secret storage and bootstrap](README.md#secret-storage-and-bootstrap).
 
+Keep `runtime/Dockerfile`’s bridge release, source commit and archive checksums aligned with `packages/bridge/scripts/download-bridge.ts`. The image’s `SANOMA_BRIDGE_BIN` overrides npm’s platform binary. Preserve its build-time isolated-session protocol check; runtime changes require a new `sanoma` version.
+
 ## Checks
 
 `pnpm vitest run packages/sanoma` needs Postgres (`pnpm db:up`) and builds the packages the fixture loads when they are stale (`packages/workflows`, `packages/bridge`, `connectors/ghost`, `packages/app`, this one); `packed.test.ts` installs them as tarballs with pnpm, which needs the registry or a warm store for their third-party dependencies. `embedded.test.ts` runs this platform's PostgreSQL 18, which `pnpm postgres:download` fills in; without it the test skips, except in CI, where it fails. Run the gate with `SANOMA_TEST_DATABASE_URL` naming a database of your own.
