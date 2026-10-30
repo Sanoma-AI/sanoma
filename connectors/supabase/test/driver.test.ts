@@ -34,6 +34,7 @@ describe("supabaseDriver", () => {
     expect(calls()).toEqual([
       ["configure", undefined, undefined],
       ["import", "supabase_project", REF],
+      ["close", undefined, undefined],
     ]);
     expect(configure).toHaveBeenCalledWith(
       expect.objectContaining({ source: "supabase/supabase", version: "1.11.0" }),
@@ -50,7 +51,7 @@ describe("supabaseDriver", () => {
     const driver = supabaseDriver({ bridge });
     const imported = await call(driver, "project.import", { id: REF });
     const read = await call(driver, "project.read", imported);
-    expect(calls().slice(1)).toEqual([
+    expect(calls().filter(([method]) => method === "import")).toEqual([
       ["import", "supabase_project", REF],
       ["import", "supabase_project", REF],
     ]);

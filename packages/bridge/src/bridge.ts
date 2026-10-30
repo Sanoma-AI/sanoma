@@ -20,6 +20,8 @@ export interface ProviderRef {
   version: string;
   /** Hex sha256 of the release's SHA256SUMS. When set, the bridge refuses any other release. */
   sha256?: string;
+  /** Opaque UUID for one authorized operation; never a credential-derived identifier. */
+  sessionId?: string;
 }
 
 /** A diagnostic from the provider: warnings come back in replies, errors in a `BridgeError`. */
@@ -69,6 +71,7 @@ export interface PlanResult {
   /** The provider's plan, opaque: pass it to `apply` unchanged. Empty for a delete; for a replace, the new object's. */
   planned: Uint8Array;
   plannedPrivate: Uint8Array;
+  planToken: Uint8Array;
   warnings: Diagnostic[];
 }
 
@@ -80,6 +83,7 @@ export interface PlanResult {
 export interface ApplyInput extends PlanInput {
   planned?: Uint8Array;
   plannedPrivate?: Uint8Array;
+  planToken?: Uint8Array;
 }
 
 export interface ApplyResult {
@@ -96,7 +100,7 @@ export interface Bridge {
   schema(ref: ProviderRef): Promise<{ schema: SchemaDocument; sha256: string }>;
   /**
    * Starts and configures the provider. The same config again is a no-op; another config for the
-   * same release fails (`failed_precondition`) until `close(ref)`.
+   * same session fails (`failed_precondition`) until `close(ref)`.
    */
   configure(ref: ProviderRef, configJson: string): Promise<{ warnings: Diagnostic[] }>;
   /**
@@ -133,7 +137,7 @@ export interface Bridge {
    * before the provider was called, or the provider process failed.
    */
   apply(ref: ProviderRef, typeName: string, input: ApplyInput): Promise<ApplyResult>;
-  /** Stops one configured provider, or every one. */
+  /** Stops the selected session, or all sessions when called without a ref. */
   close(ref?: ProviderRef): Promise<void>;
   /** Stops the bridge and every provider it runs. */
   stop(): Promise<void>;
@@ -195,7 +199,7 @@ const codeName = (code: Code) => codeToString(code) as BridgeErrorCode;
 const UNREACHABLE = new Set(["ENOENT", "ECONNREFUSED", "ECONNRESET", "EPIPE"]);
 
 /** True when the error, or one it was caused by, is a socket that is not there or went away. */
-function unreachable(error: unknown): boolean {
+export function unreachable(error: unknown): boolean {
   for (let e = error, depth = 0; e instanceof Error && depth < 10; e = e.cause, depth++) {
     const { code } = e as { code?: unknown };
     if (typeof code === "string" && UNREACHABLE.has(code)) return true;
@@ -245,7 +249,12 @@ async function call<T>(run: () => Promise<T>): Promise<T> {
   }
 }
 
-const providerOf = ({ source, version, sha256 = "" }: ProviderRef) => ({ source, version, sha256 });
+const providerOf = ({ source, version, sha256 = "", sessionId = "" }: ProviderRef) => ({
+  source,
+  version,
+  sha256,
+  sessionId,
+});
 
 /**
  * A `Bridge` over a Connect client of `BridgeService`: the real client's transport is the
@@ -258,6 +267,28 @@ export function bridgeClient(
 ): Bridge {
   // A release's schema is pinned by its sha256, so it is parsed once (Stripe's is 2.3 MB).
   const schemas = new Map<string, SchemaDocument>();
+  const protocols = new Map<string, Promise<void>>();
+  const negotiate = (ref: ProviderRef) => {
+    const key = `${ref.source} ${ref.version} ${ref.sha256 ?? ""}`;
+    let pending = protocols.get(key);
+    if (!pending) {
+      pending = rpc
+        .getSchema({ provider: providerOf(ref) }, options)
+        .then((res) => {
+          if (res.sessionProtocol !== 1)
+            throw new BridgeError(
+              "failed_precondition",
+              "Incompatible provider bridge: isolated session protocol 1 is required; update the binary",
+            );
+        })
+        .catch((error) => {
+          protocols.delete(key);
+          throw error;
+        });
+      protocols.set(key, pending);
+    }
+    return pending;
+  };
   return {
     schema: (ref) =>
       call(async () => {
@@ -269,6 +300,8 @@ export function bridgeClient(
       }),
     configure: (ref, configJson) =>
       call(async () => {
+        if (!ref.sessionId) throw new BridgeError("invalid_argument", "Configure requires an explicit session UUID");
+        await negotiate(ref);
         const res = await rpc.configure({ provider: providerOf(ref), configJson }, options);
         return { warnings: res.warnings.map(toDiagnostic) };
       }),
@@ -307,12 +340,13 @@ export function bridgeClient(
           requiresReplace: res.requiresReplace,
           planned: res.planned,
           plannedPrivate: res.plannedPrivate,
+          planToken: res.planToken,
           warnings: res.warnings.map(toDiagnostic),
         };
       }),
     apply: (ref, typeName, input) =>
       call(async () => {
-        const { planned, plannedPrivate } = input;
+        const { planned, plannedPrivate, planToken } = input;
         const res = await rpc.apply(
           {
             provider: providerOf(ref),
@@ -320,6 +354,7 @@ export function bridgeClient(
             ...changeOf(input),
             ...(planned === undefined ? {} : { planned }),
             ...(plannedPrivate === undefined ? {} : { plannedPrivate }),
+            ...(planToken === undefined ? {} : { planToken }),
           },
           options,
         );
@@ -331,6 +366,7 @@ export function bridgeClient(
       }),
     close: (ref) =>
       call(async () => {
+        if (ref) await negotiate(ref);
         await rpc.close(ref ? { provider: providerOf(ref) } : {}, options);
       }),
     stop,

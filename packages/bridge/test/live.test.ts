@@ -14,7 +14,7 @@ const cacheHome =
   process.platform === "darwin"
     ? join(homedir(), "Library", "Caches")
     : (process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache"));
-const nullProvider = readPins()["hashicorp/null"]!;
+const nullProvider = { ...readPins()["hashicorp/null"]!, sessionId: "00000000-0000-0000-0000-000000000001" };
 const logs: BridgeLog[] = [];
 const triggers = (v: string) => JSON.stringify({ id: null, triggers: { v } });
 const options = () => ({
@@ -81,7 +81,7 @@ describe.skipIf(!live)("startBridge (SANOMA_LIVE=1)", () => {
       const fixture = JSON.parse(
         readFileSync(join(dir, "replies/hashicorp_null_3.3.2/null_resource/7/read.json"), "utf8"),
       );
-      expect(fixture.provider).toEqual({ ...nullProvider, protocol: 5 });
+      expect(fixture.provider).toEqual({ ...readPins()["hashicorp/null"], protocol: 5 });
       expect(fixture.scrubbed).toEqual([]);
       // The schema is written as the bridge returns it: the same bytes as the checked-in fixture.
       const schemaFile = "schemas/hashicorp_null_3.3.2.json";
@@ -127,13 +127,20 @@ describe.skipIf(!live)("startBridge (SANOMA_LIVE=1)", () => {
         expect(await plan({ ...prior, configJson: triggers("1") })).toMatchObject({ action: "none" });
         const replace = await plan({ ...prior, configJson: triggers("2") });
         expect(replace).toMatchObject({ action: "replace", requiresReplace: ["triggers"] });
-        expect(await b.apply(nullProvider, "null_resource", prior)).toEqual({ errors: [], warnings: [] });
+        expect(await b.apply(nullProvider, "null_resource", { ...prior, planToken: replace.planToken })).toEqual({
+          errors: [],
+          warnings: [],
+        });
         const replaced = await b.apply(nullProvider, "null_resource", { configJson: triggers("2"), ...replace });
         const next = JSON.parse(replaced.resource!.stateJson) as { id: string };
         expect(next.id).not.toBe(JSON.parse(prior.priorStateJson).id);
         const last = { priorStateJson: replaced.resource!.stateJson, priorSchemaVersion: 0 };
-        expect(await plan(last)).toMatchObject({ action: "delete", planned: new Uint8Array() });
-        expect(await b.apply(nullProvider, "null_resource", last)).toEqual({ errors: [], warnings: [] });
+        const removal = await plan(last);
+        expect(removal).toMatchObject({ action: "delete", planned: new Uint8Array() });
+        expect(await b.apply(nullProvider, "null_resource", { ...last, planToken: removal.planToken })).toEqual({
+          errors: [],
+          warnings: [],
+        });
         return next.id;
       };
       const id = await run(recording);
