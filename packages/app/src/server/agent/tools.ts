@@ -115,6 +115,16 @@ export function loopTools(turn: ToolsTurn) {
     });
 
   return {
+    connection_status: tool({
+      description:
+        "Read named account requirements and last-tested status, with links to secure input. Never returns credentials or tests a provider.",
+      inputSchema: z.object({}),
+      execute: async () =>
+        (await app.client.connections({ actor: principal })).map((card) => ({
+          ...card,
+          secureInput: `/connectors/${encodeURIComponent(card.vendor)}`,
+        })),
+    }),
     list_files: tool({
       description:
         "List the repository's files (those git tracks), under a directory or all of them. In the draft once you have edited.",

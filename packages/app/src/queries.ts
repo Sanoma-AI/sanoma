@@ -15,7 +15,7 @@ import {
   type ListQuery,
   type Saved,
 } from "@sanoma-ai/workflows/shared";
-import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { type QueryClient, queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { linkOptions, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -44,6 +44,7 @@ import {
   getChats,
   getConfig,
   getCredentials,
+  getConnections,
   getDriftReport,
   getGoLiveChoices,
   getGoLiveProgress,
@@ -74,7 +75,10 @@ export const api: Api = createApi((request) => callFn({ data: request }));
 /** How often the runs and a run's detail refresh while a page shows them. */
 export const POLL_MS = 2_000;
 
-/** The config cannot change while the app runs. The root route loads it for every page. */
+/**
+ * The config, as the app describes the files when asked (`AppContext.description`). The root
+ * route loads it for every page; a page that writes a file refetches it (`refreshWritten`).
+ */
 export const configQuery = () =>
   queryOptions({ queryKey: ["config"], queryFn: () => getConfig(), staleTime: Number.POSITIVE_INFINITY });
 
@@ -88,6 +92,12 @@ export const sourceQuery = (file: string) =>
     queryFn: () => getSource({ data: { file } }),
     staleTime: Number.POSITIVE_INFINITY,
   });
+
+/** After `file` is written in the checkout: refetches it, and the description the app makes again from it. */
+export const refreshWritten = (queryClient: QueryClient, file: string) =>
+  Promise.all(
+    [sourceQuery(file).queryKey, configQuery().queryKey].map((queryKey) => queryClient.invalidateQueries({ queryKey })),
+  );
 
 /** The file a workflow's outline was read from; none when it was read from `run`'s text, or not at all. */
 export const workflowFile = (workflow: Pick<WorkflowEntry, "outline">): string | undefined =>
@@ -240,6 +250,9 @@ export const scenariosNaming =
  */
 export const credentialsQuery = () =>
   queryOptions({ queryKey: ["credentials"], queryFn: () => getCredentials(), staleTime: 5_000 });
+
+export const connectionsQuery = () =>
+  queryOptions({ queryKey: ["connections"], queryFn: () => getConnections(), staleTime: 5_000 });
 
 /** What is connected for going live (the connect page): under the credentials' key, so setting one refreshes both. */
 export const setupStatusQuery = () =>
@@ -654,14 +667,14 @@ export const DataSearch = z.object({
 export type DataSearch = z.infer<typeof DataSearch>;
 
 /**
- * The Data page's tab (`/data?app=`): an app's name, or `ROOT_APP` for the collections the root
- * declares; none for All.
+ * A list's app tab (`?app=` on Data, Workflows and Permissions, `components/app-scope.tsx`): an
+ * app's name, or `ROOT_APP` for what the root holds; none for All.
  */
-export const DataListSearch = z.object({
+export const AppSearch = z.object({
   app: z.string().min(1).optional().catch(undefined),
 });
 
-/** The root as the Data page's `?app=`: `.`, a folder no app can be named (`APP_NAME`). */
+/** The root as a list's `?app=`: `.`, a folder no app can be named (`APP_NAME`). */
 export const ROOT_APP = ".";
 
 /** The runtime's own types for who may act (`sanoma.person`, `.agent`, `.group`): on People, never on Hosting. */
@@ -689,7 +702,7 @@ export const PeopleSearch = z.object({
 
 /** Going live's Connect page's search (`/hosting/connect`, and `/setup/connect`): how creating the GitHub App went, as its callback comes back. */
 export const ConnectSearch = z.object({
-  github: z.enum(["connected", "expired", "failed", "bad-org", "nobody"]).optional(),
+  github: z.enum(["connected", "expired", "failed", "bad-org", "nobody"]).optional().catch(undefined),
 });
 
 /** The grid's search with no record open in the form: for a link's or `navigate`'s `search`. */

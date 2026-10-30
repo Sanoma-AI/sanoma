@@ -23,6 +23,7 @@ import {
   VendorLogo,
 } from "../../components/common.tsx";
 import { availableConnectorsQuery, configQuery, connectorsOf, credentialsQuery } from "../../queries.ts";
+import { SecretStorage } from "../../components/connections.tsx";
 
 export const Route = createFileRoute("/connectors/")({
   // `add` names the available connector whose steps to add it show.
@@ -39,6 +40,7 @@ function ConnectorsPage() {
   return (
     <>
       <CrumbHeader />
+      <SecretStorage />
       <Region title="Installed">
         <Installed />
       </Region>

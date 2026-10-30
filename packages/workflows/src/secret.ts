@@ -46,6 +46,35 @@ export interface Secrets {
   ensure(name: string, make: () => string): Promise<string>;
 }
 
+/** A named call can resolve only the auxiliary secret markers present in its authorized input. */
+export function secretsForInput(input: unknown, secrets: Secrets, creates: readonly string[] = []): Secrets {
+  const allowed = new Map<string, boolean>();
+  for (const name of creates) {
+    if (!SECRET_NAME.test(name)) throw new DriverError("Invalid operation secret destination", { retryable: false });
+    allowed.set(name, true);
+  }
+  const visit = (value: unknown) => {
+    if (isSecret(value)) allowed.set(value.$secret, allowed.get(value.$secret) === true || value.generate === true);
+    else if (Array.isArray(value)) value.forEach(visit);
+    else if (value && typeof value === "object") Object.values(value).forEach(visit);
+  };
+  visit(input);
+  const check = (name: string, generate: boolean) => {
+    if (!allowed.has(name) || (generate && !allowed.get(name)))
+      throw new DriverError("The call does not authorize this secret access", { retryable: false });
+  };
+  return {
+    async get(name) {
+      check(name, false);
+      return secrets.get(name);
+    },
+    async ensure(name, make) {
+      check(name, true);
+      return secrets.ensure(name, make);
+    },
+  };
+}
+
 /** A value for a secret with `generate`: 32 random bytes, base64url. */
 export const generateSecret = (): string => randomBytes(32).toString("base64url");
 

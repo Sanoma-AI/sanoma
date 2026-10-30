@@ -82,6 +82,15 @@ interface CompanyApi {
       list: OpFn<{}, unknown>;
     };
     connection: {
+      /** `sanoma.connection.activate`, a access. */
+      activate: OpFn<{
+        connection: {
+          $connection: string;
+          vendor: string;
+          revision?: string;
+        };
+        expectedRevision: string;
+      }, unknown>;
       /** `sanoma.connection.bind`, a access. */
       bind: OpFn<{
         connection: {
@@ -92,6 +101,23 @@ interface CompanyApi {
         account: string;
         scopes: string[];
         expectedRevision: string | null;
+      }, unknown>;
+      /** `sanoma.connection.configure`, a access. */
+      configure: OpFn<{
+        target: {
+          connection: {
+            $connection: string;
+            vendor: string;
+            revision?: string;
+          };
+        } | {
+          rule: string;
+        };
+        requestId: string;
+        expectedRevision: string | null;
+        definition: string;
+        account: string;
+        scopes: string[];
       }, unknown>;
       /** `sanoma.connection.create`, a access. */
       create: OpFn<{
@@ -107,6 +133,29 @@ interface CompanyApi {
           revision?: string;
         };
         expectedRevision: string;
+      }, unknown>;
+      /** `sanoma.connection.prepare`, a access. */
+      prepare: OpFn<{
+        target: {
+          connection: {
+            $connection: string;
+            vendor: string;
+            revision?: string;
+          };
+        } | {
+          rule: string;
+        };
+        requestId: string;
+        definition: string;
+        authorization: string;
+      }, unknown>;
+      /** `sanoma.connection.test`, a read. */
+      test: OpFn<{
+        connection: {
+          $connection: string;
+          vendor: string;
+          revision?: string;
+        };
       }, unknown>;
     };
   };

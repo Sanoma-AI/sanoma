@@ -1,7 +1,7 @@
 import { live, replay } from "@sanoma-ai/testing/replay";
 import { type CallContext, DriverError, memorySecrets, type Secrets } from "@sanoma-ai/workflows";
 import { delay, http, HttpResponse } from "msw";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { project } from "../src/connector.ts";
 import { neonDriver } from "../src/driver.ts";
 import { replayOptions, TEST_KEY } from "./replay.ts";
@@ -37,6 +37,12 @@ const callWith = (secrets: Secrets = memorySecrets()): CallContext => ({
   opId: "neon.project",
   attempt: 1,
   secrets,
+  authentication: {
+    kind: "api-key",
+    method: "apiKey",
+    credentialVersion: "fixture",
+    credentials: { apiKey: TEST_KEY },
+  },
 });
 const op = (name: string, input: object, call = callWith(), driver = neonDriver()) => driver.ops[name]!(input, call);
 /** The `DriverError` `promise` fails with. */
@@ -211,10 +217,9 @@ describe.skipIf(live)("neonDriver", () => {
   });
 
   it("refuses without its key, before any request", async () => {
-    vi.stubEnv("NEON_API_KEY", "");
-    await expect(op("project.read", { id: P })).rejects.toMatchObject({
+    await expect(op("project.read", { id: P }, { ...callWith(), authentication: undefined })).rejects.toMatchObject({
       retryable: false,
-      message: expect.stringContaining("NEON_API_KEY is not set"),
+      code: "unsupported",
     });
     expect(sent).toEqual([]);
   });

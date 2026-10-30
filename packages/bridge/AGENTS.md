@@ -6,7 +6,7 @@ This package owns the provider-bridge client, provider replay, and resource sche
 - [Source map](src/AGENTS.md): client, configuration, replay, and generation boundaries; follow [tfschema](src/tfschema/AGENTS.md) for schema conversion changes.
 - [Test map](test/AGENTS.md): offline coverage versus the opt-in live test, and the helpers that replay and record the bridge (`fakeBridge`, the recorder), which stay out of the package and read `SANOMA_LIVE` and `SANOMA_RECORD` themselves: the bridge does not depend on `@sanoma-ai/testing`.
 
-Keep provider configuration serialized through `ensureConfigured`; preserve reconfiguration after credential changes or provider loss. Recorded fixtures must retain secret scrubbing and rejection of secret-bearing private state.
+Keep one fresh provider session per authorized operation through `withProviderSession`; never reuse credential-bearing processes or implicitly replay a failed mutation. Negotiate session protocol 1 before sending credentials or session cleanup. Recorded fixtures must retain secret scrubbing and rejection of secret-bearing private state.
 
 The binary ships in `../bridge-bin/<platform>` ([its notes](../bridge-bin/AGENTS.md)); `RELEASE` in `scripts/download-bridge.ts` pins the provider-bridge release they and `pnpm bridge:download` take.
 

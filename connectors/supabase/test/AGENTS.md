@@ -11,3 +11,5 @@ Tests for the Supabase connector. They run on the replies in `../testdata` and t
 | [`management.test.ts`](management.test.ts) | The Management API operations over `fixtures/` (msw replay), the URL in the secrets store only; a create (and its guard) and delete over the `sanoma-apply-test*` replies         |
 | [`replay.ts`](replay.ts)                   | The replay options: token, the project read live (`SUPABASE_TEST_PROJECT_REF`), and the scrub of its ref and organization                                                         |
 | `fixtures/`                                | Management API exchanges, written by hand in the recorder's format: `pooler`, `health`, `projects` (the guard) and failures                                                       |
+
+`vault.test.ts` checks the isolated SQL transport and safe errors. `vault-live.test.ts` is opt-in with `SANOMA_VAULT_TEST_DATABASE_URL`: it creates/drops its own database and login on a disposable administrator instance with the actual Vault extension. It verifies conformance, permissions, CAS, external ownership and rotation; use only synthetic values.

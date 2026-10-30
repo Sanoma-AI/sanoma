@@ -32,12 +32,25 @@ export const CHAT_MESSAGES_TABLE = "sanoma_chat_messages";
 /** The runtime's tables, each with the word the messages name it by. */
 const TABLES: readonly [what: string, ddl: string][] = [
   [
+    "connection health",
+    `CREATE TABLE IF NOT EXISTS sanoma_connection_health (
+      connection_id text PRIMARY KEY, revision text NOT NULL, health text NOT NULL,
+      credential_version text, externally_renewed boolean NOT NULL, checked_at timestamptz NOT NULL DEFAULT now())`,
+  ],
+  [
+    "connection setup receipts",
+    `CREATE TABLE IF NOT EXISTS sanoma_connection_setups (
+      connection_id text NOT NULL, revision text NOT NULL, credential_version text NOT NULL,
+      PRIMARY KEY(connection_id, revision))`,
+  ],
+  [
     "connections",
     `CREATE TABLE IF NOT EXISTS sanoma_connections (
     id text PRIMARY KEY, vendor text NOT NULL, method text NOT NULL, owner text, rule text,
     account text NOT NULL, scopes jsonb NOT NULL, revision text NOT NULL, definition text NOT NULL,
-    credential text, status text NOT NULL DEFAULT 'connected', updated_by text NOT NULL,
-    updated_at timestamptz NOT NULL DEFAULT now())`,
+    credential text, location jsonb, status text NOT NULL DEFAULT 'connected', updated_by text NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now());
+    ALTER TABLE sanoma_connections ADD COLUMN IF NOT EXISTS location jsonb`,
   ],
   [
     "credentials",

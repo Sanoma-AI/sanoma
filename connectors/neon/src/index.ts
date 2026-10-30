@@ -3,8 +3,10 @@ import { neonOps } from "./connector.ts";
 import { neonDriver } from "./driver.ts";
 import { fakeNeon } from "./fake.ts";
 import { neonSteps } from "./steps.ts";
+import { neonApiKey } from "./authentication.ts";
 
 export { REGIONS } from "./connector.ts";
+export { neonApiKey } from "./authentication.ts";
 
 /**
  * Neon, serverless Postgres: the resource type `neon.project` (`read`, `import`, `plan`,
@@ -14,4 +16,9 @@ export { REGIONS } from "./connector.ts";
  * its fake (`fakeNeon`), of which each sandbox run makes its own, and its steps for Gherkin tests
  * (`neonSteps`).
  */
-export const neon = withSetup(neonOps, { driver: neonDriver, fake: fakeNeon, steps: neonSteps });
+export const neon = withSetup(neonOps, {
+  authentication: { apiKey: neonApiKey },
+  driver: neonDriver,
+  fake: fakeNeon,
+  steps: neonSteps,
+});

@@ -1,4 +1,4 @@
-import type { ConnectionRegistry } from "./connection.ts";
+import type { ConnectionRef, ConnectionRegistry, ConnectionSnapshot } from "./connection.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Collection } from "./collection.ts";
 import type { DeadlineRegistry } from "./deadlines.ts";
@@ -98,6 +98,8 @@ export interface Run {
   fakeDrivers?: Map<string, DriverFn>;
   /** A sandbox run's own secrets, in memory, from `seedSandbox`; unset for a live run. */
   fakeSecrets?: Secrets;
+  /** Synthetic, run-local identities; this resolver never reads production connection records. */
+  fakeConnection?: (vendor: string, ref?: ConnectionRef) => ConnectionSnapshot | undefined;
   approvals: ApprovalState[];
   /** The next ledger `seq`. Advanced only outside steps, so a replay counts the same way. */
   seq: number;

@@ -9,7 +9,7 @@ import { Spinner } from "#/components/ui/spinner.tsx";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/components/ui/table.tsx";
 import { errorBodyOf } from "../api.ts";
 import { adoptFn, startRunFn } from "../functions.ts";
-import { RUNS_KEY, sourceQuery } from "../queries.ts";
+import { RUNS_KEY, refreshWritten } from "../queries.ts";
 
 /** The drift run whose report the page shows, which Adopt writes the vendor's values from, and the workflow that checks again. */
 export interface Adopt {
@@ -62,7 +62,7 @@ function AdoptButton({ adopt: { runId, drift }, id, path }: { adopt: Adopt; id: 
     mutationFn: () => adoptField({ data: { runId, id, paths: [path] } }),
     onSuccess: async ({ file, revision }) => {
       toast.success(`Wrote ${path} into ${file}${revision ? `, committed as ${revision.slice(0, 7)}` : ""}`);
-      await queryClient.invalidateQueries({ queryKey: sourceQuery(file).queryKey });
+      await refreshWritten(queryClient, file);
       // Then checks again, which reads the file as it now is: a failure here leaves the adopt done.
       try {
         await start({ data: { workflow: drift, input: {} } });

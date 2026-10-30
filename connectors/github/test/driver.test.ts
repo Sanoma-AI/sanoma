@@ -34,6 +34,7 @@ describe("githubDriver", () => {
     expect(calls()).toEqual([
       ["configure", undefined, undefined],
       ["import", "github_repository", "sanoma"],
+      ["close", undefined, undefined],
     ]);
     expect(read).toMatchObject({ id: "Sanoma-AI/sanoma", gone: false, handle: expect.stringMatching(/^1:./) });
     expect(github.repository.read.output.parse(read).state).toMatchObject({
@@ -43,12 +44,12 @@ describe("githubDriver", () => {
     });
   });
 
-  it("configures the provider once, and reads a state it was given without importing", async () => {
+  it("uses a fresh session to read a state it was given without importing", async () => {
     const driver = githubDriver({ bridge });
     const imported = await call(driver, "repository.import", { id: "Sanoma-AI/provider-bridge" });
     expect(github.repository.import.output.parse(imported).state).toMatchObject({ name: "provider-bridge" });
     await call(driver, "repository.read", imported);
-    expect(calls().map(([method]) => method)).toEqual(["configure", "import", "read"]);
+    expect(calls().map(([method]) => method)).toEqual(["configure", "import", "close", "configure", "read", "close"]);
   });
 
   it("imports a state it cannot read back, one without an id", async () => {
@@ -56,7 +57,7 @@ describe("githubDriver", () => {
     const imported = await call(driver, "repository.import", { id: "Sanoma-AI/sanoma" });
     const read = await call(driver, "repository.read", { ...imported, state: { ...imported.state, id: null } });
     expect(read).toMatchObject({ id: "Sanoma-AI/sanoma", gone: false, state: { id: "sanoma" } });
-    expect(calls().map(([method]) => method)).toEqual(["configure", "import", "import"]);
+    expect(calls().map(([method]) => method)).toEqual(["configure", "import", "close", "configure", "import", "close"]);
   });
 
   it("configures the provider for the owner each call names, with the token read on every call", async () => {
@@ -75,15 +76,15 @@ describe("githubDriver", () => {
       JSON.stringify({ owner: "someone-else", token: "ghx_test" }),
     );
     await call(driver, "repository.import", { id: "Sanoma-AI/sanoma" });
-    // A new token: the bridge refuses another config until the provider is closed. Two calls at
-    // once configure once.
+    // Rotated credentials and concurrent calls each get their own provider session.
     vi.stubEnv("GITHUB_TOKEN", "ghx_other");
     await Promise.all([
       call(driver, "repository.import", { id: "Sanoma-AI/sanoma" }),
       call(driver, "repository.import", { id: "Sanoma-AI/provider-bridge" }),
     ]);
-    expect(close).toHaveBeenCalledTimes(3);
-    expect(configure).toHaveBeenCalledTimes(4);
+    expect(close).toHaveBeenCalledTimes(5);
+    expect(configure).toHaveBeenCalledTimes(5);
+    expect(new Set(configure.mock.calls.map(([ref]) => ref.sessionId)).size).toBe(5);
   });
 
   it("refuses a call that names no owner, or two, and calls nothing", async () => {
@@ -142,10 +143,10 @@ describe("githubDriver", () => {
     const err = await call(driver, "repository.import", { id: "Sanoma-AI/sanoma" }).catch((e: unknown) => e);
     expect(err).toMatchObject({ retryable: true, vendorCode: "unavailable" });
     await call(driver, "repository.import", { id: "Sanoma-AI/sanoma" });
-    expect(calls().filter(([method]) => method === "configure")).toHaveLength(2);
+    expect(calls().filter(([method]) => method === "configure")).toHaveLength(3);
   });
 
-  it("configures again, and retries, when the bridge has forgotten the provider", async () => {
+  it("configures a fresh session after the bridge was closed", async () => {
     const driver = githubDriver({ bridge });
     await call(driver, "repository.import", { id: "Sanoma-AI/sanoma" });
     await bridge.close(); // a restarted bridge
@@ -156,9 +157,10 @@ describe("githubDriver", () => {
       "configure",
       "import",
       "close",
-      "import",
+      "close",
       "configure",
       "import",
+      "close",
     ]);
   });
 

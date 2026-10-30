@@ -11,6 +11,7 @@ import {
 import { fail, type Instance, UNREGISTERED, type WakeupApi, wakeupCalls } from "./wakeup-driver.ts";
 import { INSTANCE_TOKEN, instanceUrl } from "./wakeup-service.ts";
 import { wakeupOps } from "./wakeup-type.ts";
+import type { ConnectionRef } from "./connection.ts";
 
 /*
  * Fake vendors for tests, at `@sanoma-ai/workflows/fake`. Kept off the main entry so the
@@ -25,6 +26,76 @@ export interface FakeCall {
   at: string;
   idempotencyKey: string;
   attempt: number;
+  connection?: string;
+}
+
+/** A factory per named account: state, faults and idempotent replies never cross connections. */
+export function connectionFakes<F extends Fake<unknown>>(make: () => F) {
+  const seen = new WeakSet<object>();
+  const fresh = () => {
+    const fake = make();
+    const parts = [
+      fake,
+      fake.driver,
+      fake.driver.ops,
+      ...(fake.state && typeof fake.state === "object" ? [fake.state] : []),
+    ];
+    if (parts.some((part) => seen.has(part)))
+      throw new Error("A named fake factory must create separate state for each connection");
+    for (const part of parts) seen.add(part);
+    return fake;
+  };
+  const first = fresh();
+  const { vendor } = first.driver;
+  let unused: F | undefined = first;
+  const accounts = new Map<string, { fake: F; identity?: string }>();
+  const calls: FakeCall[] = [];
+  const account = (ref: ConnectionRef): F => {
+    if (ref.vendor !== vendor || !ref.$connection.startsWith(`${vendor}/`))
+      throw new Error(`fake ${vendor}: select a connection of this connector`);
+    let entry = accounts.get(ref.$connection);
+    if (!entry) {
+      entry = { fake: unused ?? fresh() };
+      unused = undefined;
+      accounts.set(ref.$connection, entry);
+    }
+    return entry.fake;
+  };
+  const ops: Record<string, DriverFn> = {};
+  for (const key of Object.keys(first.driver.ops)) {
+    ops[key] = async (input, call) => {
+      const selected = call.connection;
+      if (!selected || selected.vendor !== vendor)
+        throw new DriverError(`fake ${vendor}: select a named connection`, { retryable: false });
+      const ref = { vendor, $connection: selected.id };
+      account(ref);
+      let entry = accounts.get(selected.id)!;
+      // Rebinding to another vendor account gets fresh state. Rotation within an account does not.
+      if (entry.identity !== undefined && entry.identity !== selected.account) {
+        entry = { fake: fresh() };
+        accounts.set(selected.id, entry);
+      }
+      entry.identity = selected.account;
+      calls.push({
+        op: `${vendor}.${key}`,
+        input: structuredClone(input),
+        at: new Date().toISOString(),
+        idempotencyKey: call.idempotencyKey,
+        attempt: call.attempt,
+        connection: selected.id,
+      });
+      return entry.fake.driver.ops[key]!(input, call);
+    };
+  }
+  return {
+    driver: { vendor, ops } satisfies Driver,
+    account,
+    calls,
+    reset() {
+      for (const entry of accounts.values()) entry.fake.reset();
+      calls.length = 0;
+    },
+  };
 }
 
 export interface FakeOptions {

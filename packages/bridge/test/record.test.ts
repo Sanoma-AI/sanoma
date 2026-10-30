@@ -15,7 +15,7 @@ import { fakeBridge } from "./fake-bridge.ts";
 import { recorder } from "./record.ts";
 
 // The recorder against an in-memory provider whose state holds every kind of secret.
-const ref = { source: "example/widget", version: "1.0.0" };
+const ref = { sessionId: "00000000-0000-0000-0000-000000000001", source: "example/widget", version: "1.0.0" };
 const token = "TOKENVALUE123";
 const apiKey = "api-key-abcdefgh";
 const config = JSON.stringify({ api_key: apiKey, token, owner: "acme-corp" });
@@ -67,7 +67,12 @@ const state = (id: string) =>
 
 let applies = 0;
 const provider: ServiceImpl<typeof BridgeService> = {
-  getSchema: () => ({ schemaJson: `${JSON.stringify(schema, null, 2)}\n`, protocol: 6, sha256: "ab".repeat(32) }),
+  getSchema: () => ({
+    schemaJson: `${JSON.stringify(schema, null, 2)}\n`,
+    protocol: 6,
+    sessionProtocol: 1,
+    sha256: "ab".repeat(32),
+  }),
   configure: () => ({ warnings: [], sha256: "ab".repeat(32) }),
   import: (req) => {
     if (req.id === "leaky") {
@@ -145,6 +150,19 @@ beforeEach(() => {
 });
 
 describe("recorder", () => {
+  it("keeps secret scrubbing tied to the configured session", async () => {
+    const bridge = recordingBridge();
+    await bridge.configure(ref, config);
+    const other = { ...ref, sessionId: "00000000-0000-0000-0000-000000000002" };
+    await bridge.configure(other, JSON.stringify({ token: "OTHER-TOKEN-456" }));
+    await bridge.import(ref, "widget_thing", "account-a");
+    const saved = text("replies/example_widget_1.0.0/widget_thing/account-a/import.json");
+    expect(saved).not.toContain(token);
+    expect(saved).not.toContain(apiKey);
+    expect(saved).not.toContain(ref.sessionId);
+    expect(saved).toContain("<scrubbed:config.token>");
+  });
+
   it("writes the schema, then scrubbed import and read fixtures", async () => {
     const bridge = recordingBridge();
     await bridge.schema(ref);
@@ -157,8 +175,17 @@ describe("recorder", () => {
     expect(JSON.parse(text("schemas/example_widget_1.0.0.json"))).toEqual(schema);
 
     const imported = fixture("replies/example_widget_1.0.0/widget_thing/w_1/import.json");
-    expect(imported.provider).toEqual({ ...ref, sha256: "ab".repeat(32), protocol: 6 });
-    expect(imported.request).toEqual({ provider: { ...ref }, typeName: "widget_thing", id: "w:1" });
+    expect(imported.provider).toEqual({
+      source: ref.source,
+      version: ref.version,
+      sha256: "ab".repeat(32),
+      protocol: 6,
+    });
+    expect(imported.request).toEqual({
+      provider: { source: ref.source, version: ref.version },
+      typeName: "widget_thing",
+      id: "w:1",
+    });
     expect(imported.scrubbed).toEqual([
       "config.owner",
       "widget_thing.rule.key",

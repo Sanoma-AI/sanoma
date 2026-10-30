@@ -119,7 +119,15 @@ describe("permissionsGrid", () => {
     expect(grid.ops).toEqual([
       // The runtime's listing of apps, which a page may call: a visitor only with a permit.
       { id: "sanoma.apps.list", cells: [...Array.from({ length: 3 }, () => ({ answer: "allow" })), ...visitorDenied] },
-      ...["sanoma.connection.bind", "sanoma.connection.create", "sanoma.connection.disconnect"].map((id) => ({
+      ...[
+        "sanoma.connection.activate",
+        "sanoma.connection.bind",
+        "sanoma.connection.configure",
+        "sanoma.connection.create",
+        "sanoma.connection.disconnect",
+        "sanoma.connection.prepare",
+        "sanoma.connection.test",
+      ].map((id) => ({
         id,
         cells: [...Array.from({ length: 3 }, () => ({ answer: "allow" })), ...visitorDenied],
       })),
@@ -170,6 +178,11 @@ describe("permissionsGrid", () => {
     expect([...none.workflows, ...none.workflows.flatMap((w) => w.ops), ...none.ops].map((row) => row.cells)).toEqual([
       [...allowed, ...visitorDenied],
       [...allowed, { answer: "allow" }, { answer: "allow" }],
+      [...allowed, ...visitorDenied],
+      [...allowed, ...visitorDenied],
+      [...allowed, ...visitorDenied],
+      [...allowed, ...visitorDenied],
+
       [...allowed, ...visitorDenied],
       [...allowed, ...visitorDenied],
       [...allowed, ...visitorDenied],

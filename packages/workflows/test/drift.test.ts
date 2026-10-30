@@ -353,7 +353,16 @@ describe("the built-in drift workflow in a config", () => {
       {
         name: "call",
         builtin: true,
-        ops: ["sanoma.apps.list", "sanoma.connection.bind", "sanoma.connection.create", "sanoma.connection.disconnect"],
+        ops: [
+          "sanoma.apps.list",
+          "sanoma.connection.activate",
+          "sanoma.connection.bind",
+          "sanoma.connection.configure",
+          "sanoma.connection.create",
+          "sanoma.connection.disconnect",
+          "sanoma.connection.prepare",
+          "sanoma.connection.test",
+        ],
       },
       { name: "change", builtin: true },
       { name: "drift", builtin: true, ops: [] },

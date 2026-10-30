@@ -1,75 +1,55 @@
-import { describe, expect, it } from "vitest";
-import { BridgeError, ensureConfigured } from "@sanoma-ai/bridge";
+import { expect, it, vi } from "vitest";
+import { BridgeError, withProviderSession } from "@sanoma-ai/bridge";
 import { fixturesDir, loadReplies, stateBridge } from "@sanoma-ai/bridge/fake";
 
 const ref = { source: "integrations/github", version: "6.13.0" };
-const config = (token: string) => JSON.stringify({ owner: "Sanoma-AI", token });
+const bridge = () => stateBridge(loadReplies(fixturesDir, ref));
 
-/** A state bridge over the recorded GitHub replies, and the methods it was called with. */
-function bridge() {
-  const b = stateBridge(loadReplies(fixturesDir, ref));
-  return Object.assign(b, { methods: () => b.calls.map((c) => c.method) });
-}
-
-describe("ensureConfigured", () => {
-  it("configures once, then runs each call", async () => {
-    const b = bridge();
-    await ensureConfigured(b, ref, config("a"), () => b.import(ref, "github_repository", "sanoma"));
-    await ensureConfigured(b, ref, config("a"), () => b.import(ref, "github_repository", "sanoma"));
-    expect(b.methods()).toEqual(["configure", "import", "import"]);
+it("keeps concurrent accounts and credential replacements in separate sessions", async () => {
+  const b = bridge();
+  const entered = Promise.withResolvers<void>(),
+    release = Promise.withResolvers<void>();
+  const old = withProviderSession(b, ref, '{"token":"synthetic-old"}', async (session) => {
+    entered.resolve();
+    await release.promise;
+    return b.import(session, "github_repository", "sanoma");
   });
-
-  it("closes and configures again when the config changes, once for concurrent calls", async () => {
-    const b = bridge();
-    await ensureConfigured(b, ref, config("a"));
-    await Promise.all([ensureConfigured(b, ref, config("b")), ensureConfigured(b, ref, config("b"))]);
-    expect(b.methods()).toEqual(["configure", "close", "configure"]);
-  });
-
-  it("closes the provider for another config only once the calls under the one it has are done", async () => {
-    const b = bridge();
-    let finish!: () => void;
-    const held = new Promise<void>((resolve) => (finish = resolve));
-    const first = ensureConfigured(b, ref, config("a"), async () => {
-      await held;
-      return b.import(ref, "github_repository", "sanoma");
-    });
-    const second = ensureConfigured(b, ref, config("b"), () => b.import(ref, "github_repository", "sanoma"));
-    // Both calls under the new config wait for the one under the old, then share one configure.
-    const third = ensureConfigured(b, ref, config("b"), () => b.import(ref, "github_repository", "provider-bridge"));
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(b.methods()).toEqual(["configure"]);
-    finish();
-    await Promise.all([first, second, third]);
-    expect(b.methods()).toEqual(["configure", "import", "close", "configure", "import", "import"]);
-  });
-
-  it("configures again after the provider has gone, rethrowing the error", async () => {
-    const b = bridge();
-    await ensureConfigured(b, ref, config("a"));
-    const gone = new BridgeError("unavailable", "provider exited");
-    await expect(ensureConfigured(b, ref, config("a"), () => Promise.reject(gone))).rejects.toBe(gone);
-    await ensureConfigured(b, ref, config("a"));
-    expect(b.methods()).toEqual(["configure", "configure"]);
-  });
-
-  it("configures again and retries once when the bridge has forgotten the provider", async () => {
-    const b = bridge();
-    await ensureConfigured(b, ref, config("a"));
-    await b.close(); // a restarted bridge, or another client
-    const read = await ensureConfigured(b, ref, config("a"), () =>
-      b.read(ref, "github_repository", JSON.stringify({ id: "sanoma" })),
+  await entered.promise;
+  try {
+    await Promise.all(
+      ["synthetic-new", "synthetic-sales"].map((token) =>
+        withProviderSession(b, ref, JSON.stringify({ token }), (session) =>
+          b.import(session, "github_repository", "sanoma"),
+        ),
+      ),
     );
-    expect(read.gone).toBe(false);
-    expect(b.methods()).toEqual(["configure", "close", "read", "configure", "read"]);
-  });
+    const configs = b.calls.filter((c) => c.method === "configure");
+    expect(new Set(configs.map((c) => c.ref!.sessionId)).size).toBe(3);
+    expect(JSON.stringify(b.calls)).not.toContain("synthetic");
+    expect(b.calls.filter((c) => c.method === "close")).toHaveLength(2);
+  } finally {
+    release.resolve();
+    await old;
+  }
+  expect(b.calls.filter((c) => c.method === "close")).toHaveLength(3);
+});
 
-  it("keeps other errors as they are", async () => {
-    const b = bridge();
-    const error = await ensureConfigured(b, ref, config("a"), () =>
-      b.import(ref, "github_branch_protection", "provider-bridge:main"),
-    ).catch((e: unknown) => e);
-    expect(error).toMatchObject({ code: "failed_precondition", message: expect.stringContaining("branch protection") });
-    expect(b.methods()).toEqual(["configure", "import"]);
-  });
+it("closes a failed configuration and never replays a mutation implicitly", async () => {
+  const b = bridge(),
+    run = vi.fn<() => Promise<never>>(async () => {
+      throw new BridgeError("unavailable", "lost reply");
+    });
+  await expect(withProviderSession(b, ref, "{}", run)).rejects.toMatchObject({ code: "unavailable" });
+  expect(run).toHaveBeenCalledTimes(1);
+  expect(b.calls.map((c) => c.method)).toEqual(["configure", "close"]);
+  const close = vi.spyOn(b, "close");
+  vi.spyOn(b, "configure").mockRejectedValueOnce(new Error("failed configure"));
+  await expect(withProviderSession(b, ref, "{}", run)).rejects.toThrow("failed configure");
+  expect(close).toHaveBeenCalledTimes(1);
+});
+
+it("preserves a completed mutation result when session cleanup fails", async () => {
+  const b = bridge();
+  vi.spyOn(b, "close").mockRejectedValue(new Error("lost cleanup response"));
+  expect(await withProviderSession(b, ref, "{}", async () => "created")).toBe("created");
 });

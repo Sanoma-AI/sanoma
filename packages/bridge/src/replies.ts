@@ -18,6 +18,8 @@ import { DiagnosticSchema } from "./gen/bridge/v1/bridge_pb.ts";
 import type { JsonObject } from "./json.ts";
 import type { TfShape } from "./tfschema/types.ts";
 
+const session = (ref: ProviderRef) => `${releaseName(ref)}/${ref.sessionId ?? ""}`;
+
 /** A call a fake bridge received, in order. */
 export interface BridgeCall {
   method: "schema" | "configure" | "import" | "read" | "plan" | "apply" | "close";
@@ -152,6 +154,7 @@ const planOf = (
     unknownPaths,
     requiresReplace,
     planned: new TextEncoder().encode(plannedStateJson),
+    planToken: new Uint8Array(),
     plannedPrivate: new Uint8Array(),
     warnings: [],
   } satisfies PlanResult;
@@ -187,8 +190,8 @@ export function stateBridge(
   types: StateTypes = {},
 ): ProviderClient & { calls: BridgeCall[] } {
   const configured = new Map<string, string>();
-  const ready = (ref: { source: string; version: string }) => {
-    if (!configured.has(releaseName(ref))) {
+  const ready = (ref: ProviderRef) => {
+    if (!configured.has(session(ref))) {
       throw new BridgeError("failed_precondition", `${releaseName(ref)} is not configured; call Configure first`);
     }
   };
@@ -267,14 +270,14 @@ export function stateBridge(
     },
     async configure(ref, configJson) {
       calls.push({ method: "configure", ref });
-      const before = configured.get(releaseName(ref));
+      const before = configured.get(session(ref));
       if (before !== undefined && before !== configJson) {
         throw new BridgeError(
           "failed_precondition",
           `${releaseName(ref)} is already configured with a different config; Close it first`,
         );
       }
-      configured.set(releaseName(ref), configJson);
+      configured.set(session(ref), configJson);
       return { warnings: [] };
     },
     async import(ref, typeName, id) {
@@ -294,7 +297,7 @@ export function stateBridge(
     },
     async close(ref) {
       calls.push({ method: "close", ...(ref ? { ref } : {}) });
-      if (ref) configured.delete(releaseName(ref));
+      if (ref) configured.delete(session(ref));
       else configured.clear();
     },
   };

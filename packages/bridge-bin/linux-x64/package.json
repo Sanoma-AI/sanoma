@@ -1,6 +1,6 @@
 {
   "name": "@sanoma-ai/bridge-linux-x64",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "description": "The provider-bridge binary for Linux on x64, installed by @sanoma-ai/bridge as an optional dependency",
   "keywords": [
     "opentofu",

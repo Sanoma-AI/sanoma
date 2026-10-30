@@ -25,6 +25,7 @@
     "oxlint.json",
     "README.md",
     "LICENSE",
+    "SECRET-SUPPORT.md",
     "KMS-SECRETS.md"
   ],
   "type": "module",

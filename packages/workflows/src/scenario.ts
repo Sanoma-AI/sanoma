@@ -29,6 +29,7 @@ import {
 import { errorCode, errorInfo, SanomaError } from "./errors.ts";
 import { type CallRecord, contains, type CoreExpectation, detailOf, isCall } from "./expectations.ts";
 import type { Fake } from "./fake.ts";
+import type { ConnectionRef } from "./connection.ts";
 import { fill, isBug, objectUnder, restOf, seedFrom, shapeOf } from "./fill.ts";
 import type { LedgerRecord } from "./ledger.ts";
 import type { Driver, Op } from "./op.ts";
@@ -92,10 +93,26 @@ export interface ScenarioStep {
  * its import id, with `fields` to set on it (put, when the vendor has none) or `gone` to remove it.
  */
 export type Given =
-  | { step: string; op: string; input: unknown; as?: string }
-  | { step: string; op: string; fault: Fault }
-  | { step: string; resource: string; vendor: string; type: string; name: string; fields: Record<string, unknown> }
-  | { step: string; resource: string; vendor: string; type: string; name: string; gone: true };
+  | { step: string; op: string; input: unknown; as?: string; connection?: ConnectionRef }
+  | { step: string; op: string; fault: Fault; connection?: ConnectionRef }
+  | {
+      step: string;
+      resource: string;
+      vendor: string;
+      type: string;
+      name: string;
+      fields: Record<string, unknown>;
+      connection?: ConnectionRef;
+    }
+  | {
+      step: string;
+      resource: string;
+      vendor: string;
+      type: string;
+      name: string;
+      gone: true;
+      connection?: ConnectionRef;
+    };
 
 /** How one approval is decided; `approval` is its title or its id. */
 export interface Decision {
@@ -671,7 +688,8 @@ function rulesOf(scope: Scope): { rules: Rule[]; parameterTypes: ParameterTypeSp
           read: (values) => {
             const seed = def.fn(...values);
             const op = opNamed(seed.op);
-            if ("fault" in seed) return [{ op, fault: seed.fault }];
+            const connection = seed.connection && { connection: seed.connection };
+            if ("fault" in seed) return [{ op, fault: seed.fault, ...connection }];
             let input: unknown;
             try {
               input = fill(opOf(op).input, seed.input);
@@ -681,7 +699,7 @@ function rulesOf(scope: Scope): { rules: Rule[]; parameterTypes: ParameterTypeSp
                 cause: err,
               });
             }
-            return [{ op, input, ...(seed.as === undefined ? {} : { as: seed.as }) }];
+            return [{ op, input, ...(seed.as === undefined ? {} : { as: seed.as }), ...connection }];
           },
         });
         continue;
