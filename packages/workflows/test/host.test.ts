@@ -108,8 +108,7 @@ describe("a host type", () => {
     expect(problems).toEqual(
       ["cms", "gone"].map((name) => ({
         file: "resources/infra.ts",
-        line: 3,
-        column: 1,
+        export: "host",
         message: `domains names "${name}", which is not a public site (defineSite({ public: true }))`,
       })),
     );
@@ -151,7 +150,7 @@ describe("a host type", () => {
       ),
     });
     expect(describeConfig({ workflows: [], connectors: [acme], root }).problems).toEqual([
-      { file: "resources/infra.ts", line: 3, column: 1, message: "sanoma.example is the domain of both www and docs" },
+      { file: "resources/infra.ts", export: "host", message: "sanoma.example is the domain of both www and docs" },
     ]);
   });
 

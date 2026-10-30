@@ -168,7 +168,7 @@ export const host = docker.container({
       'sites/hello/routes/greet.tsx:4:76: a visitor\'s call to workflow "hello" is refused: no permit in policies/ names anonymous for workflow:hello. ' +
         'Add: permit (principal == Sanoma::Principal::"anonymous", action == Sanoma::Action::"workflow:hello", resource);',
     );
-    expect(problems).toContain("resources/infra.ts:3:1: hello.example is the domain of both hello and www");
+    expect(problems).toContain("resources/infra.ts#host: hello.example is the domain of both hello and www");
     expect(problems).toContainEqual(
       expect.stringMatching(/^sites\/hello\/routes\/index\.tsx:9:\d+: error TS\d+: .*"\/sites\/hello\/nope"/),
     );

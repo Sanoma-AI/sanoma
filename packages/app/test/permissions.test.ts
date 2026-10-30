@@ -8,7 +8,6 @@ import {
   allowAll,
   defineConnector,
   defineWorkflow,
-  readPolicyFiles,
   type Policy,
   resolveConfig,
   type SanomaConfig,
@@ -111,11 +110,7 @@ const site = { name: "www", public: true as const, pages: [], calls: [], problem
 
 /** The grid under `policy`, as `getPermissions` answers it, `described` as the description says it, beside a public site. */
 const gridOf = (policy: Policy, described = description.policy) =>
-  permissions({
-    resolved: { ...resolved, policy },
-    description: { ...description, policy: described, sites: [site] },
-    policyFiles: readPolicyFiles(root),
-  });
+  permissions({ resolved: { ...resolved, policy }, description: { ...description, policy: described, sites: [site] } });
 
 describe("the Permissions grid", () => {
   // The grid itself is `permissionsGrid`'s (`packages/workflows/test/grid.test.ts`): here what the app adds.
@@ -126,14 +121,16 @@ describe("the Permissions grid", () => {
       groups: [null, "agents", "finance", "visitors", "anonymous"],
     });
     expect(grid.workflows.map((w) => w.id)).toEqual(["refund"]);
-    expect(gridOf(allowAll, { defined: false }).policy.defined).toBe(false);
+    expect(gridOf(allowAll, { defined: false, files: [] }).policy.defined).toBe(false);
   });
 
-  it("serves each policy file's text, with each policy's id and where it is, from the people fixture", () => {
+  it("serves each policy file's text, as the description read it, with each policy's id and where it is, from the people fixture", () => {
     const fixture = resolveConfig(people);
-    const filesOf = (policyFiles: { file: string; text: string }[]) =>
-      permissions({ resolved: { ...fixture }, description: describeConfig(people), policyFiles }).files;
-    const read = readPolicyFiles(fixture.root!);
+    const described = describeConfig(people);
+    const filesOf = (files: { file: string; text: string }[]) =>
+      permissions({ resolved: { ...fixture }, description: { ...described, policy: { ...described.policy, files } } })
+        .files;
+    const read = described.policy.files;
     const files = filesOf(read);
     const file = "policies/refunds.cedar";
     const text = readFileSync(

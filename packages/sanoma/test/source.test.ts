@@ -12,7 +12,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -537,28 +537,40 @@ describe("localGitSource's apps", () => {
     const empty = source({ "README.md": "# The starter\n" });
     await expect(take(empty.url)).rejects.toThrow(`${empty.url} holds no app: a source holds one apps/<name>/`);
 
-    // An app of the company's own, one never taken (no shared history), and one not there.
-    mkdirSync(join(draft.root, "apps/own"));
-    writeFileSync(
-      join(draft.root, "apps/own/app.ts"),
-      'import { defineApp } from "sanoma";\n\nexport default defineApp({});\n',
+    // The apps as main has them: a draft's app.ts is never loaded. The company's own, one never
+    // taken (no shared history), and one not there.
+    const onMain = (files: Record<string, string>, message: string) => {
+      for (const [path, text] of Object.entries(files)) {
+        mkdirSync(dirname(join(dir, path)), { recursive: true });
+        writeFileSync(join(dir, path), text);
+      }
+      git("add", "--all");
+      git("commit", "--quiet", "-m", message);
+    };
+    onMain(
+      {
+        "apps/own/app.ts": 'import { defineApp } from "sanoma";\n\nexport default defineApp({});\n',
+        "apps/stray/app.ts": APP_TS.replace("<url>", two.url),
+      },
+      "Own apps",
     );
-    mkdirSync(join(draft.root, "apps/stray"));
-    writeFileSync(join(draft.root, "apps/stray/app.ts"), APP_TS.replace("<url>", two.url));
-    await expect(draft.update!({ folder: "stray", author: "ada" })).rejects.toThrow(
-      "The draft has uncommitted changes",
-    );
-    await draft.commit({ paths: ["apps"], message: "Own apps", author: "agent" });
     const update = (folder: string) => draft.update!({ folder, author: "ada" });
+    // One only in the draft waits for its take to be published.
+    mkdirSync(join(draft.root, "apps/fresh"));
+    writeFileSync(join(draft.root, "apps/fresh/app.ts"), APP_TS.replace("<url>", two.url));
+    await expect(update("fresh")).rejects.toThrow(
+      "apps/fresh/ is only in this draft: publish the take first, then update it",
+    );
+    await expect(update("stray")).rejects.toThrow("The draft has uncommitted changes");
+    rmSync(join(draft.root, "apps/fresh"), { recursive: true, force: true });
     await expect(update("own")).rejects.toThrow("apps/own/app.ts names no source: the app is the company's own");
     await expect(update("gone")).rejects.toThrow("There is no app apps/gone/");
     // Its source is a's, merged above: a has history with it, stray is merely named so.
     expect((await update("stray")).merged).toBe(0);
     const other = source({ "apps/stray/app.ts": APP_TS });
-    writeFileSync(join(draft.root, "apps/stray/app.ts"), APP_TS.replace("<url>", other.url));
-    await draft.commit({ paths: ["apps/stray/app.ts"], message: "Stray", author: "agent" });
+    onMain({ "apps/stray/app.ts": APP_TS.replace("<url>", other.url) }, "Stray");
     await expect(update("stray")).rejects.toThrow(`apps/stray/ shares no history with ${other.url}`);
-    await expect(repo.behind!("own")).rejects.toThrow("There is no app apps/own/");
+    await expect(repo.behind!("own")).rejects.toThrow("apps/own/app.ts names no source: the app is the company's own");
     expect(execFileSync("git", ["status", "--porcelain"], { cwd: draft.root, encoding: "utf8" })).toBe("");
     expect(await repo.head(draft.branch)).not.toBe(before);
   });

@@ -1,9 +1,11 @@
 // oxlint-disable-next-line import/no-unassigned-import
 import "@tanstack/react-start/server-only";
+import { randomUUID } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import {
+  ADMIN,
   type ApprovalState,
   type DriftReport,
   errorCode,
@@ -11,8 +13,11 @@ import {
   type InputIssue,
   invalidInput,
   isEnded,
+  isRules,
   type LedgerRecord,
   loadPolicies,
+  mayDeclarePeople,
+  peopleSources,
   nextFire,
   PolicyDeniedError,
   type PreviewAnswer,
@@ -27,6 +32,7 @@ import {
   type ConfigDescription,
   type DataValue,
   formatOptions,
+  NotLiteral,
   permissionsGrid,
   setFields,
 } from "@sanoma-ai/workflows/describe";
@@ -47,6 +53,8 @@ import {
   type DecideCall,
   type EnforcementResponse,
   type ErrorResponse,
+  type PatchRequest,
+  type PatchResponse,
   type PermissionsResponse,
   type PreviewQuery,
   type RunDetail,
@@ -58,6 +66,7 @@ import {
   startRunSchema,
 } from "../api.ts";
 import type { AppContext } from "../context.ts";
+import { contentFields } from "../content-files.ts";
 import { databaseHost, LOOPBACK } from "../loopback.ts";
 import { secretValues } from "./secrets.ts";
 
@@ -126,11 +135,15 @@ export const validate =
 export const readStartRun = (data: StartRunRequest): StartRunRequest =>
   parse(startRunSchema(data), data, "The request");
 
-/** What `getConfig` answers (`AppConfig`): the description `withoutSources`, and where this instance is. */
+/**
+ * What `getConfig` answers (`AppConfig`): the description `withoutSources`, where this instance
+ * is, and the content kinds as they are now (`contentFields`).
+ */
 export const appConfig = (app: AppContext): AppConfig => ({
   ...withoutSources(app.description),
   place: app.place,
   databaseHost: databaseHost(app.resolved.databaseUrl),
+  content: app.resolved.root === undefined ? [] : contentFields(app.resolved.root),
 });
 
 /**
@@ -162,8 +175,8 @@ export const withoutSources = (description: ConfigDescription): ConfigDescriptio
 
 /**
  * A file the description names, as it is now: a workflow's file (its outline's `file`, read
- * as the outline read it, with `\n` line endings) or a data file (a resource's, a collection's
- * or a problem's `file`, relative to the config's root). Never a path the request makes up. `null` when the
+ * as the outline read it, with `\n` line endings) or a company file (a resource's, a collection's,
+ * a site's or an app's, or a problem's `file`, relative to the config's root). Never a path the request makes up. `null` when the
  * description names no such file, or it can no longer be read: not a 404, which a page's
  * loader would take for its own page not being found.
  */
@@ -176,6 +189,8 @@ export async function fileSource(
     resolved.root !== undefined &&
     (description.resources.some((r) => r.file === file) ||
       description.collections.some((c) => c.declared?.file === file) ||
+      description.sites.some((site) => site.at?.file === file) ||
+      description.apps.some((app) => app.at?.file === file) ||
       description.problems.some((p) => p.file === file));
   if (!workflowFile && !dataFile) return { source: null };
   try {
@@ -395,6 +410,15 @@ const remoteUrlOf = async (source: Source): Promise<string | undefined> => {
   }
 };
 
+/** The connector whose remote half is for the repository's remote (`remoteFor`); none without a remote, or without such a connector. */
+const remoteOf = async ({ resolved, source }: Pick<AppContext, "resolved" | "source">) => {
+  const url = source && (await remoteUrlOf(source));
+  return url === undefined ? undefined : remoteFor(resolved.remotes, url);
+};
+
+/** A change's page in this app at `origin`, which its pull request's status links. */
+const changePage = (id: string, origin: string) => new URL(`/changes/${encodeURIComponent(id)}`, origin).href;
+
 /** Each repository's last answer to `hasRemote`, and when it was asked. */
 const remotes = new WeakMap<object, { at: number; has: Promise<boolean> }>();
 
@@ -412,8 +436,9 @@ export async function openChange(
 ): Promise<{ runId: string }> {
   const chat = await client.chats.get(id);
   if (chat?.person !== actor.id) throw new ApiError(404, { error: `No chat ${id}` });
-  const page = new URL(`/changes/${encodeURIComponent(id)}`, origin).href;
-  return { runId: await client.openChange({ id, title: chat.title, page }, { startedBy: actor }) };
+  return {
+    runId: await client.openChange({ id, title: chat.title, page: changePage(id, origin) }, { startedBy: actor }),
+  };
 }
 
 /**
@@ -428,8 +453,7 @@ export async function hostEnforcement({
   resolved,
   source,
 }: Pick<AppContext, "client" | "description" | "resolved" | "source">): Promise<EnforcementResponse> {
-  const url = source && (await remoteUrlOf(source));
-  const found = url === undefined ? undefined : remoteFor(resolved.remotes, url);
+  const found = await remoteOf({ resolved, source });
   if (!found) return null;
   const host = description.vendors[found.vendor]!.title;
   try {
@@ -443,7 +467,7 @@ export async function hostEnforcement({
 /** The report of a drift run once it ends (`SanomaClient.driftReport`). */
 export const driftReport = ({ client }: AppContext, runId: string): Promise<DriftReport> => client.driftReport(runId);
 
-/** The adopt under way, if any: one at a time, so two never read the same file and both write it. */
+/** The adopt or patch under way, if any: one at a time, so two never read the same file and both write it. */
 let adopting: Promise<unknown> = Promise.resolve();
 
 /**
@@ -460,11 +484,8 @@ export function adopt(app: AppContext, actor: Principal, request: AdoptRequest):
   return done;
 }
 
-async function adoptNow(
-  { client, resolved, source }: AppContext,
-  actor: Principal,
-  { runId, id, paths }: AdoptRequest,
-): Promise<AdoptResponse> {
+async function adoptNow(app: AppContext, actor: Principal, { runId, id, paths }: AdoptRequest): Promise<AdoptResponse> {
+  const { client, resolved } = app;
   const result = (await client.driftReport(runId)).resources.find((r) => r.id === id);
   if (result?.status !== "drifted") {
     throw new ApiError(404, { error: `Run ${runId} found no drift on ${id}`, code: "invalid_input" });
@@ -479,26 +500,131 @@ async function adoptNow(
   // The id is `<file>#<export>`, the file relative to the root: the drift run read it there.
   const at = id.lastIndexOf("#");
   const file = id.slice(0, at);
-  const path = join(resolved.root, file);
   let text: string;
   try {
-    text = await setFields(await readFile(path, "utf8"), id.slice(at + 1), fields, formatOptions(resolved.root));
+    text = await setFields(
+      await readFile(join(resolved.root, file), "utf8"),
+      id.slice(at + 1),
+      fields,
+      formatOptions(resolved.root),
+    );
   } catch (err) {
     throw new ApiError(409, { error: `Could not adopt into ${file}: ${errorMessage(err)}` });
   }
+  return written(app, actor, file, text, `Adopt ${paths.join(", ")} of ${result.name} from ${result.vendor}`);
+}
+
+/**
+ * Writes `text` into the checkout's `file` (relative to the root), then commits it through the
+ * app's source, when it has one, as `actor`: what Adopt and a patch without a remote land as.
+ */
+async function written(
+  { resolved, source }: AppContext,
+  actor: Principal,
+  file: string,
+  text: string,
+  message: string,
+): Promise<{ file: string; revision?: string }> {
+  const path = join(resolved.root!, file);
   await writeFile(path, text);
   if (!source) return { file };
   try {
-    const commit = await source.commit({
-      paths: [relative(source.root, path)],
-      message: `Adopt ${paths.join(", ")} of ${result.name} from ${result.vendor}`,
-      author: actor.id,
-    });
+    const commit = await source.commit({ paths: [relative(source.root, path)], message, author: actor.id });
     return { file, ...(commit && { revision: commit.revision }) };
   } catch (err) {
     // Said, not hidden behind a 500's "Something went wrong": the file is written, and uncommitted.
     throw new ApiError(500, { error: `Wrote ${file}, but could not commit it: ${errorMessage(err)}` });
   }
+}
+
+/**
+ * A form's Save: sets `fields` of the declaration at `at` (one the description names: a resource,
+ * a collection, a site or an app) in its file (`setFields`), as `actor`, and lands it. With a
+ * repository that drafts and has a remote a connector's remote half is for, it is a change: the
+ * file written in a draft of its own (`ui-<id>`), committed there, and the change opened for
+ * review (`SanomaClient.openChange`), whose run holds a change to the rules for `admin`; the
+ * change's run id. Otherwise the file is written in the checkout and committed as Adopt does, but
+ * a change to the rules (a people file) only by someone in `admin`: a 403 for anyone else, since
+ * nothing would review it. A 404 for a declaration the description does not name; a 409, with the
+ * writer's reason, for a field the file computes or a declaration that is no object literal.
+ * Patches run one at a time, with Adopt's.
+ */
+export function patch(
+  app: AppContext,
+  actor: Principal,
+  request: PatchRequest,
+  origin?: string,
+): Promise<PatchResponse> {
+  const done = adopting.then(() => patchNow(app, actor, request, origin));
+  adopting = done.catch(() => undefined);
+  return done;
+}
+
+async function patchNow(
+  app: AppContext,
+  actor: Principal,
+  { at, fields }: PatchRequest,
+  origin: string | undefined,
+): Promise<PatchResponse> {
+  const { description, resolved, source, client } = app;
+  const named = [
+    ...description.resources.map((r) => r.at),
+    ...description.collections.map((c) => c.declared?.at),
+    ...description.sites.map((s) => s.at),
+    ...description.apps.map((a) => a.at),
+  ].some((known) => known?.file === at.file && known.export === at.export);
+  if (!named) {
+    throw new ApiError(404, { error: `${at.file}#${at.export} is not a declaration`, code: "invalid_input" });
+  }
+  if (resolved.root === undefined) throw new Error("The config has no root, so its files cannot be written");
+  const root = resolved.root;
+  const message = `Change ${Object.keys(fields).join(", ")} of ${at.export === "default" ? at.file : at.export}`;
+  /** The file under `dir` as it is, and with the fields set; a 409 saying why they cannot be. */
+  const edited = async (dir: string) => {
+    try {
+      const before = await readFile(join(dir, at.file), "utf8");
+      return { before, text: await setFields(before, at.export, fields, formatOptions(root)) };
+    } catch (err) {
+      const error = err instanceof NotLiteral ? err.reason : `Could not write ${at.file}: ${errorMessage(err)}`;
+      throw new ApiError(409, { error });
+    }
+  };
+  if (source?.draft && (await reviewsChanges(app))) {
+    // The file as the draft has it: main's, which the change is reviewed against.
+    const id = `ui-${randomUUID().slice(0, 8)}`;
+    const draft = await source.draft(id);
+    const inDraft = join(draft.root, relative(source.root, root));
+    try {
+      const { text } = await edited(inDraft);
+      await writeFile(join(inDraft, at.file), text);
+      await draft.commit({ paths: [relative(draft.root, join(inDraft, at.file))], message, author: actor.id });
+      const page = origin && changePage(id, origin);
+      return { change: await client.openChange({ id, title: message, ...(page && { page }) }, { startedBy: actor }) };
+    } catch (err) {
+      // No change opened on it (a policy refusing the change, say): the draft would be left behind with nothing to close it.
+      await source.closeDraft?.(id);
+      throw err;
+    }
+  }
+  const { before, text } = await edited(root);
+  if (
+    (isRules(at.file) || mayDeclarePeople(before) || peopleSources(root).has(at.file)) &&
+    !actor.groups?.includes(ADMIN)
+  ) {
+    throw new ApiError(403, {
+      error: `A change to ${at.file} waits for an admin, and this company has no remote to review on`,
+      code: "not_approver",
+    });
+  }
+  return written(app, actor, at.file, text, message);
+}
+
+/**
+ * Whether a change can be reviewed: the repository drafts and has a remote that a connector's
+ * remote half is for (`remoteFor`), as opening a change needs.
+ */
+async function reviewsChanges(app: AppContext): Promise<boolean> {
+  return !!app.source?.draft && !!app.source.diff && (await remoteOf(app)) !== undefined;
 }
 
 /**
@@ -527,17 +653,14 @@ const grids = new WeakMap<object, PermissionsResponse>();
 /**
  * The Permissions page's grid (`getPermissions`): the policy, its grid (`permissionsGrid`, the
  * one `sanoma check` reports too: nobody's own answer, the actor asking is not used), then the
- * policy's files as the app read them when it started (`sourcesOf`).
+ * policy's files as the description read them as the app started (`policy.files`, `sourcesOf`).
  */
-export function permissions(app: Pick<AppContext, "resolved" | "description" | "policyFiles">): PermissionsResponse {
+export function permissions(app: Pick<AppContext, "resolved" | "description">): PermissionsResponse {
   let grid = grids.get(app.resolved);
   if (!grid) {
-    const { resolved, description, policyFiles } = app;
-    grid = {
-      policy: description.policy,
-      ...permissionsGrid(resolved, description),
-      files: sourcesOf(policyFiles ?? []),
-    };
+    const { resolved, description } = app;
+    const { files, ...policy } = description.policy;
+    grid = { policy, ...permissionsGrid(resolved, description), files: sourcesOf(files) };
     grids.set(resolved, grid);
   }
   return grid;

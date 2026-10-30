@@ -52,12 +52,6 @@ export interface AppContext {
    * workflows' sources (`withoutSources`), which `getSource` serves one at a time.
    */
   description: ConfigDescription;
-  /**
-   * The root's `policies/**\/*.cedar` (`readPolicyFiles`), read as it starts, beside the policy
-   * `resolveConfig` made from them: the source the Permissions page shows with its grid; none
-   * when not given.
-   */
-  policyFiles?: { file: string; text: string }[];
   /** Where this instance is, from `resolved.databaseUrl` (`placeOf`): what the bar's badge says. */
   place: Place;
   client: SanomaClient;
