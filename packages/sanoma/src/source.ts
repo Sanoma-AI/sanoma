@@ -6,6 +6,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import {
   type AppMerge,
+  appSourceOf,
   type CheckResult,
   type Draft,
   draftBranch,
@@ -121,14 +122,6 @@ async function fetchSource(cwd: string, url: string, ref?: string): Promise<stri
     // Its commit is pinned by its id.
     await gitIn(cwd, ["update-ref", "-d", into]);
   }
-}
-
-/** The source URL of the app `folder` in the checkout at `cwd`, as its `app.ts` names it; an error when it names none. */
-function sourceOf(cwd: string, folder: string): string {
-  const app = readApps(cwd).find((a) => a.name === folder);
-  if (!app) throw new Error(`There is no app apps/${folder}/`);
-  if (app.source === undefined) throw new Error(`apps/${folder}/app.ts names no source: the app is the company's own`);
-  return app.source;
 }
 
 /**
@@ -353,7 +346,7 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
           if (!readApps(root).some((app) => app.name === folder) && existsSync(join(at, "apps", folder))) {
             throw new Error(`apps/${folder}/ is only in this draft: publish the take first, then update it`);
           }
-          const url = sourceOf(root, folder);
+          const url = appSourceOf(root, folder);
           const from = await fetchSource(at, url);
           return serial(async () => {
             await mustShareHistory(at, from, folder, url);
@@ -374,7 +367,7 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
     },
     check: async (id) => checks(draftAt(id), databaseUrl, async () => (await listed()).get(id) === true),
     async behind(folder) {
-      const url = sourceOf(root, folder);
+      const url = appSourceOf(root, folder);
       const from = await fetchSource(root, url);
       await mustShareHistory(root, from, folder, url);
       return behindIn(root, from, folder);

@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { APP_NAME } from "./shared.ts";
+import { APP_NAME, APPS_DIR, appOfPath } from "./shared.ts";
 
 // Where an import may reach, as the lints and the data-file reader all decide it, the one walk up
 // the directories and the one walk down (`filesUnder`). Node's `path` and `fs` only, no parser:
@@ -65,8 +65,7 @@ export function filesUnder(dir: string, keep: (name: string) => boolean): string
     .toSorted();
 }
 
-/** Where a company's apps are, under its root: `apps/<app>/`. */
-export const APPS_DIR = "apps";
+export { APPS_DIR, appOfPath };
 
 /** Each directory's company root (the nearest one with a `sanoma.config.ts`, short of a `node_modules`), once found. */
 const roots = new Map<string, string>();
@@ -96,12 +95,6 @@ export function appOfFile(file: string | undefined): string | undefined {
     if (root !== null) roots.set(dir, root);
   }
   return root === null ? undefined : appOfPath(relPath(root, file));
-}
-
-/** The app a path relative to a company's root is in: `<app>` under `apps/<app>/`; undefined for any other. */
-export function appOfPath(rel: string): string | undefined {
-  const [top, app, ...rest] = rel.split("/");
-  return top === APPS_DIR && app !== undefined && rest.length && APP_NAME.test(app) ? app : undefined;
 }
 
 /** The apps' folders under `root` whose names are an `APP_NAME`, sorted: `apps/<app>/`, absolute. */

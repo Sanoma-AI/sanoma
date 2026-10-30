@@ -42,12 +42,17 @@ export const admin = sanoma.group({ name: "admin", members: [ada] });
 export const ops = sanoma.group({ name: "ops", members: [ada, bo, refundBot] });
 `,
 );
-// Broken when the app starts, so the description (read once, then) has its problem; gone once it
-// has, since admission reads the people per request and admits nobody while their files have one.
-const TEAM = join(root, "resources/team.ts");
+// A person the type refuses, made through a helper outside resources/: the description has its
+// problem, and admission, which loads only the files that import the constructors themselves
+// (\`mayDeclarePeople\`), still admits the people while it is there.
+mkdirSync(join(root, "lib"));
 writeFileSync(
-  TEAM,
-  `import { sanoma } from "sanoma/resources";\n\nexport const broken = sanoma.person({ id: "two words" });\n`,
+  join(root, "lib/team.ts"),
+  `import { sanoma } from "sanoma/resources";\n\nexport const person = sanoma.person;\n`,
+);
+writeFileSync(
+  join(root, "resources/team.ts"),
+  `import { person } from "../lib/team.ts";\n\nexport const broken = person({ id: "two words" });\n`,
 );
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
@@ -70,7 +75,6 @@ let app: App;
 beforeAll(async () => {
   ensureBuilt(appDir, ["dist/server/server.js"], ["pnpm", "exec", "vite", "build"]);
   app = await startApp(testApp.config, { port: 0, source });
-  rmSync(TEAM);
 }, 120_000);
 
 afterAll(async () => {
@@ -131,14 +135,22 @@ describe("People", () => {
     );
   });
 
-  it("lists the groups with their members, and the agents with whom they act for", async () => {
-    expect(rows((await page("/people?show=groups")).html)).toEqual([
+  it("lists the groups with their members, and the agents with whom they act for, agents built in", async () => {
+    const groups = (await page("/people?show=groups")).html;
+    expect(rows(groups)).toEqual([
       ["admin", "ada", "resources/people.ts#admin"],
       ["ops", "ada bo refund-bot", "resources/people.ts#ops"],
+      // The group the runtime puts every agent in, declared nowhere.
+      ["agents (built in)", "refund-bot", "the runtime: every agent"],
     ]);
-    expect(rows((await page("/people?show=agents")).html)).toEqual([
-      ["refund-bot", "refund-bot", "bo", "ops", "resources/people.ts#refundBot"],
+    // The tab counts the groups declared.
+    expect(groups).toMatch(/href="\/people\?show=groups"[^>]*>Groups<span[^>]*>2<\/span>/);
+    const agents = (await page("/people?show=agents&person=refund-bot")).html;
+    expect(rows(agents)).toEqual([
+      ["refund-bot", "refund-bot", "bo", "ops agents (built in)", "resources/people.ts#refundBot"],
     ]);
+    // Muted, beside the declared ones, in the table and on the open card.
+    expect(agents.match(/title="The runtime puts every agent in it"/g)).toHaveLength(2);
   });
 
   it("opens a row's declaration form over the list: its fields as declared, its identity and references read-only", async () => {
@@ -198,6 +210,14 @@ describe("People", () => {
     ).toEqual({ file: PEOPLE, revision: "abcdef0123456789" });
     expect(readFileSync(join(root, PEOPLE), "utf8")).toBe(before.replace('name: "Bo Lin"', 'name: "Bo L."'));
     expect(commits).toEqual([{ paths: [PEOPLE], message: "Change name of bo", author: "ada" }]);
+    // The next page reads the description made again from the file as it now is: no restart.
+    expect(rows((await page("/people")).html)[1]).toEqual([
+      "Bo L.",
+      "bo",
+      "GitHub · bo-lin",
+      "ops",
+      "resources/people.ts#bo",
+    ]);
     writeFileSync(join(root, PEOPLE), before);
     commits.length = 0;
   });

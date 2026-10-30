@@ -1,4 +1,4 @@
-import { readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { createRequire, registerHooks } from "node:module";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -254,12 +254,35 @@ function placeOf(gen: Generation, error: unknown): { file: string; line?: number
   return undefined;
 }
 
+/**
+ * Each company file under `root` a load has read, and each one's folder, with its stamp
+ * (`stampOf`) as it was before the file was read: the latest generation's for a file several
+ * read. Taken after a load, it still says what the load read, so a file changed while it read is
+ * found changed after.
+ */
+export function stampsOf(root: string): Map<string, string> {
+  const stamps = new Map<string, string>();
+  if (!existsSync(root)) return stamps;
+  const real = realpathSync(root);
+  // In the order made: a later generation's stamp is the newer.
+  for (const gen of registry.generations.values()) {
+    if (gen.root === real) for (const [path, stamp] of gen.stamps) stamps.set(path, stamp);
+  }
+  return stamps;
+}
+
 const byOrder = <T extends string | number>(a: T, b: T) => (a < b ? -1 : a > b ? 1 : 0);
 
-/** A file's size and modification time, or that it is gone. */
-function stampOf(path: string): string {
+/** A file's size and modification time, or that it is gone: what a generation keeps of each file it read. */
+export function stampOf(path: string): string {
   const stat = statSync(path, { bigint: true, throwIfNoEntry: false });
   return stat ? `${stat.size} ${stat.mtimeNs}` : "gone";
+}
+
+/** True while each path's stamp (`stampOf`) is still the one kept. */
+export function fresh(stamps: ReadonlyMap<string, string>): boolean {
+  for (const [path, stamp] of stamps) if (stampOf(path) !== stamp) return false;
+  return true;
 }
 
 /** Records a file of the generation, and its directory, as they are now: before it is read, so an edit after is seen. */
@@ -267,7 +290,11 @@ function touch(gen: Generation, file: string) {
   for (const path of [file, dirname(file)]) if (!gen.stamps.has(path)) gen.stamps.set(path, stampOf(path));
 }
 
-/** The generation of `root` and these constructors: the current one while nothing it stamped changed, else a new one. */
+/**
+ * The generation of `root` and these constructors: the current one while nothing it stamped
+ * changed, else a new one. A generation of `root` whose files changed goes, whatever its
+ * constructors, so `stampsOf` never keeps the stamps of one no load will make again.
+ */
 function generationOf(
   root: string,
   connectors: readonly Connector<any, any>[],
@@ -278,11 +305,13 @@ function generationOf(
     return info?.package ? [`${info.package}/resources`, id] : [];
   });
   const typesKey = [...packages, ...[...types.values()].map(idOf)].join(" ");
+  let current: Generation | undefined;
   for (const gen of registry.generations.values()) {
-    if (gen.root !== root || gen.typesKey !== typesKey) continue;
-    if ([...gen.stamps].every(([path, stamp]) => stampOf(path) === stamp)) return gen;
-    registry.generations.delete(gen.id);
+    if (gen.root !== root) continue;
+    if (!fresh(gen.stamps)) registry.generations.delete(gen.id);
+    else if (gen.typesKey === typesKey) current = gen;
   }
+  if (current !== undefined) return current;
   const gen: Generation = {
     id: String(++registry.seq),
     root,

@@ -393,17 +393,13 @@ describe("readSites", () => {
         problems: [],
         warnings: [],
       },
-      // A value its schema refuses: nothing it says is kept.
+      // A value its schema refuses in who may see it: public, login and locales all left out.
       {
         name: "quoted",
+        at: atSite("quoted"),
         pages: [{ path: "/sites/quoted" }],
         calls: [],
-        problems: [
-          problemAt(
-            "quoted",
-            expect.stringMatching(/^its default export is `defineSite\(\{ … \}\)` from "sanoma\/site": .* at public$/),
-          ),
-        ],
+        problems: [problemAt("quoted", schema("public"))],
         warnings: [],
       },
       {
@@ -563,6 +559,25 @@ describe("readSites", () => {
     ]);
   });
 
+  it("keeps a public site's public, login and locales when a field only for show is wrong or a key is unknown", () => {
+    const root = tree("cosmetic", {
+      ...site("www", "icon: 3", 'colour: "red"', "public: true", 'locales: ["en", "fr"]'),
+    });
+    const [www] = describeConfig(config(root)).sites;
+    expect(www).toEqual({
+      name: "www",
+      at: atSite("www"),
+      public: true,
+      locales: ["en", "fr"],
+      pages: [{ path: "/sites/www" }],
+      calls: [],
+      problems: [problemAt("www", expect.stringMatching(/Unrecognized key: "colour".* at icon$/))],
+      warnings: [],
+    });
+    expect(siteLocales(root)).toEqual({ www: ["en", "fr"] });
+    expect(siteIcons(root)).toEqual({});
+  });
+
   it("reads a public site's locales from site.ts, its default first, and makes a problem of what it cannot keep", () => {
     const root = tree("locales", {
       ...site("www", "public: true", 'locales: ["en", "fr", "pt-BR"]'),
@@ -600,7 +615,7 @@ describe("readSites", () => {
       members: [["default", loginless]],
       staff: [["default", loginless]],
       twice: [["default", '"en" is in `locales` twice']],
-      // Said once, by the schema.
+      // Said once, by the schema: its locales are left out with its `public`.
       unread: [["default", schema("public")]],
       www: [],
     });

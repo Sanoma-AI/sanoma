@@ -5,7 +5,7 @@ import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
-import { memo, useState } from "react";
+import { Fragment, memo, useState } from "react";
 import { z } from "zod";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Card } from "#/components/ui/card.tsx";
@@ -28,10 +28,12 @@ import {
   VendorLogo,
 } from "../../components/common.tsx";
 import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
+import { type AppGroup, AppGroupRow, AppTabs, appGroupsOf, pickGroup } from "../../components/app-scope.tsx";
 import { ChatButton } from "../../components/chat-button.tsx";
 import { LinkRow, RunsTable } from "../../components/runs-table.tsx";
 import { startsOf } from "../../components/workflow.tsx";
 import {
+  AppSearch,
   type CalledVendor,
   configQuery,
   lastRunsQuery,
@@ -48,9 +50,11 @@ type WorkflowFilter = (typeof WORKFLOW_FILTERS)[number];
 
 /**
  * `?view=runs` shows every run as a table, `?status=` and `?workflow=` (a workflow's name, as its
- * page links here) filtering it; anything else, a row per workflow, `?filter=` picking them.
+ * page links here) filtering it; anything else, a row per workflow, `?filter=` picking them and
+ * `?app=` the folder they are in.
  */
 const HomeSearch = z.object({
+  ...AppSearch.shape,
   view: z.literal("runs").optional().catch(undefined),
   status: z.enum(RUN_STATUSES).optional().catch(undefined),
   workflow: z.string().optional().catch(undefined),
@@ -101,8 +105,11 @@ const FILTER_LABEL: Record<WorkflowFilter, string> = {
  * one card holding the tab's table.
  */
 function WorkflowsPage() {
-  const { view, status, workflow, filter = "all" } = Route.useSearch();
+  const { view, status, workflow, filter = "all", app } = Route.useSearch();
   const { data: config } = useSuspenseQuery(configQuery());
+  const groups = appGroupsOf(config.apps, config.workflows, (wf) => wf.app);
+  const { tab, shown } = pickGroup(groups, app);
+  const scoped = shown.flatMap((group) => group.items);
   const { pending, mine } = usePending();
   const yours = countByWorkflow(mine);
   const { data: last } = useSuspenseQuery(lastRunsQuery());
@@ -146,12 +153,12 @@ function WorkflowsPage() {
             link={
               <Link
                 to="/workflows"
-                search={{ filter: f === "all" ? undefined : f, view: undefined }}
+                search={{ filter: f === "all" ? undefined : f, view: undefined, app: tab }}
                 // Lit only where the URL has no other filter, nor All runs' view.
                 activeOptions={EXACT_SEARCH}
               />
             }
-            count={config.workflows.filter(picks[f]).length}
+            count={scoped.filter(picks[f]).length}
           >
             {FILTER_LABEL[f]}
           </LinkTab>
@@ -160,11 +167,18 @@ function WorkflowsPage() {
           All runs
         </LinkTab>
       </LinkTabs>
+      {!runs && (
+        <AppTabs
+          groups={groups}
+          tab={tab}
+          link={(key) => <Link to="/workflows" search={{ filter: filter === "all" ? undefined : filter, app: key }} />}
+        />
+      )}
       {runs ? (
         <AllRuns status={status} workflow={workflow} />
       ) : (
         <Overview
-          workflows={config.workflows.filter(picks[filter])}
+          groups={shown.map((group) => ({ ...group, items: group.items.filter(picks[filter]) }))}
           none={config.workflows.length === 0}
           waiting={countByWorkflow(pending)}
           yours={yours}
@@ -180,21 +194,22 @@ const matches = (wf: WorkflowEntry, query: string) =>
   query === "" || `${wf.title ?? ""} ${wf.name}`.toLocaleLowerCase("en").includes(query.toLocaleLowerCase("en"));
 
 /**
- * The workflows the tab picks as a table, in one card under a find box that filters them
- * by title or name, in the browser. Those whose runs wait on an approval you may decide come
- * first, then the rest by their last run, those never run last. A row: its title, how it starts,
+ * The workflows the tabs pick as a table, in one card under a find box that filters them
+ * by title or name, in the browser; under a heading per folder while more than one holds some.
+ * Those whose runs wait on an approval you may decide come first, then the rest by their last run,
+ * those never run last. A row: its title, how it starts,
  * the vendors it calls, its last run and how many approvals its runs wait on (yours among them).
  * The page reads each query in one pass and hands each row its share: a poll that changed one
  * row's run draws that row alone. `none` when the config has no workflows at all.
  */
 function Overview({
-  workflows,
+  groups,
   none,
   waiting,
   yours,
   last,
 }: {
-  workflows: WorkflowEntry[];
+  groups: AppGroup<WorkflowEntry>[];
   none: boolean;
   waiting: Record<string, number>;
   yours: Record<string, number>;
@@ -208,12 +223,18 @@ function Overview({
         <Nothing className="border-0" title="This config has no workflows" />
       </Card>
     );
-  const shown = workflows
-    .filter((wf) => matches(wf, query.trim()))
-    .toSorted(
-      (a, b) =>
-        (yours[b.name] ?? 0) - (yours[a.name] ?? 0) || (last[b.name]?.createdAt ?? 0) - (last[a.name]?.createdAt ?? 0),
-    );
+  const shown = groups
+    .map((group) => ({
+      ...group,
+      items: group.items
+        .filter((wf) => matches(wf, query.trim()))
+        .toSorted(
+          (a, b) =>
+            (yours[b.name] ?? 0) - (yours[a.name] ?? 0) ||
+            (last[b.name]?.createdAt ?? 0) - (last[a.name]?.createdAt ?? 0),
+        ),
+    }))
+    .filter((group) => group.items.length > 0);
   return (
     <Card className="gap-0 py-0">
       <div className="flex items-center gap-2 p-3">
@@ -246,15 +267,20 @@ function Overview({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {shown.map((wf) => (
-              <WorkflowRow
-                key={wf.name}
-                workflow={wf}
-                vendors={vendors[wf.name] ?? NO_VENDORS}
-                last={last[wf.name]}
-                waiting={waiting[wf.name] ?? 0}
-                yours={yours[wf.name] ?? 0}
-              />
+            {shown.map((group) => (
+              <Fragment key={group.key}>
+                {shown.length > 1 && <AppGroupRow group={group} columns={5} />}
+                {group.items.map((wf) => (
+                  <WorkflowRow
+                    key={wf.name}
+                    workflow={wf}
+                    vendors={vendors[wf.name] ?? NO_VENDORS}
+                    last={last[wf.name]}
+                    waiting={waiting[wf.name] ?? 0}
+                    yours={yours[wf.name] ?? 0}
+                  />
+                ))}
+              </Fragment>
             ))}
           </TableBody>
         </Table>

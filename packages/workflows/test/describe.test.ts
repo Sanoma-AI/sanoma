@@ -14,7 +14,7 @@ import { z } from "zod";
 import { defineConfig, defineConnector, defineWorkflow, memoryLedger, vendorInfo } from "../src/index.ts";
 import { readPolicyFiles } from "../src/cedar.ts";
 import { rootOf } from "../src/config.ts";
-import { ConfigDescriptionSchema, describeConfig, outlineWorkflow } from "../src/describe.ts";
+import { ConfigDescriptionSchema, describeConfig, liveDescription, outlineWorkflow } from "../src/describe.ts";
 import { defineFake } from "../src/fake.ts";
 import { VENDOR } from "../src/op.ts";
 import { apiNameOf, problemLine } from "../src/shared.ts";
@@ -406,6 +406,46 @@ describe("a workflow's name in a site's api", () => {
       ],
       ["then", [[1, 1, "A site calls this workflow api.then, which a promise would take for its own: rename it"]]],
     ]);
+  });
+});
+
+/** A people file declaring ada with `name` as written: an expression. */
+const adaNamed = (name: string) =>
+  `import { sanoma } from "sanoma/resources";\nimport { ADA } from "../lib/names.ts";\n\nexport const ada = sanoma.person({ id: "ada", name: ${name} });\n`;
+
+describe("liveDescription", () => {
+  let dir: string;
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("keeps the description while the files are as they were, and makes it again once one it loaded, a helper or a folder changes", () => {
+    dir = mkdtempSync(join(tmpdir(), "sanoma-live-"));
+    const write = (rel: string, text: string) => {
+      mkdirSync(join(dir, rel, ".."), { recursive: true });
+      writeFileSync(join(dir, rel), text);
+    };
+    write("lib/names.ts", 'export const ADA = "Ada";\n');
+    write("resources/people.ts", adaNamed("ADA"));
+    const live = liveDescription({ workflows: [], connectors: [], root: dir });
+    const named = () =>
+      Object.fromEntries(live().resources.map((r) => [r.name, (r.desired as { name?: string }).name]));
+    const first = live();
+    expect(named()).toEqual({ ada: "Ada" });
+    expect(live()).toBe(first);
+    // A field saved in the file.
+    write("resources/people.ts", adaNamed('"Ada Ortiz"'));
+    expect(named()).toEqual({ ada: "Ada Ortiz" });
+    const second = live();
+    expect(second).not.toBe(first);
+    expect(live()).toBe(second);
+    // A helper it imports, then a new data file in a folder it read.
+    write("resources/people.ts", adaNamed("ADA"));
+    write("lib/names.ts", 'export const ADA = "Ada Lovelace";\n');
+    expect(named()).toEqual({ ada: "Ada Lovelace" });
+    write(
+      "resources/more.ts",
+      'import { sanoma } from "sanoma/resources";\n\nexport const bo = sanoma.person({ id: "bo" });\n',
+    );
+    expect(Object.keys(named()).toSorted()).toEqual(["ada", "bo"]);
   });
 });
 

@@ -654,21 +654,27 @@ export function preview(
   return policy.preview(requests.map((request) => ({ ...request, principal: actor })));
 }
 
-/** Each app's grid, by its resolved config: built from the policy and the description, both read once as the app starts. */
+/** Each grid, by the description it was built from: again once the files change (the people, their groups). */
 const grids = new WeakMap<object, PermissionsResponse>();
+
+/** The policy's files by the resolved config, as the first grid read them: the text of the policy it enforces, read once as the app starts. */
+const policyFiles = new WeakMap<object, PermissionsResponse["files"]>();
 
 /**
  * The Permissions page's grid (`getPermissions`): the policy, its grid (`permissionsGrid`, the
- * one `sanoma check` reports too: nobody's own answer, the actor asking is not used), then the
- * policy's files as the description read them as the app started (`policy.files`, `sourcesOf`).
+ * one `sanoma check` reports too: nobody's own answer, the actor asking is not used) over the
+ * people as the files declare them now, then the policy's files as the policy was read (`sourcesOf`):
+ * a `.cedar` file edited since shows once the app restarts, as its rules apply.
  */
 export function permissions(app: Pick<AppContext, "resolved" | "description">): PermissionsResponse {
-  let grid = grids.get(app.resolved);
+  const { resolved, description } = app;
+  let grid = grids.get(description);
   if (!grid) {
-    const { resolved, description } = app;
-    const { files, ...policy } = description.policy;
-    grid = { policy, ...permissionsGrid(resolved, description), files: sourcesOf(files) };
-    grids.set(resolved, grid);
+    const { files: read, ...policy } = description.policy;
+    let files = policyFiles.get(resolved);
+    if (!files) policyFiles.set(resolved, (files = sourcesOf(read)));
+    grid = { policy, ...permissionsGrid(resolved, description), files };
+    grids.set(description, grid);
   }
   return grid;
 }
@@ -819,13 +825,13 @@ const RunsLimit = RunsQuery.pick({ limit: true });
  * only the result of a run it started: its other reads are `policy_denied`.
  */
 export async function callApi(app: AppContext, actor: Principal, { name, input, id }: CallRequest): Promise<unknown> {
-  const { client, description, resolved } = app;
+  const { client, resolved } = app;
   if (resolved.ops.has(name)) {
     return client.call(name, input ?? {}, { actor, ...(id === undefined ? {} : { id }) });
   }
   const [api, method = "start", ...rest] = name.split(".");
   // Two workflows of one api name (a problem describeConfig reports) are neither.
-  const named = rest.length ? [] : description.workflows.filter((wf) => apiNameOf(wf.name) === api);
+  const named = rest.length ? [] : app.description.workflows.filter((wf) => apiNameOf(wf.name) === api);
   const entry = named.length === 1 ? named[0] : undefined;
   const visitor = isVisitor(actor);
   if (!entry || (visitor && entry.builtin)) throw notCallable(name);

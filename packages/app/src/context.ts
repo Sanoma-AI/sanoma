@@ -44,12 +44,13 @@ export interface AdmittingLogin extends Omit<LoginProvider, "resolveActor"> {
   resolveActor(request: Request): Promise<Principal | undefined>;
 }
 
-/** What `startApp` hands every request: built once at boot, shared by all requests. */
+/** What `startApp` hands every request: built once at boot, shared by all requests; its `description` follows the files. */
 export interface AppContext {
   resolved: ResolvedConfig;
   /**
-   * `describeConfig(config)`, made once: what the page reads (`getConfig`), less the
-   * workflows' sources (`withoutSources`), which `getSource` serves one at a time.
+   * `describeConfig(config)` as the files are now (`liveDescription`: made again once a file it
+   * loaded changed): what the page reads (`getConfig`), less the workflows' sources
+   * (`withoutSources`), which `getSource` serves one at a time. Read it per request, never keep it.
    */
   description: ConfigDescription;
   /** Where this instance is, from `resolved.databaseUrl` (`placeOf`): what the bar's badge says. */

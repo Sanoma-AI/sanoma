@@ -18,7 +18,7 @@ import {
   type SanomaConfig,
   type Source,
 } from "@sanoma-ai/workflows";
-import { type ConfigDescription, describeConfig, readPeople, type SiteEntry } from "@sanoma-ai/workflows/describe";
+import { type ConfigDescription, liveDescription, readPeople, type SiteEntry } from "@sanoma-ai/workflows/describe";
 import { siteDir } from "@sanoma-ai/workflows/shared";
 import { NodeRequest, sendNodeResponse } from "srvx/node";
 import type { AppContext, LoginProvider, RequestContext, ServerEntry } from "./context.ts";
@@ -129,7 +129,10 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   }
   const resolved = resolveConfig(config);
   const login = admitting(given, () => readPeople(resolved.root));
-  const description = describeConfig(config);
+  // Made again on a request once a file it loaded has changed (a form's Save, say); what is said
+  // here, the public sites' hosts and their logins, stay as the app started.
+  const describe = liveDescription(config);
+  const description = describe();
   // Problems in the files do not stop the app: a data file's resources are left out (the Hosting
   // page lists the problems), a workflow the worker will refuse is shown with its outline's error,
   // and a site's call to what the config lacks fails when it is made.
@@ -148,6 +151,17 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   if (warnings.length)
     console.warn(`sanoma app: warnings in the sites (\`sanoma check\` lists them):\n${warnings.join("\n")}`);
   const hosts = publicHosts(description, options.domains ?? {});
+  // Each public site's domain, as `publicHosts` set it on the description made at boot: set again
+  // on each one made after, which `readSites` makes without it.
+  const domains = new Map(description.sites.flatMap((site) => (site.domain ? [[site.name, site.domain]] : [])));
+  const current = (): ConfigDescription => {
+    const now = describe();
+    for (const site of now.sites) {
+      const domain = domains.get(site.name);
+      if (domain !== undefined) site.domain = domain;
+    }
+    return now;
+  };
   const ingress = new Map<string, IngressRoute>();
   // A git host's webhooks, answered once the app is made.
   const webhooks: IngressRoute[] = [...resolved.remotes]
@@ -275,13 +289,14 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   }
   const responder = loaded.value;
   const client = connected.value;
+  // What every context shares; each defines its own `description` getter, which a spread would read once.
+  const shared = { resolved, place: placeOf(resolved.databaseUrl), client, source: options.source };
   const app: AppContext = {
-    resolved,
-    description,
-    place: placeOf(resolved.databaseUrl),
-    client,
+    ...shared,
+    get description() {
+      return current();
+    },
     login,
-    source: options.source,
   };
   // Each public site served, by name, with its own context, whose login is its front door: its
   // login half, if it has one, made once the app listens (`openLogins`). A public site whose
@@ -297,7 +312,14 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
     }
     const half = site.login === undefined ? undefined : Promise.withResolvers<LoginHalf>();
     if (half) halves.set(site, half);
-    sites.set(site.name, { ...app, site: site.name, login: publicFront(site, half?.promise) });
+    sites.set(site.name, {
+      ...shared,
+      get description() {
+        return current();
+      },
+      site: site.name,
+      login: publicFront(site, half?.promise),
+    });
   }
 
   try {

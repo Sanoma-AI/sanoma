@@ -261,6 +261,10 @@ describe("the connect page", () => {
     for (const value of ["sbp_madeup", KEYS.client_secret, KEYS.webhook_secret, "made-up"]) {
       expect(page).not.toContain(value);
     }
+    // A value of ?github= the callback never sends is no outcome: the page without it.
+    const odd = await get("/hosting/connect?github=bogus");
+    expect(odd.status).toBe(307);
+    expect(odd.headers.get("location")).toBe("/hosting/connect");
   });
 });
 
