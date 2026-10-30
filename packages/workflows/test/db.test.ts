@@ -98,6 +98,27 @@ describe("sanoma_credentials", () => {
       await conn.end();
     }
   });
+
+  it("keeps the table keyed by namespace, and its rows", async () => {
+    const url = testDatabaseUrl("db_credentials_kept");
+    const conn = await connectMaking(url);
+    try {
+      await conn.query(`DROP TABLE IF EXISTS ${CREDENTIALS_TABLE}`);
+      await conn.query(
+        `CREATE TABLE ${CREDENTIALS_TABLE} (namespace text NOT NULL, name text NOT NULL, value text NOT NULL, ` +
+          "version text NOT NULL, set_by text NOT NULL, set_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(namespace, name))",
+      );
+      await conn.query(
+        `INSERT INTO ${CREDENTIALS_TABLE} (namespace, name, value, version, set_by) VALUES ('default', 'X', 'sealed', '1', 'leon')`,
+      );
+      await prepareDatabase(url);
+      expect((await conn.query(`SELECT namespace, name FROM ${CREDENTIALS_TABLE}`)).rows).toEqual([
+        { namespace: "default", name: "X" },
+      ]);
+    } finally {
+      await conn.end();
+    }
+  });
 });
 
 describe("sanoma_wakeup", () => {
