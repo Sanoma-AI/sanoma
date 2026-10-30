@@ -75,7 +75,7 @@ export const DeclaredResourceSchema = z.strictObject({
 export type DeclaredResource = z.infer<typeof DeclaredResourceSchema>;
 
 /**
- * A collection `resources/data.ts` declares: where it is, for the Resources page. Its fields are
+ * A collection `resources/data.ts` declares: where it is, for its declaration on Hosting. Its fields are
  * the collection's own (`describeConfig`'s `collections`), from the same file, which the runtime
  * imports.
  */

@@ -308,7 +308,7 @@ export interface AvailableConnectors {
   error?: string;
 }
 
-/** What the Go live page offers to choose from (`getGoLiveChoices`), and why a list is empty. */
+/** What going live (on Hosting) offers to choose from (`getGoLiveChoices`), and why a list is empty. */
 export interface GoLiveChoices {
   /** The GitHub accounts a repository can be made in: the token's user and organizations, and the App's installations. */
   owners: { login: string; kind: "user" | "organization"; via: "token" | "app" }[];
@@ -331,7 +331,7 @@ export interface GoLiveChoices {
   errors: string[];
 }
 
-/** An apply run as the Go live page follows it: its status, the plan it waits on, and what it did. */
+/** An apply run as going live (on Hosting) follows it: its status, the plan it waits on, and what it did. */
 export interface GoLiveRun {
   runId: string;
   status: RunSummary["status"];

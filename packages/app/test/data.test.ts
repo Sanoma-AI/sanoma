@@ -177,7 +177,7 @@ describe("the Data section", () => {
       /<nav aria-label="Breadcrumb"[^>]*><ol[^>]*><li[^>]*><a [^>]*href="\/data"[^>]*>Data<\/a>/,
     );
     expect(grid.html).toMatch(/<h1[^>]*>Outbound/);
-    expect(grid.html).toMatch(/Declared in <a [^>]*href="\/resources\?resource=resources%2Fdata\.ts%23outbound"/);
+    expect(grid.html).toMatch(/Declared in <a [^>]*href="\/hosting\?resource=resources%2Fdata\.ts%23outbound"/);
 
     expect(rowKeys((await page(`/data/outbound${searchOf({ order: "-company" })}`)).html)).toEqual([
       "Initech",
@@ -310,10 +310,10 @@ describe("the Data section", () => {
     expect((await page("/workflows/outbound-next?new=true")).html).not.toContain("for real");
   });
 
-  it("lists the collections on the Resources page, each linking to its grid", async () => {
-    const { html } = await page("/resources");
-    expect(html).toContain(">Collections</h2>");
-    expect(html).toMatch(/<a [^>]*href="\/data\/outbound"[^>]*>Outbound<\/a>/);
+  it("shows a collection's declaration on Hosting, which lists collections no longer: they are on Data", async () => {
+    const { html } = await page("/hosting?resource=resources%2Fdata.ts%23outbound");
+    expect(html).not.toContain(">Collections</h2>");
+    expect(html).toMatch(/<h2[^>]*><code>resources\/data\.ts<\/code><\/h2>/);
   });
 
   it("adds, edits, holds, refuses and deletes a record from the grid in Chrome, as the person", async (ctx) => {

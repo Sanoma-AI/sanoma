@@ -653,6 +653,18 @@ export const DataSearch = z.object({
 });
 export type DataSearch = z.infer<typeof DataSearch>;
 
+/** The runtime's own types for who may act (`sanoma.person`, `.agent`, `.group`): on People, never on Hosting. */
+const PEOPLE_TYPES = new Set(["person", "agent", "group"]);
+export const isPeople = (r: { vendor: string; type: string }) => r.vendor === "sanoma" && PEOPLE_TYPES.has(r.type);
+
+/** Hosting's search (`/hosting`, and `/resources`, which redirects there): `?resource=`, the declaration whose file the page shows. */
+export const HostingSearch = z.object({ resource: z.string().optional() });
+
+/** Going live's Connect page's search (`/hosting/connect`, and `/setup/connect`): how creating the GitHub App went, as its callback comes back. */
+export const ConnectSearch = z.object({
+  github: z.enum(["connected", "expired", "failed", "bad-org", "nobody"]).optional(),
+});
+
 /** The grid's search with no record open in the form: for a link's or `navigate`'s `search`. */
 export const closeRecord = (prev: DataSearch): DataSearch => ({ ...prev, record: undefined, new: undefined });
 

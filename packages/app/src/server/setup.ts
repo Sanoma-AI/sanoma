@@ -380,7 +380,7 @@ async function connectNow(
   const diff = branch && commit ? await git!("show", "--format=", commit.revision) : undefined;
   const runId = await client.apply({ only: Object.keys(bind), bind }, { startedBy: actor }).catch((err: unknown) => {
     throw new ApiError(500, {
-      error: `Committed ${INFRA}, but could not start the apply that binds it: ${errorMessage(err)}. Apply it from Resources.`,
+      error: `Committed ${INFRA}, but could not start the apply that binds it: ${errorMessage(err)}. Apply it from Hosting.`,
     });
   });
   return { file: INFRA, text, runId, ...commit, ...(branch && { branch }), ...(diff && { diff }) };
