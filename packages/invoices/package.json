@@ -1,6 +1,6 @@
 {
   "name": "@sanoma-ai/invoices",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Shared invoice models and React PDF rendering for browser tools and workflows",
   "keywords": [
     "cleaning",
