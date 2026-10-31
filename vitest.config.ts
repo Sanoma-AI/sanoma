@@ -8,6 +8,9 @@ export default defineConfig({
   resolve: {
     // Run tests against source, not dist/. Keep in sync with `paths` in tsconfig.json.
     alias: [
+      { find: /^@sanoma-ai\/invoices\/pdf$/, replacement: src("./packages/invoices/src/pdf.tsx") },
+      { find: /^@sanoma-ai\/invoices\/browser$/, replacement: src("./packages/invoices/src/browser.ts") },
+      { find: /^@sanoma-ai\/invoices\/node$/, replacement: src("./packages/invoices/src/node.ts") },
       { find: /^@sanoma-ai\/invoices$/, replacement: src("./packages/invoices/src/index.ts") },
       { find: /^@sanoma-ai\/invoices\/examples$/, replacement: src("./packages/invoices/src/examples.ts") },
       {

@@ -57,7 +57,7 @@ A finished run: the graph shows how each step went, and the ledger records each 
 | [`sanoma`](packages/sanoma/README.md)                                  | The bin a company repo runs, checks and exports itself with; what its workflows import        |
 | [`@sanoma-ai/workflows`](packages/workflows/README.md)                 | Define connectors and workflows, run them durably on DBOS, and lint them                      |
 | [`@sanoma-ai/app`](packages/app/README.md)                             | Web UI over a config, started with `startApp(config)`                                         |
-| [`@sanoma-ai/invoices`](packages/invoices/README.md)                   | Portable invoice validation, exact calculations and service-business adapters                 |
+| [`@sanoma-ai/invoices`](packages/invoices/README.md)                   | Shared invoice validation, exact calculations, industry adapters and React PDF rendering      |
 | [`@sanoma-ai/testing`](packages/testing/README.md)                     | `startTestWorker`, `testDatabaseUrl`, a vitest test app, vendor replay, and scenario testing  |
 | [`@sanoma-ai/bridge`](packages/bridge/README.md)                       | OpenTofu providers: the provider-bridge client, its fake, the resource generator              |
 | [`@sanoma-ai/desktop`](packages/desktop/README.md)                     | The desktop shell (private): runs a company folder's own launcher and shows the app           |
