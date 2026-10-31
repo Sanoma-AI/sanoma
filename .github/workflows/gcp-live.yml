@@ -23,7 +23,7 @@ jobs:
       SANOMA_GCP_LIVE_OTHER_ACCOUNT: s455-proof-b@sanoma-513217.iam.gserviceaccount.com
       SANOMA_GCP_LIVE_RING: projects/sanoma-513217/locations/us-central1/keyRings/sanoma-455-proof-20261030
       SANOMA_GCP_LIVE_AUDIENCE: //iam.googleapis.com/projects/599722402477/locations/global/workloadIdentityPools/sanoma-455-proof/providers/github
-      SANOMA_BRIDGE_BIN: ${{ runner.temp }}/provider-bridge
+      SANOMA_BRIDGE_BIN: /tmp/sanoma-455-provider-bridge
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
