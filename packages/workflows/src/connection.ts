@@ -565,7 +565,10 @@ export class ConnectionRegistry {
     const method = this.catalog.methods.get(row.vendor)![row.method]!;
     const bundle = row.credential ? await this.secrets?.read(row.credential) : undefined;
     if (row.credential && !bundle) throw new SecretStoreError("unavailable");
-    const identity = await verifyAuthentication(method, bundle && decodeCredentials(method, bundle.value));
+    const identity = await verifyAuthentication(method, bundle && decodeCredentials(method, bundle.value), {
+      connectionId: row.id,
+      vendor: row.vendor,
+    });
     if (identity.account !== row.account) throw new AuthenticationError("wrong_account");
     if (JSON.stringify(identity.scopes) !== JSON.stringify([...new Set(row.scopes)].toSorted()))
       throw new AuthenticationError("scope_changed");
@@ -670,7 +673,10 @@ export class ConnectionRegistry {
       material.credentials = decodeCredentials(method, bundle.value);
       material.credentialVersion = bundle.version;
     }
-    const identity = await verifyAuthentication(method, material.credentials);
+    const identity = await verifyAuthentication(method, material.credentials, {
+      connectionId: selected.id,
+      vendor: selected.vendor,
+    });
     if (identity.account !== selected.account) throw new AuthenticationError("wrong_account");
     if (JSON.stringify(identity.scopes) !== JSON.stringify([...new Set(selected.scopes)].toSorted()))
       throw new AuthenticationError("scope_changed");
