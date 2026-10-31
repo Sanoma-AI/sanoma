@@ -58,7 +58,8 @@ const shipped = (text: string) => JSON.stringify({ ...JSON.parse(text), devDepen
  * The commits since the one that last set this package's version, or removed its `private`, that touch
  * what it is built from: its directory (not `test/` or an `AGENTS.md`), a file outside it that its
  * `prepack` names (the download script of a binary package), and its `package.json` when more than its
- * `devDependencies` differs.
+ * `devDependencies` differs. Historical commits alone do not require a bump when the effective
+ * inputs match the version-setting commit (for example, after integrating a squash release).
  */
 export function changedSince(pkg: Manifest, root = process.cwd()): string[] {
   const git = (...args: string[]) => run("git", args, root).trim();
@@ -78,6 +79,7 @@ export function changedSince(pkg: Manifest, root = process.cwd()): string[] {
     ...(same ? [`:(exclude)${manifest}`] : []),
     ...prepack,
   ];
+  if (!git("diff", "--name-only", set, "HEAD", "--", ...specs)) return [];
   return git("log", "--format=%h", `${set}..`, "--", ...specs)
     .split("\n")
     .filter(Boolean);

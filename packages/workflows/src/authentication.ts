@@ -10,6 +10,12 @@ export interface AuthenticationIdentity {
   expiresAt?: number;
 }
 
+/** Server-selected account reference for deployment-bound workload identity resolution. */
+export interface AuthenticationContext {
+  readonly connectionId: string;
+  readonly vendor: string;
+}
+
 export type AuthenticationProblem =
   | "missing"
   | "expired"
@@ -57,10 +63,11 @@ export function authenticationProblem(error: unknown): AuthenticationProblem | u
 export async function verifyAuthentication(
   method: Authentication,
   credentials?: unknown,
+  context?: AuthenticationContext,
 ): Promise<AuthenticationIdentity> {
   if (!method.verify) throw new AuthenticationError("unsupported");
   try {
-    const identity = await method.verify(credentials);
+    const identity = await (method.kind === "workload-identity" ? method.verify(context) : method.verify(credentials));
     if (
       typeof identity?.account !== "string" ||
       !identity.account.trim() ||
@@ -104,7 +111,7 @@ export type Authentication<S extends z.ZodType = z.ZodType> =
       storage?: never;
       version?: never;
       schema?: never;
-      verify?(): Promise<AuthenticationIdentity>;
+      verify?(context?: AuthenticationContext): Promise<AuthenticationIdentity>;
     };
 
 export function defineAuthentication<S extends z.ZodType>(definition: Authentication<S>): Authentication<S> {

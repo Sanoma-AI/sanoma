@@ -51,44 +51,45 @@ A finished run: the graph shows how each step went, and the ledger records each 
 
 ## Contents
 
-| Path                                                                   | What it is                                                                                    |
-| ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| [`packages/`](packages/AGENTS.md)                                      | Core workspace packages                                                                       |
-| [`sanoma`](packages/sanoma/README.md)                                  | The bin a company repo runs, checks and exports itself with; what its workflows import        |
-| [`@sanoma-ai/workflows`](packages/workflows/README.md)                 | Define connectors and workflows, run them durably on DBOS, and lint them                      |
-| [`@sanoma-ai/app`](packages/app/README.md)                             | Web UI over a config, started with `startApp(config)`                                         |
-| [`@sanoma-ai/invoices`](packages/invoices/README.md)                   | Shared invoice validation, exact calculations, industry adapters and React PDF rendering      |
-| [`@sanoma-ai/testing`](packages/testing/README.md)                     | `startTestWorker`, `testDatabaseUrl`, a vitest test app, vendor replay, and scenario testing  |
-| [`@sanoma-ai/bridge`](packages/bridge/README.md)                       | OpenTofu providers: the provider-bridge client, its fake, the resource generator              |
-| [`@sanoma-ai/desktop`](packages/desktop/README.md)                     | The desktop shell (private): runs a company folder's own launcher and shows the app           |
-| [`connectors/`](connectors/AGENTS.md)                                  | Vendor connectors, one workspace package each                                                 |
-| [`@sanoma-ai/connector-ghost`](connectors/ghost/README.md)             | Ghost Admin API post operations and an in-memory fake                                         |
-| [`@sanoma-ai/connector-resend`](connectors/resend/README.md)           | Resend broadcast and email operations and an in-memory fake                                   |
-| [`@sanoma-ai/connector-exa`](connectors/exa/README.md)                 | Exa web search, page contents, similar pages and answers, and an in-memory fake               |
-| [`@sanoma-ai/connector-invoices`](connectors/invoices/README.md)       | Local invoice PDF generation for workflows                                                    |
-| [`@sanoma-ai/connector-bluesky`](connectors/bluesky/README.md)         | Bluesky post operations and an in-memory fake                                                 |
-| [`@sanoma-ai/connector-cloudflare`](connectors/cloudflare/README.md)   | Cloudflare Containers: a host that stops when quiet, and a Durable Object alarm that wakes it |
-| [`@sanoma-ai/connector-docker`](connectors/docker/README.md)           | The local Docker host: a container that runs the company, through its OpenTofu provider       |
-| [`@sanoma-ai/connector-github`](connectors/github/README.md)           | GitHub resources read through its OpenTofu provider, and a replay fake                        |
-| [`@sanoma-ai/connector-stripe`](connectors/stripe/README.md)           | Stripe resources read through its OpenTofu provider, and a replay fake                        |
-| [`@sanoma-ai/connector-supabase`](connectors/supabase/README.md)       | Supabase projects read through its OpenTofu provider, and a replay fake                       |
-| [`@sanoma-ai/connector-neon`](connectors/neon/README.md)               | Neon projects, the company's database that pauses and branches, and an in-memory fake         |
-| [`@sanoma-ai/connector-better-auth`](connectors/better-auth/README.md) | Better Auth, a visitor login for public sites, on the company's database                      |
-| [`@sanoma-ai/connector-anthropic`](connectors/anthropic/README.md)     | Anthropic's Claude models for the app's agent, through the AI SDK                             |
-| [`modules/`](modules/AGENTS.md)                                        | Placeholder for parts not written yet                                                         |
-| [`types/`](types/AGENTS.md)                                            | Ambient type declarations shared by the packages                                              |
-| [`.github/`](.github/AGENTS.md)                                        | GitHub Actions CI and the README's images                                                     |
-| [`.claude/`](.claude/)                                                 | Agent skills for Claude Code                                                                  |
-| [`.agents/`](.agents/)                                                 | Vendored agent skills                                                                         |
-| [`package.json`](package.json)                                         | Root scripts: checks, build, test, `db:up`, `bridge:download`, `postgres:download`            |
-| [`tsconfig.json`](tsconfig.json)                                       | Root TypeScript config: `sanoma`'s shipped options, with `@sanoma-ai/*` paths to each `src/`  |
-| [`vitest.config.ts`](vitest.config.ts)                                 | Test config with aliases to the package sources                                               |
-| [`docker-compose.yml`](docker-compose.yml)                             | Postgres for DBOS on port 5433                                                                |
-| [`lefthook.yml`](lefthook.yml)                                         | Pre-commit format and lint on staged files                                                    |
-| [`.oxlintrc.json`](.oxlintrc.json)                                     | Lint config                                                                                   |
-| [`.oxfmtrc.json`](.oxfmtrc.json)                                       | Format config                                                                                 |
-| [`pnpm-workspace.yaml`](pnpm-workspace.yaml)                           | Workspace globs: `packages/*` and `connectors/*`                                              |
-| [`skills-lock.json`](skills-lock.json)                                 | Lock file for installed agent skills                                                          |
+| Path                                                                   | What it is                                                                                       |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| [`packages/`](packages/AGENTS.md)                                      | Core workspace packages                                                                          |
+| [`sanoma`](packages/sanoma/README.md)                                  | The bin a company repo runs, checks and exports itself with; what its workflows import           |
+| [`@sanoma-ai/workflows`](packages/workflows/README.md)                 | Define connectors and workflows, run them durably on DBOS, and lint them                         |
+| [`@sanoma-ai/app`](packages/app/README.md)                             | Web UI over a config, started with `startApp(config)`                                            |
+| [`@sanoma-ai/invoices`](packages/invoices/README.md)                   | Shared invoice validation, exact calculations, industry adapters and React PDF rendering         |
+| [`@sanoma-ai/testing`](packages/testing/README.md)                     | `startTestWorker`, `testDatabaseUrl`, a vitest test app, vendor replay, and scenario testing     |
+| [`@sanoma-ai/bridge`](packages/bridge/README.md)                       | OpenTofu providers: the provider-bridge client, its fake, the resource generator                 |
+| [`@sanoma-ai/desktop`](packages/desktop/README.md)                     | The desktop shell (private): runs a company folder's own launcher and shows the app              |
+| [`connectors/`](connectors/AGENTS.md)                                  | Vendor connectors, one workspace package each                                                    |
+| [`@sanoma-ai/connector-invoices`](connectors/invoices/README.md)       | Local invoice PDF generation for workflows                                                       |
+| [`@sanoma-ai/connector-gcp`](connectors/gcp/README.md)                 | Google Cloud KMS/IAM resources through explicit workload identity and isolated provider sessions |
+| [`@sanoma-ai/connector-ghost`](connectors/ghost/README.md)             | Ghost Admin API post operations and an in-memory fake                                            |
+| [`@sanoma-ai/connector-resend`](connectors/resend/README.md)           | Resend broadcast and email operations and an in-memory fake                                      |
+| [`@sanoma-ai/connector-exa`](connectors/exa/README.md)                 | Exa web search, page contents, similar pages and answers, and an in-memory fake                  |
+| [`@sanoma-ai/connector-bluesky`](connectors/bluesky/README.md)         | Bluesky post operations and an in-memory fake                                                    |
+| [`@sanoma-ai/connector-cloudflare`](connectors/cloudflare/README.md)   | Cloudflare Containers: a host that stops when quiet, and a Durable Object alarm that wakes it    |
+| [`@sanoma-ai/connector-docker`](connectors/docker/README.md)           | The local Docker host: a container that runs the company, through its OpenTofu provider          |
+| [`@sanoma-ai/connector-github`](connectors/github/README.md)           | GitHub resources read through its OpenTofu provider, and a replay fake                           |
+| [`@sanoma-ai/connector-stripe`](connectors/stripe/README.md)           | Stripe resources read through its OpenTofu provider, and a replay fake                           |
+| [`@sanoma-ai/connector-supabase`](connectors/supabase/README.md)       | Supabase projects read through its OpenTofu provider, and a replay fake                          |
+| [`@sanoma-ai/connector-neon`](connectors/neon/README.md)               | Neon projects, the company's database that pauses and branches, and an in-memory fake            |
+| [`@sanoma-ai/connector-better-auth`](connectors/better-auth/README.md) | Better Auth, a visitor login for public sites, on the company's database                         |
+| [`@sanoma-ai/connector-anthropic`](connectors/anthropic/README.md)     | Anthropic's Claude models for the app's agent, through the AI SDK                                |
+| [`modules/`](modules/AGENTS.md)                                        | Placeholder for parts not written yet                                                            |
+| [`types/`](types/AGENTS.md)                                            | Ambient type declarations shared by the packages                                                 |
+| [`.github/`](.github/AGENTS.md)                                        | GitHub Actions CI and the README's images                                                        |
+| [`.claude/`](.claude/)                                                 | Agent skills for Claude Code                                                                     |
+| [`.agents/`](.agents/)                                                 | Vendored agent skills                                                                            |
+| [`package.json`](package.json)                                         | Root scripts: checks, build, test, `db:up`, `bridge:download`, `postgres:download`               |
+| [`tsconfig.json`](tsconfig.json)                                       | Root TypeScript config: `sanoma`'s shipped options, with `@sanoma-ai/*` paths to each `src/`     |
+| [`vitest.config.ts`](vitest.config.ts)                                 | Test config with aliases to the package sources                                                  |
+| [`docker-compose.yml`](docker-compose.yml)                             | Postgres for DBOS on port 5433                                                                   |
+| [`lefthook.yml`](lefthook.yml)                                         | Pre-commit format and lint on staged files                                                       |
+| [`.oxlintrc.json`](.oxlintrc.json)                                     | Lint config                                                                                      |
+| [`.oxfmtrc.json`](.oxfmtrc.json)                                       | Format config                                                                                    |
+| [`pnpm-workspace.yaml`](pnpm-workspace.yaml)                           | Workspace globs: `packages/*` and `connectors/*`                                                 |
+| [`skills-lock.json`](skills-lock.json)                                 | Lock file for installed agent skills                                                             |
 
 Connectors live here under `connectors/`; one moves to its own repo only when someone outside the team maintains it.
 
@@ -125,7 +126,7 @@ To dogfood a change from a Sanoma repo of your own before it is published, link 
 
 [`release.yml`](.github/workflows/release.yml) publishes `sanoma` and the `@sanoma-ai/*` packages to npm with [trusted publishing](https://docs.npmjs.com/trusted-publishers) (no npm token). Each package has its own version, and a release ships only the packages whose version changed. To release:
 
-1. In a pull request, bump `version` in the `package.json` of each public package that changed since its last release (not a private one, such as `@sanoma-ai/testing`); a breaking change in a 0.x package is a minor bump, and a provider-bridge release (`RELEASE` in `packages/bridge/scripts/download-bridge.ts`) is a change to the `@sanoma-ai/bridge-<platform>` packages, as a PostgreSQL release (`RELEASE` in `packages/sanoma/scripts/download-postgres.ts`) is to the `@sanoma-ai/postgres-<platform>` packages. Packages that depend on one you bumped need a new version too when their published range leaves the new one out: an exact pin (`workspace:*`, as `sanoma` pins the runtime and `@sanoma-ai/bridge` its binaries), or a peer range (`workspace:^`, published as `^` on the version at that time) after a minor bump. `node scripts/release-check.ts` names each one it finds, counting the ones that pin those in turn, and the workflow runs it first. It also names a public version whose source has changed since (the `git log` below, less tests and `AGENTS.md` files), which needs a new version too, and a package npm does not have yet. The pull request's description carries the release notes. What changed in a package since the commit that last set its version:
+1. In a pull request, bump `version` in the `package.json` of each public package that changed since its last release (not a private one, such as `@sanoma-ai/testing`); a breaking change in a 0.x package is a minor bump, and a provider-bridge release (`RELEASE` in `packages/bridge/scripts/download-bridge.ts`) is a change to the `@sanoma-ai/bridge-<platform>` packages, as a PostgreSQL release (`RELEASE` in `packages/sanoma/scripts/download-postgres.ts`) is to the `@sanoma-ai/postgres-<platform>` packages. Packages that depend on one you bumped need a new version too when their published range leaves the new one out: an exact pin (`workspace:*`, as `sanoma` pins the runtime and `@sanoma-ai/bridge` its binaries), or a peer range (`workspace:^`, published as `^` on the version at that time) after a minor bump. `node scripts/release-check.ts` names each one it finds, counting the ones that pin those in turn, and the workflow runs it first. It also names a public version whose effective shipped inputs differ from the commit that set its version (excluding tests, `AGENTS.md` and manifest-only `devDependencies` changes), which needs a new version too, and a package npm does not have yet. Merged historical commits alone require no bump when those inputs are unchanged. The pull request's description carries the release notes. To inspect a package's history since the commit that last set its version (this log alone is not the release check):
 
    ```sh
    dir=connectors/ghost; git log --oneline "$(git log -1 --format=%H -G'"version":' -- "$dir/package.json")".. -- "$dir"
