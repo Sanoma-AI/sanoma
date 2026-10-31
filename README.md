@@ -62,6 +62,7 @@ A finished run: the graph shows how each step went, and the ledger records each 
 | [`@sanoma-ai/bridge`](packages/bridge/README.md)                       | OpenTofu providers: the provider-bridge client, its fake, the resource generator                 |
 | [`@sanoma-ai/desktop`](packages/desktop/README.md)                     | The desktop shell (private): runs a company folder's own launcher and shows the app              |
 | [`connectors/`](connectors/AGENTS.md)                                  | Vendor connectors, one workspace package each                                                    |
+| [`@sanoma-ai/connector-invoices`](connectors/invoices/README.md)       | Local invoice PDF generation for workflows                                                       |
 | [`@sanoma-ai/connector-gcp`](connectors/gcp/README.md)                 | Google Cloud KMS/IAM resources through explicit workload identity and isolated provider sessions |
 | [`@sanoma-ai/connector-ghost`](connectors/ghost/README.md)             | Ghost Admin API post operations and an in-memory fake                                            |
 | [`@sanoma-ai/connector-resend`](connectors/resend/README.md)           | Resend broadcast and email operations and an in-memory fake                                      |
