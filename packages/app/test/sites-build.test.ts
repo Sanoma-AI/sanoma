@@ -493,7 +493,14 @@ describe("a company's app with its sites", () => {
     expect(site).toMatch(/@layer utilities\.hello\{[^]*\.hidden\{display:none\}/);
     // The kit's (sanoma/ui.css): its classes and variants, with the site's own token beside its
     // tokens, and its colour for one of them; never all of preflight.
-    expect(site).toMatch(/\.bg-primary\{background-color:var\(--primary\)\}/);
+    // Minification may combine identical fallback declarations into a selector list.
+    expect(
+      [...site!.matchAll(/([^{}]+)\{([^{}]*)\}/g)].some(
+        ([, selectors, declarations]) =>
+          selectors!.split(",").includes(".bg-primary") &&
+          declarations!.split(";").includes("background-color:var(--primary)"),
+      ),
+    ).toBe(true);
     expect(site).toMatch(/\.data-open\\:[\w-]+:where\(\[data-state=open\]\)/);
     expect(site).toMatch(/\.bg-hello\{background-color:var\(--color-hello\)\}/);
     expect(site).toMatch(/\[data-site=hello\]\{--primary:red\}/);
