@@ -292,6 +292,7 @@ export {
   type AuthenticationProblem,
   type Authentication,
   type AuthenticationIdentity,
+  type AuthenticationContext,
   type CallAuthentication,
 } from "./authentication.ts";
 export { checkSecretStore, type SecretStoreCheck } from "./secret-store-check.ts";
