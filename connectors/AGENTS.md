@@ -14,10 +14,13 @@ One workspace package per vendor, each built on `@sanoma-ai/workflows`. A connec
 | [`exa/`](exa/AGENTS.md)                 | `@sanoma-ai/connector-exa`: Exa web search, page contents, similar pages and answers, and an in-memory fake           |
 | [`ghost/`](ghost/AGENTS.md)             | `@sanoma-ai/connector-ghost`: Ghost Admin API post operations and an in-memory fake                                   |
 | [`github/`](github/AGENTS.md)           | `@sanoma-ai/connector-github`: GitHub resources read through its OpenTofu provider, and pull requests (a remote half) |
+| [`invoices/`](invoices/AGENTS.md)       | `@sanoma-ai/connector-invoices`: local invoice PDF generation for standard, pet-sitting and cleaning inputs           |
 | [`neon/`](neon/AGENTS.md)               | `@sanoma-ai/connector-neon`: Neon projects (the company's database, which pauses and branches), branches and computes |
 | [`resend/`](resend/AGENTS.md)           | `@sanoma-ai/connector-resend`: Resend broadcast and email operations and an in-memory fake                            |
 | [`stripe/`](stripe/AGENTS.md)           | `@sanoma-ai/connector-stripe`: Stripe resources read through its OpenTofu provider                                    |
 | [`supabase/`](supabase/AGENTS.md)       | `@sanoma-ai/connector-supabase`: Supabase projects (OpenTofu provider), pooler and health                             |
+
+Local computation connectors may use the same operation contract without representing an external vendor. [`invoices/`](invoices/AGENTS.md) runs its portable generator in both live and fake execution, needs no credentials or HTTP replay, and still uses normal policy and checkpoint boundaries.
 
 ## Integration sources
 

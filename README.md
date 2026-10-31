@@ -65,6 +65,7 @@ A finished run: the graph shows how each step went, and the ledger records each 
 | [`@sanoma-ai/connector-ghost`](connectors/ghost/README.md)             | Ghost Admin API post operations and an in-memory fake                                         |
 | [`@sanoma-ai/connector-resend`](connectors/resend/README.md)           | Resend broadcast and email operations and an in-memory fake                                   |
 | [`@sanoma-ai/connector-exa`](connectors/exa/README.md)                 | Exa web search, page contents, similar pages and answers, and an in-memory fake               |
+| [`@sanoma-ai/connector-invoices`](connectors/invoices/README.md)       | Local invoice PDF generation for workflows                                                    |
 | [`@sanoma-ai/connector-bluesky`](connectors/bluesky/README.md)         | Bluesky post operations and an in-memory fake                                                 |
 | [`@sanoma-ai/connector-cloudflare`](connectors/cloudflare/README.md)   | Cloudflare Containers: a host that stops when quiet, and a Durable Object alarm that wakes it |
 | [`@sanoma-ai/connector-docker`](connectors/docker/README.md)           | The local Docker host: a container that runs the company, through its OpenTofu provider       |
