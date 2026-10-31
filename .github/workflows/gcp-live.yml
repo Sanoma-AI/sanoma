@@ -1,10 +1,31 @@
 name: GCP live verification
 on:
   workflow_dispatch:
-  # Temporary bootstrap trigger while this workflow is not on main; remove after verification.
-  push:
-    branches: [task/489-gcp-provisioning]
-    paths: [.github/workflows/gcp-live.yml]
+    inputs:
+      project:
+        description: Disposable GCP project ID
+        required: true
+        type: string
+      project_number:
+        description: Numeric project ID
+        required: true
+        type: string
+      provisioner:
+        description: Federated provisioning service-account email
+        required: true
+        type: string
+      denied_account:
+        description: Existing service account this federation must not impersonate
+        required: true
+        type: string
+      key_ring:
+        description: Existing disposable CryptoKeyRing resource name
+        required: true
+        type: string
+      audience:
+        description: Full workload identity provider audience
+        required: true
+        type: string
 permissions:
   contents: read
   id-token: write
@@ -17,12 +38,12 @@ jobs:
     timeout-minutes: 30
     env:
       SANOMA_GCP_PROVISION_LIVE: "1"
-      SANOMA_GCP_LIVE_PROJECT: sanoma-513217
-      SANOMA_GCP_LIVE_PROJECT_NUMBER: "599722402477"
-      SANOMA_GCP_LIVE_PROVISIONER: s455-proof-provision@sanoma-513217.iam.gserviceaccount.com
-      SANOMA_GCP_LIVE_OTHER_ACCOUNT: s455-proof-b@sanoma-513217.iam.gserviceaccount.com
-      SANOMA_GCP_LIVE_RING: projects/sanoma-513217/locations/us-central1/keyRings/sanoma-455-proof-20261030
-      SANOMA_GCP_LIVE_AUDIENCE: //iam.googleapis.com/projects/599722402477/locations/global/workloadIdentityPools/sanoma-455-proof/providers/github
+      SANOMA_GCP_LIVE_PROJECT: ${{ inputs.project }}
+      SANOMA_GCP_LIVE_PROJECT_NUMBER: ${{ inputs.project_number }}
+      SANOMA_GCP_LIVE_PROVISIONER: ${{ inputs.provisioner }}
+      SANOMA_GCP_LIVE_OTHER_ACCOUNT: ${{ inputs.denied_account }}
+      SANOMA_GCP_LIVE_RING: ${{ inputs.key_ring }}
+      SANOMA_GCP_LIVE_AUDIENCE: ${{ inputs.audience }}
       SANOMA_BRIDGE_BIN: /tmp/sanoma-455-provider-bridge
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
