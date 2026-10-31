@@ -1262,6 +1262,7 @@ export class SanomaClient {
     const identity = await verifyAuthentication(
       method,
       encoded === undefined ? undefined : decodeCredentials(method, encoded),
+      { connectionId: setup.id, vendor: setup.vendor },
     );
     if (setup.expectedAccount && setup.expectedAccount !== identity.account)
       throw new AuthenticationError("wrong_account");
@@ -1330,6 +1331,7 @@ export class SanomaClient {
     const identity = await verifyAuthentication(
       method,
       encoded === undefined ? undefined : decodeCredentials(method, encoded),
+      { connectionId: setup.id, vendor: setup.vendor },
     );
     if (identity.account !== review.account) throw new AuthenticationError("wrong_account");
     if (JSON.stringify(identity.scopes) !== JSON.stringify([...new Set(review.scopes)].toSorted()))

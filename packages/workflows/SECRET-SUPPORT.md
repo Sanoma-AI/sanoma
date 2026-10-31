@@ -17,7 +17,7 @@ Configuration and lifecycle contracts remain in [Credentials](README.md#credenti
 
 ## Connector coverage
 
-**Neon is the only connector in this checkout declaring a named authentication method.** Its [authentication documentation](../../connectors/neon/README.md#authentication) describes the supported bundle and provider verification.
+**Neon is the only connector in the 0.10.1 checkpoint declaring a named authentication method.** Its [authentication documentation](../../connectors/neon/README.md#authentication) describes the supported bundle and provider verification.
 
 GitHub, Stripe, Supabase and Docker resource drivers use the session-capable bridge, but do not yet opt into named authentication. Supabase Vault is a storage adapter; it does not migrate the Supabase Management API/resource driver. Other connectors retain their existing authentication paths. Login, model and remote halves are also distinct from named operation accounts. This release does not promise multiple named accounts for every connector, nor Gmail, LinkedIn, Reddit or Instagram OAuth connections.
 

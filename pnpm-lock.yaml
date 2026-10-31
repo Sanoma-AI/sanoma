@@ -167,6 +167,25 @@ importers:
         specifier: ^4.6.5
         version: 4.6.5
 
+  connectors/gcp:
+    dependencies:
+      google-auth-library:
+        specifier: ^10.5.0
+        version: 10.9.1(supports-color@11.0.0)
+    devDependencies:
+      '@sanoma-ai/bridge':
+        specifier: workspace:*
+        version: link:../../packages/bridge
+      '@sanoma-ai/workflows':
+        specifier: workspace:*
+        version: link:../../packages/workflows
+      msw:
+        specifier: ^3.0.3
+        version: 3.0.3(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.4)(jiti@2.7.0)(yaml@2.9.1))
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+
   connectors/ghost:
     dependencies:
       jose:
