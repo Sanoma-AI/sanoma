@@ -1,0 +1,1707 @@
+{
+  "dataSources": {},
+  "formatVersion": 1,
+  "protocol": 5,
+  "providerConfig": {
+    "attributes": {
+      "access_approval_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "access_context_manager_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "access_token": {
+        "optional": true,
+        "type": "string"
+      },
+      "active_directory_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "add_terraform_attribution_label": {
+        "optional": true,
+        "type": "bool"
+      },
+      "agent_identity_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "agent_registry_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "agentic_applications_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "alloydb_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "apigee_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "apihub_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "apikeys_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "app_engine_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "apphub_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "artifact_registry_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "assured_workloads_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "backup_dr_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "beyondcorp_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "big_query_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "biglake_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "biglake_hive_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "biglake_iceberg_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "bigquery_analytics_hub_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "bigquery_connection_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "bigquery_data_transfer_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "bigquery_datapolicy_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "bigquery_datapolicyv2_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "bigquery_reservation_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "bigtable_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "billing_budgets_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "billing_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "billing_project": {
+        "optional": true,
+        "type": "string"
+      },
+      "binary_authorization_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "blockchain_node_engine_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "certificate_manager_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "ces_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "chronicle_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "cloud_asset_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "cloud_billing_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "cloud_build_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "cloud_functions_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "cloud_identity_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "cloud_ids_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "cloud_quotas_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "cloud_resource_manager_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "cloud_run_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "cloud_run_v2_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "cloud_scheduler_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "cloud_security_compliance_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "cloud_support_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "cloud_tasks_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "cloudbuildv2_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "clouddeploy_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "clouddomains_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "cloudfunctions2_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "colab_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "composer_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "compute_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "config_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "contact_center_insights_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "container_analysis_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "container_attached_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "container_aws_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "container_azure_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "container_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "core_billing_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "credentials": {
+        "optional": true,
+        "type": "string"
+      },
+      "data_catalog_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "data_fusion_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "data_lineage_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "data_loss_prevention_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "data_pipeline_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "database_migration_service_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "dataflow_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "dataform_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "dataplex_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "dataproc_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "dataproc_gdc_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "dataproc_metastore_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "datastream_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "default_labels": {
+        "optional": true,
+        "type": [
+          "map",
+          "string"
+        ]
+      },
+      "deletion_policy": {
+        "optional": true,
+        "type": "string"
+      },
+      "deployment_manager_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "developer_connect_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "dialogflow_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "dialogflow_cx_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "discovery_engine_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "dns_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "document_ai_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "document_ai_warehouse_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "edgecontainer_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "edgenetwork_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "essential_contacts_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "eventarc_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "filestore_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "firebase_app_check_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "firebase_app_hosting_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "firebase_data_connect_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "firebase_remote_config_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "firebaserules_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "firestore_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "gemini_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "gemini_data_analytics_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "gke_backup_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "gke_hub2_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "gke_hub_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "gkeonprem_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "healthcare_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "hypercomputecluster_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "iam2_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "iam3_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "iam_beta_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "iam_credentials_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "iam_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "iam_workforce_pool_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "iap_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "identity_platform_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "impersonate_service_account": {
+        "optional": true,
+        "type": "string"
+      },
+      "impersonate_service_account_delegates": {
+        "optional": true,
+        "type": [
+          "list",
+          "string"
+        ]
+      },
+      "integration_connectors_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "integrations_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "kms_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "license_manager_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "logging_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "looker_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "lustre_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "managed_kafka_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "memcache_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "memorystore_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "migration_center_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "model_armor_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "model_armor_global_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "monitoring_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "netapp_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "network_connectivity_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "network_connectivityv1_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "network_management_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "network_managementv1_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "network_security_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "network_services_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "observability_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "oracle_database_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "org_policy_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "os_config_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "os_config_v2_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "os_login_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "parallelstore_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "parameter_manager_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "parameter_manager_regional_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "poll_interval": {
+        "optional": true,
+        "type": "string"
+      },
+      "prefer_global_endpoints": {
+        "optional": true,
+        "type": "bool"
+      },
+      "prefer_regional_endpoints": {
+        "optional": true,
+        "type": "bool"
+      },
+      "privateca_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "privileged_access_manager_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "project": {
+        "optional": true,
+        "type": "string"
+      },
+      "public_ca_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "pubsub_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "pubsub_lite_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "recaptcha_enterprise_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "redis_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "region": {
+        "optional": true,
+        "type": "string"
+      },
+      "request_reason": {
+        "optional": true,
+        "type": "string"
+      },
+      "request_timeout": {
+        "optional": true,
+        "type": "string"
+      },
+      "resource_manager3_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "resource_manager_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "resource_manager_v3_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "scopes": {
+        "optional": true,
+        "type": [
+          "list",
+          "string"
+        ]
+      },
+      "secret_manager_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "secret_manager_regional_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "secure_source_manager_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "security_center_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "security_center_management_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "security_center_v2_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "securityposture_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "service_directory_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "service_management_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "service_networking_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "service_usage_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "site_verification_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "source_repo_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "spanner_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "sql_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "storage_batch_operations_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "storage_control_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "storage_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "storage_ftp_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "storage_insights_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "storage_transfer_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "tags_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "tags_location_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "terraform_attribution_label_addition_strategy": {
+        "optional": true,
+        "type": "string"
+      },
+      "transcoder_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "universe_domain": {
+        "optional": true,
+        "type": "string"
+      },
+      "user_project_override": {
+        "optional": true,
+        "type": "bool"
+      },
+      "vector_search_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "vertex_ai_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "vmwareengine_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "vpc_access_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "workbench_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "workflows_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "workload_identity_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "workstations_custom_endpoint": {
+        "optional": true,
+        "type": "string"
+      },
+      "zone": {
+        "optional": true,
+        "type": "string"
+      }
+    },
+    "blocks": {
+      "batching": {
+        "block": {
+          "attributes": {
+            "enable_batching": {
+              "optional": true,
+              "type": "bool"
+            },
+            "send_after": {
+              "optional": true,
+              "type": "string"
+            }
+          },
+          "blocks": {}
+        },
+        "nesting": "list"
+      },
+      "external_credentials": {
+        "block": {
+          "attributes": {
+            "audience": {
+              "required": true,
+              "type": "string"
+            },
+            "identity_token": {
+              "required": true,
+              "type": "string"
+            },
+            "service_account_email": {
+              "required": true,
+              "type": "string"
+            }
+          },
+          "blocks": {}
+        },
+        "nesting": "list"
+      }
+    }
+  },
+  "providerMeta": {
+    "attributes": {
+      "module_name": {
+        "optional": true,
+        "type": "string"
+      }
+    },
+    "blocks": {}
+  },
+  "resources": {
+    "google_kms_key_ring": {
+      "block": {
+        "attributes": {
+          "id": {
+            "computed": true,
+            "optional": true,
+            "type": "string"
+          },
+          "location": {
+            "description": "The location for the KeyRing.\nA full list of valid locations can be found by running 'gcloud kms locations list'.",
+            "descriptionKind": "plain",
+            "required": true,
+            "type": "string"
+          },
+          "name": {
+            "description": "The resource name for the KeyRing.",
+            "descriptionKind": "plain",
+            "required": true,
+            "type": "string"
+          },
+          "project": {
+            "computed": true,
+            "optional": true,
+            "type": "string"
+          }
+        },
+        "blocks": {
+          "timeouts": {
+            "block": {
+              "attributes": {
+                "create": {
+                  "optional": true,
+                  "type": "string"
+                },
+                "delete": {
+                  "optional": true,
+                  "type": "string"
+                }
+              },
+              "blocks": {}
+            },
+            "nesting": "single"
+          }
+        }
+      },
+      "schemaVersion": 0
+    },
+    "google_kms_crypto_key": {
+      "block": {
+        "attributes": {
+          "crypto_key_backend": {
+            "computed": true,
+            "description": "The resource name of the backend environment associated with all CryptoKeyVersions within this CryptoKey.\nThe resource name is in the format \"projects/*/locations/*/ekmConnections/*\" and only applies to \"EXTERNAL_VPC\" keys.",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": "string"
+          },
+          "deletion_policy": {
+            "computed": true,
+            "description": "Whether Terraform will be prevented from destroying the instance. Defaults to \"DELETE\".\nWhen a 'terraform destroy' or 'terraform apply' would delete the instance,\nthe command will fail if this field is set to \"PREVENT\" in Terraform state.\nWhen set to \"ABANDON\", the command will remove the resource from Terraform\nmanagement without updating or deleting the resource in the API.\nWhen set to \"DELETE\", deleting the resource is allowed.\n",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": "string"
+          },
+          "destroy_scheduled_duration": {
+            "computed": true,
+            "description": "The period of time that versions of this key spend in the DESTROY_SCHEDULED state before transitioning to DESTROYED.\nIf not specified at creation time, the default duration is 30 days.",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": "string"
+          },
+          "effective_labels": {
+            "computed": true,
+            "description": "All of labels (key/value pairs) present on the resource in GCP, including the labels configured through Terraform, other clients and services.",
+            "descriptionKind": "plain",
+            "type": [
+              "map",
+              "string"
+            ]
+          },
+          "id": {
+            "computed": true,
+            "optional": true,
+            "type": "string"
+          },
+          "import_only": {
+            "computed": true,
+            "description": "Whether this key may contain imported versions only.",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": "bool"
+          },
+          "key_ring": {
+            "description": "The KeyRing that this key belongs to.\nFormat: ''projects/{{project}}/locations/{{location}}/keyRings/{{keyRing}}''.",
+            "descriptionKind": "plain",
+            "required": true,
+            "type": "string"
+          },
+          "labels": {
+            "description": "Labels with user-defined metadata to apply to this resource.\n\n\n**Note**: This field is non-authoritative, and will only manage the labels present in your configuration.\nPlease refer to the field 'effective_labels' for all of the labels present on the resource.",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": [
+              "map",
+              "string"
+            ]
+          },
+          "name": {
+            "description": "The resource name for the CryptoKey.",
+            "descriptionKind": "plain",
+            "required": true,
+            "type": "string"
+          },
+          "primary": {
+            "computed": true,
+            "description": "A copy of the primary CryptoKeyVersion that will be used by cryptoKeys.encrypt when this CryptoKey is given in EncryptRequest.name.\nKeys with purpose ENCRYPT_DECRYPT may have a primary. For other keys, this field will be unset.",
+            "descriptionKind": "plain",
+            "type": [
+              "list",
+              [
+                "object",
+                {
+                  "name": "string",
+                  "state": "string"
+                }
+              ]
+            ]
+          },
+          "purpose": {
+            "description": "The immutable purpose of this CryptoKey. See the\n[purpose reference](https://cloud.google.com/kms/docs/reference/rest/v1/projects.locations.keyRings.cryptoKeys#CryptoKeyPurpose)\nfor possible inputs.\nDefault value is \"ENCRYPT_DECRYPT\".",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": "string"
+          },
+          "rotation_period": {
+            "description": "Every time this period passes, generate a new CryptoKeyVersion and set it as the primary.\nThe first rotation will take place after the specified period. The rotation period has\nthe format of a decimal number with up to 9 fractional digits, followed by the\nletter 's' (seconds). It must be greater than a day (ie, 86400).",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": "string"
+          },
+          "skip_initial_version_creation": {
+            "description": "If set to true, the request will create a CryptoKey without any CryptoKeyVersions.\nYou must use the 'google_kms_crypto_key_version' resource to create a new CryptoKeyVersion\nor 'google_kms_key_ring_import_job' resource to import the CryptoKeyVersion.\nThis field is only applicable during initial CryptoKey creation.",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": "bool"
+          },
+          "terraform_labels": {
+            "computed": true,
+            "description": "The combination of labels configured directly on the resource\n and default labels configured on the provider.",
+            "descriptionKind": "plain",
+            "type": [
+              "map",
+              "string"
+            ]
+          }
+        },
+        "blocks": {
+          "timeouts": {
+            "block": {
+              "attributes": {
+                "create": {
+                  "optional": true,
+                  "type": "string"
+                },
+                "delete": {
+                  "optional": true,
+                  "type": "string"
+                },
+                "update": {
+                  "optional": true,
+                  "type": "string"
+                }
+              },
+              "blocks": {}
+            },
+            "nesting": "single"
+          },
+          "version_template": {
+            "block": {
+              "attributes": {
+                "algorithm": {
+                  "description": "The algorithm to use when creating a version based on this template.\nSee the [algorithm reference](https://cloud.google.com/kms/docs/reference/rest/v1/CryptoKeyVersionAlgorithm) for possible inputs.",
+                  "descriptionKind": "plain",
+                  "required": true,
+                  "type": "string"
+                },
+                "protection_level": {
+                  "description": "The protection level to use when creating a version based on this template. Possible values include \"SOFTWARE\", \"HSM\", \"EXTERNAL\", \"EXTERNAL_VPC\". Defaults to \"SOFTWARE\".",
+                  "descriptionKind": "plain",
+                  "optional": true,
+                  "type": "string"
+                }
+              },
+              "blocks": {},
+              "description": "A template describing settings for new crypto key versions.",
+              "descriptionKind": "plain"
+            },
+            "maxItems": 1,
+            "nesting": "list"
+          }
+        }
+      },
+      "schemaVersion": 1
+    },
+    "google_kms_crypto_key_iam_member": {
+      "block": {
+        "attributes": {
+          "crypto_key_id": {
+            "required": true,
+            "type": "string"
+          },
+          "etag": {
+            "computed": true,
+            "type": "string"
+          },
+          "id": {
+            "computed": true,
+            "optional": true,
+            "type": "string"
+          },
+          "member": {
+            "required": true,
+            "type": "string"
+          },
+          "role": {
+            "required": true,
+            "type": "string"
+          }
+        },
+        "blocks": {
+          "condition": {
+            "block": {
+              "attributes": {
+                "description": {
+                  "optional": true,
+                  "type": "string"
+                },
+                "expression": {
+                  "required": true,
+                  "type": "string"
+                },
+                "title": {
+                  "required": true,
+                  "type": "string"
+                }
+              },
+              "blocks": {}
+            },
+            "maxItems": 1,
+            "nesting": "list"
+          }
+        }
+      },
+      "schemaVersion": 0
+    },
+    "google_service_account": {
+      "block": {
+        "attributes": {
+          "account_id": {
+            "description": "The account id that is used to generate the service account email address and a stable unique id. It is unique within a project, must be 6-30 characters long, and match the regular expression [a-z]([-a-z0-9]*[a-z0-9]) to comply with RFC1035. Changing this forces a new service account to be created.",
+            "descriptionKind": "plain",
+            "required": true,
+            "type": "string"
+          },
+          "create_ignore_already_exists": {
+            "description": "If set to true, skip service account creation if a service account with the same email already exists.",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": "bool"
+          },
+          "deletion_policy": {
+            "computed": true,
+            "description": "Whether Terraform will be prevented from destroying the instance. Defaults to \"DELETE\".\nWhen a 'terraform destroy' or 'terraform apply' would delete the instance,\nthe command will fail if this field is set to \"PREVENT\" in Terraform state.\nWhen set to \"ABANDON\", the command will remove the resource from Terraform\nmanagement without updating or deleting the resource in the API.\nWhen set to \"DELETE\", deleting the resource is allowed.\n",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": "string"
+          },
+          "description": {
+            "description": "A text description of the service account. Must be less than or equal to 256 UTF-8 bytes.",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": "string"
+          },
+          "disabled": {
+            "description": "Whether the service account is disabled. Defaults to false",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": "bool"
+          },
+          "display_name": {
+            "description": "The display name for the service account. Can be updated without creating a new resource.",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": "string"
+          },
+          "email": {
+            "computed": true,
+            "description": "The e-mail address of the service account. This value should be referenced from any google_iam_policy data sources that would grant the service account privileges.",
+            "descriptionKind": "plain",
+            "type": "string"
+          },
+          "id": {
+            "computed": true,
+            "optional": true,
+            "type": "string"
+          },
+          "member": {
+            "computed": true,
+            "description": "The Identity of the service account in the form 'serviceAccount:{email}'. This value is often used to refer to the service account in order to grant IAM permissions.",
+            "descriptionKind": "plain",
+            "type": "string"
+          },
+          "name": {
+            "computed": true,
+            "description": "The fully-qualified name of the service account.",
+            "descriptionKind": "plain",
+            "type": "string"
+          },
+          "project": {
+            "computed": true,
+            "description": "The ID of the project that the service account will be created in. Defaults to the provider project configuration.",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": "string"
+          },
+          "unique_id": {
+            "computed": true,
+            "description": "The unique id of the service account.",
+            "descriptionKind": "plain",
+            "type": "string"
+          }
+        },
+        "blocks": {
+          "timeouts": {
+            "block": {
+              "attributes": {
+                "create": {
+                  "optional": true,
+                  "type": "string"
+                }
+              },
+              "blocks": {}
+            },
+            "nesting": "single"
+          }
+        }
+      },
+      "schemaVersion": 0
+    },
+    "google_service_account_iam_member": {
+      "block": {
+        "attributes": {
+          "etag": {
+            "computed": true,
+            "type": "string"
+          },
+          "id": {
+            "computed": true,
+            "optional": true,
+            "type": "string"
+          },
+          "member": {
+            "required": true,
+            "type": "string"
+          },
+          "role": {
+            "required": true,
+            "type": "string"
+          },
+          "service_account_id": {
+            "required": true,
+            "type": "string"
+          }
+        },
+        "blocks": {
+          "condition": {
+            "block": {
+              "attributes": {
+                "description": {
+                  "optional": true,
+                  "type": "string"
+                },
+                "expression": {
+                  "required": true,
+                  "type": "string"
+                },
+                "title": {
+                  "required": true,
+                  "type": "string"
+                }
+              },
+              "blocks": {}
+            },
+            "maxItems": 1,
+            "nesting": "list"
+          }
+        }
+      },
+      "schemaVersion": 0
+    },
+    "google_iam_workload_identity_pool": {
+      "block": {
+        "attributes": {
+          "deletion_policy": {
+            "computed": true,
+            "description": "Whether Terraform will be prevented from destroying the instance. Defaults to \"DELETE\".\nWhen a 'terraform destroy' or 'terraform apply' would delete the instance,\nthe command will fail if this field is set to \"PREVENT\" in Terraform state.\nWhen set to \"ABANDON\", the command will remove the resource from Terraform\nmanagement without updating or deleting the resource in the API.\nWhen set to \"DELETE\", deleting the resource is allowed.\n",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": "string"
+          },
+          "description": {
+            "description": "A description of the pool. Cannot exceed 256 characters.",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": "string"
+          },
+          "disabled": {
+            "description": "Whether the pool is disabled. You cannot use a disabled pool to exchange tokens, or use\nexisting tokens to access resources. If the pool is re-enabled, existing tokens grant\naccess again.",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": "bool"
+          },
+          "display_name": {
+            "description": "A display name for the pool. Cannot exceed 32 characters.",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": "string"
+          },
+          "id": {
+            "computed": true,
+            "optional": true,
+            "type": "string"
+          },
+          "mode": {
+            "computed": true,
+            "description": "The mode for the pool is operating in. Pools with an unspecified mode will operate as if they\nare in 'FEDERATION_ONLY' mode.\n\n~> **Note** This field cannot be changed after the Workload Identity Pool is created. While\n'terraform plan' may show an update if you change this field's value, 'terraform apply'\n**will fail with an API error** (such as 'Error 400: Attempted to update an immutable field.').\nTo specify a different 'mode', please create a new Workload Identity Pool resource.\n\n* 'FEDERATION_ONLY': Pools can only be used for federating external workload identities into\nGoogle Cloud. Unless otherwise noted, no structure or format constraints are applied to\nworkload identities in a 'FEDERATION_ONLY' mode pool, and you may not create any resources\nwithin the pool besides providers.\n* 'TRUST_DOMAIN': Pools can be used to assign identities to Google Cloud workloads. All\nidentities within a 'TRUST_DOMAIN' mode pool must consist of a single namespace and individual\nworkload identifier. The subject identifier for all identities must conform to the following\nformat: 'ns/<namespace>/sa/<workload_identifier>'.\n'google_iam_workload_identity_pool_provider's cannot be created within 'TRUST_DOMAIN'\nmode pools.\n* 'SYSTEM_TRUST_DOMAIN': Pools are managed by Google Cloud services. Neither\n'google_iam_workload_identity_pool_namespace's nor 'google_iam_workload_identity_pool_provider's\ncan be created within 'SYSTEM_TRUST_DOMAIN' mode pools. All identities within a\n'SYSTEM_TRUST_DOMAIN' mode pool are in one of the following formats:\n\n    * 'spiffe://<trust-domain>/ns/<kubernetes-namespace>/sa/<kubernetes-service-account>'\n    * 'spiffe://<trust-domain>/resources/<resource-scope>/<resource-name>' Possible values: [\"FEDERATION_ONLY\", \"TRUST_DOMAIN\", \"SYSTEM_TRUST_DOMAIN\"]",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": "string"
+          },
+          "name": {
+            "computed": true,
+            "description": "The resource name of the pool as\n'projects/{project_number}/locations/global/workloadIdentityPools/{workload_identity_pool_id}'.",
+            "descriptionKind": "plain",
+            "type": "string"
+          },
+          "project": {
+            "computed": true,
+            "optional": true,
+            "type": "string"
+          },
+          "state": {
+            "computed": true,
+            "description": "The state of the pool.\n* 'STATE_UNSPECIFIED': State unspecified.\n* 'ACTIVE': The pool is active, and may be used in Google Cloud policies.\n* 'DELETED': The pool is soft-deleted. Soft-deleted pools are permanently deleted after\n  approximately 30 days. You can restore a soft-deleted pool using\n  'UndeleteWorkloadIdentityPool'. You cannot reuse the ID of a soft-deleted pool until it is\n  permanently deleted. While a pool is deleted, you cannot use it to exchange tokens, or\n  use existing tokens to access resources. If the pool is undeleted, existing tokens grant\n  access again.",
+            "descriptionKind": "plain",
+            "type": "string"
+          },
+          "workload_identity_pool_id": {
+            "description": "The ID to use for the pool, which becomes the final component of the resource name. This\nvalue should be 4-32 characters, and may contain the characters [a-z0-9-]. The prefix\n'gcp-' is reserved for use by Google, and may not be specified.",
+            "descriptionKind": "plain",
+            "required": true,
+            "type": "string"
+          }
+        },
+        "blocks": {
+          "attestation_rules": {
+            "block": {
+              "attributes": {
+                "google_cloud_resource": {
+                  "description": "A single workload operating on Google Cloud. For example:\n'//run.googleapis.com/projects/123/type/Service/*'.",
+                  "descriptionKind": "plain",
+                  "required": true,
+                  "type": "string"
+                }
+              },
+              "blocks": {},
+              "description": "Defines which workloads can receive an identity within a pool. When an AttestationRule is\ndefined under a managed identity, matching workloads may receive that identity. A maximum of\n50 AttestationRules can be set.",
+              "descriptionKind": "plain"
+            },
+            "nesting": "set"
+          },
+          "inline_certificate_issuance_config": {
+            "block": {
+              "attributes": {
+                "ca_pools": {
+                  "description": "A required mapping of a cloud region to the CA pool resource located in that region used\nfor certificate issuance, adhering to these constraints:\n\n* **Key format:** A supported cloud region name equivalent to the location identifier in\nthe corresponding map entry's value.\n* **Value format:** A valid CA pool resource path format like:\n'projects/{project}/locations/{location}/caPools/{ca_pool}'\n* **Region Matching:** Workloads are ONLY issued certificates from CA pools within the\nsame region. Also the CA pool region (in value) must match the workload's region (key).",
+                  "descriptionKind": "plain",
+                  "optional": true,
+                  "type": [
+                    "map",
+                    "string"
+                  ]
+                },
+                "key_algorithm": {
+                  "computed": true,
+                  "description": "Key algorithm to use when generating the key pair. This key pair will be used to create\nthe certificate. If unspecified, this will default to 'ECDSA_P256'.\n\n* 'RSA_2048': Specifies RSA with a 2048-bit modulus.\n* 'RSA_3072': Specifies RSA with a 3072-bit modulus.\n* 'RSA_4096': Specifies RSA with a 4096-bit modulus.\n* 'ECDSA_P256': Specifies ECDSA with curve P256.\n* 'ECDSA_P384': Specifies ECDSA with curve P384. Possible values: [\"RSA_2048\", \"RSA_3072\", \"RSA_4096\", \"ECDSA_P256\", \"ECDSA_P384\"]",
+                  "descriptionKind": "plain",
+                  "optional": true,
+                  "type": "string"
+                },
+                "lifetime": {
+                  "computed": true,
+                  "description": "Lifetime of the workload certificates issued by the CA pool in seconds. Must be between\n'86400s' (24 hours) to '2592000s' (30 days), ends in the suffix \"'s'\" (indicating seconds)\nand is preceded by the number of seconds. If unspecified, this will be defaulted to\n'86400s' (24 hours).",
+                  "descriptionKind": "plain",
+                  "optional": true,
+                  "type": "string"
+                },
+                "rotation_window_percentage": {
+                  "computed": true,
+                  "description": "Rotation window percentage indicating when certificate rotation should be initiated based\non remaining lifetime. Must be between '50' - '80'. If unspecified, this will be defaulted\nto '50'.",
+                  "descriptionKind": "plain",
+                  "optional": true,
+                  "type": "number"
+                },
+                "use_default_shared_ca": {
+                  "description": "If set to true, the trust domain will utilize the GCP-provisioned default CA. A default\nCA in the same region as the workload will be selected to issue the certificate. Enabling\nthis will clear any existing 'ca_pools' configuration to provision the certificates.\n\n~> **Note** This field is mutually exclusive with 'ca_pools'. If this flag is enabled,\ncertificates will be automatically provisioned from the default shared CAs. This flag should\nnot be set if you want to use your own CA pools to provision the certificates.",
+                  "descriptionKind": "plain",
+                  "optional": true,
+                  "type": "bool"
+                }
+              },
+              "blocks": {},
+              "description": "Represents configuration for generating mutual TLS (mTLS) certificates for the identities\nwithin this pool. Defines the Certificate Authority (CA) pool resources and configurations\nrequired for issuance and rotation of mTLS workload certificates.",
+              "descriptionKind": "plain"
+            },
+            "maxItems": 1,
+            "nesting": "list"
+          },
+          "inline_trust_config": {
+            "block": {
+              "attributes": {},
+              "blocks": {
+                "additional_trust_bundles": {
+                  "block": {
+                    "attributes": {
+                      "trust_default_shared_ca": {
+                        "description": "If set to True, the trust bundle will include the private ca managed identity regional root\npublic certificates.\n\n~> **Note** 'trust_default_shared_ca' is only supported for managed identity trust domain\nresource.",
+                        "descriptionKind": "plain",
+                        "optional": true,
+                        "type": "bool"
+                      },
+                      "trust_domain": {
+                        "required": true,
+                        "type": "string"
+                      }
+                    },
+                    "blocks": {
+                      "trust_anchors": {
+                        "block": {
+                          "attributes": {
+                            "pem_certificate": {
+                              "description": "PEM certificate of the PKI used for validation. Must only contain one ca\ncertificate(either root or intermediate cert).",
+                              "descriptionKind": "plain",
+                              "required": true,
+                              "type": "string"
+                            }
+                          },
+                          "blocks": {},
+                          "description": "List of Trust Anchors to be used while performing validation against a given\n'TrustStore'. The incoming end entity's certificate must be chained up to one of the\ntrust anchors here.",
+                          "descriptionKind": "plain"
+                        },
+                        "minItems": 1,
+                        "nesting": "list"
+                      }
+                    },
+                    "description": "Maps specific trust domains (e.g., \"example.com\") to their corresponding 'TrustStore'\nobjects, which contain the trusted root certificates for that domain. There can be a\nmaximum of '10' trust domain entries in this map.\n\nNote that a trust domain automatically trusts itself and don't need to be specified here.\nIf however, this 'WorkloadIdentityPool''s trust domain contains any trust anchors in the\n'additional_trust_bundles' map, those trust anchors will be *appended to* the Trust Bundle\nautomatically derived from your 'InlineCertificateIssuanceConfig''s 'ca_pools'.",
+                    "descriptionKind": "plain"
+                  },
+                  "nesting": "set"
+                }
+              },
+              "description": "Represents config to add additional trusted trust domains. Defines configuration for extending\ntrust to additional trust domains. By establishing trust with another domain, the current\ndomain will recognize and accept certificates issued by entities within the trusted domains.\nNote that a trust domain automatically trusts itself, eliminating the need for explicit\nconfiguration.",
+              "descriptionKind": "plain"
+            },
+            "maxItems": 1,
+            "nesting": "list"
+          },
+          "timeouts": {
+            "block": {
+              "attributes": {
+                "create": {
+                  "optional": true,
+                  "type": "string"
+                },
+                "delete": {
+                  "optional": true,
+                  "type": "string"
+                },
+                "update": {
+                  "optional": true,
+                  "type": "string"
+                }
+              },
+              "blocks": {}
+            },
+            "nesting": "single"
+          }
+        }
+      },
+      "schemaVersion": 0
+    },
+    "google_iam_workload_identity_pool_provider": {
+      "block": {
+        "attributes": {
+          "attribute_condition": {
+            "description": "[A Common Expression Language](https://github.com/google/cel-spec) expression, in\nplain text, to restrict what otherwise valid authentication credentials issued by the\nprovider should not be accepted.\n\nThe expression must output a boolean representing whether to allow the federation.\n\nThe following keywords may be referenced in the expressions:\n  * 'assertion': JSON representing the authentication credential issued by the provider.\n  * 'google': The Google attributes mapped from the assertion in the 'attribute_mappings'.\n  * 'attribute': The custom attributes mapped from the assertion in the 'attribute_mappings'.\n\nThe maximum length of the attribute condition expression is 4096 characters. If\nunspecified, all valid authentication credential are accepted.\n\nThe following example shows how to only allow credentials with a mapped 'google.groups'\nvalue of 'admins':\n'''\n\"'admins' in google.groups\"\n'''",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": "string"
+          },
+          "attribute_mapping": {
+            "description": "Maps attributes from authentication credentials issued by an external identity provider\nto Google Cloud attributes, such as 'subject' and 'segment'.\n\nEach key must be a string specifying the Google Cloud IAM attribute to map to.\n\nThe following keys are supported:\n  * 'google.subject': The principal IAM is authenticating. You can reference this value\n    in IAM bindings. This is also the subject that appears in Cloud Logging logs.\n    Cannot exceed 127 characters.\n  * 'google.groups': Groups the external identity belongs to. You can grant groups\n    access to resources using an IAM 'principalSet' binding; access applies to all\n    members of the group.\n\nYou can also provide custom attributes by specifying 'attribute.{custom_attribute}',\nwhere '{custom_attribute}' is the name of the custom attribute to be mapped. You can\ndefine a maximum of 50 custom attributes. The maximum length of a mapped attribute key\nis 100 characters, and the key may only contain the characters [a-z0-9_].\n\nYou can reference these attributes in IAM policies to define fine-grained access for a\nworkload to Google Cloud resources. For example:\n  * 'google.subject':\n    'principal://iam.googleapis.com/projects/{project}/locations/{location}/workloadIdentityPools/{pool}/subject/{value}'\n  * 'google.groups':\n    'principalSet://iam.googleapis.com/projects/{project}/locations/{location}/workloadIdentityPools/{pool}/group/{value}'\n  * 'attribute.{custom_attribute}':\n    'principalSet://iam.googleapis.com/projects/{project}/locations/{location}/workloadIdentityPools/{pool}/attribute.{custom_attribute}/{value}'\n\nEach value must be a [Common Expression Language](https://github.com/google/cel-spec)\nfunction that maps an identity provider credential to the normalized attribute specified\nby the corresponding map key.\n\nYou can use the 'assertion' keyword in the expression to access a JSON representation of\nthe authentication credential issued by the provider.\n\nThe maximum length of an attribute mapping expression is 2048 characters. When evaluated,\nthe total size of all mapped attributes must not exceed 8KB.\n\nFor AWS providers, the following rules apply:\n  - If no attribute mapping is defined, the following default mapping applies:\n    '''\n    {\n      \"google.subject\":\"assertion.arn\",\n      \"attribute.aws_role\":\n        \"assertion.arn.contains('assumed-role')\"\n        \" ? assertion.arn.extract('{account_arn}assumed-role/')\"\n        \"   + 'assumed-role/'\"\n        \"   + assertion.arn.extract('assumed-role/{role_name}/')\"\n        \" : assertion.arn\",\n    }\n    '''\n  - If any custom attribute mappings are defined, they must include a mapping to the\n    'google.subject' attribute.\n\nFor OIDC providers, the following rules apply:\n  - Custom attribute mappings must be defined, and must include a mapping to the\n    'google.subject' attribute. For example, the following maps the 'sub' claim of the\n    incoming credential to the 'subject' attribute on a Google token.\n    '''\n    {\"google.subject\": \"assertion.sub\"}\n    '''",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": [
+              "map",
+              "string"
+            ]
+          },
+          "deletion_policy": {
+            "computed": true,
+            "description": "Whether Terraform will be prevented from destroying the instance. Defaults to \"DELETE\".\nWhen a 'terraform destroy' or 'terraform apply' would delete the instance,\nthe command will fail if this field is set to \"PREVENT\" in Terraform state.\nWhen set to \"ABANDON\", the command will remove the resource from Terraform\nmanagement without updating or deleting the resource in the API.\nWhen set to \"DELETE\", deleting the resource is allowed.\n",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": "string"
+          },
+          "description": {
+            "description": "A description for the provider. Cannot exceed 256 characters.",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": "string"
+          },
+          "disabled": {
+            "description": "Whether the provider is disabled. You cannot use a disabled provider to exchange tokens.\nHowever, existing tokens still grant access.",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": "bool"
+          },
+          "display_name": {
+            "description": "A display name for the provider. Cannot exceed 32 characters.",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": "string"
+          },
+          "id": {
+            "computed": true,
+            "optional": true,
+            "type": "string"
+          },
+          "name": {
+            "computed": true,
+            "description": "The resource name of the provider as\n'projects/{project_number}/locations/global/workloadIdentityPools/{workload_identity_pool_id}/providers/{workload_identity_pool_provider_id}'.",
+            "descriptionKind": "plain",
+            "type": "string"
+          },
+          "project": {
+            "computed": true,
+            "optional": true,
+            "type": "string"
+          },
+          "state": {
+            "computed": true,
+            "description": "The state of the provider.\n* STATE_UNSPECIFIED: State unspecified.\n* ACTIVE: The provider is active, and may be used to validate authentication credentials.\n* DELETED: The provider is soft-deleted. Soft-deleted providers are permanently deleted\n  after approximately 30 days. You can restore a soft-deleted provider using\n  UndeleteWorkloadIdentityPoolProvider. You cannot reuse the ID of a soft-deleted provider\n  until it is permanently deleted.",
+            "descriptionKind": "plain",
+            "type": "string"
+          },
+          "workload_identity_pool_id": {
+            "description": "The ID used for the pool, which is the final component of the pool resource name. This\nvalue should be 4-32 characters, and may contain the characters [a-z0-9-]. The prefix\n'gcp-' is reserved for use by Google, and may not be specified.",
+            "descriptionKind": "plain",
+            "required": true,
+            "type": "string"
+          },
+          "workload_identity_pool_provider_id": {
+            "description": "The ID for the provider, which becomes the final component of the resource name. This\nvalue must be 4-32 characters, and may contain the characters [a-z0-9-]. The prefix\n'gcp-' is reserved for use by Google, and may not be specified.",
+            "descriptionKind": "plain",
+            "required": true,
+            "type": "string"
+          }
+        },
+        "blocks": {
+          "aws": {
+            "block": {
+              "attributes": {
+                "account_id": {
+                  "description": "The AWS account ID.",
+                  "descriptionKind": "plain",
+                  "required": true,
+                  "type": "string"
+                }
+              },
+              "blocks": {},
+              "description": "An Amazon Web Services identity provider. Not compatible with the property oidc or saml.",
+              "descriptionKind": "plain"
+            },
+            "maxItems": 1,
+            "nesting": "list"
+          },
+          "oidc": {
+            "block": {
+              "attributes": {
+                "allowed_audiences": {
+                  "description": "Acceptable values for the 'aud' field (audience) in the OIDC token. Token exchange\nrequests are rejected if the token audience does not match one of the configured\nvalues. Each audience may be at most 256 characters. A maximum of 10 audiences may\nbe configured.\n\nIf this list is empty, the OIDC token audience must be equal to the full canonical\nresource name of the WorkloadIdentityPoolProvider, with or without the HTTPS prefix.\nFor example:\n'''\n//iam.googleapis.com/projects/<project-number>/locations/<location>/workloadIdentityPools/<pool-id>/providers/<provider-id>\nhttps://iam.googleapis.com/projects/<project-number>/locations/<location>/workloadIdentityPools/<pool-id>/providers/<provider-id>\n'''",
+                  "descriptionKind": "plain",
+                  "optional": true,
+                  "type": [
+                    "list",
+                    "string"
+                  ]
+                },
+                "issuer_uri": {
+                  "description": "The OIDC issuer URL.",
+                  "descriptionKind": "plain",
+                  "required": true,
+                  "type": "string"
+                },
+                "jwks_json": {
+                  "description": "OIDC JWKs in JSON String format. For details on definition of a\nJWK, see https:tools.ietf.org/html/rfc7517. If not set, then we\nuse the 'jwks_uri' from the discovery document fetched from the\n.well-known path for the 'issuer_uri'. Currently, RSA and EC asymmetric\nkeys are supported. The JWK must use following format and include only\nthe following fields:\n'''\n{\n  \"keys\": [\n    {\n          \"kty\": \"RSA/EC\",\n          \"alg\": \"<algorithm>\",\n          \"use\": \"sig\",\n          \"kid\": \"<key-id>\",\n          \"n\": \"\",\n          \"e\": \"\",\n          \"x\": \"\",\n          \"y\": \"\",\n          \"crv\": \"\"\n    }\n  ]\n}\n'''",
+                  "descriptionKind": "plain",
+                  "optional": true,
+                  "type": "string"
+                }
+              },
+              "blocks": {},
+              "description": "An OpenId Connect 1.0 identity provider. Not compatible with the property aws or saml.",
+              "descriptionKind": "plain"
+            },
+            "maxItems": 1,
+            "nesting": "list"
+          },
+          "saml": {
+            "block": {
+              "attributes": {
+                "idp_metadata_xml": {
+                  "description": "SAML Identity provider configuration metadata xml doc.",
+                  "descriptionKind": "plain",
+                  "required": true,
+                  "type": "string"
+                }
+              },
+              "blocks": {},
+              "description": "An SAML 2.0 identity provider. Not compatible with the property oidc or aws.",
+              "descriptionKind": "plain"
+            },
+            "maxItems": 1,
+            "nesting": "list"
+          },
+          "timeouts": {
+            "block": {
+              "attributes": {
+                "create": {
+                  "optional": true,
+                  "type": "string"
+                },
+                "delete": {
+                  "optional": true,
+                  "type": "string"
+                },
+                "update": {
+                  "optional": true,
+                  "type": "string"
+                }
+              },
+              "blocks": {}
+            },
+            "nesting": "single"
+          },
+          "x509": {
+            "block": {
+              "attributes": {},
+              "blocks": {
+                "trust_store": {
+                  "block": {
+                    "attributes": {},
+                    "blocks": {
+                      "intermediate_cas": {
+                        "block": {
+                          "attributes": {
+                            "pem_certificate": {
+                              "description": "PEM certificate of the PKI used for validation. Must only contain one\nca certificate(either root or intermediate cert).",
+                              "descriptionKind": "plain",
+                              "optional": true,
+                              "type": "string"
+                            }
+                          },
+                          "blocks": {},
+                          "description": "Set of intermediate CA certificates used for building the trust chain to\ntrust anchor.\nIMPORTANT: Intermediate CAs are only supported when configuring x509 federation.",
+                          "descriptionKind": "plain"
+                        },
+                        "nesting": "list"
+                      },
+                      "trust_anchors": {
+                        "block": {
+                          "attributes": {
+                            "pem_certificate": {
+                              "description": "PEM certificate of the PKI used for validation. Must only contain one\nca certificate(either root or intermediate cert).",
+                              "descriptionKind": "plain",
+                              "optional": true,
+                              "type": "string"
+                            }
+                          },
+                          "blocks": {},
+                          "description": "List of Trust Anchors to be used while performing validation\nagainst a given TrustStore. The incoming end entity's certificate\nmust be chained up to one of the trust anchors here.",
+                          "descriptionKind": "plain"
+                        },
+                        "minItems": 1,
+                        "nesting": "list"
+                      }
+                    },
+                    "description": "A Trust store, use this trust store as a wrapper to config the trust\nanchor and optional intermediate cas to help build the trust chain for\nthe incoming end entity certificate. Follow the x509 guidelines to\ndefine those PEM encoded certs. Only 1 trust store is currently\nsupported.",
+                    "descriptionKind": "plain"
+                  },
+                  "maxItems": 1,
+                  "minItems": 1,
+                  "nesting": "list"
+                }
+              },
+              "description": "An X.509-type identity provider represents a CA. It is trusted to assert a\nclient identity if the client has a certificate that chains up to this CA.",
+              "descriptionKind": "plain"
+            },
+            "maxItems": 1,
+            "nesting": "list"
+          }
+        }
+      },
+      "schemaVersion": 0
+    }
+  },
+  "source": "hashicorp/google",
+  "version": "8.7.0"
+}
