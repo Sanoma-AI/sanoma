@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { calculateInvoice, InvoiceValidationError, type InvoiceIssue, type InvoiceTotals } from "./calculate.ts";
 import { validateLogo } from "./logo.ts";
+export { validateLogo } from "./logo.ts";
 
 export const pdfLimits = {
   lines: 100,

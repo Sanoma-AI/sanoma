@@ -46,7 +46,7 @@ The separate `@sanoma-ai/invoices/examples` entry point exports fictional `petSi
 
 Calculation and adapter failures throw `InvoiceValidationError`, with `code: "invalid_invoice"` and serializable `issues: { code, path, message }[]`. Paths identify fields, including row indices. Adapters map calculation paths back to their `services` rows. Errors do not include submitted field values. Unexpected programming failures are not converted to validation errors.
 
-The package performs no persistence. A browser consumer can keep form state in memory and use native autocomplete; saving data or arranging automation belongs to a separate Sanoma experience. The browser editor and durable workflow operation are separate follow-up surfaces.
+The package performs no persistence. A browser consumer can keep form state in memory and use native autocomplete; saving data or arranging automation belongs to a separate Sanoma experience. The [browser editor](../app/README.md#stateless-invoice-editor) and [durable workflow operation](../../connectors/invoices/README.md) are separate consumers of this package.
 
 ## PDF rendering
 
@@ -85,4 +85,4 @@ Run `pnpm --filter @sanoma-ai/invoices smoke:browser /tmp/invoice-proof` with Go
 
 A local verification on 2026-10-30 (macOS arm64, Node 26.12.1, Chrome 156.0.8078.76, React-pdf 4.9.0) measured a 1,329,433-byte minified consumer bundle including fixtures. The three one-page examples took 12–73 ms in Chrome; the 40-row, nine-page example took 104 ms. At 4x CPU throttling they took 45–106 ms and 466 ms respectively. These are single local runs, not throughput benchmarks or mobile-device guarantees. The four examples plus a French-currency/PNG-logo case matched Node's extracted content, page dimensions/counts and totals; final PDFs were also rasterized for visual inspection.
 
-The `@sanoma-ai/invoices/pdf-contract` entry exports PDF option validation, limits and error types without loading the React PDF engine. Workflow execution is provided separately by [`@sanoma-ai/connector-invoices`](../../connectors/invoices/README.md), whose bounded JSON result is suitable for durable checkpoints.
+The `@sanoma-ai/invoices/pdf-contract` entry exports PDF option validation, limits and error types without loading the React PDF engine. Its `validateLogo(base64)` validates and sanitizes supported PNG bytes and returns a data URI, so forms can reject unsupported assets before rendering. Workflow execution is provided separately by [`@sanoma-ai/connector-invoices`](../../connectors/invoices/README.md), whose bounded JSON result is suitable for durable checkpoints.
