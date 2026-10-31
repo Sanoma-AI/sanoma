@@ -60,6 +60,26 @@ describe("changedSince", () => {
     commit({ "packages/a/package.json": manifest("0.1.0") });
     expect(changedSince(pkg, root)).toEqual([]);
   });
+
+  it("ignores side-branch history already included in a squash release, but still detects later changes", () => {
+    git("checkout", "-qb", "feature");
+    commit({ "packages/a/src/index.ts": "2" });
+    git("checkout", "-q", "main");
+    git("merge", "--squash", "feature");
+    git("commit", "-qm", "Squash feature");
+    commit({ "packages/a/package.json": manifest("0.1.1") });
+    git("checkout", "-q", "feature");
+    git("merge", "--no-ff", "-qm", "Integrate release", "main");
+    expect(changedSince(pkg, root)).toEqual([]);
+    const next = commit({ "packages/a/src/index.ts": "3" });
+    expect(changedSince(pkg, root)).toContain(next);
+  });
+
+  it("ignores source edits that were fully reverted before release", () => {
+    commit({ "packages/a/src/index.ts": "2" });
+    commit({ "packages/a/src/index.ts": "1" });
+    expect(changedSince(pkg, root)).toEqual([]);
+  });
 });
 
 describe("releaseCheck", () => {
