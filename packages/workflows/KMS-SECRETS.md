@@ -8,7 +8,7 @@ One company runs in one process with its own database authority and **GCP identi
 
 The proposed default is one symmetric SOFTWARE CryptoKey per company and environment, with keys grouped in a shared environment key ring/project. HSM protection is an independent provisioning choice, with different pricing; per-company software keys do not imply HSM protection. Separate production and test identities, keys and databases.
 
-This adapter is not a deployed Cloud boundary. D1 implementation is tracked in [#492](https://github.com/Sanoma-AI/sanoma/issues/492) and [draft PR #496](https://github.com/Sanoma-AI/sanoma/pull/496); deployment and positive/negative IAM proof on the intended host remain required. A Cloudflare deployment does not automatically have a Google identity. Workload Identity Federation or another approved refreshable credential route must bind the authenticated workload to its company; tenant code cannot select or impersonate other companies. The adapter provisions no identities, keys, database grants or shared service.
+This adapter is not a production Cloud deployment. D1 implementation is tracked in [#492](https://github.com/Sanoma-AI/sanoma/issues/492) and [PR #496](https://github.com/Sanoma-AI/sanoma/pull/496). Isolated live IAM tests have passed; intended-host deployment and rollout checks remain separate. A Cloudflare deployment does not automatically have a Google identity. Workload Identity Federation or another approved refreshable credential route must bind the authenticated workload to its company; tenant code cannot select or impersonate other companies. The adapter provisions no identities, keys, database grants or shared service.
 
 ```ts
 import { KeyManagementServiceClient } from "@google-cloud/kms";
@@ -70,7 +70,7 @@ Values larger than 65,536 UTF-8 bytes are rejected. No plaintext or data-key cac
 
 There are three different rotations:
 
-- **KMS version rotation:** a new primary version under the same CryptoKey. New writes use it; existing rows still decrypt through their original enabled versions, without configuration changes. Automatic rotation does not rewrite old rows.
+- **KMS version rotation:** a new primary version under the same CryptoKey. After the primary change propagates, new writes use it; existing rows still decrypt through their original enabled versions, without configuration changes. Automatic rotation does not rewrite old rows.
 - **CryptoKey replacement:** change `keyName` and retain old company keys in `decryptKeyNames`. Read and rewrite old rows with their expected versions; conflict means reread rather than overwrite. This draft supports those primitives, not an automatic migration worker. Backups may still need the old keys.
 - **Vendor credential rotation:** obtain a new API key or refresh an OAuth token, then save the new value. KMS rotation does not rotate vendor credentials or remove a compromised runtime's access.
 
@@ -94,4 +94,6 @@ Focused tests use real local Postgres and AES-GCM with a GCP transport/IAM model
 
 The opt-in live suite requires two pre-provisioned test CryptoKeys and separate identities, each authorized only on its own key. Configure `SANOMA_GCP_KMS_LIVE=1`, `SANOMA_GCP_KMS_LIVE_KEY`, `SANOMA_GCP_KMS_LIVE_OTHER_KEY`, `SANOMA_GCP_KMS_LIVE_CREDENTIALS` and `SANOMA_GCP_KMS_LIVE_OTHER_CREDENTIALS`; the latter two name ignored SDK credential/federation configuration files. Use the isolated `SANOMA_TEST_DATABASE_URL` and run `pnpm vitest run packages/workflows/test/kms-secrets-live.test.ts`.
 
-The suite creates no cloud resources and cleans only its own synthetic Postgres rows. Its positive checks prevent nonexistent/disabled keys from masquerading as an isolation proof. Local modeled tests do not establish real IAM isolation. No live GCP verification, workload issuer or production provisioning is claimed by this draft.
+The suite creates no cloud resources and cleans only its own synthetic Postgres rows. Its positive checks prevent nonexistent/disabled keys from masquerading as an isolation proof. Local modeled tests do not establish real IAM isolation.
+
+Live verification on `sanoma-513217` passed at `c3c293d0bc48cbcf66adf8e0cb0c57f500e686bc`: store conformance and two-way encrypt/decrypt denial between two existing company keys under distinct scoped identities. A separate run also proved production/preview denial in both directions. Positive own-key operations passed before each negative check. The local SDK used explicit service-account impersonation through the administrator’s OAuth session, with no service-account private keys. A separate temporary Cloud Run broker proof exercised the SDK/store against remote company databases, cross-key denials and KMS primary-version rotation: old ciphertext remained readable and new writes adopted the new primary after propagation. These are isolated synthetic resources, not a managed-hosting rollout; runtime renewal and production deployment evidence belong to D1.
