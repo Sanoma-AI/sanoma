@@ -1,6 +1,6 @@
 {
   "name": "@sanoma-ai/workflows",
-  "version": "0.10.1",
+  "version": "0.10.2",
   "description": "Business processes as TypeScript functions, run durably on DBOS",
   "keywords": [
     "approvals",
@@ -24,8 +24,10 @@
     "!src/AGENTS.md",
     "oxlint.json",
     "README.md",
+    "LICENSE",
     "SECRET-SUPPORT.md",
-    "LICENSE"
+    "CLOUD-IDENTITY.md",
+    "KMS-SECRETS.md"
   ],
   "type": "module",
   "sideEffects": false,
@@ -75,6 +77,14 @@
     "./wakeup-service": {
       "types": "./dist/wakeup-service.d.ts",
       "default": "./dist/wakeup-service.js"
+    },
+    "./cloud-identity": {
+      "types": "./dist/cloud-identity.d.ts",
+      "default": "./dist/cloud-identity.js"
+    },
+    "./kms-secrets": {
+      "types": "./dist/kms-secrets.d.ts",
+      "default": "./dist/kms-secrets.js"
     }
   },
   "publishConfig": {
@@ -95,7 +105,10 @@
     "@cucumber/query": "16.1.1",
     "@dbos-inc/dbos-sdk": "^5.2.11",
     "@faker-js/faker": "^10.6.0",
+    "@google-cloud/kms": "^6.3.0",
     "ai": "7.0.153",
+    "crc-32": "^1.2.2",
+    "google-auth-library": "^11.3.2",
     "oxc-parser": "^0.153.0",
     "oxfmt": "^0.72.0",
     "pg": "^8.23.1",

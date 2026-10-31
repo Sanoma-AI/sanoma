@@ -1,0 +1,7 @@
+{
+  "hashicorp/google": {
+    "version": "8.7.0",
+    "sha256": "6cdda89470cd3dbcb6d60ec54134ae608d3775fd47bd80d7762ce5428da56a3d",
+    "note": "Verified OpenTofu registry release, signing key 0C0AF313E5FD9F80. Schema recorded with provider-bridge v0.2.0; retained provider configuration and seven selected resource schemas, omitted unrelated resources/data sources."
+  }
+}

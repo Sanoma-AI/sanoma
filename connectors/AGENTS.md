@@ -1,6 +1,6 @@
 # connectors
 
-One workspace package per vendor, each built on `@sanoma-ai/workflows`. A connector package exports one constant, the vendor's operations with its live driver, its in-memory fake and its steps for Gherkin tests attached (`withSetup`), so a config names the connector alone. A vendor with an OpenTofu provider (Docker, GitHub, Stripe, Supabase) is one `tfConnector` record from [`@sanoma-ai/bridge/connector`](../packages/bridge/README.md#connectors-for-opentofu-providers) over the types `pnpm generate` writes, which gives its resource types, connector, driver and fake.
+One workspace package per vendor, each built on `@sanoma-ai/workflows`. A connector package exports one constant, the vendor's operations with its live driver, its in-memory fake and its steps for Gherkin tests attached (`withSetup`), so a config names the connector alone. A vendor with an OpenTofu provider (Docker, GCP, GitHub, Stripe, Supabase) is one `tfConnector` record from [`@sanoma-ai/bridge/connector`](../packages/bridge/README.md#connectors-for-opentofu-providers) over the types `pnpm generate` writes, which gives its resource types, connector, driver and fake.
 
 ## Contents
 
@@ -12,6 +12,7 @@ One workspace package per vendor, each built on `@sanoma-ai/workflows`. A connec
 | [`cloudflare/`](cloudflare/AGENTS.md)   | `@sanoma-ai/connector-cloudflare`: a Container host that stops when quiet, and its Durable Object alarm that wakes it |
 | [`docker/`](docker/AGENTS.md)           | `@sanoma-ai/connector-docker`: the local Docker host, a container that runs the company                               |
 | [`exa/`](exa/AGENTS.md)                 | `@sanoma-ai/connector-exa`: Exa web search, page contents, similar pages and answers, and an in-memory fake           |
+| [`gcp/`](gcp/AGENTS.md)                 | `@sanoma-ai/connector-gcp`: KMS/IAM provisioning with named OIDC workload identities and isolated provider sessions   |
 | [`ghost/`](ghost/AGENTS.md)             | `@sanoma-ai/connector-ghost`: Ghost Admin API post operations and an in-memory fake                                   |
 | [`github/`](github/AGENTS.md)           | `@sanoma-ai/connector-github`: GitHub resources read through its OpenTofu provider, and pull requests (a remote half) |
 | [`neon/`](neon/AGENTS.md)               | `@sanoma-ai/connector-neon`: Neon projects (the company's database, which pauses and branches), branches and computes |
@@ -23,7 +24,7 @@ One workspace package per vendor, each built on `@sanoma-ai/workflows`. A connec
 
 Where a connector's calls come from, in order; the schemas are hand-written Zod in every case, whatever carries the calls:
 
-1. **Resources** (things a company creates and keeps in sync): the vendor's OpenTofu/Terraform provider through the bridge, as a `tfConnector` record (Docker, GitHub, Stripe, Supabase).
+1. **Resources** (things a company creates and keeps in sync): the vendor's OpenTofu/Terraform provider through the bridge, as a `tfConnector` record (Docker, GCP, GitHub, Stripe, Supabase).
 2. **Operations**: the vendor's officially supported TypeScript SDK as the transport, when one exists and is maintained (Bluesky's `@atproto/api`, Exa's `exa-js`, Cloudflare's `cloudflare`, which carries its container and alarm resources too: the Worker they run is the package's own code, uploaded with them, and Neon's `@neondatabase/api-client`, which carries its project resource).
 3. No official SDK: a client generated from the vendor's published OpenAPI spec with Hey API, pinned to a commit and cut to the operations called, in `src/generated/`, never edited by hand (Resend).
 4. Neither: a driver hand-written on `fetch`, the last resort (Ghost).

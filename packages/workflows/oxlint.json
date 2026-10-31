@@ -100,6 +100,8 @@
                   "@sanoma-ai/workflows/plugin",
                   "@sanoma-ai/workflows/scenario",
                   "@sanoma-ai/workflows/scenarios",
+                  "@sanoma-ai/workflows/cloud-identity",
+                  "@sanoma-ai/workflows/kms-secrets",
                   "@sanoma-ai/workflows/wakeup-service"
                 ],
                 "message": "A workflow must call vendors through ctx, so the policy sees every call: import the connector itself, `@sanoma-ai/connector-<vendor>`."

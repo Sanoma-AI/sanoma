@@ -12,6 +12,7 @@
     "paths": {
       "@sanoma-ai/workflows": ["./packages/workflows/src/index.ts"],
       "@sanoma-ai/workflows/data": ["./packages/workflows/src/data.ts"],
+      "@sanoma-ai/workflows/cloud-identity": ["./packages/workflows/src/cloud-identity.ts"],
       "@sanoma-ai/workflows/describe": ["./packages/workflows/src/describe.ts"],
       "@sanoma-ai/workflows/description": ["./packages/workflows/src/description.ts"],
       "@sanoma-ai/workflows/fake": ["./packages/workflows/src/fake.ts"],
@@ -20,6 +21,7 @@
       "@sanoma-ai/workflows/scenario": ["./packages/workflows/src/scenario.ts"],
       "@sanoma-ai/workflows/scenarios": ["./packages/workflows/src/scenarios.ts"],
       "@sanoma-ai/workflows/shared": ["./packages/workflows/src/shared.ts"],
+      "@sanoma-ai/workflows/kms-secrets": ["./packages/workflows/src/kms-secrets.ts"],
       "@sanoma-ai/workflows/wakeup-service": ["./packages/workflows/src/wakeup-service.ts"],
       "@sanoma-ai/testing": ["./packages/testing/src/index.ts"],
       "@sanoma-ai/testing/database": ["./packages/testing/src/database.ts"],

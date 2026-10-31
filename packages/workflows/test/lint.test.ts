@@ -10,6 +10,11 @@ import { ensureBuilt } from "./build.ts";
 const messages = (src: string, filename?: string) => lintWorkflow(src, filename).map((p) => p.message);
 
 describe("lintWorkflow", () => {
+  it("refuses runtime identity access in workflow code", () => {
+    expect(messages('import { cloudIdentityAuth } from "@sanoma-ai/workflows/cloud-identity";')).toEqual([
+      expect.stringMatching(/import .*cloud-identity.*not allowed/),
+    ]);
+  });
   it("passes the example workflow", () => {
     const src = readFileSync(new URL("./fixtures/announce.ts", import.meta.url), "utf8");
     expect(lintWorkflow(src)).toEqual([]);
@@ -61,6 +66,12 @@ describe("lintWorkflow", () => {
       expect.stringMatching(/^import "@sanoma-ai\/connector-github\/remote" .*through ctx/),
       expect.stringMatching(/^import "@sanoma-ai\/app" .*approve itself/),
       expect.stringMatching(/^import "\.\.\/sanoma\.config\.ts" .*outside workflows\/.*through ctx/),
+    ]);
+  });
+
+  it("refuses the KMS store entry in workflows", () => {
+    expect(messages('import { kmsPostgresStore } from "@sanoma-ai/workflows/kms-secrets";')).toEqual([
+      expect.stringMatching(/import .*kms-secrets.*not allowed/),
     ]);
   });
 
