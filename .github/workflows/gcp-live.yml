@@ -1,0 +1,36 @@
+name: GCP live verification
+on:
+  workflow_dispatch:
+  # Temporary bootstrap trigger while this workflow is not on main; remove after verification.
+  push:
+    branches: [task/489-gcp-provisioning]
+    paths: [.github/workflows/gcp-live.yml]
+permissions:
+  contents: read
+  id-token: write
+concurrency:
+  group: gcp-live-verification
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SANOMA_GCP_PROVISION_LIVE: "1"
+      SANOMA_GCP_LIVE_PROJECT: sanoma-513217
+      SANOMA_GCP_LIVE_PROJECT_NUMBER: "599722402477"
+      SANOMA_GCP_LIVE_PROVISIONER: s455-proof-provision@sanoma-513217.iam.gserviceaccount.com
+      SANOMA_GCP_LIVE_OTHER_ACCOUNT: s455-proof-b@sanoma-513217.iam.gserviceaccount.com
+      SANOMA_GCP_LIVE_RING: projects/sanoma-513217/locations/us-central1/keyRings/sanoma-455-proof-20261030
+      SANOMA_GCP_LIVE_AUDIENCE: //iam.googleapis.com/projects/599722402477/locations/global/workloadIdentityPools/sanoma-455-proof/providers/github
+      SANOMA_BRIDGE_BIN: ${{ runner.temp }}/provider-bridge
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca
+        with:
+          cache: false
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm bridge:download --out "$SANOMA_BRIDGE_BIN"
+      - run: pnpm vitest run connectors/gcp/test/live.test.ts
