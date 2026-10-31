@@ -145,3 +145,5 @@ export {
 } from "./components/kit.tsx";
 export type { Tone } from "./lib/tone.ts";
 export { useDensity } from "./components/density.tsx";
+
+export { InvoiceEditor, type InvoiceEditorProps } from "./components/invoice-editor/index.tsx";

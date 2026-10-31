@@ -16,6 +16,7 @@
 /* The kit's classes, relative to this file, so also from an install, where Tailwind does not look. */
 @source "./components/ui";
 @source "./components/kit.tsx";
+@source "./components/invoice-editor";
 @source "./lib/tone.ts";
 
 @custom-variant dark (&:is(.dark *));

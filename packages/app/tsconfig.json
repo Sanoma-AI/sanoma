@@ -5,6 +5,9 @@
     // Source, as in the root tsconfig. Keep in sync with its `paths`. (`#/*` is package.json's
     // `imports`, which TypeScript, Vite and the shadcn CLI all read.)
     "paths": {
+      "@sanoma-ai/invoices": ["../invoices/src/index.ts"],
+      "@sanoma-ai/invoices/browser": ["../invoices/src/browser.ts"],
+      "@sanoma-ai/invoices/pdf-contract": ["../invoices/src/render-contract.ts"],
       "@sanoma-ai/workflows": ["../workflows/src/index.ts"],
       "@sanoma-ai/workflows/describe": ["../workflows/src/describe.ts"],
       "@sanoma-ai/workflows/description": ["../workflows/src/description.ts"],

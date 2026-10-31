@@ -1,9 +1,10 @@
 import { execFile } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { executablePath, launch } from "puppeteer-core";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ensureBuilt, repo as checkout, serving } from "./fixture.ts";
@@ -31,7 +32,9 @@ const manifest = (dir: string) => JSON.parse(readFileSync(join(checkout, "packag
 /** `sanoma`'s dependencies in this workspace, `@sanoma-ai/<dir>` each: packed, as `sanoma` is, into `vendor/<dir>.tgz`. */
 const workspace = Object.entries(manifest("sanoma").dependencies as Record<string, string>)
   .filter(([, range]) => range.startsWith("workspace:"))
-  .map(([name]) => name.replace("@sanoma-ai/", ""));
+  .map(([name]) => name.replace("@sanoma-ai/", ""))
+  // The app ships source importing the shared invoice package; pack that transitive dependency too.
+  .concat("invoices");
 
 const files: Record<string, string> = {
   "package.json": JSON.stringify({
@@ -70,12 +73,12 @@ const files: Record<string, string> = {
     .replace("import hello", 'import { anthropic } from "@sanoma-ai/connector-anthropic";\nimport hello')
     .replace("connectors: []", "connectors: [anthropic]"),
   // The site's stylesheet with a plugin, as the README's recipe has it.
-  "sites/hello/style.css": `${readFileSync(join(fixture, "sites/hello/style.css"), "utf8")}@plugin "@tailwindcss/typography";\n`,
+  "sites/hello/style.css": `${readFileSync(join(fixture, "sites/hello/style.css"), "utf8")}@import "sanoma/ui.css";\n@plugin "@tailwindcss/typography";\n`,
   // Imported by the Sites panel on every page.
   "sites/hello/site.ts": `import { defineSite } from "sanoma/site";\n\nexport default defineSite({ title: "Hello desk" });\n`,
   "sites/hello/routes/run.tsx": `import { createFileRoute } from "@tanstack/react-router";
 import { Link, RunForm } from "sanoma/site";
-import { Region } from "sanoma/ui";
+import { InvoiceEditor, Region } from "sanoma/ui";
 
 export const Route = createFileRoute("/sites/hello/run")({ component: Run });
 
@@ -84,6 +87,11 @@ function Run() {
     <Region title="Greet someone">
       <p className="prose">Fill in the form.</p>
       <RunForm workflow="hello" />
+      <InvoiceEditor kind="cleaning" initialValue={{
+        number: "PACKED-001", issuedOn: "2026-10-30", currency: "USD",
+        issuer: { name: "Packed Cleaning" }, recipient: { name: "Example Client" },
+        services: [{ service: "standard", quantity: "2", unitPrice: "120", unit: "visit" }],
+      }} />
       <Link to="/sites/hello">Back to the hello site</Link>
     </Region>
   );
@@ -140,6 +148,9 @@ describe("sanoma from packed tarballs: the dev server", () => {
     expect(html).toContain("Greet someone");
     expect(html).toContain("Starts a live run of hello.");
     expect(html).toContain("Back to the hello site");
+    expect(html).toContain("Cleaning services");
+    expect(html).toContain("Download PDF");
+    expect(html).toContain("Nothing is uploaded or saved by this tool");
     // The fixture's content/, read and rendered by marked and yaml as installed from the tarballs.
     const post = (await (await fetch(`${url}/sites/hello/post`)).text()).replaceAll("<!-- -->", "");
     expect(post).toContain("<h3>The first post</h3>");
@@ -173,6 +184,46 @@ describe("sanoma from packed tarballs: the dev server", () => {
     expect(css.status, stderr()).toBe(200);
     // The typography plugin's class, in the site's own layer.
     expect(await css.text()).toMatch(/@layer utilities\.hello\b[\s\S]*\.prose \{/);
+  }, 60_000);
+
+  it("renders the invoice PDF from the installed UI and invoice packages", async (ctx) => {
+    const chrome = process.env.CHROME_PATH ?? (await executablePath("chrome").catch(() => ""));
+    if (!existsSync(chrome)) ctx.skip("no Chrome: install Google Chrome or set CHROME_PATH");
+    const browser = await launch({ executablePath: chrome, headless: true });
+    try {
+      const page = await browser.newPage();
+      const errors: string[] = [];
+      page.on("pageerror", (error) => errors.push(String(error)));
+      page.on("console", (message) => {
+        if (message.type() === "error") errors.push(message.text());
+      });
+      await page.goto(`${server!.url}/sites/hello/run`, { waitUntil: "networkidle0" });
+      // Page expressions are strings because this test is typed for Node, without DOM globals.
+      await page
+        .waitForFunction(
+          `document.querySelector('[aria-label="Invoice PDF preview"] [role="status"]')?.textContent === "PDF is up to date"`,
+        )
+        .catch(async (error: unknown) => {
+          throw new Error(
+            `${String(error)}\n${errors.join("\n")}\n${await page.evaluate("document.body.innerText")}\n${stderr().slice(-5000)}`,
+          );
+        });
+      expect(await page.evaluate(`document.querySelector('[aria-label="Invoice PDF preview"]').textContent`)).toContain(
+        "$240.00",
+      );
+      const header = await page.evaluate(`(async () => {
+        const url = document.querySelector('object[type="application/pdf"]').data.split("#")[0];
+        const bytes = await (await fetch(url)).arrayBuffer();
+        return new TextDecoder().decode(bytes.slice(0, 5));
+      })()`);
+      expect(header).toBe("%PDF-");
+      // Classes declared inside installed source must be included by the kit stylesheet's @source.
+      expect(await page.evaluate(`getComputedStyle(document.querySelector('[name="issuer.name"]')).height`)).toBe(
+        "44px",
+      );
+    } finally {
+      await browser.close();
+    }
   }, 60_000);
 
   // The chat's third engine as a company runs it: OpenCode installed on first use under the

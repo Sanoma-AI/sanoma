@@ -22,6 +22,7 @@ const BUILT: [dir: string, outputs: string[]][] = [
   ["connectors/ghost", ["dist/index.js"]],
   ["connectors/anthropic", ["dist/index.js"]],
   ["connectors/docker", ["dist/index.js"]],
+  ["packages/invoices", ["dist/index.js", "dist/browser.js"]],
   ["packages/app", ["dist/server/server.js"]],
   ["packages/sanoma", ["dist/index.js", "dist/oxlint-plugin.js", "oxlint.json"]],
 ];
