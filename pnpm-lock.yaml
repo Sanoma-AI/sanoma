@@ -522,6 +522,12 @@ importers:
 
   packages/dev: {}
 
+  packages/invoices:
+    dependencies:
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+
   packages/postgres-bin/darwin-arm64: {}
 
   packages/postgres-bin/darwin-x64: {}
