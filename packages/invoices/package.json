@@ -46,6 +46,10 @@
     "./node": {
       "types": "./dist/node.d.ts",
       "default": "./dist/node.js"
+    },
+    "./pdf-contract": {
+      "types": "./dist/render-contract.d.ts",
+      "default": "./dist/render-contract.js"
     }
   },
   "publishConfig": {

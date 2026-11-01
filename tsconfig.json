@@ -12,6 +12,7 @@
     // Published packages resolve to dist/ through their package.json exports.
     // Keep in sync with resolve.alias in vitest.config.ts.
     "paths": {
+      "@sanoma-ai/invoices/pdf-contract": ["./packages/invoices/src/render-contract.ts"],
       "@sanoma-ai/invoices/pdf": ["./packages/invoices/src/pdf.tsx"],
       "@sanoma-ai/invoices/browser": ["./packages/invoices/src/browser.ts"],
       "@sanoma-ai/invoices/node": ["./packages/invoices/src/node.ts"],

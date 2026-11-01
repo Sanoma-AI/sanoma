@@ -1,0 +1,71 @@
+{
+  "name": "@sanoma-ai/connector-invoices",
+  "version": "0.1.0",
+  "description": "Local invoice PDF generation for Sanoma workflows",
+  "keywords": [
+    "invoices",
+    "pdf",
+    "sanoma",
+    "sanoma-connector"
+  ],
+  "homepage": "https://github.com/Sanoma-AI/sanoma/tree/main/connectors/invoices#readme",
+  "bugs": "https://github.com/Sanoma-AI/sanoma/issues",
+  "license": "FSL-1.1-ALv2",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Sanoma-AI/sanoma.git",
+    "directory": "connectors/invoices"
+  },
+  "files": [
+    "dist",
+    "features",
+    "logo.svg",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./fake": {
+      "types": "./dist/fake.d.ts",
+      "default": "./dist/fake.js"
+    },
+    "./driver": {
+      "types": "./dist/driver.d.ts",
+      "default": "./dist/driver.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist",
+    "prepack": "pnpm run clean && pnpm run build",
+    "watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput"
+  },
+  "dependencies": {
+    "@sanoma-ai/invoices": "workspace:^"
+  },
+  "devDependencies": {
+    "@sanoma-ai/workflows": "workspace:*",
+    "zod": "^4.6.5"
+  },
+  "peerDependencies": {
+    "@sanoma-ai/workflows": "workspace:^",
+    "zod": "^4"
+  },
+  "engines": {
+    "node": ">=26"
+  },
+  "sanoma": {
+    "title": "Invoices",
+    "logo": "logo.svg"
+  }
+}
