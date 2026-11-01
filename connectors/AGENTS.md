@@ -15,7 +15,7 @@ One workspace package per vendor, each built on `@sanoma-ai/workflows`. A connec
 | [`gcp/`](gcp/AGENTS.md)                   | `@sanoma-ai/connector-gcp`: KMS/IAM provisioning with named OIDC workload identities and isolated provider sessions                            |
 | [`ghost/`](ghost/AGENTS.md)               | `@sanoma-ai/connector-ghost`: Ghost Admin API post operations and an in-memory fake                                                            |
 | [`github/`](github/AGENTS.md)             | `@sanoma-ai/connector-github`: GitHub resources (OpenTofu provider), operations through its App, pull requests                                 |
-| [`invoices/`](invoices/AGENTS.md)         | `@sanoma-ai/connector-invoices`: local invoice PDF generation for standard, pet-sitting and cleaning inputs                                    |
+| [`invoices/`](invoices/AGENTS.md)         | `@sanoma-ai/connector-invoices` (private): local invoice PDF generation for standard, pet-sitting and cleaning inputs                          |
 | [`neon/`](neon/AGENTS.md)                 | `@sanoma-ai/connector-neon`: Neon projects (the company's database, which pauses and branches), branches and computes                          |
 | [`sanoma-cloud/`](sanoma-cloud/AGENTS.md) | `@sanoma-ai/connector-sanoma-cloud`: Sanoma Cloud's database and host (a host that binds its own bootstrap), over sanoma-ops's workflows       |
 | [`resend/`](resend/AGENTS.md)             | `@sanoma-ai/connector-resend`: Resend broadcast and email operations and an in-memory fake                                                     |
