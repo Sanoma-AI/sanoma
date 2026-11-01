@@ -258,6 +258,18 @@ importers:
         specifier: ^4.6.5
         version: 4.6.5
 
+  connectors/sanoma-cloud:
+    devDependencies:
+      '@sanoma-ai/testing':
+        specifier: workspace:*
+        version: link:../../packages/testing
+      '@sanoma-ai/workflows':
+        specifier: workspace:*
+        version: link:../../packages/workflows
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+
   connectors/stripe:
     devDependencies:
       '@sanoma-ai/bridge':

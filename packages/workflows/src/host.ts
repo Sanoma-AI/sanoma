@@ -46,8 +46,11 @@ export interface HostSpec {
     source: string;
     /** The branch (or tag) it runs: `main`, never a commit. */
     ref: string;
-    /** The secrets it passes the runtime (`SANOMA_DATABASE_URL`, `SANOMA_SECRETS_KEY`): a write-only field. */
-    secrets: string;
+    /**
+     * The secrets it passes the runtime (`SANOMA_DATABASE_URL`, `SANOMA_SECRETS_KEY`): a write-only
+     * field. Absent for a host that binds its own bootstrap (`bindsBootstrap`).
+     */
+    secrets?: string;
     /** The port the app listens on. */
     port: string;
     /** A public site's domain, by site name: the app serves each site at the root of its domain (`SANOMA_DOMAINS`). */
@@ -58,6 +61,11 @@ export interface HostSpec {
    * file may not declare it, so a merge to `ref` is a change to the host.
    */
   revision: string;
+  /**
+   * True for a host whose vendor mints the instance's bootstrap (its database URL, keys and
+   * tokens) and binds it itself, as Sanoma Cloud's does: such a type takes no `secrets`.
+   */
+  bindsBootstrap?: boolean;
   outputs: (state: Record<string, unknown>) => HostOutputs;
 }
 
@@ -83,8 +91,9 @@ function unwrap(schema: z.ZodType): z.ZodType {
 
 /**
  * Throws what is wrong with a resource type's `host`: an input or `revision` that names no field,
- * `secrets` that is not write-only, a `revision` that is, an unknown lifetime, a type apply cannot
- * change (not `writable`).
+ * `secrets` that is not write-only, missing (unless the host binds its own bootstrap) or given
+ * beside `bindsBootstrap`, a `revision` that is write-only, an unknown lifetime, a type apply
+ * cannot change (not `writable`).
  */
 export function checkHost(
   what: string,
@@ -96,10 +105,17 @@ export function checkHost(
   if (!LIFETIMES.includes(host.capabilities?.lifetime)) {
     problems.push(`capabilities.lifetime is one of ${LIFETIMES.join(", ")}`);
   }
-  for (const [input, path] of [...Object.entries(host.inputs ?? {}), ["revision", host.revision] as const]) {
+  // An input given as undefined is one not given.
+  const given = Object.entries(host.inputs ?? {}).filter(([, path]) => path !== undefined);
+  for (const [input, path] of [...given, ["revision", host.revision] as const]) {
     if (typeof path !== "string" || !hasPath(type.schema, path)) problems.push(`${input} names no field (${path})`);
   }
-  if (!type.fields.writeOnly.includes(host.inputs?.secrets)) problems.push("inputs.secrets must be a write-only field");
+  const secrets = host.inputs?.secrets;
+  if (host.bindsBootstrap) {
+    if (secrets !== undefined) problems.push("inputs.secrets is not taken by a host that binds its own bootstrap");
+  } else if (secrets === undefined || !type.fields.writeOnly.includes(secrets)) {
+    problems.push("inputs.secrets must be a write-only field, unless the host binds its own bootstrap");
+  }
   if (type.fields.writeOnly.includes(host.revision)) problems.push("revision must not be write-only: drift reads it");
   if (typeof host.outputs !== "function") problems.push("outputs must be a function of the state");
   if (problems.length) throw new Error(`${what}: its host: ${problems.join("; ")}`);

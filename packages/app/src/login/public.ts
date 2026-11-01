@@ -18,7 +18,8 @@ const notFound = () =>
   });
 
 /** An api token, `Authorization: Bearer sca_…`: the request's, or undefined. */
-const bearerOf = (request: Request) => /^Bearer (sca_\S+)$/.exec(request.headers.get("authorization") ?? "")?.[1];
+export const bearerOf = (request: Request) =>
+  /^Bearer (sca_\S+)$/.exec(request.headers.get("authorization") ?? "")?.[1];
 
 /**
  * The login on a public site's host (`site:<name>`, so the page shows who it says): a caller with
