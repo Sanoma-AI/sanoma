@@ -319,18 +319,16 @@ describe("the apply workflow on the company's resources", () => {
     expect((await apply({ only: [id.website] })).report.plan.rebinds).toEqual([]);
   });
 
-  it("is the only workflow that may change a declared resource", () => {
+  it("leaves a change operation to any workflow's uses: its call refuses a declared object", () => {
     const create = resolveConfig(app.config).ops.get("github.repository.create")!;
-    const sneak = defineWorkflow({
-      name: "sneak",
+    const own = defineWorkflow({
+      name: "own",
       trigger: "manual",
       input: z.object({}),
       uses: [create],
       run: async () => 1,
     });
-    expect(() => resolveConfig({ ...app.config, workflows: [sneak] })).toThrow(
-      "github.repository.create changes a declared resource, which only apply does",
-    );
+    expect(resolveConfig({ ...app.config, workflows: [own] }).workflows.has("own")).toBe(true);
   });
 });
 

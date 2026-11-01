@@ -238,7 +238,7 @@ const record = z.record(z.string(), z.unknown());
 export const PLAN_ACTIONS = ["none", "create", "update", "replace", "delete"] as const;
 export type PlanAction = (typeof PLAN_ACTIONS)[number];
 
-/** The operations of a writable type that change its objects: only the apply workflow calls them (`isChangeOp`). */
+/** The operations of a writable type that change its objects (`isChangeOp`): apply's for a declared object, any workflow's for another. */
 export const CHANGE_OPS = ["create", "update", "delete"] as const;
 
 const opsOf = <S extends z.ZodObject>(schema: S) => {
@@ -293,7 +293,8 @@ export type ResourceOps<S extends z.ZodObject, W extends boolean = false> = Spec
 
 /**
  * True for an operation that changes a writable type's objects (`CHANGE_OPS`), which only the
- * apply workflow may call: by its vendor, resource and name, so a copy of a connector is told too.
+ * apply workflow may call on a declared object (a workflow's call is refused one, `refuseDeclared`
+ * in `call.ts`): by its vendor, resource and name, so a copy of a connector is told too.
  */
 export function isChangeOp(
   op: { readonly vendor: string; readonly resource: string; readonly name: string },
@@ -565,8 +566,9 @@ function pathsIn(value: unknown, paths: ReadonlySet<string>, prefix = ""): strin
  *   returns the same: `{ gone: true }` when the object no longer exists, else its fresh
  *   `state`. A driver may import first when it is given no state.
  *
- * A `writable` type has the change operations too, which only the apply workflow may call
- * (`isChangeOp`): `create`, `update` and `delete` effect `write` (`delete` idempotent), and `plan`:
+ * A `writable` type has the change operations too, which only the apply workflow may call on a
+ * declared object, and any workflow on another (`isChangeOp`): `create`, `update` and `delete`
+ * effect `write` (`delete` idempotent), and `plan`:
  *
  * - `plan` (`read`, idempotent) takes `{ id?, state?, handle?, desired? }`, no `desired` for a
  *   delete and no `id` for a create, and returns `{ action, planned?, unknown, replace }`:

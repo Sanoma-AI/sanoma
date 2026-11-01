@@ -290,6 +290,7 @@ const runOn = (ledger: LedgerStore): Run => ({
     drivers: new Map(),
     fakes: new Map(),
     types: new Map(),
+    declaredObjects: async () => ({ bound: new Map(), named: new Map() }),
     collections: new Map(),
     steps: [],
     policy: allowAll,

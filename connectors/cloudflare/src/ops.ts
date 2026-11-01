@@ -3,6 +3,7 @@ import {
   type CallContext,
   DriverError,
   errorMessage,
+  isSecret,
   type PlanAction,
   resolveSecrets,
   retryableStatus,
@@ -438,13 +439,37 @@ const hostUrl = (host: unknown) => {
   return "url" in checked ? checked.url : String(host);
 };
 
-/** An alarm's state: the host's, its registered wake and when it last rang, and whether the host's Worker took this company's token. */
-const alarmState = (host: string, wake: { at?: unknown; rang?: unknown } | undefined, healthy: boolean) => ({
+/**
+ * An alarm's state: the host's, its registered wake and when it last rang, whether the host's
+ * Worker took this company's token, and the name of the secret that holds the token (`token`)
+ * when it is not the default, so a declared alarm's state is as it was.
+ */
+const alarmState = (
+  host: string,
+  wake: { at?: unknown; rang?: unknown } | undefined,
+  healthy: boolean,
+  token: string,
+) => ({
   host,
   at: typeof wake?.at === "string" ? wake.at : null,
   rang: typeof wake?.rang === "string" ? wake.rang : null,
   healthy,
+  ...(token !== WAKEUP_TOKEN && { token }),
 });
+
+/**
+ * The name of the secret that holds the host's wakeup token: the marker `desired.token` gives
+ * (`secret("NAME")`), else the one a state names, else `SANOMA_WAKEUP_TOKEN`, a declared alarm's.
+ */
+function tokenName(desired: Record<string, unknown> | undefined, state: Record<string, unknown> | undefined) {
+  const given = desired?.token;
+  if (given !== undefined && given !== null) {
+    if (!isSecret(given))
+      throw refused(`alarm: token names the secret that holds the token, secret("NAME"), not its value`);
+    return given.$secret;
+  }
+  return typeof state?.token === "string" ? state.token : WAKEUP_TOKEN;
+}
 
 /** What the host's wake route answered: its status, its JSON, and its own `error` when it gave one. */
 interface Answer {
@@ -466,7 +491,8 @@ const NO_TOKEN = `add ${WAKEUP_TOKEN} to the host's secrets (secret("${WAKEUP_TO
 
 /**
  * `cloudflare.alarm`'s operations and `alarm.register` over `api().send`: the host's own Worker's
- * wake route (`/__sanoma/wake`), each request with the company's `SANOMA_WAKEUP_TOKEN`. `create`
+ * wake route (`/__sanoma/wake`), each request with the company's `SANOMA_WAKEUP_TOKEN`, read from
+ * the secret the alarm's `token` names (`tokenName`; `register` reads the default). `create`
  * mints and stores the token when none is, and stores the host's URL as `SANOMA_HOST_URL` for a
  * register made off the host (on it, the Worker sets it in the container's environment).
  */
@@ -491,29 +517,33 @@ export function alarmOps(api: () => Pick<CloudflareApi, "send">) {
     return { where, status: res.status, json, ...(typeof error === "string" && { own: error }) };
   };
 
-  /** The alarm at `host`: its state, or undefined when no Worker of Sanoma's answers there. */
-  const look = async (host: string, token: string) => {
+  /** The alarm at `host`, with the token the secret `name` holds: its state, or undefined when no Worker of Sanoma's answers there. */
+  const look = async (host: string, token: string, name: string) => {
     const answer = await route(host, "GET", token);
-    if (answer.status === 200) return { answer, state: alarmState(host, answer.json as object, true) };
+    if (answer.status === 200) return { answer, state: alarmState(host, answer.json as object, true, name) };
     // The Worker's own refusal: it lacks the token, or holds another.
     if ((answer.status === 404 || answer.status === 401) && answer.own) {
-      return { answer, state: alarmState(host, undefined, false) };
+      return { answer, state: alarmState(host, undefined, false, name) };
     }
     if (answer.status === 404) return { answer, state: undefined };
     throw failed(answer);
   };
 
-  const read = async ({ id }: { id: string }, call: CallContext) => {
+  /** The alarm at `id`, read with the token the secret `name` holds. */
+  const readWith = async (id: string, name: string, call: CallContext) => {
     // Without the token, the Worker refuses it: the alarm reads as unhealthy, and a plan to delete it goes on.
-    const { state } = await look(id, (await call.secrets.get(WAKEUP_TOKEN)) ?? "");
+    const { state } = await look(id, (await call.secrets.get(name)) ?? "", name);
     return state ? { id, gone: false, state } : { id, gone: true };
   };
 
+  const read = ({ id, state }: { id: string; state?: Record<string, unknown> }, call: CallContext) =>
+    readWith(id, tokenName(undefined, state), call);
+
   const plan = async (
-    { id, desired }: { id?: string; desired?: Record<string, unknown> },
+    { id, state: known, desired }: { id?: string; state?: Record<string, unknown>; desired?: Record<string, unknown> },
     call: CallContext,
   ): Promise<Planned> => {
-    const state = id === undefined ? undefined : (await read({ id }, call)).state;
+    const state = id === undefined ? undefined : (await readWith(id, tokenName(desired, known), call)).state;
     if (!desired) return { action: state ? "delete" : "none", ...NONE };
     const planned = { host: hostUrl(desired.host) };
     const unknown = [...alarm.fields.vendorOwned];
@@ -529,28 +559,37 @@ export function alarmOps(api: () => Pick<CloudflareApi, "send">) {
     plan,
     create: async ({ desired }: { desired: Record<string, unknown> }, { secrets }: CallContext) => {
       const host = hostUrl(desired.host);
-      const token = await secrets.ensure(WAKEUP_TOKEN, mintInstanceToken);
-      const { answer, state } = await look(host, token);
+      const name = tokenName(desired, undefined);
+      const token = await secrets.ensure(name, mintInstanceToken);
+      const { answer, state } = await look(host, token, name);
       if (!state) throw failed(answer, "no Worker of Sanoma's answers there: apply the host first");
-      if (answer.status === 404)
-        throw refused(`alarm.create: the host has no ${WAKEUP_TOKEN}: ${NO_TOKEN}`, "no_token");
+      if (answer.status === 404) {
+        const advice = name === WAKEUP_TOKEN ? NO_TOKEN : `give the host's secrets ${WAKEUP_TOKEN}: secret("${name}")`;
+        throw refused(`alarm.create: the host has no ${WAKEUP_TOKEN}: ${advice}`, "no_token");
+      }
       if (answer.status === 401) {
-        throw refused(`alarm.create: the host's ${WAKEUP_TOKEN} is not the stored one: apply the host again`, "token");
+        throw refused(
+          `alarm.create: the host's ${WAKEUP_TOKEN} is not the stored ${name}: apply the host again`,
+          "token",
+        );
       }
       // For a register made off the host: on it, the Worker's SANOMA_HOST_URL is in the environment, which comes first.
       await secrets.ensure(HOST_URL, () => host);
       return { id: host, state };
     },
-    update: async ({ id, desired }: { id: string; desired: Record<string, unknown> }, call: CallContext) => {
-      const { state } = await read({ id }, call);
+    update: async (
+      { id, state: known, desired }: { id: string; state?: Record<string, unknown>; desired: Record<string, unknown> },
+      call: CallContext,
+    ) => {
+      const { state } = await readWith(id, tokenName(desired, known), call);
       if (!state || hostUrl(desired.host) !== state.host) {
         throw refused(`alarm.update: a new host is a new alarm`, "plan_changed");
       }
       return { id, state };
     },
-    delete: async ({ id }: { id: string }, { secrets }: CallContext) => {
+    delete: async ({ id, state }: { id: string; state?: Record<string, unknown> }, { secrets }: CallContext) => {
       // Without the token it is still asked: a host that is gone answers 404, one that holds a wake refuses.
-      const answer = await route(id, "DELETE", (await secrets.get(WAKEUP_TOKEN)) ?? "");
+      const answer = await route(id, "DELETE", (await secrets.get(tokenName(undefined, state))) ?? "");
       if (answer.status !== 204 && answer.status !== 404) throw failed(answer);
       return { id, gone: true as const };
     },

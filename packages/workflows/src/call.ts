@@ -33,8 +33,10 @@ import { callAt, callName, type CallNode } from "./outline.ts";
 import { allowAll, type Decision, type Policy, type PolicyCall, policyOpOf, type RecordedDecision } from "./policy.ts";
 import type { Run, StartHold, WorkerState } from "./run.ts";
 import { reservedFor, runtimeHold } from "./change.ts";
+import { isChangeOp } from "./resource.ts";
 import { readPeople } from "./resources.ts";
 import {
+  APPLY_WORKFLOW,
   approverLabel,
   CALL_WORKFLOW,
   CHANGE_MERGE,
@@ -425,6 +427,35 @@ function ask(
   return policy.version === undefined ? decision : { ...decision, policyVersion: policy.version };
 }
 
+/**
+ * Refuses a change operation (`isChangeOp`) aimed at an object the data files declare, which only
+ * apply changes: an `update` or `delete` of an id bound in the lockfile, and a `create` whose
+ * identity (what its type's `find` makes of `desired`) a data file declares or the lockfile binds.
+ * Any other object is the workflow's own, its change an ordinary write.
+ */
+async function refuseDeclared(run: Run, op: Op, input: unknown) {
+  const type = `${op.vendor}.${op.resource}`;
+  const { id, desired } = input as { id?: unknown; desired?: Record<string, unknown> };
+  let target: string | undefined;
+  if (op.name !== "create") target = typeof id === "string" ? id : undefined;
+  else {
+    try {
+      target = run.state.types.get(type)?.find?.(desired ?? {});
+    } catch {
+      // A `desired` its type cannot name names no declared object; the driver judges it.
+    }
+  }
+  if (target === undefined) return;
+  const declared = await run.state.declaredObjects();
+  const key = declared.bound.get(`${type} ${target}`) ?? declared.named.get(`${type} ${target}`);
+  if (key === undefined) return;
+  throw new SanomaError(
+    "invalid_input",
+    `${op.id} changes ${key}, a declared resource, which only apply does: change the data file instead`,
+    { op: op.id, workflow: run.workflow, declared: key },
+  );
+}
+
 async function callOp(run: Run, id: string, input: unknown, place: Placed, ref?: ConnectionRef) {
   // The worker's declaration, never the workflow's: its effect, schemas and retry setting.
   const op = run.state.ops.get(id);
@@ -437,9 +468,8 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed, ref?:
         : `No connector or fake for ${id} in this worker: no fake its connectors attach implements it`,
     );
   }
-  // Only apply changes a declared resource, and only change takes a change's steps; `resolveConfig`
-  // refuses any other workflow that uses such an operation.
-  const reserved = reservedFor(op, run.state.types);
+  // Only change takes a change's steps; `resolveConfig` refuses any other workflow that uses one.
+  const reserved = reservedFor(op);
   if (reserved && run.workflow !== reserved.workflow) {
     throw new SanomaError("invalid_input", `${op.id} ${reserved.does}, which only ${reserved.workflow} does`, {
       op: op.id,
@@ -457,6 +487,8 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed, ref?:
   // before the step is recorded asks again.
   const connection = await DBOS.runStep(
     async () => {
+      // Read in a step, so a replay reuses the answer the first execution had, whatever the files say since.
+      if (run.workflow !== APPLY_WORKFLOW && isChangeOp(op, run.state.types)) await refuseDeclared(run, op, parsed);
       if (run.sandbox !== undefined) {
         if (!run.fakeConnection) throw new SanomaError("invalid_input", "Sandbox account state is unavailable");
         return run.fakeConnection(op.vendor, ref);
