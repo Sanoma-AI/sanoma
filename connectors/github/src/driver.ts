@@ -94,7 +94,9 @@ async function resolveNode(id: string, token: string) {
 /** The token, from the environment, read on every call. */
 function readToken() {
   const value = process.env.GITHUB_TOKEN;
-  if (!value) throw new DriverError("github: GITHUB_TOKEN is not set", { retryable: false });
+  // Optional in `env` (the operations through the App need none), so the hint the env guard gives is here.
+  if (!value)
+    throw new DriverError("github: GITHUB_TOKEN is not set; set it on the connector page", { retryable: false });
   return value;
 }
 
@@ -151,10 +153,22 @@ const Repository = z.object({
   clone_url: z.string(),
   ssh_url: z.string(),
   default_branch: z.string(),
+  template_repository: z.object({ full_name: z.string() }).nullish(),
 });
 const Ref = z.object({ object: z.object({ sha: z.string() }) });
 const Sha = z.object({ sha: z.string() });
-const Branch = z.object({ commit: z.object({ sha: z.string(), commit: z.object({ tree: Sha }) }) });
+const Branch = z.object({
+  commit: z.object({ sha: z.string(), commit: z.object({ message: z.string(), tree: Sha }) }),
+});
+const Key = z.object({ id: z.number(), key: z.string() });
+
+/** Whether `reply` is GitHub's 422 saying `what` (one of its validation errors). */
+const refused = (reply: { status: number; body: any }, what: RegExp) =>
+  reply.status === 422 && what.test(JSON.stringify(reply.body?.errors ?? reply.body?.message ?? ""));
+
+/** How long, and how often, a commit waits for a repository just generated to fill from its template. */
+const FILL_TRIES = 10;
+const FILL_WAIT_MS = 1000;
 
 /**
  * The operations through the App, over GitHub's REST API: each mints an installation token from
@@ -169,14 +183,24 @@ const appDriver = defineDriver(githubApp, {
   },
   repository: {
     async generate({ installation, template, owner, name, private: isPrivate, description }, call) {
-      const from = repoPath(template.owner, template.repository);
-      const made = await ok(await tokenFor(call, installation), "POST", `${from}/generate`, Repository, {
+      const token = await tokenFor(call, installation);
+      const path = `${repoPath(template.owner, template.repository)}/generate`;
+      const reply = await send(token, "POST", path, {
         owner,
         name,
         private: isPrivate,
         include_all_branches: false,
         ...(description !== undefined && { description }),
       });
+      let made: z.infer<typeof Repository>;
+      if (reply.status < 300) made = read(Repository, reply.body, `POST ${path}`);
+      else if (refused(reply, /already exists/i)) {
+        // Made already, by an earlier try of the same step whose answer was lost: that one, when it is from the template.
+        const there = await ok(token, "GET", repoPath(owner, name), Repository);
+        const wanted = `${template.owner}/${template.repository}`.toLowerCase();
+        if (there.template_repository?.full_name.toLowerCase() !== wanted) throw failure("POST", path, reply);
+        made = there;
+      } else throw failure("POST", path, reply);
       return {
         id: made.id,
         fullName: made.full_name,
@@ -194,18 +218,25 @@ const appDriver = defineDriver(githubApp, {
       const head = async (name: string) => {
         const path = `${repo.path}/branches/${branchPath(name)}`;
         const reply = await send(token, "GET", path);
-        if (reply.status === 404) return undefined;
+        // 409: an empty repository, as one just generated is until its template's copy lands.
+        if (reply.status === 404 || reply.status === 409) return undefined;
         if (reply.status >= 300) throw failure("GET", path, reply);
         const { commit } = read(Branch, reply.body, `GET ${path}`);
-        return { sha: commit.sha, tree: commit.commit.tree.sha };
+        return { sha: commit.sha, tree: commit.commit.tree.sha, message: commit.commit.message };
       };
-      /** The default branch's head, which a branch not there yet starts from. */
+      /**
+       * The default branch's head, which a branch not there yet starts from; waited for, since a
+       * repository just generated fills from its template in the background.
+       */
       const start = async () => {
         const { default_branch } = await ok(token, "GET", repo.path, Repository.pick({ default_branch: true }));
-        const found = await head(default_branch);
-        if (found) return found;
+        for (let i = 0; i < FILL_TRIES; i++) {
+          if (i) await new Promise((resolve) => setTimeout(resolve, FILL_WAIT_MS));
+          const found = await head(default_branch);
+          if (found) return found;
+        }
         throw new DriverError(`github: ${repository} has no ${default_branch} to start ${branch} from`, {
-          retryable: false,
+          retryable: true,
           vendorCode: "no_branch",
         });
       };
@@ -215,6 +246,8 @@ const appDriver = defineDriver(githubApp, {
         base_tree: parent.tree,
         tree: Object.entries(files).map(([path, content]) => ({ path, mode: "100644", type: "blob", content })),
       });
+      // The head is this commit already (an earlier try of the same step whose answer was lost).
+      if (existing && tree.sha === parent.tree && parent.message === message) return { sha: parent.sha };
       const commit = await ok(token, "POST", `${repo.path}/git/commits`, Sha, {
         message,
         tree: tree.sha,
@@ -230,12 +263,16 @@ const appDriver = defineDriver(githubApp, {
     async addDeployKey({ installation, repository, title, key, readOnly }, call) {
       const repo = repoOf(repository);
       const token = await tokenFor(call, installation, repo.name);
-      const added = await ok(token, "POST", `${repo.path}/keys`, z.object({ id: z.number() }), {
-        title,
-        key,
-        read_only: readOnly,
-      });
-      return { id: added.id };
+      const path = `${repo.path}/keys`;
+      const reply = await send(token, "POST", path, { title, key, read_only: readOnly });
+      if (reply.status < 300) return { id: read(Key, reply.body, `POST ${path}`).id };
+      // Added already, by an earlier try of the same step whose answer was lost: GitHub keeps the key without its comment.
+      if (refused(reply, /already in use/i)) {
+        const bare = key.trim().split(/\s+/).slice(0, 2).join(" ");
+        const there = (await ok(token, "GET", `${path}?per_page=100`, z.array(Key))).find((k) => k.key === bare);
+        if (there) return { id: there.id };
+      }
+      throw failure("POST", path, reply);
     },
   },
 });

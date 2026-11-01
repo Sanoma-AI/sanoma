@@ -31,5 +31,27 @@
       "documentation_url": "https://docs.github.com/rest/repos/repos#create-a-repository-using-a-template",
       "status": "422"
     }
+  },
+  {
+    "method": "GET",
+    "path": "/repos/acme/acme-ops",
+    "status": 200,
+    "body": {
+      "id": 1296269,
+      "node_id": "R_kgDOBEhTfQ",
+      "name": "acme-ops",
+      "full_name": "acme/acme-ops",
+      "private": true,
+      "owner": {
+        "login": "acme",
+        "type": "Organization"
+      },
+      "html_url": "https://github.com/acme/acme-ops",
+      "description": "someone else's",
+      "clone_url": "https://github.com/acme/acme-ops.git",
+      "ssh_url": "git@github.com:acme/acme-ops.git",
+      "default_branch": "main",
+      "template_repository": null
+    }
   }
 ]

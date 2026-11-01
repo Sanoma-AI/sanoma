@@ -4,7 +4,7 @@ import { DriverError } from "@sanoma-ai/workflows";
 import type { z } from "zod";
 import { defineFake, type FakeOptions } from "@sanoma-ai/workflows/fake";
 import { githubApp, githubTf } from "./connector.ts";
-import { failed } from "./rest.ts";
+import { branchPath, failed } from "./rest.ts";
 import { owned } from "./owner.ts";
 
 /**
@@ -133,7 +133,7 @@ export function fakeGithubApp(options: FakeOptions = {}) {
               };
             },
             commit: async ({ installation, repository, branch, message, files }) => {
-              const repo = reached(installation, repository, `GET /branches/${branch}`);
+              const repo = reached(installation, repository, `GET /branches/${branchPath(branch)}`);
               const head = repo.branches[branch] ?? repo.branches[repo.defaultBranch];
               if (!head)
                 throw new DriverError(`github: ${repository} has no ${repo.defaultBranch}`, {
@@ -146,7 +146,8 @@ export function fakeGithubApp(options: FakeOptions = {}) {
             },
             addDeployKey: async ({ installation, repository, title, key, readOnly }) => {
               const repo = reached(installation, repository, "POST /keys");
-              if (repo.keys.some((k) => k.key === key)) {
+              // GitHub takes a key once across all of GitHub, not once per repository.
+              if (Object.values(state.repositories).some((r) => r.keys.some((k) => k.key === key))) {
                 throw fail(`POST /repos/${repository}/keys`, 422, "Validation Failed", ["key is already in use"]);
               }
               const id = ++state.seq;
@@ -173,15 +174,17 @@ export function fakeGithubApp(options: FakeOptions = {}) {
  * the object at GitHub, and `remove` deletes it, so the next read says it is gone and an import
  * answers as the provider does.
  *
- * The operations through the App answer from `app` (`fakeGithubApp`), with its own state and
- * faults, logging into the same `calls`.
+ * The operations through the App answer from `app` (`fakeGithubApp`), with its own state,
+ * logging into the same `calls`; the faults (`failNext` and the others) reach either by its id.
  */
 export function fakeGithub(options: FakeGithubOptions = {}) {
   const fake = tfFake(githubTf, { missingReply, ...options });
   const app = fakeGithubApp({ calls: fake.calls });
   // Named by owner as the driver's calls are; the fake's own objects are held by the provider's
   // import ids (`sanoma`, `sanoma:main`), what `put`, `override` and `remove` take.
-  const { driver, reset } = fake;
+  const { driver, reset, failNext, loseReply, rateLimit, hold } = fake;
+  /** Whether `opId` is one of the operations through the App, whose faults are `app`'s. */
+  const ofApp = (opId: string) => Object.hasOwn(app.driver.ops, opId.slice("github.".length));
   return Object.assign(fake, {
     driver: { vendor: driver.vendor, ops: { ...owned(() => driver).ops, ...app.driver.ops } },
     app,
@@ -189,5 +192,10 @@ export function fakeGithub(options: FakeGithubOptions = {}) {
       reset();
       app.reset();
     },
+    failNext: (opId: string, err?: unknown) =>
+      ofApp(opId) ? app.failNext(opId as never, err) : failNext(opId as never, err),
+    loseReply: (opId: string) => (ofApp(opId) ? app.loseReply(opId as never) : loseReply(opId as never)),
+    rateLimit: (opId: string) => (ofApp(opId) ? app.rateLimit(opId as never) : rateLimit(opId as never)),
+    hold: (opId: string) => (ofApp(opId) ? app.hold(opId as never) : hold(opId as never)),
   });
 }

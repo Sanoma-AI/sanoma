@@ -51,6 +51,16 @@
   {
     "method": "GET",
     "path": "/repos/acme/acme-ops/branches/main",
+    "status": 409,
+    "body": {
+      "message": "Git Repository is empty.",
+      "documentation_url": "https://docs.github.com/rest/branches/branches#get-a-branch",
+      "status": "409"
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/repos/acme/acme-ops/branches/main",
     "status": 200,
     "body": {
       "name": "main",

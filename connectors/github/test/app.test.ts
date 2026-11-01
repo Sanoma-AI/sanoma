@@ -95,15 +95,26 @@ describe("the operations through the App", () => {
     });
   });
 
-  it.skipIf(live)("fails with what failed validation on a 422", async () => {
-    play("app-generate-taken");
-    await expect(call(githubDriver(), "repository.generate", generate)).rejects.toMatchObject({
-      status: 422,
-      retryable: false,
-      message:
-        "github: POST /repos/Sanoma-AI/company-template/generate answered 422: Validation Failed: name already exists on this account",
-    });
-  });
+  it.skipIf(live)(
+    "fails with what failed validation on a 422, when the repository there is not the template's",
+    async () => {
+      play("app-generate-taken");
+      await expect(call(githubDriver(), "repository.generate", generate)).rejects.toMatchObject({
+        status: 422,
+        retryable: false,
+        message:
+          "github: POST /repos/Sanoma-AI/company-template/generate answered 422: Validation Failed: name already exists on this account",
+      });
+    },
+  );
+
+  it.skipIf(live)(
+    "answers the repository an earlier try made from the template, when its answer was lost",
+    async () => {
+      play("app-generate-retried");
+      expect(await call(githubDriver(), "repository.generate", generate)).toMatchObject({ fullName: "acme/acme-ops" });
+    },
+  );
 
   it.skipIf(live)("commits files on top of a branch, its head and tree read in one call", async () => {
     play("app-commit");
@@ -126,17 +137,34 @@ describe("the operations through the App", () => {
     expect(new Set(bearers())).toEqual(new Set(["Bearer ghs_recorded"]));
   });
 
-  it.skipIf(live)("starts a branch not there yet from the default branch", async () => {
-    play("app-commit-new-branch");
-    const input = { installation: 7, repository: "acme/acme-ops", branch: "setup/acme", message: "Set up acme", files };
+  it.skipIf(live)("makes no second commit when the head is the commit an earlier try made", async () => {
+    play("app-commit-retried");
+    const input = { installation: 7, repository: "acme/acme-ops", branch: "main", message: "Set up acme", files };
     expect(await call(githubDriver(), "repository.commit", input)).toEqual({
       sha: "7638417db6d59f3c431d3e1f261cc637155684cd",
     });
-    expect(sent.at(-1)!.body).toEqual({
-      ref: "refs/heads/setup/acme",
-      sha: "7638417db6d59f3c431d3e1f261cc637155684cd",
-    });
   });
+
+  it.skipIf(live)(
+    "starts a branch not there yet from the default branch, waiting for a new repository to fill",
+    async () => {
+      play("app-commit-new-branch");
+      const input = {
+        installation: 7,
+        repository: "acme/acme-ops",
+        branch: "setup/acme",
+        message: "Set up acme",
+        files,
+      };
+      expect(await call(githubDriver(), "repository.commit", input)).toEqual({
+        sha: "7638417db6d59f3c431d3e1f261cc637155684cd",
+      });
+      expect(sent.at(-1)!.body).toEqual({
+        ref: "refs/heads/setup/acme",
+        sha: "7638417db6d59f3c431d3e1f261cc637155684cd",
+      });
+    },
+  );
 
   it.skipIf(live)("adds a read-only deploy key", async () => {
     play("app-deploy-key");
@@ -144,6 +172,12 @@ describe("the operations through the App", () => {
     expect(await call(githubDriver(), "repository.addDeployKey", input)).toEqual({ id: 1234 });
     expect(sent[0]!.body).toEqual({ repositories: ["acme-ops"] });
     expect(sent[1]!.body).toEqual({ title: "acme host", key: KEY, read_only: true });
+  });
+
+  it.skipIf(live)("answers the key an earlier try added, which GitHub keeps without its comment", async () => {
+    play("app-deploy-key-retried");
+    const input = { installation: 7, repository: "acme/acme-ops", title: "acme host", key: `${KEY} host@acme` };
+    expect(await call(githubDriver(), "repository.addDeployKey", input)).toEqual({ id: 1234 });
   });
 
   it("fails, not retryable, without the App's keys, and calls nothing", async () => {
@@ -159,10 +193,13 @@ describe("the operations through the App", () => {
     expect(sent).toEqual([]);
   });
 
-  it("refuses a repository not written <owner>/<name>", () => {
-    expect(() => github.repository.commit.input.parse({ ...generate, repository: "acme-ops" })).toThrow(
-      "a repository as <owner>/<name>",
-    );
+  it("refuses a repository not written <owner>/<name>, or a name that is a path's own", () => {
+    for (const repository of ["acme-ops", "acme/..", "../keys", "acme/."]) {
+      expect(() => github.repository.commit.input.parse({ ...generate, repository }), repository).toThrow(
+        "a repository as <owner>/<name>",
+      );
+    }
+    expect(() => github.repository.generate.input.parse({ ...generate, name: ".." })).toThrow("a GitHub name");
   });
 });
 
@@ -228,10 +265,15 @@ describe("fakeGithubApp", () => {
     const key = { installation: 7, repository: "acme/acme-ops", title: "host", key: KEY };
     await call(fake.driver, "repository.addDeployKey", key);
     await expect(call(fake.driver, "repository.addDeployKey", key)).rejects.toMatchObject({ status: 422 });
+    // Once across all of GitHub, as GitHub takes a key.
+    await call(fake.driver, "repository.generate", { ...generate, name: "acme-site" });
+    await expect(
+      call(fake.driver, "repository.addDeployKey", { ...key, repository: "acme/acme-site" }),
+    ).rejects.toMatchObject({ status: 422 });
     await expect(
       call(fake.driver, "repository.addDeployKey", { ...key, repository: "Sanoma-AI/company-template" }),
     ).rejects.toMatchObject({ status: 404 });
-    fake.app.failNext("github.repository.commit");
+    fake.failNext("github.repository.commit");
     await expect(
       call(fake.driver, "repository.commit", {
         installation: 7,

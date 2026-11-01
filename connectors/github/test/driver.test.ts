@@ -123,7 +123,10 @@ describe("githubDriver", () => {
       (e: unknown) => e,
     );
     expect(err).toBeInstanceOf(DriverError);
-    expect(err).toMatchObject({ message: "github: GITHUB_TOKEN is not set", retryable: false });
+    expect(err).toMatchObject({
+      message: "github: GITHUB_TOKEN is not set; set it on the connector page",
+      retryable: false,
+    });
     expect(calls()).toEqual([]);
   });
 

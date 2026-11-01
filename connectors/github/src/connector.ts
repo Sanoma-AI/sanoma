@@ -78,10 +78,13 @@ export const githubTf = tfConnector({
 /** The account an installation of the App is on. */
 export const Account = z.object({ login: z.string(), type: z.enum(["User", "Organization"]) });
 
+/** An account's or a repository's name: GitHub's characters, never `.` or `..` alone (a path's own). */
+const part = z.string().regex(/^(?!\.\.?$)[\w.-]+$/, "a GitHub name: letters, digits, `-`, `_` and `.`");
+
 /** `<owner>/<name>`, as GitHub's `full_name`. */
 const fullName = z
   .string()
-  .regex(/^[\w.-]+\/[\w.-]+$/, "a repository as <owner>/<name>")
+  .regex(/^(?!\.\.?\/)[\w.-]+\/(?!\.\.?$)[\w.-]+$/, "a repository as <owner>/<name>")
   .describe("The repository, as <owner>/<name>");
 const installation = z.number().int().positive().describe("The id of the App's installation that acts");
 
@@ -107,12 +110,14 @@ const appSpecs = {
   repository: {
     generate: {
       effect: "write",
+      // The driver finds what an earlier try of the same step made, so a retry repeats nothing.
+      idempotent: true,
       description: "Make a repository from a template repository, through an installation of the GitHub App",
       input: z.object({
         installation,
-        template: z.object({ owner: z.string().min(1), repository: z.string().min(1) }).describe("The template"),
-        owner: z.string().min(1).describe("The account the new repository belongs to"),
-        name: z.string().min(1).describe("The new repository's name"),
+        template: z.object({ owner: part, repository: part }).describe("The template"),
+        owner: part.describe("The account the new repository belongs to"),
+        name: part.describe("The new repository's name"),
         private: z.boolean().default(true).describe("Whether it is private (the default)"),
         description: z.string().optional(),
       }),
@@ -127,6 +132,8 @@ const appSpecs = {
     },
     commit: {
       effect: "write",
+      // The driver finds what an earlier try of the same step made, so a retry repeats nothing.
+      idempotent: true,
       description:
         "Commit files (path to text) on top of a branch, through an installation of the GitHub App; a branch not there yet starts from the default branch",
       input: z.object({
@@ -141,6 +148,8 @@ const appSpecs = {
     },
     addDeployKey: {
       effect: "write",
+      // The driver finds what an earlier try of the same step made, so a retry repeats nothing.
+      idempotent: true,
       description: "Add an SSH deploy key to a repository, through an installation of the GitHub App",
       input: z.object({
         installation,
