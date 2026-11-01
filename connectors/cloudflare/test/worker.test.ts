@@ -1,5 +1,6 @@
+import { WAKE_PATH as RUNTIME_WAKE_PATH } from "@sanoma-ai/workflows";
 import { describe, expect, it, vi } from "vitest";
-import { imageLabel, Instance, INACTIVITY_MS, type ObjectState, worker } from "../worker/instance.js";
+import { imageLabel, Instance, INACTIVITY_MS, type ObjectState, WAKE_PATH, worker } from "../worker/instance.js";
 
 // The Worker's own code, `worker/instance.js`, over a stubbed `ctx`: the routes of its object,
 // the start of its container, the proxy and the alarm. The kits run it over the fake's `ctx`
@@ -101,6 +102,10 @@ const wake = (method: string, { token = TOKEN, body }: { token?: string; body?: 
   });
 
 describe("the Worker's object", () => {
+  it("serves its wake where the runtime registers one (`WAKE_PATH`), which it cannot import", () => {
+    expect(WAKE_PATH).toBe(RUNTIME_WAKE_PATH);
+  });
+
   it("holds a wake only with the company's token, each registration replacing the one before", async () => {
     const { ctx, storage, alarm, container } = stubCtx();
     const object = new Instance(ctx, ENV);

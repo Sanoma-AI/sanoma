@@ -18,6 +18,8 @@ const RUNS = `registry.cloudflare.com/${TEST_ACCOUNT}/sanoma-ai-runtime`;
 const PINNED = `${RUNS}@sha256:${"7".repeat(64)}`;
 const PINNED_NEXT = `${RUNS}@sha256:${"8".repeat(64)}`;
 const PREPARATIONS = "/containers/image-preparations";
+/** The zone `acme.example` in the `domains` fixture. */
+const ZONE = "023e105f4ecef8ad9ca31a8372d0c353";
 
 const TOKEN = "swi_the-company-token";
 const URL_OF = "https://sanoma-company.example.workers.dev";
@@ -428,6 +430,45 @@ describe.skipIf(live)("cloudflareDriver", () => {
       expect(sent.some((r) => r.method === "PUT" || r.method === "DELETE")).toBe(false);
     });
 
+    it("attaches the declared domains to the Worker in the zone it looks up, and detaches them at delete", async () => {
+      const domains = { www: "www.acme.example" };
+      play("domains");
+      expect(await op("container.create", { desired: { ...desired, domains } })).toEqual({
+        id: "company",
+        state: { ...state, domains },
+      });
+      const attached = sent.find((r) => r.method === "PUT" && r.path === apiPath("/workers/domains"));
+      expect(attached!.body).toEqual({ hostname: "www.acme.example", service: "sanoma-company", zone_id: ZONE });
+      expect(await op("container.delete", { id: "company" })).toEqual({ id: "company", gone: true });
+      expect(await op("container.read", { id: "company" })).toEqual({ id: "company", gone: true });
+      expect(sent.map((r) => `${r.method} ${r.path.replace(API, "")}`).filter((r) => r.includes("domains"))).toEqual([
+        "GET /workers/domains?service=sanoma-company",
+        "PUT /workers/domains",
+        "GET /workers/domains?service=sanoma-company",
+        `DELETE /workers/domains/${fixture("domains")
+          .find((e) => e.method === "DELETE")!
+          .path.split("/")
+          .pop()}`,
+      ]);
+    });
+
+    it("refuses a domain whose zone the account does not hold, naming both, before anything changes", async () => {
+      const noZone = reply(`/client/v4/zones?name=other.example&account.id=${TEST_ACCOUNT}`, 200, {
+        ...cfResult([]),
+        result_info: { page: 1, per_page: 20, count: 0, total_count: 0, total_pages: 0 },
+      });
+      play("no-zone", [...only("create", (_, i) => i < 2), noZone]);
+      await expect(
+        op("container.create", { desired: { ...desired, domains: { www: "www.other.example" } } }),
+      ).rejects.toMatchObject({
+        name: "DriverError",
+        retryable: false,
+        vendorCode: "no_zone",
+        message: expect.stringMatching(/no zone other\.example for the domain www\.other\.example/),
+      });
+      expect(sent.some((r) => r.method !== "GET")).toBe(false);
+    });
+
     it("plans an update when the declaration leaves out the domains the Worker serves", async () => {
       const [settings, ...rest] = only("update-to-a-new-image", (_, i) => i < 3);
       const body = structuredClone(settings!.body) as { result: { bindings: object[] } };
@@ -591,10 +632,18 @@ describe.skipIf(live)("cloudflareDriver", () => {
       expect(sent[0]!.headers.get("authorization") === `Bearer ${TOKEN}`).toBe(true);
     });
 
-    it("refuses to register before the alarm stored the host's URL, without a request", async () => {
+    it("registers at the host's URL from the environment first, as the Worker sets it on the host", async () => {
+      vi.stubEnv("SANOMA_HOST_URL", URL_OF);
+      play("register-from-env", [wake(204, null, "PUT")]);
+      const call = callWith({ SANOMA_WAKEUP_TOKEN: TOKEN, SANOMA_HOST_URL: "https://elsewhere.example.workers.dev" });
+      expect(await op("alarm.register", { at: "2099-01-01T00:00:00Z" }, call)).toEqual({});
+      expect(sent[0]!.headers.get("authorization") === `Bearer ${TOKEN}`).toBe(true);
+    });
+
+    it("refuses to register with no host's URL in the environment or the store, naming both, without a request", async () => {
       await expect(op("alarm.register", { at: "2099-01-01T00:00:00Z" })).rejects.toMatchObject({
         retryable: false,
-        message: expect.stringContaining("SANOMA_HOST_URL is not set"),
+        message: expect.stringContaining("SANOMA_HOST_URL is set neither in the environment"),
       });
       expect(sent).toEqual([]);
     });

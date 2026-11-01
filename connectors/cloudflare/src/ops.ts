@@ -6,6 +6,7 @@ import {
   type PlanAction,
   resolveSecrets,
   retryableStatus,
+  WAKE_PATH,
   type WakeupRegistration,
 } from "@sanoma-ai/workflows";
 import { domainsOf, domainsText } from "@sanoma-ai/workflows/shared";
@@ -18,7 +19,6 @@ import {
   MAIN_MODULE,
   NAMESPACE,
   OBJECT_CLASS,
-  WAKE_PATH,
   type WorkerModule,
   workerModules,
 } from "./worker.ts";
@@ -32,8 +32,9 @@ export const COMPATIBILITY_DATE = "2026-10-01";
 /** The migration that makes the Worker's object class, on its first upload only. */
 export const MIGRATION = { new_tag: "v1", new_sqlite_classes: [OBJECT_CLASS] };
 /**
- * The host's own URL, which the Worker gives the container and `alarm.create` stores: where
- * `alarm.register` sends the wake, as the registration names no host.
+ * The host's own URL, a plain-text binding the Worker gives the container, which `alarm.create`
+ * also stores for a register made off the host: where `alarm.register` (and a runtime that
+ * declares no wakeup, `envWakeup`) sends the wake, as the registration names no host.
  */
 export const HOST_URL = "SANOMA_HOST_URL";
 /** How long the account may take to prepare an image to run, as Wrangler waits for it. */
@@ -99,6 +100,12 @@ export interface Preparation {
   reason?: string;
 }
 
+/** A custom domain attached to a Worker, as the fields read here. */
+export interface AttachedDomain {
+  id: string;
+  hostname: string;
+}
+
 /** Cloudflare, as the operations use it. Each call fails with a `DriverError`, except `send`. */
 export interface CloudflareApi {
   /** The Worker's URL: `https://<script>.<account subdomain>.workers.dev`. */
@@ -130,6 +137,14 @@ export interface CloudflareApi {
   createApplication(name: string, namespaceId: string): Promise<Application>;
   /** Deletes the application; nothing when there is none. */
   deleteApplication(id: string): Promise<void>;
+  /** The id of the account's zone of that name (`GET /zones?name=&account.id=`); undefined when it holds none. */
+  zone(name: string): Promise<string | undefined>;
+  /** The custom domains attached to the Worker (`GET …/workers/domains?service=`). */
+  domains(script: string): Promise<AttachedDomain[]>;
+  /** Attaches `hostname`, of the zone `zoneId`, to the Worker as a custom domain (`PUT …/workers/domains`). */
+  attachDomain(script: string, hostname: string, zoneId: string): Promise<void>;
+  /** Detaches a custom domain (`DELETE …/workers/domains/{id}`); nothing when it is gone. */
+  detachDomain(id: string): Promise<void>;
   /** A request to a Worker: its answer, or a throw when there is none. */
   send(url: string, init: RequestInit): Promise<Response>;
 }
@@ -140,6 +155,13 @@ export const refused = (message: string, vendorCode?: string) =>
 
 /** The company's Worker, named after it. */
 export const scriptOf = (name: string) => `sanoma-${name}`;
+
+/** The zone a hostname is looked up in: its last two labels (`www.acme.example` → `acme.example`). */
+export const apexOf = (hostname: string) => hostname.split(".").slice(-2).join(".");
+
+/** Whether the Worker's bindings name domains (`SANOMA_DOMAINS`): its custom domains are Sanoma's to detach. */
+const servesDomains = (bindings: ReadBinding[] | undefined) =>
+  bindings?.some((b) => b.type === "plain_text" && b.name === TEXT.domains) ?? false;
 
 type ContainerState = {
   id: string | null;
@@ -197,6 +219,14 @@ const health = async (
   return { error, exit: typeof body?.exit === "string" };
 };
 
+/** Makes the Worker's custom domains the declared ones: the others detached, each missing one attached. */
+const routeDomains = async (cf: CloudflareApi, script: string, declared: Map<string, string>) => {
+  const attached = await cf.domains(script);
+  for (const domain of attached) if (!declared.has(domain.hostname)) await cf.detachDomain(domain.id);
+  const held = new Set(attached.map((d) => d.hostname));
+  for (const [hostname, zoneId] of declared) if (!held.has(hostname)) await cf.attachDomain(script, hostname, zoneId);
+};
+
 export interface ContainerOptions {
   /** How long a create or update waits for the Worker to answer at its new revision. */
   startTimeoutMs: number;
@@ -213,6 +243,34 @@ export interface ContainerOptions {
  * the object destroys a container started at another and starts it again.
  */
 export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs }: ContainerOptions) {
+  /** Each zone found, by `<account>/<apex>`, for the life of the driver: a zone held is looked up once. */
+  const zones = new Map<string, string>();
+
+  /**
+   * Each declared hostname's zone id, by hostname, looked up in the account (once per apex); a
+   * refusal for a hostname whose zone the account does not hold.
+   */
+  const zonesOf = async (cf: CloudflareApi, name: string, hostnames: string[]) => {
+    const found = new Map<string, string>();
+    for (const hostname of hostnames) {
+      const apex = apexOf(hostname);
+      const key = `${cf.account}/${apex}`;
+      let id = zones.get(key);
+      if (id === undefined) {
+        id = await cf.zone(apex);
+        if (id === undefined) {
+          throw refused(
+            `container ${name}: the account holds no zone ${apex} for the domain ${hostname}: add the zone to the account, or declare another domain`,
+            "no_zone",
+          );
+        }
+        zones.set(key, id);
+      }
+      found.set(hostname, id);
+    }
+    return found;
+  };
+
   /** The Worker `name` runs, from its bindings and its application; `checkHealth` asks it too. None for a Worker that is not Sanoma's. */
   const inspect = async (name: string, checkHealth: boolean) => {
     const cf = api();
@@ -332,6 +390,8 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
     // Copied and prepared before anything changes, so a copy or a preparation that fails leaves
     // the Worker as it was. Each apply asks again, which costs a manifest's HEAD once the copy is
     // there, and puts back one gone; the object starts only a pinned image of the account's.
+    // A domain whose zone the account lacks is refused before anything changes too.
+    const hostnames = domains ? await zonesOf(cf, name, Object.values(domains)) : new Map<string, string>();
     const runs = accountPinned(image, cf.account) ? image : await cf.copyImage(image);
     await prepared(cf, runs);
     const served = domains ? domainsText(domains) : undefined;
@@ -375,6 +435,8 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
       // 2026-10-29; a Worker deployed again after the application started at once).
       await cf.upload(script, metadata);
     }
+    // The declared domains routed to the Worker; ones it served before and no longer declares, detached.
+    if (domains || servesDomains(current)) await routeDomains(cf, script, hostnames);
     await started(cf, script, url, revision);
     const state: ContainerState = {
       id: app.id,
@@ -424,6 +486,7 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
       if (bindings && !isOurs(bindings)) {
         throw refused(`a Worker named ${script} that is not Sanoma's exists: it is not deleted`, "exists");
       }
+      if (servesDomains(bindings)) for (const domain of await cf.domains(script)) await cf.detachDomain(domain.id);
       const app = await cf.application(script);
       if (app) await cf.deleteApplication(app.id);
       await cf.deleteScript(script);
@@ -467,8 +530,9 @@ const NO_TOKEN = `add ${WAKEUP_TOKEN} to the host's secrets (secret("${WAKEUP_TO
 /**
  * `cloudflare.alarm`'s operations and `alarm.register` over `api().send`: the host's own Worker's
  * wake route (`/__sanoma/wake`), each request with the company's `SANOMA_WAKEUP_TOKEN`. `create`
- * mints and stores the token when none is, and stores the host's URL as `SANOMA_HOST_URL` for a
- * register made off the host (on it, the Worker sets it in the container's environment).
+ * mints and stores the token when none is, and the host's URL as `SANOMA_HOST_URL`. `register`
+ * sends to the host's URL from the environment, `SANOMA_HOST_URL`, which the Worker sets in the
+ * container's; off the host, from the stored one.
  */
 export function alarmOps(api: () => Pick<CloudflareApi, "send">) {
   const route = async (host: string, method: string, token: string, body?: unknown): Promise<Answer> => {
@@ -537,7 +601,7 @@ export function alarmOps(api: () => Pick<CloudflareApi, "send">) {
       if (answer.status === 401) {
         throw refused(`alarm.create: the host's ${WAKEUP_TOKEN} is not the stored one: apply the host again`, "token");
       }
-      // For a register made off the host: on it, the Worker's SANOMA_HOST_URL is in the environment, which comes first.
+      // Only for a register made off the host (a test's, a kit's): on it, the Worker's binding comes first.
       await secrets.ensure(HOST_URL, () => host);
       return { id: host, state };
     },
@@ -557,8 +621,13 @@ export function alarmOps(api: () => Pick<CloudflareApi, "send">) {
     register: async (registration: WakeupRegistration, call: CallContext) => {
       const token = await call.secrets.get(WAKEUP_TOKEN);
       if (!token) throw refused(`alarm.register: ${WAKEUP_TOKEN} is not set: apply the alarm, which mints it`);
-      const host = await call.secrets.get(HOST_URL);
-      if (!host) throw refused(`alarm.register: ${HOST_URL} is not set: apply the alarm, which stores it`);
+      // On the host, the Worker's binding is in the environment; off it, only a stored one names the host.
+      const host = process.env[HOST_URL] || (await call.secrets.get(HOST_URL));
+      if (!host) {
+        throw refused(
+          `alarm.register: ${HOST_URL} is set neither in the environment (the Worker sets it on the host) nor among the stored credentials (apply the alarm, which stores it)`,
+        );
+      }
       const answer = await route(hostUrl(host), "PUT", token, registration);
       if (answer.status === 204) return {};
       throw failed(answer, answer.status === 404 && answer.own ? NO_TOKEN : undefined);
