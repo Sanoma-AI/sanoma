@@ -144,6 +144,12 @@ export function fakeGithubApp(options: FakeOptions = {}) {
               repo.branches[branch] = { sha, files: { ...head.files, ...files } };
               return { sha };
             },
+            head: async ({ installation, repository, branch }) => {
+              const repo = reached(installation, repository, `GET /branches/${branchPath(branch)}`);
+              const head = repo.branches[branch];
+              if (!head) throw fail(`GET /repos/${repository}/branches/${branchPath(branch)}`, 404, "Branch not found");
+              return { sha: head.sha };
+            },
             addDeployKey: async ({ installation, repository, title, key, readOnly }) => {
               const repo = reached(installation, repository, "POST /keys");
               // GitHub takes a key once across all of GitHub, not once per repository.

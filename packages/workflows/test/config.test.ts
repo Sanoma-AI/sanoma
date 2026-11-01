@@ -178,7 +178,7 @@ describe("a change's operations, built in", () => {
   it("are in every config, with no connector, each with a driver over the worker's repository", async () => {
     const resolved = resolveConfig({ workflows: [], connectors: [] });
     const ids = ["sanoma.change.open", "sanoma.change.review", "sanoma.change.merge", "sanoma.change.close"];
-    // Beside the listing of apps, also built in.
+    // Beside the listing of apps and the runtime's own operations, also built in.
     expect([...resolved.ops.keys()]).toEqual([
       ...ids,
       "sanoma.connection.test",
@@ -189,6 +189,11 @@ describe("a change's operations, built in", () => {
       "sanoma.connection.bind",
       "sanoma.connection.create",
       "sanoma.apps.list",
+      "sanoma.secret.generate",
+      "sanoma.secret.delete",
+      "sanoma.invite.mint",
+      "sanoma.token.mint",
+      "sanoma.token.revoke",
     ]);
     expect(ids.map((id) => resolved.ops.get(id)!.effect)).toEqual(["write", "write", "write", "write"]);
     expect(resolved.ops.get("sanoma.change.merge")!.target!({ id: "c1" })).toBe("change:c1");

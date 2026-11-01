@@ -260,6 +260,22 @@ const appDriver = defineDriver(githubApp, {
       }
       return { sha: commit.sha };
     },
+    async head({ installation, repository, branch }, call) {
+      const repo = repoOf(repository);
+      const token = await tokenFor(call, installation, repo.name);
+      const path = `${repo.path}/branches/${branchPath(branch)}`;
+      const reply = await send(token, "GET", path);
+      // 409: an empty repository, as one just generated is until its template's copy lands: tried again.
+      if (reply.status === 409) {
+        throw new DriverError(`github: ${repository} is empty until its template's copy lands`, {
+          retryable: true,
+          status: 409,
+          vendorCode: "no_branch",
+        });
+      }
+      if (reply.status >= 300) throw failure("GET", path, reply);
+      return { sha: read(Branch, reply.body, `GET ${path}`).commit.sha };
+    },
     async addDeployKey({ installation, repository, title, key, readOnly }, call) {
       const repo = repoOf(repository);
       const token = await tokenFor(call, installation, repo.name);

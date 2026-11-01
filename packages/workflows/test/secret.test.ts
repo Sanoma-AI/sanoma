@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { decrypt, encrypt } from "../src/credentials.ts";
+import { deploymentKey } from "../src/deployment-key.ts";
 import { memorySecrets, resolveSecrets } from "../src/index.ts";
 import { secret } from "../src/secret.ts";
 import { secret as fromResources } from "@sanoma-ai/workflows/resources";
@@ -86,6 +87,17 @@ describe("encrypt and decrypt", () => {
       expect(() => decrypt("PASSWORD", sealed)).toThrow("invalid_value");
     } finally {
       vi.unstubAllEnvs();
+    }
+  });
+
+  it("accepts a key as padded base64 or as base64url without padding (a generate marker's), and the same bytes either way", () => {
+    const bytes = randomBytes(32);
+    for (const name of ["SANOMA_SECRETS_KEY", "SANOMA_SIGNING_KEY"] as const) {
+      expect(deploymentKey(name, { [name]: bytes.toString("base64") })).toEqual(bytes);
+      expect(deploymentKey(name, { [name]: bytes.toString("base64url") })).toEqual(bytes);
+      for (const bad of [randomBytes(16).toString("base64url"), `${"-".repeat(43)}=`, "x".repeat(44)]) {
+        expect(() => deploymentKey(name, { [name]: bad })).toThrow(`${name} must be 32 random bytes`);
+      }
     }
   });
 });

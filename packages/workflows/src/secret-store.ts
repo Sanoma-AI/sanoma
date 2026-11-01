@@ -1,4 +1,4 @@
-import { deploymentKey } from "./deployment-key.ts";
+import { DEPLOYMENT_KEYS, type DeploymentKeyName, deploymentKey } from "./deployment-key.ts";
 /** Opaque values belong only in trusted runtime code, never workflow history or descriptions. */
 export interface SecretValue {
   value: string;
@@ -65,7 +65,7 @@ export interface SecretStore {
 export type SecretBinding =
   | { path: string; management: "sanoma" | "external"; env?: never; bootstrap?: never }
   | { env: string; management?: "external"; path?: never; bootstrap?: never }
-  | { bootstrap: "SANOMA_SIGNING_KEY" | "SANOMA_SECRETS_KEY"; management?: "external"; env?: never; path?: never };
+  | { bootstrap: DeploymentKeyName; management?: "external"; env?: never; path?: never };
 
 export interface SecretConfiguration {
   /** Omitted: built-in encrypted Postgres, supplied by the runtime. */
@@ -145,10 +145,10 @@ export function checkSecretConfiguration(config: SecretConfiguration): void {
     invalid();
   for (const [name, b] of Object.entries(config.bindings ?? {})) {
     if (!namePattern.test(name) || !b || typeof b !== "object") invalid();
-    if (["SANOMA_SIGNING_KEY", "SANOMA_SECRETS_KEY"].includes(name) && !("env" in b) && !("bootstrap" in b)) invalid();
+    if (DEPLOYMENT_KEYS.includes(name) && !("env" in b) && !("bootstrap" in b)) invalid();
     if ("bootstrap" in b) {
       if (
-        !["SANOMA_SIGNING_KEY", "SANOMA_SECRETS_KEY"].includes(b.bootstrap!) ||
+        !DEPLOYMENT_KEYS.includes(b.bootstrap!) ||
         b.path !== undefined ||
         b.env !== undefined ||
         (b.management !== undefined && b.management !== "external")
@@ -194,8 +194,7 @@ export class SecretAccess {
     const binding = Object.hasOwn(this.bindings, name) ? this.bindings[name] : undefined;
     if (binding?.bootstrap !== undefined)
       return { store: "bootstrap", namespace: "", path: binding.bootstrap, management: "external" };
-    if (["SANOMA_SIGNING_KEY", "SANOMA_SECRETS_KEY"].includes(name) && !binding)
-      throw new SecretStoreError("invalid_configuration");
+    if (DEPLOYMENT_KEYS.includes(name) && !binding) throw new SecretStoreError("invalid_configuration");
     if (binding?.env !== undefined)
       return { store: "environment", namespace: "", path: binding.env, management: "external" };
     return {
@@ -213,7 +212,7 @@ export class SecretAccess {
   async read(name: string): Promise<SecretValue | undefined> {
     const location = this.location(name);
     if (location.store === "bootstrap" && location.namespace === "") {
-      const value = deploymentKey(location.path as "SANOMA_SIGNING_KEY" | "SANOMA_SECRETS_KEY").toString("base64");
+      const value = deploymentKey(location.path as DeploymentKeyName).toString("base64");
       return { value, version: "bootstrap" };
     }
     if (location.store === "environment" && location.namespace === "") {
@@ -238,10 +237,14 @@ export class SecretAccess {
     return secretStoreCall(() => this.store.write(location, value, options));
   }
 
-  async delete(name: string, options: { expectedVersion: string; by: string }): Promise<void> {
+  /** Deletes the value at `expectedVersion`; without one, the value stored now, and none stored is nothing to do. */
+  async delete(name: string, options: { expectedVersion?: string; by?: string } = {}): Promise<void> {
     const location = this.writable(name);
     if (this.store.capabilities.deletion === "unsupported") throw new SecretStoreError("unsupported");
-    await secretStoreCall(() => this.store.delete(location, options));
+    const expectedVersion = options.expectedVersion ?? (await this.read(name))?.version;
+    if (expectedVersion === undefined) return;
+    const by = options.by ?? "sanoma";
+    await secretStoreCall(() => this.store.delete(location, { expectedVersion, by }));
   }
 
   async ensure(name: string, make: () => string): Promise<string> {

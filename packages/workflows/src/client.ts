@@ -79,6 +79,7 @@ import {
   errorMessage,
   HOST_CHECK_AGENT,
   isEnded,
+  isToken,
   isVisitor,
   refusalOf,
   type RunStatus,
@@ -319,11 +320,13 @@ export class SanomaClient {
     input: z.input<S>,
     options: StartOptions,
   ): Promise<string> {
-    const startedBy = await this.admitted(
-      parseOrThrow(
-        PrincipalOrId,
-        options?.startedBy,
-        '`startedBy` must be a principal, such as "alice" or { id: "alice" }',
+    const startedBy = await this.withSubject(
+      await this.admitted(
+        parseOrThrow(
+          PrincipalOrId,
+          options?.startedBy,
+          '`startedBy` must be a principal, such as "alice" or { id: "alice" }',
+        ),
       ),
     );
     if (typeof workflow === "string") {
@@ -1498,6 +1501,14 @@ export class SanomaClient {
    */
   private async admitted(principal: Principal): Promise<Principal> {
     return admit(principal, readPeople(this.config.root));
+  }
+
+  /** An api token's principal (`token:<id>`) with the subject its row acts for, refused once the token is revoked; anyone else as given. */
+  private async withSubject(principal: Principal): Promise<Principal> {
+    if (!isToken(principal)) return principal;
+    const subject = await this.tokens.subjectOf(principal.id.slice("token:".length));
+    if (subject === undefined) throw new NotAdmittedError(principal.id);
+    return { ...principal, subject };
   }
 
   /** `options.by`, who sets or clears a credential, admitted (`admitted`): their id; never a visitor's. */

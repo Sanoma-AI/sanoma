@@ -18,13 +18,36 @@ export interface Principal {
   groups?: string[];
   /** For an agent: the id of the person whose instruction it carries. */
   onBehalfOf?: string;
+  /**
+   * For a visitor: the email their site's login verified (`LoginHalf.verify`), which the app
+   * passes on. Admission keeps it for a visitor alone; a run's `ctx.startedBy.email`.
+   */
+  email?: string;
+  /**
+   * For an api token (`token:<id>`): the subject its row acts for, which `SanomaClient.start`
+   * reads from the row, never from the caller; a run's `ctx.startedBy.subject`.
+   */
+  subject?: string;
 }
 
 export const Principal: z.ZodType<Principal> = z.object({
   id: z.string().regex(/\S/, "id must not be blank"),
   groups: z.array(z.string()).optional(),
   onBehalfOf: z.string().regex(/\S/, "onBehalfOf must not be blank").optional(),
+  email: z.string().optional(),
+  subject: z.string().optional(),
 });
+
+/**
+ * Who started a run, as its workflow sees it (`ctx.startedBy`): the principal's id (`alice`,
+ * `visitor:<login>:<subject>`, `token:<id>`), with the email a visitor's login verified, and for
+ * an api token the subject its row acts for, so a workflow can tell whose a record is.
+ */
+export interface StartedBy {
+  readonly id: string;
+  readonly email?: string;
+  readonly subject?: string;
+}
 
 /** A built-in a workflow may call, as its description lists them. */
 export type Builtin = WorkflowEntry["builtins"][number];
@@ -227,6 +250,8 @@ interface BaseCtx {
    */
   now(): Promise<number>;
   readonly runId: string;
+  /** Who started the run: read, never called (`StartedBy`). */
+  readonly startedBy: StartedBy;
 }
 
 export type Ctx<U extends readonly Use[]> = BaseCtx &

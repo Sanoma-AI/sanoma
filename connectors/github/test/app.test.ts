@@ -116,6 +116,25 @@ describe("the operations through the App", () => {
     },
   );
 
+  it.skipIf(live)("reads the commit a branch is at, on a token for that repository alone", async () => {
+    play("app-head");
+    const input = { installation: 7, repository: "acme/acme-ops", branch: "main" };
+    expect(await call(githubDriver(), "repository.head", input)).toEqual({
+      sha: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    });
+    expect(sent[0]!.body).toEqual({ repositories: ["acme-ops"] });
+    expect(bearers()).toEqual(["Bearer ghs_recorded"]);
+  });
+
+  it.skipIf(live)("tries a branch's head again while the repository is empty, as one just generated is", async () => {
+    play("app-head-empty");
+    const input = { installation: 7, repository: "acme/acme-ops", branch: "main" };
+    await expect(call(githubDriver(), "repository.head", input)).rejects.toMatchObject({
+      status: 409,
+      retryable: true,
+    });
+  });
+
   it.skipIf(live)("commits files on top of a branch, its head and tree read in one call", async () => {
     play("app-commit");
     const input = { installation: 7, repository: "acme/acme-ops", branch: "main", message: "Set up acme", files };
@@ -237,6 +256,21 @@ describe("fakeGithubApp", () => {
       "github.repository.commit",
       "github.repository.addDeployKey",
     ]);
+  });
+
+  it("reads a branch's head, and answers 404 for a branch not there", async () => {
+    const fake = fakeGithub();
+    await call(fake.driver, "repository.generate", generate);
+    const head = { installation: 7, repository: "acme/acme-ops", branch: "main" };
+    const { sha } = await call(fake.driver, "repository.commit", { ...head, message: "Set up", files });
+    expect(await call(fake.driver, "repository.head", head)).toEqual({ sha });
+    await expect(call(fake.driver, "repository.head", { ...head, branch: "nope" })).rejects.toMatchObject({
+      status: 404,
+      retryable: false,
+    });
+    await expect(
+      call(fake.driver, "repository.head", { ...head, repository: "Sanoma-AI/company-template" }),
+    ).rejects.toMatchObject({ status: 404 });
   });
 
   it("makes the same SHA for the same parent, message and files", async () => {
