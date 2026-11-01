@@ -1,4 +1,4 @@
-import { createHmac, createSign, timingSafeEqual } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import {
   DriverError,
   type HostEnforcement,
@@ -7,21 +7,27 @@ import {
   type RemoteEvent,
   type RemoteHalf,
   type RepoRef,
-  retryableStatus,
   type SourceHost,
 } from "@sanoma-ai/workflows";
 import { z } from "zod";
+import {
+  appJwtOf,
+  branchPath,
+  failed,
+  GITHUB_APP_SECRETS,
+  installationToken,
+  limited,
+  ok,
+  read,
+  repoPath,
+  send,
+} from "./rest.ts";
+
+export { appJwt, GITHUB_APP_SECRETS } from "./rest.ts";
 
 // GitHub's remote half: a repository's pull requests, the `sanoma` commit status, the rules on a
 // branch and the App's webhooks, over GitHub's REST API with plain `fetch`. It signs in as the
 // company's GitHub App when the App is installed on the owner, else with `GITHUB_TOKEN`.
-
-/** The secrets of the company's GitHub App the half reads, as the app's manifest flow stores them. */
-export const GITHUB_APP_SECRETS = {
-  id: "SANOMA_GITHUB_APP_ID",
-  pem: "SANOMA_GITHUB_APP_PEM",
-  webhook_secret: "SANOMA_GITHUB_WEBHOOK_SECRET",
-} as const;
 
 /** A person's token, the one the resources' driver reads too. */
 const TOKEN = "GITHUB_TOKEN";
@@ -32,95 +38,11 @@ const CONTEXT = "sanoma";
 /** What `enforcement` says when GitHub refuses to read a branch's rules (a private repository on Free). */
 const NO_RULES = "On a private repository this needs GitHub Team or Pro, or a public repository.";
 
-const API = "https://api.github.com";
-
-const jwtPart = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
-
-/** A JWT the GitHub App signs for itself, good for 9 minutes: what its installations are listed and its tokens minted with. */
-export function appJwt(appId: string, pem: string): string {
-  const now = Math.floor(Date.now() / 1000);
-  const body = `${jwtPart({ alg: "RS256", typ: "JWT" })}.${jwtPart({ iat: now - 60, exp: now + 540, iss: appId })}`;
-  return `${body}.${createSign("RSA-SHA256").update(body).sign(pem, "base64url")}`;
-}
-
-interface Reply {
-  status: number;
-  headers: Headers;
-  body: any;
-}
-
-/** One call to GitHub's REST API, signed in with `token`; a failure to reach it is a retryable `DriverError`. */
-async function send(token: string, method: string, path: string, body?: unknown): Promise<Reply> {
-  try {
-    const res = await fetch(`${API}${path}`, {
-      method,
-      headers: {
-        authorization: `Bearer ${token}`,
-        accept: "application/vnd.github+json",
-        "x-github-api-version": "2022-11-28",
-        "user-agent": "sanoma",
-        ...(body !== undefined && { "content-type": "application/json" }),
-      },
-      ...(body !== undefined && { body: JSON.stringify(body) }),
-      signal: AbortSignal.timeout(30_000),
-    });
-    // The body too: the timeout may fire while it streams.
-    const text = await res.text();
-    return { status: res.status, headers: res.headers, body: parseJson(text) };
-  } catch (cause) {
-    throw new DriverError(`github: ${method} ${path}: the request failed`, { retryable: true, cause });
-  }
-}
-
-/** `text` as JSON, else the text itself (undefined when empty). */
-function parseJson(text: string): unknown {
-  try {
-    return text ? JSON.parse(text) : undefined;
-  } catch {
-    return text;
-  }
-}
-
-/** A rate limit: a 429, or a 403 with no requests left or a `retry-after` (GitHub's secondary limits). */
-const limited = ({ status, headers }: Reply) =>
-  status === 429 || (status === 403 && (headers.get("x-ratelimit-remaining") === "0" || headers.has("retry-after")));
-
-/** GitHub's answer as a `DriverError`, its message GitHub's own; retryable on a rate limit or a server error. */
-function failed(method: string, path: string, reply: Reply, vendorCode?: string): DriverError {
-  const message = typeof reply.body?.message === "string" ? reply.body.message : `status ${reply.status}`;
-  return new DriverError(`github: ${method} ${path} answered ${reply.status}: ${message}`, {
-    retryable: retryableStatus(reply.status) || limited(reply),
-    status: reply.status,
-    ...(vendorCode && { vendorCode }),
-  });
-}
-
-/** The body of a 2xx answer, read with `schema`; anything else a `DriverError`. */
-async function ok<T>(token: string, method: string, path: string, schema: z.ZodType<T>, body?: unknown): Promise<T> {
-  const reply = await send(token, method, path, body);
-  if (reply.status >= 300) throw failed(method, path, reply);
-  return read(schema, reply.body, `${method} ${path}`);
-}
-
-function read<T>(schema: z.ZodType<T>, body: unknown, what: string): T {
-  const parsed = schema.safeParse(body);
-  if (!parsed.success) {
-    throw new DriverError(`github: ${what} answered what Sanoma cannot read: ${z.prettifyError(parsed.error)}`, {
-      retryable: false,
-    });
-  }
-  return parsed.data;
-}
-
 const Installation = z.object({ id: z.number(), account: z.object({ login: z.string(), type: z.string() }) });
-const AccessToken = z.object({ token: z.string(), expires_at: z.string() });
 
 /** A JWT of the App, when its keys are among `found`. */
-function jwtOf(found: Map<string, string>): string | undefined {
-  const id = found.get(GITHUB_APP_SECRETS.id);
-  const pem = found.get(GITHUB_APP_SECRETS.pem);
-  return id && pem ? appJwt(id, pem) : undefined;
-}
+const jwtOf = (found: Map<string, string>) =>
+  appJwtOf(found.get(GITHUB_APP_SECRETS.id), found.get(GITHUB_APP_SECRETS.pem));
 
 const installations = (jwt: string) => ok(jwt, "GET", "/app/installations?per_page=100", z.array(Installation));
 
@@ -134,9 +56,7 @@ async function appToken(found: Map<string, string>, owner: string, name?: string
   if (!jwt) return undefined;
   const installation = (await installations(jwt)).find((i) => i.account.login.toLowerCase() === owner.toLowerCase());
   if (!installation) return undefined;
-  const scope = name === undefined ? undefined : { repositories: [name] };
-  const made = await ok(jwt, "POST", `/app/installations/${installation.id}/access_tokens`, AccessToken, scope);
-  return { token: made.token, expiresAt: Date.parse(made.expires_at) };
+  return installationToken(jwt, installation.id, name);
 }
 
 /** A token, with when an installation token's hour is out. */
@@ -211,16 +131,13 @@ const Rule = z.object({
     .optional(),
 });
 
-/** A branch name in a path, each `/`-separated part encoded. */
-const branchPath = (branch: string) => branch.split("/").map(encodeURIComponent).join("/");
-
 /**
  * The repository `repo` on GitHub, signed in as `githubToken` says. The token is kept for the calls
  * made together and after them, an installation token until five minutes before its hour is out and
  * a person's for five minutes, so a token or an installation set later is used soon after.
  */
 function openRepo(repo: RepoRef, { secrets }: RemoteContext): SourceHost {
-  const base = `/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}`;
+  const base = repoPath(repo.owner, repo.name);
   let kept: Promise<Minted> | undefined;
   let until = 0;
   const token = async (prefer?: "app" | "token") => {

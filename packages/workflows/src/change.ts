@@ -3,18 +3,9 @@ import type { ApprovalState, Approver } from "./define.ts";
 import { errorInfo } from "./errors.ts";
 import { type CallContext, defineConnector, defineDriver, type Driver, DriverError } from "./op.ts";
 import { approve, approvedFor, type Decision, deny } from "./policy.ts";
-import { isChangeOp, type Resource } from "./resource.ts";
 import { currentRun } from "./run.ts";
 import type { Secrets } from "./secret.ts";
-import {
-  APPLY_WORKFLOW,
-  CHANGE_MERGE,
-  CHANGE_WORKFLOW,
-  DRAFT_ID,
-  errorMessage,
-  groupNamesOf,
-  type PeopleResource,
-} from "./shared.ts";
+import { CHANGE_MERGE, CHANGE_WORKFLOW, DRAFT_ID, errorMessage, groupNamesOf, type PeopleResource } from "./shared.ts";
 import {
   type CheckResult,
   type RemoteContext,
@@ -117,17 +108,15 @@ export const changeOps = defineConnector("sanoma", {
 
 /**
  * The built-in workflow that alone may call `op`, what the operation does and what to do instead:
- * `apply` for a writable resource type's change operations (`isChangeOp`), `change` for
- * `sanoma.change.*`; undefined for any other. `resolveConfig` refuses a workflow that uses one, and
- * a run's call of one outside its workflow fails.
+ * `change` for `sanoma.change.*`; undefined for any other. `resolveConfig` refuses a workflow that
+ * uses one, and a run's call of one outside its workflow fails. A resource type's change
+ * operations are not reserved: any workflow may call them for an object no data file declares,
+ * and the call refuses a declared one (`refuseDeclared` in `call.ts`), which only apply changes.
  */
-export function reservedFor(
-  op: { readonly vendor: string; readonly resource: string; readonly name: string },
-  types: ReadonlyMap<string, Pick<Resource, "writable">>,
-): { workflow: string; does: string; instead: string } | undefined {
-  if (isChangeOp(op, types)) {
-    return { workflow: APPLY_WORKFLOW, does: "changes a declared resource", instead: "change the data file" };
-  }
+export function reservedFor(op: {
+  readonly vendor: string;
+  readonly resource: string;
+}): { workflow: string; does: string; instead: string } | undefined {
   if (op.vendor === "sanoma" && op.resource === "change") {
     return { workflow: CHANGE_WORKFLOW, does: "changes the company's repository", instead: "send a draft for review" };
   }

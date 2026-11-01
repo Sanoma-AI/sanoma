@@ -67,7 +67,7 @@ import { appsListDriver, appsListOps } from "./apps-list.ts";
 import type { Steps } from "./steps.ts";
 import { checkSchedule } from "./schedules.ts";
 import { changeCodeOf, computeVersion } from "./version.ts";
-import type { DeclaredResource } from "./resources.ts";
+import type { DeclaredResource, ResourceProblem } from "./resources.ts";
 import { checkWakeupOps, type DeclaredWakeup } from "./wakeup.ts";
 import { sanomaWakeupDriver, wakeupSteps } from "./wakeup-driver.ts";
 import { wakeupOps } from "./wakeup-type.ts";
@@ -194,6 +194,11 @@ export interface ResolvedConfig {
    * declares a host type.
    */
   hosts(): Promise<string[]>;
+  /**
+   * The objects the data files under `root` declare, read at each call: what a workflow's change
+   * operation may not aim at, since only apply changes a declared object.
+   */
+  declaredObjects(): Promise<DeclaredObjects>;
   /**
    * `root`, as a `file:` URL, when `scenarios/` or an app's `apps/<app>/scenarios/` in it is a
    * directory: the feature files under those, each named by its path from the root.
@@ -359,7 +364,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     if (BUILT_IN_WORKFLOWS.has(wf.name)) {
       throw new Error(`A workflow is named "${wf.name}", the name of a built-in workflow; name it otherwise`);
     }
-    checkUses(wf, ops, drivers, types);
+    checkUses(wf, ops, drivers);
     checkSchedule(wf);
     const other = names.get(wf.name);
     if (other && other !== wf) {
@@ -385,6 +390,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   const hosts = async () =>
     (await read()).resources.filter((r) => types.get(`${r.vendor}.${r.type}`)?.host).map((r) => r.id);
   names.set(CHANGE_WORKFLOW, changeWorkflow(changeOps, changeSteps({ remotes, hosts })));
+  const declaredObjects = () => readDeclaredObjects(root, connectors, declarable);
   // Built-in: a direct call the policy holds for an approval, made a run, when any operation may be called directly.
   const call = callWorkflow(ops, drivers, types);
   if (call.uses.length) names.set(CALL_WORKFLOW, call);
@@ -411,6 +417,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     models: makersOf(config.connectors, "model"),
     remotes,
     hosts,
+    declaredObjects,
     ...(scenarios && { scenarios }),
     types,
     steps: [...new Set([...running.flatMap((c) => setupOf(c).steps ?? []), ...(config.steps ?? [])])],
@@ -587,6 +594,34 @@ export async function declaredWakeup(config: SanomaConfig): Promise<DeclaredWake
 }
 
 /**
+ * The objects a company's data files declare, which only apply changes (`refuseDeclared` in
+ * `call.ts`), by `<vendor>.<type> <id or name>` to their key: each binding in the lockfile, an
+ * orphan's too, by its id, and each declaration by its identity (what its type's `find` made);
+ * and the files' problems, while which the declared objects are not known.
+ */
+export interface DeclaredObjects {
+  keys: ReadonlyMap<string, string>;
+  problems: readonly ResourceProblem[];
+}
+
+/** The objects the data files under `root` and its lockfile declare (`DeclaredObjects`): none without a root. */
+async function readDeclaredObjects(
+  root: string | undefined,
+  connectors: readonly Connector<any, any>[],
+  declarable: ReadonlyMap<string, Resource>,
+): Promise<DeclaredObjects> {
+  if (root === undefined) return { keys: new Map(), problems: [] };
+  // Loaded when a call asks, not with the worker.
+  const { loadDataFiles } = await import("./resources.ts");
+  const { resources, bindings, problems } = loadDataFiles(root, connectors, declarable);
+  const named = resources.flatMap((r) =>
+    r.identity === undefined ? [] : [[`${r.vendor}.${r.type} ${r.identity}`, r.id] as const],
+  );
+  const bound = Object.entries(bindings).map(([key, { type, id }]) => [`${type} ${id}`, key] as const);
+  return { keys: new Map([...named, ...bound]), problems };
+}
+
+/**
  * The data files under `root` and the lockfile beside them, in one read, as a drift or apply run
  * records them: each resource with its binding, without its write-only values (a secret marker
  * names one, and stays), which a run never compares and never records, the bindings, the orphans
@@ -734,19 +769,15 @@ function guarded(vendor: string, env: DriverEnv, fn: DriverFn): DriverFn {
  * Every operation a workflow uses must be one the config's connectors declare, with a driver.
  * The workflow normally imports the same connector object; a copy is accepted only if it
  * declares the same effect and retry setting, and the worker's declaration is used either way.
- * None may use an operation a built-in workflow alone calls (`reservedFor`): a declared resource's
- * change, which only apply makes, or a change's step, which only the change workflow takes.
+ * None may use an operation a built-in workflow alone calls (`reservedFor`): a change's step, which
+ * only the change workflow takes. A resource type's change operations are allowed: the call
+ * refuses one aimed at a declared object (`DeclaredObjects`), which only apply changes.
  */
-function checkUses(
-  wf: WorkflowDefinition<any, any>,
-  ops: Map<string, Op>,
-  impls: Map<string, unknown>,
-  types: ReadonlyMap<string, Resource>,
-) {
+function checkUses(wf: WorkflowDefinition<any, any>, ops: Map<string, Op>, impls: Map<string, unknown>) {
   const problems: string[] = [];
   for (const op of (wf.uses as readonly Use[]).filter(isOp)) {
     const known = ops.get(op.id);
-    const reserved = known && reservedFor(known, types);
+    const reserved = known && reservedFor(known);
     if (!known) problems.push(`${op.id} is not declared by any connector in \`connectors\``);
     else if (reserved) {
       problems.push(`${op.id} ${reserved.does}, which only ${reserved.workflow} does: ${reserved.instead} instead`);

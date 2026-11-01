@@ -33,8 +33,10 @@ import { callAt, callName, type CallNode } from "./outline.ts";
 import { allowAll, type Decision, type Policy, type PolicyCall, policyOpOf, type RecordedDecision } from "./policy.ts";
 import type { Run, StartHold, WorkerState } from "./run.ts";
 import { reservedFor, runtimeHold } from "./change.ts";
+import { isChangeOp } from "./resource.ts";
 import { readPeople } from "./resources.ts";
 import {
+  APPLY_WORKFLOW,
   approverLabel,
   CALL_WORKFLOW,
   CHANGE_MERGE,
@@ -42,6 +44,7 @@ import {
   errorMessage,
   fitsOp,
   LOGIN_CODE_WORKFLOW,
+  problemLine,
   type Saved,
   WORKFLOW_ACTION,
 } from "./shared.ts";
@@ -433,6 +436,50 @@ function ask(
   return policy.version === undefined ? decision : { ...decision, policyVersion: policy.version };
 }
 
+/**
+ * Refuses a change operation (`isChangeOp`) aimed at an object the data files declare, which only
+ * apply changes: an `update` or `delete` of an id the lockfile binds or a data file names, and a
+ * `create` or `update` whose identity (what its type's `find` makes of `desired`) a data file
+ * declares or the lockfile binds. Any other object is the workflow's own, its change an ordinary
+ * write. While the files have problems, which objects they declare is not known, so it refuses.
+ */
+async function refuseDeclared(run: Run, op: Op, input: unknown) {
+  const type = `${op.vendor}.${op.resource}`;
+  const { id, desired } = input as { id?: unknown; desired?: Record<string, unknown> };
+  const targets: string[] = [];
+  if (op.name !== "create" && typeof id === "string") targets.push(id);
+  const find = run.state.types.get(type)?.find;
+  if (op.name !== "delete" && desired && find) {
+    try {
+      targets.push(find(desired));
+    } catch (err) {
+      throw new SanomaError(
+        "invalid_input",
+        `${op.id}: its desired names no ${type} (${errorMessage(err)}), so it cannot be told from a declared one`,
+        { op: op.id, workflow: run.workflow },
+      );
+    }
+  }
+  if (!targets.length) return;
+  const declared = await run.state.declaredObjects();
+  if (declared.problems.length) {
+    throw new SanomaError(
+      "invalid_input",
+      `${op.id} waits for the data files to be fixed, since only apply changes a declared resource: ${declared.problems.map(problemLine).join("; ")}`,
+      { op: op.id, workflow: run.workflow },
+    );
+  }
+  for (const target of targets) {
+    const key = declared.keys.get(`${type} ${target}`);
+    if (key === undefined) continue;
+    throw new SanomaError(
+      "invalid_input",
+      `${op.id} changes ${key}, a declared resource, which only apply does: change the data file instead`,
+      { op: op.id, workflow: run.workflow, declared: key },
+    );
+  }
+}
+
 async function callOp(run: Run, id: string, input: unknown, place: Placed, ref?: ConnectionRef) {
   // The worker's declaration, never the workflow's: its effect, schemas and retry setting.
   const op = run.state.ops.get(id);
@@ -445,9 +492,8 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed, ref?:
         : `No connector or fake for ${id} in this worker: no fake its connectors attach implements it`,
     );
   }
-  // Only apply changes a declared resource, and only change takes a change's steps; `resolveConfig`
-  // refuses any other workflow that uses such an operation.
-  const reserved = reservedFor(op, run.state.types);
+  // Only change takes a change's steps; `resolveConfig` refuses any other workflow that uses one.
+  const reserved = reservedFor(op);
   if (reserved && run.workflow !== reserved.workflow) {
     throw new SanomaError("invalid_input", `${op.id} ${reserved.does}, which only ${reserved.workflow} does`, {
       op: op.id,
@@ -477,6 +523,9 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed, ref?:
     DBOS.runStep(
       async () => {
         if (run.sandbox === undefined) await run.state.connections?.assertCurrent(connection, run.actor.id);
+        // Read in the step, so a replay reuses the first answer, and asked again after each
+        // approval, so a call made after a long wait sees the files as they are then.
+        if (run.workflow !== APPLY_WORKFLOW && isChangeOp(op, run.state.types)) await refuseDeclared(run, op, parsed);
         return decide(run, op, parsed, connection);
       },
       { name: `policy:${op.id}` },

@@ -1,0 +1,34 @@
+[
+  {
+    "method": "POST",
+    "path": "/app/installations/7/access_tokens",
+    "status": 201,
+    "body": {
+      "token": "ghs_recorded",
+      "expires_at": "2026-10-31T13:00:00Z",
+      "permissions": {
+        "administration": "write",
+        "contents": "write",
+        "metadata": "read"
+      },
+      "repository_selection": "all"
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/repos/acme/acme-ops/keys",
+    "status": 201,
+    "body": {
+      "id": 1234,
+      "key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl",
+      "url": "https://api.github.com/repos/acme/acme-ops/keys/1234",
+      "title": "acme host",
+      "verified": true,
+      "created_at": "2026-10-31T12:00:00Z",
+      "read_only": true,
+      "added_by": "sanoma-work[bot]",
+      "last_used": null,
+      "enabled": true
+    }
+  }
+]

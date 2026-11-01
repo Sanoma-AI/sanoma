@@ -14,7 +14,7 @@ One workspace package per vendor, each built on `@sanoma-ai/workflows`. A connec
 | [`exa/`](exa/AGENTS.md)                 | `@sanoma-ai/connector-exa`: Exa web search, page contents, similar pages and answers, and an in-memory fake                                    |
 | [`gcp/`](gcp/AGENTS.md)                 | `@sanoma-ai/connector-gcp`: KMS/IAM provisioning with named OIDC workload identities and isolated provider sessions                            |
 | [`ghost/`](ghost/AGENTS.md)             | `@sanoma-ai/connector-ghost`: Ghost Admin API post operations and an in-memory fake                                                            |
-| [`github/`](github/AGENTS.md)           | `@sanoma-ai/connector-github`: GitHub resources read through its OpenTofu provider, and pull requests (a remote half)                          |
+| [`github/`](github/AGENTS.md)           | `@sanoma-ai/connector-github`: GitHub resources (OpenTofu provider), operations through its App, pull requests                                 |
 | [`invoices/`](invoices/AGENTS.md)       | `@sanoma-ai/connector-invoices`: local invoice PDF generation for standard, pet-sitting and cleaning inputs                                    |
 | [`neon/`](neon/AGENTS.md)               | `@sanoma-ai/connector-neon`: Neon projects (the company's database, which pauses and branches), branches and computes                          |
 | [`resend/`](resend/AGENTS.md)           | `@sanoma-ai/connector-resend`: Resend broadcast and email operations and an in-memory fake                                                     |
