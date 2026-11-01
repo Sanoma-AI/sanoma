@@ -15,6 +15,7 @@ Describe Sanoma the way the [README's opening](README.md#sanoma) does (workflow 
 | The desktop shell (Electron) that runs a company folder in a window   | [desktop](packages/desktop/AGENTS.md)                                  |
 | Test workers, fakes, recorded HTTP replay, scenarios                  | [testing](packages/testing/AGENTS.md)                                  |
 | Provider bridge, schema generation, provider replay                   | [bridge](packages/bridge/AGENTS.md)                                    |
+| Portable invoice schemas, calculations and industry adapters          | [invoices](packages/invoices/AGENTS.md)                                |
 | Vendor connectors                                                     | [connector conventions](connectors/AGENTS.md), then the vendor package |
 
 Source and test directory maps live below each package. Open them when navigating that area; do not read every descendant guide up front.
