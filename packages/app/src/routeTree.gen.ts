@@ -21,6 +21,7 @@ import { Route as PermissionsRouteImport } from './routes/permissions'
 import { Route as ResourcesRouteImport } from './routes/resources'
 import { Route as StartRouteImport } from './routes/start'
 import { Route as WorkflowsRouteRouteImport } from './routes/workflows/route'
+import { Route as ApiCallRouteImport } from './routes/api/call'
 import { Route as ApiChatRouteImport } from './routes/api/chat'
 import { Route as ApiSignInRouteImport } from './routes/api/sign-in'
 import { Route as AppsIndexRouteImport } from './routes/apps/index'
@@ -106,6 +107,11 @@ const StartRoute = StartRouteImport.update({
 const WorkflowsRouteRoute = WorkflowsRouteRouteImport.update({
   id: '/workflows',
   path: '/workflows',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiCallRoute = ApiCallRouteImport.update({
+  id: '/api/call',
+  path: '/api/call',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiChatRoute = ApiChatRouteImport.update({
@@ -253,6 +259,7 @@ export interface FileRoutesByFullPath {
   '/resources': typeof ResourcesRoute
   '/start': typeof StartRoute
   '/workflows/$name': typeof WorkflowsNameRouteRouteWithChildren
+  '/api/call': typeof ApiCallRoute
   '/api/chat': typeof ApiChatRoute
   '/api/sign-in': typeof ApiSignInRoute
   '/apps/$name': typeof AppsNameRoute
@@ -286,6 +293,7 @@ export interface FileRoutesByTo {
   '/permissions': typeof PermissionsRoute
   '/resources': typeof ResourcesRoute
   '/start': typeof StartRoute
+  '/api/call': typeof ApiCallRoute
   '/api/chat': typeof ApiChatRoute
   '/api/sign-in': typeof ApiSignInRoute
   '/apps/$name': typeof AppsNameRoute
@@ -327,6 +335,7 @@ export interface FileRoutesById {
   '/resources': typeof ResourcesRoute
   '/start': typeof StartRoute
   '/workflows/$name': typeof WorkflowsNameRouteRouteWithChildren
+  '/api/call': typeof ApiCallRoute
   '/api/chat': typeof ApiChatRoute
   '/api/sign-in': typeof ApiSignInRoute
   '/apps/$name': typeof AppsNameRoute
@@ -369,6 +378,7 @@ export interface FileRouteTypes {
     | '/resources'
     | '/start'
     | '/workflows/$name'
+    | '/api/call'
     | '/api/chat'
     | '/api/sign-in'
     | '/apps/$name'
@@ -402,6 +412,7 @@ export interface FileRouteTypes {
     | '/permissions'
     | '/resources'
     | '/start'
+    | '/api/call'
     | '/api/chat'
     | '/api/sign-in'
     | '/apps/$name'
@@ -442,6 +453,7 @@ export interface FileRouteTypes {
     | '/resources'
     | '/start'
     | '/workflows/$name'
+    | '/api/call'
     | '/api/chat'
     | '/api/sign-in'
     | '/apps/$name'
@@ -482,6 +494,7 @@ export interface RootRouteChildren {
   PermissionsRoute: typeof PermissionsRoute
   ResourcesRoute: typeof ResourcesRoute
   StartRoute: typeof StartRoute
+  ApiCallRoute: typeof ApiCallRoute
   ApiChatRoute: typeof ApiChatRoute
   ApiSignInRoute: typeof ApiSignInRoute
   RunsIdRoute: typeof RunsIdRoute
@@ -578,6 +591,13 @@ declare module '@tanstack/react-router' {
       path: '/workflows'
       fullPath: '/workflows'
       preLoaderRoute: typeof WorkflowsRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/call': {
+      id: '/api/call'
+      path: '/api/call'
+      fullPath: '/api/call'
+      preLoaderRoute: typeof ApiCallRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/chat': {
@@ -879,6 +899,7 @@ const rootRouteChildren: RootRouteChildren = {
   PermissionsRoute: PermissionsRoute,
   ResourcesRoute: ResourcesRoute,
   StartRoute: StartRoute,
+  ApiCallRoute: ApiCallRoute,
   ApiChatRoute: ApiChatRoute,
   ApiSignInRoute: ApiSignInRoute,
   RunsIdRoute: RunsIdRoute,

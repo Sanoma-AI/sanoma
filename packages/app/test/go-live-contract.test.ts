@@ -406,4 +406,33 @@ describe("going live by contract", () => {
       renderInfra(contextOf([github, supabase, docker]), { ...unsized, region: "eu-west-1" }, DEPLOY_KEY),
     ).rejects.toMatchObject({ status: 400, body: { issues: [{ path: ["organization"] }] } });
   });
+
+  it("offers no type of a vendor whose host binds its own bootstrap: its file is not going live's to write yet", async () => {
+    const own = defineResource({
+      vendor: "cloud",
+      type: "host",
+      title: "Cloud host",
+      identity: "name",
+      schema: z.object({
+        name: z.string(),
+        source: z.string(),
+        ref: z.string(),
+        port: z.number(),
+        revision: z.string(),
+      }),
+      fields: { immutable: [], vendorOwned: [], writeOnly: [] },
+      find: ({ name }) => name,
+      writable: true,
+      host: {
+        capabilities: { lifetime: "stops-when-quiet", publicUrl: true, buildsFromGit: false, staticEgress: false },
+        bindsBootstrap: true,
+        inputs: { source: "source", ref: "ref", port: "port" },
+        revision: "revision",
+        outputs: () => ({ url: "https://acme.example.test", healthy: true }),
+      },
+    });
+    const app = contextOf([github, neon, defineConnector("cloud", { host: own }, { package: "@acme/cloud" })]);
+    expect((await goLiveChoices(app)).missing).toEqual(["a host type"]);
+    await expect(renderInfra(app, choices, DEPLOY_KEY)).rejects.toMatchObject({ status: 409 });
+  });
 });
