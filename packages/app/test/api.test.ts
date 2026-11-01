@@ -292,6 +292,18 @@ describe("POST /api/call", () => {
     });
   });
 
+  it("refuses an api token on the app's own host, whose login reads none", async () => {
+    const app = appContext();
+    const headers = { "content-type": "application/json", authorization: "Bearer sca_test", [ACTOR_HEADER]: "ada" };
+    const request = new Request("http://127.0.0.1/api/call", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ name: "data.outbound.list" }),
+    });
+    const res = await postCall(request, { app, actor: actorOf(app, request) });
+    expect(res.status).toBe(401);
+  });
+
   it("answers a refusal with its status and body, and a request that says nobody or names nothing 400", async () => {
     expect(await post({ name: "nothing.here" })).toMatchObject({ status: 400, body: { code: "invalid_input" } });
     expect(await post({ input: {} })).toMatchObject({ status: 400, body: { code: "invalid_input" } });

@@ -1,6 +1,6 @@
 import { type CallContext, DriverError, type PlanAction } from "@sanoma-ai/workflows";
 import type { z } from "zod";
-import { database, host, hostSlug, PORT, REGIONS, repositoryKey, repositoryOf } from "./connector.ts";
+import { database, host, hostSlug, PORT, REGIONS, repositoryKey, repositoryOf, SLUG, SLUG_RULE } from "./connector.ts";
 
 // The connector's operations over Sanoma Cloud's API (`CloudApi`, sanoma-ops's four workflows):
 // the driver's starts them over the public api, the fake's answers from its state. Both go
@@ -107,6 +107,18 @@ function expected(what: string, expect: Expect | undefined, fresh: Planned) {
   }
 }
 
+/** A host's slug (`hostSlug`), refused at plan when what it is made from is no slug the Cloud takes. */
+function slugOf(want: HostState): string {
+  const slug = hostSlug(want);
+  if (!SLUG.test(slug)) {
+    throw refused(
+      `a cloud.host's slug, made from its name, domains.app or repository, is ${slug ? `"${slug}"` : "empty"}, not ${SLUG_RULE}: declare \`name\``,
+      "no_slug",
+    );
+  }
+  return slug;
+}
+
 /** The company at `slug`, or undefined when the token holds none there. */
 const company = async (cloud: CloudApi, slug: string) => (await cloud.list({ slug })).find((c) => c.slug === slug);
 
@@ -162,7 +174,7 @@ const planHost = async (
   const state = id === undefined ? undefined : (await readHost(cloud, id)).state;
   if (!desired) return { action: state ? "delete" : "none", ...NONE, state };
   const want = host.schema.parse(desired);
-  const name = hostSlug(want);
+  const name = slugOf(want);
   if (!state) {
     return {
       action: "create",
@@ -250,11 +262,11 @@ export function cloudOperations(api: (call: CallContext) => CloudApi) {
       create: async ({ desired }: { desired: State }, call: CallContext) => {
         const cloud = api(call);
         const want = host.schema.parse(desired);
-        const slug = hostSlug(want);
+        const slug = slugOf(want);
         const repository = repositoryOf(want.source);
         if (!repository)
           throw refused(`host.create: ${want.source} names no repository (owner and name)`, "no_repository");
-        const made = await cloud.signup({
+        await cloud.signup({
           slug,
           name: slug,
           part: "host",
@@ -269,18 +281,9 @@ export function cloudOperations(api: (call: CallContext) => CloudApi) {
           await cloud.deploy({ slug, revision: want.revision });
           found = await company(cloud, slug);
         }
-        if (hasHost(found)) return { id: slug, state: hostState(found) };
-        if (!made.host) throw refused(`host.create: the Cloud made no host for ${slug}`, "not_made");
-        const revision = made.host.revision ?? want.revision ?? "";
-        return {
-          id: slug,
-          state: hostState({
-            slug,
-            url: made.host.url ?? made.url,
-            revision,
-            repository: { ...repository, ref: want.ref },
-          }),
-        };
+        // As `read` will see it: a host the list does not show would be made again by the next plan.
+        if (!hasHost(found)) throw refused(`host.create: the Cloud made no host for ${slug}`, "not_made");
+        return { id: slug, state: hostState(found) };
       },
       update: async ({ id, desired, expect }: { id: string; desired: State; expect?: Expect }, call: CallContext) => {
         const cloud = api(call);

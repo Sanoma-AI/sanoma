@@ -248,6 +248,7 @@ export function fakeCloud(options: FakeCloudOptions = {}) {
     /** Empties the state and stops everything. */
     async reset() {
       await close();
+      started.length = 0;
       reset();
     },
   });

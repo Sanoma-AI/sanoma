@@ -115,8 +115,20 @@ const hasField = (type: Resource, field: string) => field in (type.schema.shape 
  * What going live declares that the config's connectors do not: the repository type and its
  * deploy key's (a GitHub connector of an earlier release has none), a database type, a host type.
  */
-const missingTypes = ({ resolved }: AppContext) => {
+/**
+ * The resource types going live may choose from: all but those of a vendor whose host binds its
+ * own bootstrap (Sanoma Cloud's), whose database and host go together in a file of their own
+ * that going live does not write yet (#514 G1).
+ */
+function offered({ resolved }: AppContext): Resource[] {
   const types = [...resolved.types.values()];
+  const own = new Set(types.filter((type) => type.host?.bindsBootstrap).map((type) => type.vendor));
+  return types.filter((type) => !own.has(type.vendor));
+}
+
+const missingTypes = (app: AppContext) => {
+  const { resolved } = app;
+  const types = offered(app);
   return [
     ...[REPOSITORY, DEPLOY_KEY].filter((id) => !resolved.types.has(id)),
     ...(types.some((type) => type.database) ? [] : ["a database type"]),
@@ -172,7 +184,7 @@ const isConnected = (stored: Connections, vendor: string, strictly = false) => {
  * connected, else the first connected; when none is, the same over all (the page asks to connect).
  */
 function pick(app: AppContext, stored: Connections, meets: (type: Resource) => unknown, preferred: string[]) {
-  const all = [...app.resolved.types.values()].filter(meets);
+  const all = offered(app).filter(meets);
   const connected = all.filter((type) => isConnected(stored, type.vendor));
   const among = connected.length ? connected : all;
   return preferred.map((id) => among.find((type) => idOf(type) === id)).find(Boolean) ?? among[0];
@@ -456,16 +468,15 @@ export async function renderInfra(
   }
   setPath(hosted, inputs.source, new Reference("repo"));
   setPath(hosted, inputs.ref, "main");
-  // A host that binds its own bootstrap (Sanoma Cloud's) takes no secrets.
-  if (inputs.secrets)
-    setPath(hosted, inputs.secrets, {
-      SANOMA_DATABASE_URL: secret(DATABASE_URL),
-      SANOMA_SIGNING_KEY: secret("SANOMA_SIGNING_KEY"),
-      ...(!app.resolved.secrets.store && { SANOMA_SECRETS_KEY: secret(SECRETS_KEY) }),
-      [SOURCE_KEY]: secret(SOURCE_KEY),
-      ...wakeup.secrets,
-      ...(await senderSecrets(app)),
-    });
+  // `offered` leaves out a host that binds its own bootstrap, the one kind with no secrets.
+  setPath(hosted, inputs.secrets!, {
+    SANOMA_DATABASE_URL: secret(DATABASE_URL),
+    SANOMA_SIGNING_KEY: secret("SANOMA_SIGNING_KEY"),
+    ...(!app.resolved.secrets.store && { SANOMA_SECRETS_KEY: secret(SECRETS_KEY) }),
+    [SOURCE_KEY]: secret(SOURCE_KEY),
+    ...wakeup.secrets,
+    ...(await senderSecrets(app)),
+  });
   setPath(hosted, inputs.port, port);
   const woken = wakeup.type;
   return renderDataFile(

@@ -22,8 +22,14 @@ import { z } from "zod";
  */
 export const REGIONS = ["us-east", "us-west", "eu-central", "eu-west", "ap-southeast"] as const;
 
-/** A company's slug, its address `<slug>.sanoma.work`: as sanoma-ops's sign-up checks it. */
+/**
+ * A company's slug, its address `<slug>.sanoma.work`: as sanoma-ops's sign-up checks it, lower
+ * case letters, digits and dashes, a dash at neither end, one of them or 3 to 40 (`SLUG_RULE`).
+ */
 export const SLUG = /^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])?$/;
+
+/** `SLUG` in words. */
+export const SLUG_RULE = "a slug: lower case letters, digits and dashes, a dash at neither end, one of them or 3 to 40";
 
 /** The port the runtime listens on in a Cloud host: the Cloud's, whatever is declared. */
 export const PORT = 3000;
@@ -65,7 +71,7 @@ export function hostSlug(desired: { name?: unknown; source?: unknown; domains?: 
   return repository ? slugged(repository.name) : "";
 }
 
-const slugField = z.string().regex(SLUG, "a slug: lower case letters, digits and dashes, 3 to 40 of them");
+const slugField = z.string().regex(SLUG, SLUG_RULE);
 
 const databaseSchema = z.object({
   name: slugField

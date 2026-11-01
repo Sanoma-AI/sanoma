@@ -208,6 +208,24 @@ describe("cloud's host through the workflows", () => {
     });
   });
 
+  it("refuses at plan a slug the Cloud does not take, made from the repository's name", async () => {
+    const unnamed = { source: "https://github.com/acme/ab.git", ref: "main" };
+    await expect(op("host.plan", { desired: unnamed })).rejects.toMatchObject({
+      vendorCode: "no_slug",
+      retryable: false,
+      message: expect.stringContaining('"ab"'),
+    });
+    expect(sent).toEqual([]);
+  });
+
+  it("fails a create whose host cloud-list does not show, rather than bind one the next plan makes again", async () => {
+    workflows = {
+      cloudSignup: () => ({ output: { slug: "acme", url: "https://acme.sanoma.work" } }),
+      cloudList: () => ({ output: [] }),
+    };
+    await expect(op("host.create", { desired: declaredHost })).rejects.toMatchObject({ vendorCode: "not_made" });
+  });
+
   it("closes the host with cloud-close, and is done already when it is gone", async () => {
     let held = [acme()];
     workflows = {

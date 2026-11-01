@@ -73,6 +73,7 @@ import {
 } from "../api.ts";
 import type { AppContext } from "../context.ts";
 import { contentFields } from "../content-files.ts";
+import { bearerOf } from "../login/public.ts";
 import { databaseHost, LOOPBACK } from "../loopback.ts";
 import { secretValues } from "./secrets.ts";
 
@@ -881,10 +882,16 @@ export async function callApi(app: AppContext, actor: Principal, { name, input, 
 
 /**
  * `POST /api/call`: `callApi` over plain JSON, for a client that is not the app's page, such as
- * Sanoma Cloud's connector with a bearer token. The body is a `CallRequest`; the answer is the
- * call's output as JSON (`null` for none), or an `ApiError`'s body with its status.
+ * Sanoma Cloud's connector with a bearer token, taken only on a public site's host. The body is a
+ * `CallRequest`; the answer is the call's output as JSON (`null` for none), or an `ApiError`'s body
+ * with its status.
  */
 export async function postCall(request: Request, context: ActorContext): Promise<Response> {
+  // Only a public site's login reads a token: elsewhere the request would act as the cookie's
+  // person, unchecked for CSRF (the route skips it for a token).
+  if (context.app.site === undefined && bearerOf(request) !== undefined) {
+    return Response.json({ error: "An api token is taken only on a public site's host" }, { status: 401 });
+  }
   try {
     const actor = await requireActor(context);
     const call = parse(CallRequest, await request.json().catch(() => undefined), "The request");
