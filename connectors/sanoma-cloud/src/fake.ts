@@ -5,17 +5,10 @@ import { defineFake, type FakeOptions } from "@sanoma-ai/workflows/fake";
 import { REGIONS, cloudOps, SLUG } from "./connector.ts";
 import { type CloudApi, cloudOperations, type Company } from "./operations.ts";
 
-/** A `GET /wake` a host's runtime answered: when. */
-export interface FakeWake {
-  at: Date;
-}
-
 /** What `start` runs for a company's host: a runtime answering at `url`, until `stop`. */
 export interface FakeRuntime {
   url: string;
   stop(): Promise<void>;
-  /** Each `/wake` it answered, in order, when it records them. */
-  wakes?: readonly FakeWake[];
 }
 
 /** Starts a company's runtime at a revision, as the Cloud's container would, its bootstrap the Cloud's own. */
@@ -29,7 +22,6 @@ export interface FakeCloudOptions extends FakeOptions {
 /** A company as the fake Cloud keeps it: the parts it has. */
 export interface FakeCompany {
   slug: string;
-  name: string;
   repository?: { owner: string; name: string; ref: string };
   database?: { id: string; region: string };
   host?: { revision: string; domains?: Record<string, string> };
@@ -46,21 +38,17 @@ export interface FakeCloudState extends Record<string, unknown> {
 const fail = (workflow: string, message: string) =>
   new DriverError(`Sanoma Cloud: ${workflow}: ${message}`, { retryable: false, status: 422 });
 
-/** A runtime that answers `/healthz` and records each `/wake`: what a host runs unless the fake is given `start`. */
+/** A runtime that answers `/healthz` and `/wake`: what a host runs unless the fake is given `start`. */
 const stubRuntime: StartRuntime = async () => {
-  const wakes: FakeWake[] = [];
   const server = createServer((req, res) => {
     const path = new URL(req.url ?? "/", "http://runtime").pathname;
     if (path === "/healthz") return void res.writeHead(200).end("ok\n");
-    if (path !== "/wake") return void res.writeHead(404).end();
-    wakes.push({ at: new Date() });
-    res.writeHead(204).end();
+    res.writeHead(path === "/wake" ? 204 : 404).end();
   });
   await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
   server.unref();
   return {
     url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
-    wakes,
     stop: () => new Promise<void>((done) => server.close(() => done())),
   };
 };
@@ -70,22 +58,16 @@ const stubRuntime: StartRuntime = async () => {
  * host, kept for the fake's life, that starts the runtime on a request while the host is there
  * (one start at a time) and forwards the request to it, and answers 404 while there is none.
  */
-function address(start: StartRuntime, started: FakeRuntime[]) {
+function address(slug: string, start: StartRuntime) {
   let revision: string | undefined;
   let runtime: Promise<FakeRuntime> | undefined;
   let server: Server | undefined;
   let url: string | undefined;
-  const up = (slug: string) =>
-    (runtime ??= start({ slug, revision: revision! }).then(
-      (made) => {
-        started.push(made);
-        return made;
-      },
-      (err: unknown) => {
-        runtime = undefined;
-        throw err;
-      },
-    ));
+  const up = () =>
+    (runtime ??= start({ slug, revision: revision! }).catch((err: unknown) => {
+      runtime = undefined;
+      throw err;
+    }));
   /** Stops the runtime, the address kept: the next request starts it again. */
   const suspend = async () => {
     const was = runtime;
@@ -97,13 +79,13 @@ function address(start: StartRuntime, started: FakeRuntime[]) {
   };
   return {
     /** Runs the host at `revision`, now: a new revision stops the runtime that ran the old one. */
-    async run(slug: string, at: string): Promise<string> {
+    async run(at: string): Promise<string> {
       if (revision !== at) await suspend();
       revision = at;
       if (!server) {
         server = createServer((req, res) => {
           if (revision === undefined) return void res.writeHead(404).end("There is nothing here yet\n");
-          up(slug).then(
+          up().then(
             (made) => {
               const out = forward(
                 new URL(req.url ?? "/", made.url),
@@ -126,7 +108,7 @@ function address(start: StartRuntime, started: FakeRuntime[]) {
         server.unref();
         url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
       }
-      await up(slug);
+      await up();
       return url!;
     },
     suspend,
@@ -153,17 +135,16 @@ function address(start: StartRuntime, started: FakeRuntime[]) {
  * default; a host at its revision), every part healthy. A host runs `start`'s runtime behind an
  * address in this process that outlives it (`<slug>.sanoma.work`'s stand-in), which starts it on
  * a request; a deploy moves it to the new revision; a close removes the part, and the company with
- * its last. `stop(slug)` stops a host's runtime as a quiet spell would, the address kept; `wakes()`
- * lists the `/wake`s the runtimes answered; `close()` (and `reset()`) stops everything. It refuses
+ * its last. `stop(slug)` stops a host's runtime as a quiet spell would, the address kept;
+ * `close()` (and `reset()`) stops everything. It refuses
  * what sanoma-ops's workflows refuse: a slug that is not one, a region the Cloud has not, a host
  * with no repository, a deploy of a company with no host.
  */
 export function fakeCloud(options: FakeCloudOptions = {}) {
   const start = options.start ?? stubRuntime;
   const addresses = new Map<string, ReturnType<typeof address>>();
-  const started: FakeRuntime[] = [];
   const addressOf = (slug: string) => {
-    const found = addresses.get(slug) ?? address(start, started);
+    const found = addresses.get(slug) ?? address(slug, start);
     addresses.set(slug, found);
     return found;
   };
@@ -171,7 +152,6 @@ export function fakeCloud(options: FakeCloudOptions = {}) {
   /** A company as `cloud-list` answers it. */
   const listed = (c: FakeCompany): Company => ({
     slug: c.slug,
-    name: c.name,
     url: addresses.get(c.slug)?.url ?? `https://${c.slug}.sanoma.work`,
     status: "running",
     ...(c.host && { revision: c.host.revision, healthy: true, ...(c.host.domains && { domains: c.host.domains }) }),
@@ -180,26 +160,21 @@ export function fakeCloud(options: FakeCloudOptions = {}) {
   });
 
   const api = (state: FakeCloudState): CloudApi => ({
-    async signup({ slug, name, part, repository, ref, revision, region, domains }) {
+    async signup({ slug, part, repository, ref, revision, region, domains }) {
       if (!SLUG.test(slug)) throw fail("cloud-signup", `${slug} is not a company's address`);
       if (region && !(REGIONS as readonly string[]).includes(region)) {
         throw fail("cloud-signup", `Sanoma Cloud has no region ${region}`);
       }
-      const company = (state.companies[slug] ??= { slug, name });
+      const company = (state.companies[slug] ??= { slug });
       if (repository) company.repository = { ...repository, ref: ref ?? "main" };
       if (part === "database") company.database ??= { id: `fake-db-${++state.seq}`, region: region ?? "us-east" };
       else {
         if (!company.repository) throw fail("cloud-signup", "The host needs a repository: pass `repository`");
         const at = revision ?? company.host?.revision ?? "";
         company.host = { revision: at, ...(domains && { domains }) };
-        await addressOf(slug).run(slug, at);
+        await addressOf(slug).run(at);
       }
-      return {
-        slug,
-        url: addresses.get(slug)?.url ?? `https://${slug}.sanoma.work`,
-        ...(company.database && { database: { id: company.database.id } }),
-        ...(company.host && { host: { url: addresses.get(slug)?.url, revision: company.host.revision } }),
-      };
+      return {};
     },
     list: async ({ slug }) =>
       Object.values(state.companies)
@@ -209,7 +184,7 @@ export function fakeCloud(options: FakeCloudOptions = {}) {
       const company = state.companies[slug];
       if (!company?.host) throw fail("cloud-deploy", `Company "${slug}" has no host: make it with cloud-signup`);
       company.host.revision = revision;
-      return { revision, url: await addressOf(slug).run(slug, revision) };
+      return { revision, url: await addressOf(slug).run(revision) };
     },
     async close({ slug, part }) {
       const company = state.companies[slug];
@@ -241,14 +216,11 @@ export function fakeCloud(options: FakeCloudOptions = {}) {
     async stop(slug?: string) {
       for (const [at, found] of addresses) if (slug === undefined || at === slug) await found.suspend();
     },
-    /** Each `/wake` the runtimes answered, in order of their starts. */
-    wakes: (): FakeWake[] => started.flatMap((r) => r.wakes ?? []),
     /** Stops every runtime and closes every address. */
     close,
     /** Empties the state and stops everything. */
     async reset() {
       await close();
-      started.length = 0;
       reset();
     },
   });

@@ -1,6 +1,6 @@
-import { type CallContext, DriverError, type PlanAction } from "@sanoma-ai/workflows";
+import { type CallContext, diffDeclared, DriverError, type PlanAction } from "@sanoma-ai/workflows";
 import type { z } from "zod";
-import { database, host, hostSlug, PORT, REGIONS, repositoryKey, repositoryOf, SLUG, SLUG_RULE } from "./connector.ts";
+import { database, host, hostSlug, PORT, REGIONS, repositoryOf, SLUG, SLUG_RULE } from "./connector.ts";
 
 // The connector's operations over Sanoma Cloud's API (`CloudApi`, sanoma-ops's four workflows):
 // the driver's starts them over the public api, the fake's answers from its state. Both go
@@ -23,18 +23,9 @@ export interface SignupInput {
   domains?: Record<string, string>;
 }
 
-/** What `cloud-signup` answers. */
-export interface SignupOutput {
-  slug: string;
-  url?: string;
-  database?: { id: string };
-  host?: { url?: string; revision?: string };
-}
-
 /** One company as `cloud-list` reads it: the parts it has. */
 export interface Company {
   slug: string;
-  name?: string;
   url?: string;
   /** The commit its host runs: set while it has a host. */
   revision?: string;
@@ -48,7 +39,8 @@ export interface Company {
 
 /** Sanoma Cloud's API: sanoma-ops's workflows, each a run's output. Each call fails with a `DriverError`. */
 export interface CloudApi {
-  signup(input: SignupInput): Promise<SignupOutput>;
+  /** Its answer is not read: `create` reads the part from `list`, as `read` will. */
+  signup(input: SignupInput): Promise<unknown>;
   /** The token's companies, or the one at `slug`: none when it has none (not found). */
   list(input: { slug?: string }): Promise<Company[]>;
   deploy(input: { slug: string; revision: string }): Promise<unknown>;
@@ -56,7 +48,7 @@ export interface CloudApi {
 }
 
 /** The driver's own refusal, before or instead of a call: never retried. */
-export const refused = (message: string, vendorCode?: string) =>
+const refused = (message: string, vendorCode?: string) =>
   new DriverError(`Sanoma Cloud: ${message}`, { retryable: false, ...(vendorCode && { vendorCode }) });
 
 type State = Record<string, unknown>;
@@ -66,6 +58,9 @@ type Planned = { action: PlanAction; planned?: State; unknown: string[]; replace
 type Expect = { action: PlanAction; replace: string[] };
 
 const NONE = { unknown: [], replace: [] };
+
+/** True when a company has a database. */
+const hasDatabase = (c: Company | undefined): c is Company & { database: { id: string } } => c?.database !== undefined;
 
 /** True when a company has a host: the Cloud keeps its revision while it does. */
 const hasHost = (c: Company | undefined): c is Company & { revision: string } =>
@@ -97,8 +92,11 @@ function databaseState(c: Company & { database: { id: string } }): DatabaseState
   };
 }
 
-/** Values compared as JSON, so two maps of the same domains are the same. */
-const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+/** The immutable fields of `type` where `state` differs from what `desired` declares (`diffDeclared`, the type's `normalize`). */
+function immutableChanged(type: Parameters<typeof diffDeclared>[0], state: State, desired: State): string[] {
+  const changed = new Set(diffDeclared(type, state, desired).map((d) => d.path.split(".")[0]));
+  return type.fields.immutable.filter((f) => changed.has(f));
+}
 
 /** A plan's `expect` met, or a refusal: what apply was shown is what it changes. */
 function expected(what: string, expect: Expect | undefined, fresh: Planned) {
@@ -124,12 +122,12 @@ const company = async (cloud: CloudApi, slug: string) => (await cloud.list({ slu
 
 /**
  * A database's slug: its `name`, else the one Cloud company the token holds (the host's, which
- * makes it); refused when the token holds none or several.
+ * makes it), with that company; refused when the token holds none or several.
  */
-const databaseSlug = async (cloud: CloudApi, name: string | undefined) => {
-  if (name) return name;
+const databaseSlug = async (cloud: CloudApi, name: string | undefined): Promise<{ slug: string; held?: Company }> => {
+  if (name) return { slug: name };
   const held = (await cloud.list({})).filter((c) => c.status !== "closed");
-  if (held.length === 1) return held[0]!.slug;
+  if (held.length === 1) return { slug: held[0]!.slug, held: held[0] };
   throw refused(
     `a cloud.database with no name takes the one Cloud company its token holds, and it holds ${held.length ? held.length : "none"}: ` +
       "declare `name`, the company's slug, or apply the host first",
@@ -139,9 +137,7 @@ const databaseSlug = async (cloud: CloudApi, name: string | undefined) => {
 
 const readDatabase = async (cloud: CloudApi, id: string) => {
   const found = await company(cloud, id);
-  return found?.database
-    ? { id, gone: false, state: databaseState(found as typeof found & { database: { id: string } }) }
-    : { id, gone: true as const };
+  return hasDatabase(found) ? { id, gone: false, state: databaseState(found) } : { id, gone: true as const };
 };
 const planDatabase = async (
   cloud: CloudApi,
@@ -151,7 +147,7 @@ const planDatabase = async (
   if (!desired) return { action: state ? "delete" : "none", ...NONE, state };
   const want = database.schema.parse(desired);
   if (!state) {
-    const name = await databaseSlug(cloud, want.name);
+    const { slug: name } = await databaseSlug(cloud, want.name);
     return {
       action: "create",
       planned: { ...want, name, id: null, healthy: null },
@@ -159,7 +155,7 @@ const planDatabase = async (
       replace: [],
     };
   }
-  const replace = (["name", "region"] as const).filter((f) => want[f] !== undefined && want[f] !== state[f]);
+  const replace = immutableChanged(database, state, want);
   return { action: replace.length ? "replace" : "none", planned: { ...state, ...want }, unknown: [], replace, state };
 };
 
@@ -183,18 +179,7 @@ const planHost = async (
       replace: [],
     };
   }
-  // What the Cloud cannot change in place, a repository by its owner and name.
-  const declared = {
-    name,
-    source: repositoryKey(want.source),
-    ref: want.ref,
-    port: want.port,
-    domains: want.domains,
-  };
-  const now: State = { ...state, source: repositoryKey(state.source) };
-  const replace = (Object.keys(declared) as (keyof typeof declared)[]).filter(
-    (f) => declared[f] !== undefined && !same(declared[f], now[f]),
-  );
+  const replace = immutableChanged(host, state, { ...want, name });
   const planned = { ...state, ...(want.revision && { revision: want.revision }) };
   if (replace.length) return { action: "replace", planned, unknown: [], replace, state };
   const action = want.revision && want.revision !== state.revision ? "update" : "none";
@@ -212,24 +197,26 @@ function answer(planned: Planned & { state?: unknown }): Planned {
  * (`database.*`, with `storeUrl`) and the host type's (`host.*`).
  */
 export function cloudOperations(api: (call: CallContext) => CloudApi) {
+  const databaseRead = async ({ id }: { id: string }, call: CallContext) => readDatabase(api(call), id);
+  const hostRead = async ({ id }: { id: string }, call: CallContext) => readHost(api(call), id);
   return {
     database: {
-      import: async ({ id }: { id: string }, call: CallContext) => readDatabase(api(call), id),
-      read: async ({ id }: { id: string }, call: CallContext) => readDatabase(api(call), id),
+      import: databaseRead,
+      read: databaseRead,
       plan: async (input: { id?: string; desired?: State }, call: CallContext) =>
         answer(await planDatabase(api(call), input)),
       create: async ({ desired }: { desired: State }, call: CallContext) => {
         const cloud = api(call);
         const want = database.schema.parse(desired);
-        const slug = await databaseSlug(cloud, want.name);
+        const { slug, held } = await databaseSlug(cloud, want.name);
         // The wizard made it with the company: bound now rather than made again.
-        let found = await company(cloud, slug);
-        if (!found?.database) {
+        let found = held ?? (await company(cloud, slug));
+        if (!hasDatabase(found)) {
           await cloud.signup({ slug, name: slug, part: "database", ...(want.region && { region: want.region }) });
           found = await company(cloud, slug);
         }
-        if (!found?.database) throw refused(`database.create: the Cloud made no database for ${slug}`, "not_made");
-        return { id: slug, state: databaseState(found as typeof found & { database: { id: string } }) };
+        if (!hasDatabase(found)) throw refused(`database.create: the Cloud made no database for ${slug}`, "not_made");
+        return { id: slug, state: databaseState(found) };
       },
       update: async ({ id, desired, expect }: { id: string; desired: State; expect?: Expect }, call: CallContext) => {
         const fresh = await planDatabase(api(call), { id, desired });
@@ -246,7 +233,7 @@ export function cloudOperations(api: (call: CallContext) => CloudApi) {
       },
       delete: async ({ id }: { id: string }, call: CallContext) => {
         const cloud = api(call);
-        if ((await company(cloud, id))?.database) await cloud.close({ slug: id, part: "database" });
+        if (hasDatabase(await company(cloud, id))) await cloud.close({ slug: id, part: "database" });
         return { id, gone: true as const };
       },
       storeUrl: async () => ({
@@ -255,8 +242,8 @@ export function cloudOperations(api: (call: CallContext) => CloudApi) {
       }),
     },
     host: {
-      import: async ({ id }: { id: string }, call: CallContext) => readHost(api(call), id),
-      read: async ({ id }: { id: string }, call: CallContext) => readHost(api(call), id),
+      import: hostRead,
+      read: hostRead,
       plan: async (input: { id?: string; desired?: State }, call: CallContext) =>
         answer(await planHost(api(call), input)),
       create: async ({ desired }: { desired: State }, call: CallContext) => {

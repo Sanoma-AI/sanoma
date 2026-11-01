@@ -247,9 +247,9 @@ describe("cloud's database through the workflows", () => {
       id: "acme",
       state: { name: "acme", region: "us-east", id: "proj-1", healthy: true },
     });
+    // One list: the company it takes holds the database already.
     expect(sent.filter((s) => s.name.endsWith(".start")).map((s) => [s.name, s.input])).toEqual([
       ["cloudList.start", {}],
-      ["cloudList.start", { slug: "acme" }],
     ]);
   });
 
@@ -339,9 +339,11 @@ describe("cloud's driver errors", () => {
     });
   });
 
-  it("retries a 5xx, and no reply", async () => {
+  it("retries a 5xx, a 429, and no reply", async () => {
     workflows = { cloudList: () => ({ status: 500, body: { error: "Something went wrong" } }) };
     await expect(op("host.read", { id: "acme" })).rejects.toMatchObject({ retryable: true, status: 500 });
+    workflows = { cloudList: () => ({ status: 429, body: { error: "Too many requests" } }) };
+    await expect(op("host.read", { id: "acme" })).rejects.toMatchObject({ retryable: true, status: 429 });
     vi.stubEnv("SANOMA_CLOUD_URL", "http://127.0.0.1:1");
     await expect(op("host.read", { id: "acme" })).rejects.toMatchObject({
       retryable: true,

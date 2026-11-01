@@ -112,10 +112,6 @@ const idOf = (type: Resource) => `${type.vendor}.${type.type}`;
 const hasField = (type: Resource, field: string) => field in (type.schema.shape as Record<string, unknown>);
 
 /**
- * What going live declares that the config's connectors do not: the repository type and its
- * deploy key's (a GitHub connector of an earlier release has none), a database type, a host type.
- */
-/**
  * The resource types going live may choose from: all but those of a vendor whose host binds its
  * own bootstrap (Sanoma Cloud's), whose database and host go together in a file of their own
  * that going live does not write yet (#514 G1).
@@ -126,6 +122,10 @@ function offered({ resolved }: AppContext): Resource[] {
   return types.filter((type) => !own.has(type.vendor));
 }
 
+/**
+ * What going live declares that the config's connectors do not: the repository type and its
+ * deploy key's (a GitHub connector of an earlier release has none), a database type, a host type.
+ */
 const missingTypes = (app: AppContext) => {
   const { resolved } = app;
   const types = offered(app);

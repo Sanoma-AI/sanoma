@@ -76,7 +76,7 @@ Its state adds `revision`, `url` and `healthy`. It meets the [`Host` contract](h
 
 ### Errors and retries
 
-A run that fails fails the call with its failure, which the api answers with a 422 (`DriverError`, its status and `code` as `vendorCode`). Only no reply and a 5xx are retryable; a workflow's refusal (a slug someone else holds, a region the Cloud has not) and a refused token (401, said without its value) are final. A run that has not ended in 15 minutes (`runTimeoutMs`) fails retryable, and the retry resumes it. The driver's own refusals have a `vendorCode`: `no_slug`, `immutable`, `plan_changed`, `no_repository`, `gone`, `not_made`.
+A run that fails fails the call with its failure, which the api answers with a 422 (`DriverError`, its status and `code` as `vendorCode`). Only no reply, a 408, a 429 and a 5xx are retryable (`retryableStatus`); a workflow's refusal (a slug someone else holds, a region the Cloud has not) and a refused token (401, said without its value) are final. A run that has not ended in 15 minutes (`runTimeoutMs`) fails retryable, and the retry resumes it. The driver's own refusals have a `vendorCode`: `no_slug`, `immutable`, `plan_changed`, `no_repository`, `gone`, `not_made`.
 
 ### Running it live
 
