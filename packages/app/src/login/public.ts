@@ -52,8 +52,8 @@ export function publicFront(
       if (bearer !== undefined) return tokenOf(request, bearer);
       const verified = half && login !== undefined ? await (await half).verify(request) : null;
       if (!verified || !SUBJECT.test(verified.subject)) return ANONYMOUS_PRINCIPAL;
-      // The email a provider verified rides along (`LoginIdentity.email`); the runtime's admission keeps only id and groups.
-      const visitor: Principal & { email?: string } = visitorPrincipal(login!, verified.subject);
+      // The email a provider verified rides along (`LoginIdentity.email`); admission keeps it as a run's `ctx.startedBy.email`.
+      const visitor: Principal = visitorPrincipal(login!, verified.subject);
       if (verified.email) visitor.email = verified.email;
       return visitor;
     },

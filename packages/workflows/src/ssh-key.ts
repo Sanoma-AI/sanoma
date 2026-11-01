@@ -1,4 +1,4 @@
-import { createPublicKey, generateKeyPair, type KeyObject } from "node:crypto";
+import { createPrivateKey, createPublicKey, generateKeyPair, type KeyObject } from "node:crypto";
 import { promisify } from "node:util";
 
 // SSH key pairs, as a deploy key needs them: what going live makes (the app's `goLive`) and
@@ -40,7 +40,7 @@ export async function sourceKeyPair(): Promise<{ privateKey: string; publicKey: 
 /** The public half of an RSA private key in PEM, in OpenSSH's one-line format; undefined for anything else. */
 export function sshPublicKey(privateKey: string): string | undefined {
   try {
-    const key = createPublicKey(privateKey);
+    const key = createPublicKey(createPrivateKey(privateKey));
     return key.asymmetricKeyType === "rsa" ? openSshLine(key) : undefined;
   } catch {
     return undefined;

@@ -1503,11 +1503,12 @@ export class SanomaClient {
     return admit(principal, readPeople(this.config.root));
   }
 
-  /** An api token's principal (`token:<id>`) with the subject its row acts for, while the token is live; anyone else as given. */
+  /** An api token's principal (`token:<id>`) with the subject its row acts for, refused once the token is revoked; anyone else as given. */
   private async withSubject(principal: Principal): Promise<Principal> {
     if (!isToken(principal)) return principal;
     const subject = await this.tokens.subjectOf(principal.id.slice("token:".length));
-    return subject === undefined ? principal : { ...principal, subject };
+    if (subject === undefined) throw new NotAdmittedError(principal.id);
+    return { ...principal, subject };
   }
 
   /** `options.by`, who sets or clears a credential, admitted (`admitted`): their id; never a visitor's. */

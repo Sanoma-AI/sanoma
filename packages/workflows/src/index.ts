@@ -211,7 +211,7 @@ export {
 export type { Chat, Chats } from "./chats.ts";
 export type { Tokens } from "./tokens.ts";
 export { type InviteRequest, openInvite, sealInvite, sealLoginCode } from "./seal.ts";
-export { INVITE_REQUEST_MS, sanoma } from "./runtime-ops.ts";
+export { sanoma } from "./runtime-ops.ts";
 export { sourceKeyPair, sshPublicKey } from "./ssh-key.ts";
 export {
   checkWakeup,

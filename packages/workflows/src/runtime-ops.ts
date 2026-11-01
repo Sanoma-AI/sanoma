@@ -14,11 +14,14 @@ import { memoryTokens, type Tokens } from "./tokens.ts";
 // registers them in every config with their driver (`runtimeDriver`), so a policy may name them;
 // a sandbox run calls `sandboxRuntimeDriver`, over its own secrets and tokens, posting nothing.
 
-/** A secret's name, as the store takes it: upper case. */
-const SecretName = z.string().regex(SECRET_NAME, "a secret's name: upper case, A-Z, 0-9 and _");
+/** The deployment's own keys, which no operation here reads, makes or deletes. */
+const DEPLOYMENT_KEYS = new Set(["SANOMA_SIGNING_KEY", "SANOMA_SECRETS_KEY"]);
 
-/** How long the invite request `sanoma.invite.mint` seals is good for: a day. */
-export const INVITE_REQUEST_MS = 24 * 60 * 60_000;
+/** A secret's name, as the store takes it (upper case), other than the deployment's own keys. */
+const SecretName = z
+  .string()
+  .regex(SECRET_NAME, "a secret's name: upper case, A-Z, 0-9 and _")
+  .refine((name) => !DEPLOYMENT_KEYS.has(name), "the deployment's own keys are not a workflow's to use");
 
 /** How long an instance gets to answer `POST /auth/invite`. */
 const INVITE_TIMEOUT_MS = 10_000;
@@ -59,7 +62,8 @@ export const sanoma = defineConnector("sanoma", {
   invite: {
     mint: {
       effect: "access",
-      // Each try seals a new request, and the instance's newest invite for an email replaces the last.
+      // Each try seals a new request (good for `sealInvite`'s few minutes), and the instance's newest
+      // invite for an email replaces the last.
       idempotent: true,
       description:
         "Ask an instance for an invite link that signs a declared person in: a request sealed under the instance's signing key, named by a secret marker, posted to its /auth/invite",
@@ -103,6 +107,20 @@ export const sanoma = defineConnector("sanoma", {
 
 /** A `DriverError` that a retry would not change. */
 const refuse = (message: string) => new DriverError(`sanoma: ${message}`, { retryable: false });
+
+/** The secrets store's refusals (`SecretStoreError`) as the call's, retried only when the store was unavailable. */
+async function storeCall<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    const store = err as { name?: unknown; code?: unknown; retryable?: unknown } | null;
+    if (store?.name !== "SecretStoreError") throw err;
+    throw new DriverError(`sanoma: the secrets store answered ${String(store.code)}`, {
+      retryable: store.retryable === true,
+      cause: err,
+    });
+  }
+}
 
 /** The token id a call mints, from its idempotency key: the same on every try of one call, so a retry finds its own. */
 function tokenIdOf(call: CallContext) {
@@ -159,14 +177,14 @@ export function runtimeDriver({
     secret: {
       async generate({ name, kind }, call) {
         if (kind === "random") {
-          await call.secrets.ensure(name, generateSecret);
+          await storeCall(() => call.secrets.ensure(name, generateSecret));
           return { name };
         }
         // A pair made only when none is stored: the public half is always derived from what is.
-        let stored = await call.secrets.get(name);
+        let stored = await storeCall(() => call.secrets.get(name));
         if (stored === undefined) {
           const pair = await sourceKeyPair();
-          stored = await call.secrets.ensure(name, () => pair.privateKey);
+          stored = await storeCall(() => call.secrets.ensure(name, () => pair.privateKey));
         }
         const publicKey = sshPublicKey(stored);
         if (!publicKey)
@@ -175,21 +193,21 @@ export function runtimeDriver({
       },
       async delete({ name }, call) {
         if (!call.secrets.delete) throw refuse("this secrets store deletes nothing");
-        await call.secrets.delete(name);
+        await storeCall(() => call.secrets.delete!(name));
         return {};
       },
     },
     invite: {
       async mint({ host, email, key }, call) {
-        const signingKey = signingKeyOf(key.$secret, await call.secrets.get(key.$secret));
-        const request = sealInvite({ email, exp: Date.now() + INVITE_REQUEST_MS }, signingKey);
+        const signingKey = signingKeyOf(key.$secret, await storeCall(() => call.secrets.get(key.$secret)));
+        const request = sealInvite({ email }, signingKey);
         return invite(host, request, call);
       },
     },
     token: {
       async mint({ subject, groups, store }, call) {
         const id = tokenIdOf(call);
-        const held = await call.secrets.get(store);
+        const held = await storeCall(() => call.secrets.get(store));
         if (held !== undefined) {
           // This call's own, stored by a try whose answer was lost.
           if ((await tokens.resolve(held))?.principal.id === `token:${id}`) return { id };
@@ -199,9 +217,12 @@ export function runtimeDriver({
         try {
           ({ token } = await tokens.mint({ id, subject, groups }));
         } catch (err) {
-          throw refuse(`token ${id} could not be minted (an earlier try may have, unstored): ${errorMessage(err)}`);
+          // A try that minted this id and stopped before storing it left a token nobody holds: revoked here.
+          if ((await tokens.subjectOf(id)) === undefined) throw err;
+          await tokens.revoke({ id });
+          throw refuse(`an earlier try minted token ${id} and stopped before storing it: it is revoked, start again`);
         }
-        if ((await call.secrets.ensure(store, () => token)) !== token) {
+        if ((await storeCall(() => call.secrets.ensure(store, () => token))) !== token) {
           await tokens.revoke({ id });
           throw refuse(`${store} was stored by someone else meanwhile: the token minted is revoked`);
         }

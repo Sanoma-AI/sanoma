@@ -1,4 +1,4 @@
-import { createPublicKey, randomBytes } from "node:crypto";
+import { createPublicKey, generateKeyPairSync, randomBytes } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
@@ -8,7 +8,6 @@ import { z } from "zod";
 import { lintWorkflow } from "../src/lint.ts";
 import {
   defineWorkflow,
-  INVITE_REQUEST_MS,
   memorySecrets,
   memorySecretStore,
   openInvite,
@@ -16,7 +15,8 @@ import {
   sanoma,
   sshPublicKey,
 } from "../src/index.ts";
-import { sandboxRuntimeDriver } from "../src/runtime-ops.ts";
+import { runtimeDriver, sandboxRuntimeDriver } from "../src/runtime-ops.ts";
+import { memoryTokens } from "../src/tokens.ts";
 import { rootWith } from "./harness.ts";
 
 // Needs Postgres: `pnpm db:up`. The runtime's own operations a workflow calls (`sanoma.secret.*`,
@@ -91,6 +91,10 @@ forbid (principal, action == Sanoma::Action::"sanoma.secret.delete", resource)
 when { context.input.name == "KEEP_ME" };
 `,
 });
+
+/** A small RSA private key in PEM. */
+const createPrivateKeyPem = () =>
+  generateKeyPairSync("rsa", { modulusLength: 1024 }).privateKey.export({ type: "pkcs1", format: "pem" }).toString();
 
 const messages = (src: string) => lintWorkflow(src).map((p) => p.message);
 
@@ -210,8 +214,9 @@ describe("the runtime's own operations", () => {
     try {
       const opened = openInvite(request)!;
       expect(opened).toMatchObject({ email: "ada@acme.test", nonce: expect.any(String) });
-      expect(opened.exp).toBeGreaterThanOrEqual(before + INVITE_REQUEST_MS);
-      expect(opened.exp).toBeLessThanOrEqual(Date.now() + INVITE_REQUEST_MS);
+      // Posted at once, so good for `sealInvite`'s few minutes, not longer.
+      expect(opened.exp).toBeGreaterThan(before);
+      expect(opened.exp).toBeLessThanOrEqual(Date.now() + 5 * 60_000);
     } finally {
       vi.unstubAllEnvs();
     }
@@ -281,6 +286,8 @@ describe("the runtime's own operations", () => {
         subject: "visitor:better-auth:owner-2",
       });
       await app.client.tokens.revoke({ id: minted.id });
+      // Revoked, it starts nothing.
+      await expect(run("whoami", {}, caller)).rejects.toMatchObject({ code: "not_admitted" });
     });
   });
 });
@@ -331,5 +338,64 @@ describe("the runtime's own operations in a config", () => {
         { ...call, opId: "sanoma.token.mint", attempt: 2 },
       ),
     ).toEqual({ id });
+  });
+
+  it("refuses the deployment's own keys as any operation's secret", () => {
+    const resolved = resolveConfig({ workflows: [keys], connectors: [] });
+    const parses = (op: string, input: object) => resolved.ops.get(op)!.input.safeParse(input).success;
+    for (const name of ["SANOMA_SIGNING_KEY", "SANOMA_SECRETS_KEY"]) {
+      expect(parses("sanoma.secret.generate", { name, kind: "random" })).toBe(false);
+      expect(parses("sanoma.secret.delete", { name })).toBe(false);
+      expect(parses("sanoma.token.mint", { subject: "x", groups: [], store: name })).toBe(false);
+      expect(parses("sanoma.invite.mint", { host: "https://a.test", email: "a@a.test", key: { $secret: name } })).toBe(
+        false,
+      );
+    }
+    expect(parses("sanoma.secret.delete", { name: "ACME_KEY" })).toBe(true);
+  });
+
+  it("seals an invite under a key stored as base64url without padding, as a generate marker makes one", async () => {
+    const bytes = randomBytes(32);
+    const secrets = memorySecrets({ ACME_SIGNING_KEY: bytes.toString("base64url") });
+    let request = "";
+    const driver = runtimeDriver({
+      tokens: memoryTokens(),
+      invite: async (_host, sealed) => ((request = sealed), { url: "https://acme.test/auth/invite/x" }),
+    });
+    await driver.ops["invite.mint"]!(
+      { host: "https://acme.test", email: "ada@acme.test", key: { $secret: "ACME_SIGNING_KEY" } },
+      { idempotencyKey: "run:1", runId: "run", opId: "sanoma.invite.mint", attempt: 1, secrets },
+    );
+    vi.stubEnv("SANOMA_SIGNING_KEY", bytes.toString("base64url"));
+    try {
+      expect(openInvite(request)).toMatchObject({ email: "ada@acme.test" });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("revokes a token an earlier try minted and never stored, and refuses the call", async () => {
+    const tokens = memoryTokens();
+    const driver = runtimeDriver({ tokens });
+    const call = {
+      idempotencyKey: "run:2",
+      runId: "run",
+      opId: "sanoma.token.mint",
+      attempt: 1,
+      secrets: memorySecrets(),
+    };
+    const input = { subject: "visitor:x:1", groups: [], store: "ACME_TOKEN" };
+    const { id } = (await driver.ops["token.mint"]!(input, call)) as { id: string };
+    // The try that minted it stopped before the store write: the store holds nothing.
+    await call.secrets.delete!("ACME_TOKEN");
+    await expect(driver.ops["token.mint"]!(input, { ...call, attempt: 2 })).rejects.toThrow(
+      new RegExp(`minted token ${id} and stopped before storing it: it is revoked`),
+    );
+    expect(await tokens.subjectOf(id)).toBeUndefined();
+  });
+
+  it("derives no public half from a public key", () => {
+    const pem = createPublicKey(createPrivateKeyPem()).export({ type: "spki", format: "pem" }).toString();
+    expect(sshPublicKey(pem)).toBeUndefined();
   });
 });
