@@ -64,6 +64,8 @@ import {
 } from "./shared.ts";
 import { fakeSourceDriver, type RemoteHalf, SOURCE_RESOLVE, sourceDriver, sourceOps } from "./source.ts";
 import { appsListDriver, appsListOps } from "./apps-list.ts";
+import { runtimeDriver, sandboxRuntimeDriver, sanoma } from "./runtime-ops.ts";
+import { tokenStore } from "./tokens.ts";
 import type { Steps } from "./steps.ts";
 import { checkSchedule } from "./schedules.ts";
 import { changeCodeOf, computeVersion } from "./version.ts";
@@ -170,7 +172,8 @@ export interface ResolvedConfig {
   login?: { sender: Op };
   /**
    * The operations the connectors declare, by id, the built-in `sanoma.change.*` (`changeOps`, in
-   * every config), `sanoma.source.resolve` and `sanoma.wakeup`'s when one declares a host type,
+   * every config) and the runtime's own a workflow may use (`sanoma.secret.*`, `sanoma.invite.mint`,
+   * `sanoma.token.*`, in every config), `sanoma.source.resolve` and `sanoma.wakeup`'s when one declares a host type,
    * and the collections' (`data.<name>.<op>`).
    */
   ops: Map<string, Op>;
@@ -333,12 +336,14 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   const declared = [...collections.values()];
   const dataStore = declared.length ? lazyPool(databaseUrl, "data") : undefined;
   // Built-in, in every config: a change's operations, which the template's policy names
-  // (`sanoma.change.merge`), and the listing of apps a page may call (`sanoma.apps.list`).
+  // (`sanoma.change.merge`), the listing of apps a page may call (`sanoma.apps.list`), and what a
+  // workflow asks the runtime to do for it (`sanoma.secret.*`, `sanoma.invite.mint`, `sanoma.token.*`).
   const ops = indexConnectors([
     ...running,
     changeOps,
     connectionOps,
     appsListOps,
+    sanoma,
     ...(hostTyped ? [sourceOps] : []),
     ...(dataStore ? [collectionsConnector(declared)] : []),
   ]);
@@ -352,6 +357,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
       changeDriver(remotes),
       connectionDriver(connections),
       appsListDriver,
+      runtimeDriver({ tokens: tokenStore(() => connectionPool.db()) }),
       ...(hostTyped ? [sourceDriver] : []),
       ...(dataStore ? [collectionsDriver(declared, dataStore)] : []),
     ],
@@ -480,11 +486,13 @@ function collectionsOf(config: SanomaConfig): Map<string, Collection> {
 /**
  * The built-in drivers a sandbox run calls beside its fakes (`seedSandbox`), for the built-in
  * operations among `ops` that no fake implements: `sanoma.apps.list`'s own, which needs no
- * credentials and changes nothing (GitHub's public search), and `sanoma.source.resolve`'s fake
- * (`fakeSourceDriver`), for a config with a host type.
+ * credentials and changes nothing (GitHub's public search), the runtime's own operations over the
+ * run's secrets and tokens of its own (`sandboxRuntimeDriver`, made for each run), and
+ * `sanoma.source.resolve`'s fake (`fakeSourceDriver`), for a config with a host type.
  */
 export const sandboxDrivers = (ops: ReadonlyMap<string, unknown>): Driver[] => [
   appsListDriver,
+  sandboxRuntimeDriver(),
   ...(ops.has(SOURCE_RESOLVE) ? [fakeSourceDriver] : []),
 ];
 

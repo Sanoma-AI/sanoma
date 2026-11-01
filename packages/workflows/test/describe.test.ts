@@ -107,6 +107,11 @@ describe("describeConfig", () => {
       "sanoma.connection.disconnect",
       "sanoma.connection.prepare",
       "sanoma.connection.test",
+      "sanoma.invite.mint",
+      "sanoma.secret.delete",
+      "sanoma.secret.generate",
+      "sanoma.token.mint",
+      "sanoma.token.revoke",
     ]);
     const publish = ops.find((o) => o.id === "ghost.post.publish")!;
     expect(publish).toMatchObject({

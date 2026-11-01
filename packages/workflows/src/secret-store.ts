@@ -238,10 +238,14 @@ export class SecretAccess {
     return secretStoreCall(() => this.store.write(location, value, options));
   }
 
-  async delete(name: string, options: { expectedVersion: string; by: string }): Promise<void> {
+  /** Deletes the value at `expectedVersion`; without one, the value stored now, and none stored is nothing to do. */
+  async delete(name: string, options: { expectedVersion?: string; by?: string } = {}): Promise<void> {
     const location = this.writable(name);
     if (this.store.capabilities.deletion === "unsupported") throw new SecretStoreError("unsupported");
-    await secretStoreCall(() => this.store.delete(location, options));
+    const expectedVersion = options.expectedVersion ?? (await this.read(name))?.version;
+    if (expectedVersion === undefined) return;
+    const by = options.by ?? "sanoma";
+    await secretStoreCall(() => this.store.delete(location, { expectedVersion, by }));
   }
 
   async ensure(name: string, make: () => string): Promise<string> {

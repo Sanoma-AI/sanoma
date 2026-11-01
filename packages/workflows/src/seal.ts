@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
-import { signingKeyFor as keyFor } from "./deployment-key.ts";
+import { deriveSigningKey, signingKeyFor } from "./deployment-key.ts";
 
 // Small values sealed under a key of their own, derived from the deployment's SANOMA_SIGNING_KEY
 // for one purpose (HKDF-SHA256): a sign-in code in a `login-code` run's input, and a request for
@@ -9,10 +9,17 @@ import { signingKeyFor as keyFor } from "./deployment-key.ts";
 const IV = 12;
 const TAG = 16;
 
-/** `value` as JSON, sealed for `purpose`: base64url of the IV, the tag and the ciphertext. */
-function seal(purpose: string, value: unknown): string {
+/** The key for `purpose`: derived from `signingKey`, a deployment's signing key, else from this process's own. */
+const keyFor = (purpose: string, signingKey?: Buffer) =>
+  signingKey ? deriveSigningKey(signingKey, purpose) : signingKeyFor(purpose);
+
+/**
+ * `value` as JSON, sealed for `purpose` under `signingKey` (this process's own by default): base64url
+ * of the IV, the tag and the ciphertext.
+ */
+function seal(purpose: string, value: unknown, signingKey?: Buffer): string {
   const iv = randomBytes(IV);
-  const cipher = createCipheriv("aes-256-gcm", keyFor(purpose), iv).setAAD(Buffer.from(purpose));
+  const cipher = createCipheriv("aes-256-gcm", keyFor(purpose, signingKey), iv).setAAD(Buffer.from(purpose));
   const text = Buffer.concat([cipher.update(JSON.stringify(value), "utf8"), cipher.final()]);
   return Buffer.concat([iv, cipher.getAuthTag(), text]).toString("base64url");
 }
@@ -62,16 +69,21 @@ const INVITE_REQUEST_MS = 5 * 60_000;
 
 /**
  * A request for `email`'s invite, sealed under a key derived from `SANOMA_SIGNING_KEY` (purpose
- * `invite request`): what a holder of the deployment's signing key sends the instance as
- * `POST /auth/invite { request }` (going live, and Sanoma Cloud's birth invite). `exp` defaults
- * to five minutes from now, `nonce` to 16 random bytes.
+ * `invite request`), or from `signingKey`, another deployment's signing key (its 32 bytes): what
+ * a holder of the deployment's signing key sends the instance as `POST /auth/invite { request }`
+ * (going live, and Sanoma Cloud's birth invite, `sanoma.invite.mint`). `exp` defaults to five
+ * minutes from now, `nonce` to 16 random bytes.
  */
-export function sealInvite({ email, exp, nonce }: { email: string; exp?: number; nonce?: string }): string {
-  return seal(INVITE, {
+export function sealInvite(
+  { email, exp, nonce }: { email: string; exp?: number; nonce?: string },
+  signingKey?: Buffer,
+): string {
+  const request = {
     email,
     exp: exp ?? Date.now() + INVITE_REQUEST_MS,
     nonce: nonce ?? randomBytes(16).toString("base64url"),
-  } satisfies InviteRequest);
+  } satisfies InviteRequest;
+  return seal(INVITE, request, signingKey);
 }
 
 /** The request `sealInvite` sealed, while `exp` is after `now`; undefined for anything else, or once it expired. */

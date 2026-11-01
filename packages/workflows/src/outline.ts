@@ -193,7 +193,7 @@ const PARAM =
   "run must take ctx as its first parameter, by one name: destructured, its calls cannot be read into the graph";
 const CTX_USE =
   "ctx is only called, directly (`await ctx.<vendor>.<resource>.<op>(…)`, `ctx.approval(…)`, `ctx.sleep(…)`, " +
-  "`ctx.all([…])`) or read for ctx.runId: passed on, aliased or destructured, its calls are not in the graph";
+  "`ctx.all([…])`) or read for ctx.runId or ctx.startedBy: passed on, aliased or destructured, its calls are not in the graph";
 const CTX_CALL = (what: string) =>
   `ctx.${what} is not a call the graph can draw: an operation is ctx.<vendor>.<resource>.<op>(…), ` +
   "and the built-ins are ctx.approval(…), ctx.sleep(…), ctx.all([…]) and ctx.now()";
@@ -237,7 +237,7 @@ interface Where {
 }
 
 /** The members of `ctx` that are read, not placed: no record, no node. */
-const READS = new Set(["now", "runId"]);
+const READS = new Set(["now", "runId", "startedBy"]);
 
 /**
  * The nodes of `fn`'s body (`run`'s, or a callback's the outline reads), each with an empty `path`
@@ -282,7 +282,7 @@ export function outlineBody(
     return uses;
   };
 
-  /** `ctx.runId`, read. */
+  /** `ctx.runId` or `ctx.startedBy`, read. */
   const isRead = (member: Node) =>
     !member.computed &&
     unwrap(member.object)?.type === "Identifier" &&

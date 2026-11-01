@@ -11,6 +11,7 @@ import {
   SleepFor,
   type SleepRequest,
   SleepUntil,
+  type StartedBy,
   scriptPath,
   type Use,
   type WorkflowDefinition,
@@ -195,11 +196,20 @@ export function buildCtx(wf: WorkflowDefinition<any, any>, run: Run): any {
     );
   }
   if (uses.includes("all")) members.all = placed("all", (node, list) => all(run, list, node.path));
-  return guarded(members, "ctx", wf.name);
+  return guarded(members, "ctx", wf.name, { startedBy: startedByOf(run.actor) });
 }
 
-/** `members`, each object in it included, refusing any member not in it (`strict`). */
-function guarded(members: Record<string, unknown>, path: string, workflow: string): Record<string, unknown> {
+/** Who started the run, as `ctx.startedBy` shows it: a plain frozen record, whose absent fields read as undefined. */
+const startedByOf = ({ id, email, subject }: Principal): StartedBy =>
+  Object.freeze({ id, ...(email && { email }), ...(subject && { subject }) });
+
+/** `members`, each object in it included, refusing any member not in it (`strict`), with `plain`'s as they are. */
+function guarded(
+  members: Record<string, unknown>,
+  path: string,
+  workflow: string,
+  plain: Record<string, unknown> = {},
+): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(members)) {
     out[key] =
@@ -207,7 +217,7 @@ function guarded(members: Record<string, unknown>, path: string, workflow: strin
         ? guarded(value as Record<string, unknown>, `${path}.${key}`, workflow)
         : value;
   }
-  return strict(out, path, workflow);
+  return strict({ ...out, ...plain }, path, workflow);
 }
 
 /** Where a `ctx` member was called from, as a stack frame says. */

@@ -1,10 +1,8 @@
 // oxlint-disable-next-line import/no-unassigned-import
 import "@tanstack/react-start/server-only";
-import { generateKeyPair } from "node:crypto";
 import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { findPackageJSON } from "node:module";
 import { dirname, join } from "node:path";
-import { promisify } from "node:util";
 import {
   APPLY_WORKFLOW,
   databaseUrlSecret,
@@ -13,6 +11,7 @@ import {
   isEnded,
   type Principal,
   sealInvite,
+  sourceKeyPair,
   type RepoRef,
   type Resource,
   vendorCodeOf,
@@ -230,35 +229,6 @@ const githubHeaders = (token: string) => ({
   "x-github-api-version": "2022-11-28",
   "user-agent": "sanoma",
 });
-
-/** RFC 4253's `string`: the bytes after their length, 32 bits big-endian. */
-function sshString(bytes: Buffer) {
-  const length = Buffer.alloc(4);
-  length.writeUInt32BE(bytes.length);
-  return Buffer.concat([length, bytes]);
-}
-
-/** RFC 4253's `mpint` of a JWK's integer, unsigned with no leading zero: one first when its top bit is set. */
-function sshMpint(value: string) {
-  const bytes = Buffer.from(value, "base64url");
-  return sshString(bytes[0]! & 0x80 ? Buffer.concat([Buffer.of(0), bytes]) : bytes);
-}
-
-/**
- * A new deploy key: its private half RSA 3072 in PKCS#1 PEM, which OpenSSH reads as it is (Node
- * writes no OpenSSH private key, which ed25519 would need), and its public half in OpenSSH's
- * one-line format, as GitHub takes it: `ssh-rsa`, then the base64 of the strings `ssh-rsa`, `e`
- * and `n`.
- */
-export async function sourceKeyPair(): Promise<{ privateKey: string; publicKey: string }> {
-  const { privateKey, publicKey } = await promisify(generateKeyPair)("rsa", { modulusLength: 3072 });
-  const { e, n } = publicKey.export({ format: "jwk" });
-  const wire = Buffer.concat([sshString(Buffer.from("ssh-rsa")), sshMpint(e!), sshMpint(n!)]);
-  return {
-    privateKey: privateKey.export({ type: "pkcs1", format: "pem" }).toString(),
-    publicKey: `ssh-rsa ${wire.toString("base64")}`,
-  };
-}
 
 /**
  * The GitHub connector's remote half over the stored credentials alone: going live lists accounts

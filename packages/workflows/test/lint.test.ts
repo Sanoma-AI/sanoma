@@ -355,10 +355,11 @@ describe("lintWorkflow on run, which the worker holds to the outline", () => {
     ).toEqual([]);
   });
 
-  it("refuses ctx passed on, aliased, read for anything but runId, or destructured", () => {
+  it("refuses ctx passed on, aliased, read for anything but runId and startedBy, or destructured", () => {
     const only = expect.stringMatching(
-      /^ctx is only called, directly .*or read for ctx\.runId: passed on, aliased or destructured/,
+      /^ctx is only called, directly .*or read for ctx\.runId or ctx\.startedBy: passed on, aliased or destructured/,
     );
+    expect(inRun(`if (ctx.startedBy.email === input.owner) await ctx.sleep({ ms: 1 });`)).toEqual([]);
     expect(inRun(`await helper(ctx);`)).toEqual([only]);
     expect(inRun(`const c = ctx; await c.ghost.post.create({ title: "a" });`)).toEqual([only]);
     expect(inRun(`const create = ctx.ghost.post.create; await create({ title: "a" });`)).toEqual([only]);

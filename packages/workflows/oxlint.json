@@ -83,7 +83,7 @@
               },
               {
                 "name": "@sanoma-ai/workflows",
-                "allowImportNames": ["defineWorkflow", "mayDecide", "errorCode", "z"],
+                "allowImportNames": ["defineWorkflow", "mayDecide", "errorCode", "sanoma", "z"],
                 "allowTypeImports": true,
                 "message": "A workflow imports only these and types from @sanoma-ai/workflows: the rest (SanomaClient, startWorker, the ledger stores, config helpers) could start runs, approve its own approvals, forge the ledger or read credentials. Ask for approval with `ctx.approval`."
               }

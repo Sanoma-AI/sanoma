@@ -56,7 +56,7 @@ describe("the people types", () => {
     ]);
     const resolved = resolveConfig({ workflows: [], connectors: [] });
     expect(resolved.types.size).toBe(0);
-    // The vendor's only operations are a change's, built in.
+    // The vendor's only operations are the runtime's own, built in.
     expect([...resolved.ops.keys()].filter((id) => id.startsWith("sanoma."))).toEqual([
       "sanoma.change.open",
       "sanoma.change.review",
@@ -70,6 +70,11 @@ describe("the people types", () => {
       "sanoma.connection.bind",
       "sanoma.connection.create",
       "sanoma.apps.list",
+      "sanoma.secret.generate",
+      "sanoma.secret.delete",
+      "sanoma.invite.mint",
+      "sanoma.token.mint",
+      "sanoma.token.revoke",
     ]);
     // No drift or apply: the change workflow, and call for the listing of apps, in every config.
     expect([...resolved.workflows.keys()]).toEqual(["change", "call"]);

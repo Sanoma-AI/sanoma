@@ -26,6 +26,8 @@ export interface Tokens {
    * undefined for anything not a token minted here, or one revoked.
    */
   resolve(token: string): Promise<{ principal: Principal; subject: string } | undefined>;
+  /** The subject the token `id` acts for (a workflow's `ctx.startedBy.subject`); undefined for one revoked or missing. */
+  subjectOf(id: string): Promise<string | undefined>;
 }
 
 export function tokenStore(db: () => Promise<Pool>): Tokens {
@@ -57,6 +59,42 @@ export function tokenStore(db: () => Promise<Pool>): Tokens {
       const row = rows[0];
       if (!row) return undefined;
       return { principal: { id: `token:${row.id}`, groups: row.groups }, subject: row.subject };
+    },
+    async subjectOf(id) {
+      const { rows } = await (
+        await db()
+      ).query<{ subject: string }>(`SELECT subject FROM ${TABLE} WHERE id = $1 AND revoked_at IS NULL`, [id]);
+      return rows[0]?.subject;
+    },
+  };
+}
+
+/** The api tokens in memory, for a sandbox run's `sanoma.token.*`: the same contract, nothing kept past the process. */
+export function memoryTokens(): Tokens {
+  const rows = new Map<string, { hash: string; subject: string; groups: string[]; revoked: boolean }>();
+  return {
+    async mint({ id = randomUUID(), subject, groups }) {
+      if (rows.has(id)) throw new Error(`A token with the id ${id} exists`);
+      const token = `${PREFIX}${generateSecret()}`;
+      rows.set(id, { hash: hashOf(token), subject, groups: [...groups], revoked: false });
+      return { id, token };
+    },
+    async revoke({ id }) {
+      const row = rows.get(id);
+      if (row) row.revoked = true;
+    },
+    async resolve(token) {
+      const hash = hashOf(token);
+      for (const [id, row] of rows) {
+        if (row.hash === hash && !row.revoked) {
+          return { principal: { id: `token:${id}`, groups: [...row.groups] }, subject: row.subject };
+        }
+      }
+      return undefined;
+    },
+    async subjectOf(id) {
+      const row = rows.get(id);
+      return row && !row.revoked ? row.subject : undefined;
     },
   };
 }

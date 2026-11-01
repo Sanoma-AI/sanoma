@@ -14,13 +14,14 @@ import {
   type HostLifetime,
   resolveConfig,
   type SanomaConfig,
+  sourceKeyPair,
 } from "@sanoma-ai/workflows";
 import { describeConfig } from "@sanoma-ai/workflows/describe";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { secret } from "@sanoma-ai/workflows/resources";
 import { z } from "zod";
 import type { AppContext } from "../src/context.ts";
-import { goLiveChoices, renderInfra, sourceKeyPair } from "../src/server/go-live.ts";
+import { goLiveChoices, renderInfra } from "../src/server/go-live.ts";
 
 // Going live chooses the database, the host and the wakeup by their contracts, among the config's
 // types: among those whose vendor is connected, Neon's database first, Cloudflare's host first,

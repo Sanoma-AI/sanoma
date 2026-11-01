@@ -24,9 +24,16 @@ export function deploymentKey(
 }
 
 /**
- * A 32-byte key of its own for `purpose`, derived from `SANOMA_SIGNING_KEY` (HKDF-SHA256 over its
- * base64 text): each use of the signing key (a login's cookies, the setup's state, sealed values)
- * gets a key no other use shares.
+ * A 32-byte key of its own for `purpose`, derived from a deployment's signing key (HKDF-SHA256
+ * over its base64 text), as that deployment derives it from its `SANOMA_SIGNING_KEY`.
+ */
+export const deriveSigningKey = (signingKey: Buffer, purpose: string): Buffer =>
+  Buffer.from(hkdfSync("sha256", signingKey.toString("base64"), "", purpose, 32));
+
+/**
+ * A 32-byte key of its own for `purpose`, derived from `SANOMA_SIGNING_KEY` (`deriveSigningKey`):
+ * each use of the signing key (a login's cookies, the setup's state, sealed values) gets a key no
+ * other use shares.
  */
 export const signingKeyFor = (purpose: string): Buffer =>
-  Buffer.from(hkdfSync("sha256", deploymentKey("SANOMA_SIGNING_KEY").toString("base64"), "", purpose, 32));
+  deriveSigningKey(deploymentKey("SANOMA_SIGNING_KEY"), purpose);
