@@ -25,7 +25,7 @@ export function loopbackLogin(): LoginProvider {
       if (isLoopback(listenHost)) return;
       throw new Error(
         `The app has no login, so it listens on this machine only, not ${listenHost}: ` +
-          "anyone who could reach it would act as any name. Pass a login provider (githubLogin) to listen there.",
+          "anyone who could reach it would act as any name. Pass a login provider (staffLogin) to listen there.",
       );
     },
     resolveActor: (request) => actorFromHeader(request) ?? actorFromCookie(request),

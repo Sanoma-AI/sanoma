@@ -296,6 +296,31 @@ export type SetCredentialRequest = z.infer<typeof SetCredentialRequest>;
 export interface SetupStatus {
   githubApp: { slug: string; setBy?: string; setAt?: string } | null;
   tokens: CredentialStatus[];
+  /**
+   * How people will sign in on the host: `you`, the email declared for the person asking (the
+   * invite that signs them in once the host answers goes to it); `sender`, the config's
+   * `login.sender` operation, and whether its connector's credentials are set; whether the GitHub
+   * App's client is stored, for "Sign in with GitHub". Neither a sender nor GitHub leaves invite
+   * links alone: a warning, not blocking.
+   */
+  signIn: { you: string | null; sender: string | null; senderConnected: boolean; github: boolean };
+}
+
+/** The People page's sign-in facts (`getPeopleSignIns`): whether this app mints invite links, and when each person last signed in. */
+export interface PeopleSignIns {
+  invites: boolean;
+  /** By person id: when (milliseconds since the epoch) and how; one who never signed in is left out. */
+  last: Record<string, { at: number; method: string }>;
+}
+
+/** What `inviteFn` takes: the declared person to mint a one-use invite link for. */
+export const InviteRequest = z.object({ person: z.string().min(1) });
+export type InviteRequest = z.infer<typeof InviteRequest>;
+
+/** A one-use link that signs a person in, until `expiresAt` (ISO 8601). */
+export interface InviteLink {
+  url: string;
+  expiresAt: string;
 }
 
 /**

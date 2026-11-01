@@ -7,13 +7,14 @@ import { useTestApp } from "@sanoma-ai/testing/harness";
 import { resolveConfig, type SanomaConfig, type Source } from "@sanoma-ai/workflows";
 import { describeConfig, readPeople } from "@sanoma-ai/workflows/describe";
 import { executablePath, launch } from "puppeteer-core";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { ACTOR_COOKIE } from "../src/api.ts";
 import type { AppContext } from "../src/context.ts";
 import { type App, startApp } from "../src/index.ts";
 import { admitting } from "../src/login/admission.ts";
 import { loopbackLogin } from "../src/loopback.ts";
 import { patch } from "../src/server/core.ts";
+import { invitePerson, peopleSignIns } from "../src/server/people.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built app, as data.test.ts does. People: `/people`, its
 // tabs and table from the people file, a row's declaration form over the list, Save through
@@ -122,9 +123,9 @@ describe("People", () => {
     expect(html).toMatch(/href="\/people\?show=groups"[^>]*>Groups<span[^>]*>2<\/span>/);
     expect(html).toMatch(/href="\/people\?show=agents"[^>]*>Agents<span[^>]*>1<\/span>/);
     expect(rows(html)).toEqual([
-      ["Ada Ortiz", "ada", "Email · ada@example.test", "admin ops", "resources/people.ts#ada"],
-      ["Bo Lin", "bo", "GitHub · bo-lin", "ops", "resources/people.ts#bo"],
-      ["Cy Chen", "cy", "cannot sign in", "none", "resources/people.ts#cy"],
+      ["Ada Ortiz", "ada", "Email · ada@example.test", "admin ops", "never", "resources/people.ts#ada"],
+      ["Bo Lin", "bo", "GitHub · bo-lin", "ops", "never", "resources/people.ts#bo"],
+      ["Cy Chen", "cy", "cannot sign in", "none", "never", "resources/people.ts#cy"],
     ]);
     // A row opens over the list; its declaration opens in its file on Hosting.
     expect(html).toContain('href="/people?show=people&amp;person=ada"');
@@ -133,6 +134,46 @@ describe("People", () => {
     expect(html).toMatch(
       /problem in the data files(?:(?!<\/ul>)[\s\S])*resources\/team\.ts(?:(?!<\/ul>)[\s\S])*one word/,
     );
+  });
+
+  it("says when each person last signed in and how, and mints an invite link only where the login makes them", async () => {
+    await testApp.client.recordSignIn("cy", "github");
+    await testApp.client.recordSignIn("cy", "code");
+    const signIns = await peopleSignIns(context());
+    expect(signIns).toEqual({ invites: false, last: { cy: { at: expect.any(Number), method: "code" } } });
+    expect(rows((await page("/people")).html)[2]).toEqual([
+      "Cy Chen",
+      "cy",
+      "cannot sign in",
+      "none",
+      expect.stringMatching(/ · email code$/),
+      "resources/people.ts#cy",
+    ]);
+    // On this machine the picker signs anyone in: no invites.
+    await expect(invitePerson(context(), { id: "ada" }, "ada", "http://localhost")).rejects.toMatchObject({
+      status: 409,
+    });
+
+    // A host's login mints them, for a declared person with an email.
+    const invite = vi.fn<(email: string, at: { origin: string }) => Promise<{ url: string; expiresAt: Date }>>(
+      async (email, { origin }) => ({
+        url: `${origin}/auth/invite/tok-${email}`,
+        expiresAt: new Date(0),
+      }),
+    );
+    const hosted = { ...context(), login: { ...context().login, invite } };
+    expect((await peopleSignIns(hosted)).invites).toBe(true);
+    expect(await invitePerson(hosted, { id: "ada" }, "ada", "https://acme.example")).toEqual({
+      url: "https://acme.example/auth/invite/tok-ada@example.test",
+      expiresAt: new Date(0).toISOString(),
+    });
+    expect(invite).toHaveBeenCalledWith("ada@example.test", { origin: "https://acme.example", by: "ada" });
+    await expect(invitePerson(hosted, { id: "ada" }, "bo", "https://acme.example")).rejects.toMatchObject({
+      status: 409,
+    });
+    await expect(invitePerson(hosted, { id: "ada" }, "nobody", "https://acme.example")).rejects.toMatchObject({
+      status: 404,
+    });
   });
 
   it("lists the groups with their members, and the agents with whom they act for, agents built in", async () => {
@@ -216,6 +257,7 @@ describe("People", () => {
       "bo",
       "GitHub · bo-lin",
       "ops",
+      "never",
       "resources/people.ts#bo",
     ]);
     writeFileSync(join(root, PEOPLE), before);

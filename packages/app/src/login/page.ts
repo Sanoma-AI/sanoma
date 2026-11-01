@@ -18,3 +18,21 @@ export function smallPage(status: number, title: string, body: string): Response
     headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
   });
 }
+
+/**
+ * A request's origin, https when a proxy that ends TLS says so (`x-forwarded-proto: https`), as
+ * Start's `getRequestUrl({ xForwardedProto: true })` reads it: the absolute URLs a page or an invite writes take it.
+ */
+export function requestOrigin(request: Request): string {
+  const url = new URL(request.url);
+  if (request.headers.get("x-forwarded-proto") === "https") url.protocol = "https:";
+  return url.origin;
+}
+
+/** Whether a change comes from the app's own page: the browser says so, or its `Origin` names the request's host. */
+export function sameOrigin(request: Request): boolean {
+  const site = request.headers.get("sec-fetch-site");
+  if (site !== null) return site === "same-origin";
+  const origin = URL.parse(request.headers.get("origin") ?? "");
+  return origin !== null && origin.host === request.headers.get("host");
+}

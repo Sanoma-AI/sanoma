@@ -41,6 +41,10 @@ export function admitting(
   };
   return {
     ...login,
+    // Read when asked: a login may learn its sign-out route once the app has opened it.
+    get signOut() {
+      return login.signOut;
+    },
     async resolveActor(request) {
       return (await resolve(request)).admitted;
     },

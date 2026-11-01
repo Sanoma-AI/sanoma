@@ -14,6 +14,7 @@ import {
   ConnectExistingRequest,
   DecideCall,
   GoLiveRequest,
+  InviteRequest,
   PatchRequest,
   PreviewQuery,
   RunsQuery,
@@ -55,7 +56,8 @@ import {
   validate,
 } from "./server/core.ts";
 import { availableConnectors } from "./server/available.ts";
-import { goLive, goLiveChoices, goLiveHost, goLiveProgress } from "./server/go-live.ts";
+import { goLive, goLiveChoices, goLiveHost, goLiveProgress, goLiveSignIn } from "./server/go-live.ts";
+import { invitePerson, peopleSignIns } from "./server/people.ts";
 import { connectExisting, setSetupToken, setupStatus } from "./server/setup.ts";
 import { withPrincipal } from "./middleware.ts";
 import { chatFor } from "./server/agent/turn.ts";
@@ -210,8 +212,10 @@ export const clearCredentialFn = createServerFn(CHANGE)
   .validator(validate(ClearCredentialRequest))
   .handler(({ data, context }) => clearCredential(context.app, context.principal, data));
 
-/** What is connected for going live: the GitHub App's slug, and whether each token is set. */
-export const getSetupStatus = createServerFn(READ).handler(({ context }) => setupStatus(context.app));
+/** What is connected for going live: the GitHub App's slug, whether each token is set, and how people will sign in. */
+export const getSetupStatus = createServerFn(READ).handler(async ({ context }) =>
+  setupStatus(context.app, await context.actor()),
+);
 
 /** Stores a pasted setup token (`GITHUB_TOKEN`, `SUPABASE_ACCESS_TOKEN`) as the actor; never sent back. */
 export const setSetupTokenFn = createServerFn(CHANGE)
@@ -245,6 +249,20 @@ export const goLiveFn = createServerFn(CHANGE)
 export const goLiveHostFn = createServerFn(CHANGE)
   .middleware([withPrincipal])
   .handler(({ context }) => goLiveHost(context.app, context.principal));
+/** Signs the person going live in on the host, by a sealed invite request: the link to open. */
+export const goLiveSignInFn = createServerFn(CHANGE)
+  .middleware([withPrincipal])
+  .handler(({ context }) => goLiveSignIn(context.app, context.principal));
+
+/** When each declared person last signed in, and whether this app mints invite links. */
+export const getPeopleSignIns = createServerFn(READ).handler(({ context }) => peopleSignIns(context.app));
+
+/** A one-use invite link for a declared person, minted by the host's staff login. */
+export const inviteFn = createServerFn(CHANGE)
+  .middleware([withPrincipal])
+  .validator(validate(InviteRequest))
+  .handler(({ data, context }) => invitePerson(context.app, context.principal, data.person, context.origin));
+
 /** Declares an existing repository and/or project in infra.ts, commits it, and starts the apply that binds them. */
 export const connectExistingFn = createServerFn(CHANGE)
   .middleware([withPrincipal])

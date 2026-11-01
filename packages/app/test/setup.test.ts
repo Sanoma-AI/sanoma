@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { github as githubConnector } from "@sanoma-ai/connector-github";
+import { resend } from "@sanoma-ai/connector-resend";
 import { supabase } from "@sanoma-ai/connector-supabase";
 import { neon } from "@sanoma-ai/connector-neon";
 import { ensureBuilt, testDatabaseUrl } from "@sanoma-ai/testing";
@@ -32,7 +33,7 @@ const root = mkdtempSync(join(tmpdir(), "sanoma-setup-"));
 mkdirSync(join(root, "resources"));
 writeFileSync(
   join(root, "resources", "people.ts"),
-  'import { sanoma } from "sanoma/resources";\n\nexport const alice = sanoma.person({ id: "alice" });\n',
+  'import { sanoma } from "sanoma/resources";\n\nexport const alice = sanoma.person({ id: "alice", email: "alice@acme.test" });\n',
 );
 const config = defineConfig({
   workflows: [],
@@ -143,11 +144,12 @@ describe("creating the GitHub App", () => {
     expect(manifest).toEqual(githubManifest(app.url, `Sanoma ${ctx.description.appName}`));
     expect(manifest).toMatchObject({
       redirect_url: `${app.url}/setup/github/callback`,
-      callback_urls: [`${app.url}/auth/github/callback`],
+      callback_urls: [`${app.url}/auth/better-auth/callback/github`],
       public: false,
       default_permissions: {
         administration: "write",
         contents: "write",
+        emails: "read",
         metadata: "read",
         pull_requests: "write",
         statuses: "write",
@@ -229,6 +231,31 @@ describe("creating the GitHub App", () => {
   });
 });
 
+describe("sign-in on the host", () => {
+  it("names the config's sender, connected once its connector's credentials are stored", async () => {
+    const withSender = defineConfig({
+      ...config,
+      connectors: [supabase, resend],
+      login: { sender: resend.emails.send },
+    });
+    const sending = { ...ctx, resolved: resolveConfig(withSender) };
+    vi.stubEnv("RESEND_API_KEY", "");
+    try {
+      expect((await setupStatus(sending)).signIn).toMatchObject({
+        sender: "resend.emails.send",
+        senderConnected: false,
+      });
+      vi.stubEnv("RESEND_API_KEY", "re_madeup");
+      expect((await setupStatus(sending)).signIn).toMatchObject({
+        sender: "resend.emails.send",
+        senderConnected: true,
+      });
+    } finally {
+      vi.stubEnv("RESEND_API_KEY", "");
+    }
+  });
+});
+
 describe("the connect page", () => {
   it("says what is connected, and stores a pasted token, never showing a value", async () => {
     expect(await setupStatus(ctx)).toEqual({
@@ -237,7 +264,10 @@ describe("the connect page", () => {
         expect.objectContaining({ name: "GITHUB_TOKEN", status: "missing" }),
         expect.objectContaining({ name: "SUPABASE_ACCESS_TOKEN", status: "missing" }),
       ],
+      // The App's client is stored (the callback above): GitHub sign-in on the host.
+      signIn: { you: null, sender: null, senderConnected: false, github: true },
     });
+    expect((await setupStatus(ctx, { id: "alice" })).signIn.you).toBe("alice@acme.test");
     await setSetupToken(ctx, { id: "alice" }, { name: "SUPABASE_ACCESS_TOKEN", value: "sbp_madeup" });
     await expect(setSetupToken(ctx, { id: "alice" }, { name: "STRIPE_SECRET_KEY", value: "sk" })).rejects.toThrow(
       /not a setup token/,

@@ -12,12 +12,21 @@ import {
   errorMessage,
   isEnded,
   type Principal,
+  sealInvite,
   type RepoRef,
   type Resource,
   vendorCodeOf,
   wakeupHostTypes,
 } from "@sanoma-ai/workflows";
-import { type DataValue, formatOptions, readLockfile, Reference, renderDataFile } from "@sanoma-ai/workflows/describe";
+import {
+  type DataValue,
+  formatOptions,
+  readLockfile,
+  readPeople,
+  Reference,
+  renderDataFile,
+} from "@sanoma-ai/workflows/describe";
+import { personsOf } from "@sanoma-ai/workflows/shared";
 import { secret } from "@sanoma-ai/workflows/resources";
 import { WAKEUP_TOKEN } from "@sanoma-ai/workflows/wakeup-service";
 import {
@@ -460,6 +469,7 @@ export async function renderInfra(
     ...(!app.resolved.secrets.store && { SANOMA_SECRETS_KEY: secret(SECRETS_KEY) }),
     [SOURCE_KEY]: secret(SOURCE_KEY),
     ...wakeup.secrets,
+    ...(await senderSecrets(app)),
   });
   setPath(hosted, inputs.port, port);
   const woken = wakeup.type;
@@ -639,6 +649,52 @@ async function latestRun({ client }: AppContext): Promise<GoLiveRun | null> {
     ...(report && { results: report.results }),
     ...(run.error && { error: run.error }),
   };
+}
+
+/**
+ * The variables the config's sign-in sender (`login.sender`) reads, as the host's secrets: each
+ * its driver declares (`RESEND_API_KEY`, `RESEND_FROM`), an optional one only when it is stored,
+ * so the host sends sign-in codes as this app does. None without a sender.
+ */
+async function senderSecrets({ client, resolved }: AppContext): Promise<Record<string, DataValue>> {
+  const sender = resolved.login?.sender;
+  const env = sender && resolved.driversByVendor.get(sender.vendor)?.env;
+  if (!env) return {};
+  const names = Object.keys(env.shape);
+  const stored = await client.secrets(names);
+  return Object.fromEntries(
+    names
+      .filter((name) => stored.has(name) || !env.shape[name]!.safeParse(undefined).success)
+      .map((name) => [name, secret(name)]),
+  );
+}
+
+/**
+ * Signs the person going live in on the host, once it answers: posts an invite request sealed
+ * under the signing key the host shares (`sealInvite`) for the email the people file declares for
+ * them to the host's `POST /auth/invite`, and returns the one-use link it mints, for the page to
+ * open. Refused before the host answers, and for someone with no email declared.
+ */
+export async function goLiveSignIn(app: AppContext, actor: Principal): Promise<{ url: string }> {
+  const host = await hostAnswer(app);
+  if (!host?.healthy) throw new ApiError(409, { error: "The host is not answering yet" });
+  const email = personsOf(readPeople(app.resolved.root).people).find((p) => p.id === actor.id)?.email;
+  if (!email) {
+    throw new ApiError(409, { error: `${actor.id} has no email declared in the people file: add one to be signed in` });
+  }
+  const res = await fetch(new URL("/auth/invite", host.url), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ request: sealInvite({ email }) }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  const body = (await res.json().catch(() => ({}))) as { url?: unknown; error?: unknown };
+  if (!res.ok || typeof body.url !== "string") {
+    throw new ApiError(502, {
+      error: `The host did not mint an invite (${res.status}${typeof body.error === "string" ? `: ${body.error}` : ""})`,
+    });
+  }
+  return { url: body.url };
 }
 
 /** Where the host answers, from the latest finished apply runs that made or changed it, and whether `/healthz` answers. */

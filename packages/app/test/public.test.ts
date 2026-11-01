@@ -19,6 +19,16 @@ const half: LoginHalf = {
   signOut: "/auth/acme/sign-out",
 };
 
+/** Api tokens: `sca_good` is token t1's, any other unknown or revoked. */
+const tokens = async (token: string) =>
+  token === "sca_good"
+    ? { principal: { id: "token:t1", groups: ["visitors"] }, subject: "visitor:acme:u1" }
+    : undefined;
+
+/** A request to the site's api with `token` as its bearer, and a visitor's cookie. */
+const bearer = (token: string) =>
+  request("/api/x", { headers: { authorization: `Bearer ${token}`, cookie: "subject=u2" } });
+
 describe("publicFront", () => {
   it("is anonymous on a site with no login, whatever the staff login's cookie or header says", async () => {
     const front = publicFront({ name: "hello" });
@@ -43,6 +53,18 @@ describe("publicFront", () => {
     expect(front.signOut).toBe("/auth/acme/sign-out");
   });
 
+  it("takes an api token as token:<id> in its groups, and answers one unknown or revoked with a 401", async () => {
+    const front = publicFront({ name: "members", login: "acme" }, Promise.resolve(half), tokens);
+    const good = bearer("sca_good");
+    expect(await front.handle!(good)).toBeUndefined();
+    expect(await front.resolveActor(good)).toEqual({ id: "token:t1", groups: ["visitors"] });
+    const bad = await front.handle!(bearer("sca_revoked"));
+    expect(bad?.status).toBe(401);
+    expect(bad?.headers.get("www-authenticate")).toBe("Bearer");
+    // Another kind of bearer is not an api token: the visitor's cookie decides.
+    expect(await front.resolveActor(bearer("other"))).toEqual({ id: "visitor:acme:u2", groups: ["visitors"] });
+  });
+
   it("sends its login's routes to the half, answers any other /auth/ with a 404 and other methods with a 405, and lets the rest through", async () => {
     let made!: (made: LoginHalf) => void;
     const front = publicFront({ name: "members", login: "acme" }, new Promise((done) => (made = done)));
@@ -51,7 +73,7 @@ describe("publicFront", () => {
     made(half);
     expect((await early)?.status).toBe(204);
     expect((await front.handle!(request("/auth/acme/nope")))?.status).toBe(404);
-    for (const path of ["/auth/github/start", "/auth/loopback", "/auth", "/auth/acme-two/x"]) {
+    for (const path of ["/auth/invite", "/auth/loopback", "/auth", "/auth/acme-two/x"]) {
       expect((await front.handle!(request(path)))?.status, path).toBe(404);
     }
     expect(await front.handle!(request("/"))).toBeUndefined();

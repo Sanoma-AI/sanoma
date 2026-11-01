@@ -724,13 +724,7 @@ describe("a company's app with its sites", () => {
   });
 
   it("answers a public host's request for the app's pages, routes, a staff login's routes or a staff server function with a 404", async () => {
-    for (const path of [
-      "/workflows",
-      "/sites/hello",
-      "/setup/github/manifest",
-      "/auth/github/start",
-      "/auth/loopback",
-    ]) {
+    for (const path of ["/workflows", "/sites/hello", "/setup/github/manifest", "/auth/invite", "/auth/loopback"]) {
       expect((await at(path, "hello.localhost")).status, path).toBe(404);
     }
     expect((await at("/", "hello.localhost", { method: "PUT" })).status).toBe(405);

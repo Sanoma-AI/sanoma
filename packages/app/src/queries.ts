@@ -56,6 +56,7 @@ import {
   getRun,
   getRuns,
   getScenarios,
+  getPeopleSignIns,
   getSetupStatus,
   getSource,
   openChangeFn,
@@ -257,6 +258,10 @@ export const connectionsQuery = () =>
 /** What is connected for going live (the connect page): under the credentials' key, so setting one refreshes both. */
 export const setupStatusQuery = () =>
   queryOptions({ queryKey: ["credentials", "setup"], queryFn: () => getSetupStatus(), staleTime: 5_000 });
+
+/** When each declared person last signed in, and whether this app mints invite links: under the runs' key, so it refreshes with them. */
+export const peopleSignInsQuery = () =>
+  queryOptions({ queryKey: [...RUNS_KEY, "sign-ins"], queryFn: () => getPeopleSignIns(), staleTime: 5_000 });
 
 /** Whether the chat has a model to answer on: under the credentials' key, so setting its key refreshes it. */
 export const chatModelQuery = () =>
