@@ -2,11 +2,11 @@
 
 Generate invoice PDFs locally through Sanoma's normal workflow operations. Pet sitting and cleaning use the same model, calculation and React PDF document as the portable browser renderer. No account, credentials or network connection is needed to generate a PDF.
 
+Not on npm yet: the package is private until its first release ([#526](https://github.com/Sanoma-AI/sanoma/issues/526)). Inside this repository it is a workspace package.
+
 ```sh
 pnpm add @sanoma-ai/connector-invoices
 ```
-
-Not on npm yet: the package is private until its first release ([#526](https://github.com/Sanoma-AI/sanoma/issues/526)). Inside this repository it is a workspace package.
 
 Register `invoices` in the company's `connectors` and declare the operation in the workflow's `uses`:
 
