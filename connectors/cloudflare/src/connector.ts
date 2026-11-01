@@ -97,6 +97,12 @@ const alarmSchema = z.object({
     .nullish()
     .describe("When the alarm last rang the host's /wake for that registration, null until it has"),
   healthy: z.boolean().nullish().describe("Whether the host's Worker answers its wake route with this company's token"),
+  token: z
+    .string()
+    .nullish()
+    .describe(
+      "The secret that holds the host's wakeup token, a `secret(\"NAME\")`: the one the host's secrets give as SANOMA_WAKEUP_TOKEN, by default SANOMA_WAKEUP_TOKEN itself. A state gives its name when it is another",
+    ),
 });
 
 /**
@@ -104,7 +110,9 @@ const alarmSchema = z.object({
  * the container at the time the worker registered and calls its `/wake`. The alarm
  * is the host's object's, so it has no id of its own: its binding is the host's URL, and a new
  * host is a new alarm. The host's `secrets` must carry `SANOMA_WAKEUP_TOKEN`, which `create`
- * mints when none is stored.
+ * mints when none is stored, under the store name `token` gives (`secret("NAME")`), by default
+ * `SANOMA_WAKEUP_TOKEN`: a workflow that makes hosts for several companies names one per company.
+ * The state keeps that name, so a `read`, `update` or `delete` given the state sends the same token.
  */
 export const alarm = defineResource({
   vendor: "cloudflare",
@@ -114,7 +122,7 @@ export const alarm = defineResource({
   fields: {
     immutable: ["host"],
     vendorOwned: ["at", "rang", "healthy"],
-    writeOnly: [],
+    writeOnly: ["token"],
     references: { host: { type: ["cloudflare.container"], by: ["url"] } },
   },
   bindingId: (state) => String(state.host),

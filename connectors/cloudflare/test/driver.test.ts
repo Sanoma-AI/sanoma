@@ -583,6 +583,15 @@ describe.skipIf(live)("cloudflareDriver", () => {
       });
     });
 
+    it("refuses to plan a declared alarm under a token of its own, without a request", async () => {
+      const own = { host: URL_OF, token: { $secret: "CLOUD_ACME_WAKEUP_TOKEN" } };
+      await expect(op("alarm.plan", { desired: own })).rejects.toMatchObject({
+        retryable: false,
+        message: expect.stringContaining("leave token out of the data file"),
+      });
+      expect(sent).toEqual([]);
+    });
+
     it("registers a wake at the stored host's wake route, with the token", async () => {
       play("register-only", [wake(204, null, "PUT")]);
       const call = callWith({ SANOMA_WAKEUP_TOKEN: TOKEN, SANOMA_HOST_URL: URL_OF });

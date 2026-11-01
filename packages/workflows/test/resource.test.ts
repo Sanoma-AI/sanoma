@@ -509,14 +509,12 @@ describe("a writable resource type", () => {
     expect(() => crate.box.delete.output.parse({ id: "b-1", gone: false })).toThrow(/gone/);
   });
 
-  it("is refused in any workflow's uses but apply's, and listed with its change operations", () => {
+  it("is allowed in any workflow's uses (the call refuses a declared object), and listed with its change operations", () => {
     const config = {
       workflows: [changeWorkflow],
       connectors: [withSetup(crate, { driver: () => driver })],
     };
-    expect(() => resolveConfig(config)).toThrow(
-      'Workflow "boxes": crate.box.create changes a declared resource, which only apply does: change the data file instead',
-    );
+    expect(resolveConfig(config).workflows.has("boxes")).toBe(true);
     const reading = defineWorkflow({ ...changeWorkflow, name: "plans", uses: [crate.box.plan], run: async () => 1 });
     const { resourceTypes } = describeConfig({ ...config, workflows: [reading], ledger: memoryLedger() });
     expect(resourceTypes[0]?.ops).toEqual([

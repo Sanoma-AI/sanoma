@@ -1,6 +1,7 @@
 import type { ConnectionRef, ConnectionRegistry, ConnectionSnapshot } from "./connection.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Collection } from "./collection.ts";
+import type { DeclaredObjects } from "./config.ts";
 import type { DeadlineRegistry } from "./deadlines.ts";
 import type { ApprovalState, Approver, Principal, WorkflowDefinition } from "./define.ts";
 import type { Fake } from "./fake.ts";
@@ -53,6 +54,8 @@ export interface WorkerState {
   /** The worker's `source`, when it was given one. */
   source?: Source;
   types: ReadonlyMap<string, Resource>;
+  /** The objects the data files declare, read at each call: a workflow's change operation may not aim at one (`refuseDeclared`). */
+  declaredObjects(): Promise<DeclaredObjects>;
   /** The collections, by name, which scenarios' steps may name (`data.<name>`). */
   collections: ReadonlyMap<string, Collection>;
   steps: readonly Steps[];
