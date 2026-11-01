@@ -1,5 +1,5 @@
-import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from "node:crypto";
-import { deploymentKey } from "./deployment-key.ts";
+import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { signingKeyFor as keyFor } from "./deployment-key.ts";
 
 // Small values sealed under a key of their own, derived from the deployment's SANOMA_SIGNING_KEY
 // for one purpose (HKDF-SHA256): a sign-in code in a `login-code` run's input, and a request for
@@ -8,9 +8,6 @@ import { deploymentKey } from "./deployment-key.ts";
 
 const IV = 12;
 const TAG = 16;
-
-const keyFor = (purpose: string) =>
-  Buffer.from(hkdfSync("sha256", deploymentKey("SANOMA_SIGNING_KEY"), "", purpose, 32));
 
 /** `value` as JSON, sealed for `purpose`: base64url of the IV, the tag and the ciphertext. */
 function seal(purpose: string, value: unknown): string {

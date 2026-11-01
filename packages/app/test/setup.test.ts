@@ -74,6 +74,7 @@ const NAMES = [
   "SANOMA_WAKEUP_URL",
   "SANOMA_WAKEUP_ACCOUNT_TOKEN",
   "SANOMA_WAKEUP_TOKEN",
+  "RESEND_API_KEY",
 ];
 let app: App;
 let client: SanomaClient;
@@ -238,20 +239,21 @@ describe("sign-in on the host", () => {
       connectors: [supabase, resend],
       login: { sender: resend.emails.send },
     });
-    const sending = { ...ctx, resolved: resolveConfig(withSender) };
-    vi.stubEnv("RESEND_API_KEY", "");
+    const sendingClient = await SanomaClient.connect(withSender);
+    const sending = { ...ctx, resolved: resolveConfig(withSender), client: sendingClient };
     try {
       expect((await setupStatus(sending)).signIn).toMatchObject({
         sender: "resend.emails.send",
         senderConnected: false,
       });
-      vi.stubEnv("RESEND_API_KEY", "re_madeup");
+      await sendingClient.setCredential("RESEND_API_KEY", "re_madeup", { by: "alice" });
       expect((await setupStatus(sending)).signIn).toMatchObject({
         sender: "resend.emails.send",
         senderConnected: true,
       });
     } finally {
-      vi.stubEnv("RESEND_API_KEY", "");
+      await sendingClient.clearCredential("RESEND_API_KEY", { by: "alice" });
+      await sendingClient.close();
     }
   });
 });

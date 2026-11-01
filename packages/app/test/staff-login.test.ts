@@ -108,7 +108,7 @@ describe("staffLogin", () => {
       { to: "ada@acme.test", code: expect.not.stringContaining("123456") },
       { startedBy: "login" },
     );
-    await context.staff!.record({ type: "signin.recorded", method: "code", identity: { email: "ada@acme.test" } });
+    await context.staff!.record("code", { email: "ada@acme.test" });
     expect(client.recordSignIn).toHaveBeenCalledWith("ada", "code");
   });
 

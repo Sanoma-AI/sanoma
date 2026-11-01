@@ -373,12 +373,8 @@ export interface LoginIdentity {
 /** How a login half lets a person in: an email code, GitHub, an invite link, an email and a password. */
 export type LoginMethod = "code" | "github" | "invite" | "password";
 
-/** A staff sign-in, as a staff login half tells the app (`LoginContext.staff.record`): who, by which method. */
-export interface SignInEvent {
-  type: "signin.recorded";
-  method: Exclude<LoginMethod, "password">;
-  identity: LoginIdentity;
-}
+/** How a person signed in to the staff login, which the ledger records (`signin.recorded`): all but a password. */
+export type SignInMethod = Exclude<LoginMethod, "password">;
 
 /**
  * What the app gives a connector's login half (`ConnectorSetup.login`) when it makes it: for a
@@ -415,8 +411,8 @@ export interface LoginContext {
     admits(identity: LoginIdentity): boolean;
     /** The company's own OAuth clients, each a method when given. */
     social: { github?: { clientId: string; clientSecret: string } };
-    /** Tells the app of a sign-in, which the ledger records. Must not throw. */
-    record(event: SignInEvent): Promise<void>;
+    /** Tells the app of a sign-in by `method` of the person `identity` names, which the ledger records. Must not throw. */
+    record(method: SignInMethod, identity: LoginIdentity): Promise<void>;
   };
 }
 
@@ -426,6 +422,24 @@ export interface LoginContext {
  * limits), never from `X-Forwarded-For`.
  */
 export const CLIENT_IP_HEADER = "x-sanoma-client-ip";
+
+/**
+ * A request's origin, https when a proxy that ends TLS says so (`x-forwarded-proto: https`), as
+ * Start's `getRequestUrl({ xForwardedProto: true })` reads it: the absolute URLs a page or an invite writes, and a login's cookies, take it.
+ */
+export function requestOrigin(request: Request): string {
+  const url = new URL(request.url);
+  if (request.headers.get("x-forwarded-proto") === "https") url.protocol = "https:";
+  return url.origin;
+}
+
+/** Whether a change comes from the page's own origin (a login's CSRF check): the browser says so, or its `Origin` names the request's host. */
+export function sameOrigin(request: Request): boolean {
+  const site = request.headers.get("sec-fetch-site");
+  if (site !== null) return site === "same-origin";
+  const origin = URL.parse(request.headers.get("origin") ?? "");
+  return origin !== null && origin.host === request.headers.get("host");
+}
 
 /**
  * A connector's login half: how a public site tells who a visitor is, and, made with

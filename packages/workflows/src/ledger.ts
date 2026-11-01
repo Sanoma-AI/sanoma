@@ -9,7 +9,7 @@ import { type Db, LEDGER_TABLE as TABLE, lazyPool, pgCode } from "./db.ts";
 import type { Approver, Principal } from "./define.ts";
 import { type ErrorInfo, isFinal, keepCode } from "./errors.ts";
 import { shown, warn } from "./log.ts";
-import type { Effect } from "./op.ts";
+import type { Effect, SignInMethod } from "./op.ts";
 import type { RecordedDecision } from "./policy.ts";
 import type { Run } from "./run.ts";
 import { errorMessage } from "./shared.ts";
@@ -146,9 +146,6 @@ export type LedgerRecord = {
   /** `by` minted an invite for the declared `person`, good until `expiresAt` (ISO 8601); in `invite:<person>`, outside any run. */
   | { type: "invite.minted"; person: string; by: string; expiresAt: string }
 );
-
-/** How a person signed in: an email code, GitHub, an invite link, or the loopback picker. */
-export type SignInMethod = "code" | "github" | "invite" | "loopback";
 
 /** What a sign-in's or an invite's record names as its workflow: the staff login, which is no run. */
 const LOGIN = "login";

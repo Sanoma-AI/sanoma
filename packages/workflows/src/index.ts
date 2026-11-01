@@ -1,6 +1,8 @@
 export {
   type CallContext,
   CLIENT_IP_HEADER,
+  requestOrigin,
+  sameOrigin,
   type Connector,
   type ConnectorSetup,
   type ConnectorVendor,
@@ -22,7 +24,7 @@ export {
   type OpSpec,
   type ResourceGroup,
   retryableStatus,
-  type SignInEvent,
+  type SignInMethod,
   type VendorInfo,
   withSetup,
 } from "./op.ts";
@@ -158,7 +160,6 @@ export {
   type LedgerGroup,
   type LedgerRecord,
   type LedgerStore,
-  type SignInMethod,
 } from "./ledger.ts";
 export { ApprovalMessage, APPROVALS_EVENT, ApprovalWithdrawal, decisionEventOf } from "./approvals.ts";
 export { RUNTIME_VERSION } from "./version.ts";
@@ -307,7 +308,7 @@ export {
 export { checkSecretStore, type SecretStoreCheck } from "./secret-store-check.ts";
 
 export { postgresSecretStore } from "./credentials.ts";
-export { deploymentKey } from "./deployment-key.ts";
+export { deploymentKey, signingKeyFor } from "./deployment-key.ts";
 
 export {
   defineConnection,

@@ -1,5 +1,11 @@
 import { hkdfSync, randomUUID } from "node:crypto";
-import { CLIENT_IP_HEADER, type LoginContext, type LoginHalf, type SignInEvent } from "@sanoma-ai/workflows";
+import {
+  CLIENT_IP_HEADER,
+  type LoginContext,
+  type LoginHalf,
+  type LoginIdentity,
+  type SignInMethod,
+} from "@sanoma-ai/workflows";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { Client } from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -14,7 +20,7 @@ const HOST = "company.example";
 const DECLARED = "alice@example.com";
 
 const codes = new Map<string, string>();
-const signIns: SignInEvent[] = [];
+const signIns: [SignInMethod, LoginIdentity][] = [];
 const context: LoginContext = {
   databaseUrl,
   key,
@@ -24,7 +30,7 @@ const context: LoginContext = {
   staff: {
     admits: ({ email }) => email?.toLowerCase() === DECLARED,
     social: {},
-    record: async (event) => void signIns.push(event),
+    record: async (method, identity) => void signIns.push([method, identity]),
   },
 };
 
@@ -135,7 +141,7 @@ describe("the staff login", () => {
       subject: expect.any(String),
       email: DECLARED,
     });
-    expect(signIns).toEqual([{ type: "signin.recorded", method: "code", identity: { email: DECLARED } }]);
+    expect(signIns).toEqual([["code", { email: DECLARED }]]);
   });
 
   it("signs a declared person in by an invite, once, and a new one replaces the last", async () => {
@@ -148,7 +154,7 @@ describe("the staff login", () => {
     expect(landed.status).toBe(302);
     expect(landed.headers.get("location")).toBe(`https://${HOST}/`);
     expect(await half.verify(request("/", { cookie: cookieOf(landed) }))).toMatchObject({ email: DECLARED });
-    expect(signIns).toEqual([{ type: "signin.recorded", method: "invite", identity: { email: DECLARED } }]);
+    expect(signIns).toEqual([["invite", { email: DECLARED }]]);
     expect(await half.invitation!(token)).toBeUndefined();
     const again = (await half.handle(request(invitation.path)))!;
     expect(again.headers.get("location")).toMatch(/error=INVALID_TOKEN/);

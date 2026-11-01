@@ -11,6 +11,7 @@ import {
   isLoopback,
   type LoginHalf,
   problemLine,
+  requestOrigin,
   warningLine,
   type ResolvedConfig,
   resolveConfig,
@@ -24,7 +25,6 @@ import { NodeRequest, sendNodeResponse } from "srvx/node";
 import type { AppContext, LoginProvider, RequestContext, ServerEntry } from "./context.ts";
 import { admitting } from "./login/admission.ts";
 import { loginKey } from "./login/keys.ts";
-import { requestOrigin } from "./login/page.ts";
 import { publicFront } from "./login/public.ts";
 import { sendLoginCode } from "./login/staff.ts";
 import { hostName, loopbackLogin, placeOf } from "./loopback.ts";
@@ -332,17 +332,10 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
         done();
       });
     });
-  } catch (err) {
-    await responder.close();
-    await closeQuietly(client);
-    throw err;
-  }
-
-  // The staff login, once there is a client and the files it admits by; a login that cannot start stops the app.
-  try {
+    // The staff login, once there is a client and the files it admits by; a login that cannot start stops the app.
     await given.open?.(app);
   } catch (err) {
-    await new Promise((done) => server.close(done));
+    if (server.listening) await new Promise((done) => server.close(done));
     await responder.close();
     await closeQuietly(client);
     throw err;

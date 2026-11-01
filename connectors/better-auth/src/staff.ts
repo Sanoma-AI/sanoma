@@ -3,7 +3,8 @@ import {
   type LoginContext,
   type LoginHalf,
   type LoginMethod,
-  type SignInEvent,
+  sameOrigin,
+  type SignInMethod,
 } from "@sanoma-ai/workflows";
 import { createAuthMiddleware } from "better-auth/api";
 import { magicLink } from "better-auth/plugins/magic-link";
@@ -52,7 +53,7 @@ interface StaffUser {
 }
 
 /** How a session was made, by the route that made it. */
-const METHOD_OF: Record<string, SignInEvent["method"]> = {
+const METHOD_OF: Record<string, SignInMethod> = {
   "/sign-in/email-otp": "code",
   "/callback/:id": "github",
   "/magic-link/verify": "invite",
@@ -82,7 +83,7 @@ export async function betterAuthStaffLogin({ databaseUrl, key, sendCode, staff }
       ["http", ["*"]],
       ["https", ["*"]],
     ]),
-    options: () => ({
+    options: {
       session: { expiresIn: SESSION_SECONDS },
       user: { additionalFields: { github: { type: "string" as const, required: false, input: false } } },
       advanced: { cookiePrefix: "sanoma" },
@@ -116,13 +117,7 @@ export async function betterAuthStaffLogin({ databaseUrl, key, sendCode, staff }
         user: {
           create: {
             // Nobody the files do not declare gets a row, whatever the route.
-            before: async (user: StaffUser) =>
-              staff.admits({
-                ...(user.emailVerified && { email: user.email }),
-                ...(user.github && { github: user.github }),
-              })
-                ? undefined
-                : false,
+            before: async (user: StaffUser) => (staff.admits(identityOf(user)) ? undefined : false),
           },
         },
         session: {
@@ -131,12 +126,12 @@ export async function betterAuthStaffLogin({ databaseUrl, key, sendCode, staff }
               const method = ctx?.path === undefined ? undefined : METHOD_OF[ctx.path];
               if (!method || !ctx) return;
               const user = await ctx.context.internalAdapter.findUserById(session.userId);
-              if (user) await staff.record({ type: "signin.recorded", method, identity: identityOf(user) });
+              if (user) await staff.record(method, identityOf(user));
             },
           },
         },
       },
-    }),
+    },
   });
   const authFor = (request: Request) => auths.get(protocolOf(request))!;
   const methods: LoginMethod[] = [
@@ -199,11 +194,3 @@ const identityOf = (user: StaffUser) => ({
 
 /** A token as the magic link plugin stores it (`storeToken: "hashed"`): SHA-256, base64url without padding. */
 const hashed = (token: string) => createHash("sha256").update(token).digest("base64url");
-
-/** Whether a change comes from the page's own origin: its `Origin` names the request's host, or the browser says so. */
-function sameOrigin(request: Request): boolean {
-  const site = request.headers.get("sec-fetch-site");
-  if (site !== null) return site === "same-origin";
-  const origin = URL.parse(request.headers.get("origin") ?? "");
-  return origin !== null && origin.host === request.headers.get("host");
-}

@@ -26,10 +26,10 @@ export async function betterAuthLogin({ databaseUrl, key, origins, sendCode }: L
     schema: SCHEMA,
     basePath: BASE_PATH,
     hosts,
-    options: () => ({
+    options: {
       emailAndPassword: { enabled: true },
       plugins: sendCode ? [emailCode(sendCode)] : [],
-    }),
+    },
   });
   /** The instance for the request's host, or none for a host that is not the site's. */
   const authFor = (request: Request) => {

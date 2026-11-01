@@ -8,6 +8,8 @@ import {
   type LoginIdentity,
   openInvite,
   personOf,
+  requestOrigin,
+  sameOrigin,
   sealLoginCode,
 } from "@sanoma-ai/workflows";
 import { admit, readPeople } from "@sanoma-ai/workflows/describe";
@@ -15,7 +17,7 @@ import { z } from "zod";
 import type { AppContext, LoginProvider } from "../context.ts";
 import { secretValues } from "../server/secrets.ts";
 import { loginKey } from "./keys.ts";
-import { escapeHtml, requestOrigin, sameOrigin, smallPage, wantsJson } from "./page.ts";
+import { escapeHtml, smallPage, wantsJson } from "./page.ts";
 
 // The staff login on a host: a login half (Better Auth's, `betterAuthStaffLogin`) made once the app
 // listens, given what only the app has: who the files declare, the sender (a `login-code` run as
@@ -53,9 +55,26 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
       return undefined;
     }
   };
+  /** Who the half says is signed in, once per request: `handle` asks, then admission. */
+  const verified = new WeakMap<Request, Promise<LoginIdentity | undefined>>();
+  const identityOf = (request: Request) => {
+    let found = verified.get(request);
+    if (!found) {
+      found = (async () => {
+        const session = await half?.verify(request);
+        if (!session) return undefined;
+        const { email, github } = session;
+        return { ...(email && { email }), ...(github && { github }) };
+      })();
+      verified.set(request, found);
+    }
+    return found;
+  };
 
   const provider: LoginProvider = {
     name: "staff",
+    // The half's (Better Auth's), which the sign-in page posts to as well.
+    signOut: "/auth/better-auth/sign-out",
     check() {},
     async open(context) {
       app = context;
@@ -69,7 +88,7 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
         staff: {
           admits: (identity) => admitted(identity) !== undefined,
           social,
-          async record({ method, identity }) {
+          async record(method, identity) {
             const person = personOf(identity, people().people);
             if (person === undefined) return;
             await client
@@ -78,17 +97,11 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
           },
         },
       });
-      provider.signOut = half.signOut;
     },
     async close() {
       await half?.close?.();
     },
-    async resolveActor(request) {
-      const verified = await half?.verify(request);
-      if (!verified) return undefined;
-      const { email, github } = verified;
-      return { ...(email && { email }), ...(github && { github }) };
-    },
+    resolveActor: identityOf,
     async handle(request) {
       if (!half) return smallPage(503, "Starting", "<p>The app is starting. Try again in a moment.</p>");
       const own = await half.handle(request);
@@ -97,16 +110,13 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
       if (pathname === INVITE && request.method === "POST") return mint(request);
       if (pathname.startsWith(`${INVITE}/`) && request.method === "GET")
         return landing(pathname.slice(INVITE.length + 1));
-      if (await half.verify(request)) return undefined;
-      if (wantsJson(request)) {
-        return Response.json({ error: "Sign in first" }, { status: 401, headers: { "cache-control": "no-store" } });
-      }
-      return signInPage(half);
+      if (await identityOf(request)) return undefined;
+      return wantsJson(request) ? refuse(401, "Sign in first") : signInPage(half);
     },
     async invite(email, { origin, by }) {
       if (!half?.invite || !app) throw new Error("The app is starting");
       const person = personOf({ email }, people().people);
-      if (person === undefined) throw new InviteError(`${email} is not a declared person's email`);
+      if (person === undefined) throw new Error(`${email} is not a declared person's email`);
       const { host, protocol } = new URL(origin);
       const token = await half.invite(
         email,
@@ -131,24 +141,17 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
       by = LOGIN_AGENT;
     } else {
       if (!sameOrigin(request)) return refuse(403, "Ask for an invite from this app's own page");
-      const verified = await half!.verify(request);
-      const asking =
-        verified &&
-        admitted({
-          ...(verified.email && { email: verified.email }),
-          ...(verified.github && { github: verified.github }),
-        });
+      const identity = await identityOf(request);
+      const asking = identity && admitted(identity);
       if (!asking) return refuse(401, "Sign in first");
       ({ email } = body.data);
       by = asking.id;
     }
-    try {
-      const { url } = await provider.invite!(email, { origin: requestOrigin(request), by });
-      return Response.json({ url }, { headers: { "cache-control": "no-store" } });
-    } catch (err) {
-      if (err instanceof InviteError) return refuse(403, err.message);
-      throw err;
+    if (personOf({ email }, people().people) === undefined) {
+      return refuse(403, `${email} is not a declared person's email`);
     }
+    const { url } = await provider.invite!(email, { origin: requestOrigin(request), by });
+    return Response.json({ url }, { headers: { "cache-control": "no-store" } });
   }
 
   /** An invite's landing page: whom it is for and a link that signs them in, so a link preview never uses it up. */
@@ -187,9 +190,6 @@ export async function sendLoginCode(client: AppContext["client"], email: string,
 /** A refusal of `POST /auth/invite`, as JSON saying why. */
 const refuse = (status: number, error: string) =>
   Response.json({ error }, { status, headers: { "cache-control": "no-store" } });
-
-/** An invite refused for what it asks (an undeclared email): a 403, saying why. */
-export class InviteError extends Error {}
 
 /**
  * The sign-in page: an email, then the six-digit code sent to it, and GitHub when the company has

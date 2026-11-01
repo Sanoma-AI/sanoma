@@ -292,7 +292,6 @@ const SIGN_IN_METHOD: Record<string, string> = {
   code: "email code",
   github: "GitHub",
   invite: "invite link",
-  loopback: "this machine",
 };
 
 /**

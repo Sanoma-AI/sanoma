@@ -53,7 +53,7 @@ import {
 import { type CedarPolicySource, policyAt } from "./cedar.ts";
 import type { Policy } from "./policy.ts";
 import { type Resource, resourceTypesOf, withoutWriteOnly } from "./resource.ts";
-import { loginCodeWorkflow } from "./login-code.ts";
+import { CODE_MAIL, loginCodeWorkflow } from "./login-code.ts";
 import {
   APPLY_WORKFLOW,
   BUILT_IN_WORKFLOWS,
@@ -424,9 +424,6 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     ...(root !== undefined && { root }),
   };
 }
-
-/** What a sign-in code is sent as: a sender must take it. */
-const CODE_MAIL = { to: "person@example.com", subject: "Your sign-in code", text: "123456" };
 
 /**
  * The config's `login.sender`, as the config's operations have it: refused unless it is an

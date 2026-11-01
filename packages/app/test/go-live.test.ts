@@ -14,7 +14,14 @@ import { fakeSupabase } from "@sanoma-ai/connector-supabase/fake";
 import { testDatabaseUrl, waitFor, withFake } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
 import { fakeHost } from "@sanoma-ai/testing/host";
-import { isEnded, memoryLedger, openInvite, resolveConfig, type SanomaConfig } from "@sanoma-ai/workflows";
+import {
+  isEnded,
+  memoryLedger,
+  openInvite,
+  resolveConfig,
+  SanomaClient,
+  type SanomaConfig,
+} from "@sanoma-ai/workflows";
 import { describeConfig, loadDataFiles, readLockfile, readResources } from "@sanoma-ai/workflows/describe";
 import { startWakeupService, type WakeupService } from "@sanoma-ai/workflows/wakeup-service";
 import { http, HttpResponse } from "msw";
@@ -340,22 +347,22 @@ describe("going live", () => {
   });
 
   it("gives the host the sign-in sender's variables when the config names one, an optional one once stored", async () => {
-    const sending = {
-      ...ctx,
-      resolved: resolveConfig({
-        ...config,
-        connectors: [...config.connectors, resend],
-        login: { sender: resend.emails.send },
-      }),
+    const withSender: SanomaConfig = {
+      ...config,
+      connectors: [...config.connectors, resend],
+      login: { sender: resend.emails.send },
     };
-    const text = await renderInfra(sending, choices(), DEPLOY_KEY);
-    expect(text).toContain(`    RESEND_API_KEY: secret("RESEND_API_KEY"),\n`);
-    expect(text).not.toContain("RESEND_FROM");
-    await app.client.setSecret("RESEND_FROM", "Acme <hi@acme.test>", { by: "alice" });
+    const client = await SanomaClient.connect({ ...withSender, databaseUrl });
+    const sending = { ...ctx, resolved: resolveConfig(withSender), client };
     try {
+      const text = await renderInfra(sending, choices(), DEPLOY_KEY);
+      expect(text).toContain(`    RESEND_API_KEY: secret("RESEND_API_KEY"),\n`);
+      expect(text).not.toContain("RESEND_FROM");
+      await client.setCredential("RESEND_FROM", "Acme <hi@acme.test>", { by: "alice" });
       expect(await renderInfra(sending, choices(), DEPLOY_KEY)).toContain(`    RESEND_FROM: secret("RESEND_FROM"),\n`);
     } finally {
-      await app.client.clearSecret("RESEND_FROM", { by: "alice" });
+      await client.clearCredential("RESEND_FROM", { by: "alice" });
+      await client.close();
     }
     expect(await renderInfra(ctx, choices(), DEPLOY_KEY)).not.toContain("RESEND_");
   });

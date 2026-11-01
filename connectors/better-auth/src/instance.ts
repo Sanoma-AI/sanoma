@@ -1,4 +1,4 @@
-import { CLIENT_IP_HEADER } from "@sanoma-ai/workflows";
+import { CLIENT_IP_HEADER, requestOrigin } from "@sanoma-ai/workflows";
 import { type BetterAuthOptions, betterAuth } from "better-auth";
 import { getMigrations } from "better-auth/db/migration";
 import { emailOTP } from "better-auth/plugins/email-otp";
@@ -26,8 +26,8 @@ export interface BetterAuthSetup<O extends ExtraOptions> {
   basePath: string;
   /** The hosts each protocol's instance answers, as Better Auth's `allowedHosts` takes them. */
   hosts: ReadonlyMap<Protocol, readonly string[]>;
-  /** The rest of the options, for one protocol's instance, given the pool its database is on. */
-  options: (protocol: Protocol, pool: Pool) => O;
+  /** The rest of the options, the same for each protocol's instance. */
+  options: O;
 }
 
 /** Each database and schema's migration, once per process however many logins run on it. */
@@ -50,37 +50,34 @@ export async function openBetterAuth<O extends ExtraOptions>({
   if (!/^[0-9a-f]{64}$/.test(key)) throw new Error("better-auth: the app gives no key to sign cookies with");
   const pool = new Pool({ connectionString: databaseUrl });
   pool.on("error", (err) => console.warn(`better-auth: a database connection failed: ${err.message}`));
-  const optionsFor = (protocol: Protocol) => {
-    const own = options(protocol, pool);
-    return {
-      // On only in production by default; in memory, per process.
-      rateLimit: { enabled: true },
-      logger: { level: "warn" as const },
-      ...own,
-      // Schema-qualified queries, not a search_path, which the URL's own `options` could undo.
-      database: {
-        dialect: new PostgresDialect({ pool }),
-        type: "postgres" as const,
-        schemaName: schema,
-        transaction: true,
-      },
-      // `secrets` over `secret`, else BETTER_AUTH_SECRETS in the environment would win.
-      secrets: [{ version: 1, value: key }],
-      secret: key,
-      basePath,
-      // A request's Host must be one of these, and its origin is trusted.
-      baseURL: { allowedHosts: [...(hosts.get(protocol) ?? [])], protocol },
-      telemetry: { enabled: false },
-      advanced: {
-        // The app sets it from the socket; Better Auth would otherwise believe a client's X-Forwarded-For.
-        ipAddress: { ipAddressHeaders: [CLIENT_IP_HEADER] },
-        useSecureCookies: protocol === "https",
-        // Its default under NODE_ENV=test is off: the same check everywhere.
-        disableOriginCheck: false,
-        ...own.advanced,
-      },
-    };
-  };
+  const optionsFor = (protocol: Protocol) => ({
+    // On only in production by default; in memory, per process.
+    rateLimit: { enabled: true },
+    logger: { level: "warn" as const },
+    ...options,
+    // Schema-qualified queries, not a search_path, which the URL's own `options` could undo.
+    database: {
+      dialect: new PostgresDialect({ pool }),
+      type: "postgres" as const,
+      schemaName: schema,
+      transaction: true,
+    },
+    // `secrets` over `secret`, else BETTER_AUTH_SECRETS in the environment would win.
+    secrets: [{ version: 1, value: key }],
+    secret: key,
+    basePath,
+    // A request's Host must be one of these, and its origin is trusted.
+    baseURL: { allowedHosts: [...(hosts.get(protocol) ?? [])], protocol },
+    telemetry: { enabled: false },
+    advanced: {
+      // The app sets it from the socket; Better Auth would otherwise believe a client's X-Forwarded-For.
+      ipAddress: { ipAddressHeaders: [CLIENT_IP_HEADER] },
+      useSecureCookies: protocol === "https",
+      // Its default under NODE_ENV=test is off: the same check everywhere.
+      disableOriginCheck: false,
+      ...options.advanced,
+    },
+  });
   try {
     const protocols = [...hosts.keys()];
     await migrateOnce(databaseUrl, schema, optionsFor(protocols[0]!));
@@ -128,7 +125,7 @@ async function migrate(databaseUrl: string, schema: string, options: BetterAuthO
 
 /** A request's protocol: https when it came over TLS or through a proxy that says so (`x-forwarded-proto`). */
 export const protocolOf = (request: Request): Protocol =>
-  request.url.startsWith("https:") || request.headers.get("x-forwarded-proto") === "https" ? "https" : "http";
+  requestOrigin(request).startsWith("https:") ? "https" : "http";
 
 /**
  * The app's Sign out POSTs no body, which Better Auth's sign-out answers with 415: the request

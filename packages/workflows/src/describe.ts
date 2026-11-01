@@ -18,6 +18,7 @@ import {
 } from "./description.ts";
 import { isDirect } from "./direct.ts";
 import { type CredentialStatus, credentialsOf } from "./env.ts";
+import { CODE_MAIL } from "./login-code.ts";
 import { lintWorkflow } from "./lint.ts";
 import { fresh, stampOf, stampsOf } from "./load.ts";
 import { LOCKFILE } from "./lockfile.ts";
@@ -306,9 +307,6 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     ...(resolved.login && { login: { sender: resolved.login.sender.id } }),
   };
 }
-
-/** A sign-in code's mail, as the policy is asked about it. */
-const CODE_MAIL = { to: "person@example.com", subject: "Your sign-in code", text: "<text>" };
 
 /**
  * The policy holding or denying the sign-in code: `login.sender` as the runtime's agent `login`

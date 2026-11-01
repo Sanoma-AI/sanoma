@@ -18,15 +18,7 @@ import {
   vendorCodeOf,
   wakeupHostTypes,
 } from "@sanoma-ai/workflows";
-import {
-  type DataValue,
-  formatOptions,
-  readLockfile,
-  readPeople,
-  Reference,
-  renderDataFile,
-} from "@sanoma-ai/workflows/describe";
-import { personsOf } from "@sanoma-ai/workflows/shared";
+import { type DataValue, formatOptions, readLockfile, Reference, renderDataFile } from "@sanoma-ai/workflows/describe";
 import { secret } from "@sanoma-ai/workflows/resources";
 import { WAKEUP_TOKEN } from "@sanoma-ai/workflows/wakeup-service";
 import {
@@ -41,6 +33,7 @@ import {
 import type { AppContext } from "../context.ts";
 import { asApplyPlan } from "../lib/apply-plan.ts";
 import { invalid } from "./core.ts";
+import { declaredEmail } from "./people.ts";
 import { secretValues } from "./secrets.ts";
 import { mintWakeupToken, WAKEUP_URL } from "./setup.ts";
 
@@ -658,14 +651,10 @@ async function latestRun({ client }: AppContext): Promise<GoLiveRun | null> {
  */
 async function senderSecrets({ client, resolved }: AppContext): Promise<Record<string, DataValue>> {
   const sender = resolved.login?.sender;
-  const env = sender && resolved.driversByVendor.get(sender.vendor)?.env;
-  if (!env) return {};
-  const names = Object.keys(env.shape);
-  const stored = await client.secrets(names);
+  if (!sender) return {};
+  const statuses = (await client.credentials()).get(sender.vendor) ?? [];
   return Object.fromEntries(
-    names
-      .filter((name) => stored.has(name) || !env.shape[name]!.safeParse(undefined).success)
-      .map((name) => [name, secret(name)]),
+    statuses.filter((c) => c.status === "set" || !c.optional).map((c) => [c.name, secret(c.name)]),
   );
 }
 
@@ -678,7 +667,7 @@ async function senderSecrets({ client, resolved }: AppContext): Promise<Record<s
 export async function goLiveSignIn(app: AppContext, actor: Principal): Promise<{ url: string }> {
   const host = await hostAnswer(app);
   if (!host?.healthy) throw new ApiError(409, { error: "The host is not answering yet" });
-  const email = personsOf(readPeople(app.resolved.root).people).find((p) => p.id === actor.id)?.email;
+  const email = declaredEmail(app, actor.id);
   if (!email) {
     throw new ApiError(409, { error: `${actor.id} has no email declared in the people file: add one to be signed in` });
   }

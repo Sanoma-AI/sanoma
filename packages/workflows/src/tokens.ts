@@ -1,7 +1,8 @@
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 import { API_TOKENS_TABLE as TABLE } from "./db.ts";
 import type { Principal } from "./define.ts";
+import { generateSecret, tokenHash as hashOf } from "./secret.ts";
 
 // The api tokens, in the config's database beside the runtime's other tables: a caller of a
 // public site's api (`callFn`) with `Authorization: Bearer sca_…` is the principal `token:<id>`,
@@ -27,12 +28,10 @@ export interface Tokens {
   resolve(token: string): Promise<{ principal: Principal; subject: string } | undefined>;
 }
 
-const hashOf = (token: string) => createHash("sha256").update(token).digest("hex");
-
 export function tokenStore(db: () => Promise<Pool>): Tokens {
   return {
     async mint({ id = randomUUID(), subject, groups }) {
-      const token = `${PREFIX}${randomBytes(32).toString("base64url")}`;
+      const token = `${PREFIX}${generateSecret()}`;
       await (
         await db()
       ).query(`INSERT INTO ${TABLE} (id, hash, subject, groups) VALUES ($1, $2, $3, $4::jsonb)`, [

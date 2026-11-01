@@ -1,4 +1,3 @@
-import { deploymentKey } from "@sanoma-ai/workflows";
 // oxlint-disable-next-line import/no-unassigned-import
 import "@tanstack/react-start/server-only";
 import { execFile } from "node:child_process";
@@ -10,14 +9,14 @@ import { promisify } from "node:util";
 import { parse, serialize } from "cookie-es";
 import {
   type CredentialStatus,
-  credentialsOf,
   errorMessage,
   isLoopback,
   memorySecrets,
   type Principal,
+  requestOrigin,
 } from "@sanoma-ai/workflows";
-import { type DataValue, formatOptions, readPeople, renderDataFile } from "@sanoma-ai/workflows/describe";
-import { credentialReady, personsOf } from "@sanoma-ai/workflows/shared";
+import { type DataValue, formatOptions, renderDataFile } from "@sanoma-ai/workflows/describe";
+import { credentialReady } from "@sanoma-ai/workflows/shared";
 import { secret as secretOf } from "@sanoma-ai/workflows/resources";
 import { mintInstanceToken, WAKEUP_TOKEN } from "@sanoma-ai/workflows/wakeup-service";
 import {
@@ -32,6 +31,7 @@ import {
 } from "../api.ts";
 import type { AppContext } from "../context.ts";
 import { type ActorContext, invalid } from "./core.ts";
+import { declaredEmail } from "./people.ts";
 import { signer } from "../login/keys.ts";
 import { escapeHtml } from "../login/page.ts";
 
@@ -130,7 +130,7 @@ const cookie = (request: Request, name: string, value: string, path: string, max
     maxAge,
     httpOnly: true,
     sameSite: "lax",
-    secure: request.url.startsWith("https:") || request.headers.get("x-forwarded-proto") === "https",
+    secure: requestOrigin(request).startsWith("https:"),
   });
 
 /** What the page shows: the App's slug, each token's status and how people will sign in on the host (`signIn`); never a value. */
@@ -156,21 +156,14 @@ export async function setupStatus(app: AppContext, actor?: Principal): Promise<S
 }
 
 /** The declared email of the person asking, and the config's sender, with whether its connector's credentials are set. */
-async function signInStatus({ client, resolved }: AppContext, actor?: Principal) {
-  const you = actor && personsOf(readPeople(resolved.root).people).find((p) => p.id === actor.id)?.email;
-  const sender = resolved.login?.sender;
-  const driver = sender && resolved.driversByVendor.get(sender.vendor);
-  let senderConnected = false;
-  if (driver) {
-    const drivers = new Map([[sender.vendor, driver]]);
-    const names = [...credentialsOf(drivers, () => undefined).values()].flat().map((c) => c.name);
-    const stored = await client.secrets(names);
-    // As the worker reads them: the environment wins over a stored value.
-    const lookup = (name: string) => process.env[name] || stored.get(name)?.value;
-    const statuses = credentialsOf(drivers, lookup).get(sender.vendor) ?? [];
-    senderConnected = statuses.every(credentialReady);
-  }
-  return { you: you ?? null, sender: sender?.id ?? null, senderConnected };
+async function signInStatus(app: AppContext, actor?: Principal) {
+  const sender = app.resolved.login?.sender;
+  const statuses = sender && (await app.client.credentials()).get(sender.vendor);
+  return {
+    you: (actor && declaredEmail(app, actor.id)) ?? null,
+    sender: sender?.id ?? null,
+    senderConnected: !!statuses?.every(credentialReady),
+  };
 }
 
 /**
@@ -315,8 +308,7 @@ function toConnect(github: "connected" | "expired" | "failed" | "bad-org" | "nob
 
 /** Signs setup state with the independent app-signing key. */
 function stateSigner() {
-  const secretsKey = deploymentKey("SANOMA_SIGNING_KEY").toString("base64");
-  return signer(secretsKey, "sanoma setup state");
+  return signer("sanoma setup state");
 }
 
 // Connecting an existing repository or database: each is imported by its name or ref, declared
