@@ -1,7 +1,7 @@
 {
   "name": "@sanoma-ai/invoices",
   "version": "0.1.0",
-  "description": "Portable invoice schemas, exact calculations and service-business adapters for browser tools and workflows",
+  "description": "Shared invoice models and React PDF rendering for browser tools and workflows",
   "keywords": [
     "cleaning",
     "invoices",
@@ -19,7 +19,8 @@
   "files": [
     "dist",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "docs/invoice-preview.png"
   ],
   "type": "module",
   "sideEffects": false,
@@ -33,6 +34,18 @@
     "./examples": {
       "types": "./dist/examples.d.ts",
       "default": "./dist/examples.js"
+    },
+    "./pdf": {
+      "types": "./dist/pdf.d.ts",
+      "default": "./dist/pdf.js"
+    },
+    "./browser": {
+      "types": "./dist/browser.d.ts",
+      "default": "./dist/browser.js"
+    },
+    "./node": {
+      "types": "./dist/node.d.ts",
+      "default": "./dist/node.js"
     }
   },
   "publishConfig": {
@@ -41,10 +54,24 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "clean": "rm -rf dist",
-    "prepack": "pnpm run clean && pnpm run build"
+    "prepack": "pnpm run clean && pnpm run build",
+    "typecheck": "tsc -p tsconfig.json",
+    "smoke:browser": "node scripts/browser-smoke.ts"
   },
   "dependencies": {
+    "@react-pdf/renderer": "^4.9.0",
+    "fast-png": "^8.0.0",
+    "fflate": "^0.8.3",
     "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "pdfjs-dist": "^6.4.299",
+    "react": "^19.3.0",
+    "vite": "^8.3.5"
+  },
+  "peerDependencies": {
+    "react": "^19.3.0"
   },
   "engines": {
     "node": ">=26"

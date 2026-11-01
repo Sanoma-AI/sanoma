@@ -2,6 +2,8 @@
   // The compiler options are the ones a company repo extends; this adds the checkout's paths.
   "extends": "./packages/sanoma/tsconfig.base.json",
   "compilerOptions": {
+    // Headless PDF documents use React JSX too; DOM globals remain in package-specific configs.
+    "jsx": "react-jsx",
     // The checkout's own code is Node's throughout: its `@types/node`, from the root, for every
     // package's build config too (they extend this from their own directories).
     "types": ["node"],
@@ -10,6 +12,9 @@
     // Published packages resolve to dist/ through their package.json exports.
     // Keep in sync with resolve.alias in vitest.config.ts.
     "paths": {
+      "@sanoma-ai/invoices/pdf": ["./packages/invoices/src/pdf.tsx"],
+      "@sanoma-ai/invoices/browser": ["./packages/invoices/src/browser.ts"],
+      "@sanoma-ai/invoices/node": ["./packages/invoices/src/node.ts"],
       "@sanoma-ai/invoices": ["./packages/invoices/src/index.ts"],
       "@sanoma-ai/invoices/examples": ["./packages/invoices/src/examples.ts"],
       "@sanoma-ai/workflows": ["./packages/workflows/src/index.ts"],
@@ -68,7 +73,8 @@
   ],
   // The app's routes and components (JSX, DOM) are checked by packages/app/tsconfig.json
   // (`typecheck:ui`). Its Node entry, src/index.ts, is still checked here through its tests.
+  // The invoice package checks its JSX document and browser adapter in its own tsconfig.
   // A fixture's sites, and its apps', are checked as a company's are, by the tsconfig sanoma writes beside them
   // when a test builds them.
-  "exclude": ["packages/app/src", "**/test/fixtures/*/sites", "**/test/fixtures/*/apps/*/sites"]
+  "exclude": ["packages/app/src", "packages/invoices", "**/test/fixtures/*/sites", "**/test/fixtures/*/apps/*/sites"]
 }
