@@ -6,6 +6,8 @@ Generate invoice PDFs locally through Sanoma's normal workflow operations. Pet s
 pnpm add @sanoma-ai/connector-invoices
 ```
 
+Not on npm yet: the package is private until its first release ([#526](https://github.com/Sanoma-AI/sanoma/issues/526)). Inside this repository it is a workspace package.
+
 Register `invoices` in the company's `connectors` and declare the operation in the workflow's `uses`:
 
 ```ts

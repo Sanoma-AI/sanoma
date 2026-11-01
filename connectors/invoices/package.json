@@ -1,6 +1,7 @@
 {
   "name": "@sanoma-ai/connector-invoices",
   "version": "0.1.0",
+  "private": true,
   "description": "Local invoice PDF generation for Sanoma workflows",
   "keywords": [
     "invoices",
