@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { keyBytes } from "./deployment-key.ts";
 import { type CallContext, defineConnector, defineDriver, DriverError, retryableStatus } from "./op.ts";
 import { generateSecret, SECRET_NAME } from "./secret.ts";
 import { sealInvite } from "./seal.ts";
@@ -112,8 +113,8 @@ function tokenIdOf(call: CallContext) {
 /** The 32 bytes of a signing key stored as text (base64, or base64url as `generate` makes one), or a refusal. */
 function signingKeyOf(secret: string, text: string | undefined): Buffer {
   if (text === undefined) throw refuse(`the secret ${secret} is not set: store the instance's signing key under it`);
-  const key = Buffer.from(text, "base64");
-  if (key.length !== 32) throw refuse(`${secret} is not a signing key: 32 bytes in base64`);
+  const key = keyBytes(text);
+  if (!key) throw refuse(`${secret} is not a signing key: 32 bytes in base64`);
   return key;
 }
 

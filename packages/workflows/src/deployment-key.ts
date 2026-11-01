@@ -17,10 +17,19 @@ export function deploymentKey(
       throw new Error(`${name}_FILE could not be read`);
     }
   }
-  if (!encoded || !/^[A-Za-z0-9+/]{43}=$/.test(encoded) || Buffer.from(encoded, "base64").length !== 32) {
-    throw new Error(`${name} must be 32 random bytes in base64; supply ${name} or ${name}_FILE`);
-  }
-  return Buffer.from(encoded, "base64");
+  const key = encoded === undefined ? undefined : keyBytes(encoded);
+  if (!key) throw new Error(`${name} must be 32 random bytes in base64; supply ${name} or ${name}_FILE`);
+  return key;
+}
+
+/**
+ * The 32 bytes of a key written as text: padded base64 (`sanoma key`), or base64url without
+ * padding (a `secret(..., { generate: true })` marker's value). Anything else is `undefined`.
+ */
+export function keyBytes(text: string): Buffer | undefined {
+  if (/^[A-Za-z0-9+/]{43}=$/.test(text)) return Buffer.from(text, "base64");
+  if (/^[A-Za-z0-9_-]{43}$/.test(text)) return Buffer.from(text, "base64url");
+  return undefined;
 }
 
 /**
