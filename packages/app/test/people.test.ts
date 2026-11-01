@@ -70,7 +70,7 @@ const source: Source = {
 };
 
 const config: SanomaConfig = { workflows: [], connectors: [], root };
-const testApp = useTestApp(config, { databaseUrl: testDatabaseUrl("people") });
+const testApp = useTestApp(config, { databaseUrl: testDatabaseUrl("app_people") });
 let app: App;
 
 beforeAll(async () => {
