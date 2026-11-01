@@ -142,6 +142,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     ...(resolved.scenarios && { scenarios: resolved.scenarios }),
     ...(options.source && { source: options.source }),
     types: resolved.types,
+    declaredObjects: resolved.declaredObjects,
     collections: resolved.collections,
     steps: resolved.steps,
     policy: resolved.policy,

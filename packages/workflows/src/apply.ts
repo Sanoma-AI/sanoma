@@ -38,7 +38,7 @@ export { APPLY_WORKFLOW } from "./shared.ts";
 // would make each match its declaration, asks one approval wherever the policy holds a change,
 // then makes the changes in dependency order, keeping the lockfile's bindings as it goes. It is a
 // workflow like any other, held to the same lint, so every vendor call goes through `ctx`. Only
-// it may call a writable type's change operations (`isChangeOp`).
+// it may call a writable type's change operations (`isChangeOp`) on a declared object.
 
 /** What a person answers for a bound object the vendor no longer has (`gone`), or a binding no declaration has (`orphan`). */
 export const PLAN_ANSWERS = ["recreate", "forget", "delete"] as const;
