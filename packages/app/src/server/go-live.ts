@@ -456,14 +456,16 @@ export async function renderInfra(
   }
   setPath(hosted, inputs.source, new Reference("repo"));
   setPath(hosted, inputs.ref, "main");
-  setPath(hosted, inputs.secrets, {
-    SANOMA_DATABASE_URL: secret(DATABASE_URL),
-    SANOMA_SIGNING_KEY: secret("SANOMA_SIGNING_KEY"),
-    ...(!app.resolved.secrets.store && { SANOMA_SECRETS_KEY: secret(SECRETS_KEY) }),
-    [SOURCE_KEY]: secret(SOURCE_KEY),
-    ...wakeup.secrets,
-    ...(await senderSecrets(app)),
-  });
+  // A host that binds its own bootstrap (Sanoma Cloud's) takes no secrets.
+  if (inputs.secrets)
+    setPath(hosted, inputs.secrets, {
+      SANOMA_DATABASE_URL: secret(DATABASE_URL),
+      SANOMA_SIGNING_KEY: secret("SANOMA_SIGNING_KEY"),
+      ...(!app.resolved.secrets.store && { SANOMA_SECRETS_KEY: secret(SECRETS_KEY) }),
+      [SOURCE_KEY]: secret(SOURCE_KEY),
+      ...wakeup.secrets,
+      ...(await senderSecrets(app)),
+    });
   setPath(hosted, inputs.port, port);
   const woken = wakeup.type;
   return renderDataFile(

@@ -24,7 +24,7 @@ import { createApi } from "../src/api-client.ts";
 import type { AppContext } from "../src/context.ts";
 import { loopbackLogin } from "../src/loopback.ts";
 import { admitting } from "../src/login/admission.ts";
-import { actorOf, appConfig, callApi, requireActor, serverFnFailure, validate } from "../src/server/core.ts";
+import { actorOf, appConfig, callApi, postCall, requireActor, serverFnFailure, validate } from "../src/server/core.ts";
 import companySites from "./fixtures/company-sites/sanoma.config.ts";
 
 // Needs Postgres (`pnpm db:up`). A site's `api`: `callFn` through the server core, as its server
@@ -231,6 +231,39 @@ describe("callFn", () => {
       body: { code: "invalid_input", issues: [expect.objectContaining({ path: ["id"] })] },
     });
     expect(await call({ name: "outboundNext.result", input: {} })).toMatchObject({
+      status: 400,
+      body: { code: "invalid_input" },
+    });
+  });
+});
+
+/** `POST /api/call` (`postCall`) with this body, as the loopback login reads `actor` from the header: the answer's status and JSON. */
+async function post(body: unknown, actor: string | null = "ada") {
+  const app = appContext();
+  const headers = { "content-type": "application/json", ...(actor === null ? {} : { [ACTOR_HEADER]: actor }) };
+  const request = new Request("http://127.0.0.1/api/call", { method: "POST", headers, body: JSON.stringify(body) });
+  const res = await postCall(request, { app, actor: actorOf(app, request) });
+  return { status: res.status, body: (await res.json()) as any };
+}
+
+describe("POST /api/call", () => {
+  it("starts a workflow and reads its result as callFn does, over plain JSON", async () => {
+    await post({ name: "data.outbound.save", input: { record: lead("Json Co") }, id: crypto.randomUUID() });
+    const id = crypto.randomUUID();
+    expect(await post({ name: "outboundNext.start", input: { company: "Json Co" }, id })).toEqual({
+      status: 200,
+      body: { runId: id },
+    });
+    expect(await post({ name: "outboundNext.result", input: { runId: id } })).toEqual({
+      status: 200,
+      body: expect.any(String),
+    });
+  });
+
+  it("answers a refusal with its status and body, and a request that says nobody or names nothing 400", async () => {
+    expect(await post({ name: "nothing.here" })).toMatchObject({ status: 400, body: { code: "invalid_input" } });
+    expect(await post({ input: {} })).toMatchObject({ status: 400, body: { code: "invalid_input" } });
+    expect(await post({ name: "outboundNext.start", input: { company: "Bob" } }, null)).toMatchObject({
       status: 400,
       body: { code: "invalid_input" },
     });

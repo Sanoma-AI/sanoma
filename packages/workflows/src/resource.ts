@@ -693,7 +693,8 @@ export function defineResource<
         if (!underAny(path, writeOnly)) {
           throw new Error(`${what}: ${at} is not write-only, so it takes a value, not a secret (${value.$secret})`);
         }
-        if (isSanomaSecret(value.$secret) && !(host && underAny(path, new Set([host.inputs.secrets])))) {
+        const hostSecrets = host?.inputs.secrets;
+        if (isSanomaSecret(value.$secret) && !(hostSecrets !== undefined && underAny(path, new Set([hostSecrets])))) {
           throw new Error(`${what}: ${at} names ${value.$secret}, one of sanoma's own: only a host's secrets may`);
         }
         secrets.add(at);

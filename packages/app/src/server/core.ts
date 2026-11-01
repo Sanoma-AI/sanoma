@@ -46,7 +46,7 @@ import {
   type AdoptResponse,
   ApiError,
   type AppConfig,
-  type CallRequest,
+  CallRequest,
   type ChangeDetail,
   ChangesQuery,
   type ClearCredentialRequest,
@@ -871,6 +871,22 @@ export async function callApi(app: AppContext, actor: Principal, { name, input, 
     }
     default:
       throw notCallable(name);
+  }
+}
+
+/**
+ * `POST /api/call`: `callApi` over plain JSON, for a client that is not the app's page, such as
+ * Sanoma Cloud's connector with a bearer token. The body is a `CallRequest`; the answer is the
+ * call's output as JSON (`null` for none), or an `ApiError`'s body with its status.
+ */
+export async function postCall(request: Request, context: ActorContext): Promise<Response> {
+  try {
+    const actor = await requireActor(context);
+    const call = parse(CallRequest, await request.json().catch(() => undefined), "The request");
+    return Response.json((await callApi(context.app, actor, call)) ?? null);
+  } catch (err) {
+    const { status, body } = toApiError(err, "an api call");
+    return Response.json(body, { status });
   }
 }
 

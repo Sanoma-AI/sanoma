@@ -65,6 +65,16 @@ describe("a host type", () => {
       /domains names no field \(domains\)/,
     ],
     ["secrets that are not write-only", { writeOnly: [] }, /inputs\.secrets must be a write-only field/],
+    [
+      "no secrets, when it does not bind its own bootstrap",
+      { inputs: { source: "repo.url", ref: "repo.branch", port: "port" } },
+      /inputs\.secrets must be a write-only field, unless the host binds its own bootstrap/,
+    ],
+    [
+      "secrets beside binding its own bootstrap",
+      { bindsBootstrap: true },
+      /inputs\.secrets is not taken by a host that binds its own bootstrap/,
+    ],
     ["a revision that is write-only", { writeOnly: ["env", "commit"] }, /revision must not be write-only/],
     [
       "a lifetime it does not know (stops-on-exit, until a host that stops on exit)",
@@ -77,6 +87,14 @@ describe("a host type", () => {
 
   it.each(["long-lived", "stops-when-quiet"] as const)("may be %s", (lifetime) => {
     expect(hostOf({ capabilities: { ...host.capabilities, lifetime } }).host?.capabilities.lifetime).toBe(lifetime);
+  });
+
+  it("takes no secrets when it binds its own bootstrap, and may then name a Sanoma secret nowhere", () => {
+    const service = hostOf({ bindsBootstrap: true, inputs: { source: "repo.url", ref: "repo.branch", port: "port" } });
+    expect(service.host).toMatchObject({ bindsBootstrap: true, inputs: { source: "repo.url" } });
+    expect(() =>
+      service({ name: "app", repo: { url: "u", branch: "main" }, env: { KEY: secret("SANOMA_SECRETS_KEY") as never } }),
+    ).toThrow(/one of sanoma's own: only a host's secrets may/);
   });
 
   it("may take a public site's domains in a field of its own", () => {

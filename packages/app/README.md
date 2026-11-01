@@ -225,6 +225,8 @@ The kit's look is in the app's stylesheet, which a public site's own host does n
 
 A visitor of a public site (`isVisitor`: signed in through a visitor login, or `anonymous`) calls the same way, where a policy `permit` lets it ([policies](https://www.npmjs.com/package/@sanoma-ai/workflows#policies)), with less to read: `.result` only of a run it started (another's is `run_not_found`), never `.latest`, `.runs`, `.approvals` or `.ledger` (`policy_denied`), and none of the runtime's own workflows (`invalid_input`). Later: read actions in the policy, so a rule can let a visitor read more.
 
+A client that is not the app's page (Sanoma Cloud's connector, say) calls the same way over plain JSON: `POST /api/call` with the body `{ name, input?, id? }` answers the call's output as JSON (`null` for none), or a refusal's status with its body (below). A request with `Authorization: Bearer sca_…` acts as its token, as on any public site's host, and is not checked for CSRF, since it carries no cookie's authority.
+
 An operation's call and a start send a new id each (`crypto.randomUUID()`, letters, digits, `_` and `-`; a start's is its run's id), so a request that is retried is made once; a person's next attempt is a new call, since a failed write's id is spent. Every call needs someone to say who is asking, as a change does ([Login](#login)): a loader's call runs in-process while the server renders the page, as the person whose request it renders. A refusal is an `ApiError`, whose `body` holds the stable `code`:
 
 | `code`             | Status | When                                                                                                                                                                                                                 |
