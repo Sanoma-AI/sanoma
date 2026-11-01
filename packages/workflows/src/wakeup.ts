@@ -3,7 +3,6 @@ import { hasPath } from "./host.ts";
 import type { Op } from "./op.ts";
 import type { References, Resource } from "./resource.ts";
 import type { DeclaredResource } from "./resources.ts";
-import { instanceUrl, WAKEUP_TOKEN } from "./wakeup-service.ts";
 
 // The `Wakeup` contract: what a resource type that wakes a stopped instance at a time declares
 // about itself, beside `Host`. Declaring one in a data file is the whole switch: the worker then
@@ -32,19 +31,6 @@ export interface EnvWakeup {
 
 /** Where a host gives the runtime its own URL: the Cloudflare Worker's plain-text binding. */
 export const HOST_URL = "SANOMA_HOST_URL";
-
-/**
- * The wakeup `env` names (`EnvWakeup`): its host's URL, `SANOMA_HOST_URL`, as the wakeup service
- * keeps one (`instanceUrl`), and its token, `SANOMA_WAKEUP_TOKEN`, when both are set and the URL is
- * one; undefined otherwise. A host Sanoma Cloud made gives both to an instance that declares no
- * wakeup of its own.
- */
-export function envWakeup(env: NodeJS.ProcessEnv): EnvWakeup | undefined {
-  const host = env[HOST_URL]?.trim();
-  const token = env[WAKEUP_TOKEN]?.trim();
-  const checked = host ? instanceUrl(host) : undefined;
-  return checked && "url" in checked && token ? { url: checked.url, token } : undefined;
-}
 
 /** What a wakeup's state says of it. */
 export interface WakeupOutputs {

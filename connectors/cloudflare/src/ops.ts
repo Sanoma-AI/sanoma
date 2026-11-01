@@ -154,9 +154,14 @@ export const scriptOf = (name: string) => `sanoma-${name}`;
 /** The zone a hostname is looked up in: its last two labels (`www.acme.example` → `acme.example`). */
 export const apexOf = (hostname: string) => hostname.split(".").slice(-2).join(".");
 
-/** Whether the Worker's bindings name domains (`SANOMA_DOMAINS`): its custom domains are Sanoma's to detach. */
-const servesDomains = (bindings: ReadBinding[] | undefined) =>
-  bindings?.some((b) => b.type === "plain_text" && b.name === TEXT.domains) ?? false;
+/**
+ * The hostnames the Worker's bindings say it was declared to serve (`SANOMA_DOMAINS`): the custom
+ * domains that are Sanoma's to detach. One attached by hand and never declared is left alone.
+ */
+const declaredBefore = (bindings: ReadBinding[] | undefined) => {
+  const text = bindings?.find((b) => b.type === "plain_text" && b.name === TEXT.domains)?.text;
+  return new Set(text ? Object.values(domainsOf(text)) : []);
+};
 
 type ContainerState = {
   id: string | null;
@@ -226,7 +231,7 @@ const zonesOf = async (cf: CloudflareApi, name: string, hostnames: string[]) => 
     const id = await cf.zone(apex);
     if (id === undefined) {
       throw refused(
-        `container ${name}: the account holds no zone ${apex} for the domain ${hostname}: add the zone to the account, or declare another domain`,
+        `container ${name}: the account holds no zone ${apex} for the domain ${hostname}, or the API token cannot read it: add the zone to the account or Zone Read to the token, or declare another domain`,
         "no_zone",
       );
     }
@@ -379,7 +384,8 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
     // there, and puts back one gone; the object starts only a pinned image of the account's.
     // The custom domains are read first too: the ones an update's Worker has, and each declared
     // one missing, with its zone, so a domain whose zone the account lacks is refused here.
-    const attached = current && (domains || servesDomains(current)) ? await cf.domains(script) : [];
+    const before = declaredBefore(current);
+    const attached = current && (domains || before.size > 0) ? await cf.domains(script) : [];
     const held = new Set(attached.map((d) => d.hostname));
     const missing = await zonesOf(
       cf,
@@ -429,10 +435,13 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
       // 2026-10-29; a Worker deployed again after the application started at once).
       await cf.upload(script, metadata);
     }
-    // The declared domains routed to the Worker; ones it served before and no longer declares, detached.
-    const hostnames = new Set(Object.values(domains ?? {}));
-    for (const domain of attached) if (!hostnames.has(domain.hostname)) await cf.detachDomain(domain.id);
+    // The declared domains routed to the Worker, attached first so a failed attach leaves the old
+    // route up; then the ones declared before and no longer, detached.
     for (const [hostname, zoneId] of missing) await cf.attachDomain(script, hostname, zoneId);
+    const hostnames = new Set(Object.values(domains ?? {}));
+    for (const domain of attached) {
+      if (before.has(domain.hostname) && !hostnames.has(domain.hostname)) await cf.detachDomain(domain.id);
+    }
     await started(cf, script, url, revision);
     const state: ContainerState = {
       id: app.id,
@@ -482,7 +491,11 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
       if (bindings && !isOurs(bindings)) {
         throw refused(`a Worker named ${script} that is not Sanoma's exists: it is not deleted`, "exists");
       }
-      if (servesDomains(bindings)) for (const domain of await cf.domains(script)) await cf.detachDomain(domain.id);
+      const before = declaredBefore(bindings);
+      if (before.size > 0) {
+        for (const domain of await cf.domains(script))
+          if (before.has(domain.hostname)) await cf.detachDomain(domain.id);
+      }
       const app = await cf.application(script);
       if (app) await cf.deleteApplication(app.id);
       await cf.deleteScript(script);

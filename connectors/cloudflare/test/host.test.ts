@@ -138,18 +138,22 @@ describe("cloudflare.container's custom domains on the fake", () => {
     fake.driver.ops[`container.${name}`]!(input, call(`cloudflare.container.${name}`));
   afterAll(() => fake.close());
 
-  it("attaches each declared domain at create, detaches one no longer declared, and every one at delete", async () => {
+  it("attaches each declared domain at create, detaches one no longer declared, and every declared one at delete, leaving one attached by hand", async () => {
     await op("create", { desired });
     const zone = fake.state.zones["acme.example"];
     expect(Object.values(fake.state.domains)).toEqual([
       { hostname: "www.acme.example", service: "sanoma-company", zone_id: zone },
     ]);
+    // Attached by hand and never declared: left alone.
+    const byHand = { hostname: "app.acme.example", service: "sanoma-company", zone_id: zone! };
+    fake.state.domains.byhand = byHand;
     await op("update", { id: "company", desired: { ...desired, domains: { shop: "shop.acme.example" } } });
     expect(Object.values(fake.state.domains)).toEqual([
+      byHand,
       { hostname: "shop.acme.example", service: "sanoma-company", zone_id: zone },
     ]);
     await op("delete", { id: "company" });
-    expect(fake.state.domains).toEqual({});
+    expect(fake.state.domains).toEqual({ byhand: byHand });
   });
 
   it("refuses a domain whose zone the account does not hold, before the Worker exists", async () => {
@@ -160,6 +164,6 @@ describe("cloudflare.container's custom domains on the fake", () => {
       message: expect.stringContaining("no zone other.example for the domain www.other.example"),
     });
     expect(fake.state.scripts).toEqual({});
-    expect(fake.state.domains).toEqual({});
+    expect(Object.values(fake.state.domains).map((d) => d.hostname)).not.toContain("www.other.example");
   });
 });

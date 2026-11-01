@@ -2,7 +2,7 @@ import { DBOS, type ScheduledWorkflowFn } from "@dbos-inc/dbos-sdk";
 import { awaitApproval } from "./approvals.ts";
 import { buildCtx, decideStart, isInfrastructureError, startHoldOf } from "./call.ts";
 import { dbosStatusesOf } from "./client.ts";
-import { declaredWakeup, type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
+import { declaredWakeup, envWakeup, type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { configuredSecrets } from "./credentials.ts";
 import { type Db, DBOS_DATABASE_OPTIONS, lazyPool, prepareDatabase, stampVersion } from "./db.ts";
 import {
@@ -16,7 +16,6 @@ import {
   stopWhenIdle,
 } from "./deadlines.ts";
 import type { WorkflowDefinition } from "./define.ts";
-import { envWakeup } from "./wakeup.ts";
 import { credentialsOf, unconfigured, unconfiguredSummary } from "./env.ts";
 import { errorInfo, parseOrThrow, PolicyDeniedError } from "./errors.ts";
 import { entry, ownedLedger, skipped, write, writeFailure } from "./ledger.ts";
