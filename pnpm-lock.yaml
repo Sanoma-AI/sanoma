@@ -606,6 +606,9 @@ importers:
       '@sanoma-ai/bridge':
         specifier: workspace:*
         version: link:../bridge
+      '@sanoma-ai/connector-better-auth':
+        specifier: workspace:*
+        version: link:../../connectors/better-auth
       '@sanoma-ai/workflows':
         specifier: workspace:*
         version: link:../workflows

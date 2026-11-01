@@ -29,7 +29,10 @@ const fixture = fileURLToPath(new URL("./fixtures/sites/", import.meta.url));
 
 const manifest = (dir: string) => JSON.parse(readFileSync(join(checkout, "packages", dir, "package.json"), "utf8"));
 
-/** `sanoma`'s dependencies in this workspace, `@sanoma-ai/<dir>` each: packed, as `sanoma` is, into `vendor/<dir>.tgz`. */
+/**
+ * `sanoma`'s dependencies in this workspace, `@sanoma-ai/<name>` each: packed, as `sanoma` is, into
+ * `vendor/<name>.tgz`, from `packages/<name>`, or `connectors/<id>` for `connector-<id>`.
+ */
 const workspace = Object.entries(manifest("sanoma").dependencies as Record<string, string>)
   .filter(([, range]) => range.startsWith("workspace:"))
   .map(([name]) => name.replace("@sanoma-ai/", ""))
@@ -116,7 +119,12 @@ describe("sanoma from packed tarballs: the dev server", () => {
         cwd: join(checkout, from),
       });
     await Promise.all([
-      ...["sanoma", ...workspace].map((pkg) => pack(join("packages", pkg), pkg)),
+      ...["sanoma", ...workspace].map((pkg) =>
+        pack(
+          pkg.startsWith("connector-") ? join("connectors", pkg.slice("connector-".length)) : join("packages", pkg),
+          pkg,
+        ),
+      ),
       pack("connectors/anthropic", "connector-anthropic"),
     ]);
     // No lockfile to freeze (CI sets it by default).

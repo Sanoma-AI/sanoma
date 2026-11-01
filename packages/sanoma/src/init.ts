@@ -31,6 +31,8 @@ export interface Creator {
   id: string;
   name?: string;
   github?: string;
+  /** Their email: what the staff login sends a sign-in code to, and an invite is for, on a host. */
+  email?: string;
 }
 
 export interface StartOptions {
@@ -162,14 +164,16 @@ function machineUser(): string {
 /**
  * Who is starting the company: their GitHub login, as `gh` is signed in, which the GitHub sign-in
  * matches and the loopback sign-in takes as the id; else this machine's user name. Named as git's
- * `user.name`, which `startCompany` requires.
+ * `user.name`, which `startCompany` requires, with git's `user.email`, which a host's staff login
+ * sends sign-in codes to.
  */
 export async function whoIsStarting(): Promise<Creator> {
-  const [login, name] = await Promise.all([
+  const [login, name, email] = await Promise.all([
     output("gh", ["api", "user", "--jq", ".login"]),
     output("git", ["config", "user.name"]),
+    output("git", ["config", "user.email"]),
   ]);
-  const named = name ? { name } : {};
+  const named = { ...(name && { name }), ...(/^[^\s@]+@[^\s@]+$/.test(email) && { email }) };
   if (/^[A-Za-z0-9-]+$/.test(login)) return { id: free(login), github: login, ...named };
   return { id: free(machineUser()), ...named };
 }
