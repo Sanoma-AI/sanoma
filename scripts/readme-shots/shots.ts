@@ -35,6 +35,7 @@ const assets = join(repo, ".github/assets");
 const BUILT: [dir: string, outputs: string[]][] = [
   ["packages/workflows", ["dist/index.js"]],
   ["connectors/ghost", ["dist/index.js", "dist/fake.js"]],
+  ["connectors/better-auth", ["dist/index.js"]],
   ["packages/testing", ["dist/index.js"]],
   ["packages/app", ["dist/server/server.js"]],
   ["packages/sanoma", ["dist/cli.js", "dist/index.js"]],

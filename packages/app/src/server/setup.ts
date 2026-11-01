@@ -1,4 +1,3 @@
-import { deploymentKey } from "@sanoma-ai/workflows";
 // oxlint-disable-next-line import/no-unassigned-import
 import "@tanstack/react-start/server-only";
 import { execFile } from "node:child_process";
@@ -7,8 +6,17 @@ import { existsSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 import { promisify } from "node:util";
-import { type CredentialStatus, errorMessage, isLoopback, memorySecrets, type Principal } from "@sanoma-ai/workflows";
+import { parse, serialize } from "cookie-es";
+import {
+  type CredentialStatus,
+  errorMessage,
+  isLoopback,
+  memorySecrets,
+  type Principal,
+  requestOrigin,
+} from "@sanoma-ai/workflows";
 import { type DataValue, formatOptions, renderDataFile } from "@sanoma-ai/workflows/describe";
+import { credentialReady } from "@sanoma-ai/workflows/shared";
 import { secret as secretOf } from "@sanoma-ai/workflows/resources";
 import { mintInstanceToken, WAKEUP_TOKEN } from "@sanoma-ai/workflows/wakeup-service";
 import {
@@ -23,7 +31,7 @@ import {
 } from "../api.ts";
 import type { AppContext } from "../context.ts";
 import { type ActorContext, invalid } from "./core.ts";
-import { cookie, cookies } from "../login/github.ts";
+import { declaredEmail } from "./people.ts";
 import { signer } from "../login/keys.ts";
 import { escapeHtml } from "../login/page.ts";
 
@@ -33,7 +41,7 @@ import { escapeHtml } from "../login/page.ts";
 // keys are stored as encrypted credentials; or, for a personal account, a token of the person's
 // own. The others through a pasted token. Nothing here sends a stored value to a page.
 
-/** Where the App's keys are stored, by what GitHub's conversion calls them. `githubLogin` reads the client's. */
+/** Where the App's keys are stored, by what GitHub's conversion calls them. The staff login reads the client's. */
 export const GITHUB_APP = {
   id: "SANOMA_GITHUB_APP_ID",
   slug: "SANOMA_GITHUB_APP_SLUG",
@@ -110,10 +118,28 @@ const STATE = "sanoma_setup_state";
 const STATE_PATH = "/setup/github";
 const API = "https://api.github.com";
 
-/** What the page shows: the App's slug, and each token's status; never a value. */
-export async function setupStatus(app: AppContext): Promise<SetupStatus> {
+const cookies = (request: Request) => parse(request.headers.get("cookie") ?? "");
+
+/**
+ * A Set-Cookie line (`maxAge` 0 clears it): httpOnly, Lax, and Secure when the request came over
+ * HTTPS (directly or through a proxy that says so).
+ */
+const cookie = (request: Request, name: string, value: string, path: string, maxAge: number) =>
+  serialize(name, value, {
+    path,
+    maxAge,
+    httpOnly: true,
+    sameSite: "lax",
+    secure: requestOrigin(request).startsWith("https:"),
+  });
+
+/** What the page shows: the App's slug, each token's status and how people will sign in on the host (`signIn`); never a value. */
+export async function setupStatus(app: AppContext, actor?: Principal): Promise<SetupStatus> {
   const names = setupTokens(app);
-  const found = await app.client.secrets([GITHUB_APP.slug, ...names]);
+  const [found, signIn] = await Promise.all([
+    app.client.secrets([GITHUB_APP.slug, GITHUB_APP.client_id, GITHUB_APP.client_secret, ...names]),
+    signInStatus(app, actor),
+  ]);
   const slug = found.get(GITHUB_APP.slug);
   const tokens = names.map((name): CredentialStatus => {
     const { description, optional = false } = SETUP_TOKENS[name]!;
@@ -122,7 +148,22 @@ export async function setupStatus(app: AppContext): Promise<SetupStatus> {
     const { source, setBy, setAt } = secret;
     return { name, description, optional, status: "set", source, ...(setBy && { setBy, setAt }) };
   });
-  return { githubApp: slug ? { slug: slug.value, setBy: slug.setBy, setAt: slug.setAt } : null, tokens };
+  return {
+    githubApp: slug ? { slug: slug.value, setBy: slug.setBy, setAt: slug.setAt } : null,
+    tokens,
+    signIn: { ...signIn, github: found.has(GITHUB_APP.client_id) && found.has(GITHUB_APP.client_secret) },
+  };
+}
+
+/** The declared email of the person asking, and the config's sender, with whether its connector's credentials are set. */
+async function signInStatus(app: AppContext, actor?: Principal) {
+  const sender = app.resolved.login?.sender;
+  const statuses = sender && (await app.client.credentials()).get(sender.vendor);
+  return {
+    you: (actor && declaredEmail(app, actor.id)) ?? null,
+    sender: sender?.id ?? null,
+    senderConnected: !!statuses?.every(credentialReady),
+  };
 }
 
 /**
@@ -156,21 +197,23 @@ export async function mintWakeupToken(client: AppContext["client"], actor: Princ
 }
 
 /**
- * The manifest the App is created from: its OAuth callback is the login's, its webhook this app's,
- * on unless the app is on this machine, which GitHub cannot reach.
+ * The manifest the App is created from: its OAuth callback is the staff login's (Better Auth's),
+ * its webhook this app's, on unless the app is on this machine, which GitHub cannot reach.
  */
 export function githubManifest(origin: string, name: string) {
   return {
     name,
     url: origin,
     redirect_url: `${origin}${CALLBACK}`,
-    callback_urls: [`${origin}/auth/github/callback`],
+    callback_urls: [`${origin}/auth/better-auth/callback/github`],
     // `remoteWebhook` answers it: a push deploys or plans a change again, a closed pull request ends one.
     hook_attributes: { url: `${origin}/webhooks/github`, active: !isLoopback(new URL(origin).hostname) },
     public: false,
     default_permissions: {
       administration: "write",
       contents: "write",
+      // The staff login's "Sign in with GitHub" reads the person's verified emails.
+      emails: "read",
       metadata: "read",
       pull_requests: "write",
       // The `sanoma` commit status a change's review sets.
@@ -265,8 +308,7 @@ function toConnect(github: "connected" | "expired" | "failed" | "bad-org" | "nob
 
 /** Signs setup state with the independent app-signing key. */
 function stateSigner() {
-  const secretsKey = deploymentKey("SANOMA_SIGNING_KEY").toString("base64");
-  return signer(secretsKey, "sanoma setup state");
+  return signer("sanoma setup state");
 }
 
 // Connecting an existing repository or database: each is imported by its name or ref, declared

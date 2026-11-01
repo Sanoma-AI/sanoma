@@ -5,7 +5,7 @@ import { warn } from "./log.ts";
 import { errorMessage } from "./shared.ts";
 
 // The runtime's own tables live in the config's database, beside DBOS's: the credentials, the
-// ledger, the collections' records, the wakeup's row and the operator agent's chats. What they
+// ledger, the collections' records, the wakeup's row, the operator agent's chats and the api tokens. What they
 // share is here: the one preparation of a database, a pool that opens once it is prepared and
 // survives a dropped connection, and a table creation two processes may race.
 
@@ -28,6 +28,8 @@ export const WAKEUP_TABLE = "sanoma_wakeup";
 export const CHATS_TABLE = "sanoma_chats";
 /** Each chat's messages, the AI SDK's UI messages as JSON, in `seq` order. */
 export const CHAT_MESSAGES_TABLE = "sanoma_chat_messages";
+/** The api tokens (`tokens.ts`): each one's SHA-256, never the token, whom it acts for, its groups, and when it was revoked. */
+export const API_TOKENS_TABLE = "sanoma_api_tokens";
 
 /** The runtime's tables, each with the word the messages name it by. */
 const TABLES: readonly [what: string, ddl: string][] = [
@@ -96,6 +98,11 @@ const TABLES: readonly [what: string, ddl: string][] = [
     "chat messages",
     `CREATE TABLE IF NOT EXISTS ${CHAT_MESSAGES_TABLE} (chat_id text NOT NULL REFERENCES ${CHATS_TABLE} (id) ` +
       "ON DELETE CASCADE, id text NOT NULL, seq integer NOT NULL, message jsonb NOT NULL, PRIMARY KEY (chat_id, id))",
+  ],
+  [
+    "api tokens",
+    `CREATE TABLE IF NOT EXISTS ${API_TOKENS_TABLE} (id text PRIMARY KEY, hash text NOT NULL UNIQUE, ` +
+      "subject text NOT NULL, groups jsonb NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), revoked_at timestamptz)",
   ],
 ];
 

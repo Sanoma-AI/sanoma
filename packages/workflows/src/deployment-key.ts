@@ -1,3 +1,4 @@
+import { hkdfSync } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 /** Bootstrap only: never resolves through the secret store that the key unlocks. */
@@ -21,3 +22,11 @@ export function deploymentKey(
   }
   return Buffer.from(encoded, "base64");
 }
+
+/**
+ * A 32-byte key of its own for `purpose`, derived from `SANOMA_SIGNING_KEY` (HKDF-SHA256 over its
+ * base64 text): each use of the signing key (a login's cookies, the setup's state, sealed values)
+ * gets a key no other use shares.
+ */
+export const signingKeyFor = (purpose: string): Buffer =>
+  Buffer.from(hkdfSync("sha256", deploymentKey("SANOMA_SIGNING_KEY").toString("base64"), "", purpose, 32));

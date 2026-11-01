@@ -77,6 +77,7 @@
   "dependencies": {
     "@sanoma-ai/app": "workspace:*",
     "@sanoma-ai/bridge": "workspace:*",
+    "@sanoma-ai/connector-better-auth": "workspace:*",
     "@sanoma-ai/workflows": "workspace:*",
     "@types/node": "^26.6.4",
     "oxlint": "^1.87.0",

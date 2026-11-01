@@ -22,8 +22,16 @@ import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup } from "#/co
 import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
 import { Skeleton } from "#/components/ui/skeleton.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
-import { errorBodyOf, INFRA, type GoLiveChoices, type GoLiveRequest, type GoLiveRun, SETUP_VENDORS } from "../api.ts";
-import { goLiveFn, goLiveHostFn } from "../functions.ts";
+import {
+  errorBodyOf,
+  INFRA,
+  type GoLiveChoices,
+  type GoLiveRequest,
+  type GoLiveRun,
+  SETUP_VENDORS,
+  type SetupStatus,
+} from "../api.ts";
+import { goLiveFn, goLiveHostFn, goLiveSignInFn } from "../functions.ts";
 import { RUN_TONE } from "../lib/tone.ts";
 import {
   goLiveChoicesQuery,
@@ -115,6 +123,7 @@ function GoLiveSteps() {
               </ItemDescription>
             </ItemContent>
           </Item>
+          <SignInItem signIn={status.signIn} />
           {vendors.map((v) => (
             <Item key={v.title} role="listitem" variant="outline" size="xs">
               <ItemContent>
@@ -163,7 +172,7 @@ function GoLiveSteps() {
         {!data ? (
           <p className="text-muted-foreground">Once the repository is made, this repository is pushed to it.</p>
         ) : progress.host ? (
-          <HostAnswer host={progress.host} />
+          <HostAnswer host={progress.host} you={status.signIn.you} />
         ) : hostRun ? (
           <>
             <RunStatus run={run} />
@@ -430,8 +439,74 @@ function PushButton() {
   );
 }
 
-/** Where the host answers, once it does. */
-function HostAnswer({ host }: { host: { url: string; healthy: boolean } }) {
+/**
+ * How people will sign in on the host: by an email code through the config's sender, by GitHub
+ * through the App, and always by invite links. With neither a connected sender nor GitHub, a
+ * warning that does not block going live, and the two fixes.
+ */
+function SignInItem({ signIn }: { signIn: SetupStatus["signIn"] }) {
+  const code = signIn.sender !== null && signIn.senderConnected;
+  const ways = [code && "an email code", signIn.github && "GitHub", "invite links"].filter(Boolean).join(", ");
+  return (
+    <Item role="listitem" variant="outline" size="xs">
+      <ItemContent>
+        <ItemHeading>
+          Sign-in
+          {code || signIn.github ? (
+            <ToneBadge tone="ok">{ways}</ToneBadge>
+          ) : (
+            <ToneBadge tone="waiting">warning · not blocking</ToneBadge>
+          )}
+        </ItemHeading>
+        <ItemDescription>
+          {code || signIn.github ? (
+            <>People sign in on the host with {ways}.</>
+          ) : (
+            <>
+              On the host, people can sign in only by an invite link someone signed in there makes. To let them sign in
+              themselves:{" "}
+              {signIn.sender === null ? (
+                <>
+                  name a sender in <code>sanoma.config.ts</code>, such as{" "}
+                  <code>login: {"{ sender: resend.emails.send }"}</code>, and connect it
+                </>
+              ) : (
+                <>
+                  connect <code>{signIn.sender.split(".")[0]}</code>, the sender
+                </>
+              )}
+              , for an email code; or create the GitHub App, for Sign in with GitHub.
+            </>
+          )}
+          {signIn.you === null && (
+            <> Declare your email in the people file to be signed in on the host when it first answers.</>
+          )}
+        </ItemDescription>
+      </ItemContent>
+    </Item>
+  );
+}
+
+/** Where the host answers, once it does: Open signs the person in there by an invite when their email is declared. */
+function HostAnswer({ host, you }: { host: { url: string; healthy: boolean }; you: string | null }) {
+  const signIn = useServerFn(goLiveSignInFn);
+  const mutation = useMutation({
+    // The tab opens on the click, so no popup blocker stops it, and is sent to the link once minted.
+    mutationFn: async (tab: Window | null) => ({ tab, ...(await signIn()) }),
+    onSuccess: ({ tab, url }) => {
+      if (tab) tab.location.href = url;
+      else window.location.assign(url);
+    },
+    onError: (err, tab) => {
+      tab?.close();
+      toast.error(errorBodyOf(err)?.error ?? err.message);
+    },
+  });
+  const open = () => {
+    const tab = window.open("", "_blank");
+    if (tab) tab.opener = null;
+    mutation.mutate(tab);
+  };
   return (
     <ItemGroup>
       <Item role="listitem" variant="outline" size="xs">
@@ -444,7 +519,16 @@ function HostAnswer({ host }: { host: { url: string; healthy: boolean } }) {
             <code>{host.url}</code>
           </ItemDescription>
         </ItemContent>
-        {host.healthy && (
+        {host.healthy && you !== null && (
+          <ItemActions>
+            <Button variant="outline" size="sm" onClick={open} disabled={mutation.isPending}>
+              {mutation.isPending && <Spinner data-icon="inline-start" />}
+              Open, signed in as {you}
+              <ArrowSquareOutIcon aria-hidden="true" data-icon="inline-end" />
+            </Button>
+          </ItemActions>
+        )}
+        {host.healthy && you === null && (
           <ItemActions>
             <ButtonLink variant="outline" size="sm">
               <a href={host.url} target="_blank" rel="noreferrer">

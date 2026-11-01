@@ -285,12 +285,20 @@ export const CHANGE_TOPIC = "change:event";
 /** Lists the apps on GitHub with Sanoma's claims: the one runtime operation a page may call (`isDirect`). */
 export const APPS_LIST = "sanoma.apps.list";
 
-/** The workflows the runtime adds itself, which a config's own may not be named: drift, apply, call and change. */
+/**
+ * The built-in workflow that sends a staff or visitor sign-in code through the config's
+ * `login.sender`, started by the runtime's agent `login` (`LOGIN_AGENT`): its input's code is
+ * sealed, and the mail's body is recorded as `<text>` and `<html>`.
+ */
+export const LOGIN_CODE_WORKFLOW = "login-code";
+
+/** The workflows the runtime adds itself, which a config's own may not be named: drift, apply, call, change and login-code. */
 export const BUILT_IN_WORKFLOWS: ReadonlySet<string> = new Set([
   DRIFT_WORKFLOW,
   APPLY_WORKFLOW,
   CALL_WORKFLOW,
   CHANGE_WORKFLOW,
+  LOGIN_CODE_WORKFLOW,
 ]);
 
 /**
@@ -361,14 +369,22 @@ export const VISITORS = "visitors";
 /** The principal a public page runs as when nobody is signed in: no groups. */
 export const ANONYMOUS = "anonymous";
 
-/** `visitor:<login connector's vendor>:<provider subject>`: the only form a visitor's id takes. */
+/** `visitor:<login connector's vendor>:<provider subject>`: the form a signed-in visitor's id takes. */
 const VISITOR_ID = /^visitor:[^\s:]+:\S+$/;
 
+/** `token:<id>`: a caller of a public site's api with a token (`SanomaClient.tokens`), a visitor too. */
+const TOKEN_ID = /^token:\S+$/;
+
 /**
- * True for `anonymous` and for a visitor's id: a principal no data file declares and the staff
- * logins never admit. Marked by the id alone, since a principal crosses to the worker as JSON.
+ * True for `anonymous`, a visitor's id and a token's (`token:<id>`): a principal no data file
+ * declares and the staff logins never admit. Marked by the id alone, since a principal crosses to
+ * the worker as JSON.
  */
-export const isVisitor = (p: Pick<Principal, "id">): boolean => p.id === ANONYMOUS || VISITOR_ID.test(p.id);
+export const isVisitor = (p: Pick<Principal, "id">): boolean =>
+  p.id === ANONYMOUS || VISITOR_ID.test(p.id) || isToken(p);
+
+/** True for an api token's principal (`token:<id>`), whose groups are its row's. */
+export const isToken = (p: Pick<Principal, "id">): boolean => TOKEN_ID.test(p.id);
 
 /**
  * The visitor a public site's login vouches for: `subject` from the provider behind the `login`
@@ -389,8 +405,16 @@ export const WAKEUP_AGENT = "wakeup";
 export const SCHEDULE_AGENT = "schedule";
 /** The runtime's agent that checks and deploys the hosts: drift's, and apply's after a push to `main` (`SanomaClient.remoteEvent`). */
 export const HOST_CHECK_AGENT = "host-check";
-/** The runtime's own agents (scenarios, the host check, scheduled runs, the wakeup's registration), declared whether a data file names them or not. */
-export const RUNTIME_AGENTS: readonly string[] = ["scenarios", HOST_CHECK_AGENT, SCHEDULE_AGENT, WAKEUP_AGENT];
+/** The runtime's agent that sends a sign-in code (`LOGIN_CODE_WORKFLOW`): a company's policy exempts it from its holds on sending. */
+export const LOGIN_AGENT = "login";
+/** The runtime's own agents (scenarios, the host check, scheduled runs, the wakeup's registration, sign-in codes), declared whether a data file names them or not. */
+export const RUNTIME_AGENTS: readonly string[] = [
+  "scenarios",
+  HOST_CHECK_AGENT,
+  SCHEDULE_AGENT,
+  WAKEUP_AGENT,
+  LOGIN_AGENT,
+];
 
 /** The declared resources of one of the runtime's people types, by `desired`. */
 const peopleOfType = <T>(resources: readonly PeopleResource[], type: "person" | "agent" | "group") =>

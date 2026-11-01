@@ -2,8 +2,10 @@ import { spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { dirname, extname, isAbsolute, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type AppOptions, githubLogin, type IngressRoute, startApp } from "@sanoma-ai/app";
+import { type AppOptions, type IngressRoute, staffLogin, startApp } from "@sanoma-ai/app";
+import { betterAuthStaffLogin } from "@sanoma-ai/connector-better-auth";
 import {
+  deploymentKey,
   errorMessage,
   isLoopback,
   type ResolvedConfig,
@@ -222,39 +224,38 @@ export function parseDomains(value: string | undefined): Record<string, string> 
 
 /**
  * The app's host (`SANOMA_APP_HOST`, default 127.0.0.1), the public sites' domains
- * (`SANOMA_DOMAINS`, `parseDomains`) and, when the `SANOMA_GITHUB_*` variables are set, GitHub
- * sign-in; both or neither, and any host but this machine needs it. An empty value is the same
- * as unset. On a host beyond this machine, or with one of them set, one the environment leaves
- * unset is read from the stored secrets (`readSecrets`), where creating the GitHub App on the
- * app's connect page put them. A mistake in them is a UsageError.
+ * (`SANOMA_DOMAINS`, `parseDomains`) and its login: on this machine the loopback picker (the
+ * app's default); on any other host the staff login (`staffLogin` over Better Auth), which needs
+ * `SANOMA_SIGNING_KEY`, with GitHub as a method when `SANOMA_GITHUB_CLIENT_ID` and
+ * `SANOMA_GITHUB_CLIENT_SECRET` are both set, in the environment or in the stored secrets
+ * (`readSecrets`), where creating the GitHub App on the app's connect page put them. An empty
+ * value is the same as unset. A mistake in them is a UsageError.
  */
 export async function appOptions(readSecrets?: ReadSecrets): Promise<Pick<AppOptions, "host" | "login" | "domains">> {
   const env = process.env;
   const domains = parseDomains(env.SANOMA_DOMAINS);
   const host = env.SANOMA_APP_HOST || undefined;
   const options = { host, ...(domains && { domains }) };
-  const beyond = host !== undefined && !isLoopback(host);
+  if (host === undefined || isLoopback(host)) return options;
+  try {
+    deploymentKey("SANOMA_SIGNING_KEY");
+  } catch (err) {
+    throw new UsageError(`SANOMA_APP_HOST=${host} signs people in, which ${errorMessage(err)}`);
+  }
   const found = new Map<string, string>(GITHUB.flatMap((name) => (env[name] ? [[name, env[name]]] : [])));
-  if ((beyond || found.size) && readSecrets && found.size < GITHUB.length) {
+  if (readSecrets && found.size < GITHUB.length) {
     const stored = await readSecrets([...GITHUB]).catch((err: unknown) => {
       throw new UsageError(`GitHub sign-in could not read the stored client id and secret: ${errorMessage(err)}`);
     });
     for (const [name, value] of stored) if (value && !found.has(name)) found.set(name, value);
   }
   const [clientId, clientSecret] = GITHUB.map((name) => found.get(name));
-  if (!clientId && !clientSecret) {
-    if (beyond) throw new UsageError(`SANOMA_APP_HOST=${host} needs GitHub sign-in: set ${GITHUB.join(", ")}`);
-    return options;
-  }
-  if (!clientId || !clientSecret) {
+  if (Boolean(clientId) !== Boolean(clientSecret)) {
     const missing = GITHUB.filter((name) => !found.has(name));
     throw new UsageError(`GitHub sign-in needs ${GITHUB.join(", ")}: ${missing.join(", ")} not set`);
   }
-  try {
-    return { ...options, login: githubLogin({ clientId, clientSecret }) };
-  } catch (err) {
-    throw new UsageError(errorMessage(err));
-  }
+  const github = clientId && clientSecret ? { github: { clientId, clientSecret } } : {};
+  return { ...options, login: staffLogin(betterAuthStaffLogin, github) };
 }
 
 /**

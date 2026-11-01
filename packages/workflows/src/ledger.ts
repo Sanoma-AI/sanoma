@@ -1,5 +1,6 @@
 import type { ConnectionSnapshot } from "./connection.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { randomUUID } from "node:crypto";
 import { appendFile, mkdir, readFile, truncate } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -8,7 +9,7 @@ import { type Db, LEDGER_TABLE as TABLE, lazyPool, pgCode } from "./db.ts";
 import type { Approver, Principal } from "./define.ts";
 import { type ErrorInfo, isFinal, keepCode } from "./errors.ts";
 import { shown, warn } from "./log.ts";
-import type { Effect } from "./op.ts";
+import type { Effect, SignInMethod } from "./op.ts";
 import type { RecordedDecision } from "./policy.ts";
 import type { Run } from "./run.ts";
 import { errorMessage } from "./shared.ts";
@@ -137,7 +138,57 @@ export type LedgerRecord = {
   | { type: "run.finished"; output: unknown }
   /** `error` as for `op.called`. */
   | { type: "run.failed"; error: ErrorInfo }
+  /**
+   * A declared person signed in to the staff login, by `method`; written outside any run, in the
+   * person's own `signin:<person>` (`signInRecord`), its `at` when.
+   */
+  | { type: "signin.recorded"; person: string; method: SignInMethod }
+  /** `by` minted an invite for the declared `person`, good until `expiresAt` (ISO 8601); in `invite:<person>`, outside any run. */
+  | { type: "invite.minted"; person: string; by: string; expiresAt: string }
 );
+
+/** What a sign-in's or an invite's record names as its workflow: the staff login, which is no run. */
+const LOGIN = "login";
+
+/**
+ * The record of a sign-in or an invite, written outside any run (`SanomaClient.recordSignIn`,
+ * `recordInvite`): in the run `signin:<person>` or `invite:<person>`, each with an id of its own,
+ * `seq` 0, so a person's records read in the order they were written.
+ */
+export function loginRecord(
+  app: string,
+  actor: Principal,
+  body: Extract<LedgerBody, { type: "signin.recorded" | "invite.minted" }>,
+  at = Date.now(),
+): LedgerRecord {
+  const runId = `${body.type === "signin.recorded" ? "signin" : "invite"}:${body.person}`;
+  return {
+    v: 1,
+    app,
+    id: `${runId}:${body.type}:${at}:${randomUUID()}`,
+    runId,
+    seq: 0,
+    at,
+    actor,
+    workflow: LOGIN,
+    ...body,
+  } as LedgerRecord;
+}
+
+/** When each of `people` last signed in, and how, by id: from their `signin:<person>` records; one who never did is left out. */
+export async function lastSignIns(
+  store: LedgerStore,
+  people: readonly string[],
+): Promise<Record<string, { at: number; method: SignInMethod }>> {
+  const last = await Promise.all(
+    people.map(async (person) => {
+      const records = await store.read(`signin:${person}`);
+      const latest = records.reduce<LedgerRecord | undefined>((a, r) => (a && a.at > r.at ? a : r), undefined);
+      return latest?.type === "signin.recorded" ? [[person, { at: latest.at, method: latest.method }] as const] : [];
+    }),
+  );
+  return Object.fromEntries(last.flat());
+}
 
 /**
  * The `ctx.all` member a record was written in. `id` is `all:<seq>`, the run's next `seq` when

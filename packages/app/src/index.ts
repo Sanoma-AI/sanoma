@@ -11,6 +11,7 @@ import {
   isLoopback,
   type LoginHalf,
   problemLine,
+  requestOrigin,
   warningLine,
   type ResolvedConfig,
   resolveConfig,
@@ -25,6 +26,7 @@ import type { AppContext, LoginProvider, RequestContext, ServerEntry } from "./c
 import { admitting } from "./login/admission.ts";
 import { loginKey } from "./login/keys.ts";
 import { publicFront } from "./login/public.ts";
+import { sendLoginCode } from "./login/staff.ts";
 import { hostName, loopbackLogin, placeOf } from "./loopback.ts";
 import { type Published, PUBLISHED_FILE, publishedOf } from "./content-files.ts";
 import { seoFile } from "./seo.ts";
@@ -34,7 +36,7 @@ import { remoteWebhook } from "./server/webhooks.ts";
 
 export { ACTOR_HEADER } from "./api.ts";
 export type { LoginProvider, ResolveActor } from "./context.ts";
-export { githubLogin, type GithubLoginOptions } from "./login/github.ts";
+export { type MakeStaffLogin, type StaffSocial, staffLogin } from "./login/staff.ts";
 export { loopbackLogin } from "./loopback.ts";
 
 export interface AppOptions {
@@ -318,7 +320,7 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
         return current();
       },
       site: site.name,
-      login: publicFront(site, half?.promise),
+      login: publicFront(site, half?.promise, (token) => client.tokens.resolve(token)),
     });
   }
 
@@ -330,12 +332,14 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
         done();
       });
     });
+    // The staff login, once there is a client and the files it admits by; a login that cannot start stops the app.
+    await given.open?.(app);
   } catch (err) {
+    if (server.listening) await new Promise((done) => server.close(done));
     await responder.close();
     await closeQuietly(client);
     throw err;
   }
-
   const opened = await openLogins(resolved, client, halves);
   for (const { name } of halves.keys()) if (!opened.has(name)) sites.delete(name);
 
@@ -357,6 +361,9 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
             responder.close(),
           ]);
         } finally {
+          await given
+            .close?.()
+            .catch((err: unknown) => console.error("sanoma app: closing the login also failed:", err));
           await Promise.all(
             [...opened].map(([name, half]) =>
               half
@@ -376,17 +383,6 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
 
 /** A public site's host on this machine. */
 const localHost = (site: string) => `${siteHost(site)}.localhost`;
-
-/**
- * A request's origin, https when a proxy that ends TLS says so (`x-forwarded-proto: https`), as
- * Start's `getRequestUrl({ xForwardedProto: true })` and the GitHub login's cookie read it: only
- * the absolute URLs a page writes take it.
- */
-function requestOrigin(request: Request): string {
-  const url = new URL(request.url);
-  if (request.headers.get("x-forwarded-proto") === "https") url.protocol = "https:";
-  return url.origin;
-}
 
 /**
  * Each public site's hosts, to its entry: `<name>.localhost`, and the domain `domains` gives it
@@ -436,6 +432,7 @@ async function openLogins(
             key: loginKey(login!),
             secrets,
             origins,
+            ...(resolved.login && { sendCode: (email, code) => sendLoginCode(client, email, code) }),
           }))(),
       );
       try {

@@ -1,16 +1,8 @@
-import type { Principal, ResolvedConfig, SanomaClient, Source } from "@sanoma-ai/workflows";
+import type { LoginIdentity, Principal, ResolvedConfig, SanomaClient, Source } from "@sanoma-ai/workflows";
 import type { ConfigDescription } from "@sanoma-ai/workflows/describe";
 import type { Place } from "./api.ts";
 
-/**
- * What a login vouches for about who is asking: a name they gave (`id`, the loopback's), a
- * verified email, a GitHub login. The app admits the declared person they match (`personOf`).
- */
-export interface LoginIdentity {
-  id?: string;
-  email?: string;
-  github?: string;
-}
+export type { LoginIdentity } from "@sanoma-ai/workflows";
 
 /**
  * Says who is making a request, or undefined when nobody is named. The app refuses a change
@@ -20,9 +12,10 @@ export type ResolveActor = (request: Request) => LoginIdentity | undefined | Pro
 
 /**
  * Who may use the app and how they sign in. `startApp` calls `check` with the host it is to
- * listen on before anything else, gives every request to `handle` first, and asks
- * `resolveActor` who is making a change. The default, `loopbackLogin()`, takes the name the page
- * sends and refuses any host but this machine; `githubLogin` signs people in with GitHub.
+ * listen on before anything else, `open` once it listens, gives every request to `handle` first,
+ * and asks `resolveActor` who is making a change; `close` when it stops. The default,
+ * `loopbackLogin()`, takes the name the page sends and refuses any host but this machine;
+ * `staffLogin` signs people in with a login half (Better Auth's) on a host.
  */
 export interface LoginProvider {
   /** Names the provider; its routes, if any, are under `/auth/<name>/`. */
@@ -37,6 +30,16 @@ export interface LoginProvider {
   handle?(request: Request): Response | undefined | Promise<Response | undefined>;
   /** The path the page POSTs to to sign out, which `handle` serves; none, no Sign out. */
   signOut?: string;
+  /** Called once the app listens, with what it serves: a login that needs the client or the files starts here. */
+  open?(app: AppContext): Promise<void>;
+  /** Called when the app stops. */
+  close?(): Promise<void>;
+  /**
+   * An invite for the declared person `email` names, minted for `by` (a declared person's id, or
+   * the runtime's agent `login` for a sealed request): its link, on `origin`. Only a login that has
+   * invites; it records the mint.
+   */
+  invite?(email: string, request: { origin: string; by: string }): Promise<{ url: string; expiresAt: Date }>;
 }
 
 /** A login as the app uses it (`admitting`): `resolveActor` names the declared principal asking, or nobody. */

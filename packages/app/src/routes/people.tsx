@@ -1,10 +1,16 @@
 import type { ConfigDescription, DeclaredResource } from "@sanoma-ai/workflows/describe";
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { LinkIcon } from "@phosphor-icons/react/dist/csr/Link";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
+import { useServerFn } from "@tanstack/react-start";
 import { AGENTS } from "@sanoma-ai/workflows/shared";
 import type { ReactNode } from "react";
+import { toast } from "sonner";
 import { Badge } from "#/components/ui/badge.tsx";
+import { Button } from "#/components/ui/button.tsx";
+import { Input } from "#/components/ui/input.tsx";
+import { Spinner } from "#/components/ui/spinner.tsx";
 import { CardAction, CardContent, CardDescription, CardHeader } from "#/components/ui/card.tsx";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/components/ui/table.tsx";
 import { cn } from "#/lib/utils.ts";
@@ -22,15 +28,20 @@ import {
   Nothing,
   pageTitle,
   Problems,
+  When,
 } from "../components/common.tsx";
 import { DeclarationForm } from "../components/declaration-form.tsx";
-import { configQuery, isPeople, PEOPLE_VIEWS, PeopleSearch, type PeopleView } from "../queries.ts";
+import { errorBodyOf } from "../api.ts";
+import { inviteFn } from "../functions.ts";
+import { configQuery, isPeople, PEOPLE_VIEWS, PeopleSearch, peopleSignInsQuery, type PeopleView } from "../queries.ts";
 
 export const Route = createFileRoute("/people")({
   validateSearch: PeopleSearch,
   // The list beside the one open takes the width there is.
   staticData: { crumb: "People", wide: true },
   head: ({ match }) => pageTitle(match.staticData.crumb),
+  // Who signed in when: a failed read leaves the column blank, never the page.
+  loader: ({ context: { queryClient } }) => queryClient.prefetchQuery({ ...peopleSignInsQuery(), staleTime: "static" }),
   component: PeoplePage,
 });
 
@@ -221,6 +232,7 @@ function PeopleTable({
           <TableHead>Id</TableHead>
           <TableHead>{show === "agents" ? "Acts for" : "Signs in with"}</TableHead>
           <TableHead>Groups</TableHead>
+          {show === "people" && <TableHead>Last signed in</TableHead>}
           <TableHead>Declared in</TableHead>
         </TableRow>
       </TableHeader>
@@ -247,6 +259,11 @@ function PeopleTable({
             <TableCell>
               <Names names={groupsOf.get(row.name) ?? []} builtIn={builtInGroups(row.type)} none="none" />
             </TableCell>
+            {show === "people" && (
+              <TableCell>
+                <LastSignIn person={row.name} />
+              </TableCell>
+            )}
             <TableCell>
               <DeclaredIn resource={row} />
             </TableCell>
@@ -254,6 +271,66 @@ function PeopleTable({
         ))}
       </TableBody>
     </Table>
+  );
+}
+
+/** When the person last signed in on this app and how, from the ledger; `never` until they do. */
+function LastSignIn({ person }: { person: string }) {
+  const { data } = useQuery(peopleSignInsQuery());
+  const last = data?.last[person];
+  if (!last) return <span className="text-muted-foreground">{data ? "never" : ""}</span>;
+  return (
+    <span>
+      <When at={last.at} />{" "}
+      <span className="text-muted-foreground">· {SIGN_IN_METHOD[last.method] ?? last.method}</span>
+    </span>
+  );
+}
+
+/** How a sign-in was made, as the column says it. */
+const SIGN_IN_METHOD: Record<string, string> = {
+  code: "email code",
+  github: "GitHub",
+  invite: "invite link",
+};
+
+/**
+ * A one-use link that signs the person in, for 24 hours, replacing their last: minted by the
+ * host's sign-in for someone with an email declared, to send them however you like.
+ */
+function InviteLink({ person, email }: { person: string; email: string | undefined }) {
+  const { data } = useQuery(peopleSignInsQuery());
+  const invite = useServerFn(inviteFn);
+  const mutation = useMutation({
+    mutationFn: () => invite({ data: { person } }),
+    onError: (err) => toast.error(errorBodyOf(err)?.error ?? err.message),
+  });
+  if (!data?.invites) return null;
+  if (email === undefined) {
+    return <p className="text-sm text-muted-foreground">Declare an email to make an invite link for them.</p>;
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      <div>
+        <Button variant="outline" size="sm" onClick={() => mutation.mutate()} disabled={mutation.isPending}>
+          {mutation.isPending ? (
+            <Spinner data-icon="inline-start" />
+          ) : (
+            <LinkIcon aria-hidden="true" data-icon="inline-start" />
+          )}
+          Invite link
+        </Button>
+      </div>
+      {mutation.data && (
+        <>
+          <Input readOnly value={mutation.data.url} aria-label="Invite link" onFocus={(e) => e.target.select()} />
+          <p className="text-sm text-muted-foreground">
+            Signs in {email} once, until <When at={Date.parse(mutation.data.expiresAt)} />. A new link replaces this
+            one.
+          </p>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -353,6 +430,12 @@ function Opened({ resource, show, people }: { resource: DeclaredResource; show: 
             </Facts>
             <p className="text-sm text-muted-foreground">Written on each group: open it under Groups to change it.</p>
           </div>
+        )}
+        {resource.type === "person" && (
+          <InviteLink
+            person={resource.name}
+            email={typeof resource.desired.email === "string" ? resource.desired.email : undefined}
+          />
         )}
         <DeclarationForm resource={resource} type={type} />
       </CardContent>

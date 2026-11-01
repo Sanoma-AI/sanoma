@@ -1,6 +1,8 @@
 export {
   type CallContext,
   CLIENT_IP_HEADER,
+  requestOrigin,
+  sameOrigin,
   type Connector,
   type ConnectorSetup,
   type ConnectorVendor,
@@ -12,13 +14,17 @@ export {
   type Effect,
   isOp,
   isSvgElement,
+  INVITE_SECONDS,
   type LoginContext,
   type LoginHalf,
+  type LoginIdentity,
+  type LoginMethod,
   type ModelContext,
   type Op,
   type OpSpec,
   type ResourceGroup,
   retryableStatus,
+  type SignInMethod,
   type VendorInfo,
   withSetup,
 } from "./op.ts";
@@ -201,6 +207,8 @@ export {
   storeDatabaseUrl,
 } from "./database.ts";
 export type { Chat, Chats } from "./chats.ts";
+export type { Tokens } from "./tokens.ts";
+export { type InviteRequest, openInvite, sealInvite, sealLoginCode } from "./seal.ts";
 export {
   checkWakeup,
   type DeclaredWakeup,
@@ -243,6 +251,8 @@ export {
   principalOf,
   RUNTIME_AGENTS,
   HOST_CHECK_AGENT,
+  LOGIN_AGENT,
+  LOGIN_CODE_WORKFLOW,
   SCHEDULE_AGENT,
   credentialReady,
   DEFAULT_SLEEP_NAME,
@@ -298,7 +308,7 @@ export {
 export { checkSecretStore, type SecretStoreCheck } from "./secret-store-check.ts";
 
 export { postgresSecretStore } from "./credentials.ts";
-export { deploymentKey } from "./deployment-key.ts";
+export { deploymentKey, signingKeyFor } from "./deployment-key.ts";
 
 export {
   defineConnection,

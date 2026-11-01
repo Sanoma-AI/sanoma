@@ -53,7 +53,15 @@ import {
 import { type CedarPolicySource, policyAt } from "./cedar.ts";
 import type { Policy } from "./policy.ts";
 import { type Resource, resourceTypesOf, withoutWriteOnly } from "./resource.ts";
-import { APPLY_WORKFLOW, BUILT_IN_WORKFLOWS, CALL_WORKFLOW, CHANGE_WORKFLOW, DATA_VENDOR } from "./shared.ts";
+import { CODE_MAIL, loginCodeWorkflow } from "./login-code.ts";
+import {
+  APPLY_WORKFLOW,
+  BUILT_IN_WORKFLOWS,
+  CALL_WORKFLOW,
+  CHANGE_WORKFLOW,
+  DATA_VENDOR,
+  LOGIN_CODE_WORKFLOW,
+} from "./shared.ts";
 import { fakeSourceDriver, type RemoteHalf, SOURCE_RESOLVE, sourceDriver, sourceOps } from "./source.ts";
 import { appsListDriver, appsListOps } from "./apps-list.ts";
 import type { Steps } from "./steps.ts";
@@ -131,6 +139,13 @@ export interface SanomaConfig {
    * that sets it and declares a wakeup of its own.
    */
   wakeup?: true;
+  /**
+   * How the staff and visitor logins send a sign-in code: `sender`, an operation of a connector in
+   * `connectors` with the effect `send` that takes `{ to, subject, text }`, such as
+   * `resend.emails.send`. With it, the runtime registers the built-in `login-code` workflow,
+   * which the runtime's agent `login` runs; without it, nobody signs in by code.
+   */
+  login?: { sender: Op };
 }
 
 /** A config, checked, with everything a worker, client or app derives from it. */
@@ -150,6 +165,8 @@ export interface ResolvedConfig {
   changeCode: string;
   /** The DBOS queue runs are started on: `sanoma:<appName>`. */
   queueName: string;
+  /** The config's `login`, checked (`checkSender`); the built-in `login-code` workflow sends through its `sender`. */
+  login?: { sender: Op };
   /**
    * The operations the connectors declare, by id, the built-in `sanoma.change.*` (`changeOps`, in
    * every config), `sanoma.source.resolve` and `sanoma.wakeup`'s when one declares a host type,
@@ -377,6 +394,9 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   // Built-in: a direct call the policy holds for an approval, made a run, when any operation may be called directly.
   const call = callWorkflow(ops, drivers, types);
   if (call.uses.length) names.set(CALL_WORKFLOW, call);
+  // Built-in: sending a sign-in code, when the config names how.
+  const login = config.login && { sender: checkSender(config.login, ops, drivers) };
+  if (login) names.set(LOGIN_CODE_WORKFLOW, loginCodeWorkflow(login.sender, appName));
   const { policy, policies, problems: policyProblems } = policyAt(root, { ops, workflows: names, collections });
   return {
     secrets: config.secrets ?? {},
@@ -388,6 +408,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     version: computeVersion({ appName, workflows: [...names.values()] }),
     changeCode: changeCodeOf(names.get(CHANGE_WORKFLOW)!),
     queueName: `sanoma:${appName}`,
+    ...(login && { login }),
     ops,
     drivers,
     driversByVendor,
@@ -409,6 +430,26 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     ...(ledger !== undefined && { ledger }),
     ...(root !== undefined && { root }),
   };
+}
+
+/**
+ * The config's `login.sender`, as the config's operations have it: refused unless it is an
+ * operation of a connector in `connectors`, with the effect `send`, a driver, and an input that
+ * takes `{ to, subject, text }`.
+ */
+function checkSender(login: unknown, ops: ReadonlyMap<string, Op>, drivers: ReadonlyMap<string, unknown>): Op {
+  const sender: unknown = (login as { sender?: unknown } | null)?.sender;
+  const fix = "name a connector's send operation, such as `login: { sender: resend.emails.send }`";
+  if (!isOp(sender)) throw new Error(`The config's \`login.sender\` is not an operation: ${fix}`);
+  const op = ops.get(sender.id);
+  if (!op) throw new Error(`The config's \`login.sender\`, ${sender.id}, is of no connector in \`connectors\`: add it`);
+  if (op.effect !== "send")
+    throw new Error(`The config's \`login.sender\`, ${op.id}, does not send (its effect is ${op.effect}): ${fix}`);
+  if (!drivers.has(op.id))
+    throw new Error(`The config's \`login.sender\`, ${op.id}, has no driver: the connector package must attach one`);
+  if (!op.input.safeParse(CODE_MAIL).success)
+    throw new Error(`The config's \`login.sender\`, ${op.id}, does not take an email as { to, subject, text }: ${fix}`);
+  return op;
 }
 
 /**

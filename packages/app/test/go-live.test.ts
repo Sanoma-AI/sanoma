@@ -8,12 +8,20 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { fakeGithub } from "@sanoma-ai/connector-github/fake";
 import { github } from "@sanoma-ai/connector-github";
+import { resend } from "@sanoma-ai/connector-resend";
 import { supabase } from "@sanoma-ai/connector-supabase";
 import { fakeSupabase } from "@sanoma-ai/connector-supabase/fake";
 import { testDatabaseUrl, waitFor, withFake } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
 import { fakeHost } from "@sanoma-ai/testing/host";
-import { isEnded, memoryLedger, resolveConfig, type SanomaConfig } from "@sanoma-ai/workflows";
+import {
+  isEnded,
+  memoryLedger,
+  openInvite,
+  resolveConfig,
+  SanomaClient,
+  type SanomaConfig,
+} from "@sanoma-ai/workflows";
 import { describeConfig, loadDataFiles, readLockfile, readResources } from "@sanoma-ai/workflows/describe";
 import { startWakeupService, type WakeupService } from "@sanoma-ai/workflows/wakeup-service";
 import { http, HttpResponse } from "msw";
@@ -26,7 +34,7 @@ import { type GoLiveProgress, INFRA } from "../src/api.ts";
 import type { AppContext } from "../src/context.ts";
 import { loopbackLogin } from "../src/loopback.ts";
 import { admitting } from "../src/login/admission.ts";
-import { goLive, goLiveChoices, goLiveHost, goLiveProgress, renderInfra } from "../src/server/go-live.ts";
+import { goLive, goLiveChoices, goLiveHost, goLiveProgress, goLiveSignIn, renderInfra } from "../src/server/go-live.ts";
 import { setSetupToken } from "../src/server/setup.ts";
 
 // Going live end to end, on fakes, from a company with nothing but a first commit: the choices
@@ -54,7 +62,7 @@ writeFileSync(
   join(root, "resources/people.ts"),
   `import { sanoma } from "sanoma/resources";
 
-export const alice = sanoma.person({ id: "alice" });
+export const alice = sanoma.person({ id: "alice", email: "alice@acme.test" });
 export const lead = sanoma.person({ id: "lead" });
 `,
 );
@@ -81,7 +89,21 @@ const started: { port: number; revision: string; secrets: Record<string, string>
 const servers: Server[] = [];
 const host = fakeHost(async (input) => {
   started.push(input);
-  const server = createServer((req, res) => res.writeHead(req.url === "/healthz" ? 200 : 404).end());
+  // `/healthz`, and `POST /auth/invite` as the staff login answers a sealed request.
+  const server = createServer((req, res) => {
+    if (req.method === "POST" && req.url === "/auth/invite") {
+      let body = "";
+      req.on("data", (chunk) => (body += chunk));
+      req.on("end", () => {
+        const opened = openInvite(JSON.parse(body).request);
+        if (!opened) return res.writeHead(403).end();
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ url: `http://127.0.0.1:${input.port}/auth/invite/for-${opened.email}` }));
+      });
+      return;
+    }
+    res.writeHead(req.url === "/healthz" ? 200 : 404).end();
+  });
   servers.push(server);
   await new Promise<void>((done) => server.listen(input.port, "127.0.0.1", done));
   const { port } = server.address() as AddressInfo;
@@ -324,6 +346,27 @@ describe("going live", () => {
     }
   });
 
+  it("gives the host the sign-in sender's variables when the config names one, an optional one once stored", async () => {
+    const withSender: SanomaConfig = {
+      ...config,
+      connectors: [...config.connectors, resend],
+      login: { sender: resend.emails.send },
+    };
+    const client = await SanomaClient.connect({ ...withSender, databaseUrl });
+    const sending = { ...ctx, resolved: resolveConfig(withSender), client };
+    try {
+      const text = await renderInfra(sending, choices(), DEPLOY_KEY);
+      expect(text).toContain(`    RESEND_API_KEY: secret("RESEND_API_KEY"),\n`);
+      expect(text).not.toContain("RESEND_FROM");
+      await client.setCredential("RESEND_FROM", "Acme <hi@acme.test>", { by: "alice" });
+      expect(await renderInfra(sending, choices(), DEPLOY_KEY)).toContain(`    RESEND_FROM: secret("RESEND_FROM"),\n`);
+    } finally {
+      await client.clearCredential("RESEND_FROM", { by: "alice" });
+      await client.close();
+    }
+    expect(await renderInfra(ctx, choices(), DEPLOY_KEY)).not.toContain("RESEND_");
+  });
+
   it("refuses a push before the repository and the database are made", async () => {
     await expect(goLiveHost(ctx, alice)).rejects.toMatchObject({ status: 409 });
   });
@@ -387,6 +430,9 @@ describe("going live", () => {
     expect(progress.run!.results![0]).toMatchObject({ id: `${INFRA}#host`, status: "done" });
     expect(progress.bound.host).toBe(true);
     expect(progress.host).toEqual({ url: `http://127.0.0.1:${port}`, healthy: true });
+    // Open signs the person going live in there, by an invite request sealed with the shared key.
+    expect(await goLiveSignIn(ctx, alice)).toEqual({ url: `http://127.0.0.1:${port}/auth/invite/for-alice@acme.test` });
+    await expect(goLiveSignIn(ctx, { id: "lead" })).rejects.toMatchObject({ status: 409 });
     // The host runs main as pushed, given the database URL, the key, the deploy key's private half
     // and the wakeup's instance token, minted when the wakeup service was connected, none of which
     // any ledger record holds.

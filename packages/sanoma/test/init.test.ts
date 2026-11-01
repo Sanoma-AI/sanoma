@@ -168,6 +168,17 @@ describe("whoIsStarting", () => {
       expect(await whoIsStarting()).toMatchObject({ id: "founder", github: taken });
     }
   });
+
+  it("takes git's user.email as the email a host's sign-in sends codes to", async () => {
+    signedIn("ada-ortiz");
+    const config = join(mkdtempSync(join(tmpdir(), "sanoma-git-")), "gitconfig");
+    writeFileSync(config, "[user]\n\tname = Ada Ortiz\n\temail = ada@acme.test\n");
+    vi.stubEnv("GIT_CONFIG_GLOBAL", config);
+    expect(await whoIsStarting()).toMatchObject({ id: "ada-ortiz", name: "Ada Ortiz", email: "ada@acme.test" });
+    expect(declareFounder('export const founder = sanoma.person({ id: "founder" });\n', await whoIsStarting())).toBe(
+      'export const founder = sanoma.person({ id: "ada-ortiz", github: "ada-ortiz", name: "Ada Ortiz", email: "ada@acme.test" });\n',
+    );
+  });
 });
 
 describe("templatePeopleIds", () => {

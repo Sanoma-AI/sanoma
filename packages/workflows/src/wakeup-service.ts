@@ -1,7 +1,7 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { connectMaking, createTable, type Db, openPool } from "./db.ts";
 import { info, warn } from "./log.ts";
-import { generateSecret } from "./secret.ts";
+import { generateSecret, tokenHash as hashOf } from "./secret.ts";
 import { errorMessage } from "./shared.ts";
 
 /*
@@ -109,12 +109,6 @@ export const WAKEUP_TOKEN = "SANOMA_WAKEUP_TOKEN";
 
 /** An instance token the service takes: `swi_`, then at least as many base64url characters as a minted one has. */
 export const INSTANCE_TOKEN = /^swi_[\w-]{43,256}$/;
-
-/**
- * The token's sha256, which is all the tables keep: a token is found by its hash (a unique index),
- * so the secret itself is never compared, and a guess's timing says nothing an attacker can steer.
- */
-const hashOf = (token: string) => createHash("sha256").update(token).digest("hex");
 
 /** A date-time as `Date.toISOString` writes one, or with an offset: four-digit years only. */
 const ISO_DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2})$/;

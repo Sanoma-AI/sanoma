@@ -204,3 +204,49 @@ describe("the login half", () => {
     expect(another?.status).toBe(401);
   });
 });
+
+describe("the login half with a sender", () => {
+  const codes = new Map<string, string>();
+  let half: LoginHalf;
+  beforeAll(async () => {
+    half = await betterAuthLogin({ ...context, sendCode: async (email, code) => void codes.set(email, code) });
+  });
+  afterAll(() => half.close?.());
+
+  it("offers the code beside the password", () => {
+    expect(half.methods).toEqual(["password", "code"]);
+  });
+
+  it("signs anyone in by a code mailed to them, and says their email, verified", async () => {
+    const email = `${randomUUID()}@example.com`;
+    const sent = (await half.handle(
+      request("/auth/better-auth/email-otp/send-verification-otp", { body: { email, type: "sign-in" } }),
+    ))!;
+    expect(sent.status).toBe(200);
+    const code = codes.get(email)!;
+    expect(code).toMatch(/^\d{6}$/);
+    const wrong = (await half.handle(
+      request("/auth/better-auth/sign-in/email-otp", { body: { email, otp: code === "000000" ? "111111" : "000000" } }),
+    ))!;
+    expect(wrong.status).toBe(400);
+    const signIn = (await half.handle(request("/auth/better-auth/sign-in/email-otp", { body: { email, otp: code } })))!;
+    expect(signIn.status).toBe(200);
+    const verified = await half.verify(request("/", { cookie: cookieOf(signIn) }));
+    expect(verified).toEqual({ subject: expect.any(String), email });
+  });
+
+  it("has no code routes without a sender", async () => {
+    const plain = await betterAuthLogin(context);
+    try {
+      expect(plain.methods).toEqual(["password"]);
+      const sent = await plain.handle(
+        request("/auth/better-auth/email-otp/send-verification-otp", {
+          body: { email: "a@example.com", type: "sign-in" },
+        }),
+      );
+      expect(sent?.status).toBe(404);
+    } finally {
+      await plain.close?.();
+    }
+  });
+});

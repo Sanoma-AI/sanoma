@@ -422,5 +422,7 @@ export const ConfigDescriptionSchema = z.strictObject({
    * the config does not have as its problems; none when the root has no `sites/`.
    */
   sites: z.array(SiteEntrySchema),
+  /** The config's `login`: the operation its sign-in codes are sent with, by id. */
+  login: z.strictObject({ sender: z.string() }).optional(),
 });
 export type ConfigDescription = z.infer<typeof ConfigDescriptionSchema>;

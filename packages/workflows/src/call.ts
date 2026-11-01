@@ -43,6 +43,7 @@ import {
   DATA_VENDOR,
   errorMessage,
   fitsOp,
+  LOGIN_CODE_WORKFLOW,
   problemLine,
   type Saved,
   WORKFLOW_ACTION,
@@ -67,11 +68,18 @@ export function isInfrastructureError(err: unknown, state: Pick<WorkerState, "st
   return takenByDbos(err) || (state.stopped && errorCode(err) === undefined);
 }
 
-/** The value as the ledger records it: each of the operation's `opaque` fields as `"<name>"`. */
-export function recorded(op: Op, value: unknown): unknown {
-  if (!op.opaque?.length || typeof value !== "object" || value === null || Array.isArray(value)) return value;
+/** The fields of a mail a `login-code` run sends that the ledger never shows: its body, which holds the code. */
+const LOGIN_CODE_BODY = ["text", "html"];
+
+/**
+ * The value as the ledger records it: each of the operation's `opaque` fields as `"<name>"`, and
+ * in a run of `workflow` `login-code`, the mail's `text` and `html` too, so no colleague reads another's code.
+ */
+export function recorded(op: Op, value: unknown, workflow?: string): unknown {
+  const hidden = [...(op.opaque ?? []), ...(workflow === LOGIN_CODE_WORKFLOW ? LOGIN_CODE_BODY : [])];
+  if (!hidden.length || typeof value !== "object" || value === null || Array.isArray(value)) return value;
   const out: Record<string, unknown> = { ...value };
-  for (const name of op.opaque) if (out[name] !== undefined) out[name] = `<${name}>`;
+  for (const name of hidden) if (out[name] !== undefined) out[name] = `<${name}>`;
   return out;
 }
 
@@ -523,7 +531,7 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed, ref?:
       { name: `policy:${op.id}` },
     );
   let decision = await decideStep();
-  const logged = recorded(op, parsed);
+  const logged = recorded(op, parsed, run.workflow);
   const call = {
     type: "op.called",
     op: op.id,
@@ -616,7 +624,11 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed, ref?:
   try {
     await write(
       run,
-      entry(run, { ...call, output: recorded(op, output), durationMs, attempt: result.attempt }, { seq, at }),
+      entry(
+        run,
+        { ...call, output: recorded(op, output, run.workflow), durationMs, attempt: result.attempt },
+        { seq, at },
+      ),
     );
   } catch (err) {
     // The vendor acted, and nothing records it. A workflow that caught this and called again
