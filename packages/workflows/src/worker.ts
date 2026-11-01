@@ -2,7 +2,7 @@ import { DBOS, type ScheduledWorkflowFn } from "@dbos-inc/dbos-sdk";
 import { awaitApproval } from "./approvals.ts";
 import { buildCtx, decideStart, isInfrastructureError, startHoldOf } from "./call.ts";
 import { dbosStatusesOf } from "./client.ts";
-import { declaredWakeup, envWakeup, type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
+import { declaredWakeup, type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { configuredSecrets } from "./credentials.ts";
 import { type Db, DBOS_DATABASE_OPTIONS, lazyPool, prepareDatabase, stampVersion } from "./db.ts";
 import {
@@ -16,6 +16,7 @@ import {
   stopWhenIdle,
 } from "./deadlines.ts";
 import type { WorkflowDefinition } from "./define.ts";
+import { envWakeup } from "./wakeup.ts";
 import { credentialsOf, unconfigured, unconfiguredSummary } from "./env.ts";
 import { errorInfo, parseOrThrow, PolicyDeniedError } from "./errors.ts";
 import { entry, ownedLedger, skipped, write, writeFailure } from "./ledger.ts";
@@ -117,14 +118,12 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
   setLogLevel(options.logLevel);
   // Read once, when it matters: a worker stops itself, registering its next deadline there, only
   // when its caller hears it stop (`onStopped`).
-  // The data files' wakeup, else the one a host Sanoma Cloud made names in the environment, which an
-  // instance running the wakeup service ignores: it must not stop.
-  const wakeup =
-    options.onStopped || config.wakeup === true
-      ? ((await declaredWakeup(config)) ?? (config.wakeup === true ? undefined : envWakeup(process.env)))
-      : undefined;
+  const declared = options.onStopped || config.wakeup === true ? await declaredWakeup(config) : undefined;
+  // Else the one a host Sanoma Cloud made names in the environment, which an instance running the
+  // wakeup service ignores: it must not stop.
+  const wakeup = declared ?? (options.onStopped && config.wakeup !== true ? envWakeup(process.env) : undefined);
   // The wakeup service wakes the instances that stop: one that runs it must not stop with its worker.
-  if (config.wakeup === true && wakeup) {
+  if (config.wakeup === true && declared) {
     throw new Error(
       "The config runs the wakeup service (`wakeup: true`) and declares a wakeup of its own: an instance that runs the service must not stop, so leave out one of them",
     );

@@ -3,6 +3,7 @@ import {
   type CallContext,
   DriverError,
   errorMessage,
+  HOST_URL,
   type PlanAction,
   resolveSecrets,
   retryableStatus,
@@ -31,12 +32,6 @@ import {
 export const COMPATIBILITY_DATE = "2026-10-01";
 /** The migration that makes the Worker's object class, on its first upload only. */
 export const MIGRATION = { new_tag: "v1", new_sqlite_classes: [OBJECT_CLASS] };
-/**
- * The host's own URL, a plain-text binding the Worker gives the container, which `alarm.create`
- * also stores for a register made off the host: where `alarm.register` (and a runtime that
- * declares no wakeup, `envWakeup`) sends the wake, as the registration names no host.
- */
-export const HOST_URL = "SANOMA_HOST_URL";
 /** How long the account may take to prepare an image to run, as Wrangler waits for it. */
 const PREPARE_TIMEOUT_MS = 15 * 60_000;
 
@@ -220,36 +215,24 @@ const health = async (
 };
 
 /**
- * Each declared hostname's zone id, by hostname, looked up in the account once per apex; a
- * refusal for a hostname whose zone the account does not hold.
+ * Each hostname's zone id, by hostname, looked up in the account once per apex; a refusal for a
+ * hostname whose zone the account does not hold.
  */
 const zonesOf = async (cf: CloudflareApi, name: string, hostnames: string[]) => {
-  const zones = new Map<string, string>();
-  const found = new Map<string, string>();
+  const ids = new Map<string, string>();
   for (const hostname of hostnames) {
     const apex = apexOf(hostname);
-    let id = zones.get(apex);
+    if (ids.has(apex)) continue;
+    const id = await cf.zone(apex);
     if (id === undefined) {
-      id = await cf.zone(apex);
-      if (id === undefined) {
-        throw refused(
-          `container ${name}: the account holds no zone ${apex} for the domain ${hostname}: add the zone to the account, or declare another domain`,
-          "no_zone",
-        );
-      }
-      zones.set(apex, id);
+      throw refused(
+        `container ${name}: the account holds no zone ${apex} for the domain ${hostname}: add the zone to the account, or declare another domain`,
+        "no_zone",
+      );
     }
-    found.set(hostname, id);
+    ids.set(apex, id);
   }
-  return found;
-};
-
-/** Makes the Worker's custom domains the declared ones: the others detached, each missing one attached. */
-const routeDomains = async (cf: CloudflareApi, script: string, declared: Map<string, string>) => {
-  const attached = await cf.domains(script);
-  for (const domain of attached) if (!declared.has(domain.hostname)) await cf.detachDomain(domain.id);
-  const held = new Set(attached.map((d) => d.hostname));
-  for (const [hostname, zoneId] of declared) if (!held.has(hostname)) await cf.attachDomain(script, hostname, zoneId);
+  return new Map(hostnames.map((hostname) => [hostname, ids.get(apexOf(hostname))!]));
 };
 
 export interface ContainerOptions {
@@ -280,10 +263,11 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
     const served = text.get(TEXT.domains);
     // The domains it serves that are attached: one whose attach failed, or detached by hand, is
     // drift, so the next apply attaches it again.
-    const attached = served ? new Set((await cf.domains(script)).map((d) => d.hostname)) : undefined;
-    const domains = served
-      ? Object.fromEntries(Object.entries(domainsOf(served)).filter(([, hostname]) => attached!.has(hostname)))
-      : {};
+    let domains: Record<string, string> | undefined;
+    if (served) {
+      const attached = new Set((await cf.domains(script)).map((d) => d.hostname));
+      domains = Object.fromEntries(Object.entries(domainsOf(served)).filter(([, hostname]) => attached.has(hostname)));
+    }
     const state: ContainerState = {
       id: app?.id ?? null,
       name,
@@ -293,7 +277,7 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
       ref: text.get(TEXT.ref) ?? "",
       revision: text.get(TEXT.revision) ?? null,
       port: Number(text.get(TEXT.port) ?? 0),
-      ...(Object.keys(domains).length > 0 && { domains }),
+      ...(domains && Object.keys(domains).length > 0 && { domains }),
       url,
       healthy: checkHealth && app !== undefined && "revision" in (await health(cf, url, false)),
     };
@@ -393,8 +377,15 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
     // Copied and prepared before anything changes, so a copy or a preparation that fails leaves
     // the Worker as it was. Each apply asks again, which costs a manifest's HEAD once the copy is
     // there, and puts back one gone; the object starts only a pinned image of the account's.
-    // A domain whose zone the account lacks is refused before anything changes too.
-    const hostnames = domains ? await zonesOf(cf, name, Object.values(domains)) : new Map<string, string>();
+    // The custom domains are read first too: the ones an update's Worker has, and each declared
+    // one missing, with its zone, so a domain whose zone the account lacks is refused here.
+    const attached = current && (domains || servesDomains(current)) ? await cf.domains(script) : [];
+    const held = new Set(attached.map((d) => d.hostname));
+    const missing = await zonesOf(
+      cf,
+      name,
+      Object.values(domains ?? {}).filter((hostname) => !held.has(hostname)),
+    );
     const runs = accountPinned(image, cf.account) ? image : await cf.copyImage(image);
     await prepared(cf, runs);
     const served = domains ? domainsText(domains) : undefined;
@@ -439,7 +430,9 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
       await cf.upload(script, metadata);
     }
     // The declared domains routed to the Worker; ones it served before and no longer declares, detached.
-    if (domains || servesDomains(current)) await routeDomains(cf, script, hostnames);
+    const hostnames = new Set(Object.values(domains ?? {}));
+    for (const domain of attached) if (!hostnames.has(domain.hostname)) await cf.detachDomain(domain.id);
+    for (const [hostname, zoneId] of missing) await cf.attachDomain(script, hostname, zoneId);
     await started(cf, script, url, revision);
     const state: ContainerState = {
       id: app.id,

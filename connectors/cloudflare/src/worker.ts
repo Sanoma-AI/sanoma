@@ -39,6 +39,5 @@ export {
   Instance,
   NAMESPACE,
   type ObjectState,
-  WAKE_PATH,
   worker,
 } from "../worker/instance.js";

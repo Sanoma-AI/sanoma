@@ -219,17 +219,6 @@
     }
   },
   {
-    "method": "GET",
-    "path": "/client/v4/accounts/0123456789abcdef0123456789abcdef/workers/domains?service=sanoma-company",
-    "status": 200,
-    "body": {
-      "success": true,
-      "errors": [],
-      "messages": [],
-      "result": []
-    }
-  },
-  {
     "method": "PUT",
     "path": "/client/v4/accounts/0123456789abcdef0123456789abcdef/workers/domains",
     "status": 200,

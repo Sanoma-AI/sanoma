@@ -439,12 +439,13 @@ describe("the stop rule", () => {
 });
 
 describe("envWakeup", () => {
-  it("names the host's wakeup when both values are set, its URL without a trailing slash", () => {
+  it("names the host's wakeup when both values are set and the URL is http(s), without a trailing slash", () => {
     const env = { SANOMA_HOST_URL: "https://acme.example.test/", SANOMA_WAKEUP_TOKEN: "swi_token" };
     expect(envWakeup(env)).toEqual({ url: "https://acme.example.test", token: "swi_token" });
     expect(envWakeup({ SANOMA_HOST_URL: env.SANOMA_HOST_URL })).toBeUndefined();
     expect(envWakeup({ SANOMA_WAKEUP_TOKEN: env.SANOMA_WAKEUP_TOKEN })).toBeUndefined();
     expect(envWakeup({ SANOMA_HOST_URL: "", SANOMA_WAKEUP_TOKEN: "" })).toBeUndefined();
+    expect(envWakeup({ SANOMA_HOST_URL: "ftp://acme.example.test", SANOMA_WAKEUP_TOKEN: "swi_token" })).toBeUndefined();
   });
 });
 

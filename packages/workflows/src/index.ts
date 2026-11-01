@@ -56,7 +56,6 @@ export {
 export {
   declaredWakeup,
   defineConfig,
-  envWakeup,
   resolveConfig,
   resolveDatabaseUrl,
   type ResolvedConfig,
@@ -206,6 +205,8 @@ export {
   checkWakeup,
   type DeclaredWakeup,
   type EnvWakeup,
+  envWakeup,
+  HOST_URL,
   WAKE_PATH,
   type WakeupOutputs,
   type WakeupRegistration,

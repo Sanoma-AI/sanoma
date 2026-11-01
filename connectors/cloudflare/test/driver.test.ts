@@ -442,7 +442,6 @@ describe.skipIf(live)("cloudflareDriver", () => {
       expect(await op("container.delete", { id: "company" })).toEqual({ id: "company", gone: true });
       expect(await op("container.read", { id: "company" })).toEqual({ id: "company", gone: true });
       expect(sent.map((r) => `${r.method} ${r.path.replace(API, "")}`).filter((r) => r.includes("domains"))).toEqual([
-        "GET /workers/domains?service=sanoma-company",
         "PUT /workers/domains",
         "GET /workers/domains?service=sanoma-company",
         `DELETE /workers/domains/${fixture("domains")

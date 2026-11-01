@@ -327,6 +327,8 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
 
   const api = (state: FakeCloudflareState): CloudflareApi => {
     const appOf = (script: string) => Object.values(state.applications).find((a) => a.name === script);
+    /** A new id, 32 digits, as Cloudflare's are 32 hexadecimal ones. */
+    const nextId = () => String(++state.seq).padStart(32, "0");
     return {
       workerUrl: (script) => serve(state, script),
       async bindings(script) {
@@ -354,9 +356,7 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
         }
         envs.set(script, env);
         // The namespace the first upload made, kept across uploads as Cloudflare keeps it.
-        const namespace_id =
-          state.scripts[script]?.bindings.find((b) => b.namespace_id)?.namespace_id ??
-          `${String(++state.seq).padStart(32, "0")}`;
+        const namespace_id = state.scripts[script]?.bindings.find((b) => b.namespace_id)?.namespace_id ?? nextId();
         state.scripts[script] = {
           bindings: bindings.map(({ type, name, ...rest }) =>
             type === "secret_text"
@@ -423,7 +423,7 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
       },
       async zone(name) {
         if (options.zones && !options.zones.includes(name)) return undefined;
-        state.zones[name] ??= String(++state.seq).padStart(32, "0");
+        state.zones[name] ??= nextId();
         return state.zones[name];
       },
       async domains(script) {
@@ -438,9 +438,7 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
         if (!zone || (hostname !== zone && !hostname.endsWith(`.${zone}`))) {
           throw fail(400, 100117, `workers/domains: ${hostname} is not in the zone ${zone_id}`);
         }
-        const id =
-          Object.entries(state.domains).find(([, d]) => d.hostname === hostname)?.[0] ??
-          String(++state.seq).padStart(32, "0");
+        const id = Object.entries(state.domains).find(([, d]) => d.hostname === hostname)?.[0] ?? nextId();
         state.domains[id] = { hostname, service: script, zone_id };
       },
       async detachDomain(id) {
