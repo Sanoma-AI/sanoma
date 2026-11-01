@@ -127,7 +127,10 @@ describe("the runtime's own operations", () => {
       req.on("data", (chunk: Buffer) => (body += chunk.toString()));
       req.on("end", () => {
         if (req.method === "POST" && req.url === "/auth/invite") posted.push(JSON.parse(body));
-        res.writeHead(status, { "content-type": "application/json" });
+        res.writeHead(status, {
+          "content-type": "application/json",
+          ...(status === 307 && { location: "/auth/invite" }),
+        });
         res.end(JSON.stringify(status < 300 ? { url: `${host}/auth/invite/one-use` } : { error: "Not today" }));
       });
     });
@@ -226,10 +229,13 @@ describe("the runtime's own operations", () => {
     status = 403;
     try {
       await expect(run("invite", { host })).rejects.toThrow(/answered 403 to POST \/auth\/invite: Not today/);
+      // A redirect is not followed: the sealed request goes to the host named alone.
+      status = 307;
+      await expect(run("invite", { host })).rejects.toThrow(/answered 307 to POST \/auth\/invite/);
     } finally {
       status = 200;
     }
-    expect(posted.splice(0)).toHaveLength(1);
+    expect(posted.splice(0)).toHaveLength(2);
     await store.delete(
       { namespace: "default", path: "ACME_SIGNING_KEY" },
       {
@@ -340,10 +346,10 @@ describe("the runtime's own operations in a config", () => {
     ).toEqual({ id });
   });
 
-  it("refuses the deployment's own keys as any operation's secret", () => {
+  it("refuses the runtime's own SANOMA_ names as any operation's secret", () => {
     const resolved = resolveConfig({ workflows: [keys], connectors: [] });
     const parses = (op: string, input: object) => resolved.ops.get(op)!.input.safeParse(input).success;
-    for (const name of ["SANOMA_SIGNING_KEY", "SANOMA_SECRETS_KEY"]) {
+    for (const name of ["SANOMA_SIGNING_KEY", "SANOMA_SECRETS_KEY", "SANOMA_GITHUB_APP_PEM"]) {
       expect(parses("sanoma.secret.generate", { name, kind: "random" })).toBe(false);
       expect(parses("sanoma.secret.delete", { name })).toBe(false);
       expect(parses("sanoma.token.mint", { subject: "x", groups: [], store: name })).toBe(false);

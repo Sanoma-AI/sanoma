@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { DEPLOYMENT_KEYS, keyBytes } from "./deployment-key.ts";
+import { keyBytes } from "./deployment-key.ts";
 import { type CallContext, defineConnector, defineDriver, DriverError, retryableStatus } from "./op.ts";
 import { generateSecret, SECRET_NAME } from "./secret.ts";
 import { sealInvite } from "./seal.ts";
@@ -14,11 +14,11 @@ import { memoryTokens, type Tokens } from "./tokens.ts";
 // registers them in every config with their driver (`runtimeDriver`), so a policy may name them;
 // a sandbox run calls `sandboxRuntimeDriver`, over its own secrets and tokens, posting nothing.
 
-/** A secret's name, as the store takes it (upper case), other than the deployment's own keys. */
+/** A secret's name, as the store takes it (upper case), other than the runtime's own (`SANOMA_…`: its keys and credentials). */
 const SecretName = z
   .string()
   .regex(SECRET_NAME, "a secret's name: upper case, A-Z, 0-9 and _")
-  .refine((name) => !DEPLOYMENT_KEYS.includes(name), "the deployment's own keys are not a workflow's to use");
+  .refine((name) => !name.startsWith("SANOMA_"), "a SANOMA_ name is the runtime's own, not a workflow's to use");
 
 /** How long an instance gets to answer `POST /auth/invite`. */
 const INVITE_TIMEOUT_MS = 10_000;
@@ -131,6 +131,8 @@ export async function postInvite(host: string, request: string): Promise<{ url: 
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ request }),
+      // A redirect is answered as it is (a 3xx, not retried): the sealed request goes to `host` alone.
+      redirect: "manual",
       signal: AbortSignal.timeout(INVITE_TIMEOUT_MS),
     });
   } catch (err) {

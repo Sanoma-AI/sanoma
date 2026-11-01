@@ -126,6 +126,15 @@ describe("the operations through the App", () => {
     expect(bearers()).toEqual(["Bearer ghs_recorded"]);
   });
 
+  it.skipIf(live)("tries a branch's head again while the repository is empty, as one just generated is", async () => {
+    play("app-head-empty");
+    const input = { installation: 7, repository: "acme/acme-ops", branch: "main" };
+    await expect(call(githubDriver(), "repository.head", input)).rejects.toMatchObject({
+      status: 409,
+      retryable: true,
+    });
+  });
+
   it.skipIf(live)("commits files on top of a branch, its head and tree read in one call", async () => {
     play("app-commit");
     const input = { installation: 7, repository: "acme/acme-ops", branch: "main", message: "Set up acme", files };
