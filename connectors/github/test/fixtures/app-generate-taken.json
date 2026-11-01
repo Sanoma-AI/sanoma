@@ -1,0 +1,35 @@
+[
+  {
+    "method": "POST",
+    "path": "/app/installations/7/access_tokens",
+    "status": 201,
+    "body": {
+      "token": "ghs_recorded",
+      "expires_at": "2026-10-31T13:00:00Z",
+      "permissions": {
+        "administration": "write",
+        "contents": "write",
+        "metadata": "read"
+      },
+      "repository_selection": "all"
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/repos/Sanoma-AI/company-template/generate",
+    "status": 422,
+    "body": {
+      "message": "Validation Failed",
+      "errors": [
+        {
+          "resource": "Repository",
+          "code": "custom",
+          "field": "name",
+          "message": "name already exists on this account"
+        }
+      ],
+      "documentation_url": "https://docs.github.com/rest/repos/repos#create-a-repository-using-a-template",
+      "status": "422"
+    }
+  }
+]

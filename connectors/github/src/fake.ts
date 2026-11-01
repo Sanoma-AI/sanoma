@@ -1,5 +1,8 @@
+import { createHash } from "node:crypto";
 import { type FixtureError, tfFake, type TfFakeOptions, type TfFakeState } from "@sanoma-ai/bridge/fake";
-import { githubTf } from "./connector.ts";
+import { DriverError } from "@sanoma-ai/workflows";
+import { defineFake, type FakeOptions } from "@sanoma-ai/workflows/fake";
+import { githubApp, githubTf } from "./connector.ts";
 import { owned } from "./owner.ts";
 
 /**
@@ -20,6 +23,136 @@ function missingReply(type: string, id: string): FixtureError | undefined {
 export type FakeGithubState = TfFakeState;
 export type FakeGithubOptions = TfFakeOptions;
 
+/** A repository as the App's fake keeps one: its branches' heads and files, and its deploy keys. */
+export interface FakeAppRepository {
+  id: number;
+  private: boolean;
+  description?: string;
+  defaultBranch: string;
+  branches: Record<string, { sha: string; files: Record<string, string> }>;
+  keys: { id: number; title: string; key: string; readOnly: boolean }[];
+}
+
+export interface FakeGithubAppState extends Record<string, unknown> {
+  /** Counts up, for ids made in order. */
+  seq: number;
+  /** The App's installations, by id. */
+  installations: Record<
+    number,
+    { account: { login: string; type: "User" | "Organization" }; repositorySelection: "all" | "selected" }
+  >;
+  /** The repositories, by `<owner>/<name>`. */
+  repositories: Record<string, FakeAppRepository>;
+}
+
+/** A SHA of `parts`, as a commit's: the same for the same parts. */
+const shaOf = (...parts: unknown[]) => createHash("sha1").update(JSON.stringify(parts)).digest("hex");
+
+/** A `DriverError` as the driver makes one of GitHub's answer `status`. */
+const fail = (status: number, message: string) =>
+  new DriverError(`github: answered ${status}: ${message}`, { retryable: false, status });
+
+/** The fake's template, which `repository.generate` copies. */
+export const FAKE_TEMPLATE = "Sanoma-AI/company-template";
+
+/**
+ * The operations through the App, over an in-memory GitHub: installation 7 on the organization
+ * `acme`, and the public template `Sanoma-AI/company-template` (`main`, a README). An installation
+ * reaches the repositories of its own account; a commit's SHA is the same for the same parent,
+ * message and files.
+ */
+export function fakeGithubApp(options: FakeOptions = {}) {
+  return defineFake(
+    githubApp,
+    {
+      initial: (): FakeGithubAppState => ({
+        seq: 1,
+        installations: { 7: { account: { login: "acme", type: "Organization" }, repositorySelection: "all" } },
+        repositories: {
+          [FAKE_TEMPLATE]: {
+            id: 1,
+            private: false,
+            defaultBranch: "main",
+            branches: { main: { sha: shaOf("template"), files: { "README.md": "# Company\n" } } },
+            keys: [],
+          },
+        },
+      }),
+      ops: (state) => {
+        const installed = (id: number) => {
+          const found = state.installations[id];
+          if (!found) throw fail(404, "Not Found");
+          return found;
+        };
+        /** A repository the installation reaches: one of its own account's. */
+        const reached = (installation: number, repository: string) => {
+          const { account } = installed(installation);
+          const found = state.repositories[repository];
+          if (!found || repository.split("/")[0]!.toLowerCase() !== account.login.toLowerCase()) {
+            throw fail(404, "Not Found");
+          }
+          return found;
+        };
+        return {
+          installation: {
+            get: async ({ id }) => ({ id, ...installed(id) }),
+          },
+          repository: {
+            generate: async ({ installation, template, owner, name, private: isPrivate, description }) => {
+              const { account } = installed(installation);
+              const from = state.repositories[`${template.owner}/${template.repository}`];
+              if (!from) throw fail(404, "Not Found");
+              if (owner.toLowerCase() !== account.login.toLowerCase()) {
+                throw fail(403, "Resource not accessible by integration");
+              }
+              const fullName = `${owner}/${name}`;
+              if (state.repositories[fullName])
+                throw fail(422, "Validation Failed: name already exists on this account");
+              const files = structuredClone(from.branches[from.defaultBranch]?.files ?? {});
+              const id = ++state.seq;
+              state.repositories[fullName] = {
+                id,
+                private: isPrivate,
+                ...(description !== undefined && { description }),
+                defaultBranch: from.defaultBranch,
+                branches: { [from.defaultBranch]: { sha: shaOf(fullName, files), files } },
+                keys: [],
+              };
+              return {
+                id,
+                fullName,
+                cloneUrl: `https://github.com/${fullName}.git`,
+                sshUrl: `git@github.com:${fullName}.git`,
+                defaultBranch: from.defaultBranch,
+              };
+            },
+            commit: async ({ installation, repository, branch, message, files }) => {
+              const repo = reached(installation, repository);
+              const head = repo.branches[branch] ?? repo.branches[repo.defaultBranch];
+              if (!head)
+                throw new DriverError(`github: ${repository} has no ${repo.defaultBranch}`, {
+                  retryable: false,
+                  vendorCode: "no_branch",
+                });
+              const sha = shaOf(head.sha, message, files);
+              repo.branches[branch] = { sha, files: { ...head.files, ...files } };
+              return { sha };
+            },
+            addDeployKey: async ({ installation, repository, title, key, readOnly }) => {
+              const repo = reached(installation, repository);
+              if (repo.keys.some((k) => k.key === key)) throw fail(422, "Validation Failed: key is already in use");
+              const id = ++state.seq;
+              repo.keys.push({ id, title, key, readOnly });
+              return { id };
+            },
+          },
+        };
+      },
+    },
+    options,
+  );
+}
+
 /**
  * A GitHub that answers as the provider did when its replies were recorded (`@sanoma-ai/bridge`'s
  * `testdata/replies`), through the real driver over a bridge of those replies: `import` and
@@ -31,11 +164,22 @@ export type FakeGithubOptions = TfFakeOptions;
  * `put` makes an object, `override` changes what the next read returns, as if someone edited
  * the object at GitHub, and `remove` deletes it, so the next read says it is gone and an import
  * answers as the provider does.
+ *
+ * The operations through the App answer from `app` (`fakeGithubApp`), with its own state and
+ * faults, logging into the same `calls`.
  */
 export function fakeGithub(options: FakeGithubOptions = {}) {
   const fake = tfFake(githubTf, { missingReply, ...options });
+  const app = fakeGithubApp({ calls: fake.calls });
   // Named by owner as the driver's calls are; the fake's own objects are held by the provider's
   // import ids (`sanoma`, `sanoma:main`), what `put`, `override` and `remove` take.
-  const { driver } = fake;
-  return Object.assign(fake, { driver: owned(() => driver) });
+  const { driver, reset } = fake;
+  return Object.assign(fake, {
+    driver: { vendor: driver.vendor, ops: { ...owned(() => driver).ops, ...app.driver.ops } },
+    app,
+    reset() {
+      reset();
+      app.reset();
+    },
+  });
 }

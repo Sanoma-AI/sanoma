@@ -1,0 +1,97 @@
+[
+  {
+    "method": "POST",
+    "path": "/app/installations/7/access_tokens",
+    "status": 201,
+    "body": {
+      "token": "ghs_recorded",
+      "expires_at": "2026-10-31T13:00:00Z",
+      "permissions": {
+        "administration": "write",
+        "contents": "write",
+        "metadata": "read"
+      },
+      "repository_selection": "all"
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/repos/acme/acme-ops/git/ref/heads/main",
+    "status": 200,
+    "body": {
+      "ref": "refs/heads/main",
+      "node_id": "REF_kwDO",
+      "url": "https://api.github.com/repos/acme/acme-ops/git/refs/heads/main",
+      "object": {
+        "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+        "type": "commit",
+        "url": "https://api.github.com/repos/acme/acme-ops/git/commits/a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+      }
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/repos/acme/acme-ops/git/commits/a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    "status": 200,
+    "body": {
+      "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+      "message": "Initial commit",
+      "tree": {
+        "sha": "9fb037999f264ba9a7fc6274d15fa3ae2ab98312",
+        "url": "https://api.github.com/repos/acme/acme-ops/git/trees/9fb037999f264ba9a7fc6274d15fa3ae2ab98312"
+      },
+      "parents": []
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/repos/acme/acme-ops/git/trees",
+    "status": 201,
+    "body": {
+      "sha": "cd8274d15fa3ae2ab983129fb037999f264ba9a7",
+      "url": "https://api.github.com/repos/acme/acme-ops/git/trees/cd8274d15fa3ae2ab983129fb037999f264ba9a7",
+      "tree": [
+        {
+          "path": "sanoma.config.ts",
+          "mode": "100644",
+          "type": "blob",
+          "sha": "44b4fc6d56897b048c772eb4087f854f46256132",
+          "size": 120
+        }
+      ],
+      "truncated": false
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/repos/acme/acme-ops/git/commits",
+    "status": 201,
+    "body": {
+      "sha": "7638417db6d59f3c431d3e1f261cc637155684cd",
+      "message": "Set up acme",
+      "tree": {
+        "sha": "cd8274d15fa3ae2ab983129fb037999f264ba9a7"
+      },
+      "parents": [
+        {
+          "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+        }
+      ]
+    }
+  },
+  {
+    "method": "PATCH",
+    "path": "/repos/acme/acme-ops/git/refs/heads/main",
+    "status": 200,
+    "body": {
+      "ref": "refs/heads/main",
+      "node_id": "REF_kwDO",
+      "url": "https://api.github.com/repos/acme/acme-ops/git/refs/heads/main",
+      "object": {
+        "sha": "7638417db6d59f3c431d3e1f261cc637155684cd",
+        "type": "commit",
+        "url": "https://api.github.com/repos/acme/acme-ops/git/commits/7638417db6d59f3c431d3e1f261cc637155684cd"
+      }
+    }
+  }
+]

@@ -1,0 +1,27 @@
+[
+  {
+    "method": "POST",
+    "path": "/app/installations/7/access_tokens",
+    "status": 201,
+    "body": {
+      "token": "ghs_recorded",
+      "expires_at": "2026-10-31T13:00:00Z",
+      "permissions": {
+        "administration": "write",
+        "contents": "write",
+        "metadata": "read"
+      },
+      "repository_selection": "all"
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/repos/Sanoma-AI/company-template/generate",
+    "status": 403,
+    "body": {
+      "message": "Resource not accessible by integration",
+      "documentation_url": "https://docs.github.com/rest/repos/repos#create-a-repository-using-a-template",
+      "status": "403"
+    }
+  }
+]

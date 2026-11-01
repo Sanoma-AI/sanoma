@@ -112,8 +112,9 @@ describe("githubDriver", () => {
   it("reads through the process's default bridge when given none, and declares the token's variable alone", () => {
     const driver = githubDriver();
     expect(Object.keys(driver.env!.shape)).toEqual(["GITHUB_TOKEN"]);
-    expect(driver.env!.shape.GITHUB_TOKEN!.safeParse(undefined).success).toBe(false);
-    expect(Object.keys(driver.ops)).toContain("repository.read");
+    // Optional: the operations through the App need none, and the resources' refuse without it (below).
+    expect(driver.env!.shape.GITHUB_TOKEN!.safeParse(undefined).success).toBe(true);
+    expect(Object.keys(driver.ops)).toEqual(expect.arrayContaining(["repository.read", "repository.generate"]));
   });
 
   it("fails, not retryable, without GITHUB_TOKEN, and calls nothing", async () => {
