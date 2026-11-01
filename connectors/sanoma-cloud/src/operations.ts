@@ -59,8 +59,9 @@ type Expect = { action: PlanAction; replace: string[] };
 
 const NONE = { unknown: [], replace: [] };
 
-/** True when a company has a database. */
-const hasDatabase = (c: Company | undefined): c is Company & { database: { id: string } } => c?.database !== undefined;
+/** True when a company has a database: one the Cloud has not closed. */
+const hasDatabase = (c: Company | undefined): c is Company & { database: { id: string } } =>
+  c?.database !== undefined && c.status !== "closed";
 
 /** True when a company has a host: the Cloud keeps its revision while it does. */
 const hasHost = (c: Company | undefined): c is Company & { revision: string } =>

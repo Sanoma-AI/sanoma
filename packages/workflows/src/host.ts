@@ -105,7 +105,9 @@ export function checkHost(
   if (!LIFETIMES.includes(host.capabilities?.lifetime)) {
     problems.push(`capabilities.lifetime is one of ${LIFETIMES.join(", ")}`);
   }
-  for (const [input, path] of [...Object.entries(host.inputs ?? {}), ["revision", host.revision] as const]) {
+  // An input given as undefined is one not given.
+  const given = Object.entries(host.inputs ?? {}).filter(([, path]) => path !== undefined);
+  for (const [input, path] of [...given, ["revision", host.revision] as const]) {
     if (typeof path !== "string" || !hasPath(type.schema, path)) problems.push(`${input} names no field (${path})`);
   }
   const secrets = host.inputs?.secrets;

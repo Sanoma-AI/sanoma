@@ -60,13 +60,14 @@ const slugged = (name: string) =>
     .replaceAll(/^-+|-+$/g, "");
 
 /**
- * A host's slug, as a declaration gives it: its `name`, else the first label of `domains.app`,
- * else its repository's name, made a slug. Empty when it gives none of them.
+ * A host's slug, as a declaration gives it: its `name`, else `<slug>` of a `domains.app` of
+ * `<slug>.sanoma.work` (another domain names no slug), else its repository's name, made a slug.
+ * Empty when it gives none of them.
  */
 export function hostSlug(desired: { name?: unknown; source?: unknown; domains?: unknown }): string {
   if (typeof desired.name === "string" && desired.name) return desired.name;
   const app = (desired.domains as Record<string, unknown> | null | undefined)?.app;
-  if (typeof app === "string" && app.includes(".")) return app.slice(0, app.indexOf("."));
+  if (typeof app === "string" && app.endsWith(".sanoma.work")) return app.slice(0, -".sanoma.work".length);
   const repository = repositoryOf(desired.source);
   return repository ? slugged(repository.name) : "";
 }
@@ -124,7 +125,7 @@ const hostSchema = z.object({
   name: slugField
     .optional()
     .describe(
-      "The company's slug, its address `<slug>.sanoma.work`: by default the first label of `domains.app`, else the repository's name",
+      "The company's slug, its address `<slug>.sanoma.work`: by default the slug of `domains.app`, else the repository's name",
     ),
   source: z.string().min(1).describe("The company repository's clone URL, or a declared GitHub repository"),
   ref: z.string().min(1).describe("The branch it runs, such as `main`, never a commit"),

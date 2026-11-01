@@ -92,6 +92,9 @@ describe("a host type", () => {
   it("takes no secrets when it binds its own bootstrap, and may then name a Sanoma secret nowhere", () => {
     const service = hostOf({ bindsBootstrap: true, inputs: { source: "repo.url", ref: "repo.branch", port: "port" } });
     expect(service.host).toMatchObject({ bindsBootstrap: true, inputs: { source: "repo.url" } });
+    // `secrets: undefined` is no secrets.
+    const unset = { source: "repo.url", ref: "repo.branch", port: "port", secrets: undefined };
+    expect(hostOf({ bindsBootstrap: true, inputs: unset }).host?.bindsBootstrap).toBe(true);
     expect(() =>
       service({ name: "app", repo: { url: "u", branch: "main" }, env: { KEY: secret("SANOMA_SECRETS_KEY") as never } }),
     ).toThrow(/one of sanoma's own: only a host's secrets may/);

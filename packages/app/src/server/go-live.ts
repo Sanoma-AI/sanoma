@@ -469,7 +469,10 @@ export async function renderInfra(
   setPath(hosted, inputs.source, new Reference("repo"));
   setPath(hosted, inputs.ref, "main");
   // `offered` leaves out a host that binds its own bootstrap, the one kind with no secrets.
-  setPath(hosted, inputs.secrets!, {
+  if (!inputs.secrets) {
+    throw new ApiError(409, { error: `${host.title} binds its own bootstrap: going live does not write its file yet` });
+  }
+  setPath(hosted, inputs.secrets, {
     SANOMA_DATABASE_URL: secret(DATABASE_URL),
     SANOMA_SIGNING_KEY: secret("SANOMA_SIGNING_KEY"),
     ...(!app.resolved.secrets.store && { SANOMA_SECRETS_KEY: secret(SECRETS_KEY) }),

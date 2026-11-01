@@ -208,6 +208,15 @@ describe("cloud's host through the workflows", () => {
     });
   });
 
+  it("takes no slug from a domains.app that is not at sanoma.work", async () => {
+    workflows = { cloudList: () => ({ output: [] }) };
+    const custom = { ...declaredHost, domains: { app: "www.acme.com" } };
+    expect(await op("host.plan", { desired: custom })).toMatchObject({
+      action: "create",
+      planned: { name: "acme-ops" },
+    });
+  });
+
   it("refuses at plan a slug the Cloud does not take, made from the repository's name", async () => {
     const unnamed = { source: "https://github.com/acme/ab.git", ref: "main" };
     await expect(op("host.plan", { desired: unnamed })).rejects.toMatchObject({
