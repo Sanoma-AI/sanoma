@@ -12,13 +12,17 @@ export {
   type Effect,
   isOp,
   isSvgElement,
+  INVITE_SECONDS,
   type LoginContext,
   type LoginHalf,
+  type LoginIdentity,
+  type LoginMethod,
   type ModelContext,
   type Op,
   type OpSpec,
   type ResourceGroup,
   retryableStatus,
+  type SignInEvent,
   type VendorInfo,
   withSetup,
 } from "./op.ts";
@@ -154,6 +158,7 @@ export {
   type LedgerGroup,
   type LedgerRecord,
   type LedgerStore,
+  type SignInMethod,
 } from "./ledger.ts";
 export { ApprovalMessage, APPROVALS_EVENT, ApprovalWithdrawal, decisionEventOf } from "./approvals.ts";
 export { RUNTIME_VERSION } from "./version.ts";
@@ -201,6 +206,8 @@ export {
   storeDatabaseUrl,
 } from "./database.ts";
 export type { Chat, Chats } from "./chats.ts";
+export type { Tokens } from "./tokens.ts";
+export { type InviteRequest, openInvite, sealInvite, sealLoginCode } from "./seal.ts";
 export {
   checkWakeup,
   type DeclaredWakeup,
@@ -243,6 +250,8 @@ export {
   principalOf,
   RUNTIME_AGENTS,
   HOST_CHECK_AGENT,
+  LOGIN_AGENT,
+  LOGIN_CODE_WORKFLOW,
   SCHEDULE_AGENT,
   credentialReady,
   DEFAULT_SLEEP_NAME,

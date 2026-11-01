@@ -4,7 +4,8 @@ import { type AppEntry, appsAt } from "./apps.ts";
 import { readSource, type SourceFile } from "./ast.ts";
 import { readPolicyFiles } from "./cedar.ts";
 import { recordSchemaOf } from "./collection.ts";
-import { connectorsOf, resolveConfig, rootOf, type SanomaConfig } from "./config.ts";
+import { decideCall } from "./call.ts";
+import { connectorsOf, type ResolvedConfig, resolveConfig, rootOf, type SanomaConfig } from "./config.ts";
 import { type Builtin, jsonSchemaOf, opIdsOf, type Use } from "./define.ts";
 import {
   CAPABILITIES,
@@ -27,7 +28,17 @@ import { allowAll, policyOpOf } from "./policy.ts";
 import { type Resource, resourceTypesOf, valueAt } from "./resource.ts";
 import { type DeclaredResource, inAppPeople, loadDataFiles, type ResourceProblem } from "./resources.ts";
 import { apiNameProblem } from "./sdk.ts";
-import { apiNameOf, BUILT_IN_WORKFLOWS, DATA_VENDOR, errorMessage, problemLine } from "./shared.ts";
+import {
+  apiNameOf,
+  BUILT_IN_WORKFLOWS,
+  DATA_VENDOR,
+  errorMessage,
+  LOGIN_AGENT,
+  LOGIN_CODE_WORKFLOW,
+  type PeopleResource,
+  principalOf,
+  problemLine,
+} from "./shared.ts";
 import { readSites, type SiteEntry } from "./sites.ts";
 
 // `@sanoma-ai/workflows/describe`: what a UI renders from, apart from the main entry.
@@ -282,6 +293,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
       ...appProblems,
       ...appClashes(apps, collections, sites),
       ...domainProblems(dataFiles.resources, resources, sites),
+      ...loginProblems(resolved, dataFiles.resources),
     ],
     apps,
     policy: {
@@ -291,7 +303,34 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
       files: resolved.root === undefined ? [] : readPolicyFiles(resolved.root),
     },
     sites,
+    ...(resolved.login && { login: { sender: resolved.login.sender.id } }),
   };
+}
+
+/** A sign-in code's mail, as the policy is asked about it. */
+const CODE_MAIL = { to: "person@example.com", subject: "Your sign-in code", text: "<text>" };
+
+/**
+ * The policy holding or denying the sign-in code: `login.sender` as the runtime's agent `login`
+ * in a run of `login-code` must be allowed, or nobody receives a code.
+ */
+function loginProblems(resolved: ResolvedConfig, people: readonly PeopleResource[]): ResourceProblem[] {
+  if (!resolved.login || resolved.policyProblems.length) return [];
+  const { sender } = resolved.login;
+  const agent = principalOf(LOGIN_AGENT, people)!;
+  const run = { id: "check", workflow: LOGIN_CODE_WORKFLOW, approvals: [] };
+  const decision = decideCall(resolved.policy, sender, CODE_MAIL, agent, run);
+  if (decision.kind === "allow") return [];
+  const does = decision.kind === "deny" ? "denies" : "holds";
+  const by = decision.reasons?.length ? ` (${decision.reasons.join(", ")})` : "";
+  return [
+    {
+      file: "policies",
+      message:
+        `the policy ${does} ${sender.id} for the sign-in code${by}, so nobody receives one: exempt the runtime's ` +
+        `agent, \`unless { principal == Sanoma::Principal::"${LOGIN_AGENT}" }\``,
+    },
+  ];
 }
 
 /** That the root's `kind` `name`, in `file`, is named as an app is. */

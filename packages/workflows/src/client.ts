@@ -26,6 +26,7 @@ import {
 } from "./approvals.ts";
 import { beforeOf, decideCall, decideStart, recorded, startHoldOf } from "./call.ts";
 import { type Chats, chatStore } from "./chats.ts";
+import { type Tokens, tokenStore } from "./tokens.ts";
 import { collectionsDriver } from "./collection.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { configuredSecrets } from "./credentials.ts";
@@ -58,7 +59,15 @@ import {
   SanomaError,
   vendorCodeOf,
 } from "./errors.ts";
-import { insertRecord, type LedgerRecord, type OwnedLedger, ownedLedger } from "./ledger.ts";
+import {
+  insertRecord,
+  lastSignIns,
+  type LedgerRecord,
+  loginRecord,
+  type OwnedLedger,
+  ownedLedger,
+  type SignInMethod,
+} from "./ledger.ts";
 import { warn } from "./log.ts";
 import type { CallContext, Driver, Op } from "./op.ts";
 import { allowAll, type RecordedDecision } from "./policy.ts";
@@ -268,6 +277,8 @@ export class SanomaClient {
   private readonly storedSecrets: SecretAccess;
   /** The operator agent's chats: their rows and their transcripts, in the config's database. */
   readonly chats: Chats;
+  /** The api tokens a public site's api takes as a bearer (`token:<id>`, a visitor): minted, revoked, resolved. */
+  readonly tokens: Tokens;
   private readonly options: ClientOptions;
 
   private constructor(
@@ -284,6 +295,7 @@ export class SanomaClient {
     this.pool = lazyPool(config.databaseUrl, "client");
     this.storedSecrets = configuredSecrets(config.secrets, () => this.db());
     this.chats = chatStore(() => this.db());
+    this.tokens = tokenStore(() => this.db());
   }
 
   /**
@@ -637,6 +649,32 @@ export class SanomaClient {
       loadOutput: true,
     });
     return row ? { runId: row.workflowID, output: row.output, at: row.updatedAt ?? row.createdAt } : null;
+  }
+
+  /** Records that the declared `person` signed in to the staff login, by `method`: a ledger record outside any run. */
+  async recordSignIn(person: string, method: SignInMethod): Promise<void> {
+    const actor = await this.admitted({ id: person });
+    await this.audit.store.append(
+      loginRecord(this.config.appName, actor, { type: "signin.recorded", person: actor.id, method }),
+    );
+  }
+
+  /** Records that `by` minted an invite for the declared `person`, good until `expiresAt`: a ledger record outside any run. */
+  async recordInvite(person: string, options: { by: string; expiresAt: Date }): Promise<void> {
+    const [actor, invited] = await Promise.all([this.admitted({ id: options.by }), this.admitted({ id: person })]);
+    await this.audit.store.append(
+      loginRecord(this.config.appName, actor, {
+        type: "invite.minted",
+        person: invited.id,
+        by: actor.id,
+        expiresAt: options.expiresAt.toISOString(),
+      }),
+    );
+  }
+
+  /** When each of `people` last signed in to the staff login, and how, by id (`recordSignIn`); one who never did is left out. */
+  lastSignIns(people: readonly string[]): Promise<Record<string, { at: number; method: SignInMethod }>> {
+    return lastSignIns(this.audit.store, people);
   }
 
   /** The run's audit record, in order, from the ledger store. */

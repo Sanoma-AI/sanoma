@@ -360,12 +360,35 @@ export interface ConnectorSetup {
 /** What the app gives a connector's model half (`ConnectorSetup.model`): the secrets, as a login half reads them. */
 export type ModelContext = Pick<LoginContext, "secrets">;
 
-/** What the app gives a connector's login half (`ConnectorSetup.login`) when it makes it for a public site. */
+/**
+ * What a login vouches for about who is asking: a name they gave (`id`, the loopback's), a
+ * verified email, a GitHub login. The app admits the declared person they match (`personOf`).
+ */
+export interface LoginIdentity {
+  id?: string;
+  email?: string;
+  github?: string;
+}
+
+/** How a login half lets a person in: an email code, GitHub, an invite link, an email and a password. */
+export type LoginMethod = "code" | "github" | "invite" | "password";
+
+/** A staff sign-in, as a staff login half tells the app (`LoginContext.staff.record`): who, by which method. */
+export interface SignInEvent {
+  type: "signin.recorded";
+  method: Exclude<LoginMethod, "password">;
+  identity: LoginIdentity;
+}
+
+/**
+ * What the app gives a connector's login half (`ConnectorSetup.login`) when it makes it: for a
+ * public site, once per site; for the staff login, once, with `staff`.
+ */
 export interface LoginContext {
   /** The company's database (`resolved.databaseUrl`), where a login like Better Auth keeps its users. */
   databaseUrl: string;
   /**
-   * A 32-byte key derived from the deployment's `SANOMA_SECRETS_KEY` for this login (HKDF-SHA256,
+   * A 32-byte key derived from the deployment's `SANOMA_SIGNING_KEY` for this login (HKDF-SHA256,
    * purpose `login <connector>`), hex; a login signs its cookies with it and never asks a person for a secret.
    */
   key: string;
@@ -377,9 +400,24 @@ export interface LoginContext {
   /**
    * The origins the site answers on, scheme included and `:*` for any port:
    * `["http://www.localhost:*", "https://sanoma.example"]`; a login needs the protocol for its
-   * cookies and allowed hosts.
+   * cookies and allowed hosts. Empty for the staff login, which answers on any host the app does.
    */
   origins: readonly string[];
+  /**
+   * Sends a sign-in code to an email, through the config's `login.sender` (a run of the built-in
+   * `login-code` workflow, as the runtime's agent `login`); absent when the config names no
+   * sender, and then the login offers no code.
+   */
+  sendCode?(email: string, code: string): Promise<void>;
+  /** For the staff login only: who it may let in, the company's social clients, and where it tells of a sign-in. */
+  staff?: {
+    /** Whether the people files declare the person `identity` names; a login never makes a user for anyone else. */
+    admits(identity: LoginIdentity): boolean;
+    /** The company's own OAuth clients, each a method when given. */
+    social: { github?: { clientId: string; clientSecret: string } };
+    /** Tells the app of a sign-in, which the ledger records. Must not throw. */
+    record(event: SignInEvent): Promise<void>;
+  };
 }
 
 /**
@@ -390,22 +428,43 @@ export interface LoginContext {
 export const CLIENT_IP_HEADER = "x-sanoma-client-ip";
 
 /**
- * A connector's login half: how a public site tells who a visitor is. The app makes one with
- * `login(context)` once per public site, when it starts; a login that keeps tables in the
- * database migrates them itself there, serialized and idempotent. It answers the provider's
- * subject only; the app makes the principal from it (`visitor:<connector>:<subject>`, in
- * `visitors`), so a connector never sets a visitor's groups. A visitor's address, for rate
- * limits, is the `CLIENT_IP_HEADER` header.
+ * A connector's login half: how a public site tells who a visitor is, and, made with
+ * `LoginContext.staff`, how the app's staff sign in. The app makes one with `login(context)` once
+ * per public site (and once for staff), when it starts; a login that keeps tables in the database
+ * migrates them itself there, serialized and idempotent. It answers the provider's subject and
+ * what it verified; the app makes the principal from it (`visitor:<connector>:<subject>`, in
+ * `visitors`, or the declared person the identity matches), so a connector never sets groups. A
+ * visitor's address, for rate limits, is the `CLIENT_IP_HEADER` header.
  */
 export interface LoginHalf {
-  /** Who signed in, as the provider's stable subject, or null; never throws for a missing or bad cookie. */
-  verify(request: Request): Promise<{ subject: string } | null>;
+  /**
+   * Who signed in, as the provider's stable subject, with their email when the provider verified
+   * it and their GitHub login when they signed in with GitHub; null for a missing or bad cookie,
+   * for which it never throws.
+   */
+  verify(request: Request): Promise<{ subject: string; email?: string; github?: string } | null>;
   /** Answers its own routes, `/auth/<vendor>/*`; undefined for any other request. */
   handle(request: Request): Promise<Response | undefined>;
   /** The path a page POSTs to sign out, which `handle` serves; the app's own Sign out POSTs it with no body. */
   signOut?: string;
+  /** How a person may sign in now: what the sign-in page offers. */
+  methods?: readonly LoginMethod[];
+  /**
+   * A staff login's invite for `email`, a declared person's: a one-use token, good for
+   * `INVITE_SECONDS`, which replaces the last one minted for that email. `request` is the
+   * request that asked for it, on the host the invite is for.
+   */
+  invite?(email: string, request: Request): Promise<string>;
+  /**
+   * The invite a token is, while it is good: for whom, and the path (on the login's routes) that
+   * signs them in with it, using it up.
+   */
+  invitation?(token: string): Promise<{ email: string; path: string } | undefined>;
   close?(): Promise<void>;
 }
+
+/** How long an invite lasts: 24 hours. */
+export const INVITE_SECONDS = 24 * 60 * 60;
 
 /**
  * The connector with `setup` laid over what it already carries, as a connector package exports
