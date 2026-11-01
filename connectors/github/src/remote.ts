@@ -10,7 +10,18 @@ import {
   type SourceHost,
 } from "@sanoma-ai/workflows";
 import { z } from "zod";
-import { appJwt, branchPath, failed, GITHUB_APP_SECRETS, installationToken, limited, ok, read, send } from "./rest.ts";
+import {
+  appJwtOf,
+  branchPath,
+  failed,
+  GITHUB_APP_SECRETS,
+  installationToken,
+  limited,
+  ok,
+  read,
+  repoPath,
+  send,
+} from "./rest.ts";
 
 export { appJwt, GITHUB_APP_SECRETS } from "./rest.ts";
 
@@ -30,11 +41,8 @@ const NO_RULES = "On a private repository this needs GitHub Team or Pro, or a pu
 const Installation = z.object({ id: z.number(), account: z.object({ login: z.string(), type: z.string() }) });
 
 /** A JWT of the App, when its keys are among `found`. */
-function jwtOf(found: Map<string, string>): string | undefined {
-  const id = found.get(GITHUB_APP_SECRETS.id);
-  const pem = found.get(GITHUB_APP_SECRETS.pem);
-  return id && pem ? appJwt(id, pem) : undefined;
-}
+const jwtOf = (found: Map<string, string>) =>
+  appJwtOf(found.get(GITHUB_APP_SECRETS.id), found.get(GITHUB_APP_SECRETS.pem));
 
 const installations = (jwt: string) => ok(jwt, "GET", "/app/installations?per_page=100", z.array(Installation));
 
@@ -48,7 +56,7 @@ async function appToken(found: Map<string, string>, owner: string, name?: string
   if (!jwt) return undefined;
   const installation = (await installations(jwt)).find((i) => i.account.login.toLowerCase() === owner.toLowerCase());
   if (!installation) return undefined;
-  return installationToken(jwt, installation.id, name === undefined ? undefined : [name]);
+  return installationToken(jwt, installation.id, name);
 }
 
 /** A token, with when an installation token's hour is out. */
@@ -129,7 +137,7 @@ const Rule = z.object({
  * a person's for five minutes, so a token or an installation set later is used soon after.
  */
 function openRepo(repo: RepoRef, { secrets }: RemoteContext): SourceHost {
-  const base = `/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}`;
+  const base = repoPath(repo.owner, repo.name);
   let kept: Promise<Minted> | undefined;
   let until = 0;
   const token = async (prefer?: "app" | "token") => {

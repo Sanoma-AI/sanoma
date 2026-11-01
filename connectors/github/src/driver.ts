@@ -1,16 +1,17 @@
 import { defaultBridge, type ProviderClient } from "@sanoma-ai/bridge";
 import { type CallContext, type Driver, DriverError, defineDriver, retryableStatus } from "@sanoma-ai/workflows";
 import { z } from "zod";
-import { githubApp, githubTf } from "./connector.ts";
+import { Account, githubApp, githubTf } from "./connector.ts";
 import { owned } from "./owner.ts";
 import {
-  appJwt,
+  appJwtOf,
   branchPath,
   failed as failure,
   GITHUB_APP_SECRETS,
   installationToken,
   ok,
   read,
+  repoPath,
   send,
 } from "./rest.ts";
 
@@ -121,32 +122,27 @@ export function githubDriver({ bridge = defaultBridge() }: GithubDriverOptions =
 /** A JWT of the App, signed with its keys from the call's secrets (what the app's Create GitHub App stores). */
 async function jwtFor({ secrets }: CallContext): Promise<string> {
   const [id, pem] = await Promise.all([secrets.get(GITHUB_APP_SECRETS.id), secrets.get(GITHUB_APP_SECRETS.pem)]);
-  if (!id || !pem) {
-    throw new DriverError(`github: ${GITHUB_APP_SECRETS.id} and ${GITHUB_APP_SECRETS.pem} are not stored`, {
-      retryable: false,
-      vendorCode: "no_app",
-    });
-  }
-  try {
-    return appJwt(id, pem);
-  } catch (cause) {
-    throw new DriverError("github: signing as the GitHub App failed", { retryable: false, cause });
-  }
+  const jwt = appJwtOf(id, pem);
+  if (jwt) return jwt;
+  throw new DriverError(`github: ${GITHUB_APP_SECRETS.id} and ${GITHUB_APP_SECRETS.pem} are not stored`, {
+    retryable: false,
+    vendorCode: "no_app",
+  });
 }
 
 /** A token of the installation, minted for this call (for the repository `name` alone, when given) and never kept. */
 const tokenFor = async (call: CallContext, installation: number, name?: string) =>
-  (await installationToken(await jwtFor(call), installation, name === undefined ? undefined : [name])).token;
+  (await installationToken(await jwtFor(call), installation, name)).token;
 
-/** `<owner>/<name>` as a path, each part encoded, and the name alone. */
+/** `<owner>/<name>` as its API path, and the name alone. */
 function repoOf(repository: string) {
   const [owner = "", name = ""] = repository.split("/");
-  return { path: `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`, name };
+  return { path: repoPath(owner, name), name };
 }
 
 const Installation = z.object({
   id: z.number(),
-  account: z.object({ login: z.string(), type: z.enum(["User", "Organization"]) }),
+  account: Account,
   repository_selection: z.enum(["all", "selected"]),
 });
 const Repository = z.object({
@@ -158,6 +154,7 @@ const Repository = z.object({
 });
 const Ref = z.object({ object: z.object({ sha: z.string() }) });
 const Sha = z.object({ sha: z.string() });
+const Branch = z.object({ commit: z.object({ sha: z.string(), commit: z.object({ tree: Sha }) }) });
 
 /**
  * The operations through the App, over GitHub's REST API: each mints an installation token from
@@ -172,7 +169,7 @@ const appDriver = defineDriver(githubApp, {
   },
   repository: {
     async generate({ installation, template, owner, name, private: isPrivate, description }, call) {
-      const from = repoOf(`${template.owner}/${template.repository}`).path;
+      const from = repoPath(template.owner, template.repository);
       const made = await ok(await tokenFor(call, installation), "POST", `${from}/generate`, Repository, {
         owner,
         name,
@@ -188,43 +185,42 @@ const appDriver = defineDriver(githubApp, {
         defaultBranch: made.default_branch,
       };
     },
-    // One commit with Git's data API: the branch's head, a tree over its tree with the files'
+    // One commit with Git's data API: the branch's head and its tree, a tree over it with the files'
     // contents (GitHub writes their blobs), a commit on the head, and the branch moved to it.
     async commit({ installation, repository, branch, message, files }, call) {
       const repo = repoOf(repository);
       const token = await tokenFor(call, installation, repo.name);
-      /** The branch's head, or undefined when it is not there. */
+      /** The branch's head commit and its tree, or undefined when the branch is not there. */
       const head = async (name: string) => {
-        const path = `${repo.path}/git/ref/heads/${branchPath(name)}`;
+        const path = `${repo.path}/branches/${branchPath(name)}`;
         const reply = await send(token, "GET", path);
         if (reply.status === 404) return undefined;
         if (reply.status >= 300) throw failure("GET", path, reply);
-        return read(Ref, reply.body, `GET ${path}`).object.sha;
+        const { commit } = read(Branch, reply.body, `GET ${path}`);
+        return { sha: commit.sha, tree: commit.commit.tree.sha };
       };
-      let parent = await head(branch);
-      const fresh = parent === undefined;
-      if (fresh) {
-        // A branch not there yet starts from the default branch.
+      /** The default branch's head, which a branch not there yet starts from. */
+      const start = async () => {
         const { default_branch } = await ok(token, "GET", repo.path, Repository.pick({ default_branch: true }));
-        parent = await head(default_branch);
-        if (parent === undefined) {
-          throw new DriverError(`github: ${repository} has no ${default_branch} to start ${branch} from`, {
-            retryable: false,
-            vendorCode: "no_branch",
-          });
-        }
-      }
-      const base = await ok(token, "GET", `${repo.path}/git/commits/${parent}`, z.object({ tree: Sha }));
+        const found = await head(default_branch);
+        if (found) return found;
+        throw new DriverError(`github: ${repository} has no ${default_branch} to start ${branch} from`, {
+          retryable: false,
+          vendorCode: "no_branch",
+        });
+      };
+      const existing = await head(branch);
+      const parent = existing ?? (await start());
       const tree = await ok(token, "POST", `${repo.path}/git/trees`, Sha, {
-        base_tree: base.tree.sha,
+        base_tree: parent.tree,
         tree: Object.entries(files).map(([path, content]) => ({ path, mode: "100644", type: "blob", content })),
       });
       const commit = await ok(token, "POST", `${repo.path}/git/commits`, Sha, {
         message,
         tree: tree.sha,
-        parents: [parent],
+        parents: [parent.sha],
       });
-      if (fresh) {
+      if (!existing) {
         await ok(token, "POST", `${repo.path}/git/refs`, Ref, { ref: `refs/heads/${branch}`, sha: commit.sha });
       } else {
         await ok(token, "PATCH", `${repo.path}/git/refs/heads/${branchPath(branch)}`, Ref, { sha: commit.sha });

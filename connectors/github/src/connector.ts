@@ -75,6 +75,9 @@ export const githubTf = tfConnector({
   info: vendorInfo(import.meta.url),
 });
 
+/** The account an installation of the App is on. */
+export const Account = z.object({ login: z.string(), type: z.enum(["User", "Organization"]) });
+
 /** `<owner>/<name>`, as GitHub's `full_name`. */
 const fullName = z
   .string()
@@ -95,7 +98,7 @@ const appSpecs = {
       input: z.object({ id: z.number().int().positive().describe("The installation's id") }),
       output: z.object({
         id: z.number(),
-        account: z.object({ login: z.string(), type: z.enum(["User", "Organization"]) }),
+        account: Account,
         repositorySelection: z.enum(["all", "selected"]),
       }),
       target: ({ id }: { id: number }) => String(id),

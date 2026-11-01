@@ -23,6 +23,19 @@ export function appJwt(appId: string, pem: string): string {
   return `${body}.${createSign("RSA-SHA256").update(body).sign(pem, "base64url")}`;
 }
 
+/**
+ * A JWT of the App, signed with its keys: undefined when either is missing, and a `DriverError`
+ * (not retryable) when the key cannot sign.
+ */
+export function appJwtOf(id: string | undefined, pem: string | undefined): string | undefined {
+  if (!id || !pem) return undefined;
+  try {
+    return appJwt(id, pem);
+  } catch (cause) {
+    throw new DriverError("github: signing as the GitHub App failed", { retryable: false, cause });
+  }
+}
+
 export interface Reply {
   status: number;
   headers: Headers;
@@ -69,10 +82,9 @@ export const limited = ({ status, headers }: Reply) =>
 export function failed(method: string, path: string, reply: Reply, vendorCode?: string): DriverError {
   const said = typeof reply.body?.message === "string" ? reply.body.message : `status ${reply.status}`;
   // A 422's `message` is "Validation Failed"; what failed is in its `errors`.
-  const errors: unknown[] = Array.isArray(reply.body?.errors) ? reply.body.errors : [];
-  const why = errors.flatMap((e) =>
-    typeof (e as { message?: unknown })?.message === "string" ? [(e as { message: string }).message] : [],
-  );
+  const why = ((reply.body?.errors ?? []) as unknown[])
+    .map((e) => (e as { message?: unknown } | null)?.message)
+    .filter((m) => typeof m === "string");
   const message = why.length ? `${said}: ${why.join("; ")}` : said;
   return new DriverError(`github: ${method} ${path} answered ${reply.status}: ${message}`, {
     retryable: retryableStatus(reply.status) || limited(reply),
@@ -104,17 +116,21 @@ export function read<T>(schema: z.ZodType<T>, body: unknown, what: string): T {
   return parsed.data;
 }
 
+/** A repository's path, each part encoded. */
+export const repoPath = (owner: string, name: string) =>
+  `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
+
 /** A branch name in a path, each `/`-separated part encoded. */
 export const branchPath = (branch: string) => branch.split("/").map(encodeURIComponent).join("/");
 
 const AccessToken = z.object({ token: z.string(), expires_at: z.string() });
 
 /**
- * An installation token of the App, minted with its JWT, good for an hour; for the repositories
- * `repositories` alone when given, which GitHub refuses (422) when the installation does not cover them.
+ * An installation token of the App, minted with its JWT, good for an hour; for the repository
+ * `name` alone when given, which GitHub refuses (422) when the installation does not cover it.
  */
-export async function installationToken(jwt: string, installation: number, repositories?: string[]) {
-  const scope = repositories && { repositories };
+export async function installationToken(jwt: string, installation: number, name?: string) {
+  const scope = name === undefined ? undefined : { repositories: [name] };
   const made = await ok(jwt, "POST", `/app/installations/${installation}/access_tokens`, AccessToken, scope);
   return { token: made.token, expiresAt: Date.parse(made.expires_at) };
 }

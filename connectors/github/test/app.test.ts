@@ -1,19 +1,15 @@
-import { createVerify, generateKeyPairSync } from "node:crypto";
-import { type Exchange, live, replay } from "@sanoma-ai/testing/replay";
+import { live, replay } from "@sanoma-ai/testing/replay";
 import { type Driver, memorySecrets } from "@sanoma-ai/workflows";
 import { describe, expect, it } from "vitest";
 import { githubDriver } from "../src/driver.ts";
 import { FAKE_TEMPLATE, fakeGithub } from "../src/fake.ts";
 import { github } from "../src/index.ts";
 import { GITHUB_APP_SECRETS } from "../src/rest.ts";
+import { app, scrub, signer } from "./app-keys.ts";
 
 // The operations through the App over replayed replies (`fixtures/app-*.json`), hand-written in the
 // shape GitHub answers until the App is recorded live: they make repositories, commits and keys, so
 // they skip themselves live.
-
-/** What a recording must not keep: a token GitHub minted. */
-const scrub = (exchanges: Exchange[]): Exchange[] =>
-  JSON.parse(JSON.stringify(exchanges).replaceAll(/"token":"[^"]*"/g, '"token":"ghs_recorded"'));
 
 const { play, sent } = replay({
   fixtures: new URL("./fixtures/", import.meta.url),
@@ -21,18 +17,6 @@ const { play, sent } = replay({
   env: {},
   scrub,
 });
-
-/** The App's keys: a key pair of its own, made once. */
-const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
-const pem = privateKey.export({ type: "pkcs1", format: "pem" }).toString();
-const app = { [GITHUB_APP_SECRETS.id]: "4242", [GITHUB_APP_SECRETS.pem]: pem };
-
-/** The App's id a request's JWT is signed by, or "nobody" when the signature does not verify. */
-const signer = (headers: Headers) => {
-  const [head, body, signature] = headers.get("authorization")!.replace("Bearer ", "").split(".");
-  const verified = createVerify("RSA-SHA256").update(`${head}.${body}`).verify(publicKey, signature!, "base64url");
-  return verified ? JSON.parse(Buffer.from(body!, "base64url").toString()).iss : "nobody";
-};
 
 let seq = 0;
 /** Calls one of a driver's operations the way the runtime does, its input parsed by the operation's schema. */
@@ -100,7 +84,7 @@ describe("the operations through the App", () => {
     expect(JSON.stringify(made)).not.toContain("ghs_");
   });
 
-  it.skipIf(live)("fails with GitHub's message when the App may not generate there, or the name is taken", async () => {
+  it.skipIf(live)("fails with GitHub's message when the App may not generate there", async () => {
     play("app-generate-forbidden");
     await expect(call(githubDriver(), "repository.generate", generate)).rejects.toMatchObject({
       code: "driver_failed",
@@ -121,7 +105,7 @@ describe("the operations through the App", () => {
     });
   });
 
-  it.skipIf(live)("commits files on top of a branch with Git's data API", async () => {
+  it.skipIf(live)("commits files on top of a branch, its head and tree read in one call", async () => {
     play("app-commit");
     const input = { installation: 7, repository: "acme/acme-ops", branch: "main", message: "Set up acme", files };
     expect(await call(githubDriver(), "repository.commit", input)).toEqual({
@@ -129,16 +113,16 @@ describe("the operations through the App", () => {
     });
     // Minted for this repository alone.
     expect(sent[0]!.body).toEqual({ repositories: ["acme-ops"] });
-    expect(sent[3]!.body).toEqual({
+    expect(sent[2]!.body).toEqual({
       base_tree: "9fb037999f264ba9a7fc6274d15fa3ae2ab98312",
       tree: [{ path: "sanoma.config.ts", mode: "100644", type: "blob", content: files["sanoma.config.ts"] }],
     });
-    expect(sent[4]!.body).toEqual({
+    expect(sent[3]!.body).toEqual({
       message: "Set up acme",
       tree: "cd8274d15fa3ae2ab983129fb037999f264ba9a7",
       parents: ["a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"],
     });
-    expect(sent[5]!.body).toEqual({ sha: "7638417db6d59f3c431d3e1f261cc637155684cd" });
+    expect(sent[4]!.body).toEqual({ sha: "7638417db6d59f3c431d3e1f261cc637155684cd" });
     expect(new Set(bearers())).toEqual(new Set(["Bearer ghs_recorded"]));
   });
 
@@ -199,12 +183,7 @@ describe("fakeGithubApp", () => {
       defaultBranch: "main",
     });
     const commit = { installation: 7, repository: "acme/acme-ops", branch: "main", message: "Set up", files };
-    const { sha } = await call(fake.driver, "repository.commit", commit);
-    expect(sha).toMatch(/^[0-9a-f]{40}$/);
-    // The same parent, message and files: the same SHA.
-    const other = fakeGithub();
-    await call(other.driver, "repository.generate", generate);
-    expect(await call(other.driver, "repository.commit", commit)).toEqual({ sha });
+    expect((await call(fake.driver, "repository.commit", commit)).sha).toMatch(/^[0-9a-f]{40}$/);
     await call(fake.driver, "repository.commit", { ...commit, branch: "setup" });
     const repo = fake.app.state.repositories["acme/acme-ops"]!;
     expect(fake.app.state.repositories[FAKE_TEMPLATE]!.branches.main!.files).toEqual({ "README.md": "# Company\n" });
@@ -223,15 +202,29 @@ describe("fakeGithubApp", () => {
     ]);
   });
 
+  it("makes the same SHA for the same parent, message and files", async () => {
+    const commit = { installation: 7, repository: "acme/acme-ops", branch: "main", message: "Set up", files };
+    const [one, two] = [fakeGithub(), fakeGithub()];
+    for (const fake of [one, two]) await call(fake.driver, "repository.generate", generate);
+    expect(await call(one.driver, "repository.commit", commit)).toEqual(
+      await call(two.driver, "repository.commit", commit),
+    );
+  });
+
   it("answers as GitHub does: an installation not there, another account, a name taken, a key in use", async () => {
     const fake = fakeGithub();
     await expect(call(fake.driver, "installation.get", { id: 8 })).rejects.toMatchObject({ status: 404 });
     await expect(call(fake.driver, "repository.generate", { ...generate, owner: "other" })).rejects.toMatchObject({
       status: 403,
-      message: "github: answered 403: Resource not accessible by integration",
+      message:
+        "github: POST /repos/Sanoma-AI/company-template/generate answered 403: Resource not accessible by integration",
     });
     await call(fake.driver, "repository.generate", generate);
-    await expect(call(fake.driver, "repository.generate", generate)).rejects.toMatchObject({ status: 422 });
+    await expect(call(fake.driver, "repository.generate", generate)).rejects.toMatchObject({
+      status: 422,
+      message:
+        "github: POST /repos/Sanoma-AI/company-template/generate answered 422: Validation Failed: name already exists on this account",
+    });
     const key = { installation: 7, repository: "acme/acme-ops", title: "host", key: KEY };
     await call(fake.driver, "repository.addDeployKey", key);
     await expect(call(fake.driver, "repository.addDeployKey", key)).rejects.toMatchObject({ status: 422 });

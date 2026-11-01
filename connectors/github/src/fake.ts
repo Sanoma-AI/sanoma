@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
 import { type FixtureError, tfFake, type TfFakeOptions, type TfFakeState } from "@sanoma-ai/bridge/fake";
 import { DriverError } from "@sanoma-ai/workflows";
+import type { z } from "zod";
 import { defineFake, type FakeOptions } from "@sanoma-ai/workflows/fake";
 import { githubApp, githubTf } from "./connector.ts";
+import { failed } from "./rest.ts";
 import { owned } from "./owner.ts";
 
 /**
@@ -37,10 +39,7 @@ export interface FakeGithubAppState extends Record<string, unknown> {
   /** Counts up, for ids made in order. */
   seq: number;
   /** The App's installations, by id. */
-  installations: Record<
-    number,
-    { account: { login: string; type: "User" | "Organization" }; repositorySelection: "all" | "selected" }
-  >;
+  installations: Record<number, Omit<z.output<typeof githubApp.installation.get.output>, "id">>;
   /** The repositories, by `<owner>/<name>`. */
   repositories: Record<string, FakeAppRepository>;
 }
@@ -48,9 +47,12 @@ export interface FakeGithubAppState extends Record<string, unknown> {
 /** A SHA of `parts`, as a commit's: the same for the same parts. */
 const shaOf = (...parts: unknown[]) => createHash("sha1").update(JSON.stringify(parts)).digest("hex");
 
-/** A `DriverError` as the driver makes one of GitHub's answer `status`. */
-const fail = (status: number, message: string) =>
-  new DriverError(`github: answered ${status}: ${message}`, { retryable: false, status });
+/** The `DriverError` the driver makes of GitHub's answer `status` to `<method> <path>`. */
+const fail = (where: string, status: number, message: string, errors: string[] = []) => {
+  const [method = "", path = ""] = where.split(" ");
+  const body = { message, ...(errors.length && { errors: errors.map((e) => ({ message: e })) }) };
+  return failed(method, path, { status, headers: new Headers(), body });
+};
 
 /** The fake's template, which `repository.generate` copies. */
 export const FAKE_TEMPLATE = "Sanoma-AI/company-template";
@@ -79,35 +81,39 @@ export function fakeGithubApp(options: FakeOptions = {}) {
         },
       }),
       ops: (state) => {
-        const installed = (id: number) => {
+        /** The installation, as its JWT reads it (`where`), else its token is minted. */
+        const installed = (id: number, where = `POST /app/installations/${id}/access_tokens`) => {
           const found = state.installations[id];
-          if (!found) throw fail(404, "Not Found");
+          if (!found) throw fail(where, 404, "Not Found");
           return found;
         };
-        /** A repository the installation reaches: one of its own account's. */
-        const reached = (installation: number, repository: string) => {
-          const { account } = installed(installation);
+        /** Whether `owner` is the installation's account. */
+        const owns = (installation: number, owner: string) =>
+          owner.toLowerCase() === installed(installation).account.login.toLowerCase();
+        /** A repository the installation reaches (one of its own account's), as `<method> <path under it>` asks. */
+        const reached = (installation: number, repository: string, where: string) => {
           const found = state.repositories[repository];
-          if (!found || repository.split("/")[0]!.toLowerCase() !== account.login.toLowerCase()) {
-            throw fail(404, "Not Found");
+          if (!found || !owns(installation, repository.split("/")[0]!)) {
+            const [method, path] = where.split(" ");
+            throw fail(`${method} /repos/${repository}${path}`, 404, "Not Found");
           }
           return found;
         };
         return {
           installation: {
-            get: async ({ id }) => ({ id, ...installed(id) }),
+            get: async ({ id }) => ({ id, ...installed(id, `GET /app/installations/${id}`) }),
           },
           repository: {
             generate: async ({ installation, template, owner, name, private: isPrivate, description }) => {
-              const { account } = installed(installation);
+              const mine = owns(installation, owner);
+              const where = `POST /repos/${template.owner}/${template.repository}/generate`;
               const from = state.repositories[`${template.owner}/${template.repository}`];
-              if (!from) throw fail(404, "Not Found");
-              if (owner.toLowerCase() !== account.login.toLowerCase()) {
-                throw fail(403, "Resource not accessible by integration");
-              }
+              if (!from) throw fail(where, 404, "Not Found");
+              if (!mine) throw fail(where, 403, "Resource not accessible by integration");
               const fullName = `${owner}/${name}`;
-              if (state.repositories[fullName])
-                throw fail(422, "Validation Failed: name already exists on this account");
+              if (state.repositories[fullName]) {
+                throw fail(where, 422, "Validation Failed", ["name already exists on this account"]);
+              }
               const files = structuredClone(from.branches[from.defaultBranch]?.files ?? {});
               const id = ++state.seq;
               state.repositories[fullName] = {
@@ -127,7 +133,7 @@ export function fakeGithubApp(options: FakeOptions = {}) {
               };
             },
             commit: async ({ installation, repository, branch, message, files }) => {
-              const repo = reached(installation, repository);
+              const repo = reached(installation, repository, `GET /branches/${branch}`);
               const head = repo.branches[branch] ?? repo.branches[repo.defaultBranch];
               if (!head)
                 throw new DriverError(`github: ${repository} has no ${repo.defaultBranch}`, {
@@ -139,8 +145,10 @@ export function fakeGithubApp(options: FakeOptions = {}) {
               return { sha };
             },
             addDeployKey: async ({ installation, repository, title, key, readOnly }) => {
-              const repo = reached(installation, repository);
-              if (repo.keys.some((k) => k.key === key)) throw fail(422, "Validation Failed: key is already in use");
+              const repo = reached(installation, repository, "POST /keys");
+              if (repo.keys.some((k) => k.key === key)) {
+                throw fail(`POST /repos/${repository}/keys`, 422, "Validation Failed", ["key is already in use"]);
+              }
               const id = ++state.seq;
               repo.keys.push({ id, title, key, readOnly });
               return { id };
