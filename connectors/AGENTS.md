@@ -4,23 +4,23 @@ One workspace package per vendor, each built on `@sanoma-ai/workflows`. A connec
 
 ## Contents
 
-| Path                                      | What it is                                                                                                                                          |
-| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`anthropic/`](anthropic/AGENTS.md)       | `@sanoma-ai/connector-anthropic`: Anthropic's Claude models (a model half) on the company's key                                                     |
-| [`better-auth/`](better-auth/AGENTS.md)   | `@sanoma-ai/connector-better-auth`: Better Auth, the visitor login for public sites and the staff sign-in on a host, on the company's database      |
-| [`bluesky/`](bluesky/AGENTS.md)           | `@sanoma-ai/connector-bluesky`: Bluesky (AT Protocol) post operations and an in-memory fake                                                         |
-| [`cloudflare/`](cloudflare/AGENTS.md)     | `@sanoma-ai/connector-cloudflare`: a Container host that stops when quiet, and its Durable Object alarm that wakes it                               |
-| [`docker/`](docker/AGENTS.md)             | `@sanoma-ai/connector-docker`: the local Docker host, a container that runs the company                                                             |
-| [`exa/`](exa/AGENTS.md)                   | `@sanoma-ai/connector-exa`: Exa web search, page contents, similar pages and answers, and an in-memory fake                                         |
-| [`gcp/`](gcp/AGENTS.md)                   | `@sanoma-ai/connector-gcp`: KMS/IAM provisioning with named OIDC workload identities and isolated provider sessions                                 |
-| [`ghost/`](ghost/AGENTS.md)               | `@sanoma-ai/connector-ghost`: Ghost Admin API post operations and an in-memory fake                                                                 |
-| [`github/`](github/AGENTS.md)             | `@sanoma-ai/connector-github`: GitHub resources (OpenTofu provider), operations through its App, pull requests                                      |
-| [`invoices/`](invoices/AGENTS.md)         | `@sanoma-ai/connector-invoices` (private until its first release, #526): local invoice PDF generation for standard, pet-sitting and cleaning inputs |
-| [`neon/`](neon/AGENTS.md)                 | `@sanoma-ai/connector-neon`: Neon projects (the company's database, which pauses and branches), branches and computes                               |
-| [`sanoma-cloud/`](sanoma-cloud/AGENTS.md) | `@sanoma-ai/connector-sanoma-cloud`: Sanoma Cloud's database and host (a host that binds its own bootstrap), over sanoma-ops's workflows            |
-| [`resend/`](resend/AGENTS.md)             | `@sanoma-ai/connector-resend`: Resend broadcast and email operations and an in-memory fake                                                          |
-| [`stripe/`](stripe/AGENTS.md)             | `@sanoma-ai/connector-stripe`: Stripe resources read through its OpenTofu provider                                                                  |
-| [`supabase/`](supabase/AGENTS.md)         | `@sanoma-ai/connector-supabase`: Supabase projects (OpenTofu provider), pooler and health                                                           |
+| Path                                      | What it is                                                                                                                                     |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`anthropic/`](anthropic/AGENTS.md)       | `@sanoma-ai/connector-anthropic`: Anthropic's Claude models (a model half) on the company's key                                                |
+| [`better-auth/`](better-auth/AGENTS.md)   | `@sanoma-ai/connector-better-auth`: Better Auth, the visitor login for public sites and the staff sign-in on a host, on the company's database |
+| [`bluesky/`](bluesky/AGENTS.md)           | `@sanoma-ai/connector-bluesky`: Bluesky (AT Protocol) post operations and an in-memory fake                                                    |
+| [`cloudflare/`](cloudflare/AGENTS.md)     | `@sanoma-ai/connector-cloudflare`: a Container host that stops when quiet, and its Durable Object alarm that wakes it                          |
+| [`docker/`](docker/AGENTS.md)             | `@sanoma-ai/connector-docker`: the local Docker host, a container that runs the company                                                        |
+| [`exa/`](exa/AGENTS.md)                   | `@sanoma-ai/connector-exa`: Exa web search, page contents, similar pages and answers, and an in-memory fake                                    |
+| [`gcp/`](gcp/AGENTS.md)                   | `@sanoma-ai/connector-gcp`: KMS/IAM provisioning with named OIDC workload identities and isolated provider sessions                            |
+| [`ghost/`](ghost/AGENTS.md)               | `@sanoma-ai/connector-ghost`: Ghost Admin API post operations and an in-memory fake                                                            |
+| [`github/`](github/AGENTS.md)             | `@sanoma-ai/connector-github`: GitHub resources (OpenTofu provider), operations through its App, pull requests                                 |
+| [`invoices/`](invoices/AGENTS.md)         | `@sanoma-ai/connector-invoices` (private): local invoice PDF generation for standard, pet-sitting and cleaning inputs                          |
+| [`neon/`](neon/AGENTS.md)                 | `@sanoma-ai/connector-neon`: Neon projects (the company's database, which pauses and branches), branches and computes                          |
+| [`sanoma-cloud/`](sanoma-cloud/AGENTS.md) | `@sanoma-ai/connector-sanoma-cloud`: Sanoma Cloud's database and host (a host that binds its own bootstrap), over sanoma-ops's workflows       |
+| [`resend/`](resend/AGENTS.md)             | `@sanoma-ai/connector-resend`: Resend broadcast and email operations and an in-memory fake                                                     |
+| [`stripe/`](stripe/AGENTS.md)             | `@sanoma-ai/connector-stripe`: Stripe resources read through its OpenTofu provider                                                             |
+| [`supabase/`](supabase/AGENTS.md)         | `@sanoma-ai/connector-supabase`: Supabase projects (OpenTofu provider), pooler and health                                                      |
 
 Local computation connectors may use the same operation contract without representing an external vendor. [`invoices/`](invoices/AGENTS.md) runs its portable generator in both live and fake execution, needs no credentials or HTTP replay, and still uses normal policy and checkpoint boundaries.
 
