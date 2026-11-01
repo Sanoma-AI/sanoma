@@ -107,6 +107,7 @@ describe("sanoma/ui", () => {
         "FieldTitle",
         "FloatingCard",
         "Input",
+        "InvoiceEditor",
         "Item",
         "ItemActions",
         "ItemContent",

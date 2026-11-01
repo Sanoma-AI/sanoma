@@ -255,6 +255,26 @@ async function markWon(company: string): Promise<string> {
 
 `describeConfig` reads what each site calls from its pages' source, parsed and never run, since they are browser code (`readSites`, in `@sanoma-ai/workflows/describe`: the site's outline, as a workflow has one): a workflow's page and a collection's list the sites' pages that call them under **Used by**, and a call to a workflow, collection or operation the config does not have, or to an operation a page may not call directly, fails `sanoma check`. A page links there only when this build serves it. Name what a site calls in its code (`<RunForm workflow="announce" />`, `api.announce.start(…)`, `api.data.outbound.list()`): a name held in a variable or built at run time is not read, so its page is not listed.
 
+### Stateless invoice editor
+
+```tsx
+import { InvoiceEditor } from "sanoma/ui";
+
+export function CleaningInvoiceTool() {
+  return <InvoiceEditor kind="cleaning" />;
+}
+```
+
+Use the site's existing `sanoma/ui.css` import and theme. `kind` is `"pet-sitting"` or `"cleaning"`; both use TanStack Form over the shared [invoice schemas and industry adapters](../invoices/README.md). Optional `initialValue` is the corresponding `PetSittingInput` or `CleaningInput`. It is read once per mount: change the component's React `key` to replace initial data for the same industry. Changing `kind` resets the editor. Invoice numbers and dates are entered explicitly.
+
+The editor keeps draft fields, logo bytes and rendered PDFs in memory only. It does not save drafts, defaults or recovery data in browser storage, cookies or URLs, and it makes no document-generation or save requests. Native autocomplete hints let the browser offer contact/address values according to its own settings; the component does not manage those suggestions. Closing or reloading loses the draft. A downloaded PDF is the user's explicit file export.
+
+Valid changes update the actual PDF preview after a 300 ms debounce. The renderer loads on demand. The last valid preview remains visible while fields are incomplete or a new render runs, and an older completion cannot replace the current preview. Download validates the current form and waits for that revision, reusing its preview render when possible. If fields change during preparation, the user is asked to download the updated version. Browsers without an embedded PDF viewer can still download. Object URLs are revoked on replacement/unmount; queued preview work is cancelled, while an already running render finishes without publishing after unmount.
+
+The optional `onDownload(file)` callback **replaces** the built-in browser download. It receives an `InvoiceFile` and may return a promise; the caller owns any download or other action it performs. Without a callback, clicking Download PDF creates a local file download. Rendering failures appear beside the preview, field errors beside touched fields, and a rejected callback gets a separate download error. See the invoice package's [PDF limits](../invoices/README.md#pdf-rendering) for supported text, currencies and PNG logos. The editor includes no save, signup or automation handoff; that conversion design remains [TBD (#504)](https://github.com/Sanoma-AI/sanoma/issues/504).
+
+For local verification, run `pnpm exec vitest run packages/app/test/invoice-editor.test.ts packages/app/test/ui.test.ts`, then `pnpm --filter @sanoma-ai/app smoke:invoices /tmp/invoice-editor-proof` with Chrome installed (or `CHROME_PATH` set). The browser smoke renders real PDFs, exercises both industry adapters, downloads, delayed preview completion, mobile layout, field events, logos and viewer fallback, and rejects storage writes and document network requests. Viewport emulation does not replace physical-device testing.
+
 ### Content
 
 `content`, from `sanoma/site`, is the Markdown under the company repo's `content/`, as of the build: each folder directly under `content/` is a kind, and each `*.md` directly in it an entry, its slug the file's name. Both names are URL segments (`/^[a-z][a-z0-9-]*$/`); subfolders, `.mdx` and other files are left alone. A post, `content/posts/zapier-and-sanoma.md`, and the page that shows it:
