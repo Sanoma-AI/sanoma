@@ -260,6 +260,12 @@ const appDriver = defineDriver(githubApp, {
       }
       return { sha: commit.sha };
     },
+    async head({ installation, repository, branch }, call) {
+      const repo = repoOf(repository);
+      const token = await tokenFor(call, installation, repo.name);
+      const { commit } = await ok(token, "GET", `${repo.path}/branches/${branchPath(branch)}`, Branch);
+      return { sha: commit.sha };
+    },
     async addDeployKey({ installation, repository, title, key, readOnly }, call) {
       const repo = repoOf(repository);
       const token = await tokenFor(call, installation, repo.name);

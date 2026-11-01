@@ -146,6 +146,14 @@ const appSpecs = {
       output: z.object({ sha: z.string().describe("The new commit's") }),
       target: ({ repository }: { repository: string }) => repository,
     },
+    head: {
+      effect: "read",
+      idempotent: true,
+      description: "Read the commit a branch is at, through an installation of the GitHub App",
+      input: z.object({ installation, repository: fullName, branch: z.string().min(1) }),
+      output: z.object({ sha: z.string().describe("The branch's head commit") }),
+      target: ({ repository }: { repository: string }) => repository,
+    },
     addDeployKey: {
       effect: "write",
       // The driver finds what an earlier try of the same step made, so a retry repeats nothing.
@@ -177,7 +185,7 @@ type GithubSpecs = Omit<typeof githubTf.resources, "repository"> & {
 
 /**
  * The connector's operations: each resource type's (`github.repository.read`, …), and those
- * through the App, `installation.get` and, in the repository's group, `generate`, `commit` and
+ * through the App, `installation.get` and, in the repository's group, `generate`, `commit`, `head` and
  * `addDeployKey` (Neon's pattern for operations beside a type's).
  */
 export const githubOps = {
