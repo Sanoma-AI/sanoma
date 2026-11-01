@@ -529,6 +529,23 @@ describe("the stop rule with the environment's wakeup", () => {
     expect(wakes).toEqual([]);
     expect(registered).toEqual([]);
   });
+
+  it("ignores the environment's wakeup in an instance that runs the wakeup service, which must not stop", async () => {
+    vi.stubEnv("SANOMA_HOST_URL", host);
+    vi.stubEnv("SANOMA_WAKEUP_TOKEN", TOKEN);
+    app.config.wakeup = true;
+    try {
+      const runId = await app.client.start(nap, { seconds: 30 }, { startedBy: alice });
+      const stops: SelfStop[] = [];
+      const worker = await app.start({ ...fast, onStopped: (s) => stops.push(s) });
+      await waitFor(() => worker.deadlines.waitOf(runId) !== undefined);
+      await new Promise((r) => setTimeout(r, 500));
+      expect(stops).toEqual([]);
+      expect(wakes).toEqual([]);
+    } finally {
+      delete app.config.wakeup;
+    }
+  });
 });
 
 describe("the supervisor", () => {

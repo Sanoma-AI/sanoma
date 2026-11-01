@@ -219,6 +219,31 @@ const health = async (
   return { error, exit: typeof body?.exit === "string" };
 };
 
+/**
+ * Each declared hostname's zone id, by hostname, looked up in the account once per apex; a
+ * refusal for a hostname whose zone the account does not hold.
+ */
+const zonesOf = async (cf: CloudflareApi, name: string, hostnames: string[]) => {
+  const zones = new Map<string, string>();
+  const found = new Map<string, string>();
+  for (const hostname of hostnames) {
+    const apex = apexOf(hostname);
+    let id = zones.get(apex);
+    if (id === undefined) {
+      id = await cf.zone(apex);
+      if (id === undefined) {
+        throw refused(
+          `container ${name}: the account holds no zone ${apex} for the domain ${hostname}: add the zone to the account, or declare another domain`,
+          "no_zone",
+        );
+      }
+      zones.set(apex, id);
+    }
+    found.set(hostname, id);
+  }
+  return found;
+};
+
 /** Makes the Worker's custom domains the declared ones: the others detached, each missing one attached. */
 const routeDomains = async (cf: CloudflareApi, script: string, declared: Map<string, string>) => {
   const attached = await cf.domains(script);
@@ -243,34 +268,6 @@ export interface ContainerOptions {
  * the object destroys a container started at another and starts it again.
  */
 export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs }: ContainerOptions) {
-  /** Each zone found, by `<account>/<apex>`, for the life of the driver: a zone held is looked up once. */
-  const zones = new Map<string, string>();
-
-  /**
-   * Each declared hostname's zone id, by hostname, looked up in the account (once per apex); a
-   * refusal for a hostname whose zone the account does not hold.
-   */
-  const zonesOf = async (cf: CloudflareApi, name: string, hostnames: string[]) => {
-    const found = new Map<string, string>();
-    for (const hostname of hostnames) {
-      const apex = apexOf(hostname);
-      const key = `${cf.account}/${apex}`;
-      let id = zones.get(key);
-      if (id === undefined) {
-        id = await cf.zone(apex);
-        if (id === undefined) {
-          throw refused(
-            `container ${name}: the account holds no zone ${apex} for the domain ${hostname}: add the zone to the account, or declare another domain`,
-            "no_zone",
-          );
-        }
-        zones.set(key, id);
-      }
-      found.set(hostname, id);
-    }
-    return found;
-  };
-
   /** The Worker `name` runs, from its bindings and its application; `checkHealth` asks it too. None for a Worker that is not Sanoma's. */
   const inspect = async (name: string, checkHealth: boolean) => {
     const cf = api();
@@ -281,6 +278,12 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
     const url = await cf.workerUrl(script);
     const text = new Map(bindings.filter((b) => b.type === "plain_text").map((b) => [b.name, b.text ?? ""]));
     const served = text.get(TEXT.domains);
+    // The domains it serves that are attached: one whose attach failed, or detached by hand, is
+    // drift, so the next apply attaches it again.
+    const attached = served ? new Set((await cf.domains(script)).map((d) => d.hostname)) : undefined;
+    const domains = served
+      ? Object.fromEntries(Object.entries(domainsOf(served)).filter(([, hostname]) => attached!.has(hostname)))
+      : {};
     const state: ContainerState = {
       id: app?.id ?? null,
       name,
@@ -290,7 +293,7 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
       ref: text.get(TEXT.ref) ?? "",
       revision: text.get(TEXT.revision) ?? null,
       port: Number(text.get(TEXT.port) ?? 0),
-      ...(served && { domains: domainsOf(served) }),
+      ...(Object.keys(domains).length > 0 && { domains }),
       url,
       healthy: checkHealth && app !== undefined && "revision" in (await health(cf, url, false)),
     };

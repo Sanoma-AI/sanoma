@@ -452,6 +452,17 @@ describe.skipIf(live)("cloudflareDriver", () => {
       ]);
     });
 
+    it("plans an update when a domain the Worker serves is not attached, so the next apply attaches it", async () => {
+      const [settings, ...rest] = only("update-to-a-new-image", (_, i) => i < 3);
+      const body = structuredClone(settings!.body) as { result: { bindings: object[] } };
+      body.result.bindings.push({ type: "plain_text", name: "SANOMA_DOMAINS", text: "www=www.acme.example" });
+      const none = reply(apiPath("/workers/domains?service=sanoma-company"), 200, cfResult([]));
+      play("domain-unattached", [{ ...settings!, body }, ...rest, none]);
+      const domains = { www: "www.acme.example" };
+      const planned = await op("container.plan", { id: "company", desired: { ...desired, domains } });
+      expect(planned).toMatchObject({ action: "update", planned: { domains } });
+    });
+
     it("refuses a domain whose zone the account does not hold, naming both, before anything changes", async () => {
       const noZone = reply(`/client/v4/zones?name=other.example&account.id=${TEST_ACCOUNT}`, 200, {
         ...cfResult([]),
@@ -473,7 +484,12 @@ describe.skipIf(live)("cloudflareDriver", () => {
       const [settings, ...rest] = only("update-to-a-new-image", (_, i) => i < 3);
       const body = structuredClone(settings!.body) as { result: { bindings: object[] } };
       body.result.bindings.push({ type: "plain_text", name: "SANOMA_DOMAINS", text: "www=acme.example" });
-      play("domains-removed", [{ ...settings!, body }, ...rest]);
+      const attached = reply(
+        apiPath("/workers/domains?service=sanoma-company"),
+        200,
+        cfResult([{ id: "d1", hostname: "acme.example", service: "sanoma-company", zone_id: ZONE }]),
+      );
+      play("domains-removed", [{ ...settings!, body }, ...rest, attached]);
       expect(await op("container.plan", { id: "company", desired })).toMatchObject({ action: "update" });
     });
 

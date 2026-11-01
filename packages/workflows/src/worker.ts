@@ -117,17 +117,16 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
   setLogLevel(options.logLevel);
   // Read once, when it matters: a worker stops itself, registering its next deadline there, only
   // when its caller hears it stop (`onStopped`).
-  // The data files' wakeup, else the one a host Sanoma Cloud made names in the environment.
+  // The data files' wakeup, else the one a host Sanoma Cloud made names in the environment, which an
+  // instance running the wakeup service ignores: it must not stop.
   const wakeup =
     options.onStopped || config.wakeup === true
-      ? ((await declaredWakeup(config)) ?? envWakeup(process.env))
+      ? ((await declaredWakeup(config)) ?? (config.wakeup === true ? undefined : envWakeup(process.env)))
       : undefined;
   // The wakeup service wakes the instances that stop: one that runs it must not stop with its worker.
   if (config.wakeup === true && wakeup) {
     throw new Error(
-      "type" in wakeup
-        ? "The config runs the wakeup service (`wakeup: true`) and declares a wakeup of its own: an instance that runs the service must not stop, so leave out one of them"
-        : "The config runs the wakeup service (`wakeup: true`) and its environment names a wakeup of its own (SANOMA_HOST_URL and SANOMA_WAKEUP_TOKEN): an instance that runs the service must not stop, so leave out one of them",
+      "The config runs the wakeup service (`wakeup: true`) and declares a wakeup of its own: an instance that runs the service must not stop, so leave out one of them",
     );
   }
   // The config's own, or a Postgres store made for this worker, which `stop` then closes.
