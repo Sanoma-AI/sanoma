@@ -1,18 +1,15 @@
-import { createHmac, createVerify, generateKeyPairSync } from "node:crypto";
+import { createHmac } from "node:crypto";
 import { type Exchange, live, replay } from "@sanoma-ai/testing/replay";
 import { remoteFor, resolveConfig } from "@sanoma-ai/workflows";
 import { describe, expect, it } from "vitest";
 import { github } from "../src/index.ts";
 import { appJwt, GITHUB_APP_SECRETS, githubRemote, githubToken } from "../src/remote.ts";
+import { app, pem, scrub, signer } from "./app-keys.ts";
 
 // GitHub's remote half over replayed replies. The reads (`remote-*.json`) are GitHub's own
 // answers, for Sanoma-AI/sanoma (public, a ruleset requiring a pull request) and sanoma-ops (private,
 // on Free). The writes are hand-written in the shape GitHub answers, for a repository that does not
 // exist, so no live run opens, merges or comments on anything: they skip themselves live.
-
-/** What a recording must not keep: a token GitHub minted. */
-const scrub = (exchanges: Exchange[]): Exchange[] =>
-  JSON.parse(JSON.stringify(exchanges).replaceAll(/"token":"[^"]*"/g, '"token":"ghs_recorded"'));
 
 const { play, sent } = replay({
   fixtures: new URL("./fixtures/", import.meta.url),
@@ -28,18 +25,6 @@ const only = (values: Record<string, string | undefined>) => ({
 });
 /** The secrets as the app reads them: here from the environment, which the replay sets. */
 const fromEnv = only(process.env);
-
-/** The App's keys: a key pair of its own, made once. */
-const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
-const pem = privateKey.export({ type: "pkcs1", format: "pem" }).toString();
-const app = { [GITHUB_APP_SECRETS.id]: "4242", [GITHUB_APP_SECRETS.pem]: pem };
-
-/** The App's id a request's JWT is signed by, or "nobody" when the signature does not verify. */
-const signer = (headers: Headers) => {
-  const [head, body, signature] = headers.get("authorization")!.replace("Bearer ", "").split(".");
-  const verified = createVerify("RSA-SHA256").update(`${head}.${body}`).verify(publicKey, signature!, "base64url");
-  return verified ? JSON.parse(Buffer.from(body!, "base64url").toString()).iss : "nobody";
-};
 
 /** A branch head the hand-written replies name. */
 const HEAD = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678";

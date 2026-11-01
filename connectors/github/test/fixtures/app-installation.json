@@ -1,0 +1,25 @@
+[
+  {
+    "method": "GET",
+    "path": "/app/installations/7",
+    "status": 200,
+    "body": {
+      "id": 7,
+      "account": {
+        "login": "acme",
+        "id": 1,
+        "type": "Organization"
+      },
+      "repository_selection": "selected",
+      "app_id": 4242,
+      "target_type": "Organization",
+      "permissions": {
+        "administration": "write",
+        "contents": "write",
+        "metadata": "read"
+      },
+      "events": ["push", "pull_request"],
+      "created_at": "2026-10-31T12:00:00Z"
+    }
+  }
+]
