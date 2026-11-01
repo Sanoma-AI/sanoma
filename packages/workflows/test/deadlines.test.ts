@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { DBOS, type DBOSClient, type WorkflowStatus } from "@dbos-inc/dbos-sdk";
 import { startTestWorker, testDatabaseUrl } from "@sanoma-ai/testing";
 import { Pool } from "pg";
@@ -12,6 +14,7 @@ import {
   defineDriver,
   defineResource,
   defineWorkflow,
+  envWakeup,
   memoryLedger,
   resolveConfig,
   SanomaClient,
@@ -432,6 +435,99 @@ describe("the stop rule", () => {
     await app.start({ stopCheckMs: 60_000 });
     await app.client.decide(runId, { decision: "approve", by: { id: "lead" } });
     expect(await app.client.result(runId)).toBe("asked");
+  });
+});
+
+describe("envWakeup", () => {
+  it("names the host's wakeup when both values are set, its URL without a trailing slash", () => {
+    const env = { SANOMA_HOST_URL: "https://acme.example.test/", SANOMA_WAKEUP_TOKEN: "swi_token" };
+    expect(envWakeup(env)).toEqual({ url: "https://acme.example.test", token: "swi_token" });
+    expect(envWakeup({ SANOMA_HOST_URL: env.SANOMA_HOST_URL })).toBeUndefined();
+    expect(envWakeup({ SANOMA_WAKEUP_TOKEN: env.SANOMA_WAKEUP_TOKEN })).toBeUndefined();
+    expect(envWakeup({ SANOMA_HOST_URL: "", SANOMA_WAKEUP_TOKEN: "" })).toBeUndefined();
+  });
+});
+
+describe("the stop rule with the environment's wakeup", () => {
+  // No data file declares a wakeup: the host names its own in the environment, as Sanoma Cloud's does.
+  const app = useWorker("deadlines_env", {});
+  const fast = { stopCheckMs: 100, idleHorizonMs: 1_000 };
+  const TOKEN = "swi_the-instance-token";
+  const wakes: { method: string; url: string; authorization: string | undefined; body: unknown }[] = [];
+  let answer: { status: number; body?: unknown } = { status: 204 };
+  let server: Server;
+  let host: string;
+  beforeAll(async () => {
+    server = createServer((req, res) => {
+      let text = "";
+      req.on("data", (chunk: Buffer) => (text += chunk.toString()));
+      req.on("end", () => {
+        wakes.push({
+          method: req.method ?? "",
+          url: req.url ?? "",
+          authorization: req.headers.authorization,
+          body: text ? JSON.parse(text) : undefined,
+        });
+        if (answer.body === undefined) return void res.writeHead(answer.status).end();
+        res.writeHead(answer.status, { "content-type": "application/json" }).end(JSON.stringify(answer.body));
+      });
+    });
+    await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+    host = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    wakes.length = 0;
+    answer = { status: 204 };
+  });
+  afterAll(async () => {
+    server.closeAllConnections();
+    await new Promise<void>((done) => server.close(() => done()));
+  });
+
+  it("registers the next deadline at the host's wake route with the token, and stops", async () => {
+    vi.stubEnv("SANOMA_HOST_URL", `${host}/`);
+    vi.stubEnv("SANOMA_WAKEUP_TOKEN", TOKEN);
+    const runId = await app.client.start(nap, { seconds: 30 }, { startedBy: alice });
+    const stops: SelfStop[] = [];
+    await app.start({ ...fast, onStopped: (s) => stops.push(s) });
+    await waitFor(() => stops.length === 1);
+    const at = new Date((await untilOf(app.client, runId))!).toISOString();
+    expect(stops).toEqual([{ at }]);
+    expect(wakes).toEqual([{ method: "PUT", url: "/__sanoma/wake", authorization: `Bearer ${TOKEN}`, body: { at } }]);
+    // No driver: the connector's register is never called.
+    expect(registered).toEqual([]);
+    expect(await app.row()).toMatchObject({ at: new Date(at), last_error: null });
+  });
+
+  it("keeps running when the host refuses the registration, recording its status and error", async () => {
+    vi.stubEnv("SANOMA_HOST_URL", host);
+    vi.stubEnv("SANOMA_WAKEUP_TOKEN", TOKEN);
+    answer = { status: 401, body: { error: "the token is not this host's SANOMA_WAKEUP_TOKEN" } };
+    await app.client.start(nap, { seconds: 30 }, { startedBy: alice });
+    const stops: SelfStop[] = [];
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    await app.start({ ...fast, onStopped: (s) => stops.push(s) });
+    await waitFor(async () => (await app.row()).last_error !== null);
+    expect((await app.row()).last_error).toBe(
+      `PUT ${host}/__sanoma/wake answered 401: the token is not this host's SANOMA_WAKEUP_TOKEN`,
+    );
+    expect(stops).toEqual([]);
+    warn.mockRestore();
+  });
+
+  it("never stops, registering nothing, when the environment names no wakeup", async () => {
+    vi.stubEnv("SANOMA_HOST_URL", undefined);
+    vi.stubEnv("SANOMA_WAKEUP_TOKEN", undefined);
+    const runId = await app.client.start(nap, { seconds: 30 }, { startedBy: alice });
+    const stops: SelfStop[] = [];
+    const worker = await app.start({ ...fast, onStopped: (s) => stops.push(s) });
+    await waitFor(() => worker.deadlines.waitOf(runId) !== undefined);
+    await new Promise((r) => setTimeout(r, 500));
+    expect(await worker.idle()).toBe(true);
+    expect(stops).toEqual([]);
+    expect(wakes).toEqual([]);
+    expect(registered).toEqual([]);
   });
 });
 

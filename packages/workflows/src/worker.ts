@@ -2,10 +2,19 @@ import { DBOS, type ScheduledWorkflowFn } from "@dbos-inc/dbos-sdk";
 import { awaitApproval } from "./approvals.ts";
 import { buildCtx, decideStart, isInfrastructureError, startHoldOf } from "./call.ts";
 import { dbosStatusesOf } from "./client.ts";
-import { declaredWakeup, type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
+import { declaredWakeup, envWakeup, type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { configuredSecrets } from "./credentials.ts";
 import { type Db, DBOS_DATABASE_OPTIONS, lazyPool, prepareDatabase, stampVersion } from "./db.ts";
-import { deadlineRegistry, type Deadlines, idle, onOwnQueue, type SelfStop, stopWhenIdle } from "./deadlines.ts";
+import {
+  deadlineRegistry,
+  type Deadlines,
+  declaredRegister,
+  envRegister,
+  idle,
+  onOwnQueue,
+  type SelfStop,
+  stopWhenIdle,
+} from "./deadlines.ts";
 import type { WorkflowDefinition } from "./define.ts";
 import { credentialsOf, unconfigured, unconfiguredSummary } from "./env.ts";
 import { errorInfo, parseOrThrow, PolicyDeniedError } from "./errors.ts";
@@ -79,10 +88,10 @@ export interface WorkerOptions {
    * and other short waits never stop it.
    */
   idleHorizonMs?: number;
-  /** How often a worker whose data files declare a wakeup checks whether it may stop: every 15 s by default. */
+  /** How often a worker with a wakeup (declared, or named by its environment: `envWakeup`) checks whether it may stop: every 15 s by default. */
   stopCheckMs?: number;
   /**
-   * Given, and with a wakeup declared, the worker stops itself when idle (`stopCheckMs`); without
+   * Given, and with a wakeup (declared, or named by the environment), the worker stops itself when idle (`stopCheckMs`); without
    * it, nobody would start another, so it never does. Called once the worker has stopped itself, with the deadline it registered with the
    * wakeup (null for none): a supervisor starts a fresh worker on the next write or wake, since a
    * stopped one cannot launch again.
@@ -108,11 +117,17 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
   setLogLevel(options.logLevel);
   // Read once, when it matters: a worker stops itself, registering its next deadline there, only
   // when its caller hears it stop (`onStopped`).
-  const wakeup = options.onStopped || config.wakeup === true ? await declaredWakeup(config) : undefined;
+  // The data files' wakeup, else the one a host Sanoma Cloud made names in the environment.
+  const wakeup =
+    options.onStopped || config.wakeup === true
+      ? ((await declaredWakeup(config)) ?? envWakeup(process.env))
+      : undefined;
   // The wakeup service wakes the instances that stop: one that runs it must not stop with its worker.
   if (config.wakeup === true && wakeup) {
     throw new Error(
-      "The config runs the wakeup service (`wakeup: true`) and declares a wakeup of its own: an instance that runs the service must not stop, so leave out one of them",
+      "type" in wakeup
+        ? "The config runs the wakeup service (`wakeup: true`) and declares a wakeup of its own: an instance that runs the service must not stop, so leave out one of them"
+        : "The config runs the wakeup service (`wakeup: true`) and its environment names a wakeup of its own (SANOMA_HOST_URL and SANOMA_WAKEUP_TOKEN): an instance that runs the service must not stop, so leave out one of them",
     );
   }
   // The config's own, or a Postgres store made for this worker, which `stop` then closes.
@@ -232,14 +247,19 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
       warn(`the policies do not hold, so every call and start is refused:\n  ${resolved.policyProblems.join("\n  ")}`);
     }
     if (wakeup && options.onStopped) {
-      const registerId = wakeup.type.wakeup!.register;
       stopRule = stopWhenIdle({
         // The row is one more of the runtime's tables: the secrets' pool, on the same database.
         db: () => secrets.db(),
-        wakeup: wakeup.binding ?? wakeup.id,
-        // `resolveConfig` checked the operation is the config's (`checkWakeupOps`).
-        register: { op: resolved.ops.get(registerId)!, fn: resolved.drivers.get(registerId) },
-        secrets: state.secrets,
+        register:
+          "type" in wakeup
+            ? declaredRegister({
+                // `resolveConfig` checked the operation is the config's (`checkWakeupOps`).
+                op: resolved.ops.get(wakeup.type.wakeup!.register)!,
+                fn: resolved.drivers.get(wakeup.type.wakeup!.register),
+                secrets: state.secrets,
+                wakeup: wakeup.binding ?? wakeup.id,
+              })
+            : envRegister(wakeup),
         deadlines: state.deadlines,
         idle: () => worker.idle(),
         everyMs: options.stopCheckMs ?? 15_000,

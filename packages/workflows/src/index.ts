@@ -56,6 +56,7 @@ export {
 export {
   declaredWakeup,
   defineConfig,
+  envWakeup,
   resolveConfig,
   resolveDatabaseUrl,
   type ResolvedConfig,
@@ -204,6 +205,8 @@ export type { Chat, Chats } from "./chats.ts";
 export {
   checkWakeup,
   type DeclaredWakeup,
+  type EnvWakeup,
+  WAKE_PATH,
   type WakeupOutputs,
   type WakeupRegistration,
   type WakeupSpec,
