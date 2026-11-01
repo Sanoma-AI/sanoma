@@ -1,4 +1,5 @@
 import {
+  ADMIN,
   errorMessage,
   INVITE_SECONDS,
   LOGIN_AGENT,
@@ -54,6 +55,16 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
     } catch {
       return undefined;
     }
+  };
+  /** The nonces of sealed invite requests used, until each expires. */
+  const spent = new Map<string, number>();
+  /** Marks a sealed request's nonce used; false when it was already. */
+  const spend = (nonce: string, exp: number) => {
+    const now = Date.now();
+    for (const [n, until] of spent) if (until <= now) spent.delete(n);
+    if (spent.has(nonce)) return false;
+    spent.set(nonce, exp);
+    return true;
   };
   /** Who the half says is signed in, once per request: `handle` asks, then admission. */
   const verified = new WeakMap<Request, Promise<LoginIdentity | undefined>>();
@@ -137,6 +148,8 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
     if ("request" in body.data) {
       const opened = openInvite(body.data.request);
       if (!opened) return refuse(403, "That invite request is not one this deployment sealed, or it expired");
+      // Each sealed request mints once: a copy of it, replayed before it expires, mints nothing.
+      if (!spend(opened.nonce, opened.exp)) return refuse(403, "That invite request was used already");
       ({ email } = opened);
       by = LOGIN_AGENT;
     } else {
@@ -144,6 +157,8 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
       const identity = await identityOf(request);
       const asking = identity && admitted(identity);
       if (!asking) return refuse(401, "Sign in first");
+      // An invite signs its holder in as that person: only an admin hands one out.
+      if (!asking.groups?.includes(ADMIN)) return refuse(403, `Only someone in ${ADMIN} makes an invite link`);
       ({ email } = body.data);
       by = asking.id;
     }
@@ -184,7 +199,7 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
  * send. What the staff login and every visitor login send their codes with.
  */
 export async function sendLoginCode(client: AppContext["client"], email: string, code: string): Promise<void> {
-  await client.start(LOGIN_CODE_WORKFLOW, { to: email, code: sealLoginCode(code) }, { startedBy: LOGIN_AGENT });
+  await client.start(LOGIN_CODE_WORKFLOW, { to: email, code: sealLoginCode(email, code) }, { startedBy: LOGIN_AGENT });
 }
 
 /** A refusal of `POST /auth/invite`, as JSON saying why. */

@@ -37,11 +37,11 @@ export function loginCodeWorkflow(
     input: LoginCodeInput,
     uses: [sender],
     run: async (ctx, input) => {
-      const [vendor = "", resource = "", name = ""] = sender.id.split(".");
+      const { vendor, resource, name } = sender;
       const mail = {
         to: input.to,
         subject: `Your ${company} sign-in code`,
-        text: textOf(company, openLoginCode(input.code)),
+        text: textOf(company, openLoginCode(input.code, input.to)),
       };
       // `ctx` called directly, so the outline places the call.
       return (ctx as unknown as Record<string, Record<string, Record<string, OpCall>>>)[vendor]![resource]![name]!(

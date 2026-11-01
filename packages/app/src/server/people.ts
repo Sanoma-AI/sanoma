@@ -1,6 +1,6 @@
 // oxlint-disable-next-line import/no-unassigned-import
 import "@tanstack/react-start/server-only";
-import type { Principal } from "@sanoma-ai/workflows";
+import { ADMIN, type Principal } from "@sanoma-ai/workflows";
 import { readPeople } from "@sanoma-ai/workflows/describe";
 import { personsOf } from "@sanoma-ai/workflows/shared";
 import { ApiError, type InviteLink, type PeopleSignIns } from "../api.ts";
@@ -37,6 +37,10 @@ export async function invitePerson(
     throw new ApiError(409, {
       error: "Invite links are for the app on a host: here, the person picker signs anyone in",
     });
+  }
+  // An invite signs its holder in as that person: only an admin hands one out.
+  if (!actor.groups?.includes(ADMIN)) {
+    throw new ApiError(403, { error: `Only someone in ${ADMIN} makes an invite link`, code: "not_approver" });
   }
   const found = declared(app).find((p) => p.id === person);
   if (!found) throw new ApiError(404, { error: `No person ${person} is declared` });

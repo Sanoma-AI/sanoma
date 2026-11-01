@@ -17,6 +17,7 @@ import {
   ANONYMOUS_PRINCIPAL,
   type At,
   declaresPeople,
+  isToken,
   isVisitor,
   type PeopleResource,
   personOf,
@@ -149,7 +150,9 @@ export function admit(
   const who = asking.github ?? asking.id ?? asking.email ?? "This sign-in";
   if (asking.id !== undefined && isVisitor({ id: asking.id })) {
     if (signIn) throw new NotAdmittedError(who);
-    return asking.id === ANONYMOUS ? ANONYMOUS_PRINCIPAL : { id: asking.id, groups: [VISITORS] };
+    if (asking.id === ANONYMOUS) return ANONYMOUS_PRINCIPAL;
+    // A token's groups are its row's (`SanomaClient.tokens`), which only the public front reads; a visitor's are stamped.
+    return { id: asking.id, groups: isToken({ id: asking.id }) ? [...(asking.groups ?? [])] : [VISITORS] };
   }
   if (problems.length) {
     // The runtime's own agents are declared by no file, so a broken one does not stop them (`check`'s scenarios).

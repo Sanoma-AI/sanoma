@@ -22,6 +22,8 @@ writeFileSync(
 export const ada = sanoma.person({ id: "ada", email: "ada@acme.test" });
 export const bo = sanoma.person({ id: "bo", github: "bo-gh" });
 export const cy = sanoma.person({ id: "cy" });
+export const dee = sanoma.person({ id: "dee", email: "dee@acme.test" });
+export const admin = sanoma.group({ name: "admin", members: [ada] });
 `,
 );
 afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -123,7 +125,7 @@ describe("staffLogin", () => {
     expect(await login.handle!(signedIn)).toBeUndefined();
     expect(await login.resolveActor(signedIn)).toEqual({ email: "ada@acme.test" });
     const admitted = admitting(login, () => readPeople(root));
-    expect(await admitted.resolveActor(signedIn)).toEqual({ id: "ada", groups: [] });
+    expect(await admitted.resolveActor(signedIn)).toEqual({ id: "ada", groups: ["admin"] });
     expect(admitted.signOut).toBe("/auth/better-auth/sign-out");
   });
 
@@ -155,6 +157,11 @@ describe("staffLogin", () => {
     expect(await asked.json()).toEqual({ url: `${APP}/auth/invite/tok-ada@acme.test` });
     expect(client.recordInvite).toHaveBeenCalledWith("ada", { by: "ada", expiresAt: expect.any(Date) });
 
+    // An invite signs its holder in as that person: someone not in admin gets none.
+    const notAdmin = await login.handle!(
+      request("/auth/invite", { cookie: "who=dee@acme.test", body: { email: "ada@acme.test" } }),
+    );
+    expect(notAdmin?.status).toBe(403);
     const stranger = await login.handle!(
       request("/auth/invite", { cookie: "who=ada@acme.test", body: { email: "mallory@acme.test" } }),
     );
@@ -177,6 +184,10 @@ describe("staffLogin", () => {
     ))!;
     expect(await asked.json()).toEqual({ url: `${APP}/auth/invite/tok-ada@acme.test` });
     expect(client.recordInvite).toHaveBeenCalledWith("ada", { by: "login", expiresAt: expect.any(Date) });
+    // A copy of a sealed request mints once.
+    const once = sealInvite({ email: "ada@acme.test" });
+    expect((await login.handle!(request("/auth/invite", { body: { request: once } })))?.status).toBe(200);
+    expect((await login.handle!(request("/auth/invite", { body: { request: once } })))?.status).toBe(403);
     const expired = sealInvite({ email: "ada@acme.test", exp: Date.now() - 1 });
     expect((await login.handle!(request("/auth/invite", { body: { request: expired } })))?.status).toBe(403);
     expect((await login.handle!(request("/auth/invite", { body: { nope: 1 } })))?.status).toBe(400);

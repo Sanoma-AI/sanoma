@@ -140,6 +140,25 @@ export async function betterAuthStaffLogin({ databaseUrl, key, sendCode, staff }
     "invite",
   ];
 
+  /** Mints `email`'s invite, server-side, its token from `minted`; a new one replaces the last. */
+  async function mint(email: string, request: Request): Promise<string> {
+    const auth = authFor(request);
+    const normalized = email.toLowerCase();
+    // A new invite replaces the last: the old one's row goes.
+    const { adapter } = await auth.$context;
+    await adapter.deleteMany({
+      model: "verification",
+      where: [{ field: "value", value: JSON.stringify({ type: "magic-link", email: normalized }) }],
+    });
+    await auth.api.signInMagicLink({ body: { email: normalized, callbackURL: "/" }, headers: request.headers });
+    const token = minted.get(normalized);
+    minted.delete(normalized);
+    if (!token) throw new Error("better-auth: the invite was not minted");
+    return token;
+  }
+  /** The invite being minted, which the next waits for. */
+  let invites: Promise<unknown> = Promise.resolve();
+
   return {
     async verify(request) {
       const session = await authFor(request).api.getSession({ headers: request.headers });
@@ -152,24 +171,17 @@ export async function betterAuthStaffLogin({ databaseUrl, key, sendCode, staff }
       if (!ROUTES.has(route) || (!sendCode && CODE_ROUTES.has(route)))
         return new Response("Not found", { status: 404 });
       if (request.method !== "GET" && !sameOrigin(request)) return new Response("Forbidden", { status: 403 });
+      // Any host is allowed, so Better Auth trusts any redirect: only a path on this host is taken.
+      if (!localRedirects(new URL(request.url))) return new Response("Bad Request", { status: 400 });
       return authFor(request).handler(withSignOutBody(request, SIGN_OUT));
     },
     signOut: SIGN_OUT,
     methods,
-    async invite(email, request) {
-      const auth = authFor(request);
-      const normalized = email.toLowerCase();
-      // A new invite replaces the last: the old one's row goes.
-      const { adapter } = await auth.$context;
-      await adapter.deleteMany({
-        model: "verification",
-        where: [{ field: "value", value: JSON.stringify({ type: "magic-link", email: normalized }) }],
-      });
-      await auth.api.signInMagicLink({ body: { email: normalized, callbackURL: "/" }, headers: request.headers });
-      const token = minted.get(normalized);
-      minted.delete(normalized);
-      if (!token) throw new Error("better-auth: the invite was not minted");
-      return token;
+    invite(email, request) {
+      // One at a time: each takes its token from `minted` and replaces the last invite's row.
+      const next = invites.then(() => mint(email, request));
+      invites = next.catch(() => undefined);
+      return next;
     },
     async invitation(token) {
       // The first of the instances: they share the tables.
@@ -191,6 +203,16 @@ const identityOf = (user: StaffUser) => ({
   ...(user.emailVerified && { email: user.email }),
   ...(user.github && { github: user.github }),
 });
+
+/** The query parameters Better Auth redirects to. */
+const REDIRECTS = ["callbackURL", "errorCallbackURL", "newUserCallbackURL"];
+
+/** Whether each redirect a request names is a path on its own host: `/x`, never `//x` or another origin. */
+const localRedirects = (url: URL) =>
+  REDIRECTS.every((name) => {
+    const to = url.searchParams.get(name);
+    return to === null || (to.startsWith("/") && !to.startsWith("//") && !to.startsWith("/\\"));
+  });
 
 /** A token as the magic link plugin stores it (`storeToken: "hashed"`): SHA-256, base64url without padding. */
 const hashed = (token: string) => createHash("sha256").update(token).digest("base64url");

@@ -158,6 +158,11 @@ describe("the staff login", () => {
     expect(await half.invitation!(token)).toBeUndefined();
     const again = (await half.handle(request(invitation.path)))!;
     expect(again.headers.get("location")).toMatch(/error=INVALID_TOKEN/);
+    // A redirect to another origin is refused before Better Auth sees it, which trusts any host here.
+    for (const to of ["https://evil.example", "//evil.example"]) {
+      const query = new URLSearchParams({ token: "x", errorCallbackURL: to });
+      expect((await half.handle(request(`/auth/better-auth/magic-link/verify?${query}`)))?.status, to).toBe(400);
+    }
   });
 
   it("makes no user for anyone the files do not declare, whatever the route", async () => {

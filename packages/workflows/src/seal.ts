@@ -35,14 +35,19 @@ function unseal(purpose: string, sealed: string): unknown {
 const CODE = "login code";
 const INVITE = "invite request";
 
-/** A sign-in code sealed for a `login-code` run's input, so the run's input never shows it. */
-export const sealLoginCode = (code: string): string => seal(CODE, code);
+/**
+ * A sign-in code sealed with the email it is for, for a `login-code` run's input, so the run's
+ * input never shows it and a copy of it opens for no one else.
+ */
+export const sealLoginCode = (to: string, code: string): string => seal(CODE, { to, code });
 
-/** The code `sealLoginCode` sealed; throws for anything else. */
-export function openLoginCode(sealed: string): string {
-  const code = unseal(CODE, sealed);
-  if (typeof code !== "string") throw new Error("The sign-in code is not one this deployment sealed");
-  return code;
+/** The code `sealLoginCode` sealed for `to`; throws for anything else, a code sealed for another email among it. */
+export function openLoginCode(sealed: string, to: string): string {
+  const opened = unseal(CODE, sealed) as { to?: unknown; code?: unknown } | undefined;
+  if (typeof opened?.code !== "string" || opened.to !== to) {
+    throw new Error(`The sign-in code is not one this deployment sealed for ${to}`);
+  }
+  return opened.code;
 }
 
 /** A request for an invite (`POST /auth/invite { request }`): for whom, until when (ms since the epoch), and a nonce. */

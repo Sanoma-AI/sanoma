@@ -72,7 +72,7 @@ When the company's config names a sender (`login: { sender: resend.emails.send }
 - GitHub (`/sign-in/social`, back at `/callback/github`), with the company's GitHub App's client, matched by the verified email GitHub gives, else the login;
 - an invite (`/magic-link/verify`), a one-use magic link valid 24 hours that the app mints server-side (`invite`), a new one replacing the person's last; Better Auth's own `/sign-in/magic-link` is not served.
 
-Every other Better Auth route is a 404, and a POST whose `Origin` is not the request's own host is a 403. Each sign-in is told to the app (`signin.recorded` in the ledger, with how).
+Every other Better Auth route is a 404, a POST whose `Origin` is not the request's own host is a 403, and a `callbackURL`, `errorCallbackURL` or `newUserCallbackURL` that is not a path on the request's host is a 400. Invites are minted one at a time. Each sign-in is told to the app (`signin.recorded` in the ledger, with how).
 
 ### Later
 

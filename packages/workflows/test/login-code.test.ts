@@ -9,7 +9,7 @@ import {
   sealInvite,
   sealLoginCode,
 } from "../src/index.ts";
-import { describeConfig } from "../src/describe.ts";
+import { admit, describeConfig } from "../src/describe.ts";
 import { memoryLedger } from "../src/ledger.ts";
 import { VENDOR } from "../src/op.ts";
 import { isVisitor } from "../src/shared.ts";
@@ -43,7 +43,7 @@ describe("the login-code workflow", () => {
   it("mails the code as the login agent, and the ledger never shows it", async () => {
     const runId = await app.client.start(
       LOGIN_CODE_WORKFLOW,
-      { to: "alice@example.com", code: sealLoginCode("123456") },
+      { to: "alice@example.com", code: sealLoginCode("alice@example.com", "123456") },
       { startedBy: LOGIN_AGENT },
     );
     await app.client.result(runId);
@@ -62,6 +62,13 @@ describe("the login-code workflow", () => {
       { startedBy: LOGIN_AGENT },
     );
     await expect(app.client.result(runId)).rejects.toThrow(/not one this deployment sealed/);
+    // Another's code, copied from their run's input, mails nobody else.
+    const copied = await app.client.start(
+      LOGIN_CODE_WORKFLOW,
+      { to: "mallory@example.com", code: sealLoginCode("alice@example.com", "123456") },
+      { startedBy: LOGIN_AGENT },
+    );
+    await expect(app.client.result(copied)).rejects.toThrow(/not one this deployment sealed for mallory@example.com/);
     expect(app.ops()).toEqual([]);
   });
 
@@ -149,6 +156,16 @@ describe("a token's principal", () => {
     expect(isVisitor({ id: "token:abc" })).toBe(true);
     expect(isVisitor({ id: "token:" })).toBe(false);
   });
+
+  it("keeps the groups its row gives, through admission, and never signs in", () => {
+    const people = { people: [], problems: [] };
+    expect(admit({ id: "token:t1", groups: ["members"] }, people)).toEqual({ id: "token:t1", groups: ["members"] });
+    expect(admit({ id: "visitor:acme:u1", groups: ["members"] }, people)).toEqual({
+      id: "visitor:acme:u1",
+      groups: ["visitors"],
+    });
+    expect(() => admit({ id: "token:t1", groups: ["members"] }, people, true)).toThrow(/not declared/);
+  });
 });
 
 describe("sealed invite requests", () => {
@@ -156,7 +173,7 @@ describe("sealed invite requests", () => {
     const sealed = sealInvite({ email: "alice@example.com" });
     expect(openInvite(sealed)).toMatchObject({ email: "alice@example.com", nonce: expect.any(String) });
     expect(openInvite(sealed, Date.now() + 10 * 60_000)).toBeUndefined();
-    expect(openInvite(sealLoginCode("123456"))).toBeUndefined();
+    expect(openInvite(sealLoginCode("alice@example.com", "123456"))).toBeUndefined();
     expect(openInvite(`${sealed.slice(0, -2)}AA`)).toBeUndefined();
     expect(openInvite("")).toBeUndefined();
   });

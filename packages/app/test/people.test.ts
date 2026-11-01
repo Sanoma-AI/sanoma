@@ -100,6 +100,9 @@ const text = (html: string) =>
     .replace(/\s+/g, " ")
     .trim();
 
+/** Ada, as admitted: in admin. */
+const ADA = { id: "ada", groups: ["admin", "ops"] };
+
 /** The context `startApp` hands a request, for calling the server core as the page's Save does. */
 function context(): AppContext {
   return {
@@ -163,15 +166,21 @@ describe("People", () => {
     );
     const hosted = { ...context(), login: { ...context().login, invite } };
     expect((await peopleSignIns(hosted)).invites).toBe(true);
-    expect(await invitePerson(hosted, { id: "ada" }, "ada", "https://acme.example")).toEqual({
+    // Only an admin hands one out: it signs its holder in as that person.
+    await expect(
+      invitePerson(hosted, { id: "bo", groups: ["ops"] }, "ada", "https://acme.example"),
+    ).rejects.toMatchObject({
+      status: 403,
+    });
+    expect(await invitePerson(hosted, ADA, "ada", "https://acme.example")).toEqual({
       url: "https://acme.example/auth/invite/tok-ada@example.test",
       expiresAt: new Date(0).toISOString(),
     });
     expect(invite).toHaveBeenCalledWith("ada@example.test", { origin: "https://acme.example", by: "ada" });
-    await expect(invitePerson(hosted, { id: "ada" }, "bo", "https://acme.example")).rejects.toMatchObject({
+    await expect(invitePerson(hosted, ADA, "bo", "https://acme.example")).rejects.toMatchObject({
       status: 409,
     });
-    await expect(invitePerson(hosted, { id: "ada" }, "nobody", "https://acme.example")).rejects.toMatchObject({
+    await expect(invitePerson(hosted, ADA, "nobody", "https://acme.example")).rejects.toMatchObject({
       status: 404,
     });
   });

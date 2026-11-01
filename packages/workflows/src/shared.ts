@@ -381,7 +381,10 @@ const TOKEN_ID = /^token:\S+$/;
  * the worker as JSON.
  */
 export const isVisitor = (p: Pick<Principal, "id">): boolean =>
-  p.id === ANONYMOUS || VISITOR_ID.test(p.id) || TOKEN_ID.test(p.id);
+  p.id === ANONYMOUS || VISITOR_ID.test(p.id) || isToken(p);
+
+/** True for an api token's principal (`token:<id>`), whose groups are its row's. */
+export const isToken = (p: Pick<Principal, "id">): boolean => TOKEN_ID.test(p.id);
 
 /**
  * The visitor a public site's login vouches for: `subject` from the provider behind the `login`
