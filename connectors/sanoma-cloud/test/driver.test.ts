@@ -292,16 +292,29 @@ describe("cloud's database through the workflows", () => {
 });
 
 describe("cloud's driver errors", () => {
-  it("fails a call with the run's failure, final for a workflow's refusal", async () => {
+  it("fails a call with a failed run's failure, as the api answers it (422), final", async () => {
     workflows = {
       cloudList: () => ({ output: [] }),
       cloudSignup: () => ({
-        status: 400,
-        body: { error: "acme.sanoma.work is taken: pick another address", code: "invalid_input" },
+        status: 422,
+        body: { error: "acme.sanoma.work is taken: pick another address", code: "driver_failed", runId: "r1" },
       }),
     };
     await expect(op("host.create", { desired: declaredHost })).rejects.toMatchObject({
       message: "Sanoma Cloud: cloud-signup: acme.sanoma.work is taken: pick another address",
+      retryable: false,
+      status: 422,
+      vendorCode: "driver_failed",
+    });
+  });
+
+  it("fails a call the api refuses with its refusal, final", async () => {
+    workflows = {
+      cloudList: () => ({ output: [] }),
+      cloudSignup: () => ({ status: 400, body: { error: "The input: slug is not a slug", code: "invalid_input" } }),
+    };
+    await expect(op("host.create", { desired: declaredHost })).rejects.toMatchObject({
+      message: "Sanoma Cloud: cloud-signup: The input: slug is not a slug",
       retryable: false,
       status: 400,
       vendorCode: "invalid_input",

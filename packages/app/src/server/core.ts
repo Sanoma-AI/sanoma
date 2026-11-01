@@ -819,7 +819,7 @@ const RunsLimit = RunsQuery.pick({ limit: true });
  * A site's `api` call (`callFn`), as the person asking. An operation's id calls it directly
  * (`SanomaClient.call`, which refuses one that is not direct), with `{}` for no input. A
  * workflow's api name (`apiNameOf`) starts it, as does `<name>.start`, answering `{ runId }`;
- * `<name>.result` (`{ runId, waitMs? }`, at most 20 s), `.latest`, `.runs` (`{ limit? }`),
+ * `<name>.result` (`{ runId, waitMs? }`, at most 20 s; a failed run's failure, `runFailure`), `.latest`, `.runs` (`{ limit? }`),
  * `.approvals` and `.ledger` (`{ runId }`) read its runs, a run of another workflow being none.
  * Anything else is `invalid_input`. A visitor (`isVisitor`) calls no built-in workflow and reads
  * only the result of a run it started: its other reads are `policy_denied`.
@@ -850,13 +850,18 @@ export async function callApi(app: AppContext, actor: Principal, { name, input, 
       const until = Date.now() + Math.min(waitMs, RESULT_WAIT_MS);
       // Its status polled here rather than `client.result`'s wait, whose DBOS poller outlives
       // the timeout: a page asks again every 20 s while a run waits for days.
-      while (!isEnded((await runOf(app, workflow, runId, visitor ? actor : undefined)).status)) {
+      let run: RunSummary;
+      while (!isEnded((run = await runOf(app, workflow, runId, visitor ? actor : undefined)).status)) {
         if (Date.now() >= until) {
           throw new ApiError(409, { error: `Run ${runId} is still running`, code: "run_running", runId });
         }
         await sleep(RESULT_POLL_MS);
       }
-      return client.result(runId);
+      try {
+        return await client.result(runId);
+      } catch (err) {
+        throw run.status === "finished" ? err : runFailure(run, err);
+      }
     }
     case "latest":
       return client.latest(workflow);
@@ -888,6 +893,20 @@ export async function postCall(request: Request, context: ActorContext): Promise
     const { status, body } = toApiError(err, "an api call");
     return Response.json(body, { status });
   }
+}
+
+/**
+ * What `.result` answers for a run that failed or was cancelled: the runtime's answer when its
+ * error has a code with a status of its own (`policy_denied`, 403), else a 422 with the run's
+ * failure as the run recorded it and its code (`driver_failed`), if any. The failure is the
+ * run's answer, so the caller sees it (a 500 would hide it, and a client would try again).
+ */
+function runFailure(run: RunSummary, err: unknown): ApiError {
+  const answered = asApiError(err);
+  if (answered.status < 500) return answered;
+  const code = errorCode(err);
+  const error = run.error ?? `Run ${run.runId} ${run.status === "cancelled" ? "was cancelled" : "failed"}`;
+  return new ApiError(422, { error, ...(code && { code }), runId: run.runId });
 }
 
 /** The 400 for a name `callApi` does not know. */

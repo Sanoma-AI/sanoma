@@ -42,9 +42,9 @@ export interface FakeCloudState extends Record<string, unknown> {
   companies: Record<string, FakeCompany>;
 }
 
-/** A company's workflow refusing, as sanoma-ops's do: the run fails, and its call with it. */
+/** A company's workflow refusing, as sanoma-ops's do: the run fails, which the api answers 422, and its call with it. */
 const fail = (workflow: string, message: string) =>
-  new DriverError(`Sanoma Cloud: ${workflow}: ${message}`, { retryable: false, status: 400 });
+  new DriverError(`Sanoma Cloud: ${workflow}: ${message}`, { retryable: false, status: 422 });
 
 /** A runtime that answers `/healthz` and records each `/wake`: what a host runs unless the fake is given `start`. */
 const stubRuntime: StartRuntime = async () => {

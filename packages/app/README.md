@@ -219,7 +219,7 @@ The kit's look is in the app's stylesheet, which a public site's own host does n
 | `api.stripe.customers.get({ id })`                                                            | A vendor's read, directly: an operation `describeConfig` marks `direct` (a vendor's write is refused: start a workflow)     |
 | `await api.outboundNext({ company })`                                                         | Starts `outbound-next` (a workflow's name in camelCase) and answers its output once the run ends, or rejects with its error |
 | `api.outboundNext.start(input)`                                                               | Starts it: `{ runId }`                                                                                                      |
-| `.result(runId, waitMs?)`                                                                     | The run's output, waiting at most 20 s; `run_running` when it has not ended                                                 |
+| `.result(runId, waitMs?)`                                                                     | The run's output, waiting at most 20 s; `run_running` when it has not ended, a 422 with its failure when it failed          |
 | `.latest()`, `.runs({ limit })`                                                               | The newest finished run's `{ runId, output, at }` (null when none has), and its latest runs                                 |
 | `.approvals(runId)`, `.ledger(runId)`                                                         | What the run's page shows; a run of another workflow is `run_not_found`                                                     |
 
@@ -236,6 +236,7 @@ An operation's call and a start send a new id each (`crypto.randomUUID()`, lette
 | `approval_pending` | 409    | The policy holds the call for an approval: `runId` is the run of the built-in `call` workflow that makes it once approved, in the Inbox and at `/workflows/call/runs/<runId>`; `api.call.result(runId)` waits for it |
 | `run_running`      | 409    | `.result` waited and the run has not ended (`runId`)                                                                                                                                                                 |
 | `run_not_found`    | 404    | No such run of that workflow                                                                                                                                                                                         |
+| (the run's)        | 422    | `.result` of a run that failed or was cancelled: `error` is its failure, `code` its code if it has one (`driver_failed`), `runId` the run; a code with a status of its own (`policy_denied`) answers with that       |
 
 `sanoma/site` exports `ApiError` (`status`, and `body`, an `ErrorResponse`: `error`, `code`, and `issues`, `runId` and the rest as the code has them) and `errorBodyOf(err)`, the body when `err` is an `ApiError` and `undefined` otherwise, so a page branches on a code without a cast. A held write is `approval_pending`, with the `runId` of the run that makes it once approved:
 

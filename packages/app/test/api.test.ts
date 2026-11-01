@@ -8,6 +8,8 @@ import {
   ANONYMOUS_PRINCIPAL,
   defineConnector,
   defineDriver,
+  defineWorkflow,
+  DriverError,
   type Principal,
   resolveConfig,
   type SanomaConfig,
@@ -44,10 +46,21 @@ const acme = defineConnector("acme", {
       input: z.object({ id: z.string(), name: z.string() }),
       output: z.object({ id: z.string(), name: z.string() }),
     },
+    close: {
+      effect: "write",
+      input: z.object({ id: z.string() }),
+      output: z.object({}),
+    },
   },
 });
 const acmeDriver = defineDriver(acme, {
-  customer: { get: async ({ id }) => ({ id, name: "Acme Ltd" }), rename: async (input) => input },
+  customer: {
+    get: async ({ id }) => ({ id, name: "Acme Ltd" }),
+    rename: async (input) => input,
+    close: async ({ id }) => {
+      throw new DriverError(`${id} cannot be closed`, { retryable: false });
+    },
+  },
 });
 
 // The outbound fixture, copied to a root of its own: its collection, and its workflow, which imports
@@ -79,8 +92,18 @@ permit (principal in Sanoma::Group::"visitors", action == Sanoma::Action::"workf
 );
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
+/** A workflow whose run fails: its one call's vendor refuses it. */
+const refuse = defineWorkflow({
+  name: "refuse",
+  title: "Close a customer",
+  trigger: "manual",
+  input: z.object({ id: z.string() }),
+  uses: [acme.customer.close],
+  run: async (ctx, { id }) => ctx.acme.customer.close({ id }),
+});
+
 const config: SanomaConfig = {
-  workflows: [outboundNext],
+  workflows: [outboundNext, refuse],
   connectors: [withSetup(acme, { driver: () => acmeDriver })],
   collections: [outbound],
   root,
@@ -257,6 +280,15 @@ describe("POST /api/call", () => {
     expect(await post({ name: "outboundNext.result", input: { runId: id } })).toEqual({
       status: 200,
       body: expect.any(String),
+    });
+  });
+
+  it("answers a failed run's result 422 with its failure, so a client neither retries it nor loses why", async () => {
+    const id = crypto.randomUUID();
+    await post({ name: "refuse.start", input: { id: "c9" }, id });
+    expect(await post({ name: "refuse.result", input: { runId: id } })).toEqual({
+      status: 422,
+      body: { error: "c9 cannot be closed", code: "driver_failed", runId: id },
     });
   });
 

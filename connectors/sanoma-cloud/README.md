@@ -36,10 +36,10 @@ One company is one slug, its address `<slug>.sanoma.work`, and both declarations
 
 ### `cloud.database`
 
-| Field    | What it is                                                                                                        |
-| -------- | ----------------------------------------------------------------------------------------------------------------- |
-| `name`   | Optional: the company's slug (above). It cannot change.                                                           |
-| `region` | Optional: `us-east` (the Cloud's default), `us-west`, `eu-central` or `ap-southeast` (`REGIONS`). It cannot move. |
+| Field    | What it is                                                                                                                   |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `name`   | Optional: the company's slug (above). It cannot change.                                                                      |
+| `region` | Optional: `us-east` (the Cloud's default), `us-west`, `eu-central`, `eu-west` or `ap-southeast` (`REGIONS`). It cannot move. |
 
 Its state adds what the Cloud sets: `id` (the database's id there) and `healthy`. It meets the [`Database` contract](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#databases): it pauses (a Neon compute in the Cloud's organization) and does not branch yet. Its `storeUrl` stores nothing and says so: the Cloud binds the URL to the host, and a laptop never needs it.
 
@@ -76,7 +76,7 @@ Its state adds `revision`, `url` and `healthy`. It meets the [`Host` contract](h
 
 ### Errors and retries
 
-A run that fails fails the call with the api's answer (`DriverError`, its status and `code` as `vendorCode`). Only no reply and a 5xx are retryable; a workflow's refusal (a slug someone else holds, a region the Cloud has not) and a refused token (401, said without its value) are final. A run that has not ended in 15 minutes (`runTimeoutMs`) fails retryable, and the retry resumes it. The driver's own refusals have a `vendorCode`: `no_slug`, `immutable`, `plan_changed`, `no_repository`, `gone`, `not_made`.
+A run that fails fails the call with its failure, which the api answers with a 422 (`DriverError`, its status and `code` as `vendorCode`). Only no reply and a 5xx are retryable; a workflow's refusal (a slug someone else holds, a region the Cloud has not) and a refused token (401, said without its value) are final. A run that has not ended in 15 minutes (`runTimeoutMs`) fails retryable, and the retry resumes it. The driver's own refusals have a `vendorCode`: `no_slug`, `immutable`, `plan_changed`, `no_repository`, `gone`, `not_made`.
 
 ### Running it live
 

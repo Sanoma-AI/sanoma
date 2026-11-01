@@ -74,7 +74,7 @@ describe("cloud.database meets the Database contract", () => {
     expect(database.database).toMatchObject({
       capabilities: { pauses: true, branch: false },
       storeUrl: "cloud.database.storeUrl",
-      regions: ["us-east", "us-west", "eu-central", "ap-southeast"],
+      regions: ["us-east", "us-west", "eu-central", "eu-west", "ap-southeast"],
     });
     const secrets = memorySecrets();
     const stored = await fake.driver.ops["database.storeUrl"]!(

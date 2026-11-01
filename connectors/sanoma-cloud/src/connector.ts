@@ -16,8 +16,11 @@ import { z } from "zod";
  * with the company's Cloud token; the schemas are a cut of their fields, by hand.
  */
 
-/** The regions a Cloud database takes, each a Neon region in the Cloud's organization. */
-export const REGIONS = ["us-east", "us-west", "eu-central", "ap-southeast"] as const;
+/**
+ * The regions a Cloud database takes, each a Neon region in the Cloud's organization, as
+ * sanoma-ops's `cloud-signup` maps them: AWS us-east-1, us-west-2, eu-central-1, eu-west-2, ap-southeast-1.
+ */
+export const REGIONS = ["us-east", "us-west", "eu-central", "eu-west", "ap-southeast"] as const;
 
 /** A company's slug, its address `<slug>.sanoma.work`: as sanoma-ops's sign-up checks it. */
 export const SLUG = /^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])?$/;
