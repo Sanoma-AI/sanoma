@@ -68,7 +68,8 @@ import type { Steps } from "./steps.ts";
 import { checkSchedule } from "./schedules.ts";
 import { changeCodeOf, computeVersion } from "./version.ts";
 import type { DeclaredResource, ResourceProblem } from "./resources.ts";
-import { checkWakeupOps, type DeclaredWakeup } from "./wakeup.ts";
+import { checkWakeupOps, type DeclaredWakeup, type EnvWakeup, HOST_URL } from "./wakeup.ts";
+import { instanceUrl, WAKEUP_TOKEN } from "./wakeup-service.ts";
 import { sanomaWakeupDriver, wakeupSteps } from "./wakeup-driver.ts";
 import { wakeupOps } from "./wakeup-type.ts";
 import { checkDatabaseOps } from "./database.ts";
@@ -591,6 +592,19 @@ export async function declaredWakeup(config: SanomaConfig): Promise<DeclaredWake
     ...(declared.binding !== undefined && { binding: declared.binding }),
     ...(host && { host: { id: host.id, type: typeOf(host) } }),
   };
+}
+
+/**
+ * The wakeup `env` names (`EnvWakeup`): its host's URL, `SANOMA_HOST_URL`, as the wakeup service
+ * keeps one (`instanceUrl`), and its token, `SANOMA_WAKEUP_TOKEN`, when both are set and the URL is
+ * one; undefined otherwise. A host Sanoma Cloud made gives both to an instance that declares no
+ * wakeup of its own.
+ */
+export function envWakeup(env: NodeJS.ProcessEnv): EnvWakeup | undefined {
+  const host = env[HOST_URL]?.trim();
+  const token = env[WAKEUP_TOKEN]?.trim();
+  const checked = host ? instanceUrl(host) : undefined;
+  return checked && "url" in checked && token ? { url: checked.url, token } : undefined;
 }
 
 /**

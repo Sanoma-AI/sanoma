@@ -11,6 +11,27 @@ import type { DeclaredResource } from "./resources.ts";
 // replaced registration starts a worker that finds nothing to do and stops again. The contract is
 // here; the worker's side is `deadlines.ts`.
 
+/**
+ * A host's own wake route, where a wakeup that the host holds itself takes a registration: `PUT`
+ * with `WakeupRegistration` and the instance's `SANOMA_WAKEUP_TOKEN` as a bearer, answered 204.
+ * The Cloudflare Worker serves it; a hosted instance that declares no wakeup registers there
+ * (`EnvWakeup`).
+ */
+export const WAKE_PATH = "/__sanoma/wake";
+
+/**
+ * The wakeup a hosted instance's environment names, when its data files declare none: its own
+ * host's URL (`SANOMA_HOST_URL`) and its token (`SANOMA_WAKEUP_TOKEN`), which the host gives the
+ * runtime. The worker registers each deadline at `{url}{WAKE_PATH}` itself, with no driver.
+ */
+export interface EnvWakeup {
+  url: string;
+  token: string;
+}
+
+/** Where a host gives the runtime its own URL: the Cloudflare Worker's plain-text binding. */
+export const HOST_URL = "SANOMA_HOST_URL";
+
 /** What a wakeup's state says of it. */
 export interface WakeupOutputs {
   healthy: boolean;

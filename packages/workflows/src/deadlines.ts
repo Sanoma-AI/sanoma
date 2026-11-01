@@ -8,7 +8,7 @@ import { warn } from "./log.ts";
 import type { CallContext, DriverFn, Op } from "./op.ts";
 import type { Secrets } from "./secret.ts";
 import { errorMessage, WAKEUP_AGENT } from "./shared.ts";
-import type { WakeupRegistration } from "./wakeup.ts";
+import { type EnvWakeup, WAKE_PATH, type WakeupRegistration } from "./wakeup.ts";
 
 // What a worker knows of its own runs that DBOS cannot tell it: which are executing and which are
 // blocked in a `ctx` wait, and until when. DBOS sees both as PENDING. A worker that registers a
@@ -133,15 +133,15 @@ export interface SelfStop {
   at: string | null;
 }
 
-/** What the stop rule acts on: the wakeup row, the wakeup's register operation, and the worker. */
+/** Registers a deadline with the instance's wakeup, replacing what it held; throws when it could not. */
+export type RegisterWakeup = (registration: WakeupRegistration) => Promise<void>;
+
+/** What the stop rule acts on: the wakeup row, how a deadline is registered, and the worker. */
 export interface StopRule {
   /** The wakeup row's database. */
   db: () => Promise<Db>;
-  /** The declared wakeup's binding, else its declaration's id: what scopes a registration's idempotency key to this instance. */
-  wakeup: string;
-  /** The wakeup type's register operation, and its driver (none when the connector attaches none). */
-  register: { op: Op; fn: DriverFn | undefined };
-  secrets: Secrets;
+  /** The declared wakeup's register operation (`declaredRegister`), or the host's own route (`envRegister`). */
+  register: RegisterWakeup;
   deadlines: Deadlines;
   idle: () => Promise<boolean>;
   everyMs: number;
@@ -174,7 +174,7 @@ export function stopWhenIdle(rule: StopRule): { close(): void } {
     const db = await rule.db();
     if (at !== null) {
       try {
-        await registerWakeup(rule, { at });
+        await rule.register({ at });
       } catch (err) {
         const message = errorMessage(err);
         await recordWakeupError(db, message);
@@ -214,18 +214,64 @@ export function stopWhenIdle(rule: StopRule): { close(): void } {
   };
 }
 
+/** A declared wakeup's register operation, and what its call needs. */
+export interface DeclaredRegister {
+  /** The wakeup type's register operation. */
+  op: Op;
+  /** Its driver: none when the connector attaches none. */
+  fn: DriverFn | undefined;
+  /** The instance's secrets, which the driver reads the wakeup's token from. */
+  secrets: Secrets;
+  /** The declared wakeup's binding, else its declaration's id: what scopes a registration's idempotency key to this instance. */
+  wakeup: string;
+}
+
 /**
- * Calls the wakeup's register operation, as `SanomaClient.call` calls a driver: its input parsed,
- * a `CallContext` of the runtime's, and no ledger record, which is a run's.
+ * Registers through the declared wakeup's register operation, as `SanomaClient.call` calls a
+ * driver: its input parsed, a `CallContext` of the runtime's, and no ledger record, which is a run's.
  */
-export async function registerWakeup(
-  { register: { op, fn }, secrets, wakeup }: Pick<StopRule, "register" | "secrets" | "wakeup">,
-  registration: WakeupRegistration,
-) {
-  if (!fn) throw new Error(`${op.id} has no driver: the connector package must attach one`);
-  // Fresh each time: a repeat of an earlier `at` after another registration must re-arm it, so no
-  // two registrations share a key (real drivers never dedupe on it anyway).
-  const key = `wakeup:${wakeup}:${randomUUID()}`;
-  const context: CallContext = { idempotencyKey: key, runId: key, opId: op.id, attempt: 1, secrets, by: WAKEUP_AGENT };
-  await fn(op.input.parse(registration), context);
+export function declaredRegister({ op, fn, secrets, wakeup }: DeclaredRegister): RegisterWakeup {
+  return async (registration) => {
+    if (!fn) throw new Error(`${op.id} has no driver: the connector package must attach one`);
+    // Fresh each time: a repeat of an earlier `at` after another registration must re-arm it, so no
+    // two registrations share a key (real drivers never dedupe on it anyway).
+    const key = `wakeup:${wakeup}:${randomUUID()}`;
+    const context: CallContext = {
+      idempotencyKey: key,
+      runId: key,
+      opId: op.id,
+      attempt: 1,
+      secrets,
+      by: WAKEUP_AGENT,
+    };
+    await fn(op.input.parse(registration), context);
+  };
+}
+
+/**
+ * Registers at the host's own wake route, as the environment names it (`EnvWakeup`): `PUT
+ * {url}/__sanoma/wake` with the token as a bearer and the registration as JSON, no driver and no
+ * secret store. 204 is taken; anything else fails with its status and the route's own `error`.
+ */
+export function envRegister({ url, token }: EnvWakeup): RegisterWakeup {
+  return async (registration) => {
+    const where = `PUT ${url}${WAKE_PATH}`;
+    let res: Response;
+    try {
+      res = await fetch(`${url}${WAKE_PATH}`, {
+        method: "PUT",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify(registration),
+        // A redirect is no answer of the host's, and would carry the token elsewhere.
+        redirect: "manual",
+        signal: AbortSignal.timeout(30_000),
+      });
+    } catch (err) {
+      throw new Error(`${where}: no answer (${errorMessage(err)})`, { cause: err });
+    }
+    if (res.status === 204) return;
+    const body: unknown = await res.json().catch(() => undefined);
+    const error = (body as { error?: unknown } | undefined)?.error;
+    throw new Error(`${where} answered ${res.status}${typeof error === "string" ? `: ${error}` : ""}`);
+  };
 }

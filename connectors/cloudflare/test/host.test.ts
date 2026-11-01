@@ -122,3 +122,48 @@ describe("cloudflare.container meets the Host contract on the fake", () => {
     expect(Object.values(fake.state.scripts["sanoma-company"]!.images)).toEqual(Object.keys(fake.state.images));
   });
 });
+
+describe("cloudflare.container's custom domains on the fake", () => {
+  const desired = {
+    name: "company",
+    image: "ghcr.io/sanoma-ai/runtime:0.7.0",
+    source: "https://github.com/acme/company.git",
+    ref: "main",
+    revision: "abc123",
+    port: 3000,
+    domains: { www: "www.acme.example" },
+  };
+  const fake = fakeCloudflare({ zones: ["acme.example"] });
+  const op = (name: string, input: object) =>
+    fake.driver.ops[`container.${name}`]!(input, call(`cloudflare.container.${name}`));
+  afterAll(() => fake.close());
+
+  it("attaches each declared domain at create, detaches one no longer declared, and every declared one at delete, leaving one attached by hand", async () => {
+    await op("create", { desired });
+    const zone = fake.state.zones["acme.example"];
+    expect(Object.values(fake.state.domains)).toEqual([
+      { hostname: "www.acme.example", service: "sanoma-company", zone_id: zone },
+    ]);
+    // Attached by hand and never declared: left alone.
+    const byHand = { hostname: "app.acme.example", service: "sanoma-company", zone_id: zone! };
+    fake.state.domains.byhand = byHand;
+    await op("update", { id: "company", desired: { ...desired, domains: { shop: "shop.acme.example" } } });
+    expect(Object.values(fake.state.domains)).toEqual([
+      byHand,
+      { hostname: "shop.acme.example", service: "sanoma-company", zone_id: zone },
+    ]);
+    await op("delete", { id: "company" });
+    expect(fake.state.domains).toEqual({ byhand: byHand });
+  });
+
+  it("refuses a domain whose zone the account does not hold, before the Worker exists", async () => {
+    await expect(
+      op("create", { desired: { ...desired, domains: { www: "www.other.example" } } }),
+    ).rejects.toMatchObject({
+      vendorCode: "no_zone",
+      message: expect.stringContaining("no zone other.example for the domain www.other.example"),
+    });
+    expect(fake.state.scripts).toEqual({});
+    expect(Object.values(fake.state.domains).map((d) => d.hostname)).not.toContain("www.other.example");
+  });
+});

@@ -32,6 +32,8 @@ export type StartContainer = (input: {
 export interface FakeCloudflareOptions extends FakeOptions {
   /** What a container runs. Default: a stub that answers `/healthz` 200 and `/wake` 204. */
   start?: StartContainer;
+  /** The zones the account holds, by name. Default: every one asked for, as a sandbox's account holds its domains. */
+  zones?: readonly string[];
 }
 
 export interface FakeCloudflareState extends Record<string, unknown> {
@@ -42,6 +44,10 @@ export interface FakeCloudflareState extends Record<string, unknown> {
   applications: Record<string, Application & { name: string }>;
   /** The account's registry: each image copied in, by its pinned reference there, and the image it was copied from. */
   images: Record<string, string>;
+  /** The account's zones looked up so far: each one's id, by name. */
+  zones: Record<string, string>;
+  /** The Workers' custom domains, by id: the hostname, the Worker it routes to and its zone's id. */
+  domains: Record<string, { hostname: string; service: string; zone_id: string }>;
 }
 
 /** The fake account's id, which its registry's references name: the fixtures' made-up one. */
@@ -268,7 +274,8 @@ type FakeObject = ReturnType<typeof fakeObject>;
 /**
  * An in-memory Cloudflare account for tests, as the API answers: Workers in `state.scripts`,
  * container applications in `state.applications`, the images copied into its registry in
- * `state.images` (nothing is pulled), and the account's workers.dev URLs served in
+ * `state.images` (nothing is pulled), their custom domains in `state.domains` (every zone held
+ * unless `zones` names them), and the account's workers.dev URLs served in
  * this process, one server on a port of this machine per Worker name (a name with no Worker
  * answers workers.dev's 404). Each Worker runs the package's own object code
  * (`worker/instance.js`) over a `ctx` in this process: its container runs `start`'s runtime
@@ -320,6 +327,8 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
 
   const api = (state: FakeCloudflareState): CloudflareApi => {
     const appOf = (script: string) => Object.values(state.applications).find((a) => a.name === script);
+    /** A new id, 32 digits, as Cloudflare's are 32 hexadecimal ones. */
+    const nextId = () => String(++state.seq).padStart(32, "0");
     return {
       workerUrl: (script) => serve(state, script),
       async bindings(script) {
@@ -347,9 +356,7 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
         }
         envs.set(script, env);
         // The namespace the first upload made, kept across uploads as Cloudflare keeps it.
-        const namespace_id =
-          state.scripts[script]?.bindings.find((b) => b.namespace_id)?.namespace_id ??
-          `${String(++state.seq).padStart(32, "0")}`;
+        const namespace_id = state.scripts[script]?.bindings.find((b) => b.namespace_id)?.namespace_id ?? nextId();
         state.scripts[script] = {
           bindings: bindings.map(({ type, name, ...rest }) =>
             type === "secret_text"
@@ -414,6 +421,29 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
         delete state.applications[id];
         if (found) await objects.get(found.name)?.stop();
       },
+      async zone(name) {
+        if (options.zones && !options.zones.includes(name)) return undefined;
+        state.zones[name] ??= nextId();
+        return state.zones[name];
+      },
+      async domains(script) {
+        return Object.entries(state.domains)
+          .filter(([, d]) => d.service === script)
+          .map(([id, { hostname }]) => ({ id, hostname }));
+      },
+      async attachDomain(script, hostname, zone_id) {
+        if (!state.scripts[script])
+          throw fail(404, 10007, `workers/domains: This Worker does not exist on your account.`);
+        const zone = Object.entries(state.zones).find(([, id]) => id === zone_id)?.[0];
+        if (!zone || (hostname !== zone && !hostname.endsWith(`.${zone}`))) {
+          throw fail(400, 100117, `workers/domains: ${hostname} is not in the zone ${zone_id}`);
+        }
+        const id = Object.entries(state.domains).find(([, d]) => d.hostname === hostname)?.[0] ?? nextId();
+        state.domains[id] = { hostname, service: script, zone_id };
+      },
+      async detachDomain(id) {
+        delete state.domains[id];
+      },
       async send(url, init) {
         const script = scriptAt(url);
         if (!script) throw new TypeError(`fetch failed: nothing answers at ${new URL(url).origin}`);
@@ -425,7 +455,14 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
   const fake = defineFake(
     cloudflareOps,
     {
-      initial: (): FakeCloudflareState => ({ seq: 0, scripts: {}, applications: {}, images: {} }),
+      initial: (): FakeCloudflareState => ({
+        seq: 0,
+        scripts: {},
+        applications: {},
+        images: {},
+        zones: {},
+        domains: {},
+      }),
       ops: (state) => ({
         container: containerOps(() => api(state), { startTimeoutMs: 60_000, pollMs: 50 }),
         alarm: alarmOps(() => api(state)),

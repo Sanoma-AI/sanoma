@@ -10,7 +10,7 @@ import { checkWakeup, wakeupCheckWorkflows } from "@sanoma-ai/testing/wakeup";
 import { delay, http, HttpResponse } from "msw";
 import { NodeRequest, sendNodeResponse } from "srvx/node";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { registerWakeup } from "../src/deadlines.ts";
+import { declaredRegister } from "../src/deadlines.ts";
 import { describeConfig } from "../src/describe.ts";
 import {
   type CallContext,
@@ -325,14 +325,15 @@ describe("the built-in wakeup's fake under the stop rule's registrations", () =>
       const secrets = memorySecrets({ SANOMA_WAKEUP_TOKEN: mintInstanceToken() });
       await op("create", { desired: { host: url } }, callWith(secrets), fake.driver);
       const resolved = resolveConfig({ workflows: [], connectors: withHost(), ledger: memoryLedger() });
-      const rule = {
-        register: { op: resolved.ops.get("sanoma.wakeup.register")!, fn: fake.driver.ops["wakeup.register"] },
+      const register = declaredRegister({
+        op: resolved.ops.get("sanoma.wakeup.register")!,
+        fn: fake.driver.ops["wakeup.register"],
         secrets,
         wakeup: "resources/infra.ts#wakeup",
-      };
+      });
       const x = new Date(Date.now() + 300).toISOString();
       const y = new Date(Date.now() + 3_600_000).toISOString();
-      for (const at of [x, y, x]) await registerWakeup(rule, { at });
+      for (const at of [x, y, x]) await register({ at });
       await vi.waitFor(() => expect(wakes).toBe(1), { timeout: 10_000 });
     } finally {
       fake.close();

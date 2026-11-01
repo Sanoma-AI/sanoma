@@ -22,7 +22,9 @@ export interface CloudflareDriverOptions {
 
 /** The environment variables the driver reads, on every call. */
 const env = z.object({
-  CLOUDFLARE_API_TOKEN: z.string().describe("an API token with Workers Scripts Edit and Workers Containers Edit"),
+  CLOUDFLARE_API_TOKEN: z
+    .string()
+    .describe("an API token with Workers Scripts Edit and Workers Containers Edit, and Zone Read for custom domains"),
   CLOUDFLARE_ACCOUNT_ID: z
     .string()
     .regex(/^[0-9a-f]{32}$/, "an account id is 32 hexadecimal digits")
@@ -188,6 +190,24 @@ function accountApi(timeoutMs: number, subdomains: Map<string, Promise<string>>)
       await found(`DELETE containers/applications/${id}`, (cf) =>
         cf.containers.applications.delete(id, { account_id }),
       );
+    },
+    zone: (name) =>
+      calling(`GET zones?name=${name}`, async (cf) => {
+        const page = await cf.zones.list({ name, account: { id: account_id } });
+        return page.result.find((zone) => zone.name === name)?.id;
+      }),
+    domains: (script) =>
+      calling(`GET workers/domains?service=${script}`, async (cf) => {
+        const page = await cf.workers.domains.list({ account_id, service: script });
+        return page.result.map(({ id, hostname }) => ({ id, hostname }));
+      }),
+    async attachDomain(script, hostname, zone_id) {
+      await calling(`PUT workers/domains ${hostname}`, (cf) =>
+        cf.workers.domains.update({ account_id, hostname, service: script, zone_id }),
+      );
+    },
+    async detachDomain(id) {
+      await found(`DELETE workers/domains/${id}`, (cf) => cf.workers.domains.delete(id, { account_id }));
     },
     send: sender(timeoutMs),
   };

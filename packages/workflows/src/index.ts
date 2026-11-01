@@ -62,6 +62,7 @@ export {
 export {
   declaredWakeup,
   defineConfig,
+  envWakeup,
   resolveConfig,
   resolveDatabaseUrl,
   type ResolvedConfig,
@@ -212,6 +213,9 @@ export { type InviteRequest, openInvite, sealInvite, sealLoginCode } from "./sea
 export {
   checkWakeup,
   type DeclaredWakeup,
+  type EnvWakeup,
+  HOST_URL,
+  WAKE_PATH,
   type WakeupOutputs,
   type WakeupRegistration,
   type WakeupSpec,
