@@ -10,6 +10,7 @@ import {
   errorMessage,
   isEnded,
   type Principal,
+  postInvite,
   sealInvite,
   sourceKeyPair,
   type RepoRef,
@@ -641,19 +642,11 @@ export async function goLiveSignIn(app: AppContext, actor: Principal): Promise<{
   if (!email) {
     throw new ApiError(409, { error: `${actor.id} has no email declared in the people file: add one to be signed in` });
   }
-  const res = await fetch(new URL("/auth/invite", host.url), {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ request: sealInvite({ email }) }),
-    signal: AbortSignal.timeout(10_000),
-  });
-  const body = (await res.json().catch(() => ({}))) as { url?: unknown; error?: unknown };
-  if (!res.ok || typeof body.url !== "string") {
-    throw new ApiError(502, {
-      error: `The host did not mint an invite (${res.status}${typeof body.error === "string" ? `: ${body.error}` : ""})`,
-    });
+  try {
+    return await postInvite(host.url, sealInvite({ email }));
+  } catch (err) {
+    throw new ApiError(502, { error: `The host did not mint an invite (${errorMessage(err)})` });
   }
-  return { url: body.url };
 }
 
 /** Where the host answers, from the latest finished apply runs that made or changed it, and whether `/healthz` answers. */

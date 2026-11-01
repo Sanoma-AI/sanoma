@@ -45,7 +45,7 @@ export interface Secrets {
   /** The stored value; when there is none, `make()`'s, stored first. */
   ensure(name: string, make: () => string): Promise<string>;
   /** Deletes the stored value; none stored is nothing to do. The runtime's own `sanoma.secret.delete` calls it. */
-  delete?(name: string): Promise<void>;
+  delete(name: string): Promise<void>;
 }
 
 /** A named call can resolve only the auxiliary secret markers present in its authorized input. */
@@ -74,12 +74,10 @@ export function secretsForInput(input: unknown, secrets: Secrets, creates: reado
       check(name, true);
       return secrets.ensure(name, make);
     },
-    ...(secrets.delete && {
-      async delete(name: string) {
-        check(name, true);
-        return secrets.delete!(name);
-      },
-    }),
+    async delete(name) {
+      check(name, true);
+      return secrets.delete(name);
+    },
   };
 }
 

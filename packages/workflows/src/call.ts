@@ -92,13 +92,12 @@ const isSchemaError = (err: unknown) => err instanceof Error && err.name === "Zo
 
 /**
  * Whether DBOS should try an idempotent step again: not when the reply failed the output
- * schema (it would fail again), and not when the driver said the vendor's answer is final
- * (a `DriverError` with `retryable: false`, such as a 4xx). Read by code and property, never
- * `instanceof`: the error may come from another copy of this package.
+ * schema (it would fail again), and not when the error says its answer is final (`retryable:
+ * false`: a `DriverError` for a 4xx, a `SecretStoreError` other than `unavailable`). Read by
+ * property, never `instanceof`: the error may come from another copy of this package.
  */
 function shouldRetry(err: unknown): boolean {
-  if (isSchemaError(err)) return false;
-  return !(errorCode(err) === "driver_failed" && isFinal(err));
+  return !isSchemaError(err) && !isFinal(err);
 }
 
 /*

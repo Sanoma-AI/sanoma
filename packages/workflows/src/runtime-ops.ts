@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { keyBytes } from "./deployment-key.ts";
+import { DEPLOYMENT_KEYS, keyBytes } from "./deployment-key.ts";
 import { type CallContext, defineConnector, defineDriver, DriverError, retryableStatus } from "./op.ts";
 import { generateSecret, SECRET_NAME } from "./secret.ts";
 import { sealInvite } from "./seal.ts";
@@ -14,14 +14,11 @@ import { memoryTokens, type Tokens } from "./tokens.ts";
 // registers them in every config with their driver (`runtimeDriver`), so a policy may name them;
 // a sandbox run calls `sandboxRuntimeDriver`, over its own secrets and tokens, posting nothing.
 
-/** The deployment's own keys, which no operation here reads, makes or deletes. */
-const DEPLOYMENT_KEYS = new Set(["SANOMA_SIGNING_KEY", "SANOMA_SECRETS_KEY"]);
-
 /** A secret's name, as the store takes it (upper case), other than the deployment's own keys. */
 const SecretName = z
   .string()
   .regex(SECRET_NAME, "a secret's name: upper case, A-Z, 0-9 and _")
-  .refine((name) => !DEPLOYMENT_KEYS.has(name), "the deployment's own keys are not a workflow's to use");
+  .refine((name) => !DEPLOYMENT_KEYS.includes(name), "the deployment's own keys are not a workflow's to use");
 
 /** How long an instance gets to answer `POST /auth/invite`. */
 const INVITE_TIMEOUT_MS = 10_000;
@@ -108,20 +105,6 @@ export const sanoma = defineConnector("sanoma", {
 /** A `DriverError` that a retry would not change. */
 const refuse = (message: string) => new DriverError(`sanoma: ${message}`, { retryable: false });
 
-/** The secrets store's refusals (`SecretStoreError`) as the call's, retried only when the store was unavailable. */
-async function storeCall<T>(fn: () => Promise<T>): Promise<T> {
-  try {
-    return await fn();
-  } catch (err) {
-    const store = err as { name?: unknown; code?: unknown; retryable?: unknown } | null;
-    if (store?.name !== "SecretStoreError") throw err;
-    throw new DriverError(`sanoma: the secrets store answered ${String(store.code)}`, {
-      retryable: store.retryable === true,
-      cause: err,
-    });
-  }
-}
-
 /** The token id a call mints, from its idempotency key: the same on every try of one call, so a retry finds its own. */
 function tokenIdOf(call: CallContext) {
   const hex = createHash("sha256").update(call.idempotencyKey).digest("hex");
@@ -136,8 +119,11 @@ function signingKeyOf(secret: string, text: string | undefined): Buffer {
   return key;
 }
 
-/** Posts the sealed `request` to the instance's `/auth/invite`, and answers the link it minted. */
-async function postInvite(host: string, request: string): Promise<{ url: string }> {
+/**
+ * Posts the sealed `request` to the instance's `/auth/invite`, and answers the link it minted
+ * (`sanoma.invite.mint`, and going live's sign-in); a `DriverError` otherwise, retryable by status.
+ */
+export async function postInvite(host: string, request: string): Promise<{ url: string }> {
   const at = new URL("/auth/invite", host);
   let res: Response;
   try {
@@ -177,14 +163,14 @@ export function runtimeDriver({
     secret: {
       async generate({ name, kind }, call) {
         if (kind === "random") {
-          await storeCall(() => call.secrets.ensure(name, generateSecret));
+          await call.secrets.ensure(name, generateSecret);
           return { name };
         }
         // A pair made only when none is stored: the public half is always derived from what is.
-        let stored = await storeCall(() => call.secrets.get(name));
+        let stored = await call.secrets.get(name);
         if (stored === undefined) {
           const pair = await sourceKeyPair();
-          stored = await storeCall(() => call.secrets.ensure(name, () => pair.privateKey));
+          stored = await call.secrets.ensure(name, () => pair.privateKey);
         }
         const publicKey = sshPublicKey(stored);
         if (!publicKey)
@@ -192,14 +178,13 @@ export function runtimeDriver({
         return { name, publicKey };
       },
       async delete({ name }, call) {
-        if (!call.secrets.delete) throw refuse("this secrets store deletes nothing");
-        await storeCall(() => call.secrets.delete!(name));
+        await call.secrets.delete(name);
         return {};
       },
     },
     invite: {
       async mint({ host, email, key }, call) {
-        const signingKey = signingKeyOf(key.$secret, await storeCall(() => call.secrets.get(key.$secret)));
+        const signingKey = signingKeyOf(key.$secret, await call.secrets.get(key.$secret));
         const request = sealInvite({ email }, signingKey);
         return invite(host, request, call);
       },
@@ -207,7 +192,7 @@ export function runtimeDriver({
     token: {
       async mint({ subject, groups, store }, call) {
         const id = tokenIdOf(call);
-        const held = await storeCall(() => call.secrets.get(store));
+        const held = await call.secrets.get(store);
         if (held !== undefined) {
           // This call's own, stored by a try whose answer was lost.
           if ((await tokens.resolve(held))?.principal.id === `token:${id}`) return { id };
@@ -222,7 +207,7 @@ export function runtimeDriver({
           await tokens.revoke({ id });
           throw refuse(`an earlier try minted token ${id} and stopped before storing it: it is revoked, start again`);
         }
-        if ((await storeCall(() => call.secrets.ensure(store, () => token))) !== token) {
+        if ((await call.secrets.ensure(store, () => token)) !== token) {
           await tokens.revoke({ id });
           throw refuse(`${store} was stored by someone else meanwhile: the token minted is revoked`);
         }

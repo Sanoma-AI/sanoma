@@ -172,8 +172,8 @@ export interface ResolvedConfig {
   login?: { sender: Op };
   /**
    * The operations the connectors declare, by id, the built-in `sanoma.change.*` (`changeOps`, in
-   * every config) and the runtime's own a workflow may use (`sanoma.secret.*`, `sanoma.invite.mint`,
-   * `sanoma.token.*`, in every config), `sanoma.source.resolve` and `sanoma.wakeup`'s when one declares a host type,
+   * every config) and the runtime's own a workflow may use (`sanoma`, runtime-ops.ts, in every
+   * config), `sanoma.source.resolve` and `sanoma.wakeup`'s when one declares a host type,
    * and the collections' (`data.<name>.<op>`).
    */
   ops: Map<string, Op>;
@@ -337,7 +337,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   const dataStore = declared.length ? lazyPool(databaseUrl, "data") : undefined;
   // Built-in, in every config: a change's operations, which the template's policy names
   // (`sanoma.change.merge`), the listing of apps a page may call (`sanoma.apps.list`), and what a
-  // workflow asks the runtime to do for it (`sanoma.secret.*`, `sanoma.invite.mint`, `sanoma.token.*`).
+  // workflow asks the runtime to do for it (`sanoma`, runtime-ops.ts).
   const ops = indexConnectors([
     ...running,
     changeOps,

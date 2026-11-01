@@ -95,7 +95,7 @@ describe("encrypt and decrypt", () => {
     for (const name of ["SANOMA_SECRETS_KEY", "SANOMA_SIGNING_KEY"] as const) {
       expect(deploymentKey(name, { [name]: bytes.toString("base64") })).toEqual(bytes);
       expect(deploymentKey(name, { [name]: bytes.toString("base64url") })).toEqual(bytes);
-      for (const bad of [randomBytes(16).toString("base64url"), `${bytes.toString("base64url")}=`, "x".repeat(44)]) {
+      for (const bad of [randomBytes(16).toString("base64url"), `${"-".repeat(43)}=`, "x".repeat(44)]) {
         expect(() => deploymentKey(name, { [name]: bad })).toThrow(`${name} must be 32 random bytes`);
       }
     }

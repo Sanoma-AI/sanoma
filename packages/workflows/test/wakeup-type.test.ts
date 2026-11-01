@@ -66,6 +66,7 @@ const callWith = (secrets: Secrets = memorySecrets()): CallContext => ({
     get: async (name) =>
       ["SANOMA_WAKEUP_URL", "SANOMA_WAKEUP_ACCOUNT_TOKEN"].includes(name) ? process.env[name] : secrets.get(name),
     ensure: (name, make) => secrets.ensure(name, make),
+    delete: (name) => secrets.delete(name),
   },
 });
 

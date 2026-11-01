@@ -1,11 +1,12 @@
 import { hkdfSync } from "node:crypto";
 import { readFileSync } from "node:fs";
 
+/** The deployment's own keys: bound only to the environment or bootstrap, never written by the runtime. */
+export const DEPLOYMENT_KEYS: readonly string[] = ["SANOMA_SIGNING_KEY", "SANOMA_SECRETS_KEY"];
+export type DeploymentKeyName = "SANOMA_SIGNING_KEY" | "SANOMA_SECRETS_KEY";
+
 /** Bootstrap only: never resolves through the secret store that the key unlocks. */
-export function deploymentKey(
-  name: "SANOMA_SECRETS_KEY" | "SANOMA_SIGNING_KEY",
-  env: NodeJS.ProcessEnv = process.env,
-): Buffer {
+export function deploymentKey(name: DeploymentKeyName, env: NodeJS.ProcessEnv = process.env): Buffer {
   const value = env[name];
   const file = env[`${name}_FILE`];
   if (value && file) throw new Error(`Set only one of ${name} and ${name}_FILE`);
@@ -17,7 +18,7 @@ export function deploymentKey(
       throw new Error(`${name}_FILE could not be read`);
     }
   }
-  const key = encoded === undefined ? undefined : keyBytes(encoded);
+  const key = encoded ? keyBytes(encoded) : undefined;
   if (!key) throw new Error(`${name} must be 32 random bytes in base64; supply ${name} or ${name}_FILE`);
   return key;
 }

@@ -139,9 +139,9 @@ export function readPeople(root: string | undefined): DeclaredPeople {
  * (`signIn`), of the person it matches (`personOf`: email, GitHub login, then id), never an agent.
  * While no person is declared, whoever names an id is taken as given. A visitor's id (`isVisitor`)
  * is taken whatever the files say, with the groups stamped here (`visitors`, or none for
- * `anonymous`), never through a sign-in: the staff logins admit no visitor; a visitor but a
- * token keeps the `email` its login verified, and nobody keeps a `subject` given (a token's is its
- * row's, which `SanomaClient.start` reads). Throws `NotAdmittedError` for anyone else, and for
+ * `anonymous`), never through a sign-in: the staff logins admit no visitor. A visitor keeps the
+ * `email` its login verified; a `subject` is never taken from the caller (a token's is its row's,
+ * which `SanomaClient.start` reads). Throws `NotAdmittedError` for anyone else, and for
  * everyone while the people's files have problems.
  */
 export function admit(

@@ -402,6 +402,7 @@ export function tfConnector<
           ? {
               get: (name: string) => secrets.get(name),
               ensure: async (name: string, make: () => string) => (await secrets.get(name)) ?? make(),
+              delete: () => Promise.reject(new Error("A plan deletes no secret")),
             }
           : secrets;
         const resolved = await resolveSecrets(desired, view);
