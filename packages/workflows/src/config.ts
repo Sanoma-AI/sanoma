@@ -59,7 +59,7 @@ import { appsListDriver, appsListOps } from "./apps-list.ts";
 import type { Steps } from "./steps.ts";
 import { checkSchedule } from "./schedules.ts";
 import { changeCodeOf, computeVersion } from "./version.ts";
-import type { DeclaredResource } from "./resources.ts";
+import type { DeclaredResource, ResourceProblem } from "./resources.ts";
 import { checkWakeupOps, type DeclaredWakeup } from "./wakeup.ts";
 import { sanomaWakeupDriver, wakeupSteps } from "./wakeup-driver.ts";
 import { wakeupOps } from "./wakeup-type.ts";
@@ -554,29 +554,30 @@ export async function declaredWakeup(config: SanomaConfig): Promise<DeclaredWake
 
 /**
  * The objects a company's data files declare, which only apply changes (`refuseDeclared` in
- * `call.ts`): each binding in the lockfile, an orphan's too, by `<vendor>.<type> <id>` to its key,
- * and each declaration's identity (what its type's `find` made), by `<vendor>.<type> <name>` to its id.
+ * `call.ts`), by `<vendor>.<type> <id or name>` to their key: each binding in the lockfile, an
+ * orphan's too, by its id, and each declaration by its identity (what its type's `find` made);
+ * and the files' problems, while which the declared objects are not known.
  */
 export interface DeclaredObjects {
-  bound: ReadonlyMap<string, string>;
-  named: ReadonlyMap<string, string>;
+  keys: ReadonlyMap<string, string>;
+  problems: readonly ResourceProblem[];
 }
 
-/** The objects the data files under `root` and its lockfile declare (`DeclaredObjects`). */
+/** The objects the data files under `root` and its lockfile declare (`DeclaredObjects`): none without a root. */
 async function readDeclaredObjects(
   root: string | undefined,
   connectors: readonly Connector<any, any>[],
   declarable: ReadonlyMap<string, Resource>,
 ): Promise<DeclaredObjects> {
+  if (root === undefined) return { keys: new Map(), problems: [] };
   // Loaded when a call asks, not with the worker.
   const { loadDataFiles } = await import("./resources.ts");
-  const { resources, bindings } = loadDataFiles(root, connectors, declarable);
-  return {
-    bound: new Map(Object.entries(bindings).map(([key, { type, id }]) => [`${type} ${id}`, key])),
-    named: new Map(
-      resources.flatMap((r) => (r.identity === undefined ? [] : [[`${r.vendor}.${r.type} ${r.identity}`, r.id]])),
-    ),
-  };
+  const { resources, bindings, problems } = loadDataFiles(root, connectors, declarable);
+  const named = resources.flatMap((r) =>
+    r.identity === undefined ? [] : [[`${r.vendor}.${r.type} ${r.identity}`, r.id] as const],
+  );
+  const bound = Object.entries(bindings).map(([key, { type, id }]) => [`${type} ${id}`, key] as const);
+  return { keys: new Map([...named, ...bound]), problems };
 }
 
 /**

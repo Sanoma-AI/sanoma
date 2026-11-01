@@ -543,7 +543,11 @@ export function alarmOps(api: () => Pick<CloudflareApi, "send">) {
     { id, state: known, desired }: { id?: string; state?: Record<string, unknown>; desired?: Record<string, unknown> },
     call: CallContext,
   ): Promise<Planned> => {
-    const state = id === undefined ? undefined : (await readWith(id, tokenName(desired, known), call)).state;
+    // Apply plans a declared alarm, and reads and deletes it by its id alone, with the default token.
+    if (desired && tokenName(desired, undefined) !== WAKEUP_TOKEN) {
+      throw refused(`alarm: a declared alarm's token is ${WAKEUP_TOKEN}: leave token out of the data file`);
+    }
+    const state = id === undefined ? undefined : (await readWith(id, tokenName(undefined, known), call)).state;
     if (!desired) return { action: state ? "delete" : "none", ...NONE };
     const planned = { host: hostUrl(desired.host) };
     const unknown = [...alarm.fields.vendorOwned];
@@ -563,15 +567,14 @@ export function alarmOps(api: () => Pick<CloudflareApi, "send">) {
       const token = await secrets.ensure(name, mintInstanceToken);
       const { answer, state } = await look(host, token, name);
       if (!state) throw failed(answer, "no Worker of Sanoma's answers there: apply the host first");
+      // A declared host is applied; a workflow's own host, under a name of its own, is updated with it.
+      const own = name === WAKEUP_TOKEN ? undefined : `update the host with ${WAKEUP_TOKEN}: secret("${name}")`;
       if (answer.status === 404) {
-        const advice = name === WAKEUP_TOKEN ? NO_TOKEN : `give the host's secrets ${WAKEUP_TOKEN}: secret("${name}")`;
-        throw refused(`alarm.create: the host has no ${WAKEUP_TOKEN}: ${advice}`, "no_token");
+        throw refused(`alarm.create: the host has no ${WAKEUP_TOKEN}: ${own ?? NO_TOKEN}`, "no_token");
       }
       if (answer.status === 401) {
-        throw refused(
-          `alarm.create: the host's ${WAKEUP_TOKEN} is not the stored ${name}: apply the host again`,
-          "token",
-        );
+        const advice = own ?? "apply the host again";
+        throw refused(`alarm.create: the host's ${WAKEUP_TOKEN} is not the stored ${name}: ${advice}`, "token");
       }
       // For a register made off the host: on it, the Worker's SANOMA_HOST_URL is in the environment, which comes first.
       await secrets.ensure(HOST_URL, () => host);

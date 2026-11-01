@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { neon } from "@sanoma-ai/connector-neon";
@@ -102,17 +102,17 @@ const close = defineWorkflow({
   },
 });
 
-/** A workflow that aims a container's change operation at the company's name it is given. */
+/** A workflow that aims a container's change operation at the company's name it is given (an update at `id`, by default that name). */
 const aim = defineWorkflow({
   name: "aim",
   trigger: "manual",
-  input: z.object({ op: z.enum(["create", "update", "delete"]), name: z.string() }),
+  input: z.object({ op: z.enum(["create", "update", "delete"]), name: z.string(), id: z.string().optional() }),
   uses: [cloudflare.container.create, cloudflare.container.update, cloudflare.container.delete],
-  run: async (ctx, { op, name }) => {
+  run: async (ctx, { op, name, id: at = name }) => {
     const desired = { name, image: IMAGE, source: SOURCE, ref: "main", revision: "r1", port: 3000 };
     let id: string;
     if (op === "create") id = (await ctx.cloudflare.container.create({ desired })).id;
-    else if (op === "update") id = (await ctx.cloudflare.container.update({ id: name, desired })).id;
+    else if (op === "update") id = (await ctx.cloudflare.container.update({ id: at, desired })).id;
     else id = (await ctx.cloudflare.container.delete({ id: name })).id;
     return id;
   },
@@ -162,8 +162,8 @@ describe("a workflow changes the vendor objects no data file declares", () => {
   });
 
   it("is refused an object the data files declare: an id the lockfile binds, a name a data file declares", async () => {
-    const refused = async (op: "create" | "update" | "delete", name: string, key: string) => {
-      const runId = await app.client.start(aim, { op, name }, by);
+    const refused = async (op: "create" | "update" | "delete", name: string, key: string, id?: string) => {
+      const runId = await app.client.start(aim, { op, name, ...(id && { id }) }, by);
       await expect(app.client.result(runId)).rejects.toThrow(
         `cloudflare.container.${op} changes resources/hosts.ts#${key}, a declared resource, which only apply does: change the data file instead`,
       );
@@ -173,12 +173,30 @@ describe("a workflow changes the vendor objects no data file declares", () => {
     await refused("delete", "ops", "ops");
     await refused("create", "staging", "staging");
     await refused("create", "ops", "ops");
+    // An update of an object of its own that would make it a declared one.
+    await refused("update", "staging", "staging", "mine");
     expect(cf.state.scripts).toEqual({});
     // A name nothing declares is the workflow's own.
     const made = await app.client.start(aim, { op: "create", name: "other" }, by);
     expect(await app.client.result(made)).toBe("other");
     const gone = await app.client.start(aim, { op: "delete", name: "other" }, by);
     expect(await app.client.result(gone)).toBe("other");
+    expect(cf.state.scripts).toEqual({});
+  });
+
+  it("is refused any change while the data files have problems, since what they declare is not known", async () => {
+    const lock = join(root, "resources", "sanoma.lock.json");
+    const kept = readFileSync(lock, "utf8");
+    writeFileSync(lock, "<<<<<<< HEAD\n");
+    try {
+      const runId = await app.client.start(aim, { op: "create", name: "other" }, by);
+      await expect(app.client.result(runId)).rejects.toThrow(
+        "cloudflare.container.create waits for the data files to be fixed",
+      );
+      expect(calls(await app.client.ledger(runId))).toEqual([]);
+    } finally {
+      writeFileSync(lock, kept);
+    }
     expect(cf.state.scripts).toEqual({});
   });
 
