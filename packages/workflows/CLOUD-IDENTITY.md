@@ -1,8 +1,8 @@
-# Managed Cloud runtime identity
+# Managed Cloud identity
 
 `@sanoma-ai/workflows/cloud-identity` supplies the identity-broker handler and refreshable Google SDK authentication for [D1, #492](https://github.com/Sanoma-AI/sanoma/issues/492). It is a reusable implementation boundary. Isolated live checks on a temporary Cloud Run service in `sanoma-513217` have verified attached-identity issuance, scoped KMS use and separate database permissions; production deployment remains open.
 
-This runtime route is separate from the provisioning OIDC identity in [#489](https://github.com/Sanoma-AI/sanoma/issues/489). Provisioning manages enrollment and infrastructure. The company runtime receives only its deployment's bootstrap credential and short-lived access tokens. The broker issues identity; it does not read company credential rows, decrypt credentials or unwrap data keys.
+Runtime and provisioning identity are separate trust boundaries. `identityBroker` issues ten-minute OAuth access tokens for company runtimes. `provisioningIdentityBroker` supplies Google-issued OIDC tokens for the control plane’s Workload Identity Federation (WIF) flow. Deploy them with separate attached accounts, enrollment databases/readers and bootstrap credentials. Sharing handler code does not establish that separation. Neither handler reads company credential rows or unwraps data keys.
 
 ## Request and authority
 
@@ -138,3 +138,62 @@ Before rollout:
 - Deliver each bootstrap credential only to its intended deployment. For Cloudflare, explicitly pass its protected Worker binding to that company's container. Prove cold start, resume, refresh through token expiry, bounded credential rotation, revoked/expired generations and broker/audit outages.
 - Prove company A's bearer cannot select B via body/query, A's token cannot use B's key, A's database login cannot read B's rows, and preview cannot access production. Synthetic handler tests are insufficient evidence for Google IAM or database isolation.
 - Verify issuance and KMS audit attribution, credential/header redaction, service quotas, backup recovery and retained key versions. Record the actual deployment evidence before declaring D1 or managed Cloud ready.
+
+## Provisioning identity from a non-Google host
+
+The trusted control plane can obtain renewable provisioning credentials without a service-account private key:
+
+```mermaid
+flowchart LR
+  control[Trusted control plane] -->|GET /identity + provisioning bearer| issuer[Separate Cloud Run provisioning issuer]
+  issuer -->|Read fixed enrollment| db[(Provisioning enrollment database)]
+  issuer -->|Attached identity: generateIdToken| google[Google IAM Credentials]
+  google -->|OIDC token for fixed source account| issuer
+  issuer -->|idToken + expiresAt| control
+  control -->|OIDC token| sts[Google STS / WIF]
+  sts -->|Federated credential| target[Impersonate provisioning service account]
+  target -->|Scoped access token| provider[Google OpenTofu provider]
+```
+
+Three identities have different responsibilities:
+
+- The **attached issuer account** has `iam.serviceAccounts.getOpenIdToken` on the fixed source account only.
+- The **source account** identifies the control plane to WIF through its immutable numeric Google `uniqueId`; it needs no infrastructure-administration roles.
+- The **provisioning account** receives scoped infrastructure permissions and grants impersonation only to the intended WIF principal.
+
+Trusted `ProvisioningIdentity` configuration fixes the source `serviceAccount`, numeric `subject` and exact WIF provider `audience`. Configure WIF for issuer `https://accounts.google.com`, map `google.subject` from `assertion.sub`, and restrict trust to the intended subject and audience. The source and target provisioning accounts are different identities.
+
+`provisioningIdentityBroker` accepts **GET `/identity`** with a provisioning bearer, no query and no body. Its enrollment must map to the configured source account. The caller cannot select an account, audience or lifetime. It checks enrollment before issuance and before delivery; audit failure prevents delivery. Responses contain only `{ idToken, expiresAt }` and prohibit caching.
+
+`attachedGoogleIdTokenIssuer(identity)` uses the attached `Compute` identity to call [Google’s generateIdToken API](https://docs.cloud.google.com/iam/docs/reference/credentials/rest/v1/projects.serviceAccounts/generateIdToken). It validates returned claims and expiry; Google STS verifies the token signature during federation. This trusted callback does not accept caller-supplied JWTs.
+
+```ts
+import {
+  provisioningIdentityBroker,
+  attachedGoogleIdTokenIssuer,
+  postgresIdentityEnrollments,
+} from "@sanoma-ai/workflows/cloud-identity";
+
+const identity = {
+  serviceAccount: "provision-source@example-project.iam.gserviceaccount.com",
+  subject: "123456789012345678901",
+  audience:
+    "//iam.googleapis.com/projects/123456789012/locations/global/workloadIdentityPools/provision/providers/google",
+};
+const handle = provisioningIdentityBroker({
+  identity,
+  enrollments: postgresIdentityEnrollments(async () => provisioningReadOnlyPool),
+  issue: attachedGoogleIdTokenIssuer(identity),
+  audit: writeDurableProvisioningAudit,
+});
+```
+
+The pool and audit sink belong to this separate service. Use the GCP connector’s `gcpProvisioningIdentity` helper to supply this endpoint as an external-account URL credential source to both the Node verifier and the Google provider. Its protected header contains a provisioning bearer; never put the resulting configuration in source control, workflow inputs/results or logs. The target account still comes from trusted deployment configuration.
+
+Google-issued OIDC tokens last up to **one hour**. A ten-minute final impersonated access token does not shorten that lifetime. Revoking enrollment stops new issuance, but an issued OIDC or federated credential may still obtain access tokens. Incident revocation must also remove federation and/or target impersonation trust, accounting for IAM propagation and access tokens already issued. These helpers do not implement that IAM revocation workflow. The runtime route remains POST `/token` with ten-minute OAuth access tokens.
+
+### Evidence and remaining integration
+
+An isolated live check in `sanoma-513217` verified Google-issued OIDC tokens, STS exchange, scoped impersonation and rejection of another subject and target. The observed OIDC lifetime was 3,600 seconds. Temporary federation and service accounts were removed. Local tests cover both broker routes and Google’s URL-source exchange using synthetic transports.
+
+This establishes the Google trust path, not a deployed provisioning broker or provider renewal through that broker. Deploying the separate issuer/enrollment/audit boundary, delivering and rotating protected bootstrap configuration, and proving renewal and revocation through the actual host remain [#532](https://github.com/Sanoma-AI/sanoma/issues/532).

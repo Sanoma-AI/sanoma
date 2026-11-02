@@ -46,9 +46,35 @@ export default defineConfig({ connectors: [gcp], connections: [provisioning] });
 
 The mapping contains a file **path**, not its contents. Deliver the file through the trusted deployment environment; keep its contents and source tokens out of code, resource inputs, fixtures, logs and the secret-entry form. Treat this configuration and its file as security-sensitive even though no service-account private key is involved. Connect/verify the named account through the normal connection lifecycle; a declaration alone is not a verified binding.
 
-Only an explicit `external_account` OIDC federation file is accepted. It must use Google's STS endpoint, a JWT subject token and impersonation of the exact configured service account. Service-account key files, executable sources, AWS environment sources and ambient ADC fallback are refused. A successful token exchange and impersonation verify the selected identity; a configured email alone is not proof. Verification returns the account identity and an empty scope list, not the access token or an attestation of individual IAM grants. Google IAM remains authoritative for permissions.
+Only explicit `external_account` OIDC federation configuration is accepted. It must use Google's STS endpoint, a JWT subject token and impersonation of the exact configured service account. Service-account key files, executable sources, AWS environment sources and ambient ADC fallback are refused. A successful token exchange and impersonation verify the selected identity; a configured email alone is not proof. Verification returns the account identity and an empty scope list, not the access token or an attestation of individual IAM grants. Google IAM remains authoritative for permissions.
 
 The provider receives that explicit federation configuration inside a fresh session for each authorized operation. The driver checks project IDs/numbers in resource identifiers and fields against the selected deployment. The provisioning account's Google IAM grants must also limit its authority: application-side checks do not replace IAM isolation. Give provisioning and company runtime different service accounts and roles; a company runtime must not inherit the provisioning account's IAM administration permissions.
+
+### Provisioning service on a non-Google host
+
+Use the separate [provisioning identity service](../../packages/workflows/CLOUD-IDENTITY.md#provisioning-identity-from-a-non-google-host) when the control plane has no native Google identity:
+
+```ts
+import { gcpProvisioningIdentity, gcpWithIdentities } from "@sanoma-ai/connector-gcp";
+
+const gcp = gcpWithIdentities({
+  "gcp/provisioning": gcpProvisioningIdentity({
+    project: "example-company",
+    projectNumber: "123456789012",
+    serviceAccount: "provisioner@example-company.iam.gserviceaccount.com",
+    audience:
+      "//iam.googleapis.com/projects/123456789012/locations/global/workloadIdentityPools/provision/providers/google",
+    issuer: "https://provisioning.example.test/identity",
+    credential: async () => process.env.SANOMA_PROVISIONING_CREDENTIAL ?? "",
+  }),
+});
+```
+
+This is trusted deployment composition. The host supplies that explicit secret binding; there is no implicit environment fallback. `gcpProvisioningIdentity` generates an HTTPS URL-source configuration in memory, fixes Google STS and the target impersonation URL, and requests ten-minute access tokens. The named account must still be verified normally.
+
+The callback is read for each verification and provider operation. A running provider session holds its starting bootstrap header while it renews from the URL, so bootstrap rotation needs enough overlap for active operations to finish. Stopping enrollment does not invalidate already issued Google OIDC tokens, which last up to one hour: remove federation/impersonation trust as part of incident revocation. Runtime identities use the separate company broker and never receive this provisioning bootstrap.
+
+For another trusted deployment integration, `GcpIdentity.credentials` can return external-account JSON asynchronously instead of `credentialsFile`. Configure exactly one source. Callback/file/SDK failures are sanitized and never fall back to another identity. Do not call this callback from a workflow or serialize its output into durable state.
 
 ### First administrator setup
 

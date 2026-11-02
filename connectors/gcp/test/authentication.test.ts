@@ -1,11 +1,13 @@
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, expect, it } from "vitest";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { verifyAuthentication } from "@sanoma-ai/workflows";
 import { gcpAuthentication, federationCredentials, accountOf, type GcpIdentity } from "../src/authentication.ts";
+
+import { gcpProvisioningIdentity } from "../src/index.ts";
 
 let directory: string;
 const exchanges: string[] = [];
@@ -61,10 +63,11 @@ beforeAll(async () => {
   ] as const) {
     const source = join(directory, `${name}.token`);
     await writeFile(source, `subject-${name}`);
-    await writeFile(identity.credentialsFile, JSON.stringify(configFor(identity, source)));
+    await writeFile(identity.credentialsFile!, JSON.stringify(configFor(identity, source)));
   }
   server.listen({ onUnhandledFrame: "error" });
 });
+afterEach(() => server.resetHandlers());
 afterAll(async () => {
   server.close();
   await rm(directory, { recursive: true, force: true });
@@ -96,14 +99,14 @@ it("rejects key files, changed impersonation targets and executable credential s
     { ...valid, credential_source: { executable: { command: "must-not-run" } } },
     { ...valid, token_url: "https://untrusted.example.test/token" },
   ]) {
-    await writeFile(identity.credentialsFile, JSON.stringify(invalid));
+    await writeFile(identity.credentialsFile!, JSON.stringify(invalid));
     await expect(federationCredentials(identity)).rejects.toMatchObject({ problem: "rejected" });
   }
 });
 
 it("does not treat a configured target as verified when Google denies impersonation", async () => {
   const identity = { ...a, credentialsFile: join(directory, "denied.json") };
-  await writeFile(identity.credentialsFile, JSON.stringify(configFor(a, join(directory, "b.token"))));
+  await writeFile(identity.credentialsFile!, JSON.stringify(configFor(a, join(directory, "b.token"))));
   const error = await verifyAuthentication(gcpAuthentication({ "gcp/a": identity }), undefined, {
     vendor: "gcp",
     connectionId: "gcp/a",
@@ -111,4 +114,73 @@ it("does not treat a configured target as verified when Google denies impersonat
   expect(error).toMatchObject({ problem: "unavailable" });
   expect(String(error)).not.toContain("synthetic-secret-never-return");
   expect(error).not.toHaveProperty("cause");
+});
+
+it("uses the provisioning URL source and reads a rotated bootstrap for each verification", async () => {
+  const issuer = "https://provisioning.example.test/identity";
+  let bearer = "a".repeat(43);
+  const seen: string[] = [];
+  server.use(
+    http.get(issuer, ({ request }) => {
+      seen.push(request.headers.get("authorization")!);
+      return HttpResponse.json({ idToken: "subject-a", expiresAt: Date.now() + 3_600_000 });
+    }),
+  );
+  const identity = gcpProvisioningIdentity({
+    project: a.project,
+    projectNumber: a.projectNumber,
+    serviceAccount: a.serviceAccount,
+    audience: configFor(a, "unused").audience,
+    issuer,
+    credential: async () => bearer,
+  });
+  const auth = gcpAuthentication({ "gcp/provisioning": identity });
+  const context = { vendor: "gcp", connectionId: "gcp/provisioning" };
+  expect(await verifyAuthentication(auth, undefined, context)).toEqual({ account: accountOf(a), scopes: [] });
+  bearer = "b".repeat(43);
+  expect(await verifyAuthentication(auth, undefined, context)).toEqual({ account: accountOf(a), scopes: [] });
+  expect(seen).toEqual([`Bearer ${"a".repeat(43)}`, `Bearer ${bearer}`]);
+  expect(await federationCredentials(identity)).toMatchObject({
+    service_account_impersonation: { token_lifetime_seconds: 600 },
+    credential_source: { url: issuer, headers: { Authorization: `Bearer ${bearer}` } },
+  });
+});
+
+it("rejects unsafe issuer URLs, invalid bootstraps and ambiguous credential sources", async () => {
+  const options = {
+    project: a.project,
+    projectNumber: a.projectNumber,
+    serviceAccount: a.serviceAccount,
+    audience: configFor(a, "unused").audience,
+    issuer: "https://provisioning.example.test/identity",
+    credential: async () => "a".repeat(43),
+  };
+  for (const issuer of [
+    "http://example.test/identity",
+    "https://user:pass@example.test/identity",
+    "https://example.test/token",
+    "https://example.test/identity?target=other",
+    "https://example.test/identity#target",
+  ])
+    expect(() => gcpProvisioningIdentity({ ...options, issuer })).toThrow("Authentication: rejected");
+  expect(() => gcpProvisioningIdentity({ ...options, audience: "other" })).toThrow("Authentication: rejected");
+  for (const credential of [
+    async () => "invalid",
+    async () => {
+      throw new Error("synthetic-sensitive-bootstrap");
+    },
+  ]) {
+    const error = await federationCredentials(gcpProvisioningIdentity({ ...options, credential })).catch((e) => e);
+    expect(error).toMatchObject({ problem: "rejected" });
+    expect(String(error)).not.toContain("synthetic-sensitive-bootstrap");
+    expect(error).not.toHaveProperty("cause");
+  }
+  const ambiguous = { ...a, credentials: async () => JSON.stringify(configFor(a, "unused")) };
+  await expect(federationCredentials(ambiguous)).rejects.toMatchObject({ problem: "rejected" });
+  await expect(
+    verifyAuthentication(gcpAuthentication({ "gcp/a": ambiguous }), undefined, {
+      vendor: "gcp",
+      connectionId: "gcp/a",
+    }),
+  ).rejects.toMatchObject({ problem: "missing" });
 });
