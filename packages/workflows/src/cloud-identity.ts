@@ -1,6 +1,9 @@
 import { createHash, randomBytes } from "node:crypto";
 import { Compute, OAuth2Client } from "google-auth-library";
 import type { Db } from "./db.ts";
+import { enrollmentBroker } from "./identity-broker.ts";
+export { provisioningIdentityBroker, attachedGoogleIdTokenIssuer } from "./provisioning-identity.ts";
+export type { ProvisioningIdentity, ProvisioningIdToken } from "./provisioning-identity.ts";
 
 export { postgresIdentityProvisioning, IdentityProvisioningError } from "./identity-provisioning.ts";
 export type { IdentityProvisioning, DeploymentIdentity, EnrollIdentity } from "./identity-provisioning.ts";
@@ -106,12 +109,6 @@ export interface IdentityBrokerOptions {
   /** Must durably record the decision without token values. A failure prevents delivery. */
   audit(event: IdentityAudit): Promise<void>;
 }
-const validEnrollment = (e: IdentityEnrollment | undefined): e is IdentityEnrollment =>
-  !!e &&
-  [e.deployment, e.company, e.environment].every((v) => typeof v === "string" && v.length > 0 && v.length <= 256) &&
-  ACCOUNT.test(e.serviceAccount) &&
-  Number.isSafeInteger(e.generation) &&
-  e.generation > 0;
 const validToken = (token: CloudAccessToken, now: number) =>
   typeof token?.accessToken === "string" &&
   token.accessToken.length > 0 &&
@@ -120,77 +117,17 @@ const validToken = (token: CloudAccessToken, now: number) =>
   Number.isFinite(token.expiresAt) &&
   token.expiresAt > now &&
   token.expiresAt <= now + LIFETIME + 30_000;
-const reply = (status: number, body: unknown) =>
-  Response.json(body, {
-    status,
-    headers: { "Cache-Control": "no-store", Pragma: "no-cache" },
-  });
-
-// Node/edge adapters can represent an empty POST as a stream. Reject actual bytes,
-// without buffering attacker-controlled input or waiting indefinitely for its end.
-async function hasBody(request: Request): Promise<boolean> {
-  if (!request.body) return false;
-  const reader = request.body.getReader();
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  try {
-    const first = await Promise.race([
-      reader.read(),
-      new Promise<never>((_, reject) => {
-        timeout = setTimeout(() => reject(new CloudIdentityError()), 5_000);
-      }),
-    ]);
-    return !first.done;
-  } finally {
-    clearTimeout(timeout);
-    void reader.cancel().catch(() => {});
-  }
-}
-
 /** POST /token with a deployment bearer credential and no query or body. No enrollment endpoint. */
 export function identityBroker(options: IdentityBrokerOptions): (request: Request) => Promise<Response> {
-  return async (request) => {
-    let enrollment: IdentityEnrollment | undefined;
-    try {
-      const url = new URL(request.url);
-      if (url.pathname !== "/token" || request.method !== "POST") return reply(404, { error: "not_found" });
-      if (url.search || (await hasBody(request))) return reply(400, { error: "invalid_request" });
-      const authorization = request.headers.get("authorization") ?? "";
-      const credential = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
-      const hash = CREDENTIAL.test(credential) ? credentialHash(credential) : undefined;
-      enrollment = hash ? await options.enrollments.active(hash) : undefined;
-      if (!validEnrollment(enrollment)) {
-        await options.audit({ result: "denied" });
-        return reply(401, { error: "unauthorized" });
-      }
-      // Copy authoritative values before any awaits; caller fields never select a target or lifetime.
-      enrollment = {
-        deployment: enrollment.deployment,
-        company: enrollment.company,
-        environment: enrollment.environment,
-        serviceAccount: enrollment.serviceAccount,
-        generation: enrollment.generation,
-      };
-      const token = await options.issue(enrollment.serviceAccount);
-      if (!validToken(token, Date.now())) throw new CloudIdentityError();
-      const current = await options.enrollments.active(hash!);
-      if (
-        !current ||
-        (Object.keys(enrollment) as (keyof IdentityEnrollment)[]).some((key) => current[key] !== enrollment![key])
-      ) {
-        await options.audit({ result: "denied", enrollment });
-        return reply(401, { error: "unauthorized" });
-      }
-      await options.audit({ result: "issued", enrollment, expiresAt: token.expiresAt });
-      return reply(200, { accessToken: token.accessToken, expiresAt: token.expiresAt });
-    } catch {
-      try {
-        await options.audit({ result: "unavailable", ...(enrollment && { enrollment }) });
-      } catch {
-        /* fail closed */
-      }
-      return reply(503, { error: "unavailable" });
-    }
-  };
+  return enrollmentBroker({
+    ...options,
+    path: "/token",
+    method: "POST",
+    accept: () => true,
+    issue: (enrollment) => options.issue(enrollment.serviceAccount),
+    valid: validToken,
+    body: (token) => ({ accessToken: token.accessToken, expiresAt: token.expiresAt }),
+  });
 }
 
 /** Cloud Run attached identity only: no ADC environment file or service-account private key fallback. */
