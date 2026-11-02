@@ -61,6 +61,7 @@ export {
   type ResourceSpec,
   withoutWriteOnly,
 } from "./resource.ts";
+export { type DnsRecord, dnsRecord } from "./dns.ts";
 export {
   declaredWakeup,
   defineConfig,

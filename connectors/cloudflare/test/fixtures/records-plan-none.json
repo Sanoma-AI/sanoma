@@ -1,0 +1,423 @@
+[
+  {
+    "method": "GET",
+    "path": "/client/v4/zones?name=sanoma.work&account.id=0123456789abcdef0123456789abcdef",
+    "status": 200,
+    "body": {
+      "success": true,
+      "errors": [],
+      "messages": [],
+      "result": [
+        {
+          "id": "00000000000000000000000000000001",
+          "name": "sanoma.work",
+          "status": "active",
+          "paused": false,
+          "type": "full",
+          "account": {
+            "id": "0123456789abcdef0123456789abcdef",
+            "name": "Sanoma"
+          },
+          "name_servers": ["ada.ns.cloudflare.com", "bob.ns.cloudflare.com"],
+          "created_on": "2026-10-01T12:00:00.000000Z",
+          "modified_on": "2026-10-01T12:00:00.000000Z"
+        }
+      ],
+      "result_info": {
+        "page": 1,
+        "per_page": 100,
+        "count": 1,
+        "total_count": 1,
+        "total_pages": 1
+      }
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/client/v4/zones/00000000000000000000000000000001/dns_records?comment.exact=sanoma:sanoma.work/check",
+    "status": 200,
+    "body": {
+      "success": true,
+      "errors": [],
+      "messages": [],
+      "result": [],
+      "result_info": {
+        "page": 1,
+        "per_page": 100,
+        "count": 0,
+        "total_count": 0,
+        "total_pages": 1
+      }
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/client/v4/zones/00000000000000000000000000000001/dns_records?name.exact=check-dkim._domainkey.sanoma.work",
+    "status": 200,
+    "body": {
+      "success": true,
+      "errors": [],
+      "messages": [],
+      "result": [],
+      "result_info": {
+        "page": 1,
+        "per_page": 100,
+        "count": 0,
+        "total_count": 0,
+        "total_pages": 1
+      }
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/client/v4/zones/00000000000000000000000000000001/dns_records?name.exact=check-send.sanoma.work",
+    "status": 200,
+    "body": {
+      "success": true,
+      "errors": [],
+      "messages": [],
+      "result": [],
+      "result_info": {
+        "page": 1,
+        "per_page": 100,
+        "count": 0,
+        "total_count": 0,
+        "total_pages": 1
+      }
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/client/v4/zones/00000000000000000000000000000001/dns_records/batch",
+    "status": 200,
+    "body": {
+      "success": true,
+      "errors": [],
+      "messages": [],
+      "result": {
+        "deletes": [],
+        "patches": [],
+        "posts": [
+          {
+            "id": "00000000000000000000000000000002",
+            "name": "check-dkim._domainkey.sanoma.work",
+            "type": "TXT",
+            "content": "\"p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCcheck\"",
+            "proxiable": false,
+            "proxied": false,
+            "ttl": 1,
+            "settings": {},
+            "meta": {},
+            "comment": "sanoma:sanoma.work/check",
+            "tags": [],
+            "created_on": "2026-11-02T12:00:00.000000Z",
+            "modified_on": "2026-11-02T12:00:00.000000Z",
+            "comment_modified_on": "2026-11-02T12:00:00.000000Z"
+          },
+          {
+            "id": "00000000000000000000000000000003",
+            "name": "check-send.sanoma.work",
+            "type": "MX",
+            "content": "feedback-smtp.us-east-1.amazonses.com",
+            "proxiable": false,
+            "proxied": false,
+            "ttl": 1,
+            "settings": {},
+            "meta": {},
+            "comment": "sanoma:sanoma.work/check",
+            "tags": [],
+            "created_on": "2026-11-02T12:00:00.000000Z",
+            "modified_on": "2026-11-02T12:00:00.000000Z",
+            "priority": 10,
+            "comment_modified_on": "2026-11-02T12:00:00.000000Z"
+          },
+          {
+            "id": "00000000000000000000000000000004",
+            "name": "check-send.sanoma.work",
+            "type": "TXT",
+            "content": "\"v=spf1 include:amazonses.com ~all\"",
+            "proxiable": false,
+            "proxied": false,
+            "ttl": 1,
+            "settings": {},
+            "meta": {},
+            "comment": "sanoma:sanoma.work/check",
+            "tags": [],
+            "created_on": "2026-11-02T12:00:00.000000Z",
+            "modified_on": "2026-11-02T12:00:00.000000Z",
+            "comment_modified_on": "2026-11-02T12:00:00.000000Z"
+          }
+        ],
+        "puts": []
+      }
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/client/v4/zones?name=sanoma.work&account.id=0123456789abcdef0123456789abcdef",
+    "status": 200,
+    "body": {
+      "success": true,
+      "errors": [],
+      "messages": [],
+      "result": [
+        {
+          "id": "00000000000000000000000000000001",
+          "name": "sanoma.work",
+          "status": "active",
+          "paused": false,
+          "type": "full",
+          "account": {
+            "id": "0123456789abcdef0123456789abcdef",
+            "name": "Sanoma"
+          },
+          "name_servers": ["ada.ns.cloudflare.com", "bob.ns.cloudflare.com"],
+          "created_on": "2026-10-01T12:00:00.000000Z",
+          "modified_on": "2026-10-01T12:00:00.000000Z"
+        }
+      ],
+      "result_info": {
+        "page": 1,
+        "per_page": 100,
+        "count": 1,
+        "total_count": 1,
+        "total_pages": 1
+      }
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/client/v4/zones/00000000000000000000000000000001/dns_records?comment.exact=sanoma:sanoma.work/check",
+    "status": 200,
+    "body": {
+      "success": true,
+      "errors": [],
+      "messages": [],
+      "result": [
+        {
+          "id": "00000000000000000000000000000002",
+          "name": "check-dkim._domainkey.sanoma.work",
+          "type": "TXT",
+          "content": "\"p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCcheck\"",
+          "proxiable": false,
+          "proxied": false,
+          "ttl": 1,
+          "settings": {},
+          "meta": {},
+          "comment": "sanoma:sanoma.work/check",
+          "tags": [],
+          "created_on": "2026-11-02T12:00:00.000000Z",
+          "modified_on": "2026-11-02T12:00:00.000000Z",
+          "comment_modified_on": "2026-11-02T12:00:00.000000Z"
+        },
+        {
+          "id": "00000000000000000000000000000003",
+          "name": "check-send.sanoma.work",
+          "type": "MX",
+          "content": "feedback-smtp.us-east-1.amazonses.com",
+          "proxiable": false,
+          "proxied": false,
+          "ttl": 1,
+          "settings": {},
+          "meta": {},
+          "comment": "sanoma:sanoma.work/check",
+          "tags": [],
+          "created_on": "2026-11-02T12:00:00.000000Z",
+          "modified_on": "2026-11-02T12:00:00.000000Z",
+          "priority": 10,
+          "comment_modified_on": "2026-11-02T12:00:00.000000Z"
+        },
+        {
+          "id": "00000000000000000000000000000004",
+          "name": "check-send.sanoma.work",
+          "type": "TXT",
+          "content": "\"v=spf1 include:amazonses.com ~all\"",
+          "proxiable": false,
+          "proxied": false,
+          "ttl": 1,
+          "settings": {},
+          "meta": {},
+          "comment": "sanoma:sanoma.work/check",
+          "tags": [],
+          "created_on": "2026-11-02T12:00:00.000000Z",
+          "modified_on": "2026-11-02T12:00:00.000000Z",
+          "comment_modified_on": "2026-11-02T12:00:00.000000Z"
+        }
+      ],
+      "result_info": {
+        "page": 1,
+        "per_page": 100,
+        "count": 3,
+        "total_count": 3,
+        "total_pages": 1
+      }
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/client/v4/zones?name=sanoma.work&account.id=0123456789abcdef0123456789abcdef",
+    "status": 200,
+    "body": {
+      "success": true,
+      "errors": [],
+      "messages": [],
+      "result": [
+        {
+          "id": "00000000000000000000000000000001",
+          "name": "sanoma.work",
+          "status": "active",
+          "paused": false,
+          "type": "full",
+          "account": {
+            "id": "0123456789abcdef0123456789abcdef",
+            "name": "Sanoma"
+          },
+          "name_servers": ["ada.ns.cloudflare.com", "bob.ns.cloudflare.com"],
+          "created_on": "2026-10-01T12:00:00.000000Z",
+          "modified_on": "2026-10-01T12:00:00.000000Z"
+        }
+      ],
+      "result_info": {
+        "page": 1,
+        "per_page": 100,
+        "count": 1,
+        "total_count": 1,
+        "total_pages": 1
+      }
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/client/v4/zones/00000000000000000000000000000001/dns_records?comment.exact=sanoma:sanoma.work/check",
+    "status": 200,
+    "body": {
+      "success": true,
+      "errors": [],
+      "messages": [],
+      "result": [
+        {
+          "id": "00000000000000000000000000000002",
+          "name": "check-dkim._domainkey.sanoma.work",
+          "type": "TXT",
+          "content": "\"p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCcheck\"",
+          "proxiable": false,
+          "proxied": false,
+          "ttl": 1,
+          "settings": {},
+          "meta": {},
+          "comment": "sanoma:sanoma.work/check",
+          "tags": [],
+          "created_on": "2026-11-02T12:00:00.000000Z",
+          "modified_on": "2026-11-02T12:00:00.000000Z",
+          "comment_modified_on": "2026-11-02T12:00:00.000000Z"
+        },
+        {
+          "id": "00000000000000000000000000000003",
+          "name": "check-send.sanoma.work",
+          "type": "MX",
+          "content": "feedback-smtp.us-east-1.amazonses.com",
+          "proxiable": false,
+          "proxied": false,
+          "ttl": 1,
+          "settings": {},
+          "meta": {},
+          "comment": "sanoma:sanoma.work/check",
+          "tags": [],
+          "created_on": "2026-11-02T12:00:00.000000Z",
+          "modified_on": "2026-11-02T12:00:00.000000Z",
+          "priority": 10,
+          "comment_modified_on": "2026-11-02T12:00:00.000000Z"
+        },
+        {
+          "id": "00000000000000000000000000000004",
+          "name": "check-send.sanoma.work",
+          "type": "TXT",
+          "content": "\"v=spf1 include:amazonses.com ~all\"",
+          "proxiable": false,
+          "proxied": false,
+          "ttl": 1,
+          "settings": {},
+          "meta": {},
+          "comment": "sanoma:sanoma.work/check",
+          "tags": [],
+          "created_on": "2026-11-02T12:00:00.000000Z",
+          "modified_on": "2026-11-02T12:00:00.000000Z",
+          "comment_modified_on": "2026-11-02T12:00:00.000000Z"
+        }
+      ],
+      "result_info": {
+        "page": 1,
+        "per_page": 100,
+        "count": 3,
+        "total_count": 3,
+        "total_pages": 1
+      }
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/client/v4/zones/00000000000000000000000000000001/dns_records/batch",
+    "status": 200,
+    "body": {
+      "success": true,
+      "errors": [],
+      "messages": [],
+      "result": {
+        "deletes": [
+          {
+            "id": "00000000000000000000000000000002",
+            "name": "check-dkim._domainkey.sanoma.work",
+            "type": "TXT",
+            "content": "\"p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCcheck\"",
+            "proxiable": false,
+            "proxied": false,
+            "ttl": 1,
+            "settings": {},
+            "meta": {},
+            "comment": "sanoma:sanoma.work/check",
+            "tags": [],
+            "created_on": "2026-11-02T12:00:00.000000Z",
+            "modified_on": "2026-11-02T12:00:00.000000Z",
+            "comment_modified_on": "2026-11-02T12:00:00.000000Z"
+          },
+          {
+            "id": "00000000000000000000000000000003",
+            "name": "check-send.sanoma.work",
+            "type": "MX",
+            "content": "feedback-smtp.us-east-1.amazonses.com",
+            "proxiable": false,
+            "proxied": false,
+            "ttl": 1,
+            "settings": {},
+            "meta": {},
+            "comment": "sanoma:sanoma.work/check",
+            "tags": [],
+            "created_on": "2026-11-02T12:00:00.000000Z",
+            "modified_on": "2026-11-02T12:00:00.000000Z",
+            "priority": 10,
+            "comment_modified_on": "2026-11-02T12:00:00.000000Z"
+          },
+          {
+            "id": "00000000000000000000000000000004",
+            "name": "check-send.sanoma.work",
+            "type": "TXT",
+            "content": "\"v=spf1 include:amazonses.com ~all\"",
+            "proxiable": false,
+            "proxied": false,
+            "ttl": 1,
+            "settings": {},
+            "meta": {},
+            "comment": "sanoma:sanoma.work/check",
+            "tags": [],
+            "created_on": "2026-11-02T12:00:00.000000Z",
+            "modified_on": "2026-11-02T12:00:00.000000Z",
+            "comment_modified_on": "2026-11-02T12:00:00.000000Z"
+          }
+        ],
+        "patches": [],
+        "posts": [],
+        "puts": []
+      }
+    }
+  }
+]

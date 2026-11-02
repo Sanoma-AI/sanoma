@@ -1,4 +1,14 @@
-import { type Connector, defineConnector, defineResource, type OpSpec, vendorInfo } from "@sanoma-ai/workflows";
+import {
+  compareDeclared,
+  type Connector,
+  defineConnector,
+  defineResource,
+  type DnsRecord,
+  dnsRecord,
+  type OpSpec,
+  type ResourceFields,
+  vendorInfo,
+} from "@sanoma-ai/workflows";
 import { DOMAIN_NAME, SITE_KEY } from "@sanoma-ai/workflows/shared";
 import { z } from "zod";
 
@@ -135,7 +145,128 @@ export const alarm = defineResource({
   },
 });
 
-const types = defineConnector("cloudflare", { container, alarm }, vendorInfo(import.meta.url));
+/** A set's label: lower case letters, digits, `-` and `_`. */
+const LABEL = /^[a-z0-9](?:[a-z0-9_-]{0,61}[a-z0-9])?$/;
+
+const recordsSchema = z.object({
+  zone: z
+    .string()
+    .regex(DOMAIN_NAME, "a zone's name, lower case, such as `example.com`")
+    .describe("The zone's name, as the account holds it: `example.com`"),
+  name: z
+    .string()
+    .regex(LABEL, "lower case letters, digits, `-` and `_`")
+    .describe(
+      "The set's label, such as `resend`: its identity is `<zone>/<name>`, and each record it writes carries the comment `sanoma:<zone>/<name>`",
+    ),
+  records: z
+    .array(dnsRecord)
+    // Empty, it would read back as gone, a create on every apply.
+    .min(1, "a set holds at least one record: leave it out rather than empty")
+    .describe(
+      "The records, compared as a set: a list, or a declared `resend.domain`, whose `dns_records` they are then",
+    ),
+  zone_id: z.string().nullish().describe("The zone's id, which Cloudflare sets"),
+  record_ids: z
+    .array(z.string())
+    .nullish()
+    .describe("Each record's id, which Cloudflare sets, in the order of `records` as a read gives them"),
+});
+
+/** A TXT record's text as a zone may show it, quoted (`"v=spf1 …"`) or split in quoted strings (`"…" "…"`), unquoted. */
+function unquoted(content: string) {
+  const text = content.trim();
+  if (!/^"(?:[^"\\]|\\.)*"(?:\s+"(?:[^"\\]|\\.)*")*$/s.test(text)) return content;
+  return [...text.matchAll(/"((?:[^"\\]|\\.)*)"/gs)].map(([, part = ""]) => part.replace(/\\(.)/gs, "$1")).join("");
+}
+
+/** A CAA record's content, `0 issue "letsencrypt.org"`, as the fields Cloudflare takes; undefined when it is not one. */
+export function caaData(content: string) {
+  const parts = /^(\d+)\s+(\S+)\s+(.+)$/s.exec(content.trim());
+  if (!parts) return undefined;
+  const [, flags, tag, value] = parts as unknown as [string, string, string, string];
+  // A tag in any case is the same tag (RFC 8659); Cloudflare shows it in lower case.
+  return { flags: Number(flags), tag: tag.toLowerCase(), value: value.replace(/^"(.*)"$/s, "$1") };
+}
+
+/** A CAA record's fields as its content, as Cloudflare shows them: `caaData`'s reverse. */
+export const caaContent = ({ flags, tag, value }: { flags: number; tag: string; value: string }) =>
+  `${flags} ${tag} "${value}"`;
+
+/** A record's content in its compared form: a TXT record's text unquoted, a CAA record's value quoted. */
+function contentOf(type: string, content: string) {
+  if (type === "TXT") return unquoted(content);
+  const caa = type === "CAA" ? caaData(content) : undefined;
+  return caa ? caaContent(caa) : content;
+}
+
+/** A record as a zone or a declaration gives it, as far as a set compares it. */
+interface AnyRecord {
+  type: string;
+  name: string;
+  content: string;
+  priority?: number | null | undefined;
+  ttl?: number | null | undefined;
+}
+
+/** A canonical record's key: two records of one key are the same record. */
+export const keyOf = ({ type, name, content, priority, ttl }: DnsRecord) =>
+  JSON.stringify([type, name, content, priority, ttl]);
+
+/**
+ * One record in the one form a set compares: its name in lower case with no trailing dot, a TXT
+ * record's text unquoted, a CAA record's value quoted, a priority for an MX record only, and a
+ * ttl, 1 (automatic) unless given.
+ */
+export const canonicalRecord = ({ type, name, content, priority, ttl }: AnyRecord): DnsRecord => ({
+  type: type as DnsRecord["type"],
+  name: name.toLowerCase().replace(/\.$/, ""),
+  content: contentOf(type, content),
+  ...(type === "MX" && typeof priority === "number" && { priority }),
+  ttl: ttl ?? 1,
+});
+
+const recordsFields = {
+  immutable: ["zone", "name"],
+  vendorOwned: ["zone_id", "record_ids"],
+  writeOnly: [],
+  unordered: ["records"],
+  references: { records: { type: ["resend.domain"], from: "dns_records" } },
+} as const satisfies ResourceFields;
+
+/** A state or a declaration with its records in their compared form (`canonicalRecord`), each once, as a plan has them. */
+const canonicalSet = (state: Record<string, unknown>) => {
+  if (!Array.isArray(state.records)) return state;
+  const records = (state.records as AnyRecord[]).map((record) => canonicalRecord(record));
+  return { ...state, records: [...new Map(records.map((r) => [keyOf(r), r])).values()] };
+};
+
+/**
+ * `cloudflare.records({ zone, name, records })`: a set of DNS records in one of the account's
+ * zones, `<zone>/<name>`, compared as a set. Each record it writes carries the comment
+ * `sanoma:<zone>/<name>`, which is how a read finds them; a record without it is never changed or
+ * deleted, except one identical to a declared record in type, name, content (and an MX record's
+ * priority), which is adopted (its comment replaced by the mark), and is deleted with the set from then on.
+ * `records` may name a `resend.domain`, whose `dns_records` it then takes (`from`): a sending
+ * domain's records go to the zone that holds them.
+ */
+export const records = defineResource({
+  vendor: "cloudflare",
+  type: "records",
+  title: "DNS records",
+  identity: "zone/name",
+  schema: recordsSchema,
+  fields: recordsFields,
+  find: ({ zone, name }) => `${zone}/${name}`,
+  bindingId: (state) => `${String(state.zone)}/${String(state.name)}`,
+  // Drift compares each record as `canonicalRecord` has it: a ttl left out is automatic, as read.
+  normalize: (state, desired) => compareDeclared(recordsFields, canonicalSet(state), canonicalSet(desired)),
+  writable: true,
+  // Records hold no data: a set deleted by hand is written again without asking.
+  stateless: true,
+});
+
+const types = defineConnector("cloudflare", { container, alarm, records }, vendorInfo(import.meta.url));
 
 /** `alarm.register`, in the alarm type's own group, beside its resource operations. */
 const registerSpec = {
@@ -151,9 +282,10 @@ const registerSpec = {
 
 const register = defineConnector("cloudflare", { alarm: registerSpec });
 
-/** The connector's specs: both types' operations, and `register` in the alarm's group. */
+/** The connector's specs: each type's operations, and `register` in the alarm's group. */
 type CloudflareSpecs = {
   container: (typeof container)["ops"];
+  records: (typeof records)["ops"];
   alarm: (typeof alarm)["ops"] & typeof registerSpec;
 };
 
@@ -166,5 +298,5 @@ export const cloudflareOps = {
   alarm: { ...types.alarm, ...register.alarm },
 } as unknown as Connector<"cloudflare", CloudflareSpecs>;
 
-/** The connector's type: both types, with `alarm.register`. */
+/** The connector's type: the three types, with `alarm.register`. */
 export type CloudflareOps = typeof cloudflareOps;

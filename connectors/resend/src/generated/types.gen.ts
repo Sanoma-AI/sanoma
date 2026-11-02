@@ -110,6 +110,231 @@ export type SendEmailResponse = {
   id?: string;
 };
 
+/**
+ * Configure the domain capabilities for sending and receiving emails. At least one capability must be enabled.
+ */
+export type DomainCapabilities = {
+  /**
+   * Enable or disable sending emails from this domain.
+   */
+  sending?: "enabled" | "disabled";
+  /**
+   * Enable or disable receiving emails to this domain.
+   */
+  receiving?: "enabled" | "disabled";
+};
+
+export type CreateDomainRequest = {
+  /**
+   * The name of the domain you want to create.
+   */
+  name: string;
+  /**
+   * The region where emails will be sent from. Possible values are us-east-1 | eu-west-1 | sa-east-1 | ap-northeast-1
+   */
+  region?: "us-east-1" | "eu-west-1" | "sa-east-1" | "ap-northeast-1";
+  /**
+   * For advanced use cases, choose a subdomain for the Return-Path address. Defaults to 'send' (i.e., send.yourdomain.tld).
+   */
+  custom_return_path?: string;
+  /**
+   * Track the open rate of each email.
+   */
+  open_tracking?: boolean;
+  /**
+   * Track clicks within the body of each HTML email.
+   */
+  click_tracking?: boolean;
+  /**
+   * TLS mode. Opportunistic attempts secure connection but falls back to unencrypted. Enforced requires TLS or email won't be sent.
+   */
+  tls?: "opportunistic" | "enforced";
+  capabilities?: DomainCapabilities;
+  /**
+   * The subdomain to use for click and open tracking.
+   */
+  tracking_subdomain?: string;
+};
+
+export type CreateDomainResponse = {
+  /**
+   * The ID of the domain.
+   */
+  id?: string;
+  /**
+   * The name of the domain.
+   */
+  name?: string;
+  /**
+   * The date and time the domain was created.
+   */
+  created_at?: string;
+  /**
+   * The status of the domain.
+   */
+  status?: "pending" | "verified" | "failed" | "not_started" | "partially_verified" | "partially_failed";
+  capabilities?: DomainCapabilities;
+  records?: Array<DomainRecord>;
+  /**
+   * The region where the domain is hosted.
+   */
+  region?: string;
+  /**
+   * Whether open tracking is enabled for this domain.
+   */
+  open_tracking?: boolean;
+  /**
+   * Whether click tracking is enabled for this domain.
+   */
+  click_tracking?: boolean;
+  /**
+   * The subdomain used for click and open tracking.
+   */
+  tracking_subdomain?: string;
+};
+
+export type DomainRecord = {
+  /**
+   * The type of record (SPF for sending, DKIM for sending, Receiving for inbound emails, Tracking & TrackingCAA for click and open tracking).
+   */
+  record?: "SPF" | "DKIM" | "Receiving" | "Tracking" | "TrackingCAA";
+  /**
+   * The name of the DNS record.
+   */
+  name?: string;
+  /**
+   * The DNS record type.
+   */
+  type?: "MX" | "TXT" | "CNAME" | "CAA";
+  /**
+   * The time to live for the record.
+   */
+  ttl?: string;
+  /**
+   * The status of the record.
+   */
+  status?: "pending" | "verified" | "failed" | "temporary_failure" | "not_started";
+  /**
+   * The value of the record.
+   */
+  value?: string;
+  /**
+   * The priority of the record (only applicable for MX records).
+   */
+  priority?: number;
+};
+
+export type Domain = {
+  /**
+   * The type of object.
+   */
+  object?: string;
+  /**
+   * The ID of the domain.
+   */
+  id?: string;
+  /**
+   * The name of the domain.
+   */
+  name?: string;
+  /**
+   * The status of the domain.
+   */
+  status?: "pending" | "verified" | "failed" | "not_started" | "partially_verified" | "partially_failed";
+  /**
+   * The date and time the domain was created.
+   */
+  created_at?: string;
+  /**
+   * The region where the domain is hosted.
+   */
+  region?: string;
+  /**
+   * Whether open tracking is enabled for this domain.
+   */
+  open_tracking?: boolean;
+  /**
+   * Whether click tracking is enabled for this domain.
+   */
+  click_tracking?: boolean;
+  /**
+   * The subdomain used for click and open tracking.
+   */
+  tracking_subdomain?: string;
+  capabilities?: DomainCapabilities;
+  records?: Array<DomainRecord>;
+};
+
+export type VerifyDomainResponse = {
+  /**
+   * The type of object.
+   */
+  object?: string;
+  /**
+   * The ID of the domain.
+   */
+  id?: string;
+};
+
+export type ListDomainsResponse = {
+  /**
+   * Type of the response object.
+   */
+  object?: string;
+  /**
+   * Indicates if there are more results available.
+   */
+  has_more?: boolean;
+  data?: Array<ListDomainsItem>;
+};
+
+export type ListDomainsItem = {
+  /**
+   * The ID of the domain.
+   */
+  id?: string;
+  /**
+   * The name of the domain.
+   */
+  name?: string;
+  /**
+   * The status of the domain.
+   */
+  status?: "pending" | "verified" | "failed" | "not_started" | "partially_verified" | "partially_failed";
+  /**
+   * The date and time the domain was created.
+   */
+  created_at?: string;
+  /**
+   * The region where the domain is hosted.
+   */
+  region?: string;
+  /**
+   * Whether open tracking is enabled for this domain.
+   */
+  open_tracking?: boolean;
+  /**
+   * Whether click tracking is enabled for this domain.
+   */
+  click_tracking?: boolean;
+  capabilities?: DomainCapabilities;
+};
+
+export type DeleteDomainResponse = {
+  /**
+   * The type of object.
+   */
+  object?: string;
+  /**
+   * The ID of the domain.
+   */
+  id?: string;
+  /**
+   * Indicates whether the domain was deleted successfully.
+   */
+  deleted?: boolean;
+};
+
 export type CreateBroadcastOptions = {
   /**
    * Name of the broadcast.
@@ -255,6 +480,21 @@ export type SendBroadcastResponseSuccess = {
   id?: string;
 };
 
+/**
+ * Number of items to return.
+ */
+export type PaginationLimit = number;
+
+/**
+ * Return items after this cursor.
+ */
+export type PaginationAfter = string;
+
+/**
+ * Return items before this cursor.
+ */
+export type PaginationBefore = string;
+
 export type EmailsSendData = {
   body?: SendEmailRequest;
   headers?: {
@@ -276,6 +516,114 @@ export type EmailsSendResponses = {
 };
 
 export type EmailsSendResponse = EmailsSendResponses[keyof EmailsSendResponses];
+
+export type DomainsListData = {
+  body?: never;
+  path?: never;
+  query?: {
+    /**
+     * Number of items to return.
+     */
+    limit?: number;
+    /**
+     * Return items after this cursor.
+     */
+    after?: string;
+    /**
+     * Return items before this cursor.
+     */
+    before?: string;
+  };
+  url: "/domains";
+};
+
+export type DomainsListResponses = {
+  /**
+   * OK
+   */
+  200: ListDomainsResponse;
+};
+
+export type DomainsListResponse = DomainsListResponses[keyof DomainsListResponses];
+
+export type DomainsCreateData = {
+  body?: CreateDomainRequest;
+  path?: never;
+  query?: never;
+  url: "/domains";
+};
+
+export type DomainsCreateResponses = {
+  /**
+   * OK
+   */
+  201: CreateDomainResponse;
+};
+
+export type DomainsCreateResponse = DomainsCreateResponses[keyof DomainsCreateResponses];
+
+export type DomainsRemoveData = {
+  body?: never;
+  path: {
+    /**
+     * The ID of the domain.
+     */
+    domain_id: string;
+  };
+  query?: never;
+  url: "/domains/{domain_id}";
+};
+
+export type DomainsRemoveResponses = {
+  /**
+   * OK
+   */
+  200: DeleteDomainResponse;
+};
+
+export type DomainsRemoveResponse = DomainsRemoveResponses[keyof DomainsRemoveResponses];
+
+export type DomainsGetData = {
+  body?: never;
+  path: {
+    /**
+     * The ID of the domain.
+     */
+    domain_id: string;
+  };
+  query?: never;
+  url: "/domains/{domain_id}";
+};
+
+export type DomainsGetResponses = {
+  /**
+   * OK
+   */
+  200: Domain;
+};
+
+export type DomainsGetResponse = DomainsGetResponses[keyof DomainsGetResponses];
+
+export type DomainsVerifyData = {
+  body?: never;
+  path: {
+    /**
+     * The ID of the domain.
+     */
+    domain_id: string;
+  };
+  query?: never;
+  url: "/domains/{domain_id}/verify";
+};
+
+export type DomainsVerifyResponses = {
+  /**
+   * OK
+   */
+  200: VerifyDomainResponse;
+};
+
+export type DomainsVerifyResponse = DomainsVerifyResponses[keyof DomainsVerifyResponses];
 
 export type BroadcastsCreateData = {
   body?: CreateBroadcastOptions;

@@ -94,6 +94,12 @@ describe("describeConfig", () => {
       "ghost.post.publish",
       "resend.broadcast.create",
       "resend.broadcast.send",
+      "resend.domain.create",
+      "resend.domain.delete",
+      "resend.domain.import",
+      "resend.domain.plan",
+      "resend.domain.read",
+      "resend.domain.update",
       "resend.emails.send",
       "sanoma.apps.list",
       "sanoma.change.close",
@@ -400,9 +406,11 @@ describe("a workflow's name in a site's api", () => {
     ]);
     expect(apiProblems).toEqual([
       ["announce", []],
+      ["apply", []],
       ["call", []],
       ["change", []],
       ["data", [[1, 1, "A site calls this workflow api.data, which is the collections': rename it"]]],
+      ["drift", []],
       ["ghost", [[1, 1, "A site calls this workflow api.ghost, which is the vendor ghost's operations: rename it"]]],
       [
         "outbound-next",

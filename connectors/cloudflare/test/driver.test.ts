@@ -4,7 +4,7 @@ import { type CallContext, memorySecrets } from "@sanoma-ai/workflows";
 import { delay, http, HttpResponse } from "msw";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { cloudflareDriver } from "../src/driver.ts";
-import { API, replayOptions, TEST_ACCOUNT } from "./replay.ts";
+import { API, cfResult, replayOptions, TEST_ACCOUNT } from "./replay.ts";
 
 // Replays test/fixtures, written from Cloudflare's API reference (README, "Testing the driver").
 // Live, `test/live.ts` and the features run against an account instead: these tests check the
@@ -69,7 +69,6 @@ const reply = (path: string, status: number, body: unknown, method = "GET"): Exc
   body,
 });
 const wake = (status: number, body: unknown, method = "GET") => reply("/__sanoma/wake", status, body, method);
-const cfResult = (result: unknown) => ({ success: true, errors: [], messages: [], result });
 const cfError = (code: number, message: string) => ({
   success: false,
   errors: [{ code, message }],
@@ -413,12 +412,11 @@ describe.skipIf(live)("cloudflareDriver", () => {
     });
 
     it("leaves a Worker of that name that is not Sanoma's alone: reads it as gone, refuses to overwrite or delete it", async () => {
-      const foreign = reply(apiPath("/workers/scripts/sanoma-company/settings"), 200, {
-        success: true,
-        errors: [],
-        messages: [],
-        result: { bindings: [{ type: "plain_text", name: "GREETING", text: "hello" }] },
-      });
+      const foreign = reply(
+        apiPath("/workers/scripts/sanoma-company/settings"),
+        200,
+        cfResult({ bindings: [{ type: "plain_text", name: "GREETING", text: "hello" }] }),
+      );
       play("not-ours", [foreign, ...only("create", (_, i) => i === 0), foreign, foreign]);
       expect(await op("container.read", { id: "company" })).toEqual({ id: "company", gone: true });
       await expect(op("container.create", { desired })).rejects.toMatchObject({

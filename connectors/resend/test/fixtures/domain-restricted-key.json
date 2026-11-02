@@ -1,0 +1,12 @@
+[
+  {
+    "method": "POST",
+    "path": "/domains",
+    "status": 401,
+    "body": {
+      "statusCode": 401,
+      "name": "restricted_api_key",
+      "message": "This API key is restricted to only send emails."
+    }
+  }
+]
