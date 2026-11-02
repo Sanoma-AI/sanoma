@@ -379,7 +379,11 @@ function SlotCard({
               <span className="text-muted-foreground">unbound</span>
             )}
           </Fact>
-          {resource.id === `${INFRA}#host` && <HostServes />}
+          {resource.id === `${INFRA}#host` && (
+            <HostServes
+              hostname={typeof resource.desired.hostname === "string" ? resource.desired.hostname : undefined}
+            />
+          )}
         </Facts>
         {result?.error !== undefined ? (
           <p className="text-destructive">{result.error}</p>
@@ -391,18 +395,34 @@ function SlotCard({
   );
 }
 
-/** Where the host answers, from the last apply that made or changed it (going live's progress), once it does. */
-function HostServes() {
+/**
+ * Where the host answers, from the last apply that made or changed it (going live's progress),
+ * once it does; and the hostname it declares, beside it until an apply serves the app there.
+ */
+function HostServes({ hostname }: { hostname: string | undefined }) {
   const { data } = useQuery(goLiveProgressQuery());
   const host = data?.host;
-  if (!host) return null;
+  const pending = hostname !== undefined && host?.url !== `https://${hostname}`;
+  if (!host && !pending) return null;
   return (
-    <Fact label="Serves">
-      <span className="inline-flex flex-wrap items-center gap-2">
-        <ExternalLink href={host.url}>{host.url}</ExternalLink>
-        <ToneBadge tone={host.healthy ? "ok" : "off"}>{host.healthy ? "healthy" : "not answering yet"}</ToneBadge>
-      </span>
-    </Fact>
+    <>
+      {host && (
+        <Fact label="Serves">
+          <span className="inline-flex flex-wrap items-center gap-2">
+            <ExternalLink href={host.url}>{host.url}</ExternalLink>
+            <ToneBadge tone={host.healthy ? "ok" : "off"}>{host.healthy ? "healthy" : "not answering yet"}</ToneBadge>
+          </span>
+        </Fact>
+      )}
+      {pending && (
+        <Fact label="Hostname">
+          <span className="inline-flex flex-wrap items-center gap-2">
+            <code className="text-xs">{hostname}</code>
+            <span className="text-muted-foreground">once applied</span>
+          </span>
+        </Fact>
+      )}
+    </>
   );
 }
 

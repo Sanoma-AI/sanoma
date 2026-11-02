@@ -55,6 +55,12 @@ export interface HostSpec {
     port: string;
     /** A public site's domain, by site name: the app serves each site at the root of its domain (`SANOMA_DOMAINS`). */
     domains?: string;
+    /**
+     * The hostname the app is served at. A host with one reports `url` as `https://<hostname>` (its
+     * vendor's URL otherwise), so `SANOMA_HOST_URL`, the wakeup's registration and every link the
+     * runtime makes use the stable name. It is never one of `domains`' values.
+     */
+    hostname?: string;
   };
   /**
    * The field apply fills with the commit `ref` resolves to, before it plans: hidden, as a data

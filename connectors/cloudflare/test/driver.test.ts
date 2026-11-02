@@ -490,6 +490,71 @@ describe.skipIf(live)("cloudflareDriver", () => {
       expect(await op("container.plan", { id: "company", desired })).toMatchObject({ action: "update" });
     });
 
+    it("attaches the declared hostname like a domain, serves the app there as SANOMA_HOST_URL and url, and detaches it at delete", async () => {
+      const hostname = "app.acme.example";
+      play("hostname");
+      // The Worker's health is asked on workers.dev: the hostname's certificate may not be ready yet.
+      server.use(http.all(`https://${hostname}/*`, () => HttpResponse.error()));
+      expect(await op("container.create", { desired: { ...desired, hostname } })).toEqual({
+        id: "company",
+        state: { ...state, hostname, url: `https://${hostname}` },
+      });
+      const attached = sent.find((r) => r.method === "PUT" && r.path === apiPath("/workers/domains"));
+      expect(attached!.body).toEqual({ hostname, service: "sanoma-company", zone_id: ZONE });
+      const { bindings } = await uploaded();
+      const text = Object.fromEntries(
+        (bindings as { name: string; text?: string }[]).map((b) => [b.name, b.text] as const),
+      );
+      expect(text).toMatchObject({ SANOMA_HOST_URL: `https://${hostname}`, SANOMA_HOSTNAME: hostname });
+      expect(text).not.toHaveProperty("SANOMA_DOMAINS");
+      expect(await op("container.delete", { id: "company" })).toEqual({ id: "company", gone: true });
+      expect(sent.filter((r) => r.method === "DELETE" && r.path.includes("/workers/domains/"))).toHaveLength(1);
+      expect(await op("container.read", { id: "company" })).toEqual({ id: "company", gone: true });
+    });
+
+    it("reads the hostname detached by hand as drift, its url still the hostname, and plans the update that attaches it again", async () => {
+      const [settings, ...rest] = only("update-to-a-new-image", (_, i) => i < 3);
+      const body = structuredClone(settings!.body) as { result: { bindings: { name: string; text?: string }[] } };
+      body.result.bindings = body.result.bindings.map((b) =>
+        b.name === "SANOMA_HOST_URL" ? { ...b, text: "https://app.acme.example" } : b,
+      );
+      body.result.bindings.push({ type: "plain_text", name: "SANOMA_HOSTNAME", text: "app.acme.example" } as never);
+      const none = reply(apiPath("/workers/domains?service=sanoma-company"), 200, cfResult([]));
+      play("hostname-unattached", [{ ...settings!, body }, ...rest, none]);
+      const planned = await op("container.plan", {
+        id: "company",
+        desired: { ...desired, hostname: "app.acme.example" },
+      });
+      expect(planned).toMatchObject({ action: "update", planned: { hostname: "app.acme.example" } });
+      expect((planned as { planned: { url: string } }).planned.url).toBe("https://app.acme.example");
+    });
+
+    it("plans an update when the declaration leaves out the hostname the Worker serves", async () => {
+      const [settings, ...rest] = only("update-to-a-new-image", (_, i) => i < 3);
+      const body = structuredClone(settings!.body) as { result: { bindings: object[] } };
+      body.result.bindings.push({ type: "plain_text", name: "SANOMA_HOSTNAME", text: "app.acme.example" });
+      const attached = reply(
+        apiPath("/workers/domains?service=sanoma-company"),
+        200,
+        cfResult([{ id: "d1", hostname: "app.acme.example", service: "sanoma-company", zone_id: ZONE }]),
+      );
+      play("hostname-removed", [{ ...settings!, body }, ...rest, attached]);
+      expect(await op("container.plan", { id: "company", desired })).toMatchObject({ action: "update" });
+    });
+
+    it("refuses a hostname that is also a site's domain, invalid, at plan and at create, before any request", async () => {
+      const both = { ...desired, hostname: "www.acme.example", domains: { www: "www.acme.example" } };
+      const invalid = {
+        name: "DriverError",
+        retryable: false,
+        vendorCode: "invalid",
+        message: expect.stringContaining("hostname www.acme.example is also the domain of the site www"),
+      };
+      await expect(op("container.plan", { id: "company", desired: both })).rejects.toMatchObject(invalid);
+      await expect(op("container.create", { desired: both })).rejects.toMatchObject(invalid);
+      expect(sent).toEqual([]);
+    });
+
     it("refuses a secret named as one of the Worker's own bindings, without calling Cloudflare", async () => {
       const call = callWith({ X: "y" });
       await expect(

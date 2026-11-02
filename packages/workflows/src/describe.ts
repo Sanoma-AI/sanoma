@@ -361,8 +361,9 @@ function appClashes(
 
 /**
  * Each site a host's `domains` (its type's `host.inputs.domains`) names that is not a public
- * site, and each domain it gives more than one site, at the host's declaration: the app serves
- * only a public site at a domain, and one site at each.
+ * site, each domain it gives more than one site, and a domain that is the host's `hostname` too,
+ * at the host's declaration: the app serves only a public site at a domain, one site at each,
+ * and itself at another.
  */
 function domainProblems(
   declared: readonly DeclaredResource[],
@@ -372,8 +373,10 @@ function domainProblems(
   const isPublic = new Set(sites.filter((site) => site.public).map((site) => site.name));
   const problems: ResourceProblem[] = [];
   for (const resource of declared) {
-    const path = types.get(`${resource.vendor}.${resource.type}`)?.host?.inputs.domains;
+    const inputs = types.get(`${resource.vendor}.${resource.type}`)?.host?.inputs;
+    const path = inputs?.domains;
     const domains = (path === undefined ? {} : (valueAt(resource.desired, path) ?? {})) as Record<string, unknown>;
+    const hostname = inputs?.hostname === undefined ? undefined : valueAt(resource.desired, inputs.hostname);
     const messages = Object.keys(domains)
       .filter((name) => !isPublic.has(name))
       .map((name) => `domains names "${name}", which is not a public site (defineSite({ public: true }))`);
@@ -385,6 +388,10 @@ function domainProblems(
       const others = `${names.length === 2 ? "both " : ""}${names.slice(0, -1).join(", ")}`;
       messages.push(`${domain} is the domain of ${others} and ${names.at(-1)}`);
     }
+    const site =
+      typeof hostname === "string" &&
+      named.find(([, value]) => (value as string).toLowerCase() === hostname.toLowerCase());
+    if (site) messages.push(`${hostname as string} is the app's hostname and the domain of ${site[0]}`);
     problems.push(...messages.map((message) => ({ ...resource.at, message })));
   }
   return problems;

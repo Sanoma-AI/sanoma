@@ -351,6 +351,8 @@ const fakeSchema = z.object({
   secrets: z.record(z.string(), z.string()).optional(),
   port: z.number().int().nonnegative(),
   revision: z.string().optional(),
+  /** The app's hostname, reported as its `url` (`https://<hostname>`) but not served: the fake answers on this machine only. */
+  hostname: z.string().optional(),
   url: z.string().optional(),
   running: z.boolean().optional(),
 });
@@ -375,10 +377,10 @@ const hostType = (lifetime: HostLifetime) =>
     writable: true,
     host: {
       capabilities: { lifetime, publicUrl: false, buildsFromGit: true, staticEgress: false },
-      inputs: { source: "source", ref: "ref", secrets: "secrets", port: "port" },
+      inputs: { source: "source", ref: "ref", secrets: "secrets", port: "port", hostname: "hostname" },
       revision: "revision",
       outputs: (state) => ({
-        url: String(state.url ?? ""),
+        url: typeof state.hostname === "string" ? `https://${state.hostname}` : String(state.url ?? ""),
         ...(typeof state.revision === "string" && { revision: state.revision }),
         healthy: state.running === true,
       }),
@@ -584,7 +586,10 @@ export function fakeHost(start: StartHost, { lifetime = "long-lived", quietAfter
         if (!desired) return { action: state ? "delete" : "none", unknown: [], replace: [] };
         const { secrets: _, ...planned } = desired;
         if (!state) return { action: "create", planned, unknown: ["url", "running"], replace: [] };
-        const replace = ["source", "ref", "port", "revision"].filter((f) => f in desired && desired[f] !== state[f]);
+        // A hostname left out is compared too: removing it is a change.
+        const replace = ["source", "ref", "port", "revision", "hostname"].filter(
+          (f) => (f in desired || f === "hostname") && desired[f] !== state[f],
+        );
         return { action: replace.length ? "replace" : "none", planned: { ...state, ...planned }, unknown: [], replace };
       },
       create: async ({ desired }, call) => run(desired, call.secrets),

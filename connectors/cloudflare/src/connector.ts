@@ -53,7 +53,17 @@ const containerSchema = z.object({
     .refine((domains) => Object.keys(domains).length > 0, "leave `domains` out rather than empty")
     .nullish()
     .describe("A public site's domain, by site name"),
-  url: z.string().nullish().describe("The Worker's URL on workers.dev, which Cloudflare sets"),
+  hostname: z
+    .string()
+    .regex(DOMAIN_NAME)
+    .nullish()
+    .describe(
+      "The hostname the app is served at, such as `internal.acme.example`: attached to the Worker as a custom domain, and its `url`",
+    ),
+  url: z
+    .string()
+    .nullish()
+    .describe("Where the app answers: `https://<hostname>`, or the Worker's URL on workers.dev without one"),
   healthy: z
     .boolean()
     .nullish()
@@ -86,7 +96,14 @@ export const container = defineResource({
   writable: true,
   host: {
     capabilities: { lifetime: "stops-when-quiet", publicUrl: true, buildsFromGit: false, staticEgress: false },
-    inputs: { source: "source", ref: "ref", secrets: "secrets", port: "port", domains: "domains" },
+    inputs: {
+      source: "source",
+      ref: "ref",
+      secrets: "secrets",
+      port: "port",
+      domains: "domains",
+      hostname: "hostname",
+    },
     revision: "revision",
     outputs: (state) => ({
       url: String(state.url ?? ""),

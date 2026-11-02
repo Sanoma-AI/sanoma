@@ -64,6 +64,11 @@ describe("a host type", () => {
       { inputs: { ...host.inputs, domains: "domains" } },
       /domains names no field \(domains\)/,
     ],
+    [
+      "a hostname that names no field",
+      { inputs: { ...host.inputs, hostname: "hostname" } },
+      /hostname names no field \(hostname\)/,
+    ],
     ["secrets that are not write-only", { writeOnly: [] }, /inputs\.secrets must be a write-only field/],
     [
       "no secrets, when it does not bind its own bootstrap",
@@ -100,8 +105,9 @@ describe("a host type", () => {
     ).toThrow(/one of sanoma's own: only a host's secrets may/);
   });
 
-  it("may take a public site's domains in a field of its own", () => {
+  it("may take a public site's domains and the app's hostname in fields of its own", () => {
     expect(hostOf({ inputs: { ...host.inputs, domains: "sites" } }).host?.inputs.domains).toBe("sites");
+    expect(hostOf({ inputs: { ...host.inputs, hostname: "name" } }).host?.inputs.hostname).toBe("name");
   });
 
   it("is described with a problem at its declaration for each of its domains that names no public site", () => {
@@ -173,6 +179,32 @@ describe("a host type", () => {
     expect(describeConfig({ workflows: [], connectors: [acme], root }).problems).toEqual([
       { file: "resources/infra.ts", export: "host", message: "sanoma.example is the domain of both www and docs" },
     ]);
+  });
+
+  it("is described with a problem at its declaration when its hostname is a site's domain too", () => {
+    const service = hostOf({ inputs: { ...host.inputs, domains: "sites", hostname: "name" } });
+    const acme = defineConnector("acme", { service }, { title: "Acme", package: "@acme/connector" });
+    const problems = (hostname: string) => {
+      const root = tree(`hostname-${hostname}`, {
+        "resources/infra.ts": [
+          'import { acme } from "@acme/connector/resources";',
+          `export const host = acme.service({ name: "${hostname}", repo: { url: "u", branch: "main" }, sites: { www: "sanoma.example" } });`,
+          "",
+        ].join("\n"),
+        "sites/www/site.ts":
+          'import { defineSite } from "sanoma/site";\n\nexport default defineSite({ public: true });\n',
+        "sites/www/routes/index.tsx": 'import { createFileRoute } from "@tanstack/react-router";\n',
+      });
+      return describeConfig({ workflows: [], connectors: [acme], root }).problems;
+    };
+    expect(problems("Sanoma.example")).toEqual([
+      {
+        file: "resources/infra.ts",
+        export: "host",
+        message: "Sanoma.example is the app's hostname and the domain of www",
+      },
+    ]);
+    expect(problems("app.sanoma.example")).toEqual([]);
   });
 
   it("takes sanoma's own secrets in its secrets map, and no other type does", () => {
