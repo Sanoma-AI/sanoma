@@ -1,4 +1,4 @@
-import { defaultBridge, type ProviderClient } from "@sanoma-ai/bridge";
+import { defaultBridge, type BridgeError, type ProviderClient } from "@sanoma-ai/bridge";
 import { AuthenticationError, DriverError, type CallContext, type Driver } from "@sanoma-ai/workflows";
 import { accountOf, federationCredentials, identityFor, type GcpIdentities } from "./authentication.ts";
 import { gcpTf } from "./connector.ts";
@@ -37,7 +37,7 @@ export function gcpDriver(identities: GcpIdentities, bridge: ProviderClient = de
           }
           const credentials = await federationCredentials(identity);
           const driver = gcpTf.driver(
-            retainKeys(bridge),
+            retainKeys(iamImports(bridge)),
             () => ({ credentials: JSON.stringify(credentials), project: identity.project }),
             undefined,
             undefined,
@@ -55,5 +55,37 @@ export function gcpDriver(identities: GcpIdentities, bridge: ProviderClient = de
         },
       ]),
     ),
+  };
+}
+
+/** Google 8.7.0 imports read the policy but report an absent member as an error. */
+function iamImports(bridge: ProviderClient): ProviderClient {
+  return {
+    ...bridge,
+    import: async (...args) => {
+      try {
+        return await bridge.import(...args);
+      } catch (error) {
+        const failure = error as Partial<BridgeError> | null;
+        if (
+          ["google_kms_crypto_key_iam_member", "google_service_account_iam_member"].includes(args[1]) &&
+          failure?.code === "failed_precondition" &&
+          Array.isArray(failure.diagnostics) &&
+          failure.diagnostics.length === 1
+        ) {
+          const diagnostic = failure.diagnostics[0];
+          if (
+            diagnostic?.severity === "error" &&
+            diagnostic.detail === "" &&
+            diagnostic.attributePath === "" &&
+            /^Cannot find binding for "(?:[^"\\]|\\.)*" with role "(?:[^"\\]|\\.)*", member "(?:[^"\\]|\\.)*", and condition title "(?:[^"\\]|\\.)*"$/.test(
+              diagnostic.summary,
+            )
+          )
+            return { resources: [], warnings: [] };
+        }
+        throw error;
+      }
+    },
   };
 }
