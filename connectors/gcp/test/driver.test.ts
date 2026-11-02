@@ -64,6 +64,65 @@ const invoke = (driver: Driver, op: string, input: unknown, call = context(a)) =
 const ring = (project = "company-a") => `projects/${project}/locations/global/keyRings/credentials`;
 const key = () => `${ring()}/cryptoKeys/company`;
 
+it.each([
+  {
+    type: "keyIamMember",
+    parentField: "crypto_key_id",
+    parent: "projects/company-a/locations/global/keyRings/credentials/cryptoKeys/company",
+    role: "roles/cloudkms.cryptoKeyEncrypterDecrypter",
+    member: "serviceAccount:runtime@company-a.iam.gserviceaccount.com",
+  },
+  {
+    type: "serviceAccountIamMember",
+    parentField: "service_account_id",
+    parent: "projects/company-a/serviceAccounts/runtime@company-a.iam.gserviceaccount.com",
+    role: "projects/company-a/roles/issuer",
+    member:
+      "principal://iam.googleapis.com/projects/111111/locations/global/workloadIdentityPools/provisioning/subject/source",
+  },
+])(
+  "returns importable $type IDs for create/read/plan/delete, including custom roles and conditions",
+  async ({ type, parentField, parent, role, member }) => {
+    for (const condition of [
+      undefined,
+      { title: "runtime issuer", expression: "true", description: "bounded / proof" },
+    ]) {
+      const bridge = bridgeFor();
+      const driver = gcpDriver({ "gcp/a": a }, bridge);
+      const desired = { [parentField]: parent, role, member, ...(condition && { condition }) };
+      const created = (await invoke(driver, `${type}.create`, { desired })) as {
+        id: string;
+        state: Record<string, unknown>;
+      };
+      const expected = [parent, role, member, ...(condition ? [condition.title] : [])].join(" ");
+      expect(created.id).toBe(expected);
+      const nativeId = `${parent}/${role}/${member}${condition ? `/${condition.title}/${condition.description}/${condition.expression}` : ""}`;
+      const imported = vi.spyOn(bridge, "import").mockImplementation(async (_ref, typeName, id) => {
+        // Match the real provider: a native slash-form state ID is not an import ID.
+        if (id !== expected) throw new BridgeError("failed_precondition", "invalid IAM import ID", []);
+        return {
+          warnings: [],
+          resources: [
+            {
+              typeName,
+              schemaVersion: 0,
+              private: new Uint8Array(),
+              stateJson: JSON.stringify({ ...created.state, id: nativeId, condition: condition ? [condition] : [] }),
+            },
+          ],
+        };
+      });
+      expect(await invoke(driver, `${type}.read`, { id: created.id })).toMatchObject({
+        gone: false,
+        state: { id: nativeId, role, member },
+      });
+      await invoke(driver, `${type}.plan`, { id: created.id, desired });
+      await invoke(driver, `${type}.delete`, { id: created.id });
+      expect(imported).toHaveBeenCalledTimes(3);
+    }
+  },
+);
+
 it("configures and closes distinct provider sessions for concurrent named accounts", async () => {
   const bridge = bridgeFor();
   const configure = vi.spyOn(bridge, "configure");
