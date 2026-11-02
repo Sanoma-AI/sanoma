@@ -81,11 +81,10 @@ export const domain = defineResource({
   find: ({ name }) => name,
   bindingId: (state) => String(state.id),
   // The status is compared too, declared `verified` (a declaration never holds one). A Return-Path
-  // the records do not show (no SPF record read) is taken to be Resend's default.
+  // the records do not show (no SPF record read) is not drift: the read cannot tell it.
   normalize: (state, desired) => ({
     ...compareDeclared(fields, state, desired),
-    ...(state.custom_return_path === undefined &&
-      desired.custom_return_path === DEFAULT_RETURN_PATH && { custom_return_path: DEFAULT_RETURN_PATH }),
+    ...(state.custom_return_path === undefined && { custom_return_path: desired.custom_return_path }),
     status: state.status ?? "verified",
   }),
   writable: true,

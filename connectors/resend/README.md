@@ -66,7 +66,7 @@ export const mailDns = cloudflare.records({ zone: "sanoma.work", name: "resend",
 | -------------------- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `name`               | declared (identity) | The domain, in lower case: `example.com`, or a subdomain such as `mail.example.com` (Resend recommends one). Apply finds a domain of that name in the account and binds it.                                    |
 | `region`             | declared, optional  | Where Resend sends from: `us-east-1` (Resend's default), `eu-west-1`, `sa-east-1` or `ap-northeast-1`.                                                                                                         |
-| `custom_return_path` | declared, optional  | The Return-Path subdomain, `send` by default (`send.example.com`). A read takes it from the name of the domain's SPF record, and takes Resend's default when none shows it.                                    |
+| `custom_return_path` | declared, optional  | The Return-Path subdomain, `send` by default (`send.example.com`). A read takes it from the name of the domain's SPF record; one none shows is not drift.                                                      |
 | `id`                 | Resend              | The domain's id, which the binding keeps.                                                                                                                                                                      |
 | `status`             | Resend              | `not_started`, `pending`, `verified`, `failed`, `temporary_failure`, `partially_verified` or `partially_failed`.                                                                                               |
 | `records`            | Resend              | The DNS records Resend asks for, as Resend gives them (`record`, `name`, `type`, `value`, `ttl`, `status`, `priority`).                                                                                        |
@@ -78,7 +78,9 @@ Apply creates the domain, asks Resend to verify it at once, and reads it. Resend
 
 A domain is declared `verified`: any other status (`partially_verified` too) is drift (`status: verified → pending`), and apply plans an `update`, which asks Resend to verify it again.
 
-A create tried again after its reply was lost finds the name registered already, and takes the domain of that name in the account. When another account holds it, the create is refused (`registered`): [claim it](https://resend.com/docs/dashboard/domains/claim) in Resend's dashboard.
+A create tried again after its reply was lost finds the name registered already, and takes the domain of that name in the account, unless its region or Return-Path is not the one declared (refused, `conflict`). When another account holds it, the create is refused (`registered`): [claim it](https://resend.com/docs/dashboard/domains/claim) in Resend's dashboard.
+
+An update approved while the domain was pending, which finds Resend has verified it since, is done. A replace that deleted the domain and then failed (`replace_incomplete` when its create failed, naming the deleted domain) finishes when tried again: the domain is gone, so it makes it, taking the one the failed try made.
 
 Domains need a full-access API key: Resend answers a sending-only key's domain calls 401 `restricted_api_key`, which the driver refuses, saying so. Resend's free plan has 3 domains. Later: TLS (`tls`), open and click tracking and their subdomain, and receiving, which the type does not declare yet (Resend's defaults hold; a domain with any of them on has their records among `records` and `dns_records` too).
 
@@ -117,7 +119,7 @@ Resend documents `Idempotency-Key` for emails only, not broadcasts. `emails.send
 
 ### Errors and retries
 
-A 408, a 429 (except `daily_quota_exceeded` and `monthly_quota_exceeded`), a 409 `concurrent_idempotent_requests` (a request with the same key still in flight), a 5xx, a timeout (15 s; `timeoutMs` changes it) or no reply is retryable; any other 4xx is not. `status` and `vendorCode` (Resend's error `name`) are kept. Resend allows 10 requests per second per team.
+A 408, a 429 (except `daily_quota_exceeded` and `monthly_quota_exceeded`), a 409 `concurrent_idempotent_requests` (a request with the same key still in flight) or `resource_locked` (another request on the same resource), a 5xx, a timeout (15 s; `timeoutMs` changes it) or no reply is retryable; any other 4xx is not. `status` and `vendorCode` (Resend's error `name`) are kept. Resend allows 10 requests per second per team.
 
 ### Plan
 

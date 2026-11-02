@@ -152,19 +152,35 @@ export function domainOperations(api: DomainApi) {
     if (!found) throw refused(`domain ${id} was deleted while it was verified`, "gone");
     return { id, state: stateOf(found) };
   };
-  /** Creates the domain, or takes the one of that name a create that lost its reply made: its id. */
+  /**
+   * Creates the domain, or takes the one of that name this account holds already (a create that
+   * lost its reply made it) when it is the one declared: its id.
+   */
   const make = async ({ name, region, custom_return_path }: Declared): Promise<string> => {
     const made = await api.create({
       name,
       ...(region && { region }),
       ...(custom_return_path && { custom_return_path }),
     });
-    const id = made?.id ?? (await idOf(name));
+    if (made) return made.id;
+    const id = await idOf(name);
     // Not in this account's list: another account holds it.
     if (!id) {
       throw refused(
         `domain.create: another Resend account holds ${name}; claim it in Resend's dashboard, or declare another`,
         "registered",
+      );
+    }
+    const held = await api.get(id);
+    const state = held && stateOf(held);
+    const wanted = { region: region ?? DEFAULT_REGION, custom_return_path: custom_return_path ?? DEFAULT_RETURN_PATH };
+    const differs = (Object.keys(wanted) as (keyof typeof wanted)[]).filter(
+      (f) => state?.[f] !== undefined && state[f] !== wanted[f],
+    );
+    if (differs.length) {
+      throw refused(
+        `domain.create: this account holds ${name} (${id}) already, with another ${differs.join(" and ")}; import it, or delete it in Resend`,
+        "conflict",
       );
     }
     return id;
@@ -182,7 +198,7 @@ export function domainOperations(api: DomainApi) {
       ...Object.fromEntries(vendorOwned.map((f) => [f, null])),
     };
     const unknown = [...vendorOwned];
-    if (!state) return { action: "create", planned: made, unknown, replace: [] };
+    if (!state) return { action: "create", planned: made, want, unknown, replace: [] };
     // What drift reports: a declared field that differs, or a status other than `verified`.
     const differs = diffDeclared(domain, state, want).map((d) => d.path);
     const replace = immutable.filter((f) => differs.includes(f));
@@ -224,6 +240,10 @@ export function domainOperations(api: DomainApi) {
       expect?: { action: PlanAction; replace: string[] };
     }) => {
       const fresh = await plan({ id, desired });
+      // Verified since the plan was approved (Resend found the records): what it would do is done.
+      if (expect?.action === "update" && fresh.action === "none") return { id, state: fresh.state! };
+      // A replace tried again after it deleted the domain: make it, taking the one that try made.
+      if (expect?.action === "replace" && fresh.action === "create") return verify(await make(fresh.want!));
       if (expect && (expect.action !== fresh.action || expect.replace.join() !== fresh.replace.join())) {
         throw refused(`domain.update: the plan changed (${expect.action}, now ${fresh.action})`, "plan_changed");
       }
@@ -235,14 +255,17 @@ export function domainOperations(api: DomainApi) {
         try {
           made = await make(fresh.want!);
         } catch (error) {
-          // The old domain is gone, so a retry of this call would find nothing to replace. Later: apply
-          // owns a replace, deleting and unbinding, then creating as a step of its own.
+          // Retried, the call finds the domain gone and makes it (above). Later: apply owns a
+          // replace, deleting and unbinding, then creating as a step of its own.
           const { name, region } = fresh.state;
           const why = errorMessage(error).replace(/^resend: /, "");
-          throw refused(
-            `domain.update: deleted domain ${id} (${name}, ${region}) to make it anew, and the create failed: ${why}; apply again to create it`,
-            "replace_incomplete",
-            error,
+          throw new DriverError(
+            `resend: domain.update: deleted domain ${id} (${name}, ${region}) to make it anew, and the create failed: ${why}`,
+            {
+              retryable: error instanceof DriverError && error.retryable,
+              vendorCode: "replace_incomplete",
+              cause: error,
+            },
           );
         }
         return verify(made);

@@ -83,9 +83,13 @@ describe("resendDriver", () => {
     play("sender-fallback", [...fixture("create"), ...fixture("create")]);
     vi.stubEnv("RESEND_FROM", from);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    await create({ audience, subject: "s", html: "" });
+    // A module of its own: no other test's fallback has warned in it.
+    vi.resetModules();
+    const fresh = (await import("../src/driver.ts")).resendDriver({ timeoutMs: live ? 15_000 : 200 });
+    const draft = (input: Record<string, unknown>) => fresh.ops["broadcast.create"]!(input, call);
+    await draft({ audience, subject: "s", html: "" });
     // An empty sender is none.
-    await create({ audience, from: "", subject: "s", html: "" });
+    await draft({ audience, from: "", subject: "s", html: "" });
     expect(sent.map((r) => r.body)).toMatchObject([{ from }, { from }]);
     expect(warn.mock.calls.filter(([m]) => String(m).includes("RESEND_FROM"))).toHaveLength(1);
   });
@@ -196,6 +200,7 @@ describe("resendDriver", () => {
     it.each([
       [408, "request_timeout", true],
       [409, "concurrent_idempotent_requests", true],
+      [409, "resource_locked", true],
       [409, "invalid_idempotent_request", false],
     ])("a %i %s is retryable: %s", async (status, name, retryable) => {
       const body = { statusCode: status, name, message: name };
@@ -370,19 +375,19 @@ describe("resendDriver", () => {
       ]);
     });
 
-    it("takes a Return-Path the records do not show to be Resend's default", async () => {
+    it("plans no change of a Return-Path the records do not show", async () => {
       const dkim = { record: "DKIM", type: "TXT", value: "p=redacted", name: "resend._domainkey", ttl: "Auto" };
       const verified = got({ status: "verified", records: [dkim] });
       play("no-spf", [verified, verified, verified]);
       const { state } = (await domain("read", { id: ID })) as { state: Record<string, unknown> };
       expect(state).not.toHaveProperty("custom_return_path");
-      // Taken to be Resend's default: one declared otherwise is a change.
-      expect(
-        await domain("plan", { id: ID, desired: { name: "example.com", custom_return_path: "send" } }),
-      ).toMatchObject({ action: "none", replace: [] });
-      expect(
-        await domain("plan", { id: ID, desired: { name: "example.com", custom_return_path: "bounce" } }),
-      ).toMatchObject({ action: "replace", replace: ["custom_return_path"] });
+      // Whatever is declared: the read cannot tell it.
+      for (const custom_return_path of ["send", "bounce"]) {
+        expect(await domain("plan", { id: ID, desired: { name: "example.com", custom_return_path } })).toMatchObject({
+          action: "none",
+          replace: [],
+        });
+      }
     });
 
     it("takes the Return-Path from an SPF CNAME record, which newer domains have instead of the MX", async () => {
@@ -414,10 +419,22 @@ describe("resendDriver", () => {
     });
 
     it("refuses an update whose plan changed since it was approved", async () => {
-      play("changed", [got({ status: "verified" })]);
+      play("changed", [got()]);
+      const desired = { name: "example.com", region: "eu-west-1" };
       await expect(
-        domain("update", { id: ID, desired: { name: "example.com" }, expect: { action: "update", replace: [] } }),
+        domain("update", { id: ID, desired, expect: { action: "none", replace: [] } }),
       ).rejects.toMatchObject({ name: "DriverError", retryable: false, vendorCode: "plan_changed" });
+    });
+
+    it("takes an update approved for a pending domain Resend has verified since as done", async () => {
+      play("verified-since", [got({ status: "verified" })]);
+      const updated = await domain("update", {
+        id: ID,
+        desired: { name: "example.com" },
+        expect: { action: "update", replace: [] },
+      });
+      expect(updated).toMatchObject({ id: ID, state: { status: "verified" } });
+      expect(sent).toHaveLength(1);
     });
 
     it("replaces a domain moved to another region: deletes it, then makes it anew", async () => {
@@ -460,13 +477,16 @@ describe("resendDriver", () => {
         retryable: false,
         vendorCode: "replace_incomplete",
         message: expect.stringMatching(
-          new RegExp(`deleted domain ${ID} \\(example\\.com, us-east-1\\).*Invalid region.*apply again`),
+          new RegExp(`deleted domain ${ID} \\(example\\.com, us-east-1\\).*Invalid region`),
         ),
       });
     });
 
-    it("leaves a verify that fails after a replace's create as it is: the new domain exists", async () => {
+    it("finishes a replace whose verify failed when the call is tried again, on the new domain", async () => {
       const NEW = "00000000-0000-4000-8000-000000000002";
+      const desired = { name: "example.com", region: "eu-west-1" };
+      const replace = { id: ID, desired, expect: { action: "replace", replace: ["region"] } };
+      const created = got({ id: NEW, region: "eu-west-1" });
       play("replace-verify-fails", [
         got(),
         { method: "DELETE", path: `/domains/${ID}`, status: 200, body: { id: ID, deleted: true } },
@@ -477,14 +497,57 @@ describe("resendDriver", () => {
           status: 503,
           body: { statusCode: 503, name: "internal_server_error", message: "Unavailable" },
         },
+        // Tried again: the old domain is gone, and the new one holds the name.
+        notFound("GET"),
+        {
+          method: "POST",
+          path: "/domains",
+          status: 403,
+          body: {
+            statusCode: 403,
+            name: "validation_error",
+            message: "The `example.com` domain has been registered already.",
+          },
+        },
+        {
+          method: "GET",
+          path: "/domains?limit=100",
+          status: 200,
+          body: { object: "list", has_more: false, data: [{ id: NEW, name: "example.com" }] },
+        },
+        { ...created, path: `/domains/${NEW}` },
+        { ...verify, path: `/domains/${NEW}/verify` },
+        { ...created, path: `/domains/${NEW}` },
       ]);
-      await expect(
-        domain("update", {
-          id: ID,
-          desired: { name: "example.com", region: "eu-west-1" },
-          expect: { action: "replace", replace: ["region"] },
-        }),
-      ).rejects.toMatchObject({ name: "DriverError", retryable: true, status: 503 });
+      await expect(domain("update", replace)).rejects.toMatchObject({ retryable: true, status: 503 });
+      expect(await domain("update", replace)).toMatchObject({ id: NEW, state: { region: "eu-west-1" } });
+    });
+
+    it("refuses to take a domain of the name this account holds with another region", async () => {
+      play("held-elsewhere", [
+        {
+          method: "POST",
+          path: "/domains",
+          status: 403,
+          body: {
+            statusCode: 403,
+            name: "validation_error",
+            message: "The `example.com` domain has been registered already.",
+          },
+        },
+        {
+          method: "GET",
+          path: "/domains?limit=100",
+          status: 200,
+          body: { object: "list", has_more: false, data: [{ id: ID, name: "example.com" }] },
+        },
+        got(),
+      ]);
+      await expect(domain("create", { desired: { name: "example.com", region: "eu-west-1" } })).rejects.toMatchObject({
+        retryable: false,
+        vendorCode: "conflict",
+        message: expect.stringContaining("another region"),
+      });
     });
 
     it("imports by name through every page of the account's domains", async () => {

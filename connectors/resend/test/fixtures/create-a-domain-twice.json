@@ -134,6 +134,52 @@
     }
   },
   {
+    "method": "GET",
+    "path": "/domains/00000000-0000-4000-8000-000000000001",
+    "status": 200,
+    "body": {
+      "object": "domain",
+      "id": "00000000-0000-4000-8000-000000000001",
+      "name": "example.com",
+      "status": "pending",
+      "created_at": "2026-11-02 10:00:00.000000+00",
+      "region": "us-east-1",
+      "open_tracking": false,
+      "click_tracking": false,
+      "capabilities": {
+        "sending": "enabled",
+        "receiving": "disabled"
+      },
+      "records": [
+        {
+          "record": "DKIM",
+          "name": "resend._domainkey",
+          "value": "p=redacted",
+          "type": "TXT",
+          "status": "pending",
+          "ttl": "Auto"
+        },
+        {
+          "record": "SPF",
+          "name": "send",
+          "type": "MX",
+          "ttl": "Auto",
+          "status": "pending",
+          "value": "feedback-smtp.us-east-1.amazonses.com",
+          "priority": 10
+        },
+        {
+          "record": "SPF",
+          "name": "send",
+          "value": "\"v=spf1 include:amazonses.com ~all\"",
+          "type": "TXT",
+          "ttl": "Auto",
+          "status": "pending"
+        }
+      ]
+    }
+  },
+  {
     "method": "POST",
     "path": "/domains/00000000-0000-4000-8000-000000000001/verify",
     "status": 200,

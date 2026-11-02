@@ -75,10 +75,11 @@ function failure(op: string, timeoutMs: number) {
       );
     }
     // A daily or monthly quota does not lift in the seconds a retry waits; a 409
-    // `concurrent_idempotent_requests` is another request with this key still in flight.
+    // `concurrent_idempotent_requests` is another request with this key still in flight, and
+    // `resource_locked` another request on the same resource.
     const retryable =
       (retryableStatus(status) && !name?.endsWith("_quota_exceeded")) ||
-      (status === 409 && name === "concurrent_idempotent_requests");
+      (status === 409 && (name === "concurrent_idempotent_requests" || name === "resource_locked"));
     return new DriverError(`resend: ${op} failed (${status}): ${message ?? statusText}`, {
       retryable,
       status,
