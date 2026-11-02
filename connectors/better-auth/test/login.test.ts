@@ -301,9 +301,8 @@ describe("the login half with the company's GitHub client", () => {
     vi.unstubAllGlobals();
   });
 
-  /** A visitor signed in by an email code: their email and session cookie. */
-  async function signedIn() {
-    const email = `${randomUUID()}@example.com`;
+  /** A visitor signed in by an email code (to `email`, a new one by default): their email and session cookie. */
+  async function signedIn(email = `${randomUUID()}@example.com`) {
     await half.handle(
       request("/auth/better-auth/email-otp/send-verification-otp", { body: { email, type: "sign-in" } }),
     );
@@ -394,14 +393,27 @@ describe("the login half with the company's GitHub client", () => {
     expect((await half.verify(request("/", { cookie })))?.github).toBeUndefined();
   });
 
-  it("signs a visitor in with GitHub outright, by its verified email", async () => {
-    github.set("code-4", { token: "gho_four", id: 4104, login: "hopper", email: "hopper@users.github.test" });
-    const back = await viaGitHub("code-4", undefined, "sign-in/social");
+  it("signs in with GitHub only a visitor who linked it, and makes no account for anyone else", async () => {
+    const hopper = { token: "gho_four", id: 4104, login: "hopper", email: "hopper@users.github.test" };
+    github.set("code-4", hopper);
+    const refused = await viaGitHub("code-4", undefined, "sign-in/social");
+    expect(refused.headers.get("location")).toMatch(/error=signup_disabled/);
+    expect(refused.headers.getSetCookie().some((c) => c.startsWith("better-auth.session_token="))).toBe(false);
+    // Nor does it join the account of the same email: only a link does.
+    const sameEmail = await signedIn(hopper.email);
+    github.set("code-8", { ...hopper, token: "gho_eight" });
+    const unlinked = await viaGitHub("code-8", undefined, "sign-in/social");
+    expect(unlinked.headers.get("location")).toMatch(/error=account_not_linked/);
+    // Linked, the same GitHub account signs them in.
+    github.set("code-9", { ...hopper, token: "gho_nine" });
+    await viaGitHub("code-9", sameEmail.cookie);
+    github.set("code-10", { ...hopper, token: "gho_ten" });
+    const back = await viaGitHub("code-10", undefined, "sign-in/social");
     expect(back.headers.get("location")).toBe("/account");
     const session = back.headers.getSetCookie().find((c) => c.startsWith("better-auth.session_token="))!;
     expect(await half.verify(request("/", { cookie: session.split(";")[0] }))).toEqual({
-      subject: expect.any(String),
-      email: "hopper@users.github.test",
+      subject: (await half.verify(request("/", { cookie: sameEmail.cookie })))!.subject,
+      email: hopper.email,
       github: "hopper",
     });
   });

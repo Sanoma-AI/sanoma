@@ -66,13 +66,13 @@ When the company's config names a sender (`login: { sender: resend.emails.send }
 
 ### GitHub
 
-When the app has the company's GitHub App client (`SANOMA_GITHUB_CLIENT_ID` and `SANOMA_GITHUB_CLIENT_SECRET`, which `sanoma` reads on a host, the staff login's too), the login offers GitHub (`methods` lists `"github"`): a visitor signed in links their GitHub account, or signs in with it outright, and is then said to be that GitHub login (`ctx.startedBy.github` in a run they start, `user.github` in the session). Add `https://<site host>/auth/better-auth/callback/github` to the App's callback URLs (its settings, "Callback URL"), one for each site's host.
+When the app has the company's GitHub App client (`SANOMA_GITHUB_CLIENT_ID` and `SANOMA_GITHUB_CLIENT_SECRET`, which `sanoma` reads on a host, the staff login's too), the login offers GitHub (`methods` lists `"github"`): a visitor signed in links their GitHub account, and is then said to be that GitHub login (`ctx.startedBy.github` in a run they start, `user.github` in the session). Add `https://<site host>/auth/better-auth/callback/github` to the App's callback URLs (its settings, "Callback URL"), one for each site's host.
 
-| Route                                   | Body                                  | What it does                                                                                                                                                        |
-| --------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `POST /auth/better-auth/link-social`    | `{ provider: "github", callbackURL }` | Signed in: answers `{ url, redirect: true }`, GitHub's authorize page to send the browser to; back at `/callback/github`, it links the account, then `callbackURL`. |
-| `POST /auth/better-auth/sign-in/social` | `{ provider: "github", callbackURL }` | The same, signed out: signs in by GitHub's verified email, making the account on first use.                                                                         |
-| `GET /auth/better-auth/get-session`     |                                       | `{ session, user }`, `user.github` the linked login, or null when signed out.                                                                                       |
+| Route                                   | Body                                  | What it does                                                                                                                                                                               |
+| --------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `POST /auth/better-auth/link-social`    | `{ provider: "github", callbackURL }` | Signed in: answers `{ url, redirect: true }`, GitHub's authorize page to send the browser to; back at `/callback/github`, it links the account, then `callbackURL`.                        |
+| `POST /auth/better-auth/sign-in/social` | `{ provider: "github", callbackURL }` | The same, signed out: signs in a visitor who linked that GitHub account. GitHub links to an existing account and signs a linked account in; it never makes one (`?error=signup_disabled`). |
+| `GET /auth/better-auth/get-session`     |                                       | `{ session, user }`, `user.github` the linked login, or null when signed out.                                                                                                              |
 
 ```ts
 const response = await fetch("/auth/better-auth/link-social", {

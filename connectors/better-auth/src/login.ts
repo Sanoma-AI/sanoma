@@ -40,7 +40,7 @@ interface HookContext {
  * Better Auth's login half for one public site: email and password, and an email code when the
  * app can send one (`context.sendCode`); every email may sign up. With the company's GitHub client
  * (`context.social.github`), a visitor signed in links their GitHub account
- * (`/link-social`), or signs in with it (`/sign-in/social`), and is then said to be that GitHub
+ * (`/link-social`), then may sign in with it (`/sign-in/social`, which never makes an account), and is then said to be that GitHub
  * login (`verify`'s `github`). Its tables are in schema `better_auth` on the company's database,
  * migrated here before the first site starts, its cookies signed with the app's key for it
  * (`context.key`). The site's origins are its allowed hosts (a request for another host is
@@ -68,11 +68,14 @@ export async function betterAuthLogin({
       plugins: sendCode ? [emailCode(sendCode)] : [],
       user: { additionalFields: GITHUB_FIELD },
       ...(github && {
-        socialProviders: { github: { clientId: github.clientId, clientSecret: github.clientSecret } },
+        // GitHub never makes an account, nor joins one by its email: a visitor signs up by email,
+        // links GitHub (`/link-social`), and may then sign in with it.
+        socialProviders: {
+          github: { clientId: github.clientId, clientSecret: github.clientSecret, disableSignUp: true },
+        },
         // A visitor's GitHub email is seldom the one they signed in with. Linking still needs
-        // GitHub to have verified its email (GitHub is no trusted provider), and a sign-in with
-        // GitHub joins an account of the same email only when both are verified (Better Auth's rule).
-        account: { accountLinking: { allowDifferentEmails: true } },
+        // GitHub to have verified its email (GitHub is no trusted provider).
+        account: { accountLinking: { allowDifferentEmails: true, disableImplicitLinking: true } },
         databaseHooks: {
           account: {
             create: { before: oneGitHub, after: noteLogin },
