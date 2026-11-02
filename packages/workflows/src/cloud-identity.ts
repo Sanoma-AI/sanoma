@@ -5,6 +5,9 @@ import { enrollmentBroker } from "./identity-broker.ts";
 export { provisioningIdentityBroker, attachedGoogleIdTokenIssuer } from "./provisioning-identity.ts";
 export type { ProvisioningIdentity, ProvisioningIdToken } from "./provisioning-identity.ts";
 
+export { postgresIdentityProvisioning, IdentityProvisioningError } from "./identity-provisioning.ts";
+export type { IdentityProvisioning, DeploymentIdentity, EnrollIdentity } from "./identity-provisioning.ts";
+
 const LIFETIME = 600_000;
 const SCOPE = "https://www.googleapis.com/auth/cloud-platform";
 const CREDENTIAL = /^[A-Za-z0-9_-]{43}$/;
@@ -18,7 +21,7 @@ export class CloudIdentityError extends Error {
   }
 }
 
-/** Provisioning only. Deliver the value once through deployment secrets; persist only its hash. */
+/** Provisioning only. Deliver through deployment secrets; persist only its hash in the enrollment database. */
 export function createDeploymentCredential(): { credential: string; hash: string } {
   const credential = randomBytes(32).toString("base64url");
   return { credential, hash: credentialHash(credential) };
