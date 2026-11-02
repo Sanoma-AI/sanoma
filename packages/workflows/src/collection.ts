@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import { DATA_TABLE, type Db } from "./db.ts";
 import { defineFake, type Fake } from "./fake.ts";
@@ -7,6 +8,7 @@ import {
   type Connector,
   defineConnector,
   defineDriver,
+  DriverError,
   type Driver,
   type DriverImpl,
   type Op,
@@ -81,7 +83,7 @@ export interface Collection<
   readonly title?: string;
   readonly get: Op<typeof DATA_VENDOR, N, "get", { key: string }, Saved<RecordOf<F>> | null>;
   readonly list: Op<typeof DATA_VENDOR, N, "list", ListQuery<RecordOf<F>>, Saved<RecordOf<F>>[]>;
-  readonly save: Op<typeof DATA_VENDOR, N, "save", { record: RecordOf<F> }, Saved<RecordOf<F>>>;
+  readonly save: Op<typeof DATA_VENDOR, N, "save", { record: RecordOf<F>; ifAbsent?: boolean }, Saved<RecordOf<F>>>;
   readonly delete: Op<typeof DATA_VENDOR, N, "delete", { key: string }, { deleted: boolean }>;
 }
 
@@ -202,8 +204,8 @@ function specsOf(name: string, key: string, fields: Record<string, Field>, recor
     save: {
       effect: "write",
       idempotent: true,
-      description: `Save a record of ${name}: added, or replacing the one with its ${key}`,
-      input: z.object({ record }),
+      description: `Save a record of ${name}: added, or replacing the one with its ${key}; ifAbsent refuses a different existing record`,
+      input: z.object({ record, ifAbsent: z.boolean().optional() }),
       output: SAVED,
       target: ({ record: r }: { record: Record<string, string> }) => at(r[key]!),
     },
@@ -255,6 +257,8 @@ export function collectionsConnector(list: readonly Collection[]): Connector<typ
 }
 
 const COLUMNS = "key, record, updated_at, updated_by";
+const recordExists = () =>
+  new DriverError("Collection record already exists", { retryable: false, status: 409, vendorCode: "record_exists" });
 const RANGE = { gt: ">", gte: ">=", lt: "<", lte: "<=" } as const;
 
 interface Row {
@@ -294,13 +298,19 @@ export function collectionsDriver(list: readonly Collection[], store: { db(): Pr
         return row ? saved(row) : null;
       },
       list: async (listing: Listing) => (await query(...listSql(c, listing))).rows.map(saved),
-      save: async ({ record }: { record: Record<string, unknown> }, call) => {
+      save: async ({ record, ifAbsent }: { record: Record<string, unknown>; ifAbsent?: boolean }, call) => {
+        // The conflict row is locked by Postgres: never implement an insert-only claim as get + save.
+        // An identical retry by the same actor keeps the first receipt and never overwrites later progress.
+        const conflict = ifAbsent
+          ? `record = ${DATA_TABLE}.record WHERE ${DATA_TABLE}.record = EXCLUDED.record AND ${DATA_TABLE}.updated_by = EXCLUDED.updated_by`
+          : "record = EXCLUDED.record, updated_at = now(), updated_by = EXCLUDED.updated_by";
         const sql =
           `INSERT INTO ${DATA_TABLE} (collection, key, record, updated_by) VALUES ($1, $2, $3, $4) ` +
-          "ON CONFLICT (collection, key) DO UPDATE SET record = EXCLUDED.record, updated_at = now(), " +
-          `updated_by = EXCLUDED.updated_by RETURNING ${COLUMNS}`;
+          `ON CONFLICT (collection, key) DO UPDATE SET ${conflict} RETURNING ${COLUMNS}`;
         const params = [c.name, record[c.key], JSON.stringify(record), updatedBy(call)];
-        return saved((await query(sql, params)).rows[0]!);
+        const row = (await query(sql, params)).rows[0];
+        if (!row) throw recordExists();
+        return saved(row);
       },
       delete: async ({ key }: { key: string }) => {
         const sql = `DELETE FROM ${DATA_TABLE} WHERE collection = $1 AND key = $2`;
@@ -434,8 +444,18 @@ export function collectionsFake(list: readonly Collection[]): Fake<CollectionsSt
                 .toSorted(byOrder(order, types))
                 .slice(0, limit)
                 .map(saved),
-            save: async ({ record }: { record: Record<string, unknown> }, call) => {
+            save: async ({ record, ifAbsent }: { record: Record<string, unknown>; ifAbsent?: boolean }, call) => {
               const key = record[c.key] as string;
+              if (ifAbsent && Object.hasOwn(records(), key)) {
+                const previous = records()[key]!;
+                // Postgres jsonb ignores property order and omitted undefined fields.
+                if (
+                  previous.updatedBy !== updatedBy(call) ||
+                  !isDeepStrictEqual(JSON.parse(JSON.stringify(previous.record)), JSON.parse(JSON.stringify(record)))
+                )
+                  throw recordExists();
+                return saved(previous);
+              }
               const stored = {
                 key,
                 record: structuredClone(record),

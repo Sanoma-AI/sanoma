@@ -133,6 +133,22 @@ describe("the collections' fake", () => {
   };
   const keys = async (query: unknown) => ((await call(outbound.list, query)) as { key: string }[]).map((s) => s.key);
 
+  it("recovers an identical claim but refuses another actor or changed record", async () => {
+    fake.reset();
+    const first = await call(outbound.save, { record: { ...lead, seats: undefined }, ifAbsent: true }, "ada");
+    expect(await call(outbound.save, { record: lead, ifAbsent: true }, "ada")).toEqual(first);
+    await expect(call(outbound.save, { record: lead, ifAbsent: true }, "bo")).rejects.toMatchObject({
+      retryable: false,
+      status: 409,
+      vendorCode: "record_exists",
+    });
+    const advanced = await call(outbound.save, { record: { ...lead, stage: "won" } }, "ada");
+    await expect(call(outbound.save, { record: lead, ifAbsent: true }, "ada")).rejects.toMatchObject({
+      vendorCode: "record_exists",
+    });
+    expect(await call(outbound.get, { key: "Acme" })).toEqual(advanced);
+  });
+
   it("saves, gets, lists and deletes, as the driver on Postgres does", async () => {
     fake.reset();
     expect(await call(outbound.get, { key: "Acme" })).toBeNull();
