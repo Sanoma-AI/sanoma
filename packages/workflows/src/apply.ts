@@ -23,10 +23,12 @@ import {
   AFTER_CREATE_SECONDS,
   afterCreateStuck,
   fieldPathOf,
+  fromRefs,
   holderOf,
   type PlanAction,
   type Resource,
   valueAt,
+  withFrom,
 } from "./resource.ts";
 import type { ResourceProblem } from "./resources.ts";
 import { type APPLY_WORKFLOW, errorMessage } from "./shared.ts";
@@ -183,22 +185,31 @@ function inDependencyOrder<T extends { id: string; refs: Record<string, string> 
   return out;
 }
 
+/** What a run knows of the declared resources as it goes, by declared id, which `desiredOf` reads. */
+interface Known {
+  /** The lockfile's bindings, as the run has changed them so far. */
+  bindings: Bindings;
+  /** The clone URL and commit a host wanted runs. */
+  hosts: ReadonlyMap<string, { source: string; revision: string }>;
+  /** Where each host answers, as its state says. */
+  urls: ReadonlyMap<string, string>;
+  /** Each resource's state, as found or as its step left it. */
+  states: ReadonlyMap<string, State>;
+}
+
 /**
  * What a change operation is given of a declaration: its fields, where it names a resource the
  * vendor may hold by another field (`by`, as a repository's node id), that resource's binding id
- * when it has one, made in this run or before; a wakeup's `host`, the URL its host answers at
- * (`urls`, by the host's declared id) once its state says.
+ * when it has one, made in this run or before; where a `from` reference names one, that
+ * resource's state at its path (`null` while it has none); a wakeup's `host`, the URL its host
+ * answers at (`urls`, by the host's declared id) once its state says.
  */
-function desiredOf(
-  r: Declaration,
-  types: ReadonlyMap<string, Resource>,
-  bindings: Bindings,
-  hosts: ReadonlyMap<string, { source: string; revision: string }>,
-  urls: ReadonlyMap<string, string>,
-): State {
+function desiredOf(r: Declaration, types: ReadonlyMap<string, Resource>, known: Known): State {
+  const { bindings, hosts, urls, states } = known;
   const { fields, host, wakeup } = types.get(`${r.vendor}.${r.type}`)!;
   const { references = {} } = fields;
-  const out = structuredClone(r.desired);
+  const filled = withFrom(references, r.desired, r.refs, (target) => states.get(target));
+  const out = filled === r.desired ? structuredClone(filled) : filled;
   for (const [at, target] of Object.entries(r.refs)) {
     const bound = bindings[target]?.id;
     const place = holderOf(out, at);
@@ -221,6 +232,14 @@ function desiredOf(
     }
   }
   return out;
+}
+
+/** Why a step cannot run yet: a `from` reference names a resource with no state, neither found nor made. */
+function waitingOn(r: Declaration, types: ReadonlyMap<string, Resource>, states: ReadonlyMap<string, State>) {
+  const missing = fromRefs(types.get(`${r.vendor}.${r.type}`)!.fields.references, r.refs).find(
+    ({ named }) => !states.has(named),
+  );
+  return missing && `its ${missing.at} come from ${missing.named}, which has no state yet`;
 }
 
 /** Why apply cannot `what` (create, update, delete) an object of a type. */
@@ -432,9 +451,11 @@ function messageOf(step: PlanStep, before: Binding | undefined, after: Binding |
  * and right after one that changes a binding, the lockfile written and committed
  * (`steps.write`), so an object made is never left unbound. An update is given the plan's action
  * and replace (`expect`), and refuses (`plan_changed`) when the vendor now plans otherwise; a
- * reference to a resource made in this run is given its new binding, and a wakeup's `host` the
- * URL its host's state gives (`outputs(state).url`), found or made in this run. A failed step is reported
- * and the run goes on; a failure that ends the run (`isRunControlError`) ends it.
+ * reference to a resource made in this run is given its new binding, a `from` reference that
+ * resource's state at its path (planned as `null` before it has one; a step whose resource still
+ * has none fails before its driver is called), and a wakeup's `host` the URL its host's state
+ * gives (`outputs(state).url`), found or made in this run. A failed step is reported and the run
+ * goes on; a failure that ends the run (`isRunControlError`) ends it.
  */
 export function applyWorkflow(
   types: ReadonlyMap<string, Resource>,
@@ -499,15 +520,18 @@ export function applyWorkflow(
           }
         }
       }
-      // Where each declared host answers, as its state says, found now or made below: a wakeup is given it.
+      // Each declared resource's state, found now or made below, for a `from` reference to it, and
+      // where each declared host answers, as its state says: a wakeup is given it.
+      const states = new Map<string, State>();
       const urls = new Map<string, string>();
-      const answersAt = (r: Declaration, state: State) => {
+      const keep = (r: Declaration, state: State) => {
+        states.set(r.id, state);
         const url = types.get(`${r.vendor}.${r.type}`)?.host?.outputs(state).url;
         if (url) urls.set(r.id, url);
       };
       for (const resource of resources) {
         const now = found.get(resource.id);
-        if (now && "state" in now) answersAt(resource, now.state);
+        if (now && "state" in now) keep(resource, now.state);
       }
       // A host wanted runs the commit its ref names now, resolved before planning: a merge is a change
       // to it. One bound by the input needs none.
@@ -534,7 +558,9 @@ export function applyWorkflow(
         }
       }
       const drift = new Map(compare(types, resources, found, revisions).map((result) => [result.id, result]));
-      const desired = new Map(resources.map((r) => [r.id, desiredOf(r, types, locked, hosts, urls)]));
+      const desired = new Map(
+        resources.map((r) => [r.id, desiredOf(r, types, { bindings: locked, hosts, urls, states })]),
+      );
 
       const planned: PlanStep[] = [];
       for (const resource of inDependencyOrder(resources).filter((r) => wanted(r.id))) {
@@ -579,23 +605,28 @@ export function applyWorkflow(
       }
 
       const bindings: Bindings = { ...locked };
+      const known: Known = { bindings, hosts, urls, states };
       const results: ApplyResult[] = [];
       let written = false;
       let revision: string | undefined;
       for (const step of plan.steps) {
-        const todo = runOf(step);
+        const declared = declarations.get(step.id);
+        const run = runOf(step);
+        // A field taken from a resource that has no state is not known: the step fails, its driver not called.
+        const waiting =
+          declared && (run === "create" || run === "update") ? waitingOn(declared, types, states) : undefined;
+        const todo = waiting === undefined ? run : "none";
         const key = keyOf(step);
         const type = `${step.vendor}.${step.type}`;
         const before = bindings[key];
         const binding = "binding" in step ? step.binding : "";
-        const declared = declarations.get(step.id);
         const spec = types.get(type);
         let state: State | undefined;
         try {
           if (todo === "create") {
             const made = await ctx[step.vendor]![step.type]!.create(
               {
-                desired: desiredOf(declared!, types, bindings, hosts, urls),
+                desired: desiredOf(declared!, types, known),
               },
               { connection: step.connection },
             );
@@ -606,7 +637,7 @@ export function applyWorkflow(
             const changed = await ctx[step.vendor]![step.type]!.update(
               {
                 id: binding,
-                desired: desiredOf(declared!, types, bindings, hosts, urls),
+                desired: desiredOf(declared!, types, known),
                 expect,
               },
               { connection: step.connection },
@@ -619,7 +650,7 @@ export function applyWorkflow(
           } else if (todo === "bind")
             bindings[key] = { type, id: binding, ...(step.connection && { connection: step.connection }) };
           else if (todo === "forget") delete bindings[key];
-          if (state && declared) answersAt(declared, state);
+          if (state && declared) keep(declared, state);
           const after = bindings[key];
           if (after?.id !== before?.id) {
             const wrote = await steps.write(key, after, messageOf(step, before, after));
@@ -630,7 +661,7 @@ export function applyWorkflow(
           // id, again every few seconds until its output passes `until`; one that never does fails
           // the step, and the rest are not called. The loop `callAfterCreate` has, inline: a
           // function defined here may not close over `ctx`.
-          let stuck: string | undefined;
+          let stuck = waiting;
           for (const hook of todo === "create" ? (spec?.afterCreate ?? []) : []) {
             if (stuck === undefined) {
               const [vendor = "", group = "", name = ""] = hook.op.split(".");

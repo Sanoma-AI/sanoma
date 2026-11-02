@@ -16,8 +16,9 @@ import {
   withSetup,
 } from "../src/index.ts";
 import { VENDOR } from "../src/op.ts";
-import { DECLARED, isChangeOp, resourceTypesOf, withoutWriteOnly } from "../src/resource.ts";
+import { DECLARED, isChangeOp, resourceTypesOf, withFrom, withoutWriteOnly } from "../src/resource.ts";
 import { secret } from "../src/secret.ts";
+import { recordsFor, domain, records } from "./fakes/mail.ts";
 
 const fields = {
   immutable: ["name"],
@@ -273,6 +274,71 @@ describe("defineResource", () => {
       );
       // @ts-expect-error a repo names no resource
       expect(() => repo({ name: site })).toThrow("acme.repo: name takes a value, not a resource (acme.repo sanoma)");
+    });
+  });
+
+  describe("from references", () => {
+    // A record set whose `records` come from a sending domain's state: `fakes/mail.ts`.
+    const sending = domain({ name: "example.com" });
+
+    it("take a declared resource in place of the whole field, kept as its name, which the schema does not judge", () => {
+      const dns = records({ name: "mail", records: sending });
+      expect(dns.name).toBe("mail");
+      expect(dns.desired).toEqual({ name: "mail", records: "example.com" });
+      expect(dns.refs).toEqual({ records: "mail.domain:example.com" });
+    });
+
+    it("take a literal value too, which the schema judges", () => {
+      const given = recordsFor("example.com");
+      expect(records({ name: "mail", records: given })).toMatchObject({
+        desired: { name: "mail", records: given },
+        refs: {},
+      });
+      expect(() =>
+        // @ts-expect-error a record's type is one of TXT, MX, CNAME and CAA
+        records({ name: "mail", records: [{ type: "A", name: "example.com", content: "192.0.2.1" }] }),
+      ).toThrow("at records[0].type");
+    });
+
+    it("are refused as an item of the list, and of another type", () => {
+      // @ts-expect-error the resource stands for the whole list
+      expect(() => records({ name: "mail", records: [sending] })).toThrow(
+        "mail.records: records takes a mail.domain's records as a whole, not in a list",
+      );
+      const other = records({ name: "other", records: [] });
+      // @ts-expect-error records names a mail.domain
+      expect(() => records({ name: "mail", records: other })).toThrow(
+        "mail.records: records names a resource of type mail.domain, not mail.records (other)",
+      );
+    });
+
+    it("take their value from the state or name the resource by a field, not both", () => {
+      expect(() =>
+        defineResource({
+          ...records,
+          vendor: "mail",
+          type: "both",
+          fields: {
+            ...records.fields,
+            references: { records: { type: "mail.domain", from: "records", by: ["name"] } },
+          },
+        }),
+      ).toThrow(
+        "mail.both: the reference at records takes its value from its resource's state or names it by a field, not both",
+      );
+    });
+
+    it("are filled from the named resource's state at their path: null without one, or left out", () => {
+      const { desired } = records({ name: "mail", records: sending });
+      const refsById = { records: "resources/mail.ts#sending" };
+      const { references } = records.fields;
+      const state = { name: "example.com", records: recordsFor("example.com") };
+      const stateOf = (id: string) => (id === refsById.records ? state : undefined);
+      expect(withFrom(references, desired, refsById, stateOf)).toEqual({ name: "mail", records: state.records });
+      expect(withFrom(references, desired, refsById, () => undefined)).toEqual({ name: "mail", records: null });
+      expect(withFrom(references, desired, refsById, () => undefined, true)).toEqual({ name: "mail" });
+      // A declaration with no `from` reference is given back as it is.
+      expect(withFrom(references, desired, {}, stateOf)).toBe(desired);
     });
   });
 

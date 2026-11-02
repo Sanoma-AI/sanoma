@@ -13,6 +13,7 @@ import {
   type ApplyInput,
   type ApplyReport,
   defineWorkflow,
+  DriverError,
   type LedgerRecord,
   memoryLedger,
   memorySecrets,
@@ -22,6 +23,7 @@ import {
   type Source,
   withSetup,
 } from "../src/index.ts";
+import { fakeMail, mailDataFile, recordsFor } from "./fakes/mail.ts";
 import { companyFakes } from "./fixtures/company/fakes.ts";
 import company from "./fixtures/company/sanoma.config.ts";
 import { pending, rootWith, waitFor } from "./harness.ts";
@@ -548,5 +550,74 @@ describe("the apply workflow on a wakeup", () => {
     expect(actions(await apply({ only: ["resources/infra.ts#wake"] }))).toEqual([["infra.ts#wake", "none"]]);
     const drift = await app.client.driftReport(await app.client.drift({ startedBy: alice }));
     expect(drift.resources.find((r) => r.id === "resources/infra.ts#wake")).toMatchObject({ status: "clean" });
+  });
+});
+
+describe("the apply workflow on a field taken from another resource's state", () => {
+  const root = rootWithPolicy();
+  writeFileSync(join(root, "resources/mail.ts"), mailDataFile);
+  const fake = fakeMail();
+  const app = useTestApp(
+    { workflows: [], connectors: [fake.connector], ledger: memoryLedger(), root },
+    { databaseUrl: testDatabaseUrl("apply-from"), source: recordingSource(root).source },
+  );
+  const sending = "resources/mail.ts#sending";
+  const dns = "resources/mail.ts#dns";
+  beforeEach(() => {
+    rmSync(join(root, LOCKFILE), { force: true });
+    fake.reset();
+  });
+
+  async function apply(input: ApplyInput = {}) {
+    const runId = await app.client.apply(input, { startedBy: alice });
+    return { runId, report: await app.client.applyReport(runId) };
+  }
+
+  it("creates the domain, then the record set with the domain's records, planned unknown before", async () => {
+    const { runId, report } = await apply();
+    expect(actions(report)).toEqual([
+      ["mail.ts#sending", "create"],
+      ["mail.ts#dns", "create"],
+    ]);
+    // Planned before the domain exists: its records are not known yet.
+    expect(report.plan.steps[1]).toMatchObject({ planned: { records: null }, unknown: ["records"] });
+    const plans = ops(await app.client.ledger(runId)).filter(([op]) => op === "mail.records.plan");
+    expect(plans).toEqual([["mail.records.plan", { desired: { name: "example.com/mail", records: null } }]]);
+    expect(report.results.map((r) => [r.id, r.status])).toEqual([
+      [sending, "done"],
+      [dns, "done"],
+    ]);
+    expect(fake.state.sets.get("example.com/mail")).toEqual({
+      name: "example.com/mail",
+      records: recordsFor("example.com"),
+    });
+
+    // Found the next time: as declared, until the domain asks for other records.
+    expect(actions((await apply()).report)).toEqual([
+      ["mail.ts#sending", "none"],
+      ["mail.ts#dns", "none"],
+    ]);
+    const more = [...recordsFor("example.com"), { type: "TXT" as const, name: "example.com", content: "v=spf1 -all" }];
+    fake.update(({ domains }) => domains.set("example.com", { name: "example.com", records: more }));
+    const again = await apply({ only: [dns] });
+    expect(again.report.plan.steps).toMatchObject([{ id: dns, action: "update" }]);
+    expect(fake.state.sets.get("example.com/mail")?.records).toEqual(more);
+  });
+
+  it("fails the record set's step before its driver is called when the domain could not be made", async () => {
+    fake.failNext("mail.domain.create", new DriverError("mail: the domain is refused", { retryable: false }));
+    const { report } = await apply();
+    expect(report.results).toEqual([
+      { id: sending, action: "create", status: "failed", error: expect.stringContaining("the domain is refused") },
+      {
+        id: dns,
+        action: "create",
+        status: "failed",
+        error: `its records come from ${sending}, which has no state yet`,
+      },
+    ]);
+    // The record set's driver was never called to change anything.
+    expect(fake.calls.map((c) => c.op).filter((op) => !/\.(import|plan)$/.test(op))).toEqual(["mail.domain.create"]);
+    expect(report.lockfile.bindings).toEqual({});
   });
 });

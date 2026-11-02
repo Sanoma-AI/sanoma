@@ -2,7 +2,7 @@ import { z } from "zod";
 import { defineWorkflow, type WorkflowDefinition } from "./define.ts";
 import { isRunControlError } from "./errors.ts";
 import type { Op } from "./op.ts";
-import { type DriftField, diffDeclared, fieldPathOf, type Resource, valueAt } from "./resource.ts";
+import { type DriftField, diffDeclared, fieldPathOf, type Resource, valueAt, withFrom } from "./resource.ts";
 import type { DeclaredResource, ResourceProblem } from "./resources.ts";
 import { type DRIFT_WORKFLOW, errorMessage } from "./shared.ts";
 import { SOURCE_RESOLVE, type sourceOps } from "./source.ts";
@@ -128,8 +128,10 @@ export const observed = (out: { gone: boolean; state?: State }): Found =>
  * Each declared resource against what its import `found`: `error`, `absent` (unbound, with the
  * binding id of what its identity found as `found`), `gone`, else the state and the declared
  * fields compared by `diffDeclared`, a reference against the state of the resource it names
- * (so GitHub's node id for a repository counts as its name). A host with a `revisions` entry
- * also compares its revision against the commit its ref names now (or is that entry's `error`).
+ * (so GitHub's node id for a repository counts as its name), and a `from` reference's field
+ * against that resource's state at its path, left out while that resource is absent, gone or
+ * unreadable (its own row says so). A host with a `revisions` entry also compares its revision
+ * against the commit its ref names now (or is that entry's `error`).
  */
 export function compare(
   types: ReadonlyMap<string, Resource>,
@@ -137,6 +139,12 @@ export function compare(
   found: ReadonlyMap<string, Found>,
   revisions: ReadonlyMap<string, Revision> = new Map(),
 ): DriftResult[] {
+  const bound = new Set(resources.filter((r) => r.binding !== undefined).map((r) => r.id));
+  // A resource's state as a `from` reference takes it: only a bound one's, read in this run.
+  const stateOf = (target: string) => {
+    const now = found.get(target);
+    return bound.has(target) && now && "state" in now ? now.state : undefined;
+  };
   return resources.map(({ id, vendor, type, name, binding, desired, refs }): DriftResult => {
     const row = { id, type, vendor, name, ...(binding !== undefined && { binding }) };
     const now = found.get(id)!;
@@ -158,7 +166,8 @@ export function compare(
       const named = found.get(target);
       if (named && "state" in named) accept[at] = by.map((field) => named.state[field]).filter((v) => v != null);
     }
-    const fields = diffDeclared(resource, now.state, desired, accept);
+    const declared = withFrom(resource.fields.references, desired, refs, stateOf, true);
+    const fields = diffDeclared(resource, now.state, declared, accept);
     const resolved = revisions.get(id);
     if (resolved && "error" in resolved) return { ...row, status: "error", fields: [], error: resolved.error };
     // A host whose state does not say which commit it runs is not compared.
