@@ -183,7 +183,7 @@ describe("sanoma from packed tarballs: the dev server", () => {
     const text = await css.text();
     expect(text).toMatch(/@layer utilities\.hello\b[\s\S]*\.prose \{/);
     // The kit's stylesheet, imported by the site, and its @source paths as installed from the tarballs.
-    expect(text).toMatch(/\.bg-primary[{,]/);
+    expect(text).toMatch(/\.bg-primary\s*[{,]/);
   }, 60_000);
 
   // The chat's third engine as a company runs it: OpenCode installed on first use under the
