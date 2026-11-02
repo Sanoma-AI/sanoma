@@ -255,6 +255,7 @@ const zoneRecord = (record: {
   ttl: number;
   comment?: string | null;
   priority?: number;
+  proxied?: boolean;
 }): ZoneRecord => ({
   id: record.id,
   type: record.type,
@@ -263,6 +264,7 @@ const zoneRecord = (record: {
   ttl: record.ttl,
   ...(record.priority !== undefined && { priority: record.priority }),
   ...(typeof record.comment === "string" && { comment: record.comment }),
+  ...(record.proxied && { proxied: true }),
 });
 
 /**

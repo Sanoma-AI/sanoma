@@ -227,7 +227,7 @@ describe("cloudflare.records on the fake", () => {
     });
   });
 
-  it("adopts the record a changed one would be patched to, deleting its own, and adopts no MX of another priority", async () => {
+  it("adopts the record a changed one would be patched to, deleting its own, and leaves an MX of another priority alone", async () => {
     const fake = fakeCloudflare();
     const ops = fake.driver.ops;
     await ops["records.create"]!({ desired }, callWith());
@@ -261,16 +261,97 @@ describe("cloudflare.records on the fake", () => {
     }
   });
 
-  it("writes a batch all or nothing", async () => {
+  it("writes a batch all or nothing: one a record added by hand since the set's look fails is not kept", async () => {
     const fake = fakeCloudflare();
     const ops = fake.driver.ops;
     await ops["records.create"]!({ desired }, callWith());
-    const before = structuredClone(fake.state.dns);
-    // A CNAME where the set holds records: Cloudflare refuses the batch, and nothing changes.
-    const cname = { type: "CNAME", name: "check-send.sanoma.work", content: "mail.example.net" };
+    let zone = fake.state.dns["sanoma.work"]!;
+    const before = structuredClone(zone);
+    const cname = hand({ type: "CNAME", name: "check-new.sanoma.work", content: "mail.example.net" });
+    // The zone read by the set's look, its two names' lookups, then the batch: the CNAME is there by then.
+    let reads = 0;
+    Object.defineProperty(fake.state.dns, "sanoma.work", {
+      get: () => (++reads > 3 ? [...zone, cname] : zone),
+      set: (next: ZoneRecord[]) => (zone = next),
+      enumerable: true,
+    });
+    const strict = { ...SPF, content: "v=spf1 include:amazonses.com -all" };
+    const added = { type: "TXT", name: "check-new.sanoma.work", content: "token" };
     await expect(
-      ops["records.update"]!({ id: ID, desired: { ...desired, records: [DKIM, MX, SPF, cname] } }, callWith()),
+      ops["records.update"]!({ id: ID, desired: { ...desired, records: [DKIM, MX, strict, added] } }, callWith()),
     ).rejects.toMatchObject({ status: 400 });
-    expect(fake.state.dns).toEqual(before);
+    expect(zone).toEqual(before);
+  });
+
+  it("refuses a record outside the zone, a CNAME beside another declared record, and a mark too long for a comment", async () => {
+    const ops = fakeCloudflare().driver.ops;
+    const cname = { type: "CNAME", name: SPF.name, content: "mail.example.net" };
+    for (const plan of [
+      { desired: { ...desired, records: [{ ...SPF, name: "check-send.example.com" }] } },
+      { desired: { ...desired, records: [SPF, cname] } },
+      { desired: { zone: `${"z".repeat(60)}.example.com`, name: "a".repeat(40), records: [] } },
+    ]) {
+      await expect(ops["records.plan"]!(plan, callWith())).rejects.toMatchObject({ vendorCode: "invalid" });
+      await expect(ops["records.create"]!(plan, callWith())).rejects.toMatchObject({ vendorCode: "invalid" });
+    }
+  });
+
+  it("refuses to adopt a proxied record, to patch a record beside another SPF policy, and an MX to the same server at another priority", async () => {
+    const fake = fakeCloudflare();
+    const ops = fake.driver.ops;
+    fake.state.dns["sanoma.work"] = [hand({ ...SPF, proxied: true })];
+    await expect(ops["records.create"]!({ desired }, callWith())).rejects.toMatchObject({
+      vendorCode: "conflict",
+      message: expect.stringContaining("proxied"),
+    });
+    fake.state.dns["sanoma.work"] = [];
+    await ops["records.create"]!({ desired }, callWith());
+    const google = hand({ type: "TXT", name: SPF.name, content: "v=spf1 include:_spf.google.com ~all" });
+    fake.state.dns["sanoma.work"]!.push(google);
+    const strict = { ...SPF, content: "v=spf1 include:amazonses.com -all" };
+    await expect(
+      ops["records.update"]!({ id: ID, desired: { ...desired, records: [DKIM, MX, strict] } }, callWith()),
+    ).rejects.toMatchObject({ vendorCode: "conflict", message: expect.stringContaining("_spf.google.com") });
+    fake.state.dns["sanoma.work"] = fake.state.dns["sanoma.work"]!.filter((r) => r !== google);
+    fake.state.dns["sanoma.work"]!.push(hand({ ...MX, name: "check-in.sanoma.work", priority: 5 }));
+    await expect(
+      ops["records.update"]!(
+        { id: ID, desired: { ...desired, records: [DKIM, MX, SPF, { ...MX, name: "check-in.sanoma.work" }] } },
+        callWith(),
+      ),
+    ).rejects.toMatchObject({ vendorCode: "conflict", message: expect.stringContaining("check-in.sanoma.work") });
+  });
+
+  it("patches a record whose ttl changed in place, beside one of its type and name whose content changed", async () => {
+    const fake = fakeCloudflare();
+    const ops = fake.driver.ops;
+    const token = { type: "TXT", name: SPF.name, content: "site-verification=x" };
+    await ops["records.create"]!({ desired: { ...desired, records: [SPF, token] } }, callWith());
+    const idOf = (content: string) => fake.state.dns["sanoma.work"]!.find((r) => r.content === content)?.id;
+    const [spfId, tokenId] = [idOf(SPF.content), idOf(token.content)];
+    const strict = { ...SPF, content: "v=spf1 include:amazonses.com -all" };
+    await ops["records.update"]!(
+      { id: ID, desired: { ...desired, records: [{ ...token, ttl: 300 }, strict] } },
+      callWith(),
+    );
+    expect(fake.state.dns["sanoma.work"]!.find((r) => r.id === tokenId)).toMatchObject({ ...token, ttl: 300 });
+    expect(fake.state.dns["sanoma.work"]!.find((r) => r.id === spfId)).toMatchObject(strict);
+  });
+
+  it("plans a replace of records not known yet with them unknown, and takes a retried update found done as done", async () => {
+    const fake = fakeCloudflare();
+    const ops = fake.driver.ops;
+    await ops["records.create"]!({ desired }, callWith());
+    expect(
+      await ops["records.plan"]!({ id: ID, desired: { ...desired, name: "other", records: null } }, callWith()),
+    ).toMatchObject({ action: "replace", unknown: ["records", "zone_id", "record_ids"], replace: ["name"] });
+    const update = {
+      id: ID,
+      desired: { ...desired, records: [DKIM, MX] },
+      expect: { action: "update", replace: [] },
+    };
+    await ops["records.update"]!(update, callWith());
+    const again = (await ops["records.update"]!(update, callWith())) as Answer;
+    expect(again.state.records).toHaveLength(2);
   });
 });

@@ -115,6 +115,8 @@ export interface ZoneRecord {
   /** In seconds; 1 is automatic. */
   ttl: number;
   comment?: string | null;
+  /** Whether its traffic goes through Cloudflare; a set's never does. */
+  proxied?: boolean;
 }
 
 /** A record as a batch writes it: never proxied, its comment the set's mark. */

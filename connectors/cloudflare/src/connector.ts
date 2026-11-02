@@ -241,7 +241,7 @@ const canonicalSet = (state: Record<string, unknown>) => {
  * zones, `<zone>/<name>`, compared as a set. Each record it writes carries the comment
  * `sanoma:<zone>/<name>`, which is how a read finds them; a record without it is never changed or
  * deleted, except one identical to a declared record in type, name, content (and an MX record's
- * priority), which is adopted (the comment added).
+ * priority), which is adopted (its comment replaced by the mark), and is deleted with the set from then on.
  * `records` may name a `resend.domain`, whose `dns_records` it then takes (`from`): a sending
  * domain's records go to the zone that holds them.
  */

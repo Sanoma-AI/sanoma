@@ -80,7 +80,7 @@ const fail = (status: number, code: number, message: string) =>
   new DriverError(`cloudflare: ${message}`, { retryable: retryableStatus(status), status, vendorCode: String(code) });
 
 /** A record as the zone `zone` holds a write of it: a CAA record's fields as its content, a name outside the zone refused. */
-function dnsRecordOf(zone: string, { type, name, ttl, comment, content, priority, data }: RecordWrite) {
+function dnsRecordOf(zone: string, { type, name, ttl, comment, proxied, content, priority, data }: RecordWrite) {
   if (name !== zone && !name.endsWith(`.${zone}`)) {
     throw fail(400, 9005, `dns_records/batch: ${name} is not in the zone ${zone}`);
   }
@@ -91,6 +91,7 @@ function dnsRecordOf(zone: string, { type, name, ttl, comment, content, priority
     ttl,
     ...(priority !== undefined && { priority }),
     comment,
+    proxied,
   };
 }
 
@@ -513,7 +514,9 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
         });
         for (const record of [...patched, ...posted]) {
           const beside = held.filter((r) => r.id !== record.id && r.name === record.name);
-          if (beside.some((r) => r.type === record.type && r.content === record.content)) {
+          if (
+            beside.some((r) => r.type === record.type && r.content === record.content && r.priority === record.priority)
+          ) {
             throw fail(400, 81058, "dns_records/batch: An identical record already exists.");
           }
           if (beside.some((r) => r.type === "CNAME" || record.type === "CNAME")) {

@@ -20,6 +20,8 @@ import {
 const DNS_EDIT = "Zone → DNS → Edit";
 const OWNED = [...recordsType.fields.vendorOwned];
 const IMMUTABLE = recordsType.fields.immutable;
+/** The longest comment a record of a Free zone holds, which the mark is. */
+const MARK_MAX = 100;
 
 /** A set's state: its zone and label, its records by key, and their ids beside. */
 type RecordsState = {
@@ -30,10 +32,11 @@ type RecordsState = {
   record_ids: string[];
 };
 
-/** A record the zone holds: its id and comment, and the record in the shared shape (`canonicalRecord`), with its key. */
+/** A record the zone holds: its id, comment and whether it is proxied, and the record in the shared shape (`canonicalRecord`), with its key. */
 interface Held {
   id: string;
   comment: string | undefined;
+  proxied: boolean;
   record: DnsRecord;
   key: string;
 }
@@ -43,9 +46,9 @@ const keyOf = ({ type, name, content, priority, ttl }: DnsRecord) =>
   JSON.stringify([type, name, content, priority, ttl]);
 const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
-const heldOf = ({ id, comment, ...rest }: ZoneRecord): Held => {
+const heldOf = ({ id, comment, proxied, ...rest }: ZoneRecord): Held => {
   const record = canonicalRecord(rest);
-  return { id, comment: comment ?? undefined, record, key: keyOf(record) };
+  return { id, comment: comment ?? undefined, proxied: proxied === true, record, key: keyOf(record) };
 };
 
 /** `<zone>/<name>`, a set's id, split. */
@@ -56,15 +59,35 @@ function idOf(id: string) {
 }
 
 /**
- * A set's declared records, each in its compared form, each once; a refusal for none, one the
- * shared shape refuses, an MX record without a priority, a CAA record's content not its fields,
- * or two of one type, name and content that differ otherwise (Cloudflare holds one of them).
+ * The mark of the set `<zone>/<name>`, `sanoma:<zone>/<name>`: the comment of every record it
+ * writes; a refusal when it is longer than a record's comment holds on a Free zone.
  */
-function declaredRecords(set: string, given: unknown): DnsRecord[] {
+function markOf(zone: string, name: string) {
+  const mark = `sanoma:${zone}/${name}`;
+  if (mark.length > MARK_MAX) {
+    throw refused(
+      `records ${zone}/${name}: its mark ${mark} is ${mark.length} characters, and a record's comment holds ${MARK_MAX}: give the set a shorter name`,
+      "invalid",
+    );
+  }
+  return mark;
+}
+
+/**
+ * A set's declared records, each in its compared form, each once; a refusal for none, one the
+ * shared shape refuses, one whose name is not in the zone, an MX record without a priority, a
+ * CAA record's content not its fields, two of one type, name and content that differ otherwise
+ * (Cloudflare holds one of them), or a CNAME beside another record of its name.
+ */
+function declaredRecords(zone: string, name: string, given: unknown): DnsRecord[] {
+  const set = `${zone}/${name}`;
   const parsed = recordsType.schema.shape.records.safeParse(given);
   if (!parsed.success) throw refused(`records ${set}: ${z.prettifyError(parsed.error)}`, "invalid");
   const seen = new Map<string, DnsRecord>();
   for (const record of parsed.data.map((r) => canonicalRecord(r))) {
+    if (record.name !== zone && !record.name.endsWith(`.${zone}`)) {
+      throw refused(`records ${set}: ${record.type} ${record.name} is not in the zone ${zone}`, "invalid");
+    }
     if (record.type === "MX" && record.priority === undefined) {
       throw refused(`records ${set}: the MX record ${record.name} needs a priority`, "invalid");
     }
@@ -84,13 +107,22 @@ function declaredRecords(set: string, given: unknown): DnsRecord[] {
     }
     seen.set(same, record);
   }
-  return [...seen.values()];
+  const declared = [...seen.values()];
+  const cname = declared.find((r) => r.type === "CNAME" && declared.some((o) => o !== r && o.name === r.name));
+  if (cname) {
+    throw refused(
+      `records ${set}: the CNAME ${cname.name} is declared beside another record of its name, which a CNAME cannot stand beside`,
+      "invalid",
+    );
+  }
+  return declared;
 }
 
 /**
  * How the zone's marked records become the declared ones: those kept as they are, those patched
- * (a marked record of the same type and name, with other content, priority or ttl), the declared
- * ones no marked record holds, which a write posts or adopts, and the marked ones no longer declared.
+ * (a marked record of the same type and name, with other content, priority or ttl, or proxied by
+ * hand), the declared ones no marked record holds, which a write posts or adopts, and the marked
+ * ones no longer declared.
  */
 function diff(declared: DnsRecord[], held: Held[]) {
   const left = [...held];
@@ -102,17 +134,24 @@ function diff(declared: DnsRecord[], held: Held[]) {
   // Each declared record held exactly first, so a patch never takes a record another one keeps.
   const unheld = declared.filter((record) => {
     const key = keyOf(record);
-    const same = take((h) => h.key === key);
+    const same = take((h) => h.key === key && !h.proxied);
     if (same) kept.push(same);
     return !same;
   });
   const patched: [Held, DnsRecord][] = [];
-  const missing: DnsRecord[] = [];
-  for (const record of unheld) {
-    const slot = take((h) => h.record.type === record.type && h.record.name === record.name);
-    if (slot) patched.push([slot, record]);
-    else missing.push(record);
-  }
+  /** The records no marked one `matches`, the others paired with theirs to be patched. */
+  const pair = (records: DnsRecord[], matches: (h: Held, record: DnsRecord) => boolean) =>
+    records.filter((record) => {
+      const slot = take((h) => matches(h, record));
+      if (slot) patched.push([slot, record]);
+      return !slot;
+    });
+  const at = (h: Held, record: DnsRecord) => h.record.type === record.type && h.record.name === record.name;
+  // One of the same content first (its ttl or priority changed), then any of its type and name.
+  const missing = pair(
+    pair(unheld, (h, record) => at(h, record) && h.record.content === record.content),
+    at,
+  );
   return { kept, patched, missing, stale: left };
 }
 
@@ -133,13 +172,14 @@ const named = ({ record, comment }: Held) =>
 
 /**
  * Whether an unmarked record at a declared record's name keeps it from being written: a CNAME,
- * which no other record may stand beside (and a declared CNAME beside any record), or a second
- * SPF policy, which makes both invalid.
+ * which no other record may stand beside (and a declared CNAME beside any record), a second SPF
+ * policy, which makes both invalid, or an MX record to the same server at another priority.
  */
 const clashes = (record: DnsRecord, { record: other }: Held) =>
   other.type === "CNAME" ||
   record.type === "CNAME" ||
-  (record.type === "TXT" && other.type === "TXT" && isSpf(record.content) && isSpf(other.content));
+  (record.type === "TXT" && other.type === "TXT" && isSpf(record.content) && isSpf(other.content)) ||
+  (record.type === "MX" && other.type === "MX" && record.content === other.content);
 
 /** Whether a TXT record's text is an SPF policy: `v=spf1`, in any case. */
 const isSpf = (text: string) => /^v=spf1(\s|$)/i.test(text);
@@ -170,7 +210,7 @@ type Found = Awaited<ReturnType<typeof look>>;
  */
 async function look(cf: CloudflareApi, id: string) {
   const { zone, name } = idOf(id);
-  const mark = `sanoma:${zone}/${name}`;
+  const mark = markOf(zone, name);
   const zoneId = await cf.zone(zone);
   const held = zoneId === undefined ? [] : (await dns(zone, () => cf.dnsRecords(zoneId, mark))).map(heldOf);
   return { zone, name, mark, zoneId, held };
@@ -186,23 +226,23 @@ function stateOf(zone: string, name: string, zoneId: string, held: Held[]): Reco
 function planOf(found: Found | undefined, desired: Record<string, unknown>): Planned {
   const zone = String(desired.zone);
   const name = String(desired.name);
+  markOf(zone, name);
   // `null`: taken from another resource's state, known only after apply.
   const given = desired.records;
   const records =
     given === null || given === undefined
       ? given
-      : declaredRecords(`${zone}/${name}`, given).toSorted((a, b) => compare(keyOf(a), keyOf(b)));
+      : declaredRecords(zone, name, given).toSorted((a, b) => compare(keyOf(a), keyOf(b)));
+  /** A new set's unknown fields: Cloudflare's, and its records while they are not known. */
+  const unknown = [...(records == null ? ["records"] : []), ...OWNED];
   if (!found?.zoneId || found.held.length === 0) {
-    return {
-      action: "create",
-      planned: { zone, name, records: records ?? null },
-      unknown: [...(records == null ? ["records"] : []), ...OWNED],
-      replace: [],
-    };
+    return { action: "create", planned: { zone, name, records: records ?? null }, unknown, replace: [] };
   }
   const state = stateOf(found.zone, found.name, found.zoneId, found.held);
   const replace = IMMUTABLE.filter((field) => desired[field] !== (state as Record<string, unknown>)[field]);
-  if (replace.length > 0) return { action: "replace", planned: { zone, name, records }, unknown: OWNED, replace };
+  if (replace.length > 0) {
+    return { action: "replace", planned: { zone, name, records: records ?? null }, unknown, replace };
+  }
   // Left out: its resource is absent or unreadable, so the set keeps what it holds.
   if (records === undefined) return { action: "none", planned: state, ...NONE };
   if (records === null) {
@@ -221,9 +261,10 @@ function planOf(found: Found | undefined, desired: Record<string, unknown>): Pla
 /**
  * `cloudflare.records`' operations over `api()`, made on each call. A read finds a set's records
  * by its mark alone; a write is one batch, all or nothing, of posts, patches (a marked record of a
- * declared one's type and name, or an unmarked one identical to it, adopted) and deletes (marked,
- * no longer declared), and never touches another record: one in its way (a CNAME at the name,
- * another SPF policy) is refused, naming it.
+ * declared one's type and name, or an unmarked one identical to it, adopted: its comment replaced
+ * by the mark) and deletes (marked, no longer declared), and never touches another record: one in
+ * its way (a CNAME at the name, another SPF policy, an MX to the same server at another priority,
+ * a proxied one identical to it) is refused, naming it.
  */
 export function recordsOps(api: () => CloudflareApi) {
   /** The set `id` as the zone holds it, or gone: no record carries its mark, or the zone is not the account's. */
@@ -248,7 +289,7 @@ export function recordsOps(api: () => CloudflareApi) {
     const set = `${String(desired.zone)}/${String(desired.name)}`;
     // A backstop: apply fails a step whose records are still not known before it gets here.
     if (desired.records === null || desired.records === undefined) throw notKnown(set);
-    const declared = declaredRecords(set, desired.records);
+    const declared = declaredRecords(String(desired.zone), String(desired.name), desired.records);
     const cf = before?.cf ?? api();
     const { zone, name, mark, zoneId, held } = before?.found ?? (await look(cf, set));
     if (zoneId === undefined) {
@@ -270,7 +311,7 @@ export function recordsOps(api: () => CloudflareApi) {
       }
       return found;
     };
-    /** The other record identical to `record` (its type, content and priority), taken to adopt; a refusal for another set's. */
+    /** The other record identical to `record` (its type, content and priority), taken to adopt; a refusal for another set's or a proxied one. */
     const adoptable = async (record: DnsRecord) => {
       const at = await othersAt(record.name);
       const same = at.findIndex(
@@ -282,17 +323,24 @@ export function recordsOps(api: () => CloudflareApi) {
       if (adopted.comment?.startsWith("sanoma:")) {
         throw refused(`records ${set}: ${record.type} ${record.name} is another set's: ${named(adopted)}`, "conflict");
       }
+      if (adopted.proxied) {
+        throw refused(
+          `records ${set}: ${named(adopted)} is proxied through Cloudflare, and a set's records are not: turn its proxy off by hand to have it adopted, or delete it`,
+          "conflict",
+        );
+      }
       return adopted;
     };
-    for (const [slot, record] of patched) {
-      // Patched to what another record already is: that one adopted instead, this one deleted.
-      const adopted = await adoptable(record);
-      if (adopted) batch.deletes.push({ id: slot.id });
-      batch.patches.push({ id: (adopted ?? slot).id, ...writeOf(mark, record) });
-    }
-    for (const record of missing) {
+    // Each record to patch (its marked `slot`) or to post, in that order.
+    const writes: [Held | undefined, DnsRecord][] = [
+      ...patched,
+      ...missing.map((r): [undefined, DnsRecord] => [undefined, r]),
+    ];
+    for (const [slot, record] of writes) {
+      // What another record already is: that one adopted instead (its comment replaced by the mark), its own deleted.
       const adopted = await adoptable(record);
       if (adopted) {
+        if (slot) batch.deletes.push({ id: slot.id });
         batch.patches.push({ id: adopted.id, ...writeOf(mark, record) });
         continue;
       }
@@ -303,7 +351,8 @@ export function recordsOps(api: () => CloudflareApi) {
           "conflict",
         );
       }
-      batch.posts.push(writeOf(mark, record));
+      if (slot) batch.patches.push({ id: slot.id, ...writeOf(mark, record) });
+      else batch.posts.push(writeOf(mark, record));
     }
     const written =
       batch.posts.length + batch.patches.length + batch.deletes.length === 0
@@ -332,7 +381,8 @@ export function recordsOps(api: () => CloudflareApi) {
       const cf = api();
       const found = await look(cf, id);
       const fresh = planOf(found, desired);
-      replanned("records.update", fresh, expect);
+      // An update planned and found done (a retry after its batch was written) is done: the zone holds what was declared.
+      if (!(expect?.action === "update" && fresh.action === "none")) replanned("records.update", fresh, expect);
       // Records left out, or as declared: what the zone holds, unwritten.
       if (fresh.action === "none") return { id, state: fresh.planned as RecordsState };
       return put(desired, { cf, found });
