@@ -422,7 +422,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   const call = callWorkflow(ops, drivers, types);
   if (call.uses.length) names.set(CALL_WORKFLOW, call);
   // Built-in: sending a sign-in code, when the config names how.
-  const login = config.login && checkLogin(config.login, ops, drivers);
+  const login = config.login && checkLogin(config.login, ops, drivers, appName);
   if (login) names.set(LOGIN_CODE_WORKFLOW, loginCodeWorkflow(login, appName));
   const { policy, policies, problems: policyProblems } = policyAt(root, { ops, workflows: names, collections });
   return {
@@ -472,7 +472,12 @@ const isSender = (from: string) => EMAIL.safeParse(NAMED.exec(from)?.[1] ?? from
  * operation of a connector in `connectors`, with the effect `send`, a driver, and an input that
  * takes `{ from, to, subject, text }`, and `from` is an email address.
  */
-function checkLogin(login: unknown, ops: ReadonlyMap<string, Op>, drivers: ReadonlyMap<string, unknown>): Login {
+function checkLogin(
+  login: unknown,
+  ops: ReadonlyMap<string, Op>,
+  drivers: ReadonlyMap<string, unknown>,
+  company: string,
+): Login {
   const { sender, from } = (login ?? {}) as { sender?: unknown; from?: unknown };
   const example = '`login: { sender: resend.emails.send, from: "Acme <login@acme.example>" }`';
   const fix = `name a connector's send operation, such as ${example}`;
@@ -493,7 +498,7 @@ function checkLogin(login: unknown, ops: ReadonlyMap<string, Op>, drivers: Reado
       `The config's \`login.from\`, ${JSON.stringify(from)}, is not an email address: write \`login@acme.example\` or \`Acme <login@acme.example>\`, ${where}`,
     );
   // One that drops `from` (a plain object without it) would send from its vendor's default.
-  if (!keepsInput(op, codeMail(from)))
+  if (!keepsInput(op, codeMail(from, company)))
     throw new Error(
       `The config's \`login.sender\`, ${op.id}, does not take an email as { from, to, subject, text } with \`login.from\`: ${fix}`,
     );

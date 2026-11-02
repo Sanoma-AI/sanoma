@@ -1,12 +1,12 @@
 import { DriverError } from "@sanoma-ai/workflows";
 import { defineFake, type FakeOptions } from "@sanoma-ai/workflows/fake";
-import { DEFAULT_REGION, DEFAULT_RETURN_PATH, type DomainStatus, resendOps } from "./connector.ts";
+import { DEFAULT_REGION, DEFAULT_RETURN_PATH, type DomainStatus, resendOps, senderOf } from "./connector.ts";
 import { type ApiDomain, type ApiRecord, type DomainApi, domainOperations } from "./domains.ts";
 
 export interface FakeResendBroadcast {
   id: string;
   audience: string;
-  from?: string;
+  from: string;
   subject: string;
   html: string;
   status: "draft" | "sent";
@@ -15,7 +15,7 @@ export interface FakeResendBroadcast {
 export interface FakeResendEmail {
   id: string;
   to: string | string[];
-  from?: string;
+  from: string;
   subject: string;
   html?: string;
   text?: string;
@@ -107,8 +107,9 @@ export function fakeResend(options: FakeOptions = {}) {
         domain: domainOperations(fakeDomains(state)),
         broadcast: {
           create: async (input) => {
+            const from = senderOf("broadcast.create", input.from);
             const id = `bc_${String(++state.seq).padStart(4, "0")}`;
-            state.broadcasts[id] = { id, ...input, status: "draft" };
+            state.broadcasts[id] = { id, ...input, from, status: "draft" };
             return { id };
           },
           send: async ({ id }) => {
@@ -123,8 +124,9 @@ export function fakeResend(options: FakeOptions = {}) {
         },
         emails: {
           send: async (input) => {
+            const from = senderOf("emails.send", input.from);
             const id = `em_${String(++state.seq).padStart(4, "0")}`;
-            state.emails[id] = { id, ...input };
+            state.emails[id] = { id, ...input, from };
             return { id };
           },
         },

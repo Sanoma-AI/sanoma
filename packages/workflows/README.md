@@ -861,6 +861,10 @@ Status: early (0.x). The API may change between minor versions.
 
 TODO: redact fields a schema marks `.meta({ sensitive: true })` from the ledger, the approvals event and DBOS's step records, so a secret passed by mistake is not kept.
 
+## Changes
+
+- 0.11.0: the config's `login` takes `from`, the address sign-in codes are sent from, and requires it: a config with `login` and no `from` (or one that is no email address, or a sender that does not keep it) is refused when it loads, so the worker, the app and `sanoma check` do not start until it is set ([Signing in on a host](#signing-in-on-a-host)). It replaces the Resend connector's retired `RESEND_FROM`.
+
 License: FSL-1.1-ALv2.
 
 The server-only [GCP KMS credential store](KMS-SECRETS.md) is a managed-backend option with explicit company-scoped bootstrap. It requires reviewed IAM/database isolation and does not provision Cloud infrastructure.

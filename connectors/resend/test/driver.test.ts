@@ -3,6 +3,7 @@ import { type CallContext, memorySecrets } from "@sanoma-ai/workflows";
 import { delay, http, HttpResponse } from "msw";
 import { describe, expect, it, vi } from "vitest";
 import { resendDriver } from "../src/driver.ts";
+import { fakeResend } from "../src/fake.ts";
 import { audience, from, replayOptions } from "./replay.ts";
 
 // Replays test/fixtures; the README says how to run these tests against Resend.
@@ -89,6 +90,20 @@ describe("resendDriver", () => {
       });
     }
     expect(sent).toEqual([]);
+  });
+
+  it("has the fake, like the driver, refuse a send with no sender, or an empty one", async () => {
+    const fake = fakeResend().driver.ops;
+    for (const sender of [{}, { from: "" }]) {
+      for (const attempt of [
+        fake["broadcast.create"]!({ audience, ...sender, subject: "s", html: "" }, call),
+        fake["emails.send"]!({ to, ...sender, subject: "s", text: "Hello" }, call),
+      ])
+        await expect(attempt).rejects.toMatchObject({
+          retryable: false,
+          message: expect.stringContaining("needs `from`"),
+        });
+    }
   });
 
   it("fails a 422 for good, with Resend's status and error name", async () => {

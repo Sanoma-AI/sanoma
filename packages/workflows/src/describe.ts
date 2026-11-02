@@ -317,7 +317,7 @@ function loginProblems(resolved: ResolvedConfig, people: readonly PeopleResource
   const { sender, from } = resolved.login;
   const agent = principalOf(LOGIN_AGENT, people)!;
   const run = { id: "check", workflow: LOGIN_CODE_WORKFLOW, approvals: [] };
-  const decision = decideCall(resolved.policy, sender, codeMail(from), agent, run);
+  const decision = decideCall(resolved.policy, sender, codeMail(from, resolved.appName), agent, run);
   if (decision.kind === "allow") return [];
   const does = decision.kind === "deny" ? "denies" : "holds";
   const by = decision.reasons?.length ? ` (${decision.reasons.join(", ")})` : "";

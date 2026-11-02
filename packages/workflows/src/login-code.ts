@@ -17,12 +17,16 @@ type OpCall = (input: unknown) => Promise<unknown>;
 /** The workflow's input: to whom, and the code, sealed. */
 const LoginCodeInput = z.object({ to: z.string().min(1), code: z.string().min(1) });
 
-/** What a sign-in code is sent as, from `from`, for checks before any is: a sender must take it, and the policy is asked about it. */
-export const codeMail = (from: string) => ({
+/**
+ * The mail a sign-in code is sent as, from `from`, saying it is `company`'s: the workflow's, and,
+ * with a stand-in `to` and `text`, what is checked before any is sent (a sender must take it, and
+ * the policy is asked about it).
+ */
+export const codeMail = (from: string, company: string, to = "person@example.com", text = "<text>") => ({
   from,
-  to: "person@example.com",
-  subject: "Your sign-in code",
-  text: "<text>",
+  to,
+  subject: `Your ${company} sign-in code`,
+  text,
 });
 
 /** The mail's text: the code, what it is for, and how long it lasts; nothing else, and no link. */
@@ -44,12 +48,7 @@ export function loginCodeWorkflow(
     uses: [sender],
     run: async (ctx, input) => {
       const { vendor, resource, name } = sender;
-      const mail = {
-        from,
-        to: input.to,
-        subject: `Your ${company} sign-in code`,
-        text: textOf(company, openLoginCode(input.code, input.to)),
-      };
+      const mail = codeMail(from, company, input.to, textOf(company, openLoginCode(input.code, input.to)));
       // `ctx` called directly, so the outline places the call.
       return (ctx as unknown as Record<string, Record<string, Record<string, OpCall>>>)[vendor]![resource]![name]!(
         mail,
