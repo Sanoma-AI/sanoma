@@ -31,3 +31,10 @@ Feature: Refunds
     And "Refund over 10,000" is approved by ada
     Then shop.refunds.create was held for group "finance"
     And the run succeeds
+
+  Scenario: A visitor who linked GitHub refunds
+    Given a visitor "hopper@example.com" with GitHub "hopper" is acting
+    When refund runs with
+      | amount | 500 |
+    Then shop.refunds.create was called
+    And the run succeeds

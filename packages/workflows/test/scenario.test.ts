@@ -1492,6 +1492,30 @@ describe("people in a scenario: who is acting, held for a group, denied with a r
     expect(anonymous).toMatchObject({ startedBy: "anonymous" });
   });
 
+  it("reads a visitor with the email its login verified, and a GitHub login", async () => {
+    const text = readFileSync(new URL("./fixtures/people/scenarios/refund.feature", import.meta.url), "utf8");
+    const [, , , , linked] = await parsePeople(text);
+    expect(linked!.startedBy).toEqual({
+      id: "visitor:scenario:visitor",
+      groups: ["visitors"],
+      email: "hopper@example.com",
+      github: "hopper",
+    });
+    const [emailed] = await parsePeople(
+      scenarioOf('    Given a visitor "ada@example.com" is acting\n    When refund runs\n'),
+    );
+    expect(emailed!.startedBy).toEqual({
+      id: "visitor:scenario:visitor",
+      groups: ["visitors"],
+      email: "ada@example.com",
+    });
+    await expect(
+      parsePeople(
+        scenarioOf('    Given a visitor "a@example.com" is acting\n    And bo is acting\n    When refund runs\n'),
+      ),
+    ).rejects.toThrow("scenarios/people.feature:4: visitor:scenario:visitor is acting already: a run has one actor");
+  });
+
   it("refuses someone, or a group, the data files do not declare, and a second actor", async () => {
     const thrownBy = async (steps: string) => {
       try {
