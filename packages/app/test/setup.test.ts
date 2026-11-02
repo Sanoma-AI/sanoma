@@ -248,7 +248,7 @@ describe("sign-in on the host", () => {
     const withSender = defineConfig({
       ...config,
       connectors: [supabase, resend],
-      login: { sender: resend.emails.send },
+      login: { sender: resend.emails.send, from: "Acme <login@acme.test>" },
     });
     const sendingClient = await SanomaClient.connect(withSender);
     const sending = { ...ctx, resolved: resolveConfig(withSender), client: sendingClient };

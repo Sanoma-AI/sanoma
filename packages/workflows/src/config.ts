@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { configuredSecrets } from "./credentials.ts";
 import {
   configuredIdentityProvisioning,
@@ -49,6 +50,7 @@ import {
   type DriverEnv,
   type DriverFn,
   isOp,
+  keepsInput,
   type Op,
   checkConnector,
   setupOf,
@@ -59,7 +61,7 @@ import { rootSnapshot, type RootSnapshot } from "./bundled.ts";
 import { type CedarPolicySource, policyAt, readPolicyFiles } from "./cedar.ts";
 import type { Policy } from "./policy.ts";
 import { checkFromRefs, type Resource, resourceTypesOf, withoutWriteOnly } from "./resource.ts";
-import { CODE_MAIL, loginCodeWorkflow } from "./login-code.ts";
+import { codeMail, loginCodeWorkflow } from "./login-code.ts";
 import {
   APPLY_WORKFLOW,
   BUILT_IN_WORKFLOWS,
@@ -152,11 +154,19 @@ export interface SanomaConfig {
   wakeup?: true;
   /**
    * How the staff and visitor logins send a sign-in code: `sender`, an operation of a connector in
-   * `connectors` with the effect `send` that takes `{ to, subject, text }`, such as
-   * `resend.emails.send`. With it, the runtime registers the built-in `login-code` workflow,
-   * which the runtime's agent `login` runs; without it, nobody signs in by code.
+   * `connectors` with the effect `send` that takes `{ from, to, subject, text }`, such as
+   * `resend.emails.send`, and `from`, the address codes are sent from (`login@acme.example` or
+   * `Acme <login@acme.example>`), on a domain the sender's vendor has verified (`resend.domain`
+   * declares one). With it, the runtime registers the built-in `login-code` workflow, which the
+   * runtime's agent `login` runs; without it, nobody signs in by code.
    */
-  login?: { sender: Op };
+  login?: Login;
+}
+
+/** The config's `login`: the operation sign-in codes are sent with, and the address they are sent from. */
+export interface Login {
+  sender: Op;
+  from: string;
 }
 
 /** A config, checked, with everything a worker, client or app derives from it. */
@@ -177,8 +187,8 @@ export interface ResolvedConfig {
   changeCode: string;
   /** The DBOS queue runs are started on: `sanoma:<appName>`. */
   queueName: string;
-  /** The config's `login`, checked (`checkSender`); the built-in `login-code` workflow sends through its `sender`. */
-  login?: { sender: Op };
+  /** The config's `login`, checked (`checkLogin`); the built-in `login-code` workflow sends through its `sender`, from its `from`. */
+  login?: Login;
   /**
    * The operations the connectors declare, by id, the built-in `sanoma.change.*` (`changeOps`, in
    * every config) and the runtime's own a workflow may use (`sanoma`, runtime-ops.ts, in every
@@ -413,8 +423,8 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   const call = callWorkflow(ops, drivers, types);
   if (call.uses.length) names.set(CALL_WORKFLOW, call);
   // Built-in: sending a sign-in code, when the config names how.
-  const login = config.login && { sender: checkSender(config.login, ops, drivers) };
-  if (login) names.set(LOGIN_CODE_WORKFLOW, loginCodeWorkflow(login.sender, appName));
+  const login = config.login && checkLogin(config.login, ops, drivers, appName);
+  if (login) names.set(LOGIN_CODE_WORKFLOW, loginCodeWorkflow(login, appName));
   const { policy, policies, problems: policyProblems } = policyAt(root, { ops, workflows: names, collections });
   return {
     secrets: config.secrets ?? {},
@@ -452,14 +462,27 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   };
 }
 
+/** A name before an address in angle brackets, `Acme <login@acme.example>`, on one line. */
+const NAMED = /^[^<>\r\n]*<([^<>]+)>$/;
+
+/** Whether `from` is an email address, bare or after a name: the address as `z.email()` takes it, the vendor having the last word. */
+const EMAIL = z.email();
+const isSender = (from: string) => EMAIL.safeParse(NAMED.exec(from)?.[1] ?? from).success;
+
 /**
- * The config's `login.sender`, as the config's operations have it: refused unless it is an
+ * The config's `login`, as the config's operations have it: refused unless `sender` is an
  * operation of a connector in `connectors`, with the effect `send`, a driver, and an input that
- * takes `{ to, subject, text }`.
+ * takes `{ from, to, subject, text }`, and `from` is an email address.
  */
-function checkSender(login: unknown, ops: ReadonlyMap<string, Op>, drivers: ReadonlyMap<string, unknown>): Op {
-  const sender: unknown = (login as { sender?: unknown } | null)?.sender;
-  const fix = "name a connector's send operation, such as `login: { sender: resend.emails.send }`";
+function checkLogin(
+  login: unknown,
+  ops: ReadonlyMap<string, Op>,
+  drivers: ReadonlyMap<string, unknown>,
+  company: string,
+): Login {
+  const { sender, from } = (login ?? {}) as { sender?: unknown; from?: unknown };
+  const example = '`login: { sender: resend.emails.send, from: "Acme <login@acme.example>" }`';
+  const fix = `name a connector's send operation, such as ${example}`;
   if (!isOp(sender)) throw new Error(`The config's \`login.sender\` is not an operation: ${fix}`);
   const op = ops.get(sender.id);
   if (!op) throw new Error(`The config's \`login.sender\`, ${sender.id}, is of no connector in \`connectors\`: add it`);
@@ -467,9 +490,21 @@ function checkSender(login: unknown, ops: ReadonlyMap<string, Op>, drivers: Read
     throw new Error(`The config's \`login.sender\`, ${op.id}, does not send (its effect is ${op.effect}): ${fix}`);
   if (!drivers.has(op.id))
     throw new Error(`The config's \`login.sender\`, ${op.id}, has no driver: the connector package must attach one`);
-  if (!op.input.safeParse(CODE_MAIL).success)
-    throw new Error(`The config's \`login.sender\`, ${op.id}, does not take an email as { to, subject, text }: ${fix}`);
-  return op;
+  const where = "on a domain the sender's vendor has verified";
+  if (typeof from !== "string" || !from)
+    throw new Error(
+      `The config's \`login.from\` is not set: give the address codes are sent from, ${where}, as in ${example}`,
+    );
+  if (!isSender(from))
+    throw new Error(
+      `The config's \`login.from\`, ${JSON.stringify(from)}, is not an email address: write \`login@acme.example\` or \`Acme <login@acme.example>\`, ${where}`,
+    );
+  // One that drops `from` (a plain object without it) would send from its vendor's default.
+  if (!keepsInput(op, codeMail(from, company)))
+    throw new Error(
+      `The config's \`login.sender\`, ${op.id}, does not take an email as { from, to, subject, text } with \`login.from\`: ${fix}`,
+    );
+  return { sender: op, from };
 }
 
 /**

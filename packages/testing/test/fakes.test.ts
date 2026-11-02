@@ -124,7 +124,10 @@ describe("fakes", () => {
     const resend = fakeResend();
     const create = resend.driver.ops["broadcast.create"]!;
     const send = resend.driver.ops["broadcast.send"]!;
-    const { id } = (await create({ audience: "news", subject: "Hi", html: "" }, call("r:0"))) as { id: string };
+    const { id } = (await create(
+      { audience: "news", from: "hi@example.test", subject: "Hi", html: "" },
+      call("r:0"),
+    )) as { id: string };
 
     resend.loseReply("resend.broadcast.send");
     await expect(send({ id }, call("r:1"))).rejects.toMatchObject({ retryable: true });
@@ -189,7 +192,10 @@ describe("fakes", () => {
     const resend = fakeResend({ calls });
     const bluesky = fakeBluesky({ calls });
     await ghost.driver.ops["post.create"]!(draft, call("r:0"));
-    await resend.driver.ops["broadcast.create"]!({ audience: "news", subject: "Hi", html: "" }, call("r:1"));
+    await resend.driver.ops["broadcast.create"]!(
+      { audience: "news", from: "hi@example.test", subject: "Hi", html: "" },
+      call("r:1"),
+    );
     await bluesky.driver.ops["post.create"]!({ text: "x" }, call("r:2"));
     expect(calls.map((c) => c.op)).toEqual(["ghost.post.create", "resend.broadcast.create", "bluesky.post.create"]);
     expect(Object.values(ghost.state.posts)).toHaveLength(1);

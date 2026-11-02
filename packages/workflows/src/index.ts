@@ -66,6 +66,7 @@ export {
   declaredWakeup,
   defineConfig,
   envWakeup,
+  type Login,
   readRootSnapshot,
   resolveConfig,
   resolveDatabaseUrl,

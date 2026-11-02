@@ -531,6 +531,21 @@ export function isOp(x: unknown): x is Op {
 }
 
 /**
+ * True when `op`'s input takes `sample` and keeps each of its fields: one that strips a field
+ * takes none of it. A wakeup's `register` and the config's `login.sender` are checked with it.
+ */
+export function keepsInput(op: Op, sample: Record<string, unknown>): boolean {
+  try {
+    const parsed = op.input.safeParse(sample);
+    const data = parsed.data as Record<string, unknown> | undefined;
+    return parsed.success && Object.keys(sample).every((key) => data?.[key] !== undefined);
+  } catch {
+    // An async refinement, which a sync parse cannot run: no input the runtime can check.
+    return false;
+  }
+}
+
+/**
  * What a driver for a connector must implement: every operation, by resource and name. Each
  * function gets the input as the operation's schema parses it and returns what its output
  * schema accepts.

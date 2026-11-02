@@ -64,6 +64,74 @@ const invoke = (driver: Driver, op: string, input: unknown, call = context(a)) =
 const ring = (project = "company-a") => `projects/${project}/locations/global/keyRings/credentials`;
 const key = () => `${ring()}/cryptoKeys/company`;
 
+const missingMember = {
+  severity: "error" as const,
+  summary:
+    'Cannot find binding for "resource" with role "roles/viewer", member "serviceAccount:runtime@company-a.iam.gserviceaccount.com", and condition title ""',
+  detail: "",
+  attributePath: "",
+};
+
+it.each(["keyIamMember", "serviceAccountIamMember"])(
+  "treats a confirmed absent %s as gone for read, plan and idempotent delete",
+  async (type) => {
+    const bridge = bridgeFor();
+    const parent =
+      type === "keyIamMember" ? key() : "projects/company-a/serviceAccounts/runtime@company-a.iam.gserviceaccount.com";
+    const desired = {
+      [type === "keyIamMember" ? "crypto_key_id" : "service_account_id"]: parent,
+      role: "roles/viewer",
+      member: "serviceAccount:runtime@company-a.iam.gserviceaccount.com",
+    };
+    const id = [parent, desired.role, desired.member].join(" ");
+    vi.spyOn(bridge, "import").mockRejectedValue(
+      new BridgeError("failed_precondition", "provider error", [missingMember]),
+    );
+    const apply = vi.spyOn(bridge, "apply");
+    const driver = gcpDriver({ "gcp/a": a }, bridge);
+    expect(await invoke(driver, `${type}.read`, { id })).toMatchObject({ id, gone: true });
+    expect(await invoke(driver, `${type}.plan`, { id, desired })).toMatchObject({ action: "create" });
+    await invoke(driver, `${type}.delete`, { id });
+    expect(apply).not.toHaveBeenCalled();
+    await invoke(driver, `${type}.create`, { desired });
+    expect(apply).toHaveBeenCalledTimes(1);
+  },
+);
+
+it.each([
+  new BridgeError("permission_denied", "synthetic-bearer-token", [missingMember]),
+  new BridgeError("failed_precondition", missingMember.summary),
+  new BridgeError("failed_precondition", "synthetic-bearer-token", [
+    { ...missingMember, summary: 'Cannot import IAM member with condition title "x", it matches multiple conditions' },
+  ]),
+  new BridgeError("failed_precondition", "synthetic-bearer-token", [{ ...missingMember, detail: "permission denied" }]),
+  new BridgeError("failed_precondition", "synthetic-bearer-token", [
+    missingMember,
+    { ...missingMember, summary: "permission denied" },
+  ]),
+  new BridgeError("failed_precondition", "synthetic-bearer-token", [
+    { ...missingMember, summary: missingMember.summary + " permission denied" },
+  ]),
+])("preserves and sanitizes IAM import failures instead of reporting absence (%#)", async (failure) => {
+  const bridge = bridgeFor();
+  vi.spyOn(bridge, "import").mockRejectedValue(failure);
+  const apply = vi.spyOn(bridge, "apply");
+  const driver = gcpDriver({ "gcp/a": a }, bridge);
+  for (const type of ["keyIamMember", "serviceAccountIamMember"])
+    await expect(invoke(driver, `${type}.read`, { id: key() })).rejects.toThrow(`gcp: ${type}.read failed`);
+  expect(apply).not.toHaveBeenCalled();
+});
+
+it("does not classify another resource's IAM-like diagnostic as absence", async () => {
+  const bridge = bridgeFor();
+  vi.spyOn(bridge, "import").mockRejectedValue(
+    new BridgeError("failed_precondition", "provider error", [missingMember]),
+  );
+  await expect(invoke(gcpDriver({ "gcp/a": a }, bridge), "cryptoKey.read", { id: key() })).rejects.toThrow(
+    "gcp: cryptoKey.read failed",
+  );
+});
+
 it.each([
   {
     type: "keyIamMember",
