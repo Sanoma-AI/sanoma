@@ -191,6 +191,53 @@ describe("a direct call", () => {
     ]);
   });
 
+  it("enforces conditional writes through policy and audits success and stale refusal", async () => {
+    const before = lead("Acme");
+    const record = lead("Acme", "contacted");
+    await client.call("data.outbound.save", { record: before }, { actor: ada, id: "conditional-seed" });
+    const input = { record, ifRecord: before };
+    const saved = await client.call("data.outbound.save", input, { actor: ada, id: "conditional-save" });
+    expect(saved).toMatchObject({ record, updatedBy: "ada" });
+    expect(
+      await failure(
+        client.call(
+          "data.outbound.save",
+          {
+            record: { ...record, contact: "changed@acme.test" },
+            ifRecord: before,
+          },
+          { actor: ada, id: "conditional-stale" },
+        ),
+      ),
+    ).toMatchObject({ code: "driver_failed" });
+    expect(
+      await failure(
+        client.call(
+          "data.outbound.save",
+          {
+            record: lead("Acme", "lost"),
+            ifRecord: record,
+          },
+          { actor: ada, id: "conditional-denied" },
+        ),
+      ),
+    ).toMatchObject({ code: "policy_denied" });
+    expect(await rows()).toEqual([{ key: "Acme", record, updated_by: "ada" }]);
+    const events = await records();
+    expect(events).toHaveLength(3);
+    expect(events.find((event) => event.runId === "direct:ada:conditional-stale")).toMatchObject({
+      type: "op.called",
+      error: { code: "driver_failed" },
+    });
+    expect(events.some((event) => event.runId === "direct:ada:conditional-denied")).toBe(false);
+    expect(events.find((event) => event.runId === "direct:ada:conditional-save")).toMatchObject({
+      type: "op.called",
+      input,
+      output: saved,
+      decision: { kind: "allow" },
+    });
+  });
+
   it("returns what the first write with an id returned, and refuses that id with another input", async () => {
     const first = await client.call("data.outbound.save", { record: lead("Acme") }, { actor: ada, id: "w2" });
     await db.query(`UPDATE ${DATA_TABLE} SET updated_by = 'someone' WHERE collection = 'outbound'`);

@@ -279,7 +279,7 @@ unless { context has before };
           op: "data.outbound.save",
           effect: "write",
           node: "1.0.0",
-          input: { record: { ...lead, stage: "contacted" } },
+          input: { record: { ...lead, stage: "contacted" }, ifRecord: lead },
         },
       ]);
       expect(calls[1]!.output).toMatchObject({ key: "Acme", updatedBy: `run:${runId}` });
