@@ -3,6 +3,8 @@ import { CREDENTIALS_TABLE as TABLE, type Db } from "./db.ts";
 import {
   SecretAccess,
   SecretStoreError,
+  checkSecretConfiguration,
+  isSecretStoreFactory,
   type SecretAddress,
   type SecretConfiguration,
   type SecretStore,
@@ -105,5 +107,24 @@ export function postgresSecretStore(db: () => Promise<Db>): SecretStore {
   };
 }
 
-export const configuredSecrets = (config: SecretConfiguration, db: () => Promise<Db>): SecretAccess =>
-  new SecretAccess(config, postgresSecretStore(db));
+export function configuredSecrets(config: SecretConfiguration, db: () => Promise<Db>): SecretAccess {
+  checkSecretConfiguration(config);
+  const selected = config.store;
+  if (!selected || !isSecretStoreFactory(selected)) return new SecretAccess(config, postgresSecretStore(db));
+  try {
+    const store = selected.create({ database: db });
+    checkSecretConfiguration({ store });
+    if (
+      isSecretStoreFactory(store) ||
+      store.id !== selected.id ||
+      (Object.keys(selected.capabilities) as (keyof typeof selected.capabilities)[]).some(
+        (key) => store.capabilities[key] !== selected.capabilities[key],
+      )
+    )
+      throw new SecretStoreError("invalid_configuration");
+    return new SecretAccess({ ...config, store }, postgresSecretStore(db));
+  } catch {
+    // Config construction may otherwise leak a provider's bootstrap/database diagnostics.
+    throw new SecretStoreError("invalid_configuration");
+  }
+}

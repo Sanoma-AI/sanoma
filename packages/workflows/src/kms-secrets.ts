@@ -2,7 +2,13 @@ import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from "node:
 import type { protos } from "@google-cloud/kms";
 import crc32c from "crc-32/crc32c.js";
 import type { Db } from "./db.ts";
-import { SecretStoreError, type SecretAddress, type SecretStore, type SecretValue } from "./secret-store.ts";
+import {
+  SecretStoreError,
+  type SecretAddress,
+  type SecretStore,
+  type SecretStoreFactory,
+  type SecretValue,
+} from "./secret-store.ts";
 
 /** Install with a privileged connection; runtime needs only SELECT/INSERT/UPDATE/DELETE on its company database. */
 export const KMS_SECRETS_SQL = `
@@ -47,8 +53,8 @@ export interface KmsPostgresOptions {
   decryptKeyNames?: readonly string[];
   /** Explicit client under a company-scoped IAM identity, never fleet credentials. Caller owns its lifecycle. */
   kms: GcpKmsClient;
-  /** Company-scoped database access. Caller owns connection lifecycle; never shared admin authority. */
-  database: () => Promise<Db>;
+  /** Omit in config to use the runtime's database. An explicit connection remains caller-owned. */
+  database?: () => Promise<Db>;
 }
 
 interface Envelope {
@@ -68,6 +74,13 @@ interface Row {
 }
 const FORMAT = "sanoma-gcp-kms-v1";
 const MAX_BYTES = 65_536;
+const capabilities = Object.freeze({
+  writable: true,
+  maxBytes: MAX_BYTES,
+  conditionalWrites: "atomic" as const,
+  deletion: "destroy" as const,
+  changeDetection: "read" as const,
+});
 const keyName =
   /^projects\/[a-zA-Z0-9-]+\/locations\/[a-z0-9-]+\/keyRings\/[a-zA-Z0-9_-]+\/cryptoKeys\/[a-zA-Z0-9_-]+$/;
 const nonempty = (v: string) =>
@@ -111,11 +124,34 @@ const versionOf = (name: unknown, key: string): name is string =>
 const checksum = (value: Uint8Array) => crc32c.buf(value) >>> 0;
 
 /** Versioned envelope encryption; no plaintext/data-key cache, no SANOMA_SECRETS_KEY and no Secrets Manager. */
-export function kmsPostgresStore(options: KmsPostgresOptions): SecretStore {
+export function kmsPostgresStore(options: KmsPostgresOptions & { database: () => Promise<Db> }): SecretStore;
+export function kmsPostgresStore(options: KmsPostgresOptions & { database?: undefined }): SecretStoreFactory;
+export function kmsPostgresStore(options: KmsPostgresOptions): SecretStore | SecretStoreFactory;
+export function kmsPostgresStore(options: KmsPostgresOptions): SecretStore | SecretStoreFactory {
   const { company, keyName: writeKey, kms, database } = options;
   const keys = new Set([writeKey, ...(options.decryptKeyNames ?? [])]);
-  if (!nonempty(company) || [...keys].some((k) => !nonempty(k) || !keyName.test(k)))
+  if (
+    !nonempty(company) ||
+    [...keys].some((k) => !nonempty(k) || !keyName.test(k)) ||
+    typeof kms?.encrypt !== "function" ||
+    typeof kms?.decrypt !== "function" ||
+    (database !== undefined && typeof database !== "function")
+  )
     throw new SecretStoreError("invalid_configuration");
+  if (!database)
+    return Object.freeze({
+      kind: "runtime",
+      id: "kms-postgres",
+      capabilities,
+      create: ({ database: runtimeDatabase }: { database: () => Promise<Db> }) =>
+        kmsPostgresStore({
+          company,
+          keyName: writeKey,
+          decryptKeyNames: [...keys],
+          kms,
+          database: runtimeDatabase,
+        }),
+    });
   const context = (address: SecretAddress, version: string) => {
     if (!nonempty(address.namespace) || !nonempty(address.path)) throw new SecretStoreError("invalid_configuration");
     return { company, namespace: address.namespace, path: address.path, version, format: FORMAT };
@@ -209,13 +245,7 @@ export function kmsPostgresStore(options: KmsPostgresOptions): SecretStore {
   };
   return {
     id: "kms-postgres",
-    capabilities: Object.freeze({
-      writable: true,
-      maxBytes: MAX_BYTES,
-      conditionalWrites: "atomic",
-      deletion: "destroy",
-      changeDetection: "read",
-    }),
+    capabilities,
     validate: (namespace) =>
       safe(async () => {
         const address = { namespace, path: "__validation__" },

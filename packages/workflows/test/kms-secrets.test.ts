@@ -1,7 +1,18 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import crc32c from "crc-32/crc32c.js";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
+import {
+  SanomaClient,
+  defineConnector,
+  defineDriver,
+  defineWorkflow,
+  memoryLedger,
+  startWorker,
+  withSetup,
+} from "../src/index.ts";
+import { describeConfig } from "../src/describe.ts";
 import { lazyPool } from "../src/db.ts";
 import { checkSecretStore } from "../src/secret-store-check.ts";
 import { KMS_SECRETS_SQL, kmsPostgresStore, type GcpKmsClient } from "../src/kms-secrets.ts";
@@ -69,6 +80,30 @@ const kms = fakeKms([KEY, NEXT_KEY]);
 const store = (keyName = KEY, decryptKeyNames: string[] = []) =>
   kmsPostgresStore({ company: "acme", keyName, decryptKeyNames, kms: kms.client, database: () => pool.db() });
 const address = () => ({ namespace: "testing", path: randomUUID() });
+const ops = defineConnector("kmsprobe", {
+  credential: {
+    check: {
+      effect: "read",
+      input: z.object({}),
+      output: z.object({ configured: z.boolean() }),
+    },
+  },
+});
+const probe = withSetup(ops, {
+  driver: () =>
+    defineDriver(ops, {
+      credential: {
+        check: async (_input, call) => ({ configured: (await call.secrets.get("API_KEY")) === "runtime-private-key" }),
+      },
+    }),
+});
+const workflow = defineWorkflow({
+  name: "kms-runtime-probe",
+  trigger: "manual",
+  input: z.object({}),
+  uses: [probe.credential.check],
+  run: async (ctx) => ctx.kmsprobe.credential.check({}),
+});
 beforeAll(async () => {
   await (await pool.db()).query(KMS_SECRETS_SQL);
 });
@@ -77,6 +112,88 @@ afterAll(async () => {
 });
 
 describe("KMS encrypted Postgres", () => {
+  it("uses the selected KMS store for intake, direct calls, durable calls and restart without a local encryption key", async () => {
+    const databaseUrl = testDatabaseUrl("kms_runtime"),
+      admin = lazyPool(databaseUrl, "kms-runtime-setup");
+    await (await admin.db()).query(KMS_SECRETS_SQL);
+    const transport = fakeKms([KEY]);
+    const encrypt = vi.spyOn(transport.client, "encrypt");
+    const config = {
+      connectors: [probe],
+      workflows: [workflow],
+      databaseUrl,
+      ledger: memoryLedger(),
+      secrets: {
+        namespace: randomUUID(),
+        store: kmsPostgresStore({ company: "acme", keyName: KEY, kms: transport.client }),
+      },
+    };
+    const description = describeConfig(config);
+    expect(description.secrets?.store).toBe("kms-postgres");
+    expect(encrypt).not.toHaveBeenCalled();
+    vi.stubEnv("SANOMA_SECRETS_KEY", undefined);
+    let client: SanomaClient | undefined, worker: Awaited<ReturnType<typeof startWorker>> | undefined;
+    try {
+      client = await SanomaClient.connect(config);
+      await client.setSecret("API_KEY", "runtime-private-key", { by: "tester" });
+      expect(await client.call("kmsprobe.credential.check", {}, { actor: { id: "tester" } })).toEqual({
+        configured: true,
+      });
+      worker = await startWorker(config);
+      const run = await client.start(workflow, {}, { startedBy: { id: "tester" } });
+      expect(await client.result(run, 10_000)).toEqual({ configured: true });
+      expect(JSON.stringify(await client.ledger(run))).not.toContain("runtime-private-key");
+      const db = await admin.db();
+      const rows = await db.query("SELECT envelope FROM sanoma_kms.secrets WHERE namespace=$1", [
+        config.secrets.namespace,
+      ]);
+      expect(rows.rowCount).toBe(1);
+      expect(JSON.stringify(rows.rows)).not.toContain("runtime-private-key");
+      expect(
+        (await db.query("SELECT name FROM sanoma_credentials WHERE namespace=$1", [config.secrets.namespace])).rowCount,
+      ).toBe(0);
+      await worker.stop();
+      worker = undefined;
+      await client.close();
+      client = undefined;
+      client = await SanomaClient.connect(config);
+      expect((await client.secrets(["API_KEY"])).get("API_KEY")?.value).toBe("runtime-private-key");
+      transport.state.denied = true;
+      await expect(client.secrets(["API_KEY"])).rejects.toMatchObject({ code: "denied" });
+    } finally {
+      await worker?.stop();
+      await client?.close();
+      await admin.close();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("binds a reused store definition separately to each runtime database", async () => {
+    const urls = [testDatabaseUrl("kms_runtime_a"), testDatabaseUrl("kms_runtime_b")];
+    const admins = urls.map((url) => lazyPool(url, "kms-runtime-isolation"));
+    const clients: SanomaClient[] = [];
+    const config = {
+      connectors: [],
+      secrets: {
+        namespace: randomUUID(),
+        store: kmsPostgresStore({ company: "acme", keyName: KEY, kms: fakeKms([KEY]).client }),
+      },
+    };
+    try {
+      for (const admin of admins) await (await admin.db()).query(KMS_SECRETS_SQL);
+      for (const databaseUrl of urls) clients.push(await SanomaClient.connect({ ...config, databaseUrl }));
+      await clients[0]!.setSecret("TOKEN", "database-a", { by: "tester" });
+      expect((await clients[1]!.secrets(["TOKEN"])).size).toBe(0);
+      await clients[1]!.setSecret("TOKEN", "database-b", { by: "tester" });
+      expect((await clients[0]!.secrets(["TOKEN"])).get("TOKEN")?.value).toBe("database-a");
+      await clients[0]!.close();
+      clients.shift();
+      expect((await clients[0]!.secrets(["TOKEN"])).get("TOKEN")?.value).toBe("database-b");
+    } finally {
+      for (const client of clients) await client.close();
+      for (const admin of admins) await admin.close();
+    }
+  });
   it("uses unsigned Castagnoli checksums matching the published check vector", () => {
     expect(crc32c.buf(Buffer.from("123456789")) >>> 0).toBe(0xe3069283);
   });
