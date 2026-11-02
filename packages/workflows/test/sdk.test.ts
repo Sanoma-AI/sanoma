@@ -126,6 +126,9 @@ export async function page() {
   await api.nope();
   // @ts-expect-error: a company is text
   await api.outboundNext.start({ company: 1 });
+  await api.data.outbound.save({ record: { company: "x", contact: "y", stage: "researched", owner: "ada" }, ifAbsent: true });
+  // @ts-expect-error: ifAbsent must be a boolean
+  await api.data.outbound.save({ record: { company: "x", contact: "y", stage: "researched", owner: "ada" }, ifAbsent: "yes" });
   // @ts-expect-error: not a stage
   await api.data.outbound.save({ record: { company: "x", contact: "y", stage: "lunch", owner: "ada" } });
   // @ts-expect-error: a vendor's write is not called directly

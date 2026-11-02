@@ -72,6 +72,38 @@ describe("the collections' driver on Postgres", () => {
   };
   const keys = async (query: unknown) => ((await call(leads.list, query)) as { key: string }[]).map((s) => s.key);
 
+  it("claims an absent key atomically across competing callers", async () => {
+    const results = await Promise.allSettled([
+      call(leads.save, { record: { company: "Acme", stage: "new", seats: 1 }, ifAbsent: true }, "ada"),
+      call(leads.save, { record: { company: "Acme", stage: "new", seats: 2 }, ifAbsent: true }, "bo"),
+    ]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    const failed = results.find((r) => r.status === "rejected");
+    expect(failed).toMatchObject({
+      status: "rejected",
+      reason: { retryable: false, vendorCode: "record_exists", status: 409 },
+    });
+    const winner = results.find((r) => r.status === "fulfilled");
+    expect(await call(leads.get, { key: "Acme" })).toEqual(winner?.status === "fulfilled" ? winner.value : undefined);
+  });
+
+  it("recovers an identical insert-only save without replacing later progress or another actor's record", async () => {
+    const record = { company: "Acme", stage: "new", seats: 1 };
+    const first = await call(leads.save, { record, ifAbsent: true }, "ada");
+    // A response can be lost after commit: the next call must recover the original receipt.
+    expect(
+      await call(leads.save, { record: { seats: 1, stage: "new", company: "Acme" }, ifAbsent: true }, "ada"),
+    ).toEqual(first);
+    await expect(call(leads.save, { record, ifAbsent: true }, "bo")).rejects.toMatchObject({
+      vendorCode: "record_exists",
+    });
+    const advanced = await call(leads.save, { record: { ...record, stage: "won" } }, "ada");
+    await expect(call(leads.save, { record, ifAbsent: true }, "ada")).rejects.toMatchObject({
+      vendorCode: "record_exists",
+    });
+    expect(await call(leads.get, { key: "Acme" })).toEqual(advanced);
+  });
+
   it("saves a record by its key, replacing the one there, and says when and by whom", async () => {
     expect(await call(leads.get, { key: "Acme" })).toBeNull();
     const first = await call(leads.save, { record: { company: "Acme", stage: "new" } });
