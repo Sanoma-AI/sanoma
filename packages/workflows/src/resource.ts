@@ -520,7 +520,8 @@ export function withFrom(
     if (!place) continue;
     const state = stateOf(named);
     if (state === undefined && drop) delete place.holder[place.key];
-    else place.holder[place.key] = (state && valueAt(state, from)) ?? null;
+    // A copy: what a driver is given never shares an object with the resource's state.
+    else place.holder[place.key] = structuredClone((state && valueAt(state, from)) ?? null);
   }
   return out;
 }

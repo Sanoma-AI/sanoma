@@ -234,12 +234,17 @@ function desiredOf(r: Declaration, types: ReadonlyMap<string, Resource>, known: 
   return out;
 }
 
-/** Why a step cannot run yet: a `from` reference names a resource with no state, neither found nor made. */
+/**
+ * Why a step cannot run yet: a `from` reference names a resource with no state, neither found nor
+ * made, or whose state has nothing at its path yet.
+ */
 function waitingOn(r: Declaration, types: ReadonlyMap<string, Resource>, states: ReadonlyMap<string, State>) {
-  const missing = fromRefs(types.get(`${r.vendor}.${r.type}`)!.fields.references, r.refs).find(
-    ({ named }) => !states.has(named),
-  );
-  return missing && `its ${missing.at} come from ${missing.named}, which has no state yet`;
+  for (const { at, named, from } of fromRefs(types.get(`${r.vendor}.${r.type}`)!.fields.references, r.refs)) {
+    const state = states.get(named);
+    if (state === undefined) return `its ${at} come from ${named}, which has no state yet`;
+    if (valueAt(state, from) == null) return `its ${at} come from ${named}, whose state has no ${from} yet`;
+  }
+  return undefined;
 }
 
 /** Why apply cannot `what` (create, update, delete) an object of a type. */
@@ -661,6 +666,7 @@ export function applyWorkflow(
           // id, again every few seconds until its output passes `until`; one that never does fails
           // the step, and the rest are not called. The loop `callAfterCreate` has, inline: a
           // function defined here may not close over `ctx`.
+          // A step waiting on a `from` reference ran as `none` above, and fails here with why.
           let stuck = waiting;
           for (const hook of todo === "create" ? (spec?.afterCreate ?? []) : []) {
             if (stuck === undefined) {

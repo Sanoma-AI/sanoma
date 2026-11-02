@@ -604,6 +604,18 @@ describe("the apply workflow on a field taken from another resource's state", ()
     expect(fake.state.sets.get("example.com/mail")?.records).toEqual(more);
   });
 
+  it("fails the record set's step before its driver is called while the domain lists no records yet", async () => {
+    fake.update(({ domains }) => domains.set("example.com", { name: "example.com", records: null }));
+    const { report } = await apply();
+    expect(resultOf(report, dns)).toEqual({
+      id: dns,
+      action: "create",
+      status: "failed",
+      error: `its records come from ${sending}, whose state has no records yet`,
+    });
+    expect(fake.calls.map((c) => c.op)).not.toContain("mail.records.create");
+  });
+
   it("fails the record set's step before its driver is called when the domain could not be made", async () => {
     fake.failNext("mail.domain.create", new DriverError("mail: the domain is refused", { retryable: false }));
     const { report } = await apply();
