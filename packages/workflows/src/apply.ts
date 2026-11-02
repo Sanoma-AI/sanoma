@@ -314,6 +314,9 @@ function decide(
   return result.status === "drifted" ? { step, problem: cannot("update") } : { step };
 }
 
+/** Whether apply makes a declared resource: one unbound (`absent`) or `gone`. */
+const creates = (result: DriftResult) => result.status === "absent" || result.status === "gone";
+
 /** The step a `plan` answer makes of a declared resource: a create for one unbound or gone, else an update, a replace or none. */
 function fromPlan(
   r: Declaration,
@@ -321,7 +324,7 @@ function fromPlan(
   p: { action: PlanAction; planned?: State; unknown: string[]; replace: string[] },
 ): { step?: PlanStep; problem?: ResourceProblem } {
   const head = { id: r.id, vendor: r.vendor, type: r.type };
-  const creating = result.status === "absent" || result.status === "gone";
+  const creating = creates(result);
   if (creating && p.action === "create") {
     return { step: { ...head, action: "create", planned: p.planned ?? {}, unknown: p.unknown } };
   }
@@ -562,11 +565,11 @@ export function applyWorkflow(
       }
       const drift = new Map(compare(types, resources, found, revisions).map((result) => [result.id, result]));
       // A `from` field not known yet is `null` in a create's plan, and left out of a bound object's, as drift does.
-      const creating = (id: string) => ["absent", "gone"].includes(drift.get(id)!.status);
       const desired = new Map(
         resources.map((r) => [
           r.id,
-          desiredOf(r, types, { bindings: locked, hosts, urls, states }, creating(r.id) ? "unknown" : "drop").desired,
+          desiredOf(r, types, { bindings: locked, hosts, urls, states }, creates(drift.get(r.id)!) ? "unknown" : "drop")
+            .desired,
         ]),
       );
 
@@ -622,6 +625,9 @@ export function applyWorkflow(
       for (const planStep of plan.steps) {
         const declared = declarations.get(planStep.id);
         const binding = "binding" in planStep ? planStep.binding : "";
+        // Its fields as the run knows them now. A `from` field not known yet is left out: a step
+        // that would write it fails below, so a create is never given `null`.
+        const filled = declared && desiredOf(declared, types, known, "drop");
         // A declaration planned as it is, whose `from` resource a step of this run changed, is
         // planned again against that resource's new state: its records follow a replaced domain.
         let step = planStep;
@@ -629,38 +635,28 @@ export function applyWorkflow(
         if (
           planStep.action === "none" &&
           declared &&
+          filled &&
           fromRefs(types.get(`${planStep.vendor}.${planStep.type}`)?.fields.references, declared.refs).some(
             ({ named }) => remade.has(named),
           )
         ) {
           try {
             const again = await ctx[planStep.vendor]![planStep.type]!.plan(
-              { id: binding, desired: desiredOf(declared, types, known, "drop").desired },
+              { id: binding, desired: filled.desired },
               { connection: planStep.connection },
             );
-            if (again.action === "update" || again.action === "replace") {
-              const { id, vendor, type, connection } = planStep;
-              step = {
-                id,
-                vendor,
-                type,
-                connection,
-                action: again.action,
-                binding,
-                fields: [],
-                replace: again.replace,
-              };
-            }
+            const next = fromPlan(declared, drift.get(planStep.id)!, again).step;
+            if (next?.action === "update" || next?.action === "replace")
+              step = { ...next, connection: planStep.connection };
           } catch (err) {
             if (isRunControlError(err)) throw err;
             replanned = `could not be planned again: ${errorMessage(err)}`;
           }
         }
         const run = runOf(step);
-        const fields =
-          declared && (run === "create" || run === "update") ? desiredOf(declared, types, known, "unknown") : undefined;
         // A field taken from a resource that has no state there is not known: the step fails, its driver not called.
-        const waiting = replanned ?? (fields?.unfilled[0] && waitingFor(fields.unfilled[0]));
+        const unfilled = run === "create" || run === "update" ? filled?.unfilled[0] : undefined;
+        const waiting = replanned ?? (unfilled && waitingFor(unfilled));
         const todo = waiting === undefined ? run : "none";
         const key = keyOf(step);
         const type = `${step.vendor}.${step.type}`;
@@ -670,7 +666,7 @@ export function applyWorkflow(
         try {
           if (todo === "create") {
             const made = await ctx[step.vendor]![step.type]!.create(
-              { desired: fields!.desired },
+              { desired: filled!.desired },
               { connection: step.connection },
             );
             bindings[key] = { type, id: made.id, ...(step.connection && { connection: step.connection }) };
@@ -678,7 +674,7 @@ export function applyWorkflow(
           } else if (todo === "update" && (step.action === "update" || step.action === "replace")) {
             const expect = { action: step.action, replace: step.replace };
             const changed = await ctx[step.vendor]![step.type]!.update(
-              { id: binding, desired: fields!.desired, expect },
+              { id: binding, desired: filled!.desired, expect },
               { connection: step.connection },
             );
             bindings[key] = { type, id: changed.id, ...(step.connection && { connection: step.connection }) };

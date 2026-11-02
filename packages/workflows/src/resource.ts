@@ -770,9 +770,8 @@ export function defineResource<
     // the schema does not judge the marker, nor the name that holds the place of the state.
     const unjudged = new Set<string>();
     // Each resource `given` names, where `references` allows one of its type, replaced by its name.
-    // `path` is the field's, as `references` names it; `at` has list items' indexes too; `item`
-    // says `value` is an item of the list at `path`.
-    const resolve = (value: unknown, path: string, at: string, item = false): unknown => {
+    // `path` is the field's, as `references` names it; `at` has list items' indexes too.
+    const resolve = (value: unknown, path: string, at: string): unknown => {
       if (isSecret(value)) {
         if (!underAny(path, writeOnly)) {
           throw new Error(`${what}: ${at} is not write-only, so it takes a value, not a secret (${value.$secret})`);
@@ -793,14 +792,16 @@ export function defineResource<
           throw new Error(`${what}: ${at} names a resource of type ${types.join(" or ")}, not ${id} (${value.name})`);
         if (value.name === undefined)
           throw new Error(`${what}: ${at} names a ${id}, which has no identity to name it by`);
-        if (wants.from !== undefined) {
-          if (item) throw new Error(`${what}: ${path} takes a ${id}'s ${wants.from} as a whole, not in a list`);
-          unjudged.add(at);
-        }
+        if (wants.from !== undefined) unjudged.add(at);
         refs[at] = `${id}:${value.name}`;
         return value.name;
       }
-      if (Array.isArray(value)) return value.map((v, i) => resolve(v, path, `${at}.${i}`, true));
+      if (Array.isArray(value)) {
+        const from = references[path]?.from;
+        const listed = from === undefined ? undefined : value.find(isDeclared);
+        if (listed) throw new Error(`${what}: ${path} takes a ${listed[DECLARED]}'s ${from} as a whole, not in a list`);
+        return value.map((item, i) => resolve(item, path, `${at}.${i}`));
+      }
       if (!isObject(value)) return value;
       return Object.fromEntries(
         Object.entries(value).map(([field, v]) => [field, resolve(v, joinPath(path, field), joinPath(at, field))]),
