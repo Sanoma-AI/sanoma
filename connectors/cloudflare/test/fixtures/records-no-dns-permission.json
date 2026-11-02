@@ -1,0 +1,51 @@
+[
+  {
+    "method": "GET",
+    "path": "/client/v4/zones?name=sanoma.work&account.id=0123456789abcdef0123456789abcdef",
+    "status": 200,
+    "body": {
+      "success": true,
+      "errors": [],
+      "messages": [],
+      "result": [
+        {
+          "id": "00000000000000000000000000000001",
+          "name": "sanoma.work",
+          "status": "active",
+          "paused": false,
+          "type": "full",
+          "account": {
+            "id": "0123456789abcdef0123456789abcdef",
+            "name": "Sanoma"
+          },
+          "name_servers": ["ada.ns.cloudflare.com", "bob.ns.cloudflare.com"],
+          "created_on": "2026-10-01T12:00:00.000000Z",
+          "modified_on": "2026-10-01T12:00:00.000000Z"
+        }
+      ],
+      "result_info": {
+        "page": 1,
+        "per_page": 100,
+        "count": 1,
+        "total_count": 1,
+        "total_pages": 1
+      }
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/client/v4/zones/00000000000000000000000000000001/dns_records?comment.exact=sanoma:sanoma.work/check",
+    "status": 403,
+    "body": {
+      "success": false,
+      "errors": [
+        {
+          "code": 10000,
+          "message": "Authentication error"
+        }
+      ],
+      "messages": [],
+      "result": null
+    }
+  }
+]

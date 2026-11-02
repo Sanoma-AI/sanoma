@@ -1,11 +1,12 @@
 {
   "name": "@sanoma-ai/connector-cloudflare",
-  "version": "0.2.0",
-  "description": "Cloudflare for Sanoma: a Container host that stops when quiet, and a Durable Object alarm that wakes it, from one Worker",
+  "version": "0.3.0",
+  "description": "Cloudflare for Sanoma: a Container host that stops when quiet, a Durable Object alarm that wakes it, from one Worker, and a zone's DNS records",
   "keywords": [
     "cloudflare",
     "connector",
     "containers",
+    "dns",
     "durable-objects",
     "host",
     "resources",

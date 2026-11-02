@@ -11,6 +11,17 @@ export const TEST_SUBDOMAIN = "example";
 /** Where the API's paths start. */
 export const API = `/client/v4/accounts/${TEST_ACCOUNT}`;
 
+/** Cloudflare's reply around `result`. */
+export const cfResult = (result: unknown) => ({ success: true, errors: [], messages: [], result });
+
+/** Cloudflare's reply to a `GET` of a list at `path`: `items`, on one page. */
+export const cfList = (path: string, items: unknown[]): Exchange => ({
+  method: "GET",
+  path,
+  status: 200,
+  body: { ...cfResult(items), result_info: { page: 1, per_page: 100, count: items.length, total_count: items.length } },
+});
+
 /** Replaces each distinct string it is given with `make(1)`, `make(2)`, ... in order of appearance. */
 const renumber = (make: (n: number) => string) => {
   const seen = new Map<string, string>();
@@ -20,13 +31,14 @@ const renumber = (make: (n: number) => string) => {
   };
 };
 
-/** The account's id and subdomain made up, ids numbered and tokens out, so a recording names nothing real. */
+/** The account's id and subdomain made up, ids numbered (the zones' and DNS records' too) and tokens out, so a recording names nothing real. */
 function scrub(exchanges: Exchange[]): Exchange[] {
   const account = process.env.CLOUDFLARE_ACCOUNT_ID ?? TEST_ACCOUNT;
   const subdomain = exchanges.find((e) => e.path.endsWith("/workers/subdomain"))?.body as
     | { result?: { subdomain?: string } }
     | undefined;
   let text = JSON.stringify(exchanges).replaceAll(account, TEST_ACCOUNT);
+  const hexId = renumber((n) => String(n).padStart(32, "0"));
   const real = subdomain?.result?.subdomain;
   if (real)
     text = text
@@ -41,7 +53,9 @@ function scrub(exchanges: Exchange[]): Exchange[] {
       .replace(
         /\bswi_[A-Za-z0-9_-]+/g,
         renumber((n) => `swi_recorded${String(n).padStart(4, "0")}`),
-      ),
+      )
+      // Cloudflare's own ids (a zone's, a DNS record's): 32 hexadecimal digits, the account's kept made up.
+      .replace(/\b[0-9a-f]{32}\b/g, (id) => (id === TEST_ACCOUNT ? id : hexId(id))),
   );
 }
 
