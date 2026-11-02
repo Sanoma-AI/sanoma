@@ -9,6 +9,8 @@ const WORKER = new URL("../worker/", import.meta.url);
 export const MAIN_MODULE = "index.js";
 /** The modules uploaded, the entry first. */
 const MODULES = [MAIN_MODULE, "instance.js"] as const;
+/** The entry module of a Worker that serves the public sites, beside `MODULES` and the sites bundle under `sites/` (`sites.ts`). */
+export const SITES_MODULE = "sites.js";
 
 /** The Durable Object class the Worker exports, which the container application runs behind. */
 export const OBJECT_CLASS = "SanomaInstance";
@@ -16,7 +18,9 @@ export const OBJECT_CLASS = "SanomaInstance";
 /** One module of the Worker: its file name, which the upload names it by, and its source. */
 export interface WorkerModule {
   name: string;
-  content: string;
+  content: string | Uint8Array<ArrayBuffer>;
+  /** What the module is, as the upload types its part: an ES module unless it says. */
+  type?: "esm" | "wasm" | "text" | "data";
 }
 
 let modules: Promise<WorkerModule[]> | undefined;
@@ -31,6 +35,12 @@ export function workerModules(): Promise<WorkerModule[]> {
   });
   return modules;
 }
+
+/** The sites router, `worker/sites.js`, read from the package. */
+export const sitesRouter = async (): Promise<WorkerModule> => ({
+  name: SITES_MODULE,
+  content: await readFile(new URL(SITES_MODULE, WORKER), "utf8"),
+});
 
 export {
   HEALTH_PATH,

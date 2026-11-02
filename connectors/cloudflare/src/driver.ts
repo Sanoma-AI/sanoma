@@ -63,6 +63,14 @@ function failure(what: string, { APIError, APIConnectionTimeoutError }: Sdk, tim
   return new DriverError(`cloudflare: ${what}: no reply`, { retryable: true, cause: error });
 }
 
+/** How an upload types each kind of module's part. */
+const MODULE_TYPES = {
+  esm: "application/javascript+module",
+  wasm: "application/wasm",
+  text: "text/plain",
+  data: "application/octet-stream",
+} as const;
+
 const isStatus = (error: unknown, status: number) => error instanceof DriverError && error.status === status;
 
 /** A request to a Worker, with a timeout: a redirect is no answer of the Worker's, and would carry the token elsewhere. */
@@ -130,11 +138,35 @@ function accountApi(timeoutMs: number, subdomains: Map<string, Promise<string>>)
         // which the SDK's type does not have yet.
         const form = new FormData();
         form.append("metadata", new Blob([JSON.stringify(metadata)], { type: "application/json" }), "metadata.json");
-        for (const { name, content } of modules) {
-          form.append(name, new Blob([content], { type: "application/javascript+module" }), name);
+        for (const { name, content, type = "esm" } of modules) {
+          form.append(name, new Blob([content], { type: MODULE_TYPES[type] }), name);
         }
         await cf.put(`/accounts/${account_id}/workers/scripts/${script}`, { body: form });
       });
+    },
+    async assetsSession(script, manifest) {
+      const { jwt, buckets } = await calling(`POST workers/scripts/${script}/assets-upload-session`, (cf) =>
+        cf.workers.scripts.assets.upload.create(script, { account_id, manifest }),
+      );
+      if (!jwt) throw refused(`${script}: the assets upload session answered no jwt`);
+      return { jwt, buckets: buckets ?? [] };
+    },
+    async uploadAssets(jwt, files) {
+      // One part per asset, named by its hash, its base64 the content and its type the one it is
+      // served with, as the API reference's example sends them; the session's jwt, not the
+      // account's token, authorizes it.
+      const form = new FormData();
+      for (const { hash, base64, contentType } of files) {
+        form.append(hash, new File([base64], hash, { type: contentType }), hash);
+      }
+      const answer = await calling("POST workers/assets/upload", (cf) =>
+        cf.post<{ result?: { jwt?: string } | null }>(`/accounts/${account_id}/workers/assets/upload`, {
+          query: { base64: true },
+          body: form,
+          headers: { authorization: `Bearer ${jwt}` },
+        }),
+      );
+      return answer.result?.jwt ?? undefined;
     },
     async enableSubdomain(script) {
       await calling(`POST workers/scripts/${script}/subdomain`, (cf) =>

@@ -38,6 +38,7 @@ export interface ObjectState {
     get<T>(key: string): Promise<T | undefined>;
     put(key: string, value: unknown): Promise<void>;
     delete(key: string): Promise<boolean>;
+    getAlarm(): Promise<number | null>;
     setAlarm(at: number): Promise<void>;
     deleteAlarm(): Promise<void>;
   };
@@ -49,6 +50,8 @@ export declare class Instance {
   constructor(ctx: ObjectState, env: Record<string, unknown>);
   fetch(request: Request): Promise<Response>;
   alarm(): Promise<void>;
+  /** Starts the container from an alarm now, without waiting for it: a run was queued for it. */
+  startNow(): Promise<void>;
 }
 
 /** The Worker's default export: every request goes to the one object. */

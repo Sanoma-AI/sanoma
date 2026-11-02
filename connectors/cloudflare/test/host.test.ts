@@ -1,4 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
@@ -165,5 +167,66 @@ describe("cloudflare.container's custom domains on the fake", () => {
     });
     expect(fake.state.scripts).toEqual({});
     expect(Object.values(fake.state.domains).map((d) => d.hostname)).not.toContain("www.other.example");
+  });
+});
+
+const b64 = (text: string) => Buffer.from(text).toString("base64");
+
+describe("cloudflare.container's public sites on the fake", () => {
+  /** What the container's bundle route answers: one site, its entry and one asset. */
+  const bundle = {
+    sites: ["www"],
+    mainModule: "index.js",
+    modules: [{ name: "index.js", type: "esm", content: b64("export default {};\n") }],
+    assets: [{ path: "/assets/main-3f2a.js", content: b64("console.log(1);\n") }],
+  };
+  const asked: string[] = [];
+  // A container that builds the bundle on the first ask, as the runtime's route does.
+  const fake = fakeCloudflare({
+    zones: ["acme.example"],
+    async start() {
+      let built = false;
+      const server = createServer((req, res) => {
+        if (req.url === "/healthz") return void res.writeHead(200).end("ok\n");
+        if (req.url !== "/__sanoma/sites-bundle") return void res.writeHead(404).end();
+        asked.push(req.headers.authorization ?? "");
+        if (!built) return void ((built = true), res.writeHead(202).end("{}"));
+        res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(bundle));
+      });
+      await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+      return {
+        url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+        stop: () => new Promise<void>((done) => server.close(() => done())),
+      };
+    },
+  });
+  const op = (name: string, input: object) =>
+    fake.driver.ops[`container.${name}`]!(input, call(`cloudflare.container.${name}`));
+  afterAll(() => fake.close());
+
+  it("uploads the bundle the container built beside the Worker, its assets once, with the instance token", async () => {
+    const desired = {
+      name: "company",
+      image: "ghcr.io/sanoma-ai/runtime:0.7.0",
+      source: "https://github.com/acme/company.git",
+      ref: "main",
+      revision: "abc123",
+      port: 3000,
+      domains: { www: "www.acme.example" },
+      secrets: { SANOMA_WAKEUP_TOKEN: secret("HOST_KEY") },
+    };
+    await op("create", { desired });
+    expect(asked).toEqual([`Bearer ${key}`, `Bearer ${key}`]);
+    const worker = fake.state.scripts["sanoma-company"]!;
+    expect(worker.main_module).toBe("sites.js");
+    expect(worker.modules).toEqual(["index.js", "instance.js", "sites.js", "sites/index.js"]);
+    expect(worker.bindings).toContainEqual({ type: "assets", name: "ASSETS" });
+    const [hash] = Object.values(worker.assets!);
+    expect(Object.keys(worker.assets!)).toEqual(["/assets/main-3f2a.js"]);
+    expect(fake.state.assets).toEqual({ [hash!]: "text/javascript" });
+    // A new revision: the container builds again, and the session needs none of the assets it has.
+    await op("update", { id: "company", desired: { ...desired, revision: "def456" } });
+    expect(fake.state.scripts["sanoma-company"]!.assets).toEqual(worker.assets);
+    expect(Object.keys(fake.state.assets)).toEqual([hash]);
   });
 });

@@ -15,6 +15,7 @@ import { domainsOf, domainsText } from "@sanoma-ai/workflows/shared";
 import { instanceUrl, mintInstanceToken, WAKEUP_TOKEN } from "@sanoma-ai/workflows/wakeup-service";
 import { alarm, container } from "./connector.ts";
 import { accountPinned } from "./registry.ts";
+import { serveSites } from "./sites.ts";
 import {
   HEALTH_PATH,
   IMAGE,
@@ -53,7 +54,8 @@ const RESERVED = new Set<string>([NAMESPACE, ...Object.values(TEXT)]);
 /** A binding as the upload sends it. */
 export type Binding =
   | { type: "durable_object_namespace"; name: string; class_name: string }
-  | { type: "plain_text" | "secret_text"; name: string; text: string };
+  | { type: "plain_text" | "secret_text"; name: string; text: string }
+  | { type: "assets"; name: string };
 
 /** A binding as a read shows it: a secret's name, never its text. */
 export interface ReadBinding {
@@ -82,6 +84,8 @@ export interface Upload {
   migrations?: typeof MIGRATION;
   /** The Worker's own logs (what its object saw of a start), kept by Cloudflare for seven days. */
   observability: { enabled: boolean };
+  /** The assets an upload session put in (its completion `jwt`), and how the Worker serves them (`sites.ts`). */
+  assets?: { jwt: string; config: Record<string, unknown> };
   modules: WorkerModule[];
 }
 
@@ -186,8 +190,26 @@ export interface CloudflareApi {
   dnsRecordsAt(zoneId: string, name: string): Promise<ZoneRecord[]>;
   /** Writes the batch, all of it or none (`POST /zones/{id}/dns_records/batch`): the records patched and posted, as the zone now holds them. */
   writeDns(zoneId: string, batch: DnsBatch): Promise<{ patches: ZoneRecord[]; posts: ZoneRecord[] }>;
+  /**
+   * Opens an upload session for the assets of the Worker's next upload
+   * (`POST …/scripts/{name}/assets-upload-session`): the buckets of hashes Cloudflare lacks, each
+   * one request of `uploadAssets`, and the session's `jwt` (with no buckets, what the upload redeems).
+   */
+  assetsSession(
+    script: string,
+    manifest: Record<string, { hash: string; size: number }>,
+  ): Promise<{ jwt: string; buckets: string[][] }>;
+  /** Uploads one bucket with the session's `jwt` (`POST …/workers/assets/upload?base64=true`): the completion jwt once the last is in. */
+  uploadAssets(jwt: string, files: AssetFile[]): Promise<string | undefined>;
   /** A request to a Worker: its answer, or a throw when there is none. */
   send(url: string, init: RequestInit): Promise<Response>;
+}
+
+/** One asset as a bucket uploads it: its hash, its content in base64, and the type it is served with. */
+export interface AssetFile {
+  hash: string;
+  base64: string;
+  contentType: string;
 }
 
 /** The driver's own refusal, before or instead of a call: never retried. */
@@ -319,7 +341,8 @@ export interface ContainerOptions {
  * uploaded with the declared bindings and that image (the migration on its first upload), its
  * workers.dev URL turned on, the application made when there is none, and then a wait until the
  * Worker answers at the new revision, which starts the container. A new image is a new upload:
- * the object destroys a container started at another and starts it again.
+ * the object destroys a container started at another and starts it again. With domains and the
+ * instance token, the public sites the container built go on the Worker last (`serveSites`).
  */
 export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs }: ContainerOptions) {
   /** The Worker `name` runs, from its bindings and its application; `checkHealth` asks it too. None for a Worker that is not Sanoma's. */
@@ -509,6 +532,9 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
       if (before.has(domain.hostname) && !hostnames.has(domain.hostname)) await cf.detachDomain(domain.id);
     }
     await started(cf, script, url, revision);
+    // The public sites on the Worker, once the container that builds them runs (`sites.ts`).
+    const token = secrets[WAKEUP_TOKEN];
+    if (domains && token) await serveSites(cf, { script, url, token, metadata, startTimeoutMs, pollMs });
     const state: ContainerState = {
       id: app.id,
       name,

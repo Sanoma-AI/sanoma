@@ -8,7 +8,9 @@
 // another destroyed and started again (a deploy); it waits for `/healthz`, and proxies every
 // request to it. It answers `/__sanoma/health` without starting it (with `?start=1`, once it
 // runs), and holds the company's one wake (`/__sanoma/wake`) as an alarm, which starts the
-// container at `at` and calls its `/wake`.
+// container at `at` and calls its `/wake`. `startNow`, which the sites router calls over RPC
+// when a page on the Worker queued a run, starts the container from an alarm too, without the
+// caller waiting for it.
 
 /** The object's own route: the wake it holds. */
 export const WAKE_PATH = "/__sanoma/wake";
@@ -26,6 +28,8 @@ const POLL_MS = 250;
 const MAX_POLL_MS = 1_000;
 /** Where the wake is kept, in the object's storage. */
 const WAKE_KEY = "wake";
+/** Where a start `startNow` asked for is kept until the alarm that makes it rings. */
+const START_KEY = "start";
 /** The binding that names the object, in the Worker's env. */
 export const NAMESPACE = "SANOMA_INSTANCE";
 /** The name the upload gives the runtime image (`containers[].images`), which the object starts. */
@@ -240,10 +244,32 @@ export class Instance {
     return new Response(null, { status: 204 });
   }
 
-  /** The wake is due: start the container and send it `/wake`, then note when. A throw makes Cloudflare retry the alarm. */
+  /**
+   * Starts the container soon, without waiting for it: a run was queued for it (the sites
+   * router's call, over RPC, once a page on the Worker started one). An alarm now, which outlives
+   * the request that asked, makes the start; a wake held for later is set again once it is made.
+   */
+  async startNow() {
+    const storage = this.ctx.storage;
+    await storage.put(START_KEY, true);
+    const set = await storage.getAlarm();
+    if (set === null || set > Date.now()) await storage.setAlarm(Date.now());
+  }
+
+  /**
+   * A start `startNow` asked for, then the wake if it is due: start the container and send it
+   * `/wake`, then note when. A wake not due yet is set again. A throw makes Cloudflare retry the alarm.
+   */
   async alarm() {
-    const wake = await this.ctx.storage.get(WAKE_KEY);
-    if (!wake) return;
+    const storage = this.ctx.storage;
+    if (await storage.get(START_KEY)) {
+      await this.ensureRunning();
+      await storage.delete(START_KEY);
+    }
+    const wake = await storage.get(WAKE_KEY);
+    if (!wake || wake.rang) return;
+    const at = Date.parse(wake.at);
+    if (at > Date.now()) return storage.setAlarm(at);
     await this.ensureRunning();
     const res = await this.ctx.container.getTcpPort(this.port).fetch("http://container/wake");
     await res.body?.cancel();

@@ -92,7 +92,8 @@ beforeAll(async () => {
       assets: {
         directory: "assets",
         binding: "ASSETS",
-        run_worker_first: true,
+        // As the connector uploads them (`ASSETS_CONFIG`): the client build straight from the assets.
+        run_worker_first: ["/*", "!/assets/*"],
         html_handling: "none",
         not_found_handling: "none",
       },
@@ -173,6 +174,15 @@ describe("buildWorker", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("etag")).toBeTruthy();
     expect(await response.text()).toContain("Bienvenue sur le site intl");
+  });
+
+  it("serves the client build straight from the Worker's assets, for a page to hydrate", async () => {
+    const script = bundle!.assets.find(({ path }) => path.startsWith("/assets/") && path.endsWith(".js"));
+    expect(script).toBeDefined();
+    const response = await get(`https://hello.example${script!.path}`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toMatch(/javascript/);
+    expect(await response.text()).toBe(Buffer.from(script!.content, "base64").toString());
   });
 
   it("renders a page on the Worker, and its robots.txt", async () => {

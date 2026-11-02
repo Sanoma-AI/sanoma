@@ -76,6 +76,13 @@ const cfError = (code: number, message: string) => ({
   result: null,
 });
 
+/** An asset's hash in an assets upload session's manifest, as the direct upload guide's example makes it. */
+const hashOf = (base64: string, extension: string) =>
+  createHash("sha256")
+    .update(base64 + extension)
+    .digest("hex")
+    .slice(0, 32);
+
 /** The upload's form, as Cloudflare reads it. */
 async function formOf(request: (typeof sent)[number]) {
   return new Response(request.body as string, {
@@ -447,6 +454,90 @@ describe.skipIf(live)("cloudflareDriver", () => {
           .path.split("/")
           .pop()}`,
       ]);
+    });
+
+    it("serves the public sites from the Worker once its container built them: the bundle, an assets session, and the Worker uploaded again", async () => {
+      const domains = { www: "www.acme.example" };
+      play("sites");
+      expect(await op("container.create", { desired: { ...desired, domains } })).toEqual({
+        id: "company",
+        state: { ...state, domains },
+      });
+      const steps = sent.map((r) => `${r.method} ${r.path.replace(API, "")}`);
+      expect(steps.slice(steps.indexOf("GET /__sanoma/health?start=1"))).toEqual([
+        "GET /__sanoma/health?start=1",
+        // Building, then built: asked again until it is.
+        "GET /__sanoma/sites-bundle",
+        "GET /__sanoma/sites-bundle",
+        "POST /workers/scripts/sanoma-company/assets-upload-session",
+        "POST /workers/assets/upload?base64=true",
+        "PUT /workers/scripts/sanoma-company",
+      ]);
+      const [asked, , session, assets, upload] = sent.slice(-5);
+      // The container's route takes the instance token; the assets upload, the session's jwt.
+      expect(asked!.headers.get("authorization") === `Bearer ${TOKEN}`).toBe(true);
+      expect(assets!.headers.get("authorization")).toBe("Bearer eyJhbGciOiJIUzI1NiJ9.session.signature");
+      const bundle = only("sites", (e) => e.path === "/__sanoma/sites-bundle" && e.status === 200)[0]!.body as {
+        assets: { path: string; content: string }[];
+      };
+      const [script, page] = bundle.assets;
+      expect(session!.body).toEqual({
+        manifest: {
+          [script!.path]: { hash: hashOf(script!.content, "js"), size: Buffer.from(script!.content, "base64").length },
+          [page!.path]: { hash: hashOf(page!.content, "html"), size: Buffer.from(page!.content, "base64").length },
+        },
+      });
+      // One part per asset the bucket names, by its hash: its base64, and the type it is served with.
+      const files = await formOf(assets!);
+      const parts = [hashOf(script!.content, "js"), hashOf(page!.content, "html")].map(
+        (hash) => files.get(hash) as File,
+      );
+      expect(await Promise.all(parts.map(async (f) => [f.type, await f.text()]))).toEqual([
+        ["text/javascript", script!.content],
+        ["text/html", page!.content],
+      ]);
+      // The Worker as the deploy uploaded it, with the sites router its entry, the bundle under
+      // `sites/`, and the assets the session put in bound.
+      const form = await formOf(upload!);
+      const metadata = await metadataOf(form);
+      const deployed = await metadataOf(
+        await formOf(
+          sent.findLast((r) => r !== upload && r.method === "PUT" && r.path.endsWith("/scripts/sanoma-company"))!,
+        ),
+      );
+      expect(metadata).toEqual({
+        ...deployed,
+        main_module: "sites.js",
+        bindings: [...deployed.bindings, { type: "assets", name: "ASSETS" }],
+        assets: {
+          jwt: "eyJhbGciOiJIUzI1NiJ9.completion.signature",
+          config: { html_handling: "none", not_found_handling: "none", run_worker_first: ["/*", "!/assets/*"] },
+        },
+      });
+      const modules = ["index.js", "instance.js", "sites.js", "sites/index.js", "sites/chunk.js", "sites/cedar.wasm"];
+      expect(modules.map((name) => [name, (form.get(name) as File | null)?.type])).toEqual([
+        ["index.js", "application/javascript+module"],
+        ["instance.js", "application/javascript+module"],
+        ["sites.js", "application/javascript+module"],
+        ["sites/index.js", "application/javascript+module"],
+        ["sites/chunk.js", "application/javascript+module"],
+        ["sites/cedar.wasm", "application/wasm"],
+      ]);
+      expect(await (form.get("sites.js") as File).text()).toContain('from "./sites/index.js"');
+      // Deleted as any: its assets go with it.
+      expect(await op("container.delete", { id: "company" })).toEqual({ id: "company", gone: true });
+      expect(await op("container.read", { id: "company" })).toEqual({ id: "company", gone: true });
+    });
+
+    it("refuses when the container could not build the sites bundle, saying why", async () => {
+      const failed = reply("/__sanoma/sites-bundle", 500, { error: "sites/www/routes/index.tsx: Unexpected token" });
+      const before = only("sites", (e) => e.path !== "/__sanoma/sites-bundle").slice(0, 12);
+      play("sites-failed", [...before, failed]);
+      await expect(
+        op("container.create", { desired: { ...desired, domains: { www: "www.acme.example" } } }),
+      ).rejects.toThrow(
+        "cloudflare: sanoma-company: its container did not give the sites bundle: sites/www/routes/index.tsx: Unexpected token",
+      );
     });
 
     it("plans an update when a domain the Worker serves is not attached, so the next apply attaches it", async () => {

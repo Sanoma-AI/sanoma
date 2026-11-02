@@ -1,3 +1,7 @@
+import { cpSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { WAKE_PATH as RUNTIME_WAKE_PATH } from "@sanoma-ai/workflows";
 import { describe, expect, it, vi } from "vitest";
 import { imageLabel, Instance, INACTIVITY_MS, type ObjectState, WAKE_PATH, worker } from "../worker/instance.js";
@@ -86,6 +90,7 @@ function stubCtx({
       get: async <T>(key: string) => storage.get(key) as T | undefined,
       put: async (key, value) => void storage.set(key, value),
       delete: async (key) => storage.delete(key),
+      getAlarm: async () => alarm,
       setAlarm: async (at) => void (alarm = at),
       deleteAlarm: async () => void (alarm = null),
     },
@@ -316,6 +321,71 @@ describe("the Worker's object", () => {
     await object.fetch(wake("PUT", { body: { at: "2000-01-01T00:00:00Z" } }));
     vi.spyOn(console, "error").mockImplementation(() => {});
     await expect(object.alarm()).rejects.toThrow("the container answered /wake with 503");
+  });
+
+  it("starts the container from an alarm at startNow, without the caller waiting, and sets a later wake again", async () => {
+    const { ctx, calls, sent, alarm } = stubCtx();
+    const object = new Instance(ctx, ENV);
+    const later = new Date(Date.now() + 60 * 60_000).toISOString();
+    await object.fetch(wake("PUT", { body: { at: later } }));
+    await object.startNow();
+    expect(calls).toEqual([]);
+    expect(alarm()).toBeLessThanOrEqual(Date.now());
+    await object.alarm();
+    expect(calls).toEqual(["start r2", `timeout ${INACTIVITY_MS}`]);
+    expect(alarm()).toBe(Date.parse(later));
+    expect(sent.map((r) => new URL(r.url).pathname)).not.toContain("/wake");
+  });
+
+  it("leaves an alarm due sooner than now as it is at startNow, and never rings a wake twice", async () => {
+    const { ctx, sent, alarm } = stubCtx({
+      answer: (r) => new Response(null, { status: new URL(r.url).pathname === "/wake" ? 204 : 200 }),
+    });
+    const object = new Instance(ctx, ENV);
+    await object.fetch(wake("PUT", { body: { at: "2000-01-01T00:00:00Z" } }));
+    await object.startNow();
+    expect(alarm()).toBe(Date.parse("2000-01-01T00:00:00Z"));
+    await object.alarm();
+    await object.startNow();
+    await object.alarm();
+    expect(sent.filter((r) => new URL(r.url).pathname === "/wake")).toHaveLength(1);
+  });
+
+  it("answers a site's page from the sites bundle on the Worker, the rest from the object, and has the object start the container", async () => {
+    // The Worker as the upload lays it out: the package's modules, and beside them under `sites/`
+    // a bundle (which the package does not ship) whose site on `www.acme.example` queues a run.
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "sanoma-sites-router-")));
+    try {
+      cpSync(fileURLToPath(new URL("../worker/", import.meta.url)), dir, { recursive: true });
+      mkdirSync(join(dir, "sites"));
+      writeFileSync(
+        join(dir, "sites", "index.js"),
+        `export default {
+          serves: (request) => new URL(request.url).hostname === "www.acme.example",
+          fetch: async (request, env, ctx, host) => (await host.startNow(), new Response("from the site")),
+        };`,
+      );
+      const router = (await import(pathToFileURL(join(dir, "sites.js")).href)) as {
+        default: { fetch(request: Request, env: unknown, ctx: unknown): Promise<Response> };
+        SanomaInstance: unknown;
+      };
+      const entry = (await import(pathToFileURL(join(dir, "index.js")).href)) as { SanomaInstance: unknown };
+      const startNow = vi.fn<() => Promise<void>>(async () => {});
+      const getByName = vi.fn<(name: string) => object>(() => ({
+        fetch: async () => new Response("from the object"),
+        startNow,
+      }));
+      const env = { SANOMA_INSTANCE: { getByName } };
+      const page = await router.default.fetch(new Request("https://www.acme.example/"), env, {});
+      expect(await page.text()).toBe("from the site");
+      expect(startNow).toHaveBeenCalledOnce();
+      const app = await router.default.fetch(new Request("https://sanoma-company.acme.workers.dev/"), env, {});
+      expect(await app.text()).toBe("from the object");
+      // The object class its upload binds, as `index.js` exports it.
+      expect(router.SanomaInstance).toBe(entry.SanomaInstance);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("sends every request of the Worker to its one object", async () => {

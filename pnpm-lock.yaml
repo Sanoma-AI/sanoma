@@ -119,6 +119,9 @@ importers:
       cloudflare:
         specifier: ^7.3.0
         version: 7.3.0
+      mime:
+        specifier: ^4.1.1
+        version: 4.1.1
       srvx:
         specifier: ^0.11.22
         version: 0.11.22

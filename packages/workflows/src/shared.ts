@@ -141,6 +141,12 @@ export const domainsText = (domains: Readonly<Record<string, string>>): string =
     .map((site) => `${site}=${domains[site]}`)
     .join(",");
 
+/**
+ * Where a hosted container answers, with its instance token (`SANOMA_WAKEUP_TOKEN`), the bundle
+ * of its public sites that a host's Worker serves: the Cloudflare host downloads it at a deploy.
+ */
+export const SITES_BUNDLE_PATH = "/__sanoma/sites-bundle";
+
 /** The domains `domainsText` wrote, by site name; throws for a pair that is not `<site>=<hostname>`, or a site named twice. */
 export function domainsOf(text: string): Record<string, string> {
   const domains: Record<string, string> = {};
