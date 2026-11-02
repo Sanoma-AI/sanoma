@@ -127,6 +127,9 @@ export async function page() {
   // @ts-expect-error: a company is text
   await api.outboundNext.start({ company: 1 });
   await api.data.outbound.save({ record: { company: "x", contact: "y", stage: "researched", owner: "ada" }, ifAbsent: true });
+  await api.data.outbound.save({ record: { company: "x", contact: "y", stage: "researched", owner: "ada" }, ifRecord: { company: "x", obsolete: "old" } });
+  // @ts-expect-error: ifRecord is a complete JSON record, not a revision string
+  await api.data.outbound.save({ record: { company: "x", contact: "y", stage: "researched", owner: "ada" }, ifRecord: "revision" });
   // @ts-expect-error: ifAbsent must be a boolean
   await api.data.outbound.save({ record: { company: "x", contact: "y", stage: "researched", owner: "ada" }, ifAbsent: "yes" });
   // @ts-expect-error: not a stage
