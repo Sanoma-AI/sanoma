@@ -222,8 +222,11 @@ const servedAt = (hostname: string | undefined, workerUrl: string) => (hostname 
 
 /** Refuses a hostname that is also a site's domain, before any request: the app and the site would share it. */
 const checkHostname = (name: unknown, hostname: unknown, domains: unknown) => {
-  const site = Object.entries((domains ?? {}) as Record<string, unknown>).find(([, domain]) => domain === hostname);
-  if (typeof hostname === "string" && site) {
+  if (typeof hostname !== "string") return;
+  const site = Object.entries((domains ?? {}) as Record<string, unknown>).find(
+    ([, domain]) => typeof domain === "string" && domain.toLowerCase() === hostname.toLowerCase(),
+  );
+  if (site) {
     throw refused(
       `container ${String(name)}: hostname ${hostname} is also the domain of the site ${site[0]}: the app and a site need a hostname each`,
       "invalid",
@@ -376,12 +379,12 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
       port: Number(text.get(TEXT.port) ?? 0),
       ...(domains && Object.keys(domains).length > 0 && { domains }),
       ...(hostname && { hostname }),
-      // Where the Worker says the app answers, attached or not; its health is asked on workers.dev.
-      url: servedAt(declaredHostname, url),
+      // Where the app answers now: at its hostname once attached; its health is asked on workers.dev.
+      url: servedAt(hostname, url),
       healthy: checkHealth && app !== undefined && "revision" in (await health(cf, url, false)),
     };
     const secrets = bindings.filter((b) => b.type === "secret_text").map((b) => b.name);
-    return { state, secrets };
+    return { state, secrets, workerUrl: url };
   };
 
   const read = async ({ id }: { id: string }) => {
@@ -406,7 +409,10 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
         (field) => (field in planned || OPTIONAL.has(field)) && !same(field, planned[field], state[field]),
       ) || sorted(Object.keys(secrets ?? {})) !== sorted(found.secrets);
     if (!changed) return { action: "none", planned: state, ...NONE };
-    return { action: "update", planned: { ...state, ...planned }, ...NONE };
+    // Where the app will answer: at the declared hostname, or on workers.dev without one.
+    const { hostname: _, ...was } = state;
+    const url = servedAt((planned.hostname as string | null | undefined) ?? undefined, found.workerUrl);
+    return { action: "update", planned: { ...was, ...planned, url }, ...NONE };
   };
 
   /** Waits until the Worker at `url` answers at `revision`, which starts its container. */
@@ -714,13 +720,22 @@ export function alarmOps(api: () => Pick<CloudflareApi, "send">) {
     if (desired && tokenName(desired, undefined) !== WAKEUP_TOKEN) {
       throw refused(`alarm: a declared alarm's token is ${WAKEUP_TOKEN}: leave token out of the data file`);
     }
-    const state = id === undefined ? undefined : (await readWith(id, tokenName(undefined, known), call)).state;
+    const host = desired && hostUrl(desired.host);
+    const at = async (url: string) => (await readWith(url, tokenName(undefined, known), call)).state;
+    let state: Record<string, unknown> | undefined;
+    try {
+      state = id === undefined ? undefined : await at(id);
+    } catch (error) {
+      // No answer at the URL it was bound at (a hostname detached): it is read where its host is now.
+      if (host === undefined || host === id) throw error;
+      state = await at(host);
+    }
     if (!desired) return { action: state ? "delete" : "none", ...NONE };
-    const planned = { host: hostUrl(desired.host) };
+    const planned = { host: host! };
     const unknown = [...alarm.fields.vendorOwned];
     if (!state) return { action: "create", planned, unknown, replace: [] };
-    // The alarm is the host's object's: a new host is a new alarm.
-    if (planned.host !== state.host) return { action: "replace", planned, unknown, replace: ["host"] };
+    // The alarm is the host's object's: a new host URL is a new binding, which the update follows.
+    if (planned.host !== id) return { action: "replace", planned, unknown, replace: ["host"] };
     return { action: "none", planned: state, ...NONE };
   };
 
@@ -748,14 +763,17 @@ export function alarmOps(api: () => Pick<CloudflareApi, "send">) {
       return { id: host, state };
     },
     update: async (
-      { id, state: known, desired }: { id: string; state?: Record<string, unknown>; desired: Record<string, unknown> },
+      { state: known, desired }: { id: string; state?: Record<string, unknown>; desired: Record<string, unknown> },
       call: CallContext,
     ) => {
-      const { state } = await readWith(id, tokenName(desired, known), call);
-      if (!state || hostUrl(desired.host) !== state.host) {
-        throw refused(`alarm.update: a new host is a new alarm`, "plan_changed");
+      // A new host URL (a hostname declared or dropped, or the host replaced) is read where the
+      // alarm is now: the host's own object holds it, whichever name reaches the Worker.
+      const host = hostUrl(desired.host);
+      const { state } = await readWith(host, tokenName(desired, known), call);
+      if (!state) {
+        throw refused(`alarm.update: no Worker of Sanoma's answers at ${host}: apply the host first`, "plan_changed");
       }
-      return { id, state };
+      return { id: host, state };
     },
     delete: async ({ id, state }: { id: string; state?: Record<string, unknown> }, { secrets }: CallContext) => {
       // Without the token it is still asked: a host that is gone answers 404, one that holds a wake refuses.

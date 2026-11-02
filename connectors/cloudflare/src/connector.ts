@@ -136,7 +136,7 @@ const alarmSchema = z.object({
  * `cloudflare.alarm({ host })`: the Durable Object alarm of the host's own Worker, which starts
  * the container at the time the worker registered and calls its `/wake`. The alarm
  * is the host's object's, so it has no id of its own: its binding is the host's URL, and a new
- * host is a new alarm. The host's `secrets` must carry `SANOMA_WAKEUP_TOKEN`, which `create`
+ * URL (a hostname declared or dropped) a replace, which `update` makes by reading it there. The host's `secrets` must carry `SANOMA_WAKEUP_TOKEN`, which `create`
  * mints when none is stored, under the store name `token` gives (`secret("NAME")`), by default
  * `SANOMA_WAKEUP_TOKEN`: a workflow that makes hosts for several companies names one per company.
  * The state keeps that name, so a `read`, `update` or `delete` given the state sends the same token.

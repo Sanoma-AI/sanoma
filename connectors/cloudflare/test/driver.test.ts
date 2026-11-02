@@ -512,7 +512,7 @@ describe.skipIf(live)("cloudflareDriver", () => {
       expect(await op("container.read", { id: "company" })).toEqual({ id: "company", gone: true });
     });
 
-    it("reads the hostname detached by hand as drift, its url still the hostname, and plans the update that attaches it again", async () => {
+    it("reads the hostname detached by hand as drift, and plans the update that attaches it again at its url", async () => {
       const [settings, ...rest] = only("update-to-a-new-image", (_, i) => i < 3);
       const body = structuredClone(settings!.body) as { result: { bindings: { name: string; text?: string }[] } };
       body.result.bindings = body.result.bindings.map((b) =>
@@ -539,7 +539,14 @@ describe.skipIf(live)("cloudflareDriver", () => {
         cfResult([{ id: "d1", hostname: "app.acme.example", service: "sanoma-company", zone_id: ZONE }]),
       );
       play("hostname-removed", [{ ...settings!, body }, ...rest, attached]);
-      expect(await op("container.plan", { id: "company", desired })).toMatchObject({ action: "update" });
+      const planned = (await op("container.plan", { id: "company", desired })) as {
+        action: string;
+        planned: Record<string, unknown>;
+      };
+      // Planned back on workers.dev, so a wakeup on the host is planned to follow it.
+      expect(planned.action).toBe("update");
+      expect(planned.planned.url).toBe(URL_OF);
+      expect(planned.planned).not.toHaveProperty("hostname");
     });
 
     it("refuses a hostname that is also a site's domain, invalid, at plan and at create, before any request", async () => {
@@ -669,6 +676,31 @@ describe.skipIf(live)("cloudflareDriver", () => {
       expect(token).toMatch(/^swi_/);
       expect(await call.secrets.get("SANOMA_HOST_URL")).toBe(URL_OF);
       expect(sent[0]!.headers.get("authorization") === `Bearer ${token}`).toBe(true);
+    });
+
+    it("follows its host to a new URL (a hostname declared): planned a replace, which the update makes by reading it there", async () => {
+      const moved = "https://app.acme.example";
+      const call = callWith({ SANOMA_WAKEUP_TOKEN: TOKEN });
+      play("alarm-moves", [wake(200, { at: null }), wake(200, { at: "2026-11-02T12:00:00.000Z" })]);
+      expect(await op("alarm.plan", { id: URL_OF, desired: { host: moved } }, call)).toMatchObject({
+        action: "replace",
+        planned: { host: moved },
+        replace: ["host"],
+      });
+      expect(await op("alarm.update", { id: URL_OF, desired: { host: moved } }, call)).toEqual({
+        id: moved,
+        state: { host: moved, at: "2026-11-02T12:00:00.000Z", rang: null, healthy: true },
+      });
+    });
+
+    it("plans its move from a URL that no longer answers (a hostname detached) by reading it where its host is now", async () => {
+      const call = callWith({ SANOMA_WAKEUP_TOKEN: TOKEN });
+      play("alarm-detached", [wake(200, { at: null })]);
+      // Before it, the bound hostname gets no answer at all.
+      server.use(http.all("https://app.acme.example/*", () => HttpResponse.error()));
+      expect(await op("alarm.plan", { id: "https://app.acme.example", desired: { host: URL_OF } }, call)).toMatchObject(
+        { action: "replace", planned: { host: URL_OF } },
+      );
     });
 
     it("refuses an alarm for a host without the token, and one with another", async () => {

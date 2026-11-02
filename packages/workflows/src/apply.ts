@@ -643,6 +643,19 @@ export function applyWorkflow(
             });
             const answer = fromPlan(resource, result, answered);
             if (answer.step) add(answer.step, answered.planned);
+            // A host whose change moves its URL, known in its plan (a hostname declared or
+            // dropped): its wakeup is planned at the new one, so the same apply moves it.
+            const spec = types.get(`${resource.vendor}.${resource.type}`)?.host;
+            const action = answer.step?.action;
+            if (
+              spec &&
+              answered.planned &&
+              answered.unknown.length === 0 &&
+              (action === "update" || action === "replace")
+            ) {
+              const url = spec.outputs(answered.planned).url;
+              if (url) urls.set(resource.id, url);
+            }
             if (answer.problem) problems.push(answer.problem);
           } catch (err) {
             if (isRunControlError(err)) throw err;

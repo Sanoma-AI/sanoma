@@ -559,8 +559,7 @@ describe("the apply workflow on a wakeup", () => {
     writeFileSync(infra, readFileSync(infra, "utf8").replace("port: 0 })", 'port: 0, hostname: "app.acme.example" })'));
     const moved = await apply();
     expect(resultOf(moved, "resources/infra.ts#app")!.host!.url).toBe("https://app.acme.example");
-    // A wakeup found before is planned with the URL its host had then: the next apply moves it.
-    await apply();
+    // Planned at the URL the host's plan gives it, so the same apply moves its wakeup there.
     expect(await timer()).toEqual({ name: "wake", host: "https://app.acme.example" });
   });
 });
