@@ -1,8 +1,8 @@
-// DBOS's optional dependencies: required lazily by its client and runtime, only with tracing or
-// OTLP logs on, and unresolvable in a bundle without them. The Worker's build aliases each to
-// `missing.js`, which throws if one is ever loaded (measured on workerd for #428: DBOSClient bundles
-// with exactly these and enqueues).
-export const OPTIONAL = [
+// What the runtime imports that the Worker never runs, and its build leaves out, aliasing each to
+// `missing.js`, whose every use throws: DBOS's optional dependencies, required lazily only with
+// tracing or OTLP logs on (measured on workerd for #428: DBOSClient bundles without exactly these,
+// and enqueues), and the runtime's source tools, which parse and format the company's files.
+export const OPTIONAL: readonly string[] = [
   "@opentelemetry/api",
   "@opentelemetry/context-async-hooks",
   "@opentelemetry/core",
@@ -12,4 +12,6 @@ export const OPTIONAL = [
   "@opentelemetry/sdk-trace-base",
   "winston",
   "winston-transport",
-] as const;
+  "oxc-parser",
+  "oxfmt",
+];
