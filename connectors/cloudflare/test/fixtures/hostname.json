@@ -165,7 +165,7 @@
           {
             "type": "plain_text",
             "name": "SANOMA_HOST_URL",
-            "text": "https://app.acme.example"
+            "text": "https://sanoma-company.example.workers.dev"
           },
           {
             "type": "secret_text",
@@ -291,7 +291,7 @@
           {
             "type": "plain_text",
             "name": "SANOMA_HOST_URL",
-            "text": "https://app.acme.example"
+            "text": "https://sanoma-company.example.workers.dev"
           },
           {
             "type": "plain_text",

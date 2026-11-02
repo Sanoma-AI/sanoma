@@ -407,8 +407,9 @@ function SlotCard({
  * once it does; and the hostname it declares, beside it until an apply serves the app there.
  */
 function HostServes({ hostname }: { hostname: string | undefined }) {
-  const { data, isPending } = useQuery(goLiveProgressQuery());
-  if (isPending) return null;
+  const { data } = useQuery(goLiveProgressQuery());
+  // Not known yet, or not known at all: nothing said rather than a hostname wrongly pending.
+  if (data === undefined) return null;
   const host = data?.host;
   const pending = hostname !== undefined && host?.url !== hostnameUrl(hostname);
   if (!host && !pending) return null;

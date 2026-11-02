@@ -63,7 +63,11 @@ const containerSchema = z.object({
   url: z
     .string()
     .nullish()
-    .describe("Where the app answers: `https://<hostname>`, or the Worker's URL on workers.dev without one"),
+    .describe("Where the app answers: `https://<hostname>` once attached, or the Worker's URL on workers.dev"),
+  worker_url: z
+    .string()
+    .nullish()
+    .describe("The Worker's URL on workers.dev, which Cloudflare sets: where its alarm and health checks reach it"),
   healthy: z
     .boolean()
     .nullish()
@@ -87,7 +91,7 @@ export const container = defineResource({
   schema: containerSchema,
   fields: {
     immutable: ["name"],
-    vendorOwned: ["id", "url", "healthy"],
+    vendorOwned: ["id", "url", "worker_url", "healthy"],
     writeOnly: ["secrets"],
     references: { source: { type: "github.repository", by: ["http_clone_url"] } },
   },
@@ -107,6 +111,8 @@ export const container = defineResource({
     revision: "revision",
     outputs: (state) => ({
       url: String(state.url ?? ""),
+      // The alarm reaches the Worker on workers.dev, whatever hostname the app is served at.
+      ...(typeof state.worker_url === "string" && { wakeUrl: state.worker_url }),
       ...(typeof state.revision === "string" && { revision: state.revision }),
       healthy: state.healthy === true,
     }),
@@ -136,7 +142,7 @@ const alarmSchema = z.object({
  * `cloudflare.alarm({ host })`: the Durable Object alarm of the host's own Worker, which starts
  * the container at the time the worker registered and calls its `/wake`. The alarm
  * is the host's object's, so it has no id of its own: its binding is the host's URL, and a new
- * URL (a hostname declared or dropped) a replace, which `update` makes by reading it there. The host's `secrets` must carry `SANOMA_WAKEUP_TOKEN`, which `create`
+ * host is a new alarm. The host's `secrets` must carry `SANOMA_WAKEUP_TOKEN`, which `create`
  * mints when none is stored, under the store name `token` gives (`secret("NAME")`), by default
  * `SANOMA_WAKEUP_TOKEN`: a workflow that makes hosts for several companies names one per company.
  * The state keeps that name, so a `read`, `update` or `delete` given the state sends the same token.

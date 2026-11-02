@@ -352,7 +352,7 @@ const fakeSchema = z.object({
   secrets: z.record(z.string(), z.string()).optional(),
   port: z.number().int().nonnegative(),
   revision: z.string().optional(),
-  /** The app's hostname, reported as its `url` (`https://<hostname>`) but not served: the fake answers on this machine only. */
+  /** The app's hostname, reported as its `url` (`https://<hostname>`) but not served: the fake answers on this machine only, its `wakeUrl`. */
   hostname: z.string().optional(),
   url: z.string().optional(),
   running: z.boolean().optional(),
@@ -382,6 +382,8 @@ const hostType = (lifetime: HostLifetime) =>
       revision: "revision",
       outputs: (state) => ({
         url: typeof state.hostname === "string" ? hostnameUrl(state.hostname) : String(state.url ?? ""),
+        // Its wakeup reaches it where it answers, on this machine.
+        ...(typeof state.hostname === "string" && { wakeUrl: String(state.url ?? "") }),
         ...(typeof state.revision === "string" && { revision: state.revision }),
         healthy: state.running === true,
       }),

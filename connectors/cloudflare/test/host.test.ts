@@ -156,13 +156,15 @@ describe("cloudflare.container's custom domains on the fake", () => {
     expect(fake.state.domains).toEqual({ byhand: byHand });
   });
 
-  it("attaches the app's hostname beside the domains, serves it as url and SANOMA_HOST_URL, and detaches it once no longer declared", async () => {
+  it("attaches the app's hostname beside the domains, serves it as its url, and detaches it once no longer declared", async () => {
     const hostname = "app.acme.example";
     const made = (await op("create", { desired: { ...desired, hostname } })) as { state: Record<string, unknown> };
     expect(made.state).toMatchObject({ hostname, url: `https://${hostname}` });
     const text = () =>
       Object.fromEntries(fake.state.scripts["sanoma-company"]!.bindings.map((b) => [b.name, b.text] as const));
-    expect(text()).toMatchObject({ SANOMA_HOST_URL: `https://${hostname}`, SANOMA_HOSTNAME: hostname });
+    expect(text()).toMatchObject({ SANOMA_HOSTNAME: hostname });
+    // The wakeup reaches the Worker where it answers, never through the hostname.
+    expect(text().SANOMA_HOST_URL).toBe(made.state.worker_url);
     const hostnames = () =>
       Object.values(fake.state.domains)
         .map((d) => d.hostname)

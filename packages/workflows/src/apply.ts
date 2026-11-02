@@ -552,15 +552,12 @@ export function applyWorkflow(
       const urls = new Map<string, string>();
       // The resources whose step to change them has started and not left a state yet.
       const unsettled = new Set<string>();
-      /** Where a declared host answers, as its state (found, made or planned) says. */
-      const answersAt = (r: Declaration, state: State) => {
-        const url = types.get(`${r.vendor}.${r.type}`)?.host?.outputs(state).url;
-        if (url) urls.set(r.id, url);
-      };
       const keep = (r: Declaration, state: State) => {
         states.set(r.id, state);
         unsettled.delete(r.id);
-        answersAt(r, state);
+        const outputs = types.get(`${r.vendor}.${r.type}`)?.host?.outputs(state);
+        const url = outputs?.wakeUrl ?? outputs?.url;
+        if (url) urls.set(r.id, url);
       };
       for (const resource of resources) {
         const now = found.get(resource.id);
@@ -647,11 +644,6 @@ export function applyWorkflow(
             });
             const answer = fromPlan(resource, result, answered);
             if (answer.step) add(answer.step, answered.planned);
-            // A host whose change moves its URL, known in its plan (a hostname declared or
-            // dropped): its wakeup is planned at the new one, so the same apply moves it.
-            const action = answer.step?.action;
-            if (answered.planned && answered.unknown.length === 0 && (action === "update" || action === "replace"))
-              answersAt(resource, answered.planned);
             if (answer.problem) problems.push(answer.problem);
           } catch (err) {
             if (isRunControlError(err)) throw err;
