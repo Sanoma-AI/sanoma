@@ -11,6 +11,7 @@ import {
   defineDriver,
   defineResource,
   defineWorkflow,
+  dnsRecord,
   memoryLedger,
   resolveConfig,
   withSetup,
@@ -19,6 +20,9 @@ import { VENDOR } from "../src/op.ts";
 import { DECLARED, isChangeOp, resourceTypesOf, withFrom, withoutWriteOnly } from "../src/resource.ts";
 import { secret } from "../src/secret.ts";
 import { recordsFor, domain, records } from "./fakes/mail.ts";
+
+/** The messages `dnsRecord` refuses a value with. */
+const refused = (value: object) => dnsRecord.safeParse(value).error?.issues.map((issue) => issue.message);
 
 const fields = {
   immutable: ["name"],
@@ -354,6 +358,12 @@ describe("defineResource", () => {
       });
       // A declaration with no `from` reference is given back as it is.
       expect(withFrom(references, desired, {}, stateOf, "drop").desired).toBe(desired);
+      // One with no place in the declaration to fill is unfilled, never skipped.
+      const nested = { "spec.records": { type: "mail.domain", from: "records" } };
+      expect(withFrom(nested, desired, { "spec.records": refsById.records }, stateOf, "unknown")).toEqual({
+        desired,
+        unfilled: [{ ...none, at: "spec.records", stated: true }],
+      });
     });
 
     it("are refused at a write-only field", () => {
@@ -366,6 +376,22 @@ describe("defineResource", () => {
         }),
       ).toThrow("mail.secret: records is write-only, so it cannot take its value from another resource's state");
     });
+  });
+
+  it("takes a DNS record as a zone holds it: its name lower case with no trailing dot, a TXT record's text unquoted", () => {
+    const record = { type: "TXT", name: "mail._domainkey.example.com", content: "p=key" } as const;
+    expect(dnsRecord.parse(record)).toEqual(record);
+    expect(refused({ ...record, name: "Mail._domainkey.example.com" })).toEqual(["a record's name is lower case"]);
+    expect(refused({ ...record, name: "mail._domainkey.example.com." })).toEqual([
+      "a record's name has no trailing dot",
+    ]);
+    expect(refused({ ...record, content: '"p=key"' })).toEqual([
+      "a TXT record's content is its text, not wrapped in quotes",
+    ]);
+    // Only a TXT record's: a CAA record's value has its quotes.
+    expect(
+      dnsRecord.safeParse({ type: "CAA", name: "example.com", content: '0 issue "letsencrypt.org"' }).success,
+    ).toBe(true);
   });
 
   it("is implemented by an ordinary driver", () => {

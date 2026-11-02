@@ -23,7 +23,7 @@ import {
   type Source,
   withSetup,
 } from "../src/index.ts";
-import { fakeMail, mailDataFile, recordsFor } from "./fakes/mail.ts";
+import { chainDataFile, fakeMail, mailDataFile, recordsFor } from "./fakes/mail.ts";
 import { companyFakes } from "./fixtures/company/fakes.ts";
 import company from "./fixtures/company/sanoma.config.ts";
 import { pending, rootWith, waitFor } from "./harness.ts";
@@ -447,6 +447,8 @@ describe("the apply workflow on a vendor that replaces", () => {
         binding: before,
         fields: [{ path: "region", desired: "us", actual: "eu" }],
         replace: ["region"],
+        // A replace makes a new object: its id is known only after.
+        unknown: ["id"],
       },
     ]);
     const after = resultOf(report, web)!.binding!;
@@ -671,5 +673,151 @@ describe("the apply workflow on a field taken from another resource's state", ()
     // The record set's driver was never called to change anything.
     expect(fake.calls.map((c) => c.op).filter((op) => !/\.(import|plan)$/.test(op))).toEqual(["mail.domain.create"]);
     expect(report.lockfile.bindings).toEqual({});
+  });
+
+  it("plans the record set as none while its domain's update leaves the records as they are", async () => {
+    await apply();
+    // To be verified again: an update that changes no record.
+    fake.update(({ domains }) =>
+      domains.set("example.com", { name: "example.com", records: recordsFor("example.com"), verified: false }),
+    );
+    const { runId, report } = await apply();
+    expect(actions(report)).toEqual([
+      ["mail.ts#sending", "update"],
+      ["mail.ts#dns", "none"],
+    ]);
+    // Planned with the records the domain holds, which its update keeps.
+    const plans = ops(await app.client.ledger(runId)).filter(([op]) => op === "mail.records.plan");
+    expect(plans).toEqual([
+      [
+        "mail.records.plan",
+        { id: "example.com/mail", desired: { name: "example.com/mail", records: recordsFor("example.com") } },
+      ],
+    ]);
+    expect(report.results.map((r) => [r.id, r.status])).toEqual([
+      [sending, "done"],
+      [dns, "done"],
+    ]);
+  });
+
+  it("fails the record set's step when its domain's update fails, never given the records it held before", async () => {
+    await apply();
+    // A key rotated: the domain's update lists other records, and the set holds the old ones.
+    const old = [{ type: "TXT" as const, name: "mail._domainkey.example.com", content: "p=old" }];
+    fake.update(({ domains, sets }) => {
+      domains.set("example.com", { name: "example.com", records: old });
+      sets.set("example.com/mail", { name: "example.com/mail", records: old });
+    });
+    fake.failNext("mail.domain.update", new DriverError("mail: the domain is refused", { retryable: false }));
+    const { report } = await apply();
+    // The update's plan lists other records there: the set's are unknown, its update in the plan.
+    expect(report.plan.steps).toMatchObject([
+      { id: sending, action: "update" },
+      { id: dns, action: "update", unknown: ["records"] },
+    ]);
+    expect(report.results).toEqual([
+      {
+        id: sending,
+        action: "update",
+        status: "failed",
+        binding: "example.com",
+        error: expect.stringContaining("the domain is refused"),
+      },
+      {
+        id: dns,
+        action: "update",
+        status: "failed",
+        binding: "example.com/mail",
+        error: `its records come from ${sending}, which has no state yet`,
+      },
+    ]);
+    expect(fake.calls.map((c) => c.op)).not.toContain("mail.records.update");
+    expect(fake.state.sets.get("example.com/mail")?.records).toEqual(old);
+  });
+
+  it("fails each step down a chain whose first change fails, as the one between waits", async () => {
+    const copy = "resources/mail.ts#copy";
+    writeFileSync(join(root, "resources/mail.ts"), chainDataFile);
+    try {
+      expect((await apply()).report.results.map((r) => [r.id, r.status])).toEqual([
+        [sending, "done"],
+        [dns, "done"],
+        [copy, "done"],
+      ]);
+      expect(fake.state.copies.get("example.com/copy")?.records).toEqual(recordsFor("example.com"));
+      const old = [{ type: "TXT" as const, name: "mail._domainkey.example.com", content: "p=old" }];
+      fake.update(({ domains, sets, copies }) => {
+        domains.set("example.com", { name: "example.com", records: old });
+        sets.set("example.com/mail", { name: "example.com/mail", records: old });
+        copies.set("example.com/copy", { name: "example.com/copy", records: old });
+      });
+      fake.failNext("mail.domain.update", new DriverError("mail: the domain is refused", { retryable: false }));
+      const { report } = await apply();
+      expect(report.plan.steps).toMatchObject([
+        { id: sending, action: "update" },
+        { id: dns, action: "update", unknown: ["records"] },
+        { id: copy, action: "update", unknown: ["records"] },
+      ]);
+      expect(report.results.map((r) => [r.id, r.status, r.error])).toEqual([
+        [sending, "failed", expect.stringContaining("the domain is refused")],
+        [dns, "failed", `its records come from ${sending}, which has no state yet`],
+        // The set waited: the copy is not given the records the set held before.
+        [copy, "failed", `its records come from ${dns}, which has no state yet`],
+      ]);
+      expect(fake.state.copies.get("example.com/copy")?.records).toEqual(old);
+    } finally {
+      writeFileSync(join(root, "resources/mail.ts"), mailDataFile);
+    }
+  });
+
+  it("runs a bound record set's other change without its records while its domain is gone, as planned", async () => {
+    writeFileSync(
+      join(root, "resources/mail.ts"),
+      mailDataFile.replace("records: sending", 'label: "Mail", records: sending'),
+    );
+    try {
+      await apply();
+      fake.update(({ domains, sets }) => {
+        domains.delete("example.com");
+        sets.set("example.com/mail", { name: "example.com/mail", label: "Old", records: recordsFor("example.com") });
+      });
+      const { report } = await apply({ only: [dns] });
+      expect(report.plan.steps).toMatchObject([{ id: dns, action: "update" }]);
+      expect(resultOf(report, dns)).toMatchObject({ status: "done" });
+      // Its label changed, its records kept.
+      expect(fake.state.sets.get("example.com/mail")).toEqual({
+        name: "example.com/mail",
+        label: "Mail",
+        records: recordsFor("example.com"),
+      });
+    } finally {
+      writeFileSync(join(root, "resources/mail.ts"), mailDataFile);
+    }
+  });
+
+  it("gives a record set its domain's records when the domain's failed update would not have changed them", async () => {
+    writeFileSync(
+      join(root, "resources/mail.ts"),
+      mailDataFile.replace("records: sending", 'label: "Mail", records: sending'),
+    );
+    try {
+      await apply();
+      fake.update(({ domains, sets }) => {
+        domains.set("example.com", { name: "example.com", records: recordsFor("example.com"), verified: false });
+        sets.set("example.com/mail", { name: "example.com/mail", label: "Old", records: recordsFor("example.com") });
+      });
+      fake.failNext("mail.domain.update", new DriverError("mail: the check failed", { retryable: false }));
+      const { report } = await apply();
+      expect(report.results.map((r) => [r.id, r.action, r.status])).toEqual([
+        [sending, "update", "failed"],
+        [dns, "update", "done"],
+      ]);
+      expect(fake.state.sets.get("example.com/mail")).toMatchObject({
+        label: "Mail",
+        records: recordsFor("example.com"),
+      });
+    } finally {
+      writeFileSync(join(root, "resources/mail.ts"), mailDataFile);
+    }
   });
 });

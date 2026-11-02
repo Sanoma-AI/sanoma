@@ -42,15 +42,16 @@ export interface FieldReference {
    * state at this path, as a whole (a list or an object), read in the same run or made by an
    * earlier step of it (`records: mail` takes a `resend.domain`'s `dns_records`). A data file may
    * give a literal value here instead. `desired` holds the resource's `name` until then, which the
-   * schema does not judge. Where that resource has no state yet or nothing at the path, or the same
-   * apply plans to create, update or replace it, a plan is given `null` there (known after apply:
-   * the type's `plan` must accept it and report the path in `unknown`), so a change it makes is
-   * planned, and approved, up front; except that a plan of a bound object leaves the field out
-   * while its resource is absent, gone or unreadable and not about to change, as drift does. A
-   * step that would write a value still not known fails before its driver is called, and drift
-   * leaves the field out. Not on a write-only field
-   * (refused). Not yet on a bridge-backed type (`tfConnector`): an OpenTofu provider's plan reads
-   * `null` as unset, not as known after apply.
+   * schema does not judge. Where the same apply changes that resource at the path (creates or
+   * replaces it, or updates it with the path `unknown` or another value there in its plan), or,
+   * for a create, it has no state yet or nothing at the path, a plan is given `null` there (known
+   * after apply: the type's `plan` must accept it and report the path in `unknown`), so a change it
+   * makes is planned, and approved, up front. A plan of a bound object leaves the field out while
+   * its resource is absent, gone or unreadable and not about to change, as drift does, and its step
+   * runs without it. A step given `null` for the field whose value is still not known (its
+   * resource's step failed or did not run) fails before its driver is called, and drift leaves the
+   * field out. Not on a write-only field (refused). Not yet on a bridge-backed type
+   * (`tfConnector`): an OpenTofu provider's plan reads `null` as unset, not as known after apply.
    */
   readonly from?: string;
 }
@@ -501,7 +502,7 @@ export function holderOf(value: unknown, path: string): { holder: State; key: st
  * reference (`FieldReference.from`): its path, the resource it names (`named`), and the path in
  * that resource's state its value comes from.
  */
-export const fromRefs = (references: References | undefined, refs: Readonly<Record<string, string>>) =>
+const fromRefs = (references: References | undefined, refs: Readonly<Record<string, string>>) =>
   Object.entries(refs).flatMap(([at, named]) => {
     const from = references?.[fieldPathOf(at)]?.from;
     return from === undefined ? [] : [{ at, named, from }];
@@ -521,17 +522,18 @@ export interface Unfilled {
 
 /**
  * `desired` with each field a `from` reference names given the state of the resource it names
- * at that path (a copy), `stateOf` that resource by what `refs` holds there; and the references it
- * could not fill, where that resource has no state or nothing there, each such field `null`
- * (`unknown`, a value known after apply) or left out (`drop`), as `missing` says (for each
- * resource, given a function). `desired` itself when there is no such field.
+ * at that path (a copy), `stateOf` that resource (by what `refs` holds there, and the path read);
+ * and the references it could not fill, where that resource has no state or nothing there, each
+ * such field `null` (`unknown`, a value known after apply) or left out (`drop`), as `missing` says
+ * (for each reference, given a function). A reference with no place in `desired` to fill is
+ * unfilled too. `desired` itself when there is no such field.
  */
 export function withFrom(
   references: References | undefined,
   desired: State,
   refs: Readonly<Record<string, string>>,
-  stateOf: (named: string) => State | undefined,
-  missing: Missing | ((named: string) => Missing),
+  stateOf: (named: string, from: string) => State | undefined,
+  missing: Missing | ((named: string, from: string) => Missing),
 ): { desired: State; unfilled: Unfilled[] } {
   const taken = fromRefs(references, refs);
   if (!taken.length) return { desired, unfilled: [] };
@@ -539,16 +541,16 @@ export function withFrom(
   const unfilled: Unfilled[] = [];
   for (const { at, named, from } of taken) {
     const place = holderOf(out, at);
-    if (!place) continue;
-    const state = stateOf(named);
+    const state = stateOf(named, from);
     const value = state === undefined ? undefined : valueAt(state, from);
-    if (value != null) {
+    if (place && value != null) {
       // A copy: what a driver is given never shares an object with the resource's state.
       place.holder[place.key] = structuredClone(value);
       continue;
     }
     unfilled.push({ at, named, from, stated: state !== undefined });
-    if ((typeof missing === "function" ? missing(named) : missing) === "drop") delete place.holder[place.key];
+    if (!place) continue;
+    if ((typeof missing === "function" ? missing(named, from) : missing) === "drop") delete place.holder[place.key];
     else place.holder[place.key] = null;
   }
   return { desired: out, unfilled };
@@ -562,7 +564,7 @@ export const valueAt = (value: unknown, path: string) =>
   path.split(".").reduce<unknown>((v, key) => (isObject(v) || Array.isArray(v) ? (v as State)[key] : undefined), value);
 
 /** True when the two are the same JSON, where a missing value is `null`. */
-function same(a: unknown, b: unknown): boolean {
+export function same(a: unknown, b: unknown): boolean {
   if (a === b || (a == null && b == null)) return true;
   if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((item, i) => same(item, b[i]));
   if (isObject(a) && isObject(b)) return Object.keys({ ...a, ...b }).every((key) => same(a[key], b[key]));
