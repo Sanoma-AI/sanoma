@@ -38,6 +38,23 @@ const read = (status: string): Exchange[] => [
   { method: "GET", path: "/broadcasts/bc_1", status: 200, body: { object: "broadcast", id: "bc_1", status } },
 ];
 
+// The sending domain's calls, and Resend's replies about it.
+const ID = "00000000-0000-4000-8000-000000000001";
+const domain = (op: string, input: Record<string, unknown>) =>
+  driver.ops[`domain.${op}`]!(input, { ...call, idempotencyKey: `run-1:${op}`, opId: `resend.domain.${op}` });
+/** The domain as the fixtures' `GET` gives it, with `body`'s fields instead. */
+const got = (body: Record<string, unknown> = {}): Exchange => {
+  const [, , reply] = fixture("create-a-domain") as [Exchange, Exchange, Exchange & { body: object }];
+  return { ...reply, body: { ...reply.body, ...body } };
+};
+const verify: Exchange = { method: "POST", path: `/domains/${ID}/verify`, status: 200, body: { id: ID } };
+const notFound = (method: string): Exchange => ({
+  method,
+  path: `/domains/${ID}`,
+  status: 404,
+  body: { statusCode: 404, name: "not_found", message: "Domain not found" },
+});
+
 describe("resendDriver", () => {
   it("creates a broadcast as a draft, then reads it and sends it", async () => {
     play("create-and-send");
@@ -61,14 +78,9 @@ describe("resendDriver", () => {
     expect(sent.slice(1).map((r) => r.headers.get("idempotency-key"))).toEqual(["run-1:4", "run-1:4"]);
   });
 
-  it("takes the sender from RESEND_FROM, read at the call, when the input has none", async () => {
-    play("create");
+  it("refuses a broadcast with no sender without calling Resend, RESEND_FROM set or not", async () => {
+    // RESEND_FROM is no longer read: a config that relied on it passes `from`.
     vi.stubEnv("RESEND_FROM", from);
-    await create({ audience, subject: "s", html: "" });
-    expect(sent[0]!.body).toMatchObject({ from });
-  });
-
-  it("refuses a broadcast with no sender without calling Resend", async () => {
     await expect(create({ audience, subject: "s", html: "" })).rejects.toMatchObject({
       name: "DriverError",
       retryable: false,
@@ -101,19 +113,21 @@ describe("resendDriver", () => {
       expect(sent[0]!.headers.get("idempotency-key")).toBe("run-1:5");
     });
 
-    it("sends to a list, as text, from RESEND_FROM when the input's sender is empty", async () => {
+    it("sends to a list, as text", async () => {
       play("send-an-email");
-      vi.stubEnv("RESEND_FROM", from);
-      await email({ to: [to, to], from: "", subject: "s", text: "Hello" }, 6);
+      await email({ to: [to, to], from, subject: "s", text: "Hello" }, 6);
       expect(sent[0]!.body).toEqual({ to: [to, to], from, subject: "s", text: "Hello" });
     });
 
-    it("refuses an email with no sender without calling Resend", async () => {
-      await expect(email({ to, subject: "s", text: "Hello" }, 7)).rejects.toMatchObject({
-        name: "DriverError",
-        retryable: false,
-        message: "resend: emails.send needs `from` in its input, or RESEND_FROM set",
-      });
+    it("refuses an email with no sender, or an empty one, without calling Resend", async () => {
+      for (const sender of [{}, { from: "" }]) {
+        await expect(email({ to, ...sender, subject: "s", text: "Hello" }, 7)).rejects.toMatchObject({
+          name: "DriverError",
+          retryable: false,
+          message:
+            "resend: emails.send needs `from` in its input, a sender on a domain verified in Resend, such as `Acme <news@acme.example>`",
+        });
+      }
       expect(sent).toEqual([]);
     });
 
@@ -242,6 +256,208 @@ describe("resendDriver", () => {
         retryable: true,
         status: undefined,
         message: "resend: broadcast.send timed out after 200 ms",
+      });
+    });
+  });
+
+  // Replayed only: live, the features make and delete a domain (README, "Testing the driver").
+  describe.skipIf(live)("domain", () => {
+    it("creates a domain, asks Resend to verify it at once, and reads its records as a zone holds them", async () => {
+      play("create-a-domain");
+      const made = await domain("create", { desired: { name: "example.com" } });
+      expect(sent.slice(0, 3).map((r) => `${r.method} ${r.path}`)).toEqual([
+        "POST /domains",
+        `POST /domains/${ID}/verify`,
+        `GET /domains/${ID}`,
+      ]);
+      // Only what was declared: Resend's defaults stand for the rest.
+      expect(sent[0]!.body).toEqual({ name: "example.com" });
+      // One call, several requests: none carries the call's key, which Resend would hold to one request.
+      expect(sent.slice(0, 3).map((r) => r.headers.get("idempotency-key"))).toEqual([null, null, null]);
+      expect(made).toMatchObject({
+        id: ID,
+        state: { name: "example.com", region: "us-east-1", custom_return_path: "send", id: ID, status: "pending" },
+      });
+      // Full names, the SPF text without the quotes Resend's read puts around it, "Auto" as 1.
+      expect((made as { state: { dns_records: unknown } }).state.dns_records).toEqual([
+        { type: "TXT", name: "resend._domainkey.example.com", content: "p=redacted", ttl: 1 },
+        {
+          type: "MX",
+          name: "send.example.com",
+          content: "feedback-smtp.us-east-1.amazonses.com",
+          priority: 10,
+          ttl: 1,
+        },
+        { type: "TXT", name: "send.example.com", content: "v=spf1 include:amazonses.com ~all", ttl: 1 },
+      ]);
+      await domain("delete", { id: ID });
+    });
+
+    it("sends the region and Return-Path declared", async () => {
+      play("declared", [
+        { method: "POST", path: "/domains", status: 201, body: { id: ID } },
+        verify,
+        got({ region: "eu-west-1" }),
+      ]);
+      await domain("create", { desired: { name: "example.com", region: "eu-west-1", custom_return_path: "bounce" } });
+      expect(sent[0]!.body).toEqual({ name: "example.com", region: "eu-west-1", custom_return_path: "bounce" });
+    });
+
+    it("names a subdomain's records in full, whether Resend writes them relative to the zone or in full", async () => {
+      const pending = { ttl: "Auto", status: "pending" };
+      play("subdomain", [
+        got({
+          name: "mail.example.com",
+          records: [
+            { record: "DKIM", type: "TXT", value: "p=redacted", name: "resend._domainkey.mail", ...pending },
+            {
+              record: "SPF",
+              type: "MX",
+              value: "feedback-smtp.us-east-1.amazonses.com",
+              priority: 10,
+              name: "bounce.mail",
+              ...pending,
+            },
+            {
+              record: "SPF",
+              type: "TXT",
+              value: '"v=spf1 include:" "amazonses.com ~all"',
+              name: "bounce.mail",
+              ...pending,
+            },
+            {
+              record: "Tracking",
+              type: "CNAME",
+              value: "links1.resend-dns.com",
+              name: "links.mail.example.com.",
+              ...pending,
+            },
+          ],
+        }),
+      ]);
+      const { state } = (await domain("read", { id: ID })) as {
+        state: { custom_return_path: string; dns_records: { name: string; content: string }[] };
+      };
+      expect(state.custom_return_path).toBe("bounce");
+      // Split into two quoted strings, as a long TXT value may be: joined, unquoted.
+      expect(state.dns_records[2]).toMatchObject({ content: "v=spf1 include:amazonses.com ~all" });
+      expect(state.dns_records.map((r) => r.name)).toEqual([
+        "resend._domainkey.mail.example.com",
+        "bounce.mail.example.com",
+        "bounce.mail.example.com",
+        "links.mail.example.com",
+      ]);
+    });
+
+    it("takes the Return-Path from an SPF CNAME record, which newer domains have instead of the MX", async () => {
+      const spf = { record: "SPF", type: "CNAME", ttl: "Auto", status: "pending" };
+      play("cname-spf", [got({ records: [{ ...spf, name: "bounce", value: "send.resend-dns.com" }] })]);
+      expect(await domain("read", { id: ID })).toMatchObject({
+        state: {
+          custom_return_path: "bounce",
+          dns_records: [{ type: "CNAME", name: "bounce.example.com", content: "send.resend-dns.com", ttl: 1 }],
+        },
+      });
+    });
+
+    it("plans no change for a verified domain, and verifies an unverified one again", async () => {
+      play("verified", [got({ status: "verified" })]);
+      expect(await domain("plan", { id: ID, desired: { name: "example.com" } })).toMatchObject({
+        action: "none",
+        unknown: [],
+        replace: [],
+      });
+      play("reverify", [got(), got(), verify, got({ status: "verified" })]);
+      expect(await domain("plan", { id: ID, desired: { name: "example.com" } })).toMatchObject({ action: "update" });
+      const updated = await domain("update", {
+        id: ID,
+        desired: { name: "example.com" },
+        expect: { action: "update", replace: [] },
+      });
+      expect(updated).toMatchObject({ id: ID, state: { status: "verified" } });
+    });
+
+    it("refuses an update whose plan changed since it was approved", async () => {
+      play("changed", [got({ status: "verified" })]);
+      await expect(
+        domain("update", { id: ID, desired: { name: "example.com" }, expect: { action: "update", replace: [] } }),
+      ).rejects.toMatchObject({ name: "DriverError", retryable: false, vendorCode: "plan_changed" });
+    });
+
+    it("replaces a domain moved to another region: deletes it, then makes it anew", async () => {
+      const NEW = "00000000-0000-4000-8000-000000000002";
+      play("replace", [
+        got(),
+        { method: "DELETE", path: `/domains/${ID}`, status: 200, body: { id: ID, deleted: true } },
+        { method: "POST", path: "/domains", status: 201, body: { id: NEW } },
+        { ...verify, path: `/domains/${NEW}/verify` },
+        { ...got({ id: NEW, region: "eu-west-1" }), path: `/domains/${NEW}` },
+      ]);
+      const replaced = await domain("update", {
+        id: ID,
+        desired: { name: "example.com", region: "eu-west-1" },
+        expect: { action: "replace", replace: ["region"] },
+      });
+      expect(replaced).toMatchObject({ id: NEW, state: { region: "eu-west-1" } });
+      expect(sent[2]!.body).toEqual({ name: "example.com", region: "eu-west-1" });
+    });
+
+    it("imports by name through every page of the account's domains", async () => {
+      const other = { id: "00000000-0000-4000-8000-0000000000ff", name: "other.example" };
+      play("import-pages", [
+        {
+          method: "GET",
+          path: "/domains?limit=100",
+          status: 200,
+          body: { object: "list", has_more: true, data: [other] },
+        },
+        {
+          method: "GET",
+          path: `/domains?limit=100&after=${other.id}`,
+          status: 200,
+          body: { object: "list", has_more: false, data: [{ id: ID, name: "example.com" }] },
+        },
+        got(),
+      ]);
+      expect(await domain("import", { id: "example.com" })).toMatchObject({ id: ID, gone: false });
+    });
+
+    it("answers gone for a name the account has not, an id Resend has not, and a delete of one gone", async () => {
+      play("gone", [
+        { method: "GET", path: "/domains?limit=100", status: 200, body: { object: "list", has_more: false, data: [] } },
+        notFound("GET"),
+        notFound("GET"),
+        notFound("DELETE"),
+      ]);
+      expect(await domain("import", { id: "example.com" })).toEqual({ id: "example.com", gone: true });
+      expect(await domain("import", { id: ID })).toEqual({ id: ID, gone: true });
+      expect(await domain("read", { id: ID })).toEqual({ id: ID, gone: true });
+      expect(await domain("delete", { id: ID })).toEqual({ id: ID, gone: true });
+    });
+
+    it("refuses a name another account holds, saying so", async () => {
+      const [registered] = (fixture("create-a-domain-twice") as Exchange[]).filter((e) => e.status === 403);
+      play("another-account", [
+        registered!,
+        { method: "GET", path: "/domains?limit=100", status: 200, body: { object: "list", has_more: false, data: [] } },
+      ]);
+      await expect(domain("create", { desired: { name: "example.com" } })).rejects.toMatchObject({
+        name: "DriverError",
+        retryable: false,
+        vendorCode: "registered",
+        message: expect.stringContaining("another Resend account holds example.com"),
+      });
+    });
+
+    it("says a sending-only key cannot manage domains", async () => {
+      play("domain-restricted-key");
+      await expect(domain("create", { desired: { name: "example.com" } })).rejects.toMatchObject({
+        name: "DriverError",
+        retryable: false,
+        status: 401,
+        vendorCode: "restricted_api_key",
+        message:
+          "resend: domain.create needs a full-access API key in RESEND_API_KEY: This API key is restricted to only send emails.",
       });
     });
   });

@@ -346,7 +346,7 @@ describe("going live", () => {
     }
   });
 
-  it("gives the host the sign-in sender's variables when the config names one, an optional one once stored", async () => {
+  it("gives the host the sign-in sender's variables when the config names one, and no others", async () => {
     const withSender: SanomaConfig = {
       ...config,
       connectors: [...config.connectors, resend],
@@ -357,11 +357,9 @@ describe("going live", () => {
     try {
       const text = await renderInfra(sending, choices(), DEPLOY_KEY);
       expect(text).toContain(`    RESEND_API_KEY: secret("RESEND_API_KEY"),\n`);
+      // The driver declares no RESEND_FROM any more: a send names its `from`.
       expect(text).not.toContain("RESEND_FROM");
-      await client.setCredential("RESEND_FROM", "Acme <hi@acme.test>", { by: "alice" });
-      expect(await renderInfra(sending, choices(), DEPLOY_KEY)).toContain(`    RESEND_FROM: secret("RESEND_FROM"),\n`);
     } finally {
-      await client.clearCredential("RESEND_FROM", { by: "alice" });
       await client.close();
     }
     expect(await renderInfra(ctx, choices(), DEPLOY_KEY)).not.toContain("RESEND_");

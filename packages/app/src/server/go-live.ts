@@ -633,7 +633,7 @@ async function latestRun({ client }: AppContext): Promise<GoLiveRun | null> {
 
 /**
  * The variables the config's sign-in sender (`login.sender`) reads, as the host's secrets: each
- * its driver declares (`RESEND_API_KEY`, `RESEND_FROM`), an optional one only when it is stored,
+ * its driver declares (Resend's `RESEND_API_KEY`), an optional one only when it is stored,
  * so the host sends sign-in codes as this app does. None without a sender.
  */
 async function senderSecrets({ client, resolved }: AppContext): Promise<Record<string, DataValue>> {

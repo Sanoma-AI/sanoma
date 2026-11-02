@@ -9,7 +9,17 @@ export default {
     patch: { input: (spec: { webhooks?: unknown }) => void delete spec.webhooks },
     filters: {
       operations: {
-        include: ["POST /broadcasts", "GET /broadcasts/{id}", "POST /broadcasts/{id}/send", "POST /emails"],
+        include: [
+          "POST /broadcasts",
+          "GET /broadcasts/{id}",
+          "POST /broadcasts/{id}/send",
+          "POST /emails",
+          "POST /domains",
+          "GET /domains",
+          "GET /domains/{domain_id}",
+          "DELETE /domains/{domain_id}",
+          "POST /domains/{domain_id}/verify",
+        ],
       },
     },
   },
