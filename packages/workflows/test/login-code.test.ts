@@ -140,7 +140,7 @@ describe("the config's login", () => {
   });
 
   it("takes `from` as an address, or a name and an address", () => {
-    for (const from of [FROM, "login@acme.example", "Acme Login <login@acme.example>"])
+    for (const from of [FROM, "login@acme.example", "Acme Login <login@acme.example>", "<login@acme.example>"])
       expect(resolveConfig(config({}, resend.emails.send, from)).login).toEqual({ sender: resend.emails.send, from });
   });
 
@@ -149,29 +149,40 @@ describe("the config's login", () => {
     expect(() => resolveConfig(unset)).toThrow(/`login.from` is not set: .*from: "Acme <login@acme.example>"/);
     for (const from of ["", 42])
       expect(() => resolveConfig(config({}, resend.emails.send, from))).toThrow(/`login.from` is not set/);
-    for (const from of ["acme", "Acme", " login@acme.example", "<login@acme.example>", "Acme <login>", "Acme <a@b> x"])
+    for (const from of [
+      "acme",
+      " login@acme.example",
+      "login@localhost",
+      "Acme <login>",
+      "Acme <a@b.c> x",
+      "Acme\n<a@b.c>",
+    ])
       expect(() => resolveConfig(config({}, resend.emails.send, from))).toThrow(
         /`login.from`, .* is not an email address/,
       );
   });
 
-  it("refuses a sender whose input does not take `from`", () => {
-    const mailerOps = defineConnector("mailer", {
-      mail: {
-        send: {
-          effect: "send",
-          description: "Send one email, from the account's own address.",
-          input: z.strictObject({ to: z.string(), subject: z.string(), text: z.string() }),
-          output: z.object({ id: z.string() }),
+  it("refuses a sender whose input refuses `from`, or drops it", () => {
+    const mail = { to: z.string(), subject: z.string(), text: z.string() };
+    for (const input of [z.strictObject(mail), z.object(mail)]) {
+      const mailerOps = defineConnector("mailer", {
+        mail: {
+          send: {
+            effect: "send",
+            description: "Send one email, from the account's own address.",
+            input,
+            output: z.object({ id: z.string() }),
+          },
         },
-      },
-    });
-    const mailer = withSetup(mailerOps, {
-      driver: () => defineDriver(mailerOps, { mail: { send: async () => ({ id: "m1" }) } }),
-    });
-    expect(() =>
-      resolveConfig({ connectors: [mailer], ledger: memoryLedger(), login: { sender: mailer.mail.send, from: FROM } }),
-    ).toThrow(/mailer\.mail\.send, does not take an email as \{ from, to, subject, text \} with `login.from`/);
+      });
+      const mailer = withSetup(mailerOps, {
+        driver: () => defineDriver(mailerOps, { mail: { send: async () => ({ id: "m1" }) } }),
+      });
+      const login = { sender: mailer.mail.send, from: FROM };
+      expect(() => resolveConfig({ connectors: [mailer], ledger: memoryLedger(), login })).toThrow(
+        /mailer\.mail\.send, does not take an email as \{ from, to, subject, text \} with `login.from`/,
+      );
+    }
   });
 
   it("refuses a company workflow named login-code", async () => {

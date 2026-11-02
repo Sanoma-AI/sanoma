@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { configuredSecrets } from "./credentials.ts";
 import type { IdentityProvisioning } from "./identity-provisioning.ts";
 import { secretsForInput } from "./secret.ts";
@@ -451,8 +452,11 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   };
 }
 
-/** An email address, `addr@domain`, or `Name <addr@domain>`: a simple check, the vendor has the last word. */
-const ADDRESS = /^(?:[^\s<>@]+@[^\s<>@]+|[^\s<>][^<>]*<[^\s<>@]+@[^\s<>@]+>)$/;
+/** A name before an address in angle brackets, `Acme <login@acme.example>`, on one line. */
+const NAMED = /^[^<>\r\n]*<([^<>]+)>$/;
+
+/** Whether `from` is an email address, bare or after a name: the address as `z.email()` takes it, the vendor having the last word. */
+const isSender = (from: string) => z.email().safeParse(NAMED.exec(from)?.[1] ?? from).success;
 
 /**
  * The config's `login`, as the config's operations have it: refused unless `sender` is an
@@ -475,11 +479,13 @@ function checkLogin(login: unknown, ops: ReadonlyMap<string, Op>, drivers: Reado
     throw new Error(
       `The config's \`login.from\` is not set: give the address codes are sent from, ${where}, as in ${example}`,
     );
-  if (!ADDRESS.test(from))
+  if (!isSender(from))
     throw new Error(
       `The config's \`login.from\`, ${JSON.stringify(from)}, is not an email address: write \`login@acme.example\` or \`Acme <login@acme.example>\`, ${where}`,
     );
-  if (!op.input.safeParse({ ...CODE_MAIL, from }).success)
+  // A sender that drops `from` (a plain object without it) would send from its vendor's default.
+  const parsed = op.input.safeParse({ ...CODE_MAIL, from });
+  if (!parsed.success || (parsed.data as { from?: unknown } | null)?.from !== from)
     throw new Error(
       `The config's \`login.sender\`, ${op.id}, does not take an email as { from, to, subject, text } with \`login.from\`: ${fix}`,
     );

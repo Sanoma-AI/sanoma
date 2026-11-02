@@ -18,15 +18,10 @@ type OpCall = (input: unknown) => Promise<unknown>;
 const LoginCodeInput = z.object({ to: z.string().min(1), code: z.string().min(1) });
 
 /**
- * What a sign-in code is sent as, for checks before any is: a sender must take it, with the
- * config's `login.from` as its `from`, and the policy is asked about it.
+ * What a sign-in code is sent as, for checks before any is, with the config's `login.from` as its
+ * `from`: a sender must take it, and the policy is asked about it.
  */
-export const CODE_MAIL = {
-  from: "Acme <login@acme.example>",
-  to: "person@example.com",
-  subject: "Your sign-in code",
-  text: "<text>",
-};
+export const CODE_MAIL = { to: "person@example.com", subject: "Your sign-in code", text: "<text>" };
 
 /** The mail's text: the code, what it is for, and how long it lasts; nothing else, and no link. */
 const textOf = (company: string, code: string) =>
