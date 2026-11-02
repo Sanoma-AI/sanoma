@@ -1,6 +1,6 @@
 {
   "name": "sanoma",
-  "version": "0.10.6",
+  "version": "0.10.7",
   "description": "One command over a Sanoma repo: run the worker and the app, check it, write its .env.example, export a run's ledger",
   "keywords": [
     "approvals",
@@ -31,7 +31,8 @@
     "site.d.ts",
     "ui.js",
     "ui.d.ts",
-    "ui.css"
+    "ui.css",
+    "identity"
   ],
   "type": "module",
   "sideEffects": false,

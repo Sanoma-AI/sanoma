@@ -1,6 +1,6 @@
 {
   "name": "@sanoma-ai/workflows",
-  "version": "0.10.5",
+  "version": "0.10.6",
   "description": "Business processes as TypeScript functions, run durably on DBOS",
   "keywords": [
     "approvals",
@@ -85,6 +85,10 @@
     "./kms-secrets": {
       "types": "./dist/kms-secrets.d.ts",
       "default": "./dist/kms-secrets.js"
+    },
+    "./identity-service": {
+      "types": "./dist/identity-service.d.ts",
+      "default": "./dist/identity-service.js"
     }
   },
   "publishConfig": {

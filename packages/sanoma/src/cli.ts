@@ -25,6 +25,7 @@ Runs the repo in the working directory, from its sanoma.config.ts (after its .en
                                       template, .env, an install and a git repository
   sanoma worker                       the worker alone, for a deployment
   sanoma app                          the app alone (built with the sites), for a deployment
+  sanoma identity                     standalone runtime/provisioning identity broker from protected host configuration
   sanoma wakeup                       the wakeup service alone, on the config's database: it calls each instance
                                       registered with it at the time the instance asked (port 3100 by default)
   sanoma wakeup account <label>       mints an account of that service, printing {"id","token"} on stdout
@@ -100,6 +101,15 @@ export async function main(argv: string[]): Promise<number> {
       return keep(await load({ postgres: "find" }), (config, resolved) =>
         runApp(config, { port: port(), log, resolved }),
       );
+    }
+    case "identity": {
+      if (rest.length) throw new UsageError("usage: sanoma identity");
+      const { runIdentity } = await import("./identity.ts");
+      const service = await runIdentity();
+      console.log(`the identity service at ${service.url}; ctrl-c to stop`);
+      emit({ event: "ready", url: service.url, sites: {} });
+      onSignal(() => service.stop());
+      return new Promise<never>(() => {});
     }
     case "wakeup": {
       const [sub, label, ...extra] = rest;
