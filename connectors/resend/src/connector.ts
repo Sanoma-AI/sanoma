@@ -1,4 +1,11 @@
-import { compareDeclared, defineConnector, defineResource, dnsRecord, vendorInfo } from "@sanoma-ai/workflows";
+import {
+  compareDeclared,
+  defineConnector,
+  defineResource,
+  dnsRecord,
+  DriverError,
+  vendorInfo,
+} from "@sanoma-ai/workflows";
 import { DOMAIN_NAME } from "@sanoma-ai/workflows/shared";
 import { z } from "zod";
 
@@ -92,6 +99,24 @@ export const domain = defineResource({
   stateless: false,
 });
 
+/** A broadcast's or an email's sender: Resend requires one, and the environment gives none. */
+const sender = z
+  .string()
+  .min(1)
+  .describe("The sender, such as `Acme <news@acme.example>`, on a domain verified in Resend");
+
+/**
+ * The sender, the input's `from` (unless empty): the driver and the fake refuse a send with none,
+ * as the schema does, for a call that skipped it.
+ */
+export function senderOf(op: string, from: string | undefined): string {
+  if (from) return from;
+  throw new DriverError(
+    `resend: ${op} needs \`from\` in its input, a sender on a domain verified in Resend (for sign-in codes, the config's \`login.from\`)`,
+    { retryable: false },
+  );
+}
+
 /**
  * Resend's Broadcasts API (https://resend.com/docs/api-reference/broadcasts), its one-email send
  * (https://resend.com/docs/api-reference/emails/send-email) and its sending domains, the resource
@@ -107,7 +132,7 @@ export const resendOps = defineConnector(
         description: "Create a broadcast to an audience. Nothing is sent.",
         input: z.object({
           audience: z.string().min(1),
-          from: z.string().optional().describe("The sender, such as `Acme <news@acme.example>`, on a verified domain"),
+          from: sender,
           subject: z.string().min(1),
           html: z.string(),
         }),
@@ -128,10 +153,7 @@ export const resendOps = defineConnector(
         input: z
           .object({
             to: z.union([z.string().min(1), z.array(z.string().min(1)).min(1).max(50)]),
-            from: z
-              .string()
-              .optional()
-              .describe("The sender, such as `Acme <news@acme.example>`, on a verified domain"),
+            from: sender,
             subject: z.string().min(1),
             html: z.string().optional(),
             text: z.string().optional(),

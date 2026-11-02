@@ -29,7 +29,12 @@ export default defineWorkflow({
   ],
   run: async (ctx, { title, body, launchAt, audience }) => {
     const post = await ctx.ghost.post.create({ title, html: body, status: "draft" });
-    const email = await ctx.resend.broadcast.create({ audience, subject: title, html: body });
+    const email = await ctx.resend.broadcast.create({
+      audience,
+      from: "Acme <news@acme.example>",
+      subject: title,
+      html: body,
+    });
 
     await ctx.approval("Review launch copy", {
       approver: "marketing-lead",

@@ -15,6 +15,6 @@ Feature: Resend emails
   Scenario: Send an email to a list
     When resend.emails.send is called with
       """
-      { "to": ["ada@example.com", "grace@example.com"], "subject": "Following up", "text": "Hello" }
+      { "to": ["ada@example.com", "grace@example.com"], "from": "Acme <hello@acme.example>", "subject": "Following up", "text": "Hello" }
       """
     Then a Resend email to "grace@example.com" is sent

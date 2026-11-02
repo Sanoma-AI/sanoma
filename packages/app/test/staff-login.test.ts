@@ -79,7 +79,11 @@ describe("staffLogin", () => {
       { github: { clientId: "id", clientSecret: "secret" } },
     );
     await provider.open!({
-      resolved: { databaseUrl: "postgresql://x/y", root, ...(sender && { login: { sender: {} } }) },
+      resolved: {
+        databaseUrl: "postgresql://x/y",
+        root,
+        ...(sender && { login: { sender: {}, from: "Acme <login@acme.test>" } }),
+      },
       client,
     } as unknown as AppContext);
     return provider;
