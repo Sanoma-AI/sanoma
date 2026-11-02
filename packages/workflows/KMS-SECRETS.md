@@ -12,11 +12,10 @@ This adapter is not a production Cloud deployment. D1 implementation is tracked 
 
 ```ts
 import { KeyManagementServiceClient } from "@google-cloud/kms";
-import { KMS_SECRETS_SQL, kmsPostgresStore } from "@sanoma-ai/workflows/kms-secrets";
+import { kmsPostgresStore } from "@sanoma-ai/workflows/kms-secrets";
 
-// Privileged deployment setup, once per company database:
-await adminDb.query(KMS_SECRETS_SQL);
-// Grant runtime USAGE on sanoma_kms and SELECT/INSERT/UPDATE/DELETE on sanoma_kms.secrets.
+// Prepare the database first with sanoma.secretStore.prepare (below).
+// companyDatabase connects using the resulting restricted runtime URL.
 
 // Supply the company-scoped refreshable auth client from trusted bootstrap.
 // D1 provides cloudIdentityAuth in the separate /cloud-identity entry once released.
@@ -32,6 +31,37 @@ await store.validate("production");
 ```
 
 The caller owns client/database lifecycle, including `kms.close()`. `SANOMA_SIGNING_KEY` stays independent. This store does not use `SANOMA_SECRETS_KEY`. Workflow code cannot import this backend entry. Secret intake must remain outside durable workflow inputs/outputs.
+
+## Preparing the company database
+
+The built-in `sanoma.secretStore.prepare` operation initializes an existing, dedicated company/environment Postgres database. It installs the private KMS schema, creates a restricted runtime login, saves that login's URL in the provisioning runtime's selected secret store, and returns only `{ company, environment, role, store }`. It does not create the database or the GCP key. Use it in a provisioning workflow:
+
+```ts
+import { defineWorkflow, sanoma } from "sanoma";
+import { z } from "zod";
+
+export const prepareStorage = defineWorkflow({
+  name: "prepare-managed-storage",
+  trigger: "manual",
+  input: z.object({}),
+  uses: [sanoma.secretStore.prepare],
+  run: async (ctx) =>
+    await ctx.sanoma.secretStore.prepare({
+      company: "acme",
+      environment: "production",
+      database: { $secret: "SANOMA_DATABASE_URL_CLOUD_ACME" },
+      store: "CLOUD_ACME_DATABASE_URL",
+    }),
+});
+```
+
+The source secret names a privileged provisioning URL for that database: its login must be able to install the schema, create roles and grant database/schema privileges. Keep it in the selected secret store; neither the URL nor its password belongs in workflow input. The destination must be a different, writable secret name outside the reserved `SANOMA_` prefix. Supply `CLOUD_ACME_DATABASE_URL` to the host through a secret reference; never give the company runtime the source administrator URL. Remote connections require certificate-verified TLS (`sslmode=verify-full`); loopback databases support local development. URL query options that can override connection authority are refused.
+
+This is an `access` operation, evaluated under policy and recorded in the ledger; direct calls are refused. Its database work runs inside the trusted driver boundary. The runtime URL is saved before database mutation, so retries after an uncertain outcome retain the same password. A transaction serializes preparation and binds the database immutably to company, environment, role and a credential hash in `sanoma_kms.deployment`. A conflicting binding, destination or pre-existing unowned role is refused. This operation neither adopts existing credentials nor rotates a database password; keep its saved runtime URL for retries and recovery.
+
+Preparation removes public grants from the target database and its `public` schema. The runtime receives `CONNECT`, `CREATE` and `TEMPORARY` on its own database, plus `USAGE`/`CREATE` on `public`, so Sanoma can initialize its DBOS and application schemas. It receives only `USAGE` on `sanoma_kms` and `SELECT`/`INSERT`/`UPDATE`/`DELETE` on `sanoma_kms.secrets`. It cannot administer roles or databases, own the database or KMS schema, or access the private deployment binding. Unexpected role privilege drift is refused on retry. Use a dedicated database; preparation changes its access grants.
+
+Success verifies the stored login and its KMS-table permissions. It means **database initialized**, not **managed storage ready**: GCP key/IAM provisioning, refreshable runtime identity, host secret delivery, KMS validation and a deployed credential read/write still need their own checks. A sandbox run uses isolated in-memory bindings and makes no database connections. It cannot establish Postgres or live IAM readiness.
 
 ## One shared key versus a key per company
 

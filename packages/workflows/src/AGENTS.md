@@ -95,3 +95,5 @@ The source of `@sanoma-ai/workflows`: how connectors, workflows and policies are
 `kms-secrets.ts` is the server-only `/kms-secrets` backend: GCP envelope encryption, fixed company scope, explicit KMS/database authority and versioned CAS. Preserve authenticated company/namespace/path/version/format and keep no plaintext/data-key cache. [KMS-SECRETS.md](../KMS-SECRETS.md) owns deployment, rotation and recovery constraints.
 
 `identity-provisioning.ts` owns the separate enrollment writer: immutable deployment mappings, serialized enrollment/retirement/revocation, bounded validity and sanitized failures, with run-local sandbox authority.
+
+`storage-provisioning.ts` implements `sanoma.secretStore.prepare`: private KMS schema, restricted company/environment database login, immutable binding and stable retry credential stored by reference. It returns metadata only; sandbox preparation has no database effects. [Database preparation](../KMS-SECRETS.md#preparing-the-company-database) owns its privilege and readiness boundaries.
