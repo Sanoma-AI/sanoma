@@ -230,9 +230,11 @@ export class Instance {
     }
     const storage = this.ctx.storage;
     if (request.method === "GET") return json(200, (await storage.get(WAKE_KEY)) ?? { at: null });
+    // A start `startNow` asked for keeps its alarm, which sets the wake's once it rang.
+    const starting = Boolean(await storage.get(START_KEY));
     if (request.method === "DELETE") {
       await storage.delete(WAKE_KEY);
-      await storage.deleteAlarm();
+      if (!starting) await storage.deleteAlarm();
       return new Response(null, { status: 204 });
     }
     if (request.method !== "PUT") return problem(405, "GET, PUT or DELETE");
@@ -240,7 +242,8 @@ export class Instance {
     if (!wake) return problem(400, "the body must be { at: an ISO 8601 time }");
     // Whatever it held is replaced: a wake that rings for an older one starts a worker with nothing to do.
     await storage.put(WAKE_KEY, wake);
-    await storage.setAlarm(Date.parse(wake.at));
+    const set = starting ? await storage.getAlarm() : null;
+    if (set === null || set > Date.parse(wake.at)) await storage.setAlarm(Date.parse(wake.at));
     return new Response(null, { status: 204 });
   }
 

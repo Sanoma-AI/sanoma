@@ -337,6 +337,20 @@ describe("the Worker's object", () => {
     expect(sent.map((r) => new URL(r.url).pathname)).not.toContain("/wake");
   });
 
+  it("keeps the alarm of a start asked for when a wake is registered or cleared meanwhile", async () => {
+    const { ctx, calls, alarm } = stubCtx();
+    const object = new Instance(ctx, ENV);
+    await object.startNow();
+    const now = alarm();
+    const later = new Date(Date.now() + 60 * 60_000).toISOString();
+    await object.fetch(wake("PUT", { body: { at: later } }));
+    expect(alarm()).toBe(now);
+    await object.fetch(wake("DELETE"));
+    expect(alarm()).toBe(now);
+    await object.alarm();
+    expect(calls).toContain("start r2");
+  });
+
   it("leaves an alarm due sooner than now as it is at startNow, and never rings a wake twice", async () => {
     const { ctx, sent, alarm } = stubCtx({
       answer: (r) => new Response(null, { status: new URL(r.url).pathname === "/wake" ? 204 : 200 }),

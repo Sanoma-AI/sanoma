@@ -253,6 +253,9 @@
     "status": 202,
     "body": {
       "building": true
+    },
+    "headers": {
+      "x-sanoma-sites-bundle": "1"
     }
   },
   {
@@ -289,6 +292,9 @@
           "content": "PCFkb2N0eXBlIGh0bWw+PHRpdGxlPkFjbWU8L3RpdGxlPjxoMT5BY21lPC9oMT4K"
         }
       ]
+    },
+    "headers": {
+      "x-sanoma-sites-bundle": "1"
     }
   },
   {

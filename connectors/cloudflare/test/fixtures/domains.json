@@ -253,6 +253,9 @@
     "status": 404,
     "body": {
       "error": "no public site without a login has a domain"
+    },
+    "headers": {
+      "x-sanoma-sites-bundle": "1"
     }
   },
   {

@@ -46,6 +46,8 @@ describe("sitesBundleRoute", () => {
     expect((await ask()).status).toBe(202);
     const res = await settled();
     expect(res.status).toBe(200);
+    // Marked as the route's: a runtime without it answers without the header.
+    expect(res.headers.get("x-sanoma-sites-bundle")).toBe("1");
     expect(await res.json()).toEqual(bundle);
     expect(buildWorker).toHaveBeenCalledOnce();
     const [repo, options] = buildWorker.mock.calls[0]!;

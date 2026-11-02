@@ -32,6 +32,7 @@ import {
   readContent,
 } from "./content-files.ts";
 import type { ServerEntry } from "./context.ts";
+import { PUBLIC_FNS } from "./public-fns.ts";
 
 export { CONTENT_TYPES, type ContentProblem, contentTypes, readContent } from "./content-files.ts";
 
@@ -1026,12 +1027,9 @@ async function workerPlugins(root: string, sites: string[], options: BuildWorker
   ];
 }
 
-/** The server functions a public site's host answers (`PUBLIC_FNS` in `middleware.ts`): the Worker's, of the app's. */
-export const WORKER_FUNCTIONS: ReadonlySet<string> = new Set(["callFn", "getActor"]);
-
 /**
  * What the Worker's server bundle leaves out of the app's: the app's chrome (a public site's host
- * never draws it), the handlers of every server function but `WORKER_FUNCTIONS` (each still
+ * never draws it), the handlers of every server function but `PUBLIC_FNS` (each still
  * registered, which a public site's host refuses before its handler, as the container's does), and
  * the runtime's read of its version from a package.json beside it (inlined from the build's).
  */
@@ -1069,7 +1067,7 @@ function workerTrim(): Plugin {
             call = (call.callee as Node).object as Node;
           }
           if (call?.type !== "CallExpression" || (call.callee as { name?: string }).name !== "createServerFn") continue;
-          if (WORKER_FUNCTIONS.has(name)) continue;
+          if (PUBLIC_FNS.has(name)) continue;
           const init = declarator.init as Node;
           const args = (call.arguments as Node[]).map((arg) => code.slice(arg.start, arg.end)).join(", ");
           const refused = JSON.stringify(`${name} is not served on a public site's host`);

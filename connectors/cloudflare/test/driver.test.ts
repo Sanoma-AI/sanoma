@@ -62,6 +62,14 @@ const state = {
 /** The exchanges of `name` that match `keep`. */
 const only = (name: string, keep: (e: Exchange, i: number) => boolean) => fixture(name).filter(keep);
 const apiPath = (path: string) => `${API}${path}`;
+/** The create of the `sites` fixture up to its wait for the container, then `bundle`'s answers. */
+const sitesWith = (...bundle: Exchange[]) => [
+  ...only("sites", (e) => e.path !== "/__sanoma/sites-bundle").slice(0, 12),
+  ...bundle,
+];
+/** The header the container's bundle route marks its answers with. */
+const ROUTE = { "x-sanoma-sites-bundle": "1" };
+const withSites = { ...desired, domains: { www: "www.acme.example" } };
 const reply = (path: string, status: number, body: unknown, method = "GET"): Exchange => ({
   method,
   path,
@@ -530,14 +538,21 @@ describe.skipIf(live)("cloudflareDriver", () => {
     });
 
     it("refuses when the container could not build the sites bundle, saying why", async () => {
-      const failed = reply("/__sanoma/sites-bundle", 500, { error: "sites/www/routes/index.tsx: Unexpected token" });
-      const before = only("sites", (e) => e.path !== "/__sanoma/sites-bundle").slice(0, 12);
-      play("sites-failed", [...before, failed]);
-      await expect(
-        op("container.create", { desired: { ...desired, domains: { www: "www.acme.example" } } }),
-      ).rejects.toThrow(
-        "cloudflare: sanoma-company: its container did not give the sites bundle: sites/www/routes/index.tsx: Unexpected token",
+      const error = "sites/www/routes/index.tsx: Unexpected token";
+      play("sites-failed", sitesWith({ ...reply("/__sanoma/sites-bundle", 500, { error }), headers: ROUTE }));
+      await expect(op("container.create", { desired: withSites })).rejects.toThrow(
+        `cloudflare: sanoma-company: its container did not give the sites bundle (its sites are served from the container meanwhile): ${error}`,
       );
+    });
+
+    it("asks again while the container starts again, and leaves the Worker as deployed for a runtime without the route", async () => {
+      // The object's 503 while the container restarts; then an image from before the route, whose
+      // app sends the path to its login.
+      const restarting = reply("/__sanoma/sites-bundle", 503, { error: "the company's container did not answer" });
+      const login = { ...reply("/__sanoma/sites-bundle", 302, ""), headers: { location: "/auth/login" } };
+      play("sites-old-runtime", sitesWith(restarting, login));
+      expect(await op("container.create", { desired: withSites })).toMatchObject({ id: "company" });
+      expect(sent.filter((r) => r.method === "PUT" && r.path.endsWith("/scripts/sanoma-company"))).toHaveLength(2);
     });
 
     it("plans an update when a domain the Worker serves is not attached, so the next apply attaches it", async () => {

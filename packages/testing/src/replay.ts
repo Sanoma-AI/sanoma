@@ -9,7 +9,7 @@ export interface Exchange {
   /** The URL's path and query, decoded; the host is not compared. */
   path: string;
   status: number;
-  /** Rate-limit headers only. */
+  /** Rate-limit headers, and Sanoma's own (`x-sanoma-*`), only. */
   headers?: Record<string, string>;
   body: unknown;
 }
@@ -79,7 +79,9 @@ export function replay({ fixtures, needs, env, scrub, fill = (e) => e }: ReplayO
         if (live) {
           const res = await fetch(bypass(request));
           const text = await res.text();
-          const kept = Object.fromEntries([...res.headers].filter(([k]) => /^(ratelimit-|retry-after$)/.test(k)));
+          const kept = Object.fromEntries(
+            [...res.headers].filter(([k]) => /^(ratelimit-|retry-after$|x-sanoma-)/.test(k)),
+          );
           const headers = Object.keys(kept).length > 0 ? { headers: kept } : {};
           exchanges.push({ method: req.method, path, status: res.status, ...headers, body: parse(text) });
           // `fetch` decoded the body: the reply must no longer say it is compressed.

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { extname } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { DriverError, errorMessage } from "@sanoma-ai/workflows";
-import { SITES_BUNDLE_PATH } from "@sanoma-ai/workflows/shared";
+import { SITES_BUNDLE_HEADER, SITES_BUNDLE_PATH } from "@sanoma-ai/workflows/shared";
 import mime from "mime";
 import type { AssetFile, CloudflareApi, Upload } from "./ops.ts";
 import { SITES_MODULE, sitesRouter } from "./worker.ts";
@@ -60,8 +60,10 @@ interface Polling {
 
 /**
  * The bundle the container at `url` built, asked with the instance token until it answers it
- * (202 while it builds); undefined when it has no site to serve on the Worker (404). A failed
- * build, or a token it refuses, is a refusal.
+ * (202 while it builds, or the object's 503 while the container starts again); undefined when
+ * it has no site to serve on the Worker (404), or the runtime has no such route (an answer
+ * without `SITES_BUNDLE_HEADER`: an image from before it). A failed build, or a token it
+ * refuses, is a refusal.
  */
 export async function sitesBundle(
   cf: CloudflareApi,
@@ -78,12 +80,18 @@ export async function sitesBundle(
         method: "GET",
         headers: { authorization: `Bearer ${token}` },
       });
-      if (res.status === 200) return (await res.json()) as SitesBundle;
+      const route = res.headers.has(SITES_BUNDLE_HEADER);
+      if (route && res.status === 200) return (await res.json()) as SitesBundle;
       const body = (await res.json().catch(() => undefined)) as { error?: unknown } | undefined;
-      if (res.status === 404) return undefined;
       const said = typeof body?.error === "string" ? body.error : `${SITES_BUNDLE_PATH} answered ${res.status}`;
-      if (res.status !== 202) throw refused(`${script}: its container did not give the sites bundle: ${said}`);
-      last = "it is building the bundle";
+      if (!route && res.status !== 503) return undefined;
+      if (route && res.status === 404) return undefined;
+      if (route && res.status !== 202) {
+        throw refused(
+          `${script}: its container did not give the sites bundle (its sites are served from the container meanwhile): ${said}`,
+        );
+      }
+      last = route ? "it is building the bundle" : said;
     } catch (error) {
       if (!(error instanceof TypeError || (error instanceof Error && error.name === "TimeoutError"))) throw error;
       // No answer this time (the container stopped under it, a timeout): the next ask starts it again.

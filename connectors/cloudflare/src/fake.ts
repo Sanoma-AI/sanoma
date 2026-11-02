@@ -571,6 +571,8 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
       },
       async assetsSession(script, manifest) {
         const jwt = `session-${++state.seq}`;
+        // A state saved before the fake kept assets has none.
+        state.assets ??= {};
         const hashes = Object.fromEntries(Object.entries(manifest).map(([path, { hash }]) => [path, hash]));
         const missing = new Set(Object.values(hashes).filter((hash) => !(hash in state.assets)));
         if (!missing.size) {
@@ -585,7 +587,7 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
         if (!session) throw fail(401, 10000, "workers/assets/upload: the jwt is no open upload session's");
         for (const { hash, contentType } of files) {
           if (!session.missing.delete(hash)) throw fail(400, 10203, `workers/assets/upload: ${hash} is not asked for`);
-          state.assets[hash] = contentType;
+          (state.assets ??= {})[hash] = contentType;
         }
         if (session.missing.size) return undefined;
         sessions.delete(jwt);

@@ -2,7 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import type { IngressRoute } from "@sanoma-ai/app";
 import { errorMessage, readRootSnapshot, resolveConfig, type SanomaConfig } from "@sanoma-ai/workflows";
 import { describeConfig } from "@sanoma-ai/workflows/describe";
-import { SITES_BUNDLE_PATH } from "@sanoma-ai/workflows/shared";
+import { SITES_BUNDLE_HEADER, SITES_BUNDLE_PATH } from "@sanoma-ai/workflows/shared";
 import { siteBuild } from "./sites.ts";
 
 /** What the route builds from: the config, the checkout it was loaded from, and the host's domains. */
@@ -16,6 +16,13 @@ export interface SitesBundleOptions {
 }
 
 const digest = (text: string) => createHash("sha256").update(text).digest();
+
+/** An answer of the route, as JSON, never cached, and marked as the route's (`SITES_BUNDLE_HEADER`). */
+const answered = (status: number, body: string) =>
+  new Response(body, {
+    status,
+    headers: { "content-type": "application/json", "cache-control": "no-store", [SITES_BUNDLE_HEADER]: "1" },
+  });
 
 /**
  * `GET /__sanoma/sites-bundle` with the instance token: the bundle of the public sites the
@@ -55,15 +62,12 @@ export function sitesBundleRoute(
     path: SITES_BUNDLE_PATH,
     async handle(request) {
       if (!timingSafeEqual(digest(request.headers.get("authorization") ?? ""), expected)) {
-        return Response.json({ error: "the token is not this instance's SANOMA_WAKEUP_TOKEN" }, { status: 401 });
+        return answered(401, JSON.stringify({ error: "the token is not this instance's SANOMA_WAKEUP_TOKEN" }));
       }
       if (answer) {
         const { status, body } = answer;
         if (status === 500) answer = undefined;
-        return new Response(body, {
-          status,
-          headers: { "content-type": "application/json", "cache-control": "no-store" },
-        });
+        return answered(status, body);
       }
       building ??= build()
         .catch((err: unknown) => {
@@ -71,7 +75,7 @@ export function sitesBundleRoute(
           answer = { status: 500, body: JSON.stringify({ error: errorMessage(err) }) };
         })
         .finally(() => (building = undefined));
-      return Response.json({ building: true }, { status: 202, headers: { "cache-control": "no-store" } });
+      return answered(202, JSON.stringify({ building: true }));
     },
   };
 }

@@ -146,6 +146,8 @@ export const domainsText = (domains: Readonly<Record<string, string>>): string =
  * of its public sites that a host's Worker serves: the Cloudflare host downloads it at a deploy.
  */
 export const SITES_BUNDLE_PATH = "/__sanoma/sites-bundle";
+/** The header every answer of that route carries: a runtime without the route answers without it. */
+export const SITES_BUNDLE_HEADER = "x-sanoma-sites-bundle";
 
 /** The domains `domainsText` wrote, by site name; throws for a pair that is not `<site>=<hostname>`, or a site named twice. */
 export function domainsOf(text: string): Record<string, string> {

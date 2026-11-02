@@ -2,14 +2,13 @@ import { cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } fr
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildWorker, prerenderedPages, WORKER_FUNCTIONS, type WorkerBundle } from "@sanoma-ai/app/build";
+import { buildWorker, prerenderedPages, type WorkerBundle } from "@sanoma-ai/app/build";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { defineConfig, readRootSnapshot, resolveConfig, SanomaClient } from "@sanoma-ai/workflows";
 import { describeConfig } from "@sanoma-ai/workflows/describe";
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { unstable_startWorker } from "wrangler";
-import { PUBLIC_FNS } from "../src/middleware.ts";
 import fixture from "./fixtures/company-sites/sanoma.config.ts";
 
 // The sites bundle (`buildWorker`) of the fixture company, built and run on workerd (Miniflare)
@@ -174,6 +173,10 @@ describe("buildWorker", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("etag")).toBeTruthy();
     expect(await response.text()).toContain("Bienvenue sur le site intl");
+    // With a query, which the page may read: rendered, not the page as built.
+    const queried = await get("https://intl.example/fr?ref=mail");
+    expect(queried.headers.get("etag")).toBeNull();
+    expect(await queried.text()).toContain("Bienvenue sur le site intl");
   });
 
   it("serves the client build straight from the Worker's assets, for a page to hydrate", async () => {
@@ -210,10 +213,6 @@ describe("buildWorker", () => {
       await db.end();
     }
     expect(Number(await (await get("https://hello.example/__test/started")).text())).toBe(before + 1);
-  });
-
-  it("answers the server functions a public site's host answers, as the container does", () => {
-    expect(WORKER_FUNCTIONS).toEqual(PUBLIC_FNS);
   });
 
   it("leaves the container a site with a login, the app's paths and any other host", async () => {

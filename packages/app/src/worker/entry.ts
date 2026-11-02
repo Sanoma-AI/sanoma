@@ -188,13 +188,19 @@ export default {
     if (prerender) return render(prerender.request, env, ctx, host, prerender.site);
     const site = siteAt(request, env);
     if (!site) return new Response("Not found\n", { status: 404 });
-    const { pathname } = new URL(request.url);
-    const file =
-      request.method === "GET" || request.method === "HEAD" ? prerenderedPath(site.name, pathname) : undefined;
-    if (file && env.ASSETS) {
-      const asset = await env.ASSETS.fetch(new Request(new URL(file, request.url), request));
-      if (asset.ok) return asset;
-      await asset.body?.cancel();
+    const { pathname, search } = new URL(request.url);
+    if ((request.method === "GET" || request.method === "HEAD") && env.ASSETS) {
+      // A file of the client build at its path (a site's public files too; `/assets/*` never gets
+      // here), then the page prerendered for the path, which a query may change: rendered then.
+      const files = [
+        ...(pathname.startsWith(`${PRERENDERED}/`) ? [] : [pathname]),
+        ...(search ? [] : [prerenderedPath(site.name, pathname)].filter((file) => file !== undefined)),
+      ];
+      for (const file of files) {
+        const asset = await env.ASSETS.fetch(new Request(new URL(file, request.url), request));
+        if (asset.ok) return asset;
+        await asset.body?.cancel();
+      }
     }
     return render(request, env, ctx, host, site);
   },
