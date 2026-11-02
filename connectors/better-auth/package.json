@@ -1,6 +1,6 @@
 {
   "name": "@sanoma-ai/connector-better-auth",
-  "version": "0.1.5",
+  "version": "0.2.0",
   "description": "Better Auth for Sanoma: the visitor login of public sites (email and password, or an email code) and the staff sign-in on a host (email code, invite links, GitHub), on the company's own database",
   "keywords": [
     "auth",
