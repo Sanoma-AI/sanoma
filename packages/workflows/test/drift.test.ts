@@ -21,6 +21,7 @@ import {
   SanomaClient,
 } from "../src/index.ts";
 import { defineFake } from "../src/fake.ts";
+import { fakeMail, mailDataFile, recordsFor } from "./fakes/mail.ts";
 import { companyConfig, companyDir, companyFakes, nodeIdOf } from "./fixtures/company/fakes.ts";
 import company from "./fixtures/company/sanoma.config.ts";
 import { CALL_WORKFLOW, visitorPrincipal } from "../src/shared.ts";
@@ -287,6 +288,58 @@ describe("a drift run's record of the data files", () => {
     });
     expect(JSON.stringify(steps)).not.toContain(secret);
     expect(JSON.stringify(await app.client.ledger(runId))).not.toContain(secret);
+  });
+});
+
+describe("a drift run on a field taken from another resource's state", () => {
+  // A record set whose records come from its domain's state (`fakes/mail.ts`), both bound.
+  const root = rootWith({ "resources/mail.ts": mailDataFile });
+  writeLockfile(root, {
+    "resources/mail.ts#sending": { type: "mail.domain", id: "example.com" },
+    "resources/mail.ts#dns": { type: "mail.records", id: "example.com/mail" },
+  });
+  const fake = fakeMail();
+  const app = useApp("drift-from", () => ({ workflows: [], connectors: [fake.connector], root }));
+  beforeEach(() => {
+    fake.state.domains.set("example.com", { name: "example.com", records: recordsFor("example.com") });
+    // In another order than the domain's: the records are a set.
+    fake.state.sets.set("example.com/mail", {
+      name: "example.com/mail",
+      records: recordsFor("example.com").toReversed(),
+    });
+  });
+  const dnsOf = async () =>
+    byId(await app.client.driftReport(await app.client.drift({ startedBy: alice })))["resources/mail.ts#dns"];
+
+  it("is clean while the record set holds the records its domain asks for, in any order", async () => {
+    expect(await dnsOf()).toMatchObject({ status: "clean", fields: [] });
+  });
+
+  it("drifts when the domain asks for other records, or the set is missing one", async () => {
+    const spf = { type: "TXT" as const, name: "example.com", content: "v=spf1 -all" };
+    fake.state.domains.set("example.com", { name: "example.com", records: [...recordsFor("example.com"), spf] });
+    const changed = await dnsOf();
+    expect(changed).toMatchObject({ status: "drifted", fields: [{ path: "records" }] });
+    // Compared as the declared items are, each with every field one of them has.
+    expect(changed!.fields[0]!.desired).toContainEqual({ ...spf, priority: null });
+    expect(changed!.fields[0]!.actual).toHaveLength(2);
+
+    fake.state.domains.set("example.com", { name: "example.com", records: recordsFor("example.com") });
+    fake.state.sets.set("example.com/mail", { name: "example.com/mail", records: recordsFor("example.com").slice(1) });
+    expect(await dnsOf()).toMatchObject({ status: "drifted", fields: [{ path: "records" }] });
+  });
+
+  it("leaves the field out while the domain lists no records yet", async () => {
+    fake.state.domains.set("example.com", { name: "example.com", records: null });
+    expect(await dnsOf()).toMatchObject({ status: "clean", fields: [] });
+  });
+
+  it("leaves the field out while the domain is gone, which the domain's own row reports", async () => {
+    fake.state.domains.delete("example.com");
+    fake.state.sets.set("example.com/mail", { name: "example.com/mail", records: [] });
+    const report = await app.client.driftReport(await app.client.drift({ startedBy: alice }));
+    expect(byId(report)["resources/mail.ts#sending"]).toMatchObject({ status: "gone" });
+    expect(byId(report)["resources/mail.ts#dns"]).toMatchObject({ status: "clean", fields: [] });
   });
 });
 

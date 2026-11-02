@@ -9,6 +9,16 @@ import type {
   BroadcastsGetResponses,
   BroadcastsSendData,
   BroadcastsSendResponses,
+  DomainsCreateData,
+  DomainsCreateResponses,
+  DomainsGetData,
+  DomainsGetResponses,
+  DomainsListData,
+  DomainsListResponses,
+  DomainsRemoveData,
+  DomainsRemoveResponses,
+  DomainsVerifyData,
+  DomainsVerifyResponses,
   EmailsSendData,
   EmailsSendResponses,
 } from "./types.gen.ts";
@@ -45,6 +55,72 @@ export const emailsSend = <ThrowOnError extends boolean = true>(
       "Content-Type": "application/json",
       ...options?.headers,
     },
+  });
+
+/**
+ * Retrieve a list of domains
+ */
+export const domainsList = <ThrowOnError extends boolean = true>(
+  options?: Options<DomainsListData, ThrowOnError>,
+): RequestResult<DomainsListResponses, unknown, ThrowOnError> =>
+  (options?.client ?? client).get<DomainsListResponses, unknown, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/domains",
+    ...options,
+  });
+
+/**
+ * Create a new domain
+ */
+export const domainsCreate = <ThrowOnError extends boolean = true>(
+  options?: Options<DomainsCreateData, ThrowOnError>,
+): RequestResult<DomainsCreateResponses, unknown, ThrowOnError> =>
+  (options?.client ?? client).post<DomainsCreateResponses, unknown, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/domains",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options?.headers,
+    },
+  });
+
+/**
+ * Remove an existing domain
+ */
+export const domainsRemove = <ThrowOnError extends boolean = true>(
+  options: Options<DomainsRemoveData, ThrowOnError>,
+): RequestResult<DomainsRemoveResponses, unknown, ThrowOnError> =>
+  (options.client ?? client).delete<DomainsRemoveResponses, unknown, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/domains/{domain_id}",
+    ...options,
+  });
+
+/**
+ * Retrieve a single domain
+ */
+export const domainsGet = <ThrowOnError extends boolean = true>(
+  options: Options<DomainsGetData, ThrowOnError>,
+): RequestResult<DomainsGetResponses, unknown, ThrowOnError> =>
+  (options.client ?? client).get<DomainsGetResponses, unknown, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/domains/{domain_id}",
+    ...options,
+  });
+
+/**
+ * Verify an existing domain
+ *
+ * Triggers verification of the domain's DNS records including DKIM, SPF, and the tracking CNAME (if a tracking subdomain is configured).
+ */
+export const domainsVerify = <ThrowOnError extends boolean = true>(
+  options: Options<DomainsVerifyData, ThrowOnError>,
+): RequestResult<DomainsVerifyResponses, unknown, ThrowOnError> =>
+  (options.client ?? client).post<DomainsVerifyResponses, unknown, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/domains/{domain_id}/verify",
+    ...options,
   });
 
 /**

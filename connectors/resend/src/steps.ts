@@ -3,12 +3,14 @@ import { resendOps } from "./connector.ts";
 
 const { create, send } = resendOps.broadcast;
 const email = resendOps.emails.send;
+const domain = resendOps.domain.create;
 
 /**
  * Resend's steps for Gherkin tests: a draft broadcast before the run (named `broadcast`, so an
- * operation's own test can use `$broadcast.id`), Resend failing the next send, a broadcast the
- * run sent, found by its subject among those seeded and created, and an email the run sent to an
- * address, alone or in its list.
+ * operation's own test can use `$broadcast.id`), a sending domain before the run, created and
+ * asked to verify as apply does (named `domain`, so `$domain.id`), Resend failing the next send, a
+ * broadcast the run sent, found by its subject among those seeded and created, and an email the
+ * run sent to an address, alone or in its list.
  */
 export const resendSteps = defineSteps("resend", ({ given, then }) => {
   given("a Resend broadcast {string}", (subject: string) => ({
@@ -16,6 +18,7 @@ export const resendSteps = defineSteps("resend", ({ given, then }) => {
     input: { subject, from: "Sanoma <news@example.com>" },
     as: "broadcast",
   }));
+  given("a Resend domain {string}", (name: string) => ({ op: domain, input: { desired: { name } }, as: "domain" }));
   given("Resend fails to send once", () => ({ op: send, fault: "failNext" }));
   then("the Resend broadcast {string} is sent", (subject: string) => ({
     op: send,

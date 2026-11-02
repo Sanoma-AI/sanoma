@@ -24,9 +24,13 @@ import {
   afterCreateStuck,
   fieldPathOf,
   holderOf,
+  type Missing,
   type PlanAction,
   type Resource,
+  same,
+  type Unfilled,
   valueAt,
+  withFrom,
 } from "./resource.ts";
 import type { ResourceProblem } from "./resources.ts";
 import { type APPLY_WORKFLOW, errorMessage } from "./shared.ts";
@@ -60,13 +64,14 @@ export type ApplyInput = z.infer<typeof ApplyInput>;
 /**
  * One declared resource, or orphaned binding, by what apply does with it: `create` it (as the
  * vendor plans: `planned`, the paths `unknown` until it exists), `update` or `replace` its bound
- * object (the declared `fields` that differ, the paths that force the replace), `bind` it to an
+ * object (the declared `fields` that differ, the paths that force the replace, any `unknown` until
+ * it is done: a `from` field whose resource changes first), `bind` it to an
  * object its identity `found` or the input `given`, ask about a `gone` object or an `orphan`ed
  * binding (unless `answer`ed), or `none`.
  */
 export type PlanStep = { id: string; vendor: string; type: string; connection?: ConnectionRef } & (
   | { action: "create"; planned: Record<string, unknown>; unknown: string[] }
-  | { action: "update" | "replace"; binding: string; fields: DriftField[]; replace: string[] }
+  | { action: "update" | "replace"; binding: string; fields: DriftField[]; replace: string[]; unknown?: string[] }
   | { action: "bind"; binding: string; source: "found" | "given" }
   | { action: "gone"; binding: string; answer?: PlanAnswer }
   | { action: "orphan"; key: string; binding: string; answer?: PlanAnswer }
@@ -183,22 +188,40 @@ function inDependencyOrder<T extends { id: string; refs: Record<string, string> 
   return out;
 }
 
+/** What a run knows of the declared resources as it goes, by declared id, which `desiredOf` reads. */
+interface Known {
+  /** The lockfile's bindings, as the run has changed them so far. */
+  bindings: Bindings;
+  /** The clone URL and commit a host wanted runs. */
+  hosts: ReadonlyMap<string, { source: string; revision: string }>;
+  /** Where each host answers, as its state says. */
+  urls: ReadonlyMap<string, string>;
+  /**
+   * A resource's state as found or as its step left it, to read a `from` reference's path in;
+   * undefined while it has none known there.
+   */
+  stateOf: (named: string, from: string) => State | undefined;
+}
+
 /**
  * What a change operation is given of a declaration: its fields, where it names a resource the
  * vendor may hold by another field (`by`, as a repository's node id), that resource's binding id
- * when it has one, made in this run or before; a wakeup's `host`, the URL its host answers at
- * (`urls`, by the host's declared id) once its state says.
+ * when it has one, made in this run or before; where a `from` reference names one, that
+ * resource's state at its path, or while it has none there, `null` (`unknown`) or nothing
+ * (`drop`), as `missing` says, with those references as `unfilled`; a wakeup's `host`,
+ * the URL its host answers at (`urls`, by the host's declared id) once its state says.
  */
 function desiredOf(
   r: Declaration,
   types: ReadonlyMap<string, Resource>,
-  bindings: Bindings,
-  hosts: ReadonlyMap<string, { source: string; revision: string }>,
-  urls: ReadonlyMap<string, string>,
-): State {
+  known: Known,
+  missing: Missing | ((named: string, from: string) => Missing),
+): { desired: State; unfilled: Unfilled[] } {
+  const { bindings, hosts, urls, stateOf } = known;
   const { fields, host, wakeup } = types.get(`${r.vendor}.${r.type}`)!;
   const { references = {} } = fields;
-  const out = structuredClone(r.desired);
+  const filled = withFrom(references, r.desired, r.refs, stateOf, missing);
+  const out = filled.desired === r.desired ? structuredClone(r.desired) : filled.desired;
   for (const [at, target] of Object.entries(r.refs)) {
     const bound = bindings[target]?.id;
     const place = holderOf(out, at);
@@ -220,8 +243,15 @@ function desiredOf(
       if (place) place.holder[place.key] = value;
     }
   }
-  return out;
+  return { desired: out, unfilled: filled.unfilled };
 }
+
+/** Whether two dotted paths name the same field, or one a field inside the other. */
+const overlaps = (a: string, b: string) => a === b || a.startsWith(`${b}.`) || b.startsWith(`${a}.`);
+
+/** Why a step cannot write a field a `from` reference takes: its resource has no state, or nothing at the path. */
+const waitingFor = ({ at, named, from, stated }: Unfilled) =>
+  `its ${at} come from ${named}, ${stated ? `whose state has no ${from} yet` : "which has no state yet"}`;
 
 /** Why apply cannot `what` (create, update, delete) an object of a type. */
 const cannotChange = (type: Pick<Resource, "vendor" | "type" | "writable"> | undefined, what: string) =>
@@ -292,6 +322,9 @@ function decide(
   return result.status === "drifted" ? { step, problem: cannot("update") } : { step };
 }
 
+/** Whether apply makes a declared resource: one unbound (`absent`) or `gone`. */
+const creates = (result: DriftResult) => result.status === "absent" || result.status === "gone";
+
 /** The step a `plan` answer makes of a declared resource: a create for one unbound or gone, else an update, a replace or none. */
 function fromPlan(
   r: Declaration,
@@ -299,12 +332,21 @@ function fromPlan(
   p: { action: PlanAction; planned?: State; unknown: string[]; replace: string[] },
 ): { step?: PlanStep; problem?: ResourceProblem } {
   const head = { id: r.id, vendor: r.vendor, type: r.type };
-  const creating = result.status === "absent" || result.status === "gone";
+  const creating = creates(result);
   if (creating && p.action === "create") {
     return { step: { ...head, action: "create", planned: p.planned ?? {}, unknown: p.unknown } };
   }
   if (!creating && (p.action === "update" || p.action === "replace")) {
-    return { step: { ...head, action: p.action, binding: result.binding!, fields: result.fields, replace: p.replace } };
+    return {
+      step: {
+        ...head,
+        action: p.action,
+        binding: result.binding!,
+        fields: result.fields,
+        replace: p.replace,
+        ...(p.unknown.length && { unknown: p.unknown }),
+      },
+    };
   }
   if (!creating && p.action === "none") return { step: { ...head, action: "none", binding: result.binding! } };
   return { problem: problemOf(r.id, `the vendor plans to ${p.action} it, which apply does not do here`) };
@@ -432,9 +474,14 @@ function messageOf(step: PlanStep, before: Binding | undefined, after: Binding |
  * and right after one that changes a binding, the lockfile written and committed
  * (`steps.write`), so an object made is never left unbound. An update is given the plan's action
  * and replace (`expect`), and refuses (`plan_changed`) when the vendor now plans otherwise; a
- * reference to a resource made in this run is given its new binding, and a wakeup's `host` the
- * URL its host's state gives (`outputs(state).url`), found or made in this run. A failed step is reported
- * and the run goes on; a failure that ends the run (`isRunControlError`) ends it.
+ * reference to a resource made in this run is given its new binding, a `from` reference that
+ * resource's state at its path as an earlier step left it (planned as `null` while this apply
+ * changes it there, or a create's while it has none there, so the change is planned and approved
+ * up front, and the step planned again once the value is known: done without a write when it
+ * plans `none`, else expecting the fresh plan; a step whose resource still has none there, its
+ * step failed or not done, fails before its driver is called), and a wakeup's `host` the URL its host's state gives
+ * (`outputs(state).url`), found or made in this run. A failed step is reported and the run
+ * goes on; a failure that ends the run (`isRunControlError`) ends it.
  */
 export function applyWorkflow(
   types: ReadonlyMap<string, Resource>,
@@ -499,15 +546,21 @@ export function applyWorkflow(
           }
         }
       }
-      // Where each declared host answers, as its state says, found now or made below: a wakeup is given it.
+      // Each declared resource's state, found now or made below, for a `from` reference to it, and
+      // where each declared host answers, as its state says: a wakeup is given it.
+      const states = new Map<string, State>();
       const urls = new Map<string, string>();
-      const answersAt = (r: Declaration, state: State) => {
+      // The resources whose step to change them has started and not left a state yet.
+      const unsettled = new Set<string>();
+      const keep = (r: Declaration, state: State) => {
+        states.set(r.id, state);
+        unsettled.delete(r.id);
         const url = types.get(`${r.vendor}.${r.type}`)?.host?.outputs(state).url;
         if (url) urls.set(r.id, url);
       };
       for (const resource of resources) {
         const now = found.get(resource.id);
-        if (now && "state" in now) answersAt(resource, now.state);
+        if (now && "state" in now) keep(resource, now.state);
       }
       // A host wanted runs the commit its ref names now, resolved before planning: a merge is a change
       // to it. One bound by the input needs none.
@@ -534,32 +587,69 @@ export function applyWorkflow(
         }
       }
       const drift = new Map(compare(types, resources, found, revisions).map((result) => [result.id, result]));
-      const desired = new Map(resources.map((r) => [r.id, desiredOf(r, types, locked, hosts, urls)]));
-
+      // Each declaration's fields as planned, each after the ones it names. A `from` field whose
+      // value this apply changes is planned unknown (`null`), so the change it makes is in the plan,
+      // and the approval: its resource created or replaced, or updated where the update's plan
+      // leaves the path unknown or plans another value there. One whose resource has no state
+      // there is `null` in a create's plan, and left out of a bound object's, as drift does, and
+      // run so.
+      const desired = new Map<string, State>();
+      // For each resource a step changes: whether the change touches a path of its state.
+      const touches = new Map<string, (from: string) => boolean>();
+      // For each step, the `from` fields planned left out: run so, not waited for.
+      const dropped = new Map<string, Set<string>>();
+      // The steps planned with a `from` field `null`: planned again at their step, once known.
+      const awaited = new Set<string>();
       const planned: PlanStep[] = [];
+      const add = (step: PlanStep, after?: State) => {
+        planned.push(step);
+        const before = states.get(step.id);
+        if (runOf(step) === "create" || step.action === "replace") touches.set(step.id, () => true);
+        else if (step.action === "update")
+          touches.set(
+            step.id,
+            (from) =>
+              (step.unknown ?? []).some((path) => overlaps(path, from)) ||
+              after === undefined ||
+              !same(valueAt(after, from), valueAt(before, from)),
+          );
+      };
       for (const resource of inDependencyOrder(resources).filter((r) => wanted(r.id))) {
         const result = drift.get(resource.id)!;
+        const changesAt = (named: string, from: string) => touches.get(named)?.(from) ?? false;
+        const missing = (named: string, from: string): Missing =>
+          creates(result) || changesAt(named, from) ? "unknown" : "drop";
+        const stateOf = (named: string, from: string) => (changesAt(named, from) ? undefined : states.get(named));
+        const { desired: fields, unfilled } = desiredOf(
+          resource,
+          types,
+          { bindings: locked, hosts, urls, stateOf },
+          missing,
+        );
+        desired.set(resource.id, fields);
+        const left = unfilled.filter((u) => missing(u.named, u.from) === "drop").map((u) => u.at);
+        if (left.length) dropped.set(resource.id, new Set(left));
+        if (left.length < unfilled.length) awaited.add(resource.id);
         const unresolved = revisions.get(resource.id);
         // A host whose ref could not be resolved has no commit to run (compare says so only for one it found).
         const next =
           unresolved && "error" in unresolved && result.status !== "error"
             ? { problem: problemOf(resource.id, unresolved.error) }
-            : decide(resource, result, found.get(resource.id)!, input, desired.get(resource.id)!, types, usable);
+            : decide(resource, result, found.get(resource.id)!, input, fields, types, usable);
         if (next.ask !== undefined) {
           try {
-            const answer = fromPlan(
-              resource,
-              result,
-              await ctx[resource.vendor]![resource.type]!.plan(next.ask, { connection: resource.connection }),
-            );
-            if (answer.step) planned.push(answer.step);
+            const answered = await ctx[resource.vendor]![resource.type]!.plan(next.ask, {
+              connection: resource.connection,
+            });
+            const answer = fromPlan(resource, result, answered);
+            if (answer.step) add(answer.step, answered.planned);
             if (answer.problem) problems.push(answer.problem);
           } catch (err) {
             if (isRunControlError(err)) throw err;
             problems.push(problemOf(resource.id, `could not be planned: ${errorMessage(err)}`));
           }
         }
-        if (next.step) planned.push(next.step);
+        if (next.step) add(next.step);
         if (next.problem) problems.push(next.problem);
       }
       const orphaned = orphansOf(orphans, input, wanted, usable, types);
@@ -579,47 +669,74 @@ export function applyWorkflow(
       }
 
       const bindings: Bindings = { ...locked };
+      // A resource whose step failed or waited has no state known where its change touches it: a
+      // `from` reference there fails, never given the state before; elsewhere the state stands.
+      const settled = (named: string, from: string) =>
+        unsettled.has(named) && touches.get(named)?.(from) ? undefined : states.get(named);
+      const known: Known = { bindings, hosts, urls, stateOf: settled };
       const results: ApplyResult[] = [];
       let written = false;
       let revision: string | undefined;
       for (const step of plan.steps) {
-        const todo = runOf(step);
+        const declared = declarations.get(step.id);
+        const binding = "binding" in step ? step.binding : "";
+        const run = runOf(step);
+        const writing = run === "create" || run === "update";
+        // For a step that writes them, its fields as the run knows them now, a `from` field from
+        // its resource's state as an earlier step left it. One not known yet is left out, so a
+        // driver is never given `null`: planned unknown, the step fails, its driver not called;
+        // planned left out (its resource had no state there and no change), it runs without.
+        const filled = declared && writing ? desiredOf(declared, types, known, "drop") : undefined;
+        const unfilled = filled?.unfilled.find((u) => !dropped.get(step.id)?.has(u.at));
+        const waiting = unfilled && waitingFor(unfilled);
+        // Unsettled until the step leaves its new state (`keep`). Its URL stays: a host answers
+        // where it did until a change moves it.
+        if (writing) unsettled.add(step.id);
+        const todo = waiting === undefined ? run : "none";
         const key = keyOf(step);
         const type = `${step.vendor}.${step.type}`;
         const before = bindings[key];
-        const binding = "binding" in step ? step.binding : "";
-        const declared = declarations.get(step.id);
         const spec = types.get(type);
         let state: State | undefined;
         try {
           if (todo === "create") {
             const made = await ctx[step.vendor]![step.type]!.create(
-              {
-                desired: desiredOf(declared!, types, bindings, hosts, urls),
-              },
+              { desired: filled!.desired },
               { connection: step.connection },
             );
             bindings[key] = { type, id: made.id, ...(step.connection && { connection: step.connection }) };
             state = made.state;
           } else if (todo === "update" && (step.action === "update" || step.action === "replace")) {
-            const expect = { action: step.action, replace: step.replace };
-            const changed = await ctx[step.vendor]![step.type]!.update(
-              {
-                id: binding,
-                desired: desiredOf(declared!, types, bindings, hosts, urls),
-                expect,
-              },
-              { connection: step.connection },
-            );
-            bindings[key] = { type, id: changed.id, ...(step.connection && { connection: step.connection }) };
-            state = changed.state;
+            // A step planned with a `from` field unknown (its resource changed first) is planned again with its fields as now known: the approval covered the change in kind,
+            // and the vendor now says which. Nothing to write, it is done; else the update expects
+            // the fresh plan, an action other than an update or replace refused as changed.
+            let expect: Expect = { action: step.action, replace: step.replace };
+            let unchanged = false;
+            if (awaited.has(step.id)) {
+              const fresh = await ctx[step.vendor]![step.type]!.plan(
+                { id: binding, desired: filled!.desired },
+                { connection: step.connection },
+              );
+              unchanged = fresh.action === "none";
+              if (fresh.action === "update" || fresh.action === "replace")
+                expect = { action: fresh.action, replace: fresh.replace };
+            }
+            if (unchanged) unsettled.delete(step.id);
+            else {
+              const changed = await ctx[step.vendor]![step.type]!.update(
+                { id: binding, desired: filled!.desired, expect },
+                { connection: step.connection },
+              );
+              bindings[key] = { type, id: changed.id, ...(step.connection && { connection: step.connection }) };
+              state = changed.state;
+            }
           } else if (todo === "delete") {
             await ctx[step.vendor]![step.type]!.delete({ id: binding }, { connection: step.connection });
             delete bindings[key];
           } else if (todo === "bind")
             bindings[key] = { type, id: binding, ...(step.connection && { connection: step.connection }) };
           else if (todo === "forget") delete bindings[key];
-          if (state && declared) answersAt(declared, state);
+          if (state && declared) keep(declared, state);
           const after = bindings[key];
           if (after?.id !== before?.id) {
             const wrote = await steps.write(key, after, messageOf(step, before, after));
@@ -630,7 +747,8 @@ export function applyWorkflow(
           // id, again every few seconds until its output passes `until`; one that never does fails
           // the step, and the rest are not called. The loop `callAfterCreate` has, inline: a
           // function defined here may not close over `ctx`.
-          let stuck: string | undefined;
+          // A step waiting on a `from` reference ran as `none`, and fails here with why.
+          let stuck = waiting;
           for (const hook of todo === "create" ? (spec?.afterCreate ?? []) : []) {
             if (stuck === undefined) {
               const [vendor = "", group = "", name = ""] = hook.op.split(".");

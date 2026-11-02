@@ -116,18 +116,22 @@ describe("startWorker, resolveConfig and describeConfig", () => {
       version: expect.stringMatching(/^sanoma@[0-9a-f]{64}$/),
       queueName: "sanoma:sanoma",
     });
-    // The config's workflow, the change workflow every config has, and call for the listing of apps.
-    expect([...resolved.workflows]).toEqual([
-      ["announce", announce],
-      ["change", expect.objectContaining({ name: "change" })],
-      ["call", expect.objectContaining({ name: "call" })],
-    ]);
+    // The config's workflow, drift and apply for the resource type a connector declares
+    // (`resend.domain`), the change workflow every config has, and call for the listing of apps.
+    expect([...resolved.workflows].map(([name]) => name)).toEqual(["announce", "drift", "apply", "change", "call"]);
+    expect(resolved.workflows.get("announce")).toBe(announce);
     expect([...resolved.ops.keys()].toSorted()).toEqual([
       "bluesky.post.create",
       "ghost.post.create",
       "ghost.post.publish",
       "resend.broadcast.create",
       "resend.broadcast.send",
+      "resend.domain.create",
+      "resend.domain.delete",
+      "resend.domain.import",
+      "resend.domain.plan",
+      "resend.domain.read",
+      "resend.domain.update",
       "resend.emails.send",
       "sanoma.apps.list",
       "sanoma.change.close",

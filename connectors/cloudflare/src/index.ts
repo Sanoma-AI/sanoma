@@ -6,8 +6,9 @@ import { cloudflareSteps } from "./steps.ts";
 
 /**
  * Cloudflare: the resource types `cloudflare.container`, the company's Worker and its Container,
- * which meets the `Host` contract, and `cloudflare.alarm`, its Durable Object's alarm, which meets
- * the `Wakeup` contract (`read`, `import`, `plan`, `create`, `update`, `delete` each), and
+ * which meets the `Host` contract, `cloudflare.alarm`, its Durable Object's alarm, which meets
+ * the `Wakeup` contract, and `cloudflare.records`, a set of DNS records in one of the account's
+ * zones (`read`, `import`, `plan`, `create`, `update`, `delete` each), and
  * `cloudflare.alarm.register` (effect `write`), which the worker registers each deadline through
  * before it stops. It carries its live driver (`cloudflareDriver`), which reads its credentials
  * when called, its fake (`fakeCloudflare`), of which each sandbox run makes its own, and its steps

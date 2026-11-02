@@ -11,13 +11,18 @@ import {
   defineDriver,
   defineResource,
   defineWorkflow,
+  dnsRecord,
   memoryLedger,
   resolveConfig,
   withSetup,
 } from "../src/index.ts";
 import { VENDOR } from "../src/op.ts";
-import { DECLARED, isChangeOp, resourceTypesOf, withoutWriteOnly } from "../src/resource.ts";
+import { DECLARED, isChangeOp, resourceTypesOf, withFrom, withoutWriteOnly } from "../src/resource.ts";
 import { secret } from "../src/secret.ts";
+import { recordsFor, domain, records } from "./fakes/mail.ts";
+
+/** The messages `dnsRecord` refuses a value with. */
+const refused = (value: object) => dnsRecord.safeParse(value).error?.issues.map((issue) => issue.message);
 
 const fields = {
   immutable: ["name"],
@@ -274,6 +279,143 @@ describe("defineResource", () => {
       // @ts-expect-error a repo names no resource
       expect(() => repo({ name: site })).toThrow("acme.repo: name takes a value, not a resource (acme.repo sanoma)");
     });
+  });
+
+  describe("from references", () => {
+    // A record set whose `records` come from a sending domain's state: `fakes/mail.ts`.
+    const sending = domain({ name: "example.com" });
+
+    it("take a declared resource in place of the whole field, kept as its name, which the schema does not judge", () => {
+      const dns = records({ name: "mail", records: sending });
+      expect(dns.name).toBe("mail");
+      expect(dns.desired).toEqual({ name: "mail", records: "example.com" });
+      expect(dns.refs).toEqual({ records: "mail.domain:example.com" });
+    });
+
+    it("take a literal value too, which the schema judges", () => {
+      const given = recordsFor("example.com");
+      expect(records({ name: "mail", records: given })).toMatchObject({
+        desired: { name: "mail", records: given },
+        refs: {},
+      });
+      expect(() =>
+        // @ts-expect-error a record's type is one of TXT, MX, CNAME and CAA
+        records({ name: "mail", records: [{ type: "A", name: "example.com", content: "192.0.2.1" }] }),
+      ).toThrow("at records[0].type");
+    });
+
+    it("are refused as an item of the list, and of another type", () => {
+      // @ts-expect-error the resource stands for the whole list
+      expect(() => records({ name: "mail", records: [sending] })).toThrow(
+        "mail.records: records takes a mail.domain's records as a whole, not in a list",
+      );
+      const other = records({ name: "other", records: [] });
+      // @ts-expect-error records names a mail.domain
+      expect(() => records({ name: "mail", records: other })).toThrow(
+        "mail.records: records names a resource of type mail.domain, not mail.records (other)",
+      );
+    });
+
+    it("take their value from the state or name the resource by a field, not both", () => {
+      expect(() =>
+        defineResource({
+          ...records,
+          vendor: "mail",
+          type: "both",
+          fields: {
+            ...records.fields,
+            references: { records: { type: "mail.domain", from: "records", by: ["name"] } },
+          },
+        }),
+      ).toThrow(
+        "mail.both: the reference at records takes its value from its resource's state or names it by a field, not both",
+      );
+    });
+
+    it("are filled from the named resource's state at their path: null or left out without a value there", () => {
+      const { desired } = records({ name: "mail", records: sending });
+      const refsById = { records: "resources/mail.ts#sending" };
+      const { references } = records.fields;
+      const state = { name: "example.com", records: recordsFor("example.com") };
+      const stateOf = (id: string) => (id === refsById.records ? state : undefined);
+      const filled = withFrom(references, desired, refsById, stateOf, "unknown");
+      expect(filled).toEqual({ desired: { name: "mail", records: state.records }, unfilled: [] });
+      // A copy: the value given shares nothing with the resource's state.
+      expect(filled.desired.records).not.toBe(state.records);
+      const none = { at: "records", named: refsById.records, from: "records", stated: false };
+      expect(withFrom(references, desired, refsById, () => undefined, "unknown")).toEqual({
+        desired: { name: "mail", records: null },
+        unfilled: [none],
+      });
+      expect(withFrom(references, desired, refsById, () => undefined, "drop")).toEqual({
+        desired: { name: "mail" },
+        unfilled: [none],
+      });
+      // A state with nothing at the path is as unknown as none.
+      expect(withFrom(references, desired, refsById, () => ({ name: "example.com" }), "drop")).toEqual({
+        desired: { name: "mail" },
+        unfilled: [{ ...none, stated: true }],
+      });
+      // A declaration with no `from` reference is given back as it is.
+      expect(withFrom(references, desired, {}, stateOf, "drop").desired).toBe(desired);
+      // One with no place in the declaration to fill is unfilled, never skipped.
+      const nested = { "spec.records": { type: "mail.domain", from: "records" } };
+      expect(withFrom(nested, desired, { "spec.records": refsById.records }, stateOf, "unknown")).toEqual({
+        desired,
+        unfilled: [{ ...none, at: "spec.records", stated: true }],
+      });
+    });
+
+    it("are refused at a write-only field", () => {
+      expect(() =>
+        defineResource({
+          ...records,
+          vendor: "mail",
+          type: "secret",
+          fields: { ...records.fields, writeOnly: ["records"] },
+        }),
+      ).toThrow("mail.secret: records is write-only, so it cannot take its value from another resource's state");
+      // Nor at a field that holds one.
+      expect(() =>
+        defineResource({
+          ...records,
+          vendor: "mail",
+          type: "keyed",
+          fields: { ...records.fields, writeOnly: ["records.secret"] },
+        }),
+      ).toThrow(
+        "mail.keyed: records.secret is write-only, so records, which holds it, cannot take its value from another resource's state",
+      );
+    });
+  });
+
+  it("refuses a `from` path the named type's state has no field at, when a config is resolved", () => {
+    const typo = defineResource({
+      ...records,
+      vendor: "mail",
+      type: "typo",
+      fields: { ...records.fields, references: { records: { type: "mail.domain", from: "record" } } },
+    });
+    const mail = defineConnector("mail", { domain, typo }, { title: "Mail", package: "@sanoma-ai/testing-mail" });
+    expect(() => resolveConfig({ workflows: [], connectors: [mail] })).toThrow(
+      "mail.typo: the reference at records takes record from a mail.domain's state, which has no such field (its fields: name, records, verified)",
+    );
+  });
+
+  it("takes a DNS record as a zone holds it: its name lower case with no trailing dot, a TXT record's text unquoted", () => {
+    const record = { type: "TXT", name: "mail._domainkey.example.com", content: "p=key" } as const;
+    expect(dnsRecord.parse(record)).toEqual(record);
+    expect(refused({ ...record, name: "Mail._domainkey.example.com" })).toEqual(["a record's name is lower case"]);
+    expect(refused({ ...record, name: "mail._domainkey.example.com." })).toEqual([
+      "a record's name has no trailing dot",
+    ]);
+    expect(refused({ ...record, content: '"p=key"' })).toEqual([
+      "a TXT record's content is its text, not wrapped in quotes",
+    ]);
+    // Only a TXT record's: a CAA record's value has its quotes.
+    expect(
+      dnsRecord.safeParse({ type: "CAA", name: "example.com", content: '0 issue "letsencrypt.org"' }).success,
+    ).toBe(true);
   });
 
   it("is implemented by an ordinary driver", () => {
