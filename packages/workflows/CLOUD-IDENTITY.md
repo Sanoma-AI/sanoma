@@ -51,7 +51,27 @@ The broker login must have no writer-role membership, inherited write grants or 
 
 ### Provisioning operations
 
-The trusted control-plane config supplies `identityProvisioning`; company runtimes and the serving broker do not receive this writer. Install `CLOUD_IDENTITY_SQL` separately with administrative authority, then construct the writer over its dedicated database pool:
+The trusted control-plane config supplies `identityProvisioning` with its protected enrollment-writer URL and maximum credential validity. Company runtimes and the serving broker do not receive this writer. Install `CLOUD_IDENTITY_SQL` separately with administrative authority, then configure the control plane:
+
+```ts
+import { defineConfig } from "sanoma";
+
+export default defineConfig({
+  connectors: [], // Add the control plane's configured vendor connectors.
+  identityProvisioning: {
+    databaseUrl: process.env.SANOMA_IDENTITY_WRITE_DATABASE_URL ?? "",
+    maxValidityMs: 24 * 60 * 60 * 1000,
+  },
+});
+```
+
+The environment name above is an explicit config choice, not an automatic fallback. Supply its value through protected deployment configuration; never place the URL in source, workflow inputs/results or logs. Missing or malformed URLs are refused with a sanitized error. Remote Postgres connections require verified TLS. Each client and worker owns a separate, lazy enrollment pool and closes it on shutdown or startup failure. Config resolution and descriptions perform no database I/O and do not expose the URL. There is no fallback to the company database or broker reader.
+
+Before writes, the managed pool checks that its login has schema USAGE and SELECT, INSERT and UPDATE on both enrollment tables. It refuses schema CREATE, table DELETE, TRUNCATE, REFERENCES or TRIGGER, and superuser, create-role, create-database or bypass-RLS authority. Use a dedicated restricted login rather than a database owner; effective inherited permissions also matter.
+
+The one-day limit is illustrative; choose a validity and renewal policy for the deployment. `maxValidityMs` is required and enforced against the enrollment database clock. This configuration does not install schemas, create roles, provision IAM, deliver credentials or schedule renewal.
+
+Trusted composition that already owns a writer pool may instead supply the low-level `IdentityProvisioning` adapter:
 
 ```ts
 import { postgresIdentityProvisioning } from "@sanoma-ai/workflows/cloud-identity";
@@ -59,11 +79,11 @@ import { postgresIdentityProvisioning } from "@sanoma-ai/workflows/cloud-identit
 const identityProvisioning = postgresIdentityProvisioning(async () => enrollmentWriterPool, {
   maxValidityMs: 24 * 60 * 60 * 1000,
 });
-// Supply identityProvisioning to defineConfig in the trusted control plane.
-// Deployment composition owns the writer pool and closes it on shutdown.
+// Supply this adapter as defineConfig's identityProvisioning value.
+// Its caller owns pool shutdown, TLS and permission validation.
 ```
 
-The one-day limit is illustrative; choose a validity and renewal policy for the deployment. `maxValidityMs` is required and enforced against the enrollment database clock. The adapter does not install schemas, create roles, provision IAM, deliver credentials or schedule renewal.
+An explicitly supplied adapter stays caller-owned; Sanoma does not close it or apply the managed pool's connection and permission checks.
 
 Workflows declare the built-in `sanoma.identity.enroll`, `.retire` and `.revoke` operations in `uses`. They pass through the existing policy and ledger path; direct calls are refused. All three identify the same fixed mapping: `deployment`, `company`, `environment` and `serviceAccount`. The workflow and policy must authorize the actor against that company and environment before granting access.
 
@@ -244,7 +264,7 @@ Create the login and deliver its authentication separately. Neither serving role
 
 Audit rows contain fixed issuance metadata: result, deployment, company, environment, service account, generation and expiry. They contain no tokens, bearer hashes, authorization headers or arbitrary request fields. Audit failure prevents token delivery and returns a sanitized error; recovery never switches identities.
 
-GET or HEAD `/healthz` and the launcher's `ready` event mean the process is listening. They do **not** prove current Google issuance, continuing database/audit availability, provider renewal or managed-store readiness. Before declaring a company ready, verify its deployed runtime can write and read a credential under its own key/database identity. The two-company, preview/production, renewal, cold-start, outage and recovery checks remain #532 gates.
+The liveness route uses `/health`: [Cloud Run reserves some paths ending in `z`](https://docs.cloud.google.com/run/docs/known-issues#reserved-url-paths), so `/healthz` may be intercepted before it reaches the service. GET or HEAD `/health` and the launcher's `ready` event mean the process is listening. They do **not** prove current Google issuance, continuing database/audit availability, provider renewal or managed-store readiness. Before declaring a company ready, verify its deployed runtime can write and read a credential under its own key/database identity. The two-company, preview/production, renewal, cold-start, outage and recovery checks remain #532 gates.
 
 Trusted programmatic composition may call `startIdentityService(options)` from `@sanoma-ai/workflows/identity-service`, returning `{ url, stop }`. Its default host is loopback; the caller owns shutdown. The serving package does not load company code.
 

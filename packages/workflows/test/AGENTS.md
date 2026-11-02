@@ -73,4 +73,4 @@ Vitest tests for `@sanoma-ai/workflows`. Files that start runs need Postgres (`p
 
 `kms-secrets.test.ts` uses real isolated Postgres and a per-key GCP KMS transport/IAM model; it also checks runtime-bound intake, direct/workflow calls, restart and separate database bindings. `kms-secrets-live.test.ts` is opt-in under `SANOMA_GCP_KMS_LIVE=1`, uses synthetic values and two existing disposable keys and independently scoped identity configurations, and checks real IAM isolation. Do not claim live proof from the model tests.
 
-`identity-provisioning.test.ts` covers isolated Postgres enrollment concurrency, immutable mappings, rotation/revocation, read-only broker-role refusals, lost-response recovery and policy-controlled workflow operations with plaintext exclusion from durable history.
+`identity-provisioning.test.ts` covers isolated Postgres enrollment concurrency, immutable mappings, rotation/revocation, restricted writer and read-only broker-role refusals, lazy config/pool ownership, lost-response recovery and policy-controlled workflow operations with plaintext exclusion from durable history.

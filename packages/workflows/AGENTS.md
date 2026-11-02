@@ -44,8 +44,8 @@ This package owns workflow declarations, durable execution, policy and approval 
 
 The server-only `/identity-service` entry performs no schema installation; administrator setup owns its enrollment and audit schemas, which must never enter company `db.ts` tables. Keep runtime and provisioning issuance separate: `/token` supplies ten-minute company OAuth tokens; `/identity` supplies Google OIDC tokens for a fixed provisioning WIF subject/audience. They require separate enrollment readers, bootstraps and attached issuer accounts. `identity-broker.ts` shares request/audit checks only. Preserve evidence limits in [Cloud identity](CLOUD-IDENTITY.md).
 
+Identity enrollment uses the config's explicit `identityProvisioning`. Database configuration creates a separate lazy pool per client/worker, closed on shutdown or startup failure; explicit adapters remain caller-owned. Keep resolution/descriptions free of I/O and credentials, enforce restricted writer permissions and verified remote TLS, and never fall back to a company or broker database pool or initialize schemas. See [Cloud identity](CLOUD-IDENTITY.md#provisioning-operations).
+
 ## Checks
 
 Run `pnpm vitest run packages/workflows` with Postgres from `pnpm db:up`, plus `pnpm typecheck` for the type-level tests. Build this package with `pnpm --filter @sanoma-ai/workflows build` before building consumers.
-
-Identity enrollment uses the config’s explicit, separate `identityProvisioning` writer; never fall back to a company or broker database pool. See [Cloud identity](CLOUD-IDENTITY.md#provisioning-operations).

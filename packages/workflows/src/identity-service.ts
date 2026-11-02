@@ -139,7 +139,7 @@ export async function startIdentityService(options: IdentityServiceOptions): Pro
         res.end('{"error":"invalid_request"}');
         return;
       }
-      if (req.url === "/healthz" && (req.method === "GET" || req.method === "HEAD")) {
+      if (req.url === "/health" && (req.method === "GET" || req.method === "HEAD")) {
         res.writeHead(200, { "Content-Type": "text/plain", "Cache-Control": "no-store" });
         res.end("ok\n");
         return;
