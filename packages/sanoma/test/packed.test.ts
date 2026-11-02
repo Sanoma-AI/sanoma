@@ -155,6 +155,33 @@ describe("sanoma from packed tarballs: the dev server", () => {
     expect(stderr()).not.toContain("ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING");
   }, 60_000);
 
+  it("composes managed storage from sanoma alone without opening clients during configuration", async () => {
+    const result = await run(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `
+      import assert from "node:assert/strict";
+      import { managedKmsStore } from "sanoma/secrets";
+      const forbidden = async () => { throw new Error("configuration performed I/O"); };
+      globalThis.fetch = forbidden;
+      const store = managedKmsStore({
+        company: "acme",
+        keyName: "projects/test-project/locations/us-central1/keyRings/production/cryptoKeys/acme",
+        identity: { endpoint: "https://identity.example.test/token", credential: forbidden },
+      });
+      assert.equal(store.id, "kms-postgres");
+      const bound = store.create({ database: forbidden });
+      await bound.close();
+      console.log("managed storage configured");
+    `,
+      ],
+      { cwd: dir, env: { ...process.env, NODE_PATH: "" } },
+    );
+    expect(result.stdout.trim()).toBe("managed storage configured");
+  });
+
   it("starts the chat saying to connect a model, linking to the Anthropic connector's page, until its key is set", async () => {
     const { url } = server!;
     const html = (await (await fetch(`${url}/workflows`)).text()).replaceAll("<!-- -->", "");

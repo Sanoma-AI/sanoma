@@ -116,13 +116,19 @@ export function configuredSecrets(config: SecretConfiguration, db: () => Promise
     checkSecretConfiguration({ store });
     if (
       isSecretStoreFactory(store) ||
+      (store.close !== undefined && typeof store.close !== "function") ||
       store.id !== selected.id ||
       (Object.keys(selected.capabilities) as (keyof typeof selected.capabilities)[]).some(
         (key) => store.capabilities[key] !== selected.capabilities[key],
       )
     )
       throw new SecretStoreError("invalid_configuration");
-    return new SecretAccess({ ...config, store }, postgresSecretStore(db));
+    return new SecretAccess(
+      { ...config, store },
+      postgresSecretStore(db),
+      undefined,
+      () => store.close?.() ?? Promise.resolve(),
+    );
   } catch {
     // Config construction may otherwise leak a provider's bootstrap/database diagnostics.
     throw new SecretStoreError("invalid_configuration");

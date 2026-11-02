@@ -13,6 +13,20 @@ import {
 } from "../src/authentication.ts";
 
 describe("secret store contract", () => {
+  it("closes a runtime-owned adapter once and leaves a standalone adapter caller-owned", async () => {
+    const store = memorySecretStore();
+    const close = vi.fn<() => Promise<void>>(async () => {});
+    const adapter = { ...store, close };
+    const owned = configuredSecrets(
+      { store: { kind: "runtime", id: store.id, capabilities: store.capabilities, create: () => adapter } },
+      vi.fn<() => Promise<Db>>(),
+    );
+    await Promise.all([owned.close(), owned.close()]);
+    expect(close).toHaveBeenCalledTimes(1);
+    await configuredSecrets({ store: adapter }, vi.fn<() => Promise<Db>>()).close();
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
   it("validates factory metadata without binding or opening a database and refuses unbound use", () => {
     const store = memorySecretStore();
     const create = vi.fn<SecretStoreFactory["create"]>(() => store);

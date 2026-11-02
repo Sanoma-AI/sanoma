@@ -69,7 +69,10 @@ export interface SecretStoreFactory {
   readonly id: string;
   readonly capabilities: Readonly<SecretStoreCapabilities>;
   /** The runtime owns this connection. Never close it or retain it outside the returned adapter. */
-  create(context: { database: () => Promise<Db> }): SecretStore;
+  create(context: { database: () => Promise<Db> }): SecretStore & {
+    /** Close only clients this adapter opens lazily; never the supplied database. */
+    close?(): Promise<void>;
+  };
 }
 
 export const isSecretStoreFactory = (store: SecretStore | SecretStoreFactory): store is SecretStoreFactory =>
@@ -188,13 +191,17 @@ export class SecretAccess {
   private readonly bindings: Readonly<Record<string, SecretBinding>>;
 
   private readonly env: (name: string) => string | undefined;
+  private closing?: Promise<void>;
+  private readonly onClose?: () => Promise<void>;
 
   constructor(
     config: SecretConfiguration,
     defaultStore: SecretStore,
     env: (name: string) => string | undefined = (name) => process.env[name],
+    onClose?: () => Promise<void>,
   ) {
     this.env = env;
+    this.onClose = onClose;
     checkSecretConfiguration(config);
     const store = config.store ?? defaultStore;
     if (isSecretStoreFactory(store)) throw new SecretStoreError("invalid_configuration");
@@ -204,6 +211,13 @@ export class SecretAccess {
     this.bindings = Object.fromEntries(
       Object.entries(config.bindings ?? {}).map(([name, binding]) => [name, { ...binding }]),
     );
+  }
+
+  /** Only runtime-factory adapters are owned here; configured standalone stores remain caller-owned. */
+  close(): Promise<void> {
+    return (this.closing ??= secretStoreCall(async () => {
+      await this.onClose?.();
+    }));
   }
 
   location(name: string): SecretLocation {
