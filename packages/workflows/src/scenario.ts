@@ -517,6 +517,18 @@ function rulesOf(scope: Scope): { rules: Rule[]; parameterTypes: ParameterTypeSp
     },
     {
       kind: "when",
+      source: "{workflow} runs with exactly",
+      takes: TAKES_OBJECT,
+      read: ([name], pickle) => {
+        const { input } = workflowOf(name);
+        return {
+          workflow: name as string,
+          input: input.parse(fieldsFrom(pickle, input, inputOf(name))),
+        };
+      },
+    },
+    {
+      kind: "when",
       source: "{workflow} runs with",
       takes: TAKES_OBJECT,
       read: ([name], pickle) => {
