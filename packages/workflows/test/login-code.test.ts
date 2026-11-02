@@ -1,6 +1,9 @@
 import { resend } from "@sanoma-ai/connector-resend";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import {
+  defineConnector,
+  defineDriver,
   INVITE_SECONDS,
   LOGIN_AGENT,
   LOGIN_CODE_WORKFLOW,
@@ -8,6 +11,7 @@ import {
   resolveConfig,
   sealInvite,
   sealLoginCode,
+  withSetup,
 } from "../src/index.ts";
 import { admit, describeConfig } from "../src/describe.ts";
 import { memoryLedger } from "../src/ledger.ts";
@@ -19,6 +23,9 @@ import { ALICE, rootWith, useApp } from "./harness.ts";
 // the runtime's agent `login`, the code sealed in the run's input and the mail's body never in the
 // ledger; the sealed invite request; sign-ins and invites as ledger records; `sanoma check`'s
 // problem for a policy that holds the code.
+
+/** The address the sign-in codes are sent from. */
+const FROM = "Acme <login@acme.example>";
 
 /** The template's policy: every send waits for editor, unless editor asked, or the runtime's agent `login` does. */
 const HOLD_SENDS = (exempt: boolean) => `@id("editor-reviews")
@@ -37,7 +44,7 @@ describe("the login-code workflow", () => {
   const root = rootWith({ "policies/policy.cedar": HOLD_SENDS(true), "resources/people.ts": PEOPLE });
   const app = useApp("login-code", (v) => ({
     root,
-    login: { sender: v.connectors.find((c) => c[VENDOR].id === "resend")!.emails!.send! },
+    login: { sender: v.connectors.find((c) => c[VENDOR].id === "resend")!.emails!.send!, from: FROM },
   }));
 
   it("mails the code as the login agent, and the ledger never shows it", async () => {
@@ -48,7 +55,11 @@ describe("the login-code workflow", () => {
     );
     await app.client.result(runId);
     const [mail] = app.vendors.calls.filter((c) => c.op === "resend.emails.send");
-    expect(mail!.input).toMatchObject({ to: "alice@example.com", subject: expect.stringContaining("sign-in code") });
+    expect(mail!.input).toMatchObject({
+      from: FROM,
+      to: "alice@example.com",
+      subject: expect.stringContaining("sign-in code"),
+    });
     expect((mail!.input as { text: string }).text).toContain("123456");
     const ledger = JSON.stringify(await app.client.ledger(runId));
     expect(ledger).not.toContain("123456");
@@ -103,16 +114,16 @@ describe("the login-code workflow", () => {
 
 describe("the config's login", () => {
   const connectors = [resend];
-  const config = (files: Record<string, string>, sender: unknown = resend.emails.send) => ({
+  const config = (files: Record<string, string>, sender: unknown = resend.emails.send, from: unknown = FROM) => ({
     connectors,
     root: rootWith(files),
     ledger: memoryLedger(),
-    login: { sender } as never,
+    login: { sender, from } as never,
   });
 
   it("registers login-code and describes the sender", () => {
     const description = describeConfig(config({ "resources/people.ts": ALICE }));
-    expect(description.login).toEqual({ sender: "resend.emails.send" });
+    expect(description.login).toEqual({ sender: "resend.emails.send", from: FROM });
     expect(description.workflows.find((w) => w.name === LOGIN_CODE_WORKFLOW)?.builtin).toBe(true);
     expect(description.problems).toEqual([]);
   });
@@ -128,9 +139,43 @@ describe("the config's login", () => {
     expect(() => resolveConfig(config({}, "resend.emails.send"))).toThrow(/is not an operation/);
   });
 
+  it("takes `from` as an address, or a name and an address", () => {
+    for (const from of [FROM, "login@acme.example", "Acme Login <login@acme.example>"])
+      expect(resolveConfig(config({}, resend.emails.send, from)).login).toEqual({ sender: resend.emails.send, from });
+  });
+
+  it("refuses a missing `from`, or one that is no email address", () => {
+    const unset = { ...config({}), login: { sender: resend.emails.send } as never };
+    expect(() => resolveConfig(unset)).toThrow(/`login.from` is not set: .*from: "Acme <login@acme.example>"/);
+    for (const from of ["", 42])
+      expect(() => resolveConfig(config({}, resend.emails.send, from))).toThrow(/`login.from` is not set/);
+    for (const from of ["acme", "Acme", " login@acme.example", "<login@acme.example>", "Acme <login>", "Acme <a@b> x"])
+      expect(() => resolveConfig(config({}, resend.emails.send, from))).toThrow(
+        /`login.from`, .* is not an email address/,
+      );
+  });
+
+  it("refuses a sender whose input does not take `from`", () => {
+    const mailerOps = defineConnector("mailer", {
+      mail: {
+        send: {
+          effect: "send",
+          description: "Send one email, from the account's own address.",
+          input: z.strictObject({ to: z.string(), subject: z.string(), text: z.string() }),
+          output: z.object({ id: z.string() }),
+        },
+      },
+    });
+    const mailer = withSetup(mailerOps, {
+      driver: () => defineDriver(mailerOps, { mail: { send: async () => ({ id: "m1" }) } }),
+    });
+    expect(() =>
+      resolveConfig({ connectors: [mailer], ledger: memoryLedger(), login: { sender: mailer.mail.send, from: FROM } }),
+    ).toThrow(/mailer\.mail\.send, does not take an email as \{ from, to, subject, text \} with `login.from`/);
+  });
+
   it("refuses a company workflow named login-code", async () => {
     const { defineWorkflow } = await import("../src/index.ts");
-    const { z } = await import("zod");
     const wf = defineWorkflow({
       name: LOGIN_CODE_WORKFLOW,
       trigger: "manual",

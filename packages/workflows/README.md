@@ -145,19 +145,19 @@ A script or another service acts through an API token: `client.tokens.mint({ sub
 
 #### Signing in on a host
 
-The app on a host signs people in by an email code, an invite link, or GitHub ([the app's README](https://www.npmjs.com/package/@sanoma-ai/app#staff-sign-in-on-a-host)). The code goes out through the operation the config names as `login.sender`, a connector's send that takes `{ to, subject, text }`:
+The app on a host signs people in by an email code, an invite link, or GitHub ([the app's README](https://www.npmjs.com/package/@sanoma-ai/app#staff-sign-in-on-a-host)). The code goes out through the operation the config names as `login.sender`, a connector's send that takes `{ from, to, subject, text }`, from the address it names as `login.from` (`login@acme.example` or `Acme <login@acme.example>`), on a domain the sender's vendor has verified ([`resend.domain`](https://www.npmjs.com/package/@sanoma-ai/connector-resend#sending-domain) declares one):
 
 ```ts
 import { resend } from "@sanoma-ai/connector-resend";
 
 export default defineConfig({
   connectors: [resend],
-  login: { sender: resend.emails.send },
+  login: { sender: resend.emails.send, from: "Acme <login@acme.example>" },
   // …
 });
 ```
 
-With one, the runtime registers the built-in workflow `login-code` (so a company workflow may not be named that), which the app starts as the agent `login` with the code sealed under `SANOMA_SIGNING_KEY` together with the email it is for (`sealLoginCode(to, code)`, so a copy of a run's input mails it to nobody else); its one call mails "Your <company> sign-in code", under the policy and in the ledger like any send, the mail's `text` recorded as `<text>`. A policy that holds sends exempts it (`unless { … || principal == Sanoma::Principal::"login" }`): otherwise `describeConfig` reports a problem on `policies`, naming the policy and the fix. `resolveConfig` refuses a sender that is no connector's operation, does not send, has no driver, or takes no email. Each sign-in and each invite is a ledger record outside any run (`signin.recorded { person, method }` under `signin:<person>`, `invite.minted { person, by, expiresAt }` under `invite:<person>`), written by `client.recordSignIn(person, method)` and `client.recordInvite(person, { by, expiresAt })`; `client.lastSignIns(people)` reads when each last signed in and how. `sealInvite({ email })` seals an invite request for five minutes under `SANOMA_SIGNING_KEY` (`openInvite` opens one), which an instance holding the same key answers with a one-use invite link at `POST /auth/invite`.
+With one, the runtime registers the built-in workflow `login-code` (so a company workflow may not be named that), which the app starts as the agent `login` with the code sealed under `SANOMA_SIGNING_KEY` together with the email it is for (`sealLoginCode(to, code)`, so a copy of a run's input mails it to nobody else); its one call mails "Your <company> sign-in code", under the policy and in the ledger like any send, the mail's `text` recorded as `<text>`. A policy that holds sends exempts it (`unless { … || principal == Sanoma::Principal::"login" }`): otherwise `describeConfig` reports a problem on `policies`, naming the policy and the fix. `resolveConfig` refuses a sender that is no connector's operation, does not send, has no driver, or takes no email from `login.from`, and a `login.from` that is missing or no email address. Each sign-in and each invite is a ledger record outside any run (`signin.recorded { person, method }` under `signin:<person>`, `invite.minted { person, by, expiresAt }` under `invite:<person>`), written by `client.recordSignIn(person, method)` and `client.recordInvite(person, { by, expiresAt })`; `client.lastSignIns(people)` reads when each last signed in and how. `sealInvite({ email })` seals an invite request for five minutes under `SANOMA_SIGNING_KEY` (`openInvite` opens one), which an instance holding the same key answers with a one-use invite link at `POST /auth/invite`.
 
 ### Policies
 

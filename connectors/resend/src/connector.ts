@@ -107,7 +107,12 @@ export const resendOps = defineConnector(
         description: "Create a broadcast to an audience. Nothing is sent.",
         input: z.object({
           audience: z.string().min(1),
-          from: z.string().optional().describe("The sender, such as `Acme <news@acme.example>`, on a verified domain"),
+          from: z
+            .string()
+            .optional()
+            .describe(
+              "The sender, such as `Acme <news@acme.example>`, on a verified domain: the driver refuses a send with none",
+            ),
           subject: z.string().min(1),
           html: z.string(),
         }),
@@ -131,7 +136,9 @@ export const resendOps = defineConnector(
             from: z
               .string()
               .optional()
-              .describe("The sender, such as `Acme <news@acme.example>`, on a verified domain"),
+              .describe(
+                "The sender, such as `Acme <news@acme.example>`, on a verified domain: the driver refuses a send with none",
+              ),
             subject: z.string().min(1),
             html: z.string().optional(),
             text: z.string().optional(),
