@@ -1,10 +1,11 @@
-import { type CallContext, type Driver, DriverError, memorySecrets, type Op, type Secrets } from "@sanoma-ai/workflows";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { type CallContext, type Driver, DriverError, memorySecrets, type Secrets } from "@sanoma-ai/workflows";
+import { beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import { z } from "zod";
 import { readPins } from "@sanoma-ai/bridge";
 import { fixturesDir } from "@sanoma-ai/bridge/fake";
 import { BridgeError } from "../src/bridge.ts";
 import { resourcePath, tfConnector } from "../src/connector.ts";
+import { tfFake } from "../src/tffake.ts";
 import type { TfResourceType, TfShape } from "../src/tfschema/types.ts";
 import { changeReplay } from "./change-replay.ts";
 
@@ -55,8 +56,7 @@ describe("a writable type's change operations, over hashicorp/null's recorded pl
       "read",
       "update",
     ]);
-    // A tf type's change operations are not in its static type (that says only `read` and `import`).
-    const thing = (ops as unknown as Record<string, Record<string, Op>>).thing!;
+    const thing = ops.thing;
     expect(thing.create).toMatchObject({ effect: "write", idempotent: false });
     expect(thing.delete).toMatchObject({ effect: "write", idempotent: true });
     expect(thing.plan).toMatchObject({ effect: "read", idempotent: true });
@@ -70,6 +70,32 @@ describe("a writable type's change operations, over hashicorp/null's recorded pl
       info: { package: "@sanoma-ai/connector-nulls" },
     });
     expect(Object.keys(readOnly.resources.thing.ops).toSorted()).toEqual(["import", "read"]);
+    // @ts-expect-error A read-only provider resource exposes no mutations.
+    expect(readOnly.connector.thing.create).toBeUndefined();
+    // @ts-expect-error The resource constructor preserves the same boundary.
+    expect(readOnly.resources.thing.ops.delete).toBeUndefined();
+
+    const mixed = tfConnector({
+      vendor: "nulls",
+      provider,
+      info: { package: "@sanoma-ai/connector-nulls" },
+      types: {
+        writable: { tf: null_resource, title: "Writable", writable: true },
+        readonly: { tf: null_resource, title: "Read only", writable: false },
+        defaulted: { tf: null_resource, title: "Default" },
+      },
+    });
+    expect(mixed.connector.writable.create).toMatchObject({ effect: "write" });
+    expect(mixed.resources.writable.ops.update).toBeDefined();
+    // @ts-expect-error An explicit false keeps change operations out of the public type.
+    expect(mixed.connector.readonly.delete).toBeUndefined();
+    // @ts-expect-error Omitting writable keeps change operations out too, beside a writable sibling.
+    expect(mixed.connector.defaulted.plan).toBeUndefined();
+    const fake = tfFake(mixed);
+    expectTypeOf<Parameters<typeof fake.failNext>[0]>()
+      .extract<"nulls.writable.create">()
+      .toEqualTypeOf<"nulls.writable.create">();
+    expectTypeOf<Parameters<typeof fake.failNext>[0]>().extract<"nulls.readonly.delete">().toBeNever();
   });
 
   it("plans a create, with what is known only after it", async () => {
