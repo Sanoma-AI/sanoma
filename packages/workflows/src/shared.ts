@@ -141,6 +141,15 @@ export const domainsText = (domains: Readonly<Record<string, string>>): string =
     .map((site) => `${site}=${domains[site]}`)
     .join(",");
 
+/** Where a host with a `hostname` serves the app (`HostSpec`'s `hostname`): `https://<hostname>`. */
+export const hostnameUrl = (hostname: string): string => `https://${hostname}`;
+
+/** The site whose domain is also the app's `hostname`, compared in lower case; undefined when none is. */
+export const siteAtHostname = (hostname: string, domains: Readonly<Record<string, unknown>>): string | undefined =>
+  Object.entries(domains).find(
+    ([, domain]) => typeof domain === "string" && domain.toLowerCase() === hostname.toLowerCase(),
+  )?.[0];
+
 /** The domains `domainsText` wrote, by site name; throws for a pair that is not `<site>=<hostname>`, or a site named twice. */
 export function domainsOf(text: string): Record<string, string> {
   const domains: Record<string, string> = {};

@@ -5,7 +5,14 @@ import type {
   ResourceProblem,
   ResourceTypeEntry,
 } from "@sanoma-ai/workflows/describe";
-import { APPLY_WORKFLOW, DRIFT_WORKFLOW, exportSpan, isEnded, problemAt } from "@sanoma-ai/workflows/shared";
+import {
+  APPLY_WORKFLOW,
+  DRIFT_WORKFLOW,
+  exportSpan,
+  hostnameUrl,
+  isEnded,
+  problemAt,
+} from "@sanoma-ai/workflows/shared";
 import { type QueryClient, useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
@@ -403,7 +410,7 @@ function HostServes({ hostname }: { hostname: string | undefined }) {
   const { data, isPending } = useQuery(goLiveProgressQuery());
   if (isPending) return null;
   const host = data?.host;
-  const pending = hostname !== undefined && host?.url !== `https://${hostname}`;
+  const pending = hostname !== undefined && host?.url !== hostnameUrl(hostname);
   if (!host && !pending) return null;
   return (
     <>

@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
+import { hostnameUrl } from "@sanoma-ai/workflows/shared";
 import {
   defineConnector,
   defineDriver,
@@ -380,7 +381,7 @@ const hostType = (lifetime: HostLifetime) =>
       inputs: { source: "source", ref: "ref", secrets: "secrets", port: "port", hostname: "hostname" },
       revision: "revision",
       outputs: (state) => ({
-        url: typeof state.hostname === "string" ? `https://${state.hostname}` : String(state.url ?? ""),
+        url: typeof state.hostname === "string" ? hostnameUrl(state.hostname) : String(state.url ?? ""),
         ...(typeof state.revision === "string" && { revision: state.revision }),
         healthy: state.running === true,
       }),

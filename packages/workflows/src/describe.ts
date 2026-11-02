@@ -39,6 +39,7 @@ import {
   type PeopleResource,
   principalOf,
   problemLine,
+  siteAtHostname,
 } from "./shared.ts";
 import { readSites, type SiteEntry } from "./sites.ts";
 
@@ -388,10 +389,8 @@ function domainProblems(
       const others = `${names.length === 2 ? "both " : ""}${names.slice(0, -1).join(", ")}`;
       messages.push(`${domain} is the domain of ${others} and ${names.at(-1)}`);
     }
-    const site =
-      typeof hostname === "string" &&
-      named.find(([, value]) => (value as string).toLowerCase() === hostname.toLowerCase());
-    if (site) messages.push(`${hostname as string} is the app's hostname and the domain of ${site[0]}`);
+    const site = typeof hostname === "string" ? siteAtHostname(hostname, domains) : undefined;
+    if (site) messages.push(`${hostname as string} is the app's hostname and the domain of ${site}`);
     problems.push(...messages.map((message) => ({ ...resource.at, message })));
   }
   return problems;

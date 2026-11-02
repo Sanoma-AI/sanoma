@@ -11,7 +11,7 @@ import {
   WAKE_PATH,
   type WakeupRegistration,
 } from "@sanoma-ai/workflows";
-import { domainsOf, domainsText } from "@sanoma-ai/workflows/shared";
+import { domainsOf, domainsText, hostnameUrl, siteAtHostname } from "@sanoma-ai/workflows/shared";
 import { instanceUrl, mintInstanceToken, WAKEUP_TOKEN } from "@sanoma-ai/workflows/wakeup-service";
 import { alarm, container } from "./connector.ts";
 import { accountPinned } from "./registry.ts";
@@ -202,9 +202,9 @@ export const scriptOf = (name: string) => `sanoma-${name}`;
 /** The zone a hostname is looked up in: its last two labels (`www.acme.example` → `acme.example`). */
 export const apexOf = (hostname: string) => hostname.split(".").slice(-2).join(".");
 
-/** A plain-text binding's text, when the Worker has it. */
-const textOf = (bindings: ReadBinding[] | undefined, name: string) =>
-  bindings?.find((b) => b.type === "plain_text" && b.name === name)?.text || undefined;
+/** The Worker's plain-text bindings, by name. */
+const textOf = (bindings: ReadBinding[] | undefined) =>
+  new Map((bindings ?? []).filter((b) => b.type === "plain_text").map((b) => [b.name, b.text ?? ""]));
 
 /**
  * The hostnames the Worker's bindings say it was declared to serve (`SANOMA_DOMAINS` and
@@ -212,23 +212,27 @@ const textOf = (bindings: ReadBinding[] | undefined, name: string) =>
  * never declared is left alone.
  */
 const declaredBefore = (bindings: ReadBinding[] | undefined) => {
-  const domains = textOf(bindings, TEXT.domains);
-  const hostname = textOf(bindings, TEXT.hostname);
+  const text = textOf(bindings);
+  const domains = text.get(TEXT.domains);
+  const hostname = text.get(TEXT.hostname);
   return new Set([...(domains ? Object.values(domainsOf(domains)) : []), ...(hostname ? [hostname] : [])]);
 };
 
 /** Where the app answers: its declared hostname, else the Worker's workers.dev URL. */
-const servedAt = (hostname: string | undefined, workerUrl: string) => (hostname ? `https://${hostname}` : workerUrl);
+const servedAt = (hostname: string | null | undefined, workerUrl: string) =>
+  hostname ? hostnameUrl(hostname) : workerUrl;
 
-/** Refuses a hostname that is also a site's domain, before any request: the app and the site would share it. */
+/**
+ * Refuses a hostname that is also a site's domain, before any request: the app and the site would
+ * share it. `describeConfig` reports it at a data file's declaration; this guards a workflow's own
+ * call, which no data file declares.
+ */
 const checkHostname = (name: unknown, hostname: unknown, domains: unknown) => {
   if (typeof hostname !== "string") return;
-  const site = Object.entries((domains ?? {}) as Record<string, unknown>).find(
-    ([, domain]) => typeof domain === "string" && domain.toLowerCase() === hostname.toLowerCase(),
-  );
+  const site = siteAtHostname(hostname, (domains ?? {}) as Record<string, unknown>);
   if (site) {
     throw refused(
-      `container ${String(name)}: hostname ${hostname} is also the domain of the site ${site[0]}: the app and a site need a hostname each`,
+      `container ${String(name)}: hostname ${hostname} is also the domain of the site ${site}: the app and a site need a hostname each`,
       "invalid",
     );
   }
@@ -358,7 +362,7 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
     if (!bindings || !isOurs(bindings)) return undefined;
     const app = await cf.application(script);
     const url = await cf.workerUrl(script);
-    const text = new Map(bindings.filter((b) => b.type === "plain_text").map((b) => [b.name, b.text ?? ""]));
+    const text = textOf(bindings);
     const served = text.get(TEXT.domains);
     const declaredHostname = text.get(TEXT.hostname) || undefined;
     // The domains and the hostname it serves that are attached: one whose attach failed, or
@@ -411,7 +415,7 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
     if (!changed) return { action: "none", planned: state, ...NONE };
     // Where the app will answer: at the declared hostname, or on workers.dev without one.
     const { hostname: _, ...was } = state;
-    const url = servedAt((planned.hostname as string | null | undefined) ?? undefined, found.workerUrl);
+    const url = servedAt(planned.hostname as string | null | undefined, found.workerUrl);
     return { action: "update", planned: { ...was, ...planned, url }, ...NONE };
   };
 
