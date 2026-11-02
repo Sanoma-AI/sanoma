@@ -1,13 +1,18 @@
 import { createHash, randomUUID } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
 import { lazyPool } from "../src/db.ts";
 import { CLOUD_IDENTITY_SQL, createDeploymentCredential, postgresIdentityEnrollments } from "../src/cloud-identity.ts";
-import { postgresIdentityProvisioning, memoryIdentityProvisioning } from "../src/identity-provisioning.ts";
+import {
+  postgresIdentityProvisioning,
+  memoryIdentityProvisioning,
+  configuredIdentityProvisioning,
+} from "../src/identity-provisioning.ts";
 import { defineWorkflow, memorySecretStore, sanoma } from "../src/index.ts";
 import { z } from "zod";
-import { Pool } from "pg";
+import { Pool, escapeIdentifier, escapeLiteral } from "pg";
+import { describeConfig } from "../src/describe.ts";
 import { runtimeDriver } from "../src/runtime-ops.ts";
 import { memoryTokens } from "../src/tokens.ts";
 import { memorySecrets } from "../src/secret.ts";
@@ -17,6 +22,10 @@ const databaseUrl = testDatabaseUrl("identity_provisioning");
 const pool = lazyPool(databaseUrl, "identity-provisioning-test");
 const provision = postgresIdentityProvisioning(() => pool.db(), { maxValidityMs: 86_400_000 });
 const reader = postgresIdentityEnrollments(() => pool.db());
+const writerRole = `identity_writer_${randomUUID().replaceAll("-", "")}`;
+const writerUrl = new URL(databaseUrl);
+writerUrl.username = writerRole;
+writerUrl.password = randomUUID();
 const identity = () => ({
   deployment: randomUUID(),
   company: "company-a",
@@ -33,8 +42,77 @@ beforeAll(async () => {
   const db = await pool.db();
   await db.query("DROP SCHEMA IF EXISTS sanoma_identity CASCADE");
   await db.query(CLOUD_IDENTITY_SQL);
+  await db.query(
+    `CREATE ROLE ${escapeIdentifier(writerRole)} LOGIN PASSWORD ${escapeLiteral(writerUrl.password)} NOINHERIT`,
+  );
+  await db.query(
+    `GRANT CONNECT ON DATABASE ${escapeIdentifier(writerUrl.pathname.slice(1))} TO ${escapeIdentifier(writerRole)}`,
+  );
+  await db.query(`GRANT USAGE ON SCHEMA sanoma_identity TO ${escapeIdentifier(writerRole)}`);
+  await db.query(
+    `GRANT SELECT, INSERT, UPDATE ON sanoma_identity.deployments, sanoma_identity.credentials TO ${escapeIdentifier(writerRole)}`,
+  );
 });
-afterAll(() => pool.close());
+afterAll(async () => {
+  const db = await pool.db();
+  await db.query(`DROP OWNED BY ${escapeIdentifier(writerRole)}`);
+  await db.query(`DROP ROLE ${escapeIdentifier(writerRole)}`);
+  await pool.close();
+});
+
+describe("declarative enrollment writer", () => {
+  it("describes and closes unused config without I/O, and sanitizes invalid URLs", async () => {
+    const connect = vi.spyOn(Pool.prototype, "connect");
+    try {
+      const config = { databaseUrl: writerUrl.href, maxValidityMs: 86_400_000 };
+      expect(JSON.stringify(describeConfig({ connectors: [], identityProvisioning: config }))).not.toContain(
+        writerUrl.href,
+      );
+      await configuredIdentityProvisioning(config).close();
+      expect(connect).not.toHaveBeenCalled();
+      expect(() => configuredIdentityProvisioning({ ...config, databaseUrl: "sensitive-invalid-value" })).toThrow(
+        "Identity provisioning: invalid",
+      );
+    } finally {
+      connect.mockRestore();
+    }
+  });
+
+  it("uses a restricted writer, denies privilege drift and closes its own pool", async () => {
+    const configured = configuredIdentityProvisioning({ databaseUrl: writerUrl.href, maxValidityMs: 86_400_000 });
+    const input = enrollment();
+    try {
+      await configured.store!.enroll(input);
+      expect(await reader.active(input.hash)).toBeDefined();
+      const db = await pool.db();
+      await db.query(`REVOKE UPDATE ON sanoma_identity.credentials FROM ${escapeIdentifier(writerRole)}`);
+      try {
+        await expect(configured.store!.enroll(enrollment())).rejects.toMatchObject({ code: "invalid" });
+      } finally {
+        await db.query(`GRANT UPDATE ON sanoma_identity.credentials TO ${escapeIdentifier(writerRole)}`);
+      }
+      await configured.store!.revoke(input);
+      expect(await reader.active(input.hash)).toBeUndefined();
+    } finally {
+      await configured.close();
+    }
+    await configured.close();
+    await expect(configured.store!.enroll(enrollment())).rejects.toMatchObject({ code: "unavailable" });
+  });
+
+  it("rejects an administrator writer and leaves caller-supplied adapters owned by the caller", async () => {
+    const admin = configuredIdentityProvisioning({ databaseUrl, maxValidityMs: 86_400_000 });
+    try {
+      await expect(admin.store!.enroll(enrollment())).rejects.toMatchObject({ code: "invalid" });
+    } finally {
+      await admin.close();
+    }
+    const adapter = memoryIdentityProvisioning(),
+      close = vi.fn<() => Promise<void>>();
+    await configuredIdentityProvisioning({ ...adapter, close } as typeof adapter).close();
+    expect(close).not.toHaveBeenCalled();
+  });
+});
 
 describe("transactional enrollment authority", () => {
   it("enrolls an exact immutable mapping idempotently and rejects rebinding or hash reuse", async () => {
@@ -341,5 +419,36 @@ when { context.input.company == "company-b" };
       ),
     ).rejects.toThrow(/cannot be called directly/);
     expect(await store.read({ namespace: "default", path: "DIRECT_BOOTSTRAP" })).toBeUndefined();
+  });
+});
+
+describe("runtime-owned enrollment connection", () => {
+  const store = memorySecretStore();
+  const app = useTestApp(
+    {
+      connectors: [],
+      workflows: [enroll, revoke],
+      secrets: { store },
+      identityProvisioning: { databaseUrl: writerUrl.href, maxValidityMs: 86_400_000 },
+    },
+    { databaseUrl: testDatabaseUrl("identity_config_runtime") },
+  );
+  it("enrolls through the configured dedicated database rather than the company runtime database", async () => {
+    const input = {
+      deployment: randomUUID(),
+      company: "company-a",
+      store: "CONFIGURED_BOOTSTRAP",
+      generation: 1,
+      validUntil: new Date(Date.now() + 3_600_000).toISOString(),
+    };
+    await app.client.result(await app.client.start(enroll, input, { startedBy: "ada" }));
+    const bearer = (await store.read({ namespace: "default", path: input.store }))!.value;
+    const hash = createHash("sha256").update(bearer).digest("hex");
+    expect(await reader.active(hash)).toMatchObject({ deployment: input.deployment });
+    await app.stop();
+    const { rows } = await (
+      await pool.db()
+    ).query("SELECT count(*)::int AS count FROM pg_stat_activity WHERE usename=$1", [writerRole]);
+    expect(rows[0].count).toBe(0);
   });
 });

@@ -96,7 +96,7 @@ afterAll(async () => {
 it("serves the runtime route with read-only enrollment and append-only audit roles", async () => {
   const service = await startIdentityService(options);
   try {
-    expect((await fetch(service.url + "/healthz")).status).toBe(200);
+    expect((await fetch(service.url + "/health")).status).toBe(200);
     expect((await fetch(service.url + "/token", { method: "POST" })).status).toBe(401);
     const response = await fetch(service.url + "/token", {
       method: "POST",

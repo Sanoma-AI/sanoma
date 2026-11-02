@@ -180,6 +180,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
           () => DBOS.shutdown(),
           () => storedSecrets.close(),
           () => resolved.connections.close(),
+          () => resolved.identityProvisioning.close(),
           () => secrets.close(),
           () => resolved.connectionPool.close(),
           () => ledger.close(),
@@ -277,6 +278,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
       await Promise.all([
         storedSecrets.close(),
         resolved.connections.close(),
+        resolved.identityProvisioning.close(),
         secrets.close(),
         ledger.close(),
         resolved.dataStore?.close(),
