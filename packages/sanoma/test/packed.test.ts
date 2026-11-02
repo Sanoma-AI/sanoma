@@ -73,7 +73,7 @@ const files: Record<string, string> = {
     .replace("import hello", 'import { anthropic } from "@sanoma-ai/connector-anthropic";\nimport hello')
     .replace("connectors: []", "connectors: [anthropic]"),
   // The site's stylesheet with a plugin, as the README's recipe has it.
-  "sites/hello/style.css": `${readFileSync(join(fixture, "sites/hello/style.css"), "utf8")}@plugin "@tailwindcss/typography";\n`,
+  "sites/hello/style.css": `${readFileSync(join(fixture, "sites/hello/style.css"), "utf8")}@import "sanoma/ui.css";\n@plugin "@tailwindcss/typography";\n`,
   // Imported by the Sites panel on every page.
   "sites/hello/site.ts": `import { defineSite } from "sanoma/site";\n\nexport default defineSite({ title: "Hello desk" });\n`,
   "sites/hello/routes/run.tsx": `import { createFileRoute } from "@tanstack/react-router";
@@ -180,7 +180,10 @@ describe("sanoma from packed tarballs: the dev server", () => {
     const css = await fetch(`${url}${href}`, { headers: { accept: "text/css" } });
     expect(css.status, stderr()).toBe(200);
     // The typography plugin's class, in the site's own layer.
-    expect(await css.text()).toMatch(/@layer utilities\.hello\b[\s\S]*\.prose \{/);
+    const text = await css.text();
+    expect(text).toMatch(/@layer utilities\.hello\b[\s\S]*\.prose \{/);
+    // The kit's stylesheet, imported by the site, and its @source paths as installed from the tarballs.
+    expect(text).toContain(".bg-primary");
   }, 60_000);
 
   // The chat's third engine as a company runs it: OpenCode installed on first use under the
