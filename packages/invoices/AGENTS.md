@@ -1,6 +1,6 @@
 # invoices
 
-`@sanoma-ai/invoices`: portable invoice schemas, exact calculations and industry adapters. Read [README.md](README.md) for the input contract and rounding rules.
+`@sanoma-ai/invoices` (private): portable invoice schemas, exact calculations and industry adapters. Read [README.md](README.md) for the input contract and rounding rules.
 
 | Path                                    | Purpose                                                             |
 | --------------------------------------- | ------------------------------------------------------------------- |
