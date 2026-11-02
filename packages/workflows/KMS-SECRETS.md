@@ -12,36 +12,42 @@ This adapter is not a production Cloud deployment. D1 implementation is tracked 
 
 Privileged deployment setup installs `KMS_SECRETS_SQL` once in the company database and grants the runtime `USAGE` on `sanoma_kms` and `SELECT/INSERT/UPDATE/DELETE` on `sanoma_kms.secrets`. The store does not install its schema or grant permissions during startup.
 
-In deployment configuration, omit `database` to use the runtime's existing company database:
+In deployment configuration, `managedKmsStore` composes the runtime identity broker and KMS transport with the runtime's existing company database:
 
 ```ts
-import { KeyManagementServiceClient } from "@google-cloud/kms";
-import { defineConfig } from "@sanoma-ai/workflows";
-import { kmsPostgresStore } from "@sanoma-ai/workflows/kms-secrets";
-
-// Trusted bootstrap supplies the company-scoped, refreshable auth client.
-// cloudIdentityAuth from /cloud-identity supports the fixed runtime broker route.
-const kms = new KeyManagementServiceClient({ authClient: companyAuthClient });
+import { defineConfig } from "sanoma";
+import { managedKmsStore } from "sanoma/secrets";
 
 export default defineConfig({
   connectors: [],
   databaseUrl: companyDatabaseUrl,
   secrets: {
     namespace: "production",
-    store: kmsPostgresStore({
+    store: managedKmsStore({
       company: companyIdFromTrustedBootstrap,
       keyName: "projects/cloud-project/locations/us-central1/keyRings/production/cryptoKeys/company-id",
-      kms,
+      identity: {
+        endpoint: "https://identity.example.com/token",
+        credential: async () => readProtectedDeploymentCredential(),
+      },
     }),
   },
 });
 ```
 
-Without `database`, `kmsPostgresStore` returns a `SecretStoreFactory`: non-secret `id` and capabilities plus `create({ database })`. The runtime binds a fresh adapter to its own database connection for each access context. Reusing a configuration does not rebind an earlier instance to another database. Configuration descriptions inspect metadata without querying KMS or Postgres; startup validates the selected store. Factory construction must perform no I/O or allocate clients needing cleanup, and the returned adapter must preserve its declared ID and capabilities. A factory must be bound by the runtime before use; it cannot be passed directly to `SecretAccess` or the store conformance checker.
+The company ID, key reference, broker endpoint and credential reader come from trusted deployment bootstrap. `credential` reads the current bearer value from protected host configuration and is called again when the short-lived Google token needs renewal. It must not read that value from the store it unlocks. Optional `decryptKeyNames` allows retained company keys during replacement or backup recovery. The helper is also exported by `@sanoma-ai/workflows/kms-secrets`; `sanoma/secrets` makes it available to company repos that install only `sanoma` and their connectors.
 
-For standalone use, supply `database` explicitly to receive a `SecretStore`:
+`managedKmsStore` returns a `SecretStoreFactory`: non-secret `id` and capabilities plus `create({ database })`. The runtime binds a fresh adapter to its own database connection for each access context. Each bound managed adapter opens its SDK client lazily and owns its refreshed-token state; runtime shutdown closes that client. Reusing a configuration does not rebind an earlier instance to another database. Configuration descriptions inspect metadata without querying the broker, KMS or Postgres; startup validates the selected store.
+
+Factory construction must perform no I/O or allocate clients needing cleanup, and the returned adapter must preserve its declared ID and capabilities. An adapter that opens clients lazily may return `close()` for the runtime to call; it must never close the supplied database connection. A factory must be bound by the runtime before use; it cannot be passed directly to `SecretAccess` or the store conformance checker. A caller-supplied `SecretStore` remains caller-owned.
+
+For standalone use or an explicitly supplied KMS client, use the lower-level `kmsPostgresStore`:
 
 ```ts
+import { KeyManagementServiceClient } from "@google-cloud/kms";
+import { kmsPostgresStore } from "@sanoma-ai/workflows/kms-secrets";
+
+const kms = new KeyManagementServiceClient({ authClient: companyAuthClient });
 const store = kmsPostgresStore({
   company: companyIdFromTrustedBootstrap,
   keyName: companyKeyName,
@@ -51,7 +57,9 @@ const store = kmsPostgresStore({
 await store.validate("production");
 ```
 
-The runtime owns its database pool when `database` is omitted; an explicit database connection remains caller-owned. The caller always owns the KMS client lifecycle, including `kms.close()`. `SANOMA_SIGNING_KEY` stays independent. This store does not use `SANOMA_SECRETS_KEY`. Workflow code cannot import this backend entry. Secret intake must remain outside durable workflow inputs/outputs. Runtime binding does not establish deployed Cloud readiness; provisioning, bootstrap delivery and live company isolation remain #532 verification work.
+An explicit `database` returns a `SecretStore`; omitting it returns a factory that uses the runtime's database. In both forms of `kmsPostgresStore`, the caller owns the supplied KMS client, including `kms.close()`. An explicit database connection is also caller-owned. `managedKmsStore` supplies both the runtime binding and SDK lifecycle instead.
+
+`SANOMA_SIGNING_KEY` stays independent. This store does not use `SANOMA_SECRETS_KEY`. Workflow code cannot import either backend entry. Secret intake must remain outside durable workflow inputs/outputs. Runtime binding does not establish deployed Cloud readiness; provisioning, bootstrap delivery and live company isolation remain #532 verification work.
 
 ## One shared key versus a key per company
 

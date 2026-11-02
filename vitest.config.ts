@@ -33,6 +33,7 @@ export default defineConfig({
       { find: /^@sanoma-ai\/connector-([a-z0-9-]+)$/, replacement: src("./connectors/$1/src/index.ts") },
       { find: /^sanoma$/, replacement: src("./packages/sanoma/src/index.ts") },
       { find: /^sanoma\/resources$/, replacement: src("./packages/sanoma/src/resources.ts") },
+      { find: /^sanoma\/secrets$/, replacement: src("./packages/sanoma/src/secrets.ts") },
       { find: /^(sanoma|@sanoma-ai\/app)\/site$/, replacement: src("./packages/app/src/site.ts") },
       { find: /^sanoma\/(data|claims)$/, replacement: src("./packages/sanoma/src/$1.ts") },
       { find: /^(sanoma|@sanoma-ai\/app)\/ui$/, replacement: src("./packages/app/src/ui.ts") },
