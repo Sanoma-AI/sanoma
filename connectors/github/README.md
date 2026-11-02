@@ -90,7 +90,7 @@ All five are idempotent, so a call that fails retryably is tried again: a try af
 
 The App needs, on the accounts it is installed on: **Contents: write** (the commit), **Administration: write** (deploy keys, and generate until the narrower permission is granted), **Repository creation: write** (generate; a GitHub App permission since 2026-10-13) and **Metadata: read**. Whether an installation token may generate a repository under a personal account, not only an organization, is what #513's first step checks live.
 
-The fake answers these from `fake.app` (`fakeGithubApp`), an in-memory GitHub with its own state: installation 7 on `acme`, and the template `Sanoma-AI/company-template`. Its faults (`failNext` and the others) reach the operations through the App by their ids too.
+The fake answers these from `fake.app` (`fakeGithubApp`), an in-memory GitHub with its own state: installation 7 on the personal account `acme` (account id 7), 9 on the organization `acme-inc` (account id 9), and the template `Sanoma-AI/company-template`. Its faults (`failNext` and the others) reach the operations through the App by their ids too.
 
 ## Resource types
 
