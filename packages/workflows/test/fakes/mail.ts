@@ -115,10 +115,13 @@ export function fakeMail() {
         domain: {
           import: reader(domains),
           read: reader(domains),
-          // Its name cannot change, and its records are the vendor's, made at create.
+          // Its name cannot change, and its records are the vendor's, made at create; one that
+          // lists none yet (pending) is updated, which lists them.
           plan: async ({ id, desired }): Promise<Plan> => {
             const held = id === undefined ? undefined : domains().get(id);
             if (!desired) return { action: held ? "delete" : "none", unknown: [], replace: [] };
+            if (held?.records == null && held)
+              return { action: "update", planned: { ...held, records: null }, unknown: ["records"], replace: [] };
             if (held) return { action: "none", planned: held, unknown: [], replace: [] };
             return { action: "create", planned: { ...desired, records: null }, unknown: ["records"], replace: [] };
           },
@@ -127,8 +130,11 @@ export function fakeMail() {
             domains().set(made.name, made);
             return { id: made.name, state: made };
           },
-          // A writable type's driver has every change operation; a domain's plan never asks for this one.
-          update: async ({ id }) => ({ id, state: domains().get(id)! }),
+          update: async ({ id }) => {
+            const made = { name: id, records: recordsFor(id) };
+            domains().set(id, made);
+            return { id, state: made };
+          },
           delete: remover(domains),
         },
         records: {
@@ -140,7 +146,8 @@ export function fakeMail() {
             // A field given as `null` is known only after apply.
             const unknown = Object.keys(desired).filter((field) => desired[field] === null);
             if (!held) return { action: "create", planned: desired, unknown, replace: [] };
-            const same = JSON.stringify(desired.records) === JSON.stringify(held.records);
+            // Declared fields only: records left out (not known yet) are no change.
+            const same = !("records" in desired) || JSON.stringify(desired.records) === JSON.stringify(held.records);
             return { action: same ? "none" : "update", planned: { ...held, ...desired }, unknown, replace: [] };
           },
           create: putSet,

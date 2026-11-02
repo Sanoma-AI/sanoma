@@ -166,7 +166,7 @@ export function compare(
       const named = found.get(target);
       if (named && "state" in named) accept[at] = by.map((field) => named.state[field]).filter((v) => v != null);
     }
-    const declared = withFrom(resource.fields.references, desired, refs, stateOf, true);
+    const declared = withFrom(resource.fields.references, desired, refs, stateOf, "drop").desired;
     const fields = diffDeclared(resource, now.state, declared, accept);
     const resolved = revisions.get(id);
     if (resolved && "error" in resolved) return { ...row, status: "error", fields: [], error: resolved.error };

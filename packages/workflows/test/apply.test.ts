@@ -604,6 +604,35 @@ describe("the apply workflow on a field taken from another resource's state", ()
     expect(fake.state.sets.get("example.com/mail")?.records).toEqual(more);
   });
 
+  it("plans a bound record set without its records while its domain is gone, as drift compares it", async () => {
+    await apply();
+    fake.update(({ domains }) => domains.delete("example.com"));
+    const { runId, report } = await apply({ only: [dns] });
+    expect(report.plan.steps).toMatchObject([{ id: dns, action: "none" }]);
+    expect(resultOf(report, dns)).toMatchObject({ status: "done" });
+    const plans = ops(await app.client.ledger(runId)).filter(([op]) => op === "mail.records.plan");
+    expect(plans).toEqual([["mail.records.plan", { id: "example.com/mail", desired: { name: "example.com/mail" } }]]);
+  });
+
+  it("plans a record set again once its domain's step changed the records, and updates it in the same run", async () => {
+    await apply();
+    // The domain is pending again, its records gone, and so are the set's: planned `none` without them.
+    fake.update(({ domains, sets }) => {
+      domains.set("example.com", { name: "example.com", records: null });
+      sets.set("example.com/mail", { name: "example.com/mail", records: [] });
+    });
+    const { report } = await apply();
+    expect(actions(report)).toEqual([
+      ["mail.ts#sending", "update"],
+      ["mail.ts#dns", "none"],
+    ]);
+    expect(report.results.map((r) => [r.id, r.action, r.status])).toEqual([
+      [sending, "update", "done"],
+      [dns, "update", "done"],
+    ]);
+    expect(fake.state.sets.get("example.com/mail")?.records).toEqual(recordsFor("example.com"));
+  });
+
   it("fails the record set's step before its driver is called while the domain lists no records yet", async () => {
     fake.update(({ domains }) => domains.set("example.com", { name: "example.com", records: null }));
     const { report } = await apply();

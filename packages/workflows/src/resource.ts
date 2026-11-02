@@ -42,8 +42,12 @@ export interface FieldReference {
    * state at this path, as a whole (a list or an object), read in the same run or made by an
    * earlier step of it (`records: mail` takes a `resend.domain`'s `dns_records`). A data file may
    * give a literal value here instead. `desired` holds the resource's `name` until then, which the
-   * schema does not judge; a plan made before the resource has a state is given `null`, and drift
-   * leaves the field out while the resource is absent, gone or unreadable.
+   * schema does not judge. Where that resource has no state yet, or nothing at the path, a plan of
+   * a create is given `null` there (known after apply: the type's `plan` must accept it and report
+   * the path in `unknown`), a plan of a bound object leaves the field out, a step that would write
+   * it fails before its driver is called, and drift leaves it out. Not on a write-only field
+   * (refused). Not yet on a bridge-backed type (`tfConnector`): an OpenTofu provider's plan reads
+   * `null` as unset, not as known after apply.
    */
   readonly from?: string;
 }
@@ -500,30 +504,48 @@ export const fromRefs = (references: References | undefined, refs: Readonly<Reco
     return from === undefined ? [] : [{ at, named, from }];
   });
 
+/** A `from` reference `withFrom` could not fill: the resource it names has no state, or nothing at its path. */
+export interface Unfilled {
+  at: string;
+  named: string;
+  from: string;
+  /** True when the resource has a state, with nothing at the path. */
+  stated: boolean;
+}
+
 /**
  * `desired` with each field a `from` reference names given the state of the resource it names
- * at that path, `stateOf` that resource by what `refs` holds there: `null` where it has no state
- * (or none there), or with `drop` the field left out. Unchanged when there is no such field.
+ * at that path (a copy), `stateOf` that resource by what `refs` holds there; and the references it
+ * could not fill, where that resource has no state or nothing there, each such field `null`
+ * (`unknown`, a value known after apply) or left out (`drop`). `desired` itself when there is no
+ * such field.
  */
 export function withFrom(
   references: References | undefined,
   desired: State,
   refs: Readonly<Record<string, string>>,
   stateOf: (named: string) => State | undefined,
-  drop = false,
-): State {
+  missing: "unknown" | "drop",
+): { desired: State; unfilled: Unfilled[] } {
   const taken = fromRefs(references, refs);
-  if (!taken.length) return desired;
+  if (!taken.length) return { desired, unfilled: [] };
   const out = structuredClone(desired);
+  const unfilled: Unfilled[] = [];
   for (const { at, named, from } of taken) {
     const place = holderOf(out, at);
     if (!place) continue;
     const state = stateOf(named);
-    if (state === undefined && drop) delete place.holder[place.key];
-    // A copy: what a driver is given never shares an object with the resource's state.
-    else place.holder[place.key] = structuredClone((state && valueAt(state, from)) ?? null);
+    const value = state === undefined ? undefined : valueAt(state, from);
+    if (value != null) {
+      // A copy: what a driver is given never shares an object with the resource's state.
+      place.holder[place.key] = structuredClone(value);
+      continue;
+    }
+    unfilled.push({ at, named, from, stated: state !== undefined });
+    if (missing === "drop") delete place.holder[place.key];
+    else place.holder[place.key] = null;
   }
-  return out;
+  return { desired: out, unfilled };
 }
 
 /** A field's dotted path as `fields` names it, without a list item's index: `teams.0` is `teams`. */
@@ -722,13 +744,16 @@ export function defineResource<
   const named = new Set(identity?.match(/[A-Za-z_][\w.]*/g));
   const owned = new Set(fields.vendorOwned.filter((path) => !named.has(path)));
   const references: References = fields.references ?? {};
+  const writeOnly = new Set(fields.writeOnly);
   for (const [path, ref] of Object.entries(references)) {
     if (ref.from !== undefined && ref.by !== undefined)
       throw new Error(
         `${what}: the reference at ${path} takes its value from its resource's state or names it by a field, not both`,
       );
+    // A write-only field holds secret markers only, never a value from another resource's state.
+    if (ref.from !== undefined && underAny(path, writeOnly))
+      throw new Error(`${what}: ${path} is write-only, so it cannot take its value from another resource's state`);
   }
-  const writeOnly = new Set(fields.writeOnly);
   const declare = (
     given: Declaring<z.input<S>, R>,
     options?: { connection?: ConnectionRef },

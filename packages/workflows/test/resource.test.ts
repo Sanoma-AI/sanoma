@@ -328,17 +328,43 @@ describe("defineResource", () => {
       );
     });
 
-    it("are filled from the named resource's state at their path: null without one, or left out", () => {
+    it("are filled from the named resource's state at their path: null or left out without a value there", () => {
       const { desired } = records({ name: "mail", records: sending });
       const refsById = { records: "resources/mail.ts#sending" };
       const { references } = records.fields;
       const state = { name: "example.com", records: recordsFor("example.com") };
       const stateOf = (id: string) => (id === refsById.records ? state : undefined);
-      expect(withFrom(references, desired, refsById, stateOf)).toEqual({ name: "mail", records: state.records });
-      expect(withFrom(references, desired, refsById, () => undefined)).toEqual({ name: "mail", records: null });
-      expect(withFrom(references, desired, refsById, () => undefined, true)).toEqual({ name: "mail" });
+      const filled = withFrom(references, desired, refsById, stateOf, "unknown");
+      expect(filled).toEqual({ desired: { name: "mail", records: state.records }, unfilled: [] });
+      // A copy: the value given shares nothing with the resource's state.
+      expect(filled.desired.records).not.toBe(state.records);
+      const none = { at: "records", named: refsById.records, from: "records", stated: false };
+      expect(withFrom(references, desired, refsById, () => undefined, "unknown")).toEqual({
+        desired: { name: "mail", records: null },
+        unfilled: [none],
+      });
+      expect(withFrom(references, desired, refsById, () => undefined, "drop")).toEqual({
+        desired: { name: "mail" },
+        unfilled: [none],
+      });
+      // A state with nothing at the path is as unknown as none.
+      expect(withFrom(references, desired, refsById, () => ({ name: "example.com" }), "drop")).toEqual({
+        desired: { name: "mail" },
+        unfilled: [{ ...none, stated: true }],
+      });
       // A declaration with no `from` reference is given back as it is.
-      expect(withFrom(references, desired, {}, stateOf)).toBe(desired);
+      expect(withFrom(references, desired, {}, stateOf, "drop").desired).toBe(desired);
+    });
+
+    it("are refused at a write-only field", () => {
+      expect(() =>
+        defineResource({
+          ...records,
+          vendor: "mail",
+          type: "secret",
+          fields: { ...records.fields, writeOnly: ["records"] },
+        }),
+      ).toThrow("mail.secret: records is write-only, so it cannot take its value from another resource's state");
     });
   });
 

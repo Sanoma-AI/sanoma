@@ -329,6 +329,11 @@ describe("a drift run on a field taken from another resource's state", () => {
     expect(await dnsOf()).toMatchObject({ status: "drifted", fields: [{ path: "records" }] });
   });
 
+  it("leaves the field out while the domain lists no records yet", async () => {
+    fake.state.domains.set("example.com", { name: "example.com", records: null });
+    expect(await dnsOf()).toMatchObject({ status: "clean", fields: [] });
+  });
+
   it("leaves the field out while the domain is gone, which the domain's own row reports", async () => {
     fake.state.domains.delete("example.com");
     fake.state.sets.set("example.com/mail", { name: "example.com/mail", records: [] });
