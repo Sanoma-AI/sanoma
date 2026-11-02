@@ -55,7 +55,7 @@ import {
 import { type CedarPolicySource, policyAt } from "./cedar.ts";
 import type { Policy } from "./policy.ts";
 import { checkFromRefs, type Resource, resourceTypesOf, withoutWriteOnly } from "./resource.ts";
-import { CODE_MAIL, loginCodeWorkflow } from "./login-code.ts";
+import { codeMail, loginCodeWorkflow } from "./login-code.ts";
 import {
   APPLY_WORKFLOW,
   BUILT_IN_WORKFLOWS,
@@ -72,7 +72,7 @@ import type { Steps } from "./steps.ts";
 import { checkSchedule } from "./schedules.ts";
 import { changeCodeOf, computeVersion } from "./version.ts";
 import type { DeclaredResource, ResourceProblem } from "./resources.ts";
-import { checkWakeupOps, type DeclaredWakeup, type EnvWakeup, HOST_URL } from "./wakeup.ts";
+import { checkWakeupOps, type DeclaredWakeup, type EnvWakeup, HOST_URL, keepsInput } from "./wakeup.ts";
 import { instanceUrl, WAKEUP_TOKEN } from "./wakeup-service.ts";
 import { sanomaWakeupDriver, wakeupSteps } from "./wakeup-driver.ts";
 import { wakeupOps } from "./wakeup-type.ts";
@@ -456,7 +456,8 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
 const NAMED = /^[^<>\r\n]*<([^<>]+)>$/;
 
 /** Whether `from` is an email address, bare or after a name: the address as `z.email()` takes it, the vendor having the last word. */
-const isSender = (from: string) => z.email().safeParse(NAMED.exec(from)?.[1] ?? from).success;
+const EMAIL = z.email();
+const isSender = (from: string) => EMAIL.safeParse(NAMED.exec(from)?.[1] ?? from).success;
 
 /**
  * The config's `login`, as the config's operations have it: refused unless `sender` is an
@@ -483,9 +484,8 @@ function checkLogin(login: unknown, ops: ReadonlyMap<string, Op>, drivers: Reado
     throw new Error(
       `The config's \`login.from\`, ${JSON.stringify(from)}, is not an email address: write \`login@acme.example\` or \`Acme <login@acme.example>\`, ${where}`,
     );
-  // A sender that drops `from` (a plain object without it) would send from its vendor's default.
-  const parsed = op.input.safeParse({ ...CODE_MAIL, from });
-  if (!parsed.success || (parsed.data as { from?: unknown } | null)?.from !== from)
+  // One that drops `from` (a plain object without it) would send from its vendor's default.
+  if (!keepsInput(op, codeMail(from)))
     throw new Error(
       `The config's \`login.sender\`, ${op.id}, does not take an email as { from, to, subject, text } with \`login.from\`: ${fix}`,
     );

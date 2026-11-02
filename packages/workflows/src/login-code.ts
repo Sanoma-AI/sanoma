@@ -17,11 +17,13 @@ type OpCall = (input: unknown) => Promise<unknown>;
 /** The workflow's input: to whom, and the code, sealed. */
 const LoginCodeInput = z.object({ to: z.string().min(1), code: z.string().min(1) });
 
-/**
- * What a sign-in code is sent as, for checks before any is, with the config's `login.from` as its
- * `from`: a sender must take it, and the policy is asked about it.
- */
-export const CODE_MAIL = { to: "person@example.com", subject: "Your sign-in code", text: "<text>" };
+/** What a sign-in code is sent as, from `from`, for checks before any is: a sender must take it, and the policy is asked about it. */
+export const codeMail = (from: string) => ({
+  from,
+  to: "person@example.com",
+  subject: "Your sign-in code",
+  text: "<text>",
+});
 
 /** The mail's text: the code, what it is for, and how long it lasts; nothing else, and no link. */
 const textOf = (company: string, code: string) =>

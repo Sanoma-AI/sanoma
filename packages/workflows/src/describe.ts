@@ -18,7 +18,7 @@ import {
 } from "./description.ts";
 import { isDirect } from "./direct.ts";
 import { type CredentialStatus, credentialsOf } from "./env.ts";
-import { CODE_MAIL } from "./login-code.ts";
+import { codeMail } from "./login-code.ts";
 import { lintWorkflow } from "./lint.ts";
 import { fresh, stampOf, stampsOf } from "./load.ts";
 import { LOCKFILE } from "./lockfile.ts";
@@ -317,7 +317,7 @@ function loginProblems(resolved: ResolvedConfig, people: readonly PeopleResource
   const { sender, from } = resolved.login;
   const agent = principalOf(LOGIN_AGENT, people)!;
   const run = { id: "check", workflow: LOGIN_CODE_WORKFLOW, approvals: [] };
-  const decision = decideCall(resolved.policy, sender, { ...CODE_MAIL, from }, agent, run);
+  const decision = decideCall(resolved.policy, sender, codeMail(from), agent, run);
   if (decision.kind === "allow") return [];
   const does = decision.kind === "deny" ? "denies" : "holds";
   const by = decision.reasons?.length ? ` (${decision.reasons.join(", ")})` : "";

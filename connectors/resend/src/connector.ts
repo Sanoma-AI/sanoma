@@ -92,6 +92,14 @@ export const domain = defineResource({
   stateless: false,
 });
 
+/** A broadcast's or an email's sender: optional in the input, but the driver refuses a send with none. */
+const sender = z
+  .string()
+  .optional()
+  .describe(
+    "The sender, such as `Acme <news@acme.example>`, on a verified domain: the driver refuses a send with none",
+  );
+
 /**
  * Resend's Broadcasts API (https://resend.com/docs/api-reference/broadcasts), its one-email send
  * (https://resend.com/docs/api-reference/emails/send-email) and its sending domains, the resource
@@ -107,12 +115,7 @@ export const resendOps = defineConnector(
         description: "Create a broadcast to an audience. Nothing is sent.",
         input: z.object({
           audience: z.string().min(1),
-          from: z
-            .string()
-            .optional()
-            .describe(
-              "The sender, such as `Acme <news@acme.example>`, on a verified domain: the driver refuses a send with none",
-            ),
+          from: sender,
           subject: z.string().min(1),
           html: z.string(),
         }),
@@ -133,12 +136,7 @@ export const resendOps = defineConnector(
         input: z
           .object({
             to: z.union([z.string().min(1), z.array(z.string().min(1)).min(1).max(50)]),
-            from: z
-              .string()
-              .optional()
-              .describe(
-                "The sender, such as `Acme <news@acme.example>`, on a verified domain: the driver refuses a send with none",
-              ),
+            from: sender,
             subject: z.string().min(1),
             html: z.string().optional(),
             text: z.string().optional(),

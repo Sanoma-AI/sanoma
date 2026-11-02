@@ -112,9 +112,9 @@ const SAMPLE: WakeupRegistration = { at: new Date(0).toISOString() };
 
 /**
  * True when `op`'s input takes `sample` and keeps each of its fields: one that strips a field
- * takes none of it. A wakeup's `register` is checked with it.
+ * takes none of it. A wakeup's `register` and the config's `login.sender` are checked with it.
  */
-function keepsInput(op: Op, sample: Record<string, unknown>): boolean {
+export function keepsInput(op: Op, sample: Record<string, unknown>): boolean {
   try {
     const parsed = op.input.safeParse(sample);
     const data = parsed.data as Record<string, unknown> | undefined;
