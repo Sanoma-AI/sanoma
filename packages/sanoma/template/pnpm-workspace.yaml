@@ -2,8 +2,11 @@
 minimumReleaseAgeExclude:
   - sanoma
   - "@sanoma-ai/*"
-# pnpm 11 stops an install on a dependency's build script it was not told about: these two come
-# with the app's Pi agent (its model providers) and are not needed.
+# pnpm 11 stops an install on a dependency's build script it was not told about: the first two come
+# with the app's Pi agent (its model providers), the others with its Worker build for the Cloudflare
+# host (their binaries come as platform packages), and none is needed.
 allowBuilds:
   "@google/genai": false
   protobufjs: false
+  esbuild: false
+  workerd: false
