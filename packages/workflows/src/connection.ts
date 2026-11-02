@@ -300,6 +300,11 @@ export class ConnectionRegistry {
     this.secrets = secrets;
   }
 
+  /** Release runtime-owned storage clients; the caller owns the database connection. */
+  async close(): Promise<void> {
+    await this.secrets?.close();
+  }
+
   /** A direct metadata write uses the same transaction as its default ledger record. */
   onDatabase(db: Db): ConnectionRegistry {
     return new ConnectionRegistry(this.catalog, async () => db, this.secrets);

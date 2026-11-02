@@ -60,6 +60,10 @@
       "types": "./dist/data.d.ts",
       "default": "./dist/data.js"
     },
+    "./secrets": {
+      "types": "./dist/secrets.d.ts",
+      "default": "./dist/secrets.js"
+    },
     "./claims": {
       "types": "./dist/claims.d.ts",
       "default": "./dist/claims.js"

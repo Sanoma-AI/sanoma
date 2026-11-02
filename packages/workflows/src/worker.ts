@@ -130,6 +130,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
   // The config's own, or a Postgres store made for this worker, which `stop` then closes.
   const ledger = ownedLedger(resolved);
   const secrets = lazyPool(resolved.databaseUrl, "secrets");
+  const storedSecrets = configuredSecrets(resolved.secrets, () => secrets.db());
   let stopRule: { close(): void } | undefined;
   let stopping: Promise<void> | undefined;
   const horizonMs = options.idleHorizonMs ?? 60_000;
@@ -148,7 +149,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     policy: resolved.policy,
     ...(resolved.root !== undefined && { root: resolved.root }),
     ledger: ledger.store,
-    secrets: configuredSecrets(resolved.secrets, () => secrets.db()),
+    secrets: storedSecrets,
     workflows: resolved.workflows,
     outlines: new Map([...resolved.workflows].map(([name, wf]) => [name, outlineOf(wf)])),
     // `registered` is filled below, before any run starts: every name of this config's is registered then.
@@ -177,6 +178,8 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
         let failed: { error: unknown } | undefined;
         for (const close of [
           () => DBOS.shutdown(),
+          () => storedSecrets.close(),
+          () => resolved.connections.close(),
           () => secrets.close(),
           () => resolved.connectionPool.close(),
           () => ledger.close(),
@@ -197,7 +200,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
   const previous = current;
   let launched = false;
   try {
-    await configuredSecrets(resolved.secrets, () => secrets.db()).validate();
+    await storedSecrets.validate();
     for (const name of resolved.workflows.keys()) {
       if (!registered.has(name)) registered.set(name, register(name));
     }
@@ -272,6 +275,8 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     if (launched) await worker.stop().catch((error: unknown) => (stopFailed = { error }));
     else {
       await Promise.all([
+        storedSecrets.close(),
+        resolved.connections.close(),
         secrets.close(),
         ledger.close(),
         resolved.dataStore?.close(),

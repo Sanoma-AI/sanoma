@@ -1,10 +1,34 @@
 import { randomBytes, randomUUID } from "node:crypto";
+import type { OAuth2Client } from "google-auth-library";
 import crc32c from "crc-32/crc32c.js";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
+import {
+  SanomaClient,
+  defineConnector,
+  defineDriver,
+  defineWorkflow,
+  memoryLedger,
+  startWorker,
+  withSetup,
+} from "../src/index.ts";
+import { describeConfig } from "../src/describe.ts";
 import { lazyPool } from "../src/db.ts";
 import { checkSecretStore } from "../src/secret-store-check.ts";
-import { KMS_SECRETS_SQL, kmsPostgresStore, type GcpKmsClient } from "../src/kms-secrets.ts";
+import { KMS_SECRETS_SQL, kmsPostgresStore, managedKmsStore, type GcpKmsClient } from "../src/kms-secrets.ts";
+
+const managedSdk = vi.hoisted(() => ({
+  make: vi.fn<(options: { authClient: OAuth2Client }) => GcpKmsClient & { close(): Promise<void> }>(),
+}));
+vi.mock("@google-cloud/kms", () => {
+  const { make } = managedSdk;
+  return {
+    KeyManagementServiceClient: function KeyManagementServiceClient(options: { authClient: OAuth2Client }) {
+      return make(options);
+    },
+  };
+});
 
 const KEY = "projects/test-project/locations/us-central1/keyRings/production/cryptoKeys/acme";
 const NEXT_KEY = "projects/test-project/locations/us-central1/keyRings/production/cryptoKeys/acme-next";
@@ -69,6 +93,30 @@ const kms = fakeKms([KEY, NEXT_KEY]);
 const store = (keyName = KEY, decryptKeyNames: string[] = []) =>
   kmsPostgresStore({ company: "acme", keyName, decryptKeyNames, kms: kms.client, database: () => pool.db() });
 const address = () => ({ namespace: "testing", path: randomUUID() });
+const ops = defineConnector("kmsprobe", {
+  credential: {
+    check: {
+      effect: "read",
+      input: z.object({}),
+      output: z.object({ configured: z.boolean() }),
+    },
+  },
+});
+const probe = withSetup(ops, {
+  driver: () =>
+    defineDriver(ops, {
+      credential: {
+        check: async (_input, call) => ({ configured: (await call.secrets.get("API_KEY")) === "runtime-private-key" }),
+      },
+    }),
+});
+const workflow = defineWorkflow({
+  name: "kms-runtime-probe",
+  trigger: "manual",
+  input: z.object({}),
+  uses: [probe.credential.check],
+  run: async (ctx) => ctx.kmsprobe.credential.check({}),
+});
 beforeAll(async () => {
   await (await pool.db()).query(KMS_SECRETS_SQL);
 });
@@ -77,6 +125,196 @@ afterAll(async () => {
 });
 
 describe("KMS encrypted Postgres", () => {
+  it("composes managed identity lazily and closes each runtime's SDK without closing another runtime", async () => {
+    const databaseUrl = testDatabaseUrl("kms_managed"),
+      admin = lazyPool(databaseUrl, "kms-managed-setup");
+    await (await admin.db()).query(KMS_SECRETS_SQL);
+    const closed: (() => Promise<void>)[] = [];
+    const credential = vi.fn<() => Promise<string>>(async () => "a".repeat(43));
+    const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      Response.json({
+        accessToken: "synthetic-managed-token",
+        expiresAt: Date.now() + 600_000,
+      }),
+    );
+    managedSdk.make.mockImplementation(({ authClient }) => {
+      const transport = fakeKms([KEY]).client;
+      const close = vi.fn<() => Promise<void>>(async () => {});
+      closed.push(close);
+      const authorized = async () => {
+        expect(close).not.toHaveBeenCalled();
+        expect((await authClient.getRequestHeaders()).get("authorization")).toBe("Bearer synthetic-managed-token");
+      };
+      return {
+        encrypt: async (request: Parameters<GcpKmsClient["encrypt"]>[0]) => {
+          await authorized();
+          return transport.encrypt(request);
+        },
+        decrypt: async (request: Parameters<GcpKmsClient["decrypt"]>[0]) => {
+          await authorized();
+          return transport.decrypt(request);
+        },
+        close,
+      };
+    });
+    const config = {
+      connectors: [probe],
+      workflows: [workflow],
+      databaseUrl,
+      ledger: memoryLedger(),
+      secrets: {
+        namespace: randomUUID(),
+        store: managedKmsStore({
+          company: "acme",
+          keyName: KEY,
+          identity: { endpoint: "https://identity.example.test/token", credential },
+        }),
+      },
+    };
+    let client: SanomaClient | undefined, worker: Awaited<ReturnType<typeof startWorker>> | undefined;
+    try {
+      expect(describeConfig(config).secrets?.store).toBe("kms-postgres");
+      expect(closed).toHaveLength(0);
+      expect(credential).not.toHaveBeenCalled();
+      client = await SanomaClient.connect(config);
+      await client.setSecret("API_KEY", "runtime-private-key", { by: "tester" });
+      worker = await startWorker(config);
+      const run = await client.start(workflow, {}, { startedBy: "tester" });
+      expect(await client.result(run, 10_000)).toEqual({ configured: true });
+      expect(closed).toHaveLength(2);
+      expect(credential).toHaveBeenCalledTimes(2);
+      await worker.stop();
+      worker = undefined;
+      expect(closed[1]).toHaveBeenCalledTimes(1);
+      expect((await client.secrets(["API_KEY"])).get("API_KEY")?.value).toBe("runtime-private-key");
+      expect(closed[0]).not.toHaveBeenCalled();
+      await client.close();
+      client = undefined;
+      expect(closed[0]).toHaveBeenCalledTimes(1);
+      // Runtime adapter cleanup never closes the administrator's independently owned connection.
+      expect((await (await admin.db()).query("SELECT 1 AS ready")).rows[0].ready).toBe(1);
+    } finally {
+      await worker?.stop();
+      await client?.close();
+      await admin.close();
+      fetch.mockRestore();
+      managedSdk.make.mockReset();
+    }
+  });
+
+  it("closes managed SDK clients after both client and worker startup fail", async () => {
+    const close = vi.fn<() => Promise<void>>(async () => {});
+    managedSdk.make.mockImplementation(() => ({
+      encrypt: async () => fail(7),
+      decrypt: async () => fail(7),
+      close,
+    }));
+    const config = {
+      connectors: [],
+      databaseUrl: testDatabaseUrl("kms_failed_managed"),
+      secrets: {
+        store: managedKmsStore({
+          company: "acme",
+          keyName: KEY,
+          identity: {
+            endpoint: "https://identity.example.test/token",
+            credential: async () => "a".repeat(43),
+          },
+        }),
+      },
+    };
+    try {
+      await expect(SanomaClient.connect(config)).rejects.toMatchObject({ code: "denied" });
+      expect(close).toHaveBeenCalledTimes(1);
+      await expect(startWorker(config)).rejects.toMatchObject({ code: "denied" });
+      expect(close).toHaveBeenCalledTimes(2);
+    } finally {
+      managedSdk.make.mockReset();
+    }
+  });
+
+  it("uses the selected KMS store for intake, direct calls, durable calls and restart without a local encryption key", async () => {
+    const databaseUrl = testDatabaseUrl("kms_runtime"),
+      admin = lazyPool(databaseUrl, "kms-runtime-setup");
+    await (await admin.db()).query(KMS_SECRETS_SQL);
+    const transport = fakeKms([KEY]);
+    const encrypt = vi.spyOn(transport.client, "encrypt");
+    const config = {
+      connectors: [probe],
+      workflows: [workflow],
+      databaseUrl,
+      ledger: memoryLedger(),
+      secrets: {
+        namespace: randomUUID(),
+        store: kmsPostgresStore({ company: "acme", keyName: KEY, kms: transport.client }),
+      },
+    };
+    const description = describeConfig(config);
+    expect(description.secrets?.store).toBe("kms-postgres");
+    expect(encrypt).not.toHaveBeenCalled();
+    vi.stubEnv("SANOMA_SECRETS_KEY", undefined);
+    let client: SanomaClient | undefined, worker: Awaited<ReturnType<typeof startWorker>> | undefined;
+    try {
+      client = await SanomaClient.connect(config);
+      await client.setSecret("API_KEY", "runtime-private-key", { by: "tester" });
+      expect(await client.call("kmsprobe.credential.check", {}, { actor: { id: "tester" } })).toEqual({
+        configured: true,
+      });
+      worker = await startWorker(config);
+      const run = await client.start(workflow, {}, { startedBy: { id: "tester" } });
+      expect(await client.result(run, 10_000)).toEqual({ configured: true });
+      expect(JSON.stringify(await client.ledger(run))).not.toContain("runtime-private-key");
+      const db = await admin.db();
+      const rows = await db.query("SELECT envelope FROM sanoma_kms.secrets WHERE namespace=$1", [
+        config.secrets.namespace,
+      ]);
+      expect(rows.rowCount).toBe(1);
+      expect(JSON.stringify(rows.rows)).not.toContain("runtime-private-key");
+      expect(
+        (await db.query("SELECT name FROM sanoma_credentials WHERE namespace=$1", [config.secrets.namespace])).rowCount,
+      ).toBe(0);
+      await worker.stop();
+      worker = undefined;
+      await client.close();
+      client = undefined;
+      client = await SanomaClient.connect(config);
+      expect((await client.secrets(["API_KEY"])).get("API_KEY")?.value).toBe("runtime-private-key");
+      transport.state.denied = true;
+      await expect(client.secrets(["API_KEY"])).rejects.toMatchObject({ code: "denied" });
+    } finally {
+      await worker?.stop();
+      await client?.close();
+      await admin.close();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("binds a reused store definition separately to each runtime database", async () => {
+    const urls = [testDatabaseUrl("kms_runtime_a"), testDatabaseUrl("kms_runtime_b")];
+    const admins = urls.map((url) => lazyPool(url, "kms-runtime-isolation"));
+    const clients: SanomaClient[] = [];
+    const config = {
+      connectors: [],
+      secrets: {
+        namespace: randomUUID(),
+        store: kmsPostgresStore({ company: "acme", keyName: KEY, kms: fakeKms([KEY]).client }),
+      },
+    };
+    try {
+      for (const admin of admins) await (await admin.db()).query(KMS_SECRETS_SQL);
+      for (const databaseUrl of urls) clients.push(await SanomaClient.connect({ ...config, databaseUrl }));
+      await clients[0]!.setSecret("TOKEN", "database-a", { by: "tester" });
+      expect((await clients[1]!.secrets(["TOKEN"])).size).toBe(0);
+      await clients[1]!.setSecret("TOKEN", "database-b", { by: "tester" });
+      expect((await clients[0]!.secrets(["TOKEN"])).get("TOKEN")?.value).toBe("database-a");
+      await clients[0]!.close();
+      clients.shift();
+      expect((await clients[0]!.secrets(["TOKEN"])).get("TOKEN")?.value).toBe("database-b");
+    } finally {
+      for (const client of clients) await client.close();
+      for (const admin of admins) await admin.close();
+    }
+  });
   it("uses unsigned Castagnoli checksums matching the published check vector", () => {
     expect(crc32c.buf(Buffer.from("123456789")) >>> 0).toBe(0xe3069283);
   });

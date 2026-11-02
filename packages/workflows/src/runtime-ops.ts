@@ -12,6 +12,12 @@ import {
   memoryIdentityProvisioning,
   type IdentityProvisioning,
 } from "./identity-provisioning.ts";
+import {
+  prepareSecretStore,
+  memoryStorageProvisioning,
+  storageProvisioningCode,
+  type PrepareStorage,
+} from "./storage-provisioning.ts";
 
 // What a workflow cannot do itself and the runtime does for it, as operations of the vendor
 // `sanoma` (`sanoma.secret.*`, `sanoma.invite.mint`, `sanoma.token.*`): named in `uses`, decided by
@@ -53,6 +59,24 @@ async function identityWrite(write: () => Promise<void>): Promise<void> {
  * `uses: [sanoma.secret.generate]` and `ctx.sanoma.secret.generate({ name, kind })`.
  */
 export const sanoma = defineConnector("sanoma", {
+  secretStore: {
+    prepare: {
+      effect: "access",
+      idempotent: true,
+      description:
+        "Prepare a company/environment KMS Postgres schema and restricted runtime login; store its database URL without returning credentials",
+      input: z.object({
+        company: z.string().min(1).max(256),
+        environment: z.string().min(1).max(256),
+        database: z.strictObject({ $secret: z.string().regex(SECRET_NAME) }),
+        store: SecretName,
+      }),
+      output: z.object({ company: z.string(), environment: z.string(), role: z.string(), store: z.string() }),
+      target: ({ company, environment }: { company: string; environment: string }) =>
+        JSON.stringify([company, environment]),
+      createsSecrets: ({ store }: { store: string }) => [store],
+    },
+  },
   identity: {
     enroll: {
       effect: "access",
@@ -211,13 +235,25 @@ export async function postInvite(host: string, request: string): Promise<{ url: 
 export function runtimeDriver({
   tokens,
   identities,
+  storage = prepareSecretStore,
   invite = postInvite,
 }: {
   tokens: Tokens;
   identities?: IdentityProvisioning;
+  storage?: PrepareStorage;
   invite?: (host: string, request: string, call: CallContext) => Promise<{ url: string }>;
 }) {
   return defineDriver(sanoma, {
+    secretStore: {
+      async prepare(input, call) {
+        try {
+          return await storage(input, call.secrets);
+        } catch (error) {
+          const code = storageProvisioningCode(error) ?? "unavailable";
+          throw new DriverError(`Storage provisioning: ${code}`, { retryable: code === "unavailable" });
+        }
+      },
+    },
     identity: {
       async enroll({ store, ...input }, call) {
         if (!identities) throw refuse("identity provisioning is not configured");
@@ -309,5 +345,6 @@ export const sandboxRuntimeDriver = () =>
   runtimeDriver({
     tokens: memoryTokens(),
     identities: memoryIdentityProvisioning(),
+    storage: memoryStorageProvisioning(),
     invite: async (host, _request, call) => ({ url: new URL(`/auth/invite/sandbox-${tokenIdOf(call)}`, host).href }),
   });
