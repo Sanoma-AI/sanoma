@@ -208,6 +208,10 @@ interface AnyRecord {
   ttl?: number | null | undefined;
 }
 
+/** A canonical record's key: two records of one key are the same record. */
+export const keyOf = ({ type, name, content, priority, ttl }: DnsRecord) =>
+  JSON.stringify([type, name, content, priority, ttl]);
+
 /**
  * One record in the one form a set compares: its name in lower case with no trailing dot, a TXT
  * record's text unquoted, a CAA record's value quoted, a priority for an MX record only, and a
@@ -233,7 +237,7 @@ const recordsFields = {
 const canonicalSet = (state: Record<string, unknown>) => {
   if (!Array.isArray(state.records)) return state;
   const records = (state.records as AnyRecord[]).map((record) => canonicalRecord(record));
-  return { ...state, records: [...new Map(records.map((r) => [JSON.stringify(r), r])).values()] };
+  return { ...state, records: [...new Map(records.map((r) => [keyOf(r), r])).values()] };
 };
 
 /**

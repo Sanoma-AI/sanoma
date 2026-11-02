@@ -21,9 +21,9 @@ import { fakeCloudflare } from "../src/fake.ts";
 import { cloudflare } from "../src/index.ts";
 
 // Needs Postgres: `pnpm db:up`. A data file declares a sending domain and the record set that
-// takes its DNS records (`records: mail`), as sanoma-ops's `infra.ts` will; apply and drift run
-// over the Cloudflare fake and a toy `resend.domain` made here (the Resend connector's own is
-// another lane's), whose state lists the records it asks for in `dns_records`.
+// takes its DNS records (`records: mail`); apply and drift run over the Cloudflare fake and a toy
+// `resend.domain` standing in for the Resend connector's, whose state lists the records it asks
+// for in `dns_records`.
 
 const recordsOf = (key: string): DnsRecord[] => [
   { type: "TXT", name: "resend._domainkey.sanoma.work", content: `p=${key}` },
@@ -42,7 +42,7 @@ const domain = defineResource({
   bindingId: (state) => String(state.name),
   writable: true,
 });
-// Only what the data file imports it from: no such package is published.
+// Only what the data file imports it from: the package is made up.
 const resendTypes = defineConnector("resend", { domain }, { title: "Resend", package: "@sanoma-ai/testing-resend" });
 
 /** A plan's answer. */

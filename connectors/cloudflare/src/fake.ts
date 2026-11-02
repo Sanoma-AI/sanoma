@@ -10,6 +10,7 @@ import {
   type Application,
   type CloudflareApi,
   containerOps,
+  inZone,
   type ReadBinding,
   type RecordWrite,
   scriptOf,
@@ -81,7 +82,7 @@ const fail = (status: number, code: number, message: string) =>
 
 /** A record as the zone `zone` holds a write of it: a CAA record's fields as its content, a name outside the zone refused. */
 function dnsRecordOf(zone: string, { type, name, ttl, comment, proxied, content, priority, data }: RecordWrite) {
-  if (name !== zone && !name.endsWith(`.${zone}`)) {
+  if (!inZone(name, zone)) {
     throw fail(400, 9005, `dns_records/batch: ${name} is not in the zone ${zone}`);
   }
   return {
@@ -359,9 +360,10 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
     const appOf = (script: string) => Object.values(state.applications).find((a) => a.name === script);
     /** A new id, 32 digits, as Cloudflare's are 32 hexadecimal ones. */
     const nextId = () => String(++state.seq).padStart(32, "0");
-    /** The zone of that id among those looked up: a DNS request names a zone by its id. */
+    /** The name of the zone of that id among those looked up: a request names a zone by its id. */
+    const zoneOf = (zoneId: string) => Object.entries(state.zones).find(([, id]) => id === zoneId)?.[0];
     const zoneNamed = (zoneId: string) => {
-      const zone = Object.entries(state.zones).find(([, id]) => id === zoneId)?.[0];
+      const zone = zoneOf(zoneId);
       if (!zone)
         throw fail(
           404,
@@ -476,8 +478,8 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
       async attachDomain(script, hostname, zone_id) {
         if (!state.scripts[script])
           throw fail(404, 10007, `workers/domains: This Worker does not exist on your account.`);
-        const zone = Object.entries(state.zones).find(([, id]) => id === zone_id)?.[0];
-        if (!zone || (hostname !== zone && !hostname.endsWith(`.${zone}`))) {
+        const zone = zoneOf(zone_id);
+        if (!zone || !inZone(hostname, zone)) {
           throw fail(400, 100117, `workers/domains: ${hostname} is not in the zone ${zone_id}`);
         }
         const id = Object.entries(state.domains).find(([, d]) => d.hostname === hostname)?.[0] ?? nextId();

@@ -1,9 +1,10 @@
 import { type DnsRecord, DriverError, errorMessage, type PlanAction } from "@sanoma-ai/workflows";
 import { z } from "zod";
-import { caaData, canonicalRecord, records as recordsType } from "./connector.ts";
+import { caaData, canonicalRecord, keyOf, records as recordsType } from "./connector.ts";
 import {
   type CloudflareApi,
   type DnsBatch,
+  inZone,
   NONE,
   type Planned,
   type RecordWrite,
@@ -18,8 +19,6 @@ import {
 
 /** The permission a token needs for a set, as the dashboard names it. */
 const DNS_EDIT = "Zone → DNS → Edit";
-const OWNED = [...recordsType.fields.vendorOwned];
-const IMMUTABLE = recordsType.fields.immutable;
 /** The longest comment a record of a Free zone holds, which the mark is. */
 const MARK_MAX = 100;
 
@@ -41,9 +40,6 @@ interface Held {
   key: string;
 }
 
-/** A canonical record's key: two records of one key are the same record. */
-const keyOf = ({ type, name, content, priority, ttl }: DnsRecord) =>
-  JSON.stringify([type, name, content, priority, ttl]);
 const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
 const heldOf = ({ id, comment, proxied, ...rest }: ZoneRecord): Held => {
@@ -85,7 +81,7 @@ function declaredRecords(zone: string, name: string, given: unknown): DnsRecord[
   if (!parsed.success) throw refused(`records ${set}: ${z.prettifyError(parsed.error)}`, "invalid");
   const seen = new Map<string, DnsRecord>();
   for (const record of parsed.data.map((r) => canonicalRecord(r))) {
-    if (record.name !== zone && !record.name.endsWith(`.${zone}`)) {
+    if (!inZone(record.name, zone)) {
       throw refused(`records ${set}: ${record.type} ${record.name} is not in the zone ${zone}`, "invalid");
     }
     if (record.type === "MX" && record.priority === undefined) {
@@ -130,29 +126,25 @@ function diff(declared: DnsRecord[], held: Held[]) {
     const at = left.findIndex(match);
     return at < 0 ? undefined : left.splice(at, 1)[0];
   };
-  const kept: Held[] = [];
-  // Each declared record held exactly first, so a patch never takes a record another one keeps.
-  const unheld = declared.filter((record) => {
-    const key = keyOf(record);
-    const same = take((h) => h.key === key && !h.proxied);
-    if (same) kept.push(same);
-    return !same;
-  });
-  const patched: [Held, DnsRecord][] = [];
-  /** The records no marked one `matches`, the others paired with theirs to be patched. */
-  const pair = (records: DnsRecord[], matches: (h: Held, record: DnsRecord) => boolean) =>
+  /** The records no marked one `matches`, the others paired with the one each takes, into `into`. */
+  const pair = (records: DnsRecord[], matches: (h: Held, record: DnsRecord) => boolean, into: [Held, DnsRecord][]) =>
     records.filter((record) => {
       const slot = take((h) => matches(h, record));
-      if (slot) patched.push([slot, record]);
+      if (slot) into.push([slot, record]);
       return !slot;
     });
+  const kept: [Held, DnsRecord][] = [];
+  const patched: [Held, DnsRecord][] = [];
   const at = (h: Held, record: DnsRecord) => h.record.type === record.type && h.record.name === record.name;
-  // One of the same content first (its ttl or priority changed), then any of its type and name.
+  // Each declared record held exactly first, so a patch never takes a record another one keeps;
+  // then one of the same content (its ttl or priority changed), then any of its type and name.
+  const unheld = pair(declared, (h, record) => h.key === keyOf(record) && !h.proxied, kept);
   const missing = pair(
-    pair(unheld, (h, record) => at(h, record) && h.record.content === record.content),
+    pair(unheld, (h, record) => at(h, record) && h.record.content === record.content, patched),
     at,
+    patched,
   );
-  return { kept, patched, missing, stale: left };
+  return { kept: kept.map(([h]) => h), patched, missing, stale: left };
 }
 
 /** A declared record as a batch writes it, with the set's mark. */
@@ -197,7 +189,7 @@ async function dns<T>(zone: string, call: () => Promise<T>): Promise<T> {
   }
 }
 
-/** The refusal of records given as `null` at a write: a backstop, since apply fails such a step first. */
+/** The refusal of records given as `null` at a write: a backstop, since apply fails such a step before it gets here. */
 const notKnown = (set: string) =>
   refused(`records ${set}: its records are not known yet: apply the resource they come from first`, "not_known");
 
@@ -234,15 +226,14 @@ function planOf(found: Found | undefined, desired: Record<string, unknown>): Pla
       ? given
       : declaredRecords(zone, name, given).toSorted((a, b) => compare(keyOf(a), keyOf(b)));
   /** A new set's unknown fields: Cloudflare's, and its records while they are not known. */
-  const unknown = [...(records == null ? ["records"] : []), ...OWNED];
-  if (!found?.zoneId || found.held.length === 0) {
-    return { action: "create", planned: { zone, name, records: records ?? null }, unknown, replace: [] };
-  }
+  const unknown = [...(records == null ? ["records"] : []), ...recordsType.fields.vendorOwned];
+  const anew = { zone, name, records: records ?? null };
+  if (!found?.zoneId || found.held.length === 0) return { action: "create", planned: anew, unknown, replace: [] };
   const state = stateOf(found.zone, found.name, found.zoneId, found.held);
-  const replace = IMMUTABLE.filter((field) => desired[field] !== (state as Record<string, unknown>)[field]);
-  if (replace.length > 0) {
-    return { action: "replace", planned: { zone, name, records: records ?? null }, unknown, replace };
-  }
+  const replace = recordsType.fields.immutable.filter(
+    (field) => desired[field] !== (state as Record<string, unknown>)[field],
+  );
+  if (replace.length > 0) return { action: "replace", planned: anew, unknown, replace };
   // Left out: its resource is absent or unreadable, so the set keeps what it holds.
   if (records === undefined) return { action: "none", planned: state, ...NONE };
   if (records === null) {
@@ -287,7 +278,6 @@ export function recordsOps(api: () => CloudflareApi) {
    */
   const put = async (desired: Record<string, unknown>, before?: { cf: CloudflareApi; found: Found }) => {
     const set = `${String(desired.zone)}/${String(desired.name)}`;
-    // A backstop: apply fails a step whose records are still not known before it gets here.
     if (desired.records === null || desired.records === undefined) throw notKnown(set);
     const declared = declaredRecords(String(desired.zone), String(desired.name), desired.records);
     const cf = before?.cf ?? api();
@@ -311,9 +301,8 @@ export function recordsOps(api: () => CloudflareApi) {
       }
       return found;
     };
-    /** The other record identical to `record` (its type, content and priority), taken to adopt; a refusal for another set's or a proxied one. */
-    const adoptable = async (record: DnsRecord) => {
-      const at = await othersAt(record.name);
+    /** The other record at its name (`at`) identical to `record` (its type, content and priority), taken to adopt; a refusal for another set's or a proxied one. */
+    const adoptable = (record: DnsRecord, at: Held[]) => {
       const same = at.findIndex(
         (o) =>
           o.record.type === record.type && o.record.content === record.content && o.record.priority === record.priority,
@@ -338,13 +327,14 @@ export function recordsOps(api: () => CloudflareApi) {
     ];
     for (const [slot, record] of writes) {
       // What another record already is: that one adopted instead (its comment replaced by the mark), its own deleted.
-      const adopted = await adoptable(record);
+      const at = await othersAt(record.name);
+      const adopted = adoptable(record, at);
       if (adopted) {
         if (slot) batch.deletes.push({ id: slot.id });
         batch.patches.push({ id: adopted.id, ...writeOf(mark, record) });
         continue;
       }
-      const clash = (await othersAt(record.name)).find((other) => clashes(record, other));
+      const clash = at.find((other) => clashes(record, other));
       if (clash) {
         throw refused(
           `records ${set}: ${record.type} ${record.name} cannot be written beside ${named(clash)}, which is not this set's: delete or change it by hand, or declare it as it is, which adopts it`,
@@ -376,7 +366,7 @@ export function recordsOps(api: () => CloudflareApi) {
       desired: Record<string, unknown>;
       expect?: { action: PlanAction; replace: string[] };
     }) => {
-      // Before any request, as at a create: apply fails such a step before it gets here.
+      // Before any request, as at a create.
       if (desired.records === null) throw notKnown(id);
       const cf = api();
       const found = await look(cf, id);

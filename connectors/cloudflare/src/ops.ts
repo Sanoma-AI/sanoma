@@ -282,6 +282,9 @@ const health = async (
   return { error, exit: typeof body?.exit === "string" };
 };
 
+/** Whether the full name `name` is in the zone `zone`: the zone's apex or a name under it. */
+export const inZone = (name: string, zone: string) => name === zone || name.endsWith(`.${zone}`);
+
 /**
  * Each hostname's zone id, by hostname, looked up in the account once per apex; a refusal for a
  * hostname whose zone the account does not hold.

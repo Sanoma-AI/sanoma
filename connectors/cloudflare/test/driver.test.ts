@@ -412,12 +412,11 @@ describe.skipIf(live)("cloudflareDriver", () => {
     });
 
     it("leaves a Worker of that name that is not Sanoma's alone: reads it as gone, refuses to overwrite or delete it", async () => {
-      const foreign = reply(apiPath("/workers/scripts/sanoma-company/settings"), 200, {
-        success: true,
-        errors: [],
-        messages: [],
-        result: { bindings: [{ type: "plain_text", name: "GREETING", text: "hello" }] },
-      });
+      const foreign = reply(
+        apiPath("/workers/scripts/sanoma-company/settings"),
+        200,
+        cfResult({ bindings: [{ type: "plain_text", name: "GREETING", text: "hello" }] }),
+      );
       play("not-ours", [foreign, ...only("create", (_, i) => i === 0), foreign, foreign]);
       expect(await op("container.read", { id: "company" })).toEqual({ id: "company", gone: true });
       await expect(op("container.create", { desired })).rejects.toMatchObject({

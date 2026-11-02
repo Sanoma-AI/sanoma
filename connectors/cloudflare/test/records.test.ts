@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { cloudflareDriver } from "../src/driver.ts";
 import { fakeCloudflare } from "../src/fake.ts";
 import type { ZoneRecord } from "../src/ops.ts";
-import { cfList, cfResult, replayOptions } from "./replay.ts";
+import { cfList, replayOptions } from "./replay.ts";
 
 // `cloudflare.records` over the fixtures written from Cloudflare's API reference (the `records-*`
 // ones; the features replay the others) and on the fake: the batches it sends, adoption, the
@@ -155,7 +155,7 @@ describe.skipIf(live)("cloudflare.records over the driver", () => {
 
   it("refuses a zone the account does not hold, and reads a set there as gone", async () => {
     const [zones] = fixture("records-create");
-    const none = { ...zones!, body: { ...cfResult([]), result_info: { count: 0, total_count: 0 } } };
+    const none = cfList(zones!.path, []);
     play("records-no-zone", [none, none]);
     await expect(op("records.create", { desired })).rejects.toMatchObject({ vendorCode: "no_zone" });
     expect(await op("records.read", { id: ID })).toEqual({ id: ID, gone: true });
