@@ -1,6 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { IngressRoute } from "@sanoma-ai/app";
-import { errorMessage, readRootSnapshot, resolveConfig, type SanomaConfig } from "@sanoma-ai/workflows";
+import { errorMessage, readRootSnapshot, type SanomaConfig } from "@sanoma-ai/workflows";
 import { describeConfig } from "@sanoma-ai/workflows/describe";
 import { SITES_BUNDLE_HEADER, SITES_BUNDLE_PATH } from "@sanoma-ai/workflows/shared";
 import { siteBuild } from "./sites.ts";
@@ -49,7 +49,7 @@ export function sitesBundleRoute(
     const bundle = await sites?.buildWorker(root, {
       configFile: config.file!,
       description,
-      snapshot: readRootSnapshot(config, resolveConfig(config)),
+      snapshot: readRootSnapshot(config),
       log,
     });
     if (bundle) log(`built the sites bundle for the Worker: ${bundle.sites.join(", ")}`);

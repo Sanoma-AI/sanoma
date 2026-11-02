@@ -35,7 +35,8 @@ declare module "virtual:sanoma/icons" {
 declare module "virtual:sanoma/worker" {
   export const config: import("@sanoma-ai/workflows").SanomaConfig;
   export const root: string;
-  export const sites: string[];
+  /** The sites it serves, as the description has them: public, on a domain, with no login. */
+  export const served: import("@sanoma-ai/workflows/describe").SiteEntry[];
   export const snapshot: import("@sanoma-ai/workflows").RootSnapshot;
   export const description: import("@sanoma-ai/workflows/describe").ConfigDescription;
   export const published: import("./content-files.ts").Published;

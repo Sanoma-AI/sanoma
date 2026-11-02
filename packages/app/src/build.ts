@@ -19,7 +19,7 @@ import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { createRequire, registerHooks } from "node:module";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { APP_NAME, problemLine, SITE_NAME, siteDir, siteKey } from "@sanoma-ai/workflows/shared";
+import { APP_NAME, problemLine, SITE_NAME, type SitesBundle, siteDir, siteKey } from "@sanoma-ai/workflows/shared";
 import type { ConfigDescription, SiteEntry } from "@sanoma-ai/workflows/describe";
 import type { RootSnapshot } from "@sanoma-ai/workflows";
 import type { InlineConfig, Logger, Plugin, PluginOption, ViteDevServer } from "vite";
@@ -33,6 +33,7 @@ import {
 } from "./content-files.ts";
 import type { ServerEntry } from "./context.ts";
 import { PUBLIC_FNS } from "./public-fns.ts";
+import { PRERENDERED } from "./worker/prerendered.ts";
 
 export { CONTENT_TYPES, type ContentProblem, contentTypes, readContent } from "./content-files.ts";
 
@@ -822,6 +823,12 @@ export interface BuildAppOptions {
   runtimeFrom?: string;
 }
 
+/** Vite's logger at `warn`, each warning and error said through `log`; Vite's own without one. */
+function quietLogger(vite: typeof import("vite"), log: ((line: string) => void) | undefined): Logger | undefined {
+  const logger = vite.createLogger("warn", { allowClearScreen: false });
+  return log && { ...logger, warn: (msg) => log(msg), warnOnce: (msg) => log(msg), error: (msg) => log(msg) };
+}
+
 /**
  * Builds a company repo's app with its sites into `.sanoma/app/build/<key>` (`client/` and
  * `server/server.js`, for `startApp`'s `distDir`), after writing the sites' generated files. A
@@ -850,13 +857,7 @@ export async function buildApp(
   if (existsSync(distDir)) return reused();
   const outDir = `${distDir}.${process.pid}.tmp`;
   const vite = await import("vite");
-  const logger = vite.createLogger("warn", { allowClearScreen: false });
-  const customLogger: Logger | undefined = log && {
-    ...logger,
-    warn: (msg) => log(msg),
-    warnOnce: (msg) => log(msg),
-    error: (msg) => log(msg),
-  };
+  const customLogger = quietLogger(vite, log);
   try {
     const builder = await vite.createBuilder({
       ...appViteConfig({ repo: root, runtimeFrom }),
@@ -909,20 +910,8 @@ interface WorkerTarget {
 /** The sites bundle's main module in the app's source, which re-exports Start's handler behind the sites' own routing. */
 const WORKER_ENTRY = join(pkgDir, "src", "worker", "entry.ts");
 
-/** Where the Worker's prerendered pages are among its assets: `entry.ts`'s `PRERENDERED`, which the Worker's own preview answers. */
-const PRERENDERED = "/__sanoma/sites";
-
 /** What the Cloudflare host's Worker runs a company's public sites from (`buildWorker`), for the connector to upload. */
-export interface WorkerBundle {
-  /** The sites it serves, by key: public, with a domain and no login. */
-  sites: string[];
-  /** The main module, among `modules`. */
-  mainModule: string;
-  /** The Worker's modules, by name relative to the main module, each base64. */
-  modules: { name: string; type: "esm" | "wasm" | "text" | "data"; content: string }[];
-  /** The Worker's static assets, by path from `/`, each base64: the client build and the prerendered pages. */
-  assets: { path: string; content: string }[];
-}
+export type WorkerBundle = SitesBundle;
 
 export interface BuildWorkerOptions {
   /** The company's config file, which the bundle imports for its workflows and connectors. */
@@ -936,7 +925,7 @@ export interface BuildWorkerOptions {
 }
 
 /** The sites the Worker serves: public, on a domain, with no login (a visitor's sign-in stays on the container). */
-export const workerSites = (description: ConfigDescription): SiteEntry[] =>
+const workerSites = (description: ConfigDescription): SiteEntry[] =>
   description.sites.filter((site) => site.public && site.domain && !site.login);
 
 /**
@@ -976,7 +965,7 @@ function workerModule(root: string, sites: string[], options: BuildWorkerOptions
         "cedarWeb.initSync({ module: cedarModule });\n",
         "export const cedar = cedarWeb;\n",
         exported("root", root),
-        exported("sites", sites),
+        exported("served", workerSites(options.description)),
         exported("snapshot", options.snapshot),
         exported("description", options.description),
         exported("published", publishedOf(root)),
@@ -1117,14 +1106,7 @@ export async function buildWorker(repo: string, options: BuildWorkerOptions): Pr
   const hadWrangler = existsSync(wrangler);
   rmSync(outDir, { recursive: true, force: true });
   const vite = await import("vite");
-  const { log } = options;
-  const logger = vite.createLogger("warn", { allowClearScreen: false });
-  const customLogger: Logger | undefined = log && {
-    ...logger,
-    warn: (msg) => log(msg),
-    warnOnce: (msg) => log(msg),
-    error: (msg) => log(msg),
-  };
+  const customLogger = quietLogger(vite, options.log);
   const config: InlineConfig = {
     ...repoConfig(root, undefined, { sites, plugins: await workerPlugins(root, sites, options) }),
     build: { outDir, emptyOutDir: true },
@@ -1166,8 +1148,10 @@ export async function buildWorker(repo: string, options: BuildWorkerOptions): Pr
       mainModule: main,
       modules: filesUnder(server)
         // The modules; not the stylesheets and fonts the server's build emits beside them, which the client's has.
-        .filter((path) => MODULE_TYPES[path.split(".").at(-1)!] !== undefined)
-        .map((name) => ({ name, type: MODULE_TYPES[name.split(".").at(-1)!]!, content: base64(server, name) })),
+        .flatMap((name) => {
+          const type = MODULE_TYPES[name.split(".").at(-1)!];
+          return type ? [{ name, type, content: base64(server, name) }] : [];
+        }),
       assets: filesUnder(client)
         .filter((path) => path !== "wrangler.json" && path !== ".assetsignore")
         .map((path) => ({ path: `/${path}`, content: base64(client, path) })),

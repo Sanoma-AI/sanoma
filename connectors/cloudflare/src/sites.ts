@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
 import { extname } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { DriverError, errorMessage } from "@sanoma-ai/workflows";
-import { SITES_BUNDLE_HEADER, SITES_BUNDLE_PATH } from "@sanoma-ai/workflows/shared";
+import { errorMessage } from "@sanoma-ai/workflows";
+import { SITES_BUNDLE_HEADER, SITES_BUNDLE_PATH, type SitesBundle } from "@sanoma-ai/workflows/shared";
 import mime from "mime";
+import { refused } from "./errors.ts";
 import type { AssetFile, CloudflareApi, Upload } from "./ops.ts";
 import { SITES_MODULE, sitesRouter } from "./worker.ts";
 
@@ -13,21 +14,6 @@ import { SITES_MODULE, sitesRouter } from "./worker.ts";
 // uploaded again with the bundle's modules under `sites/`, the router `worker/sites.js` as its
 // entry and the assets bound as `ASSETS`. A page of a public site without a login then answers
 // from the Worker, never waiting for the container; everything else goes to the object as before.
-
-/** A refusal, as `refused` in `ops.ts` makes one (which imports this module): never retried. */
-const refused = (message: string) => new DriverError(`cloudflare: ${message}`, { retryable: false });
-
-/** The sites bundle as the container answers it at `SITES_BUNDLE_PATH` (`WorkerBundle` in `@sanoma-ai/app/build`). */
-export interface SitesBundle {
-  /** The sites it serves, by name. */
-  sites: string[];
-  /** Its entry, which `worker/sites.js` imports as `./sites/index.js`. */
-  mainModule: string;
-  /** Its modules, each one's content in base64. */
-  modules: { name: string; type: "esm" | "wasm" | "text" | "data"; content: string }[];
-  /** Its assets (the client build and the prerendered pages), by path from `/`, each one's content in base64. */
-  assets: { path: string; content: string }[];
-}
 
 /** The binding the bundle reads its assets through (`WorkerEnv.ASSETS`). */
 export const ASSETS = "ASSETS";
@@ -116,17 +102,20 @@ export async function uploadAssets(cf: CloudflareApi, script: string, assets: Si
   const { jwt, buckets } = await cf.assetsSession(script, manifest);
   // Every asset already in: the session's jwt is the completion one.
   if (!buckets.length) return jwt;
-  let completion: string | undefined;
-  for (const bucket of buckets) {
-    completion = await cf.uploadAssets(
-      jwt,
-      bucket.map((hash) => {
-        const file = byHash.get(hash);
-        if (!file) throw refused(`${script}: the assets upload session asks for ${hash}, which no asset hashes to`);
-        return file;
-      }),
-    );
-  }
+  // Independent requests under one jwt: the one that completes the set answers the completion jwt.
+  const answers = await Promise.all(
+    buckets.map((bucket) =>
+      cf.uploadAssets(
+        jwt,
+        bucket.map((hash) => {
+          const file = byHash.get(hash);
+          if (!file) throw refused(`${script}: the assets upload session asks for ${hash}, which no asset hashes to`);
+          return file;
+        }),
+      ),
+    ),
+  );
+  const completion = answers.find((answer) => answer !== undefined);
   if (!completion)
     throw refused(`${script}: the last bucket of assets was uploaded, and Cloudflare gave no completion jwt`);
   return completion;
@@ -144,15 +133,15 @@ interface Deployed extends Polling {
 /**
  * The public sites on the Worker: the bundle the container built, its assets uploaded, and the
  * Worker uploaded again with them and the sites router as its entry (its bindings, image and
- * revision as they were, so its container keeps running). The sites served, by name: none when
- * the container has none to give, and the Worker stays as the deploy uploaded it.
+ * revision as they were, so its container keeps running). When the container has none to give,
+ * the Worker stays as the deploy uploaded it.
  */
 export async function serveSites(
   cf: CloudflareApi,
   { script, url, token, metadata, ...polling }: Deployed,
-): Promise<string[]> {
+): Promise<void> {
   const bundle = await sitesBundle(cf, script, url, token, polling);
-  if (!bundle) return [];
+  if (!bundle) return;
   if (bundle.mainModule !== "index.js") {
     throw refused(`${script}: the sites bundle's entry is ${bundle.mainModule}; the router imports sites/index.js`);
   }
@@ -172,5 +161,4 @@ export async function serveSites(
       })),
     ],
   });
-  return bundle.sites;
 }

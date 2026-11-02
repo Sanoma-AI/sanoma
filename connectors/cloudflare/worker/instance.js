@@ -286,7 +286,10 @@ export class Instance {
   }
 }
 
+/** The Worker's one object, which every request and the sites router's `startNow` go to. */
+export const instanceOf = (env) => env[NAMESPACE].getByName("instance");
+
 /** The Worker's default export: every request goes to the one object. */
 export const worker = {
-  fetch: (request, env) => env[NAMESPACE].getByName("instance").fetch(request),
+  fetch: (request, env) => instanceOf(env).fetch(request),
 };

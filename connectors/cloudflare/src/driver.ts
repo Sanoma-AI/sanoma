@@ -3,6 +3,7 @@ import type { Cloudflare } from "cloudflare";
 import { z } from "zod";
 import { cloudflareOps } from "./connector.ts";
 import { alarmOps, type CloudflareApi, containerOps, type ReadBinding, refused, type ZoneRecord } from "./ops.ts";
+import type { WorkerModule } from "./worker.ts";
 import { recordsOps } from "./records.ts";
 import { CLOUDFLARE_REGISTRY, copyImage } from "./registry.ts";
 
@@ -64,12 +65,12 @@ function failure(what: string, { APIError, APIConnectionTimeoutError }: Sdk, tim
 }
 
 /** How an upload types each kind of module's part. */
-const MODULE_TYPES = {
+const MODULE_TYPES: Record<NonNullable<WorkerModule["type"]>, string> = {
   esm: "application/javascript+module",
   wasm: "application/wasm",
   text: "text/plain",
   data: "application/octet-stream",
-} as const;
+};
 
 const isStatus = (error: unknown, status: number) => error instanceof DriverError && error.status === status;
 

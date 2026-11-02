@@ -190,8 +190,10 @@ describe("cloudflare.container's public sites on the fake", () => {
         if (req.url === "/healthz") return void res.writeHead(200).end("ok\n");
         if (req.url !== "/__sanoma/sites-bundle") return void res.writeHead(404).end();
         asked.push(req.headers.authorization ?? "");
-        if (!built) return void ((built = true), res.writeHead(202).end("{}"));
-        res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(bundle));
+        // Marked as the route's, as the runtime marks each answer.
+        const marked = { "x-sanoma-sites-bundle": "1", "content-type": "application/json" };
+        if (!built) return void ((built = true), res.writeHead(202, marked).end("{}"));
+        res.writeHead(200, marked).end(JSON.stringify(bundle));
       });
       await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
       return {

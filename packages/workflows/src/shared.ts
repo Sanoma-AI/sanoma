@@ -149,6 +149,18 @@ export const SITES_BUNDLE_PATH = "/__sanoma/sites-bundle";
 /** The header every answer of that route carries: a runtime without the route answers without it. */
 export const SITES_BUNDLE_HEADER = "x-sanoma-sites-bundle";
 
+/** What that route answers: what a host's Worker runs a company's public sites from (`buildWorker` in `@sanoma-ai/app/build`). */
+export interface SitesBundle {
+  /** The sites it serves, by key: public, with a domain and no login. */
+  sites: string[];
+  /** The main module, among `modules`. */
+  mainModule: string;
+  /** The Worker's modules, by name relative to the main module, each base64. */
+  modules: { name: string; type: "esm" | "wasm" | "text" | "data"; content: string }[];
+  /** The Worker's static assets, by path from `/`, each base64: the client build and the prerendered pages. */
+  assets: { path: string; content: string }[];
+}
+
 /** The domains `domainsText` wrote, by site name; throws for a pair that is not `<site>=<hostname>`, or a site named twice. */
 export function domainsOf(text: string): Record<string, string> {
   const domains: Record<string, string> = {};

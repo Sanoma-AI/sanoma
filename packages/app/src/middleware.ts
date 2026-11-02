@@ -17,8 +17,6 @@ export const withPrincipal = createMiddleware({ type: "function" }).server(async
   next({ context: { principal: await requireActor(context as unknown as ActorContext) } }),
 );
 
-export { PUBLIC_FNS };
-
 /** On a public site's host (`AppContext.site`) only `PUBLIC_FNS` answer: any other is a 404, as if it were not there. */
 export const publicOnly = createMiddleware({ type: "function" }).server(({ next, context, serverFnMeta }) => {
   if ((context as unknown as { app: AppContext }).app.site !== undefined && !PUBLIC_FNS.has(serverFnMeta.name)) {

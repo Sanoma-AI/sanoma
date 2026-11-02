@@ -9,18 +9,12 @@
 import { checkPreparedOnly, resolveConfig, SanomaClient, useCedarWasm, useRootSnapshot } from "@sanoma-ai/workflows";
 import { domainsOf } from "@sanoma-ai/workflows/shared";
 import start from "@tanstack/react-start/server-entry";
-import { cedar, config, description, published, root, sites, snapshot } from "virtual:sanoma/worker";
+import { cedar, config, description, published, root, served as servedSites, snapshot } from "virtual:sanoma/worker";
 import type { AppContext } from "../context.ts";
 import { publicFront } from "../login/public.ts";
 import { placeOf } from "../loopback.ts";
 import { seoFile } from "../seo.ts";
-
-/**
- * Where the build writes a site's prerendered pages among the Worker's assets:
- * `<prefix>/<site><path>/index.html` (`PRERENDERED` in `build.ts`). Not exported: workerd takes
- * each named export of a main module for an entrypoint.
- */
-const PRERENDERED = "/__sanoma/sites";
+import { PRERENDERED } from "./prerendered.ts";
 
 /** The paths a site's domain still sends to the container: the object's own, and the app's machine and login routes. */
 const CONTAINER_PATHS = /^\/(__sanoma|api|auth|webhooks|setup|wake|healthz)(\/|$)/;
@@ -54,17 +48,22 @@ useRootSnapshot(root, snapshot);
 useCedarWasm(cedar);
 checkPreparedOnly("the company's container, at its start,");
 
-/** The sites this bundle serves, by name, as the description has them. */
-const served = new Map(description.sites.filter((site) => sites.includes(site.name)).map((site) => [site.name, site]));
+/** The sites this bundle serves, by name. */
+const served = new Map(servedSites.map((site) => [site.name, site]));
+
+/** The site served at each hostname, by `SANOMA_DOMAINS` as last parsed: the same text on every request of an isolate. */
+let hosts: { text: string; sites: Map<string, string> } | undefined;
 
 /** The site the request is for: one this bundle serves, on its domain. */
-function siteAt(request: Request, env: WorkerEnv): { name: string; domain: string } | undefined {
-  if (!env.SANOMA_DOMAINS) return undefined;
-  const host = new URL(request.url).hostname;
-  const found = Object.entries(domainsOf(env.SANOMA_DOMAINS)).find(
-    ([name, domain]) => domain === host && served.has(name),
-  );
-  return found && { name: found[0], domain: found[1] };
+function siteAt(url: URL, env: WorkerEnv): { name: string; domain: string } | undefined {
+  const text = env.SANOMA_DOMAINS;
+  if (!text) return undefined;
+  if (hosts?.text !== text) {
+    const pairs = Object.entries(domainsOf(text)).filter(([name]) => served.has(name));
+    hosts = { text, sites: new Map(pairs.map(([name, domain]) => [domain, name])) };
+  }
+  const name = hosts.sites.get(url.hostname);
+  return name === undefined ? undefined : { name, domain: url.hostname };
 }
 
 /** The prerendered page for `pathname`, among the Worker's assets: undefined for a path with a trailing slash, which the router redirects. */
@@ -109,11 +108,16 @@ function siteApp(site: string, env: WorkerEnv, ctx: WorkerContext, host: WorkerH
   resolved ??= resolveConfig(bundled);
   const { client, close } = lazily(async () => {
     if (!databaseUrl) throw new Error("the Worker has no SANOMA_DATABASE_URL among its secrets");
+    // Once per request, however many writes it makes: the container starts once.
+    let starting: Promise<unknown> | undefined;
     return SanomaClient.connect(bundled, {
-      onWrite: () =>
-        ctx.waitUntil(
-          host.startNow().catch((err: unknown) => console.error("sanoma: starting the container failed:", err)),
-        ),
+      onWrite: () => {
+        if (starting) return;
+        starting = host
+          .startNow()
+          .catch((err: unknown) => console.error("sanoma: starting the container failed:", err));
+        ctx.waitUntil(starting);
+      },
     });
   });
   const app: AppContext = {
@@ -171,36 +175,37 @@ function prerenderRequest(request: Request, env: WorkerEnv) {
   const [, name, ...rest] = url.pathname.slice(PRERENDERED.length).split("/");
   const entry = name === undefined ? undefined : served.get(name);
   if (!url.pathname.startsWith(`${PRERENDERED}/`) || !entry) return undefined;
-  const domain = entry.domain ?? `${entry.name}.localhost`;
+  // Each site the bundle serves has a domain (`workerSites`).
+  const domain = entry.domain!;
   const page = new URL(`/${rest.join("/")}${url.search}`, `https://${domain}`);
   return { request: new Request(page, request), site: { name: entry.name, domain } };
+}
+
+/** The asset for a GET of `url` on `site`: a file of the client build at a path with an extension (a site's public files too; `/assets/*` never gets here), else the page prerendered for it unless a query, which the page may read, asks otherwise. */
+function assetPath({ pathname, search }: URL, site: string): string | undefined {
+  if (/\.[^/]+$/.test(pathname)) return pathname.startsWith(`${PRERENDERED}/`) ? undefined : pathname;
+  return search ? undefined : prerenderedPath(site, pathname);
 }
 
 /** The sites bundle's contract with the connector's router: what it serves, and how. */
 export default {
   /** Whether this request is the bundle's: a site it serves, on its domain, but for the paths the container keeps. */
   serves(request: Request, env: WorkerEnv): boolean {
-    return siteAt(request, env) !== undefined && !CONTAINER_PATHS.test(new URL(request.url).pathname);
+    const url = new URL(request.url);
+    return siteAt(url, env) !== undefined && !CONTAINER_PATHS.test(url.pathname);
   },
 
   async fetch(request: Request, env: WorkerEnv, ctx: WorkerContext, host: WorkerHost): Promise<Response> {
     const prerender = prerenderRequest(request, env);
     if (prerender) return render(prerender.request, env, ctx, host, prerender.site);
-    const site = siteAt(request, env);
+    const url = new URL(request.url);
+    const site = siteAt(url, env);
     if (!site) return new Response("Not found\n", { status: 404 });
-    const { pathname, search } = new URL(request.url);
-    if ((request.method === "GET" || request.method === "HEAD") && env.ASSETS) {
-      // A file of the client build at its path (a site's public files too; `/assets/*` never gets
-      // here), then the page prerendered for the path, which a query may change: rendered then.
-      const files = [
-        ...(pathname.startsWith(`${PRERENDERED}/`) ? [] : [pathname]),
-        ...(search ? [] : [prerenderedPath(site.name, pathname)].filter((file) => file !== undefined)),
-      ];
-      for (const file of files) {
-        const asset = await env.ASSETS.fetch(new Request(new URL(file, request.url), request));
-        if (asset.ok) return asset;
-        await asset.body?.cancel();
-      }
+    const file = request.method === "GET" || request.method === "HEAD" ? assetPath(url, site.name) : undefined;
+    if (file && env.ASSETS) {
+      const asset = await env.ASSETS.fetch(new Request(new URL(file, url), request));
+      if (asset.ok) return asset;
+      await asset.body?.cancel();
     }
     return render(request, env, ctx, host, site);
   },

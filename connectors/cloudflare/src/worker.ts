@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import type { SitesBundle } from "@sanoma-ai/workflows/shared";
 
 // The company's Worker, as the package ships it in `worker/`: the files `cloudflare.container`
 // uploads, and the object's code, which the fake runs in this process.
@@ -20,7 +21,7 @@ export interface WorkerModule {
   name: string;
   content: string | Uint8Array<ArrayBuffer>;
   /** What the module is, as the upload types its part: an ES module unless it says. */
-  type?: "esm" | "wasm" | "text" | "data";
+  type?: SitesBundle["modules"][number]["type"];
 }
 
 let modules: Promise<WorkerModule[]> | undefined;

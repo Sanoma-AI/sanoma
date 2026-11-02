@@ -14,6 +14,7 @@ import {
 import { domainsOf, domainsText } from "@sanoma-ai/workflows/shared";
 import { instanceUrl, mintInstanceToken, WAKEUP_TOKEN } from "@sanoma-ai/workflows/wakeup-service";
 import { alarm, container } from "./connector.ts";
+import { refused } from "./errors.ts";
 import { accountPinned } from "./registry.ts";
 import { serveSites } from "./sites.ts";
 import {
@@ -212,9 +213,7 @@ export interface AssetFile {
   contentType: string;
 }
 
-/** The driver's own refusal, before or instead of a call: never retried. */
-export const refused = (message: string, vendorCode?: string) =>
-  new DriverError(`cloudflare: ${message}`, { retryable: false, ...(vendorCode && { vendorCode }) });
+export { refused };
 
 /** The company's Worker, named after it. */
 export const scriptOf = (name: string) => `sanoma-${name}`;

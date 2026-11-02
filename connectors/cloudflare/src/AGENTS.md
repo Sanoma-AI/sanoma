@@ -11,6 +11,7 @@ Source of the Cloudflare connector: the three resource types, their operations o
 | [`records.ts`](records.ts)     | `recordsOps` over `CloudflareApi`: a set found by its mark, its plan, one batch per write, adoption, conflicts and the token's DNS permission                              |
 | [`driver.ts`](driver.ts)       | `cloudflareDriver`: `CloudflareApi` over the `cloudflare` SDK and `fetch`, failures mapped to `DriverError`, the credentials' `env`                                        |
 | [`sites.ts`](sites.ts)         | `serveSites`: the public sites on the Worker after a deploy: the container's bundle, its assets through an upload session, the Worker uploaded again with the sites router |
+| [`errors.ts`](errors.ts)       | `refused`: the driver's own refusal, never retried                                                                                                                         |
 | [`registry.ts`](registry.ts)   | `accountImage` and `copyImage`: the declared image copied into the account's registry over the OCI distribution API with `fetch`, pinned by digest                         |
 | [`fake.ts`](fake.ts)           | `fakeCloudflare`: an in-memory account whose Workers serve on this machine and run `worker/instance.js` over an in-process `ctx`                                           |
 | [`worker.ts`](worker.ts)       | The Worker's modules as uploaded (the sites router's too), and `worker/instance.js`'s routes, names and object, re-exported for the package                                |

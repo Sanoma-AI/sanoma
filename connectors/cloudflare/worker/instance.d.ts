@@ -54,5 +54,11 @@ export declare class Instance {
   startNow(): Promise<void>;
 }
 
+/** The Worker's one object, which every request and the sites router's `startNow` go to. */
+export declare function instanceOf(env: Record<string, unknown>): {
+  fetch(request: Request): Promise<Response>;
+  startNow(): Promise<void>;
+};
+
 /** The Worker's default export: every request goes to the one object. */
 export declare const worker: { fetch(request: Request, env: Record<string, unknown>): Promise<Response> };

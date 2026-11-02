@@ -2,7 +2,8 @@ import type { LoginHalf } from "@sanoma-ai/workflows";
 import { describe, expect, it } from "vitest";
 import { ApiError } from "../src/api.ts";
 import { publicFront } from "../src/login/public.ts";
-import { PUBLIC_FNS, publicOnly } from "../src/middleware.ts";
+import { publicOnly } from "../src/middleware.ts";
+import { PUBLIC_FNS } from "../src/public-fns.ts";
 
 // A public site's front door on its own host, and the server functions that host answers.
 
