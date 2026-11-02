@@ -3,6 +3,7 @@ import { type CallContext, memorySecrets } from "@sanoma-ai/workflows";
 import { delay, http, HttpResponse } from "msw";
 import { describe, expect, it, vi } from "vitest";
 import { resendDriver } from "../src/driver.ts";
+import { fakeResend } from "../src/fake.ts";
 import { audience, from, replayOptions } from "./replay.ts";
 
 // Replays test/fixtures; the README says how to run these tests against Resend.
@@ -78,30 +79,31 @@ describe("resendDriver", () => {
     expect(sent.slice(1).map((r) => r.headers.get("idempotency-key"))).toEqual(["run-1:4", "run-1:4"]);
   });
 
-  it("takes the sender from the deprecated RESEND_FROM, read at the call, when the input has none, and warns once", async () => {
-    // Two drafts: the second warns no more.
-    play("sender-fallback", [...fixture("create"), ...fixture("create")]);
+  it("refuses a broadcast with no sender, or an empty one, without calling Resend, whatever the environment holds", async () => {
+    // The retired fallback is read no more.
     vi.stubEnv("RESEND_FROM", from);
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    // A module of its own: no other test's fallback has warned in it.
-    vi.resetModules();
-    const fresh = (await import("../src/driver.ts")).resendDriver({ timeoutMs: live ? 15_000 : 200 });
-    const draft = (input: Record<string, unknown>) => fresh.ops["broadcast.create"]!(input, call);
-    await draft({ audience, subject: "s", html: "" });
-    // An empty sender is none.
-    await draft({ audience, from: "", subject: "s", html: "" });
-    expect(sent.map((r) => r.body)).toMatchObject([{ from }, { from }]);
-    expect(warn.mock.calls.filter(([m]) => String(m).includes("RESEND_FROM"))).toHaveLength(1);
+    for (const sender of [{}, { from: "" }]) {
+      await expect(create({ audience, ...sender, subject: "s", html: "" })).rejects.toMatchObject({
+        name: "DriverError",
+        retryable: false,
+        message: expect.stringContaining("needs `from` in its input"),
+      });
+    }
+    expect(sent).toEqual([]);
   });
 
-  it("refuses a broadcast with no sender without calling Resend", async () => {
-    vi.stubEnv("RESEND_FROM", undefined);
-    await expect(create({ audience, subject: "s", html: "" })).rejects.toMatchObject({
-      name: "DriverError",
-      retryable: false,
-      message: expect.stringContaining("`from`"),
-    });
-    expect(sent).toEqual([]);
+  it("has the fake, like the driver, refuse a send with no sender, or an empty one", async () => {
+    const fake = fakeResend().driver.ops;
+    for (const sender of [{}, { from: "" }]) {
+      for (const attempt of [
+        fake["broadcast.create"]!({ audience, ...sender, subject: "s", html: "" }, call),
+        fake["emails.send"]!({ to, ...sender, subject: "s", text: "Hello" }, call),
+      ])
+        await expect(attempt).rejects.toMatchObject({
+          retryable: false,
+          message: expect.stringContaining("needs `from`"),
+        });
+    }
   });
 
   it("fails a 422 for good, with Resend's status and error name", async () => {
@@ -135,12 +137,12 @@ describe("resendDriver", () => {
     });
 
     it("refuses an email with no sender, or an empty one, without calling Resend", async () => {
-      vi.stubEnv("RESEND_FROM", undefined);
       for (const sender of [{}, { from: "" }]) {
         await expect(email({ to, ...sender, subject: "s", text: "Hello" }, 7)).rejects.toMatchObject({
           name: "DriverError",
           retryable: false,
-          message: "resend: emails.send needs `from` in its input, or RESEND_FROM set",
+          message:
+            "resend: emails.send needs `from` in its input, a sender on a domain verified in Resend (for sign-in codes, the config's `login.from`)",
         });
       }
       expect(sent).toEqual([]);

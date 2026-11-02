@@ -62,7 +62,7 @@ The session is one cookie, `better-auth.session_token` (`__Secure-better-auth.se
 
 ### An email code
 
-When the company's config names a sender (`login: { sender: resend.emails.send }`), the login also signs visitors in by a code mailed to them, sent as a run of the runtime's `login-code` workflow (under the policy and in the ledger). A visitor signed in by code has a verified email, which the app gives the principal (`ctx.startedBy.email` in a run they start); one signed up by password has none until they verify it.
+When the company's config names a sender (`login: { sender: resend.emails.send, from: "Acme <login@acme.example>" }`), the login also signs visitors in by a code mailed to them, sent as a run of the runtime's `login-code` workflow (under the policy and in the ledger). A visitor signed in by code has a verified email, which the app gives the principal (`ctx.startedBy.email` in a run they start); one signed up by password has none until they verify it.
 
 ### GitHub
 
