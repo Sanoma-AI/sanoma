@@ -710,9 +710,9 @@ function devPlugins(repo: string, src: string, onFileChange?: (file: string) => 
           if (env.consumer !== "client") continue;
           env.optimizeDeps.include = [
             ...(env.optimizeDeps.include ?? []).map((id) => (SHARED.test(id) ? `${viaApp} > ${id}` : id)),
-            // The public kit's Base UI controls and TanStack Form reach these CommonJS shims.
-            // A lazy site import can evade discovery under excluded app source; name the
-            // installed dependency path explicitly so the browser never receives raw CJS.
+            // The kit's Base UI controls reach these CommonJS shims. A lazy site import can
+            // evade discovery under excluded app source; name the installed dependency path
+            // explicitly so the browser never receives raw CJS.
             `${viaApp} > @base-ui/react > use-sync-external-store/shim`,
             `${viaApp} > @base-ui/react > use-sync-external-store/shim/with-selector`,
           ];
