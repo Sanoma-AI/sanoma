@@ -34,22 +34,25 @@ export interface FakeResendState extends Record<string, unknown> {
 const fail = (op: string, status: number, message: string, vendorCode: string) =>
   new DriverError(`resend: ${op} failed (${status}): ${message}`, { retryable: false, status, vendorCode });
 
-/** The records Resend asks a new domain for, as it gives them: DKIM, then SPF's MX and TXT, names relative to the domain. */
-function recordsFor(id: string, region: string, returnPath: string): ApiRecord[] {
+/** The records Resend asks a new domain for, as it gives them: DKIM, then SPF's MX and TXT, names relative to the zone. */
+function recordsFor(id: string, name: string, region: string, returnPath: string): ApiRecord[] {
   const pending = { ttl: "Auto", status: "not_started" };
+  // Named relative to the zone, as Resend names them: the fake takes the zone to be the last two labels.
+  const sub = name.split(".").slice(0, -2).join(".");
+  const at = (label: string) => (sub ? `${label}.${sub}` : label);
   // Made up from the id: the same in every run, and a domain made again gets a new one, as at Resend.
   const key = Buffer.from(`fake DKIM key ${id}`).toString("base64");
   return [
-    { record: "DKIM", name: "resend._domainkey", type: "TXT", value: `p=${key}`, ...pending },
+    { record: "DKIM", name: at("resend._domainkey"), type: "TXT", value: `p=${key}`, ...pending },
     {
       record: "SPF",
-      name: returnPath,
+      name: at(returnPath),
       type: "MX",
       value: `feedback-smtp.${region}.amazonses.com`,
       priority: 10,
       ...pending,
     },
-    { record: "SPF", name: returnPath, type: "TXT", value: "v=spf1 include:amazonses.com ~all", ...pending },
+    { record: "SPF", name: at(returnPath), type: "TXT", value: "v=spf1 include:amazonses.com ~all", ...pending },
   ];
 }
 
@@ -64,7 +67,7 @@ function fakeDomains(state: FakeResendState): DomainApi {
         name,
         region,
         status: "not_started",
-        records: recordsFor(id, region, custom_return_path),
+        records: recordsFor(id, name, region, custom_return_path),
       };
       return { id };
     },

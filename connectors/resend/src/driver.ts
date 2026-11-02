@@ -25,6 +25,13 @@ export interface ResendDriverOptions {
 /** The environment variables the driver reads, on every call. */
 const env = z.object({
   RESEND_API_KEY: z.string().describe("an API key: a full-access one to manage domains, else sending access will do"),
+  RESEND_FROM: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      "deprecated, retires once `login.from` exists (sanoma#531): the sender of a broadcast or email whose input has no `from`, such as `Acme <news@acme.example>`, on a domain verified in Resend",
+    ),
 });
 
 /** Resend's error body. The spec declares none; the docs give `{ statusCode, name, message }`. */
@@ -87,13 +94,23 @@ function replied<T extends { id?: string }>(op: string, reply: { data: T; respon
   throw new DriverError(`resend: ${op} replied ${status} without an id`, { retryable: false, status });
 }
 
-/** The sender, the input's `from`: Resend requires one, and the driver takes it from nowhere else. */
+/** Whether this process warned of a send that took the deprecated `RESEND_FROM`: once is enough. */
+let warned = false;
+
+/** The sender: the input's `from` (unless empty), else the deprecated `RESEND_FROM`, read at the call; Resend requires one. */
 function senderOf(op: string, from: string | undefined): string {
   if (from) return from;
-  throw new DriverError(
-    `resend: ${op} needs \`from\` in its input, a sender on a domain verified in Resend, such as \`Acme <news@acme.example>\``,
-    { retryable: false },
-  );
+  const fallback = process.env.RESEND_FROM;
+  if (fallback) {
+    if (!warned) {
+      warned = true;
+      console.warn(
+        "resend: a send with no `from` took RESEND_FROM, which is deprecated and retires once `login.from` exists (sanoma#531): pass `from`",
+      );
+    }
+    return fallback;
+  }
+  throw new DriverError(`resend: ${op} needs \`from\` in its input, or RESEND_FROM set`, { retryable: false });
 }
 
 /** A request whose 404 means no such domain: `undefined` then. */

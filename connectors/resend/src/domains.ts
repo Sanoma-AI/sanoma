@@ -1,4 +1,11 @@
-import { diffDeclared, type DnsRecord, dnsRecord, DriverError, type PlanAction } from "@sanoma-ai/workflows";
+import {
+  diffDeclared,
+  type DnsRecord,
+  dnsRecord,
+  DriverError,
+  errorMessage,
+  type PlanAction,
+} from "@sanoma-ai/workflows";
 import type { z } from "zod";
 import {
   DEFAULT_REGION,
@@ -39,17 +46,17 @@ export interface DomainApi {
 }
 
 /** The driver's own refusal, before or instead of a call: never retried. */
-const refused = (message: string, vendorCode: string) =>
-  new DriverError(`resend: ${message}`, { retryable: false, vendorCode });
+const refused = (message: string, vendorCode: string, cause?: unknown) =>
+  new DriverError(`resend: ${message}`, { retryable: false, vendorCode, cause });
 
 /** Resend's ids are UUIDs: an import id that is not one is a domain's name. */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * A record's full name, from the name Resend gives: Resend writes most relative to the zone
- * (`send`, or `send.mail` for `mail.example.com` in the zone `example.com`) and some in full
- * (`links.example.com`). A relative name whose last labels begin the domain's is relative to a
- * parent zone, so those labels are not repeated.
+ * (`send`, or `send.mail` for `mail.example.com` in the zone `example.com`; `mail` for the
+ * subdomain itself) and some in full (`links.example.com`). A relative name whose last labels
+ * begin the domain's is relative to a parent zone, so those labels are not repeated.
  */
 export function fullName(name: string, domainName: string): string {
   const given = name.toLowerCase().replace(/\.$/, "");
@@ -57,8 +64,8 @@ export function fullName(name: string, domainName: string): string {
   if (given === domainName || given.endsWith(`.${domainName}`)) return given;
   const labels = given.split(".");
   const parts = domainName.split(".");
-  // The zone keeps two labels at least, and the record one of its own.
-  for (let k = Math.min(labels.length - 1, parts.length - 2); k > 0; k--) {
+  // The zone keeps two labels at least.
+  for (let k = Math.min(labels.length, parts.length - 2); k > 0; k--) {
     if (labels.slice(-k).join(".") === parts.slice(0, k).join(".")) {
       return [...labels.slice(0, -k), ...parts].join(".");
     }
@@ -95,6 +102,7 @@ function stateOf(d: ApiDomain) {
   return {
     name,
     region: d.region,
+    // Left out when the records do not show it: `normalize` then compares it as declared.
     ...(returnPath && { custom_return_path: returnPath }),
     id: d.id,
     status: d.status,
@@ -144,8 +152,8 @@ export function domainOperations(api: DomainApi) {
     if (!found) throw refused(`domain ${id} was deleted while it was verified`, "gone");
     return { id, state: stateOf(found) };
   };
-  /** Creates the domain, or takes the one of that name a create that lost its reply made, then verifies it. */
-  const make = async ({ name, region, custom_return_path }: Declared) => {
+  /** Creates the domain, or takes the one of that name a create that lost its reply made: its id. */
+  const make = async ({ name, region, custom_return_path }: Declared): Promise<string> => {
     const made = await api.create({
       name,
       ...(region && { region }),
@@ -159,7 +167,7 @@ export function domainOperations(api: DomainApi) {
         "registered",
       );
     }
-    return verify(id);
+    return id;
   };
   const plan = async ({ id, desired }: { id?: string; desired?: Record<string, unknown> }): Promise<Planned> => {
     const state = id === undefined ? undefined : (await read({ id })).state;
@@ -202,7 +210,8 @@ export function domainOperations(api: DomainApi) {
       const { state: _, want: __, ...out } = await plan(input);
       return out;
     },
-    create: ({ desired }: { desired: Record<string, unknown> }) => make(domain.schema.parse(desired)),
+    create: async ({ desired }: { desired: Record<string, unknown> }) =>
+      verify(await make(domain.schema.parse(desired))),
     // Nothing of a domain changes in place: an update asks Resend to verify it again, and a
     // replace deletes it (Resend holds one domain of a name) and makes it anew, with a new key.
     update: async ({
@@ -222,7 +231,21 @@ export function domainOperations(api: DomainApi) {
       if (fresh.action === "none") return { id, state: fresh.state };
       if (fresh.action === "replace") {
         await api.remove(id);
-        return make(fresh.want!);
+        let made: string;
+        try {
+          made = await make(fresh.want!);
+        } catch (error) {
+          // The old domain is gone, so a retry of this call would find nothing to replace. Later: apply
+          // owns a replace, deleting and unbinding, then creating as a step of its own.
+          const { name, region } = fresh.state;
+          const why = errorMessage(error).replace(/^resend: /, "");
+          throw refused(
+            `domain.update: deleted domain ${id} (${name}, ${region}) to make it anew, and the create failed: ${why}; apply again to create it`,
+            "replace_incomplete",
+            error,
+          );
+        }
+        return verify(made);
       }
       return verify(id);
     },

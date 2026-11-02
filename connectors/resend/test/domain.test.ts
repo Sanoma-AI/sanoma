@@ -71,6 +71,22 @@ describe("resend.domain", () => {
       expect(await op(fake, "update", { id, desired })).toMatchObject({ state: { status: "pending" } });
     });
 
+    it("names a subdomain's records relative to the zone, as Resend does, and reads them in full", async () => {
+      const fake = fakeResend();
+      const { id, state } = (await op(fake, "create", { desired: { name: "mail.example.com" } })) as Changed;
+      expect(fake.state.domains[id]!.records.map((r) => r.name)).toEqual([
+        "resend._domainkey.mail",
+        "send.mail",
+        "send.mail",
+      ]);
+      expect(state).toMatchObject({ custom_return_path: "send" });
+      expect(state.dns_records.map((r) => (r as { name: string }).name)).toEqual([
+        "resend._domainkey.mail.example.com",
+        "send.mail.example.com",
+        "send.mail.example.com",
+      ]);
+    });
+
     it("makes a domain moved to another region anew, with a new key", async () => {
       const fake = fakeResend();
       const before = (await op(fake, "create", { desired: { name: "example.com" } })) as Changed;

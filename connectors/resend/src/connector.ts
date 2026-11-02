@@ -80,8 +80,14 @@ export const domain = defineResource({
   fields,
   find: ({ name }) => name,
   bindingId: (state) => String(state.id),
-  // The status is compared too, declared `verified` (a declaration never holds one).
-  normalize: (state, desired) => ({ ...compareDeclared(fields, state, desired), status: state.status ?? "verified" }),
+  // The status is compared too, declared `verified` (a declaration never holds one). A Return-Path
+  // the records do not show (no SPF record read) is taken to be Resend's default.
+  normalize: (state, desired) => ({
+    ...compareDeclared(fields, state, desired),
+    ...(state.custom_return_path === undefined &&
+      desired.custom_return_path === DEFAULT_RETURN_PATH && { custom_return_path: DEFAULT_RETURN_PATH }),
+    status: state.status ?? "verified",
+  }),
   writable: true,
   // Its DKIM key is Resend's: one made again needs new DNS records, so apply asks first.
   stateless: false,
