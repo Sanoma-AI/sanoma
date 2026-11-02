@@ -230,6 +230,7 @@ describe("a config's collections", () => {
       "sanoma.connection.bind",
       "sanoma.connection.create",
       "sanoma.apps.list",
+      "sanoma.secretStore.prepare",
       "sanoma.identity.enroll",
       "sanoma.identity.retire",
       "sanoma.identity.revoke",
