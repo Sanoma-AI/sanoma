@@ -42,7 +42,7 @@ This package owns workflow declarations, durable execution, policy and approval 
 
 - Keep `previewConnection` / `connectConnection` credential intake outside durable operations. Only metadata enters the prepare/configure/activate gates. Preserve pending/uncertain refusal, expected versions and stored-version receipts when changing retries; card reads are metadata-only and health is last-tested, never a live promise. See [Connecting and managing accounts](README.md#connecting-and-managing-accounts).
 
-Keep runtime and provisioning issuance separate: `/token` supplies ten-minute company OAuth tokens; `/identity` supplies Google OIDC tokens for a fixed provisioning WIF subject/audience. They require separate enrollment readers, bootstraps and attached issuer accounts. `identity-broker.ts` shares request/audit checks only. Preserve evidence limits in [Cloud identity](CLOUD-IDENTITY.md).
+The server-only `/identity-service` entry performs no schema installation; administrator setup owns its enrollment and audit schemas, which must never enter company `db.ts` tables. Keep runtime and provisioning issuance separate: `/token` supplies ten-minute company OAuth tokens; `/identity` supplies Google OIDC tokens for a fixed provisioning WIF subject/audience. They require separate enrollment readers, bootstraps and attached issuer accounts. `identity-broker.ts` shares request/audit checks only. Preserve evidence limits in [Cloud identity](CLOUD-IDENTITY.md).
 
 ## Checks
 
