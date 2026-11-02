@@ -75,8 +75,8 @@ export const githubTf = tfConnector({
   info: vendorInfo(import.meta.url),
 });
 
-/** The account an installation of the App is on. */
-export const Account = z.object({ login: z.string(), type: z.enum(["User", "Organization"]) });
+/** The account an installation of the App is on: its login, and its id, which a rename keeps. */
+export const Account = z.object({ login: z.string(), id: z.number(), type: z.enum(["User", "Organization"]) });
 
 /** An account's or a repository's name: GitHub's characters, never `.` or `..` alone (a path's own). */
 const part = z.string().regex(/^(?!\.\.?$)[\w.-]+$/, "a GitHub name: letters, digits, `-`, `_` and `.`");

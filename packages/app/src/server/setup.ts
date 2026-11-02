@@ -155,7 +155,10 @@ export async function setupStatus(app: AppContext, actor?: Principal): Promise<S
   };
 }
 
-/** The declared email of the person asking, and the config's sender, with whether its connector's credentials are set. */
+/**
+ * The declared email of the person asking, the config's sender, with whether its connector's
+ * credentials are set, and the public sites with a login.
+ */
 async function signInStatus(app: AppContext, actor?: Principal) {
   const sender = app.resolved.login?.sender;
   const statuses = sender && (await app.client.credentials()).get(sender.vendor);
@@ -163,6 +166,9 @@ async function signInStatus(app: AppContext, actor?: Principal) {
     you: (actor && declaredEmail(app, actor.id)) ?? null,
     sender: sender?.id ?? null,
     senderConnected: !!statuses?.every(credentialReady),
+    sites: app.description.sites.flatMap(({ name, public: open, login }) =>
+      open && login !== undefined ? [{ name, login }] : [],
+    ),
   };
 }
 

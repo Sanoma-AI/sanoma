@@ -199,8 +199,8 @@ export function buildCtx(wf: WorkflowDefinition<any, any>, run: Run): any {
 }
 
 /** Who started the run, as `ctx.startedBy` shows it: a plain frozen record, whose absent fields read as undefined. */
-const startedByOf = ({ id, email, subject }: Principal): StartedBy =>
-  Object.freeze({ id, ...(email && { email }), ...(subject && { subject }) });
+const startedByOf = ({ id, email, github, subject }: Principal): StartedBy =>
+  Object.freeze({ id, ...(email && { email }), ...(github && { github }), ...(subject && { subject }) });
 
 /** `members`, each object in it included, refusing any member not in it (`strict`), with `plain`'s as they are. */
 function guarded(

@@ -58,8 +58,8 @@ const fail = (where: string, status: number, message: string, errors: string[] =
 export const FAKE_TEMPLATE = "Sanoma-AI/company-template";
 
 /**
- * The operations through the App, over an in-memory GitHub: installation 7 on the organization
- * `acme`, and the public template `Sanoma-AI/company-template` (`main`, a README). An installation
+ * The operations through the App, over an in-memory GitHub: installation 7 on the personal account
+ * `acme`, 9 on the organization `acme-inc`, and the public template `Sanoma-AI/company-template` (`main`, a README). An installation
  * reaches the repositories of its own account; a commit's SHA is the same for the same parent,
  * message and files.
  */
@@ -69,7 +69,10 @@ export function fakeGithubApp(options: FakeOptions = {}) {
     {
       initial: (): FakeGithubAppState => ({
         seq: 1,
-        installations: { 7: { account: { login: "acme", type: "Organization" }, repositorySelection: "all" } },
+        installations: {
+          7: { account: { login: "acme", id: 7, type: "User" }, repositorySelection: "all" },
+          9: { account: { login: "acme-inc", id: 9, type: "Organization" }, repositorySelection: "all" },
+        },
         repositories: {
           [FAKE_TEMPLATE]: {
             id: 1,

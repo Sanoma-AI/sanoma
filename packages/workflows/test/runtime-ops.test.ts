@@ -79,7 +79,8 @@ const whoami = defineWorkflow({
   input: z.object({}),
   uses: [],
   run: async (ctx) => {
-    return { ...ctx.startedBy, email: ctx.startedBy.email ?? null, subject: ctx.startedBy.subject ?? null };
+    const { email = null, github = null, subject = null } = ctx.startedBy;
+    return { ...ctx.startedBy, email, github, subject };
   },
 });
 
@@ -275,20 +276,29 @@ describe("the runtime's own operations", () => {
 
   describe("ctx.startedBy", () => {
     it("is a person's id", async () => {
-      expect(await run("whoami", {}, "ada")).toEqual({ id: "ada", email: null, subject: null });
+      expect(await run("whoami", {}, "ada")).toEqual({ id: "ada", email: null, github: null, subject: null });
     });
 
-    it("is a visitor's id with the email their login verified", async () => {
+    it("is a visitor's id with the email and GitHub login their login verified", async () => {
       const visitor = { id: "visitor:better-auth:u1", email: "u1@acme.test" };
-      expect(await run("whoami", {}, visitor)).toEqual({ ...visitor, subject: null });
+      expect(await run("whoami", {}, visitor)).toEqual({ ...visitor, github: null, subject: null });
+      const linked = { ...visitor, github: "ada-lovelace" };
+      expect(await run("whoami", {}, linked)).toEqual({ ...linked, subject: null });
     });
 
     it("is a token's id with its row's subject, never one the caller gives", async () => {
       const minted = await app.client.tokens.mint({ subject: "visitor:better-auth:owner-2", groups: ["visitors"] });
-      const caller = { id: `token:${minted.id}`, groups: ["visitors"], subject: "someone-else", email: "x@acme.test" };
+      const caller = {
+        id: `token:${minted.id}`,
+        groups: ["visitors"],
+        subject: "someone-else",
+        email: "x@acme.test",
+        github: "someone",
+      };
       expect(await run("whoami", {}, caller)).toEqual({
         id: `token:${minted.id}`,
         email: null,
+        github: null,
         subject: "visitor:better-auth:owner-2",
       });
       await app.client.tokens.revoke({ id: minted.id });

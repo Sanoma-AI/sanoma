@@ -25,6 +25,7 @@ export {
   type ResourceGroup,
   retryableStatus,
   type SignInMethod,
+  type SocialClients,
   type VendorInfo,
   withSetup,
 } from "./op.ts";

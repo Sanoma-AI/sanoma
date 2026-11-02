@@ -128,6 +128,7 @@ describe("runScenarios with people and a Cedar policy", () => {
         "An agent refunds nothing",
         "A visitor refunds, as the policy permits",
         "Anonymous's large refund waits for finance too",
+        "A visitor who linked GitHub refunds",
       ],
       failed: [],
     });

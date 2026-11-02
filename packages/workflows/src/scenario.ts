@@ -13,7 +13,7 @@ import {
 } from "@cucumber/messages";
 import type { z } from "zod";
 import type { RunSummary, SanomaClient } from "./client.ts";
-import type { Approver } from "./define.ts";
+import type { Approver, Principal } from "./define.ts";
 import type { ResolvedConfig } from "./config.ts";
 import {
   buildLibrary,
@@ -162,8 +162,11 @@ export interface Scenario {
   text: string;
   /** Every step in order, for a list and for marking graph nodes. */
   steps: ScenarioStep[];
-  /** Who starts the run, by id, when a `Given <who> is acting` says: a declared person or agent, `anonymous` or a visitor. */
-  startedBy?: string;
+  /**
+   * Who starts the run when a `Given … is acting` says: a declared person or agent or `anonymous`
+   * by id, or a visitor, by id or, with the email and GitHub login its login verified, as a principal.
+   */
+  startedBy?: Principal | string;
   given: Given[];
   input: unknown;
   decisions: Decision[];
@@ -208,11 +211,11 @@ interface Then {
 
 /**
  * What a step of each kind reads into; `any` is a decision, which a step of any keyword may make,
- * and `actor` a `Given` saying who starts the run (`{who} is acting`), by id.
+ * and `actor` a `Given` saying who starts the run (`{who} is acting`), by id or as a principal.
  */
 interface Items {
   given: Unstepped<Given>[];
-  actor: string;
+  actor: Principal | string;
   when: When;
   then: Then;
   any: Unstepped<Decision>;
@@ -398,6 +401,12 @@ function builtFor(scope: Scope): Built {
 /** A `Then` step of the generic steps: its expectation, checked against the run's records. */
 const expecting = (expect: CoreExpectation): Then => ({ expect, verify: (run) => detailOf(expect, run.records) });
 
+/** The scenario's visitor (`a visitor is acting`) with what its login verified, as `publicFront` passes it on. */
+const visitorWith = (verified: { email: unknown; github?: unknown }): Principal => ({
+  ...visitorPrincipal("scenario", "visitor"),
+  ...(verified as Pick<Principal, "email" | "github">),
+});
+
 /** The rules a scope has, and the parameter types their expressions use. */
 function rulesOf(scope: Scope): { rules: Rule[]; parameterTypes: ParameterTypeSpec[] } {
   const { types, collections } = scope;
@@ -455,6 +464,13 @@ function rulesOf(scope: Scope): { rules: Rule[]; parameterTypes: ParameterTypeSp
     { kind: "actor", source: "{who} is acting", read: ([who]) => actorNamed(who as string) },
     // A visitor of a public site, as a login would vouch for one; `anonymous` is a `{who}`.
     { kind: "actor", source: "a visitor is acting", read: () => visitorPrincipal("scenario", "visitor").id },
+    // A visitor with the email its login verified, and a GitHub login it linked.
+    { kind: "actor", source: "a visitor {string} is acting", read: ([email]) => visitorWith({ email }) },
+    {
+      kind: "actor",
+      source: "a visitor {string} with GitHub {string} is acting",
+      read: ([email, github]) => visitorWith({ email, github }),
+    },
     {
       kind: "given",
       source: "{op} was called with",
@@ -985,7 +1001,9 @@ function compileWorld(built: Built, specs: Map<string, Spec>) {
         switch (rule.kind) {
           case "actor":
             if (spec.startedBy !== undefined)
-              throw new Error(`${spec.startedBy} is acting already: a run has one actor`);
+              throw new Error(
+                `${typeof spec.startedBy === "string" ? spec.startedBy : spec.startedBy.id} is acting already: a run has one actor`,
+              );
             spec.startedBy = rule.read(args, pickle);
             break;
           case "given": {

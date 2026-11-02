@@ -228,10 +228,13 @@ export function parseDomains(value: string | undefined): Record<string, string> 
  * app's default); on any other host the staff login (`staffLogin` over Better Auth), which needs
  * `SANOMA_SIGNING_KEY`, with GitHub as a method when `SANOMA_GITHUB_CLIENT_ID` and
  * `SANOMA_GITHUB_CLIENT_SECRET` are both set, in the environment or in the stored secrets
- * (`readSecrets`), where creating the GitHub App on the app's connect page put them. An empty
- * value is the same as unset. A mistake in them is a UsageError.
+ * (`readSecrets`), where creating the GitHub App on the app's connect page put them; the same
+ * client goes to the public sites' logins (`social`), for visitors. An empty value is the same as
+ * unset. A mistake in them is a UsageError.
  */
-export async function appOptions(readSecrets?: ReadSecrets): Promise<Pick<AppOptions, "host" | "login" | "domains">> {
+export async function appOptions(
+  readSecrets?: ReadSecrets,
+): Promise<Pick<AppOptions, "host" | "login" | "domains" | "social">> {
   const env = process.env;
   const domains = parseDomains(env.SANOMA_DOMAINS);
   const host = env.SANOMA_APP_HOST || undefined;
@@ -254,8 +257,8 @@ export async function appOptions(readSecrets?: ReadSecrets): Promise<Pick<AppOpt
     const missing = GITHUB.filter((name) => !found.has(name));
     throw new UsageError(`GitHub sign-in needs ${GITHUB.join(", ")}: ${missing.join(", ")} not set`);
   }
-  const github = clientId && clientSecret ? { github: { clientId, clientSecret } } : {};
-  return { ...options, login: staffLogin(betterAuthStaffLogin, github) };
+  const social = clientId && clientSecret ? { github: { clientId, clientSecret } } : undefined;
+  return { ...options, login: staffLogin(betterAuthStaffLogin, social), social };
 }
 
 /**
