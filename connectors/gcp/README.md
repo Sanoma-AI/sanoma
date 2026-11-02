@@ -121,11 +121,23 @@ export const key = gcp.cryptoKey(
 
 Grant runtime encrypt/decrypt access with `keyIamMember` on the specific key. Keep production and preview identities separate. Rotation creates new key versions; it does not by itself re-encrypt stored ciphertext or retire versions needed by backups. This provisioning surface is separate from the credential-storage adapter in [#470](https://github.com/Sanoma-AI/sanoma/issues/470).
 
+### IAM member IDs
+
+For `keyIamMember` and `serviceAccountIamMember`, the public operation result's `id` is the provider's import identifier:
+
+```text
+resource_name role member [condition_title]
+```
+
+Pass that returned `id` unchanged to a subsequent read, including when no saved provider state is available. Sanoma derives it from the structured parent resource, role, member and optional condition title. Custom role paths and `principal://` members retain their slashes. The provider's native `state.id` remains unchanged; its slash-delimited representation is not the import identifier. See the pinned provider's [IAM member import implementation](https://github.com/hashicorp/terraform-provider-google/blob/v8.7.0/google/tpgiamresource/resource_iam_member.go).
+
 ## Testing and current evidence
 
 `fakeGcp` is the bridge's in-memory resource fake; it is not Google IAM or a federation server. Authentication tests use synthetic STS/IAM responses and temporary token/config files, including separate account sources, denied impersonation, rejected key/executable configs and sanitized failures. Driver tests use a provider state double to check concurrent session separation, project/account refusals, symmetric-key and retention guards, OIDC condition requirements, sanitized failures and the fake. The recorded schema/pin in `testdata/` establishes the generated provider contract, not a successful cloud deployment.
 
 The [isolated live run](https://github.com/Sanoma-AI/sanoma/actions/runs/41164779676) passed on `e43fb77c1e05d51838687d4574b2678218983386` in project `sanoma-513217`: GitHub OIDC → WIF → scoped provisioning account, denied impersonation of another existing account, real Google-provider key create/read/update, rotation-period update and key-deletion refusal. One provider session remained active for 660 seconds and fetched a fresh OIDC subject token after its ten-minute impersonated token expired. Trust was restricted to numeric repository/owner IDs, branch, workflow and the exact reviewed commit. This proves that provisioning path; it does not establish live CRUD for all seven resource types or a company runtime's identity.
+
+A later published-package workflow under [#532](https://github.com/Sanoma-AI/sanoma/issues/532) created a key ring, service account, crypto key and both IAM member types, then exposed a failure when reading an IAM member by its returned ID. The connector now derives importable public IDs while preserving native provider state. Synthetic regression coverage checks custom roles, `principal://` members, optional conditions and reads by returned ID without saved state. A successful live rerun of the full provisioning graph remains pending.
 
 The manual `gcp-live.yml` workflow accepts project ID/number, provisioner and denied-account emails, disposable key-ring name and WIF audience as inputs. Administrators must enable billing/APIs, establish narrowly scoped federation and ring permissions, and restrict trust to the intended repository, workflow, ref and reviewed commit before running it. The denied account must exist without an impersonation grant to that federation. No service-account private key is needed. Ordinary CI skips `test/live.test.ts`; only the dedicated workflow enables it. The test creates a synthetic key, so retire all its versions after verification; KMS key/ring metadata remains. Never use a production ring. Provisioning and renewable runtime identity remain separate.
 
