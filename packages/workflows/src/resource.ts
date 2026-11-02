@@ -2,7 +2,7 @@ import type { ConnectionRef } from "./connection.ts";
 import { z } from "zod";
 import { checkDatabase, type DatabaseSpec } from "./database.ts";
 import { isRunControlError } from "./errors.ts";
-import { checkHost, type HostSpec } from "./host.ts";
+import { checkHost, hasPath, type HostSpec } from "./host.ts";
 import { type Connector, type OpSpec, RESOURCE, VENDOR } from "./op.ts";
 import { isSanomaSecret, isSecret, type Secret } from "./secret.ts";
 import { errorMessage } from "./shared.ts";
@@ -37,6 +37,26 @@ export interface FieldReference {
    * declared one. Without it, the field holds the resource's `name`, and is compared as it is.
    */
   readonly by?: readonly string[];
+  /**
+   * A dotted path in that resource's state: apply and drift give this field the named resource's
+   * state at this path, as a whole (a list or an object), read in the same run or made by an
+   * earlier step of it (`records: mail` takes a `resend.domain`'s `dns_records`). A data file may
+   * give a literal value here instead. `desired` holds the resource's `name` until then, which the
+   * schema does not judge. Where the same apply changes that resource at the path (creates or
+   * replaces it, or updates it with the path `unknown` or another value there in its plan), or,
+   * for a create, it has no state yet or nothing at the path, a plan is given `null` there (known
+   * after apply: the type's `plan` must accept it and report the path in `unknown`), so a change it
+   * makes is planned, and approved, up front. A plan of a bound object leaves the field out while
+   * its resource is absent, gone or unreadable and not about to change, as drift does, and its step
+   * runs without it. A step given `null` for the field whose value is still not known (its
+   * resource's step failed or did not run) fails before its driver is called, and drift leaves the
+   * field out. An empty list or object at the path counts as known: a vendor that answers `[]`
+   * while it is still filling the list makes the dependent write an empty one. The path must be a
+   * field of each type it may name (`checkFromRefs`, when a config is resolved). Not on a
+   * write-only field, nor one holding a write-only field (refused). Not yet on a bridge-backed type
+   * (`tfConnector`): an OpenTofu provider's plan reads `null` as unset, not as known after apply.
+   */
+  readonly from?: string;
 }
 
 /** A resource type's `fields.references`: by dotted path, the resource each names. */
@@ -196,9 +216,10 @@ export interface Declared<Id extends string = string, T = State> {
 
 /**
  * What a resource type's constructor takes: its fields, where `R` (its `fields.references`)
- * names a path, a declared resource of that type instead of a value (`repository_id: site`), and
- * where a string goes, a secret (`secret("NAME")`), which the constructor allows at a write-only
- * field only.
+ * names a path, a declared resource of that type instead of a value (`repository_id: site`), in
+ * place of the whole field for a `from` reference (`records: mail`) and of each item for a list
+ * otherwise, and where a string goes, a secret (`secret("NAME")`), which the constructor allows
+ * at a write-only field only.
  */
 export type Declaring<T, R extends References = {}> = [keyof R] extends [never]
   ? WithSecrets<T>
@@ -219,9 +240,11 @@ type DeclaringAt<T, R extends References, P extends string> = T extends readonly
     : WithSecrets<T>;
 
 type DeclaringField<V, R extends References, P extends string> = P extends keyof R
-  ? V extends readonly (infer I)[]
-    ? (WithSecrets<I> | DeclaredOf<R[P]["type"]>)[]
-    : WithSecrets<V> | DeclaredOf<R[P]["type"]>
+  ? R[P] extends { readonly from: string }
+    ? WithSecrets<V> | DeclaredOf<R[P]["type"]>
+    : V extends readonly (infer I)[]
+      ? (WithSecrets<I> | DeclaredOf<R[P]["type"]>)[]
+      : WithSecrets<V> | DeclaredOf<R[P]["type"]>
   : [Extract<keyof R, `${P}.${string}`>] extends [never]
     ? WithSecrets<V>
     : DeclaringAt<V, R, P>;
@@ -477,6 +500,65 @@ export function holderOf(value: unknown, path: string): { holder: State; key: st
   return isObject(holder) || Array.isArray(holder) ? { holder: holder as State, key } : undefined;
 }
 
+/**
+ * Each place `refs` (a declaration's, by dotted path to the resource named there) holds a `from`
+ * reference (`FieldReference.from`): its path, the resource it names (`named`), and the path in
+ * that resource's state its value comes from.
+ */
+const fromRefs = (references: References | undefined, refs: Readonly<Record<string, string>>) =>
+  Object.entries(refs).flatMap(([at, named]) => {
+    const from = references?.[fieldPathOf(at)]?.from;
+    return from === undefined ? [] : [{ at, named, from }];
+  });
+
+/** What `withFrom` makes of a `from` field it cannot fill: `null` (known after apply), or nothing. */
+export type Missing = "unknown" | "drop";
+
+/** A `from` reference `withFrom` could not fill: the resource it names has no state, or nothing at its path. */
+export interface Unfilled {
+  at: string;
+  named: string;
+  from: string;
+  /** True when the resource has a state, with nothing at the path. */
+  stated: boolean;
+}
+
+/**
+ * `desired` with each field a `from` reference names given the state of the resource it names
+ * at that path (a copy), `stateOf` that resource (by what `refs` holds there, and the path read);
+ * and the references it could not fill, where that resource has no state or nothing there, each
+ * such field `null` (`unknown`, a value known after apply) or left out (`drop`), as `missing` says
+ * (for each reference, given a function). A reference with no place in `desired` to fill is
+ * unfilled too. `desired` itself when there is no such field.
+ */
+export function withFrom(
+  references: References | undefined,
+  desired: State,
+  refs: Readonly<Record<string, string>>,
+  stateOf: (named: string, from: string) => State | undefined,
+  missing: Missing | ((named: string, from: string) => Missing),
+): { desired: State; unfilled: Unfilled[] } {
+  const taken = fromRefs(references, refs);
+  if (!taken.length) return { desired, unfilled: [] };
+  const out = structuredClone(desired);
+  const unfilled: Unfilled[] = [];
+  for (const { at, named, from } of taken) {
+    const place = holderOf(out, at);
+    const state = stateOf(named, from);
+    const value = state === undefined ? undefined : valueAt(state, from);
+    if (place && value != null) {
+      // A copy: what a driver is given never shares an object with the resource's state.
+      place.holder[place.key] = structuredClone(value);
+      continue;
+    }
+    unfilled.push({ at, named, from, stated: state !== undefined });
+    if (!place) continue;
+    if ((typeof missing === "function" ? missing(named, from) : missing) === "drop") delete place.holder[place.key];
+    else place.holder[place.key] = null;
+  }
+  return { desired: out, unfilled };
+}
+
 /** A field's dotted path as `fields` names it, without a list item's index: `teams.0` is `teams`. */
 export const fieldPathOf = (at: string) => at.replaceAll(/\.\d+(?=\.|$)/g, "");
 
@@ -485,7 +567,7 @@ export const valueAt = (value: unknown, path: string) =>
   path.split(".").reduce<unknown>((v, key) => (isObject(v) || Array.isArray(v) ? (v as State)[key] : undefined), value);
 
 /** True when the two are the same JSON, where a missing value is `null`. */
-function same(a: unknown, b: unknown): boolean {
+export function same(a: unknown, b: unknown): boolean {
   if (a === b || (a == null && b == null)) return true;
   if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((item, i) => same(item, b[i]));
   if (isObject(a) && isObject(b)) return Object.keys({ ...a, ...b }).every((key) => same(a[key], b[key]));
@@ -579,6 +661,12 @@ function pathsIn(value: unknown, paths: ReadonlySet<string>, prefix = ""): strin
  * - `update` takes `{ id, state?, handle?, desired, expect? }` and returns the same; given
  *   `expect` (a plan's `action` and `replace`), it refuses a fresh plan that differs
  *   (`DriverError`, `vendorCode` `plan_changed`).
+ *
+ * A type whose fields take a `from` reference (`FieldReference.from`) is given `null` there by
+ * apply's `plan` while the value is known only after apply, so its `plan` must accept `null` and
+ * report the path in `unknown`; and its `update` must treat a field left out of `desired` as
+ * keeping what the vendor holds, since a bound object whose `from` resource is gone is updated
+ * with that field left out.
  * - `delete` takes `{ id, state?, handle? }` and returns `{ id, gone: true }`.
  *
  * `desired` may hold secret markers at write-only fields, which the driver resolves; no output
@@ -591,8 +679,10 @@ function pathsIn(value: unknown, paths: ReadonlySet<string>, prefix = ""): strin
  * schema does not have, fields the vendor owns (unless the identity names them), values the
  * schema rejects, and an empty identity. Where `fields.references` allows it, a field may name
  * another declared resource of that type (`repository_id: site`): `desired` holds, and the
- * schema and `find` read, that resource's `name`, and `refs` says where it was named. A type
- * without `find` declares resources without a `name`, found only by their bindings.
+ * schema and `find` read, that resource's `name`, and `refs` says where it was named. A `from`
+ * reference names one in place of the whole field, which apply and drift fill from its state, so
+ * the schema does not judge the name there. A type without `find` declares resources without a
+ * `name`, found only by their bindings.
  */
 export function defineResource<
   S extends z.ZodObject,
@@ -672,6 +762,20 @@ export function defineResource<
   const owned = new Set(fields.vendorOwned.filter((path) => !named.has(path)));
   const references: References = fields.references ?? {};
   const writeOnly = new Set(fields.writeOnly);
+  for (const [path, ref] of Object.entries(references)) {
+    if (ref.from !== undefined && ref.by !== undefined)
+      throw new Error(
+        `${what}: the reference at ${path} takes its value from its resource's state or names it by a field, not both`,
+      );
+    // A write-only field holds secret markers only, never a value from another resource's state.
+    if (ref.from !== undefined && underAny(path, writeOnly))
+      throw new Error(`${what}: ${path} is write-only, so it cannot take its value from another resource's state`);
+    const inside = ref.from === undefined ? undefined : fields.writeOnly.find((w) => w.startsWith(`${path}.`));
+    if (inside !== undefined)
+      throw new Error(
+        `${what}: ${inside} is write-only, so ${path}, which holds it, cannot take its value from another resource's state`,
+      );
+  }
   const declare = (
     given: Declaring<z.input<S>, R>,
     options?: { connection?: ConnectionRef },
@@ -684,8 +788,9 @@ export function defineResource<
       throw new Error(`${what}: select a declared connection of this connector`);
     }
     const refs: Record<string, string> = {};
-    // Where a secret is given, with list items' indexes: the schema does not judge its marker.
-    const secrets = new Set<string>();
+    // Where a secret, or a resource a `from` reference takes, is given, with list items' indexes:
+    // the schema does not judge the marker, nor the name that holds the place of the state.
+    const unjudged = new Set<string>();
     // Each resource `given` names, where `references` allows one of its type, replaced by its name.
     // `path` is the field's, as `references` names it; `at` has list items' indexes too.
     const resolve = (value: unknown, path: string, at: string): unknown => {
@@ -697,7 +802,7 @@ export function defineResource<
         if (isSanomaSecret(value.$secret) && !(hostSecrets !== undefined && underAny(path, new Set([hostSecrets])))) {
           throw new Error(`${what}: ${at} names ${value.$secret}, one of sanoma's own: only a host's secrets may`);
         }
-        secrets.add(at);
+        unjudged.add(at);
         return value;
       }
       if (isDeclared(value)) {
@@ -709,10 +814,16 @@ export function defineResource<
           throw new Error(`${what}: ${at} names a resource of type ${types.join(" or ")}, not ${id} (${value.name})`);
         if (value.name === undefined)
           throw new Error(`${what}: ${at} names a ${id}, which has no identity to name it by`);
+        if (wants.from !== undefined) unjudged.add(at);
         refs[at] = `${id}:${value.name}`;
         return value.name;
       }
-      if (Array.isArray(value)) return value.map((item, i) => resolve(item, path, `${at}.${i}`));
+      if (Array.isArray(value)) {
+        const from = references[path]?.from;
+        const listed = from === undefined ? undefined : value.find(isDeclared);
+        if (listed) throw new Error(`${what}: ${path} takes a ${listed[DECLARED]}'s ${from} as a whole, not in a list`);
+        return value.map((item, i) => resolve(item, path, `${at}.${i}`));
+      }
       if (!isObject(value)) return value;
       return Object.fromEntries(
         Object.entries(value).map(([field, v]) => [field, resolve(v, joinPath(path, field), joinPath(at, field))]),
@@ -732,7 +843,7 @@ export function defineResource<
       );
     }
     const parsed = schema.safeParse(desired);
-    const issues = parsed.error?.issues.filter((issue) => !secrets.has(issue.path.join(".")));
+    const issues = parsed.error?.issues.filter((issue) => !unjudged.has(issue.path.join(".")));
     if (issues?.length) throw new Error(`${what}: ${z.prettifyError(new z.ZodError(issues))}`);
     const name = find?.(desired);
     if (find && (typeof name !== "string" || name === "")) throw new Error(`${what}: its ${identity} is missing`);
@@ -768,6 +879,27 @@ export function defineResource<
     [RESOURCE]: true as const,
   });
   return Object.freeze(resource);
+}
+
+/**
+ * Throws where a `from` reference (`FieldReference.from`) names a path that a type it may name
+ * has no field at, among `types` (a config's): `dns_record` for `dns_records` would otherwise
+ * fail every create. A type not among them is left to the data files' check.
+ */
+export function checkFromRefs(types: ReadonlyMap<string, Resource>): void {
+  for (const type of types.values()) {
+    for (const [path, ref] of Object.entries(type.fields.references ?? {})) {
+      const named = ref.from === undefined ? [] : [ref.type].flat();
+      for (const held of named.map((id) => types.get(id)).filter((t) => t !== undefined)) {
+        if (!hasPath(held.schema, ref.from!)) {
+          const shape = (held.schema as Partial<z.ZodObject>).shape ?? {};
+          throw new Error(
+            `${type.vendor}.${type.type}: the reference at ${path} takes ${ref.from} from a ${held.vendor}.${held.type}'s state, which has no such field (its fields: ${Object.keys(shape).join(", ")})`,
+          );
+        }
+      }
+    }
+  }
 }
 
 /** Every resource type the connectors declare, by `<vendor>.<type>`. */
