@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
+import { configuredSecrets } from "../src/credentials.ts";
+import type { Db } from "../src/db.ts";
+import type { SecretStoreFactory } from "../src/secret-store.ts";
 import { checkSecretStore } from "../src/secret-store-check.ts";
 import { checkSecretConfiguration, memorySecretStore, SecretAccess, SecretStoreError } from "../src/secret-store.ts";
 import {
@@ -10,6 +13,35 @@ import {
 } from "../src/authentication.ts";
 
 describe("secret store contract", () => {
+  it("validates factory metadata without binding or opening a database and refuses unbound use", () => {
+    const store = memorySecretStore();
+    const create = vi.fn<SecretStoreFactory["create"]>(() => store);
+    const factory: SecretStoreFactory = { kind: "runtime", id: store.id, capabilities: store.capabilities, create };
+    checkSecretConfiguration({ store: factory });
+    expect(create).not.toHaveBeenCalled();
+    expect(() => new SecretAccess({ store: factory }, store)).toThrow("invalid_configuration");
+    const database = vi.fn<() => Promise<Db>>();
+    const bound = configuredSecrets({ store: factory }, database);
+    expect(bound.store).toBe(store);
+    expect(create).toHaveBeenCalledWith({ database });
+    expect(database).not.toHaveBeenCalled();
+  });
+
+  it("rejects inconsistent factories and sanitizes construction errors without a fallback", () => {
+    const store = memorySecretStore();
+    const factory = { kind: "runtime" as const, id: store.id, capabilities: store.capabilities };
+    for (const create of [
+      () => ({ ...store, id: "other" }),
+      () => ({ ...store, capabilities: { ...store.capabilities, conditionalWrites: "none" as const } }),
+      () => {
+        throw new Error("sensitive database URL");
+      },
+    ]) {
+      expect(() => configuredSecrets({ store: { ...factory, create } }, vi.fn<() => Promise<Db>>())).toThrow(
+        "Secret store: invalid_configuration",
+      );
+    }
+  });
   it.each([{}, { writable: false }, { maxBytes: 64 }, { deletion: "soft-delete" as const }])(
     "passes conformance: %j",
     async (options) => {

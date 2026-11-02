@@ -294,6 +294,7 @@ export {
   type SecretConfiguration,
   type SecretLocation,
   type SecretStore,
+  type SecretStoreFactory,
   type SecretStoreCapabilities,
   type SecretStoreErrorCode,
   type SecretValue,

@@ -1,4 +1,5 @@
 import { DEPLOYMENT_KEYS, type DeploymentKeyName, deploymentKey } from "./deployment-key.ts";
+import type { Db } from "./db.ts";
 /** Opaque values belong only in trusted runtime code, never workflow history or descriptions. */
 export interface SecretValue {
   value: string;
@@ -62,6 +63,18 @@ export interface SecretStore {
   delete(address: SecretAddress, options: { expectedVersion: string; by: string }): Promise<void>;
 }
 
+/** Bind a fresh adapter to each runtime's existing database; create must perform no I/O or allocate owned clients. */
+export interface SecretStoreFactory {
+  readonly kind: "runtime";
+  readonly id: string;
+  readonly capabilities: Readonly<SecretStoreCapabilities>;
+  /** The runtime owns this connection. Never close it or retain it outside the returned adapter. */
+  create(context: { database: () => Promise<Db> }): SecretStore;
+}
+
+export const isSecretStoreFactory = (store: SecretStore | SecretStoreFactory): store is SecretStoreFactory =>
+  "kind" in store && store.kind === "runtime";
+
 export type SecretBinding =
   | { path: string; management: "sanoma" | "external"; env?: never; bootstrap?: never }
   | { env: string; management?: "external"; path?: never; bootstrap?: never }
@@ -69,7 +82,7 @@ export type SecretBinding =
 
 export interface SecretConfiguration {
   /** Omitted: built-in encrypted Postgres, supplied by the runtime. */
-  store?: SecretStore;
+  store?: SecretStore | SecretStoreFactory;
   /** Defaults to `default`. Choose a distinct namespace and identity for each deployment. */
   namespace?: string;
   /** Names without a binding resolve to the same name in this namespace. */
@@ -134,7 +147,9 @@ export function checkSecretConfiguration(config: SecretConfiguration): void {
       !["atomic", "coordinated", "none"].includes(c.conditionalWrites) ||
       !["destroy", "soft-delete", "unsupported"].includes(c.deletion) ||
       !["read", "watch"].includes(c.changeDetection) ||
-      [s.validate, s.read, s.write, s.delete].some((fn) => typeof fn !== "function")
+      (isSecretStoreFactory(s)
+        ? typeof s.create !== "function"
+        : [s.validate, s.read, s.write, s.delete].some((fn) => typeof fn !== "function"))
     )
       invalid();
   }
@@ -181,7 +196,9 @@ export class SecretAccess {
   ) {
     this.env = env;
     checkSecretConfiguration(config);
-    this.store = config.store ?? defaultStore;
+    const store = config.store ?? defaultStore;
+    if (isSecretStoreFactory(store)) throw new SecretStoreError("invalid_configuration");
+    this.store = store;
     checkSecretConfiguration({ store: this.store });
     this.namespace = config.namespace ?? "default";
     this.bindings = Object.fromEntries(
