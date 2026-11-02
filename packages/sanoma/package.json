@@ -31,7 +31,8 @@
     "site.d.ts",
     "ui.js",
     "ui.d.ts",
-    "ui.css"
+    "ui.css",
+    "identity"
   ],
   "type": "module",
   "sideEffects": false,

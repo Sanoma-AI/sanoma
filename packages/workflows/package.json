@@ -85,6 +85,10 @@
     "./kms-secrets": {
       "types": "./dist/kms-secrets.d.ts",
       "default": "./dist/kms-secrets.js"
+    },
+    "./identity-service": {
+      "types": "./dist/identity-service.d.ts",
+      "default": "./dist/identity-service.js"
     }
   },
   "publishConfig": {

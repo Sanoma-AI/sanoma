@@ -101,6 +101,7 @@
                   "@sanoma-ai/workflows/scenario",
                   "@sanoma-ai/workflows/scenarios",
                   "@sanoma-ai/workflows/cloud-identity",
+                  "@sanoma-ai/workflows/identity-service",
                   "@sanoma-ai/workflows/kms-secrets",
                   "@sanoma-ai/workflows/wakeup-service"
                 ],

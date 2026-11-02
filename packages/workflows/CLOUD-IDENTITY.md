@@ -212,3 +212,40 @@ Google-issued OIDC tokens last up to **one hour**. A ten-minute final impersonat
 An isolated live check in `sanoma-513217` verified Google-issued OIDC tokens, STS exchange, scoped impersonation and rejection of another subject and target. The observed OIDC lifetime was 3,600 seconds. Temporary federation and service accounts were removed. Local tests cover both broker routes and Google’s URL-source exchange using synthetic transports.
 
 This establishes the Google trust path, not a deployed provisioning broker or provider renewal through that broker. Deploying the separate issuer/enrollment/audit boundary, delivering and rotating protected bootstrap configuration, and proving renewal and revocation through the actual host remain [#532](https://github.com/Sanoma-AI/sanoma/issues/532).
+
+## Standalone identity service
+
+`sanoma identity` serves one broker mode from protected deployment environment variables. It loads no company config, `.env`, workflows or sites, starts no worker, and creates no database or schema. Deploy runtime and provisioning modes as separate services with separate attached identities, enrollment readers, bootstraps and audit boundaries; a mode flag alone does not establish that separation.
+
+| Setting                              | Purpose                                                                                                             |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| `SANOMA_IDENTITY_MODE`               | Required: `runtime` or `provisioning`.                                                                              |
+| `SANOMA_IDENTITY_READ_DATABASE_URL`  | Required protected enrollment-reader connection string.                                                             |
+| `SANOMA_IDENTITY_AUDIT_DATABASE_URL` | Required protected audit-writer connection string.                                                                  |
+| `SANOMA_IDENTITY_HOST`               | Listening address, default `0.0.0.0` for the command.                                                               |
+| `SANOMA_IDENTITY_CONCURRENCY`        | Maximum in-flight broker requests, default `32`, allowed `1`–`256`; excess requests receive 429 with a retry delay. |
+| `PORT`                               | Listening port, default `8080`.                                                                                     |
+| `SANOMA_IDENTITY_SOURCE_ACCOUNT`     | Provisioning only: fixed source service-account email.                                                              |
+| `SANOMA_IDENTITY_SOURCE_SUBJECT`     | Provisioning only: its immutable numeric Google `uniqueId`.                                                         |
+| `SANOMA_IDENTITY_AUDIENCE`           | Provisioning only: exact WIF provider audience.                                                                     |
+
+Supply connection strings through the host's protected deployment mechanism. Never put them in source, resource plans, workflow inputs/results or logs. Runtime mode serves POST `/token`; provisioning mode serves GET `/identity`. Both require the corresponding enrollment bearer, use an attached Google identity and expose no enrollment endpoint. Put the HTTP listener behind HTTPS ingress, such as Cloud Run's TLS endpoint.
+
+An administrator installs `CLOUD_IDENTITY_SQL` from `@sanoma-ai/workflows/cloud-identity` in the enrollment database and `CLOUD_IDENTITY_AUDIT_SQL` from `@sanoma-ai/workflows/identity-service` in the audit database. The service performs no DDL. The enrollment login needs schema USAGE and SELECT on the two enrollment tables, with no table mutation or schema CREATE privileges. The audit login needs schema USAGE and INSERT on `sanoma_identity.audit_events`, with no SELECT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER or schema CREATE privileges. For example, in the audit database:
+
+```sql
+CREATE ROLE identity_audit_writer NOLOGIN;
+GRANT USAGE ON SCHEMA sanoma_identity TO identity_audit_writer;
+GRANT INSERT ON sanoma_identity.audit_events TO identity_audit_writer;
+GRANT identity_audit_writer TO example_audit_login;
+```
+
+Create the login and deliver its authentication separately. Neither serving role may be superuser, create roles/databases, bypass RLS or inherit the disallowed privileges. Startup checks these role and table/schema permissions and refuses excessive authority. Keep schema ownership and enrollment writes with separate administrative/provisioning identities.
+
+Audit rows contain fixed issuance metadata: result, deployment, company, environment, service account, generation and expiry. They contain no tokens, bearer hashes, authorization headers or arbitrary request fields. Audit failure prevents token delivery and returns a sanitized error; recovery never switches identities.
+
+GET or HEAD `/healthz` and the launcher's `ready` event mean the process is listening. They do **not** prove current Google issuance, continuing database/audit availability, provider renewal or managed-store readiness. Before declaring a company ready, verify its deployed runtime can write and read a credential under its own key/database identity. The two-company, preview/production, renewal, cold-start, outage and recovery checks remain #532 gates.
+
+Trusted programmatic composition may call `startIdentityService(options)` from `@sanoma-ai/workflows/identity-service`, returning `{ url, stop }`. Its default host is loopback; the caller owns shutdown. The serving package does not load company code.
+
+The product's [identity Dockerfile](../sanoma/identity/Dockerfile) installs a specified published `sanoma` version and runs `sanoma identity` as a non-root user. Build it only after that version is published, tag the result immutably and deploy by digest. It is separate from the company runtime image, which clones company code. Database credentials and mode configuration enter at deployment, not image build. Neither the service tests nor building the image substitutes for live deployment verification.

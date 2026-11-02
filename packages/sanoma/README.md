@@ -222,4 +222,8 @@ The repository going live makes is private, so a host is given a credential to c
 
 To try the SSH path by hand, without registering a key: `docker run --rm -e SANOMA_SOURCE=https://github.com/<owner>/<private repo>.git -e SANOMA_REVISION=<sha> -e SANOMA_SOURCE_KEY="$(cat <a PEM GitHub does not know>)" sanoma-runtime` ends at `Permission denied (publickey)`, past `Host key verification failed`: the host key was pinned and the key offered. With the private half of a deploy key of the repository, it clones and installs.
 
+### Standalone identity service
+
+`sanoma identity` runs the trusted runtime or provisioning broker from explicit host configuration, without loading company files or starting a workflow worker. It creates no database or schema. See [Cloud identity deployment](../workflows/CLOUD-IDENTITY.md#standalone-identity-service) for required variables, separate reader/audit roles, HTTPS ingress and readiness checks.
+
 Status: early (0.x). License: FSL-1.1-ALv2.

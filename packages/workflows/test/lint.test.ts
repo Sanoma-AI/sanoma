@@ -11,6 +11,9 @@ const messages = (src: string, filename?: string) => lintWorkflow(src, filename)
 
 describe("lintWorkflow", () => {
   it("refuses runtime identity access in workflow code", () => {
+    expect(messages('import { startIdentityService } from "@sanoma-ai/workflows/identity-service";')).toEqual([
+      expect.stringMatching(/import .*identity-service.*not allowed/),
+    ]);
     expect(messages('import { cloudIdentityAuth } from "@sanoma-ai/workflows/cloud-identity";')).toEqual([
       expect.stringMatching(/import .*cloud-identity.*not allowed/),
     ]);
