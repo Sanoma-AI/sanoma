@@ -62,6 +62,25 @@ async function using<T>(url: string, run: (db: Client) => Promise<T>): Promise<T
 }
 
 describe("trusted KMS database preparation", () => {
+  it("binds the login password outside SQL statement text and lets Postgres store a SCRAM verifier", async () => {
+    const f = await fixture();
+    const query = vi.spyOn(Client.prototype, "query");
+    try {
+      await prepareSecretStore(f.input, f.secrets);
+      const password = new URL((await f.secrets.get("RUNTIME"))!).password;
+      const statements = query.mock.calls.map(([text]) => text).filter((text) => typeof text === "string");
+      expect(statements.join("\n")).not.toContain(password);
+      expect(query).toHaveBeenCalledWith("SELECT pg_temp.sanoma_create_runtime($1, $2)", [f.role, password]);
+      const { rows } = await root.query<{ scram: boolean }>(
+        "SELECT rolpassword LIKE 'SCRAM-SHA-256$%' AS scram FROM pg_authid WHERE rolname=$1",
+        [f.role],
+      );
+      expect(rows[0]?.scram).toBe(true);
+    } finally {
+      query.mockRestore();
+    }
+  });
+
   it("creates a restricted login that runs Sanoma, keeps metadata private and denies another company database", async () => {
     const a = await fixture(),
       b = await fixture();

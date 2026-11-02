@@ -1,5 +1,5 @@
-import { createHash, createHmac, pbkdf2Sync, randomBytes } from "node:crypto";
-import { Client, escapeIdentifier, escapeLiteral } from "pg";
+import { createHash } from "node:crypto";
+import { Client, escapeIdentifier } from "pg";
 import { KMS_SECRETS_SQL } from "./kms-secrets.ts";
 import { generateSecret, type Secrets } from "./secret.ts";
 
@@ -54,20 +54,20 @@ const BINDING_SQL = `CREATE TABLE IF NOT EXISTS sanoma_kms.deployment (
 );
 REVOKE ALL ON sanoma_kms.deployment FROM PUBLIC;`;
 
-/** A verifier, not the login password, appears in the SQL sent to Postgres. */
-function verifier(password: string): string {
-  const salt = randomBytes(16),
-    salted = pbkdf2Sync(password, salt, 4096, 32, "sha256");
-  const client = createHmac("sha256", salted).update("Client Key").digest();
-  try {
-    const stored = createHash("sha256").update(client).digest("base64");
-    const server = createHmac("sha256", salted).update("Server Key").digest("base64");
-    return `SCRAM-SHA-256$4096:${salt.toString("base64")}$${stored}:${server}`;
-  } finally {
-    salted.fill(0);
-    client.fill(0);
-  }
-}
+// Neon requires the original password, not a client-computed SCRAM verifier. Bind it
+// as a parameter to a session-private invoker function: it stays out of submitted
+// SQL statement text and Postgres performs the password hashing. The trusted database
+// receives the value over verified TLS; this is not protection against its administrator.
+const CREATE_RUNTIME_SQL = `CREATE FUNCTION pg_temp.sanoma_create_runtime(role_name text, role_password text)
+RETURNS void LANGUAGE plpgsql AS $body$
+BEGIN
+  EXECUTE pg_catalog.format(
+    'CREATE ROLE %I LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS PASSWORD %L',
+    role_name, role_password);
+EXCEPTION WHEN OTHERS THEN
+  RAISE EXCEPTION 'Runtime role creation failed' USING ERRCODE = SQLSTATE;
+END
+$body$;`;
 
 async function credentials(input: PrepareSecretStore, secrets: Secrets) {
   if (
@@ -178,9 +178,9 @@ export const prepareSecretStore: PrepareStorage = async (input, secrets) => {
             (await db.query("SELECT 1 FROM sanoma_kms.secrets LIMIT 1")).rowCount
           )
             fail("conflict");
-          await db.query(
-            `CREATE ROLE ${role} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS PASSWORD ${escapeLiteral(verifier(prepared.password))}`,
-          );
+          await db.query("SET LOCAL password_encryption = 'scram-sha-256'");
+          await db.query(CREATE_RUNTIME_SQL);
+          await db.query("SELECT pg_temp.sanoma_create_runtime($1, $2)", [prepared.role, prepared.password]);
           await db.query(
             "INSERT INTO sanoma_kms.deployment(company,environment,runtime_role,credential_hash) VALUES($1,$2,$3,$4)",
             [company, environment, prepared.role, hash],
