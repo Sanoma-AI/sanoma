@@ -17,6 +17,7 @@ import {
   resolveConfig,
   SanomaClient,
   type SanomaConfig,
+  type SocialClients,
   type Source,
 } from "@sanoma-ai/workflows";
 import { type ConfigDescription, liveDescription, readPeople, type SiteEntry } from "@sanoma-ai/workflows/describe";
@@ -69,6 +70,12 @@ export interface AppOptions {
    * public is warned about and not served.
    */
   domains?: Record<string, string>;
+  /**
+   * The company's own OAuth clients (its GitHub App's), given to each public site's login
+   * (`LoginContext.social`), which then offers them to visitors. The staff login takes its own
+   * (`staffLogin(make, social)`).
+   */
+  social?: SocialClients;
   /**
    * Machine routes, answered right after `/healthz` and ahead of the public sites and the login,
    * at any host name: a request whose path is exactly `path` is answered by `handle`, or with 405
@@ -340,7 +347,7 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
     await closeQuietly(client);
     throw err;
   }
-  const opened = await openLogins(resolved, client, halves);
+  const opened = await openLogins(resolved, client, halves, options.social);
   for (const { name } of halves.keys()) if (!opened.has(name)) sites.delete(name);
 
   const address = server.address() as AddressInfo;
@@ -419,6 +426,7 @@ async function openLogins(
   resolved: ResolvedConfig,
   client: SanomaClient,
   halves: ReadonlyMap<SiteEntry, PromiseWithResolvers<LoginHalf>>,
+  social: SocialClients | undefined,
 ): Promise<Map<string, LoginHalf>> {
   const secrets = secretValues(client);
   const opened = new Map<string, LoginHalf>();
@@ -433,6 +441,7 @@ async function openLogins(
             secrets,
             origins,
             ...(resolved.login && { sendCode: (email, code) => sendLoginCode(client, email, code) }),
+            social,
           }))(),
       );
       try {

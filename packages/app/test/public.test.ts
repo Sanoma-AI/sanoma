@@ -53,6 +53,20 @@ describe("publicFront", () => {
     expect(front.signOut).toBe("/auth/acme/sign-out");
   });
 
+  it("carries the email and GitHub login the half verified onto the visitor", async () => {
+    const verified: LoginHalf = {
+      ...half,
+      verify: async () => ({ subject: "u3", email: "u3@acme.test", github: "u-three" }),
+    };
+    const front = publicFront({ name: "members", login: "acme" }, Promise.resolve(verified));
+    expect(await front.resolveActor(request("/"))).toEqual({
+      id: "visitor:acme:u3",
+      groups: ["visitors"],
+      email: "u3@acme.test",
+      github: "u-three",
+    });
+  });
+
   it("takes an api token as token:<id> in its groups, and answers one unknown or revoked with a 401", async () => {
     const front = publicFront({ name: "members", login: "acme" }, Promise.resolve(half), tokens);
     const good = bearer("sca_good");

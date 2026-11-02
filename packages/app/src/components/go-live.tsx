@@ -8,7 +8,7 @@ import {
 } from "@tanstack/react-query";
 import { CatchBoundary, type ErrorComponentProps, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { APPLY_WORKFLOW, errorMessage, isEnded } from "@sanoma-ai/workflows/shared";
+import { APPLY_WORKFLOW, errorMessage, isEnded, siteDir } from "@sanoma-ai/workflows/shared";
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/csr/ArrowSquareOut";
 import { PlayIcon } from "@phosphor-icons/react/dist/csr/Play";
 import { RocketIcon } from "@phosphor-icons/react/dist/csr/Rocket";
@@ -442,7 +442,8 @@ function PushButton() {
 /**
  * How people will sign in on the host: by an email code through the config's sender, by GitHub
  * through the App, and always by invite links. With neither a connected sender nor GitHub, a
- * warning that does not block going live, and the two fixes.
+ * warning that does not block going live, and the two fixes. With GitHub, the public sites whose
+ * visitors can connect it too, and the callback URL each needs on the App.
  */
 function SignInItem({ signIn }: { signIn: SetupStatus["signIn"] }) {
   const code = signIn.sender !== null && signIn.senderConnected;
@@ -476,6 +477,19 @@ function SignInItem({ signIn }: { signIn: SetupStatus["signIn"] }) {
                 </>
               )}
               , for an email code; or create the GitHub App, for Sign in with GitHub.
+            </>
+          )}
+          {signIn.github && signIn.sites.length > 0 && (
+            <>
+              {" "}
+              Visitors signed in on {signIn.sites.map((site) => siteDir(site.name)).join(", ")} can connect GitHub too,
+              once the App lists{" "}
+              <code>
+                {[
+                  ...new Set(signIn.sites.map((site) => `https://<site host>/auth/${site.login}/callback/github`)),
+                ].join(", ")}
+              </code>{" "}
+              among its callback URLs, for each site&apos;s host.
             </>
           )}
           {signIn.you === null && (

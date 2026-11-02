@@ -9,7 +9,17 @@ import {
 import { createAuthMiddleware } from "better-auth/api";
 import { magicLink } from "better-auth/plugins/magic-link";
 import { createHash } from "node:crypto";
-import { emailCode, openBetterAuth, type Protocol, protocolOf, withSignOutBody } from "./instance.ts";
+import {
+  emailCode,
+  GITHUB_FIELD,
+  identityOf,
+  localRedirects,
+  openBetterAuth,
+  type Protocol,
+  protocolOf,
+  type User,
+  withSignOutBody,
+} from "./instance.ts";
 
 // The staff login: Better Auth again, as a second instance in a schema of its own, signing in only
 // the people the files declare. An email code to a declared email, GitHub through the company's
@@ -42,14 +52,7 @@ const CODE_ROUTES = new Set([SEND_CODE, "/sign-in/email-otp"]);
 /** What the session hook reads of Better Auth's endpoint context: the route, and the user's row. */
 interface SessionContext {
   path?: string;
-  context: { internalAdapter: { findUserById(id: string): Promise<StaffUser | null> } };
-}
-
-/** A staff user's row, as far as admission reads it. */
-interface StaffUser {
-  email: string;
-  emailVerified: boolean;
-  github?: string | null;
+  context: { internalAdapter: { findUserById(id: string): Promise<User | null> } };
 }
 
 /** How a session was made, by the route that made it. */
@@ -85,7 +88,7 @@ export async function betterAuthStaffLogin({ databaseUrl, key, sendCode, staff }
     ]),
     options: {
       session: { expiresIn: SESSION_SECONDS },
-      user: { additionalFields: { github: { type: "string" as const, required: false, input: false } } },
+      user: { additionalFields: GITHUB_FIELD },
       advanced: { cookiePrefix: "sanoma" },
       ...(github && {
         socialProviders: {
@@ -117,7 +120,7 @@ export async function betterAuthStaffLogin({ databaseUrl, key, sendCode, staff }
         user: {
           create: {
             // Nobody the files do not declare gets a row, whatever the route.
-            before: async (user: StaffUser) => (staff.admits(identityOf(user)) ? undefined : false),
+            before: async (user: User) => (staff.admits(identityOf(user)) ? undefined : false),
           },
         },
         session: {
@@ -197,22 +200,6 @@ export async function betterAuthStaffLogin({ databaseUrl, key, sendCode, staff }
     close,
   };
 }
-
-/** What a user row vouches for: the email when verified, the GitHub login when they signed in with GitHub. */
-const identityOf = (user: StaffUser) => ({
-  ...(user.emailVerified && { email: user.email }),
-  ...(user.github && { github: user.github }),
-});
-
-/** The query parameters Better Auth redirects to. */
-const REDIRECTS = ["callbackURL", "errorCallbackURL", "newUserCallbackURL"];
-
-/** Whether each redirect a request names is a path on its own host: `/x`, never `//x` or another origin. */
-const localRedirects = (url: URL) =>
-  REDIRECTS.every((name) => {
-    const to = url.searchParams.get(name);
-    return to === null || (to.startsWith("/") && !to.startsWith("//") && !to.startsWith("/\\"));
-  });
 
 /** A token as the magic link plugin stores it (`storeToken: "hashed"`): SHA-256, base64url without padding. */
 const hashed = (token: string) => createHash("sha256").update(token).digest("base64url");

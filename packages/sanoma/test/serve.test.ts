@@ -69,11 +69,15 @@ describe("appOptions", () => {
 
   it("signs people in with the staff login beyond this machine, GitHub or not", async () => {
     environment({ SANOMA_APP_HOST: "0.0.0.0", SANOMA_SIGNING_KEY: KEY });
-    const { host, login } = await appOptions();
+    const { host, login, social } = await appOptions();
     expect(host).toBe("0.0.0.0");
     expect(login?.name).toBe("staff");
+    expect(social).toBeUndefined();
     environment({ ...GITHUB, SANOMA_APP_HOST: "0.0.0.0", SANOMA_SIGNING_KEY: KEY });
-    expect((await appOptions()).login?.name).toBe("staff");
+    const options = await appOptions();
+    expect(options.login?.name).toBe("staff");
+    // The same client for the public sites' logins, for visitors.
+    expect(options.social).toEqual({ github: { clientId: "id", clientSecret: "secret" } });
   });
 
   it("names SANOMA_SIGNING_KEY when the staff login has no key to sign with", async () => {
@@ -98,7 +102,9 @@ describe("appOptions", () => {
       ]);
     };
     environment({ SANOMA_APP_HOST: "0.0.0.0", SANOMA_SIGNING_KEY: KEY });
-    expect((await appOptions(stored)).login?.name).toBe("staff");
+    const options = await appOptions(stored);
+    expect(options.login?.name).toBe("staff");
+    expect(options.social).toEqual({ github: { clientId: "stored-id", clientSecret: "stored-secret" } });
     expect(asked).toEqual([["SANOMA_GITHUB_CLIENT_ID", "SANOMA_GITHUB_CLIENT_SECRET"]]);
     // Nothing stored: no GitHub, and still a login.
     expect((await appOptions(async () => new Map())).login?.name).toBe("staff");

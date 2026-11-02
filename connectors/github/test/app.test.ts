@@ -53,7 +53,7 @@ describe("the operations through the App", () => {
     const found = await call(githubDriver(), "installation.get", { id: 7 });
     expect(github.installation.get.output.parse(found)).toEqual({
       id: 7,
-      account: { login: "acme", type: "Organization" },
+      account: { login: "acme", id: 1, type: "Organization" },
       repositorySelection: "selected",
     });
     expect(sent.map((s) => signer(s.headers))).toEqual(["4242"]);
@@ -227,7 +227,7 @@ describe("fakeGithubApp", () => {
     const fake = fakeGithub();
     expect(await call(fake.driver, "installation.get", { id: 7 })).toEqual({
       id: 7,
-      account: { login: "acme", type: "Organization" },
+      account: { login: "acme", id: 1, type: "Organization" },
       repositorySelection: "all",
     });
     const made = await call(fake.driver, "repository.generate", generate);

@@ -69,7 +69,7 @@ export function fakeGithubApp(options: FakeOptions = {}) {
     {
       initial: (): FakeGithubAppState => ({
         seq: 1,
-        installations: { 7: { account: { login: "acme", type: "Organization" }, repositorySelection: "all" } },
+        installations: { 7: { account: { login: "acme", id: 1, type: "Organization" }, repositorySelection: "all" } },
         repositories: {
           [FAKE_TEMPLATE]: {
             id: 1,

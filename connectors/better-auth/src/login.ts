@@ -1,6 +1,15 @@
 import type { LoginContext, LoginHalf, LoginMethod } from "@sanoma-ai/workflows";
 import { getHostFromSource, matchesHostPattern } from "better-auth";
-import { emailCode, openBetterAuth, type Protocol, withSignOutBody } from "./instance.ts";
+import {
+  emailCode,
+  GITHUB_FIELD,
+  identityOf,
+  localRedirects,
+  openBetterAuth,
+  type Protocol,
+  type User,
+  withSignOutBody,
+} from "./instance.ts";
 
 /** The schema Better Auth's tables (`user`, `session`, `account`, `verification`) live in, on the company's database. */
 const SCHEMA = "better_auth";
@@ -8,15 +17,43 @@ const SCHEMA = "better_auth";
 const BASE_PATH = "/auth/better-auth";
 const SIGN_OUT = `${BASE_PATH}/sign-out`;
 
+/** What a GitHub account hook reads of Better Auth's account row and endpoint context. */
+interface LinkedAccount {
+  id: string;
+  providerId: string;
+  userId: string;
+  accessToken?: string | null;
+}
+interface HookContext {
+  path?: string;
+  context: {
+    internalAdapter: {
+      findAccounts(userId: string): Promise<{ providerId: string }[]>;
+      updateAccount(id: string, data: Record<string, unknown>): Promise<unknown>;
+      updateUser(id: string, data: Record<string, unknown>): Promise<unknown>;
+    };
+    socialProviders: { id: string; getUserInfo(tokens: { accessToken: string }): Promise<unknown> }[];
+  };
+}
+
 /**
  * Better Auth's login half for one public site: email and password, and an email code when the
- * app can send one (`context.sendCode`); every email may sign up. Its tables are in schema
- * `better_auth` on the company's database, migrated here before the first site starts, its
- * cookies signed with the app's key for it (`context.key`). The site's origins are its allowed
- * hosts (a request for another host is refused) and set the cookie's `Secure` flag: an `https`
- * origin's is.
+ * app can send one (`context.sendCode`); every email may sign up. With the company's GitHub client
+ * (`context.social.github`), a visitor signed in links their GitHub account
+ * (`/link-social`), or signs in with it (`/sign-in/social`), and is then said to be that GitHub
+ * login (`verify`'s `github`). Its tables are in schema `better_auth` on the company's database,
+ * migrated here before the first site starts, its cookies signed with the app's key for it
+ * (`context.key`). The site's origins are its allowed hosts (a request for another host is
+ * refused) and set the cookie's `Secure` flag: an `https` origin's is.
  */
-export async function betterAuthLogin({ databaseUrl, key, origins, sendCode }: LoginContext): Promise<LoginHalf> {
+export async function betterAuthLogin({
+  databaseUrl,
+  key,
+  origins,
+  sendCode,
+  social,
+}: LoginContext): Promise<LoginHalf> {
+  const github = social?.github;
   const sites = sitesOf(origins);
   const hosts = new Map<Protocol, string[]>();
   for (const { protocol, host } of sites) hosts.set(protocol, [...(hosts.get(protocol) ?? []), host]);
@@ -29,6 +66,21 @@ export async function betterAuthLogin({ databaseUrl, key, origins, sendCode }: L
     options: {
       emailAndPassword: { enabled: true },
       plugins: sendCode ? [emailCode(sendCode)] : [],
+      user: { additionalFields: GITHUB_FIELD },
+      ...(github && {
+        socialProviders: { github: { clientId: github.clientId, clientSecret: github.clientSecret } },
+        // A visitor's GitHub email is seldom the one they signed in with. Linking still needs
+        // GitHub to have verified its email (GitHub is no trusted provider), and a sign-in with
+        // GitHub joins an account of the same email only when both are verified (Better Auth's rule).
+        account: { accountLinking: { allowDifferentEmails: true } },
+        databaseHooks: {
+          account: {
+            create: { before: oneGitHub, after: noteLogin },
+            update: { after: noteLogin },
+            delete: { after: forgetLogin },
+          },
+        },
+      }),
     },
   });
   /** The instance for the request's host, or none for a host that is not the site's. */
@@ -37,7 +89,11 @@ export async function betterAuthLogin({ databaseUrl, key, origins, sendCode }: L
     const site = sites.find((s) => matchesHostPattern(host, s.host));
     return site && auths.get(site.protocol);
   };
-  const methods: LoginMethod[] = ["password", ...(sendCode ? (["code"] as const) : [])];
+  const methods: LoginMethod[] = [
+    "password",
+    ...(sendCode ? (["code"] as const) : []),
+    ...(github ? (["github"] as const) : []),
+  ];
   return {
     async verify(request) {
       const auth = authFor(request);
@@ -45,8 +101,7 @@ export async function betterAuthLogin({ databaseUrl, key, origins, sendCode }: L
       // Null for a missing, bad or signed-out cookie.
       const session = await auth.api.getSession({ headers: request.headers });
       if (!session) return null;
-      const { id, email, emailVerified } = session.user;
-      return { subject: id, ...(emailVerified && { email }) };
+      return { subject: session.user.id, ...identityOf(session.user as User) };
     },
     async handle(request) {
       const { pathname } = new URL(request.url);
@@ -54,12 +109,45 @@ export async function betterAuthLogin({ databaseUrl, key, origins, sendCode }: L
       // Better Auth throws for a host it does not allow, which would be a 500.
       const auth = authFor(request);
       if (!auth) return new Response("Misdirected Request", { status: 421 });
+      // Better Auth checks a redirect in a body against the site's hosts; one in the query must be a path here.
+      if (!localRedirects(new URL(request.url))) return new Response("Bad Request", { status: 400 });
       return auth.handler(withSignOutBody(request, SIGN_OUT));
     },
     signOut: SIGN_OUT,
     methods,
     close,
   };
+}
+
+/** A visitor has one GitHub account at most: another is refused (Better Auth's `unable_to_link_account`). */
+async function oneGitHub(account: LinkedAccount, ctx: HookContext | null): Promise<false | void> {
+  if (account.providerId !== "github" || !ctx) return;
+  const accounts = await ctx.context.internalAdapter.findAccounts(account.userId);
+  if (accounts.some((a) => a.providerId === "github")) return false;
+}
+
+/**
+ * Keeps a GitHub account's login on its user, once Better Auth has linked it or signed its user
+ * in with it (GitHub's redirect back, `/callback/:id`), then drops the account's tokens, which
+ * nothing here uses again: a GitHub App's user token reaches what the App and the person both
+ * reach. The login is the provider's profile for that token, since Better Auth sets no field from
+ * a profile that a person may not set (`input: false`), the GitHub login among them.
+ */
+async function noteLogin(account: LinkedAccount | null, ctx: HookContext | null): Promise<void> {
+  if (account?.providerId !== "github" || !account.accessToken || ctx?.path !== "/callback/:id") return;
+  const { internalAdapter, socialProviders } = ctx.context;
+  const provider = socialProviders.find((p) => p.id === "github")!;
+  const info = (await provider.getUserInfo({ accessToken: account.accessToken })) as { data?: { login?: unknown } };
+  const login = info?.data?.login;
+  if (typeof login !== "string") throw new Error("better-auth: GitHub did not say whose account was linked");
+  await internalAdapter.updateUser(account.userId, { github: login });
+  await internalAdapter.updateAccount(account.id, { accessToken: null, refreshToken: null, idToken: null });
+}
+
+/** A GitHub account unlinked: its user is no longer that login. */
+async function forgetLogin(account: LinkedAccount | null, ctx: HookContext | null): Promise<void> {
+  if (account?.providerId === "github" && ctx)
+    await ctx.context.internalAdapter.updateUser(account.userId, { github: null });
 }
 
 /** Each origin's host, as Better Auth's `allowedHosts` has it (`account.localhost:*`), and its protocol. */
