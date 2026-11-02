@@ -1464,6 +1464,7 @@ export class SanomaClient {
     await Promise.all([
       this.storedSecrets.close(),
       this.config.connections.close(),
+      this.config.identityProvisioning.close(),
       this.dbos.destroy(),
       this.pool.close(),
       this.audit.close(),

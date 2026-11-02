@@ -425,6 +425,8 @@ For a host deployment, deliver signing material, database authentication and the
 
 The managed Cloud [runtime identity broker](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/CLOUD-IDENTITY.md) supplies refreshable, deployment-bound Google access tokens; its enrollment, bootstrap and rollout requirements are separate from credential storage and provisioning identity.
 
+In the trusted control plane, configure `identityProvisioning: { databaseUrl, maxValidityMs }` with a protected, restricted enrollment-writer URL to use `sanoma.identity.enroll`, `.retire` and `.revoke` under policy. Each client and worker owns its lazy writer pool; company runtimes and the broker do not receive it. See [provisioning operations](CLOUD-IDENTITY.md#provisioning-operations) for setup, rotation and the caller-owned adapter option.
+
 Back up ciphertext, its namespace/path and version metadata, and the matching encryption key separately. A database-only backup cannot recover encrypted values. Preserve the signing key across ordinary restarts; replacing it invalidates sessions and pending signed authorization state. Changing a vendor token updates a stored value and its version; it does not rotate the row-encryption key. Replacing the encryption key without re-encrypting every retained value makes those values unreadable. Automated encryption-key rotation, external-store migration and OAuth reauthorization tooling are not included here.
 
 ### Resources

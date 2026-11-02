@@ -1,5 +1,9 @@
 import { configuredSecrets } from "./credentials.ts";
-import type { IdentityProvisioning } from "./identity-provisioning.ts";
+import {
+  configuredIdentityProvisioning,
+  type IdentityProvisioning,
+  type IdentityProvisioningDatabase,
+} from "./identity-provisioning.ts";
 import { secretsForInput } from "./secret.ts";
 import { isRunControlError } from "./errors.ts";
 import { currentRun } from "./run.ts";
@@ -109,7 +113,7 @@ export interface SanomaConfig {
   /** Credential storage and explicit bindings. Omitted: encrypted Postgres, no environment fallback. */
   secrets?: SecretConfiguration;
   /** Trusted control plane only: separate broker enrollment writer. Absent in company runtimes. */
-  identityProvisioning?: IdentityProvisioning;
+  identityProvisioning?: IdentityProvisioning | IdentityProvisioningDatabase;
   connections?: readonly ConnectionDefinition[];
   connectionRules?: readonly ConnectionRule[];
   /** Postgres for the runtime. Defaults to `SANOMA_DATABASE_URL`, then `DEFAULT_DATABASE_URL`. */
@@ -159,6 +163,7 @@ export interface ResolvedConfig {
   secrets: SecretConfiguration;
   connections: ConnectionRegistry;
   connectionPool: LazyPool;
+  identityProvisioning: ReturnType<typeof configuredIdentityProvisioning>;
   /**
    * Scopes workflows, queues and versions in the system database: the `name` of
    * `<root>/package.json` when it names one, else "sanoma".
@@ -331,6 +336,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   // Built-in: the collections' operations, `data.<name>.<op>`, on the config's database.
   const databaseUrl = resolveDatabaseUrl(config);
   const connectionPool = lazyPool(databaseUrl, "connections");
+  const identityProvisioning = configuredIdentityProvisioning(config.identityProvisioning);
   const connections = new ConnectionRegistry(
     connectionCatalog(config.connectors, config.connections, config.connectionRules),
     () => connectionPool.db(),
@@ -361,7 +367,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
       changeDriver(remotes),
       connectionDriver(connections),
       appsListDriver,
-      runtimeDriver({ tokens: tokenStore(() => connectionPool.db()), identities: config.identityProvisioning }),
+      runtimeDriver({ tokens: tokenStore(() => connectionPool.db()), identities: identityProvisioning.store }),
       ...(hostTyped ? [sourceDriver] : []),
       ...(dataStore ? [collectionsDriver(declared, dataStore)] : []),
     ],
@@ -413,6 +419,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     secrets: config.secrets ?? {},
     connections,
     connectionPool,
+    identityProvisioning,
     appName,
     databaseUrl,
     // The built-in's code and operations are part of the app's version, like the config's own.

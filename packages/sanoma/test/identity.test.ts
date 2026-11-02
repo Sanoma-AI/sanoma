@@ -57,7 +57,7 @@ afterAll(async () => {
 it("starts without loading company files and shuts down cleanly", async () => {
   const service = await serving(directory, ["identity"], env);
   try {
-    expect((await fetch(service.url + "/healthz")).status).toBe(200);
+    expect((await fetch(service.url + "/health")).status).toBe(200);
     expect((await fetch(service.url + "/token", { method: "POST" })).status).toBe(401);
     expect((await fetch(service.url + "/workflows")).status).toBe(404);
     const output = JSON.stringify(service.output());

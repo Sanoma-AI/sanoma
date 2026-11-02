@@ -1,4 +1,4 @@
-import type { Pool, PoolClient } from "pg";
+import { Pool, type PoolClient } from "pg";
 import type { IdentityEnrollment } from "./cloud-identity.ts";
 
 export type DeploymentIdentity = Omit<IdentityEnrollment, "generation">;
@@ -12,6 +12,69 @@ export interface IdentityProvisioning {
   enroll(input: EnrollIdentity): Promise<void>;
   retire(input: DeploymentIdentity & { generation: number; validUntil: string }): Promise<void>;
   revoke(input: DeploymentIdentity): Promise<void>;
+}
+
+/** Trusted control-plane configuration; the runtime owns this separate writer connection. */
+export interface IdentityProvisioningDatabase {
+  databaseUrl: string;
+  maxValidityMs: number;
+}
+
+/** Resolve without I/O. Explicit adapters remain caller-owned; database configuration is runtime-owned. */
+export function configuredIdentityProvisioning(
+  config: IdentityProvisioning | IdentityProvisioningDatabase | undefined,
+): { store?: IdentityProvisioning; close(): Promise<void> } {
+  if (!config) return { close: async () => {} };
+  if (!("databaseUrl" in config)) return { store: config, close: async () => {} };
+  let url: URL;
+  try {
+    url = new URL(config.databaseUrl);
+    if (
+      !["postgres:", "postgresql:"].includes(url.protocol) ||
+      !url.hostname ||
+      !url.username ||
+      !url.password ||
+      !/^\/[^/]+$/.test(url.pathname) ||
+      url.hash ||
+      [...url.searchParams.keys()].some((key) => !["sslmode", "channel_binding"].includes(key))
+    )
+      fail("invalid");
+    if (!["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) url.searchParams.set("sslmode", "verify-full");
+  } catch {
+    throw new IdentityProvisioningError("invalid");
+  }
+  const connectionString = url.href;
+  let pool: Pool | undefined;
+  let closed = false;
+  let closing: Promise<void> | undefined;
+  const store = postgresIdentityProvisioning(async () => {
+    if (closed) throw new IdentityProvisioningError("unavailable");
+    if (!pool) {
+      pool = new Pool({ connectionString, max: 5, connectionTimeoutMillis: 10_000, query_timeout: 15_000 });
+      pool.on("error", () => {});
+    }
+    // The control plane needs enrollment writes, never schema or database administration.
+    const { rows } = await pool.query<{ allowed: boolean }>(`SELECT
+      NOT EXISTS (SELECT FROM pg_roles WHERE rolname=current_user AND (rolsuper OR rolcreatedb OR rolcreaterole OR rolbypassrls))
+      AND has_schema_privilege('sanoma_identity','USAGE') AND NOT has_schema_privilege('sanoma_identity','CREATE')
+      AND has_table_privilege('sanoma_identity.deployments','SELECT')
+      AND has_table_privilege('sanoma_identity.deployments','INSERT')
+      AND has_table_privilege('sanoma_identity.deployments','UPDATE')
+      AND has_table_privilege('sanoma_identity.credentials','SELECT')
+      AND has_table_privilege('sanoma_identity.credentials','INSERT')
+      AND has_table_privilege('sanoma_identity.credentials','UPDATE')
+      AND NOT has_table_privilege('sanoma_identity.deployments','DELETE,TRUNCATE,REFERENCES,TRIGGER')
+      AND NOT has_table_privilege('sanoma_identity.credentials','DELETE,TRUNCATE,REFERENCES,TRIGGER') AS allowed`);
+    if (!rows[0]?.allowed) fail("invalid");
+    return pool;
+  }, config);
+  return {
+    store,
+    close() {
+      closed = true;
+      return (closing ??= pool?.end() ?? Promise.resolve());
+    },
+  };
 }
 
 export class IdentityProvisioningError extends Error {
