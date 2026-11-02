@@ -4,8 +4,18 @@ import type { AddressInfo } from "node:net";
 import { DriverError, errorMessage, retryableStatus } from "@sanoma-ai/workflows";
 import { defineFake, type FakeOptions } from "@sanoma-ai/workflows/fake";
 import { NodeRequest, sendNodeResponse } from "srvx/node";
-import { cloudflareOps } from "./connector.ts";
-import { alarmOps, type Application, type CloudflareApi, containerOps, type ReadBinding, scriptOf } from "./ops.ts";
+import { caaContent, cloudflareOps } from "./connector.ts";
+import {
+  alarmOps,
+  type Application,
+  type CloudflareApi,
+  containerOps,
+  type ReadBinding,
+  type RecordWrite,
+  scriptOf,
+  type ZoneRecord,
+} from "./ops.ts";
+import { recordsOps } from "./records.ts";
 import { accountImage, accountPinned, pinImage } from "./registry.ts";
 import { Instance, OBJECT_CLASS, type ObjectState, worker } from "./worker.ts";
 
@@ -48,6 +58,8 @@ export interface FakeCloudflareState extends Record<string, unknown> {
   zones: Record<string, string>;
   /** The Workers' custom domains, by id: the hostname, the Worker it routes to and its zone's id. */
   domains: Record<string, { hostname: string; service: string; zone_id: string }>;
+  /** Each zone's DNS records, by the zone's name: any set's, and any added by hand (a test's). */
+  dns: Record<string, ZoneRecord[]>;
 }
 
 /** The fake account's id, which its registry's references name: the fixtures' made-up one. */
@@ -66,6 +78,21 @@ const HOP = ["connection", "keep-alive", "transfer-encoding", "upgrade", "conten
 
 const fail = (status: number, code: number, message: string) =>
   new DriverError(`cloudflare: ${message}`, { retryable: retryableStatus(status), status, vendorCode: String(code) });
+
+/** A record as the zone `zone` holds a write of it: a CAA record's fields as its content, a name outside the zone refused. */
+function dnsRecordOf(zone: string, { type, name, ttl, comment, content, priority, data }: RecordWrite) {
+  if (name !== zone && !name.endsWith(`.${zone}`)) {
+    throw fail(400, 9005, `dns_records/batch: ${name} is not in the zone ${zone}`);
+  }
+  return {
+    type,
+    name,
+    content: data ? caaContent(data) : (content ?? ""),
+    ttl,
+    ...(priority !== undefined && { priority }),
+    comment,
+  };
+}
 
 /** workers.dev's answer for a name with no Worker behind it. */
 const nothingHere = () =>
@@ -275,7 +302,9 @@ type FakeObject = ReturnType<typeof fakeObject>;
  * An in-memory Cloudflare account for tests, as the API answers: Workers in `state.scripts`,
  * container applications in `state.applications`, the images copied into its registry in
  * `state.images` (nothing is pulled), their custom domains in `state.domains` (every zone held
- * unless `zones` names them), and the account's workers.dev URLs served in
+ * unless `zones` names them), each zone's DNS records in `state.dns`, by the zone's name (a batch
+ * is all or nothing: an identical record or one beside a CNAME fails it whole), and the account's
+ * workers.dev URLs served in
  * this process, one server on a port of this machine per Worker name (a name with no Worker
  * answers workers.dev's 404). Each Worker runs the package's own object code
  * (`worker/instance.js`) over a `ctx` in this process: its container runs `start`'s runtime
@@ -329,6 +358,18 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
     const appOf = (script: string) => Object.values(state.applications).find((a) => a.name === script);
     /** A new id, 32 digits, as Cloudflare's are 32 hexadecimal ones. */
     const nextId = () => String(++state.seq).padStart(32, "0");
+    /** The zone of that id among those looked up: a DNS request names a zone by its id. */
+    const zoneNamed = (zoneId: string) => {
+      const zone = Object.entries(state.zones).find(([, id]) => id === zoneId)?.[0];
+      if (!zone)
+        throw fail(
+          404,
+          7003,
+          `zones/${zoneId}: Could not route to /zones/${zoneId}, perhaps your object identifier is invalid?`,
+        );
+      return zone;
+    };
+    const recordsOf = (zoneId: string) => state.dns[zoneNamed(zoneId)] ?? [];
     return {
       workerUrl: (script) => serve(state, script),
       async bindings(script) {
@@ -444,6 +485,44 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
       async detachDomain(id) {
         delete state.domains[id];
       },
+      async dnsRecords(zoneId, comment) {
+        return structuredClone(recordsOf(zoneId).filter((r) => r.comment === comment));
+      },
+      async dnsRecordsAt(zoneId, name) {
+        return structuredClone(recordsOf(zoneId).filter((r) => r.name === name));
+      },
+      async writeDns(zoneId, { posts, patches, deletes }) {
+        const zone = zoneNamed(zoneId);
+        // On a copy, kept only once every change is made: a batch is one transaction.
+        const held = structuredClone(state.dns[zone] ?? []);
+        const at = (id: string) => {
+          const found = held.findIndex((r) => r.id === id);
+          if (found < 0) throw fail(404, 81044, `dns_records/batch: Record ${id} does not exist.`);
+          return found;
+        };
+        for (const { id } of deletes) held.splice(at(id), 1);
+        const patched = patches.map(({ id, ...write }) => {
+          const record = { id, ...dnsRecordOf(zone, write) };
+          held[at(id)] = record;
+          return record;
+        });
+        const posted = posts.map((write) => {
+          const record = { id: nextId(), ...dnsRecordOf(zone, write) };
+          held.push(record);
+          return record;
+        });
+        for (const record of [...patched, ...posted]) {
+          const beside = held.filter((r) => r.id !== record.id && r.name === record.name);
+          if (beside.some((r) => r.type === record.type && r.content === record.content)) {
+            throw fail(400, 81058, "dns_records/batch: An identical record already exists.");
+          }
+          if (beside.some((r) => r.type === "CNAME" || record.type === "CNAME")) {
+            throw fail(400, 81053, "dns_records/batch: An A, AAAA, or CNAME record with that host already exists.");
+          }
+        }
+        state.dns[zone] = held;
+        return structuredClone({ patches: patched, posts: posted });
+      },
       async send(url, init) {
         const script = scriptAt(url);
         if (!script) throw new TypeError(`fetch failed: nothing answers at ${new URL(url).origin}`);
@@ -462,10 +541,12 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
         images: {},
         zones: {},
         domains: {},
+        dns: {},
       }),
       ops: (state) => ({
         container: containerOps(() => api(state), { startTimeoutMs: 60_000, pollMs: 50 }),
         alarm: alarmOps(() => api(state)),
+        records: recordsOps(() => api(state)),
       }),
     },
     options,

@@ -25,9 +25,10 @@ import {
   workerModules,
 } from "./worker.ts";
 
-// Both types' operations over Cloudflare (`CloudflareApi`): the driver's calls its API with the
-// SDK and the Worker over HTTP, the fake's answers from its state and its Worker in this process.
-// Both go through `containerOps` and `alarmOps`, so they upload, plan and refuse alike.
+// Cloudflare as the operations use it (`CloudflareApi`), and the container's and the alarm's
+// operations over it: the driver's calls its API with the SDK and the Worker over HTTP, the
+// fake's answers from its state and its Worker in this process. Both go through `containerOps`
+// and `alarmOps` (and `recordsOps`, in `records.ts`), so they upload, plan and refuse alike.
 
 /** The Workers runtime the Worker is written for. */
 export const COMPATIBILITY_DATE = "2026-10-01";
@@ -102,6 +103,42 @@ export interface AttachedDomain {
   hostname: string;
 }
 
+/** A DNS record as a zone holds it (`GET /zones/{id}/dns_records`), as the fields read here. */
+export interface ZoneRecord {
+  id: string;
+  type: string;
+  /** The full name, as Cloudflare gives it. */
+  name: string;
+  /** As Cloudflare shows it: a TXT record's text may be quoted. */
+  content: string;
+  priority?: number;
+  /** In seconds; 1 is automatic. */
+  ttl: number;
+  comment?: string | null;
+}
+
+/** A record as a batch writes it: never proxied, its comment the set's mark. */
+export interface RecordWrite {
+  type: string;
+  name: string;
+  ttl: number;
+  proxied: false;
+  comment: string;
+  /** Everything but a CAA record's. */
+  content?: string;
+  /** An MX record's. */
+  priority?: number;
+  /** A CAA record's, which Cloudflare takes as fields, not as content. */
+  data?: { flags: number; tag: string; value: string };
+}
+
+/** One batch of DNS changes (`POST /zones/{id}/dns_records/batch`), which Cloudflare runs as one transaction: deletes, patches, then posts. */
+export interface DnsBatch {
+  posts: RecordWrite[];
+  patches: (RecordWrite & { id: string })[];
+  deletes: { id: string }[];
+}
+
 /** Cloudflare, as the operations use it. Each call fails with a `DriverError`, except `send`. */
 export interface CloudflareApi {
   /** The Worker's URL: `https://<script>.<account subdomain>.workers.dev`. */
@@ -141,6 +178,12 @@ export interface CloudflareApi {
   attachDomain(script: string, hostname: string, zoneId: string): Promise<void>;
   /** Detaches a custom domain (`DELETE …/workers/domains/{id}`); nothing when it is gone. */
   detachDomain(id: string): Promise<void>;
+  /** The zone's records that carry the comment `comment` exactly (`GET /zones/{id}/dns_records?comment.exact=`). */
+  dnsRecords(zoneId: string, comment: string): Promise<ZoneRecord[]>;
+  /** The zone's records at the full name `name`, whoever's (`GET /zones/{id}/dns_records?name.exact=`). */
+  dnsRecordsAt(zoneId: string, name: string): Promise<ZoneRecord[]>;
+  /** Writes the batch, all of it or none (`POST /zones/{id}/dns_records/batch`): the records patched and posted, as the zone now holds them. */
+  writeDns(zoneId: string, batch: DnsBatch): Promise<{ patches: ZoneRecord[]; posts: ZoneRecord[] }>;
   /** A request to a Worker: its answer, or a throw when there is none. */
   send(url: string, init: RequestInit): Promise<Response>;
 }
@@ -178,14 +221,31 @@ type ContainerState = {
 };
 
 /** What a plan of a change finds, and the state it planned from. */
-interface Planned {
+export interface Planned {
   action: PlanAction;
   planned?: Record<string, unknown>;
   unknown: string[];
   replace: string[];
 }
 
-const NONE = { unknown: [], replace: [] };
+export const NONE = { unknown: [], replace: [] };
+
+/**
+ * Refuses an update (`what`) whose plan, made again, is not the one approved (`expect`: its
+ * action and replace), or is not an update: `plan_changed`.
+ */
+export function replanned(
+  what: string,
+  fresh: Pick<Planned, "action" | "replace">,
+  expect?: { action: PlanAction; replace: string[] },
+) {
+  if (expect && (expect.action !== fresh.action || expect.replace.join() !== fresh.replace.join())) {
+    throw refused(`${what}: the plan changed (${expect.action}, now ${fresh.action})`, "plan_changed");
+  }
+  if (fresh.action !== "update" && fresh.action !== "none") {
+    throw refused(`${what}: the plan is a ${fresh.action}, not an update`, "plan_changed");
+  }
+}
 const sorted = (names: Iterable<string>) => [...names].toSorted().join(",");
 
 /** The declared fields a change of which is an update: everything the Worker runs, and the image. */
@@ -473,12 +533,7 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
       call: CallContext,
     ) => {
       const fresh = await plan({ id, desired });
-      if (expect && (expect.action !== fresh.action || expect.replace.join() !== fresh.replace.join())) {
-        throw refused(`container.update: the plan changed (${expect.action}, now ${fresh.action})`, "plan_changed");
-      }
-      if (fresh.action !== "update" && fresh.action !== "none") {
-        throw refused(`container.update: the plan is a ${fresh.action}, not an update`, "plan_changed");
-      }
+      replanned("container.update", fresh, expect);
       if (fresh.action === "none") {
         const found = await read({ id });
         if (found.state) return { id, state: found.state };

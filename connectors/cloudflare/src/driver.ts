@@ -2,7 +2,8 @@ import { defineDriver, DriverError, retryableStatus } from "@sanoma-ai/workflows
 import type { Cloudflare } from "cloudflare";
 import { z } from "zod";
 import { cloudflareOps } from "./connector.ts";
-import { alarmOps, type CloudflareApi, containerOps, type ReadBinding, refused } from "./ops.ts";
+import { alarmOps, type CloudflareApi, containerOps, type ReadBinding, refused, type ZoneRecord } from "./ops.ts";
+import { recordsOps } from "./records.ts";
 import { CLOUDFLARE_REGISTRY, copyImage } from "./registry.ts";
 
 /*
@@ -24,7 +25,9 @@ export interface CloudflareDriverOptions {
 const env = z.object({
   CLOUDFLARE_API_TOKEN: z
     .string()
-    .describe("an API token with Workers Scripts Edit and Workers Containers Edit, and Zone Read for custom domains"),
+    .describe(
+      "an API token with Workers Scripts Edit and Workers Containers Edit, and Zone Read and Zone → DNS → Edit on the zones of custom domains and DNS records",
+    ),
   CLOUDFLARE_ACCOUNT_ID: z
     .string()
     .regex(/^[0-9a-f]{32}$/, "an account id is 32 hexadecimal digits")
@@ -209,15 +212,64 @@ function accountApi(timeoutMs: number, subdomains: Map<string, Promise<string>>)
     async detachDomain(id) {
       await found(`DELETE workers/domains/${id}`, (cf) => cf.workers.domains.delete(id, { account_id }));
     },
+    dnsRecords: (zone_id, comment) =>
+      calling(`GET zones/${zone_id}/dns_records?comment.exact=${comment}`, (cf) =>
+        everyRecord(cf, { zone_id, comment: { exact: comment } }),
+      ),
+    dnsRecordsAt: (zone_id, name) =>
+      calling(`GET zones/${zone_id}/dns_records?name.exact=${name}`, (cf) =>
+        everyRecord(cf, { zone_id, name: { exact: name } }),
+      ),
+    writeDns: (zone_id, { posts, patches, deletes }) =>
+      calling(`POST zones/${zone_id}/dns_records/batch`, async (cf) => {
+        // The SDK's params are a union per record type; `RecordWrite` is the fields each shares.
+        const result = await cf.dns.records.batch({ zone_id, posts, patches, deletes } as Parameters<
+          Cloudflare["dns"]["records"]["batch"]
+        >[0]);
+        return { patches: (result.patches ?? []).map(zoneRecord), posts: (result.posts ?? []).map(zoneRecord) };
+      }),
     send: sender(timeoutMs),
   };
 }
 
 /**
+ * Every record a list finds, page after page as its first page counts them (the SDK's own
+ * iteration asks for one page more, which answers empty).
+ */
+async function everyRecord(cf: Cloudflare, query: Parameters<Cloudflare["dns"]["records"]["list"]>[0]) {
+  const first = await cf.dns.records.list(query);
+  const found = [...first.result];
+  const pages = (first.result_info as { total_pages?: number }).total_pages ?? 1;
+  for (let page = 2; page <= pages; page++) {
+    found.push(...(await cf.dns.records.list({ ...query, page })).result);
+  }
+  return found.map(zoneRecord);
+}
+
+/** A record of Cloudflare's reply, as the fields read here. */
+const zoneRecord = (record: {
+  id: string;
+  type: string;
+  name: string;
+  content?: string;
+  ttl: number;
+  comment?: string | null;
+  priority?: number;
+}): ZoneRecord => ({
+  id: record.id,
+  type: record.type,
+  name: record.name,
+  content: record.content ?? "",
+  ttl: record.ttl,
+  ...(record.priority !== undefined && { priority: record.priority }),
+  ...(typeof record.comment === "string" && { comment: record.comment }),
+});
+
+/**
  * The real Cloudflare account at `CLOUDFLARE_ACCOUNT_ID`, with `CLOUDFLARE_API_TOKEN`: the
- * company's Worker and its container application (`cloudflare.container`), and its object's alarm
- * over the Worker's wake route with the company's `SANOMA_WAKEUP_TOKEN` (`cloudflare.alarm`). See
- * the README.
+ * company's Worker and its container application (`cloudflare.container`), its object's alarm
+ * over the Worker's wake route with the company's `SANOMA_WAKEUP_TOKEN` (`cloudflare.alarm`), and
+ * sets of DNS records in the account's zones (`cloudflare.records`). See the README.
  */
 export function cloudflareDriver(options: CloudflareDriverOptions = {}) {
   const { timeoutMs = 30_000, startTimeoutMs = 10 * 60_000, pollMs = 2_000 } = options;
@@ -227,7 +279,11 @@ export function cloudflareDriver(options: CloudflareDriverOptions = {}) {
   const worker = { send: sender(timeoutMs) };
   return defineDriver(
     cloudflareOps,
-    { container: containerOps(api, { startTimeoutMs, pollMs }), alarm: alarmOps(() => worker) },
+    {
+      container: containerOps(api, { startTimeoutMs, pollMs }),
+      alarm: alarmOps(() => worker),
+      records: recordsOps(api),
+    },
     { env },
   );
 }

@@ -75,7 +75,7 @@ export const SETUP_TOKENS: Record<string, { description: string; optional?: true
   },
   CLOUDFLARE_API_TOKEN: {
     description:
-      "An API token with Workers Scripts Edit, Workers Containers Edit and Account Settings Read, from dash.cloudflare.com/profile/api-tokens.",
+      "An API token with Workers Scripts Edit, Workers Containers Edit and Account Settings Read, and Zone Read and Zone → DNS → Edit on the zones of custom domains and DNS records, from dash.cloudflare.com/profile/api-tokens.",
     optional: true,
   },
   CLOUDFLARE_ACCOUNT_ID: {
