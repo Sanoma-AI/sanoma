@@ -66,6 +66,7 @@ export {
   declaredWakeup,
   defineConfig,
   envWakeup,
+  readRootSnapshot,
   resolveConfig,
   resolveDatabaseUrl,
   type ResolvedConfig,
@@ -240,6 +241,11 @@ export {
 } from "./client.ts";
 // A raw DBOS client on the runtime's database, for tests and tools that read DBOS directly.
 export { dbosClient } from "./db.ts";
+// The runtime bundled where a company's files are not (the Cloudflare host's Worker): the root's
+// people, policies and app name as data, Cedar's web build, and a database it only checks.
+export { type RootSnapshot, useRootSnapshot } from "./bundled.ts";
+export { checkPreparedOnly } from "./db.ts";
+export { type CedarWasm, useCedarWasm } from "./schema.ts";
 // Also at `@sanoma-ai/workflows/shared`, which a browser bundle can import.
 export {
   AGENTS,

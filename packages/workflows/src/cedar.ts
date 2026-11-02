@@ -20,6 +20,7 @@ import {
   type PreviewRequest,
   VISITOR_DENIED,
 } from "./policy.ts";
+import { rootSnapshot } from "./bundled.ts";
 import { admit, readPeople } from "./resources.ts";
 import { cedarValue, cedarWasm, contextTypeOf, messageOf, NAMESPACE, schemaOf, shapeOf } from "./schema.ts";
 import {
@@ -89,8 +90,13 @@ const ON_BEHALF_OF = "on-behalf-of";
 
 type Place = { line: number; column: number };
 
-/** `<root>/policies/**\/*.cedar`, then each app's `apps/<app>/policies/**\/*.cedar`, sorted by path in each, each relative to the root with `/` between its parts. */
+/**
+ * `<root>/policies/**\/*.cedar`, then each app's `apps/<app>/policies/**\/*.cedar`, sorted by path in
+ * each, each relative to the root with `/` between its parts; a bundled snapshot's (`useRootSnapshot`).
+ */
 export function readPolicyFiles(root: string): { file: string; text: string }[] {
+  const bundled = rootSnapshot(root);
+  if (bundled) return bundled.policies;
   return kindDirs(root, POLICIES_DIR)
     .flatMap((dir) => filesUnder(dir, (name) => name.endsWith(".cedar")))
     .map((path) => ({

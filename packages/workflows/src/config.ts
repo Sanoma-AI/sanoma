@@ -55,7 +55,8 @@ import {
   VENDOR,
   withSetup,
 } from "./op.ts";
-import { type CedarPolicySource, policyAt } from "./cedar.ts";
+import { rootSnapshot, type RootSnapshot } from "./bundled.ts";
+import { type CedarPolicySource, policyAt, readPolicyFiles } from "./cedar.ts";
 import type { Policy } from "./policy.ts";
 import { checkFromRefs, type Resource, resourceTypesOf, withoutWriteOnly } from "./resource.ts";
 import { CODE_MAIL, loginCodeWorkflow } from "./login-code.ts";
@@ -74,7 +75,7 @@ import { tokenStore } from "./tokens.ts";
 import type { Steps } from "./steps.ts";
 import { checkSchedule } from "./schedules.ts";
 import { changeCodeOf, computeVersion } from "./version.ts";
-import type { DeclaredResource, ResourceProblem } from "./resources.ts";
+import { type DeclaredResource, readPeople, type ResourceProblem } from "./resources.ts";
 import { checkWakeupOps, type DeclaredWakeup, type EnvWakeup, HOST_URL } from "./wakeup.ts";
 import { instanceUrl, WAKEUP_TOKEN } from "./wakeup-service.ts";
 import { sanomaWakeupDriver, wakeupSteps } from "./wakeup-driver.ts";
@@ -422,9 +423,10 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     identityProvisioning,
     appName,
     databaseUrl,
-    // The built-in's code and operations are part of the app's version, like the config's own.
-    version: computeVersion({ appName, workflows: [...names.values()] }),
-    changeCode: changeCodeOf(names.get(CHANGE_WORKFLOW)!),
+    // The built-in's code and operations are part of the app's version, like the config's own. A
+    // bundle's code is not the source's: it carries the hashes of the root it was read from.
+    version: rootSnapshot(root)?.version ?? computeVersion({ appName, workflows: [...names.values()] }),
+    changeCode: rootSnapshot(root)?.changeCode ?? changeCodeOf(names.get(CHANGE_WORKFLOW)!),
     queueName: `sanoma:${appName}`,
     ...(login && { login }),
     ops,
@@ -559,11 +561,25 @@ function makersOf<K extends keyof ConnectorSetup>(
 }
 
 /**
+ * What the runtime reads from `config`'s root that a bundle carries where the files are not
+ * (`useRootSnapshot`): the app's name and versions as `resolved` has them, the policy files and
+ * the people the data files declare.
+ */
+export function readRootSnapshot(config: SanomaConfig, resolved: ResolvedConfig = resolveConfig(config)): RootSnapshot {
+  const root = rootOf(config);
+  if (root === undefined) throw new Error("A config with no root has no files to carry");
+  const { appName, version, changeCode } = resolved;
+  return { appName, version, changeCode, policies: readPolicyFiles(root), people: readPeople(root) };
+}
+
+/**
  * The `name` of `<root>/package.json`, kept whole (`@acme/ops`), when that file exists and names
  * one; else "sanoma", as for a config with no `root`. Never a `package.json` above the root: a
  * parent project's name must not become the app's. A file that is not JSON is refused, naming it.
  */
 function appNameAt(root: string | undefined): string {
+  const bundled = rootSnapshot(root);
+  if (bundled) return bundled.appName;
   const file = root === undefined ? undefined : join(root, "package.json");
   if (file === undefined || !existsSync(file)) return "sanoma";
   let manifest: unknown;

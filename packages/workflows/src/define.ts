@@ -1,3 +1,4 @@
+import { bundledFile } from "./bundled.ts";
 import type { ConnectionRef } from "./connection.ts";
 import type { WorkflowEntry } from "./description.ts";
 import { fileURLToPath } from "node:url";
@@ -396,11 +397,12 @@ const isTimeZone = (zone: unknown): boolean => {
 
 /**
  * The file of the code that called the function calling this one (`defineWorkflow`'s caller),
- * from V8's call sites, as a path; undefined where there is none.
+ * from V8's call sites, as a path; where they name none, the file a bundle says it is evaluating
+ * (`bundledFile`); undefined where there is neither.
  */
 export function callerFile(): string | undefined {
   // Frame 0 is this function, frame 1 its caller, frame 2 theirs: by index, since a bundle may hold all three.
-  return scriptPath(getCallSites(3)[2]?.scriptName);
+  return scriptPath(getCallSites(3)[2]?.scriptName) ?? bundledFile();
 }
 
 /** A V8 script name (a `file:` URL for a module, a path for a script) as a path; undefined for none. */
