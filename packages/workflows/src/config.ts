@@ -1,4 +1,5 @@
 import { configuredSecrets } from "./credentials.ts";
+import type { IdentityProvisioning } from "./identity-provisioning.ts";
 import { secretsForInput } from "./secret.ts";
 import { isRunControlError } from "./errors.ts";
 import { currentRun } from "./run.ts";
@@ -107,6 +108,8 @@ export interface SanomaConfig {
   ledger?: LedgerStore;
   /** Credential storage and explicit bindings. Omitted: encrypted Postgres, no environment fallback. */
   secrets?: SecretConfiguration;
+  /** Trusted control plane only: separate broker enrollment writer. Absent in company runtimes. */
+  identityProvisioning?: IdentityProvisioning;
   connections?: readonly ConnectionDefinition[];
   connectionRules?: readonly ConnectionRule[];
   /** Postgres for the runtime. Defaults to `SANOMA_DATABASE_URL`, then `DEFAULT_DATABASE_URL`. */
@@ -357,7 +360,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
       changeDriver(remotes),
       connectionDriver(connections),
       appsListDriver,
-      runtimeDriver({ tokens: tokenStore(() => connectionPool.db()) }),
+      runtimeDriver({ tokens: tokenStore(() => connectionPool.db()), identities: config.identityProvisioning }),
       ...(hostTyped ? [sourceDriver] : []),
       ...(dataStore ? [collectionsDriver(declared, dataStore)] : []),
     ],
