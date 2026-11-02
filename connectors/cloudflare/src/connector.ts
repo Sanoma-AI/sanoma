@@ -185,7 +185,8 @@ export function caaData(content: string) {
   const parts = /^(\d+)\s+(\S+)\s+(.+)$/s.exec(content.trim());
   if (!parts) return undefined;
   const [, flags, tag, value] = parts as unknown as [string, string, string, string];
-  return { flags: Number(flags), tag, value: value.replace(/^"(.*)"$/s, "$1") };
+  // A tag in any case is the same tag (RFC 8659); Cloudflare shows it in lower case.
+  return { flags: Number(flags), tag: tag.toLowerCase(), value: value.replace(/^"(.*)"$/s, "$1") };
 }
 
 /** A CAA record's fields as its content, as Cloudflare shows them: `caaData`'s reverse. */

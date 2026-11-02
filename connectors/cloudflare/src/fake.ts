@@ -489,7 +489,9 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
         delete state.domains[id];
       },
       async dnsRecords(zoneId, comment) {
-        return structuredClone(recordsOf(zoneId).filter((r) => r.comment === comment));
+        // `comment.exact` ignores case, as Cloudflare's does.
+        const exact = comment.toLowerCase();
+        return structuredClone(recordsOf(zoneId).filter((r) => r.comment?.toLowerCase() === exact));
       },
       async dnsRecordsAt(zoneId, name) {
         return structuredClone(recordsOf(zoneId).filter((r) => r.name === name));

@@ -204,15 +204,24 @@ describe("cloudflare.records on the fake", () => {
       name: "check-send.sanoma.work",
       content: "google-site-verification=x",
     });
-    fake.state.dns["sanoma.work"] = [hand({ ...SPF, content: `"${SPF.content}"` }), other];
+    // A comment that is the mark in another case, which Cloudflare's `comment.exact` finds too.
+    const cased = hand({
+      id: "cased",
+      type: "TXT",
+      name: DKIM.name,
+      content: "kept",
+      comment: "Sanoma:sanoma.work/check",
+    });
+    fake.state.dns["sanoma.work"] = [hand({ ...SPF, content: `"${SPF.content}"` }), other, cased];
     const made = (await ops["records.create"]!({ desired }, callWith())) as Answer;
     expect(made.state.record_ids).toContain("by-hand");
+    expect(made.state.record_ids).not.toContain("cased");
     expect(fake.state.dns["sanoma.work"]!.find((r) => r.id === "by-hand")?.comment).toBe(MARK);
     await ops["records.delete"]!({ id: ID }, callWith());
-    expect(fake.state.dns["sanoma.work"]).toEqual([other]);
+    expect(fake.state.dns["sanoma.work"]).toEqual([other, cased]);
   });
 
-  it("refuses a CNAME in the way, and a zone the account does not hold", async () => {
+  it("refuses a CNAME in the way, and a create or a delete in a zone not listed", async () => {
     const fake = fakeCloudflare();
     fake.state.dns["sanoma.work"] = [
       hand({ type: "CNAME", name: "check-send.sanoma.work", content: "mail.example.net" }),
@@ -223,6 +232,10 @@ describe("cloudflare.records on the fake", () => {
     expect(fake.state.dns["sanoma.work"]).toHaveLength(1);
     const none = fakeCloudflare({ zones: [] });
     await expect(none.driver.ops["records.create"]!({ desired }, callWith())).rejects.toMatchObject({
+      vendorCode: "no_zone",
+    });
+    // Not listed may be a token without Zone Read: its records may be there, so a delete is not done.
+    await expect(none.driver.ops["records.delete"]!({ id: ID }, callWith())).rejects.toMatchObject({
       vendorCode: "no_zone",
     });
   });
@@ -245,15 +258,17 @@ describe("cloudflare.records on the fake", () => {
     expect(zone.find((r) => r.id === "mx-by-hand")?.comment).toBeUndefined();
   });
 
-  it("compares a CAA record's value quoted or not, and refuses an empty set or a record declared twice", async () => {
+  it("compares a CAA record's value quoted or not and its tag in any case, and refuses an empty set or a record declared twice", async () => {
     const fake = fakeCloudflare();
     const ops = fake.driver.ops;
     const caa = { type: "CAA", name: "sanoma.work", content: "0 issue letsencrypt.org" };
     const made = (await ops["records.create"]!({ desired: { ...desired, records: [caa] } }, callWith())) as Answer;
     expect(made.state.records).toEqual([{ ...caa, content: '0 issue "letsencrypt.org"', ttl: 1 }]);
-    expect(await ops["records.plan"]!({ id: ID, desired: { ...desired, records: [caa] } }, callWith())).toMatchObject({
-      action: "none",
-    });
+    for (const declared of [caa, { ...caa, content: "0 ISSUE letsencrypt.org" }]) {
+      expect(
+        await ops["records.plan"]!({ id: ID, desired: { ...desired, records: [declared] } }, callWith()),
+      ).toMatchObject({ action: "none" });
+    }
     for (const records of [[], [SPF, { ...SPF, ttl: 300 }]]) {
       await expect(ops["records.plan"]!({ desired: { ...desired, records } }, callWith())).rejects.toMatchObject({
         vendorCode: "invalid",
@@ -283,12 +298,13 @@ describe("cloudflare.records on the fake", () => {
     expect(zone).toEqual(before);
   });
 
-  it("refuses a record outside the zone, a CNAME beside another declared record, and a mark too long for a comment", async () => {
+  it("refuses a record outside the zone, a CNAME or a second SPF policy beside another declared record, and a mark too long for a comment", async () => {
     const ops = fakeCloudflare().driver.ops;
     const cname = { type: "CNAME", name: SPF.name, content: "mail.example.net" };
     for (const plan of [
       { desired: { ...desired, records: [{ ...SPF, name: "check-send.example.com" }] } },
       { desired: { ...desired, records: [SPF, cname] } },
+      { desired: { ...desired, records: [SPF, { ...SPF, content: "v=spf1 include:_spf.google.com ~all" }] } },
       { desired: { zone: `${"z".repeat(60)}.example.com`, name: "a".repeat(40), records: [] } },
     ]) {
       await expect(ops["records.plan"]!(plan, callWith())).rejects.toMatchObject({ vendorCode: "invalid" });

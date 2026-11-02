@@ -111,6 +111,15 @@ function declaredRecords(zone: string, name: string, given: unknown): DnsRecord[
       "invalid",
     );
   }
+  const second = declared.find(
+    (r) => spfRecord(r) && declared.some((o) => o !== r && o.name === r.name && spfRecord(o)),
+  );
+  if (second) {
+    throw refused(
+      `records ${set}: two SPF policies are declared at ${second.name}, which makes both invalid: merge them into one`,
+      "invalid",
+    );
+  }
   return declared;
 }
 
@@ -170,11 +179,13 @@ const named = ({ record, comment }: Held) =>
 const clashes = (record: DnsRecord, { record: other }: Held) =>
   other.type === "CNAME" ||
   record.type === "CNAME" ||
-  (record.type === "TXT" && other.type === "TXT" && isSpf(record.content) && isSpf(other.content)) ||
+  (spfRecord(record) && spfRecord(other)) ||
   (record.type === "MX" && other.type === "MX" && record.content === other.content);
 
 /** Whether a TXT record's text is an SPF policy: `v=spf1`, in any case. */
 const isSpf = (text: string) => /^v=spf1(\s|$)/i.test(text);
+/** Whether a record is an SPF policy: a TXT record whose text is one. */
+const spfRecord = (record: DnsRecord) => record.type === "TXT" && isSpf(record.content);
 
 /** `call`'s answer, a 403 refused as the token's missing permission on the zone. */
 async function dns<T>(zone: string, call: () => Promise<T>): Promise<T> {
@@ -193,6 +204,13 @@ async function dns<T>(zone: string, call: () => Promise<T>): Promise<T> {
 const notKnown = (set: string) =>
   refused(`records ${set}: its records are not known yet: apply the resource they come from first`, "not_known");
 
+/** The refusal of a set whose zone is not listed: the account holds no such zone, or the token cannot read it. */
+const noZone = (set: string, zone: string) =>
+  refused(
+    `records ${set}: the account holds no zone ${zone}, or the API token cannot read it: add the zone to the account, or Zone Read and ${DNS_EDIT} on it to the token`,
+    "no_zone",
+  );
+
 /** What `look` finds of a set. */
 type Found = Awaited<ReturnType<typeof look>>;
 
@@ -204,7 +222,11 @@ async function look(cf: CloudflareApi, id: string) {
   const { zone, name } = idOf(id);
   const mark = markOf(zone, name);
   const zoneId = await cf.zone(zone);
-  const held = zoneId === undefined ? [] : (await dns(zone, () => cf.dnsRecords(zoneId, mark))).map(heldOf);
+  // Cloudflare's `comment.exact` ignores case: a comment that is the mark in another case is not the set's.
+  const held =
+    zoneId === undefined
+      ? []
+      : (await dns(zone, () => cf.dnsRecords(zoneId, mark))).map(heldOf).filter((h) => h.comment === mark);
   return { zone, name, mark, zoneId, held };
 }
 
@@ -283,10 +305,7 @@ export function recordsOps(api: () => CloudflareApi) {
     const cf = before?.cf ?? api();
     const { zone, name, mark, zoneId, held } = before?.found ?? (await look(cf, set));
     if (zoneId === undefined) {
-      throw refused(
-        `records ${set}: the account holds no zone ${zone}, or the API token cannot read it: add the zone to the account, or Zone Read and ${DNS_EDIT} on it to the token`,
-        "no_zone",
-      );
+      throw noZone(set, zone);
     }
     const { kept, patched, missing, stale } = diff(declared, held);
     const batch: DnsBatch = { posts: [], patches: [], deletes: stale.map(({ id }) => ({ id })) };
@@ -380,7 +399,10 @@ export function recordsOps(api: () => CloudflareApi) {
     delete: async ({ id }: { id: string }) => {
       const cf = api();
       const { zone, zoneId, held } = await look(cf, id);
-      if (zoneId !== undefined && held.length > 0) {
+      // A zone the token cannot read is not listed, as one the account does not hold: Cloudflare
+      // answers both alike, so a delete is refused rather than done with the records left behind.
+      if (zoneId === undefined) throw noZone(id, zone);
+      if (held.length > 0) {
         await dns(zone, () =>
           cf.writeDns(zoneId, { posts: [], patches: [], deletes: held.map((h) => ({ id: h.id })) }),
         );
