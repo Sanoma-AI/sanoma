@@ -132,7 +132,8 @@ const expecting =
 
 /**
  * A record set's operations on `store()`: it writes the fields it is given over what it holds (a
- * field left out is kept), and refuses records given as `null` (`not_known`).
+ * field left out is kept), refuses records given as `null` (`not_known`), and is replaced when a
+ * record it holds is dropped.
  */
 function recordSet(store: () => Map<string, z.output<typeof recordsSchema>>) {
   const put = async ({ desired }: { desired: State }) => {
@@ -152,6 +153,10 @@ function recordSet(store: () => Map<string, z.output<typeof recordsSchema>>) {
     const same = Object.entries(desired).every(
       ([field, value]) => JSON.stringify(value) === JSON.stringify(held[field as keyof typeof held]),
     );
+    // Records are added in place; one dropped replaces the set.
+    const kept = new Set((Array.isArray(desired.records) ? desired.records : []).map((r) => JSON.stringify(r)));
+    const drops = Array.isArray(desired.records) && held.records.some((r) => !kept.has(JSON.stringify(r)));
+    if (drops) return { action: "replace", planned: { ...held, ...desired }, unknown, replace: ["records"] };
     return { action: same ? "none" : "update", planned: { ...held, ...desired }, unknown, replace: [] };
   };
   return {

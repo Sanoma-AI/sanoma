@@ -52,7 +52,7 @@ import {
 } from "./op.ts";
 import { type CedarPolicySource, policyAt } from "./cedar.ts";
 import type { Policy } from "./policy.ts";
-import { type Resource, resourceTypesOf, withoutWriteOnly } from "./resource.ts";
+import { checkFromRefs, type Resource, resourceTypesOf, withoutWriteOnly } from "./resource.ts";
 import { CODE_MAIL, loginCodeWorkflow } from "./login-code.ts";
 import {
   APPLY_WORKFLOW,
@@ -349,6 +349,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   ]);
   checkWakeupOps(types, ops);
   checkDatabaseOps(types, ops);
+  checkFromRefs(types);
   const driversByVendor = new Map([...makersOf(running, "driver")].map(([vendor, make]) => [vendor, make()]));
   const remotes = new Map([...makersOf(config.connectors, "remote")].map(([vendor, make]) => [vendor, make()]));
   const drivers = indexDrivers(

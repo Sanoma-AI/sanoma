@@ -477,8 +477,9 @@ function messageOf(step: PlanStep, before: Binding | undefined, after: Binding |
  * reference to a resource made in this run is given its new binding, a `from` reference that
  * resource's state at its path as an earlier step left it (planned as `null` while this apply
  * changes it there, or a create's while it has none there, so the change is planned and approved
- * up front; a step whose resource still has none there, its step failed or not done, fails
- * before its driver is called), and a wakeup's `host` the URL its host's state gives
+ * up front, and the step planned again once the value is known: done without a write when it
+ * plans `none`, else expecting the fresh plan; a step whose resource still has none there, its
+ * step failed or not done, fails before its driver is called), and a wakeup's `host` the URL its host's state gives
  * (`outputs(state).url`), found or made in this run. A failed step is reported and the run
  * goes on; a failure that ends the run (`isRunControlError`) ends it.
  */
@@ -597,6 +598,8 @@ export function applyWorkflow(
       const touches = new Map<string, (from: string) => boolean>();
       // For each step, the `from` fields planned left out: run so, not waited for.
       const dropped = new Map<string, Set<string>>();
+      // The steps planned with a `from` field `null`: planned again at their step, once known.
+      const awaited = new Set<string>();
       const planned: PlanStep[] = [];
       const add = (step: PlanStep, after?: State) => {
         planned.push(step);
@@ -626,6 +629,7 @@ export function applyWorkflow(
         desired.set(resource.id, fields);
         const left = unfilled.filter((u) => missing(u.named, u.from) === "drop").map((u) => u.at);
         if (left.length) dropped.set(resource.id, new Set(left));
+        if (left.length < unfilled.length) awaited.add(resource.id);
         const unresolved = revisions.get(resource.id);
         // A host whose ref could not be resolved has no commit to run (compare says so only for one it found).
         const next =
@@ -703,13 +707,29 @@ export function applyWorkflow(
             bindings[key] = { type, id: made.id, ...(step.connection && { connection: step.connection }) };
             state = made.state;
           } else if (todo === "update" && (step.action === "update" || step.action === "replace")) {
-            const expect = { action: step.action, replace: step.replace };
-            const changed = await ctx[step.vendor]![step.type]!.update(
-              { id: binding, desired: filled!.desired, expect },
-              { connection: step.connection },
-            );
-            bindings[key] = { type, id: changed.id, ...(step.connection && { connection: step.connection }) };
-            state = changed.state;
+            // A step planned with a `from` field unknown (its resource changed first) is planned again with its fields as now known: the approval covered the change in kind,
+            // and the vendor now says which. Nothing to write, it is done; else the update expects
+            // the fresh plan, an action other than an update or replace refused as changed.
+            let expect: Expect = { action: step.action, replace: step.replace };
+            let unchanged = false;
+            if (awaited.has(step.id)) {
+              const fresh = await ctx[step.vendor]![step.type]!.plan(
+                { id: binding, desired: filled!.desired },
+                { connection: step.connection },
+              );
+              unchanged = fresh.action === "none";
+              if (fresh.action === "update" || fresh.action === "replace")
+                expect = { action: fresh.action, replace: fresh.replace };
+            }
+            if (unchanged) unsettled.delete(step.id);
+            else {
+              const changed = await ctx[step.vendor]![step.type]!.update(
+                { id: binding, desired: filled!.desired, expect },
+                { connection: step.connection },
+              );
+              bindings[key] = { type, id: changed.id, ...(step.connection && { connection: step.connection }) };
+              state = changed.state;
+            }
           } else if (todo === "delete") {
             await ctx[step.vendor]![step.type]!.delete({ id: binding }, { connection: step.connection });
             delete bindings[key];

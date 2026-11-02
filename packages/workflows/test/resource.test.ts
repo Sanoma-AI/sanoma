@@ -375,7 +375,31 @@ describe("defineResource", () => {
           fields: { ...records.fields, writeOnly: ["records"] },
         }),
       ).toThrow("mail.secret: records is write-only, so it cannot take its value from another resource's state");
+      // Nor at a field that holds one.
+      expect(() =>
+        defineResource({
+          ...records,
+          vendor: "mail",
+          type: "keyed",
+          fields: { ...records.fields, writeOnly: ["records.secret"] },
+        }),
+      ).toThrow(
+        "mail.keyed: records.secret is write-only, so records, which holds it, cannot take its value from another resource's state",
+      );
     });
+  });
+
+  it("refuses a `from` path the named type's state has no field at, when a config is resolved", () => {
+    const typo = defineResource({
+      ...records,
+      vendor: "mail",
+      type: "typo",
+      fields: { ...records.fields, references: { records: { type: "mail.domain", from: "record" } } },
+    });
+    const mail = defineConnector("mail", { domain, typo }, { title: "Mail", package: "@sanoma-ai/testing-mail" });
+    expect(() => resolveConfig({ workflows: [], connectors: [mail] })).toThrow(
+      "mail.typo: the reference at records takes record from a mail.domain's state, which has no such field (its fields: name, records, verified)",
+    );
   });
 
   it("takes a DNS record as a zone holds it: its name lower case with no trailing dot, a TXT record's text unquoted", () => {

@@ -820,4 +820,48 @@ describe("the apply workflow on a field taken from another resource's state", ()
       writeFileSync(join(root, "resources/mail.ts"), mailDataFile);
     }
   });
+
+  it("does nothing to a record set planned unknown whose records turned out unchanged", async () => {
+    await apply();
+    // The domain is pending again; the set already holds the records its update lists.
+    fake.update(({ domains }) => domains.set("example.com", { name: "example.com", records: null }));
+    const { runId, report } = await apply();
+    expect(report.plan.steps).toMatchObject([
+      { id: sending, action: "update" },
+      { id: dns, action: "update", unknown: ["records"] },
+    ]);
+    expect(report.results.map((r) => [r.id, r.status])).toEqual([
+      [sending, "done"],
+      [dns, "done"],
+    ]);
+    // Planned again with the records known: none, so its driver is not called to write.
+    const plans = ops(await app.client.ledger(runId)).filter(([op]) => op === "mail.records.plan");
+    expect(plans.map(([, input]) => input)).toEqual([
+      { id: "example.com/mail", desired: { name: "example.com/mail", records: null } },
+      { id: "example.com/mail", desired: { name: "example.com/mail", records: recordsFor("example.com") } },
+    ]);
+    expect(fake.calls.map((c) => c.op)).not.toContain("mail.records.update");
+  });
+
+  it("replaces a record set planned unknown whose known records force a replace, expecting the fresh plan", async () => {
+    await apply();
+    // The domain is pending again; the set holds a record its update no longer lists.
+    const extra = { type: "TXT" as const, name: "example.com", content: "v=spf1 -all" };
+    fake.update(({ domains, sets }) => {
+      domains.set("example.com", { name: "example.com", records: null });
+      sets.set("example.com/mail", { name: "example.com/mail", records: [...recordsFor("example.com"), extra] });
+    });
+    const { runId, report } = await apply();
+    expect(report.plan.steps).toMatchObject([
+      { id: sending, action: "update" },
+      { id: dns, action: "update", replace: [], unknown: ["records"] },
+    ]);
+    expect(report.results.map((r) => [r.id, r.status])).toEqual([
+      [sending, "done"],
+      [dns, "done"],
+    ]);
+    const update = ops(await app.client.ledger(runId)).find(([op]) => op === "mail.records.update");
+    expect(update?.[1]).toMatchObject({ expect: { action: "replace", replace: ["records"] } });
+    expect(fake.state.sets.get("example.com/mail")?.records).toEqual(recordsFor("example.com"));
+  });
 });
