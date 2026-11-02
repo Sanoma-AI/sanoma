@@ -12,6 +12,7 @@ import {
   requestOrigin,
   sameOrigin,
   sealLoginCode,
+  type SocialClients,
 } from "@sanoma-ai/workflows";
 import { admit, readPeople } from "@sanoma-ai/workflows/describe";
 import { z } from "zod";
@@ -29,7 +30,7 @@ import { escapeHtml, smallPage, wantsJson } from "./page.ts";
 export type MakeStaffLogin = (context: LoginContext) => Promise<LoginHalf>;
 
 /** The company's own OAuth clients, each a sign-in method when given. */
-export type StaffSocial = NonNullable<LoginContext["staff"]>["social"];
+export type StaffSocial = SocialClients;
 
 const INVITE = "/auth/invite";
 

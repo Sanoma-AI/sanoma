@@ -25,7 +25,7 @@ export const bearerOf = (request: Request) =>
  * The login on a public site's host (`site:<name>`, so the page shows who it says): a caller with
  * an api token (`Authorization: Bearer sca_…`, `tokens`) as `token:<id>`, with the token's groups;
  * else the visitor the site's login half verifies (`visitorPrincipal`, in `visitors`, with their
- * `email` when the half verified it), else `anonymous`; never nobody. Its `handle` answers a
+ * `email` and `github` when the half verified them), else `anonymous`; never nobody. Its `handle` answers a
  * token it does not know, or one revoked, with a 401, sends `/auth/<login>/*` to the half and
  * answers any other `/auth/*` with a 404, and any method but GET, HEAD and POST with a 405.
  * `half` is being made while the app starts: a request that comes first waits for it.
@@ -53,9 +53,10 @@ export function publicFront(
       if (bearer !== undefined) return tokenOf(request, bearer);
       const verified = half && login !== undefined ? await (await half).verify(request) : null;
       if (!verified || !SUBJECT.test(verified.subject)) return ANONYMOUS_PRINCIPAL;
-      // The email a provider verified rides along (`LoginIdentity.email`); admission keeps it as a run's `ctx.startedBy.email`.
+      // What a provider verified rides along (`LoginIdentity`); admission keeps it as a run's `ctx.startedBy`.
       const visitor: Principal = visitorPrincipal(login!, verified.subject);
       if (verified.email) visitor.email = verified.email;
+      if (verified.github) visitor.github = verified.github;
       return visitor;
     },
     async handle(request) {

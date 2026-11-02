@@ -390,3 +390,48 @@ describe("a sandbox run with a host declared", () => {
     expect(checks.filter((k) => !k.ok)).toEqual([]);
   });
 });
+
+describe("a sandbox run started by a scenario's visitor", () => {
+  // Who started the run, as the workflow reads it.
+  const whoami = defineWorkflow({
+    name: "whoami",
+    title: "Who am I",
+    trigger: "manual",
+    input: z.object({}),
+    uses: [],
+    run: async (ctx) => ({ ...ctx.startedBy }),
+  });
+  const root = rootWith({
+    "policies/visitors.cedar": `permit (principal in Sanoma::Group::"visitors", action == Sanoma::Action::"workflow:whoami", resource);\n`,
+    "scenarios/whoami.feature": [
+      "Feature: Who am I",
+      "  Scenario: A visitor who linked GitHub",
+      '    Given a visitor "hopper@example.com" with GitHub "hopper" is acting',
+      "    When whoami runs",
+      "    Then the run succeeds",
+      "",
+      "  Scenario: A visitor by email",
+      '    Given a visitor "ada@example.com" is acting',
+      "    When whoami runs",
+      "    Then the run succeeds",
+      "",
+    ].join("\n"),
+  });
+  const app = useApp("sandbox-visitor", () => ({ workflows: [whoami], root }));
+
+  it("hands the run the email and GitHub login, as a public site's login would", async () => {
+    const scope = resolveConfig(app.config);
+    const { scenarios, errors } = await loadScenarios(scope);
+    expect(errors).toEqual([]);
+    const outputs = [];
+    for (const scenario of scenarios) {
+      const { runId, checks } = await runScenario(scenario, { client: app.client, scope });
+      expect(checks.filter((k) => !k.ok)).toEqual([]);
+      outputs.push(await app.client.result(runId));
+    }
+    expect(outputs).toEqual([
+      { id: "visitor:scenario:visitor", email: "hopper@example.com", github: "hopper" },
+      { id: "visitor:scenario:visitor", email: "ada@example.com" },
+    ]);
+  });
+});

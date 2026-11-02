@@ -233,6 +233,17 @@ describe("creating the GitHub App", () => {
 });
 
 describe("sign-in on the host", () => {
+  it("names the public sites with a login, whose visitors the App's client lets connect GitHub", async () => {
+    // Only what setupStatus reads of each entry.
+    const sites = [
+      { name: "www", public: true, login: "better-auth" },
+      { name: "docs", public: true },
+      { name: "ops" },
+    ];
+    const withSites = { ...ctx, description: { ...ctx.description, sites } } as unknown as AppContext;
+    expect((await setupStatus(withSites)).signIn.sites).toEqual([{ name: "www", login: "better-auth" }]);
+  });
+
   it("names the config's sender, connected once its connector's credentials are stored", async () => {
     const withSender = defineConfig({
       ...config,
@@ -267,7 +278,7 @@ describe("the connect page", () => {
         expect.objectContaining({ name: "SUPABASE_ACCESS_TOKEN", status: "missing" }),
       ],
       // The App's client is stored (the callback above): GitHub sign-in on the host.
-      signIn: { you: null, sender: null, senderConnected: false, github: true },
+      signIn: { you: null, sender: null, senderConnected: false, github: true, sites: [] },
     });
     expect((await setupStatus(ctx, { id: "alice" })).signIn.you).toBe("alice@acme.test");
     await setSetupToken(ctx, { id: "alice" }, { name: "SUPABASE_ACCESS_TOKEN", value: "sbp_madeup" });

@@ -155,3 +155,29 @@ export const emailCode = (sendCode?: (email: string, code: string) => Promise<vo
       if (type === "sign-in") await sendCode?.(email, otp);
     },
   });
+
+/** The query parameters Better Auth redirects to. */
+const REDIRECTS = ["callbackURL", "errorCallbackURL", "newUserCallbackURL"];
+
+/** Whether each redirect a request names is a path on its own host: `/x`, never `//x` or another origin. */
+export const localRedirects = (url: URL) =>
+  REDIRECTS.every((name) => {
+    const to = url.searchParams.get(name);
+    return to === null || (to.startsWith("/") && !to.startsWith("//") && !to.startsWith("/\\"));
+  });
+
+/** The user's `github` column, the GitHub login: never a person's input, so only the login sets it. */
+export const GITHUB_FIELD = { github: { type: "string" as const, required: false, input: false } };
+
+/** A user row, as far as who it vouches for reads it. */
+export interface User {
+  email: string;
+  emailVerified: boolean;
+  github?: string | null;
+}
+
+/** What a user row vouches for: the email when verified, the GitHub login when GitHub said it. */
+export const identityOf = (user: User) => ({
+  ...(user.emailVerified && { email: user.email }),
+  ...(user.github && { github: user.github }),
+});

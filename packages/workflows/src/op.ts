@@ -376,6 +376,11 @@ export type LoginMethod = "code" | "github" | "invite" | "password";
 /** How a person signed in to the staff login, which the ledger records (`signin.recorded`): all but a password. */
 export type SignInMethod = Exclude<LoginMethod, "password">;
 
+/** The company's own OAuth clients, as a login takes them: GitHub's is its GitHub App's client. */
+export interface SocialClients {
+  github?: { clientId: string; clientSecret: string };
+}
+
 /**
  * What the app gives a connector's login half (`ConnectorSetup.login`) when it makes it: for a
  * public site, once per site; for the staff login, once, with `staff`.
@@ -405,12 +410,17 @@ export interface LoginContext {
    * sender, and then the login offers no code.
    */
   sendCode?(email: string, code: string): Promise<void>;
+  /**
+   * For a public site's login: the company's own OAuth clients (its GitHub App's), each a method
+   * when given, by which a visitor signs in or, signed in, links that account (`LoginIdentity.github`).
+   */
+  social?: SocialClients;
   /** For the staff login only: who it may let in, the company's social clients, and where it tells of a sign-in. */
   staff?: {
     /** Whether the people files declare the person `identity` names; a login never makes a user for anyone else. */
     admits(identity: LoginIdentity): boolean;
     /** The company's own OAuth clients, each a method when given. */
-    social: { github?: { clientId: string; clientSecret: string } };
+    social: SocialClients;
     /** Tells the app of a sign-in by `method` of the person `identity` names, which the ledger records. Must not throw. */
     record(method: SignInMethod, identity: LoginIdentity): Promise<void>;
   };
@@ -453,8 +463,8 @@ export function sameOrigin(request: Request): boolean {
 export interface LoginHalf {
   /**
    * Who signed in, as the provider's stable subject, with their email when the provider verified
-   * it and their GitHub login when they signed in with GitHub; null for a missing or bad cookie,
-   * for which it never throws.
+   * it and their GitHub login when they signed in with GitHub or linked it; null for a missing or
+   * bad cookie, for which it never throws.
    */
   verify(request: Request): Promise<{ subject: string; email?: string; github?: string } | null>;
   /** Answers its own routes, `/auth/<vendor>/*`; undefined for any other request. */

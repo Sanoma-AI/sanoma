@@ -53,7 +53,7 @@ describe("the operations through the App", () => {
     const found = await call(githubDriver(), "installation.get", { id: 7 });
     expect(github.installation.get.output.parse(found)).toEqual({
       id: 7,
-      account: { login: "acme", type: "Organization" },
+      account: { login: "acme", id: 1, type: "Organization" },
       repositorySelection: "selected",
     });
     expect(sent.map((s) => signer(s.headers))).toEqual(["4242"]);
@@ -227,7 +227,7 @@ describe("fakeGithubApp", () => {
     const fake = fakeGithub();
     expect(await call(fake.driver, "installation.get", { id: 7 })).toEqual({
       id: 7,
-      account: { login: "acme", type: "Organization" },
+      account: { login: "acme", id: 7, type: "User" },
       repositorySelection: "all",
     });
     const made = await call(fake.driver, "repository.generate", generate);
@@ -285,6 +285,12 @@ describe("fakeGithubApp", () => {
   it("answers as GitHub does: an installation not there, another account, a name taken, a key in use", async () => {
     const fake = fakeGithub();
     await expect(call(fake.driver, "installation.get", { id: 8 })).rejects.toMatchObject({ status: 404 });
+    // Beside the personal account acme's 7, an organization's.
+    expect(await call(fake.driver, "installation.get", { id: 9 })).toEqual({
+      id: 9,
+      account: { login: "acme-inc", id: 9, type: "Organization" },
+      repositorySelection: "all",
+    });
     await expect(call(fake.driver, "repository.generate", { ...generate, owner: "other" })).rejects.toMatchObject({
       status: 403,
       message:

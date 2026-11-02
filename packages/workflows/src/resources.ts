@@ -140,9 +140,9 @@ export function readPeople(root: string | undefined): DeclaredPeople {
  * While no person is declared, whoever names an id is taken as given. A visitor's id (`isVisitor`)
  * is taken whatever the files say, with the groups stamped here (`visitors`, or none for
  * `anonymous`), never through a sign-in: the staff logins admit no visitor. A visitor keeps the
- * `email` its login verified; a `subject` is never taken from the caller (a token's is its row's,
- * which `SanomaClient.start` reads). Throws `NotAdmittedError` for anyone else, and for
- * everyone while the people's files have problems.
+ * `email` and `github` its login verified; a `subject` is never taken from the caller (a token's
+ * is its row's, which `SanomaClient.start` reads). Throws `NotAdmittedError` for anyone else, and
+ * for everyone while the people's files have problems.
  */
 export function admit(
   asking: { id?: string; email?: string; github?: string; groups?: string[]; onBehalfOf?: string },
@@ -155,7 +155,8 @@ export function admit(
     if (asking.id === ANONYMOUS) return ANONYMOUS_PRINCIPAL;
     // A token's groups are its row's (`SanomaClient.tokens`), which only the public front reads; a visitor's are stamped.
     if (isToken({ id: asking.id })) return { id: asking.id, groups: [...(asking.groups ?? [])] };
-    return { id: asking.id, groups: [VISITORS], ...(asking.email && { email: asking.email }) };
+    const { email, github } = asking;
+    return { id: asking.id, groups: [VISITORS], ...(email && { email }), ...(github && { github }) };
   }
   if (problems.length) {
     // The runtime's own agents are declared by no file, so a broken one does not stop them (`check`'s scenarios).
@@ -167,7 +168,7 @@ export function admit(
   if (!declaresPeople(people)) {
     const given = Principal.safeParse(asking).data;
     if (given) {
-      const { email: _email, subject: _subject, ...principal } = given;
+      const { email: _email, github: _github, subject: _subject, ...principal } = given;
       return principal;
     }
   } else {

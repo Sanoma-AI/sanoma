@@ -24,6 +24,11 @@ export interface Principal {
    */
   email?: string;
   /**
+   * For a visitor: the GitHub login their site's login verified (`LoginHalf.verify`: signed in
+   * with GitHub, or linked it), kept as `email` is; a run's `ctx.startedBy.github`.
+   */
+  github?: string;
+  /**
    * For an api token (`token:<id>`): the subject its row acts for, which `SanomaClient.start`
    * reads from the row, never from the caller; a run's `ctx.startedBy.subject`.
    */
@@ -35,17 +40,20 @@ export const Principal: z.ZodType<Principal> = z.object({
   groups: z.array(z.string()).optional(),
   onBehalfOf: z.string().regex(/\S/, "onBehalfOf must not be blank").optional(),
   email: z.string().optional(),
+  github: z.string().optional(),
   subject: z.string().optional(),
 });
 
 /**
  * Who started a run, as its workflow sees it (`ctx.startedBy`): the principal's id (`alice`,
- * `visitor:<login>:<subject>`, `token:<id>`), with the email a visitor's login verified, and for
- * an api token the subject its row acts for, so a workflow can tell whose a record is.
+ * `visitor:<login>:<subject>`, `token:<id>`), with the email and GitHub login a visitor's login
+ * verified, and for an api token the subject its row acts for, so a workflow can tell whose a
+ * record is.
  */
 export interface StartedBy {
   readonly id: string;
   readonly email?: string;
+  readonly github?: string;
   readonly subject?: string;
 }
 
