@@ -4,9 +4,10 @@ import { gcpAuthentication, type GcpIdentities } from "./authentication.ts";
 import { gcpDriver } from "./driver.ts";
 import { fakeGcp } from "./fake.ts";
 
+export { gcpProvisioningIdentity } from "./provisioning-identity.ts";
 export type { GcpIdentities, GcpIdentity } from "./authentication.ts";
 
-/** Bind named connections to trusted deployment WIF files; configuration contains no secret values. */
+/** Bind named connections to trusted deployment WIF sources; configuration contains no secret values. */
 export function gcpWithIdentities(identities: GcpIdentities) {
   const configured = Object.freeze(
     Object.fromEntries(Object.entries(identities).map(([id, identity]) => [id, Object.freeze({ ...identity })])),

@@ -7,6 +7,11 @@ import { sealInvite } from "./seal.ts";
 import { errorMessage } from "./shared.ts";
 import { sourceKeyPair, sshPublicKey } from "./ssh-key.ts";
 import { memoryTokens, type Tokens } from "./tokens.ts";
+import {
+  identityProvisioningCode,
+  memoryIdentityProvisioning,
+  type IdentityProvisioning,
+} from "./identity-provisioning.ts";
 
 // What a workflow cannot do itself and the runtime does for it, as operations of the vendor
 // `sanoma` (`sanoma.secret.*`, `sanoma.invite.mint`, `sanoma.token.*`): named in `uses`, decided by
@@ -23,11 +28,60 @@ const SecretName = z
 /** How long an instance gets to answer `POST /auth/invite`. */
 const INVITE_TIMEOUT_MS = 10_000;
 
+const DeploymentIdentity = z.object({
+  deployment: z.string().min(1).max(256),
+  company: z.string().min(1).max(256),
+  environment: z.string().min(1).max(256),
+  serviceAccount: z.string().regex(/^[a-z][a-z0-9-]+@[a-z][a-z0-9-]+\.iam\.gserviceaccount\.com$/),
+});
+const Generation = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+const IdentityTarget = ({ deployment }: { deployment: string }) => deployment;
+
+// Enrollment implementations can see credential hashes and database credentials. Neither their
+// errors nor causes may be captured in durable driver history, including on an uncertain commit.
+async function identityWrite(write: () => Promise<void>): Promise<void> {
+  try {
+    await write();
+  } catch (error) {
+    const code = identityProvisioningCode(error) ?? "unavailable";
+    throw new DriverError(`Identity provisioning: ${code}`, { retryable: code === "unavailable" });
+  }
+}
+
 /**
  * The runtime's own operations a workflow calls: `import { sanoma } from "sanoma"`, then
  * `uses: [sanoma.secret.generate]` and `ctx.sanoma.secret.generate({ name, kind })`.
  */
 export const sanoma = defineConnector("sanoma", {
+  identity: {
+    enroll: {
+      effect: "access",
+      idempotent: true,
+      description:
+        "Enroll a deployment identity, keeping its bootstrap credential in the secret store. A higher generation rotates it; mappings are immutable",
+      input: DeploymentIdentity.extend({ generation: Generation, validUntil: z.iso.datetime(), store: SecretName }),
+      output: z.object({ deployment: z.string(), generation: Generation, store: z.string() }),
+      target: IdentityTarget,
+      createsSecrets: ({ store }: { store: string }) => [store],
+    },
+    retire: {
+      effect: "access",
+      idempotent: true,
+      description:
+        "Shorten an old identity generation's validity after delivering its replacement; never extend access",
+      input: DeploymentIdentity.extend({ generation: Generation, validUntil: z.iso.datetime() }),
+      output: z.object({}),
+      target: IdentityTarget,
+    },
+    revoke: {
+      effect: "access",
+      idempotent: true,
+      description: "Disable all token renewal for a deployment. This deployment id cannot be re-enrolled",
+      input: DeploymentIdentity,
+      output: z.object({}),
+      target: IdentityTarget,
+    },
+  },
   secret: {
     generate: {
       effect: "write",
@@ -156,12 +210,36 @@ export async function postInvite(host: string, request: string): Promise<{ url: 
  */
 export function runtimeDriver({
   tokens,
+  identities,
   invite = postInvite,
 }: {
   tokens: Tokens;
+  identities?: IdentityProvisioning;
   invite?: (host: string, request: string, call: CallContext) => Promise<{ url: string }>;
 }) {
   return defineDriver(sanoma, {
+    identity: {
+      async enroll({ store, ...input }, call) {
+        if (!identities) throw refuse("identity provisioning is not configured");
+        // Store before enrolling: a lost DB response retries with the same credential, never a new bearer.
+        const credential = await call.secrets.ensure(store, generateSecret);
+        if (!/^[A-Za-z0-9_-]{43}$/.test(credential)) throw refuse("invalid identity bootstrap credential");
+        await identityWrite(() =>
+          identities.enroll({ ...input, hash: createHash("sha256").update(credential).digest("hex") }),
+        );
+        return { deployment: input.deployment, generation: input.generation, store };
+      },
+      async retire(input) {
+        if (!identities) throw refuse("identity provisioning is not configured");
+        await identityWrite(() => identities.retire(input));
+        return {};
+      },
+      async revoke(input) {
+        if (!identities) throw refuse("identity provisioning is not configured");
+        await identityWrite(() => identities.revoke(input));
+        return {};
+      },
+    },
     secret: {
       async generate({ name, kind }, call) {
         if (kind === "random") {
@@ -230,5 +308,6 @@ export function runtimeDriver({
 export const sandboxRuntimeDriver = () =>
   runtimeDriver({
     tokens: memoryTokens(),
+    identities: memoryIdentityProvisioning(),
     invite: async (host, _request, call) => ({ url: new URL(`/auth/invite/sandbox-${tokenIdOf(call)}`, host).href }),
   });
