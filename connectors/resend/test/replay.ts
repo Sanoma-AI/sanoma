@@ -4,13 +4,21 @@ import { type Exchange, live, type ReplayOptions } from "@sanoma-ai/testing/repl
 
 export const audience = live ? (process.env.RESEND_TEST_AUDIENCE ?? "") : "00000000-0000-4000-8000-0000000000aa";
 export const from = process.env.RESEND_TEST_FROM ?? "Sanoma test <onboarding@resend.dev>";
-/** The sender's domain, which a reply may name outside an address (an unverified domain's error). */
-const fromDomain = /@([\w.-]+)/.exec(from)?.[1];
+/**
+ * The sender's domain, which a reply may name outside an address (an unverified domain's error),
+ * and the throwaway domain the domain scenarios were recorded with (README, "Testing the driver").
+ */
+const domains = [/@([\w.-]+)/.exec(from)?.[1], process.env.RESEND_TEST_DOMAIN]
+  .filter((d): d is string => Boolean(d))
+  // The longest first, so a domain that holds the other is replaced whole.
+  .toSorted((a, b) => b.length - a.length);
 
-/** Ids, addresses, the sender's domain and keys out of a recording, so the repo never holds an account's. */
+/** Ids, addresses, the domains, DKIM keys and API keys out of a recording, so the repo never holds an account's. */
 const scrub = (exchanges: Exchange[]): Exchange[] =>
   JSON.parse(
-    (fromDomain ? JSON.stringify(exchanges).replaceAll(fromDomain, "example.com") : JSON.stringify(exchanges))
+    domains
+      .reduce((text, domain) => text.replaceAll(domain, "example.com"), JSON.stringify(exchanges))
+      .replaceAll(/"p=[A-Za-z0-9+/=]+"/g, '"p=redacted"')
       .replaceAll(
         /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi,
         "00000000-0000-4000-8000-000000000001",
