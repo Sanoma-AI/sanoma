@@ -446,9 +446,19 @@ describe("runtime-owned enrollment connection", () => {
     const hash = createHash("sha256").update(bearer).digest("hex");
     expect(await reader.active(hash)).toMatchObject({ deployment: input.deployment });
     await app.stop();
-    const { rows } = await (
-      await pool.db()
-    ).query("SELECT count(*)::int AS count FROM pg_stat_activity WHERE usename=$1", [writerRole]);
-    expect(rows[0].count).toBe(0);
+    // pg-pool resolves end() after removing idle clients from its list, before their
+    // asynchronous socket shutdown necessarily disappears from the server's view.
+    // A leaked writer must still fail; wait only for the server to observe shutdown.
+    await expect
+      .poll(
+        async () => {
+          const { rows } = await (
+            await pool.db()
+          ).query("SELECT count(*)::int AS count FROM pg_stat_activity WHERE usename=$1", [writerRole]);
+          return rows[0].count;
+        },
+        { timeout: 5_000, interval: 50 },
+      )
+      .toBe(0);
   });
 });
