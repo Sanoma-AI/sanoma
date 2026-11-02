@@ -154,8 +154,8 @@ describe("the config's login", () => {
       " login@acme.example",
       "login@localhost",
       "Acme <login>",
-      "Acme <a@b.c> x",
-      "Acme\n<a@b.c>",
+      "Acme <a@b.co> x",
+      "Acme\n<a@b.co>",
     ])
       expect(() => resolveConfig(config({}, resend.emails.send, from))).toThrow(
         /`login.from`, .* is not an email address/,

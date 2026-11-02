@@ -46,6 +46,7 @@ import {
   type DriverEnv,
   type DriverFn,
   isOp,
+  keepsInput,
   type Op,
   checkConnector,
   setupOf,
@@ -72,7 +73,7 @@ import type { Steps } from "./steps.ts";
 import { checkSchedule } from "./schedules.ts";
 import { changeCodeOf, computeVersion } from "./version.ts";
 import type { DeclaredResource, ResourceProblem } from "./resources.ts";
-import { checkWakeupOps, type DeclaredWakeup, type EnvWakeup, HOST_URL, keepsInput } from "./wakeup.ts";
+import { checkWakeupOps, type DeclaredWakeup, type EnvWakeup, HOST_URL } from "./wakeup.ts";
 import { instanceUrl, WAKEUP_TOKEN } from "./wakeup-service.ts";
 import { sanomaWakeupDriver, wakeupSteps } from "./wakeup-driver.ts";
 import { wakeupOps } from "./wakeup-type.ts";
