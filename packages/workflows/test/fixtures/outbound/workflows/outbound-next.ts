@@ -13,7 +13,10 @@ export default defineWorkflow({
     const lead = await ctx.data.outbound.get({ key: company });
     let by: string | null = null;
     if (lead) {
-      const saved = await ctx.data.outbound.save({ record: { ...lead.record, stage: "contacted" } });
+      const saved = await ctx.data.outbound.save({
+        record: { ...lead.record, stage: "contacted" },
+        ifRecord: lead.record,
+      });
       by = saved.updatedBy;
     }
     return by;

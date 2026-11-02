@@ -123,6 +123,67 @@ describe("the collections' driver on Postgres", () => {
     expect(await call(accounts.get, { key: "Acme" })).toBeNull();
   });
 
+  it("allows only one competing conditional transition and refuses stale or missing state", async () => {
+    const record = { company: "Acme", stage: "new" };
+    await call(leads.save, { record });
+    const results = await Promise.allSettled([
+      call(leads.save, { record: { ...record, seats: 1 }, ifRecord: record }, "ada"),
+      call(leads.save, { record: { ...record, seats: 2 }, ifRecord: record }, "bo"),
+    ]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.find((result) => result.status === "rejected")).toMatchObject({
+      reason: { status: 409, retryable: false, vendorCode: "record_changed" },
+    });
+    const current = await call(leads.get, { key: "Acme" });
+    await expect(call(leads.save, { record, ifRecord: record }, "late")).rejects.toMatchObject({
+      vendorCode: "record_changed",
+    });
+    expect(await call(leads.get, { key: "Acme" })).toEqual(current);
+    await expect(
+      call(leads.save, { record: { company: "Missing", stage: "new" }, ifRecord: {} }),
+    ).rejects.toMatchObject({ vendorCode: "record_changed" });
+    expect(await call(leads.get, { key: "Missing" })).toBeNull();
+  });
+
+  it("recovers a conditional write whose committed response was lost, but never rolls back later progress", async () => {
+    const before = { company: "Acme", stage: "new" };
+    const record = { ...before, seats: 1 };
+    await call(leads.save, { record: before }, "owner");
+    const db = await pool.db();
+    let loseResponse = true;
+    const uncertain = collectionsDriver([leads], {
+      db: async () =>
+        ({
+          query: async (...args: Parameters<typeof db.query>) => {
+            const result = await db.query(...args);
+            if (loseResponse) {
+              loseResponse = false;
+              throw new Error("Response lost after commit");
+            }
+            return result;
+          },
+        }) as typeof db,
+    });
+    const context = {
+      idempotencyKey: "lost-transition",
+      runId: "transition",
+      by: "run:transition",
+      opId: leads.save.id,
+      attempt: 1,
+      secrets: memorySecrets(),
+    };
+    const write = () => uncertain.ops["leads.save"]!({ record, ifRecord: before }, context);
+    await expect(write()).rejects.toThrow("Response lost after commit");
+    const committed = await call(leads.get, { key: "Acme" });
+    expect(await write()).toEqual(committed);
+    await expect(call(leads.save, { record, ifRecord: before }, "another")).rejects.toMatchObject({
+      vendorCode: "record_changed",
+    });
+    const progressed = await call(leads.save, { record: { ...record, stage: "won" }, ifRecord: record }, "owner");
+    await expect(write()).rejects.toMatchObject({ vendorCode: "record_changed" });
+    expect(await call(leads.get, { key: "Acme" })).toEqual(progressed);
+  });
+
   it("lists by equality and range, sorted up or down by a field (missing last) or by key, at most the limit", async () => {
     const rows = [
       { company: "Acme", stage: "won", seats: 12, since: "2026-01-15" },
@@ -218,7 +279,7 @@ unless { context has before };
           op: "data.outbound.save",
           effect: "write",
           node: "1.0.0",
-          input: { record: { ...lead, stage: "contacted" } },
+          input: { record: { ...lead, stage: "contacted" }, ifRecord: lead },
         },
       ]);
       expect(calls[1]!.output).toMatchObject({ key: "Acme", updatedBy: `run:${runId}` });
