@@ -2,6 +2,8 @@
 
 Portable invoice validation, calculation and React PDF rendering for browser tools and headless workflows. Pet-sitting and cleaning adapters turn industry-specific inputs into one invoice model. The root model entry imports no React or renderer code. PDF entry points use React and `@react-pdf/renderer`; React 19 is a peer dependency. No entry point uses a database or stores invoices.
 
+Private until its first release ([#529](https://github.com/Sanoma-AI/sanoma/issues/529)): it is not on npm yet, so a company repository cannot install it until then.
+
 ```sh
 pnpm add @sanoma-ai/invoices
 ```
@@ -46,7 +48,7 @@ The separate `@sanoma-ai/invoices/examples` entry point exports fictional `petSi
 
 Calculation and adapter failures throw `InvoiceValidationError`, with `code: "invalid_invoice"` and serializable `issues: { code, path, message }[]`. Paths identify fields, including row indices. Adapters map calculation paths back to their `services` rows. Errors do not include submitted field values. Unexpected programming failures are not converted to validation errors.
 
-The package performs no persistence. A browser consumer can keep form state in memory and use native autocomplete; saving data or arranging automation belongs to a separate Sanoma experience. The [browser editor](../app/README.md#stateless-invoice-editor) and [durable workflow operation](../../connectors/invoices/README.md) are separate consumers of this package.
+The package performs no persistence. A browser consumer can keep form state in memory and use native autocomplete; saving data or arranging automation belongs to a separate Sanoma experience. The [durable workflow operation](../../connectors/invoices/README.md) is a separate consumer of this package; the browser editor is not shipped yet ([#529](https://github.com/Sanoma-AI/sanoma/issues/529)).
 
 ## PDF rendering
 

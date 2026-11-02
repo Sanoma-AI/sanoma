@@ -715,8 +715,6 @@ function devPlugins(repo: string, src: string, onFileChange?: (file: string) => 
             // installed dependency path explicitly so the browser never receives raw CJS.
             `${viaApp} > @base-ui/react > use-sync-external-store/shim`,
             `${viaApp} > @base-ui/react > use-sync-external-store/shim/with-selector`,
-            // The lazy PDF engine also contains CommonJS dependencies (including base64-js).
-            `${viaApp} > @sanoma-ai/invoices/browser`,
           ];
         }
       },
