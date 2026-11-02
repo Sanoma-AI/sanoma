@@ -614,22 +614,33 @@ describe("the apply workflow on a field taken from another resource's state", ()
     expect(plans).toEqual([["mail.records.plan", { id: "example.com/mail", desired: { name: "example.com/mail" } }]]);
   });
 
-  it("plans a record set again once its domain's step changed the records, and updates it in the same run", async () => {
+  it("plans a record set to change with its domain's planned update, in one approval, and gives it the new records", async () => {
     await apply();
-    // The domain is pending again, its records gone, and so are the set's: planned `none` without them.
+    // The domain is pending again, its records gone, and so are the set's.
     fake.update(({ domains, sets }) => {
       domains.set("example.com", { name: "example.com", records: null });
       sets.set("example.com/mail", { name: "example.com/mail", records: [] });
     });
-    const { report } = await apply();
+    const runId = await app.client.apply({}, { startedBy: careful });
+    await waitFor(pending(() => app.client, runId));
+    // Planned up front: the set's records are unknown while the domain's update is to come.
+    const [approval] = await app.client.approvals(runId);
+    expect(approval).toMatchObject({ covers: ["mail.domain.update", "mail.records.update"] });
+    const plans = ops(await app.client.ledger(runId)).filter(([op]) => op === "mail.records.plan");
+    expect(plans).toEqual([
+      ["mail.records.plan", { id: "example.com/mail", desired: { name: "example.com/mail", records: null } }],
+    ]);
+    await app.client.decide(runId, { decision: "approve", by: { id: "lead" } });
+    const report = await app.client.applyReport(runId);
     expect(actions(report)).toEqual([
       ["mail.ts#sending", "update"],
-      ["mail.ts#dns", "none"],
+      ["mail.ts#dns", "update"],
     ]);
     expect(report.results.map((r) => [r.id, r.action, r.status])).toEqual([
       [sending, "update", "done"],
       [dns, "update", "done"],
     ]);
+    // Run with the records the domain's update listed.
     expect(fake.state.sets.get("example.com/mail")?.records).toEqual(recordsFor("example.com"));
   });
 

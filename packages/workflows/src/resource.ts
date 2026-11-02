@@ -42,10 +42,13 @@ export interface FieldReference {
    * state at this path, as a whole (a list or an object), read in the same run or made by an
    * earlier step of it (`records: mail` takes a `resend.domain`'s `dns_records`). A data file may
    * give a literal value here instead. `desired` holds the resource's `name` until then, which the
-   * schema does not judge. Where that resource has no state yet, or nothing at the path, a plan of
-   * a create is given `null` there (known after apply: the type's `plan` must accept it and report
-   * the path in `unknown`), a plan of a bound object leaves the field out, a step that would write
-   * it fails before its driver is called, and drift leaves it out. Not on a write-only field
+   * schema does not judge. Where that resource has no state yet or nothing at the path, or the same
+   * apply plans to create, update or replace it, a plan is given `null` there (known after apply:
+   * the type's `plan` must accept it and report the path in `unknown`), so a change it makes is
+   * planned, and approved, up front; except that a plan of a bound object leaves the field out
+   * while its resource is absent, gone or unreadable and not about to change, as drift does. A
+   * step that would write a value still not known fails before its driver is called, and drift
+   * leaves the field out. Not on a write-only field
    * (refused). Not yet on a bridge-backed type (`tfConnector`): an OpenTofu provider's plan reads
    * `null` as unset, not as known after apply.
    */
@@ -504,6 +507,9 @@ export const fromRefs = (references: References | undefined, refs: Readonly<Reco
     return from === undefined ? [] : [{ at, named, from }];
   });
 
+/** What `withFrom` makes of a `from` field it cannot fill: `null` (known after apply), or nothing. */
+export type Missing = "unknown" | "drop";
+
 /** A `from` reference `withFrom` could not fill: the resource it names has no state, or nothing at its path. */
 export interface Unfilled {
   at: string;
@@ -517,15 +523,15 @@ export interface Unfilled {
  * `desired` with each field a `from` reference names given the state of the resource it names
  * at that path (a copy), `stateOf` that resource by what `refs` holds there; and the references it
  * could not fill, where that resource has no state or nothing there, each such field `null`
- * (`unknown`, a value known after apply) or left out (`drop`). `desired` itself when there is no
- * such field.
+ * (`unknown`, a value known after apply) or left out (`drop`), as `missing` says (for each
+ * resource, given a function). `desired` itself when there is no such field.
  */
 export function withFrom(
   references: References | undefined,
   desired: State,
   refs: Readonly<Record<string, string>>,
   stateOf: (named: string) => State | undefined,
-  missing: "unknown" | "drop",
+  missing: Missing | ((named: string) => Missing),
 ): { desired: State; unfilled: Unfilled[] } {
   const taken = fromRefs(references, refs);
   if (!taken.length) return { desired, unfilled: [] };
@@ -542,7 +548,7 @@ export function withFrom(
       continue;
     }
     unfilled.push({ at, named, from, stated: state !== undefined });
-    if (missing === "drop") delete place.holder[place.key];
+    if ((typeof missing === "function" ? missing(named) : missing) === "drop") delete place.holder[place.key];
     else place.holder[place.key] = null;
   }
   return { desired: out, unfilled };
