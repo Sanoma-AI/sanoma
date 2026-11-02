@@ -1,6 +1,6 @@
 {
   "name": "sanoma",
-  "version": "0.10.7",
+  "version": "0.10.8",
   "description": "One command over a Sanoma repo: run the worker and the app, check it, write its .env.example, export a run's ledger",
   "keywords": [
     "approvals",
@@ -59,6 +59,10 @@
     "./data": {
       "types": "./dist/data.d.ts",
       "default": "./dist/data.js"
+    },
+    "./secrets": {
+      "types": "./dist/secrets.d.ts",
+      "default": "./dist/secrets.js"
     },
     "./claims": {
       "types": "./dist/claims.d.ts",

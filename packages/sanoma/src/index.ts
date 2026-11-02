@@ -48,6 +48,7 @@ export {
   type SecretConfiguration,
   type SecretBinding,
   type SecretStore,
+  type SecretStoreFactory,
   type SecretStoreCapabilities,
   type SecretAddress,
   type SecretValue,
