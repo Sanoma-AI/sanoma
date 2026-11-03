@@ -57,8 +57,8 @@ const files: Record<string, string> = {
   "pnpm-workspace.yaml": JSON.stringify({
     // The plugin's peer is the company's to install, as by default: none here.
     autoInstallPeers: false,
-    // As the template's: the build scripts of Pi's model providers, which pnpm 11 would stop on.
-    allowBuilds: { "@google/genai": false, protobufjs: false },
+    // As the template's: the build scripts of Pi's model providers and of the app's Worker build, which pnpm 11 would stop on.
+    allowBuilds: { "@google/genai": false, protobufjs: false, esbuild: false, workerd: false },
     overrides: {
       ...Object.fromEntries(workspace.map((dir) => [`@sanoma-ai/${dir}`, `file:vendor/${dir}.tgz`])),
       ...Object.fromEntries(

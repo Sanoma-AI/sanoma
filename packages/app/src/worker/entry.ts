@@ -14,10 +14,13 @@ import type { AppContext } from "../context.ts";
 import { publicFront } from "../login/public.ts";
 import { placeOf } from "../loopback.ts";
 import { seoFile } from "../seo.ts";
-import { PRERENDERED } from "./prerendered.ts";
+import { PRERENDERED, prerenderedDir } from "./prerendered.ts";
 
-/** The paths a site's domain still sends to the container: the object's own, and the app's machine and login routes. */
-const CONTAINER_PATHS = /^\/(__sanoma|api|auth|webhooks|setup|wake|healthz)(\/|$)/;
+/**
+ * The paths a site's domain still sends to the container: the object's own, and the app's machine
+ * and login routes (`serve`'s ingress: `/wake`, the wakeup service's `/wakeup`, the webhooks).
+ */
+const CONTAINER_PATHS = /^\/(__sanoma|api|auth|webhooks|setup|wake|wakeup|healthz)(\/|$)/;
 
 /** What the Worker's bindings give the bundle: the container's environment, and the Worker's assets. */
 export interface WorkerEnv {
@@ -27,7 +30,7 @@ export interface WorkerEnv {
   SANOMA_DATABASE_URL?: string;
   /** The Worker's static assets: the client build and the prerendered pages. */
   ASSETS?: { fetch(request: Request): Promise<Response> };
-  /** Set by the build's own preview only: `/__sanoma/sites/<site>/…` renders that site's page, for its prerender. */
+  /** Set by the build's own preview only: `<prerenderedDir>/…` renders that site's page, for its prerender. */
   SANOMA_PRERENDER?: string;
 }
 
@@ -69,10 +72,10 @@ function siteAt(url: URL, env: WorkerEnv): { name: string; domain: string } | un
 /** The prerendered page for `pathname`, among the Worker's assets: undefined for a path with a trailing slash, which the router redirects. */
 const prerenderedPath = (site: string, pathname: string) =>
   pathname === "/"
-    ? `${PRERENDERED}/${site}/index.html`
+    ? `${prerenderedDir(site)}/index.html`
     : pathname.endsWith("/")
       ? undefined
-      : `${PRERENDERED}/${site}${pathname}/index.html`;
+      : `${prerenderedDir(site)}${pathname}/index.html`;
 
 /** The config resolved over the bundled root, once per isolate: what `callApi` reads of it opens nothing. */
 let resolved: ReturnType<typeof resolveConfig> | undefined;
@@ -168,12 +171,12 @@ async function render(
   }
 }
 
-/** For the build's prerender: `/__sanoma/sites/<site>/<path>` is `<path>` on that site's host. */
+/** For the build's prerender: `<site's prerenderedDir>/<path>` is `<path>` on that site's host. */
 function prerenderRequest(request: Request, env: WorkerEnv) {
   if (env.SANOMA_PRERENDER !== "1") return undefined;
   const url = new URL(request.url);
-  const [, name, ...rest] = url.pathname.slice(PRERENDERED.length).split("/");
-  const entry = name === undefined ? undefined : served.get(name);
+  const [, dir, ...rest] = url.pathname.slice(PRERENDERED.length).split("/");
+  const entry = dir === undefined ? undefined : served.get(dir.replace(".", "/"));
   if (!url.pathname.startsWith(`${PRERENDERED}/`) || !entry) return undefined;
   // Each site the bundle serves has a domain (`workerSites`).
   const domain = entry.domain!;

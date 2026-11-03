@@ -49,7 +49,8 @@ export interface ObjectState {
 export declare class Instance {
   constructor(ctx: ObjectState, env: Record<string, unknown>);
   fetch(request: Request): Promise<Response>;
-  alarm(): Promise<void>;
+  /** `info` as Cloudflare gives it: how many times this alarm was retried. */
+  alarm(info?: { retryCount: number; isRetry: boolean }): Promise<void>;
   /** Starts the container from an alarm now, without waiting for it: a run was queued for it. */
   startNow(): Promise<void>;
 }

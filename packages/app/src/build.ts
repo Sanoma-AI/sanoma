@@ -33,7 +33,7 @@ import {
 } from "./content-files.ts";
 import type { ServerEntry } from "./context.ts";
 import { PUBLIC_FNS } from "./public-fns.ts";
-import { PRERENDERED } from "./worker/prerendered.ts";
+import { prerenderedDir } from "./worker/prerendered.ts";
 
 export { CONTENT_TYPES, type ContentProblem, contentTypes, readContent } from "./content-files.ts";
 
@@ -947,7 +947,7 @@ const specifier = (file: string) => JSON.stringify(file.split(sep).join("/"));
 const exported = (name: string, data: unknown) => `export const ${name} = ${JSON.stringify(data)};\n`;
 
 /** `virtual:sanoma/worker`, which `worker/entry.ts` imports: the company's config, root, description and content, and Cedar's web build, ready. */
-function workerModule(root: string, sites: string[], options: BuildWorkerOptions): Plugin {
+function workerModule(root: string, options: BuildWorkerOptions): Plugin {
   const id = `\0${WORKER}`;
   // The runtime's Cedar, its web build beside its Node one (`./web` is import-only, so no require resolves it).
   const fromRuntime = createRequire(createRequire(defaultRuntimeFrom).resolve("@sanoma-ai/workflows"));
@@ -975,12 +975,12 @@ function workerModule(root: string, sites: string[], options: BuildWorkerOptions
 }
 
 /** The Worker's plugins: Cloudflare's, over the ssr environment, the bundle's module, and DBOS's optional packages stubbed. */
-async function workerPlugins(root: string, sites: string[], options: BuildWorkerOptions): Promise<PluginOption[]> {
+async function workerPlugins(root: string, options: BuildWorkerOptions): Promise<PluginOption[]> {
   const { cloudflare } = await import("@cloudflare/vite-plugin");
   const { OPTIONAL } = await import("./worker/optional.ts");
   const missing = join(pkgDir, "src", "worker", "missing.js");
   return [
-    workerModule(root, sites, options),
+    workerModule(root, options),
     workerTrim(),
     {
       // Each company file says it is the one evaluating, for what V8's call sites name in a bundle
@@ -1108,7 +1108,7 @@ export async function buildWorker(repo: string, options: BuildWorkerOptions): Pr
   const vite = await import("vite");
   const customLogger = quietLogger(vite, options.log);
   const config: InlineConfig = {
-    ...repoConfig(root, undefined, { sites, plugins: await workerPlugins(root, sites, options) }),
+    ...repoConfig(root, undefined, { sites, plugins: await workerPlugins(root, options) }),
     build: { outDir, emptyOutDir: true },
     logLevel: "warn",
     customLogger,
@@ -1130,11 +1130,11 @@ export async function buildWorker(repo: string, options: BuildWorkerOptions): Pr
         if (!base) throw new Error("the Worker's preview has no local URL");
         for (const { site, path } of pages) {
           const page = path === "/" ? "" : path;
-          const response = await fetch(new URL(`${PRERENDERED}/${site}${page}`, base));
+          const response = await fetch(new URL(`${prerenderedDir(site)}${page}`, base));
           const html = await response.text();
           if (!response.ok)
             throw new Error(`prerendering ${site}${path} answered ${response.status}: ${html.slice(0, 200)}`);
-          const file = join(client, ...`${PRERENDERED}/${site}${page}/index.html`.split("/"));
+          const file = join(client, ...`${prerenderedDir(site)}${page}/index.html`.split("/"));
           mkdirSync(dirname(file), { recursive: true });
           writeFileSync(file, html);
         }

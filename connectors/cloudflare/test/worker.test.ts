@@ -351,6 +351,20 @@ describe("the Worker's object", () => {
     expect(calls).toContain("start r2");
   });
 
+  it("retries a start asked for that fails, then gives it up and keeps the later wake", async () => {
+    const { ctx, storage, alarm } = stubCtx({ exits: "out of capacity" });
+    const object = new Instance(ctx, ENV);
+    const later = new Date(Date.now() + 60 * 60_000).toISOString();
+    await object.fetch(wake("PUT", { body: { at: later } }));
+    await object.startNow();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    await expect(object.alarm({ retryCount: 0, isRetry: false })).rejects.toThrow("out of capacity");
+    expect(storage.has("start")).toBe(true);
+    await object.alarm({ retryCount: 5, isRetry: true });
+    expect(storage.has("start")).toBe(false);
+    expect(alarm()).toBe(Date.parse(later));
+  });
+
   it("leaves an alarm due sooner than now as it is at startNow, and never rings a wake twice", async () => {
     const { ctx, sent, alarm } = stubCtx({
       answer: (r) => new Response(null, { status: new URL(r.url).pathname === "/wake" ? 204 : 200 }),

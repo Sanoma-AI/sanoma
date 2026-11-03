@@ -30,6 +30,11 @@ const MAX_POLL_MS = 1_000;
 const WAKE_KEY = "wake";
 /** Where a start `startNow` asked for is kept until the alarm that makes it rings. */
 const START_KEY = "start";
+/**
+ * The retries of an alarm whose start keeps failing before that start is given up, so the wake
+ * held for later is set again: Cloudflare retries an alarm that throws up to six times, then drops it.
+ */
+const START_RETRIES = 5;
 /** The binding that names the object, in the Worker's env. */
 export const NAMESPACE = "SANOMA_INSTANCE";
 /** The name the upload gives the runtime image (`containers[].images`), which the object starts. */
@@ -270,12 +275,18 @@ export class Instance {
 
   /**
    * A start `startNow` asked for, then the wake if it is due: start the container and send it
-   * `/wake`, then note when. A wake not due yet is set again. A throw makes Cloudflare retry the alarm.
+   * `/wake`, then note when. A wake not due yet is set again. A throw makes Cloudflare retry the
+   * alarm; a start that still fails after `START_RETRIES` is given up, the wake kept.
    */
-  async alarm() {
+  async alarm(info) {
     const storage = this.ctx.storage;
     if (await storage.get(START_KEY)) {
-      await this.ensureRunning();
+      try {
+        await this.ensureRunning();
+      } catch (error) {
+        if ((info?.retryCount ?? 0) < START_RETRIES) throw error;
+        console.error(`starting the container for a queued run failed: ${error?.message ?? error}`);
+      }
       await storage.delete(START_KEY);
     }
     const wake = await storage.get(WAKE_KEY);

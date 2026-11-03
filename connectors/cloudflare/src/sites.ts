@@ -102,19 +102,16 @@ export async function uploadAssets(cf: CloudflareApi, script: string, assets: Si
   const { jwt, buckets } = await cf.assetsSession(script, manifest);
   // Every asset already in: the session's jwt is the completion one.
   if (!buckets.length) return jwt;
-  // Independent requests under one jwt: the one that completes the set answers the completion jwt.
-  const answers = await Promise.all(
-    buckets.map((bucket) =>
-      cf.uploadAssets(
-        jwt,
-        bucket.map((hash) => {
-          const file = byHash.get(hash);
-          if (!file) throw refused(`${script}: the assets upload session asks for ${hash}, which no asset hashes to`);
-          return file;
-        }),
-      ),
-    ),
+  // Every bucket's files first, so a hash no asset has is refused before any request starts.
+  const files = buckets.map((bucket) =>
+    bucket.map((hash) => {
+      const file = byHash.get(hash);
+      if (!file) throw refused(`${script}: the assets upload session asks for ${hash}, which no asset hashes to`);
+      return file;
+    }),
   );
+  // Independent requests under one jwt: the one that completes the set answers the completion jwt.
+  const answers = await Promise.all(files.map((bucket) => cf.uploadAssets(jwt, bucket)));
   const completion = answers.find((answer) => answer !== undefined);
   if (!completion)
     throw refused(`${script}: the last bucket of assets was uploaded, and Cloudflare gave no completion jwt`);
