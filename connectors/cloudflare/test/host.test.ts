@@ -156,6 +156,37 @@ describe("cloudflare.container's custom domains on the fake", () => {
     expect(fake.state.domains).toEqual({ byhand: byHand });
   });
 
+  it("attaches the app's hostname beside the domains, serves it as its url, and detaches it once no longer declared", async () => {
+    const hostname = "app.acme.example";
+    const made = (await op("create", { desired: { ...desired, hostname } })) as { state: Record<string, unknown> };
+    expect(made.state).toMatchObject({ hostname, url: `https://${hostname}` });
+    const text = () =>
+      Object.fromEntries(fake.state.scripts["sanoma-company"]!.bindings.map((b) => [b.name, b.text] as const));
+    expect(text()).toMatchObject({ SANOMA_HOSTNAME: hostname });
+    // The wakeup reaches the Worker where it answers, never through the hostname.
+    expect(text().SANOMA_HOST_URL).toBe(made.state.worker_url);
+    const hostnames = () =>
+      Object.values(fake.state.domains)
+        .map((d) => d.hostname)
+        .toSorted();
+    expect(hostnames()).toEqual([hostname, "www.acme.example"]);
+    expect(await op("read", { id: "company" })).toMatchObject({ state: { hostname, url: `https://${hostname}` } });
+    // Detached by hand: drift, which the next update attaches again.
+    const id = Object.entries(fake.state.domains).find(([, d]) => d.hostname === hostname)![0];
+    delete fake.state.domains[id];
+    expect(await op("plan", { id: "company", desired: { ...desired, hostname } })).toMatchObject({ action: "update" });
+    await op("update", { id: "company", desired: { ...desired, hostname } });
+    expect(hostnames()).toEqual([hostname, "www.acme.example"]);
+    // No longer declared: detached, and the app is at workers.dev again.
+    const without = (await op("update", { id: "company", desired })) as { state: Record<string, unknown> };
+    expect(hostnames()).toEqual(["www.acme.example"]);
+    expect(without.state.hostname).toBeUndefined();
+    expect(without.state.url).toBe(text().SANOMA_HOST_URL);
+    expect(text()).not.toHaveProperty("SANOMA_HOSTNAME");
+    await op("delete", { id: "company" });
+    expect(fake.state.domains).toEqual({});
+  });
+
   it("refuses a domain whose zone the account does not hold, before the Worker exists", async () => {
     await expect(
       op("create", { desired: { ...desired, domains: { www: "www.other.example" } } }),

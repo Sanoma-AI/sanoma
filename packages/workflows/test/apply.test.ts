@@ -553,6 +553,15 @@ describe("the apply workflow on a wakeup", () => {
     const drift = await app.client.driftReport(await app.client.drift({ startedBy: alice }));
     expect(drift.resources.find((r) => r.id === "resources/infra.ts#wake")).toMatchObject({ status: "clean" });
   });
+
+  it("reports a host with a hostname at https://<hostname>, and leaves its wakeup at its wakeUrl", async () => {
+    const infra = join(root, "resources/infra.ts");
+    writeFileSync(infra, readFileSync(infra, "utf8").replace("port: 0 })", 'port: 0, hostname: "app.acme.example" })'));
+    const moved = await apply();
+    expect(resultOf(moved, "resources/infra.ts#app")!.host!.url).toBe("https://app.acme.example");
+    // A wake never depends on the hostname: the wakeup reaches the host where it answers.
+    expect(await timer()).toEqual({ name: "wake", host: "http://127.0.0.1:4100" });
+  });
 });
 
 describe("the apply workflow on a field taken from another resource's state", () => {

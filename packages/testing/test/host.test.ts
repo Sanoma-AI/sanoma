@@ -31,7 +31,8 @@ import {
 // Needs Postgres: `pnpm db:up`. The conformance kit against a host in this process: its worker
 // stops and starts through the host type's own operations, and drift is the built-in workflow
 // over a data file that declares the host, bound in the lockfile. Once long-lived, once behind
-// the proxy of a host that stops, which the two checks of a stopping host add to.
+// the proxy of a host that stops, which the two checks of a stopping host add to; and that one
+// again with a hostname, which never resolves, so the kit must reach the host at its wakeUrl.
 const key = "kit-secret-value-that-never-leaks";
 
 const call = (opId: string): CallContext => ({
@@ -42,14 +43,20 @@ const call = (opId: string): CallContext => ({
   secrets: memorySecrets({ HOST_KEY: key }),
 });
 
-describe.each<[HostLifetime, string]>([
-  ["long-lived", "host_kit"],
-  ["stops-when-quiet", "host_kit_stopping"],
-])("the host conformance kit, %s", (lifetime, database) => {
+describe.each<{ title: string; lifetime: HostLifetime; database: string; hostname?: string }>([
+  { title: "long-lived", lifetime: "long-lived", database: "host_kit" },
+  { title: "stops-when-quiet", lifetime: "stops-when-quiet", database: "host_kit_stopping" },
+  {
+    title: "stops-when-quiet, with a hostname",
+    lifetime: "stops-when-quiet",
+    database: "host_kit_hostname",
+    hostname: "app.example.invalid",
+  },
+])("the host conformance kit, $title", ({ lifetime, database, hostname }) => {
   const databaseUrl = testDatabaseUrl(database);
   const repo = testRepository();
   const root = mkdtempSync(join(tmpdir(), "sanoma-host-kit-"));
-  const declared = { name: "company", source: repo.url, ref: "main", port: 0 };
+  const declared = { name: "company", source: repo.url, ref: "main", port: 0, ...(hostname && { hostname }) };
   const config: SanomaConfig = {
     workflows: [...hostCheckWorkflows],
     connectors: [hostCheck],

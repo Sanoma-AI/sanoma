@@ -15,7 +15,7 @@ import {
   sourceUrl,
 } from "./drift.ts";
 import { isRunControlError } from "./errors.ts";
-import type { HostOutputs } from "./host.ts";
+import { type HostOutputs, wakeUrlOf } from "./host.ts";
 import type { Binding, Bindings, Rebind } from "./lockfile.ts";
 import type { Op } from "./op.ts";
 import {
@@ -194,7 +194,7 @@ interface Known {
   bindings: Bindings;
   /** The clone URL and commit a host wanted runs. */
   hosts: ReadonlyMap<string, { source: string; revision: string }>;
-  /** Where each host answers, as its state says. */
+  /** Where each host's wakeup reaches it, as its state says (`wakeUrl`, else `url`). */
   urls: ReadonlyMap<string, string>;
   /**
    * A resource's state as found or as its step left it, to read a `from` reference's path in;
@@ -480,7 +480,7 @@ function messageOf(step: PlanStep, before: Binding | undefined, after: Binding |
  * up front, and the step planned again once the value is known: done without a write when it
  * plans `none`, else expecting the fresh plan; a step whose resource still has none there, its
  * step failed or not done, fails before its driver is called), and a wakeup's `host` the URL its host's state gives
- * (`outputs(state).url`), found or made in this run. A failed step is reported and the run
+ * (`outputs(state)`'s `wakeUrl`, else its `url`), found or made in this run. A failed step is reported and the run
  * goes on; a failure that ends the run (`isRunControlError`) ends it.
  */
 export function applyWorkflow(
@@ -555,7 +555,8 @@ export function applyWorkflow(
       const keep = (r: Declaration, state: State) => {
         states.set(r.id, state);
         unsettled.delete(r.id);
-        const url = types.get(`${r.vendor}.${r.type}`)?.host?.outputs(state).url;
+        const outputs = types.get(`${r.vendor}.${r.type}`)?.host?.outputs(state);
+        const url = outputs && wakeUrlOf(outputs);
         if (url) urls.set(r.id, url);
       };
       for (const resource of resources) {

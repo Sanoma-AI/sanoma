@@ -3,6 +3,7 @@ import { type Exchange, live, replay } from "@sanoma-ai/testing/replay";
 import { type CallContext, memorySecrets } from "@sanoma-ai/workflows";
 import { delay, http, HttpResponse } from "msw";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { container } from "../src/connector.ts";
 import { cloudflareDriver } from "../src/driver.ts";
 import { API, cfResult, replayOptions, TEST_ACCOUNT } from "./replay.ts";
 
@@ -56,6 +57,7 @@ const state = {
   revision: "abc123",
   port: 3000,
   url: URL_OF,
+  worker_url: URL_OF,
   healthy: true,
 };
 
@@ -91,6 +93,38 @@ async function uploaded() {
   return metadataOf(await formOf(sent.find((r) => r.method === "PUT" && r.path.startsWith(API))!));
 }
 
+/** `e`, a Worker's settings, with one more plain-text binding. */
+const withText = (e: Exchange, name: string, text: string): Exchange => {
+  const body = structuredClone(e.body) as { result: { bindings: object[] } };
+  body.result.bindings.push({ type: "plain_text", name, text });
+  return { ...e, body };
+};
+/** The Worker's attached custom domains, `hostnames`. */
+const attachedDomains = (...hostnames: string[]) =>
+  reply(
+    apiPath("/workers/domains?service=sanoma-company"),
+    200,
+    cfResult(hostnames.map((hostname, i) => ({ id: `d${i + 1}`, hostname, service: "sanoma-company", zone_id: ZONE }))),
+  );
+/** An attach Cloudflare refuses. */
+const attachRefused = reply(
+  apiPath("/workers/domains"),
+  409,
+  cfError(100117, "Hostname already has a DNS record"),
+  "PUT",
+);
+/** Cloudflare's reply to the detach of the custom domain `id`. */
+const detached = (id: string) =>
+  reply(apiPath(`/workers/domains/${id}`), 200, { success: true, errors: [], messages: [] }, "DELETE");
+/** Cloudflare's reply to the attach of `new.acme.example`. */
+const attachedNew = reply(
+  apiPath("/workers/domains"),
+  200,
+  cfResult({ id: "d2", hostname: "new.acme.example", service: "sanoma-company", zone_id: ZONE }),
+  "PUT",
+);
+/** The zone lookup of `acme.example`. */
+const zoneLookup = () => fixture("hostname").find((e) => e.path.startsWith("/client/v4/zones?"))!;
 /** The registry's temporary credentials, as the SDK's `containers.registries.credentials.generate` answers. */
 const registryCredentials = reply(
   apiPath("/containers/registries/registry.cloudflare.com/credentials"),
@@ -103,6 +137,33 @@ const registryCredentials = reply(
   }),
   "POST",
 );
+
+/** A rename's requests up to its upload, from the Worker serving `old.acme.example`: its plan, its reads, the detach of the old name. */
+const renameUntilUpload = (updated: Exchange[]) => {
+  const attached = attachedDomains("old.acme.example");
+  return [
+    withText(updated[0]!, "SANOMA_HOSTNAME", "old.acme.example"),
+    updated[1]!,
+    updated[2]!,
+    attached,
+    withText(updated[3]!, "SANOMA_HOSTNAME", "old.acme.example"),
+    attached,
+    zoneLookup(),
+    updated[4]!,
+    detached("d1"),
+  ];
+};
+const renamed = { ...desired, revision: "def456", hostname: "new.acme.example" };
+const renamedState = {
+  ...state,
+  revision: "def456",
+  hostname: "new.acme.example",
+  url: "https://new.acme.example",
+};
+const update = (input: object) =>
+  op("container.update", { id: "company", ...input, expect: { action: "update", replace: [] } });
+/** The requests' methods and paths from `from` on, without the API's prefix. */
+const requests = (from = 0) => sent.slice(from).map((r) => `${r.method} ${r.path.replace(API, "")}`);
 
 describe.skipIf(live)("cloudflareDriver", () => {
   describe("cloudflare.container", () => {
@@ -451,10 +512,11 @@ describe.skipIf(live)("cloudflareDriver", () => {
 
     it("plans an update when a domain the Worker serves is not attached, so the next apply attaches it", async () => {
       const [settings, ...rest] = only("update-to-a-new-image", (_, i) => i < 3);
-      const body = structuredClone(settings!.body) as { result: { bindings: object[] } };
-      body.result.bindings.push({ type: "plain_text", name: "SANOMA_DOMAINS", text: "www=www.acme.example" });
-      const none = reply(apiPath("/workers/domains?service=sanoma-company"), 200, cfResult([]));
-      play("domain-unattached", [{ ...settings!, body }, ...rest, none]);
+      play("domain-unattached", [
+        withText(settings!, "SANOMA_DOMAINS", "www=www.acme.example"),
+        ...rest,
+        attachedDomains(),
+      ]);
       const domains = { www: "www.acme.example" };
       const planned = await op("container.plan", { id: "company", desired: { ...desired, domains } });
       expect(planned).toMatchObject({ action: "update", planned: { domains } });
@@ -479,15 +541,170 @@ describe.skipIf(live)("cloudflareDriver", () => {
 
     it("plans an update when the declaration leaves out the domains the Worker serves", async () => {
       const [settings, ...rest] = only("update-to-a-new-image", (_, i) => i < 3);
-      const body = structuredClone(settings!.body) as { result: { bindings: object[] } };
-      body.result.bindings.push({ type: "plain_text", name: "SANOMA_DOMAINS", text: "www=acme.example" });
-      const attached = reply(
-        apiPath("/workers/domains?service=sanoma-company"),
-        200,
-        cfResult([{ id: "d1", hostname: "acme.example", service: "sanoma-company", zone_id: ZONE }]),
+      play("domains-removed", [
+        withText(settings!, "SANOMA_DOMAINS", "www=acme.example"),
+        ...rest,
+        attachedDomains("acme.example"),
+      ]);
+      const planned = (await op("container.plan", { id: "company", desired })) as {
+        action: string;
+        planned: Record<string, unknown>;
+      };
+      expect(planned.action).toBe("update");
+      expect(planned.planned).not.toHaveProperty("domains");
+    });
+
+    it("attaches the declared hostname like a domain, serves the app there as its url, and detaches it at delete", async () => {
+      const hostname = "app.acme.example";
+      play("hostname");
+      // The Worker's health is asked on workers.dev: the hostname's certificate may not be ready yet.
+      server.use(http.all(`https://${hostname}/*`, () => HttpResponse.error()));
+      const made = (await op("container.create", { desired: { ...desired, hostname } })) as {
+        state: Record<string, unknown>;
+      };
+      expect(made).toEqual({ id: "company", state: { ...state, hostname, url: `https://${hostname}` } });
+      // The host's outputs: the app at its hostname, the wakeup on workers.dev.
+      expect(container.host!.outputs(made.state)).toEqual({
+        url: `https://${hostname}`,
+        wakeUrl: URL_OF,
+        revision: "abc123",
+        healthy: true,
+      });
+      const attached = sent.find((r) => r.method === "PUT" && r.path === apiPath("/workers/domains"));
+      expect(attached!.body).toEqual({ hostname, service: "sanoma-company", zone_id: ZONE });
+      const { bindings } = await uploaded();
+      const text = Object.fromEntries(
+        (bindings as { name: string; text?: string }[]).map((b) => [b.name, b.text] as const),
       );
-      play("domains-removed", [{ ...settings!, body }, ...rest, attached]);
-      expect(await op("container.plan", { id: "company", desired })).toMatchObject({ action: "update" });
+      // The wakeup reaches the Worker on workers.dev, whatever hostname it serves.
+      expect(text).toMatchObject({ SANOMA_HOST_URL: URL_OF, SANOMA_HOSTNAME: hostname });
+      expect(text).not.toHaveProperty("SANOMA_DOMAINS");
+      expect(await op("container.delete", { id: "company" })).toEqual({ id: "company", gone: true });
+      expect(sent.filter((r) => r.method === "DELETE" && r.path.includes("/workers/domains/"))).toHaveLength(1);
+      expect(await op("container.read", { id: "company" })).toEqual({ id: "company", gone: true });
+    });
+
+    it("reads the hostname detached by hand as drift, and plans the update that attaches it again at its url", async () => {
+      const [settings, ...rest] = only("update-to-a-new-image", (_, i) => i < 3);
+      play("hostname-unattached", [
+        withText(settings!, "SANOMA_HOSTNAME", "app.acme.example"),
+        ...rest,
+        attachedDomains(),
+      ]);
+      const planned = await op("container.plan", {
+        id: "company",
+        desired: { ...desired, hostname: "app.acme.example" },
+      });
+      expect(planned).toMatchObject({ action: "update", planned: { hostname: "app.acme.example" } });
+      expect((planned as { planned: { url: string } }).planned.url).toBe("https://app.acme.example");
+    });
+
+    it("detaches a renamed hostname before the upload and attaches the new one after it, the app at the new one", async () => {
+      const updated = fixture("update-to-a-new-image");
+      play("hostname-rename", [
+        ...renameUntilUpload(updated),
+        ...updated.slice(5, 8),
+        attachedNew,
+        ...updated.slice(8),
+      ]);
+      expect(await update({ desired: renamed })).toEqual({ id: "company", state: renamedState });
+      // Detached while the bindings still name it; attached once they name the new one.
+      expect(requests().filter((r) => /^(PUT|DELETE) \/workers\/(domains|scripts\/sanoma-company)/.test(r))).toEqual([
+        "DELETE /workers/domains/d1",
+        "PUT /workers/scripts/sanoma-company",
+        "PUT /workers/domains",
+      ]);
+      expect(sent.find((r) => r.method === "PUT" && r.path === apiPath("/workers/domains"))!.body).toEqual({
+        hostname: "new.acme.example",
+        service: "sanoma-company",
+        zone_id: ZONE,
+      });
+      const { bindings } = await uploaded();
+      expect(bindings).toContainEqual({ type: "plain_text", name: "SANOMA_HOSTNAME", text: "new.acme.example" });
+    });
+
+    it("converges on a retry after a rename fails past the detach: the old name gone, the new one attached and recorded", async () => {
+      const updated = fixture("update-to-a-new-image");
+      const uploadRefused = reply(
+        apiPath("/workers/scripts/sanoma-company"),
+        400,
+        cfError(10021, "Uncaught Error: the upload failed"),
+        "PUT",
+      );
+      // The retry finds the bindings naming the old hostname, which is no longer attached.
+      const settings = withText(updated[0]!, "SANOMA_HOSTNAME", "old.acme.example");
+      play("hostname-rename-retried", [
+        ...renameUntilUpload(updated),
+        uploadRefused,
+        settings,
+        updated[1]!,
+        attachedDomains(),
+        withText(updated[3]!, "SANOMA_HOSTNAME", "old.acme.example"),
+        attachedDomains(),
+        zoneLookup(),
+        updated[4]!,
+        ...updated.slice(5, 8),
+        attachedNew,
+        updated[9]!,
+      ]);
+      await expect(update({ desired: renamed })).rejects.toMatchObject({ name: "DriverError", status: 400 });
+      // Nothing attached that the bindings do not name: the old hostname is gone, the new one not attached yet.
+      expect(requests().filter((r) => r.includes("/workers/domains/") || r === "PUT /workers/domains")).toEqual([
+        "DELETE /workers/domains/d1",
+      ]);
+      const retried = sent.length;
+      expect(await update({ desired: renamed })).toEqual({ id: "company", state: renamedState });
+      // No detach the second time: the old name is not attached; the new one is, after the upload.
+      expect(
+        requests(retried).filter((r) => /^(PUT|DELETE) \/workers\/(domains|scripts\/sanoma-company)/.test(r)),
+      ).toEqual(["PUT /workers/scripts/sanoma-company", "PUT /workers/domains"]);
+    });
+
+    it("attaches a site's new domain only after the upload names it, so it never reaches a Worker that would serve the app there", async () => {
+      const updated = fixture("update-to-a-new-image");
+      play("domain-added-fails", [
+        ...updated.slice(0, 4),
+        attachedDomains(),
+        zoneLookup(),
+        ...updated.slice(4, 8),
+        attachRefused,
+      ]);
+      const withSite = { ...desired, revision: "def456", domains: { www: "www.acme.example" } };
+      await expect(
+        op("container.update", { id: "company", desired: withSite, expect: { action: "update", replace: [] } }),
+      ).rejects.toMatchObject({ name: "DriverError", status: 409 });
+      const puts = sent.filter((r) => r.method === "PUT").map((r) => r.path);
+      expect(puts).toEqual([apiPath("/workers/scripts/sanoma-company"), apiPath("/workers/domains")]);
+    });
+
+    it("plans an update when the declaration leaves out the hostname the Worker serves", async () => {
+      const [settings, ...rest] = only("update-to-a-new-image", (_, i) => i < 3);
+      play("hostname-removed", [
+        withText(settings!, "SANOMA_HOSTNAME", "app.acme.example"),
+        ...rest,
+        attachedDomains("app.acme.example"),
+      ]);
+      const planned = (await op("container.plan", { id: "company", desired })) as {
+        action: string;
+        planned: Record<string, unknown>;
+      };
+      // Planned back on workers.dev, so a wakeup on the host is planned to follow it.
+      expect(planned.action).toBe("update");
+      expect(planned.planned.url).toBe(URL_OF);
+      expect(planned.planned).not.toHaveProperty("hostname");
+    });
+
+    it("refuses a hostname that is also a site's domain, invalid, at plan and at create, before any request", async () => {
+      const both = { ...desired, hostname: "www.acme.example", domains: { www: "www.acme.example" } };
+      const invalid = {
+        name: "DriverError",
+        retryable: false,
+        vendorCode: "invalid",
+        message: expect.stringContaining("hostname www.acme.example is also the domain of the site www"),
+      };
+      await expect(op("container.plan", { id: "company", desired: both })).rejects.toMatchObject(invalid);
+      await expect(op("container.create", { desired: both })).rejects.toMatchObject(invalid);
+      expect(sent).toEqual([]);
     });
 
     it("refuses a secret named as one of the Worker's own bindings, without calling Cloudflare", async () => {
