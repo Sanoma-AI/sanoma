@@ -42,6 +42,7 @@ const TEXT = {
   source: "SANOMA_SOURCE",
   ref: "SANOMA_REF",
   revision: "SANOMA_REVISION",
+  configurationRevision: "SANOMA_CONFIG_REVISION",
   image: "SANOMA_IMAGE",
   port: "PORT",
   domains: "SANOMA_DOMAINS",
@@ -216,6 +217,7 @@ type ContainerState = {
   source: string;
   ref: string;
   revision: string | null;
+  configurationRevision?: string;
   port: number;
   domains?: Record<string, string>;
   url: string;
@@ -251,11 +253,13 @@ export function replanned(
 const sorted = (names: Iterable<string>) => [...names].toSorted().join(",");
 
 /** The declared fields a change of which is an update: everything the Worker runs, and the image. */
-const COMPARED = ["image", "source", "ref", "revision", "port", "domains"] as const;
+const COMPARED = ["image", "source", "ref", "revision", "configurationRevision", "port", "domains"] as const;
 const same = (field: (typeof COMPARED)[number], a: unknown, b: unknown) =>
   field === "domains"
     ? domainsText((a ?? {}) as Record<string, string>) === domainsText((b ?? {}) as Record<string, string>)
-    : a === b;
+    : field === "configurationRevision"
+      ? (a ?? "") === (b ?? "")
+      : a === b;
 
 /**
  * `{ revision }` when the Worker answers, else why not; with `start`, once its container answers
@@ -267,7 +271,7 @@ const health = async (
   cf: CloudflareApi,
   url: string,
   start: boolean,
-): Promise<{ revision: string } | { error: string; exit: boolean }> => {
+): Promise<{ revision: string; configurationRevision?: string } | { error: string; exit: boolean }> => {
   let res: Response;
   try {
     res = await cf.send(`${url}${HEALTH_PATH}${start ? "?start=1" : ""}`, { method: "GET" });
@@ -275,9 +279,13 @@ const health = async (
     return { error: errorMessage(error), exit: false };
   }
   const body = (await res.json().catch(() => undefined)) as
-    | { revision?: unknown; error?: unknown; exit?: unknown }
+    | { revision?: unknown; configurationRevision?: unknown; error?: unknown; exit?: unknown }
     | undefined;
-  if (res.ok && typeof body?.revision === "string") return { revision: body.revision };
+  if (res.ok && typeof body?.revision === "string")
+    return {
+      revision: body.revision,
+      ...(typeof body.configurationRevision === "string" && { configurationRevision: body.configurationRevision }),
+    };
   const error = typeof body?.error === "string" ? body.error : `${HEALTH_PATH} answered ${res.status}`;
   return { error, exit: typeof body?.exit === "string" };
 };
@@ -347,6 +355,7 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
       source: text.get(TEXT.source) ?? "",
       ref: text.get(TEXT.ref) ?? "",
       revision: text.get(TEXT.revision) ?? null,
+      ...(text.has(TEXT.configurationRevision) && { configurationRevision: text.get(TEXT.configurationRevision)! }),
       port: Number(text.get(TEXT.port) ?? 0),
       ...(domains && Object.keys(domains).length > 0 && { domains }),
       url,
@@ -374,22 +383,47 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
     const changed =
       // `domains` left out is compared too: removing them is a change.
       COMPARED.some(
-        (field) => (field in planned || field === "domains") && !same(field, planned[field], state[field]),
+        (field) =>
+          (field in planned || field === "domains" || field === "configurationRevision") &&
+          !same(field, planned[field], state[field]),
       ) || sorted(Object.keys(secrets ?? {})) !== sorted(found.secrets);
     if (!changed) return { action: "none", planned: state, ...NONE };
-    return { action: "update", planned: { ...state, ...planned }, ...NONE };
+    return {
+      action: "update",
+      planned: {
+        ...state,
+        ...planned,
+        ...(state.configurationRevision !== undefined &&
+          planned.configurationRevision == null && { configurationRevision: null }),
+      },
+      ...NONE,
+    };
   };
 
   /** Waits until the Worker at `url` answers at `revision`, which starts its container. */
-  const started = async (cf: CloudflareApi, script: string, url: string, revision: string) => {
+  const started = async (
+    cf: CloudflareApi,
+    script: string,
+    url: string,
+    revision: string,
+    configurationRevision?: string | null,
+  ) => {
     const until = Date.now() + startTimeoutMs;
     for (;;) {
       const seen = await health(cf, url, true);
-      if ("revision" in seen && seen.revision === revision) return;
+      if (
+        "revision" in seen &&
+        seen.revision === revision &&
+        (seen.configurationRevision ?? "") === (configurationRevision ?? "")
+      )
+        return;
       // Not a wait: the container started and ended, and asking again would only start it again.
       if ("exit" in seen && seen.exit) throw refused(`${script} did not start at ${revision}: ${seen.error}`);
       if (Date.now() >= until) {
-        const why = "revision" in seen ? `it runs ${seen.revision}` : seen.error;
+        const why =
+          "revision" in seen
+            ? `it runs ${seen.revision} with configuration ${seen.configurationRevision ?? "unset"}`
+            : seen.error;
         throw refused(`${script} did not answer at ${revision} in ${Math.round(startTimeoutMs / 1000)} s: ${why}`);
       }
       await delay(pollMs);
@@ -425,7 +459,7 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
   /** Makes the Worker and its application match `desired`, and waits for it: a create and an update alike. */
   const put = async (desired: Record<string, unknown>, { secrets: store }: CallContext) => {
     const declared = container.schema.parse(await resolveSecrets(desired, store));
-    const { name, image, source, ref, revision, port, domains } = declared;
+    const { name, image, source, ref, revision, configurationRevision, port, domains } = declared;
     const secrets = declared.secrets ?? {};
     if (!revision) {
       throw refused(
@@ -465,6 +499,7 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
       [TEXT.source]: source,
       [TEXT.ref]: ref,
       [TEXT.revision]: revision,
+      ...(configurationRevision && { [TEXT.configurationRevision]: configurationRevision }),
       [TEXT.image]: image,
       [TEXT.port]: String(port),
       [TEXT.url]: url,
@@ -508,7 +543,7 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
     for (const domain of attached) {
       if (before.has(domain.hostname) && !hostnames.has(domain.hostname)) await cf.detachDomain(domain.id);
     }
-    await started(cf, script, url, revision);
+    await started(cf, script, url, revision, configurationRevision);
     const state: ContainerState = {
       id: app.id,
       name,
@@ -516,6 +551,7 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
       source,
       ref,
       revision,
+      ...(configurationRevision && { configurationRevision }),
       port,
       ...(domains && { domains }),
       url,
