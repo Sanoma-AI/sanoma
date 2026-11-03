@@ -2,6 +2,8 @@
 
 Source of `@sanoma-ai/bridge`: the client exported from the package root, the connector fake and the recorded replies it serves, exported as `@sanoma-ai/bridge/fake`, the generic connector as `@sanoma-ai/bridge/connector`, and the generator and state conversions as `@sanoma-ai/bridge/tfschema`.
 
+Preserve each resource's literal `writable` flag through `TfResources`, `TfConnector` and `tfFake`: public operation types and fake fault IDs must match the runtime operations. See the [connector contract](../README.md#connectors-for-opentofu-providers).
+
 ## Contents
 
 | Path                              | What it is                                                                                                                                                                                     |
