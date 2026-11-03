@@ -102,7 +102,7 @@ Download the arm64 build (`Sanoma-<version>-arm64.dmg`) on an Apple silicon Mac,
 
 The app needs nothing else installed: it ships the Node and the pnpm it runs a company with. git comes with Apple's command line tools, which macOS offers to install the first time `git` runs. It does not update itself: once a day it checks for a newer release and links to it (Help → Check for a Newer Sanoma).
 
-To release it, bump `version` in [`packages/desktop/package.json`](packages/desktop/package.json) (its own version line, apart from npm's) and the notes in [`RELEASE_NOTES.md`](packages/desktop/RELEASE_NOTES.md) in a pull request, merge, wait for CI on `main`, then run `gh workflow run desktop-release.yml --ref main`. [`desktop-release.yml`](.github/workflows/desktop-release.yml) builds the arm64 and x64 dmg and zip on a macOS runner, signs and notarizes them, and uploads them to a draft release `desktop-v<version>`; download it in a browser, try it, then publish the draft.
+To release it, bump `version` in [`packages/desktop/package.json`](packages/desktop/package.json) (its own version line, apart from npm's) and the notes in [`RELEASE_NOTES.md`](packages/desktop/RELEASE_NOTES.md) in a pull request, merge, wait for CI on `main`, then run `gh workflow run desktop-release.yml --ref main`. [`desktop-release.yml`](.github/workflows/desktop-release.yml) builds the arm64 and x64 dmg and zip on a macOS runner, signs and notarizes them, and uploads them to a draft release `desktop-v<version>`, each dmg also as `Sanoma-mac-<arch>.dmg`, the name the website's download buttons ask GitHub's `releases/latest/download/` for; download it in a browser, try it, then publish the draft.
 
 ## Develop
 

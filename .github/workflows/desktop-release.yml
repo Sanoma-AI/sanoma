@@ -133,12 +133,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
+          # Each dmg also under a name without the version, which the website's download buttons
+          # name: releases/latest/download/Sanoma-mac-<arch>.dmg is the newest published release's.
+          mkdir latest
           for arch in arm64 x64; do
             mv "zip/darwin/$arch/Sanoma-darwin-$arch-$VERSION.zip" "zip/darwin/$arch/Sanoma-$VERSION-$arch.zip"
+            cp "dmg/$arch/Sanoma-$VERSION-$arch.dmg" "latest/Sanoma-mac-$arch.dmg"
           done
           gh release create "desktop-v$VERSION" --repo "$GITHUB_REPOSITORY" --draft --target "$GITHUB_SHA" \
             --title "Sanoma desktop $VERSION (preview)" --notes-file ../../RELEASE_NOTES.md \
-            dmg/*/"Sanoma-$VERSION"-*.dmg zip/darwin/*/"Sanoma-$VERSION"-*.zip
+            dmg/*/"Sanoma-$VERSION"-*.dmg zip/darwin/*/"Sanoma-$VERSION"-*.zip latest/Sanoma-mac-*.dmg
           echo "Draft release desktop-v$VERSION from $GITHUB_SHA: publish it on GitHub after trying the download." >> "$GITHUB_STEP_SUMMARY"
       - name: Delete the signing keychain and the notarization key
         if: always()
