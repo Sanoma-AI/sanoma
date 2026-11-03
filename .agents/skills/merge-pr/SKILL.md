@@ -11,3 +11,10 @@ description: Verify the linked issue, current review evidence, and checks before
 4. Require mergeability, required approvals, and successful applicable CI for the current head. Resolve conflicts and repeat review/checks; never bypass branch rules.
 5. Run `gh pr merge <number> --squash --match-head-commit <reviewed-head-sha>`; recheck if the head changes. Verify the merge and report PR/issue status; close the issue only if complete.
 6. After confirming the merge, fast-forward the shared main checkout and remove only this task's clean worktree with `git worktree remove <path>`. Preserve uncommitted or ignored work and other sessions' worktrees; never force removal.
+7. Then drop this task's test databases on the 5433 Postgres: the database named in the task's `SANOMA_TEST_DATABASE_URL`, exactly as written there, and every `<that name>_<suffix>` that [`testDatabaseUrl`](../../../packages/testing/README.md) made for a test file. Run the `select` alone first and keep any names that belong to another worktree whose name extends this one's; never drop the plain `sanoma_test` or another session's databases.
+
+   ```sh
+   db=sanoma_test_<worktree> pg=postgresql://postgres:dbos@localhost:5433/postgres
+   psql "$pg" -Atc "select datname from pg_database where datname = '$db' or starts_with(datname, '${db}_')" |
+     while read -r name; do psql "$pg" -c "drop database \"$name\" with (force)"; done
+   ```
