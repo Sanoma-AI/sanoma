@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import type { OAuth2Client } from "google-auth-library";
 import crc32c from "crc-32/crc32c.js";
+import { Client, escapeIdentifier } from "pg";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -320,6 +321,76 @@ describe("KMS encrypted Postgres", () => {
   });
   it("passes atomic store conformance using real Postgres and scoped KMS transport", async () => {
     expect((await checkSecretStore(store(), randomUUID())).filter((c) => !c.ok)).toEqual([]);
+  });
+  it("validates concurrent persisted probes without retaining rows or touching existing secrets", async () => {
+    const namespace = randomUUID(),
+      s = store();
+    const existing = { namespace, path: "__validation__" };
+    const saved = await s.write(existing, "existing-credential", { expectedVersion: null, by: "tester" });
+    await Promise.all(Array.from({ length: 4 }, () => s.validate(namespace)));
+    expect(await s.read(existing)).toEqual(saved);
+    const rows = await (await pool.db()).query("SELECT path FROM sanoma_kms.secrets WHERE namespace=$1", [namespace]);
+    expect(rows.rows).toEqual([{ path: existing.path }]);
+  });
+  it.each(["SELECT", "INSERT", "UPDATE", "DELETE"])("refuses readiness when Postgres denies %s", async (denied) => {
+    const db = await pool.db(),
+      namespace = randomUUID();
+    const role = escapeIdentifier(`kms_probe_${randomUUID().replaceAll("-", "")}`);
+    const client = new Client({ connectionString: testDatabaseUrl("kms_secrets") });
+    client.on("error", () => {});
+    await db.query(`CREATE ROLE ${role} NOLOGIN`);
+    try {
+      await db.query(`GRANT USAGE ON SCHEMA sanoma_kms TO ${role}`);
+      const grants = ["SELECT", "INSERT", "UPDATE", "DELETE"].filter((grant) => grant !== denied).join(",");
+      await db.query(`GRANT ${grants} ON sanoma_kms.secrets TO ${role}`);
+      await client.connect();
+      await client.query(`SET ROLE ${role}`);
+      const restricted = kmsPostgresStore({
+        company: "acme",
+        keyName: KEY,
+        kms: kms.client,
+        database: async () => client,
+      });
+      await expect(restricted.validate(namespace)).rejects.toMatchObject({
+        code: "denied",
+        message: "Secret store: denied",
+      });
+      const rows = await db.query("SELECT path FROM sanoma_kms.secrets WHERE namespace=$1", [namespace]);
+      expect(rows.rowCount).toBe(denied === "DELETE" ? 1 : 0);
+    } finally {
+      await client.end();
+      await db.query("DELETE FROM sanoma_kms.secrets WHERE namespace=$1", [namespace]);
+      await db.query(`DROP OWNED BY ${role}`);
+      await db.query(`DROP ROLE ${role}`);
+    }
+  });
+  it("cleans up a committed probe when the INSERT response is lost", async () => {
+    const namespace = randomUUID(),
+      db = await pool.db();
+    const query = db.query,
+      callQuery = query as (...args: unknown[]) => unknown;
+    let lost = false;
+    const intercepted = function (this: typeof db, ...args: unknown[]) {
+      const result = callQuery.apply(this, args);
+      if (!lost && String(args[0]).startsWith("INSERT INTO sanoma_kms.secrets")) {
+        lost = true;
+        return Promise.resolve(result).then(() => {
+          throw new Error("sensitive lost-response diagnostic");
+        });
+      }
+      return result;
+    };
+    const spy = vi.spyOn(db, "query").mockImplementation(intercepted as typeof query);
+    try {
+      await expect(store().validate(namespace)).rejects.toMatchObject({
+        code: "unavailable",
+        message: "Secret store: unavailable",
+      });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(lost).toBe(true);
+    expect((await db.query("SELECT path FROM sanoma_kms.secrets WHERE namespace=$1", [namespace])).rowCount).toBe(0);
   });
   it("surfaces denied access without provider payloads", async () => {
     kms.state.denied = true;
