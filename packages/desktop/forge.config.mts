@@ -111,7 +111,9 @@ const config: ForgeConfig = {
       // On with a Developer ID only. The key lives in a Keychain item tied to the signature: a
       // Developer ID's holds across updates, an ad hoc one changes with every build, so each
       // update would ask for Keychain access (and a denial signs the user out of every company).
-      // One-way: a build without it cannot read the cookies one with it wrote.
+      // One-way: a build without it cannot read the cookies one with it wrote (`start` and an ad
+      // hoc `package` share an installed release's userData), and a Developer ID of another team
+      // asks for Keychain access once.
       [FuseV1Options.EnableCookieEncryption]: Boolean(identity),
       [FuseV1Options.EnableNodeOptionsEnvironmentVariable]: false,
       [FuseV1Options.EnableNodeCliInspectArguments]: false,
