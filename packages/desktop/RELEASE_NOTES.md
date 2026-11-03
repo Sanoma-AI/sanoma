@@ -1,14 +1,6 @@
 The first preview of the Sanoma desktop app for macOS. Open a company folder and the app runs that company's own `sanoma` launcher and shows the app in a window. There is nothing to install first.
 
-**Download** the `arm64` dmg on an Apple silicon Mac (M1 and later), or the `x64` dmg on an Intel Mac. Drag Sanoma to Applications. The zip files hold the same apps.
-
-**The first open.** The build is not signed by Apple yet, so macOS blocks it the first time:
-
-1. Open Sanoma from Applications and dismiss the warning.
-2. Open System Settings → Privacy & Security, scroll to Security, and click "Open Anyway" next to the message about Sanoma.
-3. Confirm with your password. From then on it opens normally.
-
-If "Open Anyway" does not appear, run this in Terminal: `xattr -dr com.apple.quarantine /Applications/Sanoma.app`.
+**Download** the `arm64` dmg on an Apple silicon Mac (M1 and later), or the `x64` dmg on an Intel Mac. Drag Sanoma to Applications and open it. The app is signed and notarized by Apple, so macOS opens it like any app from the web, after asking once whether to open something downloaded. The zip files hold the same apps.
 
 ## What it does
 
@@ -24,7 +16,6 @@ Nothing to install for the app itself. Companies that use git need Apple's comma
 
 ## Known limits
 
-- Unsigned and not notarized, so the first open goes through "Open Anyway".
 - macOS only, 13.5 (Ventura) or later, as the Node 26 it ships requires. No Windows or Linux builds yet.
 - No automatic updates: the app tells you about a newer version, and you download it and replace the app in Applications.
 - The launcher on npm (sanoma 0.6.0) still starts PostgreSQL in Docker when nothing answers at the company's database URL, so a company needs Docker or a database URL in its `.env` until sanoma 0.7.0 brings embedded PostgreSQL.
