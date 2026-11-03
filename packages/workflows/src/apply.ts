@@ -15,7 +15,7 @@ import {
   sourceUrl,
 } from "./drift.ts";
 import { isRunControlError } from "./errors.ts";
-import type { HostOutputs } from "./host.ts";
+import { type HostOutputs, wakeUrlOf } from "./host.ts";
 import type { Binding, Bindings, Rebind } from "./lockfile.ts";
 import type { Op } from "./op.ts";
 import {
@@ -556,7 +556,7 @@ export function applyWorkflow(
         states.set(r.id, state);
         unsettled.delete(r.id);
         const outputs = types.get(`${r.vendor}.${r.type}`)?.host?.outputs(state);
-        const url = outputs?.wakeUrl ?? outputs?.url;
+        const url = outputs && wakeUrlOf(outputs);
         if (url) urls.set(r.id, url);
       };
       for (const resource of resources) {

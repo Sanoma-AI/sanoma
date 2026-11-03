@@ -93,13 +93,29 @@ async function uploaded() {
   return metadataOf(await formOf(sent.find((r) => r.method === "PUT" && r.path.startsWith(API))!));
 }
 
-/** The registry's temporary credentials, as the SDK's `containers.registries.credentials.generate` answers. */
-/** `e`, a Worker's settings, with the bindings of one that serves the app at `old.acme.example`. */
-const servingOld = (e: Exchange): Exchange => {
+/** `e`, a Worker's settings, with one more plain-text binding. */
+const withText = (e: Exchange, name: string, text: string): Exchange => {
   const body = structuredClone(e.body) as { result: { bindings: object[] } };
-  body.result.bindings.push({ type: "plain_text", name: "SANOMA_HOSTNAME", text: "old.acme.example" });
+  body.result.bindings.push({ type: "plain_text", name, text });
   return { ...e, body };
 };
+/** The Worker's attached custom domains, `hostnames`. */
+const attachedDomains = (...hostnames: string[]) =>
+  reply(
+    apiPath("/workers/domains?service=sanoma-company"),
+    200,
+    cfResult(hostnames.map((hostname, i) => ({ id: `d${i + 1}`, hostname, service: "sanoma-company", zone_id: ZONE }))),
+  );
+/** An attach Cloudflare refuses. */
+const attachRefused = reply(
+  apiPath("/workers/domains"),
+  409,
+  cfError(100117, "Hostname already has a DNS record"),
+  "PUT",
+);
+/** The zone lookup of `acme.example`. */
+const zoneLookup = () => fixture("hostname").find((e) => e.path.startsWith("/client/v4/zones?"))!;
+/** The registry's temporary credentials, as the SDK's `containers.registries.credentials.generate` answers. */
 const registryCredentials = reply(
   apiPath("/containers/registries/registry.cloudflare.com/credentials"),
   200,
@@ -459,10 +475,11 @@ describe.skipIf(live)("cloudflareDriver", () => {
 
     it("plans an update when a domain the Worker serves is not attached, so the next apply attaches it", async () => {
       const [settings, ...rest] = only("update-to-a-new-image", (_, i) => i < 3);
-      const body = structuredClone(settings!.body) as { result: { bindings: object[] } };
-      body.result.bindings.push({ type: "plain_text", name: "SANOMA_DOMAINS", text: "www=www.acme.example" });
-      const none = reply(apiPath("/workers/domains?service=sanoma-company"), 200, cfResult([]));
-      play("domain-unattached", [{ ...settings!, body }, ...rest, none]);
+      play("domain-unattached", [
+        withText(settings!, "SANOMA_DOMAINS", "www=www.acme.example"),
+        ...rest,
+        attachedDomains(),
+      ]);
       const domains = { www: "www.acme.example" };
       const planned = await op("container.plan", { id: "company", desired: { ...desired, domains } });
       expect(planned).toMatchObject({ action: "update", planned: { domains } });
@@ -487,14 +504,11 @@ describe.skipIf(live)("cloudflareDriver", () => {
 
     it("plans an update when the declaration leaves out the domains the Worker serves", async () => {
       const [settings, ...rest] = only("update-to-a-new-image", (_, i) => i < 3);
-      const body = structuredClone(settings!.body) as { result: { bindings: object[] } };
-      body.result.bindings.push({ type: "plain_text", name: "SANOMA_DOMAINS", text: "www=acme.example" });
-      const attached = reply(
-        apiPath("/workers/domains?service=sanoma-company"),
-        200,
-        cfResult([{ id: "d1", hostname: "acme.example", service: "sanoma-company", zone_id: ZONE }]),
-      );
-      play("domains-removed", [{ ...settings!, body }, ...rest, attached]);
+      play("domains-removed", [
+        withText(settings!, "SANOMA_DOMAINS", "www=acme.example"),
+        ...rest,
+        attachedDomains("acme.example"),
+      ]);
       const planned = (await op("container.plan", { id: "company", desired })) as {
         action: string;
         planned: Record<string, unknown>;
@@ -535,10 +549,11 @@ describe.skipIf(live)("cloudflareDriver", () => {
 
     it("reads the hostname detached by hand as drift, and plans the update that attaches it again at its url", async () => {
       const [settings, ...rest] = only("update-to-a-new-image", (_, i) => i < 3);
-      const body = structuredClone(settings!.body) as { result: { bindings: { name: string; text?: string }[] } };
-      body.result.bindings.push({ type: "plain_text", name: "SANOMA_HOSTNAME", text: "app.acme.example" } as never);
-      const none = reply(apiPath("/workers/domains?service=sanoma-company"), 200, cfResult([]));
-      play("hostname-unattached", [{ ...settings!, body }, ...rest, none]);
+      play("hostname-unattached", [
+        withText(settings!, "SANOMA_HOSTNAME", "app.acme.example"),
+        ...rest,
+        attachedDomains(),
+      ]);
       const planned = await op("container.plan", {
         id: "company",
         desired: { ...desired, hostname: "app.acme.example" },
@@ -549,28 +564,17 @@ describe.skipIf(live)("cloudflareDriver", () => {
 
     it("attaches a renamed hostname before the upload records it, so a failed attach leaves the Worker naming the old one", async () => {
       const updated = fixture("update-to-a-new-image");
-      const attached = reply(
-        apiPath("/workers/domains?service=sanoma-company"),
-        200,
-        cfResult([{ id: "d1", hostname: "old.acme.example", service: "sanoma-company", zone_id: ZONE }]),
-      );
-      const zone = fixture("hostname").find((e) => e.path.startsWith("/client/v4/zones?"))!;
-      const taken = reply(
-        apiPath("/workers/domains"),
-        409,
-        cfError(100117, "Hostname already has a DNS record"),
-        "PUT",
-      );
+      const attached = attachedDomains("old.acme.example");
       play("hostname-rename-fails", [
-        servingOld(updated[0]!),
+        withText(updated[0]!, "SANOMA_HOSTNAME", "old.acme.example"),
         updated[1]!,
         updated[2]!,
         attached,
-        servingOld(updated[3]!),
+        withText(updated[3]!, "SANOMA_HOSTNAME", "old.acme.example"),
         attached,
-        zone,
+        zoneLookup(),
         updated[4]!,
-        taken,
+        attachRefused,
       ]);
       const renamed = { ...desired, revision: "def456", hostname: "new.acme.example" };
       await expect(
@@ -583,15 +587,13 @@ describe.skipIf(live)("cloudflareDriver", () => {
 
     it("attaches a site's new domain only after the upload names it, so it never reaches a Worker that would serve the app there", async () => {
       const updated = fixture("update-to-a-new-image");
-      const none = reply(apiPath("/workers/domains?service=sanoma-company"), 200, cfResult([]));
-      const zone = fixture("hostname").find((e) => e.path.startsWith("/client/v4/zones?"))!;
-      const taken = reply(
-        apiPath("/workers/domains"),
-        409,
-        cfError(100117, "Hostname already has a DNS record"),
-        "PUT",
-      );
-      play("domain-added-fails", [...updated.slice(0, 4), none, zone, ...updated.slice(4, 8), taken]);
+      play("domain-added-fails", [
+        ...updated.slice(0, 4),
+        attachedDomains(),
+        zoneLookup(),
+        ...updated.slice(4, 8),
+        attachRefused,
+      ]);
       const withSite = { ...desired, revision: "def456", domains: { www: "www.acme.example" } };
       await expect(
         op("container.update", { id: "company", desired: withSite, expect: { action: "update", replace: [] } }),
@@ -602,14 +604,11 @@ describe.skipIf(live)("cloudflareDriver", () => {
 
     it("plans an update when the declaration leaves out the hostname the Worker serves", async () => {
       const [settings, ...rest] = only("update-to-a-new-image", (_, i) => i < 3);
-      const body = structuredClone(settings!.body) as { result: { bindings: object[] } };
-      body.result.bindings.push({ type: "plain_text", name: "SANOMA_HOSTNAME", text: "app.acme.example" });
-      const attached = reply(
-        apiPath("/workers/domains?service=sanoma-company"),
-        200,
-        cfResult([{ id: "d1", hostname: "app.acme.example", service: "sanoma-company", zone_id: ZONE }]),
-      );
-      play("hostname-removed", [{ ...settings!, body }, ...rest, attached]);
+      play("hostname-removed", [
+        withText(settings!, "SANOMA_HOSTNAME", "app.acme.example"),
+        ...rest,
+        attachedDomains("app.acme.example"),
+      ]);
       const planned = (await op("container.plan", { id: "company", desired })) as {
         action: string;
         planned: Record<string, unknown>;

@@ -412,7 +412,7 @@ function HostServes({ hostname }: { hostname: string | undefined }) {
   const { data } = useQuery(goLiveProgressQuery());
   // Not known yet, or not known at all: nothing said rather than a hostname wrongly pending.
   if (data === undefined) return null;
-  const host = data?.host;
+  const { host } = data;
   const pending = hostname !== undefined && host?.url !== hostnameUrl(hostname);
   if (!host && !pending) return null;
   return (
