@@ -495,7 +495,12 @@ describe.skipIf(live)("cloudflareDriver", () => {
         cfResult([{ id: "d1", hostname: "acme.example", service: "sanoma-company", zone_id: ZONE }]),
       );
       play("domains-removed", [{ ...settings!, body }, ...rest, attached]);
-      expect(await op("container.plan", { id: "company", desired })).toMatchObject({ action: "update" });
+      const planned = (await op("container.plan", { id: "company", desired })) as {
+        action: string;
+        planned: Record<string, unknown>;
+      };
+      expect(planned.action).toBe("update");
+      expect(planned.planned).not.toHaveProperty("domains");
     });
 
     it("attaches the declared hostname like a domain, serves the app there as its url, and detaches it at delete", async () => {
@@ -574,6 +579,25 @@ describe.skipIf(live)("cloudflareDriver", () => {
       // Nothing uploaded and nothing detached: the old hostname stays attached and recorded.
       expect(sent.some((r) => r.method === "PUT" && r.path.includes("/workers/scripts/"))).toBe(false);
       expect(sent.some((r) => r.method === "DELETE")).toBe(false);
+    });
+
+    it("attaches a site's new domain only after the upload names it, so it never reaches a Worker that would serve the app there", async () => {
+      const updated = fixture("update-to-a-new-image");
+      const none = reply(apiPath("/workers/domains?service=sanoma-company"), 200, cfResult([]));
+      const zone = fixture("hostname").find((e) => e.path.startsWith("/client/v4/zones?"))!;
+      const taken = reply(
+        apiPath("/workers/domains"),
+        409,
+        cfError(100117, "Hostname already has a DNS record"),
+        "PUT",
+      );
+      play("domain-added-fails", [...updated.slice(0, 4), none, zone, ...updated.slice(4, 8), taken]);
+      const withSite = { ...desired, revision: "def456", domains: { www: "www.acme.example" } };
+      await expect(
+        op("container.update", { id: "company", desired: withSite, expect: { action: "update", replace: [] } }),
+      ).rejects.toMatchObject({ name: "DriverError", status: 409 });
+      const puts = sent.filter((r) => r.method === "PUT").map((r) => r.path);
+      expect(puts).toEqual([apiPath("/workers/scripts/sanoma-company"), apiPath("/workers/domains")]);
     });
 
     it("plans an update when the declaration leaves out the hostname the Worker serves", async () => {

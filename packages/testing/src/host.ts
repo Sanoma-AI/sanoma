@@ -386,7 +386,7 @@ const hostType = (lifetime: HostLifetime) =>
       outputs: (state) => ({
         url: typeof state.hostname === "string" ? hostnameUrl(state.hostname) : String(state.url ?? ""),
         // Its wakeup reaches it where it answers, on this machine.
-        ...(typeof state.hostname === "string" && { wakeUrl: String(state.url ?? "") }),
+        ...(typeof state.hostname === "string" && typeof state.url === "string" && { wakeUrl: state.url }),
         ...(typeof state.revision === "string" && { revision: state.revision }),
         healthy: state.running === true,
       }),

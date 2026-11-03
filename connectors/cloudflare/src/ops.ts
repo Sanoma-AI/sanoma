@@ -431,8 +431,9 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
         (field) => (field in planned || OPTIONAL.has(field)) && !same(field, planned[field], state[field]),
       ) || sorted(Object.keys(secrets ?? {})) !== sorted(found.secrets);
     if (!changed) return { action: "none", planned: state, ...NONE };
-    // Where the app will answer: at the declared hostname, or on workers.dev without one.
-    const { hostname: _, ...was } = state;
+    // What the Worker will serve: the declared domains and hostname, none of the found ones left
+    // out; the app at the declared hostname, or on workers.dev without one.
+    const { domains: _domains, hostname: _hostname, ...was } = state;
     const url = servedAt(planned.hostname as string | null | undefined, found.workerUrl);
     return {
       action: "update",
@@ -575,14 +576,15 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
       observability: { enabled: true },
       modules: await workerModules(),
     };
-    // An existing Worker's missing domains are attached before its upload records them in its
-    // bindings (`declaredBefore`): a failed attach then leaves the bindings naming every domain it
-    // still has, so a renamed hostname is never left attached and unrecorded (and so never
-    // detached). A new Worker's are attached once its first upload made it.
-    const attach = async () => {
-      for (const [domain, zoneId] of missing) await cf.attachDomain(script, domain, zoneId);
-    };
-    if (current) await attach();
+    // The app's hostname, on an existing Worker, is attached before the upload records it in its
+    // bindings (`declaredBefore`): a failed attach then leaves a renamed hostname's old one still
+    // recorded, so the next apply detaches it, never attached and unrecorded. The Worker serves the
+    // app at any hostname that is not a site's, so it answers there at once. A site's domain waits
+    // for the upload, so it never reaches a Worker whose `SANOMA_DOMAINS` does not name it; and a
+    // new Worker's domains wait for its first upload, which makes it.
+    const attach = (domain: string) => cf.attachDomain(script, domain, missing.get(domain)!);
+    const early = current && hostname && missing.has(hostname) ? hostname : undefined;
+    if (early) await attach(early);
     await cf.upload(script, { ...metadata, ...(current === undefined && { migrations: MIGRATION }) });
     await cf.enableSubdomain(script);
     let app = await cf.application(script);
@@ -599,7 +601,7 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
     }
     // The declared domains routed to the Worker, attached before any detach so a failed attach
     // leaves the old route up; then the ones declared before and no longer, detached.
-    if (!current) await attach();
+    for (const domain of missing.keys()) if (domain !== early) await attach(domain);
     for (const domain of attached) {
       if (before.has(domain.hostname) && !hostnames.has(domain.hostname)) await cf.detachDomain(domain.id);
     }
