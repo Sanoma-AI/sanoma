@@ -201,8 +201,10 @@ export async function checkHost(host: HostUnderTest): Promise<HostCheck[]> {
   await check("the app answers on its port", async () => {
     const outputs = spec.outputs(await apply());
     if (!outputs.healthy) throw new Error("its state says it is not healthy");
-    const res = await fetch(new URL("/healthz", outputs.url));
-    if (!res.ok) throw new Error(`${outputs.url}/healthz answered ${res.status}`);
+    // Where the host's own process answers: its wakeUrl, which never waits on a hostname's DNS.
+    const at = outputs.wakeUrl ?? outputs.url;
+    const res = await fetch(new URL("/healthz", at));
+    if (!res.ok) throw new Error(`${at}/healthz answered ${res.status}`);
   });
   await check("a queued run drains", async () => {
     await finish(await client.start("host-check-drain", {}, { startedBy }));
@@ -224,7 +226,8 @@ export async function checkHost(host: HostUnderTest): Promise<HostCheck[]> {
     };
     // A request, as a wakeup sends it, until the host answers 204 (one starting may answer 503 first).
     const wake = async () => {
-      const at = new URL("/wake", spec.outputs(applied).url);
+      const outputs = spec.outputs(applied);
+      const at = new URL("/wake", outputs.wakeUrl ?? outputs.url);
       const answer = () => fetch(at).then((res) => res.status, errorMessage);
       await waitFor(answer, (status) => status === 204, timeoutMs);
     };

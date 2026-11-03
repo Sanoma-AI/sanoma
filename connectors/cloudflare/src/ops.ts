@@ -534,6 +534,14 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
       observability: { enabled: true },
       modules: await workerModules(),
     };
+    // An existing Worker's missing domains are attached before its upload records them in its
+    // bindings (`declaredBefore`): a failed attach then leaves the bindings naming every domain it
+    // still has, so a renamed hostname is never left attached and unrecorded (and so never
+    // detached). A new Worker's are attached once its first upload made it.
+    const attach = async () => {
+      for (const [domain, zoneId] of missing) await cf.attachDomain(script, domain, zoneId);
+    };
+    if (current) await attach();
     await cf.upload(script, { ...metadata, ...(current === undefined && { migrations: MIGRATION }) });
     await cf.enableSubdomain(script);
     let app = await cf.application(script);
@@ -548,9 +556,9 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
       // 2026-10-29; a Worker deployed again after the application started at once).
       await cf.upload(script, metadata);
     }
-    // The declared domains routed to the Worker, attached first so a failed attach leaves the old
-    // route up; then the ones declared before and no longer, detached.
-    for (const [domain, zoneId] of missing) await cf.attachDomain(script, domain, zoneId);
+    // The declared domains routed to the Worker, attached before any detach so a failed attach
+    // leaves the old route up; then the ones declared before and no longer, detached.
+    if (!current) await attach();
     for (const domain of attached) {
       if (before.has(domain.hostname) && !hostnames.has(domain.hostname)) await cf.detachDomain(domain.id);
     }

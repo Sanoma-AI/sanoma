@@ -347,8 +347,10 @@ function SlotCard({
   adopt?: Adopt;
 }) {
   const binding = result?.binding ?? resource.binding;
+  const isHost = resource.id === `${INFRA}#host`;
   const fields = Object.entries(resource.desired)
-    .filter(([field]) => field !== "name")
+    // The host's hostname is shown where it serves (`HostServes`), not twice.
+    .filter(([field]) => field !== "name" && !(isHost && field === "hostname"))
     .flatMap(([field, value]) => {
       const shown = plainValue(value);
       return shown === undefined ? [] : [[field, shown] as const];
@@ -386,7 +388,7 @@ function SlotCard({
               <span className="text-muted-foreground">unbound</span>
             )}
           </Fact>
-          {resource.id === `${INFRA}#host` && (
+          {isHost && (
             <HostServes
               hostname={typeof resource.desired.hostname === "string" ? resource.desired.hostname : undefined}
             />

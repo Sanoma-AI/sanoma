@@ -30,8 +30,8 @@ export interface HostCapabilities {
 export interface HostOutputs {
   url: string;
   /**
-   * Where a wakeup reaches it, when that is not `url`: the vendor's own URL of a host whose `url`
-   * is its `hostname`, so a wake never depends on a custom domain's DNS and certificate, and a
+   * Where a wakeup (and a check of its process) reaches it, `url` when left out: the vendor's own
+   * URL of a host whose `url` may be its `hostname`, so a wake never depends on a custom domain's DNS and certificate, and a
    * hostname declared or dropped leaves its wakeup as it was. Apply gives a wakeup this one.
    */
   wakeUrl?: string;

@@ -94,6 +94,12 @@ async function uploaded() {
 }
 
 /** The registry's temporary credentials, as the SDK's `containers.registries.credentials.generate` answers. */
+/** `e`, a Worker's settings, with the bindings of one that serves the app at `old.acme.example`. */
+const servingOld = (e: Exchange): Exchange => {
+  const body = structuredClone(e.body) as { result: { bindings: object[] } };
+  body.result.bindings.push({ type: "plain_text", name: "SANOMA_HOSTNAME", text: "old.acme.example" });
+  return { ...e, body };
+};
 const registryCredentials = reply(
   apiPath("/containers/registries/registry.cloudflare.com/credentials"),
   200,
@@ -534,6 +540,40 @@ describe.skipIf(live)("cloudflareDriver", () => {
       });
       expect(planned).toMatchObject({ action: "update", planned: { hostname: "app.acme.example" } });
       expect((planned as { planned: { url: string } }).planned.url).toBe("https://app.acme.example");
+    });
+
+    it("attaches a renamed hostname before the upload records it, so a failed attach leaves the Worker naming the old one", async () => {
+      const updated = fixture("update-to-a-new-image");
+      const attached = reply(
+        apiPath("/workers/domains?service=sanoma-company"),
+        200,
+        cfResult([{ id: "d1", hostname: "old.acme.example", service: "sanoma-company", zone_id: ZONE }]),
+      );
+      const zone = fixture("hostname").find((e) => e.path.startsWith("/client/v4/zones?"))!;
+      const taken = reply(
+        apiPath("/workers/domains"),
+        409,
+        cfError(100117, "Hostname already has a DNS record"),
+        "PUT",
+      );
+      play("hostname-rename-fails", [
+        servingOld(updated[0]!),
+        updated[1]!,
+        updated[2]!,
+        attached,
+        servingOld(updated[3]!),
+        attached,
+        zone,
+        updated[4]!,
+        taken,
+      ]);
+      const renamed = { ...desired, revision: "def456", hostname: "new.acme.example" };
+      await expect(
+        op("container.update", { id: "company", desired: renamed, expect: { action: "update", replace: [] } }),
+      ).rejects.toMatchObject({ name: "DriverError", status: 409 });
+      // Nothing uploaded and nothing detached: the old hostname stays attached and recorded.
+      expect(sent.some((r) => r.method === "PUT" && r.path.includes("/workers/scripts/"))).toBe(false);
+      expect(sent.some((r) => r.method === "DELETE")).toBe(false);
     });
 
     it("plans an update when the declaration leaves out the hostname the Worker serves", async () => {

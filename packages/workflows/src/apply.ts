@@ -194,7 +194,7 @@ interface Known {
   bindings: Bindings;
   /** The clone URL and commit a host wanted runs. */
   hosts: ReadonlyMap<string, { source: string; revision: string }>;
-  /** Where each host answers, as its state says. */
+  /** Where each host's wakeup reaches it, as its state says (`wakeUrl`, else `url`). */
   urls: ReadonlyMap<string, string>;
   /**
    * A resource's state as found or as its step left it, to read a `from` reference's path in;
@@ -480,7 +480,7 @@ function messageOf(step: PlanStep, before: Binding | undefined, after: Binding |
  * up front, and the step planned again once the value is known: done without a write when it
  * plans `none`, else expecting the fresh plan; a step whose resource still has none there, its
  * step failed or not done, fails before its driver is called), and a wakeup's `host` the URL its host's state gives
- * (`outputs(state).url`), found or made in this run. A failed step is reported and the run
+ * (`outputs(state)`'s `wakeUrl`, else its `url`), found or made in this run. A failed step is reported and the run
  * goes on; a failure that ends the run (`isRunControlError`) ends it.
  */
 export function applyWorkflow(
