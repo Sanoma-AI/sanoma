@@ -1,6 +1,6 @@
 {
   "name": "@sanoma-ai/connector-supabase",
-  "version": "0.4.9",
+  "version": "0.4.11",
   "description": "Supabase projects for Sanoma, through the OpenTofu provider and the Management API",
   "keywords": [
     "connector",

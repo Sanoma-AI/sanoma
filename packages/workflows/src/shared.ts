@@ -622,6 +622,6 @@ export type OpFn<I, O> = (input: I) => Promise<O>;
 export interface CollectionApi<R> {
   get: OpFn<{ key: string }, Saved<R> | null>;
   list(query?: ListQuery<R>): Promise<Saved<R>[]>;
-  save: OpFn<{ record: R; ifAbsent?: boolean }, Saved<R>>;
+  save: OpFn<{ record: R; ifAbsent?: boolean; ifRecord?: Record<string, unknown> }, Saved<R>>;
   delete: OpFn<{ key: string }, { deleted: boolean }>;
 }

@@ -346,22 +346,20 @@ describe("going live", () => {
     }
   });
 
-  it("gives the host the sign-in sender's variables when the config names one, an optional one once stored", async () => {
+  it("gives the host the sign-in sender's variables when the config names one", async () => {
     const withSender: SanomaConfig = {
       ...config,
       connectors: [...config.connectors, resend],
-      login: { sender: resend.emails.send },
+      login: { sender: resend.emails.send, from: "Acme <login@acme.test>" },
     };
     const client = await SanomaClient.connect({ ...withSender, databaseUrl });
     const sending = { ...ctx, resolved: resolveConfig(withSender), client };
     try {
       const text = await renderInfra(sending, choices(), DEPLOY_KEY);
       expect(text).toContain(`    RESEND_API_KEY: secret("RESEND_API_KEY"),\n`);
+      // The sender is the config's `login.from`, never the environment's.
       expect(text).not.toContain("RESEND_FROM");
-      await client.setCredential("RESEND_FROM", "Acme <hi@acme.test>", { by: "alice" });
-      expect(await renderInfra(sending, choices(), DEPLOY_KEY)).toContain(`    RESEND_FROM: secret("RESEND_FROM"),\n`);
     } finally {
-      await client.clearCredential("RESEND_FROM", { by: "alice" });
       await client.close();
     }
     expect(await renderInfra(ctx, choices(), DEPLOY_KEY)).not.toContain("RESEND_");

@@ -469,7 +469,8 @@ function SignInItem({ signIn }: { signIn: SetupStatus["signIn"] }) {
               {signIn.sender === null ? (
                 <>
                   name a sender in <code>sanoma.config.ts</code>, such as{" "}
-                  <code>login: {"{ sender: resend.emails.send }"}</code>, and connect it
+                  <code>login: {'{ sender: resend.emails.send, from: "Acme <login@acme.example>" }'}</code>, and connect
+                  it
                 </>
               ) : (
                 <>

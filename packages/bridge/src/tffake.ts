@@ -1,7 +1,7 @@
 import type { Driver, DriverFn, OpIdOf } from "@sanoma-ai/workflows";
 import { defineFake, type Fake, type FakeOptions, type ResourceFake } from "@sanoma-ai/workflows/fake";
 import type { z } from "zod";
-import type { TfConnector, TfResources } from "./connector.ts";
+import type { TfConnector, TfReferences, TfResources } from "./connector.ts";
 import type { FixtureError } from "./fixtures.ts";
 import { fixturesDir } from "./pins.ts";
 import { type BridgeState, loadReplies, stateBridge, type StateObject } from "./replies.ts";
@@ -28,8 +28,13 @@ export interface TfFakeOptions extends FakeOptions {
  * objects between calls, typed by the connector's resources, as a `ResourceFake` (what a
  * scenario's resource steps need).
  */
-export interface TfFake<V extends string, T extends Record<string, z.ZodObject>>
-  extends Fake<TfFakeState, OpIdOf<V, TfResources<V, T>>>, ResourceFake {
+export interface TfFake<
+  V extends string,
+  T extends Record<string, z.ZodObject>,
+  R extends TfReferences<T> = {},
+  W extends Partial<Record<keyof T, boolean>> = {},
+>
+  extends Fake<TfFakeState, OpIdOf<V, TfResources<V, T, R, W>>>, ResourceFake {
   /**
    * Sets fields of the object of type `type` and import id `id`, in the resource's shape, for
    * the next `read` and `import` to return, as if someone edited the object at the vendor.
@@ -75,10 +80,12 @@ function grouped(driver: Driver) {
  * applies as `stateBridge` does, with the generated types' fields. Each call makes one of its own, with
  * the recorded replies, as each sandbox run does.
  */
-export function tfFake<V extends string, T extends Record<string, z.ZodObject>>(
-  tf: TfConnector<V, T>,
-  options: TfFakeOptions = {},
-): TfFake<V, T> {
+export function tfFake<
+  V extends string,
+  T extends Record<string, z.ZodObject>,
+  R extends TfReferences<T>,
+  W extends Partial<Record<keyof T, boolean>>,
+>(tf: TfConnector<V, T, R, W>, options: TfFakeOptions = {}): TfFake<V, T, R, W> {
   const { fixtures = fixturesDir, missingReply, ...fakeOptions } = options;
   /**
    * The import id of the object `id` names: `id` when there is one under it, else that of the

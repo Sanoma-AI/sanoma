@@ -92,6 +92,9 @@ describe("collection()", () => {
     expect(accepts({ ...lead, nickname: "Ac" })).toBe(false);
     const { contact: _, ...noContact } = lead;
     expect(accepts(noContact)).toBe(false);
+    expect(outbound.save.input.safeParse({ record: lead, ifAbsent: true, ifRecord: lead }).success).toBe(false);
+    // The comparison may include obsolete fields from a stored record being repaired.
+    expect(outbound.save.input.safeParse({ record: lead, ifRecord: { ...lead, obsolete: "old" } }).success).toBe(true);
   });
 
   it("lists by fields it has, equal or within a range, sorted either way, 1 to 1000 at a time", () => {
@@ -147,6 +150,27 @@ describe("the collections' fake", () => {
       vendorCode: "record_exists",
     });
     expect(await call(outbound.get, { key: "Acme" })).toEqual(advanced);
+  });
+
+  it("compares stored JSON for transitions, preserves retry receipts and refuses stale writers", async () => {
+    fake.reset();
+    await expect(call(outbound.save, { record: lead, ifRecord: lead }, "ada")).rejects.toMatchObject({
+      vendorCode: "record_changed",
+    });
+    await call(outbound.save, { record: { ...lead, seats: undefined } }, "owner");
+    const record = { ...lead, stage: "won" };
+    const transition = await call(outbound.save, { record, ifRecord: lead }, "ada");
+    expect(await call(outbound.save, { record, ifRecord: lead }, "ada")).toEqual(transition);
+    await expect(call(outbound.save, { record, ifRecord: lead }, "bo")).rejects.toMatchObject({
+      status: 409,
+      retryable: false,
+      vendorCode: "record_changed",
+    });
+    const later = await call(outbound.save, { record: { ...record, seats: 3 }, ifRecord: record }, "owner");
+    await expect(call(outbound.save, { record, ifRecord: lead }, "ada")).rejects.toMatchObject({
+      vendorCode: "record_changed",
+    });
+    expect(await call(outbound.get, { key: "Acme" })).toEqual(later);
   });
 
   it("saves, gets, lists and deletes, as the driver on Postgres does", async () => {

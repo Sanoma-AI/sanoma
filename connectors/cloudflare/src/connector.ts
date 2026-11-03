@@ -40,6 +40,13 @@ const containerSchema = z.object({
   source: z.string().min(1).describe("The company repository's clone URL, or a declared GitHub repository"),
   ref: z.string().min(1).describe("The branch it runs, such as `main`, never a commit"),
   revision: z.string().nullish().describe("The commit it runs, which apply sets from `ref`"),
+  configurationRevision: z
+    .string()
+    .regex(/^[A-Za-z0-9._-]{1,63}$/)
+    .nullish()
+    .describe(
+      "Non-secret deployment configuration revision: advance it to roll out rotated bootstrap values at the same source revision",
+    ),
   secrets: z
     .record(z.string().regex(/^[A-Z_][A-Z0-9_]*$/), z.string())
     .nullish()

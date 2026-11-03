@@ -50,7 +50,13 @@ const fanout = defineWorkflow({
   run: async (ctx, { title }) => {
     const [post, email, social] = await ctx.all([
       () => ctx.ghost.post.create({ title, html: `<p>${title}</p>`, status: "draft" }),
-      () => ctx.resend.broadcast.create({ audience: "newsletter", subject: title, html: `<p>${title}</p>` }),
+      () =>
+        ctx.resend.broadcast.create({
+          audience: "newsletter",
+          from: "Acme <news@acme.example>",
+          subject: title,
+          html: `<p>${title}</p>`,
+        }),
       () => ctx.bluesky.post.create({ text: title }),
     ]);
     await ctx.sleep({ seconds: 1 });
