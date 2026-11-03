@@ -204,6 +204,7 @@ export {
   type SourceHost,
 } from "./source.ts";
 export type { HostCapabilities, HostLifetime, HostOutputs, HostSpec } from "./host.ts";
+export { wakeUrlOf } from "./host.ts";
 export {
   checkDatabase,
   type DatabaseCapabilities,

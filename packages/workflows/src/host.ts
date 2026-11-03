@@ -29,10 +29,19 @@ export interface HostCapabilities {
 /** What a host's state says of it: where the app answers, which commit it runs, and whether it is up. */
 export interface HostOutputs {
   url: string;
+  /**
+   * Where a wakeup (and a check of its process) reaches it, `url` when left out: the vendor's own
+   * URL of a host whose `url` may be its `hostname`, so a wake never depends on a custom domain's DNS and certificate, and a
+   * hostname declared or dropped leaves its wakeup as it was. Apply gives a wakeup this one.
+   */
+  wakeUrl?: string;
   /** The commit it runs, when its state says. */
   revision?: string;
   healthy: boolean;
 }
+
+/** Where a wakeup, and a check of the host's own process, reaches it: its `wakeUrl`, else its `url`. */
+export const wakeUrlOf = (outputs: HostOutputs): string => outputs.wakeUrl ?? outputs.url;
 
 /**
  * A resource type's `host`: the fields it takes the runtime's inputs in, by dotted path into its
@@ -55,6 +64,12 @@ export interface HostSpec {
     port: string;
     /** A public site's domain, by site name: the app serves each site at the root of its domain (`SANOMA_DOMAINS`). */
     domains?: string;
+    /**
+     * The hostname the app is served at. A host with one reports `url` as `https://<hostname>` (its
+     * vendor's URL otherwise), so the links made from it use the stable name, and its vendor's URL
+     * as `wakeUrl`, where its wakeup reaches it. It is never one of `domains`' values.
+     */
+    hostname?: string;
   };
   /**
    * The field apply fills with the commit `ref` resolves to, before it plans: hidden, as a data

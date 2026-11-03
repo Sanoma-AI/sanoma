@@ -11,7 +11,7 @@ import {
   WAKE_PATH,
   type WakeupRegistration,
 } from "@sanoma-ai/workflows";
-import { domainsOf, domainsText } from "@sanoma-ai/workflows/shared";
+import { domainsOf, domainsText, hostnameUrl, siteAtHostname } from "@sanoma-ai/workflows/shared";
 import { instanceUrl, mintInstanceToken, WAKEUP_TOKEN } from "@sanoma-ai/workflows/wakeup-service";
 import { alarm, container } from "./connector.ts";
 import { refused } from "./errors.ts";
@@ -44,9 +44,12 @@ const TEXT = {
   source: "SANOMA_SOURCE",
   ref: "SANOMA_REF",
   revision: "SANOMA_REVISION",
+  configurationRevision: "SANOMA_CONFIG_REVISION",
   image: "SANOMA_IMAGE",
   port: "PORT",
   domains: "SANOMA_DOMAINS",
+  /** The app's own custom domain, when declared: the state's `url` is then `https://<hostname>`. */
+  hostname: "SANOMA_HOSTNAME",
   url: HOST_URL,
 } as const;
 /** Names a secret may not take: the Worker's own bindings. */
@@ -221,13 +224,40 @@ export const scriptOf = (name: string) => `sanoma-${name}`;
 /** The zone a hostname is looked up in: its last two labels (`www.acme.example` → `acme.example`). */
 export const apexOf = (hostname: string) => hostname.split(".").slice(-2).join(".");
 
+/** The Worker's plain-text bindings, by name. */
+const textOf = (bindings: ReadBinding[] | undefined) =>
+  new Map((bindings ?? []).filter((b) => b.type === "plain_text").map((b) => [b.name, b.text ?? ""]));
+
 /**
- * The hostnames the Worker's bindings say it was declared to serve (`SANOMA_DOMAINS`): the custom
- * domains that are Sanoma's to detach. One attached by hand and never declared is left alone.
+ * The hostnames the Worker's bindings say it was declared to serve (`SANOMA_DOMAINS` and
+ * `SANOMA_HOSTNAME`): the custom domains that are Sanoma's to detach. One attached by hand and
+ * never declared is left alone.
  */
 const declaredBefore = (bindings: ReadBinding[] | undefined) => {
-  const text = bindings?.find((b) => b.type === "plain_text" && b.name === TEXT.domains)?.text;
-  return new Set(text ? Object.values(domainsOf(text)) : []);
+  const text = textOf(bindings);
+  const domains = text.get(TEXT.domains);
+  const hostname = text.get(TEXT.hostname);
+  return new Set([...(domains ? Object.values(domainsOf(domains)) : []), ...(hostname ? [hostname] : [])]);
+};
+
+/** Where the app answers: its declared hostname, else the Worker's workers.dev URL. */
+const servedAt = (hostname: string | null | undefined, workerUrl: string) =>
+  hostname ? hostnameUrl(hostname) : workerUrl;
+
+/**
+ * Refuses a hostname that is also a site's domain, before any request: the app and the site would
+ * share it. `describeConfig` reports it at a data file's declaration; this guards a workflow's own
+ * call, which no data file declares.
+ */
+const checkHostname = (name: unknown, hostname: unknown, domains: unknown) => {
+  if (typeof hostname !== "string") return;
+  const site = siteAtHostname(hostname, (domains ?? {}) as Record<string, unknown>);
+  if (site) {
+    throw refused(
+      `container ${String(name)}: hostname ${hostname} is also the domain of the site ${site}: the app and a site need a hostname each`,
+      "invalid",
+    );
+  }
 };
 
 type ContainerState = {
@@ -237,9 +267,12 @@ type ContainerState = {
   source: string;
   ref: string;
   revision: string | null;
+  configurationRevision?: string;
   port: number;
   domains?: Record<string, string>;
+  hostname?: string;
   url: string;
+  worker_url: string;
   healthy: boolean;
 };
 
@@ -272,11 +305,22 @@ export function replanned(
 const sorted = (names: Iterable<string>) => [...names].toSorted().join(",");
 
 /** The declared fields a change of which is an update: everything the Worker runs, and the image. */
-const COMPARED = ["image", "source", "ref", "revision", "port", "domains"] as const;
+const COMPARED = [
+  "image",
+  "source",
+  "ref",
+  "revision",
+  "configurationRevision",
+  "port",
+  "domains",
+  "hostname",
+] as const;
+/** The compared fields a declaration may leave out: leaving one out is a change when the Worker has it. */
+const OPTIONAL = new Set<string>(["configurationRevision", "domains", "hostname"]);
 const same = (field: (typeof COMPARED)[number], a: unknown, b: unknown) =>
   field === "domains"
     ? domainsText((a ?? {}) as Record<string, string>) === domainsText((b ?? {}) as Record<string, string>)
-    : a === b;
+    : (a ?? null) === (b ?? null);
 
 /**
  * `{ revision }` when the Worker answers, else why not; with `start`, once its container answers
@@ -288,7 +332,7 @@ const health = async (
   cf: CloudflareApi,
   url: string,
   start: boolean,
-): Promise<{ revision: string } | { error: string; exit: boolean }> => {
+): Promise<{ revision: string; configurationRevision?: string } | { error: string; exit: boolean }> => {
   let res: Response;
   try {
     res = await cf.send(`${url}${HEALTH_PATH}${start ? "?start=1" : ""}`, { method: "GET" });
@@ -296,9 +340,13 @@ const health = async (
     return { error: errorMessage(error), exit: false };
   }
   const body = (await res.json().catch(() => undefined)) as
-    | { revision?: unknown; error?: unknown; exit?: unknown }
+    | { revision?: unknown; configurationRevision?: unknown; error?: unknown; exit?: unknown }
     | undefined;
-  if (res.ok && typeof body?.revision === "string") return { revision: body.revision };
+  if (res.ok && typeof body?.revision === "string")
+    return {
+      revision: body.revision,
+      ...(typeof body.configurationRevision === "string" && { configurationRevision: body.configurationRevision }),
+    };
   const error = typeof body?.error === "string" ? body.error : `${HEALTH_PATH} answered ${res.status}`;
   return { error, exit: typeof body?.exit === "string" };
 };
@@ -352,15 +400,16 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
     if (!bindings || !isOurs(bindings)) return undefined;
     const app = await cf.application(script);
     const url = await cf.workerUrl(script);
-    const text = new Map(bindings.filter((b) => b.type === "plain_text").map((b) => [b.name, b.text ?? ""]));
+    const text = textOf(bindings);
     const served = text.get(TEXT.domains);
-    // The domains it serves that are attached: one whose attach failed, or detached by hand, is
-    // drift, so the next apply attaches it again.
-    let domains: Record<string, string> | undefined;
-    if (served) {
-      const attached = new Set((await cf.domains(script)).map((d) => d.hostname));
-      domains = Object.fromEntries(Object.entries(domainsOf(served)).filter(([, hostname]) => attached.has(hostname)));
-    }
+    const declaredHostname = text.get(TEXT.hostname) || undefined;
+    // The domains and the hostname it serves that are attached: one whose attach failed, or
+    // detached by hand, is drift, so the next apply attaches it again.
+    const attached = new Set(served || declaredHostname ? (await cf.domains(script)).map((d) => d.hostname) : []);
+    const domains = served
+      ? Object.fromEntries(Object.entries(domainsOf(served)).filter(([, hostname]) => attached.has(hostname)))
+      : undefined;
+    const hostname = declaredHostname && attached.has(declaredHostname) ? declaredHostname : undefined;
     const state: ContainerState = {
       id: app?.id ?? null,
       name,
@@ -369,9 +418,13 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
       source: text.get(TEXT.source) ?? "",
       ref: text.get(TEXT.ref) ?? "",
       revision: text.get(TEXT.revision) ?? null,
+      ...(text.has(TEXT.configurationRevision) && { configurationRevision: text.get(TEXT.configurationRevision)! }),
       port: Number(text.get(TEXT.port) ?? 0),
       ...(domains && Object.keys(domains).length > 0 && { domains }),
-      url,
+      ...(hostname && { hostname }),
+      // Where the app answers now: at its hostname once attached; its health is asked on workers.dev.
+      url: servedAt(hostname, url),
+      worker_url: url,
       healthy: checkHealth && app !== undefined && "revision" in (await health(cf, url, false)),
     };
     const secrets = bindings.filter((b) => b.type === "secret_text").map((b) => b.name);
@@ -384,6 +437,7 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
   };
 
   const plan = async ({ id, desired }: { id?: string; desired?: Record<string, unknown> }): Promise<Planned> => {
+    if (desired) checkHostname(desired.name, desired.hostname, desired.domains);
     const found = id === undefined ? undefined : await inspect(id, false);
     if (!desired) return { action: found ? "delete" : "none", ...NONE };
     const { secrets, ...declared } = desired;
@@ -394,24 +448,52 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
     const { state } = found;
     if (planned.name !== state.name) return { action: "replace", planned, unknown, replace: ["name"] };
     const changed =
-      // `domains` left out is compared too: removing them is a change.
+      // `domains` and `hostname` left out are compared too: removing one is a change.
       COMPARED.some(
-        (field) => (field in planned || field === "domains") && !same(field, planned[field], state[field]),
+        (field) => (field in planned || OPTIONAL.has(field)) && !same(field, planned[field], state[field]),
       ) || sorted(Object.keys(secrets ?? {})) !== sorted(found.secrets);
     if (!changed) return { action: "none", planned: state, ...NONE };
-    return { action: "update", planned: { ...state, ...planned }, ...NONE };
+    // What the Worker will serve: the declared domains and hostname, none of the found ones left
+    // out; the app at the declared hostname, or on workers.dev without one.
+    const { domains: _domains, hostname: _hostname, ...was } = state;
+    const url = servedAt(planned.hostname as string | null | undefined, state.worker_url);
+    return {
+      action: "update",
+      planned: {
+        ...was,
+        ...planned,
+        ...(state.configurationRevision !== undefined &&
+          planned.configurationRevision == null && { configurationRevision: null }),
+        url,
+      },
+      ...NONE,
+    };
   };
 
   /** Waits until the Worker at `url` answers at `revision`, which starts its container. */
-  const started = async (cf: CloudflareApi, script: string, url: string, revision: string) => {
+  const started = async (
+    cf: CloudflareApi,
+    script: string,
+    url: string,
+    revision: string,
+    configurationRevision?: string | null,
+  ) => {
     const until = Date.now() + startTimeoutMs;
     for (;;) {
       const seen = await health(cf, url, true);
-      if ("revision" in seen && seen.revision === revision) return;
+      if (
+        "revision" in seen &&
+        seen.revision === revision &&
+        (seen.configurationRevision ?? "") === (configurationRevision ?? "")
+      )
+        return;
       // Not a wait: the container started and ended, and asking again would only start it again.
       if ("exit" in seen && seen.exit) throw refused(`${script} did not start at ${revision}: ${seen.error}`);
       if (Date.now() >= until) {
-        const why = "revision" in seen ? `it runs ${seen.revision}` : seen.error;
+        const why =
+          "revision" in seen
+            ? `it runs ${seen.revision} with configuration ${seen.configurationRevision ?? "unset"}`
+            : seen.error;
         throw refused(`${script} did not answer at ${revision} in ${Math.round(startTimeoutMs / 1000)} s: ${why}`);
       }
       await delay(pollMs);
@@ -447,7 +529,9 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
   /** Makes the Worker and its application match `desired`, and waits for it: a create and an update alike. */
   const put = async (desired: Record<string, unknown>, { secrets: store }: CallContext) => {
     const declared = container.schema.parse(await resolveSecrets(desired, store));
-    const { name, image, source, ref, revision, port, domains } = declared;
+    const { name, image, source, ref, revision, configurationRevision, port, domains } = declared;
+    const hostname = declared.hostname ?? undefined;
+    checkHostname(name, hostname, domains);
     const secrets = declared.secrets ?? {};
     if (!revision) {
       throw refused(
@@ -471,14 +555,16 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
     // the Worker as it was. Each apply asks again, which costs a manifest's HEAD once the copy is
     // there, and puts back one gone; the object starts only a pinned image of the account's.
     // The custom domains are read first too: the ones an update's Worker has, and each declared
-    // one missing, with its zone, so a domain whose zone the account lacks is refused here.
+    // one missing (a site's domain or the app's hostname), with its zone, so a domain whose zone
+    // the account lacks is refused here.
+    const hostnames = new Set([...Object.values(domains ?? {}), ...(hostname ? [hostname] : [])]);
     const before = declaredBefore(current);
-    const attached = current && (domains || before.size > 0) ? await cf.domains(script) : [];
+    const attached = current && (hostnames.size > 0 || before.size > 0) ? await cf.domains(script) : [];
     const held = new Set(attached.map((d) => d.hostname));
     const missing = await zonesOf(
       cf,
       name,
-      Object.values(domains ?? {}).filter((hostname) => !held.has(hostname)),
+      [...hostnames].filter((h) => !held.has(h)),
     );
     const runs = accountPinned(image, cf.account) ? image : await cf.copyImage(image);
     await prepared(cf, runs);
@@ -487,10 +573,13 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
       [TEXT.source]: source,
       [TEXT.ref]: ref,
       [TEXT.revision]: revision,
+      ...(configurationRevision && { [TEXT.configurationRevision]: configurationRevision }),
       [TEXT.image]: image,
       [TEXT.port]: String(port),
+      // Where the wakeup reaches the Worker: its workers.dev URL, whatever hostname it serves.
       [TEXT.url]: url,
       ...(served && { [TEXT.domains]: served }),
+      ...(hostname && { [TEXT.hostname]: hostname }),
     };
     const bindings: Binding[] = [
       { type: "durable_object_namespace", name: NAMESPACE, class_name: OBJECT_CLASS },
@@ -509,6 +598,13 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
       observability: { enabled: true },
       modules: await workerModules(),
     };
+    // A domain declared before and no longer is detached while the bindings still record it, and
+    // a missing one attached once the upload records it: whatever fails in between, none is left
+    // attached and unrecorded, and the next apply attaches what is still missing. A site's domain
+    // so never reaches a Worker that would serve the app there (README, Custom domains).
+    for (const domain of attached) {
+      if (before.has(domain.hostname) && !hostnames.has(domain.hostname)) await cf.detachDomain(domain.id);
+    }
     await cf.upload(script, { ...metadata, ...(current === undefined && { migrations: MIGRATION }) });
     await cf.enableSubdomain(script);
     let app = await cf.application(script);
@@ -523,15 +619,10 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
       // 2026-10-29; a Worker deployed again after the application started at once).
       await cf.upload(script, metadata);
     }
-    // The declared domains routed to the Worker, attached first so a failed attach leaves the old
-    // route up; then the ones declared before and no longer, detached.
-    for (const [hostname, zoneId] of missing) await cf.attachDomain(script, hostname, zoneId);
-    const hostnames = new Set(Object.values(domains ?? {}));
-    for (const domain of attached) {
-      if (before.has(domain.hostname) && !hostnames.has(domain.hostname)) await cf.detachDomain(domain.id);
-    }
-    await started(cf, script, url, revision);
-    // The public sites on the Worker, once the container that builds them runs (`sites.ts`).
+    for (const [domain, zone] of missing) await cf.attachDomain(script, domain, zone);
+    await started(cf, script, url, revision, configurationRevision);
+    // The public sites on the Worker, once the container that builds them runs (`sites.ts`): the
+    // same bindings, so every domain attached is one they record.
     const token = secrets[WAKEUP_TOKEN];
     if (domains && token) await serveSites(cf, { script, url, token, metadata, startTimeoutMs, pollMs });
     const state: ContainerState = {
@@ -541,9 +632,12 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
       source,
       ref,
       revision,
+      ...(configurationRevision && { configurationRevision }),
       port,
       ...(domains && { domains }),
-      url,
+      ...(hostname && { hostname }),
+      url: servedAt(hostname, url),
+      worker_url: url,
       healthy: true,
     };
     return { id: name, state };

@@ -161,6 +161,13 @@ export interface SitesBundle {
   assets: { path: string; content: string }[];
 }
 
+/** Where a host with a `hostname` serves the app (`HostSpec`'s `hostname`): `https://<hostname>`. */
+export const hostnameUrl = (hostname: string): string => `https://${hostname}`;
+
+/** The site whose domain is also the app's `hostname`, compared in lower case; undefined when none is. */
+export const siteAtHostname = (hostname: string, domains: Readonly<Record<string, unknown>>): string | undefined =>
+  Object.entries(domains).find(([, domain]) => typeof domain === "string" && same(domain, hostname))?.[0];
+
 /** The domains `domainsText` wrote, by site name; throws for a pair that is not `<site>=<hostname>`, or a site named twice. */
 export function domainsOf(text: string): Record<string, string> {
   const domains: Record<string, string> = {};
@@ -489,7 +496,7 @@ export function approverOf(name: string, resources: readonly PeopleResource[]): 
   return principalOf(name, resources) && name;
 }
 
-/** True for two strings the same but for case: an email or a GitHub login. */
+/** True for two strings the same but for case: an email, a GitHub login or a hostname. */
 const same = (a: string | undefined, b: string | undefined) =>
   a !== undefined && b !== undefined && a.toLowerCase() === b.toLowerCase();
 

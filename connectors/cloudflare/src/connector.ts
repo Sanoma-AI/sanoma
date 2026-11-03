@@ -40,6 +40,13 @@ const containerSchema = z.object({
   source: z.string().min(1).describe("The company repository's clone URL, or a declared GitHub repository"),
   ref: z.string().min(1).describe("The branch it runs, such as `main`, never a commit"),
   revision: z.string().nullish().describe("The commit it runs, which apply sets from `ref`"),
+  configurationRevision: z
+    .string()
+    .regex(/^[A-Za-z0-9._-]{1,63}$/)
+    .nullish()
+    .describe(
+      "Non-secret deployment configuration revision: advance it to roll out rotated bootstrap values at the same source revision",
+    ),
   secrets: z
     .record(z.string().regex(/^[A-Z_][A-Z0-9_]*$/), z.string())
     .nullish()
@@ -53,7 +60,21 @@ const containerSchema = z.object({
     .refine((domains) => Object.keys(domains).length > 0, "leave `domains` out rather than empty")
     .nullish()
     .describe("A public site's domain, by site name"),
-  url: z.string().nullish().describe("The Worker's URL on workers.dev, which Cloudflare sets"),
+  hostname: z
+    .string()
+    .regex(DOMAIN_NAME)
+    .nullish()
+    .describe(
+      "The hostname the app is served at, such as `internal.acme.example`: attached to the Worker as a custom domain, and its `url`",
+    ),
+  url: z
+    .string()
+    .nullish()
+    .describe("Where the app answers: `https://<hostname>` once attached, or the Worker's URL on workers.dev"),
+  worker_url: z
+    .string()
+    .nullish()
+    .describe("The Worker's URL on workers.dev, which Cloudflare sets: where its alarm and health checks reach it"),
   healthy: z
     .boolean()
     .nullish()
@@ -77,7 +98,7 @@ export const container = defineResource({
   schema: containerSchema,
   fields: {
     immutable: ["name"],
-    vendorOwned: ["id", "url", "healthy"],
+    vendorOwned: ["id", "url", "worker_url", "healthy"],
     writeOnly: ["secrets"],
     references: { source: { type: "github.repository", by: ["http_clone_url"] } },
   },
@@ -86,10 +107,19 @@ export const container = defineResource({
   writable: true,
   host: {
     capabilities: { lifetime: "stops-when-quiet", publicUrl: true, buildsFromGit: false, staticEgress: false },
-    inputs: { source: "source", ref: "ref", secrets: "secrets", port: "port", domains: "domains" },
+    inputs: {
+      source: "source",
+      ref: "ref",
+      secrets: "secrets",
+      port: "port",
+      domains: "domains",
+      hostname: "hostname",
+    },
     revision: "revision",
     outputs: (state) => ({
       url: String(state.url ?? ""),
+      // The alarm reaches the Worker on workers.dev, whatever hostname the app is served at.
+      ...(typeof state.worker_url === "string" && { wakeUrl: state.worker_url }),
       ...(typeof state.revision === "string" && { revision: state.revision }),
       healthy: state.healthy === true,
     }),
@@ -133,7 +163,8 @@ export const alarm = defineResource({
     immutable: ["host"],
     vendorOwned: ["at", "rang", "healthy"],
     writeOnly: ["token"],
-    references: { host: { type: ["cloudflare.container"], by: ["url"] } },
+    // The host's wake URL (`worker_url`, its outputs' `wakeUrl`), as apply gives it: its `url` is its hostname once attached.
+    references: { host: { type: ["cloudflare.container"], by: ["worker_url", "url"] } },
   },
   bindingId: (state) => String(state.host),
   writable: true,

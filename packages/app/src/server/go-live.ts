@@ -17,6 +17,7 @@ import {
   type Resource,
   vendorCodeOf,
   wakeupHostTypes,
+  wakeUrlOf,
 } from "@sanoma-ai/workflows";
 import { type DataValue, formatOptions, readLockfile, Reference, renderDataFile } from "@sanoma-ai/workflows/describe";
 import { secret } from "@sanoma-ai/workflows/resources";
@@ -665,7 +666,11 @@ export async function goLiveSignIn(app: AppContext, actor: Principal): Promise<{
   }
 }
 
-/** Where the host answers, from the latest finished apply runs that made or changed it, and whether `/healthz` answers. */
+/**
+ * Where the host answers, from the latest finished apply runs that made or changed it, and
+ * whether `/healthz` answers at its wake URL (`wakeUrlOf`), as the host kit asks: a new
+ * hostname's DNS and certificate may not be ready while the app already answers there.
+ */
 async function hostAnswer({ client }: AppContext): Promise<GoLiveProgress["host"]> {
   const runs = await client.runs({ workflow: APPLY_WORKFLOW, status: "finished", limit: 10 });
   const reports = await Promise.all(runs.map((run) => client.applyReport(run.runId)));
@@ -673,7 +678,7 @@ async function hostAnswer({ client }: AppContext): Promise<GoLiveProgress["host"
     const result = report.results.find((r) => r.id === KEYS.host && r.host);
     if (result?.host) {
       const { url, healthy } = result.host;
-      const answers = await fetch(new URL("/healthz", url), { signal: AbortSignal.timeout(2_000) })
+      const answers = await fetch(new URL("/healthz", wakeUrlOf(result.host)), { signal: AbortSignal.timeout(2_000) })
         .then((res) => res.ok)
         .catch(() => false);
       return { url, healthy: healthy && answers };

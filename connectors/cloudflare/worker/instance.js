@@ -130,6 +130,7 @@ export class Instance {
   health() {
     return json(200, {
       revision: this.env.SANOMA_REVISION ?? "",
+      ...(this.env.SANOMA_CONFIG_REVISION && { configurationRevision: this.env.SANOMA_CONFIG_REVISION }),
       running: this.ctx.container.running,
       ready: this.#ready,
       ...(this.#last !== undefined && !this.#ready && { last: this.#last }),
@@ -151,7 +152,11 @@ export class Instance {
     const image = container.images?.[IMAGE];
     // Not one to retry: the Worker was uploaded without its image.
     if (!image) throw new Error(`the Worker names no "${IMAGE}" image among its containers' images`);
-    const labels = { revision: this.env.SANOMA_REVISION ?? "", image: await imageLabel(image) };
+    const labels = {
+      revision: this.env.SANOMA_REVISION ?? "",
+      image: await imageLabel(image),
+      ...(this.env.SANOMA_CONFIG_REVISION && { configuration: this.env.SANOMA_CONFIG_REVISION }),
+    };
     const until = Date.now() + START_TIMEOUT_MS;
     let last;
     const saw = (what) => (last = this.#last = what);
@@ -173,8 +178,12 @@ export class Instance {
         if (!checked && container.running) {
           // One running from before: kept only if it says it started at these (a deploy otherwise).
           const info = await container.inspect();
-          const same = info && info.labels?.revision === labels.revision && (info.labels?.image ?? "") === labels.image;
-          if (!same) await container.destroy("a new revision or image");
+          const same =
+            info &&
+            info.labels?.revision === labels.revision &&
+            (info.labels?.image ?? "") === labels.image &&
+            (info.labels?.configuration ?? "") === (labels.configuration ?? "");
+          if (!same) await container.destroy("a new revision, image or configuration");
         }
         checked = true;
         if (!container.running) {

@@ -84,6 +84,9 @@ const check = (s: Scenario, records: readonly LedgerRecord[]) =>
 /** A feature with one scenario that runs tally with these table rows. */
 const tallyWith = (rows: string) => `Feature: T\n  Scenario: S\n    When tally runs with\n${rows}`;
 
+const exactWith = (fields: string) =>
+  `Feature: Exact\n  Scenario: Missing installation\n    When exact-input runs with exactly\n${fields}`;
+
 /** A scenario that expects crm.contact.save with `given` (a doc string's or a table's lines), after `keyword`. */
 const saving = (given: string, keyword = "Then") =>
   `Feature: A\n  Scenario: S\n    When announce runs\n    ${keyword} crm.contact.save was called with\n${given}`;
@@ -369,6 +372,41 @@ describe("parseFeature", () => {
   });
 
   describe("values", () => {
+    const exact = defineWorkflow({
+      name: "exact-input",
+      trigger: "manual",
+      input: z.object({
+        slug: z.string().min(1),
+        installation: z.number().optional(),
+        ref: z.string().default("main"),
+        options: z.object({ preview: z.boolean().optional() }).optional(),
+      }),
+      uses: [],
+      run: async () => null,
+    });
+    const exactScope = { ...scope, workflows: new Map([["exact-input", exact]]) };
+
+    it("preserves omitted optional inputs and schema defaults for exact JSON and tables", async () => {
+      for (const fields of [
+        doc('{ "slug": "acme", "options": {} }'),
+        "      | slug | acme |\n      | options | {} |\n",
+      ]) {
+        const [scenario] = await parseFeature(exactWith(fields), "scenarios/exact.feature", exactScope);
+        expect(scenario?.input).toEqual({ slug: "acme", ref: "main", options: {} });
+        expect(scenario?.input).not.toHaveProperty("installation");
+      }
+    });
+
+    it("refuses missing required and unknown fields in exact inputs", async () => {
+      expect(await thrown(exactWith(doc("{}")), exactScope)).toContain("slug");
+      expect(await thrown(exactWith(doc('{ "slug": "acme", "extra": true }')), exactScope)).toContain(
+        'no field "extra"',
+      );
+      expect(await thrown(exactWith(doc('{ "slug": "acme", "installation": null }')), exactScope)).toContain(
+        "installation",
+      );
+    });
+
     /** A workflow with a field of each kind a table cell may give. */
     const tally = defineWorkflow({
       name: "tally",
