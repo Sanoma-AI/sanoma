@@ -426,6 +426,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   const login = config.login && checkLogin(config.login, ops, drivers, appName);
   if (login) names.set(LOGIN_CODE_WORKFLOW, loginCodeWorkflow(login, appName));
   const { policy, policies, problems: policyProblems } = policyAt(root, { ops, workflows: names, collections });
+  const bundled = rootSnapshot(root);
   return {
     secrets: config.secrets ?? {},
     connections,
@@ -435,8 +436,8 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     databaseUrl,
     // The built-in's code and operations are part of the app's version, like the config's own. A
     // bundle's code is not the source's: it carries the hashes of the root it was read from.
-    version: rootSnapshot(root)?.version ?? computeVersion({ appName, workflows: [...names.values()] }),
-    changeCode: rootSnapshot(root)?.changeCode ?? changeCodeOf(names.get(CHANGE_WORKFLOW)!),
+    version: bundled?.version ?? computeVersion({ appName, workflows: [...names.values()] }),
+    changeCode: bundled?.changeCode ?? changeCodeOf(names.get(CHANGE_WORKFLOW)!),
     queueName: `sanoma:${appName}`,
     ...(login && { login }),
     ops,

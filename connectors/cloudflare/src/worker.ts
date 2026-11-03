@@ -37,11 +37,13 @@ export function workerModules(): Promise<WorkerModule[]> {
   return modules;
 }
 
-/** The sites router, `worker/sites.js`, read from the package. */
-export const sitesRouter = async (): Promise<WorkerModule> => ({
-  name: SITES_MODULE,
-  content: await readFile(new URL(SITES_MODULE, WORKER), "utf8"),
-});
+let router: Promise<WorkerModule> | undefined;
+
+/** The sites router, `worker/sites.js`, read from the package once. */
+export function sitesRouter(): Promise<WorkerModule> {
+  router ??= readFile(new URL(SITES_MODULE, WORKER), "utf8").then((content) => ({ name: SITES_MODULE, content }));
+  return router;
+}
 
 export {
   HEALTH_PATH,

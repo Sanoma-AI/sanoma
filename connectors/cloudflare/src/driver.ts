@@ -2,7 +2,8 @@ import { defineDriver, DriverError, retryableStatus } from "@sanoma-ai/workflows
 import type { Cloudflare } from "cloudflare";
 import { z } from "zod";
 import { cloudflareOps } from "./connector.ts";
-import { alarmOps, type CloudflareApi, containerOps, type ReadBinding, refused, type ZoneRecord } from "./ops.ts";
+import { refused } from "./errors.ts";
+import { alarmOps, type CloudflareApi, containerOps, type ReadBinding, type ZoneRecord } from "./ops.ts";
 import type { WorkerModule } from "./worker.ts";
 import { recordsOps } from "./records.ts";
 import { CLOUDFLARE_REGISTRY, copyImage } from "./registry.ts";

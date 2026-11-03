@@ -216,8 +216,6 @@ export interface AssetFile {
   contentType: string;
 }
 
-export { refused };
-
 /** The company's Worker, named after it. */
 export const scriptOf = (name: string) => `sanoma-${name}`;
 

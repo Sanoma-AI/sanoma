@@ -256,8 +256,8 @@ export class Instance {
     if (!wake) return problem(400, "the body must be { at: an ISO 8601 time }");
     // Whatever it held is replaced: a wake that rings for an older one starts a worker with nothing to do.
     await storage.put(WAKE_KEY, wake);
-    const set = starting ? await storage.getAlarm() : null;
-    if (set === null || set > Date.parse(wake.at)) await storage.setAlarm(Date.parse(wake.at));
+    if (starting) await alarmBy(storage, Date.parse(wake.at));
+    else await storage.setAlarm(Date.parse(wake.at));
     return new Response(null, { status: 204 });
   }
 
@@ -269,8 +269,7 @@ export class Instance {
   async startNow() {
     const storage = this.ctx.storage;
     await storage.put(START_KEY, true);
-    const set = await storage.getAlarm();
-    if (set === null || set > Date.now()) await storage.setAlarm(Date.now());
+    await alarmBy(storage, Date.now());
   }
 
   /**
@@ -304,6 +303,12 @@ export class Instance {
     const held = await this.ctx.storage.get(WAKE_KEY);
     if (held?.at === wake.at) await this.ctx.storage.put(WAKE_KEY, { ...held, rang: new Date().toISOString() });
   }
+}
+
+/** Sets the object's alarm to ring by `at`: an alarm set to ring sooner is left as it is. */
+async function alarmBy(storage, at) {
+  const set = await storage.getAlarm();
+  if (set === null || set > at) await storage.setAlarm(at);
 }
 
 /** The Worker's one object, which every request and the sites router's `startNow` go to. */

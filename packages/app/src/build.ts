@@ -33,7 +33,7 @@ import {
 } from "./content-files.ts";
 import type { ServerEntry } from "./context.ts";
 import { PUBLIC_FNS } from "./public-fns.ts";
-import { prerenderedDir } from "./worker/prerendered.ts";
+import { prerenderedDir, prerenderedFile } from "./worker/prerendered.ts";
 
 export { CONTENT_TYPES, type ContentProblem, contentTypes, readContent } from "./content-files.ts";
 
@@ -496,8 +496,7 @@ async function iconsModule(repo?: string): Promise<string> {
   const names = [...new Set(Object.values(siteIcons(repo)))]
     .filter((name) => ICON_NAME.test(name) && existsSync(file(name)))
     .toSorted();
-  // An absolute path with forward slashes, as Vite writes one on Windows too.
-  const imports = names.map((name, i) => `import icon${i} from ${JSON.stringify(file(name).split(sep).join("/"))};\n`);
+  const imports = names.map((name, i) => `import icon${i} from ${specifier(file(name))};\n`);
   return `${imports.join("")}export default new Map([${names.map((name, i) => `[${JSON.stringify(name)}, icon${i}]`).join(", ")}]);`;
 }
 
@@ -947,7 +946,7 @@ const specifier = (file: string) => JSON.stringify(file.split(sep).join("/"));
 const exported = (name: string, data: unknown) => `export const ${name} = ${JSON.stringify(data)};\n`;
 
 /** `virtual:sanoma/worker`, which `worker/entry.ts` imports: the company's config, root, description and content, and Cedar's web build, ready. */
-function workerModule(root: string, options: BuildWorkerOptions): Plugin {
+function workerModule(root: string, served: SiteEntry[], options: BuildWorkerOptions): Plugin {
   const id = `\0${WORKER}`;
   // The runtime's Cedar, its web build beside its Node one (`./web` is import-only, so no require resolves it).
   const fromRuntime = createRequire(createRequire(defaultRuntimeFrom).resolve("@sanoma-ai/workflows"));
@@ -965,7 +964,7 @@ function workerModule(root: string, options: BuildWorkerOptions): Plugin {
         "cedarWeb.initSync({ module: cedarModule });\n",
         "export const cedar = cedarWeb;\n",
         exported("root", root),
-        exported("served", workerSites(options.description)),
+        exported("served", served),
         exported("snapshot", options.snapshot),
         exported("description", options.description),
         exported("published", publishedOf(root)),
@@ -975,12 +974,12 @@ function workerModule(root: string, options: BuildWorkerOptions): Plugin {
 }
 
 /** The Worker's plugins: Cloudflare's, over the ssr environment, the bundle's module, and DBOS's optional packages stubbed. */
-async function workerPlugins(root: string, options: BuildWorkerOptions): Promise<PluginOption[]> {
+async function workerPlugins(root: string, served: SiteEntry[], options: BuildWorkerOptions): Promise<PluginOption[]> {
   const { cloudflare } = await import("@cloudflare/vite-plugin");
   const { OPTIONAL } = await import("./worker/optional.ts");
   const missing = join(pkgDir, "src", "worker", "missing.js");
   return [
-    workerModule(root, options),
+    workerModule(root, served, options),
     workerTrim(),
     {
       // Each company file says it is the one evaluating, for what V8's call sites name in a bundle
@@ -1108,7 +1107,7 @@ export async function buildWorker(repo: string, options: BuildWorkerOptions): Pr
   const vite = await import("vite");
   const customLogger = quietLogger(vite, options.log);
   const config: InlineConfig = {
-    ...repoConfig(root, undefined, { sites, plugins: await workerPlugins(root, options) }),
+    ...repoConfig(root, undefined, { sites, plugins: await workerPlugins(root, served, options) }),
     build: { outDir, emptyOutDir: true },
     logLevel: "warn",
     customLogger,
@@ -1134,7 +1133,7 @@ export async function buildWorker(repo: string, options: BuildWorkerOptions): Pr
           const html = await response.text();
           if (!response.ok)
             throw new Error(`prerendering ${site}${path} answered ${response.status}: ${html.slice(0, 200)}`);
-          const file = join(client, ...`${prerenderedDir(site)}${page}/index.html`.split("/"));
+          const file = join(client, ...prerenderedFile(site, path)!.split("/"));
           mkdirSync(dirname(file), { recursive: true });
           writeFileSync(file, html);
         }

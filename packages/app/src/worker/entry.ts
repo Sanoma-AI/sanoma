@@ -14,7 +14,7 @@ import type { AppContext } from "../context.ts";
 import { publicFront } from "../login/public.ts";
 import { placeOf } from "../loopback.ts";
 import { seoFile } from "../seo.ts";
-import { PRERENDERED, prerenderedDir } from "./prerendered.ts";
+import { PRERENDERED, prerenderedDir, prerenderedFile } from "./prerendered.ts";
 
 /**
  * The paths a site's domain still sends to the container: the object's own, and the app's machine
@@ -53,6 +53,8 @@ checkPreparedOnly("the company's container, at its start,");
 
 /** The sites this bundle serves, by name. */
 const served = new Map(servedSites.map((site) => [site.name, site]));
+/** The same, by their folder among the prerendered pages (`prerenderedDir`). */
+const servedAtDir = new Map(servedSites.map((site) => [prerenderedDir(site.name), site]));
 
 /** The site served at each hostname, by `SANOMA_DOMAINS` as last parsed: the same text on every request of an isolate. */
 let hosts: { text: string; sites: Map<string, string> } | undefined;
@@ -63,19 +65,12 @@ function siteAt(url: URL, env: WorkerEnv): { name: string; domain: string } | un
   if (!text) return undefined;
   if (hosts?.text !== text) {
     const pairs = Object.entries(domainsOf(text)).filter(([name]) => served.has(name));
-    hosts = { text, sites: new Map(pairs.map(([name, domain]) => [domain, name])) };
+    // In lower case, as a URL's hostname is and the container compares them.
+    hosts = { text, sites: new Map(pairs.map(([name, domain]) => [domain.toLowerCase(), name])) };
   }
   const name = hosts.sites.get(url.hostname);
   return name === undefined ? undefined : { name, domain: url.hostname };
 }
-
-/** The prerendered page for `pathname`, among the Worker's assets: undefined for a path with a trailing slash, which the router redirects. */
-const prerenderedPath = (site: string, pathname: string) =>
-  pathname === "/"
-    ? `${prerenderedDir(site)}/index.html`
-    : pathname.endsWith("/")
-      ? undefined
-      : `${prerenderedDir(site)}${pathname}/index.html`;
 
 /** The config resolved over the bundled root, once per isolate: what `callApi` reads of it opens nothing. */
 let resolved: ReturnType<typeof resolveConfig> | undefined;
@@ -176,7 +171,7 @@ function prerenderRequest(request: Request, env: WorkerEnv) {
   if (env.SANOMA_PRERENDER !== "1") return undefined;
   const url = new URL(request.url);
   const [, dir, ...rest] = url.pathname.slice(PRERENDERED.length).split("/");
-  const entry = dir === undefined ? undefined : served.get(dir.replace(".", "/"));
+  const entry = servedAtDir.get(`${PRERENDERED}/${dir}`);
   if (!url.pathname.startsWith(`${PRERENDERED}/`) || !entry) return undefined;
   // Each site the bundle serves has a domain (`workerSites`).
   const domain = entry.domain!;
@@ -187,7 +182,7 @@ function prerenderRequest(request: Request, env: WorkerEnv) {
 /** The asset for a GET of `url` on `site`: a file of the client build at a path with an extension (a site's public files too; `/assets/*` never gets here), else the page prerendered for it unless a query, which the page may read, asks otherwise. */
 function assetPath({ pathname, search }: URL, site: string): string | undefined {
   if (/\.[^/]+$/.test(pathname)) return pathname.startsWith(`${PRERENDERED}/`) ? undefined : pathname;
-  return search ? undefined : prerenderedPath(site, pathname);
+  return search ? undefined : prerenderedFile(site, pathname);
 }
 
 /** The sites bundle's contract with the connector's router: what it serves, and how. */
