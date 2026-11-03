@@ -17,8 +17,8 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 60
     env:
-      # The certificate in MAC_CERT_P12. Moving to another team's Developer ID asks every installed
-      # app for Keychain access once (cookie encryption, forge.config.mts).
+      # The certificate in MAC_CERT_P12 (another team's asks installed apps for Keychain access once:
+      # packages/desktop/README.md, "Signing and notarization").
       APPLE_SIGNING_IDENTITY: "Developer ID Application: LEON KWAN (6NP563U4MV)"
     # Actions pinned to commits, as in release.yml: this job writes releases.
     steps:
@@ -109,8 +109,12 @@ jobs:
             codesign --verify --verbose=2 "$dmg"
             notarized "$dmg" --type open --context context:primary-signature
             xcrun stapler validate "$dmg"
-            node_arch=$(lipo -archs "$app/Contents/Resources/node/node")
+            node="$app/Contents/Resources/node/node"
+            node_arch=$(lipo -archs "$node")
             [ "$node_arch" = "${pair##*:}" ] || { echo "::error::$app carries a $node_arch Node"; exit 1; }
+            # node.entitlements.plist reached it (optionsForFile matches the Node by its path).
+            codesign -d --entitlements - "$node" 2>/dev/null | grep -q disable-library-validation ||
+              { echo "::error::$node lacks node.entitlements.plist"; exit 1; }
           done
           # The runner is Apple silicon: under the hardened runtime, its Node starts, JIT and all, and
           # so does the app, still running 15 seconds on.

@@ -13,10 +13,8 @@ import { VitePlugin } from "@electron-forge/plugin-vite";
 import type { ForgeConfig } from "@electron-forge/shared-types";
 import { FuseV1Options, FuseVersion } from "@electron/fuses";
 
-// On a Mac, the app is signed with the Developer ID that APPLE_SIGNING_IDENTITY names (one in the
-// keychain), and notarized, with the dmg, when APPLE_API_KEY is the path of an App Store Connect
-// API key (APPLE_API_KEY_ID and APPLE_API_ISSUER say whose): desktop-release.yml sets them all.
-// Without them (`start`, the smoke test, a `package` here) it is signed ad hoc.
+// APPLE_SIGNING_IDENTITY signs with a Developer ID, APPLE_API_KEY (with its id and issuer)
+// notarizes; without them the build is signed ad hoc (README, "Signing and notarization").
 const identity = process.env.APPLE_SIGNING_IDENTITY;
 const notarizeWith =
   identity && process.env.APPLE_API_KEY
@@ -55,21 +53,18 @@ const config: ForgeConfig = {
     // node.entitlements.plist. Without one, ad hoc, as Apple silicon reports an app with no
     // signature as damaged: "-" goes to codesign as is (no keychain lookup), and no hardened
     // runtime (library validation rejects ad-hoc frameworks).
-    osxSign: identity
-      ? {
-          identity,
-          continueOnError: false,
-          optionsForFile: (file) =>
-            file.endsWith("/Contents/Resources/node/node")
-              ? { entitlements: join(import.meta.dirname, "node.entitlements.plist") }
-              : {},
-        }
-      : {
-          identity: "-",
-          identityValidation: false,
-          continueOnError: false,
-          optionsForFile: () => ({ hardenedRuntime: false }),
-        },
+    osxSign: {
+      continueOnError: false,
+      ...(identity
+        ? {
+            identity,
+            optionsForFile: (file: string) =>
+              file.endsWith("/Contents/Resources/node/node")
+                ? { entitlements: join(import.meta.dirname, "node.entitlements.plist") }
+                : {},
+          }
+        : { identity: "-", identityValidation: false, optionsForFile: () => ({ hardenedRuntime: false }) }),
+    },
     // The app, notarized and stapled before the makers pack it (so the zip's is too).
     osxNotarize: notarizeWith,
   },
