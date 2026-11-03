@@ -2,6 +2,8 @@
 
 Vitest tests for `@sanoma-ai/workflows`. Files that start runs need Postgres (`pnpm db:up`) and use the shared harness; the rest are unit tests.
 
+`scenario.test.ts` covers exact workflow inputs alongside generated inputs: omitted optionals, schema defaults and missing required fields. Preserve those distinctions when changing scenario compilation.
+
 ## Contents
 
 | Path                                                             | What it is                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
