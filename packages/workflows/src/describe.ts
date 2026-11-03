@@ -363,8 +363,8 @@ function appClashes(
 /**
  * Each site a host's `domains` (its type's `host.inputs.domains`) names that is not a public
  * site, each domain it gives more than one site, and a domain that is the host's `hostname` too,
- * at the host's declaration: the app serves only a public site at a domain, one site at each,
- * and itself at another.
+ * or another host's hostname or domain, at the host's declaration: the app serves only a public
+ * site at a domain, one site at each, and itself at another, and one host holds each.
  */
 function domainProblems(
   declared: readonly DeclaredResource[],
@@ -373,6 +373,11 @@ function domainProblems(
 ): ResourceProblem[] {
   const isPublic = new Set(sites.filter((site) => site.public).map((site) => site.name));
   const problems: ResourceProblem[] = [];
+  // Each hostname a host serves the app at, and each host's domains, lowercased: one host attaches each.
+  const hostnames: [string, DeclaredResource][] = [];
+  const held = new Map<string, Set<DeclaredResource>>();
+  const hold = (name: string, resource: DeclaredResource) =>
+    held.set(name.toLowerCase(), (held.get(name.toLowerCase()) ?? new Set()).add(resource));
   for (const resource of declared) {
     const inputs = types.get(`${resource.vendor}.${resource.type}`)?.host?.inputs;
     const path = inputs?.domains;
@@ -392,6 +397,17 @@ function domainProblems(
     const site = typeof hostname === "string" ? siteAtHostname(hostname, domains) : undefined;
     if (site) messages.push(`${hostname as string} is the app's hostname and the domain of ${site}`);
     problems.push(...messages.map((message) => ({ ...resource.at, message })));
+    for (const [, domain] of named) hold(domain as string, resource);
+    if (typeof hostname === "string") {
+      hostnames.push([hostname, resource]);
+      hold(hostname, resource);
+    }
+  }
+  for (const [hostname, resource] of hostnames) {
+    const others = [...(held.get(hostname.toLowerCase()) ?? [])].filter((other) => other !== resource);
+    if (others.length === 0) continue;
+    const message = `${hostname} is the app's hostname here and is served by ${others.map((o) => o.id).join(", ")} too`;
+    problems.push({ ...resource.at, message });
   }
   return problems;
 }

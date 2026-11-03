@@ -207,6 +207,37 @@ describe("a host type", () => {
     expect(problems("app.sanoma.example")).toEqual([]);
   });
 
+  it("is described with a problem at each host whose hostname another host serves too", () => {
+    const service = hostOf({ inputs: { ...host.inputs, domains: "sites", hostname: "name" } });
+    const acme = defineConnector("acme", { service }, { title: "Acme", package: "@acme/connector" });
+    const root = tree("hostname-two-hosts", {
+      "resources/infra.ts": [
+        'import { acme } from "@acme/connector/resources";',
+        'export const prod = acme.service({ name: "app.sanoma.example", repo: { url: "u", branch: "main" } });',
+        'export const staging = acme.service({ name: "App.sanoma.example", repo: { url: "u", branch: "main" } });',
+        'export const site = acme.service({ name: "other.sanoma.example", repo: { url: "u", branch: "main" }, sites: { www: "app.sanoma.example" } });',
+        "",
+      ].join("\n"),
+      "sites/www/site.ts":
+        'import { defineSite } from "sanoma/site";\n\nexport default defineSite({ public: true });\n',
+      "sites/www/routes/index.tsx": 'import { createFileRoute } from "@tanstack/react-router";\n',
+    });
+    expect(describeConfig({ workflows: [], connectors: [acme], root }).problems).toEqual([
+      {
+        file: "resources/infra.ts",
+        export: "prod",
+        message:
+          "app.sanoma.example is the app's hostname here and is served by resources/infra.ts#staging, resources/infra.ts#site too",
+      },
+      {
+        file: "resources/infra.ts",
+        export: "staging",
+        message:
+          "App.sanoma.example is the app's hostname here and is served by resources/infra.ts#prod, resources/infra.ts#site too",
+      },
+    ]);
+  });
+
   it("takes sanoma's own secrets in its secrets map, and no other type does", () => {
     const service = hostOf({});
     const env = { SANOMA_DATABASE_URL: secret("SANOMA_DATABASE_URL_STORE"), TOKEN: secret("TOKEN") };

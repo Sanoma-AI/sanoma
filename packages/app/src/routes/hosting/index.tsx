@@ -410,11 +410,11 @@ function SlotCard({
  */
 function HostServes({ hostname }: { hostname: string | undefined }) {
   const { data } = useQuery(goLiveProgressQuery());
-  // Not known yet, or not known at all: nothing said rather than a hostname wrongly pending.
-  if (data === undefined) return null;
-  const { host } = data;
-  const pending = hostname !== undefined && host?.url !== hostnameUrl(hostname);
-  if (!host && !pending) return null;
+  const host = data?.host;
+  // Where it serves not known (loading, or failed): the hostname shown, never said to be pending.
+  const pending = data !== undefined && hostname !== undefined && host?.url !== hostnameUrl(hostname);
+  const shown = hostname !== undefined && (pending || data === undefined);
+  if (!host && !shown) return null;
   return (
     <>
       {host && (
@@ -425,11 +425,11 @@ function HostServes({ hostname }: { hostname: string | undefined }) {
           </span>
         </Fact>
       )}
-      {pending && (
+      {shown && (
         <Fact label="Hostname">
           <span className="inline-flex flex-wrap items-center gap-2">
             <code className="text-xs">{hostname}</code>
-            <span className="text-muted-foreground">once applied</span>
+            {pending && <span className="text-muted-foreground">once applied</span>}
           </span>
         </Fact>
       )}

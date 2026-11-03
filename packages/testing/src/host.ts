@@ -596,7 +596,9 @@ export function fakeHost(start: StartHost, { lifetime = "long-lived", quietAfter
         const replace = ["source", "ref", "port", "revision", "hostname"].filter(
           (f) => (f in desired || f === "hostname") && desired[f] !== state[f],
         );
-        return { action: replace.length ? "replace" : "none", planned: { ...state, ...planned }, unknown: [], replace };
+        // A hostname left out is gone from the planned state too.
+        const { hostname: _hostname, ...was } = state;
+        return { action: replace.length ? "replace" : "none", planned: { ...was, ...planned }, unknown: [], replace };
       },
       create: async ({ desired }, call) => run(desired, call.secrets),
       update: async ({ desired }, call) => run(desired, call.secrets),
