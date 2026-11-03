@@ -71,15 +71,17 @@ jobs:
           base64 --decode <<<"$MAC_CERT_P12" > "$RUNNER_TEMP/certificate.p12"
           security import "$RUNNER_TEMP/certificate.p12" -k "$keychain" -P "$MAC_CERT_PASSWORD" -T /usr/bin/codesign
           rm "$RUNNER_TEMP/certificate.p12"
-          if ! security find-certificate -c "Developer ID Certification Authority" "$keychain" >/dev/null 2>&1; then
+          g2=f16cd3c54c7f83cea4bf1a3e6a0819c8aaa8e4a1528fd144715f350643d2df3a
+          if ! security find-certificate -a -Z "$keychain" | grep -qix "SHA-256 hash: $g2"; then
             curl -fsSL -o "$RUNNER_TEMP/DeveloperIDG2CA.cer" https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer
-            shasum -a 256 -c <<<"f16cd3c54c7f83cea4bf1a3e6a0819c8aaa8e4a1528fd144715f350643d2df3a  $RUNNER_TEMP/DeveloperIDG2CA.cer"
+            shasum -a 256 -c <<<"$g2  $RUNNER_TEMP/DeveloperIDG2CA.cer"
             security import "$RUNNER_TEMP/DeveloperIDG2CA.cer" -k "$keychain"
           fi
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" >/dev/null
           security list-keychains -d user -s "$keychain" "$HOME/Library/Keychains/login.keychain-db"
           security find-identity -v -p codesigning "$keychain" | grep -F "\"$APPLE_SIGNING_IDENTITY\"" ||
             { echo "::error::MAC_CERT_P12 holds no valid $APPLE_SIGNING_IDENTITY"; exit 1; }
+          grep -q "BEGIN PRIVATE KEY" <<<"$APPLE_API_KEY" || { echo "::error::APPLE_API_KEY is not a .p8 key"; exit 1; }
           printf '%s\n' "$APPLE_API_KEY" > "$RUNNER_TEMP/apple-api-key.p8"
       # Stages Node for arm64 and x64 and pnpm, then Forge builds and packs both architectures,
       # signed with the Developer ID and notarized, the apps and the dmgs (forge.config.mts).

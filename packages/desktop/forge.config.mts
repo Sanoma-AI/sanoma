@@ -16,14 +16,14 @@ import { FuseV1Options, FuseVersion } from "@electron/fuses";
 // APPLE_SIGNING_IDENTITY signs with a Developer ID, APPLE_API_KEY (with its id and issuer)
 // notarizes; without them the build is signed ad hoc (README, "Signing and notarization").
 const identity = process.env.APPLE_SIGNING_IDENTITY;
-const notarizeWith =
-  identity && process.env.APPLE_API_KEY
-    ? {
-        appleApiKey: process.env.APPLE_API_KEY,
-        appleApiKeyId: required("APPLE_API_KEY_ID"),
-        appleApiIssuer: required("APPLE_API_ISSUER"),
-      }
-    : undefined;
+if (process.env.APPLE_API_KEY && !identity) throw new Error("APPLE_API_KEY is set without APPLE_SIGNING_IDENTITY");
+const notarizeWith = process.env.APPLE_API_KEY
+  ? {
+      appleApiKey: process.env.APPLE_API_KEY,
+      appleApiKeyId: required("APPLE_API_KEY_ID"),
+      appleApiIssuer: required("APPLE_API_ISSUER"),
+    }
+  : undefined;
 
 function required(name: string): string {
   const value = process.env[name];
