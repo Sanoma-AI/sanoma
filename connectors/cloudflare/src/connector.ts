@@ -163,7 +163,8 @@ export const alarm = defineResource({
     immutable: ["host"],
     vendorOwned: ["at", "rang", "healthy"],
     writeOnly: ["token"],
-    references: { host: { type: ["cloudflare.container"], by: ["url"] } },
+    // The host's wake URL (`worker_url`, its outputs' `wakeUrl`), as apply gives it: its `url` is its hostname once attached.
+    references: { host: { type: ["cloudflare.container"], by: ["worker_url", "url"] } },
   },
   bindingId: (state) => String(state.host),
   writable: true,

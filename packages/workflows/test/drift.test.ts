@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { bluesky } from "@sanoma-ai/connector-bluesky";
+import { cloudflare } from "@sanoma-ai/connector-cloudflare";
 import { testDatabaseUrl, withFake } from "@sanoma-ai/testing";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -20,7 +21,10 @@ import {
   resolveConfig,
   SanomaClient,
 } from "../src/index.ts";
+import { compare, type Found } from "../src/drift.ts";
 import { defineFake } from "../src/fake.ts";
+import { resourceTypesOf } from "../src/resource.ts";
+import { wakeupOps } from "../src/wakeup-type.ts";
 import { fakeMail, mailDataFile, recordsFor } from "./fakes/mail.ts";
 import { companyConfig, companyDir, companyFakes, nodeIdOf } from "./fixtures/company/fakes.ts";
 import company from "./fixtures/company/sanoma.config.ts";
@@ -441,5 +445,37 @@ describe("the built-in drift workflow in a config", () => {
 
   it("changes the app's version with the operations it uses", () => {
     expect(resolveConfig(config).version).not.toBe(resolveConfig(bare).version);
+  });
+});
+
+/** A data file's wakeup of the type `type` (`cloudflare.alarm` or `sanoma.wakeup`) for its host `company`, bound to `binding`. */
+const wakeupOf = (type: "alarm" | "wakeup", binding: string) => ({
+  id: `resources/infra.ts#${type}`,
+  name: type,
+  vendor: type === "wakeup" ? "sanoma" : "cloudflare",
+  type,
+  binding,
+  desired: { host: "company" },
+  refs: { host: "resources/infra.ts#host" },
+});
+
+describe("a drift check of a wakeup whose host has a hostname", () => {
+  it("finds the wakeup's host as declared at its host's wake URL, not at the hostname its url is", () => {
+    const types = resourceTypesOf([cloudflare, wakeupOps]);
+    const workerUrl = "https://sanoma-company.example.workers.dev";
+    // The container with its hostname attached: the app at the hostname, the wakeup on workers.dev.
+    const host = {
+      state: { name: "company", hostname: "app.acme.example", url: "https://app.acme.example", worker_url: workerUrl },
+    };
+    const found = new Map<string, Found>([
+      ["resources/infra.ts#host", host],
+      ["resources/infra.ts#alarm", { state: { host: workerUrl, at: null, rang: null, healthy: true } }],
+      ["resources/infra.ts#wakeup", { state: { host: workerUrl, id: "w1", at: null, lastError: null } }],
+    ]);
+    const rows = compare(types, [wakeupOf("alarm", workerUrl), wakeupOf("wakeup", "w1")], found);
+    expect(rows.map((r) => [r.type, r.status, r.fields])).toEqual([
+      ["alarm", "clean", []],
+      ["wakeup", "clean", []],
+    ]);
   });
 });

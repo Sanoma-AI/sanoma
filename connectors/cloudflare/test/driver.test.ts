@@ -113,6 +113,16 @@ const attachRefused = reply(
   cfError(100117, "Hostname already has a DNS record"),
   "PUT",
 );
+/** Cloudflare's reply to the detach of the custom domain `id`. */
+const detached = (id: string) =>
+  reply(apiPath(`/workers/domains/${id}`), 200, { success: true, errors: [], messages: [] }, "DELETE");
+/** Cloudflare's reply to the attach of `new.acme.example`. */
+const attachedNew = reply(
+  apiPath("/workers/domains"),
+  200,
+  cfResult({ id: "d2", hostname: "new.acme.example", service: "sanoma-company", zone_id: ZONE }),
+  "PUT",
+);
 /** The zone lookup of `acme.example`. */
 const zoneLookup = () => fixture("hostname").find((e) => e.path.startsWith("/client/v4/zones?"))!;
 /** The registry's temporary credentials, as the SDK's `containers.registries.credentials.generate` answers. */
@@ -127,6 +137,33 @@ const registryCredentials = reply(
   }),
   "POST",
 );
+
+/** A rename's requests up to its upload, from the Worker serving `old.acme.example`: its plan, its reads, the detach of the old name. */
+const renameUntilUpload = (updated: Exchange[]) => {
+  const attached = attachedDomains("old.acme.example");
+  return [
+    withText(updated[0]!, "SANOMA_HOSTNAME", "old.acme.example"),
+    updated[1]!,
+    updated[2]!,
+    attached,
+    withText(updated[3]!, "SANOMA_HOSTNAME", "old.acme.example"),
+    attached,
+    zoneLookup(),
+    updated[4]!,
+    detached("d1"),
+  ];
+};
+const renamed = { ...desired, revision: "def456", hostname: "new.acme.example" };
+const renamedState = {
+  ...state,
+  revision: "def456",
+  hostname: "new.acme.example",
+  url: "https://new.acme.example",
+};
+const update = (input: object) =>
+  op("container.update", { id: "company", ...input, expect: { action: "update", replace: [] } });
+/** The requests' methods and paths from `from` on, without the API's prefix. */
+const requests = (from = 0) => sent.slice(from).map((r) => `${r.method} ${r.path.replace(API, "")}`);
 
 describe.skipIf(live)("cloudflareDriver", () => {
   describe("cloudflare.container", () => {
@@ -562,27 +599,65 @@ describe.skipIf(live)("cloudflareDriver", () => {
       expect((planned as { planned: { url: string } }).planned.url).toBe("https://app.acme.example");
     });
 
-    it("attaches a renamed hostname before the upload records it, so a failed attach leaves the Worker naming the old one", async () => {
+    it("detaches a renamed hostname before the upload and attaches the new one after it, the app at the new one", async () => {
       const updated = fixture("update-to-a-new-image");
-      const attached = attachedDomains("old.acme.example");
-      play("hostname-rename-fails", [
-        withText(updated[0]!, "SANOMA_HOSTNAME", "old.acme.example"),
+      play("hostname-rename", [
+        ...renameUntilUpload(updated),
+        ...updated.slice(5, 8),
+        attachedNew,
+        ...updated.slice(8),
+      ]);
+      expect(await update({ desired: renamed })).toEqual({ id: "company", state: renamedState });
+      // Detached while the bindings still name it; attached once they name the new one.
+      expect(requests().filter((r) => /^(PUT|DELETE) \/workers\/(domains|scripts\/sanoma-company)/.test(r))).toEqual([
+        "DELETE /workers/domains/d1",
+        "PUT /workers/scripts/sanoma-company",
+        "PUT /workers/domains",
+      ]);
+      expect(sent.find((r) => r.method === "PUT" && r.path === apiPath("/workers/domains"))!.body).toEqual({
+        hostname: "new.acme.example",
+        service: "sanoma-company",
+        zone_id: ZONE,
+      });
+      const { bindings } = await uploaded();
+      expect(bindings).toContainEqual({ type: "plain_text", name: "SANOMA_HOSTNAME", text: "new.acme.example" });
+    });
+
+    it("converges on a retry after a rename fails past the detach: the old name gone, the new one attached and recorded", async () => {
+      const updated = fixture("update-to-a-new-image");
+      const uploadRefused = reply(
+        apiPath("/workers/scripts/sanoma-company"),
+        400,
+        cfError(10021, "Uncaught Error: the upload failed"),
+        "PUT",
+      );
+      // The retry finds the bindings naming the old hostname, which is no longer attached.
+      const settings = withText(updated[0]!, "SANOMA_HOSTNAME", "old.acme.example");
+      play("hostname-rename-retried", [
+        ...renameUntilUpload(updated),
+        uploadRefused,
+        settings,
         updated[1]!,
-        updated[2]!,
-        attached,
+        attachedDomains(),
         withText(updated[3]!, "SANOMA_HOSTNAME", "old.acme.example"),
-        attached,
+        attachedDomains(),
         zoneLookup(),
         updated[4]!,
-        attachRefused,
+        ...updated.slice(5, 8),
+        attachedNew,
+        updated[9]!,
       ]);
-      const renamed = { ...desired, revision: "def456", hostname: "new.acme.example" };
-      await expect(
-        op("container.update", { id: "company", desired: renamed, expect: { action: "update", replace: [] } }),
-      ).rejects.toMatchObject({ name: "DriverError", status: 409 });
-      // Nothing uploaded and nothing detached: the old hostname stays attached and recorded.
-      expect(sent.some((r) => r.method === "PUT" && r.path.includes("/workers/scripts/"))).toBe(false);
-      expect(sent.some((r) => r.method === "DELETE")).toBe(false);
+      await expect(update({ desired: renamed })).rejects.toMatchObject({ name: "DriverError", status: 400 });
+      // Nothing attached that the bindings do not name: the old hostname is gone, the new one not attached yet.
+      expect(requests().filter((r) => r.includes("/workers/domains/") || r === "PUT /workers/domains")).toEqual([
+        "DELETE /workers/domains/d1",
+      ]);
+      const retried = sent.length;
+      expect(await update({ desired: renamed })).toEqual({ id: "company", state: renamedState });
+      // No detach the second time: the old name is not attached; the new one is, after the upload.
+      expect(
+        requests(retried).filter((r) => /^(PUT|DELETE) \/workers\/(domains|scripts\/sanoma-company)/.test(r)),
+      ).toEqual(["PUT /workers/scripts/sanoma-company", "PUT /workers/domains"]);
     });
 
     it("attaches a site's new domain only after the upload names it, so it never reaches a Worker that would serve the app there", async () => {

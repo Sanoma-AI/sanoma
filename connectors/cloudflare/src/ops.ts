@@ -576,12 +576,13 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
       observability: { enabled: true },
       modules: await workerModules(),
     };
-    // An existing Worker's hostname is attached before the upload records it, so a failed attach
-    // leaves a renamed one's old name recorded; a site's domain, and a new Worker's, wait for the
-    // upload (README, Custom domains).
-    const attach = (domain: string) => cf.attachDomain(script, domain, missing.get(domain)!);
-    const early = current && hostname && missing.has(hostname) ? hostname : undefined;
-    if (early) await attach(early);
+    // A domain declared before and no longer is detached while the bindings still record it, and
+    // a missing one attached once the upload records it: whatever fails in between, none is left
+    // attached and unrecorded, and the next apply attaches what is still missing. A site's domain
+    // so never reaches a Worker that would serve the app there (README, Custom domains).
+    for (const domain of attached) {
+      if (before.has(domain.hostname) && !hostnames.has(domain.hostname)) await cf.detachDomain(domain.id);
+    }
     await cf.upload(script, { ...metadata, ...(current === undefined && { migrations: MIGRATION }) });
     await cf.enableSubdomain(script);
     let app = await cf.application(script);
@@ -596,12 +597,7 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
       // 2026-10-29; a Worker deployed again after the application started at once).
       await cf.upload(script, metadata);
     }
-    // The declared domains routed to the Worker, attached before any detach so a failed attach
-    // leaves the old route up; then the ones declared before and no longer, detached.
-    for (const domain of missing.keys()) if (domain !== early) await attach(domain);
-    for (const domain of attached) {
-      if (before.has(domain.hostname) && !hostnames.has(domain.hostname)) await cf.detachDomain(domain.id);
-    }
+    for (const [domain, zone] of missing) await cf.attachDomain(script, domain, zone);
     await started(cf, script, url, revision, configurationRevision);
     const state: ContainerState = {
       id: app.id,

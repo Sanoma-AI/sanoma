@@ -49,7 +49,9 @@ export const wakeup = defineResource({
     immutable: [],
     vendorOwned: ["id", "at", "lastError"],
     writeOnly: [],
-    references: { host: { type: HOSTS, by: ["url"] } },
+    // Where each host's wakeup reaches it, as apply gives it (`wakeUrlOf`): a Cloudflare host's
+    // `worker_url` once its `url` is its hostname, else its `url`.
+    references: { host: { type: HOSTS, by: ["worker_url", "url"] } },
   },
   writable: true,
   // The service holds its registered wake: apply asks before it deletes one.
