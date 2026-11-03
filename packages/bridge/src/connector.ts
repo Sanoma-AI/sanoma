@@ -124,18 +124,33 @@ export interface TfConnectorSpec<V extends string, T extends Record<string, z.Zo
 const notFound = (error: BridgeError) => error.code === "not_found";
 
 /** A connector's resource types, by name. */
-export type TfResources<V extends string, T extends Record<string, z.ZodObject>, R extends TfReferences<T> = {}> = {
-  readonly [K in keyof T & string]: Resource<T[K], `${V}.${K}`, R[K] extends References ? R[K] : {}>;
+export type TfResources<
+  V extends string,
+  T extends Record<string, z.ZodObject>,
+  R extends TfReferences<T> = {},
+  W extends Partial<Record<keyof T, boolean>> = {},
+> = {
+  readonly [K in keyof T & string]: Resource<
+    T[K],
+    `${V}.${K}`,
+    R[K] extends References ? R[K] : {},
+    W[K] extends true ? true : false
+  >;
 };
 
 /** What `tfConnector` returns: the connector, its resource types, and how to drive them. */
-export interface TfConnector<V extends string, T extends Record<string, z.ZodObject>, R extends TfReferences<T> = {}> {
+export interface TfConnector<
+  V extends string,
+  T extends Record<string, z.ZodObject>,
+  R extends TfReferences<T> = {},
+  W extends Partial<Record<keyof T, boolean>> = {},
+> {
   readonly vendor: V;
   readonly provider: TfProvider;
   /** The connector, with each resource type's `read` and `import`, for `defineConfig` and workflows. */
-  readonly connector: Connector<V, TfResources<V, T, R>>;
+  readonly connector: Connector<V, TfResources<V, T, R, W>>;
   /** The resource types, which declare resources in data files: `resources.repository({ owner: "acme", name: "sanoma" })`. */
-  readonly resources: TfResources<V, T, R>;
+  readonly resources: TfResources<V, T, R, W>;
   /** The provider's types, from `resources.gen.ts`, by name: a `TfMapped` type's is the one it is stored as. */
   readonly types: { readonly [K in keyof T]: TfResourceType };
   /**
@@ -260,7 +275,18 @@ export function tfConnector<
   const V extends string,
   T extends Record<string, z.ZodObject>,
   const Refs extends TfReferences<T> = {},
->(spec: TfConnectorSpec<V, T, Refs>): TfConnector<V, T, Refs> {
+  const WriteSpec extends Record<keyof T, unknown> = Record<keyof T, unknown>,
+>(
+  spec: TfConnectorSpec<V, T, Refs> & { types: WriteSpec },
+): TfConnector<
+  V,
+  T,
+  Refs,
+  {
+    [K in keyof T]: WriteSpec[K] extends { writable: true } ? true : false;
+  }
+> {
+  type W = { [K in keyof T]: WriteSpec[K] extends { writable: true } ? true : false };
   const { vendor, provider, missing = notFound } = spec;
   const types = spec.types as Record<string, TfTypeSpec>;
   const references: Record<string, References | undefined> = spec.references ?? {};
@@ -551,8 +577,8 @@ export function tfConnector<
   return {
     vendor,
     provider,
-    connector: connector as unknown as Connector<V, TfResources<V, T, Refs>>,
-    resources: resources as unknown as TfResources<V, T, Refs>,
+    connector: connector as unknown as Connector<V, TfResources<V, T, Refs, W>>,
+    resources: resources as unknown as TfResources<V, T, Refs, W>,
     types: Object.fromEntries(Object.entries(types).map(([type, { tf }]) => [type, providerOf(tf).gen])) as TfConnector<
       V,
       T
