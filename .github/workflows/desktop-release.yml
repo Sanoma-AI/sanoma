@@ -1,6 +1,6 @@
 name: Desktop release
-# Run by hand on main: uploads the unsigned macOS app to a DRAFT GitHub Release `desktop-v<version>`
-# (README "Desktop (preview)").
+# Run by hand on main: uploads the macOS app, signed with the Developer ID and notarized, to a DRAFT
+# GitHub Release `desktop-v<version>` (README "Desktop (preview)").
 on:
   workflow_dispatch:
 
@@ -15,7 +15,7 @@ concurrency:
 jobs:
   build:
     runs-on: macos-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     # Actions pinned to commits, as in release.yml: this job writes releases.
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -48,18 +48,66 @@ jobs:
         with:
           cache: false
       - run: pnpm install --frozen-lockfile
-      # Stages Node for arm64 and x64 and pnpm, then Forge builds and packs both architectures
-      # (forge.config.mts), signed ad hoc.
-      - run: pnpm --filter @sanoma-ai/desktop run make
-      - name: Each app verifies and carries its own architecture's Node
-        working-directory: packages/desktop/out
+      # The Developer ID certificate goes into a keychain of this run's own, with Apple's intermediate
+      # (pinned) in case the .p12 lacks it, and the App Store Connect API key into a file; the last
+      # step deletes both.
+      - name: Signing keychain and notarization key
+        env:
+          MAC_CERT_P12: ${{ secrets.MAC_CERT_P12 }}
+          MAC_CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
         run: |
+          umask 077
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          password=$(openssl rand -hex 24)
+          echo "::add-mask::$password"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          base64 --decode <<<"$MAC_CERT_P12" > "$RUNNER_TEMP/certificate.p12"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$keychain" -P "$MAC_CERT_PASSWORD" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/certificate.p12"
+          curl -fsSL -o "$RUNNER_TEMP/DeveloperIDG2CA.cer" https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer
+          shasum -a 256 -c <<<"f16cd3c54c7f83cea4bf1a3e6a0819c8aaa8e4a1528fd144715f350643d2df3a  $RUNNER_TEMP/DeveloperIDG2CA.cer"
+          security import "$RUNNER_TEMP/DeveloperIDG2CA.cer" -k "$keychain"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" "$HOME/Library/Keychains/login.keychain-db"
+          security find-identity -v -p codesigning "$keychain"
+          printf '%s\n' "$APPLE_API_KEY" > "$RUNNER_TEMP/apple-api-key.p8"
+      # Stages Node for arm64 and x64 and pnpm, then Forge builds and packs both architectures,
+      # signed with the Developer ID and notarized, the apps and the dmgs (forge.config.mts).
+      - run: pnpm --filter @sanoma-ai/desktop run make
+        env:
+          APPLE_SIGNING_IDENTITY: "Developer ID Application: LEON KWAN (6NP563U4MV)"
+          APPLE_API_KEY: ${{ runner.temp }}/apple-api-key.p8
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+      - name: Each app and dmg is signed and notarized, and each app carries its own architecture's Node
+        working-directory: packages/desktop/out
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # Gatekeeper's verdict on $1 (spctl's options after it): accepted as notarized.
+          notarized() {
+            assessment=$(spctl --assess -vv "${@:2}" "$1" 2>&1) || true
+            echo "$assessment"
+            grep -qxF "source=Notarized Developer ID" <<<"$assessment" || { echo "::error::$1 is not notarized"; exit 1; }
+          }
           for pair in arm64:arm64 x64:x86_64; do
-            app="Sanoma-darwin-${pair%%:*}/Sanoma.app"
+            arch=${pair%%:*}
+            app="Sanoma-darwin-$arch/Sanoma.app"
+            dmg="make/dmg/$arch/Sanoma-$VERSION-$arch.dmg"
             codesign --verify --deep --strict --verbose=2 "$app"
+            notarized "$app" --type execute
+            xcrun stapler validate "$app"
+            codesign --verify --verbose=2 "$dmg"
+            notarized "$dmg" --type open --context context:primary-signature
+            xcrun stapler validate "$dmg"
             node_arch=$(lipo -archs "$app/Contents/Resources/node/node")
             [ "$node_arch" = "${pair##*:}" ] || { echo "::error::$app carries a $node_arch Node"; exit 1; }
           done
+          # The runner is Apple silicon: its Node starts under the hardened runtime, JIT and all.
+          Sanoma-darwin-arm64/Sanoma.app/Contents/Resources/node/node -e 'console.log("node", process.version, "starts")'
       # Forge names the dmg Sanoma-<version>-<arch>.dmg, the README's download name; the zip
       # (Sanoma-darwin-<arch>-<version>.zip, no name option) is given the same form.
       - name: Draft release
@@ -72,6 +120,11 @@ jobs:
             mv "zip/darwin/$arch/Sanoma-darwin-$arch-$VERSION.zip" "zip/darwin/$arch/Sanoma-$VERSION-$arch.zip"
           done
           gh release create "desktop-v$VERSION" --repo "$GITHUB_REPOSITORY" --draft --target "$GITHUB_SHA" \
-            --title "Sanoma desktop $VERSION (unsigned preview)" --notes-file ../../RELEASE_NOTES.md \
+            --title "Sanoma desktop $VERSION (preview)" --notes-file ../../RELEASE_NOTES.md \
             dmg/*/"Sanoma-$VERSION"-*.dmg zip/darwin/*/"Sanoma-$VERSION"-*.zip
           echo "Draft release desktop-v$VERSION from $GITHUB_SHA: publish it on GitHub after trying the download." >> "$GITHUB_STEP_SUMMARY"
+      - name: Delete the signing keychain and the notarization key
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/certificate.p12" "$RUNNER_TEMP/apple-api-key.p8"

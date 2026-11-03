@@ -1,6 +1,6 @@
-// The update check: the shell is unsigned, so it cannot update itself (Squirrel.Mac and
-// electron-updater refuse an unsigned app). It asks GitHub Releases for a newer `desktop-v*` and
-// links to its page; the person downloads and replaces the app.
+// The update check: the shell does not update itself (Squirrel.Mac would need an update server,
+// and the Windows build is unsigned). It asks GitHub Releases for a newer `desktop-v*` and links to
+// its page; the person downloads and replaces the app.
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { Rect } from "./window-state.ts";
