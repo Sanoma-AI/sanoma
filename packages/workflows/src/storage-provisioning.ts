@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
-import { Client, escapeIdentifier } from "pg";
+import { sql } from "drizzle-orm";
+import { Client } from "pg";
+import { databaseOn, type Db } from "./db.ts";
+import { kmsDeployment, kmsSecrets } from "./db/kms.ts";
 import { KMS_SECRETS_SQL } from "./kms-secrets.ts";
 import { generateSecret, type Secrets } from "./secret.ts";
 
@@ -47,7 +50,8 @@ const fail = (code: StorageProvisioningError["code"]): never => {
 };
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 const ROLE_PREFIX = "sanoma_runtime_";
-const BINDING_SQL = `CREATE TABLE IF NOT EXISTS sanoma_kms.deployment (
+/** Installs the deployment binding table beside `KMS_SECRETS_SQL`; an administrator creates it, the runtime never does. */
+export const BINDING_SQL = `CREATE TABLE IF NOT EXISTS sanoma_kms.deployment (
   singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
   company text NOT NULL, environment text NOT NULL, runtime_role text NOT NULL,
   credential_hash text NOT NULL
@@ -128,7 +132,7 @@ async function credentials(input: PrepareSecretStore, secrets: Secrets) {
   };
 }
 
-async function connected<T>(url: string, run: (db: Client) => Promise<T>): Promise<T> {
+async function connected<T>(url: string, run: (db: Db) => Promise<T>): Promise<T> {
   const db = new Client({
     connectionString: url,
     connectionTimeoutMillis: 10_000,
@@ -140,7 +144,7 @@ async function connected<T>(url: string, run: (db: Client) => Promise<T>): Promi
   });
   try {
     await db.connect();
-    return await run(db);
+    return await run(databaseOn(db));
   } finally {
     await db.end().catch(() => {});
   }
@@ -152,72 +156,69 @@ export const prepareSecretStore: PrepareStorage = async (input, secrets) => {
     const prepared = await credentials(input, secrets);
     const { company, environment } = input;
     const hash = digest(prepared.password),
-      role = escapeIdentifier(prepared.role);
-    await connected(prepared.admin, async (db) => {
-      await db.query("BEGIN");
-      try {
-        await db.query("SELECT pg_advisory_xact_lock(hashtext('sanoma.prepareSecretStore'))");
-        await db.query(KMS_SECRETS_SQL);
-        await db.query(BINDING_SQL);
-        const existing = (
-          await db.query<{ company: string; environment: string; runtime_role: string; credential_hash: string }>(
-            "SELECT company,environment,runtime_role,credential_hash FROM sanoma_kms.deployment WHERE singleton=true FOR UPDATE",
-          )
-        ).rows[0];
+      role = sql.identifier(prepared.role);
+    await connected(prepared.admin, (db) =>
+      db.transaction(async (tx) => {
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('sanoma.prepareSecretStore'))`);
+        await tx.execute(sql.raw(KMS_SECRETS_SQL));
+        await tx.execute(sql.raw(BINDING_SQL));
+        const [existing] = await tx
+          .select()
+          .from(kmsDeployment)
+          .where(sql`${kmsDeployment.singleton} = true`)
+          .for("update");
         if (existing) {
           if (
             existing.company !== company ||
             existing.environment !== environment ||
-            existing.runtime_role !== prepared.role ||
-            existing.credential_hash !== hash
+            existing.runtimeRole !== prepared.role ||
+            existing.credentialHash !== hash
           )
             fail("conflict");
         } else {
           if (
-            (await db.query("SELECT 1 FROM pg_roles WHERE rolname=$1", [prepared.role])).rowCount ||
-            (await db.query("SELECT 1 FROM sanoma_kms.secrets LIMIT 1")).rowCount
+            (await tx.execute(sql`SELECT 1 FROM pg_roles WHERE rolname = ${prepared.role}`)).rowCount ||
+            (
+              await tx
+                .select({ one: sql`1` })
+                .from(kmsSecrets)
+                .limit(1)
+            ).length
           )
             fail("conflict");
-          await db.query("SET LOCAL password_encryption = 'scram-sha-256'");
-          await db.query(CREATE_RUNTIME_SQL);
-          await db.query("SELECT pg_temp.sanoma_create_runtime($1, $2)", [prepared.role, prepared.password]);
-          await db.query(
-            "INSERT INTO sanoma_kms.deployment(company,environment,runtime_role,credential_hash) VALUES($1,$2,$3,$4)",
-            [company, environment, prepared.role, hash],
-          );
+          await tx.execute(sql`SET LOCAL password_encryption = 'scram-sha-256'`);
+          await tx.execute(sql.raw(CREATE_RUNTIME_SQL));
+          await tx.execute(sql`SELECT pg_temp.sanoma_create_runtime(${prepared.role}, ${prepared.password})`);
+          await tx
+            .insert(kmsDeployment)
+            .values({ company, environment, runtimeRole: prepared.role, credentialHash: hash });
         }
         // Never silently repair/adopt an unexpectedly privileged role on a retry.
         const authority = (
-          await db.query<{ safe: boolean }>(
-            `SELECT (
+          await tx.execute<{ safe: boolean }>(sql`SELECT (
           NOT r.rolsuper AND NOT r.rolcreatedb AND NOT r.rolcreaterole AND NOT r.rolreplication AND NOT r.rolbypassrls
           AND r.rolcanlogin AND NOT r.rolinherit
           AND NOT EXISTS(SELECT 1 FROM pg_auth_members WHERE member=r.oid)
           AND NOT EXISTS(SELECT 1 FROM pg_database WHERE datdba=r.oid)
           AND NOT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname='sanoma_kms' AND nspowner=r.oid)
-        ) AS safe FROM pg_roles r WHERE rolname=$1`,
-            [prepared.role],
-          )
+        ) AS safe FROM pg_roles r WHERE rolname = ${prepared.role}`)
         ).rows[0];
         if (!authority?.safe) fail("denied");
-        const database = (await db.query<{ name: string }>("SELECT current_database() AS name")).rows[0]!.name;
-        await db.query(`REVOKE ALL ON DATABASE ${escapeIdentifier(database)} FROM PUBLIC`);
-        await db.query(`GRANT CONNECT, CREATE, TEMPORARY ON DATABASE ${escapeIdentifier(database)} TO ${role}`);
-        await db.query("REVOKE ALL ON SCHEMA public FROM PUBLIC");
-        await db.query(`GRANT USAGE, CREATE ON SCHEMA public TO ${role}`);
-        await db.query(`GRANT USAGE ON SCHEMA sanoma_kms TO ${role}`);
-        await db.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON sanoma_kms.secrets TO ${role}`);
-        await db.query("COMMIT");
-      } catch (error) {
-        await db.query("ROLLBACK").catch(() => {});
-        throw error;
-      }
-    });
+        const database = sql.identifier(
+          (await tx.execute<{ name: string }>(sql`SELECT current_database() AS name`)).rows[0]!.name,
+        );
+        await tx.execute(sql`REVOKE ALL ON DATABASE ${database} FROM PUBLIC`);
+        await tx.execute(sql`GRANT CONNECT, CREATE, TEMPORARY ON DATABASE ${database} TO ${role}`);
+        await tx.execute(sql`REVOKE ALL ON SCHEMA public FROM PUBLIC`);
+        await tx.execute(sql`GRANT USAGE, CREATE ON SCHEMA public TO ${role}`);
+        await tx.execute(sql`GRANT USAGE ON SCHEMA sanoma_kms TO ${role}`);
+        await tx.execute(sql`GRANT SELECT, INSERT, UPDATE, DELETE ON sanoma_kms.secrets TO ${role}`);
+      }),
+    );
     // A committed schema is not enough: the stored login must work with the promised authority.
     await connected(prepared.runtime, async (db) => {
-      const { rows } = await db.query<{ safe: boolean }>(
-        `SELECT (
-        current_user=$1 AND has_schema_privilege(current_user,'sanoma_kms','USAGE')
+      const { rows } = await db.execute<{ safe: boolean }>(sql`SELECT (
+        current_user = ${prepared.role} AND has_schema_privilege(current_user,'sanoma_kms','USAGE')
         AND NOT has_schema_privilege(current_user,'sanoma_kms','CREATE')
         AND has_table_privilege(current_user,'sanoma_kms.secrets','SELECT')
         AND has_table_privilege(current_user,'sanoma_kms.secrets','INSERT')
@@ -225,9 +226,7 @@ export const prepareSecretStore: PrepareStorage = async (input, secrets) => {
         AND has_table_privilege(current_user,'sanoma_kms.secrets','DELETE')
         AND NOT has_table_privilege(current_user,'sanoma_kms.secrets','TRUNCATE,TRIGGER,REFERENCES')
         AND NOT has_table_privilege(current_user,'sanoma_kms.deployment','SELECT,INSERT,UPDATE,DELETE,TRUNCATE,TRIGGER,REFERENCES')
-      ) AS safe`,
-        [prepared.role],
-      );
+      ) AS safe`);
       if (!rows[0]?.safe) fail("denied");
     });
     return prepared.receipt;

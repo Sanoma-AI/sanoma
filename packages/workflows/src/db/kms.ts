@@ -4,7 +4,7 @@ import { boolean, check, jsonb, pgSchema, primaryKey, text, timestamp, uuid } fr
 // The KMS secret store's tables, in the schema `sanoma_kms` an administrator installs with
 // `KMS_SECRETS_SQL` (`kms-secrets.ts`) and `sanoma.secretStore.prepare` (`storage-provisioning.ts`),
 // with their grants: the runtime never makes them, so no migration is generated from this model.
-// `kms-secrets.test.ts` holds the install SQL to it.
+// `kms-schema.test.ts` holds the install SQL to it.
 
 export const kms = pgSchema("sanoma_kms");
 

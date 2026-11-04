@@ -1,7 +1,9 @@
 import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from "node:crypto";
 import type { protos } from "@google-cloud/kms";
 import crc32c from "crc-32/crc32c.js";
-import { type LegacyQuery as Db } from "./db.ts";
+import { and, eq, sql } from "drizzle-orm";
+import type { Db } from "./db.ts";
+import { kmsSecrets } from "./db/kms.ts";
 import { cloudIdentityAuth } from "./cloud-identity.ts";
 import {
   SecretStoreError,
@@ -67,12 +69,15 @@ interface Envelope {
   ciphertext: string;
   tag: string;
 }
-interface Row {
-  version: string;
-  envelope: Envelope;
-  updated_by: string;
-  updated_at: Date;
-}
+type Row = Pick<typeof kmsSecrets.$inferSelect, "version" | "envelope" | "updatedBy" | "updatedAt">;
+const columns = {
+  version: kmsSecrets.version,
+  envelope: kmsSecrets.envelope,
+  updatedBy: kmsSecrets.updatedBy,
+  updatedAt: kmsSecrets.updatedAt,
+};
+const at = (company: string, address: SecretAddress) =>
+  and(eq(kmsSecrets.company, company), eq(kmsSecrets.namespace, address.namespace), eq(kmsSecrets.path, address.path));
 const FORMAT = "sanoma-gcp-kms-v1";
 const MAX_BYTES = 65_536;
 const capabilities = Object.freeze({
@@ -245,7 +250,7 @@ export function kmsPostgresStore(options: KmsPostgresOptions): SecretStore | Sec
     }
   };
   const open = async (address: SecretAddress, row: Row): Promise<SecretValue> => {
-    const e = row.envelope;
+    const e = row.envelope as Envelope | null;
     if (!e || e.format !== FORMAT || !keys.has(e.key) || !versionOf(e.keyVersion, e.key))
       throw new SecretStoreError("invalid_value");
     const nonce = bytes(e.nonce, 12),
@@ -280,8 +285,8 @@ export function kmsPostgresStore(options: KmsPostgresOptions): SecretStore | Sec
         return {
           value: plaintext.toString("utf8"),
           version: row.version,
-          updatedBy: row.updated_by,
-          updatedAt: row.updated_at.toISOString(),
+          updatedBy: row.updatedBy,
+          updatedAt: row.updatedAt.toISOString(),
         };
       } finally {
         plaintext.fill(0);
@@ -300,33 +305,35 @@ export function kmsPostgresStore(options: KmsPostgresOptions): SecretStore | Sec
           value = randomUUID();
         const envelope = await seal(address, value, version);
         const db = await database();
-        const scope = [company, namespace, address.path, version];
+        const exact = and(at(company, address), eq(kmsSecrets.version, version));
         let removed = false;
         try {
-          const created = await db.query(
-            "INSERT INTO sanoma_kms.secrets(company,namespace,path,version,envelope,updated_by) VALUES($1,$2,$3,$4,$5,'validation') ON CONFLICT(company,namespace,path) DO NOTHING RETURNING version",
-            [...scope, JSON.stringify(envelope)],
-          );
-          if (created.rowCount !== 1) throw new SecretStoreError("conflict");
-          const updated = await db.query(
-            "UPDATE sanoma_kms.secrets SET envelope=$5,version=$4,updated_by='validation',updated_at=now() WHERE company=$1 AND namespace=$2 AND path=$3 AND version=$4 RETURNING version",
-            [...scope, JSON.stringify(envelope)],
-          );
-          if (updated.rowCount !== 1) throw new SecretStoreError("unavailable");
-          const stored = await db.query<Row>(
-            "SELECT version,envelope,updated_by,updated_at FROM sanoma_kms.secrets WHERE company=$1 AND namespace=$2 AND path=$3 AND version=$4",
-            scope,
-          );
-          if (!stored.rows[0] || (await open(address, stored.rows[0])).value !== value)
-            throw new SecretStoreError("invalid_value");
+          const created = await db
+            .insert(kmsSecrets)
+            .values({
+              company,
+              namespace: address.namespace,
+              path: address.path,
+              version,
+              envelope,
+              updatedBy: "validation",
+            })
+            .onConflictDoNothing()
+            .returning({ version: kmsSecrets.version });
+          if (created.length !== 1) throw new SecretStoreError("conflict");
+          const updated = await db
+            .update(kmsSecrets)
+            .set({ envelope, version, updatedBy: "validation", updatedAt: sql`now()` })
+            .where(exact)
+            .returning({ version: kmsSecrets.version });
+          if (updated.length !== 1) throw new SecretStoreError("unavailable");
+          const [stored] = await db.select(columns).from(kmsSecrets).where(exact);
+          if (!stored || (await open(address, stored)).value !== value) throw new SecretStoreError("invalid_value");
         } finally {
           // Also clean up a committed INSERT whose response was lost. The random address and
           // exact version prevent one concurrent probe from deleting another probe or a secret.
-          const cleanup = await db.query(
-            "DELETE FROM sanoma_kms.secrets WHERE company=$1 AND namespace=$2 AND path=$3 AND version=$4",
-            scope,
-          );
-          removed = cleanup.rowCount === 1;
+          const cleanup = await db.delete(kmsSecrets).where(exact).returning({ version: kmsSecrets.version });
+          removed = cleanup.length === 1;
         }
         if (!removed) throw new SecretStoreError("unavailable");
         // Own-key usability only. Cross-company authorization requires live IAM proof with another existing key.
@@ -334,13 +341,8 @@ export function kmsPostgresStore(options: KmsPostgresOptions): SecretStore | Sec
     read: (address) =>
       safe(async () => {
         context(address, "read");
-        const { rows } = await (
-          await database()
-        ).query<Row>(
-          "SELECT version,envelope,updated_by,updated_at FROM sanoma_kms.secrets WHERE company=$1 AND namespace=$2 AND path=$3",
-          [company, address.namespace, address.path],
-        );
-        return rows[0] && open(address, rows[0]);
+        const [row] = await (await database()).select(columns).from(kmsSecrets).where(at(company, address));
+        return row && open(address, row);
       }),
     write: (address, value, { expectedVersion, by }) =>
       safe(async () => {
@@ -348,30 +350,33 @@ export function kmsPostgresStore(options: KmsPostgresOptions): SecretStore | Sec
         if (!nonempty(by)) throw new SecretStoreError("invalid_value");
         const version = randomUUID(),
           envelope = await seal(address, value, version);
-        const args = [company, address.namespace, address.path, version, JSON.stringify(envelope), by];
-        const sql =
+        const db = await database();
+        const [row] =
           expectedVersion === null
-            ? "INSERT INTO sanoma_kms.secrets(company,namespace,path,version,envelope,updated_by) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(company,namespace,path) DO NOTHING RETURNING version,envelope,updated_by,updated_at"
-            : "UPDATE sanoma_kms.secrets SET version=$4,envelope=$5,updated_by=$6,updated_at=now() WHERE company=$1 AND namespace=$2 AND path=$3 AND version::text=$7 RETURNING version,envelope,updated_by,updated_at";
-        const { rows } = await (
-          await database()
-        ).query<Row>(sql, expectedVersion === null ? args : [...args, expectedVersion]);
-        if (!rows[0]) throw new SecretStoreError("conflict");
+            ? await db
+                .insert(kmsSecrets)
+                .values({ company, namespace: address.namespace, path: address.path, version, envelope, updatedBy: by })
+                .onConflictDoNothing()
+                .returning({ updatedAt: kmsSecrets.updatedAt })
+            : await db
+                .update(kmsSecrets)
+                .set({ version, envelope, updatedBy: by, updatedAt: sql`now()` })
+                .where(and(at(company, address), sql`${kmsSecrets.version}::text = ${expectedVersion}`))
+                .returning({ updatedAt: kmsSecrets.updatedAt });
+        if (!row) throw new SecretStoreError("conflict");
         // Return the caller's value, never make a second decrypt after a successful commit.
-        return { value, version, updatedBy: by, updatedAt: rows[0].updated_at.toISOString() };
+        return { value, version, updatedBy: by, updatedAt: row.updatedAt.toISOString() };
       }),
     delete: (address, { expectedVersion }) =>
       safe(async () => {
         context(address, expectedVersion);
-        const { rowCount } = await (
+        const deleted = await (
           await database()
-        ).query("DELETE FROM sanoma_kms.secrets WHERE company=$1 AND namespace=$2 AND path=$3 AND version::text=$4", [
-          company,
-          address.namespace,
-          address.path,
-          expectedVersion,
-        ]);
-        if (!rowCount) throw new SecretStoreError("conflict");
+        )
+          .delete(kmsSecrets)
+          .where(and(at(company, address), sql`${kmsSecrets.version}::text = ${expectedVersion}`))
+          .returning({ version: kmsSecrets.version });
+        if (!deleted.length) throw new SecretStoreError("conflict");
       }),
   };
 }
