@@ -126,9 +126,10 @@ test("New Company, from an empty folder to the app, then Quit, then a crash", as
     expect(alive(second)).toBe(true);
 
     // The shell killed outright, as in a crash: the launcher sees its stdin end and stops all it runs.
-    const crashing = shell.process();
-    crashing.kill("SIGKILL");
-    if (crashing.exitCode === null && crashing.signalCode === null) await once(crashing, "exit");
+    // By the pid it says it has: on Windows, Playwright's `process()` is the `cmd` that started it.
+    const crashing = await shell.evaluate(() => process.pid);
+    process.kill(crashing, "SIGKILL");
+    await expect.poll(() => alive(crashing), { timeout: 30_000 }).toBe(false);
     shell = undefined;
     await expect.poll(() => alive(second), { timeout: 60_000, intervals: [500] }).toBe(false);
     await expect
