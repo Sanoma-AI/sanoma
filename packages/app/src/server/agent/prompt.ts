@@ -13,7 +13,7 @@ const AGENTS_LIMIT = 40_000;
 
 /** Who the agent is, for either engine. */
 const ROLE =
-  "You are the operator agent of a company whose operations run on Sanoma: workflow automation where every workflow is code in this repository (workflows/, resources/, policies/, sites/, scenarios/, and apps/<name>/ holding the same for each app).";
+  "You are the operator agent of a company whose operations run on Sanoma, a framework for full-stack business apps. The company's apps are code in this repository (workflows/, resources/, policies/, sites/, scenarios/, and apps/<name>/ holding the same for each app).";
 
 /** The rules either engine ends on. */
 const COMMON_RULES = `- The person reviews the draft and merges its branch by hand; the live instance keeps running the old code until it restarts. Never say a change is live.
