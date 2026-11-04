@@ -2,17 +2,17 @@ import type { LoginContext, LoginHalf, LoginMethod } from "@sanoma-ai/workflows"
 import { getHostFromSource, matchesHostPattern } from "better-auth";
 import {
   emailCode,
-  GITHUB_FIELD,
   identityOf,
   localRedirects,
   openBetterAuth,
   type Protocol,
+  SCHEMAS,
   type User,
   withSignOutBody,
 } from "./instance.ts";
 
-/** The schema Better Auth's tables (`user`, `session`, `account`, `verification`) live in, on the company's database. */
-const SCHEMA = "better_auth";
+/** The schema Better Auth's tables (`user`, `session`, `account`, `verification`, `rateLimit`) live in, on the company's database. */
+const SCHEMA = SCHEMAS.visitors;
 /** Where its routes are: a site's pages POST to `<BASE_PATH>/sign-up/email`, `/sign-in/email`, `/sign-in/email-otp`… */
 const BASE_PATH = "/auth/better-auth";
 const SIGN_OUT = `${BASE_PATH}/sign-out`;
@@ -41,7 +41,7 @@ interface HookContext {
  * (`context.social.github`), a visitor also signs up and in with GitHub (`/sign-in/social`, which
  * joins the account of GitHub's verified email), or links it once signed in (`/link-social`), and
  * is then said to be that GitHub login (`verify`'s `github`). Its tables are in schema
- * `better_auth` on the company's database, migrated here before the first site starts, its
+ * `better_auth` on the company's database, which the worker makes (`prepareBetterAuth`), its
  * cookies signed with the app's key for it (`context.key`). The site's origins are its allowed
  * hosts (a request for another host is refused) and set the cookie's `Secure` flag: an `https`
  * origin's is.
@@ -66,7 +66,6 @@ export async function betterAuthLogin({
     options: {
       emailAndPassword: { enabled: true },
       plugins: sendCode ? [emailCode(sendCode)] : [],
-      user: { additionalFields: GITHUB_FIELD },
       ...(github && {
         socialProviders: { github: { clientId: github.clientId, clientSecret: github.clientSecret } },
         // GitHub stays untrusted, and the account's own email must be verified (Better Auth's

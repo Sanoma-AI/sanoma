@@ -11,12 +11,12 @@ import { magicLink } from "better-auth/plugins/magic-link";
 import { createHash } from "node:crypto";
 import {
   emailCode,
-  GITHUB_FIELD,
   identityOf,
   localRedirects,
   openBetterAuth,
   type Protocol,
   protocolOf,
+  SCHEMAS,
   type User,
   withSignOutBody,
 } from "./instance.ts";
@@ -28,7 +28,7 @@ import {
 // hooks, not its `disableSignUp`, which would send no code until a user row exists.
 
 /** The schema the staff login's tables are in, beside the visitors' `better_auth`. */
-const SCHEMA = "better_auth_staff";
+const SCHEMA = SCHEMAS.staff;
 const BASE_PATH = "/auth/better-auth";
 const SIGN_OUT = `${BASE_PATH}/sign-out`;
 const SEND_CODE = "/email-otp/send-verification-otp";
@@ -115,7 +115,6 @@ export async function betterAuthStaffLogin({ databaseUrl, key, sendCode, staff }
     options: {
       session: { expiresIn: SESSION_SECONDS },
       user: {
-        additionalFields: GITHUB_FIELD,
         // Nobody the files do not declare gets a row, whatever the route: by the verified email
         // the route proved, or by the login GitHub's own profile names (Better Auth sets no field
         // from a profile that a person may not set, so the login is kept by `keepLogin`), before

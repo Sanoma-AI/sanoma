@@ -1,7 +1,9 @@
 import { withSetup } from "@sanoma-ai/workflows";
 import { betterAuthOps } from "./connector.ts";
+import { prepareBetterAuth } from "./instance.ts";
 import { betterAuthLogin } from "./login.ts";
 
+export { prepareBetterAuth, prepareBetterAuthStaff } from "./instance.ts";
 export { betterAuthLogin } from "./login.ts";
 export { betterAuthStaffLogin } from "./staff.ts";
 
@@ -12,4 +14,4 @@ export { betterAuthStaffLogin } from "./staff.ts";
  * signed with the key the app derives for it. The staff login is `betterAuthStaffLogin`, which the
  * `sanoma` launcher runs on a host.
  */
-export const betterAuth = withSetup(betterAuthOps, { login: betterAuthLogin });
+export const betterAuth = withSetup(betterAuthOps, { prepare: prepareBetterAuth, login: betterAuthLogin });

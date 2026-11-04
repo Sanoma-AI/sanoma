@@ -494,7 +494,7 @@ Reads are open. Anyone who can reach the app sees every run, its ledger (each op
 
 ### Staff sign-in on a host
 
-`staffLogin(betterAuthStaffLogin, { github })` signs people in with [Better Auth](https://better-auth.com) inside the app (`@sanoma-ai/connector-better-auth`), its tables in schema `better_auth_staff` on the company's database, and the app admits a declared person only, matched by what the sign-in verified: their `email`, else their `github` login (each ignoring case). The sign-in page is `/auth/login` (signed in, it goes on to `/`), and every other request without a session gets it too, as a 401 (a server function call, JSON), so reads are signed in too and signing in there stays on the page asked for.
+`staffLogin(betterAuthStaffLogin, { github })` signs people in with [Better Auth](https://better-auth.com) inside the app (`@sanoma-ai/connector-better-auth`), its tables in schema `better_auth_staff` on the company's database, which the worker makes at its start (`startWorker({ prepare: [prepareBetterAuthStaff] })`, as the `sanoma` bin runs it) and the app only checks for (waiting up to a minute for a worker starting beside it), and the app admits a declared person only, matched by what the sign-in verified: their `email`, else their `github` login (each ignoring case). The sign-in page is `/auth/login` (signed in, it goes on to `/`), and every other request without a session gets it too, as a 401 (a server function call, JSON), so reads are signed in too and signing in there stays on the page asked for.
 
 ```ts
 import { betterAuthStaffLogin } from "@sanoma-ai/connector-better-auth";
