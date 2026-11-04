@@ -8,7 +8,7 @@ import {
 } from "@sanoma-ai/workflows";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { Client } from "pg";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { betterAuthStaffLogin } from "../src/staff.ts";
 
 // The staff login: codes only to declared emails, no row for anyone else, invites as one-use
@@ -57,6 +57,22 @@ const cookieOf = (response: Response) =>
     .getSetCookie()
     .find((c) => c.includes("session_token="))
     ?.split(";")[0] ?? "";
+
+/** A JSON answer, as GitHub gives one. */
+const answer = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+
+/** The GitHub account `id`'s stored access token, by row. */
+async function tokensOf(id: number): Promise<{ access_token: string | null }[]> {
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    const sql = `SELECT "accessToken" AS access_token FROM better_auth_staff.account WHERE "providerId" = 'github' AND "accountId" = $1`;
+    return (await client.query(sql, [String(id)])).rows as { access_token: string | null }[];
+  } finally {
+    await client.end();
+  }
+}
 
 async function rows(table: string): Promise<number> {
   const client = new Client({ connectionString: databaseUrl });
@@ -186,5 +202,131 @@ describe("the staff login", () => {
     const send = await half.handle(request("/auth/better-auth/sign-in/magic-link", { body: { email: DECLARED } }));
     expect(send?.status).toBe(404);
     expect(await half.handle(request("/sites/www"))).toBeUndefined();
+  });
+});
+
+describe("the staff login with GitHub", () => {
+  const GITHUB_ONLY = "Ada-Lovelace";
+  /** GitHub's side: each code it handed out, the token it is worth, and whose account that is. */
+  const github = new Map<string, { token: string; id: number; login: string; email: string }>();
+  let half: LoginHalf;
+  beforeAll(async () => {
+    const fetch = globalThis.fetch;
+    // GitHub's three endpoints the sign-in takes: the token, the user and their emails; anything else as it is.
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(input instanceof Request ? input.url : input);
+      const bearer = new Headers(init?.headers).get("authorization")?.replace(/^Bearer /, "");
+      const holder = [...github.values()].find((g) => g.token === bearer);
+      if (url.href === "https://github.com/login/oauth/access_token") {
+        const code = new URLSearchParams(String(init?.body)).get("code") ?? "";
+        const user = github.get(code);
+        return answer(user ? { access_token: user.token, token_type: "bearer", scope: "" } : { error: "bad_code" });
+      }
+      if (url.href === "https://api.github.com/user")
+        return holder ? answer({ id: holder.id, login: holder.login, name: null, email: null }) : answer({}, 401);
+      if (url.href === "https://api.github.com/user/emails")
+        return holder ? answer([{ email: holder.email, primary: true, verified: true }]) : answer({}, 401);
+      return fetch(input, init);
+    });
+    half = await betterAuthStaffLogin({
+      ...context,
+      staff: {
+        ...context.staff!,
+        // Alice by her email, Ada by her GitHub login alone.
+        admits: ({ email, github: login }) => email?.toLowerCase() === DECLARED || login === GITHUB_ONLY,
+        social: { github: { clientId: "client-id", clientSecret: "client-secret" } },
+      },
+    });
+  });
+  afterAll(async () => {
+    await half.close?.();
+    vi.unstubAllGlobals();
+  });
+  beforeEach(() => {
+    codes.clear();
+    signIns.length = 0;
+  });
+
+  /** Sends someone signed out to GitHub to sign in, and answers GitHub's redirect back with `code`, the account it stands for. */
+  async function viaGitHub(code: string) {
+    const started = (await half.handle(
+      request("/auth/better-auth/sign-in/social", { body: { provider: "github", callbackURL: "/" } }),
+    ))!;
+    expect(started.status).toBe(200);
+    const { url } = (await started.json()) as { url: string };
+    const authorize = new URL(url);
+    expect(authorize.origin + authorize.pathname).toBe("https://github.com/login/oauth/authorize");
+    const cookies = started.headers.getSetCookie().map((c) => c.split(";")[0]);
+    const query = new URLSearchParams({ code, state: authorize.searchParams.get("state")! });
+    return (await half.handle(request(`/auth/better-auth/callback/github?${query}`, { cookie: cookies.join("; ") })))!;
+  }
+
+  it("signs in a person declared by GitHub login alone, keeping the login and dropping the token", async () => {
+    github.set("code-ada", { token: "gho_ada", id: 4101, login: GITHUB_ONLY, email: "ada@users.github.test" });
+    const landed = await viaGitHub("code-ada");
+    expect(landed.status).toBe(302);
+    expect(landed.headers.get("location")).toBe("/");
+    const identity = { email: "ada@users.github.test", github: GITHUB_ONLY };
+    expect(await half.verify(request("/", { cookie: cookieOf(landed) }))).toEqual({
+      subject: expect.any(String),
+      ...identity,
+    });
+    expect(signIns).toEqual([["github", identity]]);
+    expect(await tokensOf(4101)).toEqual([{ access_token: null }]);
+  });
+
+  it("joins a declared person's account by GitHub's verified email, and keeps the login", async () => {
+    await half.handle(
+      request("/auth/better-auth/email-otp/send-verification-otp", { body: { email: DECLARED, type: "sign-in" } }),
+    );
+    await half.handle(
+      request("/auth/better-auth/sign-in/email-otp", { body: { email: DECLARED, otp: codes.get(DECLARED)! } }),
+    );
+    const users = await rows("user");
+    github.set("code-alice", { token: "gho_alice", id: 4103, login: "alice", email: DECLARED });
+    const landed = await viaGitHub("code-alice");
+    expect(landed.status).toBe(302);
+    expect(landed.headers.get("location")).toBe("/");
+    expect(await half.verify(request("/", { cookie: cookieOf(landed) }))).toMatchObject({
+      email: DECLARED,
+      github: "alice",
+    });
+    expect(await rows("user")).toBe(users);
+    expect(await tokensOf(4103)).toEqual([{ access_token: null }]);
+    // Her GitHub email moves: the row's verified email still vouches on the next sign-in.
+    github.set("code-alice-2", { token: "gho_alice_2", id: 4103, login: "alice", email: "alice@elsewhere.example" });
+    const again = await viaGitHub("code-alice-2");
+    expect(again.headers.get("location")).toBe("/");
+    expect(await half.verify(request("/", { cookie: cookieOf(again) }))).toMatchObject({
+      email: DECLARED,
+      github: "alice",
+    });
+  });
+
+  it("refuses a new GitHub account under a login a row already carries", async () => {
+    const users = await rows("user");
+    github.set("code-squat", { token: "gho_squat", id: 4109, login: GITHUB_ONLY, email: "squat@users.github.test" });
+    const landed = await viaGitHub("code-squat");
+    expect(landed.headers.get("location")).toMatch(/error=not_declared/);
+    expect(cookieOf(landed)).toBe("");
+    expect(await rows("user")).toBe(users);
+  });
+
+  it("makes no user for a GitHub account the files do not declare, and says so", async () => {
+    const users = await rows("user");
+    const accounts = await rows("account");
+    github.set("code-mallory", {
+      token: "gho_mallory",
+      id: 4102,
+      login: "mallory",
+      email: "mallory@users.github.test",
+    });
+    const landed = await viaGitHub("code-mallory");
+    expect(landed.status).toBe(302);
+    expect(landed.headers.get("location")).toMatch(/error=not_declared/);
+    expect(cookieOf(landed)).toBe("");
+    expect(await rows("user")).toBe(users);
+    expect(await rows("account")).toBe(accounts);
+    expect(signIns).toEqual([]);
   });
 });
