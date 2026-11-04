@@ -1,6 +1,7 @@
 name: Desktop release
 # Run by hand on main: uploads the macOS app, signed with the Developer ID and notarized, to a DRAFT
-# GitHub Release `desktop-v<version>` (README "Desktop (preview)").
+# GitHub Release `v<version>` (README "Desktop (preview)"). Once published, it is the update
+# update.electronjs.org offers the installed apps (packages/desktop/src/self-update.ts).
 on:
   workflow_dispatch:
 
@@ -39,7 +40,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           version=$(jq -r .version packages/desktop/package.json)
-          tag="desktop-v$version"
+          # update.electronjs.org reads only releases whose tag is a semver version. `v0.2.0` to
+          # `v0.4.2` are the npm packages' old tags (README "Desktop (preview)"), so 0.5.0 comes next.
+          tag="v$version"
           # A draft has no tag yet, so the releases (drafts included) are checked as well as the tags.
           releases=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" -q '.[].tag_name')
           if git rev-parse -q --verify "refs/tags/$tag" >/dev/null || grep -qxF "$tag" <<<"$releases"; then
@@ -125,8 +128,8 @@ jobs:
           sleep 15
           kill -0 $! || { echo "::error::the signed app exits at start"; exit 1; }
           kill $!
-      # Forge names the dmg Sanoma-<version>-<arch>.dmg, the README's download name; the zip
-      # (Sanoma-darwin-<arch>-<version>.zip, no name option) is given the same form.
+      # Forge names the dmg Sanoma-<version>-<arch>.dmg and the zip Sanoma-darwin-<arch>-<version>.zip,
+      # the name update.electronjs.org needs: a Mac zip's has `-darwin`, and `-arm64` for that build.
       - name: Draft release
         working-directory: packages/desktop/out/make
         env:
@@ -136,14 +139,14 @@ jobs:
           # Each dmg also under a name without the version, which the website's download buttons
           # name: releases/latest/download/Sanoma-mac-<arch>.dmg is the newest published release's.
           mkdir latest
+          assets=()
           for arch in arm64 x64; do
-            mv "zip/darwin/$arch/Sanoma-darwin-$arch-$VERSION.zip" "zip/darwin/$arch/Sanoma-$VERSION-$arch.zip"
             cp "dmg/$arch/Sanoma-$VERSION-$arch.dmg" "latest/Sanoma-mac-$arch.dmg"
+            assets+=("dmg/$arch/Sanoma-$VERSION-$arch.dmg" "zip/darwin/$arch/Sanoma-darwin-$arch-$VERSION.zip" "latest/Sanoma-mac-$arch.dmg")
           done
-          gh release create "desktop-v$VERSION" --repo "$GITHUB_REPOSITORY" --draft --target "$GITHUB_SHA" \
-            --title "Sanoma desktop $VERSION (preview)" --notes-file ../../RELEASE_NOTES.md \
-            dmg/*/"Sanoma-$VERSION"-*.dmg zip/darwin/*/"Sanoma-$VERSION"-*.zip latest/Sanoma-mac-*.dmg
-          echo "Draft release desktop-v$VERSION from $GITHUB_SHA: publish it on GitHub after trying the download." >> "$GITHUB_STEP_SUMMARY"
+          gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" --draft --target "$GITHUB_SHA" \
+            --title "Sanoma desktop $VERSION (preview)" --notes-file ../../RELEASE_NOTES.md "${assets[@]}"
+          echo "Draft release v$VERSION from $GITHUB_SHA: publish it on GitHub, as the latest release, after trying the download." >> "$GITHUB_STEP_SUMMARY"
       - name: Delete the signing keychain and the notarization key
         if: always()
         run: |

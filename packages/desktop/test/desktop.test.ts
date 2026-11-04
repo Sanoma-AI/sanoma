@@ -24,7 +24,9 @@ import { launch, launcherEnv, launcherOf, type Stream, USAGE_EXIT } from "../src
 import { isAppPage, linkTarget } from "../src/links.ts";
 import { hidePasswords, openLog, TAIL_LINES } from "../src/logs.ts";
 import { folderArgument, realPathOf, syncedFolderWarning } from "../src/places.ts";
+import { type QuitSteps, quitOrder } from "../src/quit.ts";
 import { archWarnings, runtimeOf } from "../src/runtime.ts";
+import { updatesItself } from "../src/self-update.ts";
 import { startSession } from "../src/session.ts";
 import { shims, writeShims } from "../src/shims.ts";
 import { DEFAULT_SIZE, nextShown, windowBounds } from "../src/window-state.ts";
@@ -593,5 +595,114 @@ describe("the window's companies", () => {
     expect(nextShown(["/a", "/b", "/c"], "/c")).toBe("/b");
     expect(nextShown(["/a", "/b"], "/a")).toBe("/b");
     expect(nextShown(["/a"], "/a")).toBeUndefined();
+  });
+});
+
+/** A release build: built, on macOS, signed with the Developer ID, in Applications. */
+const releaseBuild = { packaged: true, platform: "darwin" as const, signed: true, inApplications: () => true };
+const notAsked = () => {
+  throw new Error("asked where the app is");
+};
+
+describe("updating itself", () => {
+  test("only a built, Developer ID signed Mac app in Applications", () => {
+    expect(updatesItself(releaseBuild)).toBe(true);
+    expect(updatesItself({ ...releaseBuild, packaged: false })).toBe(false);
+    expect(updatesItself({ ...releaseBuild, signed: false })).toBe(false);
+    expect(updatesItself({ ...releaseBuild, inApplications: () => false })).toBe(false);
+    for (const platform of ["win32", "linux"] as const)
+      expect(updatesItself({ ...releaseBuild, platform })).toBe(false);
+  });
+
+  test("asks where the app is on macOS only (Electron has isInApplicationsFolder there alone)", () => {
+    expect(updatesItself({ ...releaseBuild, platform: "linux", inApplications: notAsked })).toBe(false);
+    expect(updatesItself({ ...releaseBuild, packaged: false, inApplications: notAsked })).toBe(false);
+  });
+});
+
+/** Quit's steps, recorded; `stopAll` resolves at `stopped()`, as stopping the companies takes a while. */
+function steps(busy: boolean) {
+  const calls: string[] = [];
+  let stop: (() => void) | undefined;
+  const quitSteps: QuitSteps = {
+    busy: () => busy,
+    stopAll: () => {
+      calls.push("stopAll");
+      return new Promise<void>((resolve) => (stop = resolve));
+    },
+    quit: () => calls.push("quit"),
+    install: () => calls.push("install"),
+  };
+  /** Ends the stop, then waits for what follows it. */
+  const stopped = async () => {
+    stop?.();
+    await new Promise((resolve) => setImmediate(resolve));
+  };
+  return { calls, quitSteps, stopped };
+}
+
+describe("the quit order", () => {
+  test("with nothing running, Quit goes through at once", () => {
+    const { calls, quitSteps } = steps(false);
+    expect(quitOrder(quitSteps).hold()).toBe(false);
+    expect(calls).toEqual([]);
+  });
+
+  test("Quit is held until every company stops, once, then quits", async () => {
+    const { calls, quitSteps, stopped } = steps(true);
+    const quit = quitOrder(quitSteps);
+    expect(quit.hold()).toBe(true);
+    // A second Quit meanwhile (Cmd-Q again) waits for the same stop.
+    expect(quit.hold()).toBe(true);
+    await stopped();
+    expect(calls).toEqual(["stopAll", "quit"]);
+    // That quit's own before-quit goes through.
+    expect(quit.hold()).toBe(false);
+  });
+
+  test("Restart to Update stops every company first, then installs instead of quitting", async () => {
+    const { calls, quitSteps, stopped } = steps(true);
+    const quit = quitOrder(quitSteps);
+    quit.restartToUpdate();
+    expect(calls).toEqual(["quit"]);
+    expect(quit.hold()).toBe(true);
+    await stopped();
+    expect(calls).toEqual(["quit", "stopAll", "install"]);
+    // Squirrel.Mac's own quit, after the install began, goes through.
+    expect(quit.hold()).toBe(false);
+  });
+
+  test("Restart to Update with nothing running still goes through the install", async () => {
+    const { calls, quitSteps, stopped } = steps(false);
+    const quit = quitOrder(quitSteps);
+    quit.restartToUpdate();
+    expect(quit.hold()).toBe(true);
+    await stopped();
+    expect(calls).toEqual(["quit", "stopAll", "install"]);
+  });
+
+  test("Restart to Update during a Quit installs at its end", async () => {
+    const { calls, quitSteps, stopped } = steps(true);
+    const quit = quitOrder(quitSteps);
+    expect(quit.hold()).toBe(true);
+    quit.restartToUpdate();
+    expect(quit.hold()).toBe(true);
+    await stopped();
+    expect(calls).toEqual(["stopAll", "quit", "install"]);
+  });
+
+  test("a failed install quits; an error at any other time changes nothing", async () => {
+    const { calls, quitSteps, stopped } = steps(true);
+    const quit = quitOrder(quitSteps);
+    quit.installFailed();
+    expect(calls).toEqual([]);
+    quit.restartToUpdate();
+    quit.hold();
+    // While the companies stop, an error is a check's, not the install's.
+    quit.installFailed();
+    expect(calls).toEqual(["quit", "stopAll"]);
+    await stopped();
+    quit.installFailed();
+    expect(calls).toEqual(["quit", "stopAll", "install", "quit"]);
   });
 });

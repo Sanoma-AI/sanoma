@@ -1,13 +1,13 @@
-// The update check: the shell does not update itself (Squirrel.Mac would need an update server,
-// and the Windows build is unsigned). It asks GitHub Releases for a newer `desktop-v*` and links to
-// its page; the person downloads and replaces the app.
+// The update check, for a build that does not update itself (self-update.ts: from the dmg or
+// outside Applications, ad hoc, or elsewhere than macOS). It asks GitHub Releases for a newer `v*`
+// and links to its page; the person downloads and replaces the app.
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { Rect } from "./window-state.ts";
 
-/** The repository's latest releases, a page of 100: the desktop's `desktop-v*` among any others. */
+/** The repository's latest releases, a page of 100: the desktop's `v*` among any others (0.1.0's `desktop-v0.1.0` among them). */
 export const RELEASES_URL = "https://api.github.com/repos/Sanoma-AI/sanoma/releases?per_page=100";
-export const TAG_PREFIX = "desktop-v";
+export const TAG_PREFIX = "v";
 /** At most one check a day, counted from the last one that answered. */
 export const CHECK_EVERY_MS = 24 * 60 * 60 * 1000;
 
@@ -43,7 +43,7 @@ function isLater(a: string, b: string): boolean {
 const isReleasePage = (url: unknown) => typeof url === "string" && url.startsWith("https://github.com/");
 
 /**
- * The newest published desktop release later than `current`, if any: tags `desktop-v<x.y.z>` that
+ * The newest published desktop release later than `current`, if any: tags `v<x.y.z>` that
  * are neither drafts nor prereleases.
  */
 export function newerRelease(current: string, releases: readonly GitHubRelease[]): Newer | undefined {

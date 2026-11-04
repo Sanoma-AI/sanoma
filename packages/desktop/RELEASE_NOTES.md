@@ -9,7 +9,7 @@ The first preview of the Sanoma desktop app for macOS. Open a company folder and
 - Installs and starts it with the Node 26 and pnpm the app ships, whatever the computer has (`pnpm install`, then the company's launcher).
 - Shows the app in one window. Open several companies and switch between them from the account menu under your initials (or ⌘1…⌘9, the Window menu, the Dock menu); each keeps running, gets its own storage and keeps its port, so the app remembers who you are.
 - Closing the window keeps every company running; Company → Stop stops one, and quitting stops them all. Each start is logged to `~/Library/Logs/Sanoma/`.
-- Checks GitHub Releases once a day for a newer version. Help → Check for a Newer Sanoma checks on demand, and Help links to a newer release when there is one.
+- Updates itself. In Applications, the app downloads a newer version in the background and installs it the next time you quit it, so it opens as the new version. Nothing restarts on its own; Help → Restart to Update, once an update is downloaded, restarts it at once. Run from the dmg or another folder, it cannot replace itself: it checks GitHub Releases once a day and links to a newer version instead (Help → Check for a Newer Sanoma).
 
 ## What it needs
 
@@ -18,4 +18,4 @@ Nothing to install for the app itself. Companies that use git need Apple's comma
 ## Known limits
 
 - macOS only, 13.5 (Ventura) or later, as the Node 26 it ships requires. No Windows or Linux builds yet.
-- No automatic updates: the app tells you about a newer version, and you download it and replace the app in Applications.
+- Sanoma 0.1.0 does not update itself, nor hear of this release: download this one and replace it in Applications once. Later versions arrive on their own.
