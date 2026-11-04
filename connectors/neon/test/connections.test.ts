@@ -31,6 +31,19 @@ it("uses separate Neon organization clients through the authorized runtime, incl
       const key = keyOf(request);
       return HttpResponse.json({ organizations: [{ id: key.startsWith("support-") ? "org-support" : "org-sales" }] });
     }),
+    http.get("https://console.neon.tech/api/v2/projects", ({ request }) => {
+      const key = keyOf(request);
+      return HttpResponse.json({
+        projects: [
+          {
+            id: key.startsWith("support-") ? "support-project" : "sales-project",
+            name: "same-name",
+            region_id: "aws-us-east-1",
+            pg_version: 17,
+          },
+        ],
+      });
+    }),
     http.get("https://console.neon.tech/api/v2/projects/same/branches", async ({ request }) => {
       const key = keyOf(request);
       if (key === "support-v1") {
@@ -86,6 +99,14 @@ it("uses separate Neon organization clients through the authorized runtime, incl
     run: async (ctx, input) =>
       ctx.neon.project.health({ id: "same" }, { connection: input.account === "support" ? support : sales }),
   });
+  const list = defineWorkflow({
+    name: "list-neon-projects",
+    trigger: "manual",
+    input: z.object({ account: z.enum(["support", "sales"]) }),
+    uses: [neon.project.list],
+    run: async (ctx, input) =>
+      ctx.neon.project.list({ search: "same-name" }, { connection: input.account === "support" ? support : sales }),
+  });
   const store = memorySecretStore();
   const config = {
     databaseUrl: testDatabaseUrl("neon_connections"),
@@ -93,7 +114,7 @@ it("uses separate Neon organization clients through the authorized runtime, incl
     connections: [support, sales],
     secrets: { store },
     ledger: memoryLedger(),
-    workflows: [save, health],
+    workflows: [save, health, list],
   };
   const client = await SanomaClient.connect(config);
   let worker: Awaited<ReturnType<typeof startWorker>> | undefined;
@@ -113,6 +134,12 @@ it("uses separate Neon organization clients through the authorized runtime, incl
       );
     }
     worker = await startWorker(config);
+    const listProjects = async (account: "support" | "sales") =>
+      client.result(await client.start(list, { account }, { startedBy: "alice" }), 15_000);
+    expect(await Promise.all([listProjects("support"), listProjects("sales")])).toEqual([
+      { projects: [{ id: "support-project", name: "same-name", region: "aws-us-east-1", pg_version: 17 }] },
+      { projects: [{ id: "sales-project", name: "same-name", region: "aws-us-east-1", pg_version: 17 }] },
+    ]);
     const checkHealth = async (account: "support" | "sales") =>
       client.result(await client.start(health, { account }, { startedBy: "alice" }), 15_000);
     held = checkHealth("support");
@@ -143,6 +170,9 @@ it("uses separate Neon organization clients through the authorized runtime, incl
     const before = requests.filter((r) => r.path.endsWith("/branches")).length;
     await expect(checkHealth("support")).rejects.toThrow("Authentication: wrong_account");
     expect(requests.filter((r) => r.path.endsWith("/branches"))).toHaveLength(before);
+    const listed = requests.filter((r) => r.path.endsWith("/projects")).length;
+    await expect(listProjects("support")).rejects.toThrow("Authentication: wrong_account");
+    expect(requests.filter((r) => r.path.endsWith("/projects"))).toHaveLength(listed);
   } finally {
     release.resolve();
     await held?.catch(() => undefined);

@@ -115,6 +115,23 @@ const objectId = z.string().min(1);
 
 /** What the project type's group adds beside its resource operations. */
 const projectSpecs = {
+  list: {
+    effect: "read",
+    idempotent: true,
+    description:
+      "List one page of project metadata for the selected connection; search matches partial names or IDs, not unique identities",
+    input: z.object({
+      search: z.string().min(1).max(256).optional(),
+      cursor: z.string().min(1).optional().describe("The previous page's next cursor; keep the same search"),
+      limit: z.number().int().min(1).max(400).optional().describe("Page size, default 100"),
+    }),
+    output: z.object({
+      projects: z.array(
+        z.object({ id: z.string(), name: z.string(), region: z.string(), pg_version: z.number().int() }),
+      ),
+      next: z.string().optional().describe("Continue with this cursor, even when this page has no matching project"),
+    }),
+  },
   health: {
     effect: "read",
     idempotent: true,

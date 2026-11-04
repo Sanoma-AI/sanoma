@@ -69,6 +69,15 @@ function fakeApi(state: FakeNeonState): NeonApi {
     return endpoint;
   };
   return {
+    async listProjects({ search, cursor, limit = 100 }) {
+      const matches = Object.values(state.projects)
+        .map(({ project }) => project)
+        .filter((p) => search === undefined || p.name.includes(search) || p.id.includes(search))
+        .toSorted((a, b) => a.id.localeCompare(b.id));
+      const after = cursor === undefined ? matches : matches.filter((p) => p.id.localeCompare(cursor) > 0);
+      const projects = after.slice(0, limit).map((p) => ({ ...p }));
+      return { projects, ...(after.length > limit && { pagination: { cursor: projects.at(-1)!.id } }) };
+    },
     async createProject({ project: body }) {
       if (!(REGIONS as readonly string[]).includes(body.region_id)) {
         throw fail(

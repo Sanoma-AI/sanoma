@@ -54,8 +54,20 @@ export interface BranchCreate {
   endpoints: { type: "read_write" }[];
 }
 
+/** One vendor page; unavailable projects make the page incomplete, never authoritative absence. */
+export interface ProjectListQuery {
+  search?: string;
+  cursor?: string;
+  limit?: number;
+}
+
 /** Neon's API, its answers as it sends them, cut. Each call fails with a `DriverError`. */
 export interface NeonApi {
+  listProjects(query: ProjectListQuery): Promise<{
+    projects: ApiProject[];
+    pagination?: { cursor: string };
+    unavailable_project_ids?: string[];
+  }>;
   createProject(body: ProjectCreate): Promise<{ project: ApiProject; branch: ApiBranch; endpoints: ApiEndpoint[] }>;
   /** Undefined when Neon has no such project (404). */
   getProject(id: string): Promise<ApiProject | undefined>;
@@ -189,6 +201,24 @@ export function neonOperations(neon: NeonApi) {
   };
   return {
     project: {
+      list: async ({ limit = 100, ...query }: ProjectListQuery) => {
+        const page = await neon.listProjects({ ...query, limit });
+        if (page.unavailable_project_ids?.length) {
+          throw new DriverError("neon: project.list: incomplete page; retry before reconciling projects", {
+            retryable: true,
+            vendorCode: "incomplete_page",
+          });
+        }
+        return {
+          projects: page.projects.map(({ id, name, region_id, pg_version }) => ({
+            id,
+            name,
+            region: region_id,
+            pg_version,
+          })),
+          ...(page.pagination?.cursor && { next: page.pagination.cursor }),
+        };
+      },
       import: read,
       read,
       plan: async (input: { id?: string; desired?: Record<string, unknown> }) => {

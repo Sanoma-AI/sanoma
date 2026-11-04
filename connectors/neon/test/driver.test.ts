@@ -53,6 +53,70 @@ const failure = (promise: Promise<unknown>) =>
   );
 
 describe.skipIf(live)("neonDriver", () => {
+  it("lists metadata and preserves duplicate candidates and opaque page cursors without extra vendor fields", async () => {
+    const metadata = { id: P, name: "cloud-company", region_id: "aws-us-east-1", pg_version: 17 };
+    const cursor = "opaque+page/2=";
+    play("list-pages", [
+      {
+        method: "GET",
+        path: `${PROJECTS}?search=cloud-company&limit=1`,
+        status: 200,
+        body: {
+          projects: [{ ...metadata, connection_uri: URL_STORED, settings: { secret: "synthetic-secret" } }],
+          pagination: { cursor },
+        },
+      },
+      {
+        method: "GET",
+        path: `${PROJECTS}?search=cloud-company&cursor=opaque+page/2=&limit=1`,
+        status: 200,
+        body: { projects: [{ ...metadata, id: "another-project" }], unavailable_project_ids: [] },
+      },
+    ]);
+    expect(await op("project.list", { search: "cloud-company", limit: 1 })).toEqual({
+      projects: [{ id: P, name: "cloud-company", region: "aws-us-east-1", pg_version: 17 }],
+      next: cursor,
+    });
+    expect(await op("project.list", { search: "cloud-company", cursor, limit: 1 })).toEqual({
+      projects: [{ id: "another-project", name: "cloud-company", region: "aws-us-east-1", pg_version: 17 }],
+    });
+    expect(sent).toHaveLength(2);
+    expect(sent.every((r) => r.headers.get("authorization") === `Bearer ${TEST_KEY}`)).toBe(true);
+  });
+
+  it("defaults the list page size and preserves continuation on an empty page", async () => {
+    play("list-empty", [
+      {
+        method: "GET",
+        path: `${PROJECTS}?limit=100`,
+        status: 200,
+        body: { projects: [], pagination: { cursor: "next-page" } },
+      },
+    ]);
+    expect(await op("project.list", {})).toEqual({ projects: [], next: "next-page" });
+  });
+
+  it("refuses incomplete successful responses instead of reporting authoritative absence", async () => {
+    play("list-incomplete", [
+      {
+        method: "GET",
+        path: `${PROJECTS}?limit=100`,
+        status: 200,
+        body: { projects: [], unavailable_project_ids: ["unavailable-project"] },
+      },
+    ]);
+    const err = await failure(op("project.list", {}));
+    expect(err).toMatchObject({ retryable: true, vendorCode: "incomplete_page" });
+    expect(err.message).not.toContain("unavailable-project");
+  });
+
+  it("does not turn listing authorization failures into an empty page", async () => {
+    play("list-denied", [
+      { method: "GET", path: `${PROJECTS}?limit=100`, status: 403, body: { code: "forbidden", message: "Forbidden" } },
+    ]);
+    expect(await failure(op("project.list", {}))).toMatchObject({ status: 403, retryable: false });
+  });
+
   it("creates a project with the key, its size both autoscaling limits, its database and role named", async () => {
     play("create");
     const made = await op("project.create", { desired: { ...DESIRED, size: "0.25" } });
