@@ -110,8 +110,6 @@ async function made(config: SanomaConfig, resolved: ResolvedConfig, options: Sna
       const found = text(join(root, file));
       if (found !== undefined) sources[file] = found;
     }
-  }
-  if (root !== undefined) {
     for (const dir of [...kindDirs(root, "scenarios"), join(root, "content")]) touch(dir);
   }
   // The repository's remote is in its git config: a remote added or changed is a new snapshot.

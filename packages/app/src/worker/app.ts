@@ -6,7 +6,6 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import {
   CLIENT_IP_HEADER,
   checkPreparedOnly,
-  type ResolvedConfig,
   resolveConfig,
   SanomaClient,
   useCedarWasm,
@@ -25,6 +24,7 @@ import {
 import type { AdmittingLogin } from "../context.ts";
 import { type AppHandler, appHandler } from "../handler.ts";
 import { publicFront } from "../login/public.ts";
+import { plain } from "../server/webhooks.ts";
 import { servedOnWorker } from "../snapshot.ts";
 
 // The runtime, bundled: the root's people, policies, app name and version as data, Cedar's web
@@ -58,14 +58,11 @@ const noStaffLogin: AdmittingLogin = {
   check() {},
   resolveActor: async () => undefined,
   handle: () =>
-    new Response("Signing in to the app is not available on this host yet: use the app where the company runs.\n", {
-      status: 503,
-      headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" },
-    }),
+    plain(503, "Signing in to the app is not available on this host yet: use the app where the company runs.\n"),
 };
 
 /** The handler, made on the first request from the Worker's bindings, which do not change in an isolate. */
-let made: { app: AppHandler; resolved: ResolvedConfig } | undefined;
+let made: AppHandler | undefined;
 
 function handlerOf(env: AppBundleEnv) {
   if (made) return made;
@@ -97,7 +94,7 @@ function handlerOf(env: AppBundleEnv) {
     },
     snapshot,
   );
-  return (made = { app, resolved });
+  return (made = app);
 }
 
 /**
@@ -142,10 +139,10 @@ export async function serve(
   ctx: AppBundleContext,
   host: AppHost | undefined,
 ): Promise<Response> {
-  const { app, resolved } = handlerOf(env);
+  const app = handlerOf(env);
   const { hostname } = new URL(request.url);
   if (env.SANOMA_HOSTNAME && hostname !== env.SANOMA_HOSTNAME.toLowerCase() && !app.hosts.has(hostname)) {
-    return new Response("Not found\n", { status: 404, headers: { "content-type": "text/plain; charset=utf-8" } });
+    return plain(404, "Not found\n");
   }
   // The visitor's address, from Cloudflare's header alone, for a login's rate limits: never a client's copy.
   const headers = new Headers(request.headers);
@@ -156,7 +153,7 @@ export async function serve(
   let starting: Promise<unknown> | undefined;
   const connect = () =>
     (client ??= SanomaClient.connect(
-      { ...config, root, databaseUrl: resolved.databaseUrl },
+      { ...config, root, databaseUrl: app.context.resolved.databaseUrl },
       {
         // A run waits for a worker of this bundle's code, which may not be live yet.
         appVersion: snapshot.version,

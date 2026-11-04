@@ -8,7 +8,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, extname, join, relative, sep } from "node:path";
-import { filesUnder, type SanomaConfig, type Source } from "@sanoma-ai/workflows";
+import { filesUnder, type SanomaConfig } from "@sanoma-ai/workflows";
+import { domainsText } from "@sanoma-ai/workflows/shared";
 import type { SiteEntry } from "@sanoma-ai/workflows/describe";
 import type { InlineConfig, Plugin, PluginOption } from "vite";
 import { type AppBundle, prerenderedAsset } from "./app-bundle.ts";
@@ -25,8 +26,6 @@ import {
 } from "./build.ts";
 import { type AppSnapshot, servedOnWorker } from "./snapshot.ts";
 import { appSnapshot } from "./snapshot-build.ts";
-
-export type { AppBundle, AppBundleContext, AppBundleEnv, AppBundleModule, AppHost } from "./app-bundle.ts";
 
 /** The Worker's runtime, as the bundle is built and tested for. */
 const COMPATIBILITY_DATE = "2026-10-01";
@@ -103,8 +102,6 @@ export interface BuildAppBundleOptions {
    * are prerendered, at their domain. A site without one is rendered on each request.
    */
   domains?: Readonly<Record<string, string>>;
-  /** The company's repository (`AppSnapshot.repository`): where a change is reviewed. */
-  source?: Source;
   /** See `BuildAppOptions.log`. */
   log?: (line: string) => void;
   /** See `AppViteOptions.runtimeFrom`. */
@@ -307,7 +304,7 @@ async function prerender(
         ],
         assets: { directory: client, binding: "ASSETS", html_handling: "none", not_found_handling: "none" },
         vars: {
-          SANOMA_DOMAINS: targets.map(({ site, domain }) => `${site.name}=${domain}`).join(","),
+          SANOMA_DOMAINS: domainsText(Object.fromEntries(targets.map(({ site, domain }) => [site.name, domain]))),
           DATABASE: { connectionString: "postgresql://prerender.invalid/none" },
         },
       }),
@@ -365,7 +362,7 @@ export async function buildAppBundle(repo: string, options: BuildAppBundleOption
   for (const dir of refused) {
     log?.(`${dir} is not mounted: a site's folder name is a URL segment (lowercase letters, digits and dashes)`);
   }
-  const snapshot = await appSnapshot(config, { ...(options.source && { source: options.source }) });
+  const snapshot = await appSnapshot(config);
   const outDir = join(root, ".sanoma", "app", "bundle", `build.${process.pid}.tmp`);
   // Cloudflare's plugin points its own preview at the build through `<root>/.wrangler/deploy`.
   const wrangler = join(root, ".wrangler");

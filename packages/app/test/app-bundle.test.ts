@@ -2,7 +2,8 @@ import { cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } fr
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type AppBundle, buildAppBundle, NodeOnlyImport, prerenderedPages } from "@sanoma-ai/app/bundle";
+import type { AppBundle } from "@sanoma-ai/app";
+import { buildAppBundle, NodeOnlyImport, prerenderedPages } from "@sanoma-ai/app/bundle";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { defineConfig, SanomaClient } from "@sanoma-ai/workflows";
 import { Client } from "pg";

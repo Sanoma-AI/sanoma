@@ -11,7 +11,7 @@ import { hostName, placeOf } from "./loopback.ts";
 import { seoFile } from "./seo.ts";
 import { siteHost } from "./site-path.ts";
 import type { AppSnapshot } from "./snapshot.ts";
-import { remoteWebhook } from "./server/webhooks.ts";
+import { plain, remoteWebhook } from "./server/webhooks.ts";
 
 /** A machine route, such as the wakeup's `/wake`: answered ahead of the public sites and the login (`AppHandlerOptions.ingress`). */
 export interface IngressRoute {
@@ -73,6 +73,8 @@ export interface AppHandler {
   context: AppContext;
   /** Each public site's hosts, by host name: `<name>.localhost` and its domain. */
   hosts: ReadonlyMap<string, SiteEntry>;
+  /** Each public site's domain, by site name, as `hosts` has it. */
+  domains: ReadonlyMap<string, string>;
 }
 
 /**
@@ -153,9 +155,9 @@ export function appHandler(options: AppHandlerOptions, first: AppSnapshot): AppH
     if (entry !== undefined) {
       const front = options.sites.get(entry.name);
       if (!front) {
-        return new Response(
+        return plain(
+          503,
           "This site is not served: its site.ts or its login has a problem, which the app's log names.\n",
-          { status: 503, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } },
         );
       }
       // Its URLs are at its domain, when it has one; only there may a crawler index it.
@@ -190,6 +192,7 @@ export function appHandler(options: AppHandlerOptions, first: AppSnapshot): AppH
   return {
     context,
     hosts,
+    domains,
     async fetch(request) {
       try {
         return await answer(request);

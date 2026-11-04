@@ -1,6 +1,7 @@
-// The app bundle's contract (`buildAppBundle` in `@sanoma-ai/app/build`): what the build hands a
-// host to upload, what the bundle's main module expects of its environment, and what it asks of
-// the host. Types only, so a host (the Cloudflare connector) reads them without the app.
+// The app bundle's contract (`buildAppBundle` in `@sanoma-ai/app/bundle`): what the build hands a
+// host to upload, what the bundle's main module expects of its environment, what it asks of the
+// host, and where its prerendered pages are. Nothing of the app's, so a host (the Cloudflare
+// connector) reads it from `@sanoma-ai/app` without loading the app.
 
 /** What the Worker runs the app from: the main module and its modules, the static assets, the runtime it was built for. */
 export interface AppBundle {

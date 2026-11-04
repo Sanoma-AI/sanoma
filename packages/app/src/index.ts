@@ -40,12 +40,10 @@ import { liveSnapshot } from "./snapshot-build.ts";
 
 export { ACTOR_HEADER } from "./api.ts";
 export type { LoginProvider, ResolveActor } from "./context.ts";
-export { type AppHandler, type AppHandlerOptions, appHandler, type IngressRoute } from "./handler.ts";
+export type { IngressRoute } from "./handler.ts";
 export { type MakeStaffLogin, type StaffSocial, staffLogin } from "./login/staff.ts";
 export { loopbackLogin } from "./loopback.ts";
 export type { AppBundle, AppBundleContext, AppBundleEnv, AppBundleModule, AppHost } from "./app-bundle.ts";
-export type { AppSnapshot } from "./snapshot.ts";
-export { appSnapshot, liveSnapshot } from "./snapshot-build.ts";
 
 export interface AppOptions {
   /** Defaults to 0: any free port, which `App.url` reports. 3000 is the suggested fixed port. */
@@ -126,7 +124,7 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   }
   const resolved = resolveConfig(config);
   const live = await liveSnapshot(config, { ...(options.source && { source: options.source }) });
-  let current = await live();
+  const current = await live();
   warnProblems(resolved, current);
   // The build first, importing nothing and connecting to nothing: a missing or half build is
   // refused before anything is opened. The dev server has nothing built to check.
@@ -163,7 +161,8 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   }
   const responder = loaded.value;
   const client = connected.value;
-  const login = admitting(given, () => current.people);
+  // The people as the latest request read them: `app` is made below, before any request.
+  const login = admitting(given, () => app.context.snapshot.people);
   // Each public site served, by name, with its own front door: its login half, if it has one,
   // made once the app listens (`openLogins`). A public site whose site.ts has a problem is not
   // served, as its login could be one not read.
@@ -187,7 +186,7 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   const app = appHandler(
     {
       resolved,
-      snapshot: async () => (current = await live()),
+      snapshot: live,
       client,
       login,
       sites,
@@ -228,8 +227,7 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
     await closeQuietly(client);
     throw err;
   }
-  const domains = new Map([...app.hosts.values()].flatMap((site) => (site.domain ? [[site.name, site.domain]] : [])));
-  const opened = await openLogins(resolved, client, halves, domains, options.social);
+  const opened = await openLogins(resolved, client, halves, app.domains, options.social);
   for (const { name } of halves.keys()) if (!opened.has(name)) sites.delete(name);
 
   const address = server.address() as AddressInfo;
