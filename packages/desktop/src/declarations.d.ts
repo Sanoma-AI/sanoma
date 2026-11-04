@@ -2,5 +2,5 @@
 // its dev server under `pnpm start`, undefined in a build, and its folder under .vite/renderer.
 declare const START_VITE_DEV_SERVER_URL: string | undefined;
 declare const START_VITE_NAME: string;
-// What vite.main.config.mts defines: whether the build is signed with a Developer ID.
-declare const SIGNED_WITH_DEVELOPER_ID: boolean;
+// What vite.main.config.mts defines: whether the build is signed for release.
+declare const SIGNED_BUILD: boolean;

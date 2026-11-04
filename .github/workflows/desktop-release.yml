@@ -1,27 +1,27 @@
 name: Desktop release
-# Run by hand on main: uploads the macOS app, signed with the Developer ID and notarized, to a DRAFT
-# GitHub Release `v<version>` (README "Desktop (preview)"). Once published, it is the update
+# Run by hand on main: builds the macOS app, signed with the Developer ID and notarized, and the Windows
+# x64 app, signed with Azure Artifact Signing, and uploads them to one DRAFT GitHub Release `v<version>`
+# (README "Desktop (preview)"), once both built and passed their checks. Once published, it is the update
 # update.electronjs.org offers the installed apps (packages/desktop/src/self-update.ts).
 on:
   workflow_dispatch:
 
-permissions:
-  actions: read # to see the commit's CI run
-  contents: write # to create the draft release
+permissions: {}
 
 concurrency:
   group: desktop-release
   cancel-in-progress: false
 
 jobs:
-  build:
-    runs-on: macos-latest
-    timeout-minutes: 60
-    env:
-      # The certificate in MAC_CERT_P12 (another team's asks installed apps for Keychain access once:
-      # packages/desktop/README.md, "Signing and notarization").
-      APPLE_SIGNING_IDENTITY: "Developer ID Application: LEON KWAN (6NP563U4MV)"
-    # Actions pinned to commits, as in release.yml: this job writes releases.
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read # to see the commit's CI run
+      contents: write # the releases API shows drafts only to a token that can write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    # Actions pinned to commits, as in release.yml: this workflow writes releases.
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -34,6 +34,9 @@ jobs:
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "::error::$GITHUB_SHA is not on main"; exit 1; }
           ci=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$GITHUB_SHA" --branch main --json conclusion -q '.[0].conclusion')
           [ "$ci" = success ] || { echo "::error::CI on $GITHUB_SHA is '${ci:-not run}', not success"; exit 1; }
+          # The desktop's own proof, where the commit changed what it covers.
+          desktop=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow desktop.yml --commit "$GITHUB_SHA" --branch main --json status,conclusion -q '.[0] // empty | "\(.status)/\(.conclusion)"')
+          [ -z "$desktop" ] || [ "$desktop" = completed/success ] || { echo "::error::Desktop on $GITHUB_SHA is '$desktop', not completed/success"; exit 1; }
       - name: The version is not released yet
         id: version
         env:
@@ -51,6 +54,21 @@ jobs:
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  mac:
+    needs: preflight
+    runs-on: macos-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      # The certificate in MAC_CERT_P12 (another team's asks installed apps for Keychain access once:
+      # packages/desktop/README.md, "Signing and notarization").
+      APPLE_SIGNING_IDENTITY: "Developer ID Application: LEON KWAN (6NP563U4MV)"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       # Node and pnpm from .mise.toml. No cache: a release never restores another run's cache.
       - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
@@ -97,7 +115,7 @@ jobs:
       - name: Each app and dmg is signed and notarized, and each app carries its own architecture's Node
         working-directory: packages/desktop/out
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.preflight.outputs.version }}
         run: |
           # Gatekeeper's verdict on $1 (spctl's options after it): accepted as notarized.
           notarized() {
@@ -131,24 +149,144 @@ jobs:
           kill $!
       # Forge names the dmg Sanoma-<version>-<arch>.dmg and the zip Sanoma-darwin-<arch>-<version>.zip,
       # the name update.electronjs.org needs (README "Desktop (preview)").
-      - name: Draft release
+      - name: Release assets
         working-directory: packages/desktop/out/make
         env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.preflight.outputs.version }}
         run: |
+          mkdir assets
+          cp dmg/*/"Sanoma-$VERSION"-*.dmg zip/darwin/*/Sanoma-darwin-*-"$VERSION".zip assets/
           # Each dmg also under a name without the version, which the website's download buttons
           # name: releases/latest/download/Sanoma-mac-<arch>.dmg is the newest published release's.
-          mkdir latest
           for arch in arm64 x64; do
-            cp "dmg/$arch/Sanoma-$VERSION-$arch.dmg" "latest/Sanoma-mac-$arch.dmg"
+            cp "dmg/$arch/Sanoma-$VERSION-$arch.dmg" "assets/Sanoma-mac-$arch.dmg"
           done
-          gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" --draft --target "$GITHUB_SHA" \
-            --title "Sanoma desktop $VERSION (preview)" --notes-file ../../RELEASE_NOTES.md \
-            dmg/*/"Sanoma-$VERSION"-*.dmg zip/darwin/*/Sanoma-darwin-*-"$VERSION".zip latest/Sanoma-mac-*.dmg
-          echo "Draft release v$VERSION from $GITHUB_SHA: publish it on GitHub, as the latest release, after trying the download." >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mac
+          path: packages/desktop/out/make/assets
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
       - name: Delete the signing keychain and the notarization key
         if: always()
         run: |
           security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
           rm -rf "$RUNNER_TEMP/certificate.p12" "$RUNNER_TEMP/apple-api-key.p8" "$RUNNER_TEMP/user-data"
+
+  windows:
+    needs: preflight
+    runs-on: windows-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write # azure/login's federated credential; no client secret is stored
+    env:
+      # Azure Artifact Signing: the region's endpoint, the account and its certificate profile. Their
+      # names are not secret, and a correction is a change here.
+      AZURE_SIGNING_ENDPOINT: https://eus.codesigning.azure.net
+      AZURE_SIGNING_ACCOUNT: sanomaworksigning
+      AZURE_SIGNING_PROFILE: sanomaworkpublic
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        with:
+          cache: false
+      - run: pnpm install --frozen-lockfile
+      # The signing client (Microsoft's dlib) runs on .NET 8.
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 8.0.x
+      # Microsoft's signtool and dlib, pinned to versions and their hashes; what signs for it is the
+      # Azure CLI's login below, and the dlib tries nothing else.
+      - name: Signing tools
+        run: |
+          $tools = Join-Path $env:RUNNER_TEMP "signing"
+          function Get-NuGetPackage($id, $version, $sha256) {
+            $package = Join-Path $tools "$id.zip"
+            New-Item -ItemType Directory -Force $tools | Out-Null
+            Invoke-WebRequest "https://api.nuget.org/v3-flatcontainer/$id/$version/$id.$version.nupkg" -OutFile $package
+            if ((Get-FileHash $package -Algorithm SHA256).Hash -ne $sha256) { throw "$id $version has another hash" }
+            Expand-Archive $package (Join-Path $tools $id)
+          }
+          Get-NuGetPackage microsoft.windows.sdk.buildtools 10.0.28000.2957 B7163FC6F636172726D0985963E4F7F11C41AFE1C7FDFE78F8051877360ED696
+          Get-NuGetPackage microsoft.artifactsigning.client 1.0.151 35375A4BC4E1102DA729FC3D8D9925F774C3BAAE6B8B7FF6398D948CA9AB0D8A
+          $metadata = Join-Path $tools "metadata.json"
+          @{
+            Endpoint               = $env:AZURE_SIGNING_ENDPOINT
+            CodeSigningAccountName = $env:AZURE_SIGNING_ACCOUNT
+            CertificateProfileName = $env:AZURE_SIGNING_PROFILE
+            ExcludeCredentials     = @(
+              "ManagedIdentityCredential", "WorkloadIdentityCredential", "SharedTokenCacheCredential",
+              "VisualStudioCredential", "VisualStudioCodeCredential", "AzurePowerShellCredential",
+              "AzureDeveloperCliCredential", "InteractiveBrowserCredential"
+            )
+          } | ConvertTo-Json | Set-Content $metadata
+          $dlib = Join-Path $tools "microsoft.artifactsigning.client\bin\x64\Azure.CodeSigning.Dlib.dll"
+          $signtool = Join-Path $tools "microsoft.windows.sdk.buildtools\bin\10.0.28000.0\x64\signtool.exe"
+          foreach ($file in $dlib, $signtool) { if (-not (Test-Path $file)) { throw "$file is not in its package" } }
+          "WINDOWS_SIGN_WITH_PARAMS=/v /debug /dlib $dlib /dmdf $metadata" >> $env:GITHUB_ENV
+          "WINDOWS_SIGNTOOL_PATH=$signtool" >> $env:GITHUB_ENV
+          "WINDOWS_TIMESTAMP_SERVER=http://timestamp.acs.microsoft.com" >> $env:GITHUB_ENV
+      # Federated: GitHub's token for this run, no secret (the app registration's federated credential
+      # names repo:Sanoma-AI/sanoma:ref:refs/heads/main). Signing needs no subscription.
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+      # The federated token lasts about five minutes and the build longer: a token for the signing
+      # service, asked for now, stays in the Azure CLI's cache for its hour.
+      - run: az account get-access-token --resource https://codesigning.azure.net --output none
+      # Stages Node for x64 and pnpm, then Forge builds and signs the app and the Squirrel installer
+      # (WINDOWS_SIGN_WITH_PARAMS, forge.config.mts).
+      - run: pnpm --filter @sanoma-ai/desktop run make:windows
+      - name: The installer, the app and every executable in them are validly signed, and it installs and runs
+        run: packages/desktop/scripts/check-windows-install.ps1 -Signed
+      # update.electronjs.org takes RELEASES by that name, and the nupkg by the name RELEASES gives; it
+      # knows Windows x64 from an asset named -win32-x64 (README "Desktop (preview)").
+      - name: Release assets
+        working-directory: packages/desktop/out/make/squirrel.windows/x64
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          New-Item -ItemType Directory assets | Out-Null
+          Copy-Item RELEASES, "Sanoma-$env:VERSION-full.nupkg" assets
+          Copy-Item Sanoma-Setup.exe "assets/Sanoma-$env:VERSION-win32-x64-Setup.exe"
+          # Also under a name without the version, which the website's download button will name:
+          # releases/latest/download/Sanoma-windows-x64.exe is the newest published release's.
+          Copy-Item Sanoma-Setup.exe assets/Sanoma-windows-x64.exe
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows
+          path: packages/desktop/out/make/squirrel.windows/x64/assets
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
+
+  # Only once both built and passed their checks, so a release never has one platform alone.
+  draft:
+    needs: [preflight, mac, windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write # to create the draft release
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: ${{ runner.temp }}/assets
+          merge-multiple: true
+      - name: Draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" --draft --target "$GITHUB_SHA" \
+            --title "Sanoma desktop $VERSION (preview)" --notes-file packages/desktop/RELEASE_NOTES.md \
+            "$RUNNER_TEMP"/assets/*
+          echo "Draft release v$VERSION from $GITHUB_SHA: publish it on GitHub, as the latest release, after trying the downloads." >> "$GITHUB_STEP_SUMMARY"

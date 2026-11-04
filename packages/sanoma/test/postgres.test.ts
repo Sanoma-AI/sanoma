@@ -12,13 +12,14 @@ import {
 } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { resolveDatabaseUrl } from "@sanoma-ai/workflows";
 import * as pg from "pg";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { UsageError } from "../src/config.ts";
-import { clusterDir, ensurePostgres, masked, OLD_DEFAULT_URL } from "../src/postgres.ts";
+import { cacheDir } from "../src/postgres-bin.ts";
+import { clusterDir, ensurePostgres, masked, mayBePostgres, OLD_DEFAULT_URL } from "../src/postgres.ts";
 import { gitIdentity } from "./git.ts";
 
 // pg's `Client` (the probe, and `stop`'s count of other clients) is the real one unless a test
@@ -243,6 +244,37 @@ describe("ensurePostgres with none named: the company's own", () => {
     expect(ran()).toEqual([]);
   });
 
+  it("adopts a cluster nothing is connected to, which a crashed launcher left, and stops it; a one-off command does not", async () => {
+    const root = repo();
+    postmasterPid(root, process.pid, 54321);
+    stubPostgres({ up: [54321] });
+    const oneOff = await ensurePostgres(undefined, { root, bin: fakeBin() });
+    await oneOff.stop();
+    expect(ran()).toEqual([]);
+    const ensured = await ensurePostgres(undefined, { root, bin: fakeBin(), adopt: true });
+    expect(ensured.how).toBe("answered");
+    await ensured.stop();
+    expect(ran().filter((call) => call.startsWith("pg_ctl stop"))).toHaveLength(1);
+  });
+
+  it("exits cleanly when stopping an adopted cluster fails: another launcher may be stopping it", async () => {
+    const root = repo();
+    postmasterPid(root, process.pid, 54321);
+    stubPostgres({ up: [54321] });
+    const ensured = await ensurePostgres(undefined, { root, bin: join(dir, "no-such-bin"), adopt: true });
+    await expect(ensured.stop()).resolves.toBeUndefined();
+  });
+
+  it("leaves up a cluster another launcher is connected to", async () => {
+    const root = repo();
+    postmasterPid(root, process.pid, 54321);
+    stubPostgres({ up: [54321], others: 1 });
+    const ensured = await ensurePostgres(undefined, { root, bin: fakeBin(), adopt: true });
+    expect(ensured.how).toBe("answered");
+    await ensured.stop();
+    expect(ran()).toEqual([]);
+  });
+
   it("starts over a stale postmaster.pid: one whose process is gone left to Postgres, one whose pid another program has deleted", async () => {
     stubPostgres();
     const root = repo();
@@ -309,6 +341,38 @@ describe("ensurePostgres with none named: the company's own", () => {
       "PostgreSQL refuses to run as root, so sanoma cannot start the company's own: set SANOMA_DATABASE_URL",
     );
     expect(ran()).toEqual([]);
+  });
+});
+
+const noTasklist = () => ({ stdout: "", status: null, error: new Error("no such program") });
+
+describe("cacheDir", () => {
+  it("on Windows is outside the desktop app's install, %LOCALAPPDATA%\\Sanoma, as names ignore case there", () => {
+    const cache = cacheDir("win32-x64", { LOCALAPPDATA: "L" }).toLowerCase();
+    expect(cache).toBe(join("l", "sanoma-postgres"));
+    expect(cache.startsWith(join("l", "sanoma") + sep)).toBe(false);
+  });
+});
+
+describe("mayBePostgres", () => {
+  it("asks tasklist on Windows, by the image name of the pid", () => {
+    const asked: string[] = [];
+    const answering = (stdout: string) => (command: string, args: string[]) => {
+      asked.push([command, ...args].join(" "));
+      return { stdout, status: 0 };
+    };
+    expect(mayBePostgres(7, "win32", answering('"postgres.exe","7","Console","1","20,000 K"\r\n'))).toBe(true);
+    expect(asked[0]).toContain("/FI PID eq 7");
+    expect(mayBePostgres(7, "win32", answering('"node.exe","7","Console","1","20,000 K"\r\n'))).toBe(false);
+    expect(mayBePostgres(7, "win32", answering("INFO: No tasks are running which match the criteria.\r\n"))).toBe(
+      false,
+    );
+  });
+
+  it("assumes it may be when it cannot ask", () => {
+    expect(mayBePostgres(7, "win32", noTasklist)).toBe(true);
+    expect(mayBePostgres(7, "win32", () => ({ stdout: "", status: 1 }))).toBe(true);
+    expect(mayBePostgres(7, "linux", noTasklist)).toBe(true);
   });
 });
 
