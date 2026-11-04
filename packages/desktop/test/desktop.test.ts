@@ -26,7 +26,7 @@ import { hidePasswords, openLog, TAIL_LINES } from "../src/logs.ts";
 import { folderArgument, realPathOf, syncedFolderWarning } from "../src/places.ts";
 import { type QuitSteps, quitOrder } from "../src/quit.ts";
 import { archWarnings, runtimeOf } from "../src/runtime.ts";
-import { updatesItself } from "../src/self-update.ts";
+import { firstCheckDelay, installedBySquirrel, updatesItself } from "../src/self-update.ts";
 import { startSession } from "../src/session.ts";
 import { shims, writeShims } from "../src/shims.ts";
 import { DEFAULT_SIZE, nextShown, windowBounds } from "../src/window-state.ts";
@@ -201,8 +201,7 @@ describe("the process manager", () => {
     },
   );
 
-  // Windows no longer links what a launcher left to it once it exited (`processTree`).
-  test.skipIf(windows)("a launcher that dies takes what it left in its group with it", async () => {
+  test("a launcher that dies takes what it left in its group with it", async () => {
     const port = await freePort();
     const { launched, pids } = fakeLaunch("crash", port);
     const [, grandchild] = await pids();
@@ -251,6 +250,11 @@ describe("the process manager", () => {
     const both = launcherEnv({ PATH: "a", Path: "b" }, ["s"], 3100, "win32");
     expect(Object.keys(both).filter((k) => /^path$/i.test(k))).toEqual(["PATH"]);
     expect(both.PATH).toBe("s;a;b");
+  });
+
+  test("on Windows it ends in where Git for Windows installs, as a running shell's Path lacks a new install", () => {
+    const env = launcherEnv({ Path: "C:\\w", ProgramFiles: "C:\\PF", LOCALAPPDATA: "C:\\L" }, ["s"], 3100, "win32");
+    expect(env.Path).toBe("s;C:\\w;C:\\PF\\Git\\cmd;C:\\L\\Programs\\Git\\cmd");
   });
 });
 
@@ -599,24 +603,36 @@ describe("the window's companies", () => {
 });
 
 /** A release build: built, on macOS, signed with the Developer ID, in Applications. */
-const releaseBuild = { packaged: true, platform: "darwin" as const, signed: true, inApplications: () => true };
+const releaseBuild = { packaged: true, platform: "darwin" as const, signed: true, installed: () => true };
 const notAsked = () => {
   throw new Error("asked where the app is");
 };
 
 describe("updating itself", () => {
-  test("only a built, Developer ID signed Mac app in Applications", () => {
-    expect(updatesItself(releaseBuild)).toBe(true);
-    expect(updatesItself({ ...releaseBuild, packaged: false })).toBe(false);
-    expect(updatesItself({ ...releaseBuild, signed: false })).toBe(false);
-    expect(updatesItself({ ...releaseBuild, inApplications: () => false })).toBe(false);
-    for (const platform of ["win32", "linux"] as const)
-      expect(updatesItself({ ...releaseBuild, platform })).toBe(false);
+  test.each(["darwin", "win32"] as const)("only a built, signed, installed app on %s", (platform) => {
+    const build = { ...releaseBuild, platform };
+    expect(updatesItself(build)).toBe(true);
+    expect(updatesItself({ ...build, packaged: false })).toBe(false);
+    expect(updatesItself({ ...build, signed: false })).toBe(false);
+    expect(updatesItself({ ...build, installed: () => false })).toBe(false);
   });
 
-  test("asks where the app is on macOS only (Electron has isInApplicationsFolder there alone)", () => {
-    expect(updatesItself({ ...releaseBuild, platform: "linux", inApplications: notAsked })).toBe(false);
-    expect(updatesItself({ ...releaseBuild, packaged: false, inApplications: notAsked })).toBe(false);
+  test("not on Linux, and asks where the app is last (Electron has isInApplicationsFolder on macOS alone)", () => {
+    expect(updatesItself({ ...releaseBuild, platform: "linux" })).toBe(false);
+    expect(updatesItself({ ...releaseBuild, platform: "linux", installed: notAsked })).toBe(false);
+    expect(updatesItself({ ...releaseBuild, packaged: false, installed: notAsked })).toBe(false);
+    expect(updatesItself({ ...releaseBuild, signed: false, installed: notAsked })).toBe(false);
+  });
+
+  test("a Windows app is installed when Squirrel's Update.exe is beside its app-<version> folder", () => {
+    const execPath = join("Sanoma", "app-0.5.0", "Sanoma.exe");
+    expect(installedBySquirrel(execPath, (path) => path === join("Sanoma", "Update.exe"))).toBe(true);
+    expect(installedBySquirrel(execPath, () => false)).toBe(false);
+  });
+
+  test("the first check waits out Squirrel's lock only on the launch after the install", () => {
+    expect(firstCheckDelay(["Sanoma.exe", "--squirrel-firstrun"])).toBeGreaterThanOrEqual(10_000);
+    expect(firstCheckDelay(["Sanoma.exe"])).toBe(0);
   });
 });
 

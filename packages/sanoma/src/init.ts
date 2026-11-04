@@ -191,9 +191,14 @@ export const packageName = (dir: string) =>
     .replace(/[^a-z0-9._-]+/g, "-")
     .replace(/^[-._]+|-+$/g, "") || "company";
 
+/**
+ * `<packageManager> install`, through a shell: on Windows pnpm, npm and yarn are `.cmd` shims, which
+ * Node starts only through one. As one string, as Node deprecates arguments beside `shell`; nothing
+ * in it needs quoting, the package manager being one of `packageManagerOf`'s names.
+ */
 const installWith = (cwd: string, packageManager: string) =>
   new Promise<void>((resolve, reject) => {
-    const child = spawn(packageManager, ["install"], { cwd, stdio: "inherit" });
+    const child = spawn(`${packageManager} install`, { cwd, stdio: "inherit", shell: true, windowsHide: true });
     child.once("error", reject);
     child.once("exit", (code) =>
       code === 0 ? resolve() : reject(new Error(`${packageManager} install failed; run it in ${cwd}, then sanoma`)),

@@ -27,7 +27,7 @@ console.log(`pids ${process.pid} ${grandchild.pid}`);
 if (mode === "crash") setTimeout(() => process.exit(1), 100);
 
 // As the launcher does, it stops what runs before it exits on the stop: here, a moment's wait, and
-// on Windows its grandchild, which the shell cannot reach there once the launcher exited.
+// on Windows its grandchild, as the shell looks for what is left only after a launcher that failed.
 const stop = () => {
   if (mode === "stubborn") return console.log("ignoring the stop");
   if (process.platform === "win32") grandchild.kill();

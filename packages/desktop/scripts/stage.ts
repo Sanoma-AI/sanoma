@@ -43,10 +43,17 @@ const versionOf = (dir: string) =>
     ? (JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as { version: string }).version
     : undefined;
 
+/**
+ * pnpm's native modules for other systems, left out of a Windows build: signing there covers every
+ * `.node` in the app, and signtool fails on a Mac or Linux binary (and nothing here runs them).
+ */
+const foreignBinary = (file: string) =>
+  process.platform === "win32" && /[\\/]@reflink[\\/]reflink-(?!win32-x64)[^\\/]+/.test(file);
+
 const from = pnpmPackage();
 const to = join(stage, "pnpm");
 if (versionOf(to) !== versionOf(from)) {
   rmSync(to, { recursive: true, force: true });
-  cpSync(from, to, { recursive: true, dereference: true });
+  cpSync(from, to, { recursive: true, dereference: true, filter: (file) => !foreignBinary(file) });
   console.error(`staged pnpm ${versionOf(to)} from ${from}`);
 }

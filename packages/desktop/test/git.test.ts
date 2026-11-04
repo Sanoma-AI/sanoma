@@ -25,6 +25,7 @@ import {
   identityProblem,
   isAuthFailure,
   needsCommandLineTools,
+  needsGitForWindows,
   type Run,
   setIdentity,
 } from "../src/git.ts";
@@ -97,6 +98,10 @@ function pushFrom(seed: string, file: string) {
   git(seed, "push", "--quiet", "origin", "main");
 }
 
+const gitFails: Run = async () => {
+  throw new Error("git: exit 128");
+};
+
 describe("git's prerequisites", () => {
   test("Apple's command line tools are needed on macOS when xcode-select has no path, and nowhere else", async () => {
     const calls: string[] = [];
@@ -112,6 +117,25 @@ describe("git's prerequisites", () => {
     expect(calls).toEqual(["xcode-select -p", "xcode-select -p"]);
     expect(await needsCommandLineTools("linux", answering(false))).toBe(false);
     expect(calls).toHaveLength(2);
+  });
+
+  test("Git for Windows is needed when git cannot be started on Windows, and nowhere else", async () => {
+    const missing = Object.assign(new Error("spawn git ENOENT"), { code: "ENOENT" });
+    const failing: Run = async () => {
+      throw missing;
+    };
+    const paths: (string | undefined)[] = [];
+    const found: Run = async (_command, _args, how) => {
+      paths.push(how?.env?.Path);
+      return "git version 2.50.0.windows.1";
+    };
+    expect(await needsGitForWindows("win32", {}, failing)).toBe(true);
+    expect(await needsGitForWindows("darwin", {}, failing)).toBe(false);
+    expect(await needsGitForWindows("win32", { Path: "C:\\bin", ProgramFiles: "C:\\PF" }, found)).toBe(false);
+    // Git installed since the shell started is found where its installer puts it.
+    expect(paths).toEqual(["C:\\bin;C:\\PF\\Git\\cmd"]);
+    // Git there but failing is not a missing Git.
+    expect(await needsGitForWindows("win32", {}, gitFails)).toBe(false);
   });
 
   test("an identity is read from git's config, checked, and set globally", async () => {

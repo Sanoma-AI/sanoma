@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { gitForWindows, withPath } from "./launcher.ts";
 import { hidePasswords } from "./logs.ts";
 
 /** Runs a command in `cwd`; resolves its stdout, trimmed, and rejects with what it printed on stderr. */
@@ -28,10 +29,13 @@ export const run: Run = (command, args, { cwd, env } = {}) =>
 
 /**
  * The environment the shell runs git in: this process's, with no password prompt
- * (`GIT_TERMINAL_PROMPT=0`; the OS credential helper still answers). The person's own ssh
- * settings stay as they are.
+ * (`GIT_TERMINAL_PROMPT=0`; the OS credential helper still answers), and on Windows with Git for
+ * Windows' folder on `Path` (`gitForWindows`). The person's own ssh settings stay as they are.
  */
-export const gitEnv = (base: NodeJS.ProcessEnv): NodeJS.ProcessEnv => ({ ...base, GIT_TERMINAL_PROMPT: "0" });
+export const gitEnv = (base: NodeJS.ProcessEnv, platform: NodeJS.Platform = process.platform): NodeJS.ProcessEnv => ({
+  ...(platform === "win32" ? withPath(base, [], gitForWindows(base), platform) : base),
+  GIT_TERMINAL_PROMPT: "0",
+});
 
 /**
  * Whether this computer lacks Apple's command line tools, which git on macOS is part of: there,
@@ -43,6 +47,22 @@ export async function needsCommandLineTools(platform: NodeJS.Platform = process.
   return exec("xcode-select", ["-p"]).then(
     () => false,
     () => true,
+  );
+}
+
+/** Where a person gets git on Windows, which ships none. */
+export const GIT_FOR_WINDOWS_URL = "https://git-scm.com/downloads/win";
+
+/** Whether this computer needs Git for Windows: on Windows, when `git` cannot be started. Never on another platform. */
+export async function needsGitForWindows(
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+  exec: Run = run,
+) {
+  if (platform !== "win32") return false;
+  return exec("git", ["--version"], { env: gitEnv(env, platform) }).then(
+    () => false,
+    (err: NodeJS.ErrnoException) => err.code === "ENOENT",
   );
 }
 

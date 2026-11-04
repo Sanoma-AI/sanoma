@@ -43,10 +43,10 @@ const DRAIN_MS = 1_000;
 
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
 
-/** A child and what it started: asked to stop, killed, and whether any of it is still there. */
+/** A child and what it started: asked to stop, killed (resolved once that is done), and whether any of it is still there. */
 interface Tree {
   term(): void;
-  kill(): void;
+  kill(): void | Promise<void>;
   alive(): boolean;
 }
 
@@ -60,24 +60,58 @@ function processGroup(child: ChildProcess): Tree {
       return false;
     }
   };
-  return { term: () => signal("SIGTERM"), kill: () => signal("SIGKILL"), alive: () => signal(0) };
+  return {
+    term: () => signal("SIGTERM"),
+    kill: () => {
+      signal("SIGKILL");
+    },
+    alive: () => signal(0),
+  };
 }
+
+/** A program Windows ships, by its path, as Path may not have System32. */
+const system32 = (...path: string[]) => join(process.env.SystemRoot ?? "C:\\Windows", "System32", ...path);
+
+/**
+ * The processes a child that has exited left behind, on Windows: those that still name its pid as
+ * their parent and started after it did (its pid may be another process's by now), each with what
+ * is under it. PowerShell, as nothing else Windows ships can still ask once the parent is gone.
+ */
+const orphansScript = (pid: number, since: Date) =>
+  `Get-CimInstance Win32_Process -Filter 'ParentProcessId=${pid}' | ` +
+  `Where-Object { $_.CreationDate -ge [datetime]'${since.toISOString()}' } | ` +
+  `ForEach-Object { & '${system32("taskkill.exe")}' /pid $_.ProcessId /T /F }`;
 
 /**
  * On Windows, which has no process groups and no SIGTERM: nothing to ask (the launcher stops on
  * stdin's end), and `taskkill /T /F` for the child and every process under it while the child
- * runs. Once it exited, Windows no longer links what it left to it, and its pid may be another
- * process's, so nothing is killed then.
+ * runs. Once it exited, it is what a crash left (`orphansScript`); after a clean exit nothing is
+ * there to look for.
  */
-function processTree(child: ChildProcess): Tree {
+function processTree(child: ChildProcess, since: Date): Tree {
   const alive = () => child.exitCode === null && child.signalCode === null;
   return {
     term: () => {},
     kill: () => {
-      if (!alive()) return;
-      // By its path, as Path may not have System32; when it cannot, the child alone, so `exited` still resolves.
-      const taskkill = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "taskkill.exe");
-      execFile(taskkill, ["/pid", String(child.pid), "/T", "/F"], { windowsHide: true }, (err) => err && child.kill());
+      if (alive()) {
+        // When it cannot, the child alone, so `exited` still resolves.
+        execFile(
+          system32("taskkill.exe"),
+          ["/pid", String(child.pid), "/T", "/F"],
+          { windowsHide: true },
+          (err) => err && child.kill(),
+        );
+        return;
+      }
+      if (child.exitCode === 0 || child.pid === undefined) return;
+      const powershell = system32("WindowsPowerShell", "v1.0", "powershell.exe");
+      const script = orphansScript(child.pid, since);
+      // A failure only leaves them there, as it is on a company's next start to say so.
+      return new Promise((done) => {
+        execFile(powershell, ["-NoProfile", "-NonInteractive", "-Command", script], { windowsHide: true }, () =>
+          done(),
+        );
+      });
     },
     alive,
   };
@@ -87,8 +121,9 @@ function processTree(child: ChildProcess): Tree {
  * Runs `command` in a process group of its own (`detached`; on Windows, its process tree), each
  * line it prints going to `onLine`. Once the child exits, for any reason, whatever it left in its
  * group (a worker, a dev server holding the port) gets SIGTERM, and SIGKILL when still there at
- * the deadline; `exited` resolves after that, and after the last lines it printed (or `DRAIN_MS`,
- * when a process outside the group still holds its output open).
+ * the deadline (on Windows, a kill at once, when it did not exit cleanly); `exited` resolves after
+ * that, and after the last lines it printed (or `DRAIN_MS`, when a process outside the group still
+ * holds its output open).
  */
 export function spawnGroup(
   command: string,
@@ -96,6 +131,7 @@ export function spawnGroup(
   { cwd, env, onLine, killAfterMs = KILL_AFTER_MS }: GroupOptions,
 ): Group {
   const windows = process.platform === "win32";
+  const since = new Date();
   // On Windows, `detached` would give it a console window of its own; there it shares none, hidden.
   const child = spawn(command, args, {
     cwd,
@@ -111,7 +147,7 @@ export function spawnGroup(
   );
   // A child that has stopped reading its stdin must not take this process down with EPIPE.
   child.stdin!.on("error", () => {});
-  const tree = windows ? processTree(child) : processGroup(child);
+  const tree = windows ? processTree(child, since) : processGroup(child);
   /** When the group gets SIGKILL: set by `stop`, else the deadline after the child exits. */
   let killAt: number | undefined;
   const exited = new Promise<Exit>((done) => {
@@ -119,7 +155,7 @@ export function spawnGroup(
       killAt ??= Date.now() + killAfterMs;
       tree.term();
       while (tree.alive() && Date.now() < killAt) await sleep(25);
-      tree.kill();
+      await tree.kill();
       await Promise.race([drained, sleep(DRAIN_MS)]);
       done({ code, signal: exitSignal });
     });
@@ -170,17 +206,23 @@ export function binOf(dir: string, name: string): string {
 const EXTRA_PATH = ["/opt/homebrew/bin", "/usr/local/bin"];
 
 /**
- * The launcher's environment: this process's, with `SANOMA_EVENTS=1` (JSON event lines), the
- * company's port, and PATH starting at `first` (the shims' folders, `writeShims`), then the
- * system's, then where Homebrew installs (an app started from the Finder gets a short PATH; not on
- * Windows). The port wins over the company's `.env`, which the launcher loads without overriding
- * what is set. Windows spells it `Path` and ignores case: the value is the one it has, under its
- * key, once.
+ * Where Git for Windows puts `git.exe`, for all users or just this one: the shell's `Path` has it
+ * only from the launch after the install, and a person told to install it comes back to a running
+ * shell.
  */
-export function launcherEnv(
+export const gitForWindows = (env: NodeJS.ProcessEnv): string[] =>
+  [env.ProgramFiles, env.LOCALAPPDATA && win32.join(env.LOCALAPPDATA, "Programs")].flatMap((dir) =>
+    dir ? [win32.join(dir, "Git", "cmd")] : [],
+  );
+
+/**
+ * `base` with `first` before its PATH and `last` after it. Windows spells it `Path` and ignores
+ * case: the value is the one it has, under its key, once.
+ */
+export function withPath(
   base: NodeJS.ProcessEnv,
   first: readonly string[],
-  port: number,
+  last: readonly string[],
   platform: NodeJS.Platform = process.platform,
 ): NodeJS.ProcessEnv {
   const windows = platform === "win32";
@@ -190,8 +232,25 @@ export function launcherEnv(
   const rest = Object.fromEntries(Object.entries(base).filter(([name]) => !isPath(name)));
   // Each spelling's entries, in order, as an environment copied by hand can carry both PATH and Path.
   const system = Object.entries(base).flatMap(([name, value]) => (isPath(name) ? (value ?? "").split(delimiter) : []));
-  const path = [...first, ...system, ...(windows ? [] : EXTRA_PATH)].filter(Boolean);
-  return { ...rest, SANOMA_EVENTS: "1", SANOMA_APP_PORT: String(port), [key]: [...new Set(path)].join(delimiter) };
+  const path = [...first, ...system, ...last].filter(Boolean);
+  return { ...rest, [key]: [...new Set(path)].join(delimiter) };
+}
+
+/**
+ * The launcher's environment: this process's, with `SANOMA_EVENTS=1` (JSON event lines), the
+ * company's port, and PATH (`withPath`) starting at `first` (the shims' folders, `writeShims`), then
+ * the system's, then where Homebrew installs (an app started from the Finder gets a short PATH) or,
+ * on Windows, Git for Windows. The port wins over the company's `.env`, which the launcher loads
+ * without overriding what is set.
+ */
+export function launcherEnv(
+  base: NodeJS.ProcessEnv,
+  first: readonly string[],
+  port: number,
+  platform: NodeJS.Platform = process.platform,
+): NodeJS.ProcessEnv {
+  const last = platform === "win32" ? gitForWindows(base) : EXTRA_PATH;
+  return { ...withPath(base, first, last, platform), SANOMA_EVENTS: "1", SANOMA_APP_PORT: String(port) };
 }
 
 export interface LaunchOptions extends GroupOptions {

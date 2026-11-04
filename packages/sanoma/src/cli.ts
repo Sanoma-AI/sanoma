@@ -302,7 +302,9 @@ async function dev(repo: string, packages: readonly LinkedPackage[]): Promise<ne
         cwd,
         env: process.env,
         stdio: [eventsOn() ? "pipe" : "inherit", "inherit", "inherit"],
-        detached: true,
+        // On Windows `detached` means a console window of its own.
+        detached: process.platform !== "win32",
+        windowsHide: true,
       }),
     watch: packages.map((p) => join(p.dir, "dist")),
     ignore: hot ? [join(app.dir, "dist", "client"), join(app.dir, "dist", "server")] : [],
@@ -423,16 +425,23 @@ async function wakeupAccount(label: string): Promise<number> {
   }
 }
 
+/** How soon a second signal is still the first one's stop. */
+const SAME_STOP_MS = 1_000;
+
 /**
  * On the first SIGINT or SIGTERM, or with `SANOMA_EVENTS=1` the end of stdin (a parent process
- * gone, or done), stops what runs and exits 0; a second signal exits at once. Without the variable
- * stdin is never read. Returns what stops, once, for a caller with a reason of its own to stop.
+ * gone, or done), stops what runs and exits 0; a second signal, a person's a moment later, exits at
+ * once. One at the same moment is the same stop reaching this process twice (`pnpm dlx sanoma`
+ * passes on a signal its process group got too), which must not leave Postgres running. Without the
+ * variable stdin is never read. Returns what stops, once, for a caller with a reason of its own to stop.
  */
 function onSignal(stop: () => Promise<void>): () => void {
   let stopping = false;
+  let stoppedAt = 0;
   const stopOnce = () => {
     if (stopping) return;
     stopping = true;
+    stoppedAt = Date.now();
     stop().then(
       () => process.exit(0),
       (err: unknown) => {
@@ -442,7 +451,10 @@ function onSignal(stop: () => Promise<void>): () => void {
       },
     );
   };
-  const handle = () => (stopping ? process.exit(130) : stopOnce());
+  const handle = () => {
+    if (!stopping) stopOnce();
+    else if (Date.now() - stoppedAt > SAME_STOP_MS) process.exit(130);
+  };
   // `on`, not `once`: the second signal must find the handler still there, and a dependency's
   // signal-exit (Pi's, in the app) re-sends a signal it finds no other listener for, which would
   // kill the process before `stop` ends.

@@ -1,9 +1,10 @@
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, realpathSync, watch } from "node:fs";
 import { findPackageJSON } from "node:module";
 import { dirname, join, sep } from "node:path";
 import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
+import { system32 } from "./windows.ts";
 
 /*
  * Dev mode: when the repo's `sanoma` or a `@sanoma-ai/*` package resolves into a sanoma checkout (a
@@ -204,13 +205,18 @@ export function supervise({
 
 /**
  * Ends a child started with `detached: true` and everything in its process group (what a `pnpm`
- * or `sh` it runs started): SIGTERM to the group, SIGKILL after 5 seconds. Resolves once the
- * child has exited, at once when it already has or never started.
+ * or `sh` it runs started): SIGTERM to the group, SIGKILL after 5 seconds; on Windows, which has
+ * neither, `taskkill /T /F`. Resolves once the child has exited, at once when it already has or
+ * never started.
  */
 export function end(child: ChildProcess): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null || child.pid === undefined) return Promise.resolve();
   const pid = child.pid;
   const signal = (name: NodeJS.Signals) => {
+    if (process.platform === "win32") {
+      execFile(system32("taskkill.exe"), ["/pid", String(pid), "/T", "/F"], { windowsHide: true }, () => {});
+      return;
+    }
     try {
       process.kill(-pid, name);
     } catch {
@@ -232,16 +238,20 @@ export function end(child: ChildProcess): Promise<void> {
 /**
  * Runs `pnpm run watch` in each linked package, in a process group of its own, each line it
  * prints going to `log` under the package's name: the package's own script decides how it builds.
- * `stop` ends them all.
+ * `stop` ends them all. Through a shell, as pnpm is a `.cmd` shim on Windows, which Node starts only
+ * through one.
  */
 export function startWatchers(
   packages: readonly LinkedPackage[],
   log: (line: string) => void,
 ): { stop(): Promise<void> } {
   const children = packages.map(({ name, dir }) => {
-    const child = spawn("pnpm", ["run", "watch"], {
+    const child = spawn("pnpm run watch", {
       cwd: dir,
-      detached: true,
+      shell: true,
+      // On Windows `detached` means a console window of its own.
+      detached: process.platform !== "win32",
+      windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"],
     });
     for (const stream of [child.stdout, child.stderr]) {

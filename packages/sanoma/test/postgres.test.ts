@@ -18,7 +18,7 @@ import { resolveDatabaseUrl } from "@sanoma-ai/workflows";
 import * as pg from "pg";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { UsageError } from "../src/config.ts";
-import { clusterDir, ensurePostgres, masked, OLD_DEFAULT_URL } from "../src/postgres.ts";
+import { clusterDir, ensurePostgres, masked, mayBePostgres, OLD_DEFAULT_URL } from "../src/postgres.ts";
 import { gitIdentity } from "./git.ts";
 
 // pg's `Client` (the probe, and `stop`'s count of other clients) is the real one unless a test
@@ -309,6 +309,29 @@ describe("ensurePostgres with none named: the company's own", () => {
       "PostgreSQL refuses to run as root, so sanoma cannot start the company's own: set SANOMA_DATABASE_URL",
     );
     expect(ran()).toEqual([]);
+  });
+});
+
+const noTasklist = () => ({ stdout: "", error: new Error("no such program") });
+
+describe("mayBePostgres", () => {
+  it("asks tasklist on Windows, by the image name of the pid", () => {
+    const asked: string[] = [];
+    const answering = (stdout: string) => (command: string, args: string[]) => {
+      asked.push([command, ...args].join(" "));
+      return { stdout };
+    };
+    expect(mayBePostgres(7, "win32", answering('"postgres.exe","7","Console","1","20,000 K"\r\n'))).toBe(true);
+    expect(asked[0]).toContain("/FI PID eq 7");
+    expect(mayBePostgres(7, "win32", answering('"node.exe","7","Console","1","20,000 K"\r\n'))).toBe(false);
+    expect(mayBePostgres(7, "win32", answering("INFO: No tasks are running which match the criteria.\r\n"))).toBe(
+      false,
+    );
+  });
+
+  it("assumes it may be when it cannot ask", () => {
+    expect(mayBePostgres(7, "win32", noTasklist)).toBe(true);
+    expect(mayBePostgres(7, "linux", noTasklist)).toBe(true);
   });
 });
 

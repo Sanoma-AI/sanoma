@@ -22,6 +22,7 @@ import { promisify } from "node:util";
 import { Client } from "pg";
 import { UsageError } from "./config.ts";
 import { postgresBin } from "./postgres-bin.ts";
+import { system32 } from "./windows.ts";
 
 export interface EnsuredPostgres {
   /** Postgres answered (at the URL named, or the company's own, run by another launcher); or this call started the company's own; or created it first. */
@@ -212,12 +213,29 @@ async function running(cluster: Cluster): Promise<string | undefined> {
 function clearStale(cluster: Cluster): void {
   const pm = postmaster(cluster);
   if (!pm || !alive(pm.pid)) return;
-  const ps = spawnSync("ps", ["-o", "comm=", "-p", String(pm.pid)], { encoding: "utf8" });
-  // Without `ps` to tell, the process may be the server: never a second one on its data.
-  if (ps.error || /(^|\/)postgres$/.test(ps.stdout.trim())) {
+  if (mayBePostgres(pm.pid)) {
     throw new Error(`Postgres (pid ${pm.pid}) may run in ${cluster.data} but does not answer; see ${cluster.log}`);
   }
   rmSync(pm.file, { force: true });
+}
+
+/**
+ * Whether the process `pid` may be a Postgres server: what `ps` (on Windows, `tasklist`) says it
+ * runs, or true when there is no telling, as never a second server may start on its data.
+ */
+export function mayBePostgres(
+  pid: number,
+  platform: NodeJS.Platform = process.platform,
+  run: (command: string, args: string[]) => { error?: Error; stdout: string } = (command, args) =>
+    spawnSync(command, args, { encoding: "utf8", windowsHide: true }),
+): boolean {
+  if (platform === "win32") {
+    // One CSV line, its image name first: "postgres.exe","1234",… (or a line saying there is none).
+    const list = run(system32("tasklist.exe"), ["/FI", `PID eq ${pid}`, "/FO", "CSV", "/NH"]);
+    return Boolean(list.error) || /^"postgres\.exe"/i.test(list.stdout.trim());
+  }
+  const ps = run("ps", ["-o", "comm=", "-p", String(pid)]);
+  return Boolean(ps.error) || /(^|\/)postgres$/.test(ps.stdout.trim());
 }
 
 /** Whether a process runs as `pid` (another user's too). */
@@ -376,13 +394,19 @@ const pgCtl = (bin: string, cluster: Cluster, args: string[]) => runPg(bin, "pg_
 /**
  * Runs PostgreSQL's `program` from `bin`, in a process group of its own (`pg_ctl start` leaves
  * the server in it), its output appended to `server.log`; throws, with the log's last lines,
- * when it fails.
+ * when it fails. Windows has no groups, and `detached` there leaves it no console, so the `cmd` and
+ * the `postgres` it starts would each open a window; it shares this process's, hidden under the
+ * desktop shell (`windowsHide`).
  */
 async function runPg(bin: string, program: string, cluster: Cluster, args: string[]): Promise<void> {
   const out = openSync(cluster.log, "a");
   try {
     const code = await new Promise<number | null>((resolve, reject) => {
-      const child = spawn(join(bin, "bin", program), args, { detached: true, stdio: ["ignore", out, out] });
+      const child = spawn(join(bin, "bin", program), args, {
+        detached: process.platform !== "win32",
+        windowsHide: true,
+        stdio: ["ignore", out, out],
+      });
       child.once("error", reject);
       child.once("exit", resolve);
     });

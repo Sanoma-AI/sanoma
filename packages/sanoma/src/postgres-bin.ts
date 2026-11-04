@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync } 
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { system32 } from "./windows.ts";
 
 /**
  * The platforms PostgreSQL is shipped for, as `${process.platform}-${process.arch}`. Each has a
@@ -97,7 +98,8 @@ export function cacheDir(platform: string, env: Record<string, string | undefine
 }
 
 function tar(args: string[], cwd: string): void {
-  const result = spawnSync("tar", args, { cwd, encoding: "utf8" });
+  const command = process.platform === "win32" ? system32("tar.exe") : "tar";
+  const result = spawnSync(command, args, { cwd, encoding: "utf8", windowsHide: true });
   if (result.error) throw new Error(`PostgreSQL: could not run tar to extract the binaries`, { cause: result.error });
   if (result.status !== 0) {
     throw new Error(`PostgreSQL: tar ${args.join(" ")} failed (exit ${result.status}): ${result.stderr.trim()}`);
