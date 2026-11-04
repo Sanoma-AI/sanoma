@@ -1,0 +1,20 @@
+# The format check for pull requests that ci.yml skips, so a badly formatted doc cannot reach main,
+# where it would fail CI and hold up a release.
+name: Docs
+on:
+  pull_request:
+    paths:
+      - "**/README.md"
+      - "**/AGENTS.md"
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Node and pnpm from .mise.toml, the one pin; pnpm then switches to `packageManager`.
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        with:
+          cache: true
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm format:check
