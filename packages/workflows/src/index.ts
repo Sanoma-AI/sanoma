@@ -6,6 +6,7 @@ export {
   type Connector,
   type ConnectorSetup,
   type ConnectorVendor,
+  type DatabasePreparation,
   type Driver,
   type DriverEnv,
   type DriverFn,

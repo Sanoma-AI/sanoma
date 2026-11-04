@@ -17,6 +17,7 @@ import {
   openBetterAuth,
   type Protocol,
   protocolOf,
+  SCHEMAS,
   type User,
   withSignOutBody,
 } from "./instance.ts";
@@ -28,7 +29,7 @@ import {
 // hooks, not its `disableSignUp`, which would send no code until a user row exists.
 
 /** The schema the staff login's tables are in, beside the visitors' `better_auth`. */
-const SCHEMA = "better_auth_staff";
+const SCHEMA = SCHEMAS.staff;
 const BASE_PATH = "/auth/better-auth";
 const SIGN_OUT = `${BASE_PATH}/sign-out`;
 const SEND_CODE = "/email-otp/send-verification-otp";

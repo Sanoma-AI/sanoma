@@ -7,12 +7,13 @@ import {
   localRedirects,
   openBetterAuth,
   type Protocol,
+  SCHEMAS,
   type User,
   withSignOutBody,
 } from "./instance.ts";
 
-/** The schema Better Auth's tables (`user`, `session`, `account`, `verification`) live in, on the company's database. */
-const SCHEMA = "better_auth";
+/** The schema Better Auth's tables (`user`, `session`, `account`, `verification`, `rateLimit`) live in, on the company's database. */
+const SCHEMA = SCHEMAS.visitors;
 /** Where its routes are: a site's pages POST to `<BASE_PATH>/sign-up/email`, `/sign-in/email`, `/sign-in/email-otp`… */
 const BASE_PATH = "/auth/better-auth";
 const SIGN_OUT = `${BASE_PATH}/sign-out`;

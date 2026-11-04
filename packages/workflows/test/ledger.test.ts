@@ -7,6 +7,7 @@ import { Pool } from "pg";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import {
   allowAll,
+  defineConnector,
   errorCode,
   jsonlLedger,
   type LedgerRecord,
@@ -18,6 +19,7 @@ import {
   resolveConfig,
   SanomaClient,
   startWorker,
+  withSetup,
 } from "../src/index.ts";
 import { deadlineRegistry } from "../src/deadlines.ts";
 import { currentGroup, entry, lastInvite, loginRecord, write, writeFailure } from "../src/ledger.ts";
@@ -312,6 +314,34 @@ const minted = (by: string, at: number) =>
     { type: "invite.minted", person: "sam", by, expiresAt: new Date(at + 1000).toISOString() },
     at,
   );
+
+describe("the worker's preparations", () => {
+  it("runs each connector's `prepare` and the options' after the runtime's tables, with the direct URL", async () => {
+    const prepared: string[] = [];
+    const prepare = (name: string) => async (url: string) => {
+      // The runtime's own tables are there by then.
+      await new Pool({ connectionString: url }).query("SELECT 1 FROM sanoma_invite_requests").catch((err: unknown) => {
+        throw new Error(`${name} ran before the runtime's tables: ${String(err)}`);
+      });
+      prepared.push(`${name}@${url}`);
+    };
+    const connector = withSetup(defineConnector("prepared", {}), { prepare: prepare("connector") });
+    const config = { ...minimal(databaseUrl), connectors: [connector] };
+    expect([...resolveConfig(config).preparations.keys()]).toEqual(["prepared"]);
+    const worker = await startWorker(config, { prepare: [prepare("launcher")] });
+    await worker.stop();
+    expect(prepared).toEqual([`connector@${databaseUrl}`, `launcher@${databaseUrl}`]);
+  });
+
+  it("stops the worker's start when one fails", async () => {
+    const failing = withSetup(defineConnector("failing", {}), {
+      prepare: async () => {
+        throw new Error("no schema for you");
+      },
+    });
+    await expect(startWorker({ ...minimal(databaseUrl), connectors: [failing] })).rejects.toThrow("no schema for you");
+  });
+});
 
 describe("lastInvite", () => {
   it("reads who minted a person's latest invite, and until when; nothing for one never invited", async () => {

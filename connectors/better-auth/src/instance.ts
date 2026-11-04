@@ -7,20 +7,24 @@ import { setTimeout as delay } from "node:timers/promises";
 import { Client, Pool } from "pg";
 
 // One Better Auth on the company's database, as the visitor and the staff logins both run it: its
-// tables in a schema of its own, migrated once per database and schema in a process under an
-// advisory lock, its cookies signed with the key the app derives for it, and one instance per
-// protocol, since a cookie's `Secure` flag is one per instance.
+// tables in a schema of its own, which the worker makes at its start (`prepareBetterAuth`) and the
+// app only checks, its cookies signed with the key the app derives for it, its rate limit in a
+// table rather than memory, and one instance per protocol, since a cookie's `Secure` flag is one
+// per instance.
 
 export type Protocol = "http" | "https";
 
 /** What each login sets on top of what every instance shares. */
 export type ExtraOptions = Omit<BetterAuthOptions, "database" | "secret" | "secrets" | "basePath" | "baseURL">;
 
+/** The schema each login's tables are in, on the company's database. */
+export const SCHEMAS = { visitors: "better_auth", staff: "better_auth_staff" } as const;
+
 export interface BetterAuthSetup<O extends ExtraOptions> {
   databaseUrl: string;
   /** The app's key for this login, 32 bytes as hex (`LoginContext.key`). */
   key: string;
-  /** The schema its tables are in: `better_auth` for visitors, `better_auth_staff` for staff. */
+  /** The schema its tables are in (`SCHEMAS`). */
   schema: string;
   /** Where its routes are: `/auth/better-auth`. */
   basePath: string;
@@ -30,13 +34,26 @@ export interface BetterAuthSetup<O extends ExtraOptions> {
   options: O;
 }
 
-/** Each database and schema's migration, once per process however many logins run on it. */
-const migrated = new Map<string, Promise<void>>();
+/** The user's `github` column, the GitHub login: never a person's input, so only the login sets it. */
+export const GITHUB_FIELD = { github: { type: "string" as const, required: false, input: false } };
 
 /**
- * Opens one Better Auth per protocol on the company's database, after its migrations: `auths` by
- * protocol, the `pool` they share, and `close`, which ends it. Throws, the pool ended, when the
- * key is not one the app derived or the migrations fail.
+ * What shapes the tables, the same for both logins: the `github` column, and the rate limit's
+ * table (`rateLimit.storage: "database"`, so a limit holds across processes and requests). The
+ * plugins they run (the email code, magic links) keep no tables of their own.
+ */
+const TABLE_OPTIONS = { user: { additionalFields: GITHUB_FIELD }, rateLimit: { storage: "database" as const } };
+
+/** The table the migrations make last, whose being there says the schema is prepared. */
+const LAST_TABLE = "rateLimit";
+
+/** Each database and schema checked for its tables, once per process. */
+const checked = new Map<string, Promise<void>>();
+
+/**
+ * Opens one Better Auth per protocol on the company's database: `auths` by protocol, the `pool`
+ * they share, and `close`, which ends it. Throws, the pool ended, when the key is not one the app
+ * derived or the schema's tables are not there yet (the worker makes them, `prepareBetterAuth`).
  */
 export async function openBetterAuth<O extends ExtraOptions>({
   databaseUrl,
@@ -51,10 +68,13 @@ export async function openBetterAuth<O extends ExtraOptions>({
   const pool = new Pool({ connectionString: databaseUrl });
   pool.on("error", (err) => console.warn(`better-auth: a database connection failed: ${err.message}`));
   const optionsFor = (protocol: Protocol) => ({
-    // On only in production by default; in memory, per process.
-    rateLimit: { enabled: true },
+    // On only in production by default; its counts in the schema's table, never in memory.
+    rateLimit: { enabled: true, ...TABLE_OPTIONS.rateLimit },
     logger: { level: "warn" as const },
     ...options,
+    user: { ...TABLE_OPTIONS.user, ...options.user },
+    // The session in the cookie, signed, for five minutes: most requests read no session row.
+    session: { cookieCache: { enabled: true, maxAge: 5 * 60 }, ...options.session },
     // Schema-qualified queries, not a search_path, which the URL's own `options` could undo.
     database: {
       dialect: new PostgresDialect({ pool }),
@@ -70,7 +90,8 @@ export async function openBetterAuth<O extends ExtraOptions>({
     baseURL: { allowedHosts: [...(hosts.get(protocol) ?? [])], protocol },
     telemetry: { enabled: false },
     advanced: {
-      // The app sets it from the socket; Better Auth would otherwise believe a client's X-Forwarded-For.
+      // The app sets it from the socket, or from its host's own header; Better Auth would
+      // otherwise believe a client's X-Forwarded-For.
       ipAddress: { ipAddressHeaders: [CLIENT_IP_HEADER] },
       useSecureCookies: protocol === "https",
       // Its default under NODE_ENV=test is off: the same check everywhere.
@@ -79,10 +100,8 @@ export async function openBetterAuth<O extends ExtraOptions>({
     },
   });
   try {
-    const protocols = [...hosts.keys()];
-    await migrateOnce(databaseUrl, schema, optionsFor(protocols[0]!));
-    // After the migrations: its start checks the tables, and says the schema is out of date otherwise.
-    const auths = new Map(protocols.map((protocol) => [protocol, betterAuth(optionsFor(protocol))]));
+    await checkOnce(pool, databaseUrl, schema);
+    const auths = new Map([...hosts.keys()].map((protocol) => [protocol, betterAuth(optionsFor(protocol))]));
     return { auths, pool, close: () => pool.end() };
   } catch (err) {
     await pool.end();
@@ -90,12 +109,45 @@ export async function openBetterAuth<O extends ExtraOptions>({
   }
 }
 
-/** Better Auth's migrations, once per database and schema in this process, under the advisory lock across processes. */
-function migrateOnce(databaseUrl: string, schema: string, options: BetterAuthOptions): Promise<void> {
+/** Refuses when `schema` lacks its tables: the worker makes them, and the app never does. Once per process, database and schema. */
+function checkOnce(pool: Pool, databaseUrl: string, schema: string): Promise<void> {
+  const at = `${databaseUrl}#${schema}`;
+  let done = checked.get(at);
+  if (!done) {
+    done = (async () => {
+      const { rows } = await pool.query<{ there: boolean }>("SELECT to_regclass($1) IS NOT NULL AS there", [
+        `"${schema}"."${LAST_TABLE}"`,
+      ]);
+      if (!rows[0]!.there)
+        throw new Error(
+          `better-auth: the database has no ${schema} tables yet: the worker makes them at its start, and the app never does`,
+        );
+    })().catch((err: unknown) => {
+      checked.delete(at);
+      throw err;
+    });
+    checked.set(at, done);
+  }
+  return done;
+}
+
+/** Each database and schema's migration, once per process however many workers run on it. */
+const migrated = new Map<string, Promise<void>>();
+
+/**
+ * Makes both logins' tables on the company's database, each schema's under an advisory lock
+ * across processes: what the worker runs at its start (`ConnectorSetup.prepare`, and the launcher
+ * for the staff login), on the database's direct URL. Idempotent: a second run changes nothing.
+ */
+export async function prepareBetterAuth(databaseUrl: string): Promise<void> {
+  for (const schema of Object.values(SCHEMAS)) await migrateOnce(databaseUrl, schema);
+}
+
+function migrateOnce(databaseUrl: string, schema: string): Promise<void> {
   const at = `${databaseUrl}#${schema}`;
   let done = migrated.get(at);
   if (!done) {
-    done = migrate(databaseUrl, schema, options).catch((err: unknown) => {
+    done = migrate(databaseUrl, schema).catch((err: unknown) => {
       migrated.delete(at);
       throw err;
     });
@@ -106,20 +158,26 @@ function migrateOnce(databaseUrl: string, schema: string, options: BetterAuthOpt
 
 /**
  * Holds the lock on a session of its own until that ends, whatever fails; polled, never waited
- * for by a blocked statement, as the runtime's own preparation does. The migrations make the schema.
+ * for by a blocked statement, as the runtime's own preparation does. The migrations make the
+ * schema, on a pool of their own, ended after.
  */
-async function migrate(databaseUrl: string, schema: string, options: BetterAuthOptions): Promise<void> {
+async function migrate(databaseUrl: string, schema: string): Promise<void> {
   const conn = new Client({ connectionString: databaseUrl, connectionTimeoutMillis: 10_000 });
   // An error nobody listens for ends the process; the query in flight fails with it.
   conn.on("error", (err) => console.warn(`better-auth: the migration's connection failed: ${err.message}`));
   await conn.connect();
+  const pool = new Pool({ connectionString: databaseUrl, max: 1 });
   try {
     const ask = "SELECT pg_try_advisory_lock(hashtext($1)) AS locked";
     while (!(await conn.query<{ locked: boolean }>(ask, [`sanoma.login.better-auth.${schema}`])).rows[0]!.locked)
       await delay(50);
+    const options: BetterAuthOptions = {
+      ...TABLE_OPTIONS,
+      database: { dialect: new PostgresDialect({ pool }), type: "postgres", schemaName: schema, transaction: true },
+    };
     await (await getMigrations(options)).runMigrations();
   } finally {
-    await conn.end().catch(() => undefined);
+    await Promise.all([conn.end(), pool.end()].map((ending) => ending.catch(() => undefined)));
   }
 }
 
@@ -165,9 +223,6 @@ export const localRedirects = (url: URL) =>
     const to = url.searchParams.get(name);
     return to === null || (to.startsWith("/") && !to.startsWith("//") && !to.startsWith("/\\"));
   });
-
-/** The user's `github` column, the GitHub login: never a person's input, so only the login sets it. */
-export const GITHUB_FIELD = { github: { type: "string" as const, required: false, input: false } };
 
 /** A user row, as far as who it vouches for reads it. */
 export interface User {

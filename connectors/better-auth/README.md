@@ -35,7 +35,7 @@ It has no credential. Better Auth signs its cookies with a key the app derives f
 
 ### The schema
 
-The tables (`user`, `session`, `account`, `verification`) are in the schema `better_auth` on the company's database (`SANOMA_DATABASE_URL`), beside the runtime's own, in queries that name the schema (no `search_path`, which the URL's own `options` could change). The login runs Better Auth's migrations when the app starts, before it serves the site: once per database in a process, under a Postgres advisory lock, so several processes starting at once do not race. A second start changes nothing.
+The tables (`user`, `session`, `account`, `verification`, and `rateLimit`, the rate limit's counts) are in the schema `better_auth` on the company's database (`SANOMA_DATABASE_URL`), beside the runtime's own, in queries that name the schema (no `search_path`, which the URL's own `options` could change). The worker makes them at its start, as it makes the runtime's own tables: `prepareBetterAuth`, the connector's `prepare` (and the `sanoma` bin's worker runs it for the staff sign-in, which no config names), runs Better Auth's migrations for both schemas on the database's direct URL, each under a Postgres advisory lock, so two workers starting at once do not race, and a second run changes nothing. The app never migrates: a login opened on a database the worker has not prepared refuses to open, saying so. The session rides in the cookie, signed, for five minutes (Better Auth's cookie cache), so most requests read no session row.
 
 ### The routes
 
@@ -58,7 +58,7 @@ const response = await fetch("/auth/better-auth/sign-in/email", {
 if (response.ok) window.location.reload(); // the app reads the new session cookie
 ```
 
-The session is one cookie, `better-auth.session_token` (`__Secure-better-auth.session_token`, and `Secure`, when the site is served over https): HttpOnly, SameSite=Lax, for the site's host only (no `Domain`), for seven days from sign-in. A request for a host that is not the site's is answered 421. Sign-in and sign-up are rate limited per visitor address (three tries in ten seconds), which the app gives the login in its own header, never from `X-Forwarded-For`. A site never imports `better-auth`: its pages only post to these routes.
+The session is one cookie, `better-auth.session_token` (`__Secure-better-auth.session_token`, and `Secure`, when the site is served over https): HttpOnly, SameSite=Lax, for the site's host only (no `Domain`), for seven days from sign-in. A request for a host that is not the site's is answered 421. Sign-in and sign-up are rate limited per visitor address (three tries in ten seconds), which the app gives the login in its own header, never from `X-Forwarded-For`; the counts are rows in the schema's `rateLimit` table, so the limit holds across processes and requests. A site never imports `better-auth`: its pages only post to these routes.
 
 ### An email code
 
@@ -100,7 +100,7 @@ Each `callbackURL` (and `errorCallbackURL`, where an error goes as `?error=<code
 
 ## The staff sign-in
 
-`betterAuthStaffLogin` is the app's sign-in for the company's own people on a host, which the `sanoma` bin uses off this machine (`staffLogin(betterAuthStaffLogin, { github })` from `@sanoma-ai/app`). Unlike the visitor login, nobody signs up: a code is sent, and an account made, only for an email the people file declares (anyone else gets the same answer, and nothing is stored or sent), or a GitHub login it declares. Its tables are in the schema `better_auth_staff`, migrated under the advisory lock `sanoma.login.better-auth.better_auth_staff`; its cookie is `sanoma.session_token`, for seven days, on whatever host the app answers on. Its ways in, under `/auth/better-auth/`:
+`betterAuthStaffLogin` is the app's sign-in for the company's own people on a host, which the `sanoma` bin uses off this machine (`staffLogin(betterAuthStaffLogin, { github })` from `@sanoma-ai/app`). Unlike the visitor login, nobody signs up: a code is sent, and an account made, only for an email the people file declares (anyone else gets the same answer, and nothing is stored or sent), or a GitHub login it declares. Its tables are in the schema `better_auth_staff`, which the worker makes beside `better_auth` ([the schema](#the-schema)); its cookie is `sanoma.session_token`, for seven days, on whatever host the app answers on. Its ways in, under `/auth/better-auth/`:
 
 - an email code (`/email-otp/send-verification-otp`, `/sign-in/email-otp`), with a sender;
 - GitHub (`/sign-in/social`, back at `/callback/github`), with the company's GitHub App's client, matched by the verified email GitHub gives, else the login (GitHub's `/user` for the sign-in's own token, which is then dropped; the App needs the account permission "Email addresses: read", or a private email ends in Better Auth's `?error=email_not_found`); a GitHub account the files declare by neither is refused as `?error=not_declared` (or, when its unverified email is a row's, Better Auth's `account_not_linked`), with no row left, as is a new GitHub account under a login a row already carries, since GitHub frees a renamed login; declare people by email where you can;
@@ -110,6 +110,6 @@ Every other Better Auth route is a 404, a POST whose `Origin` is not the request
 
 ### Later
 
-Password reset for visitors, more social providers (Google), and the rate limit kept in the database for several processes.
+Password reset for visitors, and more social providers (Google).
 
 The logo the app shows is Better Auth's mark, from the [Better Auth repository](https://github.com/better-auth/better-auth) (`demo/nextjs/components/logo.tsx`), in black or white. It is there only to identify the service.
