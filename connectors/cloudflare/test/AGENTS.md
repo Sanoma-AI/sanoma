@@ -2,7 +2,7 @@
 
 Tests for the Cloudflare connector: the Worker's code, the driver over replies written from Cloudflare's API reference, the features, and the Host and Wakeup kits on the fake.
 
-Preserve coverage for a configuration-revision change at the same source revision/image: plan an update, restart with the new bootstrap, and wait for matching startup health. Synthetic tests do not establish live Cloudflare rollout behavior.
+Preserve coverage for a configuration-revision change at the same source revision/image: plan an update, restart with the new bootstrap, and wait for matching startup health. Also preserve non-starting read/plan behavior and startup readiness for unchanged updates, including a retry after an uploaded revision failed to start. Synthetic tests do not establish live Cloudflare rollout behavior.
 
 ## Contents
 
