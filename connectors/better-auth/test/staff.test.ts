@@ -243,6 +243,7 @@ describe("the staff login with GitHub", () => {
     vi.unstubAllGlobals();
   });
   beforeEach(() => {
+    codes.clear();
     signIns.length = 0;
   });
 
@@ -272,6 +273,26 @@ describe("the staff login with GitHub", () => {
     });
     expect(signIns).toEqual([["github", identity]]);
     expect(await tokensOf(4101)).toEqual([{ access_token: null }]);
+  });
+
+  it("joins a declared person's account by GitHub's verified email, and keeps the login", async () => {
+    await half.handle(
+      request("/auth/better-auth/email-otp/send-verification-otp", { body: { email: DECLARED, type: "sign-in" } }),
+    );
+    await half.handle(
+      request("/auth/better-auth/sign-in/email-otp", { body: { email: DECLARED, otp: codes.get(DECLARED)! } }),
+    );
+    const users = await rows("user");
+    github.set("code-alice", { token: "gho_alice", id: 4103, login: "alice", email: DECLARED });
+    const landed = await viaGitHub("code-alice");
+    expect(landed.status).toBe(302);
+    expect(landed.headers.get("location")).toBe("/");
+    expect(await half.verify(request("/", { cookie: cookieOf(landed) }))).toMatchObject({
+      email: DECLARED,
+      github: "alice",
+    });
+    expect(await rows("user")).toBe(users);
+    expect(await tokensOf(4103)).toEqual([{ access_token: null }]);
   });
 
   it("makes no user for a GitHub account the files do not declare, and says so", async () => {

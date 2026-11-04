@@ -6,7 +6,7 @@ import {
   sameOrigin,
   type SignInMethod,
 } from "@sanoma-ai/workflows";
-import { APIError, createAuthMiddleware } from "better-auth/api";
+import { createAuthMiddleware } from "better-auth/api";
 import { magicLink } from "better-auth/plugins/magic-link";
 import { createHash } from "node:crypto";
 import {
@@ -32,8 +32,6 @@ const SCHEMA = "better_auth_staff";
 const BASE_PATH = "/auth/better-auth";
 const SIGN_OUT = `${BASE_PATH}/sign-out`;
 const SEND_CODE = "/email-otp/send-verification-otp";
-/** GitHub's redirect back, as Better Auth names the route in a hook's context. */
-const CALLBACK = "/callback/:id";
 /** How long a staff session lasts: seven days. Who may sign in is read on every request, so removing someone takes effect at once. */
 const SESSION_SECONDS = 7 * 24 * 60 * 60;
 
@@ -56,25 +54,24 @@ interface HookContext {
   path?: string;
   context: {
     internalAdapter: {
-      findUserById(id: string): Promise<(User & { id: string }) | null>;
+      findUserById(id: string): Promise<User | null>;
       updateUser(id: string, data: Record<string, unknown>): Promise<unknown>;
-      updateAccount(id: string, data: Record<string, unknown>): Promise<unknown>;
-      deleteUser(id: string): Promise<void>;
     };
   };
 }
-/** What the GitHub account hook reads of Better Auth's account row. */
-interface GitHubAccount {
-  id: string;
+/** What the account hooks read of Better Auth's account row. */
+interface Account {
   providerId: string;
   userId: string;
-  accessToken?: string | null;
 }
+
+/** GitHub's tokens are never kept: a GitHub App's user token reaches what the App and the person both reach. */
+const dropTokens = async () => ({ data: { accessToken: null, refreshToken: null, idToken: null } });
 
 /** How a session was made, by the route that made it. */
 const METHOD_OF: Record<string, SignInMethod> = {
   "/sign-in/email-otp": "code",
-  [CALLBACK]: "github",
+  "/callback/:id": "github",
   "/magic-link/verify": "invite",
 };
 
@@ -92,42 +89,12 @@ export async function betterAuthStaffLogin({ databaseUrl, key, sendCode, staff }
   const github = staff.social.github;
   /** Each invite's token as Better Auth hands it over, by email, until `invite` takes it. */
   const minted = new Map<string, string>();
-  /** The emails of user rows made on GitHub's redirect back, until `admitByGitHub` decides each. */
-  const pending = new Set<string>();
-
-  /**
-   * Keeps a GitHub account's login on its user and admits the user by it, once Better Auth has
-   * made or linked the user with it (GitHub's redirect back): GitHub's `/user` for the fresh
-   * token says whose login it is, then the token goes, which nothing here uses again. A row made
-   * for this sign-in that the files declare by neither email nor login goes too, and the sign-in
-   * ends in Better Auth's redirect with `error=not_declared`.
-   */
-  const admitByGitHub = async (account: GitHubAccount | null, ctx: HookContext | null): Promise<void> => {
-    if (account?.providerId !== "github" || ctx?.path !== CALLBACK) return;
-    const { internalAdapter } = ctx.context;
-    let login: string | undefined;
-    try {
-      if (account.accessToken) {
-        const answer = await fetch("https://api.github.com/user", {
-          headers: { authorization: `Bearer ${account.accessToken}`, "user-agent": "sanoma" },
-        });
-        const said = answer.ok ? ((await answer.json()) as { login?: unknown }).login : undefined;
-        if (typeof said === "string") login = said;
-      }
-    } finally {
-      await internalAdapter.updateAccount(account.id, { accessToken: null, refreshToken: null, idToken: null });
-    }
-    const user = await internalAdapter.findUserById(account.userId);
-    if (!user) return;
-    const made = pending.delete(user.email.toLowerCase());
-    if (!staff.admits({ ...identityOf(user), ...(login && { github: login }) })) {
-      if (made) await internalAdapter.deleteUser(user.id);
-      throw new APIError("FORBIDDEN", {
-        code: "not_declared",
-        message: "This company's files declare nobody with that GitHub account",
-      });
-    }
-    if (login && user.github !== login) await internalAdapter.updateUser(user.id, { github: login });
+  /** The login GitHub's profile names, by the request it came in, until `keepLogin` writes it. */
+  const logins = new WeakMap<object, string>();
+  /** Keeps the login GitHub named for this request on the account's user, once the account is made or refreshed. */
+  const keepLogin = async (account: Account | null, ctx: HookContext | null) => {
+    const login = account?.providerId === "github" && ctx ? logins.get(ctx) : undefined;
+    if (login) await ctx!.context.internalAdapter.updateUser(account!.userId, { github: login });
   };
   const { auths, close } = await openBetterAuth({
     databaseUrl,
@@ -141,7 +108,20 @@ export async function betterAuthStaffLogin({ databaseUrl, key, sendCode, staff }
     ]),
     options: {
       session: { expiresIn: SESSION_SECONDS },
-      user: { additionalFields: GITHUB_FIELD },
+      user: {
+        additionalFields: GITHUB_FIELD,
+        // Nobody the files do not declare gets a row, whatever the route: by the verified email
+        // the route proved, or by the login GitHub's own profile names (Better Auth sets no field
+        // from a profile that a person may not set, so the login is kept by `keepLogin`), before
+        // anything is written. A GitHub sign-in is checked again each time, with the fresh profile.
+        validateUserInfo: ({ user, source }, ctx) => {
+          const login = source.oauth?.providerId === "github" ? source.oauth.profile?.login : undefined;
+          if (typeof login === "string") logins.set(ctx, login);
+          const identity = { ...identityOf(user as User), ...(typeof login === "string" && { github: login }) };
+          if (staff.admits(identity)) return;
+          return { error: "not_declared", errorDescription: "This company's files declare nobody with that account" };
+        },
+      },
       advanced: { cookiePrefix: "sanoma" },
       ...(github && {
         socialProviders: {
@@ -169,21 +149,10 @@ export async function betterAuthStaffLogin({ databaseUrl, key, sendCode, staff }
         }),
       },
       databaseHooks: {
-        user: {
-          create: {
-            // Nobody the files do not declare gets a row, whatever the route. On GitHub's redirect
-            // back the row is made first and the account hook decides, once GitHub has said whose
-            // login it is: Better Auth sets no field from a profile that a person may not set.
-            before: async (user: User, ctx: HookContext | null) => {
-              if (ctx?.path === CALLBACK) {
-                pending.add(user.email.toLowerCase());
-                return;
-              }
-              return staff.admits(identityOf(user)) ? undefined : false;
-            },
-          },
+        account: {
+          create: { before: dropTokens, after: keepLogin },
+          update: { before: dropTokens, after: keepLogin },
         },
-        account: { create: { after: admitByGitHub } },
         session: {
           create: {
             after: async (session: { userId: string }, ctx: HookContext | null) => {
