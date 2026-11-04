@@ -322,6 +322,8 @@ export interface RemoteHalf {
   webhook?(request: Request, context: RemoteContext): Promise<RemoteEvent[]>;
   /** The accounts the company's app on the host is installed on: where it acts with no person's token. */
   owners?(context: RemoteContext): Promise<{ login: string; kind: "user" | "organization" }[]>;
+  /** The permissions the company's app on the host holds, by name (`contents: "write"`), as the host lists them; undefined without the app's keys. */
+  permissions?(context: RemoteContext): Promise<Record<string, string> | undefined>;
 }
 
 /** The remote half among `remotes` (`ResolvedConfig.remotes`) whose host `url` is on, with its vendor and the repository. */

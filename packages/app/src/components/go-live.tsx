@@ -154,7 +154,7 @@ function GoLiveSteps() {
               </ItemContent>
             </Item>
           )}
-          <SignInItem signIn={status.signIn} />
+          <SignInItem signIn={status.signIn} app={status.githubApp} />
         </ItemGroup>
         <div>
           <ButtonLink variant="outline">
@@ -464,9 +464,10 @@ function PushButton() {
  * host answers (when your email is declared); an email code through the config's sender; GitHub
  * through the App. Without a connected sender, a warning that does not block going live, and the
  * ways to fix it; invite links work whatever this says. With GitHub, the public sites whose
- * visitors can sign in with it too, and the callback URL each needs on the App.
+ * visitors can sign in with it too, and the callback URL each needs on the App; and, when the App
+ * lacks the permission to read email addresses, where to add it.
  */
-function SignInItem({ signIn }: { signIn: SetupStatus["signIn"] }) {
+function SignInItem({ signIn, app }: { signIn: SetupStatus["signIn"]; app: SetupStatus["githubApp"] }) {
   const code = signIn.sender !== null && signIn.senderConnected;
   const vendor = senderVendorOf(signIn);
   const ready = code || signIn.github || signIn.you !== null;
@@ -518,6 +519,12 @@ function SignInItem({ signIn }: { signIn: SetupStatus["signIn"] }) {
             <SignInLine ok>
               <span>
                 <span className="font-medium">GitHub</span> · the company&apos;s App
+                {app?.missing?.some((p) => p.startsWith("emails:")) && (
+                  <span className="text-muted-foreground">
+                    . The App may not read email addresses, which Sign in with GitHub needs when someone&apos;s GitHub
+                    email is private: <Link to="/hosting/connect">Connect</Link> says what to add.
+                  </span>
+                )}
                 {signIn.sites.length > 0 && (
                   <span className="text-muted-foreground">
                     . Visitors on {signIn.sites.map((site) => siteDir(site.name)).join(", ")} can sign in with GitHub

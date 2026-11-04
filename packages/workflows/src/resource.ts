@@ -216,7 +216,8 @@ export interface Declared<Id extends string = string, T = State> {
   readonly connection?: ConnectionRef;
   /**
    * Where it names another resource: the field's dotted path (a list item's with its index,
-   * `teams.0`) to that resource's `<vendor>.<type>:<name>`.
+   * `teams.0`) to that resource's `<vendor>.<type>:<name>`, or its `<vendor>.<type>` alone when it
+   * has no identity (then `desired` holds nothing there).
    */
   readonly refs: Readonly<Record<string, string>>;
 }
@@ -828,10 +829,16 @@ export function defineResource<
         const types = [wants.type].flat();
         if (!types.includes(id))
           throw new Error(`${what}: ${at} names a resource of type ${types.join(" or ")}, not ${id} (${value.name})`);
-        if (value.name === undefined)
-          throw new Error(`${what}: ${at} names a ${id}, which has no identity to name it by`);
-        if (wants.from !== undefined) unjudged.add(at);
-        refs[at] = `${id}:${value.name}`;
+        // A resource with no identity (a Neon project) stands for nothing a vendor could read: only
+        // a field the runtime consumes by the reference itself may name it, a host's database
+        // (`refs`, `deriveHosts`) or one that takes its state (`from`); `desired` holds nothing there.
+        if (value.name === undefined && path !== host?.inputs.database && wants.from === undefined) {
+          throw new Error(
+            `${what}: ${at} names a ${id}, which has no identity to name it by: only a host's database or a \`from\` reference may`,
+          );
+        }
+        if (wants.from !== undefined || value.name === undefined) unjudged.add(at);
+        refs[at] = value.name === undefined ? id : `${id}:${value.name}`;
         return value.name;
       }
       if (Array.isArray(value)) {

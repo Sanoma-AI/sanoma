@@ -49,11 +49,30 @@ const ROUTES = new Set([
 /** The routes of the email code, which answer only when the app can send one. */
 const CODE_ROUTES = new Set([SEND_CODE, "/sign-in/email-otp"]);
 
-/** What the session hook reads of Better Auth's endpoint context: the route, and the user's row. */
-interface SessionContext {
+/** What the hooks read of Better Auth's endpoint context: the route, and the rows. */
+interface HookContext {
   path?: string;
-  context: { internalAdapter: { findUserById(id: string): Promise<User | null> } };
+  context: {
+    adapter: { findOne(query: { model: string; where: { field: string; value: string }[] }): Promise<unknown> };
+    internalAdapter: {
+      findUserById(id: string): Promise<User | null>;
+      updateUser(id: string, data: Record<string, unknown>): Promise<unknown>;
+    };
+  };
 }
+/** What the account hooks read of Better Auth's account row. */
+interface Account {
+  providerId: string;
+  userId: string;
+}
+
+/** GitHub's tokens are never kept: a GitHub App's user token reaches what the App and the person both reach. */
+const dropTokens = async () => ({ data: { accessToken: null, refreshToken: null, idToken: null } });
+/** A GitHub account gone (a code proves an email its unverified row had, and drops its accounts): its user is no longer that login. */
+const forgetLogin = async (account: Account | null, ctx: HookContext | null) => {
+  if (account?.providerId === "github" && ctx)
+    await ctx.context.internalAdapter.updateUser(account.userId, { github: null });
+};
 
 /** How a session was made, by the route that made it. */
 const METHOD_OF: Record<string, SignInMethod> = {
@@ -76,6 +95,13 @@ export async function betterAuthStaffLogin({ databaseUrl, key, sendCode, staff }
   const github = staff.social.github;
   /** Each invite's token as Better Auth hands it over, by email, until `invite` takes it. */
   const minted = new Map<string, string>();
+  /** The login GitHub's profile names, by the request it came in, until `keepLogin` writes it. */
+  const logins = new WeakMap<object, string>();
+  /** Keeps the login GitHub named for this request on the account's user, once the account is made or refreshed. */
+  const keepLogin = async (account: Account | null, ctx: HookContext | null) => {
+    const login = account?.providerId === "github" && ctx ? logins.get(ctx) : undefined;
+    if (login) await ctx!.context.internalAdapter.updateUser(account!.userId, { github: login });
+  };
   const { auths, close } = await openBetterAuth({
     databaseUrl,
     key,
@@ -88,14 +114,43 @@ export async function betterAuthStaffLogin({ databaseUrl, key, sendCode, staff }
     ]),
     options: {
       session: { expiresIn: SESSION_SECONDS },
-      user: { additionalFields: GITHUB_FIELD },
+      user: {
+        additionalFields: GITHUB_FIELD,
+        // Nobody the files do not declare gets a row, whatever the route: by the verified email
+        // the route proved, or by the login GitHub's own profile names (Better Auth sets no field
+        // from a profile that a person may not set, so the login is kept by `keepLogin`), before
+        // anything is written. A GitHub sign-in is checked again each time, with the fresh profile.
+        validateUserInfo: async ({ user, source }, ctx) => {
+          const refused = {
+            error: "not_declared",
+            errorDescription: "This company's files declare nobody with that account",
+          };
+          const said = source.oauth?.providerId === "github" ? source.oauth.profile?.login : undefined;
+          const login = typeof said === "string" ? said : undefined;
+          if (login) logins.set(ctx, login);
+          const { adapter, internalAdapter } = ctx.context;
+          // A new GitHub account under a login a row already carries is another account (GitHub
+          // frees a renamed login): it is not the declared person, whatever the files say.
+          if (login && source.action === "create-user") {
+            const holder = await adapter.findOne({ model: "user", where: [{ field: "github", value: login }] });
+            if (holder) return refused;
+          }
+          // Signing in again, or linking: GitHub's email may have moved; the row's verified one still vouches.
+          const row = typeof user.id === "string" ? await internalAdapter.findUserById(user.id) : null;
+          const identity = {
+            ...identityOf(user as User),
+            ...(row && row.emailVerified && { email: row.email }),
+            ...(login && { github: login }),
+          };
+          return staff.admits(identity) ? undefined : refused;
+        },
+      },
       advanced: { cookiePrefix: "sanoma" },
       ...(github && {
         socialProviders: {
           github: {
             clientId: github.clientId,
             clientSecret: github.clientSecret,
-            mapProfileToUser: (profile: { login: string }) => ({ github: profile.login }),
           },
         },
       }),
@@ -117,15 +172,14 @@ export async function betterAuthStaffLogin({ databaseUrl, key, sendCode, staff }
         }),
       },
       databaseHooks: {
-        user: {
-          create: {
-            // Nobody the files do not declare gets a row, whatever the route.
-            before: async (user: User) => (staff.admits(identityOf(user)) ? undefined : false),
-          },
+        account: {
+          create: { before: dropTokens, after: keepLogin },
+          update: { before: dropTokens, after: keepLogin },
+          delete: { after: forgetLogin },
         },
         session: {
           create: {
-            after: async (session: { userId: string }, ctx: SessionContext | null) => {
+            after: async (session: { userId: string }, ctx: HookContext | null) => {
               const method = ctx?.path === undefined ? undefined : METHOD_OF[ctx.path];
               if (!method || !ctx) return;
               const user = await ctx.context.internalAdapter.findUserById(session.userId);

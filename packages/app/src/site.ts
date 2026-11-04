@@ -126,6 +126,11 @@ export interface SiteDefinition {
   icon?: IconName;
   /** Served at the root of its own domain to visitors, not people. */
   public?: boolean;
+  /**
+   * A public site's domain (`www.acme.example`): the production host attaches it and serves the
+   * site at its root there; in a preview and locally the site stays at `/sites/<name>`.
+   */
+  domain?: string;
   /** The connector in sanoma.config.ts whose login half signs visitors in; left out, every page runs as `anonymous`. */
   login?: string;
   /**

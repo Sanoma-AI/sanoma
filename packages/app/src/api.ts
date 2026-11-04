@@ -294,7 +294,12 @@ export type SetCredentialRequest = z.infer<typeof SetCredentialRequest>;
 
 /** What the connect page shows (`getSetupStatus`): the GitHub App, once created, and the pasted tokens' statuses. Never a value. */
 export interface SetupStatus {
-  githubApp: { slug: string; setBy?: string; setAt?: string } | null;
+  /**
+   * The company's GitHub App, once its keys are stored, with `missing`: the permissions the
+   * manifest asks for that GitHub's listing of the App lacks (one made before the manifest asked
+   * for them, or by hand), as `<name>: <level>`; null when GitHub did not say.
+   */
+  githubApp: { slug: string; setBy?: string; setAt?: string; missing: string[] | null } | null;
   tokens: CredentialStatus[];
   /**
    * How people will sign in on the host: `you`, the email declared for the person asking (the

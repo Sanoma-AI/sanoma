@@ -118,6 +118,7 @@ describe("describeConfig", () => {
       "sanoma.identity.retire",
       "sanoma.identity.revoke",
       "sanoma.invite.mint",
+      "sanoma.run.inspect",
       "sanoma.secret.delete",
       "sanoma.secret.generate",
       "sanoma.secretStore.prepare",

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { configuredSecrets } from "./credentials.ts";
+import { inspectRun } from "./run-status.ts";
 import {
   configuredIdentityProvisioning,
   type IdentityProvisioning,
@@ -378,7 +379,11 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
       changeDriver(remotes),
       connectionDriver(connections),
       appsListDriver,
-      runtimeDriver({ tokens: tokenStore(() => connectionPool.db()), identities: identityProvisioning.store }),
+      runtimeDriver({
+        tokens: tokenStore(() => connectionPool.db()),
+        identities: identityProvisioning.store,
+        inspect: inspectRun(() => connectionPool.db(), appName),
+      }),
       ...(hostTyped ? [sourceDriver] : []),
       ...(dataStore ? [collectionsDriver(declared, dataStore)] : []),
     ],

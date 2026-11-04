@@ -44,6 +44,8 @@ const Installation = z.object({ id: z.number(), account: z.object({ login: z.str
 const jwtOf = (found: Map<string, string>) =>
   appJwtOf(found.get(GITHUB_APP_SECRETS.id), found.get(GITHUB_APP_SECRETS.pem));
 
+/** The App itself, as GitHub lists it to the App: what it may do. */
+const App = z.object({ permissions: z.record(z.string(), z.string()) });
 const installations = (jwt: string) => ok(jwt, "GET", "/app/installations?per_page=100", z.array(Installation));
 
 /**
@@ -354,5 +356,9 @@ export const githubRemote: RemoteHalf = {
       login: account.login,
       kind: account.type === "Organization" ? ("organization" as const) : ("user" as const),
     }));
+  },
+  async permissions({ secrets }) {
+    const jwt = jwtOf(await secrets([GITHUB_APP_SECRETS.id, GITHUB_APP_SECRETS.pem]));
+    return jwt ? (await ok(jwt, "GET", "/app", App)).permissions : undefined;
   },
 };

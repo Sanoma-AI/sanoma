@@ -158,6 +158,16 @@ interface CompanyApi {
         };
       }, unknown>;
     };
+    run: {
+      /**
+       * Inspect a run's status in this application without its input, output or error. A snapshot, not a lock or proof that cancelled vendor calls have stopped
+       *
+       * `sanoma.run.inspect`, a read.
+       */
+      inspect: OpFn<{
+        runId: string;
+      }, unknown>;
+    };
   };
   /** The company's collections. */
   data: {

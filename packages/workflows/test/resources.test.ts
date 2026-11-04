@@ -27,7 +27,24 @@ const widget = defineResource({
   fields: { immutable: [], vendorOwned: ["url"], writeOnly: ["token"] },
   find: ({ name }) => name,
 });
-const acme = defineConnector("acme", { widget }, { package: "@acme/sanoma-connector" });
+// A type the vendor names itself (no identity), and one that takes a field of its state (`from`), naming it.
+const store = defineResource({
+  vendor: "acme",
+  type: "store",
+  title: "Store",
+  schema: z.object({ id: z.string().nullish(), region: z.string() }),
+  fields: { immutable: [], vendorOwned: ["id"], writeOnly: [] },
+});
+const box = defineResource({
+  vendor: "acme",
+  type: "box",
+  title: "Box",
+  identity: "name",
+  schema: z.object({ name: z.string(), store: z.string().nullish() }),
+  fields: { immutable: [], vendorOwned: [], writeOnly: [], references: { store: { type: "acme.store", from: "id" } } },
+  find: ({ name }) => name,
+});
+const acme = defineConnector("acme", { widget, store, box }, { package: "@acme/sanoma-connector" });
 
 const base = {
   workflows: [],
@@ -119,6 +136,25 @@ describe("readResources", () => {
       desired: { repository_id: "Sanoma-AI/docs" },
       refs: { repository_id: "resources/identity/github.ts#docs" },
     });
+  });
+
+  it("holds a `from` reference to a resource with no identity in refs alone", () => {
+    const dir = project({
+      "infra.ts":
+        'import { acme } from "@acme/sanoma-connector/resources";\n' +
+        'export const store = acme.store({ region: "eu" });\n' +
+        'export const box = acme.box({ name: "main", store });\n',
+    });
+    try {
+      const { resources, problems } = loadDataFiles(dir, base.connectors);
+      expect(problems).toEqual([]);
+      const main = resources.find((r) => r.id === "resources/infra.ts#box")!;
+      expect(main.name).toBe("main");
+      expect(main.desired).toEqual({ name: "main" });
+      expect(main.refs).toEqual({ store: "resources/infra.ts#store" });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("is what describeConfig lists as the config's resources, with their bindings and the orphans, without problems", () => {

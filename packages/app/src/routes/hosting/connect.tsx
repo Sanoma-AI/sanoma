@@ -17,7 +17,7 @@ import {
 } from "../../components/common.tsx";
 import { CredentialRow, type CredentialStore } from "../../components/credentials.tsx";
 import { Connections, SecretStorage } from "../../components/connections.tsx";
-import { SETUP_VENDORS } from "../../api.ts";
+import { SETUP_VENDORS, type SetupStatus } from "../../api.ts";
 import { setSetupTokenFn } from "../../functions.ts";
 import { ConnectSearch, setupStatusQuery } from "../../queries.ts";
 
@@ -92,7 +92,7 @@ function ConnectPage() {
  * The company's GitHub App: its slug and Install once created; until then, a form that creates it
  * on GitHub from the app's manifest, in a personal account or an organization.
  */
-function GithubApp({ app }: { app: { slug: string; setBy?: string; setAt?: string } | null }) {
+function GithubApp({ app }: { app: SetupStatus["githubApp"] }) {
   return (
     <Item role="listitem" variant="outline" size="xs">
       <ItemContent>
@@ -108,6 +108,13 @@ function GithubApp({ app }: { app: { slug: string; setBy?: string; setAt?: strin
         {app?.setBy && app.setAt && (
           <ItemDescription>
             created by {app.setBy} · <When at={Date.parse(app.setAt)} />
+          </ItemDescription>
+        )}
+        {app && app.missing && app.missing.length > 0 && (
+          <ItemDescription className="line-clamp-none">
+            The App lacks <code>{app.missing.join(", ")}</code>: in its settings on GitHub, under Permissions &amp;
+            events, set them (email addresses are an account permission, the rest repository ones), then accept the
+            update on its installation.
           </ItemDescription>
         )}
         {!app && (
