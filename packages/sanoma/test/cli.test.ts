@@ -65,6 +65,16 @@ describe("sanoma serve", () => {
 });
 
 describe("sanoma wakeup", () => {
+  // As under `pnpm dlx sanoma`, which passes on a signal its process group got too.
+  it("takes a second signal at the same moment as the same stop", async () => {
+    dir = copyFixture();
+    const { child, finished } = await serving(dir, ["wakeup"], unconfigured);
+    child.kill("SIGTERM");
+    setTimeout(() => child.kill("SIGTERM"), 5);
+    const done = await finished;
+    expect(done.code, done.stderr).toBe(0);
+  }, 60_000);
+
   it("serves the wakeup service's routes and /healthz alone, and stops on SIGINT", async () => {
     dir = copyFixture();
     const { url, stop, output } = await serving(dir, ["wakeup"], unconfigured);
