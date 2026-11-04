@@ -90,6 +90,7 @@ describe("isDirect", () => {
   it.each([
     ["a collection's write", { id: "data.outbound.save", vendor: "data", resource: "outbound", effect: "write" }, true],
     ["a vendor's read", { id: "acme.customer.get", vendor: "acme", resource: "customer", effect: "read" }, true],
+    ["a run's metadata", { id: "sanoma.run.inspect", vendor: "sanoma", resource: "run", effect: "read" }, true],
     ["a vendor's write", { id: "acme.customer.update", vendor: "acme", resource: "customer", effect: "write" }, false],
     ["a vendor's send", { id: "acme.mail.send", vendor: "acme", resource: "mail", effect: "send" }, false],
     [
@@ -381,6 +382,7 @@ describe("the built-in call workflow in a config", () => {
       "sanoma.connection.disconnect",
       "sanoma.connection.prepare",
       "sanoma.connection.test",
+      "sanoma.run.inspect",
     ]);
     expect(description.ops.filter((op) => op.direct).map((op) => op.id)).toEqual(entry?.ops);
     expect(description.ops.find((op) => op.id === "acme.customer.rename")).toMatchObject({ direct: false });
@@ -402,6 +404,7 @@ describe("the built-in call workflow in a config", () => {
       "sanoma.connection.disconnect",
       "sanoma.connection.prepare",
       "sanoma.connection.test",
+      "sanoma.run.inspect",
     ]);
     const named = defineWorkflow({
       name: "call",
