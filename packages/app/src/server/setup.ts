@@ -135,6 +135,8 @@ export async function setupStatus(app: AppContext, actor?: Principal): Promise<S
     signInStatus(app, actor),
   ]);
   const slug = found.get(GITHUB_APP.slug);
+  const github = found.has(GITHUB_APP.client_id) && found.has(GITHUB_APP.client_secret);
+  const githubEmails = slug && github ? await appReadsEmails(slug.value) : null;
   const tokens = names.map((name): CredentialStatus => {
     const { description, optional = false } = SETUP_TOKENS[name]!;
     const secret = found.get(name);
@@ -145,8 +147,26 @@ export async function setupStatus(app: AppContext, actor?: Principal): Promise<S
   return {
     githubApp: slug ? { slug: slug.value, setBy: slug.setBy, setAt: slug.setAt } : null,
     tokens,
-    signIn: { ...signIn, github: found.has(GITHUB_APP.client_id) && found.has(GITHUB_APP.client_secret) },
+    signIn: { ...signIn, github, githubEmails },
   };
+}
+
+/**
+ * Whether the App `slug` may read a person's email addresses (the account permission "Email
+ * addresses: read", which the manifest asks for and an App made elsewhere may lack), from GitHub's
+ * public listing of it; null when GitHub did not say.
+ */
+async function appReadsEmails(slug: string): Promise<boolean | null> {
+  try {
+    const res = await fetch(`${API}/apps/${encodeURIComponent(slug)}`, {
+      headers: { accept: "application/vnd.github+json", "user-agent": "sanoma" },
+    });
+    if (!res.ok) return null;
+    const { permissions } = (await res.json()) as { permissions?: Record<string, string> };
+    return permissions?.emails === "read" || permissions?.emails === "write";
+  } catch {
+    return null;
+  }
 }
 
 /**

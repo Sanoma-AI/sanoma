@@ -54,6 +54,12 @@ const KEYS = {
 };
 const conversions: string[] = [];
 const github = setupServer(
+  // The App's public listing: the one the callback stores may read email addresses.
+  http.get("https://api.github.com/apps/:slug", ({ params }) =>
+    params.slug === KEYS.slug
+      ? HttpResponse.json({ slug: params.slug, permissions: { contents: "write", emails: "read" } })
+      : HttpResponse.json({ message: "Not Found" }, { status: 404 }),
+  ),
   http.post("https://api.github.com/app-manifests/:code/conversions", ({ params }) => {
     conversions.push(String(params.code));
     return params.code === "good"
@@ -244,6 +250,22 @@ describe("sign-in on the host", () => {
     expect((await setupStatus(withSites)).signIn.sites).toEqual([{ name: "www", login: "better-auth" }]);
   });
 
+  it("says whether the App may read email addresses, which Sign in with GitHub needs, or that GitHub did not say", async () => {
+    expect((await setupStatus(ctx)).signIn).toMatchObject({ github: true, githubEmails: true });
+    github.use(
+      http.get("https://api.github.com/apps/:slug", () => HttpResponse.json({ permissions: { contents: "write" } }), {
+        once: true,
+      }),
+    );
+    expect((await setupStatus(ctx)).signIn.githubEmails).toBe(false);
+    github.use(
+      http.get("https://api.github.com/apps/:slug", () => HttpResponse.json({ message: "down" }, { status: 503 }), {
+        once: true,
+      }),
+    );
+    expect((await setupStatus(ctx)).signIn.githubEmails).toBeNull();
+  });
+
   it("names the config's sender, connected once its connector's credentials are stored", async () => {
     const withSender = defineConfig({
       ...config,
@@ -278,7 +300,7 @@ describe("the connect page", () => {
         expect.objectContaining({ name: "SUPABASE_ACCESS_TOKEN", status: "missing" }),
       ],
       // The App's client is stored (the callback above): GitHub sign-in on the host.
-      signIn: { you: null, sender: null, senderConnected: false, github: true, sites: [] },
+      signIn: { you: null, sender: null, senderConnected: false, github: true, githubEmails: true, sites: [] },
     });
     expect((await setupStatus(ctx, { id: "alice" })).signIn.you).toBe("alice@acme.test");
     await setSetupToken(ctx, { id: "alice" }, { name: "SUPABASE_ACCESS_TOKEN", value: "sbp_madeup" });

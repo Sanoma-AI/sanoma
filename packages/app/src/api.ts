@@ -300,15 +300,18 @@ export interface SetupStatus {
    * How people will sign in on the host: `you`, the email declared for the person asking (the
    * invite that signs them in once the host answers goes to it); `sender`, the config's
    * `login.sender` operation, and whether its connector's credentials are set; whether the GitHub
-   * App's client is stored, for "Sign in with GitHub"; and the public sites with a login
-   * (`sites`), whose visitors that client lets sign in with GitHub too. Neither a sender nor GitHub
-   * leaves invite links alone: a warning, not blocking.
+   * App's client is stored, for "Sign in with GitHub", and whether that App may read the
+   * person's email addresses (`githubEmails`, which a sign-in needs when their GitHub email is
+   * private; null when GitHub did not say); and the public sites with a login (`sites`), whose
+   * visitors that client lets sign in with GitHub too. Neither a sender nor GitHub leaves invite
+   * links alone: a warning, not blocking.
    */
   signIn: {
     you: string | null;
     sender: string | null;
     senderConnected: boolean;
     github: boolean;
+    githubEmails: boolean | null;
     sites: { name: string; login: string }[];
   };
 }
