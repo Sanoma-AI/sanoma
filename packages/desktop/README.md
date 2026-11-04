@@ -18,6 +18,10 @@ pnpm --filter @sanoma-ai/desktop start ~/Companies/acme  # or open a company at 
 
 `pnpm --filter @sanoma-ai/desktop package` builds the app, unpacked, into `out/` (Electron Forge, `forge.config.mts`), and `make` builds the dmg and zip for arm64 and x64 into `out/make` that [`desktop-release.yml`](../../.github/workflows/desktop-release.yml) uploads to a draft GitHub Release `v<version>` (the root README, "Desktop (preview)"); the zip, under Forge's name, is what the installed apps update from.
 
+## The icon
+
+`icons/` holds Sanoma's mark, the website's favicon: a white "S" in Fraunces on a pine rounded square, the S an outline so no font is needed. `icon.svg` is the drawing, and `icon-small.svg` the same at Fraunces's smallest optical size, for where the S is too small for the fine strokes. After changing either, run `node packages/desktop/scripts/icons.ts` on a Mac with Chrome and commit what it writes: `icon.icns`, the square on Apple's margin with a shadow, and `icon.ico`, the square filling the canvas from 16 to 256 px.
+
 ## Signing and notarization
 
 On a Mac, the environment decides how `package` and `make` sign the app (`forge.config.mts`):
@@ -47,7 +51,7 @@ On a Mac, the environment decides how `package` and `make` sign the app (`forge.
 - **Updates itself** (`src/self-update.ts`): a release build on macOS (signed with the Developer ID) that runs from an Applications folder asks [update.electronjs.org](https://github.com/electron/update.electronjs.org) at start and every hour (Electron's [`update-electron-app`](https://github.com/electron/update-electron-app)) for a newer release's zip for its architecture (which releases: the root README, "Desktop (preview)"). Squirrel.Mac (Electron's `autoUpdater`) downloads it in the background, checks it is signed by the same team, and installs it when the app next quits, so the next launch is the new version; checks stop until then. Nothing restarts the app or asks anything: Help → Restart to Update, there once the update is downloaded, quits as Quit does (every company stopped, and reopened at the launch) and relaunches the new version. A failed check (offline, the service down) goes to the console only. From the dmg, or opened from elsewhere (App Translocation), the app is on a read-only volume and cannot replace itself, so it does not try.
 - **Checks for a newer version** where it does not update itself (a built app outside Applications, an ad hoc build, Windows): at start and at most once a day (the time in `<userData>/settings.json`), it asks GitHub Releases for the newest `v*` that is neither a draft nor a prerelease (`src/update-check.ts`). A newer one gets one notification and a Help menu item that opens its release page; Help → Check for a Newer Sanoma asks at once. It never downloads or installs anything.
 
-Not yet: a second window, a company's unread or attention badge, updating itself on Windows, GitHub sign-in, an icon of its own (the tray shows the executable's), a Windows build (the shell's own code runs there and its unit tests run on Windows in `desktop.yml`; the installer comes with the packaging), Windows signing (after incorporation).
+Not yet: a second window, a company's unread or attention badge, updating itself on Windows, GitHub sign-in, a Windows build (the shell's own code runs there and its unit tests run on Windows in `desktop.yml`; the installer comes with the packaging), Windows signing (after incorporation).
 
 ## Why it ships a Node
 

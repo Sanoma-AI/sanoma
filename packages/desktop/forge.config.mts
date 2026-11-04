@@ -26,6 +26,9 @@ const notarizeWith = process.env.APPLE_API_KEY
     }
   : undefined;
 
+// Forge adds the extension for each platform: icon.icns, icon.ico (scripts/icons.ts).
+const icon = join(import.meta.dirname, "icons", "icon");
+
 function required(name: string): string {
   const value = process.env[name];
   if (!value) throw new Error(`APPLE_API_KEY is set without ${name}: notarizing needs all three`);
@@ -37,6 +40,7 @@ const config: ForgeConfig = {
     appBundleId: "ai.sanoma.desktop",
     appCategoryType: "public.app-category.business",
     asar: true,
+    icon,
     // stage/ is filled by scripts/stage.ts: pnpm, the same for every architecture, goes in here;
     // the pinned Node goes in per architecture (`packageAfterCopy`).
     extraResource: [join(import.meta.dirname, "stage", "pnpm")],
@@ -85,8 +89,17 @@ const config: ForgeConfig = {
     },
   },
   makers: [
-    new MakerDMG(identity ? { additionalDMGOptions: { "code-sign": { "signing-identity": identity } } } : {}),
-    new MakerSquirrel({ name: "Sanoma", setupExe: "Sanoma-Setup.exe" }),
+    new MakerDMG({
+      icon: `${icon}.icns`,
+      ...(identity ? { additionalDMGOptions: { "code-sign": { "signing-identity": identity } } } : {}),
+    }),
+    new MakerSquirrel({
+      name: "Sanoma",
+      setupExe: "Sanoma-Setup.exe",
+      setupIcon: `${icon}.ico`,
+      // Programs and Features takes the icon from a URL.
+      iconUrl: "https://raw.githubusercontent.com/Sanoma-AI/sanoma/main/packages/desktop/icons/icon.ico",
+    }),
     new MakerZIP({}, ["darwin", "win32"]),
   ],
   plugins: [
