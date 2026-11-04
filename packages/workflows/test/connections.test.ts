@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { connections } from "../src/db/company.ts";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -83,7 +84,7 @@ const pool = lazyDb(dbUrl, "connections-test");
 afterAll(() => pool.close());
 const registry = () => new ConnectionRegistry(connectionCatalog([mail], [support, sales], [customer]), () => pool.db());
 async function clear() {
-  await (await pool.db()).query("DELETE FROM sanoma_connections");
+  await (await pool.db()).delete(connections);
 }
 const config = () => ({
   databaseUrl: dbUrl,
@@ -426,7 +427,7 @@ describe("named connection identity", () => {
         ),
       );
       for (const result of results) expect(result).toEqual(results[0]);
-      expect((await (await pool.db()).query("SELECT id FROM sanoma_connections")).rowCount).toBe(1);
+      expect(await (await pool.db()).select({ id: connections.id }).from(connections)).toHaveLength(1);
       expect(
         (await (await pool.db()).query("SELECT id FROM sanoma_ledger WHERE run_id=$1", [`direct:alice:${id}`]))
           .rowCount,
@@ -638,7 +639,7 @@ describe("resource account selection", () => {
       ledger: memoryLedger(),
     };
     const resourcePool = lazyDb(cfg.databaseUrl, "resource-connections-test");
-    await (await resourcePool.db()).query("DELETE FROM sanoma_connections");
+    await (await resourcePool.db()).delete(connections);
     await resourcePool.close();
     const client = await SanomaClient.connect(cfg);
     let worker: Awaited<ReturnType<typeof startWorker>> | undefined;
