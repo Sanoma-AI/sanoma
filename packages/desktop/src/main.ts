@@ -952,13 +952,14 @@ let selfUpdating = false;
 let updateReady = false;
 
 /**
- * Updating itself: update-electron-app checks at once and every 10 minutes, and Squirrel.Mac
+ * Updating itself: update-electron-app checks at once and every hour, and Squirrel.Mac
  * downloads the update in the background. Nothing restarts the app: the update installs when it
  * quits, or at Help → Restart to Update. Its errors (offline, the service down) go to its log only.
  */
 function updateItself() {
   const updates = updateElectronApp({
     updateSource: { type: UpdateSourceType.ElectronPublicUpdateService, repo: REPOSITORY },
+    updateInterval: "1 hour",
     notifyUser: false,
   });
   autoUpdater.on("update-downloaded", () => {
@@ -1073,11 +1074,7 @@ const argsOf = (argv: readonly string[]) => argv.slice(1);
 /** The app's own path on a checkout's command line (`electron <app path>`), which is no company folder. */
 const ownPath = () => (process.defaultApp ? app.getAppPath() : undefined);
 
-/**
- * Quit waits for each company: those still opening, then every session, stopped; then the app
- * quits, or, after Restart to Update, Squirrel.Mac installs and relaunches it. What is open stays
- * marked so (`Company.open`), for the next launch.
- */
+/** Quit's order (`quitOrder`). What is open stays marked so (`Company.open`), for the next launch. */
 const quit = quitOrder({
   busy: () => running.size > 0 || opening.size > 0,
   stopAll: () => Promise.all(opening.values()).then(() => Promise.all([...running.keys()].map(stop))),

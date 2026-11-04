@@ -40,15 +40,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           version=$(jq -r .version packages/desktop/package.json)
-          # update.electronjs.org reads only releases whose tag is a semver version, `v<x.y.z>` here,
-          # and installed apps take only a later one. So the version must be later than every `v*`
-          # tag and release (drafts have no tag yet): `v0.2.0` to `v0.4.2` are the npm packages' old
-          # tags (README "Desktop (preview)"), so 0.5.0 comes next.
+          # Later than every `v*` tag and release, drafts included (they have no tag yet): the tag
+          # rule is in the README's "Desktop (preview)".
           grep -qxE '[0-9]+\.[0-9]+\.[0-9]+' <<<"$version" ||
             { echo "::error::version $version in packages/desktop/package.json is not x.y.z"; exit 1; }
           releases=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" -q '.[].tag_name')
           newest=$({ git tag -l 'v*'; echo "$releases"; } | sed -n 's/^v\([0-9]*\.[0-9]*\.[0-9]*\)$/\1/p' | sort -V | tail -1)
-          if [ -n "$newest" ] && { [ "$version" = "$newest" ] || [ "$(printf '%s\n' "$newest" "$version" | sort -V | tail -1)" = "$newest" ]; }; then
+          if [ "$(printf '%s\n' "$newest" "$version" | sort -V | tail -1)" = "$newest" ]; then
             echo "::error::v$newest exists: bump version in packages/desktop/package.json past it, or delete that draft"
             exit 1
           fi
@@ -132,7 +130,7 @@ jobs:
           kill -0 $! || { echo "::error::the signed app exits at start"; exit 1; }
           kill $!
       # Forge names the dmg Sanoma-<version>-<arch>.dmg and the zip Sanoma-darwin-<arch>-<version>.zip,
-      # the name update.electronjs.org needs: a Mac zip's has `-darwin`, and `-arm64` for that build.
+      # the name update.electronjs.org needs (README "Desktop (preview)").
       - name: Draft release
         working-directory: packages/desktop/out/make
         env:
@@ -142,13 +140,12 @@ jobs:
           # Each dmg also under a name without the version, which the website's download buttons
           # name: releases/latest/download/Sanoma-mac-<arch>.dmg is the newest published release's.
           mkdir latest
-          assets=()
           for arch in arm64 x64; do
             cp "dmg/$arch/Sanoma-$VERSION-$arch.dmg" "latest/Sanoma-mac-$arch.dmg"
-            assets+=("dmg/$arch/Sanoma-$VERSION-$arch.dmg" "zip/darwin/$arch/Sanoma-darwin-$arch-$VERSION.zip" "latest/Sanoma-mac-$arch.dmg")
           done
           gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" --draft --target "$GITHUB_SHA" \
-            --title "Sanoma desktop $VERSION (preview)" --notes-file ../../RELEASE_NOTES.md "${assets[@]}"
+            --title "Sanoma desktop $VERSION (preview)" --notes-file ../../RELEASE_NOTES.md \
+            dmg/*/"Sanoma-$VERSION"-*.dmg zip/darwin/*/Sanoma-darwin-*-"$VERSION".zip latest/Sanoma-mac-*.dmg
           echo "Draft release v$VERSION from $GITHUB_SHA: publish it on GitHub, as the latest release, after trying the download." >> "$GITHUB_STEP_SUMMARY"
       - name: Delete the signing keychain and the notarization key
         if: always()

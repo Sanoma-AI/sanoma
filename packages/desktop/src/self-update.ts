@@ -1,7 +1,7 @@
-// Updating itself, on macOS: `update-electron-app` asks update.electronjs.org, Electron's service for
-// public GitHub repositories, which offers the newest release tagged `v<x.y.z>` (neither a draft nor
-// a prerelease) with a `-darwin-<arch>` zip; Squirrel.Mac downloads it and installs it when the app
-// quits. A build that does not update itself checks for a newer release instead (update-check.ts).
+// Updating itself, on macOS: `update-electron-app` asks update.electronjs.org (which releases it
+// offers: the root README's "Desktop (preview)"); Squirrel.Mac downloads the update and installs it
+// when the app quits. A build that does not update itself checks for a newer release instead
+// (update-check.ts).
 
 /** The repository whose releases the app updates from. */
 export const REPOSITORY = "Sanoma-AI/sanoma";

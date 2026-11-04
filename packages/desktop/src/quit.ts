@@ -30,7 +30,7 @@ export function quitOrder(steps: QuitSteps): QuitOrder {
   let stopped = false;
   let stopping: Promise<unknown> | undefined;
   let update = false;
-  /** The install, or Quit when it throws at once (as an `error` event says a later failure). */
+  /** The install, or Quit when it throws at once; a later failure comes as `installFailed`. */
   const install = () => {
     try {
       steps.install();

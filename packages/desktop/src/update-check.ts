@@ -3,10 +3,11 @@
 // and links to its page; the person downloads and replaces the app.
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { REPOSITORY } from "./self-update.ts";
 import type { Rect } from "./window-state.ts";
 
-/** The repository's latest releases, a page of 100: the desktop's `v*` among any others (0.1.0's `desktop-v0.1.0` among them). */
-export const RELEASES_URL = "https://api.github.com/repos/Sanoma-AI/sanoma/releases?per_page=100";
+/** The repository's latest releases, a page of 100: the desktop's `v*` among any others. */
+export const RELEASES_URL = `https://api.github.com/repos/${REPOSITORY}/releases?per_page=100`;
 export const TAG_PREFIX = "v";
 /** At most one check a day, counted from the last one that answered. */
 export const CHECK_EVERY_MS = 24 * 60 * 60 * 1000;
