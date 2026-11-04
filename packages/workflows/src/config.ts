@@ -417,6 +417,11 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
       drivers: driversByVendor,
       builtInStore: !config.secrets?.store,
       signingKeyBound: config.secrets?.bindings?.SANOMA_SIGNING_KEY !== undefined,
+      hostEnvironment: Object.fromEntries(
+        Object.entries(config.secrets?.bindings ?? {}).flatMap(([name, binding]) =>
+          binding.host && binding.env !== undefined ? [[binding.env, name]] : [],
+        ),
+      ),
       ...(isOp(config.login?.sender) && { sender: config.login.sender.vendor }),
     });
   if (types.size) {
@@ -744,6 +749,7 @@ async function readDeclared(
     drivers: ReadonlyMap<string, Driver>;
     builtInStore: boolean;
     signingKeyBound: boolean;
+    hostEnvironment: Readonly<Record<string, string>>;
     sender?: string;
   },
 ): Promise<Omit<ApplyDeclared, "rebinds">> {
@@ -765,6 +771,7 @@ async function readDeclared(
       ...(run && { secrets: run.state.secrets }),
       builtInStore: options.builtInStore,
       signingKeyBound: options.signingKeyBound,
+      hostEnvironment: options.hostEnvironment,
       ...(options.sender !== undefined && { sender: options.sender }),
       mint: !!options.mint && !!run && !run.sandbox,
     });
