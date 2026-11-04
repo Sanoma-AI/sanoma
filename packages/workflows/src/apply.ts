@@ -741,7 +741,8 @@ export function applyWorkflow(
           else if (todo === "forget") delete bindings[key];
           if (state && declared) keep(declared, state);
           const after = bindings[key];
-          if (after?.id !== before?.id) {
+          // A new id, or the same object under its type's new name (`formerly`): written.
+          if (after?.id !== before?.id || (after && before && after.type !== before.type)) {
             const wrote = await steps.write(key, after, messageOf(step, before, after));
             written ||= wrote.written;
             revision = wrote.revision ?? revision;

@@ -59,6 +59,7 @@ export {
   type ResourceFields,
   type ResourceOps,
   type ResourceSpec,
+  valueAt,
   withoutWriteOnly,
 } from "./resource.ts";
 export { type DnsRecord, dnsRecord } from "./dns.ts";
@@ -205,11 +206,12 @@ export {
   type SourceHost,
 } from "./source.ts";
 export type { HostCapabilities, HostLifetime, HostOutputs, HostSpec } from "./host.ts";
-export { RUNTIME_IMAGE, RUNTIME_PORT, runtimeImage, wakeUrlOf } from "./host.ts";
+export { RUNTIME_IMAGE, RUNTIME_PORT, runtimeImage, sourceKeyId, wakeUrlOf } from "./host.ts";
 export {
   cloneUrl,
   deriveHosts,
   type HostFacts,
+  hostFacts,
   DEPLOY_KEY_TITLE,
   DEPLOY_KEY_TYPE,
   GITHUB_APP_SECRETS,
@@ -217,8 +219,8 @@ export {
   installedSanoma,
   originUrl,
   SOURCE_KEY,
-  sourceKeyId,
   sourceRepository,
+  wokenBy,
 } from "./host-derive.ts";
 export {
   checkDatabase,

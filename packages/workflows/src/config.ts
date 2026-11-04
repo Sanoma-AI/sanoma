@@ -421,8 +421,13 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     names.set(APPLY_WORKFLOW, applyWorkflow(types, ops, drivers, applySteps(appName, root, read)));
   }
   // Built-in, in every config: the life of a change, which deploys to the declared hosts after its merge.
-  const hosts = async () =>
-    (await read()).resources.filter((r) => types.get(`${r.vendor}.${r.type}`)?.host).map((r) => r.id);
+  // The declared hosts' ids, as the files say them: nothing derived, nothing minted.
+  const hosts = async () => {
+    const { loadDataFiles } = await import("./resources.ts");
+    return loadDataFiles(root, connectors, declarable)
+      .resources.filter((r) => types.get(`${r.vendor}.${r.type}`)?.host)
+      .map((r) => r.id);
+  };
   names.set(CHANGE_WORKFLOW, changeWorkflow(changeOps, changeSteps({ remotes, hosts })));
   const declaredObjects = () => readDeclaredObjects(root, connectors, declarable);
   // Built-in: a direct call the policy holds for an approval, made a run, when any operation may be called directly.
@@ -737,6 +742,7 @@ async function readDeclared(
   const run = currentRun.getStore();
   // A host that derives is filled with what it is not told (`deriveHosts`), before it is checked
   // or pinned: the deploy key it clones with among them. Minted only by a live apply.
+  const keep = new Set<string>();
   if (root !== undefined) {
     const { deriveHosts, hostFacts } = await import("./host-derive.ts");
     const facts = await hostFacts({
@@ -749,11 +755,11 @@ async function readDeclared(
       ...(options.sender !== undefined && { sender: options.sender }),
       mint: !!options.mint && !!run && !run.sandbox,
     });
-    if (facts) problems.push(...deriveHosts(resources, types, bindings, facts));
+    if (facts) problems.push(...deriveHosts(resources, types, bindings, facts, keep));
   }
-  // A derived declaration's binding (a host's deploy key) is no orphan.
+  // A host's deploy key apply declares, or cannot tell yet, is no orphan.
   const declaredIds = new Set(resources.map((r) => r.id));
-  const kept = orphans.filter((o) => !declaredIds.has(o.key));
+  const kept = orphans.filter((o) => !declaredIds.has(o.key) && !keep.has(o.key));
   // Read inside the data-file durable step: every operation of the plan uses one pinned account.
   if (run && !run.sandbox) {
     for (const resource of resources.filter((r) => types.has(`${r.vendor}.${r.type}`))) {

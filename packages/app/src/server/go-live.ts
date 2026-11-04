@@ -1,7 +1,6 @@
 // oxlint-disable-next-line import/no-unassigned-import
 import "@tanstack/react-start/server-only";
 import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { findPackageJSON } from "node:module";
 import { dirname, join } from "node:path";
 import {
   APPLY_WORKFLOW,
@@ -12,6 +11,8 @@ import {
   type Principal,
   postInvite,
   sealInvite,
+  DEPLOY_KEY_TITLE,
+  installedSanoma,
   runtimeImage,
   SOURCE_KEY,
   sourceKeyId,
@@ -374,16 +375,10 @@ function hostWakeup(
   };
 }
 
-/**
- * The version of `sanoma` the company's repository installs (resolved from its root, so a
- * hoisted install counts), which the host's runtime image is tagged with.
- */
+/** The version of `sanoma` the company's repository installs (`installedSanoma`), which the host's runtime image is tagged with. */
 async function sanomaVersion(root: string): Promise<string> {
-  const version = await Promise.resolve()
-    .then(() => readFile(findPackageJSON("sanoma", join(root, "package.json"))!, "utf8"))
-    .then((read) => (JSON.parse(read) as { version?: unknown }).version)
-    .catch(() => undefined);
-  if (typeof version !== "string") {
+  const version = await installedSanoma(root);
+  if (version === undefined) {
     throw new ApiError(409, { error: `sanoma is not installed in the company's repository (${root}): install it` });
   }
   return version;
@@ -464,7 +459,7 @@ export async function renderInfra(
                 type: "repository_deploy_key",
                 desired: {
                   repository: new Reference("repo"),
-                  title: "Sanoma host",
+                  title: DEPLOY_KEY_TITLE,
                   key: deployKey!,
                   read_only: true,
                 },

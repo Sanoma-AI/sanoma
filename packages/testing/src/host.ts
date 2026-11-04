@@ -28,6 +28,7 @@ import {
   superviseWorker,
   type SupervisorOptions,
   runtimeImage,
+  valueAt,
   wakeUrlOf,
   withSetup,
 } from "@sanoma-ai/workflows";
@@ -757,35 +758,34 @@ export function checkDerivedHost(
   const resources = [store, host];
   const problems = deriveHosts(resources, types, {}, facts);
   const { desired } = host;
-  const valueAt = (path: string) =>
-    path.split(".").reduce<unknown>((v, key) => (v as State | undefined)?.[key], desired);
 
   check("its decisions alone derive with no problem", () => {
     if (problems.length) throw new Error(problems.map((p) => p.message).join("; "));
   });
   if (inputs.image !== undefined) {
     check("its image is the installed sanoma's runtime image", () => {
-      const image = valueAt(inputs.image!);
+      const image = valueAt(desired, inputs.image!);
       if (image !== runtimeImage(DERIVED_FACTS.version)) throw new Error(`its image is ${JSON.stringify(image)}`);
     });
   }
   check("its source is the repository the app runs from", () => {
-    const source = valueAt(inputs.source);
+    const source = valueAt(desired, inputs.source);
     if (source !== DERIVED_FACTS.origin) throw new Error(`its source is ${JSON.stringify(source)}`);
   });
   check("its ref is left to its repository's default branch", () => {
-    if (valueAt(inputs.ref) != null) throw new Error(`its ref is ${JSON.stringify(valueAt(inputs.ref))}`);
+    if (valueAt(desired, inputs.ref) != null)
+      throw new Error(`its ref is ${JSON.stringify(valueAt(desired, inputs.ref))}`);
   });
   if (inputs.domains !== undefined) {
     check("its domains are the public sites'", () => {
-      const domains = valueAt(inputs.domains!);
+      const domains = valueAt(desired, inputs.domains!);
       if (JSON.stringify(domains) !== JSON.stringify(DERIVED_FACTS.domains))
         throw new Error(`its domains are ${JSON.stringify(domains)}`);
     });
   }
   if (!spec.bindsBootstrap && inputs.secrets !== undefined) {
     check("its secrets are markers, its database's URL among them", () => {
-      const secrets = (valueAt(inputs.secrets!) ?? {}) as Record<string, unknown>;
+      const secrets = (valueAt(desired, inputs.secrets!) ?? {}) as Record<string, unknown>;
       const plain = Object.entries(secrets).filter(([, value]) => !isSecret(value));
       if (plain.length) throw new Error(`${plain.map(([key]) => key).join(", ")} is no secret(...)`);
       for (const needed of ["SANOMA_DATABASE_URL", "SANOMA_SIGNING_KEY", "HOST_CHECK_VENDOR_TOKEN"]) {
@@ -794,19 +794,22 @@ export function checkDerivedHost(
     });
     check("a declaration that writes its secrets is refused", () => {
       const declare = type as unknown as (desired: State) => unknown;
-      let refused = false;
+      // Valid but for its secrets, so the refusal is of them.
+      declare({ name });
+      let refusal = "";
       try {
-        declare({ name, secrets: { SANOMA_DATABASE_URL: "postgres://host-check" } });
-      } catch {
-        refused = true;
+        declare({ name, [inputs.secrets!]: { SANOMA_DATABASE_URL: "postgres://host-check" } });
+      } catch (err) {
+        refusal = errorMessage(err);
       }
-      if (!refused) throw new Error("it took `secrets`");
+      if (!refusal.includes(inputs.secrets!))
+        throw new Error(`it took \`${inputs.secrets}\`${refusal && `: ${refusal}`}`);
     });
   }
   check("its type parses what apply derives, its secrets resolved", () => {
     // As its driver parses it: each marker resolved (`resolveSecrets`), the revision and ref resolved.
     const resolved = structuredClone(desired);
-    const secrets = inputs.secrets === undefined ? undefined : (valueAt(inputs.secrets) as State | undefined);
+    const secrets = inputs.secrets === undefined ? undefined : (valueAt(desired, inputs.secrets) as State | undefined);
     if (secrets && inputs.secrets) {
       const keys = inputs.secrets.split(".");
       let holder = resolved;

@@ -42,6 +42,7 @@ import {
   siteAtHostname,
 } from "./shared.ts";
 import { readSites, type SiteEntry, siteDomains } from "./sites.ts";
+import { sourceKeyIds } from "./host.ts";
 
 // `@sanoma-ai/workflows/describe`: what a UI renders from, apart from the main entry.
 // What `describeConfig` answers, as zod schemas and the types they infer (`./description`).
@@ -193,6 +194,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     .toSorted((a, b) => a.id.localeCompare(b.id));
 
   const dataFiles = loadDataFiles(resolved.root, connectorsOf(config), resources);
+  const sourceKeys = sourceKeyIds(dataFiles.resources, resources);
   const declared = new Map(dataFiles.collections.map((d) => [d.name, d]));
   const collections: CollectionEntry[] = [...resolved.collections.values()]
     .map((c) => ({
@@ -289,7 +291,8 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     collections,
     // An app's people are refused (`readPeople`), so the grid and the People page never show them.
     resources: dataFiles.resources.filter((r) => !inAppPeople(r)),
-    orphans: dataFiles.orphans,
+    // A host's deploy key, which apply declares, is no orphan.
+    orphans: dataFiles.orphans.filter((o) => !sourceKeys.has(o.key)),
     problems: [
       ...dataFiles.problems,
       ...appProblems,
@@ -390,7 +393,7 @@ function domainProblems(
     const inputs = host?.inputs;
     const path = inputs?.domains;
     const domains = (
-      host?.derives ? declaredDomains : path === undefined ? {} : (valueAt(resource.desired, path) ?? {})
+      path === undefined ? {} : host?.derives ? declaredDomains : (valueAt(resource.desired, path) ?? {})
     ) as Record<string, unknown>;
     const hostname = inputs?.hostname === undefined ? undefined : valueAt(resource.desired, inputs.hostname);
     const messages = Object.keys(domains)

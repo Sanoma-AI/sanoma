@@ -7,7 +7,7 @@ import { databaseUrlSecret } from "./database.ts";
 import { statusesOf } from "./env.ts";
 import type { Driver } from "./op.ts";
 import type { DeclaredResource, ResourceProblem } from "./description.ts";
-import { runtimeImage } from "./host.ts";
+import { runtimeImage, sourceKeyId } from "./host.ts";
 import type { Bindings } from "./lockfile.ts";
 import { type Resource, valueAt } from "./resource.ts";
 import { secret, type Secret, type Secrets } from "./secret.ts";
@@ -42,9 +42,6 @@ export const DEPLOY_KEY_TYPE = "github.repository_deploy_key";
 /** The title a host's deploy key has on GitHub. */
 export const DEPLOY_KEY_TITLE = "Sanoma host";
 
-/** The id apply gives the deploy key it declares for the host `hostId`: `resources/sanoma/infra.ts#host.sourceKey`. */
-export const sourceKeyId = (hostId: string) => `${hostId}.sourceKey`;
-
 /** What the runtime knows that a host derives from, read once per apply or drift run (`hostFacts`). */
 export interface HostFacts {
   /** The `sanoma` version the repository installs: the runtime image's tag. Undefined when it is not installed. */
@@ -57,8 +54,8 @@ export interface HostFacts {
   builtInStore: boolean;
   /**
    * The secrets a host carries for each vendor it deploys itself with (its data file's) or signs
-   * people in through (the login's sender), by vendor: the variables the vendor's driver reads,
-   * an optional one only when it is stored.
+   * people in through (the login's sender), by vendor: the variables the vendor's driver reads
+   * that the store holds (one only in this machine's environment is not given to the host).
    */
   carried: ReadonlyMap<string, readonly string[]>;
   /** The login sender's vendor, whose credentials a host carries so it sends sign-in codes. */
@@ -151,6 +148,18 @@ export function sourceRepository(
   );
 }
 
+/** The declared wakeup that names `host` (its `inputs.host` refers to it), if any. */
+export function wokenBy(
+  host: Pick<DeclaredResource, "id">,
+  resources: readonly DeclaredResource[],
+  types: ReadonlyMap<string, Pick<Resource, "wakeup">>,
+): DeclaredResource | undefined {
+  return resources.find((o) => {
+    const wakeup = types.get(`${o.vendor}.${o.type}`)?.wakeup;
+    return wakeup !== undefined && o.refs[wakeup.inputs.host] === host.id;
+  });
+}
+
 /** Sets `value` at the dotted `path` of `into`, making the objects on the way. */
 function setAt(into: Record<string, unknown>, path: string, value: unknown) {
   const keys = path.split(".");
@@ -179,6 +188,8 @@ const exportOf = (id: string) => id.slice(id.indexOf("#") + 1);
  *   key is the stored source key's public half, when one is and the config has the type.
  *
  * `ref` is resolved by apply (and drift) with the revision: the repository's default branch.
+ * `keep` takes the deploy-key ids not declared this read only because no source key is stored
+ * yet, which the caller must not orphan.
  * Problems: a host with no `database`, an image or a source that cannot be told.
  */
 export function deriveHosts(
@@ -186,8 +197,22 @@ export function deriveHosts(
   types: ReadonlyMap<string, Resource>,
   bindings: Bindings,
   facts: HostFacts,
+  keep?: Set<string>,
 ): ResourceProblem[] {
   const problems: ResourceProblem[] = [];
+  // One host attaches the sites' domains: two would each try to attach them.
+  const attaching = resources.filter((r) => {
+    const host = types.get(`${r.vendor}.${r.type}`)?.host;
+    return host?.derives && host.inputs.domains !== undefined;
+  });
+  if (attaching.length > 1 && Object.keys(facts.domains).length) {
+    for (const r of attaching) {
+      problems.push({
+        ...r.at,
+        message: `${r.at.export}: ${attaching.length} hosts would attach the public sites' domains: declare one host that derives, the production one`,
+      });
+    }
+  }
   // A copy: the deploy keys are put in `resources` as it goes.
   for (const r of resources.slice()) {
     const type = types.get(`${r.vendor}.${r.type}`);
@@ -230,15 +255,15 @@ export function deriveHosts(
     const secrets: Record<string, Secret> = {};
     const database = inputs.database === undefined ? undefined : refs[inputs.database];
     if (database) secrets.SANOMA_DATABASE_URL = secret(databaseUrlSecret(exportOf(database)));
-    else problem("declare the database it runs on, `database: store`: the host is given its URL");
+    else if (inputs.database !== undefined)
+      problem("declare the database it runs on, `database: store`: the host is given its URL");
     secrets.SANOMA_SIGNING_KEY = secret("SANOMA_SIGNING_KEY");
     if (facts.builtInStore) secrets.SANOMA_SECRETS_KEY = secret("SANOMA_SECRETS_KEY");
     if (repository) secrets[SOURCE_KEY] = secret(SOURCE_KEY);
-    for (const other of resources) {
-      const wakeup = types.get(`${other.vendor}.${other.type}`)?.wakeup;
-      if (!wakeup || other.refs[wakeup.inputs.host] !== r.id) continue;
+    const wakeup = wokenBy(r, resources, types);
+    if (wakeup) {
       secrets[WAKEUP_TOKEN] = secret(WAKEUP_TOKEN);
-      if (other.vendor === "sanoma") secrets[WAKEUP_URL] = secret(WAKEUP_URL);
+      if (wakeup.vendor === "sanoma") secrets[WAKEUP_URL] = secret(WAKEUP_URL);
     }
     // What it deploys itself with after a push: the vendors of its data file, its repository's, the sender's.
     const vendors = new Set([
@@ -250,7 +275,13 @@ export function deriveHosts(
     for (const name of [...carried, ...facts.githubApp]) secrets[name] = secret(name);
     setAt(desired, inputs.secrets, secrets);
 
-    if (repository && facts.sourceKey && types.has(DEPLOY_KEY_TYPE)) {
+    // Kept from orphaning while it cannot be told yet: a GitHub repository, and no source key stored.
+    if (repository && !facts.sourceKey) keep?.add(sourceKeyId(r.id));
+    // Not twice: a data file of before may declare the same key itself (GitHub takes a key once).
+    const declaredKey = resources.some(
+      (o) => `${o.vendor}.${o.type}` === DEPLOY_KEY_TYPE && o.desired.key === facts.sourceKey,
+    );
+    if (repository && facts.sourceKey && types.has(DEPLOY_KEY_TYPE) && !declaredKey) {
       const id = sourceKeyId(r.id);
       const binding = bindings[id]?.id;
       resources.splice(resources.indexOf(r), 0, {
@@ -289,24 +320,25 @@ export async function hostFacts(options: {
 }): Promise<HostFacts | undefined> {
   const { root, resources, types, drivers, secrets, mint } = options;
   const typeOf = (r: DeclaredResource) => types.get(`${r.vendor}.${r.type}`);
-  const hosts = resources.filter((r) => typeOf(r)?.host?.derives && !typeOf(r)?.host?.bindsBootstrap);
-  if (!resources.some((r) => typeOf(r)?.host?.derives)) return undefined;
-  const stored = async (name: string) => (await secrets?.get(name)) !== undefined;
+  const deriving = resources.filter((r) => typeOf(r)?.host?.derives);
+  if (!deriving.length) return undefined;
+  const hosts = deriving.filter((r) => !typeOf(r)?.host?.bindsBootstrap);
+  // Which optional credentials and App keys are stored: read at once, and only for a host given secrets.
+  const stored = async (names: readonly string[]) =>
+    secrets && hosts.length
+      ? new Set((await Promise.all(names.map(async (n) => ((await secrets.get(n)) === undefined ? [] : [n])))).flat())
+      : new Set<string>();
+  const statuses = [...drivers].flatMap(([vendor, { env }]) =>
+    env ? statusesOf(env, () => undefined).map((c) => ({ vendor, ...c })) : [],
+  );
+  // Only what the store holds: a marker for a name it does not would fail the host's deploy.
+  const held = await stored(statuses.map((c) => c.name));
   const carried = new Map<string, string[]>();
-  for (const [vendor, { env }] of drivers) {
-    if (!env) continue;
-    const names: string[] = [];
-    for (const c of statusesOf(env, () => undefined)) if (!c.optional || (await stored(c.name))) names.push(c.name);
-    carried.set(vendor, names);
+  for (const c of statuses) {
+    if (held.has(c.name)) carried.set(c.vendor, [...(carried.get(c.vendor) ?? []), c.name]);
   }
-  const githubApp: string[] = [];
-  for (const name of GITHUB_APP_SECRETS) if (await stored(name)) githubApp.push(name);
-  const woken = (host: DeclaredResource) =>
-    resources.some((o) => {
-      const wakeup = typeOf(o)?.wakeup;
-      return wakeup !== undefined && o.refs[wakeup.inputs.host] === host.id;
-    });
-  if (mint && secrets && hosts.some(woken)) await mintWakeupToken(secrets);
+  const githubApp = [...(await stored(GITHUB_APP_SECRETS))];
+  if (mint && secrets && hosts.some((h) => wokenBy(h, resources, types))) await mintWakeupToken(secrets);
   const { siteDomains } = await import("./sites.ts");
   const [version, origin, sourceKey] = await Promise.all([
     installedSanoma(root),

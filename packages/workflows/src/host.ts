@@ -187,3 +187,20 @@ export function checkHost(
   if (typeof host.outputs !== "function") problems.push("outputs must be a function of the state");
   if (problems.length) throw new Error(`${what}: its host: ${problems.join("; ")}`);
 }
+
+/** The id apply gives the deploy key it declares for the host `hostId`: `resources/sanoma/infra.ts#host.sourceKey`. */
+export const sourceKeyId = (hostId: string) => `${hostId}.sourceKey`;
+
+/**
+ * The lockfile keys that are a deriving host's deploy key (`sourceKeyId`) among `resources`: never
+ * an orphan, whether or not apply declares the key this read (before its source key is stored, or
+ * where the store does not hold it), so apply never deletes the key a host clones with.
+ */
+export function sourceKeyIds(
+  resources: readonly { id: string; vendor: string; type: string }[],
+  types: ReadonlyMap<string, { host?: HostSpec }>,
+): Set<string> {
+  return new Set(
+    resources.filter((r) => types.get(`${r.vendor}.${r.type}`)?.host?.derives).map((r) => sourceKeyId(r.id)),
+  );
+}

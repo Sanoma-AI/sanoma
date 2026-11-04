@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { describeConfig } from "../src/describe.ts";
-import { cloneUrl, deriveHosts, githubRepository, type HostFacts, sourceKeyId } from "../src/host-derive.ts";
+import { cloneUrl, deriveHosts, githubRepository, type HostFacts } from "../src/host-derive.ts";
+import { sourceKeyId } from "../src/host.ts";
 import { loadDataFiles } from "../src/resources.ts";
 import { isSecret } from "../src/secret.ts";
 import { defineConnector, defineResource, type HostSpec, type Resource, RUNTIME_IMAGE } from "../src/index.ts";
@@ -185,6 +186,22 @@ describe("a host that derives", () => {
     expect(resources.some((r) => r.type === "repository_deploy_key")).toBe(false);
   });
 
+  it("declares no deploy key of its own beside one a data file of before declares with the same key", () => {
+    const declared = `export const deployKey = github.repository_deploy_key({ repository: repo, title: "Sanoma host", key: "ssh-rsa AAAA public-half", read_only: true });\n`;
+    const { resources, bindings } = load({ "resources/sanoma/infra.ts": INFRA + declared });
+    deriveHosts(resources, types, bindings, facts());
+    expect(resources.filter((r) => r.type === "repository_deploy_key").map((r) => r.id)).toEqual([
+      "resources/sanoma/infra.ts#deployKey",
+    ]);
+  });
+
+  it("is a problem twice over: two hosts would attach the sites' domains", () => {
+    const second = 'export const staging = acme.service({ name: "staging", database: store });\n';
+    const { resources, bindings } = load({ "resources/sanoma/infra.ts": INFRA + second });
+    const problems = deriveHosts(resources, types, bindings, facts());
+    expect(problems.map((p) => p.export)).toEqual(["host", "staging"]);
+  });
+
   it("says what it cannot tell: no database, no installed sanoma, no source", () => {
     const { resources, bindings } = load({
       "resources/sanoma/infra.ts": INFRA.replace(/^export const repo = .*\n/m, "").replace(", database: store", ""),
@@ -195,6 +212,18 @@ describe("a host that derives", () => {
       expect.stringContaining("the repository has no origin"),
       expect.stringContaining("declare the database it runs on"),
     ]);
+  });
+
+  it("never counts its deploy key's binding an orphan, declared this read or not", () => {
+    const root = tree("host-derive-orphan", {
+      "resources/sanoma/infra.ts": INFRA,
+      "resources/sanoma.lock.json": JSON.stringify({
+        "resources/sanoma/infra.ts#host.sourceKey": { type: "github.repository_deploy_key", id: "42" },
+        "resources/sanoma/infra.ts#gone": { type: "acme.db", id: "gone" },
+      }),
+    });
+    const { orphans } = describeConfig({ workflows: [], connectors: [acme, github], root });
+    expect(orphans.map((o) => o.key)).toEqual(["resources/sanoma/infra.ts#gone"]);
   });
 
   it("binds by a lockfile entry of the type it was known by before", () => {
