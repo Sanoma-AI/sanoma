@@ -154,6 +154,16 @@ describe("inspection failure and sandbox boundaries", () => {
       status: "missing",
     });
   });
+  it("distinguishes exhausted recovery from an ordinary failed execution", async () => {
+    const query = vi
+      .fn<(sql: string, values: unknown[]) => Promise<{ rows: { name: string; status: string }[] }>>()
+      .mockResolvedValue({ rows: [{ name: "owner", status: "MAX_RECOVERY_ATTEMPTS_EXCEEDED" }] });
+    expect(await inspectRun(async () => ({ query }) as unknown as Db, "company")("owner-id")).toEqual({
+      runId: "owner-id",
+      workflow: "owner",
+      status: "interrupted",
+    });
+  });
   it("treats future DBOS states as active, without loading payload columns", async () => {
     const query = vi
       .fn<(sql: string, values: unknown[]) => Promise<{ rows: { name: string; status: string }[] }>>()

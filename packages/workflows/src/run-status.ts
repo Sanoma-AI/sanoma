@@ -4,7 +4,7 @@ import type { Db } from "./db.ts";
 /** Metadata only: never read a run's inputs, outputs, error or authentication data. */
 export type RunObservation = {
   runId: string;
-  status: "missing" | "active" | "finished" | "failed" | "cancelled";
+  status: "missing" | "active" | "finished" | "failed" | "cancelled" | "interrupted";
   workflow?: string;
 };
 export type InspectRun = (runId: string) => Promise<RunObservation>;
@@ -15,7 +15,7 @@ const statuses: Record<WorkflowStatusString, RunObservation["status"]> = {
   PENDING: "active",
   SUCCESS: "finished",
   ERROR: "failed",
-  MAX_RECOVERY_ATTEMPTS_EXCEEDED: "failed",
+  MAX_RECOVERY_ATTEMPTS_EXCEEDED: "interrupted",
   CANCELLED: "cancelled",
 };
 

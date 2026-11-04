@@ -69,7 +69,7 @@ export const sanoma = defineConnector("sanoma", {
       input: z.object({ runId: z.string().min(1).max(512) }),
       output: z.object({
         runId: z.string(),
-        status: z.enum(["missing", "active", "finished", "failed", "cancelled"]),
+        status: z.enum(["missing", "active", "finished", "failed", "cancelled", "interrupted"]),
         workflow: z.string().optional(),
       }),
       target: ({ runId }: { runId: string }) => runId,
