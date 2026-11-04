@@ -1,6 +1,6 @@
 # @sanoma-ai/connector-better-auth
 
-[Better Auth](https://www.better-auth.com) as a visitor login for a [Sanoma](https://github.com/Sanoma-AI/sanoma) public site, and as the app's staff sign-in on a host: visitors sign up and sign in with an email and a password (or an email code, or GitHub), staff by an email code, an invite link or GitHub, and the accounts live on the company's own database. It has no operations and no credential; it attaches a login half (`withSetup({ login })`, see [`@sanoma-ai/workflows`](https://www.npmjs.com/package/@sanoma-ai/workflows#usage)), which the app calls once for each public site that names it.
+[Better Auth](https://www.better-auth.com) as a visitor login for a [Sanoma](https://github.com/Sanoma-AI/sanoma) public site, and as the app's staff sign-in on a host: visitors sign up and sign in with an email and a password, an email code or GitHub, staff by an email code, an invite link or GitHub, and the accounts live on the company's own database. It has no operations and no credential; it attaches a login half (`withSetup({ login })`, see [`@sanoma-ai/workflows`](https://www.npmjs.com/package/@sanoma-ai/workflows#usage)), which the app calls once for each public site that names it.
 
 ## Usage
 
@@ -66,25 +66,37 @@ When the company's config names a sender (`login: { sender: resend.emails.send, 
 
 ### GitHub
 
-When the app has the company's GitHub App client (`SANOMA_GITHUB_CLIENT_ID` and `SANOMA_GITHUB_CLIENT_SECRET`, which `sanoma` reads on a host, the staff login's too), the login offers GitHub (`methods` lists `"github"`): a visitor signed in links their GitHub account, and is then said to be that GitHub login (`ctx.startedBy.github` in a run they start, `user.github` in the session). Add `https://<site host>/auth/better-auth/callback/github` to the App's callback URLs (its settings, "Callback URL"), one for each site's host.
+When the app has the company's GitHub App client (`SANOMA_GITHUB_CLIENT_ID` and `SANOMA_GITHUB_CLIENT_SECRET`, which `sanoma` reads on a host, the staff login's too), the login offers GitHub (`methods` lists `"github"`): a visitor signs up or in with GitHub ("Continue with GitHub", beside the email code), or, signed in, links their GitHub account, and is then said to be that GitHub login (`ctx.startedBy.github` in a run they start, `user.github` in the session). Add `https://<site host>/auth/better-auth/callback/github` to the App's callback URLs (its settings, "Callback URL"), one for each site's host; signing in and linking come back to the same one.
 
-| Route                                   | Body                                  | What it does                                                                                                                                                                               |
-| --------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `POST /auth/better-auth/link-social`    | `{ provider: "github", callbackURL }` | Signed in: answers `{ url, redirect: true }`, GitHub's authorize page to send the browser to; back at `/callback/github`, it links the account, then `callbackURL`.                        |
-| `POST /auth/better-auth/sign-in/social` | `{ provider: "github", callbackURL }` | The same, signed out: signs in a visitor who linked that GitHub account. GitHub links to an existing account and signs a linked account in; it never makes one (`?error=signup_disabled`). |
-| `GET /auth/better-auth/get-session`     |                                       | `{ session, user }`, `user.github` the linked login, or null when signed out.                                                                                                              |
+| Route                                   | Body                                  | What it does                                                                                                                                                                                  |
+| --------------------------------------- | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /auth/better-auth/sign-in/social` | `{ provider: "github", callbackURL }` | Answers `{ url, redirect: true }`, GitHub's authorize page to send the browser to; back at `/callback/github`, it signs the visitor in (making the account on first use), then `callbackURL`. |
+| `POST /auth/better-auth/link-social`    | `{ provider: "github", callbackURL }` | The same, signed in: links the GitHub account to the visitor's, then `callbackURL`.                                                                                                           |
+| `GET /auth/better-auth/get-session`     |                                       | `{ session, user }`, `user.github` the GitHub login, or null when signed out.                                                                                                                 |
 
 ```ts
-const response = await fetch("/auth/better-auth/link-social", {
+// "Continue with GitHub" on the sign-in page, when the login offers it
+const response = await fetch("/auth/better-auth/sign-in/social", {
   method: "POST",
   headers: { "content-type": "application/json" },
   body: JSON.stringify({ provider: "github", callbackURL: location.pathname }),
 });
 const { url } = await response.json();
-window.location.assign(url); // GitHub, then back on this page with the account linked
+window.location.assign(url); // GitHub, then back on this page signed in
 ```
 
-Each `callbackURL` (and `errorCallbackURL`, where an error goes as `?error=<code>`) is a path on the site's host. A GitHub account links to one visitor only (`?error=account_already_linked_to_different_user` for another), its email may differ from the visitor's, and GitHub must have verified it. The login is GitHub's answer for the account's own token when Better Auth links it (Better Auth sets no field a person may not set from a provider's profile), and is cleared when the visitor unlinks it (`POST /unlink-account { accountId }`, the account's id in `GET /list-accounts`). Linked, the account keeps no GitHub token: its login is read once, at each link or sign-in, and its tokens dropped, as a GitHub App's user token reaches what the App and the person both reach. A visitor links one GitHub account at most (another is `?error=unable_to_link_account`).
+Each `callbackURL` (and `errorCallbackURL`, where an error goes as `?error=<code>`, and `newUserCallbackURL`, where a new account goes) is a path on the site's host.
+
+- **One person, one account.** A GitHub sign-in whose email matches a visitor's account signs into that account when GitHub verified the email and the account's own is verified (by a code, or by GitHub at sign-up); otherwise it is refused, so an email nobody proved never joins someone's account.
+- **A new account by GitHub** has its email verified only when GitHub verified it, and `verify` says the email only then. An email code to that address later proves it, and drops the GitHub account that had not.
+- **A link** may use a GitHub account of another email, which GitHub must have verified.
+- **The login** is GitHub's answer for the account's own token at each sign-in or link (Better Auth sets no field a person may not set from a provider's profile), and is cleared when the visitor unlinks it (`POST /unlink-account { accountId }`, the account's id in `GET /list-accounts`). The account's tokens are dropped then, as a GitHub App's user token reaches what the App and the person both reach.
+
+| `?error=`                                  | When                                                                                                                             |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| `account_not_linked`                       | A sign-in's email matches an account, but one side has not verified it.                                                          |
+| `account_already_linked_to_different_user` | A link of a GitHub account that is another visitor's.                                                                            |
+| `unable_to_link_account`                   | A second GitHub account for a visitor who has one (by link or by sign-in), or a link whose GitHub email GitHub has not verified. |
 
 ## The staff sign-in
 
