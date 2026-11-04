@@ -1,7 +1,10 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import { sql } from "drizzle-orm";
 import { Pool } from "pg";
 import { NodeRequest, sendNodeResponse } from "srvx/node";
+import { type Db, databaseOn } from "./db.ts";
+import { identityAuditEvents } from "./db/identity.ts";
 import {
   identityBroker,
   postgresIdentityEnrollments,
@@ -54,8 +57,8 @@ const poolFor = (connectionString: string) => {
   return pool;
 };
 
-async function checkRoles(reader: Pool, audit: Pool): Promise<void> {
-  const read = await reader.query<{ allowed: boolean }>(`SELECT
+async function checkRoles(reader: Db, audit: Db): Promise<void> {
+  const read = await reader.execute<{ allowed: boolean }>(sql`SELECT
     has_schema_privilege('sanoma_identity', 'USAGE') AND
     NOT has_schema_privilege('sanoma_identity', 'CREATE') AND
     NOT EXISTS (SELECT FROM pg_roles WHERE rolname = current_user AND (rolsuper OR rolcreaterole OR rolcreatedb OR rolbypassrls)) AND
@@ -63,7 +66,7 @@ async function checkRoles(reader: Pool, audit: Pool): Promise<void> {
     has_table_privilege('sanoma_identity.credentials', 'SELECT') AND
     NOT has_table_privilege('sanoma_identity.deployments', 'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') AND
     NOT has_table_privilege('sanoma_identity.credentials', 'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') AS allowed`);
-  const write = await audit.query<{ allowed: boolean }>(`SELECT
+  const write = await audit.execute<{ allowed: boolean }>(sql`SELECT
     has_schema_privilege('sanoma_identity', 'USAGE') AND
     NOT has_schema_privilege('sanoma_identity', 'CREATE') AND
     NOT EXISTS (SELECT FROM pg_roles WHERE rolname = current_user AND (rolsuper OR rolcreaterole OR rolcreatedb OR rolbypassrls)) AND
@@ -94,26 +97,23 @@ export async function startIdentityService(options: IdentityServiceOptions): Pro
     let active = 0;
     reader = poolFor(options.enrollmentDatabaseUrl);
     audit = poolFor(options.auditDatabaseUrl);
-    await checkRoles(reader, audit);
+    const readerDb = databaseOn(reader);
+    const auditDb = databaseOn(audit);
+    await checkRoles(readerDb, auditDb);
     const record = async (event: IdentityAudit) => {
       const e = event.enrollment;
       // Fixed columns only: no tokens, hashes, headers or arbitrary caller fields.
-      await audit!.query(
-        `INSERT INTO sanoma_identity.audit_events
-        (result, deployment, company, environment, service_account, generation, expires_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-        [
-          event.result,
-          e?.deployment ?? null,
-          e?.company ?? null,
-          e?.environment ?? null,
-          e?.serviceAccount ?? null,
-          e?.generation ?? null,
-          event.expiresAt === undefined ? null : new Date(event.expiresAt),
-        ],
-      );
+      await auditDb.insert(identityAuditEvents).values({
+        result: event.result,
+        deployment: e?.deployment ?? null,
+        company: e?.company ?? null,
+        environment: e?.environment ?? null,
+        serviceAccount: e?.serviceAccount ?? null,
+        generation: e?.generation ?? null,
+        expiresAt: event.expiresAt === undefined ? null : new Date(event.expiresAt),
+      });
     };
-    const enrollments = postgresIdentityEnrollments(async () => reader!);
+    const enrollments = postgresIdentityEnrollments(async () => readerDb);
     const handle =
       options.mode.type === "runtime"
         ? identityBroker({ enrollments, issue: attachedGoogleTokenIssuer(), audit: record })

@@ -1,5 +1,8 @@
-import { Pool, type PoolClient } from "pg";
+import { and, desc, eq, sql } from "drizzle-orm";
+import { Pool } from "pg";
 import type { IdentityEnrollment } from "./cloud-identity.ts";
+import { type Db, databaseOn, pgCode } from "./db.ts";
+import { identityCredentials, identityDeployments } from "./db/identity.ts";
 
 export type DeploymentIdentity = Omit<IdentityEnrollment, "generation">;
 export interface EnrollIdentity extends IdentityEnrollment {
@@ -45,6 +48,7 @@ export function configuredIdentityProvisioning(
   }
   const connectionString = url.href;
   let pool: Pool | undefined;
+  let db: Db | undefined;
   let closed = false;
   let closing: Promise<void> | undefined;
   const store = postgresIdentityProvisioning(async () => {
@@ -52,9 +56,10 @@ export function configuredIdentityProvisioning(
     if (!pool) {
       pool = new Pool({ connectionString, max: 5, connectionTimeoutMillis: 10_000, query_timeout: 15_000 });
       pool.on("error", () => {});
+      db = databaseOn(pool);
     }
     // The control plane needs enrollment writes, never schema or database administration.
-    const { rows } = await pool.query<{ allowed: boolean }>(`SELECT
+    const { rows } = await db!.execute<{ allowed: boolean }>(sql`SELECT
       NOT EXISTS (SELECT FROM pg_roles WHERE rolname=current_user AND (rolsuper OR rolcreatedb OR rolcreaterole OR rolbypassrls))
       AND has_schema_privilege('sanoma_identity','USAGE') AND NOT has_schema_privilege('sanoma_identity','CREATE')
       AND has_table_privilege('sanoma_identity.deployments','SELECT')
@@ -66,7 +71,7 @@ export function configuredIdentityProvisioning(
       AND NOT has_table_privilege('sanoma_identity.deployments','DELETE,TRUNCATE,REFERENCES,TRIGGER')
       AND NOT has_table_privilege('sanoma_identity.credentials','DELETE,TRUNCATE,REFERENCES,TRIGGER') AS allowed`);
     if (!rows[0]?.allowed) fail("invalid");
-    return pool;
+    return db!;
   }, config);
   return {
     store,
@@ -130,7 +135,7 @@ const deadlineOf = (value: string) => {
 
 /** Caller owns a dedicated writer pool; never give this pool to the broker or company code. */
 export function postgresIdentityProvisioning(
-  database: () => Promise<Pick<Pool, "connect">>,
+  database: () => Promise<Db>,
   options: { maxValidityMs: number },
 ): IdentityProvisioning {
   const maximum = options.maxValidityMs;
@@ -138,38 +143,46 @@ export function postgresIdentityProvisioning(
   async function transaction(
     input: DeploymentIdentity,
     create: boolean,
-    run: (db: PoolClient, enabled: boolean, now: number) => Promise<void>,
+    run: (tx: Db, enabled: boolean, now: number) => Promise<void>,
   ) {
     checkIdentity(input);
-    let db: PoolClient | undefined;
     try {
-      db = await (await database()).connect();
-      await db.query("BEGIN");
-      if (create)
-        await db.query(
-          `INSERT INTO sanoma_identity.deployments (id, company, environment, service_account)
-          VALUES ($1,$2,$3,$4) ON CONFLICT (id) DO NOTHING`,
-          [input.deployment, input.company, input.environment, input.serviceAccount],
+      await (
+        await database()
+      ).transaction(async (tx) => {
+        if (create)
+          await tx
+            .insert(identityDeployments)
+            .values({
+              id: input.deployment,
+              company: input.company,
+              environment: input.environment,
+              serviceAccount: input.serviceAccount,
+            })
+            .onConflictDoNothing({ target: identityDeployments.id });
+        // Every writer takes the deployment row lock: enrollment cannot race revocation/retirement.
+        const [row] = await tx
+          .select({
+            deployment: identityDeployments.id,
+            company: identityDeployments.company,
+            environment: identityDeployments.environment,
+            serviceAccount: identityDeployments.serviceAccount,
+            enabled: identityDeployments.enabled,
+          })
+          .from(identityDeployments)
+          .where(eq(identityDeployments.id, input.deployment))
+          .for("update");
+        if (!row || !sameIdentity(row, input)) fail("conflict");
+        const clock = await tx.execute<{ now: number }>(
+          sql`SELECT (extract(epoch FROM clock_timestamp()) * 1000)::float8 AS now`,
         );
-      // Every writer takes the deployment row lock: enrollment cannot race revocation/retirement.
-      const { rows } = await db.query<DeploymentIdentity & { enabled: boolean }>(
-        `SELECT id AS deployment, company, environment, service_account AS "serviceAccount", enabled
-          FROM sanoma_identity.deployments WHERE id=$1 FOR UPDATE`,
-        [input.deployment],
-      );
-      const row = rows[0];
-      if (!row || !sameIdentity(row, input)) fail("conflict");
-      const clock = await db.query<{ now: Date }>("SELECT clock_timestamp() AS now");
-      await run(db, row.enabled, clock.rows[0]!.now.getTime());
-      await db.query("COMMIT");
+        await run(tx, row.enabled, clock.rows[0]!.now);
+      });
     } catch (error) {
-      await db?.query("ROLLBACK").catch(() => {});
       const code = identityProvisioningCode(error);
       if (code) throw new IdentityProvisioningError(code);
-      if ((error as { code?: string })?.code === "23505") throw new IdentityProvisioningError("conflict");
+      if (pgCode(error) === "23505") throw new IdentityProvisioningError("conflict");
       throw new IdentityProvisioningError("unavailable");
-    } finally {
-      db?.release();
     }
   }
   return {
@@ -177,48 +190,64 @@ export function postgresIdentityProvisioning(
       generationOf(input.generation);
       const until = deadlineOf(input.validUntil);
       if (!/^[0-9a-f]{64}$/.test(input.hash)) fail("invalid");
-      await transaction(input, true, async (db, enabled, now) => {
+      await transaction(input, true, async (tx, enabled, now) => {
         if (!enabled) fail("conflict");
         if (until <= now || until - now > maximum) fail("invalid");
-        const { rows } = await db.query<{ generation: string; hash: string; valid_until: Date; revoked: boolean }>(
-          `SELECT generation, hash, valid_until, revoked FROM sanoma_identity.credentials
-            WHERE deployment=$1 ORDER BY generation DESC`,
-          [input.deployment],
-        );
-        const existing = rows.find((r) => Number(r.generation) === input.generation);
+        const rows = await tx
+          .select({
+            generation: identityCredentials.generation,
+            hash: identityCredentials.hash,
+            validUntil: identityCredentials.validUntil,
+            revoked: identityCredentials.revoked,
+          })
+          .from(identityCredentials)
+          .where(eq(identityCredentials.deployment, input.deployment))
+          .orderBy(desc(identityCredentials.generation));
+        const existing = rows.find((r) => r.generation === input.generation);
         if (existing) {
           // An exact retry is safe. Never extend a retired generation or revive a revoked one.
-          if (existing.hash !== input.hash || existing.revoked || existing.valid_until.getTime() !== until)
+          if (existing.hash !== input.hash || existing.revoked || existing.validUntil.getTime() !== until)
             fail("conflict");
           return;
         }
-        if (rows[0] && Number(rows[0].generation) >= input.generation) fail("conflict");
-        await db.query(
-          `INSERT INTO sanoma_identity.credentials (hash, deployment, generation, valid_until)
-            VALUES ($1,$2,$3,$4)`,
-          [input.hash, input.deployment, input.generation, new Date(until)],
-        );
+        if (rows[0] && rows[0].generation >= input.generation) fail("conflict");
+        await tx.insert(identityCredentials).values({
+          hash: input.hash,
+          deployment: input.deployment,
+          generation: input.generation,
+          validUntil: new Date(until),
+        });
       });
     },
     async retire(input) {
       generationOf(input.generation);
       const until = deadlineOf(input.validUntil);
-      await transaction(input, false, async (db) => {
+      await transaction(input, false, async (tx) => {
         // Retirement only shortens access. The predicate protects the schema's finite interval.
-        const result = await db.query(
-          `UPDATE sanoma_identity.credentials SET
-            revoked=revoked OR $3::timestamptz <= clock_timestamp(),
-            valid_until=CASE WHEN $3::timestamptz > valid_from THEN LEAST(valid_until,$3::timestamptz) ELSE valid_until END
-            WHERE deployment=$1 AND generation=$2`,
-          [input.deployment, input.generation, new Date(until)],
-        );
-        if (!result.rowCount) fail("conflict");
+        const deadline = sql`${new Date(until).toISOString()}::timestamptz`;
+        const updated = await tx
+          .update(identityCredentials)
+          .set({
+            revoked: sql`${identityCredentials.revoked} OR ${deadline} <= clock_timestamp()`,
+            validUntil: sql`CASE WHEN ${deadline} > ${identityCredentials.validFrom} THEN LEAST(${identityCredentials.validUntil}, ${deadline}) ELSE ${identityCredentials.validUntil} END`,
+          })
+          .where(
+            and(
+              eq(identityCredentials.deployment, input.deployment),
+              eq(identityCredentials.generation, input.generation),
+            ),
+          )
+          .returning({ hash: identityCredentials.hash });
+        if (!updated.length) fail("conflict");
       });
     },
     async revoke(input) {
-      await transaction(input, false, async (db) => {
+      await transaction(input, false, async (tx) => {
         // Terminal for this deployment id. A new enrollment cannot silently re-enable it.
-        await db.query("UPDATE sanoma_identity.deployments SET enabled=false WHERE id=$1", [input.deployment]);
+        await tx
+          .update(identityDeployments)
+          .set({ enabled: false })
+          .where(eq(identityDeployments.id, input.deployment));
       });
     },
   };

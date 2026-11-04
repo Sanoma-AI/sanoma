@@ -1,68 +1,80 @@
 import { randomUUID } from "node:crypto";
+import { eq, sql } from "drizzle-orm";
+import { Client } from "pg";
 import { afterAll, expect, it } from "vitest";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
-import { lazyDb } from "../src/db.ts";
+import { databaseOn, lazyDb } from "../src/db.ts";
+import { identityCredentials, identityDeployments } from "../src/db/identity.ts";
 import { CLOUD_IDENTITY_SQL, createDeploymentCredential, postgresIdentityEnrollments } from "../src/cloud-identity.ts";
 
-const pool = lazyDb(testDatabaseUrl("identity_broker"), "identity-broker-tests");
+const url = testDatabaseUrl("identity_broker");
+const hour = (hours: number) => sql`clock_timestamp() + ${`${hours} hours`}::interval`;
+const pool = lazyDb(url, "identity-broker-tests");
 afterAll(() => pool.close());
 
 it("persists hash-only generations, bounds overlap, and gives the broker no enrollment mutation authority", async () => {
   const db = await pool.db();
   // This file has its own task-isolated database; rebuild only its broker test schema.
-  await db.query("DROP SCHEMA IF EXISTS sanoma_identity CASCADE");
-  await db.query(CLOUD_IDENTITY_SQL);
+  await db.execute(sql`DROP SCHEMA IF EXISTS sanoma_identity CASCADE`);
+  await db.execute(sql.raw(CLOUD_IDENTITY_SQL));
   const id = `deployment-${randomUUID()}`;
-  const reader = `identity_reader_${randomUUID().replaceAll("-", "")}`;
+  const reader = sql.identifier(`identity_reader_${randomUUID().replaceAll("-", "")}`);
   const old = createDeploymentCredential(),
     next = createDeploymentCredential();
-  await db.query(`CREATE ROLE ${reader} NOLOGIN`);
-  const connection = await db.connect();
+  await db.execute(sql`CREATE ROLE ${reader} NOLOGIN`);
+  const client = new Client({ connectionString: url });
+  await client.connect();
+  const connection = databaseOn(client);
   try {
-    await db.query(`GRANT USAGE ON SCHEMA sanoma_identity TO ${reader}`);
-    await db.query(`GRANT SELECT ON sanoma_identity.deployments, sanoma_identity.credentials TO ${reader}`);
-    await db.query(
-      "INSERT INTO sanoma_identity.deployments(id,company,environment,service_account) VALUES ($1,'company-a','production','runtime@identity-project.iam.gserviceaccount.com')",
-      [id],
-    );
-    await db.query(
-      "INSERT INTO sanoma_identity.credentials(hash,deployment,generation,valid_until) VALUES ($1,$3,1,clock_timestamp() + interval '1 hour'),($2,$3,2,clock_timestamp() + interval '2 hours')",
-      [old.hash, next.hash, id],
-    );
+    await db.execute(sql`GRANT USAGE ON SCHEMA sanoma_identity TO ${reader}`);
+    await db.execute(sql`GRANT SELECT ON sanoma_identity.deployments, sanoma_identity.credentials TO ${reader}`);
+    await db.insert(identityDeployments).values({
+      id,
+      company: "company-a",
+      environment: "production",
+      serviceAccount: "runtime@identity-project.iam.gserviceaccount.com",
+    });
+    await db.insert(identityCredentials).values([
+      { hash: old.hash, deployment: id, generation: 1, validUntil: hour(1) },
+      { hash: next.hash, deployment: id, generation: 2, validUntil: hour(2) },
+    ]);
     await expect(
-      db.query("UPDATE sanoma_identity.credentials SET valid_until='infinity' WHERE hash=$1", [old.hash]),
+      db
+        .update(identityCredentials)
+        .set({ validUntil: sql`'infinity'` })
+        .where(eq(identityCredentials.hash, old.hash)),
     ).rejects.toMatchObject({ code: "23514" });
-    await connection.query(`SET ROLE ${reader}`);
+    await connection.execute(sql`SET ROLE ${reader}`);
     const store = postgresIdentityEnrollments(async () => connection);
     expect(await store.active(old.hash)).toMatchObject({ deployment: id, generation: 1, company: "company-a" });
     expect(await store.active(next.hash)).toMatchObject({ deployment: id, generation: 2 });
     expect(await store.active(old.credential)).toBeUndefined();
     await expect(
-      connection.query("UPDATE sanoma_identity.deployments SET company = 'company-b' WHERE id = $1", [id]),
+      connection.update(identityDeployments).set({ company: "company-b" }).where(eq(identityDeployments.id, id)),
     ).rejects.toMatchObject({ code: "42501" });
     await expect(
-      connection.query("DELETE FROM sanoma_identity.credentials WHERE deployment = $1", [id]),
+      connection.delete(identityCredentials).where(eq(identityCredentials.deployment, id)),
     ).rejects.toMatchObject({ code: "42501" });
-    await db.query("UPDATE sanoma_identity.credentials SET revoked=true WHERE hash=$1", [old.hash]);
+    await db.update(identityCredentials).set({ revoked: true }).where(eq(identityCredentials.hash, old.hash));
     expect(await store.active(old.hash)).toBeUndefined();
     expect(await store.active(next.hash)).toBeDefined();
-    await db.query(
-      "UPDATE sanoma_identity.credentials SET valid_from=clock_timestamp()-interval '2 hours',valid_until=clock_timestamp()-interval '1 hour' WHERE hash=$1",
-      [next.hash],
-    );
+    await db
+      .update(identityCredentials)
+      .set({ validFrom: hour(-2), validUntil: hour(-1) })
+      .where(eq(identityCredentials.hash, next.hash));
     expect(await store.active(next.hash)).toBeUndefined();
-    await db.query(
-      "UPDATE sanoma_identity.credentials SET valid_until=clock_timestamp()+interval '1 hour' WHERE hash=$1",
-      [next.hash],
-    );
-    await db.query("UPDATE sanoma_identity.deployments SET enabled=false WHERE id=$1", [id]);
+    await db
+      .update(identityCredentials)
+      .set({ validUntil: hour(1) })
+      .where(eq(identityCredentials.hash, next.hash));
+    await db.update(identityDeployments).set({ enabled: false }).where(eq(identityDeployments.id, id));
     expect(await store.active(next.hash)).toBeUndefined();
   } finally {
-    await connection.query("RESET ROLE");
-    connection.release();
-    await db.query("DELETE FROM sanoma_identity.credentials WHERE deployment=$1", [id]);
-    await db.query("DELETE FROM sanoma_identity.deployments WHERE id=$1", [id]);
-    await db.query(`DROP OWNED BY ${reader}`);
-    await db.query(`DROP ROLE ${reader}`);
+    await connection.execute(sql`RESET ROLE`);
+    await client.end();
+    await db.delete(identityCredentials).where(eq(identityCredentials.deployment, id));
+    await db.delete(identityDeployments).where(eq(identityDeployments.id, id));
+    await db.execute(sql`DROP OWNED BY ${reader}`);
+    await db.execute(sql`DROP ROLE ${reader}`);
   }
 });

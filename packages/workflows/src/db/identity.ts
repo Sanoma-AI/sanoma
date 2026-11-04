@@ -4,7 +4,7 @@ import { bigint, boolean, check, pgSchema, text, timestamp, unique, uuid } from 
 // The cloud identity broker's tables, in the schema `sanoma_identity` an administrator installs
 // with `CLOUD_IDENTITY_SQL` (`cloud-identity.ts`) and `CLOUD_IDENTITY_AUDIT_SQL`
 // (`identity-service.ts`), with their grants: the runtime never makes them, so no migration is
-// generated from this model. `cloud-identity-db.test.ts` holds the install SQL to it.
+// generated from this model. `identity-schema.test.ts` holds the install SQL to it.
 
 export const identity = pgSchema("sanoma_identity");
 

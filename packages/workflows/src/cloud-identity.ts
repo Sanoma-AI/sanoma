@@ -1,6 +1,8 @@
 import { createHash, randomBytes } from "node:crypto";
 import { Compute, OAuth2Client } from "google-auth-library";
-import { type LegacyQuery as Db } from "./db.ts";
+import { and, eq, gt, lte, sql } from "drizzle-orm";
+import type { Db } from "./db.ts";
+import { identityCredentials, identityDeployments } from "./db/identity.ts";
 import { enrollmentBroker } from "./identity-broker.ts";
 export { provisioningIdentityBroker, attachedGoogleIdTokenIssuer } from "./provisioning-identity.ts";
 export type { ProvisioningIdentity, ProvisioningIdToken } from "./provisioning-identity.ts";
@@ -64,31 +66,28 @@ REVOKE ALL ON ALL TABLES IN SCHEMA sanoma_identity FROM PUBLIC;
 export function postgresIdentityEnrollments(database: () => Promise<Db>): IdentityEnrollments {
   return {
     async active(hash) {
-      const { rows } = await (
+      const [row] = await (
         await database()
-      ).query<{
-        deployment: string;
-        company: string;
-        environment: string;
-        service_account: string;
-        generation: string;
-      }>(
-        `SELECT d.id AS deployment, d.company, d.environment, d.service_account, c.generation
-          FROM sanoma_identity.credentials c JOIN sanoma_identity.deployments d ON d.id = c.deployment
-          WHERE c.hash = $1 AND NOT c.revoked AND d.enabled
-            AND c.valid_from <= clock_timestamp() AND c.valid_until > clock_timestamp()`,
-        [hash],
-      );
-      const row = rows[0];
-      return (
-        row && {
-          deployment: row.deployment,
-          company: row.company,
-          environment: row.environment,
-          serviceAccount: row.service_account,
-          generation: Number(row.generation),
-        }
-      );
+      )
+        .select({
+          deployment: identityDeployments.id,
+          company: identityDeployments.company,
+          environment: identityDeployments.environment,
+          serviceAccount: identityDeployments.serviceAccount,
+          generation: identityCredentials.generation,
+        })
+        .from(identityCredentials)
+        .innerJoin(identityDeployments, eq(identityDeployments.id, identityCredentials.deployment))
+        .where(
+          and(
+            eq(identityCredentials.hash, hash),
+            eq(identityCredentials.revoked, false),
+            eq(identityDeployments.enabled, true),
+            lte(identityCredentials.validFrom, sql`clock_timestamp()`),
+            gt(identityCredentials.validUntil, sql`clock_timestamp()`),
+          ),
+        );
+      return row;
     },
   };
 }
