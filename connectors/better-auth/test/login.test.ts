@@ -61,8 +61,12 @@ function request(
 }
 let nextIp = 1;
 
-/** The session cookie a response sets, as `name=value` for the next request. */
-const cookieOf = (response: Response) => response.headers.getSetCookie()[0]?.split(";")[0] ?? "";
+/** The session cookie a response sets, as `name=value` for the next request; empty for none. */
+const cookieOf = (response: Response) =>
+  response.headers
+    .getSetCookie()
+    .find((c) => c.includes("session_token="))
+    ?.split(";")[0] ?? "";
 
 /** A new visitor signed up through `half` on the site's page at `host`: its credentials, the answer and its cookie. */
 async function signUp(half: LoginHalf, host?: string) {
@@ -315,12 +319,12 @@ describe("the login half with the company's GitHub client", () => {
   }
 
   /**
-   * Sends the visitor with `cookie` (none: someone signed out) to GitHub by `route`, and answers
-   * GitHub's redirect back with `code`, the account it stands for: linked, or signed in.
+   * Sends the visitor with `cookie` to GitHub to link it (none: someone signed out, to sign in),
+   * and answers GitHub's redirect back with `code`, the account it stands for.
    */
-  async function viaGitHub(code: string, cookie?: string, route = "link-social") {
+  async function viaGitHub(code: string, cookie?: string) {
     const started = (await half.handle(
-      request(`/auth/better-auth/${route}`, {
+      request(`/auth/better-auth/${cookie ? "link-social" : "sign-in/social"}`, {
         ...(cookie && { cookie }),
         body: { provider: "github", callbackURL: "/account" },
       }),
@@ -337,11 +341,8 @@ describe("the login half with the company's GitHub client", () => {
     return (await half.handle(request(`/auth/better-auth/callback/github?${query}`, { cookie: cookies.join("; ") })))!;
   }
 
-  /** The visitor a GitHub sign-in's redirect back signed in, by its session cookie; null for none. */
-  async function signedInBy(back: Response) {
-    const session = back.headers.getSetCookie().find((c) => c.startsWith("better-auth.session_token="));
-    return session ? half.verify(request("/", { cookie: session.split(";")[0] })) : null;
-  }
+  /** Who the session cookie `cookie` signs in, or null. */
+  const whoIs = (cookie: string) => half.verify(request("/", { cookie }));
 
   it("offers GitHub beside the password and the code", () => {
     expect(half.methods).toEqual(["password", "code", "github"]);
@@ -349,11 +350,12 @@ describe("the login half with the company's GitHub client", () => {
 
   it("links a signed-in visitor's GitHub account, whatever its email, and says their login", async () => {
     const { email, cookie } = await signedIn();
-    github.set("code-1", { token: "gho_one", id: 4101, login: "Ada-Lovelace", email: "ada@users.github.test" });
+    const ada = { token: "gho_one", id: 4101, login: "Ada-Lovelace", email: "ada@users.github.test" };
+    github.set("code-1", ada);
     const back = await viaGitHub("code-1", cookie);
     expect(back.status).toBe(302);
     expect(back.headers.get("location")).toBe("/account");
-    expect(await half.verify(request("/", { cookie }))).toEqual({
+    expect(await whoIs(cookie)).toEqual({
       subject: expect.any(String),
       email,
       github: "Ada-Lovelace",
@@ -362,9 +364,9 @@ describe("the login half with the company's GitHub client", () => {
     const session = (await half.handle(request("/auth/better-auth/get-session", { cookie })))!;
     expect(((await session.json()) as { user: { github?: string } }).user.github).toBe("Ada-Lovelace");
     // Signed out, the linked GitHub account signs them in, whatever its email.
-    github.set("code-1b", { token: "gho_one_b", id: 4101, login: "Ada-Lovelace", email: "ada@users.github.test" });
-    const signIn = await viaGitHub("code-1b", undefined, "sign-in/social");
-    expect(await signedInBy(signIn)).toEqual(await half.verify(request("/", { cookie })));
+    github.set("code-1b", { ...ada, token: "gho_one_b" });
+    const signIn = await viaGitHub("code-1b");
+    expect(await whoIs(cookieOf(signIn))).toEqual(await whoIs(cookie));
   });
 
   it("links one GitHub account to one visitor only", async () => {
@@ -376,7 +378,7 @@ describe("the login half with the company's GitHub client", () => {
     github.set("code-3", grace);
     const refused = await viaGitHub("code-3", second.cookie);
     expect(refused.headers.get("location")).toMatch(/error=account_already_linked_to_different_user/);
-    expect((await half.verify(request("/", { cookie: second.cookie })))?.github).toBeUndefined();
+    expect((await whoIs(second.cookie))?.github).toBeUndefined();
   });
 
   it("keeps one GitHub account per visitor, its login fresh at each link, and none of its tokens", async () => {
@@ -388,12 +390,12 @@ describe("the login half with the company's GitHub client", () => {
     // Linked again after a rename: the same account, its new login.
     github.set("code-6", { ...linus, token: "gho_six", login: "linus-t" });
     await viaGitHub("code-6", cookie);
-    expect((await half.verify(request("/", { cookie })))?.github).toBe("linus-t");
+    expect((await whoIs(cookie))?.github).toBe("linus-t");
     expect(await tokensOf(4105)).toEqual([{ access_token: null, refresh_token: null }]);
     // Another GitHub account is refused.
     github.set("code-7", { token: "gho_seven", id: 4107, login: "other", email: "other@users.github.test" });
     expect((await viaGitHub("code-7", cookie)).headers.get("location")).toMatch(/error=unable_to_link_account/);
-    expect((await half.verify(request("/", { cookie })))?.github).toBe("linus-t");
+    expect((await whoIs(cookie))?.github).toBe("linus-t");
     // Unlinked (the visitor keeps their password), it is no longer theirs.
     const listed = (await half.handle(request("/auth/better-auth/list-accounts", { cookie })))!;
     const accounts = (await listed.json()) as { id: string; providerId: string }[];
@@ -402,36 +404,37 @@ describe("the login half with the company's GitHub client", () => {
       request("/auth/better-auth/unlink-account", { cookie, body: { accountId: linked.id } }),
     );
     expect(unlink?.status).toBe(200);
-    expect((await half.verify(request("/", { cookie })))?.github).toBeUndefined();
+    expect((await whoIs(cookie))?.github).toBeUndefined();
   });
 
   it("signs a new visitor up with GitHub, says their login and verified email, and keeps no token", async () => {
     const hopper = { token: "gho_four", id: 4104, login: "hopper", email: "hopper@users.github.test" };
     github.set("code-4", hopper);
-    const back = await viaGitHub("code-4", undefined, "sign-in/social");
+    const back = await viaGitHub("code-4");
     expect(back.headers.get("location")).toBe("/account");
-    const visitor = await signedInBy(back);
+    const visitor = await whoIs(cookieOf(back));
     expect(visitor).toEqual({ subject: expect.any(String), email: hopper.email, github: "hopper" });
     expect(await tokensOf(4104)).toEqual([{ access_token: null, refresh_token: null }]);
     // Again, the same account.
     github.set("code-8", { ...hopper, token: "gho_eight" });
-    const again = await viaGitHub("code-8", undefined, "sign-in/social");
-    expect(await signedInBy(again)).toEqual(visitor);
+    const again = await viaGitHub("code-8");
+    expect(await whoIs(cookieOf(again))).toEqual(visitor);
   });
 
   it("signs a visitor in by code and by GitHub of the same verified email into one account", async () => {
     const turing = { token: "gho_nine", id: 4109, login: "turing", email: `${randomUUID()}@example.com` };
     const byCode = await signedIn(turing.email);
     github.set("code-9", turing);
-    const back = await viaGitHub("code-9", undefined, "sign-in/social");
+    const back = await viaGitHub("code-9");
     expect(back.headers.get("location")).toBe("/account");
-    const { subject } = (await half.verify(request("/", { cookie: byCode.cookie })))!;
-    expect(await signedInBy(back)).toEqual({ subject, email: turing.email, github: "turing" });
-    expect(await half.verify(request("/", { cookie: byCode.cookie }))).toEqual({
-      subject,
-      email: turing.email,
-      github: "turing",
-    });
+    const visitor = { subject: (await whoIs(byCode.cookie))!.subject, email: turing.email, github: "turing" };
+    expect(await whoIs(cookieOf(back))).toEqual(visitor);
+    expect(await whoIs(byCode.cookie)).toEqual(visitor);
+    // A second GitHub account of that email joins it no more than a link would.
+    github.set("code-13", { ...turing, token: "gho_thirteen", id: 4113, login: "turing-2" });
+    const second = await viaGitHub("code-13");
+    expect(second.headers.get("location")).toMatch(/error=unable_to_link_account/);
+    expect(await whoIs(byCode.cookie)).toEqual(visitor);
   });
 
   it("joins no account by an email GitHub has not verified, or one the account has not", async () => {
@@ -439,29 +442,29 @@ describe("the login half with the company's GitHub client", () => {
     const mallory = { token: "gho_ten", id: 4110, login: "mallory", email: `${randomUUID()}@example.com` };
     const byCode = await signedIn(mallory.email);
     github.set("code-10", { ...mallory, verified: false });
-    const refused = await viaGitHub("code-10", undefined, "sign-in/social");
+    const refused = await viaGitHub("code-10");
     expect(refused.headers.get("location")).toMatch(/error=account_not_linked/);
-    expect(await signedInBy(refused)).toBeNull();
-    expect((await half.verify(request("/", { cookie: byCode.cookie })))?.github).toBeUndefined();
+    expect(await whoIs(cookieOf(refused))).toBeNull();
+    expect((await whoIs(byCode.cookie))?.github).toBeUndefined();
     // The account's email unverified (signed up by password): not that account either.
     const { email, cookie } = await signUp(half);
     github.set("code-11", { token: "gho_eleven", id: 4111, login: "eve", email });
-    const unproven = await viaGitHub("code-11", undefined, "sign-in/social");
+    const unproven = await viaGitHub("code-11");
     expect(unproven.headers.get("location")).toMatch(/error=account_not_linked/);
-    expect((await half.verify(request("/", { cookie })))?.github).toBeUndefined();
+    expect((await whoIs(cookie))?.github).toBeUndefined();
   });
 
   it("signs a visitor up by an unverified GitHub email without saying it, until a code proves it", async () => {
     const email = `${randomUUID()}@example.com`;
     github.set("code-12", { token: "gho_twelve", id: 4112, login: "unproven", email, verified: false });
-    const back = await viaGitHub("code-12", undefined, "sign-in/social");
+    const back = await viaGitHub("code-12");
     expect(back.headers.get("location")).toBe("/account");
-    const visitor = await signedInBy(back);
+    const visitor = await whoIs(cookieOf(back));
     expect(visitor).toEqual({ subject: expect.any(String), github: "unproven" });
     // Whoever proves the email by a code takes the account, without the GitHub account that did not.
     const byCode = await signedIn(email);
-    expect(await half.verify(request("/", { cookie: byCode.cookie }))).toEqual({ subject: visitor!.subject, email });
-    expect(await signedInBy(back)).toBeNull();
+    expect(await whoIs(byCode.cookie)).toEqual({ subject: visitor!.subject, email });
+    expect(await whoIs(cookieOf(back))).toBeNull();
   });
 
   it("never takes a GitHub login a visitor gives, nor a redirect off the site", async () => {

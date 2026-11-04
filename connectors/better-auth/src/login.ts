@@ -41,10 +41,11 @@ interface HookContext {
  * app can send one (`context.sendCode`); every email may sign up. With the company's GitHub client
  * (`context.social.github`), a visitor also signs up and in with GitHub (`/sign-in/social`, which
  * joins the account of GitHub's verified email), or links it once signed in (`/link-social`), and
- * is then said to be that GitHub login (`verify`'s `github`). Its tables are in schema `better_auth` on the company's database,
- * migrated here before the first site starts, its cookies signed with the app's key for it
- * (`context.key`). The site's origins are its allowed hosts (a request for another host is
- * refused) and set the cookie's `Secure` flag: an `https` origin's is.
+ * is then said to be that GitHub login (`verify`'s `github`). Its tables are in schema
+ * `better_auth` on the company's database, migrated here before the first site starts, its
+ * cookies signed with the app's key for it (`context.key`). The site's origins are its allowed
+ * hosts (a request for another host is refused) and set the cookie's `Secure` flag: an `https`
+ * origin's is.
  */
 export async function betterAuthLogin({
   databaseUrl,
@@ -68,12 +69,10 @@ export async function betterAuthLogin({
       plugins: sendCode ? [emailCode(sendCode)] : [],
       user: { additionalFields: GITHUB_FIELD },
       ...(github && {
-        // GitHub signs a visitor up and in (`/sign-in/social`), and a signed-in visitor links it (`/link-social`).
         socialProviders: { github: { clientId: github.clientId, clientSecret: github.clientSecret } },
-        // A sign-in joins the account of its email only when GitHub verified that email and the
-        // account's own is verified (GitHub stays untrusted: a trusted provider's unverified email
-        // would join it too). A link's GitHub email may differ from the visitor's, verified all the same.
-        account: { accountLinking: { allowDifferentEmails: true } },
+        // GitHub stays untrusted, and the account's own email must be verified: a sign-in joins
+        // an account only by an email both sides verified (AGENTS.md). A link's may differ.
+        account: { accountLinking: { allowDifferentEmails: true, requireLocalEmailVerified: true } },
         databaseHooks: {
           account: {
             create: { before: oneGitHub, after: noteLogin },
