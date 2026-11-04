@@ -51,11 +51,14 @@ describe("spendInviteRequest", () => {
     const [a, b] = await Promise.all([spendInviteRequest(pool, nonce, later), spendInviteRequest(pool, nonce, later)]);
     expect([a, b].toSorted()).toEqual([false, true]);
     expect(await spendInviteRequest(pool, nonce, later)).toBe(false);
-    // An expired nonce's row goes on the next spend, so a request sealed again after it may spend it again.
-    await pool.query("UPDATE sanoma_invite_requests SET expires_at = now() - interval '1 second' WHERE nonce = $1", [
-      nonce,
-    ]);
+    // A nonce just expired is kept a while longer, since the database's clock may run ahead of the
+    // app's; one an hour past goes on the next spend.
+    const stale = "UPDATE sanoma_invite_requests SET expires_at = now() - $2::interval WHERE nonce = $1";
+    await pool.query(stale, [nonce, "1 second"]);
     expect(await spendInviteRequest(pool, `other-${nonce}`, later)).toBe(true);
+    expect((await pool.query("SELECT 1 FROM sanoma_invite_requests WHERE nonce = $1", [nonce])).rowCount).toBe(1);
+    await pool.query(stale, [nonce, "61 minutes"]);
+    expect(await spendInviteRequest(pool, `third-${nonce}`, later)).toBe(true);
     expect((await pool.query("SELECT 1 FROM sanoma_invite_requests WHERE nonce = $1", [nonce])).rowCount).toBe(0);
   });
 });

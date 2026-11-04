@@ -469,7 +469,8 @@ export function sameOrigin(request: Request): boolean {
  * A connector's login half: how a public site tells who a visitor is, and, made with
  * `LoginContext.staff`, how the app's staff sign in. The app makes one with `login(context)` once
  * per public site (and once for staff), when it starts; a login that keeps tables in the database
- * migrates them itself there, serialized and idempotent. It answers the provider's subject and
+ * has its connector's `prepare` make them, which the worker runs, and only checks for them. It
+ * answers the provider's subject and
  * what it verified; the app makes the principal from it (`visitor:<connector>:<subject>`, in
  * `visitors`, or the declared person the identity matches), so a connector never sets groups. A
  * visitor's address, for rate limits, is the `CLIENT_IP_HEADER` header.

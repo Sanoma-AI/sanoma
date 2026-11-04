@@ -421,7 +421,9 @@ export async function recordWakeupStop(db: Db): Promise<void> {
  * keeps nothing across requests.
  */
 export async function spendInviteRequest(db: Db, nonce: string, expiresAt: Date): Promise<boolean> {
-  await db.query(`DELETE FROM ${INVITE_REQUESTS_TABLE} WHERE expires_at <= now()`);
+  // Rows go an hour after they expire, not at it: the app's clock decides when a request is
+  // past, and a database clock ahead of it must not forget a nonce the app still accepts.
+  await db.query(`DELETE FROM ${INVITE_REQUESTS_TABLE} WHERE expires_at <= now() - interval '1 hour'`);
   const { rowCount } = await db.query(
     `INSERT INTO ${INVITE_REQUESTS_TABLE} (nonce, expires_at) VALUES ($1, $2) ON CONFLICT (nonce) DO NOTHING`,
     [nonce, expiresAt],

@@ -10,7 +10,8 @@ import { Client, Pool } from "pg";
 // tables in a schema of its own, which the worker makes at its start (`prepareBetterAuth`) and the
 // app only checks, its cookies signed with the key the app derives for it, its rate limit in a
 // table rather than memory, and one instance per protocol, since a cookie's `Secure` flag is one
-// per instance.
+// per instance. Nothing is cached in the cookie: every request reads its session row, so a
+// revoked session, or a `github` a sign-in just wrote, is seen at once.
 
 export type Protocol = "http" | "https";
 
@@ -58,9 +59,6 @@ const databaseOn = (pool: Pool, schema: Schema) => ({
   transaction: true,
 });
 
-/** The table the migrations make last, whose being there says the schema is prepared. */
-const LAST_TABLE = "rateLimit";
-
 /** `run` once per `key` in this process, again after it fails. */
 function once(memo: Map<string, Promise<void>>, key: string, run: () => Promise<void>): Promise<void> {
   let done = memo.get(key);
@@ -77,10 +75,15 @@ function once(memo: Map<string, Promise<void>>, key: string, run: () => Promise<
 /** Each database and schema checked for its tables, once per process. */
 const checked = new Map<string, Promise<void>>();
 
+/** How long an opening login waits for a worker starting beside it to prepare the schema, and how often it looks. */
+const PREPARED_WAIT_MS = 60_000;
+const PREPARED_POLL_MS = 1_000;
+
 /**
  * Opens one Better Auth per protocol on the company's database: `auths` by protocol, the `pool`
  * they share, and `close`, which ends it. Throws, the pool ended, when the key is not one the app
- * derived or the schema's tables are not there yet (the worker makes them, `prepareBetterAuth`).
+ * derived, or when the schema's tables are still not there, or behind this version's, a minute
+ * after a worker starting beside the app should have made them (`prepareBetterAuth`).
  */
 export async function openBetterAuth<O extends ExtraOptions>({
   databaseUrl,
@@ -100,8 +103,6 @@ export async function openBetterAuth<O extends ExtraOptions>({
     logger: { level: "warn" as const },
     ...options,
     user: { ...options.user, ...TABLE_OPTIONS.user },
-    // The session in the cookie, signed, for five minutes: most requests read no session row.
-    session: { cookieCache: { enabled: true, maxAge: 5 * 60 }, ...options.session },
     database: databaseOn(pool, schema),
     // `secrets` over `secret`, else BETTER_AUTH_SECRETS in the environment would win.
     secrets: [{ version: 1, value: key }],
@@ -130,15 +131,22 @@ export async function openBetterAuth<O extends ExtraOptions>({
   }
 }
 
-/** Refuses when `schema` lacks its tables: the worker makes them, and the app never does. */
+/**
+ * Waits for `schema` to hold every table and column this version's migrations would make (Better
+ * Auth's own migration plan, read and never run), looking every second for a minute, since a
+ * deployment's worker starts beside its app; then refuses: the worker makes them, and the app
+ * never does.
+ */
 async function checkPrepared(pool: Pool, schema: Schema): Promise<void> {
-  const { rows } = await pool.query<{ there: boolean }>("SELECT to_regclass($1) IS NOT NULL AS there", [
-    `"${schema}"."${LAST_TABLE}"`,
-  ]);
-  if (!rows[0]!.there)
-    throw new Error(
-      `better-auth: the database has no ${schema} tables yet: the worker makes them at its start, and the app never does`,
-    );
+  const database = databaseOn(pool, schema);
+  for (const deadline = Date.now() + PREPARED_WAIT_MS; ; await delay(PREPARED_POLL_MS)) {
+    const { toBeCreated, toBeAdded } = await getMigrations({ ...TABLE_OPTIONS, database });
+    if (toBeCreated.length === 0 && toBeAdded.length === 0) return;
+    if (Date.now() >= deadline)
+      throw new Error(
+        `better-auth: the database's ${schema} tables are missing or behind this version's: the worker makes them at its start, and the app never does`,
+      );
+  }
 }
 
 /** Each database and schema's migration, once per process however many workers run on it. */

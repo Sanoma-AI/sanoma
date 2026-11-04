@@ -1,4 +1,5 @@
 import { hkdfSync, randomBytes, randomUUID } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
 import { CLIENT_IP_HEADER, type LoginContext, type LoginHalf } from "@sanoma-ai/workflows";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { Client } from "pg";
@@ -110,9 +111,15 @@ beforeAll(async () => {
 });
 
 describe("login", () => {
-  it("refuses to open before the worker prepared the schema, and never makes it", async () => {
-    await expect(betterAuthLogin(context)).rejects.toThrow(/no better_auth tables yet: the worker makes them/);
+  it("waits to open until the worker prepared the schema, and never makes it", async () => {
+    const opening = betterAuthLogin(context);
+    await delay(1500);
     expect(await tables()).toEqual([]);
+    await (
+      await freshPrepare()
+    )(databaseUrl);
+    await (await opening).close?.();
+    expect(await tables()).toEqual(["account", "rateLimit", "session", "user", "verification"]);
   });
 
   it("is prepared by the worker: schema better_auth and its tables, from two workers at once", async () => {
@@ -224,7 +231,7 @@ describe("the login half", () => {
       statuses.push((await half.handle(request("/auth/better-auth/sign-in/email", { body, ip: "10.9.9.9" })))?.status);
     }
     expect(statuses).toEqual([401, 401, 401]);
-    // The fourth try from the same address is refused by another instance (another request's, another process's).
+    // The fourth try from the same address is refused by another instance, which only the table tells about the first three.
     const other = await betterAuthLogin(context);
     try {
       const fourth = await other.handle(request("/auth/better-auth/sign-in/email", { body, ip: "10.9.9.9" }));
