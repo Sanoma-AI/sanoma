@@ -208,12 +208,12 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
     }
     // Whom it names is the page's words only: when the people file does not load, the link still
     // shows, without them.
-    const { person, sender } = await named(invitation.email).catch((err: unknown): Invited => {
+    const invited = await named(invitation.email).catch((err: unknown): Invited => {
       console.error(`sanoma app: whom an invite names could not be read: ${errorMessage(err)}`);
       return {};
     });
     const look = frame();
-    return smallPage(200, "Invite", invitePage(look.company!, invitation, person, sender), look);
+    return smallPage(200, "Invite", invitePage(look.company!, invitation, invited), look);
   }
 
   /** The declared person an invite for `email` signs in, with their groups, and who sent it (none for a sealed request's). */
@@ -334,8 +334,7 @@ function signInPage(half: LoginHalf, frame: PageFrame, status: number, error?: s
 function invitePage(
   company: Company,
   invitation: { email: string; path: string },
-  person: (Named & { groups: string[] }) | undefined,
-  sender: Named | undefined,
+  { person, sender }: Invited,
 ): string {
   const faces = [sender, person]
     .filter((p): p is Named => p !== undefined)

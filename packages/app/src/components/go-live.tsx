@@ -108,7 +108,7 @@ function GoLiveSteps() {
   }));
   // The sign-in sender's connector, when the setup rows above do not list it already.
   const { data: titles } = useSuspenseQuery({ ...configQuery(), select: (config) => config.vendors });
-  const named = status.signIn.sender?.split(".")[0];
+  const named = senderVendorOf(status.signIn);
   const sender = named !== undefined && !vendors.some((v) => v.vendor === named) ? named : undefined;
   const { run, bound } = progress;
   const data = bound.beforeHost;
@@ -468,15 +468,14 @@ function PushButton() {
  */
 function SignInItem({ signIn }: { signIn: SetupStatus["signIn"] }) {
   const code = signIn.sender !== null && signIn.senderConnected;
-  const vendor = signIn.sender?.split(".")[0];
+  const vendor = senderVendorOf(signIn);
+  const ready = code || signIn.github || signIn.you !== null;
   return (
     <Item role="listitem" variant="outline" size="xs">
       <ItemContent className="gap-2">
         <ItemHeading>
           Sign-in
-          <ToneBadge tone={code || signIn.github || signIn.you !== null ? "ok" : "waiting"}>
-            {code || signIn.github || signIn.you !== null ? "ready" : "invite links only"}
-          </ToneBadge>
+          <ToneBadge tone={ready ? "ok" : "waiting"}>{ready ? "ready" : "invite links only"}</ToneBadge>
         </ItemHeading>
         <ul className="flex flex-col gap-1.5 text-xs">
           <SignInLine ok={signIn.you !== null}>
@@ -556,6 +555,16 @@ function SignInLine({ ok, children }: { ok: boolean; children: ReactNode }) {
   );
 }
 
+/** The sign-in sender's connector (`resend` of `resend.emails.send`), when the config names one. */
+const senderVendorOf = (signIn: SetupStatus["signIn"]) => signIn.sender?.split(".")[0];
+
+/** Where a fix's email codes go, said under each. */
+const CODES_GO_TO = (
+  <span className="text-muted-foreground">
+    Codes then go to the emails declared in <code>resources/people.ts</code>.
+  </span>
+);
+
 /**
  * How to let people sign in themselves without an email code: name a sender (or connect the one
  * named, `vendor`), and, while the App is not there, connect it for Continue with GitHub.
@@ -567,9 +576,7 @@ function SignInFixes({ vendor, github }: { vendor: string | undefined; github: b
         <span className="font-medium">
           Connect <code>{vendor}</code>, the sender, on <Link to="/hosting/connect">Hosting › Connect</Link>
         </span>
-        <span className="text-muted-foreground">
-          Codes then go to the emails declared in <code>resources/people.ts</code>.
-        </span>
+        {CODES_GO_TO}
       </>
     ) : (
       <>
@@ -579,9 +586,7 @@ function SignInFixes({ vendor, github }: { vendor: string | undefined; github: b
         <code className="block overflow-x-auto rounded-md border bg-muted px-2 py-1.5 whitespace-pre">
           {'login: { sender: resend.emails.send, from: "Acme <login@acme.example>" }'}
         </code>
-        <span className="text-muted-foreground">
-          Codes then go to the emails declared in <code>resources/people.ts</code>.
-        </span>
+        {CODES_GO_TO}
       </>
     ),
     !github && (

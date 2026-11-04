@@ -225,6 +225,12 @@ const builtInGroups = (type: string): string[] => (type === "agent" ? [AGENTS] :
 const emailOf = (person: DeclaredResource): string | undefined =>
   typeof person.desired.email === "string" ? person.desired.email : undefined;
 
+/** Opens a person's invite card, minting their link (`useInviteCard`). */
+type OnInvite = (person: DeclaredResource) => void;
+
+/** Why a person has no invite link: nothing to send its code to. */
+const NO_EMAIL = "Declare an email to make an invite link for them";
+
 /** A person's declared name, else their id. */
 const nameOf = (person: DeclaredResource): string =>
   typeof person.desired.name === "string" ? person.desired.name : person.name;
@@ -239,7 +245,7 @@ function PeopleTable({
   people: DeclaredResource[];
   groupsOf: Directory["groupsOf"];
   open: string | undefined;
-  onInvite: (person: DeclaredResource) => void;
+  onInvite: OnInvite;
 }) {
   // Invite links are the host's staff login's: on this machine the picker signs anyone in.
   const { data } = useQuery(peopleSignInsQuery());
@@ -406,14 +412,14 @@ function InviteButton({
   size = "xs",
 }: {
   person: DeclaredResource;
-  onInvite: (person: DeclaredResource) => void;
+  onInvite: OnInvite;
   size?: "xs" | "sm";
 }) {
   const { groups } = useActor();
   const why = !groups.includes(ADMIN)
     ? `Only someone in ${ADMIN} makes an invite link`
     : emailOf(person) === undefined
-      ? "Declare an email to make an invite link for them"
+      ? NO_EMAIL
       : undefined;
   const button = (
     <Button
@@ -445,10 +451,11 @@ function InviteCard({
   onClose: () => void;
 }) {
   const name = nameOf(person);
+  const first = firstWordOf(name);
   const title = `Invite link for ${name}`;
   const copy = (link: string) =>
     navigator.clipboard.writeText(link).then(
-      () => toast.success(`Copied ${firstWordOf(name)}'s invite link`),
+      () => toast.success(`Copied ${first}'s invite link`),
       () => toast.error("Could not copy: select the link and copy it"),
     );
   return (
@@ -487,7 +494,7 @@ function InviteCard({
         </Field>
         <p className="text-sm text-muted-foreground">Send it any way you like: text, Slack, email.</p>
         <p className="border-t pt-3 text-xs text-muted-foreground">
-          Opening it signs {firstWordOf(name)} in as {emailOf(person)}. A new link replaces this one.
+          Opening it signs {first} in as {emailOf(person)}. A new link replaces this one.
         </p>
       </CardContent>
     </FloatingCard>
@@ -556,7 +563,7 @@ function Opened({
   resource: DeclaredResource;
   show: PeopleView;
   people: Directory;
-  onInvite: (person: DeclaredResource) => void;
+  onInvite: OnInvite;
 }) {
   const type = people.types.find((t) => t.type === resource.type);
   const groups = people.groupsOf.get(resource.name) ?? [];
@@ -601,11 +608,11 @@ function Opened({
 }
 
 /** The open person's Invite link, where this app mints them: it opens the same card as the row's. */
-function InviteEntry({ person, onInvite }: { person: DeclaredResource; onInvite: (person: DeclaredResource) => void }) {
+function InviteEntry({ person, onInvite }: { person: DeclaredResource; onInvite: OnInvite }) {
   const { data } = useQuery(peopleSignInsQuery());
   if (!data?.invites) return null;
   if (emailOf(person) === undefined) {
-    return <p className="text-sm text-muted-foreground">Declare an email to make an invite link for them.</p>;
+    return <p className="text-sm text-muted-foreground">{NO_EMAIL}.</p>;
   }
   return (
     <div>
