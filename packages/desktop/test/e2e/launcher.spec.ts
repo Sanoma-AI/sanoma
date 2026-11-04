@@ -176,5 +176,16 @@ test("a new company's form asks its name and says where it goes, making nothing 
 
   await page.click("#new-form [data-cancel]");
   await expect(page.locator("#home")).toBeVisible();
+
+  // A link in a company's output goes to the browser; anything else on these pages goes nowhere.
+  await shell.evaluate(({ shell: desktop }) => {
+    const opened: string[] = [];
+    (globalThis as { opened?: string[] }).opened = opened;
+    desktop.openExternal = async (url) => void opened.push(url);
+  });
+  await page.evaluate(`window.open("https://example.com/"); window.open("file:///etc/hosts"); true`);
+  await expect
+    .poll(() => shell.evaluate(() => (globalThis as { opened?: string[] }).opened))
+    .toEqual(["https://example.com/"]);
   expect(existsSync(join(work, "home", "Companies"))).toBe(false);
 });

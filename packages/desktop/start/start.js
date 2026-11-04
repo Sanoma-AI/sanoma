@@ -118,15 +118,15 @@ $("new-name").addEventListener("input", () => shown?.ask?.kind === "new" && show
 $("new-change").addEventListener("click", () => bridge.changePlace());
 $("new-form").addEventListener("submit", (event) => {
   event.preventDefault();
-  bridge.answer({ name: $("new-name").value, parent: shown.ask.parent });
+  bridge.answer("new", { name: $("new-name").value, parent: shown.ask.parent });
 });
 $("clone-form").addEventListener("submit", (event) => {
   event.preventDefault();
-  bridge.answer($("clone-url").value);
+  bridge.answer("clone", $("clone-url").value);
 });
 $("identity-form").addEventListener("submit", (event) => {
   event.preventDefault();
-  bridge.answer({ name: $("identity-name").value, email: $("identity-email").value });
+  bridge.answer("identity", { name: $("identity-name").value, email: $("identity-email").value });
 });
 for (const button of document.querySelectorAll("[data-cancel]"))
   button.addEventListener("click", () => bridge.cancel());

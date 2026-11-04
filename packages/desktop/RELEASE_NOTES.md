@@ -7,7 +7,7 @@ On a Windows x64 PC, download `Sanoma-windows-x64.exe` and run it: it installs f
 ## What it does
 
 - Opens a company: a folder with a `sanoma.config.ts`. You can use Open folder… on the start screen, File → Open Company…, Open Recent, or drop a folder on the Dock icon.
-- Starts a new company or clones one (File → New Company…, Clone Company…), and brings in a company's changes (Company → Get Updates).
+- Starts a new company or copies one from GitHub (File → New Company…, Copy from GitHub…), and brings in a company's changes (Company → Get Updates).
 - Installs and starts it with the Node 26 and pnpm the app ships, whatever the computer has (`pnpm install`, then the company's launcher).
 - Shows the app in one window. Open several companies and switch between them from the account menu under your initials (or ⌘1…⌘9, the Window menu, the Dock menu); each keeps running, gets its own storage and keeps its port, so the app remembers who you are.
 - Closing the window keeps every company running; Company → Stop stops one, and quitting stops them all. Each start is logged to `~/Library/Logs/Sanoma/` (on Windows, `%APPDATA%\Sanoma\logs`).

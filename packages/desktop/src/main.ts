@@ -250,7 +250,11 @@ async function makeTray() {
 /** One of the shell's own pages: it never navigates and opens nothing. */
 function shellPage(contents: WebContents) {
   contents.on("will-navigate", (event) => event.preventDefault());
-  contents.setWindowOpenHandler(() => ({ action: "deny" }));
+  contents.setWindowOpenHandler(({ url }) => {
+    // A link in a company's output; nothing else on these pages opens a window.
+    if (/^https?:/.test(url)) void shell.openExternal(url);
+    return { action: "deny" };
+  });
 }
 
 /** A view showing one of the shell's own pages. */
@@ -1244,7 +1248,10 @@ if (squirrelStartup || !app.requestSingleInstanceLock()) {
   fromCompany("start:show-log", (path) => shell.openPath(logFile(path)));
   ipcMain.handle("start:create", () => newCompany());
   ipcMain.handle("start:clone", () => cloneCompanyFlow());
-  ipcMain.handle("start:answer", (_event, value: unknown) => answer?.(value));
+  // For the form it was typed in: a double-click's second answer must not land on the form that followed.
+  ipcMain.handle("start:answer", (_event, kind: unknown, value: unknown) => {
+    if (ask?.kind === kind) answer?.(value);
+  });
   ipcMain.handle("start:cancel", () => answer?.(undefined));
   ipcMain.handle("start:change-place", () => changePlace());
   ipcMain.handle("start:download", () => shell.openExternal(`https://github.com/${REPOSITORY}/releases/latest`));

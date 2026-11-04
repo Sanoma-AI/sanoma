@@ -34,6 +34,8 @@ const terminal = new Terminal({
   cursorInactiveStyle: "none",
   disableStdin: true,
   fontFamily: '"IBM Plex Mono", ui-monospace, Menlo, monospace',
+  // To the browser (the shell's window rule), not xterm's own native warning.
+  linkHandler: { activate: (_event, uri) => window.open(uri) },
   fontSize: 12,
   lineHeight: 1.2,
   minimumContrastRatio: 4.5,
@@ -92,19 +94,8 @@ let hiddenOnFailure = false;
 /** The steps as drawn: drawing them again would start their spinner over, with each line of output. */
 let drawnSteps;
 let redraw;
-
-// xterm measures the font it opens with, and the bundled one loads on demand.
-const font = document.fonts.load('12px "IBM Plex Mono"');
-let opening = false;
-/** Opens the terminal, the first time its output shows: it keeps what was written to it until then. */
-function openTerminal() {
-  if (opening) return;
-  opening = true;
-  void font.finally(() => {
-    terminal.open($("log"));
-    fit.fit();
-  });
-}
+/** Whether the terminal's font is there: xterm measures the one it opens with, and the bundled one loads on demand. */
+let fontReady = false;
 
 function render(next) {
   state = next;
@@ -157,7 +148,11 @@ function render(next) {
 
   show("output", page.output);
   show("hide", failed);
-  if (page.output) openTerminal();
+  // The first time its output shows: it keeps what is written to it until then.
+  if (page.output && fontReady && !terminal.element) {
+    terminal.open($("log"));
+    fit.fit();
+  }
   writeLog(state.log);
 
   clearTimeout(redraw);
@@ -188,6 +183,10 @@ $("copy").addEventListener("click", async () => {
   setTimeout(() => {
     $("copy").textContent = "Copy";
   }, 1_500);
+});
+void document.fonts.load('12px "IBM Plex Mono"').finally(() => {
+  fontReady = true;
+  if (state) render(state);
 });
 bridge.onState(render);
 bridge.state().then((sent) => sent && render(sent));
