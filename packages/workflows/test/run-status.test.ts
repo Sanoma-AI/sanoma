@@ -3,7 +3,7 @@ import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
 import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { lazyDb } from "../src/db.ts";
 import { workflowStatus } from "../src/db/dbos.ts";
 import {
@@ -83,7 +83,7 @@ describe("run inspection through the runtime", () => {
     });
     expect(JSON.stringify(await app.client.ledger(inspection))).not.toContain(marker);
     const db = await pool.db();
-    const { rows } = await db.query("SELECT * FROM dbos.operation_outputs WHERE workflow_uuid=$1", [inspection]);
+    const { rows } = await db.execute(sql`SELECT * FROM dbos.operation_outputs WHERE workflow_uuid = ${inspection}`);
     expect(JSON.stringify(rows)).not.toContain(marker);
   });
 
@@ -105,21 +105,17 @@ describe("run inspection through the runtime", () => {
     const runId = await app.client.start(target, { marker: "other-application", fail: false }, { startedBy: actor });
     await app.client.result(runId);
     const db = await pool.db();
-    const { rows } = await db.query<{ application_name: string }>(
-      "SELECT application_name FROM dbos.workflow_status WHERE workflow_uuid=$1",
-      [runId],
-    );
-    await db.query("UPDATE dbos.workflow_status SET application_name=$2 WHERE workflow_uuid=$1", [
-      runId,
-      "other-application",
-    ]);
+    const [original] = await db
+      .select({ applicationName: workflowStatus.applicationName })
+      .from(workflowStatus)
+      .where(eq(workflowStatus.workflowUuid, runId));
+    const renameTo = (name: string | null) =>
+      db.update(workflowStatus).set({ applicationName: name }).where(eq(workflowStatus.workflowUuid, runId));
+    await renameTo("other-application");
     try {
       expect(await app.client.call("sanoma.run.inspect", { runId }, { actor })).toEqual({ runId, status: "missing" });
     } finally {
-      await db.query("UPDATE dbos.workflow_status SET application_name=$2 WHERE workflow_uuid=$1", [
-        runId,
-        rows[0]!.application_name,
-      ]);
+      await renameTo(original!.applicationName);
     }
   });
 
