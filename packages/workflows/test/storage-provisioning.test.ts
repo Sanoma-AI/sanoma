@@ -86,9 +86,12 @@ describe("trusted KMS database preparation", () => {
     try {
       await prepareSecretStore(f.input, f.secrets);
       const password = new URL((await f.secrets.get("RUNTIME"))!).password;
-      const statements = query.mock.calls.map(([text]) => text).filter((text) => typeof text === "string");
-      expect(statements.join("\n")).not.toContain(password);
-      expect(query).toHaveBeenCalledWith("SELECT pg_temp.sanoma_create_runtime($1, $2)", [f.role, password]);
+      const calls = query.mock.calls as unknown as [{ text: string }, unknown[] | undefined][];
+      expect(calls.map(([{ text }]) => text).join("\n")).not.toContain(password);
+      expect(calls).toContainEqual([
+        expect.objectContaining({ text: "SELECT pg_temp.sanoma_create_runtime($1, $2)" }),
+        [f.role, password],
+      ]);
       const { rows } = await root.query<{ scram: boolean }>(
         "SELECT rolpassword LIKE 'SCRAM-SHA-256$%' AS scram FROM pg_authid WHERE rolname=$1",
         [f.role],
@@ -142,7 +145,7 @@ describe("trusted KMS database preparation", () => {
     const callQuery = query as (...args: unknown[]) => unknown;
     const intercepted = function (this: Client, ...args: unknown[]) {
       const result = callQuery.apply(this, args);
-      if (args[0] === "COMMIT" && !lost) {
+      if (/^commit$/i.test((args[0] as { text?: string } | undefined)?.text ?? "") && !lost) {
         lost = true;
         return Promise.resolve(result).then(() => {
           throw new Error(`lost response: ${f.url}`);
