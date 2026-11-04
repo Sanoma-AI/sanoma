@@ -44,11 +44,11 @@ const versionOf = (dir: string) =>
     : undefined;
 
 /**
- * pnpm's native modules for other systems, left out of a Windows build: signing there covers every
- * `.node` in the app, and signtool fails on a Mac or Linux binary (and nothing here runs them).
+ * A native module of pnpm's for another system, left out of a Windows build: signing there covers
+ * every `.node` in the app, signtool fails on what is no Windows binary (`MZ`), and nothing runs it.
  */
 const foreignBinary = (file: string) =>
-  process.platform === "win32" && /[\\/]@reflink[\\/]reflink-(?!win32-x64)[^\\/]+/.test(file);
+  process.platform === "win32" && file.endsWith(".node") && readFileSync(file).toString("latin1", 0, 2) !== "MZ";
 
 const from = pnpmPackage();
 const to = join(stage, "pnpm");

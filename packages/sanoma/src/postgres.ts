@@ -44,8 +44,9 @@ export interface EnsurePostgresOptions {
   /** Without it, a URL named is taken as it is, unprobed, and only a cluster of the company's own that runs already is found: a `UsageError` when none does. */
   start?: boolean;
   /**
-   * For a launcher that runs on, its clients soon connected: a cluster found with no client is its to
-   * stop. Not for a one-off command, which could stop one another launcher has yet to connect to.
+   * For a launcher that runs on, its clients soon connected: a cluster found running is its to stop
+   * too, when none is left. Not for a one-off command, which could stop one another launcher has yet
+   * to connect to.
    */
   adopt?: boolean;
   /** The directory holding PostgreSQL's `bin/`; default `postgresBin()`, read only to start one. */
@@ -81,8 +82,8 @@ export function masked(databaseUrl: string): string {
  * company's own: a PostgreSQL 18 cluster in `clusterDir(root)` (`password`, mode 0600, `server.log`
  * and `data/`), on 127.0.0.1 alone at a port of its own, as `postgres` with the password. A
  * cluster another launcher runs is used as it is (`answered`), and with `adopt` stopped at the end
- * when no client is on it now: a launcher that crashed left it (on Windows, a shell's crash takes the
- * launcher with it but not `pg_ctl`'s Postgres); else, unless `start` is false, it is started (`started`), made first with `initdb` when there is no `data/` (`created`), under the
+ * when no client is left on it, as a launcher that crashed left it so (on Windows, a shell's crash
+ * takes the launcher with it but not `pg_ctl`'s Postgres); else, unless `start` is false, it is started (`started`), made first with `initdb` when there is no `data/` (`created`), under the
  * `starting` lock so two launchers never start it twice. Its port is rewritten when another
  * process took it. `pg_ctl` runs in a process group of its own (not on Windows: `runPg`), so a
  * terminal's ctrl-c reaches the launcher alone, which stops it last (`stop`).
@@ -110,7 +111,10 @@ export async function ensurePostgres(
 
   const cluster = paths(await clusterDir(root));
   const found = await running(cluster);
-  if (found !== undefined) return answered(cluster, found, log, adopt ? () => bin ?? postgresBin() : undefined);
+  if (found !== undefined) {
+    const answer = answered(cluster, found, log);
+    return adopt ? { ...answer, stop: () => stopAlone(bin ?? postgresBin(), cluster, found, log) } : answer;
+  }
   if (!start) {
     throw new UsageError(`no Postgres runs in ${cluster.dir}: set SANOMA_DATABASE_URL, or run \`sanoma\``);
   }
@@ -189,17 +193,7 @@ export async function clusterDir(root: string): Promise<string> {
 const urlOf = ({ password }: Cluster, port: number) =>
   `postgresql://postgres:${readFileSync(password, "utf8").trim()}@127.0.0.1:${port}/sanoma`;
 
-/** A cluster that already answers. With `adopt`, where the PostgreSQL binaries are: `ensurePostgres`'s `adopt`. */
-async function answered(
-  cluster: Cluster,
-  url: string,
-  log: (line: string) => void,
-  adopt?: () => string,
-): Promise<EnsuredPostgres> {
-  if (adopt && (await otherClientsAt(url)) === 0) {
-    log(`Postgres answers in ${cluster.dir} and nothing uses it: a launcher left it, and this one will stop it`);
-    return { how: "answered", databaseUrl: url, stop: () => stopAlone(adopt(), cluster, url, log) };
-  }
+function answered(cluster: Cluster, url: string, log: (line: string) => void): EnsuredPostgres {
   log(`Postgres answers in ${cluster.dir}, started by another launcher`);
   return { how: "answered", databaseUrl: url, stop: noStop };
 }
@@ -370,27 +364,6 @@ const freePort = () =>
     });
   });
 
-/** How many clients but this one are connected. */
-const otherClients = async (client: Client) =>
-  (
-    await client.query<{ others: number }>(
-      "SELECT count(*)::int AS others FROM pg_stat_activity WHERE backend_type = 'client backend' AND pid <> pg_backend_pid()",
-    )
-  ).rows[0]!.others;
-
-/** `otherClients` at a server, on a connection of its own; undefined when there is no telling. */
-async function otherClientsAt(databaseUrl: string): Promise<number | undefined> {
-  const client = serverClient(databaseUrl);
-  try {
-    await client.connect();
-    return await otherClients(client);
-  } catch {
-    return undefined;
-  } finally {
-    await client.end().catch(() => {});
-  }
-}
-
 /**
  * Stops the cluster (`pg_ctl stop -m fast`) unless a client but this one is connected: then it
  * stays up for them, and says so. A cluster that no longer answers is left alone.
@@ -400,11 +373,17 @@ async function stopAlone(bin: string, cluster: Cluster, databaseUrl: string, log
   let others: number;
   try {
     await client.connect();
+    const count = async () =>
+      (
+        await client.query<{ others: number }>(
+          "SELECT count(*)::int AS others FROM pg_stat_activity WHERE backend_type = 'client backend' AND pid <> pg_backend_pid()",
+        )
+      ).rows[0]!.others;
     // The worker's and the app's backends end a moment after their pools close: a second for them.
-    others = await otherClients(client);
+    others = await count();
     for (let i = 0; others > 0 && i < 5; i++) {
       await delay(200);
-      others = await otherClients(client);
+      others = await count();
     }
   } catch (err) {
     if (isSilent(err)) return;
@@ -424,14 +403,14 @@ const pgCtl = (bin: string, cluster: Cluster, args: string[]) => runPg(bin, "pg_
 
 /**
  * Runs PostgreSQL's `program` from `bin`, in a process group of its own (`pg_ctl start` leaves
- * the server in it), its output appended to `server.log`; throws, with the log's last lines,
- * when it fails. Windows has no groups, and `detached` there leaves it no console, so the `cmd` and
+ * the server in it), its output appended to `pg_ctl.log`; throws, with its and the server's log's
+ * last lines, when it fails. Not `server.log` itself, as `pg_ctl -l` on Windows starts the server
+ * through `cmd`, whose redirect cannot open a file another process has open for writing. Windows has no groups, and `detached` there leaves it no console, so the `cmd` and
  * the `postgres` it starts would each open a window; it shares this process's, hidden under the
- * desktop shell (`windowsHide`). Nor can its output go to the server's log there: `pg_ctl -l` starts
- * the server through `cmd`, whose redirect cannot open a file another process has open for writing.
+ * desktop shell (`windowsHide`).
  */
 async function runPg(bin: string, program: string, cluster: Cluster, args: string[]): Promise<void> {
-  const log = process.platform === "win32" ? join(cluster.dir, "pg_ctl.log") : cluster.log;
+  const log = join(cluster.dir, "pg_ctl.log");
   const out = openSync(log, "a");
   try {
     const code = await new Promise<number | null>((resolve, reject) => {
@@ -444,7 +423,7 @@ async function runPg(bin: string, program: string, cluster: Cluster, args: strin
       child.once("exit", resolve);
     });
     if (code === 0) return;
-    const ends = [...new Set([log, cluster.log])]
+    const ends = [log, cluster.log]
       .filter((file) => existsSync(file))
       .map((file) => {
         const tail = readFileSync(file, "utf8").trimEnd().split("\n").slice(-5).join("\n");

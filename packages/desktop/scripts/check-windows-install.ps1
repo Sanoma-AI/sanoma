@@ -2,16 +2,14 @@
 # the installed app: its files are where they should be, and its window opens. With -Signed, every
 # executable in the app and the install, and the installer, must carry a valid signature. Run by
 # desktop.yml (unsigned) and desktop-release.yml (-Signed) on a runner that has no Sanoma installed.
-param(
-  # packages/desktop/out
-  [Parameter(Mandatory)] [string] $Out,
-  [Parameter(Mandatory)] [string] $Version,
-  [switch] $Signed
-)
+param([switch] $Signed)
 $ErrorActionPreference = "Stop"
 # What Squirrel says about an install that failed.
 trap { Get-Content (Join-Path $env:LOCALAPPDATA "SquirrelTemp/SquirrelSetup.log") -Tail 50 -ErrorAction Ignore; break }
 
+$desktop = Split-Path $PSScriptRoot
+$Out = Join-Path $desktop "out"
+$Version = (Get-Content (Join-Path $desktop "package.json") | ConvertFrom-Json).version
 $setup = Join-Path $Out "make/squirrel.windows/x64/Sanoma-Setup.exe"
 $root = Join-Path $env:LOCALAPPDATA "Sanoma"
 

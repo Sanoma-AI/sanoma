@@ -432,23 +432,19 @@ async function wakeupAccount(label: string): Promise<number> {
   }
 }
 
-/** How soon a second signal is still the first one's stop. */
-const SAME_STOP_MS = 250;
-
 /**
  * On the first SIGINT or SIGTERM, or with `SANOMA_EVENTS=1` the end of stdin (a parent process
- * gone, or done), stops what runs and exits 0; a second signal, a person's a moment later, exits at
- * once. One at the same moment is the same stop reaching this process twice (`pnpm dlx sanoma`
- * passes on a signal its process group got too), which must not leave Postgres running. Without the
- * variable stdin is never read. Returns what stops, once, for a caller with a reason of its own to stop.
+ * gone, or done), stops what runs and exits 0; a second signal exits at once. Not with the variable:
+ * the parent has its own deadline, and it may be the same stop reaching this process twice (`pnpm dlx
+ * sanoma` passes on a signal its process group got too), which must not leave Postgres running.
+ * Without the variable stdin is never read. Returns what stops, once, for a caller with a reason of
+ * its own to stop.
  */
 function onSignal(stop: () => Promise<void>): () => void {
   let stopping = false;
-  let stoppedAt = 0;
   const stopOnce = () => {
     if (stopping) return;
     stopping = true;
-    stoppedAt = Date.now();
     stop().then(
       () => process.exit(0),
       (err: unknown) => {
@@ -460,7 +456,7 @@ function onSignal(stop: () => Promise<void>): () => void {
   };
   const handle = () => {
     if (!stopping) stopOnce();
-    else if (Date.now() - stoppedAt > SAME_STOP_MS) process.exit(130);
+    else if (!eventsOn()) process.exit(130);
   };
   // `on`, not `once`: the second signal must find the handler still there, and a dependency's
   // signal-exit (Pi's, in the app) re-sends a signal it finds no other listener for, which would

@@ -171,23 +171,17 @@ export function binOf(dir: string, name: string): string {
 const EXTRA_PATH = ["/opt/homebrew/bin", "/usr/local/bin"];
 
 /**
- * Where Git for Windows puts `git.exe`, for all users or just this one: the shell's `Path` has it
- * only from the launch after the install, and a person told to install it comes back to a running
- * shell.
+ * The launcher's environment: this process's, with `SANOMA_EVENTS=1` (JSON event lines), the
+ * company's port, and PATH starting at `first` (the shims' folders, `writeShims`), then the
+ * system's, then where Homebrew installs (an app started from the Finder gets a short PATH; not on
+ * Windows). The port wins over the company's `.env`, which the launcher loads without overriding
+ * what is set. Windows spells it `Path` and ignores case: the value is the one it has, under its
+ * key, once.
  */
-export const gitForWindows = (env: NodeJS.ProcessEnv): string[] =>
-  [env.ProgramFiles, env.LOCALAPPDATA && win32.join(env.LOCALAPPDATA, "Programs")].flatMap((dir) =>
-    dir ? [win32.join(dir, "Git", "cmd")] : [],
-  );
-
-/**
- * `base` with `first` before its PATH and `last` after it. Windows spells it `Path` and ignores
- * case: the value is the one it has, under its key, once.
- */
-export function withPath(
+export function launcherEnv(
   base: NodeJS.ProcessEnv,
   first: readonly string[],
-  last: readonly string[],
+  port: number,
   platform: NodeJS.Platform = process.platform,
 ): NodeJS.ProcessEnv {
   const windows = platform === "win32";
@@ -197,25 +191,8 @@ export function withPath(
   const rest = Object.fromEntries(Object.entries(base).filter(([name]) => !isPath(name)));
   // Each spelling's entries, in order, as an environment copied by hand can carry both PATH and Path.
   const system = Object.entries(base).flatMap(([name, value]) => (isPath(name) ? (value ?? "").split(delimiter) : []));
-  const path = [...first, ...system, ...last].filter(Boolean);
-  return { ...rest, [key]: [...new Set(path)].join(delimiter) };
-}
-
-/**
- * The launcher's environment: this process's, with `SANOMA_EVENTS=1` (JSON event lines), the
- * company's port, and PATH (`withPath`) starting at `first` (the shims' folders, `writeShims`), then
- * the system's, then where Homebrew installs (an app started from the Finder gets a short PATH) or,
- * on Windows, Git for Windows. The port wins over the company's `.env`, which the launcher loads
- * without overriding what is set.
- */
-export function launcherEnv(
-  base: NodeJS.ProcessEnv,
-  first: readonly string[],
-  port: number,
-  platform: NodeJS.Platform = process.platform,
-): NodeJS.ProcessEnv {
-  const last = platform === "win32" ? gitForWindows(base) : EXTRA_PATH;
-  return { ...withPath(base, first, last, platform), SANOMA_EVENTS: "1", SANOMA_APP_PORT: String(port) };
+  const path = [...first, ...system, ...(windows ? [] : EXTRA_PATH)].filter(Boolean);
+  return { ...rest, SANOMA_EVENTS: "1", SANOMA_APP_PORT: String(port), [key]: [...new Set(path)].join(delimiter) };
 }
 
 export interface LaunchOptions extends GroupOptions {

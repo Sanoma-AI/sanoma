@@ -65,6 +65,20 @@ test("New Company, from an empty folder to the app, then Quit, then a crash", as
   const gitIn = (...args: string[]) => execFileSync("git", ["-C", folder, ...args], { encoding: "utf8", env }).trim();
 
   let shell: ElectronApplication | undefined = await launchShell();
+  /** A launch with the company open, to its app's URL. */
+  const launchToApp = async () => {
+    shell = await launchShell();
+    await expect.poll(() => appUrl(shell!), { timeout: 5 * 60_000, intervals: [500] }).toMatch(/^http:\/\/127/);
+    return (await appUrl(shell))!;
+  };
+  const quitAndExpectStopped = async (postgres: number) => {
+    const quitting = shell!.process();
+    await shell!.close();
+    shell = undefined;
+    if (quitting.exitCode === null && quitting.signalCode === null) await once(quitting, "exit");
+    await expect.poll(() => alive(postgres), { timeout: 30_000 }).toBe(false);
+    expect(existsSync(postmasterPid), "Postgres shut down cleanly").toBe(false);
+  };
   const log = join(await shell.evaluate(({ app }) => app.getPath("logs")), `${slugOf(folder)}.log`);
   try {
     // The folder dialog is the operating system's; the person's answer is the empty folder.
@@ -110,18 +124,11 @@ test("New Company, from an empty folder to the app, then Quit, then a crash", as
       .toBeGreaterThan(0);
 
     // Quit stops the company: the app, the worker and Postgres, and nothing is left holding the folder.
-    const quitting = shell.process();
-    await shell.close();
-    shell = undefined;
-    if (quitting.exitCode === null && quitting.signalCode === null) await once(quitting, "exit");
-    await expect.poll(() => alive(first), { timeout: 30_000 }).toBe(false);
-    expect(existsSync(postmasterPid), "Postgres shut down cleanly").toBe(false);
+    await quitAndExpectStopped(first);
     await expect(fetch(url)).rejects.toThrow();
 
     // The next launch opens it again, its Postgres back up.
-    shell = await launchShell();
-    await expect.poll(() => appUrl(shell!), { timeout: 5 * 60_000, intervals: [500] }).toMatch(/^http:\/\/127/);
-    const again = (await appUrl(shell))!;
+    const again = await launchToApp();
     const second = postgresPid();
     expect(alive(second)).toBe(true);
 
@@ -143,16 +150,10 @@ test("New Company, from an empty folder to the app, then Quit, then a crash", as
       .toBe("stopped");
 
     // On Windows its Postgres runs on, out of reach (`processTree`): the next launch takes it on, and its Quit stops it.
-    shell = await launchShell();
-    await expect.poll(() => appUrl(shell!), { timeout: 5 * 60_000, intervals: [500] }).toMatch(/^http:\/\/127/);
+    await launchToApp();
     const third = postgresPid();
     if (process.platform === "win32") expect(third).toBe(second);
-    const quittingAgain = shell.process();
-    await shell.close();
-    shell = undefined;
-    if (quittingAgain.exitCode === null && quittingAgain.signalCode === null) await once(quittingAgain, "exit");
-    await expect.poll(() => alive(third), { timeout: 30_000 }).toBe(false);
-    expect(existsSync(postmasterPid), "Postgres shut down cleanly").toBe(false);
+    await quitAndExpectStopped(third);
   } catch (err) {
     if (existsSync(log)) console.error(`the shell's log (${log}):\n${readFileSync(log, "utf8")}`);
     throw err;

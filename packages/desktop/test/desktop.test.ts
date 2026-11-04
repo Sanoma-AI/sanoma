@@ -252,11 +252,6 @@ describe("the process manager", () => {
     expect(Object.keys(both).filter((k) => /^path$/i.test(k))).toEqual(["PATH"]);
     expect(both.PATH).toBe("s;a;b");
   });
-
-  test("on Windows it ends in where Git for Windows installs, as a running shell's Path lacks a new install", () => {
-    const env = launcherEnv({ Path: "C:\\w", ProgramFiles: "C:\\PF", LOCALAPPDATA: "C:\\L" }, ["s"], 3100, "win32");
-    expect(env.Path).toBe("s;C:\\w;C:\\PF\\Git\\cmd;C:\\L\\Programs\\Git\\cmd");
-  });
 });
 
 /** A company folder whose installed sanoma is the fake launcher. */

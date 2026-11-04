@@ -20,6 +20,7 @@ import {
 import {
   AUTH_MESSAGE,
   gitEnv,
+  gitForWindows,
   gitFailure,
   identityOf,
   identityProblem,
@@ -124,18 +125,19 @@ describe("git's prerequisites", () => {
     const failing: Run = async () => {
       throw missing;
     };
-    const paths: (string | undefined)[] = [];
-    const found: Run = async (_command, _args, how) => {
-      paths.push(how?.env?.Path);
-      return "git version 2.50.0.windows.1";
-    };
-    expect(await needsGitForWindows("win32", {}, failing)).toBe(true);
-    expect(await needsGitForWindows("darwin", {}, failing)).toBe(false);
-    expect(await needsGitForWindows("win32", { Path: "C:\\bin", ProgramFiles: "C:\\PF" }, found)).toBe(false);
-    // Git installed since the shell started is found where its installer puts it.
-    expect(paths).toEqual(["C:\\bin;C:\\PF\\Git\\cmd"]);
+    expect(await needsGitForWindows("win32", failing)).toBe(true);
+    expect(await needsGitForWindows("darwin", failing)).toBe(false);
+    expect(await needsGitForWindows("win32", async () => "git version 2.50.0.windows.1")).toBe(false);
     // Git there but failing is not a missing Git.
-    expect(await needsGitForWindows("win32", {}, gitFails)).toBe(false);
+    expect(await needsGitForWindows("win32", gitFails)).toBe(false);
+  });
+
+  test("Git for Windows' folders, as a running shell's Path lacks a new install", () => {
+    expect(gitForWindows({ ProgramFiles: "C:\\PF", LOCALAPPDATA: "C:\\L" })).toEqual([
+      "C:\\PF\\Git\\cmd",
+      "C:\\L\\Programs\\Git\\cmd",
+    ]);
+    expect(gitForWindows({})).toEqual([]);
   });
 
   test("an identity is read from git's config, checked, and set globally", async () => {

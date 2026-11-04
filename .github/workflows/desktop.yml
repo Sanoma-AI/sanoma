@@ -7,9 +7,15 @@ on:
     branches: [main]
     paths: &paths
       - packages/desktop/**
-      # What New Company runs first: the launcher and the template, whose `engines` the shipped Node must satisfy.
-      # Not the whole workspace it installs, as that would run these jobs on most pull requests.
-      - packages/sanoma/src/**
+      # What New Company runs first: the launcher's process code and the template, whose `engines` the
+      # shipped Node must satisfy. Not the whole workspace it installs, or these jobs would run on most pull requests.
+      - packages/sanoma/src/cli.ts
+      - packages/sanoma/src/dev.ts
+      - packages/sanoma/src/init.ts
+      - packages/sanoma/src/postgres.ts
+      - packages/sanoma/src/postgres-bin.ts
+      - packages/sanoma/src/source.ts
+      - packages/sanoma/src/windows.ts
       - packages/sanoma/template/**
       - packages/sanoma/package.json
       # `packageManager`: the pnpm the shell stages and installs companies with.
@@ -87,6 +93,7 @@ jobs:
           name: company-packages
           path: ${{ runner.temp }}/packages
           retention-days: 1
+          compression-level: 0
 
   # The packaged app, unsigned, as a person on Windows gets it. No Windows machine runs this otherwise:
   # a failure here is what the job is for.
@@ -140,8 +147,7 @@ jobs:
           npm_config_registry: http://127.0.0.1:4873/
         run: pnpm exec playwright test new-company
       - name: The Squirrel installer, silently, and the installed app
-        working-directory: packages/desktop
-        run: ./scripts/check-windows-install.ps1 -Out out -Version (Get-Content package.json | ConvertFrom-Json).version
+        run: packages/desktop/scripts/check-windows-install.ps1
       - name: What the failure left
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

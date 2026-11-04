@@ -2,7 +2,7 @@
 // never import electron and are tested on their own.
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import {
   app,
   autoUpdater,
@@ -48,6 +48,7 @@ import {
   GIT_FOR_WINDOWS_URL,
   gitEnv,
   gitFailure,
+  gitForWindows,
   type Identity,
   identityOf,
   identityProblem,
@@ -779,29 +780,38 @@ async function identityReady(cwd: string): Promise<boolean> {
  * Windows; when they are not, a dialog offers their installer, or its page, and to check again.
  */
 async function gitReady(): Promise<boolean> {
-  while (await needsGitForWindows()) {
-    const { response } = await dialog.showMessageBox({
-      type: "info",
+  return (
+    (await untilThere(() => needsGitForWindows(), {
       message: "Sanoma needs Git for Windows",
       detail: "Download opens its page in your browser. Once it is installed, choose Check Again.",
-      buttons: ["Download", "Check Again", "Cancel"],
-      defaultId: 0,
-      cancelId: 2,
-    });
-    if (response === 2) return false;
-    if (response === 0) void shell.openExternal(GIT_FOR_WINDOWS_URL);
-  }
-  while (await needsCommandLineTools()) {
-    const { response } = await dialog.showMessageBox({
-      type: "info",
+      action: "Download",
+      act: () => shell.openExternal(GIT_FOR_WINDOWS_URL),
+    })) &&
+    untilThere(() => needsCommandLineTools(), {
       message: "Sanoma needs Apple's command line tools for git",
       detail: "Install opens Apple's installer. Once it has finished, choose Check Again.",
-      buttons: ["Install", "Check Again", "Cancel"],
+      action: "Install",
+      act: installCommandLineTools,
+    })
+  );
+}
+
+/** While something is needed, a dialog offers `action` and to check again; false when the person cancels. */
+async function untilThere(
+  needed: () => Promise<boolean>,
+  offer: { message: string; detail: string; action: string; act: () => unknown },
+): Promise<boolean> {
+  while (await needed()) {
+    const { response } = await dialog.showMessageBox({
+      type: "info",
+      message: offer.message,
+      detail: offer.detail,
+      buttons: [offer.action, "Check Again", "Cancel"],
       defaultId: 0,
       cancelId: 2,
     });
     if (response === 2) return false;
-    if (response === 0) await installCommandLineTools();
+    if (response === 0) await offer.act();
   }
   return true;
 }
@@ -1102,7 +1112,10 @@ const quit = quitOrder({
 if (squirrelStartup || !app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  if (process.platform === "win32" && app.isPackaged) app.setAppUserModelId(WINDOWS_APP_ID);
+  if (process.platform === "win32") {
+    process.env.Path = [process.env.Path, ...gitForWindows(process.env)].join(delimiter);
+    if (app.isPackaged) app.setAppUserModelId(WINDOWS_APP_ID);
+  }
   app.on("second-instance", (_event, argv, cwd) => {
     const folder = folderArgument(argsOf(argv), cwd, ownPath());
     if (folder) void openCompany(folder);
@@ -1185,6 +1198,7 @@ if (squirrelStartup || !app.requestSingleInstanceLock()) {
     buildMenu();
     // No Dock elsewhere: the tray icon brings the hidden window back.
     if (process.platform !== "darwin") makeTray().catch((err: unknown) => console.error(`tray: ${messageOf(err)}`));
+    // Through a promise, so that its errors stay a rejection, not an uncaught exception's dialog.
     if (selfUpdating) void new Promise((wait) => setTimeout(wait, firstCheckDelay(process.argv))).then(updateItself);
     // Else a built app checks for a newer release and links to it: a checkout's shell (start, the
     // smoke test) shares its settings and asks GitHub only from Help.
