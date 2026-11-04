@@ -406,7 +406,13 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   const connectors = connectorsOf(config);
   // The types the data files may declare: the vendors' and the people's, whose resources are left out.
   const declarable = resourceTypesOf(connectors);
-  const read = () => readDeclared(root, connectors, declarable, types, connections);
+  const read = (options: ReadOptions = {}) =>
+    readDeclared(root, connectors, declarable, types, connections, {
+      ...options,
+      drivers: driversByVendor,
+      builtInStore: !config.secrets?.store,
+      ...(isOp(config.login?.sender) && { sender: config.login.sender.vendor }),
+    });
   if (types.size) {
     names.set(
       DRIFT_WORKFLOW,
@@ -706,6 +712,11 @@ async function readDeclaredObjects(
   return { keys: new Map([...named, ...bound]), problems };
 }
 
+/** How a run reads the data files: `mint`, apply's, mints the keys a deriving host is given (`hostFacts`). */
+export interface ReadOptions {
+  mint?: boolean;
+}
+
 /**
  * The data files under `root` and the lockfile beside them, in one read, as a drift or apply run
  * records them: each resource with its binding, without its write-only values (a secret marker
@@ -718,12 +729,32 @@ async function readDeclared(
   declarable: ReadonlyMap<string, Resource>,
   types: ReadonlyMap<string, Resource>,
   connections: ConnectionRegistry,
+  options: ReadOptions & { drivers: ReadonlyMap<string, Driver>; builtInStore: boolean; sender?: string },
 ): Promise<Omit<ApplyDeclared, "rebinds">> {
   // Loaded when a run reads the files, not with the worker.
   const { loadDataFiles } = await import("./resources.ts");
   const { resources, bindings, orphans, problems } = loadDataFiles(root, connectors, declarable);
-  // Read inside the data-file durable step: every operation of the plan uses one pinned account.
   const run = currentRun.getStore();
+  // A host that derives is filled with what it is not told (`deriveHosts`), before it is checked
+  // or pinned: the deploy key it clones with among them. Minted only by a live apply.
+  if (root !== undefined) {
+    const { deriveHosts, hostFacts } = await import("./host-derive.ts");
+    const facts = await hostFacts({
+      root,
+      resources,
+      types,
+      drivers: options.drivers,
+      ...(run && { secrets: run.state.secrets }),
+      builtInStore: options.builtInStore,
+      ...(options.sender !== undefined && { sender: options.sender }),
+      mint: !!options.mint && !!run && !run.sandbox,
+    });
+    if (facts) problems.push(...deriveHosts(resources, types, bindings, facts));
+  }
+  // A derived declaration's binding (a host's deploy key) is no orphan.
+  const declaredIds = new Set(resources.map((r) => r.id));
+  const kept = orphans.filter((o) => !declaredIds.has(o.key));
+  // Read inside the data-file durable step: every operation of the plan uses one pinned account.
   if (run && !run.sandbox) {
     for (const resource of resources.filter((r) => types.has(`${r.vendor}.${r.type}`))) {
       try {
@@ -760,7 +791,7 @@ async function readDeclared(
         ...(connection && { connection }),
       })),
     bindings,
-    orphans,
+    orphans: kept,
     problems,
   };
 }

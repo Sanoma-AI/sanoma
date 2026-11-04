@@ -41,7 +41,7 @@ import {
   problemLine,
   siteAtHostname,
 } from "./shared.ts";
-import { readSites, type SiteEntry } from "./sites.ts";
+import { readSites, type SiteEntry, siteDomains } from "./sites.ts";
 
 // `@sanoma-ai/workflows/describe`: what a UI renders from, apart from the main entry.
 // What `describeConfig` answers, as zod schemas and the types they infer (`./description`).
@@ -85,7 +85,7 @@ export {
 // The apps under `apps/`, with what their `app.ts` declares.
 export { crossAppImports, readApps } from "./apps.ts";
 // What the sites call, read from their source: a workflow's Used by.
-export { readSites, siteContentPages, siteIcons, siteLocales, sitesUnder } from "./sites.ts";
+export { readSites, siteContentPages, siteDomains, siteIcons, siteLocales, sitesUnder } from "./sites.ts";
 // The generated SDK, `.sanoma/api.ts`: a site's `api` typed from this description.
 export { API_FILE, generateApi, writeApi, writeGenerated } from "./sdk.ts";
 // The Cedar schema, `.sanoma/schema.cedarschema`: what a company's policies are validated and decided against.
@@ -294,7 +294,12 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
       ...dataFiles.problems,
       ...appProblems,
       ...appClashes(apps, collections, sites),
-      ...domainProblems(dataFiles.resources, resources, sites),
+      ...domainProblems(
+        dataFiles.resources,
+        resources,
+        sites,
+        resolved.root === undefined ? {} : siteDomains(resolved.root),
+      ),
       ...loginProblems(resolved, dataFiles.resources),
     ],
     apps,
@@ -361,15 +366,17 @@ function appClashes(
 }
 
 /**
- * Each site a host's `domains` (its type's `host.inputs.domains`) names that is not a public
- * site, each domain it gives more than one site, and a domain that is the host's `hostname` too,
- * or another host's hostname or domain, at the host's declaration: the app serves only a public
- * site at a domain, one site at each, and itself at another, and one host holds each.
+ * Each site a host's `domains` (its type's `host.inputs.domains`; for a host that derives, the
+ * public sites' own, `declaredDomains`) names that is not a public site, each domain it gives more
+ * than one site, and a domain that is the host's `hostname` too, or another host's hostname or
+ * domain, at the host's declaration: the app serves only a public site at a domain, one site at
+ * each, and itself at another, and one host holds each.
  */
 function domainProblems(
   declared: readonly DeclaredResource[],
   types: ReadonlyMap<string, Resource>,
   sites: readonly SiteEntry[],
+  declaredDomains: Readonly<Record<string, string>>,
 ): ResourceProblem[] {
   const isPublic = new Set(sites.filter((site) => site.public).map((site) => site.name));
   const problems: ResourceProblem[] = [];
@@ -379,9 +386,12 @@ function domainProblems(
   const hold = (name: string, resource: DeclaredResource) =>
     held.set(name.toLowerCase(), (held.get(name.toLowerCase()) ?? new Set()).add(resource));
   for (const resource of declared) {
-    const inputs = types.get(`${resource.vendor}.${resource.type}`)?.host?.inputs;
+    const host = types.get(`${resource.vendor}.${resource.type}`)?.host;
+    const inputs = host?.inputs;
     const path = inputs?.domains;
-    const domains = (path === undefined ? {} : (valueAt(resource.desired, path) ?? {})) as Record<string, unknown>;
+    const domains = (
+      host?.derives ? declaredDomains : path === undefined ? {} : (valueAt(resource.desired, path) ?? {})
+    ) as Record<string, unknown>;
     const hostname = inputs?.hostname === undefined ? undefined : valueAt(resource.desired, inputs.hostname);
     const messages = Object.keys(domains)
       .filter((name) => !isPublic.has(name))

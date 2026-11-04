@@ -10,6 +10,7 @@ import {
   importsOf,
   observeBy,
   observed,
+  refOf,
   type ResolveOp,
   type Revision,
   sourceUrl,
@@ -193,7 +194,7 @@ interface Known {
   /** The lockfile's bindings, as the run has changed them so far. */
   bindings: Bindings;
   /** The clone URL and commit a host wanted runs. */
-  hosts: ReadonlyMap<string, { source: string; revision: string }>;
+  hosts: ReadonlyMap<string, { source: string; revision: string; ref: string }>;
   /** Where each host's wakeup reaches it, as its state says (`wakeUrl`, else `url`). */
   urls: ReadonlyMap<string, string>;
   /**
@@ -232,11 +233,12 @@ function desiredOf(
     const named = holderOf(out, wakeup.inputs.host);
     if (url && named) named.holder[named.key] = url;
   }
-  // A host is given its source's clone URL and the commit its ref names now.
+  // A host is given its source's clone URL, its ref (the default branch when it names none) and the commit it names now.
   const run = hosts.get(r.id);
   if (host && run) {
     for (const [path, value] of [
       [host.inputs.source, run.source],
+      [host.inputs.ref, run.ref],
       [host.revision, run.revision],
     ] as const) {
       const place = holderOf(out, path);
@@ -566,19 +568,19 @@ export function applyWorkflow(
       // A host wanted runs the commit its ref names now, resolved before planning: a merge is a change
       // to it. One bound by the input needs none.
       const revisions = new Map<string, Revision>();
-      const hosts = new Map<string, { source: string; revision: string }>();
+      const hosts = new Map<string, { source: string; revision: string; ref: string }>();
       for (const { id, vendor, type, desired, refs } of resources.filter(
         (r) => wanted(r.id) && input.bind?.[r.id] === undefined,
       )) {
         const resource = types.get(`${vendor}.${type}`);
         const host = resource?.host;
         const source = host && sourceUrl(desired, refs[host.inputs.source], resource, found);
-        const ref = host && valueAt(desired, host.inputs.ref);
-        if (host && source !== undefined && typeof ref === "string" && ref) {
+        const ref = host && refOf(desired, host);
+        if (host && source !== undefined && ref !== undefined) {
           try {
-            const { revision } = await ctx.sanoma!.source!.resolve({ url: source, ref });
-            revisions.set(id, { revision });
-            hosts.set(id, { source, revision });
+            const resolved = await ctx.sanoma!.source!.resolve({ url: source, ...(ref ? { ref } : {}) });
+            revisions.set(id, { revision: resolved.revision });
+            hosts.set(id, { source, ...resolved });
           } catch (err) {
             if (isRunControlError(err)) throw err;
             revisions.set(id, { error: errorMessage(err) });

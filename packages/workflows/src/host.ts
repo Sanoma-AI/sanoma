@@ -47,6 +47,15 @@ export const wakeUrlOf = (outputs: HostOutputs): string => outputs.wakeUrl ?? ou
  * A resource type's `host`: the fields it takes the runtime's inputs in, by dotted path into its
  * declared fields, and how its state reads as `HostOutputs`. A host is drifted when
  * `outputs(state).revision` differs from what `sanoma.source.resolve` says `ref` is now.
+ *
+ * A host that `derives` (`cloudflare.host`, `cloud.host`) is declared with the decisions only: its
+ * name, its `hostname` and the `database` it runs on. Apply fills the rest before it plans
+ * (`deriveHosts`): `image` from the installed `sanoma`, `source` and `ref` from the repository the
+ * app runs from and its default branch (each declarable as an override), `secrets` (markers only,
+ * never a value) and `domains` from the decisions, the config and the sites, which a data file may
+ * not declare; the port is the image's (`RUNTIME_PORT`). One that does not derive is declared
+ * whole, its `secrets` and `port` named in its data file (`docker.container`, the deprecated
+ * `cloudflare.container`).
  */
 export interface HostSpec {
   capabilities: HostCapabilities;
@@ -57,12 +66,16 @@ export interface HostSpec {
     ref: string;
     /**
      * The secrets it passes the runtime (`SANOMA_DATABASE_URL`, `SANOMA_SECRETS_KEY`): a write-only
-     * field. Absent for a host that binds its own bootstrap (`bindsBootstrap`).
+     * field. Absent for a host that binds its own bootstrap (`bindsBootstrap`). A host that derives
+     * has it filled by apply, never declared.
      */
     secrets?: string;
-    /** The port the app listens on. */
-    port: string;
-    /** A public site's domain, by site name: the app serves each site at the root of its domain (`SANOMA_DOMAINS`). */
+    /** The port the app listens on, for a host that does not derive: one that does runs the image's, `RUNTIME_PORT`. */
+    port?: string;
+    /**
+     * A public site's domain, by site name: the app serves each site at the root of its domain
+     * (`SANOMA_DOMAINS`). A host that derives has it filled from the sites' `domain`, never declared.
+     */
     domains?: string;
     /**
      * The hostname the app is served at. A host with one reports `url` as `https://<hostname>` (its
@@ -70,6 +83,16 @@ export interface HostSpec {
      * as `wakeUrl`, where its wakeup reaches it. It is never one of `domains`' values.
      */
     hostname?: string;
+    /**
+     * The runtime image, for a host that derives: the installed `sanoma`'s (`runtimeImage`) when a
+     * data file leaves it out, an override otherwise.
+     */
+    image?: string;
+    /**
+     * A reference to the declared database the host runs the company on (`database: store`), for a
+     * host that derives: apply gives the host that database's URL, as `SANOMA_DATABASE_URL`.
+     */
+    database?: string;
   };
   /**
    * The field apply fills with the commit `ref` resolves to, before it plans: hidden, as a data
@@ -81,8 +104,22 @@ export interface HostSpec {
    * tokens) and binds it itself, as Sanoma Cloud's does: such a type takes no `secrets`.
    */
   bindsBootstrap?: boolean;
+  /**
+   * True for a host whose declaration says only the decisions (see above): apply derives its
+   * image, source, ref, secrets and domains, and a data file may not declare `secrets` or `domains`.
+   */
+  derives?: boolean;
   outputs: (state: Record<string, unknown>) => HostOutputs;
 }
+
+/** The runtime image a host runs, tagged with the installed `sanoma`'s version: GitHub's registry. */
+export const RUNTIME_IMAGE = "ghcr.io/sanoma-ai/runtime";
+
+/** The runtime image of `sanoma` at `version`: `ghcr.io/sanoma-ai/runtime:<version>`. */
+export const runtimeImage = (version: string): string => `${RUNTIME_IMAGE}:${version}`;
+
+/** The port the runtime image's app listens on (its `PORT`): a host that derives runs it there. */
+export const RUNTIME_PORT = 3000;
 
 const LIFETIMES: readonly HostLifetime[] = ["long-lived", "stops-when-quiet"];
 
@@ -108,7 +145,9 @@ function unwrap(schema: z.ZodType): z.ZodType {
  * Throws what is wrong with a resource type's `host`: an input or `revision` that names no field,
  * `secrets` that is not write-only, missing (unless the host binds its own bootstrap) or given
  * beside `bindsBootstrap`, a `revision` that is write-only, an unknown lifetime, a type apply
- * cannot change (not `writable`).
+ * cannot change (not `writable`); for a host that does not derive, no `port`, or an `image` or
+ * `database` (inputs of a host that derives); for one that does, a `port` (it runs the image's),
+ * or a `database` that is not write-only (it stands for a URL, and is never compared).
  */
 export function checkHost(
   what: string,
@@ -130,6 +169,19 @@ export function checkHost(
     if (secrets !== undefined) problems.push("inputs.secrets is not taken by a host that binds its own bootstrap");
   } else if (secrets === undefined || !type.fields.writeOnly.includes(secrets)) {
     problems.push("inputs.secrets must be a write-only field, unless the host binds its own bootstrap");
+  }
+  if (host.derives) {
+    if (host.inputs?.port !== undefined)
+      problems.push("inputs.port is not taken by a host that derives: it runs the image's");
+    const database = host.inputs?.database;
+    if (database !== undefined && !type.fields.writeOnly.includes(database)) {
+      problems.push("inputs.database must be a write-only field: it stands for the database's URL, never compared");
+    }
+  } else {
+    if (host.inputs?.port === undefined) problems.push("inputs.port names the port, unless the host derives");
+    for (const input of ["image", "database"] as const) {
+      if (host.inputs?.[input] !== undefined) problems.push(`inputs.${input} is taken by a host that derives only`);
+    }
   }
   if (type.fields.writeOnly.includes(host.revision)) problems.push("revision must not be write-only: drift reads it");
   if (typeof host.outputs !== "function") problems.push("outputs must be a function of the state");

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { defineWorkflow, type WorkflowDefinition } from "./define.ts";
 import { isRunControlError } from "./errors.ts";
+import type { HostSpec } from "./host.ts";
 import type { Op } from "./op.ts";
 import { type DriftField, diffDeclared, fieldPathOf, type Resource, valueAt, withFrom } from "./resource.ts";
 import type { DeclaredResource, ResourceProblem } from "./resources.ts";
@@ -240,10 +241,11 @@ export function driftWorkflow(
         const resource = types.get(`${vendor}.${type}`);
         const host = resource?.host;
         const source = host && sourceUrl(desired, refs[host.inputs.source], resource, found);
-        const ref = host && valueAt(desired, host.inputs.ref);
-        if (host && "state" in found.get(id)! && source !== undefined && typeof ref === "string" && ref) {
+        const ref = host && refOf(desired, host);
+        if (host && "state" in found.get(id)! && source !== undefined && ref !== undefined) {
           try {
-            revisions.set(id, await ctx.sanoma!.source!.resolve({ url: source, ref }));
+            const { revision } = await ctx.sanoma!.source!.resolve({ url: source, ...(ref ? { ref } : {}) });
+            revisions.set(id, { revision });
           } catch (err) {
             if (isRunControlError(err)) throw err;
             revisions.set(id, { error: errorMessage(err) });
@@ -254,6 +256,17 @@ export function driftWorkflow(
       return { startedAt, finishedAt: await ctx.now(), problems, resources: results } satisfies DriftReport;
     },
   });
+}
+
+/**
+ * The ref a host runs: the one its data file gives, or `""` for a host that derives and names
+ * none (its repository's default branch, which `sanoma.source.resolve` tells); undefined when it
+ * has none to resolve.
+ */
+export function refOf(desired: State, host: HostSpec): string | undefined {
+  const ref = valueAt(desired, host.inputs.ref);
+  if (typeof ref === "string" && ref) return ref;
+  return host.derives && ref == null ? "" : undefined;
 }
 
 /**

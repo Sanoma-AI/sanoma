@@ -190,6 +190,7 @@ export {
   type Draft,
   draftBranch,
   type DraftDiff,
+  defaultBranch,
   draftOf,
   type HostEnforcement,
   type PullRequest,
@@ -204,7 +205,21 @@ export {
   type SourceHost,
 } from "./source.ts";
 export type { HostCapabilities, HostLifetime, HostOutputs, HostSpec } from "./host.ts";
-export { wakeUrlOf } from "./host.ts";
+export { RUNTIME_IMAGE, RUNTIME_PORT, runtimeImage, wakeUrlOf } from "./host.ts";
+export {
+  cloneUrl,
+  deriveHosts,
+  type HostFacts,
+  DEPLOY_KEY_TITLE,
+  DEPLOY_KEY_TYPE,
+  GITHUB_APP_SECRETS,
+  githubRepository,
+  installedSanoma,
+  originUrl,
+  SOURCE_KEY,
+  sourceKeyId,
+  sourceRepository,
+} from "./host-derive.ts";
 export {
   checkDatabase,
   type DatabaseCapabilities,

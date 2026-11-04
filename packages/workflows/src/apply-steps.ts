@@ -46,19 +46,19 @@ async function lastWritten(appName: string): Promise<Bindings | undefined> {
 
 /**
  * The apply workflow's steps for a config: `read`, the data files and the lockfile as drift reads
- * them, under `root`; `appName` scopes the search for the lockfile apply last wrote.
+ * them, under `root`, minting what a deriving host is given; `appName` scopes the search for the lockfile apply last wrote.
  */
 export function applySteps(
   appName: string,
   root: string | undefined,
-  read: () => Promise<Omit<ApplyDeclared, "rebinds">>,
+  read: (options?: { mint?: boolean }) => Promise<Omit<ApplyDeclared, "rebinds">>,
 ): ApplySteps {
   return {
     // The data files, and the lockfile against the one apply last wrote: a change someone else made.
     declared: () =>
       DBOS.runStep(
         async () => {
-          const declared = await read();
+          const declared = await read({ mint: true });
           const before = await lastWritten(appName);
           return { ...declared, rebinds: before ? diffLockfiles(before, declared.bindings) : [] };
         },
