@@ -17,20 +17,19 @@ $install = Start-Process -FilePath $setup -ArgumentList "--silent" -PassThru
 if (-not $install.WaitForExit(300000)) { throw "the installer still runs after 5 minutes" }
 if ($install.ExitCode -ne 0) { throw "the installer exited with $($install.ExitCode)" }
 
-$expected = @(
-  (Join-Path $root "Update.exe"),
-  (Join-Path $root "Sanoma.exe"),
-  (Join-Path $root "app-$Version/Sanoma.exe"),
-  (Join-Path $root "app-$Version/resources/node/node.exe"),
-  (Join-Path $env:APPDATA "Microsoft/Windows/Start Menu/Programs/Sanoma.lnk")
-)
-foreach ($file in $expected) {
-  # The shortcut comes from the app's own --squirrel-install run, which the installer does not wait for.
-  $deadline = (Get-Date).AddSeconds(60)
-  while (-not (Test-Path $file)) {
-    if ((Get-Date) -gt $deadline) { throw "$file is missing after the install" }
-    Start-Sleep -Seconds 1
+foreach ($file in "Update.exe", "Sanoma.exe", "app-$Version/Sanoma.exe", "app-$Version/resources/node/node.exe") {
+  if (-not (Test-Path (Join-Path $root $file))) { throw "$file is missing after the install" }
+}
+# The shortcut comes from the app's own --squirrel-install run, which the installer may not wait for,
+# in a Start Menu folder Squirrel names after the app's company.
+$startMenu = Join-Path $env:APPDATA "Microsoft/Windows/Start Menu/Programs"
+$deadline = (Get-Date).AddSeconds(60)
+while (-not (Get-ChildItem -Path $startMenu -Recurse -Filter "Sanoma.lnk")) {
+  if ((Get-Date) -gt $deadline) {
+    Get-ChildItem -Path $startMenu -Recurse -Name
+    throw "no Sanoma shortcut in the Start Menu after the install"
   }
+  Start-Sleep -Seconds 1
 }
 
 if ($Signed) {

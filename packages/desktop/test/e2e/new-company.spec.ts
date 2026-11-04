@@ -86,7 +86,16 @@ test("New Company, from an empty folder to the app, then Quit, then a crash", as
        document.getElementById("identity-form").requestSubmit(); true`,
     );
 
-    await expect.poll(() => appUrl(shell!), { timeout: 15 * 60_000, intervals: [1_000] }).toMatch(/^http:\/\/127/);
+    await expect
+      .poll(
+        () => {
+          // What the launcher reported as its failure ends the wait, with the log below.
+          if (existsSync(log) && readFileSync(log, "utf8").includes(`"event":"error"`)) throw new Error("it failed");
+          return appUrl(shell!);
+        },
+        { timeout: 15 * 60_000, intervals: [1_000] },
+      )
+      .toMatch(/^http:\/\/127/);
     const url = (await appUrl(shell))!;
 
     // The launcher's init did its part: the commit, under the name given; the install; the Postgres.

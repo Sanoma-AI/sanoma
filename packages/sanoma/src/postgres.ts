@@ -396,10 +396,12 @@ const pgCtl = (bin: string, cluster: Cluster, args: string[]) => runPg(bin, "pg_
  * the server in it), its output appended to `server.log`; throws, with the log's last lines,
  * when it fails. Windows has no groups, and `detached` there leaves it no console, so the `cmd` and
  * the `postgres` it starts would each open a window; it shares this process's, hidden under the
- * desktop shell (`windowsHide`).
+ * desktop shell (`windowsHide`). Nor can its output go to the server's log there: `pg_ctl -l` starts
+ * the server through `cmd`, whose redirect cannot open a file another process has open for writing.
  */
 async function runPg(bin: string, program: string, cluster: Cluster, args: string[]): Promise<void> {
-  const out = openSync(cluster.log, "a");
+  const log = process.platform === "win32" ? join(cluster.dir, "pg_ctl.log") : cluster.log;
+  const out = openSync(log, "a");
   try {
     const code = await new Promise<number | null>((resolve, reject) => {
       const child = spawn(join(bin, "bin", program), args, {
@@ -411,8 +413,13 @@ async function runPg(bin: string, program: string, cluster: Cluster, args: strin
       child.once("exit", resolve);
     });
     if (code === 0) return;
-    const tail = readFileSync(cluster.log, "utf8").trimEnd().split("\n").slice(-5).join("\n");
-    throw new Error(`${program} ${args[0]} failed (exit ${code}); the end of ${cluster.log}:\n${tail}`);
+    const ends = [...new Set([log, cluster.log])]
+      .filter((file) => existsSync(file))
+      .map((file) => {
+        const tail = readFileSync(file, "utf8").trimEnd().split("\n").slice(-5).join("\n");
+        return `the end of ${file}:\n${tail}`;
+      });
+    throw new Error(`${program} ${args[0]} failed (exit ${code}); ${ends.join("\n")}`);
   } finally {
     closeSync(out);
   }
