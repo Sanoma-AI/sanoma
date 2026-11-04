@@ -275,6 +275,13 @@ describe("a new company", () => {
     await expect(session.ended).resolves.toMatchObject({ error: expect.stringContaining("pnpm install failed") });
     expect(progress).toEqual(["Installing packages"]);
   });
+
+  test("makes the folder again when Start again finds it gone", async () => {
+    const repo = join(temp(), "gone");
+    const session = createSession(options(repo, await freePort(), { FAKE_PNPM_EXIT: "1" }));
+    await session.ended;
+    expect(existsSync(repo)).toBe(true);
+  });
 });
 
 /** A session's options for `repo`, on the fake pnpm and Node, with `extra` in its environment. */

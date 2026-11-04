@@ -129,6 +129,6 @@ $("identity-form").addEventListener("submit", (event) => {
   bridge.answer("identity", { name: $("identity-name").value, email: $("identity-email").value });
 });
 for (const button of document.querySelectorAll("[data-cancel]"))
-  button.addEventListener("click", () => bridge.cancel());
+  button.addEventListener("click", () => bridge.cancel(shownAsk));
 bridge.onState(render);
 bridge.state().then(render);

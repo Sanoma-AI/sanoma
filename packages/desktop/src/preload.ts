@@ -12,7 +12,7 @@ contextBridge.exposeInMainWorld("sanoma", {
   create: () => ipcRenderer.invoke("start:create"),
   clone: () => ipcRenderer.invoke("start:clone"),
   answer: (kind: string, value: unknown) => ipcRenderer.invoke("start:answer", kind, value),
-  cancel: () => ipcRenderer.invoke("start:cancel"),
+  cancel: (kind: string) => ipcRenderer.invoke("start:cancel", kind),
   changePlace: () => ipcRenderer.invoke("start:change-place"),
   download: () => ipcRenderer.invoke("start:download"),
   stop: () => ipcRenderer.invoke("start:stop"),

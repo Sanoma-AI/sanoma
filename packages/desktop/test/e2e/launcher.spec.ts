@@ -181,6 +181,10 @@ test("a link on the shell's pages goes to the browser, and only a web or mail li
     (globalThis as Opened).opened = opened;
     desktop.openExternal = async (url) => void opened.push(url);
   });
-  await page.evaluate(`window.open("https://example.com/"); window.open("file:///etc/hosts"); true`);
-  await expect.poll(() => shell.evaluate(() => (globalThis as Opened).opened)).toEqual(["https://example.com/"]);
+  await page.evaluate(
+    `window.open("https://example.com/"); window.open("file:///etc/hosts"); window.open("mailto:a@example.com"); true`,
+  );
+  await expect
+    .poll(() => shell.evaluate(() => (globalThis as Opened).opened))
+    .toEqual(["https://example.com/", "mailto:a@example.com"]);
 });

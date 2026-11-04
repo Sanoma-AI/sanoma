@@ -34,8 +34,18 @@ const terminal = new Terminal({
   cursorInactiveStyle: "none",
   disableStdin: true,
   fontFamily: '"IBM Plex Mono", ui-monospace, Menlo, monospace',
-  // To the browser (the shell's window rule), not xterm's own native warning.
-  linkHandler: { activate: (_event, uri) => window.open(uri) },
+  // To the browser (the shell's window rule), not xterm's own native warning. What a link's text
+  // says is up to whatever printed it, so its target shows on hover, and that rule decides what opens.
+  linkHandler: {
+    activate: (_event, uri) => window.open(uri),
+    hover: (_event, uri) => {
+      $("log").title = uri;
+    },
+    leave: () => {
+      $("log").title = "";
+    },
+    allowNonHttpProtocols: true,
+  },
   fontSize: 12,
   lineHeight: 1.2,
   minimumContrastRatio: 4.5,

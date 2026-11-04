@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { isDatabaseEvent } from "./events.ts";
 import type { Company } from "./companies.ts";
@@ -54,6 +54,8 @@ export function newCompanyTarget(name: string, parent: string): { dir: string } 
  * Its progress: this start, then the launcher's `database` event once the company is set up.
  */
 export function createSession(options: SessionOptions): Session {
+  // Start again, after the person removed the empty folder a failed start left.
+  mkdirSync(options.repo, { recursive: true });
   if (hasFiles(options.repo)) return startSession(options);
   const { repo, port, node, pnpm, bin, onLine, onProgress, killAfterMs, pollMs } = options;
   const env = launcherEnv(options.env, writeShims(bin, node, pnpm), port);
@@ -107,7 +109,7 @@ export function cloneTarget(url: string, parent: string): { dir: string } | { pr
   const name = repoNameOf(url)!;
   const dir = join(parent, name);
   return existsSync(dir)
-    ? { problem: `${parent} has a ${name} already: choose another folder to clone into.` }
+    ? { problem: `${parent} has a ${name} already: choose another folder to copy it into.` }
     : { dir };
 }
 
@@ -146,7 +148,7 @@ export function cloneCompany(
 
 /** Why a cloned folder cannot be opened: it holds no company. */
 const notACompany = (dir: string) =>
-  new Error(`${dir} holds no company (no sanoma.config.ts): remove it, then clone a company's repository.`);
+  new Error(`${dir} holds no company (no sanoma.config.ts): remove it, then copy a company from GitHub.`);
 
 /**
  * The session of a company cloned from `url`: `git clone` into its folder (`cloneCompany`, with

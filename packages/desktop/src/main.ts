@@ -247,7 +247,7 @@ async function makeTray() {
   tray.on("click", showWindow);
 }
 
-/** One of the shell's own pages: it never navigates and opens nothing. */
+/** One of the shell's own pages: it never navigates, and only a web or mail link leaves it, for the browser. */
 function shellPage(contents: WebContents) {
   contents.on("will-navigate", (event) => event.preventDefault());
   contents.setWindowOpenHandler(({ url }) => {
@@ -958,8 +958,8 @@ async function cloneCompanyFlow(): Promise<void> {
   } while (problem);
   if (!(await gitReady())) return;
   const { canceled, filePaths } = await dialog.showOpenDialog({
-    title: "Choose the folder to clone the company into",
-    buttonLabel: "Clone Here",
+    title: "Choose the folder to copy the company into",
+    buttonLabel: "Copy Here",
     defaultPath: parentFolder(),
     properties: ["openDirectory", "createDirectory"],
   });
@@ -1252,7 +1252,9 @@ if (squirrelStartup || !app.requestSingleInstanceLock()) {
   ipcMain.handle("start:answer", (_event, kind: unknown, value: unknown) => {
     if (ask?.kind === kind) answer?.(value);
   });
-  ipcMain.handle("start:cancel", () => answer?.(undefined));
+  ipcMain.handle("start:cancel", (_event, kind: unknown) => {
+    if (ask?.kind === kind) answer?.(undefined);
+  });
   ipcMain.handle("start:change-place", () => changePlace());
   ipcMain.handle("start:download", () => shell.openExternal(`https://github.com/${REPOSITORY}/releases/latest`));
   ipcMain.handle("start:details", (_event, details: unknown) => setDetails(details === true));
