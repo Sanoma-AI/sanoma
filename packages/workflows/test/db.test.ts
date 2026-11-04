@@ -189,6 +189,11 @@ describe("prepareDatabase", () => {
       );
       expect(await migrationsApplied(databaseOn(admin), COMPANY_MIGRATIONS)).toBe(true);
       await checking.prepareDatabase(url);
+      // A middle entry missing while the newest is there (what the migrator skips): not prepared.
+      await admin.query("DELETE FROM drizzle.__drizzle_migrations WHERE created_at = $1", [
+        COMPANY_MIGRATIONS.journal.entries[0]!.when,
+      ]);
+      expect(await migrationsApplied(databaseOn(admin), COMPANY_MIGRATIONS)).toBe(false);
       // An empty journal table: nothing applied.
       await admin.query("DELETE FROM drizzle.__drizzle_migrations");
       expect(await migrationsApplied(databaseOn(admin), COMPANY_MIGRATIONS)).toBe(false);
