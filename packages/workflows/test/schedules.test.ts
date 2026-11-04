@@ -1,9 +1,11 @@
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
+import { eq } from "drizzle-orm";
 import { Client } from "pg";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { prepareDatabase } from "../src/db.ts";
+import { databaseOn, prepareDatabase } from "../src/db.ts";
+import { wakeup } from "../src/db/company.ts";
 import {
   defineWorkflow,
   memoryLedger,
@@ -186,7 +188,7 @@ describe("schedules on Postgres", () => {
     const pg = new Client({ connectionString: databaseUrl });
     await pg.connect();
     try {
-      await pg.query(`UPDATE sanoma_wakeup SET stopped_at = $1 WHERE id = 1`, [when]);
+      await databaseOn(pg).update(wakeup).set({ stoppedAt: when }).where(eq(wakeup.id, 1));
     } finally {
       await pg.end();
     }

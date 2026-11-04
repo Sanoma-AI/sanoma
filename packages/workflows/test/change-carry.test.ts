@@ -2,9 +2,11 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { DBOSClient } from "@dbos-inc/dbos-sdk";
 import { startTestWorker } from "@sanoma-ai/testing";
+import { sql } from "drizzle-orm";
 import { Pool } from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
+import { databaseOn } from "../src/db.ts";
 import {
   dbosClient,
   defineWorkflow,
@@ -148,9 +150,8 @@ describe("carrying change runs onto a new version", () => {
     // Started by other change code: the runtime's own, before an upgrade.
     const db = new Pool({ connectionString: databaseUrl });
     try {
-      await db.query(
-        `UPDATE dbos.workflow_status SET attributes = attributes || '{"changeCode":"other"}' WHERE workflow_uuid = $1`,
-        [runId],
+      await databaseOn(db).execute(
+        sql`UPDATE dbos.workflow_status SET attributes = attributes || '{"changeCode":"other"}' WHERE workflow_uuid = ${runId}`,
       );
     } finally {
       await db.end();

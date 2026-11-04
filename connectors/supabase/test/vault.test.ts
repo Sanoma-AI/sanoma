@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 const transport = vi.hoisted(() => ({
-  query: vi.fn<(sql: string, values: unknown[]) => Promise<{ rows: { result: unknown }[] }>>(),
+  query: vi.fn<(config: { text: string }, values: unknown[]) => Promise<{ rows: { result: unknown }[] }>>(),
   end: vi.fn<() => Promise<void>>(),
   on: vi.fn<() => void>(),
 }));
@@ -26,14 +26,10 @@ describe("Supabase Vault transport", () => {
     vi.stubEnv("SANOMA_SECRETS_KEY", undefined);
     transport.query.mockResolvedValue({ rows: [{ result: { protocol: 1, writable: true } }] });
     await store.validate("company");
-    expect(transport.query).toHaveBeenCalledWith(expect.stringContaining("$1, $2, $3, $4, $5, $6"), [
-      "validate",
-      "company",
-      null,
-      null,
-      null,
-      null,
-    ]);
+    expect(transport.query).toHaveBeenCalledWith(
+      expect.objectContaining({ text: expect.stringContaining("$1, $2, $3, $4, $5, $6") }),
+      ["validate", "company", null, null, null, null],
+    );
     await store.close();
     expect(transport.end).toHaveBeenCalledOnce();
   });
@@ -65,7 +61,7 @@ describe("Supabase Vault transport", () => {
       value: "synthetic",
       version: "a".repeat(64),
     });
-    expect(transport.query.mock.calls[0]![0]).not.toContain("synthetic");
+    expect(transport.query.mock.calls[0]![0].text).not.toContain("synthetic");
     transport.query.mockResolvedValue({ rows: [{ result: { value: "synthetic", version: "bad" } }] });
     await expect(store.read(address)).rejects.toMatchObject({ code: "unavailable" });
     transport.query.mockResolvedValue({ rows: [{ result: null }] });
