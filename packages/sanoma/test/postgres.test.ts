@@ -243,6 +243,26 @@ describe("ensurePostgres with none named: the company's own", () => {
     expect(ran()).toEqual([]);
   });
 
+  it("stops, when it can start one too, a cluster nothing is connected to, which a crashed launcher left", async () => {
+    const root = repo();
+    postmasterPid(root, process.pid, 54321);
+    stubPostgres({ up: [54321] });
+    const ensured = await ensurePostgres(undefined, { root, bin: fakeBin() });
+    expect(ensured.how).toBe("answered");
+    await ensured.stop();
+    expect(ran().filter((call) => call.startsWith("pg_ctl stop"))).toHaveLength(1);
+  });
+
+  it("leaves up a cluster another launcher is connected to", async () => {
+    const root = repo();
+    postmasterPid(root, process.pid, 54321);
+    stubPostgres({ up: [54321], others: 1 });
+    const ensured = await ensurePostgres(undefined, { root, bin: fakeBin() });
+    expect(ensured.how).toBe("answered");
+    await ensured.stop();
+    expect(ran()).toEqual([]);
+  });
+
   it("starts over a stale postmaster.pid: one whose process is gone left to Postgres, one whose pid another program has deleted", async () => {
     stubPostgres();
     const root = repo();

@@ -75,8 +75,9 @@ export function masked(databaseUrl: string): string {
  * database, as its user) and used as it is, or the call throws, saying what to do. With none, the
  * company's own: a PostgreSQL 18 cluster in `clusterDir(root)` (`password`, mode 0600, `server.log`
  * and `data/`), on 127.0.0.1 alone at a port of its own, as `postgres` with the password. A
- * cluster another launcher runs is used as it is (`answered`); else, unless `start` is false, it
- * is started (`started`), made first with `initdb` when there is no `data/` (`created`), under the
+ * cluster another launcher runs is used as it is (`answered`); one with no client left a launcher
+ * that crashed (on Windows, a shell's crash takes the launcher with it but not `pg_ctl`'s Postgres),
+ * so this launcher stops it as if its own; else, unless `start` is false, it is started (`started`), made first with `initdb` when there is no `data/` (`created`), under the
  * `starting` lock so two launchers never start it twice. Its port is rewritten when another
  * process took it. `pg_ctl` runs in a process group of its own, so a terminal's ctrl-c reaches
  * the launcher alone, which stops it last (`stop`).
@@ -104,7 +105,7 @@ export async function ensurePostgres(
 
   const cluster = paths(await clusterDir(root));
   const found = await running(cluster);
-  if (found !== undefined) return answered(cluster, found, log);
+  if (found !== undefined) return answered(cluster, found, log, start ? () => bin ?? postgresBin() : undefined);
   if (!start) {
     throw new UsageError(`no Postgres runs in ${cluster.dir}: set SANOMA_DATABASE_URL, or run \`sanoma\``);
   }
@@ -183,7 +184,20 @@ export async function clusterDir(root: string): Promise<string> {
 const urlOf = ({ password }: Cluster, port: number) =>
   `postgresql://postgres:${readFileSync(password, "utf8").trim()}@127.0.0.1:${port}/sanoma`;
 
-function answered(cluster: Cluster, url: string, log: (line: string) => void): EnsuredPostgres {
+/**
+ * A cluster that already answers. With `adopt`, the PostgreSQL binaries, when no client is connected
+ * nothing else will stop it, so this launcher does.
+ */
+async function answered(
+  cluster: Cluster,
+  url: string,
+  log: (line: string) => void,
+  adopt?: () => string,
+): Promise<EnsuredPostgres> {
+  if (adopt && (await otherClientsAt(url)) === 0) {
+    log(`Postgres answers in ${cluster.dir} and nothing uses it: a launcher left it, and this one will stop it`);
+    return { how: "answered", databaseUrl: url, stop: () => stopAlone(adopt(), cluster, url, log) };
+  }
   log(`Postgres answers in ${cluster.dir}, started by another launcher`);
   return { how: "answered", databaseUrl: url, stop: noStop };
 }
@@ -354,6 +368,27 @@ const freePort = () =>
     });
   });
 
+/** How many clients but this one are connected. */
+const otherClients = async (client: Client) =>
+  (
+    await client.query<{ others: number }>(
+      "SELECT count(*)::int AS others FROM pg_stat_activity WHERE backend_type = 'client backend' AND pid <> pg_backend_pid()",
+    )
+  ).rows[0]!.others;
+
+/** `otherClients` at a server, on a connection of its own; undefined when there is no telling. */
+async function otherClientsAt(databaseUrl: string): Promise<number | undefined> {
+  const client = serverClient(databaseUrl);
+  try {
+    await client.connect();
+    return await otherClients(client);
+  } catch {
+    return undefined;
+  } finally {
+    await client.end().catch(() => {});
+  }
+}
+
 /**
  * Stops the cluster (`pg_ctl stop -m fast`) unless a client but this one is connected: then it
  * stays up for them, and says so. A cluster that no longer answers is left alone.
@@ -363,17 +398,11 @@ async function stopAlone(bin: string, cluster: Cluster, databaseUrl: string, log
   let others: number;
   try {
     await client.connect();
-    const count = async () =>
-      (
-        await client.query<{ others: number }>(
-          "SELECT count(*)::int AS others FROM pg_stat_activity WHERE backend_type = 'client backend' AND pid <> pg_backend_pid()",
-        )
-      ).rows[0]!.others;
     // The worker's and the app's backends end a moment after their pools close: a second for them.
-    others = await count();
+    others = await otherClients(client);
     for (let i = 0; others > 0 && i < 5; i++) {
       await delay(200);
-      others = await count();
+      others = await otherClients(client);
     }
   } catch (err) {
     if (isSilent(err)) return;

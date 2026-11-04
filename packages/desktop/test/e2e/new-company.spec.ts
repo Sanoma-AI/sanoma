@@ -1,7 +1,7 @@
 // New Company, for real, in the packaged app: `pnpm dlx sanoma` from the registry in the environment
 // (the sanoma of this commit, from desktop.yml's local one), the template, the first commit, the
 // install, the company's own Postgres and the app in the window. Then Quit stops it all, and a next
-// launch, killed outright as in a crash, stops it all too. Only where SANOMA_DESKTOP_EXE names a
+// launch, killed outright as in a crash, leaves nothing a launch after it does not stop. Only where SANOMA_DESKTOP_EXE names a
 // packaged app; the smoke test covers the rest with a fake launcher.
 import { execFileSync } from "node:child_process";
 import { once } from "node:events";
@@ -118,41 +118,19 @@ test("New Company, from an empty folder to the app, then Quit, then a crash", as
     expect(existsSync(postmasterPid), "Postgres shut down cleanly").toBe(false);
     await expect(fetch(url)).rejects.toThrow();
 
-    // The next launch opens it again, its own Postgres back up.
+    // The next launch opens it again, its Postgres back up.
     shell = await launchShell();
     await expect.poll(() => appUrl(shell!), { timeout: 5 * 60_000, intervals: [500] }).toMatch(/^http:\/\/127/);
     const again = (await appUrl(shell))!;
     const second = postgresPid();
     expect(alive(second)).toBe(true);
 
-    // The shell killed outright, as in a crash: the launcher sees its stdin end and stops all it runs.
-    // By the pid it says it has: on Windows, Playwright's `process()` is the `cmd` that started it.
+    // The shell killed outright, as in a crash, by the pid it says it has: on Windows, Playwright's
+    // `process()` is the `cmd` that started it. The launcher goes with it, or stops on its stdin's end.
     const crashing = await shell.evaluate(() => process.pid);
     process.kill(crashing, "SIGKILL");
     await expect.poll(() => alive(crashing), { timeout: 30_000 }).toBe(false);
     shell = undefined;
-    await new Promise((resolve) => setTimeout(resolve, 20_000));
-    // TEMPORARY diagnostics
-    if (process.platform === "win32") {
-      console.error(
-        execFileSync(
-          "powershell.exe",
-          [
-            "-NoProfile",
-            "-Command",
-            "Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'node|postgres|Sanoma|cmd|pg_ctl' } | ForEach-Object { '{0} {1} {2} {3}' -f $_.ProcessId, $_.ParentProcessId, $_.Name, $_.CommandLine }",
-          ],
-          { encoding: "utf8" },
-        ),
-      );
-      console.error(
-        `server.log:\n${readFileSync(join(folder, ".sanoma", "postgres", "server.log"), "utf8").slice(-1500)}`,
-      );
-      console.error(
-        `pg_ctl.log:\n${readFileSync(join(folder, ".sanoma", "postgres", "pg_ctl.log"), "utf8").slice(-500)}`,
-      );
-    }
-    await expect.poll(() => alive(second), { timeout: 60_000, intervals: [500] }).toBe(false);
     await expect
       .poll(
         () =>
@@ -163,17 +141,25 @@ test("New Company, from an empty folder to the app, then Quit, then a crash", as
         { timeout: 60_000, intervals: [500] },
       )
       .toBe("stopped");
+
+    // On Windows its Postgres runs on, out of reach (`processTree`): the next launch takes it on, and its Quit stops it.
+    shell = await launchShell();
+    await expect.poll(() => appUrl(shell!), { timeout: 5 * 60_000, intervals: [500] }).toMatch(/^http:\/\/127/);
+    const third = postgresPid();
+    if (process.platform === "win32") expect(third).toBe(second);
+    const quittingAgain = shell.process();
+    await shell.close();
+    shell = undefined;
+    if (quittingAgain.exitCode === null && quittingAgain.signalCode === null) await once(quittingAgain, "exit");
+    await expect.poll(() => alive(third), { timeout: 30_000 }).toBe(false);
+    expect(existsSync(postmasterPid), "Postgres shut down cleanly").toBe(false);
   } catch (err) {
     if (existsSync(log)) console.error(`the shell's log (${log}):\n${readFileSync(log, "utf8")}`);
     throw err;
   } finally {
     await shell?.close().catch(() => {});
-    // Best effort: on Windows a new company's folder can resist it, and the temporary folder is the runner's.
-    try {
-      rmSync(log, { force: true });
-      rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
-    } catch (err) {
-      console.error(`left ${work}: ${String(err)}`);
-    }
+    // Windows holds a file a moment after the process using it exited.
+    rmSync(log, { force: true });
+    rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
   }
 });

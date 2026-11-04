@@ -201,6 +201,7 @@ describe("the process manager", () => {
     },
   );
 
+  // On Windows, by Node's job object (`processTree`).
   test("a launcher that dies takes what it left in its group with it", async () => {
     const port = await freePort();
     const { launched, pids } = fakeLaunch("crash", port);
