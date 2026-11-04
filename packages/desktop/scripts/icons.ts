@@ -37,14 +37,15 @@ const onMargin = (size: number) =>
     <g filter="url(#shadow)"><svg x="100" y="100" width="824" height="824">${square((size * 824) / 1024)}</svg></g>
   </svg>`;
 
-const iconset = join(mkdtempSync(join(tmpdir(), "sanoma-icons-")), "icon.iconset");
+const scratch = mkdtempSync(join(tmpdir(), "sanoma-icons-"));
+const iconset = join(scratch, "icon.iconset");
 mkdirSync(iconset);
 for (const points of [16, 32, 128, 256, 512]) {
   writeFileSync(join(iconset, `icon_${points}x${points}.png`), await png(onMargin(points), points));
   writeFileSync(join(iconset, `icon_${points}x${points}@2x.png`), await png(onMargin(points * 2), points * 2));
 }
 execFileSync("iconutil", ["--convert", "icns", "--output", join(icons, "icon.icns"), iconset]);
-rmSync(join(iconset, ".."), { recursive: true });
+rmSync(scratch, { recursive: true });
 
 // Windows: the square fills the canvas. An ICO is a header and a directory of PNGs (256 written as 0).
 const entries: { size: number; data: Buffer }[] = [];
