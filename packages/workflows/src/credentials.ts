@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from "node:crypto";
-import { CREDENTIALS_TABLE as TABLE, type Db } from "./db.ts";
+import { CREDENTIALS_TABLE as TABLE, type LegacyQuery as Db } from "./db.ts";
 import {
   SecretAccess,
   SecretStoreError,

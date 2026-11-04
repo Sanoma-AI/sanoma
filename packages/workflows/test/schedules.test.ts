@@ -3,7 +3,7 @@ import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { Client } from "pg";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { prepareDatabase, WAKEUP_TABLE } from "../src/db.ts";
+import { prepareDatabase } from "../src/db.ts";
 import {
   defineWorkflow,
   memoryLedger,
@@ -186,7 +186,7 @@ describe("schedules on Postgres", () => {
     const pg = new Client({ connectionString: databaseUrl });
     await pg.connect();
     try {
-      await pg.query(`UPDATE ${WAKEUP_TABLE} SET stopped_at = $1 WHERE id = 1`, [when]);
+      await pg.query(`UPDATE sanoma_wakeup SET stopped_at = $1 WHERE id = 1`, [when]);
     } finally {
       await pg.end();
     }

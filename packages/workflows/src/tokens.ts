@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { Pool } from "pg";
-import { API_TOKENS_TABLE as TABLE } from "./db.ts";
+import { API_TOKENS_TABLE as TABLE, type LegacyQuery as Db } from "./db.ts";
 import type { Principal } from "./define.ts";
 import { generateSecret, tokenHash as hashOf } from "./secret.ts";
 
@@ -48,7 +47,7 @@ export interface Tokens {
   subjectOf(id: string): Promise<string | undefined>;
 }
 
-export function tokenStore(db: () => Promise<Pool>): Tokens {
+export function tokenStore(db: () => Promise<Db>): Tokens {
   return {
     async mint({ id = randomUUID(), subject, groups }) {
       const token = newApiToken();

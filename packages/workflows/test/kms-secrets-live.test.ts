@@ -3,7 +3,7 @@ import { KeyManagementServiceClient } from "@google-cloud/kms";
 import crc32c from "crc-32/crc32c.js";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { lazyPool } from "../src/db.ts";
+import { lazyDb } from "../src/db.ts";
 import { KMS_SECRETS_SQL, kmsPostgresStore } from "../src/kms-secrets.ts";
 import { checkSecretStore } from "../src/secret-store-check.ts";
 
@@ -20,7 +20,7 @@ const company = `proof-${randomUUID()}`,
 let kms: KeyManagementServiceClient;
 let other: KeyManagementServiceClient;
 let installed = false;
-const pool = lazyPool(testDatabaseUrl("kms_live"), "kms-live-proof");
+const pool = lazyDb(testDatabaseUrl("kms_live"), "kms-live-proof");
 const rpc = async <T>(request: Promise<T>): Promise<T> => {
   try {
     return await request;

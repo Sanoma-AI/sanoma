@@ -1,5 +1,7 @@
 import type { WorkflowStatusString } from "@dbos-inc/dbos-sdk";
+import { and, eq } from "drizzle-orm";
 import type { Db } from "./db.ts";
+import { workflowStatus } from "./db/dbos.ts";
 
 /** Metadata only: never read a run's inputs, outputs, error or authentication data. */
 export type RunObservation = {
@@ -24,15 +26,14 @@ export const inspectRun =
   (database: () => Promise<Db>, appName: string): InspectRun =>
   async (runId) => {
     const db = await database();
-    const { rows } = await db.query<{ name: string; status: string }>(
-      "SELECT name,status FROM dbos.workflow_status WHERE workflow_uuid=$1 AND application_name=$2",
-      [runId, appName],
-    );
-    const row = rows[0];
+    const [row] = await db
+      .select({ name: workflowStatus.name, status: workflowStatus.status })
+      .from(workflowStatus)
+      .where(and(eq(workflowStatus.workflowUuid, runId), eq(workflowStatus.applicationName, appName)));
     if (!row) return { runId, status: "missing" };
     return {
       runId,
-      workflow: row.name,
+      ...(row.name !== null && { workflow: row.name }),
       status: Object.hasOwn(statuses, row.status) ? statuses[row.status as WorkflowStatusString] : "active",
     };
   };

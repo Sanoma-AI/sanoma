@@ -1,6 +1,5 @@
 import type { UIMessage } from "ai";
-import type { Pool } from "pg";
-import { CHAT_MESSAGES_TABLE as MESSAGES, CHATS_TABLE as CHATS } from "./db.ts";
+import { CHAT_MESSAGES_TABLE as MESSAGES, CHATS_TABLE as CHATS, type LegacyQuery as Db } from "./db.ts";
 import { SanomaError } from "./errors.ts";
 
 // The operator agent's chats, in the config's database beside the runtime's other tables: one row
@@ -63,7 +62,7 @@ const chatOf = ({ draft_id, created_at, ...row }: ChatRow): Chat => ({
 });
 
 /** The chats' store on the pool `db` gives, the config's database once it is prepared. */
-export function chatStore(db: () => Promise<Pool>): Chats {
+export function chatStore(db: () => Promise<Db>): Chats {
   return {
     async open({ id, person, engine, title }) {
       const { rows } = await (

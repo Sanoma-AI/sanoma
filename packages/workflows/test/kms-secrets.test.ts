@@ -15,7 +15,7 @@ import {
   withSetup,
 } from "../src/index.ts";
 import { describeConfig } from "../src/describe.ts";
-import { lazyPool } from "../src/db.ts";
+import { lazyDb } from "../src/db.ts";
 import { checkSecretStore } from "../src/secret-store-check.ts";
 import { KMS_SECRETS_SQL, kmsPostgresStore, managedKmsStore, type GcpKmsClient } from "../src/kms-secrets.ts";
 
@@ -89,7 +89,7 @@ function fakeKms(allowed: string[]) {
   };
   return { client, state, returned };
 }
-const pool = lazyPool(testDatabaseUrl("kms_secrets"), "kms-tests");
+const pool = lazyDb(testDatabaseUrl("kms_secrets"), "kms-tests");
 const kms = fakeKms([KEY, NEXT_KEY]);
 const store = (keyName = KEY, decryptKeyNames: string[] = []) =>
   kmsPostgresStore({ company: "acme", keyName, decryptKeyNames, kms: kms.client, database: () => pool.db() });
@@ -128,7 +128,7 @@ afterAll(async () => {
 describe("KMS encrypted Postgres", () => {
   it("composes managed identity lazily and closes each runtime's SDK without closing another runtime", async () => {
     const databaseUrl = testDatabaseUrl("kms_managed"),
-      admin = lazyPool(databaseUrl, "kms-managed-setup");
+      admin = lazyDb(databaseUrl, "kms-managed-setup");
     await (await admin.db()).query(KMS_SECRETS_SQL);
     const closed: (() => Promise<void>)[] = [];
     const credential = vi.fn<() => Promise<string>>(async () => "a".repeat(43));
@@ -236,7 +236,7 @@ describe("KMS encrypted Postgres", () => {
 
   it("uses the selected KMS store for intake, direct calls, durable calls and restart without a local encryption key", async () => {
     const databaseUrl = testDatabaseUrl("kms_runtime"),
-      admin = lazyPool(databaseUrl, "kms-runtime-setup");
+      admin = lazyDb(databaseUrl, "kms-runtime-setup");
     await (await admin.db()).query(KMS_SECRETS_SQL);
     const transport = fakeKms([KEY]);
     const encrypt = vi.spyOn(transport.client, "encrypt");
@@ -292,7 +292,7 @@ describe("KMS encrypted Postgres", () => {
 
   it("binds a reused store definition separately to each runtime database", async () => {
     const urls = [testDatabaseUrl("kms_runtime_a"), testDatabaseUrl("kms_runtime_b")];
-    const admins = urls.map((url) => lazyPool(url, "kms-runtime-isolation"));
+    const admins = urls.map((url) => lazyDb(url, "kms-runtime-isolation"));
     const clients: SanomaClient[] = [];
     const config = {
       connectors: [],

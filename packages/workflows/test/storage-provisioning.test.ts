@@ -8,7 +8,7 @@ import { prepareSecretStore, type PrepareSecretStore } from "../src/storage-prov
 import { defineWorkflow, memorySecretStore, memorySecrets, sanoma, SanomaClient } from "../src/index.ts";
 import { runtimeDriver, sandboxRuntimeDriver } from "../src/runtime-ops.ts";
 import { memoryTokens } from "../src/tokens.ts";
-import { lazyPool } from "../src/db.ts";
+import { lazyDb } from "../src/db.ts";
 import { rootWith } from "./harness.ts";
 import { storeDatabaseUrl } from "../src/database.ts";
 
@@ -262,7 +262,7 @@ const prepare = defineWorkflow({
 describe("storage provisioning workflow boundary", () => {
   const store = memorySecretStore();
   const databaseUrl = testDatabaseUrl("storage_workflow");
-  const history = lazyPool(databaseUrl, "storage-history");
+  const history = lazyDb(databaseUrl, "storage-history");
   const app = useTestApp(
     {
       connectors: [],

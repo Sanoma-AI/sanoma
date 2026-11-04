@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { configuredSecrets } from "../src/credentials.ts";
-import type { Db } from "../src/db.ts";
+import type { LegacyQuery as Db } from "../src/db.ts";
 import type { SecretStoreFactory } from "../src/secret-store.ts";
 import { checkSecretStore } from "../src/secret-store-check.ts";
 import { checkSecretConfiguration, memorySecretStore, SecretAccess, SecretStoreError } from "../src/secret-store.ts";

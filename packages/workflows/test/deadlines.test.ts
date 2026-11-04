@@ -6,7 +6,7 @@ import { startTestWorker, testDatabaseUrl } from "@sanoma-ai/testing";
 import { Pool } from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { dbosClient, prepareDatabase, WAKEUP_TABLE } from "../src/db.ts";
+import { dbosClient, prepareDatabase } from "../src/db.ts";
 import { deadlineRegistry, idle } from "../src/deadlines.ts";
 import {
   type CallContext,
@@ -155,7 +155,7 @@ function useWorker(name: string, files: Record<string, string>) {
       return ctx.worker;
     },
     async row() {
-      const { rows } = await ctx.pool.query(`SELECT * FROM ${WAKEUP_TABLE}`);
+      const { rows } = await ctx.pool.query(`SELECT * FROM sanoma_wakeup`);
       return rows[0] as { at: Date | null; stopped_at: Date | null; last_error: string | null };
     },
     /** Cancels every run left unfinished, so the next test's worker recovers none. */

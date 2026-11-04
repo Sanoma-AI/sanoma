@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
-import { lazyPool } from "../src/db.ts";
+import { lazyDb } from "../src/db.ts";
 import { CLOUD_IDENTITY_SQL, createDeploymentCredential, postgresIdentityEnrollments } from "../src/cloud-identity.ts";
 import {
   postgresIdentityProvisioning,
@@ -19,7 +19,7 @@ import { memorySecrets } from "../src/secret.ts";
 import { rootWith } from "./harness.ts";
 
 const databaseUrl = testDatabaseUrl("identity_provisioning");
-const pool = lazyPool(databaseUrl, "identity-provisioning-test");
+const pool = lazyDb(databaseUrl, "identity-provisioning-test");
 const provision = postgresIdentityProvisioning(() => pool.db(), { maxValidityMs: 86_400_000 });
 const reader = postgresIdentityEnrollments(() => pool.db());
 const writerRole = `identity_writer_${randomUUID().replaceAll("-", "")}`;

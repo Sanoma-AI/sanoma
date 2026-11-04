@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { connectMaking, createTable, type Db, openPool } from "./db.ts";
+import type { Client, Pool } from "pg";
+import { connectMaking, openPool, prepareTables, WAKEUP_MIGRATIONS } from "./db.ts";
 import { info, warn } from "./log.ts";
 import { generateSecret, tokenHash as hashOf } from "./secret.ts";
 import { errorMessage } from "./shared.ts";
@@ -19,30 +20,8 @@ export const WAKEUP_ACCOUNTS_TABLE = "sanoma_wakeup_accounts";
 /** Where the instances live: each one's URL, its token's hash and its registered wake. */
 export const WAKEUP_INSTANCES_TABLE = "sanoma_wakeup_instances";
 
-const TABLES: readonly [what: string, ddl: string][] = [
-  [
-    "wakeup accounts",
-    `CREATE TABLE IF NOT EXISTS ${WAKEUP_ACCOUNTS_TABLE} (id uuid PRIMARY KEY, token_hash text UNIQUE NOT NULL, ` +
-      "label text NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), revoked_at timestamptz)",
-  ],
-  [
-    "wakeup instances",
-    `CREATE TABLE IF NOT EXISTS ${WAKEUP_INSTANCES_TABLE} (id uuid PRIMARY KEY, ` +
-      `account_id uuid NOT NULL REFERENCES ${WAKEUP_ACCOUNTS_TABLE} (id), url text NOT NULL, ` +
-      "token_hash text UNIQUE NOT NULL, at timestamptz, " +
-      "called_at timestamptz, attempts integer NOT NULL DEFAULT 0, next_attempt_at timestamptz, " +
-      "last_error text, created_at timestamptz NOT NULL DEFAULT now())",
-  ],
-  // Each on its own, so one another process made first does not skip the next.
-  [
-    "wakeup instances",
-    `CREATE INDEX IF NOT EXISTS ${WAKEUP_INSTANCES_TABLE}_at ON ${WAKEUP_INSTANCES_TABLE} (at) WHERE at IS NOT NULL`,
-  ],
-  [
-    "wakeup instances",
-    `CREATE INDEX IF NOT EXISTS ${WAKEUP_INSTANCES_TABLE}_account ON ${WAKEUP_INSTANCES_TABLE} (account_id)`,
-  ],
-];
+/** Transitional, until this module is on the query builder (`db/wakeup.ts`): a `pg` pool or connection. */
+type Db = Pick<Pool | Client, "query">;
 
 /** How long a call to an instance's `/wake` may take. */
 const CALL_TIMEOUT_MS = 10_000;
@@ -203,9 +182,9 @@ const LIVE = `JOIN ${WAKEUP_ACCOUNTS_TABLE} a ON a.id = i.account_id AND a.revok
  * database and the tables made when missing.
  */
 async function withTables<T>(databaseUrl: string, use: (db: Db) => Promise<T>): Promise<T> {
+  await prepareTables(databaseUrl, WAKEUP_MIGRATIONS, "wakeup service");
   const conn = await connectMaking(databaseUrl);
   try {
-    for (const [what, ddl] of TABLES) await createTable(conn, ddl, what);
     return await use(conn);
   } finally {
     await conn.end().catch(() => undefined);

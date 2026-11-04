@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, expect, it } from "vitest";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
-import { lazyPool } from "../src/db.ts";
+import { lazyDb } from "../src/db.ts";
 import { CLOUD_IDENTITY_SQL, createDeploymentCredential, postgresIdentityEnrollments } from "../src/cloud-identity.ts";
 
-const pool = lazyPool(testDatabaseUrl("identity_broker"), "identity-broker-tests");
+const pool = lazyDb(testDatabaseUrl("identity_broker"), "identity-broker-tests");
 afterAll(() => pool.close());
 
 it("persists hash-only generations, bounds overlap, and gives the broker no enrollment mutation authority", async () => {

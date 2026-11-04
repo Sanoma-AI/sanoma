@@ -5,7 +5,7 @@ import { appendFile, mkdir, readFile, truncate } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { isDeepStrictEqual } from "node:util";
-import { type Db, LEDGER_TABLE as TABLE, lazyPool, pgCode } from "./db.ts";
+import { type LegacyDb as Db, LEDGER_TABLE as TABLE, lazyDb, pgCode } from "./db.ts";
 import type { Approver, Principal } from "./define.ts";
 import { type ErrorInfo, isFinal, keepCode } from "./errors.ts";
 import { shown, warn } from "./log.ts";
@@ -375,7 +375,7 @@ const DATA_EXCEPTION = /^22/;
  * The pool is opened on first use and ended by `close()`, after which the store refuses use.
  */
 export function postgresLedger(databaseUrl: string): LedgerStore & { close(): Promise<void> } {
-  const pool = lazyPool(databaseUrl, "ledger");
+  const pool = lazyDb(databaseUrl, "ledger");
 
   return {
     async append(record) {

@@ -25,7 +25,7 @@ import {
 } from "../src/index.ts";
 import { connectionCatalog, ConnectionRegistry } from "../src/connection.ts";
 import { secret } from "../src/secret.ts";
-import { lazyPool } from "../src/db.ts";
+import { lazyDb } from "../src/db.ts";
 import { visitorPrincipal } from "../src/shared.ts";
 import { tree } from "./tree.ts";
 
@@ -79,7 +79,7 @@ const probe = defineWorkflow({
   run: async (ctx) => ctx.mail.message.read({ id: "one" }, { connection: support }),
 });
 const dbUrl = testDatabaseUrl("connections");
-const pool = lazyPool(dbUrl, "connections-test");
+const pool = lazyDb(dbUrl, "connections-test");
 afterAll(() => pool.close());
 const registry = () => new ConnectionRegistry(connectionCatalog([mail], [support, sales], [customer]), () => pool.db());
 async function clear() {
@@ -637,7 +637,7 @@ describe("resource account selection", () => {
       secrets: { store: memorySecretStore() },
       ledger: memoryLedger(),
     };
-    const resourcePool = lazyPool(cfg.databaseUrl, "resource-connections-test");
+    const resourcePool = lazyDb(cfg.databaseUrl, "resource-connections-test");
     await (await resourcePool.db()).query("DELETE FROM sanoma_connections");
     await resourcePool.close();
     const client = await SanomaClient.connect(cfg);

@@ -21,7 +21,7 @@ import {
   withSetup,
 } from "@sanoma-ai/workflows";
 import { secret } from "../../workflows/src/secret.ts";
-import { lazyPool } from "../../workflows/src/db.ts";
+import { lazyDb } from "../../workflows/src/db.ts";
 import { tree } from "../../workflows/test/tree.ts";
 import { describeConfig } from "@sanoma-ai/workflows/describe";
 import { PreviewConnectionRequest, ConnectConnectionRequest } from "../src/api.ts";
@@ -89,7 +89,7 @@ const computed = defineWorkflow({
   },
 });
 const databaseUrl = testDatabaseUrl("app_connections");
-const pool = lazyPool(databaseUrl, "app-connections-tests");
+const pool = lazyDb(databaseUrl, "app-connections-tests");
 let app: AppContext;
 let store: ReturnType<typeof memorySecretStore>;
 let config: SanomaConfig;

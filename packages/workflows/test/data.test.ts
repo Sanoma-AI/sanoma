@@ -3,7 +3,7 @@ import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { Pool } from "pg";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { collection, collectionsDriver } from "../src/collection.ts";
-import { DATA_TABLE, lazyPool } from "../src/db.ts";
+import { DATA_TABLE, lazyDb } from "../src/db.ts";
 import { type LedgerRecord, memorySecrets, type Op } from "../src/index.ts";
 import { check, drive, loadScenarios } from "../src/scenario.ts";
 import { outbound } from "./fixtures/outbound/resources/data.ts";
@@ -56,7 +56,7 @@ describe("the collections' driver on Postgres", () => {
     },
   });
   const accounts = collection({ name: "accounts", key: "id", fields: { id: "text" } });
-  const pool = lazyPool(testDatabaseUrl("data"), "data test");
+  const pool = lazyDb(testDatabaseUrl("data"), "data test");
   const driver = collectionsDriver([leads, accounts], pool);
   afterAll(() => pool.close());
   beforeEach(async () => {
@@ -149,20 +149,19 @@ describe("the collections' driver on Postgres", () => {
     const before = { company: "Acme", stage: "new" };
     const record = { ...before, seats: 1 };
     await call(leads.save, { record: before }, "owner");
-    const db = await pool.db();
+    const db: Pick<Pool, "query"> = await pool.db();
     let loseResponse = true;
     const uncertain = collectionsDriver([leads], {
-      db: async () =>
-        ({
-          query: async (...args: Parameters<typeof db.query>) => {
-            const result = await db.query(...args);
-            if (loseResponse) {
-              loseResponse = false;
-              throw new Error("Response lost after commit");
-            }
-            return result;
-          },
-        }) as typeof db,
+      db: async () => ({
+        query: (async (...args: Parameters<Pool["query"]>) => {
+          const result = await (db.query as (...a: unknown[]) => Promise<unknown>)(...args);
+          if (loseResponse) {
+            loseResponse = false;
+            throw new Error("Response lost after commit");
+          }
+          return result;
+        }) as Pool["query"],
+      }),
     });
     const context = {
       idempotencyKey: "lost-transition",

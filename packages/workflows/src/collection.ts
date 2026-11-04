@@ -1,6 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
-import { DATA_TABLE, type Db } from "./db.ts";
+import { DATA_TABLE, type LegacyQuery as Db } from "./db.ts";
 import { defineFake, type Fake } from "./fake.ts";
 import { isObject } from "./resource.ts";
 import {

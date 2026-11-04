@@ -18,7 +18,7 @@ import {
   type AuthenticationContext,
 } from "../src/index.ts";
 import { secret } from "../src/secret.ts";
-import { lazyPool } from "../src/db.ts";
+import { lazyDb } from "../src/db.ts";
 import { tree } from "./tree.ts";
 
 const verify = vi.fn<(credentials: { token: string }) => Promise<{ account: string; scopes: string[] }>>(
@@ -62,7 +62,7 @@ const rule = defineConnectionRule(inbox, {
   scopes: ["read"],
 });
 const dbUrl = testDatabaseUrl("connection_setup");
-const pool = lazyPool(dbUrl, "connection-setup-tests");
+const pool = lazyDb(dbUrl, "connection-setup-tests");
 afterAll(() => pool.close());
 beforeEach(async () => {
   await (

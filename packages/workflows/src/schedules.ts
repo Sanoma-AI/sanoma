@@ -2,7 +2,7 @@ import { DBOS, type ScheduledWorkflowFn, type WorkflowSchedule } from "@dbos-inc
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { type Db, WAKEUP_TABLE } from "./db.ts";
+import { type Db, lastStopped } from "./db.ts";
 import type { Principal, WorkflowDefinition } from "./define.ts";
 import { readPeople, admit } from "./resources.ts";
 import type { WorkerState } from "./run.ts";
@@ -102,12 +102,6 @@ function sinceOf(schedule: WorkflowSchedule | undefined): Date | undefined {
   const since = (schedule?.context as Partial<ScheduleContext> | null | undefined)?.since;
   const at = typeof since === "string" ? new Date(since) : undefined;
   return at && !Number.isNaN(at.getTime()) ? at : undefined;
-}
-
-/** When the instance's worker last stopped, from the wakeup's row; undefined while it never has. */
-async function lastStopped(db: Db): Promise<Date | undefined> {
-  const { rows } = await db.query<{ stopped_at: Date | null }>(`SELECT stopped_at FROM ${WAKEUP_TABLE} WHERE id = 1`);
-  return rows[0]?.stopped_at ?? undefined;
 }
 
 /** Who starts a scheduled run, as `scheduledStarter` admitted them, or why they were not. */

@@ -1,5 +1,5 @@
 import { DEPLOYMENT_KEYS, type DeploymentKeyName, deploymentKey } from "./deployment-key.ts";
-import type { Db } from "./db.ts";
+import { type LegacyQuery as Db } from "./db.ts";
 /** Opaque values belong only in trusted runtime code, never workflow history or descriptions. */
 export interface SecretValue {
   value: string;

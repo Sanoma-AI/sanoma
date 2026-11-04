@@ -1,7 +1,7 @@
 import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from "node:crypto";
 import type { protos } from "@google-cloud/kms";
 import crc32c from "crc-32/crc32c.js";
-import type { Db } from "./db.ts";
+import { type LegacyQuery as Db } from "./db.ts";
 import { cloudIdentityAuth } from "./cloud-identity.ts";
 import {
   SecretStoreError,

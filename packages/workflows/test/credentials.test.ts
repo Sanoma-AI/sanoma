@@ -16,11 +16,11 @@ import {
   withSetup,
 } from "../src/index.ts";
 import { configuredSecrets, postgresSecretStore } from "../src/credentials.ts";
-import { lazyPool } from "../src/db.ts";
+import { lazyDb } from "../src/db.ts";
 import { credentialsOf } from "../src/env.ts";
 
 const databaseUrl = testDatabaseUrl("credentials_v2");
-const pool = lazyPool(databaseUrl, "secret-tests");
+const pool = lazyDb(databaseUrl, "secret-tests");
 const store = postgresSecretStore(() => pool.db());
 afterAll(() => pool.close());
 afterEach(() => vi.unstubAllEnvs());

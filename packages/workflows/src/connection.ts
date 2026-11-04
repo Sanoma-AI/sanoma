@@ -16,7 +16,7 @@ import { type Connector, setupOf, VENDOR, defineConnector, defineDriver, type Ca
 import { isSecret, type Secret } from "./secret.ts";
 import { SanomaError } from "./errors.ts";
 import { SecretStoreError, type SecretAccess, type SecretLocation } from "./secret-store.ts";
-import type { Db } from "./db.ts";
+import { type LegacyQuery as Db } from "./db.ts";
 
 /** Serializable account reference; vendor literal prevents cross-connector selection in typed calls. */
 export interface ConnectionRef<V extends string = string> {

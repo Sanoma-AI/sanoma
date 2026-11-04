@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { Compute, OAuth2Client } from "google-auth-library";
-import type { Db } from "./db.ts";
+import { type LegacyQuery as Db } from "./db.ts";
 import { enrollmentBroker } from "./identity-broker.ts";
 export { provisioningIdentityBroker, attachedGoogleIdTokenIssuer } from "./provisioning-identity.ts";
 export type { ProvisioningIdentity, ProvisioningIdToken } from "./provisioning-identity.ts";

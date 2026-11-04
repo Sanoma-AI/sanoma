@@ -4,12 +4,12 @@ import { afterAll, beforeAll, expect, it } from "vitest";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
-import { lazyPool } from "../src/db.ts";
+import { lazyDb } from "../src/db.ts";
 import { CLOUD_IDENTITY_SQL, createDeploymentCredential, type ProvisioningIdentity } from "../src/cloud-identity.ts";
 import { CLOUD_IDENTITY_AUDIT_SQL, startIdentityService } from "../src/identity-service.ts";
 
 const url = testDatabaseUrl("identity_service");
-const admin = lazyPool(url, "identity-service-test");
+const admin = lazyDb(url, "identity-service-test");
 const suffix = randomUUID().replaceAll("-", "");
 const readRole = `identity_r_${suffix}`,
   auditRole = `identity_a_${suffix}`;

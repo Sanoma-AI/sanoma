@@ -35,7 +35,7 @@ import {
   collectionsFake,
   isCollection,
 } from "./collection.ts";
-import { lazyPool, type LazyPool } from "./db.ts";
+import { lazyDb, type LazyDb } from "./db.ts";
 import { isDirectory, kindDirs, SCENARIOS_DIR } from "./paths.ts";
 import { callerFile, type Use, type WorkflowDefinition } from "./define.ts";
 import { DRIFT_WORKFLOW, driftWorkflow } from "./drift.ts";
@@ -174,7 +174,7 @@ export interface Login {
 export interface ResolvedConfig {
   secrets: SecretConfiguration;
   connections: ConnectionRegistry;
-  connectionPool: LazyPool;
+  connectionPool: LazyDb;
   identityProvisioning: ReturnType<typeof configuredIdentityProvisioning>;
   /**
    * Scopes workflows, queues and versions in the system database: the `name` of
@@ -241,7 +241,7 @@ export interface ResolvedConfig {
    * its first call, and closed by whoever calls the driver (the worker, and the client, which
    * calls it directly, when each stops).
    */
-  dataStore?: LazyPool;
+  dataStore?: LazyDb;
   /**
    * By name; each checked against `ops` and `drivers`. The config's, the built-ins `drift`
    * (`DRIFT_WORKFLOW`) and `apply` (`APPLY_WORKFLOW`) when its connectors declare resource types,
@@ -349,7 +349,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   const hostTyped = [...types.values()].some((type) => type.host);
   // Built-in: the collections' operations, `data.<name>.<op>`, on the config's database.
   const databaseUrl = resolveDatabaseUrl(config);
-  const connectionPool = lazyPool(databaseUrl, "connections");
+  const connectionPool = lazyDb(databaseUrl, "connections");
   const identityProvisioning = configuredIdentityProvisioning(config.identityProvisioning);
   const connections = new ConnectionRegistry(
     connectionCatalog(config.connectors, config.connections, config.connectionRules),
@@ -357,7 +357,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     configuredSecrets(config.secrets ?? {}, () => connectionPool.db()),
   );
   const declared = [...collections.values()];
-  const dataStore = declared.length ? lazyPool(databaseUrl, "data") : undefined;
+  const dataStore = declared.length ? lazyDb(databaseUrl, "data") : undefined;
   // Built-in, in every config: a change's operations, which the template's policy names
   // (`sanoma.change.merge`), the listing of apps a page may call (`sanoma.apps.list`), and what a
   // workflow asks the runtime to do for it (`sanoma`, runtime-ops.ts).

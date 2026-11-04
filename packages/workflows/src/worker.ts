@@ -4,7 +4,7 @@ import { buildCtx, decideStart, isInfrastructureError, startHoldOf } from "./cal
 import { dbosStatusesOf } from "./client.ts";
 import { declaredWakeup, envWakeup, type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { configuredSecrets } from "./credentials.ts";
-import { type Db, DBOS_DATABASE_OPTIONS, lazyPool, prepareDatabase, stampVersion } from "./db.ts";
+import { type Db, DBOS_DATABASE_OPTIONS, lazyDb, prepareDatabase, stampVersion } from "./db.ts";
 import {
   deadlineRegistry,
   type Deadlines,
@@ -136,7 +136,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
   }
   // The config's own, or a Postgres store made for this worker, which `stop` then closes.
   const ledger = ownedLedger(resolved);
-  const secrets = lazyPool(resolved.databaseUrl, "secrets");
+  const secrets = lazyDb(resolved.databaseUrl, "secrets");
   const storedSecrets = configuredSecrets(resolved.secrets, () => secrets.db());
   let stopRule: { close(): void } | undefined;
   let stopping: Promise<void> | undefined;
