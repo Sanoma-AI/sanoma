@@ -5,12 +5,8 @@ import { z } from "zod";
 // GitHub's REST API over plain `fetch`, as the remote half and the operations through the App call
 // it: GitHub's media type and `X-GitHub-Api-Version: 2022-11-28`, its failures as `DriverError`s.
 
-/** The secrets of the company's GitHub App the remote half and the operations through the App read, as the app's manifest flow stores them. */
-export const GITHUB_APP_SECRETS = {
-  id: "SANOMA_GITHUB_APP_ID",
-  pem: "SANOMA_GITHUB_APP_PEM",
-  webhook_secret: "SANOMA_GITHUB_WEBHOOK_SECRET",
-} as const;
+/** The secrets of the company's GitHub App the remote half and the operations through the App read, as the app's manifest flow stores them: the runtime's one list. */
+export { GITHUB_APP as GITHUB_APP_SECRETS } from "@sanoma-ai/workflows";
 
 const API = "https://api.github.com";
 

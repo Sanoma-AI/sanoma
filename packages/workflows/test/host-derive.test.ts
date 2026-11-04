@@ -122,8 +122,10 @@ const INFRA = [
   "",
 ].join("\n");
 
+// A tree of its own each: a lockfile one test writes binds no other's host.
+let trees = 0;
 const load = (files: Record<string, string>) => {
-  const root = tree("host-derive", files);
+  const root = tree(`host-derive-${++trees}`, files);
   return { root, ...loadDataFiles(root, [acme, github], types) };
 };
 
@@ -289,6 +291,26 @@ describe("what a host that derives is given, or refused", () => {
     expect(fromOrigin.host.desired.name).toBe("company-ops");
   });
 
+  it("keeps the name it is bound by, and is a problem with the name of another host of its type", () => {
+    const unnamed = INFRA.replace('name: "company", hostname', "hostname");
+    // Bound as `ops`: a repository renamed since does not replace it.
+    const bound = derived({
+      "resources/sanoma/infra.ts": unnamed,
+      "resources/sanoma.lock.json": JSON.stringify({
+        "resources/sanoma/infra.ts#host": { type: "acme.service", id: "ops" },
+      }),
+    });
+    expect(bound.problems).toEqual([]);
+    expect(bound.host).toMatchObject({ identity: "ops", desired: { name: "ops" } });
+    const twin = derived({
+      "resources/sanoma/infra.ts": `${unnamed}export const other = acme.service({ name: "company", hostname: "other.acme.example", database: store });\n`,
+    });
+    expect(twin.problems.map((p) => p.message)).toContain(
+      "host: its name, its repository's, is other's too, company: declare `name`",
+    );
+    expect(twin.out.leftOut.has("resources/sanoma/infra.ts#host")).toBe(true);
+  });
+
   it("is given the signing key the config binds, else its own, generated at its create", () => {
     expect(derived({ "resources/sanoma/infra.ts": INFRA }).secrets.SANOMA_SIGNING_KEY).toEqual({
       $secret: HOST_SIGNING_KEY,
@@ -316,11 +338,11 @@ describe("what a host that derives is given, or refused", () => {
   it("is given no source key where the config cannot declare a deploy key, and a private repository is a problem", () => {
     const noKeys = new Map([...types].filter(([id]) => id !== "github.repository_deploy_key"));
     const files = { "resources/sanoma/infra.ts": INFRA.replace(/^export const repo = .*\n/m, "") };
-    const open = derived(files, { publicRepository: true, sourceKey: undefined }, noKeys);
+    const open = derived(files, { sourceKey: undefined }, noKeys);
     expect(open.problems).toEqual([]);
     expect(open.secrets).not.toHaveProperty("SANOMA_SOURCE_KEY");
     expect(open.resources.some((r) => r.type === "repository_deploy_key")).toBe(false);
-    const closed = derived(files, { publicRepository: false, sourceKey: undefined }, noKeys);
+    const closed = derived(files, { privateRepositories: ["acme/company"], sourceKey: undefined }, noKeys);
     expect(closed.problems.map((p) => p.message)).toEqual([
       expect.stringContaining(
         "acme/company is private, and the config has no github.repository_deploy_key to give the host a key to clone it with: add the GitHub connector",

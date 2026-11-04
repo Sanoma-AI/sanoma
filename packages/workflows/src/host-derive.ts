@@ -79,10 +79,11 @@ export interface HostFacts {
   /** True when the config binds `SANOMA_SIGNING_KEY`: the host is given that key, else its own (`HOST_SIGNING_KEY`). */
   signingKeyBound?: boolean;
   /**
-   * For a GitHub `origin` while the config has no deploy-key type: whether GitHub shows the
-   * repository to anyone. Undefined when not asked, or when GitHub did not say.
+   * While the config has no deploy-key type, the GitHub repositories a host may clone (`origin`'s,
+   * a declared `source`'s) that GitHub shows to no one: private (or not there). One GitHub does
+   * not answer for is not among them.
    */
-  publicRepository?: boolean;
+  privateRepositories?: readonly string[];
 }
 
 const run = promisify(execFile);
@@ -201,7 +202,8 @@ const nameOf = (repository: string) =>
  * Fills, in place, each declared host that derives (`HostSpec.derives`) with what it is not told,
  * and puts the deploy key it clones with before it in `resources`:
  *
- * - `name`, left out (when its type takes `inputs.name`): its repository's name (`nameOf`);
+ * - `name`, left out (when its type takes `inputs.name`): the name it is bound by, else its
+ *   repository's (`nameOf`), unless another host of its type has that name;
  * - `image`, left out: the runtime image of the installed `sanoma` (`runtimeImage`);
  * - `source`, left out: the one repository its own data file declares (a reference to it, of a
  *   type its `source` names), else the repository the app runs from (`origin`);
@@ -221,9 +223,10 @@ const nameOf = (repository: string) =>
  * `out.keep` takes the deploy-key ids not declared this read (no source key stored yet, or its
  * host left out), which the caller must not orphan; `out.leftOut` the hosts with a problem, which
  * the caller leaves out, with what names them, so apply changes nothing it cannot give all it needs.
- * Problems: a host with no `database`, a name, an image or a source that cannot be told, a
- * credential its vendor's driver reads from this machine's environment that nothing binds, a
- * private repository it has no deploy key for, two hosts that would attach the sites' domains.
+ * Problems: a host with no `database`, a name (none to tell, or another host's), an image or a
+ * source that cannot be told, a credential its vendor's driver reads from this machine's
+ * environment that nothing binds, a private repository it has no deploy key for, two hosts that
+ * would attach the sites' domains.
  */
 export function deriveHosts(
   resources: DeclaredResource[],
@@ -289,18 +292,25 @@ export function deriveHosts(
     if (inputs.name !== undefined && valueAt(desired, inputs.name) == null) {
       const source = valueAt(desired, inputs.source);
       const named = repository ?? (typeof source === "string" ? cloneUrl(source) : undefined);
+      // A bound host keeps the name it is bound by: a renamed repository would otherwise replace it.
+      const bound = type.identity === inputs.name ? bindings[r.id]?.id : undefined;
       const name =
-        named &&
-        nameOf(
-          named
-            .replace(/\.git$/, "")
-            .split("/")
-            .at(-1)!,
-        );
+        bound ??
+        (named &&
+          nameOf(
+            named
+              .replace(/\.git$/, "")
+              .split("/")
+              .at(-1)!,
+          ));
       if (name) {
         setAt(desired, inputs.name, name);
         const identity = type.find?.(desired);
-        if (identity) Object.assign(r, { identity, name: identity });
+        const twin =
+          identity &&
+          resources.find((o) => o !== r && o.vendor === r.vendor && o.type === r.type && o.identity === identity);
+        if (twin) problem(`its name, its repository's, is ${twin.at.export}'s too, ${name}: declare \`name\``);
+        else if (identity) Object.assign(r, { identity, name: identity });
       } else problem("its name is its repository's, and it has none to name it by: declare `name`");
     }
 
@@ -314,7 +324,7 @@ export function deriveHosts(
     }
     // A deploy key is declared for a GitHub repository only where the config has the type.
     const keyed = repository !== undefined && deployKey !== undefined;
-    if (repository && !keyed && facts.publicRepository === false) {
+    if (repository && !keyed && facts.privateRepositories?.includes(repository)) {
       problem(
         `${repository} is private, and the config has no ${DEPLOY_KEY_TYPE} to give the host a key to clone it with: add the GitHub connector (@sanoma-ai/connector-github) to sanoma.config.ts`,
       );
@@ -406,7 +416,7 @@ async function publicOnGithub(repository: string): Promise<boolean | undefined> 
  * read from this machine's environment alone (`unbound`). With `mint` (apply, never drift or a
  * sandbox run), the source key (where the config has the deploy-key type) and, when a wakeup is
  * declared, the wakeup's token are minted first when none is stored, so the host is given them
- * from its first apply. With no deploy-key type, GitHub is asked whether `origin` is public.
+ * from its first apply. With no deploy-key type, GitHub is asked which repositories a host may clone are private.
  * Undefined when no declared host derives.
  */
 export async function hostFacts(options: {
@@ -452,8 +462,20 @@ export async function hostFacts(options: {
     originUrl(root),
     secrets && hosts.length && keyed ? sourceKeyOf(secrets, mint) : undefined,
   ]);
-  const repository = !keyed && hosts.length ? githubRepository(origin) : undefined;
-  const publicRepository = repository === undefined ? undefined : await publicOnGithub(repository);
+  // What a host may clone: `origin`, else the `source` it declares (with no deploy-key type, no
+  // GitHub repository is declared to be one).
+  const repositories = keyed
+    ? []
+    : [
+        ...new Set(
+          [
+            githubRepository(origin),
+            ...hosts.map((h) => githubRepository(valueAt(h.desired, typeOf(h)!.host!.inputs.source))),
+          ].filter((r) => r !== undefined),
+        ),
+      ];
+  const open = await Promise.all(repositories.map(publicOnGithub));
+  const privateRepositories = repositories.filter((_, i) => open[i] === false);
   return {
     ...(version !== undefined && { version }),
     ...(origin !== undefined && { origin }),
@@ -465,6 +487,6 @@ export async function hostFacts(options: {
     ...(options.sender !== undefined && { sender: options.sender }),
     githubApp,
     ...(sourceKey !== undefined && { sourceKey }),
-    ...(publicRepository !== undefined && { publicRepository }),
+    ...(privateRepositories.length > 0 && { privateRepositories }),
   };
 }

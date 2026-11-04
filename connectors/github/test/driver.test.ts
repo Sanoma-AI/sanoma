@@ -266,6 +266,17 @@ describe("a deploy key found by its repository and key", () => {
     fetched.mockRestore();
   });
 
+  it("is none for a repository not made yet, so it is made after it", async () => {
+    const fetched = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => new Response(JSON.stringify({ message: "Not Found" }), { status: 404 }));
+    expect(await call(githubDriver({ bridge }), "repository_deploy_key.import", { id: identity })).toEqual({
+      id: identity,
+      gone: true,
+    });
+    fetched.mockRestore();
+  });
+
   it("is found on the fake among its keys, with no lookup", async () => {
     const fake = fakeGithub();
     fake.put("repository_deploy_key", "sanoma:42", {

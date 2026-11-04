@@ -122,7 +122,7 @@ describe("the github connector", () => {
     expect(declare.team_membership({ owner: "acme", team_id: "core", username: "octocat" }).name).toBe(
       "acme/core:octocat",
     );
-    // A deploy key names its repository the same way, and is found by its binding alone.
+    // A deploy key names its repository the same way, and is found by its repository and its key.
     const key = declare.repository_deploy_key({
       repository: site,
       title: "Sanoma host",
@@ -133,7 +133,7 @@ describe("the github connector", () => {
       desired: { repository: "acme/website" },
       refs: { repository: "github.repository:acme/website" },
     });
-    expect(declare.repository_deploy_key.identity).toBeUndefined();
+    expect(declare.repository_deploy_key.identity).toBe("repository:key");
     // A collaborator too, and is found by `<owner>/<repository>:<username>`.
     expect(
       declare.repository_collaborator({ repository: site, username: "octocat", permission: "push" }),

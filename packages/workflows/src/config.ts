@@ -765,10 +765,14 @@ async function readDeclared(
     });
     if (facts) problems.push(...deriveHosts(resources, types, bindings, facts, { keep, leftOut }));
   }
-  // A host apply cannot give all it needs is left out, with what names it (its wakeup): its
-  // problem says why, and nothing of it changes until it is fixed.
-  const left = resources.filter((o) => leftOut.has(o.id) || Object.values(o.refs).some((id) => leftOut.has(id)));
-  for (const r of left) resources.splice(resources.indexOf(r), 1);
+  // A host apply cannot give all it needs is left out, with what names it (its wakeup), and what
+  // names that in turn: its problem says why, and nothing of it changes until it is fixed.
+  for (let grew = leftOut.size > 0; grew;) {
+    const before = leftOut.size;
+    for (const o of resources) if (Object.values(o.refs).some((id) => leftOut.has(id))) leftOut.add(o.id);
+    grew = leftOut.size > before;
+  }
+  for (const r of resources.filter((o) => leftOut.has(o.id))) resources.splice(resources.indexOf(r), 1);
   // A host's deploy key apply declares, or cannot tell yet, is no orphan.
   const declaredIds = new Set(resources.map((r) => r.id));
   const kept = orphans.filter((o) => !declaredIds.has(o.key) && !keep.has(o.key));
@@ -810,7 +814,7 @@ async function readDeclared(
       })),
     bindings,
     orphans: kept,
-    ...(left.length > 0 && { leftOut: left.map((r) => r.id) }),
+    ...(leftOut.size > 0 && { leftOut: [...leftOut] }),
     problems,
   };
 }

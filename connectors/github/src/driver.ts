@@ -102,8 +102,12 @@ async function resolveKey(identity: string, token: string) {
   const at = /^([^/]+)\/([^:]+):(.+)$/.exec(identity);
   if (!at) return undefined;
   const [, owner = "", name = "", text = ""] = at;
-  const keys = await ok(token, "GET", `${repoPath(owner, name)}/keys?per_page=100`, z.array(Key));
-  const there = keys.find((k) => k.key === keyText(text));
+  const path = `${repoPath(owner, name)}/keys?per_page=100`;
+  const reply = await send(token, "GET", path);
+  // No repository (not made yet) holds no key: the key is made, after it.
+  if (reply.status === 404) return undefined;
+  if (reply.status >= 300) throw failure("GET", path, reply);
+  const there = read(z.array(Key), reply.body, `GET ${path}`).find((k) => k.key === keyText(text));
   return there && { owner, id: `${name}:${there.id}` };
 }
 
