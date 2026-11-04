@@ -1,22 +1,22 @@
 # sanoma
 
-Sanoma is a framework for building business apps you can change all the way down: the pages, the data, the workflows behind them and the services they call, all as TypeScript in your own repo.
+Sanoma is a framework for building full-stack business apps you can fully customize: pages, data, workflows and the services they call, all TypeScript in your own repo. This monorepo is its source-available core, the runtime, the app and the connectors, which anyone can read and self-host. Status: early.
 
-**For developers:** work with the people who run the business the way you already ship software. Every change is a commit someone reviews, its tests pass before it goes live, and every run is recorded.
+**For developers:** work with the people who run the business the way you already ship software. Every change is a commit someone reviews, and its tests pass before it goes live.
 
-**For people who don't write code:** tell the agent what you need and it builds it. You see each change and approve it before it goes live, work that needs a person waits for them, and everything that happened is written down. It's the care a software team takes, without the code.
+**For people who don't write code:** tell the agent what you need and it builds it. You approve each change before it goes live, and work that needs a person waits for them. It's the rigor of a software team, without the code.
 
 ## How it fits together
 
 - **One repo per business:** `sanoma.config.ts` with `sites/`, `workflows/`, `resources/` and `policies/` beside it. The [`sanoma`](packages/sanoma/README.md) command runs all of it, with the app, on your machine.
-- **Sites:** React pages for your team or for the public, with sign-in. A page calls the workflows and the data directly.
+- **[Sites](packages/sanoma/README.md#sites):** React pages for your team or for the public, with sign-in. A page calls the workflows and the data directly.
 - **Workflows:** TypeScript functions for the work behind the pages. A step, an approval or a wait of a week picks up where it left off after a restart (they run on [DBOS](https://dbos.dev) with Postgres).
-- **Data:** collections in the business's own Postgres, declared in `resources/data.ts`.
+- **[Data](packages/workflows/README.md#collections):** collections in the business's own Postgres, declared in `resources/data.ts`.
 - **Connectors:** typed calls to services like Stripe, Resend and GitHub. A workflow can call only the ones it lists.
-- **Rules and records:** policies in the repo (written in [Cedar](https://docs.cedarpolicy.com)) let each call through, refuse it or hold it for a person's approval, and every run is recorded: who started it, each call with the policy's answer and the service's reply, and each approval.
-- **The agent:** the app's chat edits a draft of the repo, with its own agent or one you bring (Claude Code, Codex and others), and runs its checks there. In a new repo, every change waits for an admin to publish it.
+- **Rules and records:** [policies](packages/workflows/README.md#policies) in the repo, written in [Cedar](https://docs.cedarpolicy.com), let each call through, refuse it or hold it for a person's approval, and the [ledger](packages/workflows/README.md#ledger) records every run.
+- **The agent:** tell the app's chat what to change. Sanoma's agent, or one you bring (Claude Code, Codex and others), edits a draft copy of the repo and tests it, and in a new repo an admin [publishes each change](packages/workflows/README.md#changes).
 
-It runs on your machine, in the [desktop app](#desktop-preview), or on your own Cloudflare and Neon accounts. This monorepo is the source-available core: the runtime, the app and the connectors, which anyone can read and self-host. Status: early; the connectors so far are listed under [Contents](#contents).
+It runs on your machine, in the [desktop app](#desktop-preview), or on your own Cloudflare and Neon accounts. The connectors so far are listed under [Contents](#contents).
 
 ![The app: dana starts a run of announce, marketing-lead approves its launch copy in the Inbox, then the run finishes](.github/assets/demo.gif)
 
@@ -24,7 +24,7 @@ A run of the workflow below: dana starts it, marketing-lead approves the copy, a
 
 ## What a workflow looks like
 
-A company repo holds `sanoma.config.ts` with `workflows/`, `policies/` (Cedar) and `resources/` (its people among them) beside it, and the [`sanoma`](packages/sanoma/README.md) bin runs its workflows and the app. A workflow lists the vendor operations it may call, and can call nothing else. This one drafts a blog post, waits for the marketing lead, sleeps until launch, then publishes:
+This workflow drafts a blog post, waits for the marketing lead, sleeps until launch, then publishes:
 
 ```ts
 // workflows/announce.ts
