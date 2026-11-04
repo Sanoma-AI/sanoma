@@ -191,7 +191,7 @@ SANOMA_LIVE=1 CLOUDFLARE_API_TOKEN=... CLOUDFLARE_ACCOUNT_ID=... \
   node connectors/cloudflare/test/live.ts
 ```
 
-The kits have not run on a real account yet: the connector's first real run was Sanoma's own back office (`sanoma-ops`, 2026-10-29), deployed from the app's Resources page. What it showed: the second upload above, the Host the proxy forwards, and a cold start of about six to eight minutes on `standard-1` (the clone, `pnpm install` and `sanoma serve` of a company with a public site), which is what a visitor waits for after ten quiet minutes until the container is kept running or the sites move to the Worker.
+The kits have not run on a real account yet: the connector's first real run was Sanoma's own back office (`sanoma-ops`, 2026-10-29), deployed from the app's Resources page. What it showed: the second upload above, the Host the proxy forwards, and a cold start of about six to eight minutes on `standard-1` (the clone, `pnpm install` and `sanoma serve` of a company with a public site, the app built at start). The runtime image since runs `sanoma worker` alone over a pnpm store baked into it, building nothing at start ([runtime image](../../packages/sanoma/README.md#hosting-it-yourself)): measured locally at half a CPU, 2026-11-04 (Cloudflare's own pull time not included), the checkout under a second, `pnpm install --frozen-lockfile --prefer-offline` 7–10 s for a lockfile the store matches and 14–30 s for one a `pnpm update --latest` behind, and the worker's `/healthz` 6–16 s after: 16–38 s, against `standard-1`'s half a vCPU.
 
 It needs:
 

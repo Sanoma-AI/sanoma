@@ -149,6 +149,15 @@ export const SITES_BUNDLE_PATH = "/__sanoma/sites-bundle";
 /** The header every answer of that route carries: a runtime without the route answers without it. */
 export const SITES_BUNDLE_HEADER = "x-sanoma-sites-bundle";
 
+/**
+ * Where a hosted worker's port answers, with its instance token (`SANOMA_WAKEUP_TOKEN`) and
+ * `?revision=<commit>`, the app bundle a host's Worker script runs at that revision, built in a
+ * checkout of its own: the Cloudflare host asks for it at a deploy.
+ */
+export const APP_BUNDLE_PATH = "/__sanoma/app-bundle";
+/** The header every answer of that route carries, so a host tells them from its own errors. */
+export const APP_BUNDLE_HEADER = "x-sanoma-app-bundle";
+
 /** What that route answers: what a host's Worker runs a company's public sites from (`buildWorker` in `@sanoma-ai/app/build`). */
 export interface SitesBundle {
   /** The sites it serves, by key: public, with a domain and no login. */

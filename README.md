@@ -159,6 +159,7 @@ Open a pull request that bumps `version` in each public package's `package.json`
 
 - A breaking change in a 0.x package requires a minor version bump.
 - A provider-bridge release (`RELEASE` in `packages/bridge/scripts/download-bridge.ts`) requires new versions of the `@sanoma-ai/bridge-<platform>` packages. A PostgreSQL release (`RELEASE` in `packages/sanoma/scripts/download-postgres.ts`) requires new versions of the `@sanoma-ai/postgres-<platform>` packages.
+- `sanoma`'s `devDependencies` on the connectors its template names set the versions a new company starts from, as the workspace has them when `sanoma` is published. For a connector's release to reach new companies, release `sanoma` too; the release check does not ask for it.
 - Bump dependent packages when their published dependency ranges exclude the new version. This includes exact pins (`workspace:*`, used by `sanoma` for the runtime and by `@sanoma-ai/bridge` for its binaries) and peer ranges after a minor bump (`workspace:^`, published as `^` on the version at that time).
 
 Run `node scripts/release-check.ts` to find packages that still need a bump, including dependencies that pin other bumped packages. The release workflow runs this check first. It also reports packages missing from npm and public packages whose shipped inputs differ from the commit that set their version. Tests, `AGENTS.md` and manifest-only `devDependencies` changes are excluded. Historical commits alone do not require a bump if the shipped inputs are unchanged.
@@ -220,20 +221,20 @@ npm publish "$TMPDIR"/<file>.tgz --access public
 
 Container hosts use the public [runtime image](packages/sanoma/README.md#hosting-it-yourself) at [`ghcr.io/sanoma-ai/runtime`](https://github.com/orgs/Sanoma-AI/packages/container/package/runtime). It has one linux/amd64 manifest and is tagged with the `sanoma` version, never `latest`.
 
-After the npm packages publish, `release.yml` pushes the image if its tag is missing. It uses the job's `GITHUB_TOKEN` with `packages: write`; the registry package was made public manually in GitHub's settings. Tags are never replaced, so changes to `packages/sanoma/runtime/` require a new `sanoma` version.
+After the npm packages publish, `release.yml` pushes the image if its tag is missing. Its pnpm store is filled from npm with the packages that release published (`scripts/runtime-packages.ts`), so the image is built only after them; the hand command below takes the same list. It uses the job's `GITHUB_TOKEN` with `packages: write`; the registry package was made public manually in GitHub's settings. Tags are never replaced, so changes to `packages/sanoma/runtime/` require a new `sanoma` version.
 
 The image build checks its embedded bridge's session protocol independently of npm publication. Runtime `0.10.1` contains an incompatible older bridge. Skip it and use the corrected `0.10.2` image once published.
 
 To publish manually, run `docker login ghcr.io` and check for the tag with `docker buildx imagetools inspect ghcr.io/sanoma-ai/runtime:<version>`. If the tag does not exist, build and push it:
 
 ```sh
-docker buildx build --platform linux/amd64 --provenance=false -t ghcr.io/sanoma-ai/runtime:<version> --push packages/sanoma/runtime
+docker buildx build --platform linux/amd64 --provenance=false --build-arg PACKAGES="$(node scripts/runtime-packages.ts)" -t ghcr.io/sanoma-ai/runtime:<version> --push packages/sanoma/runtime
 ```
 
 Cloudflare containers use an image in the account's own registry. Apply copies it there from ghcr.io; see [the connector](connectors/cloudflare/README.md#the-image). To upload it manually, build and push with Wrangler:
 
 ```sh
-docker build --platform linux/amd64 -t sanoma-runtime:<version> packages/sanoma/runtime
+docker build --platform linux/amd64 --build-arg PACKAGES="$(node scripts/runtime-packages.ts)" -t sanoma-runtime:<version> packages/sanoma/runtime
 npx wrangler containers push sanoma-runtime:<version>
 ```
 
@@ -241,7 +242,7 @@ Declare the image reference Wrangler prints (`registry.cloudflare.com/<account i
 
 On Cloudflare, the company's Worker serves public sites on their own domains without a login. Pages are prerendered or rendered on the Worker using the company's database. A page only wakes the container when it starts a workflow run. See [public sites on the Worker](connectors/cloudflare/README.md#public-sites-on-the-worker).
 
-The container builds the site bundle at deploy time using `buildWorker` from `@sanoma-ai/app/build`. The build needs `workerd`, which `@sanoma-ai/app` installs alongside `wrangler` and `@cloudflare/vite-plugin`.
+The container's worker builds the bundle for a deploy's revision, in a checkout of its own (`GET /__sanoma/app-bundle?revision=<commit>`, [the worker's port](packages/sanoma/README.md#the-workers-port)), using `buildWorker` from `@sanoma-ai/app/build`. The build needs `workerd`, which `@sanoma-ai/app` installs alongside `wrangler` and `@cloudflare/vite-plugin`.
 
 ## License
 

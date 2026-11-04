@@ -56,5 +56,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Node and pnpm for scripts/runtime-packages.ts; no install.
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        with:
+          cache: true
+      # Its store from the packages npm has now: a PR's own versions are not public until the release.
       - name: Build the runtime image (not pushed)
-        run: docker build -t sanoma-runtime packages/sanoma/runtime
+        run: docker build --build-arg PACKAGES="$(node scripts/runtime-packages.ts --public)" -t sanoma-runtime packages/sanoma/runtime

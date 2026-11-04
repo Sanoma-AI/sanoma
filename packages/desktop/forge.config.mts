@@ -26,6 +26,8 @@ const notarizeWith = process.env.APPLE_API_KEY
     }
   : undefined;
 
+// Forge adds the extension for each platform: icon.icns, icon.ico (scripts/icons.ts).
+const icon = join(import.meta.dirname, "icons", "icon");
 // WINDOWS_SIGN_WITH_PARAMS, signtool's arguments, signs every executable, the app's and the
 // installer's; without it the build is unsigned (README, "Signing and notarization"). signtool's
 // path and the timestamp server come from @electron/windows-sign's own WINDOWS_SIGNTOOL_PATH and
@@ -50,6 +52,7 @@ const config: ForgeConfig = {
     appBundleId: "ai.sanoma.desktop",
     appCategoryType: "public.app-category.business",
     asar: true,
+    icon,
     // stage/ is filled by scripts/stage.ts: pnpm, the same for every architecture, goes in here;
     // the pinned Node goes in per architecture (`packageAfterCopy`).
     extraResource: [join(import.meta.dirname, "stage", "pnpm")],
@@ -99,9 +102,20 @@ const config: ForgeConfig = {
     },
   },
   makers: [
-    new MakerDMG(identity ? { additionalDMGOptions: { "code-sign": { "signing-identity": identity } } } : {}),
+    new MakerDMG({
+      icon: `${icon}.icns`,
+      ...(identity ? { additionalDMGOptions: { "code-sign": { "signing-identity": identity } } } : {}),
+    }),
     // `name` is the package id WINDOWS_APP_ID (src/self-update.ts) is made from.
-    new MakerSquirrel({ name: "Sanoma", authors: "Sanoma", setupExe: "Sanoma-Setup.exe", windowsSign } as object),
+    new MakerSquirrel({
+      name: "Sanoma",
+      authors: "Sanoma",
+      setupExe: "Sanoma-Setup.exe",
+      setupIcon: `${icon}.ico`,
+      // Programs and Features takes the icon from a URL.
+      iconUrl: "https://raw.githubusercontent.com/Sanoma-AI/sanoma/main/packages/desktop/icons/icon.ico",
+      windowsSign,
+    } as object),
     new MakerZIP({}, ["darwin"]),
   ],
   plugins: [

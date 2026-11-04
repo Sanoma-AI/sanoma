@@ -68,7 +68,14 @@ export function createSession(options: SessionOptions): Session {
     killAfterMs,
     node,
     cli: pnpm,
-    args: ["dlx", "sanoma"],
+    // The newest sanoma, today's release too: the template's exclusions, which leave third-party
+    // packages under pnpm's minimum release age.
+    args: [
+      "--config.minimumReleaseAgeExclude=sanoma",
+      "--config.minimumReleaseAgeExclude=@sanoma-ai/*",
+      "dlx",
+      "sanoma",
+    ],
     port,
     pollMs,
   });

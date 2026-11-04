@@ -14,7 +14,6 @@ import {
   resolveDatabaseUrl,
   SanomaClient,
   type SanomaConfig,
-  startWorker,
   superviseWorker,
 } from "@sanoma-ai/workflows";
 import { describeConfig, readPeople, schemaOf, writeGenerated } from "@sanoma-ai/workflows/describe";
@@ -22,7 +21,6 @@ import { domainsOf } from "@sanoma-ai/workflows/shared";
 import type { WakeupService } from "@sanoma-ai/workflows/wakeup-service";
 import { UsageError } from "./config.ts";
 import { runtimeFrom, siteBuild } from "./sites.ts";
-import { sitesBundleRoute } from "./sites-bundle.ts";
 import { localGitSource } from "./source.ts";
 
 export interface Stoppable {
@@ -37,7 +35,7 @@ export interface Served extends Stoppable {
 }
 
 /** The checkout the config was loaded from (`loadConfig` sets its `file`). */
-const rootOf = (config: SanomaConfig) => config.root ?? dirname(config.file!);
+export const rootOf = (config: SanomaConfig) => config.root ?? dirname(config.file!);
 
 /** The checkout, as the worker's and the app's `source`, a draft's check on the config's database. */
 const sourceOf = (config: SanomaConfig) => localGitSource(rootOf(config), { databaseUrl: resolveDatabaseUrl(config) });
@@ -47,20 +45,11 @@ const sourceOf = (config: SanomaConfig) => localGitSource(rootOf(config), { data
  * version to take queued runs, even one seen before; the checkout as its source; and the staff
  * login's tables among what it prepares, since no config names that login (`appOptions` makes it).
  */
-const workerOptions = (config: SanomaConfig) => ({
+export const workerOptions = (config: SanomaConfig) => ({
   promote: true,
   source: sourceOf(config),
   prepare: [prepareBetterAuthStaff],
 });
-
-/**
- * Starts the worker, for `sanoma worker`: it never stops itself, since nothing in this process
- * would start it again (no app hears a write or a wake). `serve` supervises its own.
- */
-export async function runWorker(config: SanomaConfig): Promise<Stoppable> {
-  const worker = await startWorker(config, workerOptions(config));
-  return { stop: () => worker.stop() };
-}
 
 export interface ServeOptions {
   /** The app's port: 0 for any free port. */
@@ -295,16 +284,9 @@ export async function serve(config: SanomaConfig, serveOptions: ServeOptions): P
       const { startWakeupService } = await import("@sanoma-ai/workflows/wakeup-service");
       wakeup = await startWakeupService({ databaseUrl, log: { info: log, warn: log } });
     }
-    // On a host with public domains and an instance token (Cloudflare's), the sites its Worker serves.
-    const token = process.env.SANOMA_WAKEUP_TOKEN;
-    const bundle =
-      options.domains &&
-      token &&
-      sitesBundleRoute(config, { root: rootOf(config), domains: options.domains, token, log });
     app = await served(config, { ...options, onWrite: () => void supervised.resume() }, [
       wakeRoute({ log, onWake: () => supervised.wake() }),
       ...(wakeup?.routes ?? []),
-      ...(bundle ? [bundle] : []),
     ]);
   } catch (err) {
     await wakeup?.stop().catch(() => {});
