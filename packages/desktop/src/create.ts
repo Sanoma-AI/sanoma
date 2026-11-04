@@ -1,15 +1,17 @@
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { isDatabaseEvent } from "./events.ts";
 import type { Company } from "./companies.ts";
 import { gitEnv, gitFailure } from "./git.ts";
 import { launch, launcherEnv, spawnGroup, type Stream } from "./launcher.ts";
+import { CLONING, folderNameOf, STARTING } from "./pages.ts";
 import { isCompanyFolder } from "./places.ts";
 import { type Session, type SessionOptions, startSession } from "./session.ts";
 import { writeShims } from "./shims.ts";
 
 /**
- * Where the folder dialogs for a new or cloned company start: the folder the most recently opened
- * company is in, while it is there, else the home folder.
+ * Where a new or cloned company goes first: the folder the most recently opened company is in,
+ * while it is there, else `~/Companies`, clear of the Desktop and Documents that iCloud often keeps.
  */
 export function defaultParent(
   companies: readonly Company[],
@@ -17,7 +19,7 @@ export function defaultParent(
   exists: (path: string) => boolean = existsSync,
 ): string {
   const last = companies[0] && dirname(companies[0].path);
-  return last && exists(last) ? last : home;
+  return last && exists(last) ? last : join(home, "Companies");
 }
 
 /**
@@ -30,11 +32,28 @@ export function newCompanyProblem(dir: string): string | undefined {
 }
 
 /**
+ * The folder a new company called `name` goes in, under `parent` (made by whoever starts it), or
+ * why not, in one line.
+ */
+export function newCompanyTarget(name: string, parent: string): { dir: string } | { problem: string } {
+  const folder = folderNameOf(name);
+  if (!folder) return { problem: "Give the company a name, with a letter or a number in it." };
+  const dir = join(parent, folder);
+  if (!existsSync(dir)) return { dir };
+  if (!statSync(dir).isDirectory()) return { problem: `${dir} is a file: give the company another name.` };
+  if (isCompanyFolder(dir)) return { problem: `${dir} holds a company already: open it instead.` };
+  return readdirSync(dir).some((file) => !file.startsWith("."))
+    ? { problem: `${dir} has files in it already: give the company another name, or choose another place.` }
+    : { dir };
+}
+
+/**
  * Starts a company in an empty folder: the launcher's own init (`pnpm dlx sanoma`, sanoma from
  * npm) with the shell's Node and pnpm shims and the environment of a run (`launcherEnv`). It
  * copies the template, commits and installs, then serves the company it started from that
  * company's own `node_modules/sanoma`, so its window opens as an opened company's does. A folder
  * that holds files (an init that got that far, retried) is opened as any other (`startSession`).
+ * Its progress: this start, then the launcher's `database` event once the company is set up.
  */
 export function createSession(options: SessionOptions): Session {
   if (newCompanyProblem(options.repo)) return startSession(options);
@@ -44,7 +63,10 @@ export function createSession(options: SessionOptions): Session {
   const launched = launch({
     cwd: repo,
     env,
-    onLine,
+    onLine(stream, line) {
+      onLine(stream, line);
+      if (isDatabaseEvent(line)) onProgress(STARTING);
+    },
     killAfterMs,
     node,
     cli: pnpm,
@@ -135,7 +157,7 @@ export const cloneSession =
     let stopped = false;
     let cloning: Cloning | undefined;
     if (!existsSync(options.repo)) {
-      options.onProgress("Cloning");
+      options.onProgress(CLONING);
       cloning = cloneCompany(url, options.repo, { env: gitEnv(options.env), onLine: options.onLine });
     }
     const started = (cloning?.done ?? Promise.resolve(undefined)).then((failed) => {

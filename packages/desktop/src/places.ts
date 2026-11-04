@@ -1,5 +1,5 @@
 import { existsSync, realpathSync, statSync } from "node:fs";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 /**
  * The path a company is known by: its real path, which on Windows is also in the case the disk has
@@ -81,6 +81,10 @@ export function syncedFolderWarning(
   const service = syncedBy(path, home, exists, platform, env);
   const safer = platform === "win32" ? join(home, "Companies") : "~/Companies";
   return service
-    ? `${path} is in a folder ${service} syncs, which can break its packages and its git history: a folder outside ${service}, such as ${safer}, is safer`
+    ? `This folder is in ${service}, which can break its packages and its git history. A folder outside ${service}, such as ${safer}, is safer.`
     : undefined;
 }
+
+/** `path` as a person reads it: the home folder as `~`, except on Windows, which has no such thing. */
+export const withTilde = (path: string, home: string, platform: NodeJS.Platform = process.platform) =>
+  platform !== "win32" && (path === home || path.startsWith(`${home}${sep}`)) ? `~${path.slice(home.length)}` : path;

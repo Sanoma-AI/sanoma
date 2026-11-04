@@ -7,49 +7,110 @@
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <h1>Sanoma</h1>
-    <p class="muted">
-      Open the folder a company lives in, start a new one in an empty folder, or clone one from GitHub. Sanoma installs
-      its packages and starts it on this computer, in this window. Closing the window leaves your companies running;
-      Quit stops them.
-    </p>
-    <div class="actions">
-      <button class="primary" id="choose">Open folder…</button>
-      <button id="create">New company…</button>
-      <button id="clone">Clone…</button>
-    </div>
+    <main class="column">
+      <header class="head">
+        <div class="mark" aria-hidden="true">S</div>
+        <h1 id="title"></h1>
+        <p class="muted" id="lede" hidden></p>
+      </header>
 
-    <form id="clone-form" hidden>
-      <label for="clone-url">The company's repository</label>
-      <input id="clone-url" type="text" placeholder="https://github.com/acme/company" spellcheck="false" />
-      <p class="muted">A public repository, or one this Mac's keychain can sign in to. Next, choose where it goes.</p>
-      <p class="failed" id="clone-problem" hidden></p>
-      <div class="actions">
-        <button class="primary" type="submit">Clone…</button>
-        <button type="button" data-cancel>Cancel</button>
+      <div class="stack" id="home">
+        <ul class="card" id="recent" hidden></ul>
+        <div class="card" id="choices">
+          <button class="row" id="create">
+            <span class="icon primary">
+              <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" /></svg>
+            </span>
+            <span class="row-text">
+              <span class="row-name">New company…</span>
+              <small>Starts one from scratch, in a folder on this computer.</small>
+            </span>
+          </button>
+          <button class="row" id="choose">
+            <span class="icon">
+              <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4h4l1.5 2H14v7H2z" /></svg>
+            </span>
+            <span class="row-text">
+              <span class="row-name">Open folder…</span>
+              <small>A company already on this computer.</small>
+            </span>
+          </button>
+          <button class="row" id="clone">
+            <span class="icon">
+              <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M8 2.5v8M4.5 7.5 8 11l3.5-3.5M3 13.5h10" />
+              </svg>
+            </span>
+            <span class="row-text">
+              <span class="row-name">Copy from GitHub…</span>
+              <small>A company kept in a GitHub repository.</small>
+            </span>
+          </button>
+        </div>
+        <p id="notice" hidden></p>
+        <div class="stack" id="warnings"></div>
+        <p class="muted small">Closing the window leaves your companies running; Quit stops them.</p>
       </div>
-    </form>
 
-    <form id="identity-form" hidden>
-      <p>Who makes the changes? git signs each change with a name and an email address.</p>
-      <label for="identity-name">Name</label>
-      <input id="identity-name" type="text" autocomplete="name" />
-      <label for="identity-email">Email</label>
-      <input id="identity-email" type="email" autocomplete="email" />
-      <p class="muted">Saving sets them for every git repository on this computer (git config --global).</p>
-      <p class="failed" id="identity-problem" hidden></p>
-      <div class="actions">
-        <button class="primary" type="submit">Save and continue</button>
-        <button type="button" data-cancel>Cancel</button>
-      </div>
-    </form>
-    <p id="notice" hidden></p>
-    <div id="warnings"></div>
+      <form class="stack" id="new-form" hidden>
+        <div class="card fields">
+          <div class="field">
+            <label for="new-name">What is it called?</label>
+            <input id="new-name" type="text" spellcheck="false" autocomplete="off" />
+          </div>
+          <div class="field">
+            <span class="label">Where it goes</span>
+            <div class="place">
+              <span class="muted" id="new-place"></span>
+              <button type="button" id="new-change">Change…</button>
+            </div>
+          </div>
+          <div class="banner" id="new-warning" role="status" hidden></div>
+          <p class="problem" id="new-problem" role="alert" hidden></p>
+          <p class="muted small">Setting up takes about a minute, the first time.</p>
+        </div>
+        <div class="actions">
+          <button class="primary" type="submit">Start the company</button>
+          <button type="button" data-cancel>Cancel</button>
+        </div>
+      </form>
 
-    <section id="recent-section" hidden>
-      <h2>Recent</h2>
-      <ul id="recent"></ul>
-    </section>
+      <form class="stack" id="clone-form" hidden>
+        <div class="card fields">
+          <div class="field">
+            <label for="clone-url">The company's repository</label>
+            <input id="clone-url" type="text" placeholder="https://github.com/acme/company" spellcheck="false" />
+          </div>
+          <p class="problem" id="clone-problem" role="alert" hidden></p>
+          <p class="muted small">
+            A public repository, or one this computer can already sign in to. Next, choose where it goes.
+          </p>
+        </div>
+        <div class="actions">
+          <button class="primary" type="submit">Continue…</button>
+          <button type="button" data-cancel>Cancel</button>
+        </div>
+      </form>
+
+      <form class="stack" id="identity-form" hidden>
+        <div class="card fields">
+          <div class="field">
+            <label for="identity-name">Name</label>
+            <input id="identity-name" type="text" autocomplete="name" />
+          </div>
+          <div class="field">
+            <label for="identity-email">Email</label>
+            <input id="identity-email" type="email" autocomplete="email" />
+          </div>
+          <p class="problem" id="identity-problem" role="alert" hidden></p>
+          <p class="muted small">Saved on this computer, for every company and anything else here that uses git.</p>
+        </div>
+        <div class="actions">
+          <button class="primary" type="submit">Save and continue</button>
+          <button type="button" data-cancel>Cancel</button>
+        </div>
+      </form>
+    </main>
     <script type="module" src="./start.js"></script>
   </body>
 </html>

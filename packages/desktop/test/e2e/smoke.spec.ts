@@ -4,7 +4,7 @@
 // same window, the first kept running and loaded; ⌘1 and the apps' companies API (the account
 // menu's) switch, Company → Stop stops the shown one and shows the other, Quit stops that, and the
 // next launch opens it again.
-import { cpSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { once } from "node:events";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -66,6 +66,9 @@ test("one window: a company from progress to app, a second beside it, switching,
     cpSync(fileURLToPath(new URL("../fixtures/company", import.meta.url)), dir, { recursive: true });
   }
   const userData = join(work, "user-data");
+  // Show details left on, so that the start's output is there to read as it comes.
+  mkdirSync(userData);
+  writeFileSync(join(userData, "settings.json"), JSON.stringify({ details: true }));
   const launchShell = (...args: string[]) =>
     electron.launch({ executablePath, args: [pkg, ...args, `--user-data-dir=${userData}`] });
   let shell: ElectronApplication | undefined;

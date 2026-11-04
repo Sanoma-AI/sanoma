@@ -1,6 +1,16 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { type Exit, type Group, launch, launcherEnv, launcherOf, spawnGroup, type Stream } from "./launcher.ts";
+import {
+  type Exit,
+  type Group,
+  launch,
+  launcherEnv,
+  launcherOf,
+  spawnGroup,
+  type Stream,
+  USAGE_EXIT,
+} from "./launcher.ts";
+import { CLONING, type CompanyState, INSTALLING, type Kind, STARTING } from "./pages.ts";
 import { writeShims } from "./shims.ts";
 
 export interface SessionOptions {
@@ -43,7 +53,7 @@ export function startSession(options: SessionOptions): Session {
   const run = async (): Promise<{ ready: Promise<string>; exited: Promise<Exit> } | undefined> => {
     const env = launcherEnv(options.env, writeShims(bin, node, pnpm), port);
     const group = { cwd: repo, env, onLine, killAfterMs };
-    onProgress("Installing packages");
+    onProgress(INSTALLING);
     // The shim's own command, run without it: Windows starts a `.cmd` only through a shell.
     current = spawnGroup(node, [pnpm, "install", "--prefer-offline"], group);
     const installed = await current.exited;
@@ -54,7 +64,7 @@ export function startSession(options: SessionOptions): Session {
       }
       onLine("stderr", "warning: pnpm install failed; starting with the packages already installed");
     }
-    onProgress("Starting the company");
+    onProgress(STARTING);
     const launched = launch({ ...group, node, cli: launcherOf(repo), port, pollMs });
     current = launched;
     return launched;
@@ -76,4 +86,27 @@ export function startSession(options: SessionOptions): Session {
       await ended;
     },
   };
+}
+
+/**
+ * What a company's page says of a session that ended on its own, in a sentence and in two words.
+ * With only an exit code, the shell still knows what it was doing: `ready` says the app had
+ * answered, `progress` how far a copy got.
+ */
+export function failureOf(
+  exit: Exit,
+  { kind, progress, ready }: { kind: Kind; progress: readonly string[]; ready: boolean },
+): Required<Pick<CompanyState, "message" | "pill">> {
+  const how = exit.signal ?? `exit code ${exit.code}`;
+  const settingUp = kind === "new" && !ready;
+  const message =
+    exit.code === USAGE_EXIT
+      ? `The company's configuration has a problem (${exit.error ?? "the details below say what"}). Fix it, then start again.`
+      : (exit.error ??
+        (settingUp
+          ? `Setting up stopped before the app opened (${how}). The details below say why. Start again picks up where it stopped.`
+          : `The company stopped (${how}).`));
+  const copying = kind === "clone" && progress.at(-1) === CLONING;
+  const pill = ready ? "Stopped" : settingUp ? "Not set up" : copying ? "Not copied" : "Did not start";
+  return { message, pill };
 }

@@ -22,8 +22,8 @@ import {
 import { eventOf, listeningUrlOf } from "../src/events.ts";
 import { launch, launcherEnv, launcherOf, type Stream, USAGE_EXIT } from "../src/launcher.ts";
 import { isAppPage, linkTarget } from "../src/links.ts";
-import { hidePasswords, openLog, TAIL_LINES } from "../src/logs.ts";
-import { folderArgument, realPathOf, syncedFolderWarning } from "../src/places.ts";
+import { detailsOf, hidePasswords, openLog, TAIL_LINES } from "../src/logs.ts";
+import { folderArgument, realPathOf, syncedFolderWarning, withTilde } from "../src/places.ts";
 import { type QuitSteps, quitOrder } from "../src/quit.ts";
 import { archWarnings, runtimeOf } from "../src/runtime.ts";
 import { updatesItself } from "../src/self-update.ts";
@@ -380,6 +380,14 @@ describe("companies.json", () => {
     expect(readCompanies(file)).toEqual([at("/a", 3100, "2")]);
   });
 
+  test("keeps that a synced folder's warning was read", () => {
+    const file = join(temp(), "companies.json");
+    writeCompanies(file, updated([at("/a", 3100, "2"), at("/b", 3101, "1")], "/a", { warned: true }));
+    expect(readCompanies(file)).toEqual([{ ...at("/a", 3100, "2"), warned: true }, at("/b", 3101, "1")]);
+    writeFileSync(file, JSON.stringify([{ ...at("/a", 3100, "2"), warned: "yes" }]));
+    expect(readCompanies(file)).toEqual([at("/a", 3100, "2")]);
+  });
+
   test("opens at launch the companies open at the last Quit whose folders hold one", () => {
     const list = [
       { ...at("/a", 3100, "3"), open: true },
@@ -516,6 +524,18 @@ describe("logs", () => {
     expect(log.tail().lines.at(-1)).toBe("the database");
   });
 
+  test("a note goes to the file alone, without its passwords", () => {
+    const log = openLog(temp(), "acme");
+    log.note("shell", "could not reach postgresql://u:s3cret@host/db");
+    expect(log.tail().lines).toEqual([]);
+    expect(readFileSync(log.file, "utf8")).toMatch(/Z shell could not reach postgresql:\/\/\*\*\*@host\/db\n$/);
+  });
+
+  test("Copy is what the page says, then the tail without colours", () => {
+    const tail = { start: 1, skipped: 0, lines: ["Packages: \x1b[32m+693\x1b[39m", "done"] };
+    expect(detailsOf(["acme", "Did not start"], tail)).toBe("acme\nDid not start\n\nPackages: +693\ndone");
+  });
+
   test("the page gets the colours and no event lines; the file gets every line, without escape codes", () => {
     const log = openLog(temp(), "acme");
     log.write("stdout", '{"event":"ready","sanoma":1,"url":"http://127.0.0.1:3100"}');
@@ -563,6 +583,13 @@ describe("places", () => {
     expect(realPathOf(dir).endsWith("Acme")).toBe(true);
   });
 
+  test("shows the home folder as ~, except on Windows", () => {
+    expect(withTilde(join("/Users/a", "acme"), "/Users/a", "darwin")).toBe(join("~", "acme"));
+    expect(withTilde("/Users/a", "/Users/a", "darwin")).toBe("~");
+    expect(withTilde("/Users/ab/acme", "/Users/a", "darwin")).toBe("/Users/ab/acme");
+    expect(withTilde("C:\\Users\\a\\acme", "C:\\Users\\a", "win32")).toBe("C:\\Users\\a\\acme");
+  });
+
   test("warns about folders iCloud syncs", () => {
     const home = join("/", "Users", "a");
     const icloud = join(home, "Library", "Mobile Documents", "com~apple~CloudDocs");
@@ -579,9 +606,9 @@ describe("places", () => {
     const home = join("/", "Users", "a");
     const env = { OneDrive: join(home, "OneDrive"), OneDriveCommercial: join(home, "OneDrive - Acme") };
     const onWindows = (path: string) => syncedFolderWarning(path, home, { platform: "win32", env });
-    expect(onWindows(join(home, "OneDrive", "Documents", "acme"))).toMatch(/OneDrive syncs/);
-    expect(onWindows(join(home, "OneDrive - Acme", "acme"))).toMatch(/OneDrive syncs/);
-    expect(onWindows(join(home, "iCloudDrive", "acme"))).toMatch(/iCloud syncs/);
+    expect(onWindows(join(home, "OneDrive", "Documents", "acme"))).toMatch(/in OneDrive/);
+    expect(onWindows(join(home, "OneDrive - Acme", "acme"))).toMatch(/in OneDrive/);
+    expect(onWindows(join(home, "iCloudDrive", "acme"))).toMatch(/in iCloud/);
     // Desktop and Documents sync only when OneDrive keeps them, and then they are in its folder.
     expect(onWindows(join(home, "Documents", "acme"))).toBeUndefined();
     expect(onWindows(join(home, "Companies", "acme"))).toBeUndefined();

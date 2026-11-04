@@ -15,6 +15,7 @@ import {
   defaultParent,
   isCloneUrl,
   newCompanyProblem,
+  newCompanyTarget,
   repoNameOf,
 } from "../src/create.ts";
 import {
@@ -28,6 +29,7 @@ import {
   type Run,
   setIdentity,
 } from "../src/git.ts";
+import { STARTING } from "../src/pages.ts";
 import type { SessionOptions } from "../src/session.ts";
 import { shims } from "../src/shims.ts";
 import { fastForward, LOCAL_CHANGES, ownChanges, prepareUpdate } from "../src/update-company.ts";
@@ -159,10 +161,29 @@ describe("git's prerequisites", () => {
 });
 
 describe("a new company", () => {
-  test("starts from the last company's folder, else the home folder", () => {
-    expect(defaultParent([], "/Users/a")).toBe("/Users/a");
+  test("goes in a folder named after it, under where it was asked to go", () => {
+    const parent = temp();
+    expect(newCompanyTarget("Northside Plumbing", parent)).toEqual({ dir: join(parent, "northside-plumbing") });
+    expect(newCompanyTarget("  ...  ", parent)).toEqual({
+      problem: expect.stringContaining("Give the company a name"),
+    });
+    mkdirSync(join(parent, "empty"));
+    writeFileSync(join(parent, "empty", ".DS_Store"), "");
+    expect(newCompanyTarget("empty", parent)).toEqual({ dir: join(parent, "empty") });
+    mkdirSync(join(parent, "full"));
+    writeFileSync(join(parent, "full", "notes.txt"), "");
+    expect(newCompanyTarget("full", parent)).toEqual({ problem: expect.stringContaining("has files in it already") });
+    mkdirSync(join(parent, "acme"));
+    writeFileSync(join(parent, "acme", "sanoma.config.ts"), "");
+    expect(newCompanyTarget("acme", parent)).toEqual({ problem: expect.stringContaining("holds a company already") });
+    writeFileSync(join(parent, "plain"), "");
+    expect(newCompanyTarget("plain", parent)).toEqual({ problem: expect.stringContaining("is a file") });
+  });
+
+  test("starts from the last company's folder, else ~/Companies", () => {
+    expect(defaultParent([], "/Users/a")).toBe(join("/Users/a", "Companies"));
     expect(defaultParent([company("/Users/a/Companies/acme")], "/Users/a", () => true)).toBe("/Users/a/Companies");
-    expect(defaultParent([company("/Volumes/gone/acme")], "/Users/a", () => false)).toBe("/Users/a");
+    expect(defaultParent([company("/Volumes/gone/acme")], "/Users/a", () => false)).toBe(join("/Users/a", "Companies"));
   });
 
   test("needs an empty folder, dotfiles aside", () => {
@@ -196,7 +217,8 @@ describe("a new company", () => {
     expect(existsSync(join(repo, "sanoma.config.ts"))).toBe(true);
     expect(Object.keys(shims("node", "pnpm")).every((name) => existsSync(join(bin, name)))).toBe(true);
     expect(lines).toContain(`env ${port} 1 ${bin}`);
-    expect(progress).toEqual(["Starting a new company with sanoma from npm"]);
+    // The launcher's database event: the company is set up, and starting.
+    expect(progress).toEqual(["Starting a new company with sanoma from npm", STARTING]);
     await session.stop();
     await expect(session.ended).resolves.toMatchObject({ code: 143 });
   });

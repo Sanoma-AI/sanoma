@@ -20,9 +20,15 @@ function recordOf(line: string): Record<string, unknown> | undefined {
 export const isEventLine = (line: string) => recordOf(line) !== undefined;
 
 /**
+ * Whether a line is the launcher's `database` event: a new company is set up, and its database is
+ * there (`createSession`).
+ */
+export const isDatabaseEvent = (line: string) => recordOf(line)?.event === "database";
+
+/**
  * The event a line carries that the shell acts on: `{"sanoma":1,"event":"ready","url":…,"sites":{…}}`
  * or `{"sanoma":1,"event":"error","message":…}`. Undefined for any other line, another event
- * (`database`, which the shell only logs) or one with fields that do not hold.
+ * (`database`, `isDatabaseEvent`) or one with fields that do not hold.
  */
 export function eventOf(
   line: string,

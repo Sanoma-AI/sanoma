@@ -31,7 +31,7 @@ export function archWarnings(translated: boolean, platform: NodeJS.Platform = pr
   if (!translated) return [];
   return [
     platform === "win32"
-      ? "This is the x64 build of Sanoma on an Arm PC: download the arm64 build, which runs faster."
-      : "This is the Intel build of Sanoma on an Apple silicon Mac: download the Apple silicon (arm64) build, which runs faster.",
+      ? "This is the x64 build of Sanoma on an Arm PC. The arm64 build runs faster."
+      : "This is the Intel build of Sanoma on an Apple silicon Mac. The Apple silicon build runs faster.",
   ];
 }

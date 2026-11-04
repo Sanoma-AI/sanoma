@@ -43,6 +43,8 @@ export interface CompanyLog {
    * (`hidePasswords`).
    */
   write(from: string, line: string): void;
+  /** Appends a line to the file alone: what the page says in its own words already. */
+  note(from: string, line: string): void;
   /** The last `TAIL_LINES` lines for the page. */
   tail(): LogTail;
   /** Ends this start's log: later lines (a process its launcher left, still printing) are dropped. */
@@ -58,6 +60,7 @@ export function openLog(dir: string, slug: string): CompanyLog {
   const lines: string[] = [];
   let skipped = 0;
   let closed = false;
+  const toFile = (from: string, line: string) => appendFileSync(file, `${new Date().toISOString()} ${from} ${line}\n`);
   return {
     file,
     write(from, line) {
@@ -67,7 +70,7 @@ export function openLog(dir: string, slug: string): CompanyLog {
       // line with one hidden loses its colours.
       const plain = stripVTControlCharacters(line);
       const hidden = hidePasswords(plain);
-      appendFileSync(file, `${new Date().toISOString()} ${from} ${hidden}\n`);
+      toFile(from, hidden);
       if (isEventLine(line)) return;
       lines.push(hidden === plain && hidePasswords(line) === line ? line : hidden);
       if (lines.length > TAIL_LINES) {
@@ -75,7 +78,14 @@ export function openLog(dir: string, slug: string): CompanyLog {
         skipped++;
       }
     },
+    note(from, line) {
+      if (!closed) toFile(from, hidePasswords(stripVTControlCharacters(line)));
+    },
     tail: () => ({ start, skipped, lines: [...lines] }),
     close: () => void (closed = true),
   };
 }
+
+/** What Copy puts on the clipboard: what the page says, then the tail without its colours. */
+export const detailsOf = (said: readonly string[], { lines }: LogTail) =>
+  [...said, "", ...lines.map((line) => stripVTControlCharacters(line))].join("\n");
