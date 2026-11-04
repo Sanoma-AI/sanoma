@@ -22,13 +22,15 @@ export function defaultParent(
   return last && exists(last) ? last : join(home, "Companies");
 }
 
+/** Whether `dir` holds anything but dotfiles: the launcher's init starts only where it does not. */
+const hasFiles = (dir: string) => readdirSync(dir).some((name) => !name.startsWith("."));
+
 /**
  * Why a new company cannot start in `dir`, in one line; undefined when it can: the folder is
  * empty, dotfiles aside, as the launcher's init requires (anywhere else it does nothing).
  */
 export function newCompanyProblem(dir: string): string | undefined {
-  const files = readdirSync(dir).filter((name) => !name.startsWith("."));
-  return files.length ? `${dir} has files in it already: a new company starts in an empty folder.` : undefined;
+  return hasFiles(dir) ? `${dir} has files in it already: a new company starts in an empty folder.` : undefined;
 }
 
 /**
@@ -42,7 +44,7 @@ export function newCompanyTarget(name: string, parent: string): { dir: string } 
   if (!existsSync(dir)) return { dir };
   if (!statSync(dir).isDirectory()) return { problem: `${dir} is a file: give the company another name.` };
   if (isCompanyFolder(dir)) return { problem: `${dir} holds a company already: open it instead.` };
-  return readdirSync(dir).some((file) => !file.startsWith("."))
+  return hasFiles(dir)
     ? { problem: `${dir} has files in it already: give the company another name, or choose another place.` }
     : { dir };
 }

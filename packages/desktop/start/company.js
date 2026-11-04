@@ -76,10 +76,11 @@ const STEP_ICONS = {
   now: '<circle class="ring" cx="8" cy="8" r="6.5" /><path class="arc" d="M8 1.5a6.5 6.5 0 0 1 6.5 6.5" />',
   next: '<circle class="ring" cx="8" cy="8" r="6.5" />',
 };
+const stepIcon = (status) =>
+  `<svg class="step" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">${STEP_ICONS[status]}</svg>`;
 
 function stepRow({ label, status }) {
-  const li = Object.assign(document.createElement("li"), { className: status });
-  li.innerHTML = `<svg class="step" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">${STEP_ICONS[status]}</svg>`;
+  const li = Object.assign(document.createElement("li"), { className: status, innerHTML: stepIcon(status) });
   li.append(Object.assign(document.createElement("span"), { textContent: label }));
   return li;
 }
@@ -88,32 +89,44 @@ function stepRow({ label, status }) {
 let state;
 /** The output's Hide on a failed page: for this page only, as Show details is for a start. */
 let hiddenOnFailure = false;
+/** The steps as drawn: drawing them again would start their spinner over, with each line of output. */
+let drawnSteps;
 let redraw;
+
+// xterm measures the font it opens with, and the bundled one loads on demand.
+const font = document.fonts.load('12px "IBM Plex Mono"');
+let opening = false;
+/** Opens the terminal, the first time its output shows: it keeps what was written to it until then. */
+function openTerminal() {
+  if (opening) return;
+  opening = true;
+  void font.finally(() => {
+    terminal.open($("log"));
+    fit.fit();
+  });
+}
 
 function render(next) {
   state = next;
   const now = Date.now();
-  const page = companyPage(state, now);
   const failed = state.phase === "failed";
   if (!failed) hiddenOnFailure = false;
-  const output = failed ? !hiddenOnFailure : state.details;
+  const page = companyPage(state, now, hiddenOnFailure);
   document.title = state.name;
-  document.body.dataset.layout = page.ended || output ? "wide" : "column";
+  document.body.dataset.layout = page.layout;
 
   $("company-name").textContent = state.name;
   $("pill").textContent = page.pill ?? "";
   $("pill").className = failed ? "pill" : "pill off";
-  show("pill", page.ended && page.pill);
-  const quietly = !page.ended && !output && !page.opening;
+  show("pill", page.pill);
   $("place").textContent = state.place;
-  show("place", quietly);
+  show("place", page.listed);
 
-  // One word while it opens; beside the name, the step under way, once the output takes the list's place.
-  show("current", page.opening || (!page.ended && output && page.step));
-  $("current-step").textContent = page.opening ? "Opening" : (page.step ?? "");
+  show("current", page.current);
+  $("current-step").textContent = page.current ?? "";
   $("current-note").textContent = page.note ?? "";
-  show("current-note", output && page.note);
-  show("note", quietly && page.note);
+  show("current-note", page.output && page.note);
+  show("note", page.listed && page.note);
   $("note").textContent = page.note ?? "";
 
   $("reason").textContent = state.message ?? "";
@@ -125,29 +138,33 @@ function render(next) {
   show("skip", failed && state.reopens);
 
   $("warning-text").textContent = state.warning ?? "";
-  show("warning", !!state.warning);
+  show("warning", state.warning);
   show("quiet", page.quiet);
 
-  show("steps", quietly);
-  $("steps").replaceChildren(...page.steps.map(stepRow));
+  show("steps", page.listed);
+  const steps = JSON.stringify(page.steps);
+  if (steps !== drawnSteps) {
+    drawnSteps = steps;
+    $("steps").replaceChildren(...page.steps.map(stepRow));
+  }
 
-  show("controls", !page.opening && !(failed && output));
+  show("controls", page.controls);
   show("stop", !page.ended);
-  $("details").setAttribute("aria-expanded", String(output));
-  $("details-label").textContent = output ? "Hide details" : "Show details";
-  show("closing", quietly && page.closing);
+  $("details").setAttribute("aria-expanded", String(page.output));
+  $("details-label").textContent = page.output ? "Hide details" : "Show details";
+  show("closing", page.listed && page.closing);
   $("closing").textContent = page.closing ?? "";
 
-  show("output", output);
+  show("output", page.output);
   show("hide", failed);
-  // xterm measures its font when it opens, so not while the output is hidden.
-  if (output && !terminal.element) terminal.open($("log"));
+  if (page.output) openTerminal();
   writeLog(state.log);
 
   clearTimeout(redraw);
   if (page.changesAt !== undefined) redraw = setTimeout(() => render(state), page.changesAt - now);
 }
 
+$("current").insertAdjacentHTML("afterbegin", stepIcon("now"));
 $("again").addEventListener("click", () => bridge.again());
 $("skip").addEventListener("click", () => bridge.skip());
 $("stop").addEventListener("click", () => bridge.stop());
@@ -172,7 +189,5 @@ $("copy").addEventListener("click", async () => {
     $("copy").textContent = "Copy";
   }, 1_500);
 });
-// Before anything draws: xterm measures the font it opens with, and the bundled one loads on demand.
-await document.fonts.load('12px "IBM Plex Mono"');
 bridge.onState(render);
 bridge.state().then((sent) => sent && render(sent));

@@ -443,7 +443,6 @@ function viewsFor(path: string): CompanyViews {
     loaded: false,
     url: "",
     state: {
-      path,
       name: companyName(path),
       place: withTilde(path, homedir()),
       kind: "open",
@@ -553,11 +552,12 @@ async function begin(path: string, beginAs?: Begin) {
   if (added) show(path);
   const started = start(path, views, beginning).catch((err: unknown) => {
     // Before its session (no Node staged, an unreadable folder): its page says why.
-    const message = hidePasswords(`The company could not start: ${messageOf(err)}`);
+    const error = `The company could not start: ${messageOf(err)}`;
+    const { message, pill } = failureOf({ code: null, signal: null, error }, views.state);
     setCompanyState(views, {
       phase: "failed",
-      message,
-      pill: "Did not start",
+      message: hidePasswords(message),
+      pill,
       progress: [],
       log: NO_TAIL,
       reopens: reopensAfterEnd(path),
@@ -643,11 +643,9 @@ async function start(path: string, views: CompanyViews, { how, warned }: Begin) 
   });
   const entry: Running = { session, log, stopping: false };
   running.set(path, entry);
-  let ready = false;
   session.ready.then(
     (url) => {
       if (entry.stopping) return;
-      ready = true;
       beginnings.delete(path);
       log.write("shell", `ready at ${url}`);
       if (current()) showApp(views, url);
@@ -665,8 +663,7 @@ async function start(path: string, views: CompanyViews, { how, warned }: Begin) 
       if (current()) setCompanyState(views, { phase: "stopped", progress: [], reopens });
       return;
     }
-    const { kind, progress } = views.state;
-    const { message, pill } = failureOf(exit, { kind, progress, ready });
+    const { message, pill } = failureOf(exit, views.state);
     // The page leads with it: its terminal keeps what the company printed, so it does not end by repeating that.
     log.note("shell", message);
     log.close();
@@ -887,21 +884,28 @@ async function changePlace() {
  */
 async function newCompany(): Promise<void> {
   notice = undefined;
-  let form = newCompanyForm("", parentFolder());
+  let name = "";
+  let parent = parentFolder();
+  let problem: string | undefined;
   for (;;) {
-    const value = await askFor(form);
+    const value = await askFor(newCompanyForm(name, parent, problem));
     if (!isNewCompanyAnswer(value)) return;
-    const target = newCompanyTarget(value.name, value.parent);
-    form = newCompanyForm(value.name, value.parent, "problem" in target ? target.problem : undefined);
-    if ("problem" in target) continue;
+    ({ name, parent } = value);
+    const target = newCompanyTarget(name, parent);
+    if ("problem" in target) {
+      problem = target.problem;
+      continue;
+    }
     if (!(await gitReady()) || !(await identityReady(homedir()))) return;
     try {
       mkdirSync(target.dir, { recursive: true });
     } catch (err) {
-      form = newCompanyForm(value.name, value.parent, `Sanoma could not make that folder: ${messageOf(err)}`);
+      problem = `Sanoma could not make that folder: ${messageOf(err)}`;
       continue;
     }
-    return begin(realPathOf(target.dir), { kind: "new", how: createSession, warned: !!form.warning });
+    // What the form said of a synced place is said: the page does not say it again.
+    const warned = !!syncedFolderWarning(parent, homedir());
+    return begin(realPathOf(target.dir), { kind: "new", how: createSession, warned });
   }
 }
 
@@ -1191,15 +1195,19 @@ if (squirrelStartup || !app.requestSingleInstanceLock()) {
   });
   ipcMain.handle("start:choose", () => chooseFolder());
   ipcMain.handle("start:open", (_event, path: unknown) => typeof path === "string" && openCompany(path));
-  ipcMain.handle("start:again", ({ sender }) => {
-    const [path] = companyOf(sender) ?? [];
-    if (path) void begin(path);
-  });
+  /** A message from a company's own page, about that company. */
+  const fromCompany = (channel: string, act: (path: string, views: CompanyViews) => unknown) =>
+    ipcMain.handle(channel, ({ sender }) => {
+      const company = companyOf(sender);
+      if (company) void act(...company);
+    });
+  fromCompany("start:again", (path) => begin(path));
   // A company that failed: the next launch does not open it.
-  ipcMain.handle("start:skip", ({ sender }) => {
-    const [path] = companyOf(sender) ?? [];
-    if (path) dontReopen(path);
-  });
+  fromCompany("start:skip", dontReopen);
+  fromCompany("start:stop", stopCompany);
+  fromCompany("start:got-it", warningRead);
+  fromCompany("start:copy-details", (_path, views) => copyDetails(views));
+  fromCompany("start:show-log", (path) => shell.openPath(logFile(path)));
   ipcMain.handle("start:create", () => newCompany());
   ipcMain.handle("start:clone", () => cloneCompanyFlow());
   ipcMain.handle("start:answer", (_event, value: unknown) => answer?.(value));
@@ -1207,22 +1215,6 @@ if (squirrelStartup || !app.requestSingleInstanceLock()) {
   ipcMain.handle("start:change-place", () => changePlace());
   ipcMain.handle("start:download", () => shell.openExternal(`https://github.com/${REPOSITORY}/releases/latest`));
   ipcMain.handle("start:details", (_event, details: unknown) => setDetails(details === true));
-  ipcMain.handle("start:stop", ({ sender }) => {
-    const [path] = companyOf(sender) ?? [];
-    if (path) void stopCompany(path);
-  });
-  ipcMain.handle("start:got-it", ({ sender }) => {
-    const [path, views] = companyOf(sender) ?? [];
-    if (path && views) warningRead(path, views);
-  });
-  ipcMain.handle("start:copy-details", ({ sender }) => {
-    const [, views] = companyOf(sender) ?? [];
-    if (views) copyDetails(views);
-  });
-  ipcMain.handle("start:show-log", ({ sender }) => {
-    const [path] = companyOf(sender) ?? [];
-    if (path) void shell.openPath(logFile(path));
-  });
 
   /**
    * The company whose app sent a `desktop:` message from its own page, in its top frame: nothing

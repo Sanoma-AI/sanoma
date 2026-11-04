@@ -7,6 +7,11 @@ import { folderNameOf } from "../src/pages.ts";
 
 const bridge = window.sanoma;
 const $ = (id) => document.getElementById(id);
+const el = (tag, props, ...children) => {
+  const node = Object.assign(document.createElement(tag), props);
+  node.append(...children);
+  return node;
+};
 
 const FORMS = {
   new: { title: "New company", first: () => "new-name" },
@@ -20,8 +25,6 @@ const FORMS = {
 
 /** The form shown last, so a state sent while the person types keeps what they typed. */
 let shownAsk;
-/** Where the new company form says the company goes (`ask.parent`), which its answer carries. */
-let newParent;
 
 function showNewPlace(ask) {
   $("new-place").textContent = `${ask.place}${folderNameOf($("new-name").value) || "…"}`;
@@ -47,7 +50,6 @@ function renderAsk(ask) {
   }
   shownAsk = kind;
   if (kind === "new") {
-    newParent = ask.parent;
     showNewPlace(ask);
     $("new-warning").textContent = ask.warning ?? "";
     $("new-warning").hidden = !ask.warning;
@@ -55,6 +57,9 @@ function renderAsk(ask) {
 }
 
 let shown;
+
+// Not the bridge's own function as the handler: the event would have to cross to the preload with the call.
+const download = () => bridge.download();
 
 function render(state) {
   shown = state;
@@ -74,37 +79,35 @@ function render(state) {
   notice.className = state.notice?.problem ? "problem" : "muted";
   $("warnings").replaceChildren(
     ...state.warnings.map((text) => {
-      const link = Object.assign(document.createElement("button"), { className: "link", textContent: "Download" });
-      link.type = "button";
-      link.addEventListener("click", () => bridge.download());
-      const line = Object.assign(document.createElement("p"), { textContent: `${text} ` });
-      line.append(link);
-      const banner = Object.assign(document.createElement("div"), { className: "banner" });
-      banner.append(line);
-      return banner;
+      const link = el("button", {
+        className: "link",
+        type: "button",
+        textContent: "Download",
+        onclick: download,
+      });
+      return el("div", { className: "banner" }, el("p", {}, `${text} `, link));
     }),
   );
 
   $("recent").hidden = !returning;
   $("recent").replaceChildren(
-    ...state.recent.map((c) => {
-      const text = Object.assign(document.createElement("span"), { className: "row-text" });
-      text.append(
-        Object.assign(document.createElement("span"), { className: "row-name", textContent: c.name }),
-        Object.assign(document.createElement("small"), { textContent: c.place }),
-      );
-      const button = Object.assign(document.createElement("button"), { className: "row" });
-      button.append(text);
-      if (c.running) {
-        const running = Object.assign(document.createElement("span"), { className: "running" });
-        running.append(Object.assign(document.createElement("span"), { className: "dot" }), "Running");
-        button.append(running);
-      }
-      button.addEventListener("click", () => bridge.open(c.path));
-      const li = document.createElement("li");
-      li.append(button);
-      return li;
-    }),
+    ...state.recent.map((c) =>
+      el(
+        "li",
+        {},
+        el(
+          "button",
+          { className: "row", onclick: () => bridge.open(c.path) },
+          el(
+            "span",
+            { className: "row-text" },
+            el("span", { className: "row-name", textContent: c.name }),
+            el("small", { textContent: c.place }),
+          ),
+          ...(c.running ? [el("span", { className: "running" }, el("span", { className: "dot" }), "Running")] : []),
+        ),
+      ),
+    ),
   );
 }
 
@@ -115,7 +118,7 @@ $("new-name").addEventListener("input", () => shown?.ask?.kind === "new" && show
 $("new-change").addEventListener("click", () => bridge.changePlace());
 $("new-form").addEventListener("submit", (event) => {
   event.preventDefault();
-  bridge.answer({ name: $("new-name").value, parent: newParent });
+  bridge.answer({ name: $("new-name").value, parent: shown.ask.parent });
 });
 $("clone-form").addEventListener("submit", (event) => {
   event.preventDefault();

@@ -10,7 +10,7 @@ import {
   type Stream,
   USAGE_EXIT,
 } from "./launcher.ts";
-import { CLONING, type CompanyState, INSTALLING, type Kind, STARTING } from "./pages.ts";
+import { CLONING, type CompanyState, INSTALLING, STARTING } from "./pages.ts";
 import { writeShims } from "./shims.ts";
 
 export interface SessionOptions {
@@ -90,14 +90,15 @@ export function startSession(options: SessionOptions): Session {
 
 /**
  * What a company's page says of a session that ended on its own, in a sentence and in two words.
- * With only an exit code, the shell still knows what it was doing: `ready` says the app had
+ * With only an exit code, the shell still knows what it was doing: `phase` says the app had
  * answered, `progress` how far a copy got.
  */
 export function failureOf(
   exit: Exit,
-  { kind, progress, ready }: { kind: Kind; progress: readonly string[]; ready: boolean },
+  { kind, phase, progress }: Pick<CompanyState, "kind" | "phase" | "progress">,
 ): Required<Pick<CompanyState, "message" | "pill">> {
   const how = exit.signal ?? `exit code ${exit.code}`;
+  const ready = phase === "running";
   const settingUp = kind === "new" && !ready;
   const message =
     exit.code === USAGE_EXIT

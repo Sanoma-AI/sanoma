@@ -471,10 +471,6 @@ body[data-layout="column"] #details {
   display: flex;
   flex: 1 0 160px;
   flex-direction: column;
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 11px;
-  background: var(--card);
 }
 #output-head {
   display: flex;
@@ -483,7 +479,6 @@ body[data-layout="column"] #details {
   justify-content: space-between;
   height: 40px;
   padding: 0 8px 0 16px;
-  border-bottom: 1px solid var(--line);
 }
 #output-head > span {
   color: var(--mut);
@@ -514,5 +509,5 @@ body[data-layout="column"] #details {
 /* xterm.css paints it black, which shows in the padding, and gives it an empty native scrollbar: xterm draws its own. */
 #log .xterm-viewport {
   overflow: hidden;
-  background-color: var(--card) !important;
+  background-color: var(--card);
 }

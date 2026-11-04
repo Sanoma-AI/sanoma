@@ -7,7 +7,6 @@ export type Kind = "open" | "new" | "clone";
 
 /** What a company's own page shows (`start/company.html`): its start, or why it stopped. */
 export interface CompanyState {
-  path: string;
   name: string;
   /** Its folder, the home folder as `~`. */
   place: string;
@@ -37,11 +36,14 @@ export const CLONING = "Cloning";
 export const INSTALLING = "Installing packages";
 export const STARTING = "Starting the company";
 
-const INSTALL_AND_START = ["Installing what it needs", "Starting the company"];
-const STEPS: Record<Kind, string[]> = {
+const INSTALL_AND_START = [
+  { label: "Installing what it needs", reportedBy: INSTALLING },
+  { label: "Starting the company", reportedBy: STARTING },
+];
+const STEPS: Record<Kind, { label: string; reportedBy?: string }[]> = {
   open: INSTALL_AND_START,
-  new: ["Setting up the company", "Starting it"],
-  clone: ["Copying from GitHub", ...INSTALL_AND_START],
+  new: [{ label: "Setting up the company" }, { label: "Starting it", reportedBy: STARTING }],
+  clone: [{ label: "Copying from GitHub", reportedBy: CLONING }, ...INSTALL_AND_START],
 };
 
 export interface Step {
@@ -50,9 +52,9 @@ export interface Step {
 }
 
 /**
- * The start's steps, all of them from the beginning: the ones behind the last thing the session
- * reported are done. A new company reports twice (`createSession`), and a copy from GitHub that is
- * already there skips its first. Done all through once only Got it holds the app back.
+ * The start's steps, all of them from the beginning: the one the session reported last is under
+ * way, and those before it are done (a copy from GitHub that is there already skips its first).
+ * Done all through once only Got it holds the app back.
  */
 export function stepsOf({
   kind,
@@ -60,11 +62,13 @@ export function stepsOf({
   progress,
   warning,
 }: Pick<CompanyState, "kind" | "phase" | "progress" | "warning">): Step[] {
-  const labels = STEPS[kind];
-  const last = progress.at(-1);
-  const now = last === STARTING ? labels.length - 1 : last === INSTALLING ? labels.length - 2 : 0;
+  const steps = STEPS[kind];
+  const now = Math.max(
+    0,
+    steps.findIndex((step) => step.reportedBy === progress.at(-1)),
+  );
   const waiting = phase === "running" && warning;
-  return labels.map((label, index) => ({
+  return steps.map(({ label }, index) => ({
     label,
     status: waiting || index < now ? "done" : index === now ? "now" : "next",
   }));
@@ -76,15 +80,21 @@ export const OPENING_MS = 3_000;
 export const QUIET_MS = 120_000;
 
 export interface CompanyPage {
+  /** A narrow column, or the whole window once there is output or a reason to show. */
+  layout: "column" | "wide";
   /** It has failed or stopped: no steps, and Start again. */
   ended: boolean;
-  /** Only the name and one word, so that a fast open does not flash a list. */
-  opening: boolean;
+  /** Its output shows: asked for, or, whatever was asked, a failure's unless that page hid it. */
+  output: boolean;
+  /** The steps show, in a list: a start under way, with room for them. */
+  listed: boolean;
+  /** The one thing said beside the name: one word while it opens, so that a fast open does not flash a list, else the step under way once the output takes the list's place. */
+  current?: string;
+  /** Show details and Stop show: a failure's output has its own Hide. */
+  controls: boolean;
   /** No output for `QUIET_MS`: it says so, and stops nothing. */
   quiet: boolean;
   steps: Step[];
-  /** The step under way. */
-  step?: string;
   /** How long this takes, and that the window may close: a new company's first start is the long one. */
   note?: string;
   closing?: string;
@@ -95,26 +105,32 @@ export interface CompanyPage {
   changesAt?: number;
 }
 
-/** What a company's page shows of `state` at the time `now`. */
-export function companyPage(state: CompanyState, now: number): CompanyPage {
+/** What a company's page shows of `state` at the time `now`; `hiddenOnFailure` is that page's own Hide. */
+export function companyPage(state: CompanyState, now: number, hiddenOnFailure = false): CompanyPage {
   const { kind, phase, startedAt, lastOutputAt, details, warning, bringsBack } = state;
-  const ended = phase === "failed" || phase === "stopped";
+  const failed = phase === "failed";
+  const ended = failed || phase === "stopped";
+  const output = failed ? !hiddenOnFailure : details;
   const opening = !ended && kind === "open" && !warning && !details && now < startedAt + OPENING_MS;
   const quietAt = lastOutputAt + QUIET_MS;
   const quiet = phase === "starting" && now >= quietAt;
   const steps = stepsOf(state);
+  const step = steps.find(({ status }) => status === "now")?.label;
   const isNew = !ended && kind === "new";
   return {
+    layout: ended || output ? "wide" : "column",
     ended,
-    opening,
+    output,
+    listed: !ended && !output && !opening,
+    current: opening ? "Opening" : !ended && output ? step : undefined,
+    controls: !opening && !(failed && output),
     quiet,
     steps,
-    step: steps.find((step) => step.status === "now")?.label,
     ...(isNew && {
       note: "This takes about a minute, the first time.",
       closing: `You can close this window. Sanoma keeps going, and the ${bringsBack} icon brings it back.`,
     }),
-    sendDetails: phase === "failed" && kind === "open",
+    sendDetails: failed && kind === "open",
     pill: phase === "stopped" ? "Stopped" : state.pill,
     changesAt: opening ? startedAt + OPENING_MS : phase === "starting" && !quiet ? quietAt : undefined,
   };

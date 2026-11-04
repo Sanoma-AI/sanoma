@@ -3,7 +3,6 @@ import { type CompanyState, companyPage, folderNameOf, INSTALLING, QUIET_MS, STA
 import { failureOf } from "../src/session.ts";
 
 const state = (over: Partial<CompanyState> = {}): CompanyState => ({
-  path: "/Users/a/Companies/acme",
   name: "acme",
   place: "~/Companies/acme",
   kind: "open",
@@ -43,6 +42,11 @@ describe("a start's steps", () => {
     ]);
   });
 
+  test("a new company tried again, in a folder that got that far, reports as an open does", () => {
+    expect(statuses({ kind: "new", progress: [INSTALLING] })).toEqual(["now", "next"]);
+    expect(statuses({ kind: "new", progress: [INSTALLING, STARTING] })).toEqual(["done", "now"]);
+  });
+
   test("a copy from GitHub has one more in front, done when the copy is there already", () => {
     expect(statuses({ kind: "clone", progress: ["Cloning"] })).toEqual(["now", "next", "next"]);
     expect(statuses({ kind: "clone", progress: ["Cloning", INSTALLING] })).toEqual(["done", "now", "next"]);
@@ -58,16 +62,40 @@ describe("a start's steps", () => {
 
 describe("a company's page", () => {
   test("an open shows one word for 3 seconds, then its steps, and redraws itself then", () => {
-    const early = companyPage(state(), 3_999);
-    expect(early).toMatchObject({ opening: true, changesAt: 4_000 });
-    expect(companyPage(state(), 4_000).opening).toBe(false);
+    expect(companyPage(state(), 3_999)).toMatchObject({ current: "Opening", listed: false, changesAt: 4_000 });
+    const later = companyPage(state(), 4_000);
+    expect(later).toMatchObject({ listed: true, layout: "column", controls: true });
+    expect(later.current).toBeUndefined();
   });
 
-  test("shows the steps at once for a new company, a warning to read, or details asked for", () => {
-    expect(companyPage(state({ kind: "new" }), 1_000).opening).toBe(false);
-    expect(companyPage(state({ kind: "clone" }), 1_000).opening).toBe(false);
-    expect(companyPage(state({ warning: "This folder is in iCloud" }), 1_000).opening).toBe(false);
-    expect(companyPage(state({ details: true }), 1_000).opening).toBe(false);
+  test("shows the steps at once for a new company or a warning to read", () => {
+    expect(companyPage(state({ kind: "new" }), 1_000).listed).toBe(true);
+    expect(companyPage(state({ kind: "clone" }), 1_000).listed).toBe(true);
+    expect(companyPage(state({ warning: "This folder is in iCloud" }), 1_000).listed).toBe(true);
+  });
+
+  test("with details asked for, the output takes the list's place and the step goes beside the name", () => {
+    expect(companyPage(state({ details: true }), 1_000)).toMatchObject({
+      layout: "wide",
+      output: true,
+      listed: false,
+      current: "Installing what it needs",
+      controls: true,
+    });
+    // Nothing under way when only Got it holds the app back.
+    const held = { details: true, phase: "running", warning: "This folder is in iCloud" } as const;
+    expect(companyPage(state(held), 1_000).current).toBeUndefined();
+  });
+
+  test("a failure opens its output whatever was asked, until its page hides it; its Hide replaces the controls", () => {
+    const failed = state({ phase: "failed", details: false });
+    expect(companyPage(failed, 0)).toMatchObject({ layout: "wide", output: true, controls: false, listed: false });
+    expect(companyPage(failed, 0, true)).toMatchObject({ layout: "wide", output: false, controls: true });
+    expect(companyPage(state({ phase: "stopped" }), 0)).toMatchObject({
+      layout: "wide",
+      output: false,
+      controls: true,
+    });
   });
 
   test("only a new company says how long and that the window may close, naming what brings it back", () => {
@@ -127,7 +155,7 @@ const exit = (over: { code?: number | null; signal?: NodeJS.Signals | null; erro
 });
 
 describe("why a session ended", () => {
-  const opened = { kind: "open", progress: [], ready: false } as const;
+  const opened = { kind: "open", phase: "starting", progress: [] } satisfies Parameters<typeof failureOf>[1];
 
   test("a configuration problem says so, in the launcher's words", () => {
     expect(failureOf(exit({ code: 2, error: "no workflows" }), opened)).toEqual({
@@ -138,7 +166,7 @@ describe("why a session ended", () => {
   });
 
   test("with only an exit code, a new company that never answered says it was setting up", () => {
-    expect(failureOf(exit(), { kind: "new", progress: [], ready: false })).toEqual({
+    expect(failureOf(exit(), { kind: "new", phase: "starting", progress: [] })).toEqual({
       message:
         "Setting up stopped before the app opened (exit code 1). The details below say why. Start again picks up where it stopped.",
       pill: "Not set up",
@@ -147,17 +175,17 @@ describe("why a session ended", () => {
 
   test("a copy that failed says not copied, and git's line; later on it failed to start", () => {
     const failure = exit({ code: null, error: "GitHub did not let this computer in" });
-    expect(failureOf(failure, { kind: "clone", progress: ["Cloning"], ready: false })).toEqual({
+    expect(failureOf(failure, { kind: "clone", phase: "starting", progress: ["Cloning"] })).toEqual({
       message: "GitHub did not let this computer in",
       pill: "Not copied",
     });
-    expect(failureOf(exit(), { kind: "clone", progress: ["Cloning", INSTALLING], ready: false }).pill).toBe(
+    expect(failureOf(exit(), { kind: "clone", phase: "starting", progress: ["Cloning", INSTALLING] }).pill).toBe(
       "Did not start",
     );
   });
 
   test("a company that had answered stopped, whichever way it began", () => {
-    expect(failureOf(exit({ signal: "SIGSEGV" }), { kind: "new", progress: [], ready: true })).toEqual({
+    expect(failureOf(exit({ signal: "SIGSEGV" }), { kind: "new", phase: "running", progress: [] })).toEqual({
       message: "The company stopped (SIGSEGV).",
       pill: "Stopped",
     });
