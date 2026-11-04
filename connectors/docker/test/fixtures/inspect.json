@@ -1,9 +1,9 @@
 {
   "sanoma-test-driver": {
-    "Id": "cc671833991352b8a473cc52c33fbd92fa849b3ac2059e837034979a8f9812c9",
-    "Created": "2026-10-17T06:53:31.02568147Z",
-    "Path": "docker-entrypoint.sh",
-    "Args": ["node", "-e", "require('http').createServer((q, s) => s.end('ok')).listen(3000)"],
+    "Id": "484189f591100781981bb24cb4e365c4ae74db9eb1a0ff03489a7e061b339132",
+    "Created": "2026-11-04T20:07:54.80331842Z",
+    "Path": "node",
+    "Args": ["-e", "require('http').createServer((q, s) => s.end('ok')).listen(3000)", "serve"],
     "State": {
       "Status": "running",
       "Running": true,
@@ -11,29 +11,29 @@
       "Restarting": false,
       "OOMKilled": false,
       "Dead": false,
-      "Pid": 94034,
+      "Pid": 35352,
       "ExitCode": 0,
       "Error": "",
-      "StartedAt": "2026-10-17T06:53:31.280261553Z",
+      "StartedAt": "2026-11-04T20:08:02.343845299Z",
       "FinishedAt": "0001-01-01T00:00:00Z",
       "Health": {
         "Status": "healthy",
         "FailingStreak": 0,
         "Log": [
           {
-            "Start": "2026-10-17T06:53:33.281439096Z",
-            "End": "2026-10-17T06:53:33.397149221Z",
+            "Start": "2026-11-04T20:08:04.344634383Z",
+            "End": "2026-11-04T20:08:04.853787966Z",
             "ExitCode": 0,
             "Output": ""
           }
         ]
       }
     },
-    "Image": "sha256:75d5ec1b0a76c473ed71b55d74e0d81c6024e695b2aeabde81a29a96d9260561",
-    "ResolvConfPath": "/var/lib/docker/containers/cc671833991352b8a473cc52c33fbd92fa849b3ac2059e837034979a8f9812c9/resolv.conf",
-    "HostnamePath": "/var/lib/docker/containers/cc671833991352b8a473cc52c33fbd92fa849b3ac2059e837034979a8f9812c9/hostname",
-    "HostsPath": "/var/lib/docker/containers/cc671833991352b8a473cc52c33fbd92fa849b3ac2059e837034979a8f9812c9/hosts",
-    "LogPath": "/var/lib/docker/containers/cc671833991352b8a473cc52c33fbd92fa849b3ac2059e837034979a8f9812c9/cc671833991352b8a473cc52c33fbd92fa849b3ac2059e837034979a8f9812c9-json.log",
+    "Image": "sha256:4960f8178b630d255f65e3280fe4ce77e7c1099f88562e6e28d18e7487808cda",
+    "ResolvConfPath": "/var/lib/docker/containers/484189f591100781981bb24cb4e365c4ae74db9eb1a0ff03489a7e061b339132/resolv.conf",
+    "HostnamePath": "/var/lib/docker/containers/484189f591100781981bb24cb4e365c4ae74db9eb1a0ff03489a7e061b339132/hostname",
+    "HostsPath": "/var/lib/docker/containers/484189f591100781981bb24cb4e365c4ae74db9eb1a0ff03489a7e061b339132/hosts",
+    "LogPath": "/var/lib/docker/containers/484189f591100781981bb24cb4e365c4ae74db9eb1a0ff03489a7e061b339132/484189f591100781981bb24cb4e365c4ae74db9eb1a0ff03489a7e061b339132-json.log",
     "Name": "/sanoma-test-driver",
     "RestartCount": 0,
     "Driver": "overlay2",
@@ -136,16 +136,16 @@
     },
     "GraphDriver": {
       "Data": {
-        "LowerDir": "/var/lib/docker/overlay2/f4090d1f2ed1ea5483b8acc42c1851f359ebde2368113e6cb81319a00ec4769e-init/diff:/var/lib/docker/overlay2/02cb12540cae47aa9481331b7cac2872127a7dd46c3eb992529bc415fa12d4c3/diff:/var/lib/docker/overlay2/cec59fc4839bb1c21fd4a8142a332f320dec2ffe5c750c394f79a57d6b03e5b2/diff:/var/lib/docker/overlay2/4288129ff2c7667c2c5f0afaca55ad2378f8df14ee1ce17800714f3af105f470/diff:/var/lib/docker/overlay2/598e051aa72384bc6a47c4b1067aa8ec1ee15ca21f96d15a81b56cc37e66c366/diff:/var/lib/docker/overlay2/95c082a4b76345965f9e8f4e7e882e9a019a2192fb97cf365a7171724740a256/diff",
-        "MergedDir": "/var/lib/docker/overlay2/f4090d1f2ed1ea5483b8acc42c1851f359ebde2368113e6cb81319a00ec4769e/merged",
-        "UpperDir": "/var/lib/docker/overlay2/f4090d1f2ed1ea5483b8acc42c1851f359ebde2368113e6cb81319a00ec4769e/diff",
-        "WorkDir": "/var/lib/docker/overlay2/f4090d1f2ed1ea5483b8acc42c1851f359ebde2368113e6cb81319a00ec4769e/work"
+        "LowerDir": "/var/lib/docker/overlay2/f72f98828fdcf27f8624b5a7ce460d66117446c4aca9942a74c281cbff67d197-init/diff:/var/lib/docker/overlay2/bc7167b6f92f78ddb404542136459486c9875e80a478a04bc2719ba9773a601d/diff:/var/lib/docker/overlay2/b7ac6e2b5dead1cabdb5e55013e5f59c2f16d1c03869d632d1a111b571d1377d/diff:/var/lib/docker/overlay2/17af9a830af49e66517a83a34b4515c6e741de4c4f8b082113c518a72b2b96e2/diff:/var/lib/docker/overlay2/3d54ce79208d39693bff0fde98600c01db2f9350a3de59f9d2aa68393e3b467e/diff:/var/lib/docker/overlay2/cff60686c70703cb2fea6ac6a10a5200d9ec9ba9094be151c4342468efd730ba/diff",
+        "MergedDir": "/var/lib/docker/overlay2/f72f98828fdcf27f8624b5a7ce460d66117446c4aca9942a74c281cbff67d197/merged",
+        "UpperDir": "/var/lib/docker/overlay2/f72f98828fdcf27f8624b5a7ce460d66117446c4aca9942a74c281cbff67d197/diff",
+        "WorkDir": "/var/lib/docker/overlay2/f72f98828fdcf27f8624b5a7ce460d66117446c4aca9942a74c281cbff67d197/work"
       },
       "Name": "overlay2"
     },
     "Mounts": [],
     "Config": {
-      "Hostname": "cc6718339913",
+      "Hostname": "484189f59110",
       "Domainname": "",
       "User": "",
       "AttachStdin": false,
@@ -163,10 +163,10 @@
         "SANOMA_SECRETS_KEY=docker-test-secret-value",
         "PORT=3000",
         "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-        "NODE_VERSION=24.22.0",
+        "NODE_VERSION=24.22.2",
         "YARN_VERSION=1.22.22"
       ],
-      "Cmd": ["node", "-e", "require('http').createServer((q, s) => s.end('ok')).listen(3000)"],
+      "Cmd": ["serve"],
       "Healthcheck": {
         "Test": [
           "CMD",
@@ -182,7 +182,7 @@
       "Image": "sanoma-test-healthz:dev",
       "Volumes": null,
       "WorkingDir": "",
-      "Entrypoint": ["docker-entrypoint.sh"],
+      "Entrypoint": ["node", "-e", "require('http').createServer((q, s) => s.end('ok')).listen(3000)"],
       "OnBuild": null,
       "Labels": {
         "sanoma.env": "PORT,SANOMA_REVISION,SANOMA_SECRETS_KEY,SANOMA_SOURCE",
@@ -193,7 +193,7 @@
     },
     "NetworkSettings": {
       "Bridge": "",
-      "SandboxID": "7dbb54b3e7e86622ee8fd1fdc3e7e7eb7f87a2caa6098a283f505370afbe9b81",
+      "SandboxID": "473426d227beb95f58569caf18d09830e733178f460e8a9d2fed2b19c59f3598",
       "HairpinMode": false,
       "LinkLocalIPv6Address": "",
       "LinkLocalIPv6PrefixLen": 0,
@@ -205,41 +205,41 @@
           }
         ]
       },
-      "SandboxKey": "/var/run/docker/netns/7dbb54b3e7e8",
+      "SandboxKey": "/var/run/docker/netns/473426d227be",
       "SecondaryIPAddresses": null,
       "SecondaryIPv6Addresses": null,
-      "EndpointID": "ab2db376784c553306698e946685bb5768ac4298bc791fb63f7e1a971c0d49e7",
+      "EndpointID": "fe9d3642aceb5496ff59d1ef15c47c98526f0f839896949d44a3cf1e1f3d1e3c",
       "Gateway": "172.17.0.1",
       "GlobalIPv6Address": "",
       "GlobalIPv6PrefixLen": 0,
-      "IPAddress": "172.17.0.2",
+      "IPAddress": "172.17.0.3",
       "IPPrefixLen": 16,
       "IPv6Gateway": "",
-      "MacAddress": "02:42:ac:11:00:02",
+      "MacAddress": "02:42:ac:11:00:03",
       "Networks": {
         "bridge": {
           "IPAMConfig": null,
           "Links": null,
           "Aliases": null,
-          "NetworkID": "baea0822f799df6e07e62120bf093a517fb230118ad3350cb6e8921c55f875c1",
-          "EndpointID": "ab2db376784c553306698e946685bb5768ac4298bc791fb63f7e1a971c0d49e7",
+          "NetworkID": "9d1c74ac2d223b30512e27c4f03dbe423071eba937e2550c07bace292d55ba4f",
+          "EndpointID": "fe9d3642aceb5496ff59d1ef15c47c98526f0f839896949d44a3cf1e1f3d1e3c",
           "Gateway": "172.17.0.1",
-          "IPAddress": "172.17.0.2",
+          "IPAddress": "172.17.0.3",
           "IPPrefixLen": 16,
           "IPv6Gateway": "",
           "GlobalIPv6Address": "",
           "GlobalIPv6PrefixLen": 0,
-          "MacAddress": "02:42:ac:11:00:02",
+          "MacAddress": "02:42:ac:11:00:03",
           "DriverOpts": null
         }
       }
     }
   },
-  "cc671833991352b8a473cc52c33fbd92fa849b3ac2059e837034979a8f9812c9": {
-    "Id": "cc671833991352b8a473cc52c33fbd92fa849b3ac2059e837034979a8f9812c9",
-    "Created": "2026-10-17T06:53:31.02568147Z",
-    "Path": "docker-entrypoint.sh",
-    "Args": ["node", "-e", "require('http').createServer((q, s) => s.end('ok')).listen(3000)"],
+  "484189f591100781981bb24cb4e365c4ae74db9eb1a0ff03489a7e061b339132": {
+    "Id": "484189f591100781981bb24cb4e365c4ae74db9eb1a0ff03489a7e061b339132",
+    "Created": "2026-11-04T20:07:54.80331842Z",
+    "Path": "node",
+    "Args": ["-e", "require('http').createServer((q, s) => s.end('ok')).listen(3000)", "serve"],
     "State": {
       "Status": "running",
       "Running": true,
@@ -247,29 +247,29 @@
       "Restarting": false,
       "OOMKilled": false,
       "Dead": false,
-      "Pid": 94034,
+      "Pid": 35352,
       "ExitCode": 0,
       "Error": "",
-      "StartedAt": "2026-10-17T06:53:31.280261553Z",
+      "StartedAt": "2026-11-04T20:08:02.343845299Z",
       "FinishedAt": "0001-01-01T00:00:00Z",
       "Health": {
         "Status": "healthy",
         "FailingStreak": 0,
         "Log": [
           {
-            "Start": "2026-10-17T06:53:33.281439096Z",
-            "End": "2026-10-17T06:53:33.397149221Z",
+            "Start": "2026-11-04T20:08:04.344634383Z",
+            "End": "2026-11-04T20:08:04.853787966Z",
             "ExitCode": 0,
             "Output": ""
           }
         ]
       }
     },
-    "Image": "sha256:75d5ec1b0a76c473ed71b55d74e0d81c6024e695b2aeabde81a29a96d9260561",
-    "ResolvConfPath": "/var/lib/docker/containers/cc671833991352b8a473cc52c33fbd92fa849b3ac2059e837034979a8f9812c9/resolv.conf",
-    "HostnamePath": "/var/lib/docker/containers/cc671833991352b8a473cc52c33fbd92fa849b3ac2059e837034979a8f9812c9/hostname",
-    "HostsPath": "/var/lib/docker/containers/cc671833991352b8a473cc52c33fbd92fa849b3ac2059e837034979a8f9812c9/hosts",
-    "LogPath": "/var/lib/docker/containers/cc671833991352b8a473cc52c33fbd92fa849b3ac2059e837034979a8f9812c9/cc671833991352b8a473cc52c33fbd92fa849b3ac2059e837034979a8f9812c9-json.log",
+    "Image": "sha256:4960f8178b630d255f65e3280fe4ce77e7c1099f88562e6e28d18e7487808cda",
+    "ResolvConfPath": "/var/lib/docker/containers/484189f591100781981bb24cb4e365c4ae74db9eb1a0ff03489a7e061b339132/resolv.conf",
+    "HostnamePath": "/var/lib/docker/containers/484189f591100781981bb24cb4e365c4ae74db9eb1a0ff03489a7e061b339132/hostname",
+    "HostsPath": "/var/lib/docker/containers/484189f591100781981bb24cb4e365c4ae74db9eb1a0ff03489a7e061b339132/hosts",
+    "LogPath": "/var/lib/docker/containers/484189f591100781981bb24cb4e365c4ae74db9eb1a0ff03489a7e061b339132/484189f591100781981bb24cb4e365c4ae74db9eb1a0ff03489a7e061b339132-json.log",
     "Name": "/sanoma-test-driver",
     "RestartCount": 0,
     "Driver": "overlay2",
@@ -372,16 +372,16 @@
     },
     "GraphDriver": {
       "Data": {
-        "LowerDir": "/var/lib/docker/overlay2/f4090d1f2ed1ea5483b8acc42c1851f359ebde2368113e6cb81319a00ec4769e-init/diff:/var/lib/docker/overlay2/02cb12540cae47aa9481331b7cac2872127a7dd46c3eb992529bc415fa12d4c3/diff:/var/lib/docker/overlay2/cec59fc4839bb1c21fd4a8142a332f320dec2ffe5c750c394f79a57d6b03e5b2/diff:/var/lib/docker/overlay2/4288129ff2c7667c2c5f0afaca55ad2378f8df14ee1ce17800714f3af105f470/diff:/var/lib/docker/overlay2/598e051aa72384bc6a47c4b1067aa8ec1ee15ca21f96d15a81b56cc37e66c366/diff:/var/lib/docker/overlay2/95c082a4b76345965f9e8f4e7e882e9a019a2192fb97cf365a7171724740a256/diff",
-        "MergedDir": "/var/lib/docker/overlay2/f4090d1f2ed1ea5483b8acc42c1851f359ebde2368113e6cb81319a00ec4769e/merged",
-        "UpperDir": "/var/lib/docker/overlay2/f4090d1f2ed1ea5483b8acc42c1851f359ebde2368113e6cb81319a00ec4769e/diff",
-        "WorkDir": "/var/lib/docker/overlay2/f4090d1f2ed1ea5483b8acc42c1851f359ebde2368113e6cb81319a00ec4769e/work"
+        "LowerDir": "/var/lib/docker/overlay2/f72f98828fdcf27f8624b5a7ce460d66117446c4aca9942a74c281cbff67d197-init/diff:/var/lib/docker/overlay2/bc7167b6f92f78ddb404542136459486c9875e80a478a04bc2719ba9773a601d/diff:/var/lib/docker/overlay2/b7ac6e2b5dead1cabdb5e55013e5f59c2f16d1c03869d632d1a111b571d1377d/diff:/var/lib/docker/overlay2/17af9a830af49e66517a83a34b4515c6e741de4c4f8b082113c518a72b2b96e2/diff:/var/lib/docker/overlay2/3d54ce79208d39693bff0fde98600c01db2f9350a3de59f9d2aa68393e3b467e/diff:/var/lib/docker/overlay2/cff60686c70703cb2fea6ac6a10a5200d9ec9ba9094be151c4342468efd730ba/diff",
+        "MergedDir": "/var/lib/docker/overlay2/f72f98828fdcf27f8624b5a7ce460d66117446c4aca9942a74c281cbff67d197/merged",
+        "UpperDir": "/var/lib/docker/overlay2/f72f98828fdcf27f8624b5a7ce460d66117446c4aca9942a74c281cbff67d197/diff",
+        "WorkDir": "/var/lib/docker/overlay2/f72f98828fdcf27f8624b5a7ce460d66117446c4aca9942a74c281cbff67d197/work"
       },
       "Name": "overlay2"
     },
     "Mounts": [],
     "Config": {
-      "Hostname": "cc6718339913",
+      "Hostname": "484189f59110",
       "Domainname": "",
       "User": "",
       "AttachStdin": false,
@@ -399,10 +399,10 @@
         "SANOMA_SECRETS_KEY=docker-test-secret-value",
         "PORT=3000",
         "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-        "NODE_VERSION=24.22.0",
+        "NODE_VERSION=24.22.2",
         "YARN_VERSION=1.22.22"
       ],
-      "Cmd": ["node", "-e", "require('http').createServer((q, s) => s.end('ok')).listen(3000)"],
+      "Cmd": ["serve"],
       "Healthcheck": {
         "Test": [
           "CMD",
@@ -418,7 +418,7 @@
       "Image": "sanoma-test-healthz:dev",
       "Volumes": null,
       "WorkingDir": "",
-      "Entrypoint": ["docker-entrypoint.sh"],
+      "Entrypoint": ["node", "-e", "require('http').createServer((q, s) => s.end('ok')).listen(3000)"],
       "OnBuild": null,
       "Labels": {
         "sanoma.env": "PORT,SANOMA_REVISION,SANOMA_SECRETS_KEY,SANOMA_SOURCE",
@@ -429,7 +429,7 @@
     },
     "NetworkSettings": {
       "Bridge": "",
-      "SandboxID": "7dbb54b3e7e86622ee8fd1fdc3e7e7eb7f87a2caa6098a283f505370afbe9b81",
+      "SandboxID": "473426d227beb95f58569caf18d09830e733178f460e8a9d2fed2b19c59f3598",
       "HairpinMode": false,
       "LinkLocalIPv6Address": "",
       "LinkLocalIPv6PrefixLen": 0,
@@ -441,31 +441,31 @@
           }
         ]
       },
-      "SandboxKey": "/var/run/docker/netns/7dbb54b3e7e8",
+      "SandboxKey": "/var/run/docker/netns/473426d227be",
       "SecondaryIPAddresses": null,
       "SecondaryIPv6Addresses": null,
-      "EndpointID": "ab2db376784c553306698e946685bb5768ac4298bc791fb63f7e1a971c0d49e7",
+      "EndpointID": "fe9d3642aceb5496ff59d1ef15c47c98526f0f839896949d44a3cf1e1f3d1e3c",
       "Gateway": "172.17.0.1",
       "GlobalIPv6Address": "",
       "GlobalIPv6PrefixLen": 0,
-      "IPAddress": "172.17.0.2",
+      "IPAddress": "172.17.0.3",
       "IPPrefixLen": 16,
       "IPv6Gateway": "",
-      "MacAddress": "02:42:ac:11:00:02",
+      "MacAddress": "02:42:ac:11:00:03",
       "Networks": {
         "bridge": {
           "IPAMConfig": null,
           "Links": null,
           "Aliases": null,
-          "NetworkID": "baea0822f799df6e07e62120bf093a517fb230118ad3350cb6e8921c55f875c1",
-          "EndpointID": "ab2db376784c553306698e946685bb5768ac4298bc791fb63f7e1a971c0d49e7",
+          "NetworkID": "9d1c74ac2d223b30512e27c4f03dbe423071eba937e2550c07bace292d55ba4f",
+          "EndpointID": "fe9d3642aceb5496ff59d1ef15c47c98526f0f839896949d44a3cf1e1f3d1e3c",
           "Gateway": "172.17.0.1",
-          "IPAddress": "172.17.0.2",
+          "IPAddress": "172.17.0.3",
           "IPPrefixLen": 16,
           "IPv6Gateway": "",
           "GlobalIPv6Address": "",
           "GlobalIPv6PrefixLen": 0,
-          "MacAddress": "02:42:ac:11:00:02",
+          "MacAddress": "02:42:ac:11:00:03",
           "DriverOpts": null
         }
       }
