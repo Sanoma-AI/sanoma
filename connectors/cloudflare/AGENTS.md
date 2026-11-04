@@ -10,6 +10,8 @@ Follow the shared [connector conventions](../AGENTS.md).
 
 Keep `configurationRevision` aligned across schema, plan/read, the reserved `SANOMA_CONFIG_REVISION` binding, container labels and startup health checks. It is non-secret metadata for environment-only rollouts; never derive a public label from secret values. See [The Worker](README.md#the-worker).
 
+Keep reads and plans non-starting. Explicit host/container updates must await startup readiness even when the plan is unchanged; that path must not reupload secrets. See [The Worker](README.md#the-worker) for the revision and rotation contract.
+
 The fixtures are written from Cloudflare's API reference, not recorded (README, [Testing the driver](README.md#testing-the-driver)), the `records-*` ones too until a live run on `sanoma.work` records them; a recording replaces them. Never put a token or an account id in a fixture.
 
 Run `pnpm vitest run connectors/cloudflare` (the kits need Postgres, `pnpm db:up`) and `pnpm typecheck`. `test/live.ts` runs against a real account by hand only.

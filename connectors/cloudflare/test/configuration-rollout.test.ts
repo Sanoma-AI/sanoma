@@ -2,6 +2,8 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { memorySecrets, type CallContext } from "@sanoma-ai/workflows";
 import { expect, it, vi } from "vitest";
+import { container, host } from "../src/connector.ts";
+import { containerOps, type CloudflareApi } from "../src/ops.ts";
 import { fakeCloudflare } from "../src/fake.ts";
 
 it("rolls out a rotated bootstrap at the same source and image, then converges", async () => {
@@ -75,4 +77,104 @@ it("rolls out a rotated bootstrap at the same source and image, then converges",
     vi.restoreAllMocks();
     await fake.close();
   }
+});
+
+/** An upload already succeeded; its stopped runtime has not established readiness. */
+function pendingRollout(type: typeof container | typeof host, start: () => Promise<Response>) {
+  const desired = {
+    name: "retry",
+    source: "https://github.com/acme/company.git",
+    ref: "main",
+    revision: "same-commit",
+    image: "ghcr.io/sanoma-ai/runtime:0.11.6",
+    configurationRevision: "d1-g2",
+    port: 3000,
+    secrets: { SANOMA_MANAGED_IDENTITY_CREDENTIAL: { $secret: "BOOTSTRAP" } },
+  };
+  const text = {
+    SANOMA_SOURCE: desired.source,
+    SANOMA_REF: desired.ref,
+    SANOMA_REVISION: desired.revision,
+    SANOMA_IMAGE: desired.image,
+    SANOMA_CONFIG_REVISION: desired.configurationRevision,
+    PORT: "3000",
+  };
+  const send = vi.fn<CloudflareApi["send"]>(async (url: string) =>
+    new URL(url).searchParams.has("start")
+      ? start()
+      : Response.json({
+          revision: desired.revision,
+          configurationRevision: desired.configurationRevision,
+          running: false,
+          ready: false,
+        }),
+  );
+  const upload = vi.fn<CloudflareApi["upload"]>();
+  const api = {
+    workerUrl: async () => "https://retry.example.test",
+    application: async () => ({ id: "owned-app" }),
+    bindings: async () => [
+      { type: "durable_object_namespace", name: "SANOMA_INSTANCE" },
+      { type: "secret_text", name: "SANOMA_MANAGED_IDENTITY_CREDENTIAL" },
+      ...Object.entries(text).map(([name, value]) => ({ type: "plain_text", name, text: value })),
+    ],
+    send,
+    upload,
+  } as unknown as CloudflareApi;
+  const ops = containerOps(() => api, { startTimeoutMs: 100, pollMs: 1 }, type);
+  // No bootstrap value is available: an unchanged update must not resolve or upload secrets.
+  const call: CallContext = {
+    runId: "retry",
+    opId: `cloudflare.${type.type}.update`,
+    attempt: 1,
+    idempotencyKey: "retry",
+    secrets: memorySecrets({}),
+  };
+  return { desired, ops, call, send, upload };
+}
+
+it.each([container, host])(
+  "an unchanged $type update awaits readiness while reads and plans remain passive",
+  async (type) => {
+    const ready = Promise.withResolvers<Response>();
+    const start = vi.fn<() => Promise<Response>>(() => ready.promise);
+    const { desired, ops, call, upload } = pendingRollout(type, start);
+    await expect(ops.read({ id: desired.name })).resolves.toMatchObject({ gone: false });
+    await expect(ops.plan({ id: desired.name, desired })).resolves.toMatchObject({ action: "none" });
+    expect(start).not.toHaveBeenCalled();
+    let finished = false;
+    const update = ops.update({ id: desired.name, desired }, call).then((result) => {
+      finished = true;
+      return result;
+    });
+    try {
+      await vi.waitFor(() => expect(start).toHaveBeenCalledOnce());
+      expect(finished).toBe(false);
+      ready.resolve(
+        Response.json({
+          revision: desired.revision,
+          configurationRevision: desired.configurationRevision,
+          running: true,
+          ready: true,
+        }),
+      );
+      await expect(update).resolves.toMatchObject({
+        state: { healthy: true, revision: desired.revision, configurationRevision: desired.configurationRevision },
+      });
+      expect(upload).not.toHaveBeenCalled();
+    } finally {
+      ready.resolve(
+        Response.json({ revision: desired.revision, configurationRevision: desired.configurationRevision }),
+      );
+      await update.catch(() => {});
+    }
+  },
+);
+
+it("an unchanged update refuses terminal startup failure instead of reporting successful recovery", async () => {
+  const { desired, ops, call, upload } = pendingRollout(container, async () =>
+    Response.json({ error: "synthetic startup failure", exit: "exit 128" }, { status: 503 }),
+  );
+  await expect(ops.update({ id: desired.name, desired }, call)).rejects.toThrow("synthetic startup failure");
+  expect(upload).not.toHaveBeenCalled();
 });
