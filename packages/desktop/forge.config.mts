@@ -1,7 +1,7 @@
-// Electron Forge, from its Vite + TypeScript template. `make` builds the app for this platform's
-// arm64 and x64 into out/make: a dmg and a zip on macOS, a Squirrel installer and a zip on Windows.
-// desktop-release.yml uploads the Mac ones to a draft GitHub Release. `package` builds the app,
-// unpacked, into out/.
+// Electron Forge, from its Vite + TypeScript template. `make` builds the app into out/make: a dmg
+// and a zip for arm64 and x64 on macOS, and `make:windows` a Squirrel installer for x64 on Windows.
+// desktop-release.yml uploads them to a draft GitHub Release. `package` builds the app, unpacked,
+// into out/.
 import { cpSync } from "node:fs";
 import { join } from "node:path";
 import { notarize } from "@electron/notarize";
@@ -15,7 +15,7 @@ import { FuseV1Options, FuseVersion } from "@electron/fuses";
 
 // APPLE_SIGNING_IDENTITY signs with a Developer ID, APPLE_API_KEY (with its id and issuer)
 // notarizes; without them the build is signed ad hoc (README, "Signing and notarization").
-// vite.main.config.mts reads APPLE_SIGNING_IDENTITY the same way, for SIGNED_WITH_DEVELOPER_ID.
+// vite.main.config.mts reads APPLE_SIGNING_IDENTITY the same way, for SIGNED_BUILD.
 const identity = process.env.APPLE_SIGNING_IDENTITY;
 if (process.env.APPLE_API_KEY && !identity) throw new Error("APPLE_API_KEY is set without APPLE_SIGNING_IDENTITY");
 const notarizeWith = process.env.APPLE_API_KEY
@@ -25,6 +25,21 @@ const notarizeWith = process.env.APPLE_API_KEY
       appleApiIssuer: required("APPLE_API_ISSUER"),
     }
   : undefined;
+
+// Forge adds the extension for each platform: icon.icns, icon.ico (scripts/icons.ts).
+const icon = join(import.meta.dirname, "icons", "icon");
+// WINDOWS_SIGN_WITH_PARAMS, signtool's arguments, signs every executable, the app's and the
+// installer's; without it the build is unsigned (README, "Signing and notarization"). signtool's
+// path and the timestamp server come from @electron/windows-sign's own WINDOWS_SIGNTOOL_PATH and
+// WINDOWS_TIMESTAMP_SERVER. vite.main.config.mts reads this variable too, for SIGNED_BUILD.
+// `object`, as the type of `hashes` is an enum @electron/windows-sign does not export as a value, and
+// Forge's types leave `windowsSign` out of the Squirrel maker's options, though it passes them on.
+const windowsSign: object | undefined = process.env.WINDOWS_SIGN_WITH_PARAMS
+  ? { signWithParams: process.env.WINDOWS_SIGN_WITH_PARAMS, hashes: ["sha256"] }
+  : undefined;
+// The test build's inspector (the fuses below) would run anything under Sanoma's signature.
+if (process.env.SANOMA_TEST_BUILD && (identity || windowsSign))
+  throw new Error("SANOMA_TEST_BUILD is set on a signed build");
 
 function required(name: string): string {
   const value = process.env[name];
@@ -37,6 +52,7 @@ const config: ForgeConfig = {
     appBundleId: "ai.sanoma.desktop",
     appCategoryType: "public.app-category.business",
     asar: true,
+    icon,
     // stage/ is filled by scripts/stage.ts: pnpm, the same for every architecture, goes in here;
     // the pinned Node goes in per architecture (`packageAfterCopy`).
     extraResource: [join(import.meta.dirname, "stage", "pnpm")],
@@ -68,6 +84,7 @@ const config: ForgeConfig = {
     },
     // The app, notarized and stapled before the makers pack it (so the zip's is too).
     osxNotarize: notarizeWith,
+    windowsSign,
   },
   hooks: {
     // The Node built for the architecture being packaged (scripts/download-node.ts), beside pnpm.
@@ -85,9 +102,21 @@ const config: ForgeConfig = {
     },
   },
   makers: [
-    new MakerDMG(identity ? { additionalDMGOptions: { "code-sign": { "signing-identity": identity } } } : {}),
-    new MakerSquirrel({ name: "Sanoma", setupExe: "Sanoma-Setup.exe" }),
-    new MakerZIP({}, ["darwin", "win32"]),
+    new MakerDMG({
+      icon: `${icon}.icns`,
+      ...(identity ? { additionalDMGOptions: { "code-sign": { "signing-identity": identity } } } : {}),
+    }),
+    // `name` is the package id WINDOWS_APP_ID (src/self-update.ts) is made from.
+    new MakerSquirrel({
+      name: "Sanoma",
+      authors: "Sanoma",
+      setupExe: "Sanoma-Setup.exe",
+      setupIcon: `${icon}.ico`,
+      // Programs and Features takes the icon from a URL.
+      iconUrl: "https://raw.githubusercontent.com/Sanoma-AI/sanoma/main/packages/desktop/icons/icon.ico",
+      windowsSign,
+    } as object),
+    new MakerZIP({}, ["darwin"]),
   ],
   plugins: [
     new VitePlugin({
@@ -109,10 +138,13 @@ const config: ForgeConfig = {
       // update would ask for Keychain access (and a denial signs the user out of every company).
       // One-way: a build without it cannot read the cookies one with it wrote (`start` and an ad
       // hoc `package` share an installed release's userData), and a Developer ID of another team
-      // asks for Keychain access once.
-      [FuseV1Options.EnableCookieEncryption]: Boolean(identity),
+      // asks for Keychain access once. On Windows, with a release's signature too: the key is the
+      // user's own there (DPAPI), and nothing asks; the same one-way rule holds.
+      [FuseV1Options.EnableCookieEncryption]: Boolean(identity || windowsSign),
       [FuseV1Options.EnableNodeOptionsEnvironmentVariable]: false,
-      [FuseV1Options.EnableNodeCliInspectArguments]: false,
+      // On only in the build desktop.yml tests (SANOMA_TEST_BUILD): Playwright drives the packaged
+      // app through the inspector. A release never sets it.
+      [FuseV1Options.EnableNodeCliInspectArguments]: Boolean(process.env.SANOMA_TEST_BUILD),
       [FuseV1Options.EnableEmbeddedAsarIntegrityValidation]: true,
       [FuseV1Options.OnlyLoadAppFromAsar]: true,
     }),

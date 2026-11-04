@@ -76,14 +76,13 @@ export async function startCompany(
     rmSync(carried);
   }
 
-  const own = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
+  const own = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as Manifest;
   const manifest = join(cwd, "package.json");
   const pkg = JSON.parse(readFileSync(manifest, "utf8")) as { name: string; dependencies: Record<string, string> };
   const name = packageName(basename(cwd));
   // npm refuses to install a package into one of the same name (`sanoma` in `sanoma/`).
   pkg.name = name in pkg.dependencies ? `${name}-company` : name;
-  // The template is this launcher's, so `sanoma` at its version; the rest (each versioned on its own) at `latest`.
-  pkg.dependencies.sanoma = `^${own.version}`;
+  pkg.dependencies = pinDependencies(pkg.dependencies, own);
   writeFileSync(manifest, `${JSON.stringify(pkg, null, 2)}\n`);
 
   const people = join(cwd, "resources", "people.ts");
@@ -109,6 +108,31 @@ export async function startCompany(
   await install(cwd, packageManager);
   await commit("--amend");
   return true;
+}
+
+/** What `pinDependencies` reads of this package's own manifest. */
+export interface Manifest {
+  version: string;
+  devDependencies?: Record<string, string>;
+}
+
+/**
+ * The template's dependencies at the versions released with it, as a company starts from them:
+ * `sanoma` at this launcher's own version (it pins the runtime exactly), each connector at this
+ * package's devDependency on it, which publishing writes as an exact version. The template's
+ * `pnpm-workspace.yaml` lets its install past pnpm's minimum release age, so a range or `latest`
+ * here would meet a release newer than this template and what it allows. From a checkout, whose
+ * manifest says `workspace:*`, or a manifest without devDependencies, a connector stays as the
+ * template names it.
+ */
+export function pinDependencies(dependencies: Record<string, string>, own: Manifest): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(dependencies).map(([name, range]) => {
+      if (name === "sanoma") return [name, own.version];
+      const released = own.devDependencies?.[name] ?? range;
+      return [name, released.startsWith("workspace:") ? range : released];
+    }),
+  );
 }
 
 /** The template's founder, `export const founder = sanoma.person(…)`, which `sanoma init` declares as the creator. */
@@ -191,9 +215,14 @@ export const packageName = (dir: string) =>
     .replace(/[^a-z0-9._-]+/g, "-")
     .replace(/^[-._]+|-+$/g, "") || "company";
 
+/**
+ * `<packageManager> install`, through a shell: on Windows pnpm, npm and yarn are `.cmd` shims, which
+ * Node starts only through one. As one string, as Node deprecates arguments beside `shell`; nothing
+ * in it needs quoting, the package manager being one of `packageManagerOf`'s names.
+ */
 const installWith = (cwd: string, packageManager: string) =>
   new Promise<void>((resolve, reject) => {
-    const child = spawn(packageManager, ["install"], { cwd, stdio: "inherit" });
+    const child = spawn(`${packageManager} install`, { cwd, stdio: "inherit", shell: true, windowsHide: true });
     child.once("error", reject);
     child.once("exit", (code) =>
       code === 0 ? resolve() : reject(new Error(`${packageManager} install failed; run it in ${cwd}, then sanoma`)),

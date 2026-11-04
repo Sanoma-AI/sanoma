@@ -1,0 +1,32 @@
+# The local registry of desktop.yml's New Company test: sanoma and its packages as this commit has them
+# (published here, never looked up on npm); PostgreSQL's and the bridge's binaries, which are versioned
+# apart, and everything else from npm.
+storage: ./storage
+max_body_size: 300mb
+# npm publishes only with a token: the workflow adds a user here, for its own run.
+auth:
+  htpasswd:
+    file: ./htpasswd
+uplinks:
+  npmjs:
+    url: https://registry.npmjs.org/
+packages:
+  "@sanoma-ai/postgres-*":
+    access: $all
+    proxy: npmjs
+  "@sanoma-ai/bridge-*":
+    access: $all
+    proxy: npmjs
+  "@sanoma-ai/*":
+    access: $all
+    publish: $all
+  sanoma:
+    access: $all
+    publish: $all
+  "**":
+    access: $all
+    proxy: npmjs
+log:
+  type: stdout
+  format: pretty
+  level: warn

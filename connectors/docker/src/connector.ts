@@ -95,6 +95,8 @@ export const containerType: TfMapped<typeof container> = {
       ...CREATE_ONLY,
       name,
       image,
+      // The app beside the worker: the image runs the worker alone unless told `serve`.
+      command: ["serve"],
       env: Object.entries(env).map(([key, value]) => `${key}=${value}`),
       labels: Object.entries(labels).map(([label, value]) => ({ label, value })),
       ports: [{ internal: INTERNAL_PORT, external: port, ip: "127.0.0.1", protocol: "tcp" }],

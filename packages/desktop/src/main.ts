@@ -2,7 +2,7 @@
 // never import electron and are tested on their own.
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import {
   app,
   autoUpdater,
@@ -45,13 +45,16 @@ import {
   newCompanyProblem,
 } from "./create.ts";
 import {
+  GIT_FOR_WINDOWS_URL,
   gitEnv,
   gitFailure,
+  gitForWindows,
   type Identity,
   identityOf,
   identityProblem,
   installCommandLineTools,
   needsCommandLineTools,
+  needsGitForWindows,
   setIdentity,
 } from "./git.ts";
 import { USAGE_EXIT } from "./launcher.ts";
@@ -60,7 +63,7 @@ import { type CompanyLog, hidePasswords, openLog } from "./logs.ts";
 import { folderArgument, isCompanyFolder, realPathOf, syncedFolderWarning } from "./places.ts";
 import { archWarnings, runtimeOf } from "./runtime.ts";
 import { quitOrder } from "./quit.ts";
-import { REPOSITORY, updatesItself } from "./self-update.ts";
+import { firstCheckDelay, installedBySquirrel, REPOSITORY, updatesItself, WINDOWS_APP_ID } from "./self-update.ts";
 import { type Session, type SessionOptions, startSession } from "./session.ts";
 import { type Newer, patchSettings, readSettings, runCheck, savedNewer } from "./update-check.ts";
 import { fastForward, prepareUpdate } from "./update-company.ts";
@@ -240,7 +243,7 @@ const trayMenu = () =>
 
 /** The tray icon, whose menu shows the window, lists the companies and quits; a click shows the window. */
 async function makeTray() {
-  // The app's own icon as the system shows it (Electron's, until the shell has one of its own).
+  // The app's own icon as the system shows it (icons/, from `make` and `package`; Electron's under `start`).
   tray = new Tray(await app.getFileIcon(process.execPath, { size: "small" }));
   tray.setToolTip("Sanoma");
   tray.setContextMenu(trayMenu());
@@ -773,21 +776,43 @@ async function identityReady(cwd: string): Promise<boolean> {
 }
 
 /**
- * Whether git can run: on macOS, Apple's command line tools must be there; when they are not, a
- * dialog offers their installer and to check again.
+ * Whether git can run: on macOS, Apple's command line tools must be there, and on Windows, Git for
+ * Windows; when they are not, a dialog offers their installer, or its page, and to check again.
  */
 async function gitReady(): Promise<boolean> {
-  while (await needsCommandLineTools()) {
-    const { response } = await dialog.showMessageBox({
-      type: "info",
+  return (
+    (await untilThere(() => needsGitForWindows(), {
+      message: "Sanoma needs Git for Windows",
+      detail: `Download opens ${GIT_FOR_WINDOWS_URL} in your browser. Once it is installed, choose Check Again; if this still shows, quit Sanoma and open it again.`,
+      action: "Download",
+      // A browser that does not open leaves the dialog, which comes back, with the address in it.
+      act: () => shell.openExternal(GIT_FOR_WINDOWS_URL).catch(() => {}),
+    })) &&
+    untilThere(() => needsCommandLineTools(), {
       message: "Sanoma needs Apple's command line tools for git",
       detail: "Install opens Apple's installer. Once it has finished, choose Check Again.",
-      buttons: ["Install", "Check Again", "Cancel"],
+      action: "Install",
+      act: installCommandLineTools,
+    })
+  );
+}
+
+/** While something is needed, a dialog offers `action` and to check again; false when the person cancels. */
+async function untilThere(
+  needed: () => Promise<boolean>,
+  offer: { message: string; detail: string; action: string; act: () => unknown },
+): Promise<boolean> {
+  while (await needed()) {
+    const { response } = await dialog.showMessageBox({
+      type: "info",
+      message: offer.message,
+      detail: offer.detail,
+      buttons: [offer.action, "Check Again", "Cancel"],
       defaultId: 0,
       cancelId: 2,
     });
     if (response === 2) return false;
-    if (response === 0) await installCommandLineTools();
+    if (response === 0) await offer.act();
   }
   return true;
 }
@@ -809,7 +834,7 @@ async function newCompany(): Promise<void> {
   if (warning) {
     const { response } = await dialog.showMessageBox({
       type: "warning",
-      message: "This folder is in iCloud",
+      message: "This folder is synced",
       detail: warning,
       buttons: ["Choose Another Folder", "Use This Folder"],
       defaultId: 0,
@@ -930,7 +955,9 @@ async function showCheck(asked: boolean, current: string, { found, notify }: { f
       found
         ? {
             message: `Sanoma ${found.version} is available`,
-            detail: `You have ${current}. Download it from its release page, then replace Sanoma in Applications.`,
+            detail: `You have ${current}. Download it from its release page, then ${
+              process.platform === "win32" ? "run the installer" : "replace Sanoma in Applications"
+            }.`,
             buttons: ["Open Release Page", "Later"],
           }
         : { message: `Sanoma ${current} is the newest version` },
@@ -948,13 +975,13 @@ async function showCheck(asked: boolean, current: string, { found, notify }: { f
 
 /** Whether this build updates itself (`updatesItself`), decided once the app is ready. */
 let selfUpdating = false;
-/** Set once Squirrel.Mac has downloaded an update, which installs when the app quits. */
+/** Set once Squirrel has downloaded an update, which the next launch runs. */
 let updateReady = false;
 
 /**
- * Updating itself: update-electron-app checks at once and every hour, and Squirrel.Mac
- * downloads the update in the background. Nothing restarts the app: the update installs when it
- * quits, or at Help → Restart to Update. Its errors (offline, the service down) go to its log only.
+ * Updating itself: update-electron-app checks at once and every hour, and Squirrel downloads the
+ * update in the background. Nothing restarts the app: the next launch is the new version, or
+ * Help → Restart to Update. Its errors (offline, the service down) go to its log only.
  */
 function updateItself() {
   const updates = updateElectronApp({
@@ -1086,6 +1113,10 @@ const quit = quitOrder({
 if (squirrelStartup || !app.requestSingleInstanceLock()) {
   app.quit();
 } else {
+  if (process.platform === "win32") {
+    process.env.Path = [process.env.Path, ...gitForWindows(process.env)].join(delimiter);
+    if (app.isPackaged) app.setAppUserModelId(WINDOWS_APP_ID);
+  }
   app.on("second-instance", (_event, argv, cwd) => {
     const folder = folderArgument(argsOf(argv), cwd, ownPath());
     if (folder) void openCompany(folder);
@@ -1161,13 +1192,15 @@ if (squirrelStartup || !app.requestSingleInstanceLock()) {
     selfUpdating = updatesItself({
       packaged: app.isPackaged,
       platform: process.platform,
-      signed: SIGNED_WITH_DEVELOPER_ID,
-      inApplications: () => app.isInApplicationsFolder(),
+      signed: SIGNED_BUILD,
+      installed: () =>
+        process.platform === "win32" ? installedBySquirrel(process.execPath) : app.isInApplicationsFolder(),
     });
     buildMenu();
     // No Dock elsewhere: the tray icon brings the hidden window back.
     if (process.platform !== "darwin") makeTray().catch((err: unknown) => console.error(`tray: ${messageOf(err)}`));
-    if (selfUpdating) updateItself();
+    // Through a promise, so that its errors stay a rejection, not an uncaught exception's dialog.
+    if (selfUpdating) void new Promise((wait) => setTimeout(wait, firstCheckDelay(process.argv))).then(updateItself);
     // Else a built app checks for a newer release and links to it: a checkout's shell (start, the
     // smoke test) shares its settings and asks GitHub only from Help.
     else if (app.isPackaged) {

@@ -1,10 +1,11 @@
 // Quit's order (`before-quit` in main.ts): every company stops first, then the app quits; after
-// Restart to Update, Squirrel.Mac installs the update and relaunches the app in its place.
+// Restart to Update, Squirrel installs the update and relaunches the app in its place.
 //
-// `autoUpdater.quitAndInstall` closes the window without `before-quit`, which is why it is only
-// ever the last step here: by then `before-quit` has run, the companies are stopped and the window
-// closes (rather than hiding). Squirrel.Mac then quits the app (`terminate:`), and that
-// `before-quit` goes through.
+// On macOS, `autoUpdater.quitAndInstall` closes the window without `before-quit`, which is why it
+// is only ever the last step here: by then `before-quit` has run, the companies are stopped and the
+// window closes (rather than hiding). Squirrel.Mac then quits the app (`terminate:`), and that
+// `before-quit` goes through. On Windows it starts `Update.exe`, which waits for the app to exit and
+// starts the new version, and calls `app.quit`: the same last `before-quit`.
 
 export interface QuitSteps {
   /** Whether a company is opening or running, which Quit waits for. */
@@ -13,7 +14,7 @@ export interface QuitSteps {
   stopAll: () => Promise<unknown>;
   /** `app.quit`: the window closes and the app exits, after another `before-quit`. */
   quit: () => void;
-  /** `autoUpdater.quitAndInstall`: the window closes, then Squirrel.Mac installs, quits and relaunches. */
+  /** `autoUpdater.quitAndInstall`: the window closes, then Squirrel installs, quits and relaunches. */
   install: () => void;
 }
 
@@ -22,7 +23,7 @@ export interface QuitOrder {
   hold(): boolean;
   /** Restart to Update: Quit, with the install as its last step. */
   restartToUpdate(): void;
-  /** Squirrel.Mac failed to install (an `autoUpdater` error): quit all the same, rather than stay without a window. */
+  /** Squirrel failed to install (an `autoUpdater` error): quit all the same, rather than stay without a window. */
   installFailed(): void;
 }
 
