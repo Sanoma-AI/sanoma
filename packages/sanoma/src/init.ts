@@ -113,7 +113,7 @@ export async function startCompany(
 /** What `pinDependencies` reads of this package's own manifest. */
 export interface Manifest {
   version: string;
-  devDependencies: Record<string, string>;
+  devDependencies?: Record<string, string>;
 }
 
 /**
@@ -122,13 +122,14 @@ export interface Manifest {
  * package's devDependency on it, which publishing writes as an exact version. The template's
  * `pnpm-workspace.yaml` lets its install past pnpm's minimum release age, so a range or `latest`
  * here would meet a release newer than this template and what it allows. From a checkout, whose
- * manifest says `workspace:*`, a connector stays as the template names it.
+ * manifest says `workspace:*`, or a manifest without devDependencies, a connector stays as the
+ * template names it.
  */
 export function pinDependencies(dependencies: Record<string, string>, own: Manifest): Record<string, string> {
   return Object.fromEntries(
     Object.entries(dependencies).map(([name, range]) => {
       if (name === "sanoma") return [name, own.version];
-      const released = own.devDependencies[name] ?? range;
+      const released = own.devDependencies?.[name] ?? range;
       return [name, released.startsWith("workspace:") ? range : released];
     }),
   );

@@ -1,12 +1,11 @@
 import { execFile } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { pinDependencies } from "../src/init.ts";
 import { ensureBuilt, repo as checkout, serving } from "./fixture.ts";
 import { gitIdentity } from "./git.ts";
 
@@ -98,8 +97,6 @@ function Run() {
 let dir = "";
 let server: Awaited<ReturnType<typeof serving>> | undefined;
 const stderr = () => server?.output().stderr ?? "";
-/** A JSON file as the tarball installed it. */
-const shipped = (file: string) => JSON.parse(readFileSync(join(dir, "node_modules/sanoma", file), "utf8"));
 
 describe("sanoma from packed tarballs: the dev server", () => {
   beforeAll(async () => {
@@ -158,13 +155,35 @@ describe("sanoma from packed tarballs: the dev server", () => {
     expect(stderr()).not.toContain("ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING");
   }, 60_000);
 
-  it("ships the exact versions a new company starts from", () => {
-    expect(pinDependencies(shipped("template/package.json").dependencies, shipped("package.json"))).toEqual({
-      "@sanoma-ai/connector-anthropic": manifest("../connectors/anthropic").version,
-      "@sanoma-ai/connector-ghost": manifest("../connectors/ghost").version,
-      sanoma: manifest("sanoma").version,
-    });
-  });
+  it("starts a company at the exact versions it was packed with", async () => {
+    const company = mkdtempSync(join(tmpdir(), "sanoma-packed-company-"));
+    // A pnpm that installs only a stub of `sanoma`, which the launcher hands the company to.
+    const bin = mkdtempSync(join(tmpdir(), "sanoma-packed-bin-"));
+    writeFileSync(
+      join(bin, "pnpm"),
+      [
+        "#!/bin/sh",
+        "mkdir -p node_modules/sanoma/dist",
+        "echo 'export const main = async () => 0;' > node_modules/sanoma/dist/cli.js",
+        "",
+      ].join("\n"),
+    );
+    chmodSync(join(bin, "pnpm"), 0o755);
+    try {
+      await run(process.execPath, [join(dir, "node_modules/sanoma/dist/cli.js")], {
+        cwd: company,
+        env: { ...process.env, ...env, PATH: `${bin}:${process.env.PATH}`, npm_config_user_agent: "pnpm/11" },
+      });
+      expect(JSON.parse(readFileSync(join(company, "package.json"), "utf8")).dependencies).toEqual({
+        "@sanoma-ai/connector-anthropic": manifest("../connectors/anthropic").version,
+        "@sanoma-ai/connector-ghost": manifest("../connectors/ghost").version,
+        sanoma: manifest("sanoma").version,
+      });
+    } finally {
+      rmSync(company, { recursive: true, force: true });
+      rmSync(bin, { recursive: true, force: true });
+    }
+  }, 60_000);
 
   it("composes managed storage from sanoma alone without opening clients during configuration", async () => {
     const result = await run(

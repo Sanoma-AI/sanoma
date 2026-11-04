@@ -159,6 +159,7 @@ Open a pull request that bumps `version` in each public package's `package.json`
 
 - A breaking change in a 0.x package requires a minor version bump.
 - A provider-bridge release (`RELEASE` in `packages/bridge/scripts/download-bridge.ts`) requires new versions of the `@sanoma-ai/bridge-<platform>` packages. A PostgreSQL release (`RELEASE` in `packages/sanoma/scripts/download-postgres.ts`) requires new versions of the `@sanoma-ai/postgres-<platform>` packages.
+- `sanoma`'s `devDependencies` on the connectors its template names set the versions a new company starts from, as the workspace has them when `sanoma` is published. For a connector's release to reach new companies, release `sanoma` too; the release check does not ask for it.
 - Bump dependent packages when their published dependency ranges exclude the new version. This includes exact pins (`workspace:*`, used by `sanoma` for the runtime and by `@sanoma-ai/bridge` for its binaries) and peer ranges after a minor bump (`workspace:^`, published as `^` on the version at that time).
 
 Run `node scripts/release-check.ts` to find packages that still need a bump, including dependencies that pin other bumped packages. The release workflow runs this check first. It also reports packages missing from npm and public packages whose shipped inputs differ from the commit that set their version. Tests, `AGENTS.md` and manifest-only `devDependencies` changes are excluded. Historical commits alone do not require a bump if the shipped inputs are unchanged.

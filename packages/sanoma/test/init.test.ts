@@ -165,7 +165,7 @@ describe("pinDependencies", () => {
 
   it("names every template connector as a workspace devDependency, which publishing makes a version", () => {
     for (const name of Object.keys(template.dependencies).filter((dep) => dep !== "sanoma")) {
-      expect(own.devDependencies[name], name).toBe("workspace:*");
+      expect(own.devDependencies?.[name], name).toBe("workspace:*");
     }
   });
 });
