@@ -23,6 +23,7 @@ import {
   FIRST_COMMIT,
   packageManagerOf,
   packageName,
+  pinDependencies,
   startCompany,
   TEMPLATE,
   templatePeopleIds,
@@ -81,7 +82,7 @@ describe("startCompany", () => {
     expect(pkg.dependencies).toEqual({
       "@sanoma-ai/connector-anthropic": "latest",
       "@sanoma-ai/connector-ghost": "latest",
-      sanoma: `^${version}`,
+      sanoma: version,
     });
     expect(existsSync(join(dir, "gitignore"))).toBe(false);
     // pnpm's alone.
@@ -137,6 +138,38 @@ describe("startCompany", () => {
     writeFileSync(join(dir, "notes.txt"), "mine\n");
     expect(await startCompany(dir, { creator, install: () => Promise.reject(new Error("no install")) })).toBe(false);
     expect(existsSync(join(dir, "sanoma.config.ts"))).toBe(false);
+  });
+});
+
+describe("pinDependencies", () => {
+  const template = JSON.parse(readFileSync(new URL("package.json", TEMPLATE), "utf8")) as {
+    dependencies: Record<string, string>;
+  };
+
+  it("pins sanoma and the connectors to the versions a published manifest names", () => {
+    expect(
+      pinDependencies(template.dependencies, {
+        version: "1.2.3",
+        devDependencies: {
+          "@sanoma-ai/connector-anthropic": "0.1.5",
+          "@sanoma-ai/connector-ghost": "0.4.9",
+          "@sanoma-ai/testing": "0.1.1",
+        },
+      }),
+    ).toEqual({
+      "@sanoma-ai/connector-anthropic": "0.1.5",
+      "@sanoma-ai/connector-ghost": "0.4.9",
+      sanoma: "1.2.3",
+    });
+  });
+
+  it("names every template connector as a workspace devDependency, which publishing makes a version", () => {
+    const own = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
+      devDependencies: Record<string, string>;
+    };
+    for (const name of Object.keys(template.dependencies).filter((dep) => dep !== "sanoma")) {
+      expect(own.devDependencies[name], name).toBe("workspace:*");
+    }
   });
 });
 

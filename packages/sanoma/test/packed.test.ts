@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { pinDependencies, TEMPLATE } from "../src/init.ts";
 import { ensureBuilt, repo as checkout, serving } from "./fixture.ts";
 import { gitIdentity } from "./git.ts";
 
@@ -154,6 +155,18 @@ describe("sanoma from packed tarballs: the dev server", () => {
     expect(post).toContain("Read from <strong>content/posts/hello.md</strong>.");
     expect(stderr()).not.toContain("ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING");
   }, 60_000);
+
+  it("ships the exact versions a new company starts from", () => {
+    const shipped = join(dir, "node_modules/sanoma/package.json");
+    const template = JSON.parse(readFileSync(new URL("package.json", TEMPLATE), "utf8")) as {
+      dependencies: Record<string, string>;
+    };
+    expect(pinDependencies(template.dependencies, JSON.parse(readFileSync(shipped, "utf8")))).toEqual({
+      "@sanoma-ai/connector-anthropic": manifest("../connectors/anthropic").version,
+      "@sanoma-ai/connector-ghost": manifest("../connectors/ghost").version,
+      sanoma: manifest("sanoma").version,
+    });
+  });
 
   it("composes managed storage from sanoma alone without opening clients during configuration", async () => {
     const result = await run(
