@@ -18,7 +18,7 @@
     "resources": [
       {
         "typeName": "github_repository_collaborator",
-        "stateJson": "{\"id\":\"sanoma-apply-test:octocat\",\"invitation_id\":\"1000000201\",\"permission\":\"push\",\"permission_diff_suppression\":false,\"repository\":\"sanoma-apply-test\",\"username\":\"octocat\"}",
+        "stateJson": "{\"id\":\"sanoma-apply-test:octocat\",\"invitation_id\":\"1000000201\",\"permission\":\"push\",\"permission_diff_suppression\":null,\"repository\":\"sanoma-apply-test\",\"username\":\"octocat\"}",
         "private": "eyJzY2hlbWFfdmVyc2lvbiI6IjAifQ=="
       }
     ]
