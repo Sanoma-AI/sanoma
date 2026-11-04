@@ -141,6 +141,7 @@ test("the app waits for Got it on a synced folder, once per folder", async () =>
 });
 
 test("a new company's form asks its name and says where it goes, making nothing until it is answered", async () => {
+  mkdirSync(join(work, "elsewhere"));
   await launch();
   const page = await pageNamed("index.html");
   await page.click("#create");
@@ -150,6 +151,29 @@ test("a new company's form asks its name and says where it goes, making nothing 
   await page.click('#new-form button[type="submit"]');
   await expect(page.locator("#new-problem")).toContainText("Give the company a name");
   await expect(page.locator("#new-name")).toHaveValue("...");
+
+  // Another place: what is typed stays, and the problem, about the last try, goes.
+  const elsewhere = realpathSync(join(work, "elsewhere"));
+  const answering = (dir: string) =>
+    shell.evaluate(({ dialog }, answer) => {
+      dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [answer] })) as typeof dialog.showOpenDialog;
+    }, dir);
+  await answering(elsewhere);
+  await page.click("#new-change");
+  await expect(page.locator("#new-place")).toContainText(join("elsewhere", "…"));
+  await expect(page.locator("#new-name")).toHaveValue("...");
+  await expect(page.locator("#new-problem")).toBeHidden();
+
+  // A refusal from the menu shows over the form it leaves open.
+  await shell.evaluate(({ Menu }) =>
+    Menu.getApplicationMenu()
+      ?.items.flatMap((item) => item.submenu?.items ?? [])
+      .find((item) => item.label === "Open Company…")
+      ?.click(),
+  );
+  await expect(page.locator("#notice")).toContainText("elsewhere");
+  await expect(page.locator("#new-form")).toBeVisible();
+
   await page.click("#new-form [data-cancel]");
   await expect(page.locator("#home")).toBeVisible();
   expect(existsSync(join(work, "home", "Companies"))).toBe(false);

@@ -143,6 +143,11 @@ describe("a new company's folder", () => {
     ["北京 Tea", "北京-tea"],
     ["../..", ""],
     ["   ", ""],
+    ["हिन्दी", "हिन्दी"],
+    ["がく", "がく"],
+    ["Aux", "aux-company"],
+    ["COM1", "com1-company"],
+    ["Aux Body Shop", "aux-body-shop"],
   ])("%j goes in %j", (name, folder) => {
     expect(folderNameOf(name)).toBe(folder);
   });

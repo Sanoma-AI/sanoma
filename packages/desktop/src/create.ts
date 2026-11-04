@@ -41,12 +41,16 @@ export function newCompanyTarget(name: string, parent: string): { dir: string } 
   const folder = folderNameOf(name);
   if (!folder) return { problem: "Give the company a name, with a letter or a number in it." };
   const dir = join(parent, folder);
-  if (!existsSync(dir)) return { dir };
-  if (!statSync(dir).isDirectory()) return { problem: `${dir} is a file: give the company another name.` };
-  if (isCompanyFolder(dir)) return { problem: `${dir} holds a company already: open it instead.` };
-  return hasFiles(dir)
-    ? { problem: `${dir} has files in it already: give the company another name, or choose another place.` }
-    : { dir };
+  try {
+    if (!existsSync(dir)) return { dir };
+    if (!statSync(dir).isDirectory()) return { problem: `${dir} is a file: give the company another name.` };
+    if (isCompanyFolder(dir)) return { problem: `${dir} holds a company already: open it instead.` };
+    return hasFiles(dir)
+      ? { problem: `${dir} has files in it already: give the company another name, or choose another place.` }
+      : { dir };
+  } catch (err) {
+    return { problem: `Sanoma could not read ${dir}: ${(err as Error).message}` };
+  }
 }
 
 /**

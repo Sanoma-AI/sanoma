@@ -137,13 +137,17 @@ export function companyPage(state: CompanyState, now: number, hiddenOnFailure = 
 }
 
 /**
- * The folder a new company called `name` gets: lower case, accents off, anything else that is not
- * a letter or a number a single hyphen. Empty when nothing is left.
+ * The folder a new company called `name` gets: lower case, Latin letters' accents off (other
+ * scripts' marks are part of their letters), anything else that is not a letter or a number a
+ * single hyphen. Empty when nothing is left.
  */
 export const folderNameOf = (name: string) =>
   name
     .normalize("NFKD")
-    .replace(/\p{M}/gu, "")
+    .replace(/(\p{Script=Latin})\p{M}+/gu, "$1")
+    .normalize("NFC")
     .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, "-")
-    .replace(/^-+|-+$/g, "");
+    .replace(/[^\p{L}\p{M}\p{N}]+/gu, "-")
+    .replace(/^-+|-+$/g, "")
+    // Names Windows keeps for itself, and a company's folder may end up there.
+    .replace(/^(con|prn|aux|nul|com\d|lpt\d)$/, "$1-company");

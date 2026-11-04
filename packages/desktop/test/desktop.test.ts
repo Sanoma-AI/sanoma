@@ -584,7 +584,7 @@ describe("places", () => {
   });
 
   test("shows the home folder as ~, except on Windows", () => {
-    expect(withTilde(join("/Users/a", "acme"), "/Users/a", "darwin")).toBe(join("~", "acme"));
+    expect(withTilde("/Users/a/acme", "/Users/a", "darwin")).toBe("~/acme");
     expect(withTilde("/Users/a", "/Users/a", "darwin")).toBe("~");
     expect(withTilde("/Users/ab/acme", "/Users/a", "darwin")).toBe("/Users/ab/acme");
     expect(withTilde("C:\\Users\\a\\acme", "C:\\Users\\a", "win32")).toBe("C:\\Users\\a\\acme");

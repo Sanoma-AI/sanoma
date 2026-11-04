@@ -1,5 +1,5 @@
 import { existsSync, realpathSync, statSync } from "node:fs";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 
 /**
  * The path a company is known by: its real path, which on Windows is also in the case the disk has
@@ -87,4 +87,4 @@ export function syncedFolderWarning(
 
 /** `path` as a person reads it: the home folder as `~`, except on Windows, which has no such thing. */
 export const withTilde = (path: string, home: string, platform: NodeJS.Platform = process.platform) =>
-  platform !== "win32" && (path === home || path.startsWith(`${home}${sep}`)) ? `~${path.slice(home.length)}` : path;
+  platform !== "win32" && (path === home || path.startsWith(`${home}/`)) ? `~${path.slice(home.length)}` : path;

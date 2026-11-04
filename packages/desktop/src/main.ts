@@ -634,7 +634,7 @@ async function start(path: string, views: CompanyViews, { how, warned }: Begin) 
     onLine(stream, line) {
       log.write(stream, line);
       // The page gets the log's tail while it shows; once it shows again, the next state carries it.
-      if (current() && views.state.phase !== "running") setCompanyState(views, { lastOutputAt: Date.now() });
+      if (current() && !views.showsApp) setCompanyState(views, { lastOutputAt: Date.now() });
     },
     onProgress(step) {
       log.write("shell", step);
@@ -874,7 +874,7 @@ async function changePlace() {
     properties: ["openDirectory", "createDirectory"],
   });
   if (canceled || !filePaths[0] || ask?.kind !== "new") return;
-  ask = newCompanyForm(ask.name, filePaths[0], ask.problem);
+  ask = newCompanyForm(ask.name, filePaths[0]);
   sendStart();
 }
 
@@ -905,7 +905,10 @@ async function newCompany(): Promise<void> {
     }
     // What the form said of a synced place is said: the page does not say it again.
     const warned = !!syncedFolderWarning(parent, homedir());
-    return begin(realPathOf(target.dir), { kind: "new", how: createSession, warned });
+    const dir = realPathOf(target.dir);
+    // Asked for again while it starts, its folder still empty: it is there already.
+    if (inWindow.has(dir)) return show(dir);
+    return begin(dir, { kind: "new", how: createSession, warned });
   }
 }
 

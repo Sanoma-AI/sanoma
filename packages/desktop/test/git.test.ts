@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -179,6 +179,22 @@ describe("a new company", () => {
     writeFileSync(join(parent, "plain"), "");
     expect(newCompanyTarget("plain", parent)).toEqual({ problem: expect.stringContaining("is a file") });
   });
+
+  // Permissions a test can take away only off Windows, and not as root.
+  test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "says so when it cannot read the folder",
+    () => {
+      const parent = temp();
+      const locked = join(parent, "locked");
+      mkdirSync(locked);
+      chmodSync(locked, 0o000);
+      try {
+        expect(newCompanyTarget("locked", parent)).toEqual({ problem: expect.stringContaining("could not read") });
+      } finally {
+        chmodSync(locked, 0o700);
+      }
+    },
+  );
 
   test("starts from the last company's folder, else ~/Companies", () => {
     expect(defaultParent([], "/Users/a")).toBe(join("/Users/a", "Companies"));
