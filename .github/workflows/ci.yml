@@ -1,8 +1,15 @@
 name: CI
 on:
+  # Every commit on main, whatever it changes: the release workflows refuse a commit CI did not pass.
   push:
     branches: [main]
+  # The template's AGENTS.md ships to new companies, so it stays in.
   pull_request:
+    paths:
+      - "**"
+      - "!**/README.md"
+      - "!**/AGENTS.md"
+      - packages/sanoma/template/**
 
 jobs:
   test:
