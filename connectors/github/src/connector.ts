@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
   github_branch_protection,
   github_repository,
+  github_repository_collaborator,
   github_repository_deploy_key,
   github_team_membership,
   provider,
@@ -59,13 +60,25 @@ export const githubTf = tfConnector({
       title: "Deploy key",
       writable: true,
     },
+    // Who may push to (or pull, triage, maintain, administer) one repository. Apply invites them:
+    // until they accept, GitHub holds the invitation (`invitation_id`), and delete withdraws it.
+    repository_collaborator: {
+      tf: github_repository_collaborator,
+      title: "Collaborator",
+      identity: "repository:username",
+      // The repository as `<owner>/<name>`; the driver gives the provider `<name>:<username>`.
+      find: ({ repository, username }) => `${repository}:${username}`,
+      writable: true,
+    },
   },
   // A data file names a repository by the declared one, which stands for `<owner>/<name>`: so a
-  // rule and a deploy key take their owner from it. GitHub holds a rule's repository by its node
-  // id (`R_…`); a deploy key's `repository` is `<owner>/<name>`, the provider's name with its owner.
+  // rule, a deploy key and a collaborator take their owner from it. GitHub holds a rule's
+  // repository by its node id (`R_…`); a deploy key's and a collaborator's `repository` is
+  // `<owner>/<name>`, the provider's name with its owner.
   references: {
     branch_protection: { repository_id: { type: "github.repository", by: ["name", "node_id"] } },
     repository_deploy_key: { repository: { type: "github.repository" } },
+    repository_collaborator: { repository: { type: "github.repository" } },
   },
   // The provider answers an import of a rule that is not there `failed_precondition`, saying it
   // "could not find" it (recorded: testdata/replies/…/github_branch_protection/provider-bridge_main).

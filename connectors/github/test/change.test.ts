@@ -100,3 +100,40 @@ describe("github.repository_deploy_key's change operations", () => {
     expect(bridge.calls.filter((c) => c.method === "apply")).toHaveLength(2);
   });
 });
+
+// Synthetic until recorded in the test org (an invitation goes to a real account), in the provider's
+// shape (its `id` is `<repository>:<username>`, which the driver gives as
+// `<owner>/<repository>:<username>`; `permission` is ForceNew in 6.13.0, as are `repository` and
+// `username`): `@sanoma-ai/bridge`'s testdata/replies/integrations_github_6.13.0/github_repository_collaborator/sanoma-apply-test*.
+describe("github.repository_collaborator's change operations", () => {
+  let bridge: ReturnType<typeof changeReplay>;
+  let driver: Driver;
+  beforeEach(() => {
+    bridge = changeReplay(fixturesDir, provider);
+    driver = owned(() => githubTf.driver(bridge, () => ({})));
+  });
+  const id = "sanoma-test/sanoma-apply-test:octocat";
+  const desired = { repository: "sanoma-test/sanoma-apply-test", username: "octocat", permission: "push" };
+
+  it("invites a user, bound by `<owner>/<repository>:<username>`, re-invites for a new permission, and withdraws it", async () => {
+    const plan = await call(driver, "repository_collaborator.plan", { desired });
+    expect(plan).toMatchObject({ action: "create", planned: desired, replace: [] });
+    expect(plan.unknown).toEqual(["id", "invitation_id"]);
+
+    // GitHub holds an invitation until the user accepts it.
+    const created = await call(driver, "repository_collaborator.create", { desired });
+    expect(created).toMatchObject({ id, state: { ...desired, id, invitation_id: "1000000201" } });
+
+    // A new permission deletes the invitation and sends another: a replace.
+    const maintain = { ...desired, permission: "maintain" };
+    const replaced = await call(driver, "repository_collaborator.update", {
+      ...created,
+      desired: maintain,
+      expect: { action: "replace", replace: ["permission"] },
+    });
+    expect(replaced).toMatchObject({ id, state: { ...maintain, invitation_id: "1000000202" } });
+
+    expect(await call(driver, "repository_collaborator.delete", replaced)).toEqual({ id, gone: true });
+    expect(bridge.calls.filter((c) => c.method === "apply")).toHaveLength(4);
+  });
+});
