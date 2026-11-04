@@ -26,11 +26,17 @@ import {
 // registers them in every config with their driver (`runtimeDriver`), so a policy may name them;
 // a sandbox run calls `sandboxRuntimeDriver`, over its own secrets and tokens, posting nothing.
 
-/** A secret's name, as the store takes it (upper case), other than the runtime's own (`SANOMA_…`: its keys and credentials). */
-const SecretName = z
-  .string()
-  .regex(SECRET_NAME, "a secret's name: upper case, A-Z, 0-9 and _")
-  .refine((name) => !name.startsWith("SANOMA_"), "a SANOMA_ name is the runtime's own, not a workflow's to use");
+const StoredSecretName = z.string().regex(SECRET_NAME, "a secret's name: upper case, A-Z, 0-9 and _");
+/** Generation destinations exclude the runtime's keys and credentials. */
+const SecretName = StoredSecretName.refine(
+  (name) => !name.startsWith("SANOMA_"),
+  "a SANOMA_ name is the runtime's own, not a workflow's to use",
+);
+/** Database exports are stored values a lifecycle workflow can retire; bootstrap keys remain protected. */
+const DeletableSecretName = StoredSecretName.refine(
+  (name) => !name.startsWith("SANOMA_") || /^SANOMA_DATABASE_URL_[A-Z0-9_]+$/.test(name),
+  "a SANOMA_ name may be deleted only when it is an exported database URL",
+);
 
 /** How long an instance gets to answer `POST /auth/invite`. */
 const INVITE_TIMEOUT_MS = 10_000;
@@ -143,8 +149,9 @@ export const sanoma = defineConnector("sanoma", {
     delete: {
       effect: "write",
       idempotent: true,
-      description: "Delete a stored secret; one not stored is nothing to do",
-      input: z.object({ name: SecretName }),
+      description:
+        "Delete a stored secret or exported database URL; one not stored is nothing to do. Runtime bootstrap secrets remain protected",
+      input: z.object({ name: DeletableSecretName }),
       output: z.object({}),
       target: ({ name }: { name: string }) => name,
       createsSecrets: ({ name }: { name: string }) => [name],

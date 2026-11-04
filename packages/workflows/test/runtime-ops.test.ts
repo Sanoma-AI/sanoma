@@ -12,9 +12,11 @@ import {
   memorySecretStore,
   openInvite,
   resolveConfig,
+  SecretAccess,
   sanoma,
   sshPublicKey,
 } from "../src/index.ts";
+import { databaseUrlSecret, storeDatabaseUrl } from "../src/database.ts";
 import { runtimeDriver, sandboxRuntimeDriver } from "../src/runtime-ops.ts";
 import { memoryTokens, newApiToken } from "../src/tokens.ts";
 import { rootWith } from "./harness.ts";
@@ -89,7 +91,7 @@ const root = rootWith({
 
 @reason("that one stays")
 forbid (principal, action == Sanoma::Action::"sanoma.secret.delete", resource)
-when { context.input.name == "KEEP_ME" };
+when { context.input.name == "KEEP_ME" || context.input.name == "SANOMA_DATABASE_URL_KEEP" };
 `,
 });
 
@@ -105,7 +107,18 @@ const SIGNING_KEY = randomBytes(32).toString("base64");
 describe("the runtime's own operations", () => {
   const store = memorySecretStore();
   const app = useTestApp(
-    { workflows: [keys, drop, invite, token, revoke, whoami], connectors: [], secrets: { store }, root },
+    {
+      workflows: [keys, drop, invite, token, revoke, whoami],
+      connectors: [],
+      secrets: {
+        store,
+        bindings: {
+          SANOMA_DATABASE_URL_EXTERNAL: { path: "customer/database", management: "external" },
+          SANOMA_DATABASE_URL_ENV: { env: "TEST_EXTERNAL_DATABASE_URL" },
+        },
+      },
+      root,
+    },
     { databaseUrl: testDatabaseUrl("runtime-ops") },
   );
   const stored = async (name: string) => (await store.read({ namespace: "default", path: name }))?.value;
@@ -198,6 +211,53 @@ describe("the runtime's own operations", () => {
     await run("keys", { name: "KEEP_ME", kind: "random" });
     await expect(run("drop", { name: "KEEP_ME" })).rejects.toMatchObject({ code: "policy_denied" });
     expect(await stored("KEEP_ME")).toBeDefined();
+  });
+
+  it("retires a database export through the policy and ledger without deleting neighboring values", async () => {
+    const secrets = new SecretAccess({ store }, store);
+    const name = databaseUrlSecret("cloudAcme");
+    const value = "postgresql://synthetic:private-password@db.invalid/acme";
+    await storeDatabaseUrl(secrets, "cloudAcme", value, { where: "test database", others: "another database" });
+    await store.write({ namespace: "preview", path: name }, "preview database", { expectedVersion: null, by: "test" });
+    await store.write({ namespace: "default", path: "SANOMA_DATABASE_URL_OTHER" }, "other database", {
+      expectedVersion: null,
+      by: "test",
+    });
+    const { output, ledger } = await ledgerOf("drop", { name });
+    expect(output).toEqual({});
+    expect(await stored(name)).toBeUndefined();
+    expect(ledger).toContain('"op":"sanoma.secret.delete"');
+    expect(ledger).toContain(name);
+    expect(ledger).not.toContain(value);
+    expect(ledger).not.toContain("private-password");
+    expect((await store.read({ namespace: "preview", path: name }))?.value).toBe("preview database");
+    expect(await stored("SANOMA_DATABASE_URL_OTHER")).toBe("other database");
+    expect(await run("drop", { name })).toEqual({});
+    // Deletion remains a workflow operation; adding database exports does not bypass that gate.
+    await expect(app.client.call("sanoma.secret.delete", { name }, { actor: "ada" })).rejects.toMatchObject({
+      code: "invalid_input",
+    });
+    await storeDatabaseUrl(secrets, "keep", value, { where: "test database", others: "another database" });
+    await expect(run("drop", { name: "SANOMA_DATABASE_URL_KEEP" })).rejects.toMatchObject({ code: "policy_denied" });
+    expect(await stored("SANOMA_DATABASE_URL_KEEP")).toBe(value);
+  });
+
+  it("cannot retire a database URL owned by an external store binding or environment", async () => {
+    const value = "postgresql://synthetic:external-password@db.invalid/customer";
+    await store.write({ namespace: "default", path: "customer/database" }, value, {
+      expectedVersion: null,
+      by: "test",
+    });
+    vi.stubEnv("TEST_EXTERNAL_DATABASE_URL", value);
+    try {
+      for (const name of ["SANOMA_DATABASE_URL_EXTERNAL", "SANOMA_DATABASE_URL_ENV"]) {
+        await expect(run("drop", { name })).rejects.toMatchObject({ code: "read_only" });
+      }
+      expect((await store.read({ namespace: "default", path: "customer/database" }))?.value).toBe(value);
+      expect(process.env.TEST_EXTERNAL_DATABASE_URL).toBe(value);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("mints an invite: a request sealed under the named key, posted to the instance, its link answered", async () => {
@@ -439,7 +499,16 @@ describe("the runtime's own operations in a config", () => {
   it("refuses the runtime's own SANOMA_ names as any operation's secret", () => {
     const resolved = resolveConfig({ workflows: [keys], connectors: [] });
     const parses = (op: string, input: object) => resolved.ops.get(op)!.input.safeParse(input).success;
-    for (const name of ["SANOMA_SIGNING_KEY", "SANOMA_SECRETS_KEY", "SANOMA_GITHUB_APP_PEM"]) {
+    for (const name of [
+      "SANOMA_SIGNING_KEY",
+      "SANOMA_SECRETS_KEY",
+      "SANOMA_GITHUB_APP_PEM",
+      "SANOMA_DATABASE_URL",
+      "SANOMA_DATABASE_URL_",
+      "SANOMA_DATABASE_URL_bad",
+      "SANOMA_DATABASE_URL_A-B",
+      "SANOMA_MANAGED_IDENTITY_CREDENTIAL",
+    ]) {
       expect(parses("sanoma.secret.generate", { name, kind: "random" })).toBe(false);
       expect(parses("sanoma.secret.delete", { name })).toBe(false);
       expect(parses("sanoma.token.mint", { subject: "x", groups: [], store: name })).toBe(false);
@@ -448,6 +517,29 @@ describe("the runtime's own operations in a config", () => {
       );
     }
     expect(parses("sanoma.secret.delete", { name: "ACME_KEY" })).toBe(true);
+    const name = databaseUrlSecret("cloudAcme");
+    expect(parses("sanoma.secret.delete", { name })).toBe(true);
+    expect(parses("sanoma.secret.generate", { name, kind: "random" })).toBe(false);
+    expect(parses("sanoma.token.mint", { subject: "x", groups: [], store: name })).toBe(false);
+    expect(
+      parses("sanoma.secretStore.prepare", {
+        company: "acme",
+        environment: "production",
+        database: { $secret: "ADMIN_URL" },
+        store: name,
+      }),
+    ).toBe(false);
+    expect(
+      parses("sanoma.identity.enroll", {
+        deployment: "acme",
+        company: "acme",
+        environment: "production",
+        serviceAccount: "runtime@example-project.iam.gserviceaccount.com",
+        generation: 1,
+        validUntil: "2030-01-01T00:00:00Z",
+        store: name,
+      }),
+    ).toBe(false);
   });
 
   it("seals an invite under a key stored as base64url without padding, as a generate marker makes one", async () => {
