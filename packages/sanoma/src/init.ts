@@ -128,8 +128,8 @@ export function pinDependencies(dependencies: Record<string, string>, own: Manif
   return Object.fromEntries(
     Object.entries(dependencies).map(([name, range]) => {
       if (name === "sanoma") return [name, own.version];
-      const released = own.devDependencies[name];
-      return [name, released && !released.startsWith("workspace:") ? released : range];
+      const released = own.devDependencies[name] ?? range;
+      return [name, released.startsWith("workspace:") ? range : released];
     }),
   );
 }

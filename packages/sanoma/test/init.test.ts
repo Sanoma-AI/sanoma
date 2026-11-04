@@ -21,6 +21,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   declareFounder,
   FIRST_COMMIT,
+  type Manifest,
   packageManagerOf,
   packageName,
   pinDependencies,
@@ -32,8 +33,7 @@ import {
 import { copyFixture, ensureBuilt, linkConnector, runCli } from "./fixture.ts";
 import { gitIdentity } from "./git.ts";
 
-const version = (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string })
-  .version;
+const own = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as Manifest;
 
 let dir = "";
 const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim();
@@ -82,7 +82,7 @@ describe("startCompany", () => {
     expect(pkg.dependencies).toEqual({
       "@sanoma-ai/connector-anthropic": "latest",
       "@sanoma-ai/connector-ghost": "latest",
-      sanoma: version,
+      sanoma: own.version,
     });
     expect(existsSync(join(dir, "gitignore"))).toBe(false);
     // pnpm's alone.
@@ -164,9 +164,6 @@ describe("pinDependencies", () => {
   });
 
   it("names every template connector as a workspace devDependency, which publishing makes a version", () => {
-    const own = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
-      devDependencies: Record<string, string>;
-    };
     for (const name of Object.keys(template.dependencies).filter((dep) => dep !== "sanoma")) {
       expect(own.devDependencies[name], name).toBe("workspace:*");
     }

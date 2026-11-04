@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { pinDependencies, TEMPLATE } from "../src/init.ts";
+import { pinDependencies } from "../src/init.ts";
 import { ensureBuilt, repo as checkout, serving } from "./fixture.ts";
 import { gitIdentity } from "./git.ts";
 
@@ -98,6 +98,8 @@ function Run() {
 let dir = "";
 let server: Awaited<ReturnType<typeof serving>> | undefined;
 const stderr = () => server?.output().stderr ?? "";
+/** A JSON file as the tarball installed it. */
+const shipped = (file: string) => JSON.parse(readFileSync(join(dir, "node_modules/sanoma", file), "utf8"));
 
 describe("sanoma from packed tarballs: the dev server", () => {
   beforeAll(async () => {
@@ -157,11 +159,7 @@ describe("sanoma from packed tarballs: the dev server", () => {
   }, 60_000);
 
   it("ships the exact versions a new company starts from", () => {
-    const shipped = join(dir, "node_modules/sanoma/package.json");
-    const template = JSON.parse(readFileSync(new URL("package.json", TEMPLATE), "utf8")) as {
-      dependencies: Record<string, string>;
-    };
-    expect(pinDependencies(template.dependencies, JSON.parse(readFileSync(shipped, "utf8")))).toEqual({
+    expect(pinDependencies(shipped("template/package.json").dependencies, shipped("package.json"))).toEqual({
       "@sanoma-ai/connector-anthropic": manifest("../connectors/anthropic").version,
       "@sanoma-ai/connector-ghost": manifest("../connectors/ghost").version,
       sanoma: manifest("sanoma").version,
