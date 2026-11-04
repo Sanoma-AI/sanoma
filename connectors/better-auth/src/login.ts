@@ -32,19 +32,19 @@ interface HookContext {
       updateAccount(id: string, data: Record<string, unknown>): Promise<unknown>;
       updateUser(id: string, data: Record<string, unknown>): Promise<unknown>;
     };
-    socialProviders: { id: string; getUserInfo(tokens: { accessToken: string }): Promise<unknown> }[];
   };
 }
 
 /**
  * Better Auth's login half for one public site: email and password, and an email code when the
  * app can send one (`context.sendCode`); every email may sign up. With the company's GitHub client
- * (`context.social.github`), a visitor signed in links their GitHub account
- * (`/link-social`), then may sign in with it (`/sign-in/social`, which never makes an account), and is then said to be that GitHub
- * login (`verify`'s `github`). Its tables are in schema `better_auth` on the company's database,
- * migrated here before the first site starts, its cookies signed with the app's key for it
- * (`context.key`). The site's origins are its allowed hosts (a request for another host is
- * refused) and set the cookie's `Secure` flag: an `https` origin's is.
+ * (`context.social.github`), a visitor also signs up and in with GitHub (`/sign-in/social`, which
+ * joins the account of GitHub's verified email), or links it once signed in (`/link-social`), and
+ * is then said to be that GitHub login (`verify`'s `github`). Its tables are in schema
+ * `better_auth` on the company's database, migrated here before the first site starts, its
+ * cookies signed with the app's key for it (`context.key`). The site's origins are its allowed
+ * hosts (a request for another host is refused) and set the cookie's `Secure` flag: an `https`
+ * origin's is.
  */
 export async function betterAuthLogin({
   databaseUrl,
@@ -68,14 +68,11 @@ export async function betterAuthLogin({
       plugins: sendCode ? [emailCode(sendCode)] : [],
       user: { additionalFields: GITHUB_FIELD },
       ...(github && {
-        // GitHub never makes an account, nor joins one by its email: a visitor signs up by email,
-        // links GitHub (`/link-social`), and may then sign in with it.
-        socialProviders: {
-          github: { clientId: github.clientId, clientSecret: github.clientSecret, disableSignUp: true },
-        },
-        // A visitor's GitHub email is seldom the one they signed in with. Linking still needs
-        // GitHub to have verified its email (GitHub is no trusted provider).
-        account: { accountLinking: { allowDifferentEmails: true, disableImplicitLinking: true } },
+        socialProviders: { github: { clientId: github.clientId, clientSecret: github.clientSecret } },
+        // GitHub stays untrusted, and the account's own email must be verified (Better Auth's
+        // default, pinned): a sign-in joins an account only by an email both sides verified
+        // (AGENTS.md). A link's may differ.
+        account: { accountLinking: { allowDifferentEmails: true, requireLocalEmailVerified: true } },
         databaseHooks: {
           account: {
             create: { before: oneGitHub, after: noteLogin },
@@ -130,21 +127,27 @@ async function oneGitHub(account: LinkedAccount, ctx: HookContext | null): Promi
 }
 
 /**
- * Keeps a GitHub account's login on its user, once Better Auth has linked it or signed its user
+ * Keeps a GitHub account's login on its user, once Better Auth has made, linked or signed its user
  * in with it (GitHub's redirect back, `/callback/:id`), then drops the account's tokens, which
  * nothing here uses again: a GitHub App's user token reaches what the App and the person both
- * reach. The login is the provider's profile for that token, since Better Auth sets no field from
- * a profile that a person may not set (`input: false`), the GitHub login among them.
+ * reach. The tokens go even when GitHub does not answer: the hook runs once the account is
+ * written, so its error undoes nothing. The login is GitHub's `/user` for that token, since
+ * Better Auth sets no field from a profile that a person may not set (`input: false`), the GitHub
+ * login among them.
  */
 async function noteLogin(account: LinkedAccount | null, ctx: HookContext | null): Promise<void> {
   if (account?.providerId !== "github" || !account.accessToken || ctx?.path !== "/callback/:id") return;
-  const { internalAdapter, socialProviders } = ctx.context;
-  const provider = socialProviders.find((p) => p.id === "github")!;
-  const info = (await provider.getUserInfo({ accessToken: account.accessToken })) as { data?: { login?: unknown } };
-  const login = info?.data?.login;
-  if (typeof login !== "string") throw new Error("better-auth: GitHub did not say whose account was linked");
-  await internalAdapter.updateUser(account.userId, { github: login });
-  await internalAdapter.updateAccount(account.id, { accessToken: null, refreshToken: null, idToken: null });
+  const { internalAdapter } = ctx.context;
+  try {
+    const answer = await fetch("https://api.github.com/user", {
+      headers: { authorization: `Bearer ${account.accessToken}`, "user-agent": "sanoma" },
+    });
+    const { login } = (answer.ok ? await answer.json() : {}) as { login?: unknown };
+    if (typeof login !== "string") throw new Error("better-auth: GitHub did not say whose account it is");
+    await internalAdapter.updateUser(account.userId, { github: login });
+  } finally {
+    await internalAdapter.updateAccount(account.id, { accessToken: null, refreshToken: null, idToken: null });
+  }
 }
 
 /** A GitHub account unlinked: its user is no longer that login. */

@@ -233,7 +233,7 @@ describe("creating the GitHub App", () => {
 });
 
 describe("sign-in on the host", () => {
-  it("names the public sites with a login, whose visitors the App's client lets connect GitHub", async () => {
+  it("names the public sites with a login, whose visitors the App's client lets sign in with GitHub", async () => {
     // Only what setupStatus reads of each entry.
     const sites = [
       { name: "www", public: true, login: "better-auth" },
