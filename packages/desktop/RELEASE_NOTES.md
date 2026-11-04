@@ -1,4 +1,4 @@
-The first preview of the Sanoma desktop app for macOS. Open a company folder and the app runs that company's own `sanoma` launcher and shows the app in a window. There is nothing to install first.
+A preview of the Sanoma desktop app for macOS. Open a company folder and the app runs that company's own `sanoma` launcher and shows the app in a window. There is nothing to install first.
 
 **Download** the `arm64` dmg on an Apple silicon Mac (M1 and later), or the `x64` dmg on an Intel Mac. Drag Sanoma to Applications and open it. The app is signed and notarized by Apple, so macOS opens it like any app from the web, after asking once whether to open something downloaded. The zip files hold the same apps.
 

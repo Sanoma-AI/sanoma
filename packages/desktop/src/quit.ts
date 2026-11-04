@@ -30,12 +30,21 @@ export function quitOrder(steps: QuitSteps): QuitOrder {
   let stopped = false;
   let stopping: Promise<unknown> | undefined;
   let update = false;
+  /** The install, or Quit when it throws at once (as an `error` event says a later failure). */
+  const install = () => {
+    try {
+      steps.install();
+    } catch (err) {
+      console.error("restart to update:", err);
+      steps.quit();
+    }
+  };
   return {
     hold() {
       if (stopped || !(update || steps.busy())) return false;
       stopping ??= steps.stopAll().finally(() => {
         stopped = true;
-        if (update) steps.install();
+        if (update) install();
         else steps.quit();
       });
       return true;

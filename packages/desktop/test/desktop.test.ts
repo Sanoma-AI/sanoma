@@ -4,7 +4,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import {
   afterFailure,
   type Company,
@@ -689,6 +689,23 @@ describe("the quit order", () => {
     expect(quit.hold()).toBe(true);
     await stopped();
     expect(calls).toEqual(["stopAll", "quit", "install"]);
+  });
+
+  test("an install that throws quits", async () => {
+    const { calls, quitSteps, stopped } = steps(false);
+    const quit = quitOrder({
+      ...quitSteps,
+      install: () => {
+        throw new Error("No update available");
+      },
+    });
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    quit.restartToUpdate();
+    quit.hold();
+    await stopped();
+    expect(calls).toEqual(["quit", "stopAll", "quit"]);
+    expect(quit.hold()).toBe(false);
+    error.mockRestore();
   });
 
   test("a failed install quits; an error at any other time changes nothing", async () => {
