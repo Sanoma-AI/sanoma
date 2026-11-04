@@ -26,44 +26,44 @@ const release = (tag: string, extra: Partial<GitHubRelease> = {}): GitHubRelease
 
 describe("newerRelease", () => {
   test("the newest published desktop release later than the app", () => {
-    const releases = [release("desktop-v0.2.0"), release("desktop-v0.3.1"), release("desktop-v0.3.0")];
+    const releases = [release("v0.2.0"), release("v0.3.1"), release("v0.3.0")];
     expect(newerRelease("0.1.0", releases)).toEqual({
       version: "0.3.1",
-      url: "https://github.com/Sanoma-AI/sanoma/releases/tag/desktop-v0.3.1",
+      url: "https://github.com/Sanoma-AI/sanoma/releases/tag/v0.3.1",
     });
   });
 
   test("nothing when the app is that version or later", () => {
-    expect(newerRelease("0.2.0", [release("desktop-v0.2.0"), release("desktop-v0.1.9")])).toBeUndefined();
+    expect(newerRelease("0.2.0", [release("v0.2.0"), release("v0.1.9")])).toBeUndefined();
     expect(newerRelease("0.2.0", [])).toBeUndefined();
   });
 
   test("compares each part as a number", () => {
-    expect(newerRelease("0.9.0", [release("desktop-v0.10.0")])?.version).toBe("0.10.0");
-    expect(newerRelease("0.10.0", [release("desktop-v0.9.9")])).toBeUndefined();
-    expect(newerRelease("1.9.9", [release("desktop-v2.0.0")])?.version).toBe("2.0.0");
+    expect(newerRelease("0.9.0", [release("v0.10.0")])?.version).toBe("0.10.0");
+    expect(newerRelease("0.10.0", [release("v0.9.9")])).toBeUndefined();
+    expect(newerRelease("1.9.9", [release("v2.0.0")])?.version).toBe("2.0.0");
   });
 
   test("skips drafts, prereleases, other tags, other versions and pages off GitHub", () => {
     const releases = [
-      release("desktop-v0.5.0", { draft: true }),
-      release("desktop-v0.4.0", { prerelease: true }),
-      release("v0.9.0"),
+      release("v0.5.0", { draft: true }),
+      release("v0.4.0", { prerelease: true }),
+      release("desktop-v0.9.0"),
       release("sanoma@0.9.0"),
-      release("desktop-v0.6.0-beta.1"),
-      release("desktop-v0.7"),
-      release("desktop-v0.8.0", { html_url: "https://example.com/desktop-v0.8.0" }),
+      release("v0.6.0-beta.1"),
+      release("v0.7"),
+      release("v0.8.0", { html_url: "https://example.com/v0.8.0" }),
     ];
     expect(newerRelease("0.1.0", releases)).toBeUndefined();
   });
 
   test("nothing for an app version it cannot read", () => {
-    expect(newerRelease("0.1.0-dev", [release("desktop-v0.2.0")])).toBeUndefined();
+    expect(newerRelease("0.1.0-dev", [release("v0.2.0")])).toBeUndefined();
   });
 });
 
 test("savedNewer: the last check's release while it is later than the app", () => {
-  const newer = { version: "0.2.0", url: "https://github.com/Sanoma-AI/sanoma/releases/tag/desktop-v0.2.0" };
+  const newer = { version: "0.2.0", url: "https://github.com/Sanoma-AI/sanoma/releases/tag/v0.2.0" };
   expect(savedNewer({ newer }, "0.1.0")).toEqual(newer);
   expect(savedNewer({ newer }, "0.2.0")).toBeUndefined();
   expect(savedNewer({ newer }, "0.3.0")).toBeUndefined();
@@ -111,7 +111,7 @@ test("fetchReleases asks GitHub's API and fails on an error status", async () =>
       asked.push([String(url), init]);
       return new Response(JSON.stringify(body), { status });
     }) as typeof fetch;
-  expect(await fetchReleases("0.1.0", answer(200, [release("desktop-v0.2.0")]))).toEqual([release("desktop-v0.2.0")]);
+  expect(await fetchReleases("0.1.0", answer(200, [release("v0.2.0")]))).toEqual([release("v0.2.0")]);
   expect(asked[0]![0]).toBe(RELEASES_URL);
   expect(asked[0]![1]?.headers).toMatchObject({ "User-Agent": "Sanoma/0.1.0" });
   await expect(fetchReleases("0.1.0", answer(403, { message: "rate limited" }))).rejects.toThrow(/403/);
@@ -127,9 +127,9 @@ describe("runCheck", () => {
   test("saves the time and the find, notifies once, then waits a day unless asked", async () => {
     const file = setup();
     writeFileSync(file, JSON.stringify({ other: 1 }));
-    const fetchImpl = github([release("desktop-v0.2.0")]);
+    const fetchImpl = github([release("v0.2.0")]);
     const first = await runCheck({ file, current: "0.1.0", asked: false, now, fetchImpl });
-    expect(first).toEqual({ found: { version: "0.2.0", url: release("desktop-v0.2.0").html_url }, notify: true });
+    expect(first).toEqual({ found: { version: "0.2.0", url: release("v0.2.0").html_url }, notify: true });
     expect(readSettings(file)).toEqual({ other: 1, updateCheckedAt: new Date(now).toISOString(), newer: first!.found });
     expect(await runCheck({ file, current: "0.1.0", asked: false, now: now + 60_000, fetchImpl })).toBeUndefined();
     expect(await runCheck({ file, current: "0.1.0", asked: true, now: now + 60_000, fetchImpl })).toMatchObject({
@@ -150,7 +150,7 @@ describe("runCheck", () => {
     const bounds = { x: 10, y: 20, width: 900, height: 700 };
     const fetchImpl = (async () => {
       writeFileSync(file, JSON.stringify({ bounds }));
-      return Response.json([release("desktop-v0.2.0")]);
+      return Response.json([release("v0.2.0")]);
     }) as unknown as typeof fetch;
     await runCheck({ file, current: "0.1.0", asked: true, now, fetchImpl });
     expect(readSettings(file)).toMatchObject({ bounds, updateCheckedAt: new Date(now).toISOString() });
@@ -161,7 +161,7 @@ describe("runCheck", () => {
     const blocker = setup();
     writeFileSync(blocker, "");
     const file = join(blocker, "settings.json");
-    const fetchImpl = github([release("desktop-v0.2.0")]);
+    const fetchImpl = github([release("v0.2.0")]);
     vi.spyOn(console, "error").mockImplementation(() => {});
     expect(await runCheck({ file, current: "0.1.0", asked: false, now, fetchImpl })).toMatchObject({ notify: false });
   });

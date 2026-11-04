@@ -15,6 +15,7 @@ import { FuseV1Options, FuseVersion } from "@electron/fuses";
 
 // APPLE_SIGNING_IDENTITY signs with a Developer ID, APPLE_API_KEY (with its id and issuer)
 // notarizes; without them the build is signed ad hoc (README, "Signing and notarization").
+// vite.main.config.mts reads APPLE_SIGNING_IDENTITY the same way, for SIGNED_WITH_DEVELOPER_ID.
 const identity = process.env.APPLE_SIGNING_IDENTITY;
 if (process.env.APPLE_API_KEY && !identity) throw new Error("APPLE_API_KEY is set without APPLE_SIGNING_IDENTITY");
 const notarizeWith = process.env.APPLE_API_KEY

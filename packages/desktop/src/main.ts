@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import {
   app,
+  autoUpdater,
   BaseWindow,
   dialog,
   ipcMain,
@@ -19,6 +20,7 @@ import {
   webContents,
 } from "electron";
 import squirrelStartup from "electron-squirrel-startup";
+import { UpdateSourceType, updateElectronApp } from "update-electron-app";
 import {
   afterFailure,
   type Company,
@@ -57,6 +59,8 @@ import { isAppPage, linkTarget } from "./links.ts";
 import { type CompanyLog, hidePasswords, openLog } from "./logs.ts";
 import { folderArgument, isCompanyFolder, realPathOf, syncedFolderWarning } from "./places.ts";
 import { archWarnings, runtimeOf } from "./runtime.ts";
+import { quitOrder } from "./quit.ts";
+import { REPOSITORY, updatesItself } from "./self-update.ts";
 import { type Session, type SessionOptions, startSession } from "./session.ts";
 import { type Newer, patchSettings, readSettings, runCheck, savedNewer } from "./update-check.ts";
 import { fastForward, prepareUpdate } from "./update-company.ts";
@@ -942,8 +946,40 @@ async function showCheck(asked: boolean, current: string, { found, notify }: { f
   }
 }
 
-/** The Help menu's update items: the release the last check found, while newer, and the check. */
+/** Whether this build updates itself (`updatesItself`), decided once the app is ready. */
+let selfUpdating = false;
+/** Set once Squirrel.Mac has downloaded an update, which installs when the app quits. */
+let updateReady = false;
+
+/**
+ * Updating itself: update-electron-app checks at once and every hour, and Squirrel.Mac
+ * downloads the update in the background. Nothing restarts the app: the update installs when it
+ * quits, or at Help → Restart to Update. Its errors (offline, the service down) go to its log only.
+ */
+function updateItself() {
+  const updates = updateElectronApp({
+    updateSource: { type: UpdateSourceType.ElectronPublicUpdateService, repo: REPOSITORY },
+    updateInterval: "1 hour",
+    notifyUser: false,
+  });
+  autoUpdater.on("update-downloaded", () => {
+    // Each later check would download it again: none until the next launch.
+    updates.stopUpdates();
+    updateReady = true;
+    buildMenu();
+  });
+  autoUpdater.on("error", () => quit.installFailed());
+}
+
+/**
+ * The Help menu's update items: Restart to Update once an update is downloaded, in a build that
+ * updates itself; in any other, the release the last check found, while newer, and the check.
+ */
 function updateItems(): MenuItemConstructorOptions[] {
+  if (selfUpdating)
+    return updateReady
+      ? [{ label: "Restart to Update", click: () => quit.restartToUpdate() }, { type: "separator" }]
+      : [];
   const known = savedNewer(readSettings(settingsFile()), app.getVersion());
   return [
     ...(known ? [{ label: `Download Sanoma ${known.version}…`, click: () => void shell.openExternal(known.url) }] : []),
@@ -1038,6 +1074,14 @@ const argsOf = (argv: readonly string[]) => argv.slice(1);
 /** The app's own path on a checkout's command line (`electron <app path>`), which is no company folder. */
 const ownPath = () => (process.defaultApp ? app.getAppPath() : undefined);
 
+/** Quit's order (`quitOrder`). What is open stays marked so (`Company.open`), for the next launch. */
+const quit = quitOrder({
+  busy: () => running.size > 0 || opening.size > 0,
+  stopAll: () => Promise.all(opening.values()).then(() => Promise.all([...running.keys()].map(stop))),
+  quit: () => app.quit(),
+  install: () => autoUpdater.quitAndInstall(),
+});
+
 // Windows: the Squirrel installer runs the app to add or remove its shortcuts, then expects it to quit.
 if (squirrelStartup || !app.requestSingleInstanceLock()) {
   app.quit();
@@ -1099,21 +1143,10 @@ if (squirrelStartup || !app.requestSingleInstanceLock()) {
     if (isShownApp(event)) showStart();
   });
 
-  // Quit waits for each company: those still opening, then every session, stopped. What is open
-  // stays marked so (`Company.open`), for the next launch.
-  let stopped = false;
-  let stoppingAll: Promise<unknown> | undefined;
+  // From the first Quit on, closing the window closes it (`quitting`); `quit` holds Quit until the companies stop.
   app.on("before-quit", (event) => {
     quitting = true;
-    if (!stopped && (running.size || opening.size)) {
-      event.preventDefault();
-      stoppingAll ??= Promise.all(opening.values())
-        .then(() => Promise.all([...running.keys()].map(stop)))
-        .finally(() => {
-          stopped = true;
-          app.quit();
-        });
-    }
+    if (quit.hold()) event.preventDefault();
   });
   // ctrl-c in the terminal that started the shell, or a kill: quit as the menu does, stopping each company.
   for (const signal of ["SIGINT", "SIGTERM"] as const) process.on(signal, () => app.quit());
@@ -1125,11 +1158,19 @@ if (squirrelStartup || !app.requestSingleInstanceLock()) {
 
   void app.whenReady().then(() => {
     app.setAboutPanelOptions({ applicationName: "Sanoma", applicationVersion: app.getVersion() });
+    selfUpdating = updatesItself({
+      packaged: app.isPackaged,
+      platform: process.platform,
+      signed: SIGNED_WITH_DEVELOPER_ID,
+      inApplications: () => app.isInApplicationsFolder(),
+    });
     buildMenu();
     // No Dock elsewhere: the tray icon brings the hidden window back.
     if (process.platform !== "darwin") makeTray().catch((err: unknown) => console.error(`tray: ${messageOf(err)}`));
-    // The built app only: a checkout's shell (start, the smoke test) shares its settings and asks GitHub only from Help.
-    if (app.isPackaged) {
+    if (selfUpdating) updateItself();
+    // Else a built app checks for a newer release and links to it: a checkout's shell (start, the
+    // smoke test) shares its settings and asks GitHub only from Help.
+    else if (app.isPackaged) {
       checkForUpdate(false);
       // Hourly against the saved time, not a day-long timer, which would not count the hours asleep.
       setInterval(() => checkForUpdate(false), 60 * 60 * 1000);
