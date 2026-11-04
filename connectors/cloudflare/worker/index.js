@@ -14,8 +14,13 @@ export class SanomaInstance extends DurableObject {
     return this.instance.fetch(request);
   }
 
-  alarm() {
-    return this.instance.alarm();
+  alarm(info) {
+    return this.instance.alarm(info);
+  }
+
+  /** Over RPC, from the sites router (`sites.js`): a page on the Worker queued a run. */
+  startNow() {
+    return this.instance.startNow();
   }
 }
 

@@ -4,15 +4,17 @@ Source of the Cloudflare connector: the three resource types, their operations o
 
 ## Contents
 
-| Path                           | What it is                                                                                                                                         |
-| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`connector.ts`](connector.ts) | Defines `container` (a host), `alarm` (a wakeup) and `records` (a zone's DNS record set), their schemas, and `cloudflareOps` with `alarm.register` |
-| [`ops.ts`](ops.ts)             | `CloudflareApi`, and `containerOps` and `alarmOps` over it: the upload and its bindings, plans, the wait for a revision, the wake route, refusals  |
-| [`records.ts`](records.ts)     | `recordsOps` over `CloudflareApi`: a set found by its mark, its plan, one batch per write, adoption, conflicts and the token's DNS permission      |
-| [`driver.ts`](driver.ts)       | `cloudflareDriver`: `CloudflareApi` over the `cloudflare` SDK and `fetch`, failures mapped to `DriverError`, the credentials' `env`                |
-| [`registry.ts`](registry.ts)   | `accountImage` and `copyImage`: the declared image copied into the account's registry over the OCI distribution API with `fetch`, pinned by digest |
-| [`fake.ts`](fake.ts)           | `fakeCloudflare`: an in-memory account whose Workers serve on this machine and run `worker/instance.js` over an in-process `ctx`                   |
-| [`worker.ts`](worker.ts)       | The Worker's modules as uploaded, and `worker/instance.js`'s routes, names and object, re-exported for the package                                 |
-| [`steps.ts`](steps.ts)         | `cloudflareSteps`: Cloudflare's steps for Gherkin tests (`defineSteps`)                                                                            |
-| [`resources.ts`](resources.ts) | The constructors data files import: `cloudflare.container`, `cloudflare.alarm`, `cloudflare.records`                                               |
-| [`index.ts`](index.ts)         | The package root: `cloudflare` with its driver, fake and steps attached (`withSetup`)                                                              |
+| Path                           | What it is                                                                                                                                                                 |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`connector.ts`](connector.ts) | Defines `container` (a host), `alarm` (a wakeup) and `records` (a zone's DNS record set), their schemas, and `cloudflareOps` with `alarm.register`                         |
+| [`ops.ts`](ops.ts)             | `CloudflareApi`, and `containerOps` and `alarmOps` over it: the upload and its bindings, plans, the wait for a revision, the wake route, refusals                          |
+| [`records.ts`](records.ts)     | `recordsOps` over `CloudflareApi`: a set found by its mark, its plan, one batch per write, adoption, conflicts and the token's DNS permission                              |
+| [`driver.ts`](driver.ts)       | `cloudflareDriver`: `CloudflareApi` over the `cloudflare` SDK and `fetch`, failures mapped to `DriverError`, the credentials' `env`                                        |
+| [`sites.ts`](sites.ts)         | `serveSites`: the public sites on the Worker after a deploy: the container's bundle, its assets through an upload session, the Worker uploaded again with the sites router |
+| [`errors.ts`](errors.ts)       | `refused`: the driver's own refusal, never retried                                                                                                                         |
+| [`registry.ts`](registry.ts)   | `accountImage` and `copyImage`: the declared image copied into the account's registry over the OCI distribution API with `fetch`, pinned by digest                         |
+| [`fake.ts`](fake.ts)           | `fakeCloudflare`: an in-memory account whose Workers serve on this machine and run `worker/instance.js` over an in-process `ctx`                                           |
+| [`worker.ts`](worker.ts)       | The Worker's modules as uploaded (the sites router's too), and `worker/instance.js`'s routes, names and object, re-exported for the package                                |
+| [`steps.ts`](steps.ts)         | `cloudflareSteps`: Cloudflare's steps for Gherkin tests (`defineSteps`)                                                                                                    |
+| [`resources.ts`](resources.ts) | The constructors data files import: `cloudflare.container`, `cloudflare.alarm`, `cloudflare.records`                                                                       |
+| [`index.ts`](index.ts)         | The package root: `cloudflare` with its driver, fake and steps attached (`withSetup`)                                                                                      |

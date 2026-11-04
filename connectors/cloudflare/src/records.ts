@@ -1,6 +1,7 @@
 import { type DnsRecord, DriverError, errorMessage, type PlanAction } from "@sanoma-ai/workflows";
 import { z } from "zod";
 import { caaData, canonicalRecord, keyOf, records as recordsType } from "./connector.ts";
+import { refused } from "./errors.ts";
 import {
   type CloudflareApi,
   type DnsBatch,
@@ -8,7 +9,6 @@ import {
   NONE,
   type Planned,
   type RecordWrite,
-  refused,
   replanned,
   type ZoneRecord,
 } from "./ops.ts";

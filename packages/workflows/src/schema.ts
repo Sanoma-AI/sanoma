@@ -19,11 +19,24 @@ import { CHANGE_MERGE, DATA_VENDOR, EFFECTS, groupNamesOf, type PeopleResource, 
 // resolved config and the people, in memory for the evaluator, and written as text to
 // `.sanoma/schema.cedarschema` for the policies' author.
 
-const require = createRequire(import.meta.url);
-let wasm: typeof import("@cedar-policy/cedar-wasm/nodejs") | undefined;
+/** Cedar's bindings: its builds (`/nodejs`, `/web`) export the same functions. */
+export type CedarWasm = typeof import("@cedar-policy/cedar-wasm/nodejs");
+let wasm: CedarWasm | undefined;
 
-/** `@cedar-policy/cedar-wasm`'s Node build, loaded (synchronously, once) on first use, so a process that never decides with Cedar never loads it. */
-export const cedarWasm = () => (wasm ??= require("@cedar-policy/cedar-wasm/nodejs") as typeof wasm)!;
+/**
+ * `@cedar-policy/cedar-wasm`'s Node build, loaded (synchronously, once) on first use, so a process
+ * that never decides with Cedar never loads it; or the build `useCedarWasm` gave.
+ */
+export const cedarWasm = (): CedarWasm =>
+  (wasm ??= createRequire(import.meta.url)("@cedar-policy/cedar-wasm/nodejs") as CedarWasm);
+
+/**
+ * From now on, Cedar is `bindings`: its web build, initialised, where the Node build cannot load
+ * (the Cloudflare host's Worker, which bundles the runtime).
+ */
+export function useCedarWasm(bindings: CedarWasm): void {
+  wasm = bindings;
+}
 
 /** The schema as Cedar's JSON format has it. */
 export type CedarSchemaJson = SchemaJson<string>;

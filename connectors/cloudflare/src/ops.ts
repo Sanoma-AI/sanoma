@@ -14,7 +14,9 @@ import {
 import { domainsOf, domainsText, hostnameUrl, siteAtHostname } from "@sanoma-ai/workflows/shared";
 import { instanceUrl, mintInstanceToken, WAKEUP_TOKEN } from "@sanoma-ai/workflows/wakeup-service";
 import { alarm, container } from "./connector.ts";
+import { refused } from "./errors.ts";
 import { accountPinned } from "./registry.ts";
+import { serveSites, SITES_PENDING } from "./sites.ts";
 import {
   HEALTH_PATH,
   IMAGE,
@@ -49,6 +51,8 @@ const TEXT = {
   /** The app's own custom domain, when declared: the state's `url` is then `https://<hostname>`. */
   hostname: "SANOMA_HOSTNAME",
   url: HOST_URL,
+  /** Set while the public sites' upload is still to be made (`sites.ts`). */
+  sitesPending: SITES_PENDING,
 } as const;
 /** Names a secret may not take: the Worker's own bindings. */
 const RESERVED = new Set<string>([NAMESPACE, ...Object.values(TEXT)]);
@@ -56,7 +60,8 @@ const RESERVED = new Set<string>([NAMESPACE, ...Object.values(TEXT)]);
 /** A binding as the upload sends it. */
 export type Binding =
   | { type: "durable_object_namespace"; name: string; class_name: string }
-  | { type: "plain_text" | "secret_text"; name: string; text: string };
+  | { type: "plain_text" | "secret_text"; name: string; text: string }
+  | { type: "assets"; name: string };
 
 /** A binding as a read shows it: a secret's name, never its text. */
 export interface ReadBinding {
@@ -85,6 +90,8 @@ export interface Upload {
   migrations?: typeof MIGRATION;
   /** The Worker's own logs (what its object saw of a start), kept by Cloudflare for seven days. */
   observability: { enabled: boolean };
+  /** The assets an upload session put in (its completion `jwt`), and how the Worker serves them (`sites.ts`). */
+  assets?: { jwt: string; config: Record<string, unknown> };
   modules: WorkerModule[];
 }
 
@@ -189,13 +196,27 @@ export interface CloudflareApi {
   dnsRecordsAt(zoneId: string, name: string): Promise<ZoneRecord[]>;
   /** Writes the batch, all of it or none (`POST /zones/{id}/dns_records/batch`): the records patched and posted, as the zone now holds them. */
   writeDns(zoneId: string, batch: DnsBatch): Promise<{ patches: ZoneRecord[]; posts: ZoneRecord[] }>;
+  /**
+   * Opens an upload session for the assets of the Worker's next upload
+   * (`POST …/scripts/{name}/assets-upload-session`): the buckets of hashes Cloudflare lacks, each
+   * one request of `uploadAssets`, and the session's `jwt` (with no buckets, what the upload redeems).
+   */
+  assetsSession(
+    script: string,
+    manifest: Record<string, { hash: string; size: number }>,
+  ): Promise<{ jwt: string; buckets: string[][] }>;
+  /** Uploads one bucket with the session's `jwt` (`POST …/workers/assets/upload?base64=true`): the completion jwt once the last is in. */
+  uploadAssets(jwt: string, files: AssetFile[]): Promise<string | undefined>;
   /** A request to a Worker: its answer, or a throw when there is none. */
   send(url: string, init: RequestInit): Promise<Response>;
 }
 
-/** The driver's own refusal, before or instead of a call: never retried. */
-export const refused = (message: string, vendorCode?: string) =>
-  new DriverError(`cloudflare: ${message}`, { retryable: false, ...(vendorCode && { vendorCode }) });
+/** One asset as a bucket uploads it: its hash, its content in base64, and the type it is served with. */
+export interface AssetFile {
+  hash: string;
+  base64: string;
+  contentType: string;
+}
 
 /** The company's Worker, named after it. */
 export const scriptOf = (name: string) => `sanoma-${name}`;
@@ -367,7 +388,8 @@ export interface ContainerOptions {
  * uploaded with the declared bindings and that image (the migration on its first upload), its
  * workers.dev URL turned on, the application made when there is none, and then a wait until the
  * Worker answers at the new revision, which starts the container. A new image is a new upload:
- * the object destroys a container started at another and starts it again.
+ * the object destroys a container started at another and starts it again. With domains and the
+ * instance token, the public sites the container built go on the Worker last (`serveSites`).
  */
 export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs }: ContainerOptions) {
   /** The Worker `name` runs, from its bindings and its application; `checkHealth` asks it too. None for a Worker that is not Sanoma's. */
@@ -406,7 +428,9 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
       healthy: checkHealth && app !== undefined && "revision" in (await health(cf, url, false)),
     };
     const secrets = bindings.filter((b) => b.type === "secret_text").map((b) => b.name);
-    return { state, secrets };
+    // The deploy uploaded the Worker, and its sites upload did not follow (`serveSites`).
+    const sitesPending = text.has(TEXT.sitesPending);
+    return { state, secrets, sitesPending };
   };
 
   const read = async ({ id }: { id: string }) => {
@@ -414,39 +438,55 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
     return found ? { id, gone: false, state: found.state } : { id, gone: true };
   };
 
-  const plan = async ({ id, desired }: { id?: string; desired?: Record<string, unknown> }): Promise<Planned> => {
+  /** The plan, and whether all it changes is the public sites' upload a deploy did not finish. */
+  const diff = async ({
+    id,
+    desired,
+  }: {
+    id?: string;
+    desired?: Record<string, unknown>;
+  }): Promise<{ planned: Planned; sitesOnly: boolean }> => {
     if (desired) checkHostname(desired.name, desired.hostname, desired.domains);
     const found = id === undefined ? undefined : await inspect(id, false);
-    if (!desired) return { action: found ? "delete" : "none", ...NONE };
+    if (!desired) return { planned: { action: found ? "delete" : "none", ...NONE }, sitesOnly: false };
     const { secrets, ...declared } = desired;
     const unknown = [...container.fields.vendorOwned];
     // A create plans without the account: it needs no credentials yet.
-    if (!found) return { action: "create", planned: declared, unknown, replace: [] };
+    if (!found) return { planned: { action: "create", planned: declared, unknown, replace: [] }, sitesOnly: false };
     const planned: Record<string, unknown> = declared;
     const { state } = found;
-    if (planned.name !== state.name) return { action: "replace", planned, unknown, replace: ["name"] };
+    if (planned.name !== state.name) {
+      return { planned: { action: "replace", planned, unknown, replace: ["name"] }, sitesOnly: false };
+    }
     const changed =
       // `domains` and `hostname` left out are compared too: removing one is a change.
       COMPARED.some(
         (field) => (field in planned || OPTIONAL.has(field)) && !same(field, planned[field], state[field]),
       ) || sorted(Object.keys(secrets ?? {})) !== sorted(found.secrets);
-    if (!changed) return { action: "none", planned: state, ...NONE };
+    if (!changed && !found.sitesPending)
+      return { planned: { action: "none", planned: state, ...NONE }, sitesOnly: false };
     // What the Worker will serve: the declared domains and hostname, none of the found ones left
     // out; the app at the declared hostname, or on workers.dev without one.
     const { domains: _domains, hostname: _hostname, ...was } = state;
     const url = servedAt(planned.hostname as string | null | undefined, state.worker_url);
     return {
-      action: "update",
       planned: {
-        ...was,
-        ...planned,
-        ...(state.configurationRevision !== undefined &&
-          planned.configurationRevision == null && { configurationRevision: null }),
-        url,
+        action: "update",
+        planned: {
+          ...was,
+          ...planned,
+          ...(state.configurationRevision !== undefined &&
+            planned.configurationRevision == null && { configurationRevision: null }),
+          url,
+        },
+        ...NONE,
       },
-      ...NONE,
+      // The Worker otherwise runs what is declared, its application made.
+      sitesOnly: !changed && state.id !== null,
     };
   };
+
+  const plan = async (input: { id?: string; desired?: Record<string, unknown> }) => (await diff(input)).planned;
 
   /** Waits until the Worker at `url` answers at `revision`, which starts its container. */
   const started = async (
@@ -504,8 +544,12 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
     }
   };
 
-  /** Makes the Worker and its application match `desired`, and waits for it: a create and an update alike. */
-  const put = async (desired: Record<string, unknown>, { secrets: store }: CallContext) => {
+  /**
+   * Makes the Worker and its application match `desired`, and waits for it: a create and an
+   * update alike. With `sitesOnly` (the Worker runs `desired` already, but its sites upload did
+   * not follow), the public sites' upload alone.
+   */
+  const put = async (desired: Record<string, unknown>, { secrets: store }: CallContext, sitesOnly = false) => {
     const declared = container.schema.parse(await resolveSecrets(desired, store));
     const { name, image, source, ref, revision, configurationRevision, port, domains } = declared;
     const hostname = declared.hostname ?? undefined;
@@ -547,6 +591,7 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
     const runs = accountPinned(image, cf.account) ? image : await cf.copyImage(image);
     await prepared(cf, runs);
     const served = domains ? domainsText(domains) : undefined;
+    const token = secrets[WAKEUP_TOKEN];
     const text = {
       [TEXT.source]: source,
       [TEXT.ref]: ref,
@@ -558,6 +603,8 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
       [TEXT.url]: url,
       ...(served && { [TEXT.domains]: served }),
       ...(hostname && { [TEXT.hostname]: hostname }),
+      // Until `serveSites` uploads the Worker again, without it.
+      ...(domains && token && { [TEXT.sitesPending]: "1" }),
     };
     const bindings: Binding[] = [
       { type: "durable_object_namespace", name: NAMESPACE, class_name: OBJECT_CLASS },
@@ -576,29 +623,37 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
       observability: { enabled: true },
       modules: await workerModules(),
     };
-    // A domain declared before and no longer is detached while the bindings still record it, and
-    // a missing one attached once the upload records it: whatever fails in between, none is left
-    // attached and unrecorded, and the next apply attaches what is still missing. A site's domain
-    // so never reaches a Worker that would serve the app there (README, Custom domains).
-    for (const domain of attached) {
-      if (before.has(domain.hostname) && !hostnames.has(domain.hostname)) await cf.detachDomain(domain.id);
+    let app = sitesOnly ? await cf.application(script) : undefined;
+    if (sitesOnly) {
+      if (!app) throw refused(`${script}: its container application is gone`);
+    } else {
+      // A domain declared before and no longer is detached while the bindings still record it, and
+      // a missing one attached once the upload records it: whatever fails in between, none is left
+      // attached and unrecorded, and the next apply attaches what is still missing. A site's domain
+      // so never reaches a Worker that would serve the app there (README, Custom domains).
+      for (const domain of attached) {
+        if (before.has(domain.hostname) && !hostnames.has(domain.hostname)) await cf.detachDomain(domain.id);
+      }
+      await cf.upload(script, { ...metadata, ...(current === undefined && { migrations: MIGRATION }) });
+      await cf.enableSubdomain(script);
+      app = await cf.application(script);
+      if (!app) {
+        // The application is made for the object's namespace, which the first upload made.
+        const namespace = (await cf.bindings(script))?.find((b) => b.name === NAMESPACE)?.namespace_id;
+        if (!namespace) throw refused(`${script}: Cloudflare names no namespace for its ${NAMESPACE} binding`);
+        app = await cf.createApplication(script, namespace);
+        // The object learns which application backs its namespace from a deployment made after
+        // the application exists: without this second upload every start answers "There is no
+        // container application assigned to this Durable Object namespace", for good (found live
+        // 2026-10-29; a Worker deployed again after the application started at once).
+        await cf.upload(script, metadata);
+      }
+      for (const [domain, zone] of missing) await cf.attachDomain(script, domain, zone);
+      await started(cf, script, url, revision, configurationRevision);
     }
-    await cf.upload(script, { ...metadata, ...(current === undefined && { migrations: MIGRATION }) });
-    await cf.enableSubdomain(script);
-    let app = await cf.application(script);
-    if (!app) {
-      // The application is made for the object's namespace, which the first upload made.
-      const namespace = (await cf.bindings(script))?.find((b) => b.name === NAMESPACE)?.namespace_id;
-      if (!namespace) throw refused(`${script}: Cloudflare names no namespace for its ${NAMESPACE} binding`);
-      app = await cf.createApplication(script, namespace);
-      // The object learns which application backs its namespace from a deployment made after
-      // the application exists: without this second upload every start answers "There is no
-      // container application assigned to this Durable Object namespace", for good (found live
-      // 2026-10-29; a Worker deployed again after the application started at once).
-      await cf.upload(script, metadata);
-    }
-    for (const [domain, zone] of missing) await cf.attachDomain(script, domain, zone);
-    await started(cf, script, url, revision, configurationRevision);
+    // The public sites on the Worker, once the container that builds them runs (`sites.ts`): the
+    // same bindings, so every domain attached is one they record.
+    if (domains && token) await serveSites(cf, { script, url, token, metadata, startTimeoutMs, pollMs });
     const state: ContainerState = {
       id: app.id,
       name,
@@ -630,13 +685,13 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
       }: { id: string; desired: Record<string, unknown>; expect?: { action: PlanAction; replace: string[] } },
       call: CallContext,
     ) => {
-      const fresh = await plan({ id, desired });
+      const { planned: fresh, sitesOnly } = await diff({ id, desired });
       replanned("container.update", fresh, expect);
       if (fresh.action === "none") {
         const found = await read({ id });
         if (found.state) return { id, state: found.state };
       }
-      return put(desired, call);
+      return put(desired, call, sitesOnly);
     },
     delete: async ({ id }: { id: string }) => {
       const cf = api();

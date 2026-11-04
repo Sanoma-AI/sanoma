@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { type Exchange, live, replay } from "@sanoma-ai/testing/replay";
 import { type CallContext, memorySecrets } from "@sanoma-ai/workflows";
 import { delay, http, HttpResponse } from "msw";
@@ -64,6 +65,14 @@ const state = {
 /** The exchanges of `name` that match `keep`. */
 const only = (name: string, keep: (e: Exchange, i: number) => boolean) => fixture(name).filter(keep);
 const apiPath = (path: string) => `${API}${path}`;
+/** The create of the `sites` fixture up to its wait for the container, then `bundle`'s answers. */
+const sitesWith = (...bundle: Exchange[]) => [
+  ...only("sites", (e) => e.path !== "/__sanoma/sites-bundle").slice(0, 12),
+  ...bundle,
+];
+/** The header the container's bundle route marks its answers with. */
+const ROUTE = { "x-sanoma-sites-bundle": "1" };
+const withSites = { ...desired, domains: { www: "www.acme.example" } };
 const reply = (path: string, status: number, body: unknown, method = "GET"): Exchange => ({
   method,
   path,
@@ -78,12 +87,22 @@ const cfError = (code: number, message: string) => ({
   result: null,
 });
 
+/** An asset's hash in an assets upload session's manifest, as the direct upload guide's example makes it. */
+const hashOf = (base64: string, extension: string) =>
+  createHash("sha256")
+    .update(base64 + extension)
+    .digest("hex")
+    .slice(0, 32);
+
 /** The upload's form, as Cloudflare reads it. */
 async function formOf(request: (typeof sent)[number]) {
   return new Response(request.body as string, {
     headers: { "content-type": request.headers.get("content-type")! },
   }).formData();
 }
+/** Cloudflare's reply to an upload of the Worker. */
+const workerUploaded = () =>
+  fixture("sites").find((e) => e.method === "PUT" && e.path.endsWith("/scripts/sanoma-company"))!;
 /** An upload form's `metadata` part, the JSON. */
 async function metadataOf(form: FormData) {
   return JSON.parse(await (form.get("metadata") as File).text());
@@ -508,6 +527,193 @@ describe.skipIf(live)("cloudflareDriver", () => {
           .path.split("/")
           .pop()}`,
       ]);
+    });
+
+    it("serves the public sites from the Worker once its container built them: the bundle, an assets session, and the Worker uploaded again", async () => {
+      const domains = { www: "www.acme.example" };
+      play("sites");
+      expect(await op("container.create", { desired: { ...desired, domains } })).toEqual({
+        id: "company",
+        state: { ...state, domains },
+      });
+      const steps = sent.map((r) => `${r.method} ${r.path.replace(API, "")}`);
+      expect(steps.slice(steps.indexOf("GET /__sanoma/health?start=1"))).toEqual([
+        "GET /__sanoma/health?start=1",
+        // Building, then built: asked again until it is.
+        "GET /__sanoma/sites-bundle",
+        "GET /__sanoma/sites-bundle",
+        "POST /workers/scripts/sanoma-company/assets-upload-session",
+        "POST /workers/assets/upload?base64=true",
+        "PUT /workers/scripts/sanoma-company",
+      ]);
+      const [asked, , session, assets, upload] = sent.slice(-5);
+      // The container's route takes the instance token; the assets upload, the session's jwt.
+      expect(asked!.headers.get("authorization") === `Bearer ${TOKEN}`).toBe(true);
+      expect(assets!.headers.get("authorization")).toBe("Bearer eyJhbGciOiJIUzI1NiJ9.session.signature");
+      const bundle = only("sites", (e) => e.path === "/__sanoma/sites-bundle" && e.status === 200)[0]!.body as {
+        assets: { path: string; content: string }[];
+      };
+      const [script, page] = bundle.assets;
+      expect(session!.body).toEqual({
+        manifest: {
+          [script!.path]: { hash: hashOf(script!.content, "js"), size: Buffer.from(script!.content, "base64").length },
+          [page!.path]: { hash: hashOf(page!.content, "html"), size: Buffer.from(page!.content, "base64").length },
+        },
+      });
+      // One part per asset the bucket names, by its hash: its base64, and the type it is served with.
+      const files = await formOf(assets!);
+      const parts = [hashOf(script!.content, "js"), hashOf(page!.content, "html")].map(
+        (hash) => files.get(hash) as File,
+      );
+      expect(await Promise.all(parts.map(async (f) => [f.type, await f.text()]))).toEqual([
+        ["text/javascript", script!.content],
+        ["text/html", page!.content],
+      ]);
+      // The Worker as the deploy uploaded it, with the sites router its entry, the bundle under
+      // `sites/`, and the assets the session put in bound.
+      const form = await formOf(upload!);
+      const metadata = await metadataOf(form);
+      const deployed = await metadataOf(
+        await formOf(
+          sent.findLast((r) => r !== upload && r.method === "PUT" && r.path.endsWith("/scripts/sanoma-company"))!,
+        ),
+      );
+      // The deploy's upload says the sites' is still to be made; the sites' takes that off.
+      const pending = { type: "plain_text", name: "SANOMA_SITES_PENDING", text: "1" };
+      expect(deployed.bindings).toContainEqual(pending);
+      expect(metadata).toEqual({
+        ...deployed,
+        main_module: "sites.js",
+        bindings: [
+          ...deployed.bindings.filter((b: object) => !isDeepStrictEqual(b, pending)),
+          { type: "assets", name: "ASSETS" },
+        ],
+        assets: {
+          jwt: "eyJhbGciOiJIUzI1NiJ9.completion.signature",
+          config: { html_handling: "none", not_found_handling: "none", run_worker_first: ["/*", "!/assets/*"] },
+        },
+      });
+      const modules = ["index.js", "instance.js", "sites.js", "sites/index.js", "sites/chunk.js", "sites/cedar.wasm"];
+      expect(modules.map((name) => [name, (form.get(name) as File | null)?.type])).toEqual([
+        ["index.js", "application/javascript+module"],
+        ["instance.js", "application/javascript+module"],
+        ["sites.js", "application/javascript+module"],
+        ["sites/index.js", "application/javascript+module"],
+        ["sites/chunk.js", "application/javascript+module"],
+        ["sites/cedar.wasm", "application/wasm"],
+      ]);
+      expect(await (form.get("sites.js") as File).text()).toContain('from "./sites/index.js"');
+      // Deleted as any: its assets go with it.
+      expect(await op("container.delete", { id: "company" })).toEqual({ id: "company", gone: true });
+      expect(await op("container.read", { id: "company" })).toEqual({ id: "company", gone: true });
+    });
+
+    it("refuses when the container could not build the sites bundle, saying why", async () => {
+      const error = "sites/www/routes/index.tsx: Unexpected token";
+      play("sites-failed", sitesWith({ ...reply("/__sanoma/sites-bundle", 500, { error }), headers: ROUTE }));
+      await expect(op("container.create", { desired: withSites })).rejects.toThrow(
+        `cloudflare: sanoma-company: its container did not give the sites bundle (its sites are served from the container meanwhile): ${error}`,
+      );
+    });
+
+    it("asks again while the container starts again, and uploads the Worker as deployed for a runtime without the route", async () => {
+      // The object's 503 while the container restarts; then an image from before the route, whose
+      // staff login refuses the path with its sign-in page.
+      const restarting = reply("/__sanoma/sites-bundle", 503, { error: "the company's container did not answer" });
+      const signIn = reply("/__sanoma/sites-bundle", 401, "<!doctype html><title>Sign in</title>");
+      play("sites-old-runtime", sitesWith(restarting, signIn, workerUploaded()));
+      expect(await op("container.create", { desired: withSites })).toMatchObject({ id: "company" });
+      const puts = sent.filter((r) => r.method === "PUT" && r.path.endsWith("/scripts/sanoma-company"));
+      expect(puts).toHaveLength(3);
+      // The last, the deploy's upload again without the mark of a sites upload still to be made.
+      const [deployed, last] = await Promise.all([puts[1]!, puts[2]!].map(async (r) => metadataOf(await formOf(r))));
+      expect(last).toEqual({
+        ...deployed,
+        bindings: deployed.bindings.filter((b: { name: string }) => b.name !== "SANOMA_SITES_PENDING"),
+      });
+      expect(last.bindings).not.toContainEqual(expect.objectContaining({ type: "assets" }));
+    });
+
+    it.each([
+      ["an error of Cloudflare's", reply("/__sanoma/sites-bundle", 502, "bad gateway"), "answered 502"],
+      [
+        "the app's 500 without the mark",
+        reply("/__sanoma/sites-bundle", 500, { error: "Internal error" }),
+        "Internal error",
+      ],
+      ["a timeout of Cloudflare's", reply("/__sanoma/sites-bundle", 504, ""), "answered 504"],
+      [
+        "a bundle cut off",
+        { ...reply("/__sanoma/sites-bundle", 200, '{"sites":["www"],"mainMod'), headers: ROUTE },
+        "cut off",
+      ],
+    ])("asks again on %s, and fails retryably once the start's time is up", async (_, answer, said) => {
+      const slow = cloudflareDriver({ timeoutMs: 200, startTimeoutMs: 30, pollMs: 5 });
+      play("sites-unanswered", sitesWith());
+      let asked = 0;
+      const body = typeof answer.body === "string" ? answer.body : JSON.stringify(answer.body);
+      server.use(
+        http.get("*/__sanoma/sites-bundle", () => {
+          asked++;
+          return new HttpResponse(body, { status: answer.status, headers: answer.headers });
+        }),
+      );
+      await expect(
+        slow.ops["container.create"]!({ desired: withSites }, callWith({ SANOMA_WAKEUP_TOKEN: TOKEN })),
+      ).rejects.toMatchObject({
+        name: "DriverError",
+        retryable: true,
+        message: expect.stringMatching(new RegExp(`no sites bundle from its container in 0 s.*${said}`)),
+      });
+      expect(asked).toBeGreaterThan(1);
+    });
+
+    it("reads a Worker whose sites upload did not follow as drift, and the update makes that upload alone", async () => {
+      // The Worker as the deploy uploaded it, still marked: its sites upload failed.
+      const [settings, app, subdomain] = only("update-to-a-new-image", (_, i) => i < 3);
+      const deployed = withText(
+        withText(settings!, "SANOMA_DOMAINS", "www=www.acme.example"),
+        "SANOMA_SITES_PENDING",
+        "1",
+      );
+      const domains = attachedDomains("www.acme.example");
+      const preparation = only("update-to-a-new-image", (e) => e.path.endsWith(PREPARATIONS))[0]!;
+      const [bundle, ...upload] = only("sites", (_, i) => i >= 13 && i <= 16);
+      play("sites-pending", [
+        // The plan.
+        deployed,
+        app!,
+        subdomain!,
+        domains,
+        // The update: its plan again, its reads, the image's preparation, then the sites' upload.
+        deployed,
+        app!,
+        domains,
+        deployed,
+        domains,
+        preparation,
+        app!,
+        bundle!,
+        ...upload,
+      ]);
+      const planned = await op("container.plan", { id: "company", desired: withSites });
+      expect(planned).toMatchObject({ action: "update", planned: { domains: withSites.domains } });
+      expect(await update({ desired: withSites })).toEqual({
+        id: "company",
+        state: { ...state, domains: withSites.domains },
+      });
+      // No upload of the Worker as deployed, no domain attached, no wait for its revision: the sites' alone.
+      const changes = sent.filter((r) => r.method !== "GET" && !r.path.endsWith(PREPARATIONS));
+      expect(changes.map((r) => `${r.method} ${r.path.replace(API, "")}`)).toEqual([
+        "POST /workers/scripts/sanoma-company/assets-upload-session",
+        "POST /workers/assets/upload?base64=true",
+        "PUT /workers/scripts/sanoma-company",
+      ]);
+      expect(sent.some((r) => r.path.startsWith("/__sanoma/health"))).toBe(false);
+      const { main_module, bindings } = await metadataOf(await formOf(changes.at(-1)!));
+      expect(main_module).toBe("sites.js");
+      expect(bindings).toContainEqual({ type: "assets", name: "ASSETS" });
+      expect(bindings).not.toContainEqual(expect.objectContaining({ name: "SANOMA_SITES_PENDING" }));
     });
 
     it("plans an update when a domain the Worker serves is not attached, so the next apply attaches it", async () => {

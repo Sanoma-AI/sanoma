@@ -38,6 +38,7 @@ export interface ObjectState {
     get<T>(key: string): Promise<T | undefined>;
     put(key: string, value: unknown): Promise<void>;
     delete(key: string): Promise<boolean>;
+    getAlarm(): Promise<number | null>;
     setAlarm(at: number): Promise<void>;
     deleteAlarm(): Promise<void>;
   };
@@ -48,8 +49,17 @@ export interface ObjectState {
 export declare class Instance {
   constructor(ctx: ObjectState, env: Record<string, unknown>);
   fetch(request: Request): Promise<Response>;
-  alarm(): Promise<void>;
+  /** `info` as Cloudflare gives it: how many times this alarm was retried. */
+  alarm(info?: { retryCount: number; isRetry: boolean }): Promise<void>;
+  /** Starts the container from an alarm now, without waiting for it: a run was queued for it. */
+  startNow(): Promise<void>;
 }
+
+/** The Worker's one object, which every request and the sites router's `startNow` go to. */
+export declare function instanceOf(env: Record<string, unknown>): {
+  fetch(request: Request): Promise<Response>;
+  startNow(): Promise<void>;
+};
 
 /** The Worker's default export: every request goes to the one object. */
 export declare const worker: { fetch(request: Request, env: Record<string, unknown>): Promise<Response> };
