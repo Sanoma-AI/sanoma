@@ -443,7 +443,7 @@ function PushButton() {
  * How people will sign in on the host: by an email code through the config's sender, by GitHub
  * through the App, and always by invite links. With neither a connected sender nor GitHub, a
  * warning that does not block going live, and the two fixes. With GitHub, the public sites whose
- * visitors can connect it too, and the callback URL each needs on the App.
+ * visitors can sign in with it too, and the callback URL each needs on the App.
  */
 function SignInItem({ signIn }: { signIn: SetupStatus["signIn"] }) {
   const code = signIn.sender !== null && signIn.senderConnected;
@@ -483,8 +483,8 @@ function SignInItem({ signIn }: { signIn: SetupStatus["signIn"] }) {
           {signIn.github && signIn.sites.length > 0 && (
             <>
               {" "}
-              Visitors signed in on {signIn.sites.map((site) => siteDir(site.name)).join(", ")} can connect GitHub too,
-              once the App lists{" "}
+              Visitors on {signIn.sites.map((site) => siteDir(site.name)).join(", ")} can sign in with GitHub too, once
+              the App lists{" "}
               <code>
                 {[
                   ...new Set(signIn.sites.map((site) => `https://<site host>/auth/${site.login}/callback/github`)),
