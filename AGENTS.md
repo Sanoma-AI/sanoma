@@ -29,6 +29,7 @@ Source and test directory maps live below each package. Open them when navigatin
 
 ## Documentation boundaries
 
+- For README prose and other product copy, use [copywriting](.agents/skills/copywriting/SKILL.md).
 - `README.md` explains purpose, installation, usage, and public behavior. `AGENTS.md` contains a short map, maintenance constraints, and relevant checks. Link to details rather than repeat them.
 - Put shared rules at the nearest common ancestor and package-specific rules in that package. Add deeper guidance only for a distinct boundary or a useful local map.
 - Keep separate files at the root and package level. For a small directory index where the audiences need exactly the same content, use `AGENTS.md` as the source and a relative `README.md -> AGENTS.md` symlink. Do not symlink a long user manual into automatically loaded guidance.
