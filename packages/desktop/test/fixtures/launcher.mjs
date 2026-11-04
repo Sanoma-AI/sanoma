@@ -27,7 +27,7 @@ console.log(`pids ${process.pid} ${grandchild.pid}`);
 if (mode === "crash") setTimeout(() => process.exit(1), 100);
 
 // As the launcher does, it stops what runs before it exits on the stop: here, a moment's wait, and
-// on Windows its grandchild, which the shell cannot reach there once the launcher exited.
+// on Windows its grandchild, which Node's job object would end only once the launcher is gone.
 const stop = () => {
   if (mode === "stubborn") return console.log("ignoring the stop");
   if (process.platform === "win32") grandchild.kill();

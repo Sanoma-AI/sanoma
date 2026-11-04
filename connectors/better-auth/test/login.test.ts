@@ -1,8 +1,10 @@
 import { hkdfSync, randomBytes, randomUUID } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
 import { CLIENT_IP_HEADER, type LoginContext, type LoginHalf } from "@sanoma-ai/workflows";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { prepareBetterAuth } from "../src/instance.ts";
 import { betterAuthLogin } from "../src/login.ts";
 
 const databaseUrl = testDatabaseUrl("better_auth");
@@ -18,10 +20,22 @@ const context: LoginContext = {
   origins: ["http://account.localhost:*", "https://account.example"],
 };
 
-/** A fresh copy of the module, whose once-per-process migration has not run: a process of its own. */
-async function freshLogin(): Promise<typeof betterAuthLogin> {
+/** `prepareBetterAuth` as another worker's process has it: its own memory of what it migrated. */
+async function freshPrepare(): Promise<typeof prepareBetterAuth> {
   vi.resetModules();
-  return (await import("../src/login.ts")).betterAuthLogin;
+  return (await import("../src/instance.ts")).prepareBetterAuth;
+}
+
+/** The addresses the rate limit's table counts, from its keys. */
+async function rateLimits(): Promise<string[]> {
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    const { rows } = await client.query<{ key: string }>('SELECT key FROM better_auth."rateLimit"');
+    return rows.map((row) => row.key.split("|")[0] ?? "");
+  } finally {
+    await client.end();
+  }
 }
 
 async function tables(): Promise<string[]> {
@@ -97,19 +111,32 @@ beforeAll(async () => {
 });
 
 describe("login", () => {
-  it("creates schema better_auth and its tables, from two cold starts at once", async () => {
-    const first = await freshLogin();
-    const second = await freshLogin();
-    expect(first).not.toBe(second);
-    const halves = await Promise.all([first(context), second(context)]);
-    await Promise.all(halves.map((half) => half.close?.()));
-    expect(await tables()).toEqual(["account", "session", "user", "verification"]);
+  it("waits to open until the worker prepared the schema, and never makes it", async () => {
+    const opening = betterAuthLogin(context);
+    await delay(1500);
+    expect(await tables()).toEqual([]);
+    await (
+      await freshPrepare()
+    )(databaseUrl);
+    await (await opening).close?.();
+    expect(await tables()).toEqual(["account", "rateLimit", "session", "user", "verification"]);
   });
 
-  it("starts again on the migrated schema, the same tables", async () => {
-    const half = await (await freshLogin())(context);
+  it("is prepared by the worker: schema better_auth and its tables, from two workers at once", async () => {
+    const first = await freshPrepare();
+    const second = await freshPrepare();
+    expect(first).not.toBe(second);
+    await Promise.all([first(databaseUrl), second(databaseUrl)]);
+    expect(await tables()).toEqual(["account", "rateLimit", "session", "user", "verification"]);
+  });
+
+  it("is prepared again on the migrated schema, the same tables, and then opens", async () => {
+    await (
+      await freshPrepare()
+    )(databaseUrl);
+    expect(await tables()).toEqual(["account", "rateLimit", "session", "user", "verification"]);
+    const half = await betterAuthLogin(context);
     await half.close?.();
-    expect(await tables()).toEqual(["account", "session", "user", "verification"]);
   });
 
   it("refuses a context without the app's key, and an origin that is more than a scheme and a host", async () => {
@@ -197,15 +224,24 @@ describe("the login half", () => {
     expect(await half.verify(request("/", { cookie }))).not.toBeNull();
   });
 
-  it("limits sign-in attempts per client address", async () => {
+  it("limits sign-in attempts per client address, in a table every instance shares", async () => {
     const body = { email: "no@example.com", password: "wrong-password" };
     const statuses = [];
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 3; i++) {
       statuses.push((await half.handle(request("/auth/better-auth/sign-in/email", { body, ip: "10.9.9.9" })))?.status);
     }
-    expect(statuses).toEqual([401, 401, 401, 429]);
+    expect(statuses).toEqual([401, 401, 401]);
+    // The fourth try from the same address is refused by another instance, which only the table tells about the first three.
+    const other = await betterAuthLogin(context);
+    try {
+      const fourth = await other.handle(request("/auth/better-auth/sign-in/email", { body, ip: "10.9.9.9" }));
+      expect(fourth?.status).toBe(429);
+    } finally {
+      await other.close?.();
+    }
     const another = await half.handle(request("/auth/better-auth/sign-in/email", { body, ip: "10.9.9.10" }));
     expect(another?.status).toBe(401);
+    expect(await rateLimits()).toContain("10.9.9.9");
   });
 });
 

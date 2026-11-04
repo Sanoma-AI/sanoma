@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync } 
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { system32 } from "./windows.ts";
 
 /**
  * The platforms PostgreSQL is shipped for, as `${process.platform}-${process.arch}`. Each has a
@@ -84,20 +85,23 @@ export function postgresBin({
 
 /**
  * The OS's cache for PostgreSQL's binaries: `~/Library/Caches/sanoma/postgres` on macOS,
- * `%LOCALAPPDATA%\sanoma\postgres` on Windows, `$XDG_CACHE_HOME/sanoma/postgres` (default
- * `~/.cache`) elsewhere.
+ * `%LOCALAPPDATA%\sanoma-postgres` on Windows, `$XDG_CACHE_HOME/sanoma/postgres` (default
+ * `~/.cache`) elsewhere. Not `sanoma\postgres` on Windows, where names ignore case: that is in the
+ * desktop app's install, which its installer and uninstaller clear, killing what runs from it.
  */
 export function cacheDir(platform: string, env: Record<string, string | undefined> = process.env): string {
+  if (platform.startsWith("win32-")) {
+    return join(env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "sanoma-postgres");
+  }
   const base = platform.startsWith("darwin-")
     ? join(homedir(), "Library", "Caches")
-    : platform.startsWith("win32-")
-      ? (env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"))
-      : (env.XDG_CACHE_HOME ?? join(homedir(), ".cache"));
+    : (env.XDG_CACHE_HOME ?? join(homedir(), ".cache"));
   return join(base, "sanoma", "postgres");
 }
 
 function tar(args: string[], cwd: string): void {
-  const result = spawnSync("tar", args, { cwd, encoding: "utf8" });
+  const command = process.platform === "win32" ? system32("tar.exe") : "tar";
+  const result = spawnSync(command, args, { cwd, encoding: "utf8", windowsHide: true });
   if (result.error) throw new Error(`PostgreSQL: could not run tar to extract the binaries`, { cause: result.error });
   if (result.status !== 0) {
     throw new Error(`PostgreSQL: tar ${args.join(" ")} failed (exit ${result.status}): ${result.stderr.trim()}`);

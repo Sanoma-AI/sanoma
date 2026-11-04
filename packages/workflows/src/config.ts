@@ -206,6 +206,8 @@ export interface ResolvedConfig {
   driversByVendor: Map<string, Driver>;
   /** The makers of the fakes the connectors attach, by vendor id in `connectors` order: each sandbox run makes its own. */
   fakes: Map<string, () => Fake<any, any>>;
+  /** The preparations the connectors attach (`ConnectorSetup.prepare`), by vendor id in `connectors` order: the worker runs each at its start. */
+  preparations: ReadonlyMap<string, NonNullable<ConnectorSetup["prepare"]>>;
   /** The makers of the login halves the connectors attach, by vendor id in `connectors` order: the app makes one per public site that names it. */
   logins: ReadonlyMap<string, NonNullable<ConnectorSetup["login"]>>;
   /** The makers of the model halves the connectors attach, by vendor id in `connectors` order: the app makes each once for its model registry. */
@@ -466,6 +468,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     drivers,
     driversByVendor,
     fakes,
+    preparations: makersOf(config.connectors, "prepare"),
     logins: makersOf(config.connectors, "login"),
     models: makersOf(config.connectors, "model"),
     remotes,

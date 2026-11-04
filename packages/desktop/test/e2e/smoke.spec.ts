@@ -16,8 +16,10 @@ import type { DesktopCompany } from "../../src/main.ts";
 import { runtimeOf } from "../../src/runtime.ts";
 
 const pkg = realpathSync(fileURLToPath(new URL("../../", import.meta.url)));
-/** The Electron binary: the `electron` package's main export, in Node, is its path. */
-const executablePath = createRequire(import.meta.url)("electron") as string;
+/** The packaged app when one is named (desktop.yml, on Windows; it needs SANOMA_TEST_BUILD's fuse). */
+const packaged = process.env.SANOMA_DESKTOP_EXE;
+/** Else the Electron binary, running this package: the `electron` package's main export, in Node, is its path. */
+const executablePath = packaged ?? (createRequire(import.meta.url)("electron") as string);
 const { engines } = JSON.parse(
   readFileSync(new URL("../../../sanoma/template/package.json", import.meta.url), "utf8"),
 ) as { engines: { node: string } };
@@ -57,8 +59,9 @@ const startedOf = (company: string) =>
   JSON.parse(readFileSync(join(company, "started.json"), "utf8")) as { port: number; execPath: string; pid: number };
 
 test("one window: a company from progress to app, a second beside it, switching, Stop, Quit and the next launch", async () => {
-  // By real path, as the shell names a company's log after it (macOS's tmpdir is a symlink).
-  const work = realpathSync(mkdtempSync(join(tmpdir(), "sanoma-desktop-e2e-")));
+  // By real path, as the shell names a company's log after it (macOS's tmpdir is a symlink, and a
+  // Windows runner's has a short 8.3 name).
+  const work = realpathSync.native(mkdtempSync(join(tmpdir(), "sanoma-desktop-e2e-")));
   // Outside the workspace, so their `pnpm install` is the company's own.
   const company = join(work, "fixture");
   const second = join(work, "second");
@@ -67,7 +70,7 @@ test("one window: a company from progress to app, a second beside it, switching,
   }
   const userData = join(work, "user-data");
   const launchShell = (...args: string[]) =>
-    electron.launch({ executablePath, args: [pkg, ...args, `--user-data-dir=${userData}`] });
+    electron.launch({ executablePath, args: [...(packaged ? [] : [pkg]), ...args, `--user-data-dir=${userData}`] });
   let shell: ElectronApplication | undefined;
   const logs: string[] = [];
   const windowsNow = () => shellWindows(shell!);
@@ -106,7 +109,8 @@ test("one window: a company from progress to app, a second beside it, switching,
     const [one] = await companiesIn(first);
     expect(await companiesIn(first)).toEqual([{ id: expect.any(String), name: "fixture-company", shown: true }]);
     expect(one!.id).not.toContain(work);
-    expect(started.execPath).toBe(runtimeOf({ packaged: false, appPath: pkg, resourcesPath: "" }).node);
+    const resourcesPath = await shell.evaluate(() => process.resourcesPath);
+    expect(started.execPath).toBe(runtimeOf({ packaged: Boolean(packaged), appPath: pkg, resourcesPath }).node);
     const node = await shell.evaluate(
       ({ webContents }) =>
         webContents
@@ -183,7 +187,8 @@ test("one window: a company from progress to app, a second beside it, switching,
     expect(await companiesIn(secondUrl)).toEqual([{ ...two, shown: true }]);
 
     // Quit stops it, and keeps where the window was and that the company was open.
-    const bounds = { x: 120, y: 90, width: 900, height: 700 };
+    // Within a Windows runner's 1024x768 screen, as a window is kept on its screen.
+    const bounds = { x: 100, y: 60, width: 800, height: 600 };
     await shell.evaluate(({ BaseWindow }, [id, to]) => BaseWindow.fromId(id)!.setBounds(to), [
       progress!.id,
       bounds,
@@ -211,7 +216,8 @@ test("one window: a company from progress to app, a second beside it, switching,
     throw err;
   } finally {
     await shell?.close().catch(() => {});
-    rmSync(work, { recursive: true, force: true });
+    // Windows holds a file a moment after the process using it exited.
+    rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
     for (const log of logs) rmSync(log, { force: true });
   }
 });

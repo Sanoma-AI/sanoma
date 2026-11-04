@@ -9,6 +9,7 @@ import {
   lazyPool,
   pgCode,
   prepareDatabase,
+  spendInviteRequest,
   WAKEUP_TABLE,
 } from "../src/db.ts";
 
@@ -38,6 +39,27 @@ describe("createTable", () => {
       /^could not prepare the test table: /,
     );
     await pool.query("DROP TABLE sanoma_db_test");
+  });
+});
+
+describe("spendInviteRequest", () => {
+  it("spends a nonce once, whichever connection asks, and forgets it once it expires", async () => {
+    await prepareDatabase(databaseUrl);
+    const nonce = `n-${Date.now()}`;
+    const later = new Date(Date.now() + 60_000);
+    // Two requests at once, as two processes would be: one mints.
+    const [a, b] = await Promise.all([spendInviteRequest(pool, nonce, later), spendInviteRequest(pool, nonce, later)]);
+    expect([a, b].toSorted()).toEqual([false, true]);
+    expect(await spendInviteRequest(pool, nonce, later)).toBe(false);
+    // A nonce just expired is kept a while longer, since the database's clock may run ahead of the
+    // app's; one an hour past goes on the next spend.
+    const stale = "UPDATE sanoma_invite_requests SET expires_at = now() - $2::interval WHERE nonce = $1";
+    await pool.query(stale, [nonce, "1 second"]);
+    expect(await spendInviteRequest(pool, `other-${nonce}`, later)).toBe(true);
+    expect((await pool.query("SELECT 1 FROM sanoma_invite_requests WHERE nonce = $1", [nonce])).rowCount).toBe(1);
+    await pool.query(stale, [nonce, "61 minutes"]);
+    expect(await spendInviteRequest(pool, `third-${nonce}`, later)).toBe(true);
+    expect((await pool.query("SELECT 1 FROM sanoma_invite_requests WHERE nonce = $1", [nonce])).rowCount).toBe(0);
   });
 });
 
