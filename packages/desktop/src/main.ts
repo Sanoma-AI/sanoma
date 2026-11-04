@@ -1185,7 +1185,7 @@ if (squirrelStartup || !app.requestSingleInstanceLock()) {
     buildMenu();
     // No Dock elsewhere: the tray icon brings the hidden window back.
     if (process.platform !== "darwin") makeTray().catch((err: unknown) => console.error(`tray: ${messageOf(err)}`));
-    if (selfUpdating) setTimeout(updateItself, firstCheckDelay(process.argv));
+    if (selfUpdating) void new Promise((wait) => setTimeout(wait, firstCheckDelay(process.argv))).then(updateItself);
     // Else a built app checks for a newer release and links to it: a checkout's shell (start, the
     // smoke test) shares its settings and asks GitHub only from Help.
     else if (app.isPackaged) {

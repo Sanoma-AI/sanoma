@@ -7,9 +7,11 @@ on:
     branches: [main]
     paths: &paths
       - packages/desktop/**
-      # New Company runs the launcher and the template, which also hold the `engines` the shipped Node must satisfy.
+      # What New Company runs first: the launcher and the template, whose `engines` the shipped Node must satisfy.
+      # Not the whole workspace it installs, as that would run these jobs on most pull requests.
       - packages/sanoma/src/**
       - packages/sanoma/template/**
+      - packages/sanoma/package.json
       # `packageManager`: the pnpm the shell stages and installs companies with.
       - package.json
       - .github/workflows/desktop.yml

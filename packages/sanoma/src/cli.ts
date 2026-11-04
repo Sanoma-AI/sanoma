@@ -158,11 +158,18 @@ const port = (fallback = 3000) => Number(process.env.SANOMA_APP_PORT ?? fallback
  * answers first (`withPostgres`: "start" starts the company's own, "find" only finds it running),
  * so the config resolves on it.
  */
-async function load({ policies = true, postgres }: { policies?: boolean; postgres?: "start" | "find" } = {}): Promise<
+async function load({
+  policies = true,
+  postgres,
+}: { policies?: boolean; postgres?: "serve" | "start" | "find" } = {}): Promise<
   Loaded & { postgres?: EnsuredPostgres }
 > {
   const loaded = await loadConfig();
-  const ensured = postgres && (await withPostgres(namedDatabaseUrl(loaded.config), loaded.root, postgres === "start"));
+  const ensured =
+    postgres &&
+    (await withPostgres(namedDatabaseUrl(loaded.config), loaded.root, postgres !== "find", {
+      adopt: postgres === "serve",
+    }));
   const { resolveConfig } = await import("@sanoma-ai/workflows");
   try {
     const resolved = resolveConfig(loaded.config);
@@ -189,10 +196,10 @@ async function withPostgres(
   named: string | undefined,
   root: string,
   start: boolean,
-  { announce = true } = {},
+  { announce = true, adopt = false } = {},
 ): Promise<EnsuredPostgres> {
   const { ensurePostgres } = await import("./postgres.ts");
-  const postgres = await ensurePostgres(named, { root, log, start });
+  const postgres = await ensurePostgres(named, { root, log, start, adopt });
   process.env.SANOMA_DATABASE_URL = postgres.databaseUrl;
   if (named === undefined && announce) {
     emit({ event: "database", how: postgres.how, url: postgres.databaseUrl, place: "this-computer" });
@@ -239,7 +246,7 @@ async function keep(
  * named), then the worker and the app in this process. With `devServer` (`sanoma`), a repo's sites are served from Vite's dev server, not built.
  */
 async function serveCommand(devServer: boolean): Promise<never> {
-  const loaded = await load({ postgres: "start" });
+  const loaded = await load({ postgres: "serve" });
   return keep(loaded, async (config, resolved) => {
     await (
       await import("./key.ts")
@@ -280,7 +287,7 @@ async function dev(repo: string, packages: readonly LinkedPackage[]): Promise<ne
   const named =
     process.env.SANOMA_DATABASE_URL ||
     (existsSync(dotenv) && parseEnv(readFileSync(dotenv, "utf8")).SANOMA_DATABASE_URL);
-  const postgres = named ? undefined : await withPostgres(undefined, cwd, true);
+  const postgres = named ? undefined : await withPostgres(undefined, cwd, true, { adopt: true });
   const fromTarballs = partialLink(cwd);
   if (fromTarballs.length) {
     log(
@@ -426,7 +433,7 @@ async function wakeupAccount(label: string): Promise<number> {
 }
 
 /** How soon a second signal is still the first one's stop. */
-const SAME_STOP_MS = 1_000;
+const SAME_STOP_MS = 250;
 
 /**
  * On the first SIGINT or SIGTERM, or with `SANOMA_EVENTS=1` the end of stdin (a parent process

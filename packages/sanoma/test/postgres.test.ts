@@ -12,12 +12,13 @@ import {
 } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { resolveDatabaseUrl } from "@sanoma-ai/workflows";
 import * as pg from "pg";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { UsageError } from "../src/config.ts";
+import { cacheDir } from "../src/postgres-bin.ts";
 import { clusterDir, ensurePostgres, masked, mayBePostgres, OLD_DEFAULT_URL } from "../src/postgres.ts";
 import { gitIdentity } from "./git.ts";
 
@@ -243,11 +244,14 @@ describe("ensurePostgres with none named: the company's own", () => {
     expect(ran()).toEqual([]);
   });
 
-  it("stops, when it can start one too, a cluster nothing is connected to, which a crashed launcher left", async () => {
+  it("adopts a cluster nothing is connected to, which a crashed launcher left, and stops it; a one-off command does not", async () => {
     const root = repo();
     postmasterPid(root, process.pid, 54321);
     stubPostgres({ up: [54321] });
-    const ensured = await ensurePostgres(undefined, { root, bin: fakeBin() });
+    const oneOff = await ensurePostgres(undefined, { root, bin: fakeBin() });
+    await oneOff.stop();
+    expect(ran()).toEqual([]);
+    const ensured = await ensurePostgres(undefined, { root, bin: fakeBin(), adopt: true });
     expect(ensured.how).toBe("answered");
     await ensured.stop();
     expect(ran().filter((call) => call.startsWith("pg_ctl stop"))).toHaveLength(1);
@@ -257,7 +261,7 @@ describe("ensurePostgres with none named: the company's own", () => {
     const root = repo();
     postmasterPid(root, process.pid, 54321);
     stubPostgres({ up: [54321], others: 1 });
-    const ensured = await ensurePostgres(undefined, { root, bin: fakeBin() });
+    const ensured = await ensurePostgres(undefined, { root, bin: fakeBin(), adopt: true });
     expect(ensured.how).toBe("answered");
     await ensured.stop();
     expect(ran()).toEqual([]);
@@ -333,6 +337,14 @@ describe("ensurePostgres with none named: the company's own", () => {
 });
 
 const noTasklist = () => ({ stdout: "", error: new Error("no such program") });
+
+describe("cacheDir", () => {
+  it("on Windows is outside the desktop app's install, %LOCALAPPDATA%\\Sanoma, as names ignore case there", () => {
+    const cache = cacheDir("win32-x64", { LOCALAPPDATA: "L" }).toLowerCase();
+    expect(cache).toBe(join("l", "sanoma-postgres"));
+    expect(cache.startsWith(join("l", "sanoma") + sep)).toBe(false);
+  });
+});
 
 describe("mayBePostgres", () => {
   it("asks tasklist on Windows, by the image name of the pid", () => {

@@ -30,7 +30,7 @@ export interface EnsuredPostgres {
   /** Where it answers: the URL named, or the company's own, `postgresql://postgres:<password>@127.0.0.1:<port>/sanoma`. */
   databaseUrl: string;
   /**
-   * Stops the company's own Postgres when this call started it and no other client is connected
+   * Stops the company's own Postgres when this call started or adopted it and no other client is connected
    * (another launcher's worker, say), saying so when one is; nothing otherwise.
    */
   stop(): Promise<void>;
@@ -43,6 +43,11 @@ export interface EnsurePostgresOptions {
   log?: (line: string) => void;
   /** Without it, a URL named is taken as it is, unprobed, and only a cluster of the company's own that runs already is found: a `UsageError` when none does. */
   start?: boolean;
+  /**
+   * For a launcher that runs on, its clients soon connected: a cluster found with no client is its to
+   * stop. Not for a one-off command, which could stop one another launcher has yet to connect to.
+   */
+  adopt?: boolean;
   /** The directory holding PostgreSQL's `bin/`; default `postgresBin()`, read only to start one. */
   bin?: string;
 }
@@ -75,16 +80,16 @@ export function masked(databaseUrl: string): string {
  * database, as its user) and used as it is, or the call throws, saying what to do. With none, the
  * company's own: a PostgreSQL 18 cluster in `clusterDir(root)` (`password`, mode 0600, `server.log`
  * and `data/`), on 127.0.0.1 alone at a port of its own, as `postgres` with the password. A
- * cluster another launcher runs is used as it is (`answered`); one with no client left a launcher
- * that crashed (on Windows, a shell's crash takes the launcher with it but not `pg_ctl`'s Postgres),
- * so this launcher stops it as if its own; else, unless `start` is false, it is started (`started`), made first with `initdb` when there is no `data/` (`created`), under the
+ * cluster another launcher runs is used as it is (`answered`), and with `adopt` stopped at the end
+ * when no client is on it now: a launcher that crashed left it (on Windows, a shell's crash takes the
+ * launcher with it but not `pg_ctl`'s Postgres); else, unless `start` is false, it is started (`started`), made first with `initdb` when there is no `data/` (`created`), under the
  * `starting` lock so two launchers never start it twice. Its port is rewritten when another
- * process took it. `pg_ctl` runs in a process group of its own, so a terminal's ctrl-c reaches
- * the launcher alone, which stops it last (`stop`).
+ * process took it. `pg_ctl` runs in a process group of its own (not on Windows: `runPg`), so a
+ * terminal's ctrl-c reaches the launcher alone, which stops it last (`stop`).
  */
 export async function ensurePostgres(
   databaseUrl: string | undefined,
-  { root, log = () => {}, start = true, bin }: EnsurePostgresOptions,
+  { root, log = () => {}, start = true, adopt = false, bin }: EnsurePostgresOptions,
 ): Promise<EnsuredPostgres> {
   if (databaseUrl !== undefined) {
     // A deployment's worker or app: its database's own to answer, as the runtime retries.
@@ -105,7 +110,7 @@ export async function ensurePostgres(
 
   const cluster = paths(await clusterDir(root));
   const found = await running(cluster);
-  if (found !== undefined) return answered(cluster, found, log, start ? () => bin ?? postgresBin() : undefined);
+  if (found !== undefined) return answered(cluster, found, log, adopt ? () => bin ?? postgresBin() : undefined);
   if (!start) {
     throw new UsageError(`no Postgres runs in ${cluster.dir}: set SANOMA_DATABASE_URL, or run \`sanoma\``);
   }
@@ -184,10 +189,7 @@ export async function clusterDir(root: string): Promise<string> {
 const urlOf = ({ password }: Cluster, port: number) =>
   `postgresql://postgres:${readFileSync(password, "utf8").trim()}@127.0.0.1:${port}/sanoma`;
 
-/**
- * A cluster that already answers. With `adopt`, the PostgreSQL binaries, when no client is connected
- * nothing else will stop it, so this launcher does.
- */
+/** A cluster that already answers. With `adopt`, where the PostgreSQL binaries are: `ensurePostgres`'s `adopt`. */
 async function answered(
   cluster: Cluster,
   url: string,

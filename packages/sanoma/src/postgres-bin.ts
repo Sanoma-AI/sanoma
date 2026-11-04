@@ -85,15 +85,17 @@ export function postgresBin({
 
 /**
  * The OS's cache for PostgreSQL's binaries: `~/Library/Caches/sanoma/postgres` on macOS,
- * `%LOCALAPPDATA%\sanoma\postgres` on Windows, `$XDG_CACHE_HOME/sanoma/postgres` (default
- * `~/.cache`) elsewhere.
+ * `%LOCALAPPDATA%\sanoma-postgres` on Windows, `$XDG_CACHE_HOME/sanoma/postgres` (default
+ * `~/.cache`) elsewhere. Not `sanoma\postgres` on Windows, where names ignore case: that is in the
+ * desktop app's install, which its installer and uninstaller clear, killing what runs from it.
  */
 export function cacheDir(platform: string, env: Record<string, string | undefined> = process.env): string {
+  if (platform.startsWith("win32-")) {
+    return join(env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "sanoma-postgres");
+  }
   const base = platform.startsWith("darwin-")
     ? join(homedir(), "Library", "Caches")
-    : platform.startsWith("win32-")
-      ? (env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"))
-      : (env.XDG_CACHE_HOME ?? join(homedir(), ".cache"));
+    : (env.XDG_CACHE_HOME ?? join(homedir(), ".cache"));
   return join(base, "sanoma", "postgres");
 }
 

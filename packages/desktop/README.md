@@ -30,7 +30,7 @@ On a Mac, the environment decides how `package` and `make` sign the app (`forge.
 
 On Windows, **`WINDOWS_SIGN_WITH_PARAMS`**, signtool's arguments, signs with them every executable in the app and the installer, the bundled `node.exe` and Squirrel's `Update.exe` among them, with one SHA-256 signature (`forge.config.mts`, Forge's `windowsSign`); `WINDOWS_SIGNTOOL_PATH` and `WINDOWS_TIMESTAMP_SERVER` are `@electron/windows-sign`'s own. Only such a build updates itself (`SIGNED_BUILD`), and its `EnableCookieEncryption` fuse is on (the key is the Windows user's, so nothing asks). Without the variable the build is unsigned, as in `desktop.yml`. `desktop-release.yml` signs with [Azure Artifact Signing](https://learn.microsoft.com/azure/artifact-signing/): Microsoft's dlib, pinned, with the account, profile and endpoint at the top of its `windows` job, and an OIDC login (`azure/login`, the repository variables `AZURE_CLIENT_ID` and `AZURE_TENANT_ID`, no secret); it fails unless `Get-AuthenticodeSignature` calls every executable `Valid` (`scripts/check-windows-install.ps1`).
 
-What the release cannot sign is what runs later from npm, in `%LOCALAPPDATA%\sanoma\postgres` (PostgreSQL's 123 executables and DLLs) and a company's `node_modules` (oxlint, esbuild and the like): none is signed, so Windows 11's Smart App Control, where it enforces, may block them. See "Not yet".
+What the release cannot sign is what runs later from npm, in `%LOCALAPPDATA%\sanoma-postgres` (PostgreSQL's 123 executables and DLLs) and a company's `node_modules` (oxlint, esbuild and the like): none is signed, so Windows 11's Smart App Control, where it enforces, may block them. See "Not yet".
 
 ## What it does
 
