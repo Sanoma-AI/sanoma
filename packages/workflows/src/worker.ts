@@ -23,6 +23,7 @@ import { dbosLogger, info, quietIfSandbox, setLogLevel, warn } from "./log.ts";
 import { lineStartsOf, readSource } from "./ast.ts";
 import { callsOf, outlineWithSource } from "./outline.ts";
 import { currentRun, type Run, type RunArgs, type WorkerState, type WorkflowOutline } from "./run.ts";
+import type { DatabasePreparation } from "./op.ts";
 import { applyScheduled, nextScheduledFire, type ScheduledStarter, scheduledStarter } from "./schedules.ts";
 import type { Source } from "./source.ts";
 import { approverLabel, CHANGE_WORKFLOW, errorMessage, WORKFLOW_ACTION } from "./shared.ts";
@@ -102,6 +103,12 @@ export interface WorkerOptions {
    * it off, on a database of its own, so no schedule is applied there to start a live run.
    */
   schedules?: boolean;
+  /**
+   * What else the worker prepares the database for at its start, after the runtime's own tables
+   * and the connectors' (`ConnectorSetup.prepare`): the launcher passes the staff login's, which
+   * no config names. Each gets the database's direct URL.
+   */
+  prepare?: readonly DatabasePreparation[];
 }
 
 /**
@@ -209,6 +216,9 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     // Before DBOS's pool connects, so its connections start with the database's idle-transaction
     // timeout (`DBOS_DATABASE_OPTIONS`); once per process and database.
     await prepareDatabase(resolved.databaseUrl);
+    // Then what the connectors and the launcher keep there (a login's tables): the app only reads them.
+    for (const prepare of [...resolved.preparations.values(), ...(options.prepare ?? [])])
+      await prepare(resolved.databaseUrl);
     DBOS.setConfig({
       name: resolved.appName,
       systemDatabaseUrl: resolved.databaseUrl,
