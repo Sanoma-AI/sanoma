@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { sql } from "drizzle-orm";
+import { connectionHealth, connections, connectionSetups, ledger } from "../src/db/company.ts";
 import { z } from "zod";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
@@ -65,9 +67,7 @@ const dbUrl = testDatabaseUrl("connection_setup");
 const pool = lazyDb(dbUrl, "connection-setup-tests");
 afterAll(() => pool.close());
 beforeEach(async () => {
-  await (
-    await pool.db()
-  ).query("TRUNCATE sanoma_connections, sanoma_connection_setups, sanoma_connection_health, sanoma_ledger");
+  await (await pool.db()).execute(sql`TRUNCATE ${connections}, ${connectionSetups}, ${connectionHealth}, ${ledger}`);
   await (await pool.db()).query("TRUNCATE dbos.workflow_status CASCADE");
   verify.mockClear();
 });
@@ -113,21 +113,19 @@ describe("secure connection setup", () => {
           { authentication: ["identity"] },
         ),
     });
-    const connections = ["production", "development"].map((name) =>
-      defineConnection(workload, { name, method: "identity" }),
-    );
+    const named = ["production", "development"].map((name) => defineConnection(workload, { name, method: "identity" }));
     const store = memorySecretStore();
     const read = vi.spyOn(store, "read");
     const write = vi.spyOn(store, "write");
     const client = await SanomaClient.connect({
       ...config(),
       connectors: [workload],
-      connections,
+      connections: named,
       connectionRules: [],
       secrets: { store },
     });
     try {
-      for (const connection of connections) {
+      for (const connection of named) {
         const preview = await client.previewConnection({ connection }, undefined, { actor: "alice", id: randomUUID() });
         expect(preview.account).toBe(`verified:${connection.$connection}`);
         await client.connectConnection(preview, undefined, { actor: "alice" });

@@ -1,5 +1,7 @@
 import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from "node:crypto";
-import { CREDENTIALS_TABLE as TABLE, type LegacyQuery as Db } from "./db.ts";
+import { and, eq, sql } from "drizzle-orm";
+import type { Db } from "./db.ts";
+import { credentials } from "./db/company.ts";
 import {
   SecretAccess,
   SecretStoreError,
@@ -40,13 +42,21 @@ export function decrypt(identity: string, stored: string): string {
   }
 }
 
-type Row = { value: string; version: string; set_by: string; set_at: Date };
+const returned = {
+  value: credentials.value,
+  version: credentials.version,
+  setBy: credentials.setBy,
+  setAt: credentials.setAt,
+};
+type Row = { value: string; version: string; setBy: string; setAt: Date };
+const at = ({ namespace, path }: SecretAddress) =>
+  and(eq(credentials.namespace, namespace), eq(credentials.name, path));
 const identity = ({ namespace, path }: SecretAddress) => JSON.stringify([namespace, path]);
 const decoded = (address: SecretAddress, row: Row): SecretValue => ({
   value: decrypt(identity(address), row.value),
   version: row.version,
-  updatedBy: row.set_by,
-  updatedAt: row.set_at.toISOString(),
+  updatedBy: row.setBy,
+  updatedAt: row.setAt.toISOString(),
 });
 
 /** One company's database connection supplies authority; namespace separates deployments within it. */
@@ -63,46 +73,40 @@ export function postgresSecretStore(db: () => Promise<Db>): SecretStore {
     async validate(namespace) {
       if (!namespace) throw new SecretStoreError("invalid_configuration");
       deploymentKey(SECRETS_KEY);
-      await (await db()).query(`SELECT namespace FROM ${TABLE} LIMIT 0`);
+      await (await db()).select({ namespace: credentials.namespace }).from(credentials).limit(0);
     },
     async read(address) {
-      const { rows } = await (
-        await db()
-      ).query<Row>(`SELECT value, version, set_by, set_at FROM ${TABLE} WHERE namespace = $1 AND name = $2`, [
-        address.namespace,
-        address.path,
-      ]);
-      return rows[0] && decoded(address, rows[0]);
+      const [row] = await (await db()).select(returned).from(credentials).where(at(address));
+      return row && decoded(address, row);
     },
     async write(address, value, { expectedVersion, by }) {
       if (Buffer.byteLength(value) > 65_536) throw new SecretStoreError("too_large");
       const version = randomUUID();
       const sealed = encrypt(identity(address), value);
-      const query =
+      const database = await db();
+      const [row] =
         expectedVersion === null
-          ? `INSERT INTO ${TABLE} (namespace,name,value,version,set_by) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (namespace,name) DO NOTHING RETURNING value,version,set_by,set_at`
-          : `UPDATE ${TABLE} SET value=$3,version=$4,set_by=$5,set_at=now() WHERE namespace=$1 AND name=$2 AND version=$6 RETURNING value,version,set_by,set_at`;
-      const params = [
-        address.namespace,
-        address.path,
-        sealed,
-        version,
-        by,
-        ...(expectedVersion === null ? [] : [expectedVersion]),
-      ];
-      const { rows } = await (await db()).query<Row>(query, params);
-      if (!rows[0]) throw new SecretStoreError("conflict");
-      return decoded(address, rows[0]);
+          ? await database
+              .insert(credentials)
+              .values({ namespace: address.namespace, name: address.path, value: sealed, version, setBy: by })
+              .onConflictDoNothing()
+              .returning(returned)
+          : await database
+              .update(credentials)
+              .set({ value: sealed, version, setBy: by, setAt: sql`now()` })
+              .where(and(at(address), eq(credentials.version, expectedVersion)))
+              .returning(returned);
+      if (!row) throw new SecretStoreError("conflict");
+      return decoded(address, row);
     },
     async delete(address, { expectedVersion }) {
-      const { rowCount } = await (
+      const deleted = await (
         await db()
-      ).query(`DELETE FROM ${TABLE} WHERE namespace=$1 AND name=$2 AND version=$3`, [
-        address.namespace,
-        address.path,
-        expectedVersion,
-      ]);
-      if (!rowCount) throw new SecretStoreError("conflict");
+      )
+        .delete(credentials)
+        .where(and(at(address), eq(credentials.version, expectedVersion)))
+        .returning({ name: credentials.name });
+      if (!deleted.length) throw new SecretStoreError("conflict");
     },
   };
 }

@@ -84,15 +84,6 @@ export function withLegacyQuery<T extends Db>(db: T): T & LegacyQuery & Pick<Poo
   }) as T & LegacyQuery & Pick<Pool, "connect">;
 }
 
-/** @deprecated Transitional: the table names, for the modules not yet on `db/company.ts`. */
-export const CREDENTIALS_TABLE = "sanoma_credentials";
-/** @deprecated Transitional, see `CREDENTIALS_TABLE`. */
-export const CHATS_TABLE = "sanoma_chats";
-/** @deprecated Transitional, see `CREDENTIALS_TABLE`. */
-export const CHAT_MESSAGES_TABLE = "sanoma_chat_messages";
-/** @deprecated Transitional, see `CREDENTIALS_TABLE`. */
-export const API_TOKENS_TABLE = "sanoma_api_tokens";
-
 /** The Postgres error code of `err`, or an empty string when it has none. */
 export const pgCode = (err: unknown): string => (err as { code?: unknown } | null)?.code?.toString() ?? "";
 
