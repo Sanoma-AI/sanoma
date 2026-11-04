@@ -4,15 +4,8 @@ import { createInterface } from "node:readline";
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-/**
- * The event a line a launcher started with `SANOMA_EVENTS=1` prints on stdout for its parent
- * carries (#286 L1): `{"sanoma":1,"event":"ready","url":…,"sites":{…}}` or
- * `{"sanoma":1,"event":"error","message":…}`. Undefined for any other line, another event
- * (`database`, which the shell only logs) or one with fields that do not hold.
- */
-export function eventOf(
-  line: string,
-): { event: "ready"; url: string } | { event: "error"; message: string } | undefined {
+/** The record a line a launcher started with `SANOMA_EVENTS=1` prints on stdout for its parent carries (#286 L1). */
+function recordOf(line: string): Record<string, unknown> | undefined {
   if (!line.startsWith("{")) return undefined;
   let parsed: unknown;
   try {
@@ -20,8 +13,23 @@ export function eventOf(
   } catch {
     return undefined;
   }
-  if (!isRecord(parsed) || parsed.sanoma !== 1) return undefined;
-  const { event, url, message } = parsed;
+  return isRecord(parsed) && parsed.sanoma === 1 ? parsed : undefined;
+}
+
+/** Whether a line is one of the launcher's events, of any kind: for the shell, not for reading. */
+export const isEventLine = (line: string) => recordOf(line) !== undefined;
+
+/**
+ * The event a line carries that the shell acts on: `{"sanoma":1,"event":"ready","url":…,"sites":{…}}`
+ * or `{"sanoma":1,"event":"error","message":…}`. Undefined for any other line, another event
+ * (`database`, which the shell only logs) or one with fields that do not hold.
+ */
+export function eventOf(
+  line: string,
+): { event: "ready"; url: string } | { event: "error"; message: string } | undefined {
+  const record = recordOf(line);
+  if (!record) return undefined;
+  const { event, url, message } = record;
   if (event === "ready") return typeof url === "string" ? { event, url } : undefined;
   if (event === "error") return { event, message: typeof message === "string" ? message : "the launcher failed" };
   return undefined;

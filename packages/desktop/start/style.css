@@ -106,19 +106,31 @@ li small {
 .failed {
   color: var(--bad);
 }
-pre {
-  font:
-    11px/1.45 ui-monospace,
-    Menlo,
-    monospace;
+/* A company's page: the terminal takes the height the rest leaves. xterm's padding goes on .xterm,
+   which its fit addon measures, as it would overflow on the terminal's parent. */
+body.company {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+#log {
+  flex: 1;
+  min-height: 120px;
+  margin-top: 16px;
+  overflow: hidden;
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: 8px;
+}
+/* xterm.css paints this black, under the padding and the rows' spare height. */
+#log .xterm-viewport {
+  background-color: var(--card);
+}
+#log .xterm {
+  height: 100%;
+  box-sizing: border-box;
   padding: 10px 12px;
-  max-height: 280px;
-  overflow: auto;
-  white-space: pre-wrap;
-  word-break: break-all;
 }
 form {
   margin-top: 20px;

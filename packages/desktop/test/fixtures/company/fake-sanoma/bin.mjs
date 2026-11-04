@@ -16,6 +16,7 @@ process.stdin.on("end", stop);
 process.stdin.resume();
 process.on("SIGTERM", stop);
 
+console.log("\x1b[32mfixture waiting\x1b[39m");
 while (!existsSync("go")) await new Promise((resolve) => setTimeout(resolve, 50));
 
 createServer((req, res) => {

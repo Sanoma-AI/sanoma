@@ -90,6 +90,17 @@ test("one window: a company from progress to app, a second beside it, switching,
     logs.push(...[company, second].map((dir) => join(logsFolder, `${slugOf(dir)}.log`)));
     // The window shows the company's start: the install and the launcher on their way…
     await expect.poll(shownNow, { timeout: 30_000, intervals: [50] }).toMatch(/company\.html$/);
+    // Its output in the page's terminal, the colour codes read as colours.
+    const terminalText = () =>
+      shell!.evaluate(
+        ({ webContents }) =>
+          webContents
+            .getAllWebContents()
+            .find((contents) => contents.getURL().endsWith("company.html"))!
+            .executeJavaScript("document.querySelector('#log .xterm-rows')?.textContent ?? ''") as Promise<string>,
+      );
+    await expect.poll(terminalText, { timeout: 45_000 }).toContain("fixture waiting");
+    expect(await terminalText()).not.toContain("[32m");
     const [progress] = await windowsNow();
     writeFileSync(join(company, "go"), "");
     // …then the app, in that same window, alone: none other was made, and nothing beside it.

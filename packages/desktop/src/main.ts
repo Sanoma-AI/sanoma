@@ -56,7 +56,7 @@ import {
 } from "./git.ts";
 import { USAGE_EXIT } from "./launcher.ts";
 import { isAppPage, linkTarget } from "./links.ts";
-import { type CompanyLog, hidePasswords, openLog } from "./logs.ts";
+import { type CompanyLog, hidePasswords, type LogTail, NO_TAIL, openLog } from "./logs.ts";
 import { folderArgument, isCompanyFolder, realPathOf, syncedFolderWarning } from "./places.ts";
 import { archWarnings, runtimeOf } from "./runtime.ts";
 import { quitOrder } from "./quit.ts";
@@ -99,7 +99,7 @@ export interface CompanyState {
   /** `running`: the app answers, and the window shows it once it has loaded (`showsApp`). */
   phase: "starting" | "running" | "failed" | "stopped";
   progress: string[];
-  log: string[];
+  log: LogTail;
   message?: string;
   warnings: string[];
   /** Whether the next launch opens it again (`Company.open`): a failed one offers not to. */
@@ -442,7 +442,7 @@ function viewsFor(path: string): CompanyViews {
       name: companyName(path),
       phase: "starting",
       progress: [],
-      log: [],
+      log: NO_TAIL,
       warnings: [],
       reopens: true,
     },
@@ -520,13 +520,13 @@ async function begin(path: string, how?: Begin) {
   if (how) beginnings.set(path, how);
   const added = !inWindow.has(path);
   const views = viewsFor(path);
-  setCompanyState(views, { phase: "starting", progress: [], log: [], message: undefined, reopens: true });
+  setCompanyState(views, { phase: "starting", progress: [], log: NO_TAIL, message: undefined, reopens: true });
   views.log = undefined;
   if (added) show(path);
   const started = start(path, views, beginnings.get(path) ?? startSession).catch((err: unknown) => {
     // Before its session (no Node staged, an unreadable folder): its page says why.
     const message = hidePasswords(`The company could not start: ${messageOf(err)}`);
-    setCompanyState(views, { phase: "failed", message, progress: [], log: [], reopens: reopensAfterEnd(path) });
+    setCompanyState(views, { phase: "failed", message, progress: [], log: NO_TAIL, reopens: reopensAfterEnd(path) });
   });
   opening.set(path, started);
   sendStart();

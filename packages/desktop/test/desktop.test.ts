@@ -502,8 +502,19 @@ describe("logs", () => {
     }
     const log = openLog(temp(), "acme");
     log.write("stdout", database);
+    log.write("stderr", "connect failed for postgresql://u:s3cret@host/db");
     expect(readFileSync(log.file, "utf8")).not.toContain("s3cret");
-    expect(log.tail().join("\n")).not.toContain("s3cret");
+    expect(log.tail().lines).toEqual(["connect failed for postgresql://***@host/db"]);
+  });
+
+  test("the page gets the colours and no event lines; the file gets every line, without escape codes", () => {
+    const log = openLog(temp(), "acme");
+    log.write("stdout", '{"event":"ready","sanoma":1,"url":"http://127.0.0.1:3100"}');
+    log.write("stdout", "Packages: \x1b[32m+693\x1b[39m");
+    expect(log.tail().lines).toEqual(["Packages: \x1b[32m+693\x1b[39m"]);
+    const file = readFileSync(log.file, "utf8");
+    expect(file).toContain('"event":"ready"');
+    expect(file).toMatch(/Z stdout Packages: \+693\n$/);
   });
 
   test("timestamps each line, keeps the previous start's log as .1.log, and the last lines", () => {
@@ -514,8 +525,10 @@ describe("logs", () => {
     for (let i = 0; i < TAIL_LINES + 5; i++) second.write("stderr", `line ${i}`);
     expect(readFileSync(join(dir, "acme.1.log"), "utf8")).toMatch(/^\d{4}-\d\d-\d\dT[\d:.]+Z stdout first start\n$/);
     expect(readFileSync(second.file, "utf8").split("\n")).toHaveLength(TAIL_LINES + 6);
-    expect(second.tail()).toHaveLength(TAIL_LINES);
-    expect(second.tail().at(-1)).toMatch(/stderr line 204$/);
+    expect(second.tail().skipped).toBe(5);
+    expect(second.tail().lines).toHaveLength(TAIL_LINES);
+    expect(second.tail().lines.at(-1)).toBe("line 204");
+    expect(second.tail().start).not.toBe(first.tail().start);
     second.close();
     second.write("stdout", "after the end");
     expect(readFileSync(second.file, "utf8")).not.toContain("after the end");
