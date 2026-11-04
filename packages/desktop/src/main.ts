@@ -243,7 +243,7 @@ const trayMenu = () =>
 
 /** The tray icon, whose menu shows the window, lists the companies and quits; a click shows the window. */
 async function makeTray() {
-  // The app's own icon as the system shows it (Electron's, until the shell has one of its own).
+  // The app's own icon as the system shows it (icons/, from `make` and `package`; Electron's under `start`).
   tray = new Tray(await app.getFileIcon(process.execPath, { size: "small" }));
   tray.setToolTip("Sanoma");
   tray.setContextMenu(trayMenu());
