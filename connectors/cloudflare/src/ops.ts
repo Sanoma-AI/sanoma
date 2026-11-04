@@ -701,7 +701,16 @@ export function containerOps(
       replanned(`${type.type}.update`, fresh, expect);
       if (fresh.action === "none") {
         const found = await read({ id });
-        if (found.state) return { id, state: found.state };
+        if (found.state) {
+          // Matching bindings also describe a rollout whose startup failed. An explicit update
+          // confirms readiness even when there is nothing to upload; read/plan remain passive.
+          const { revision, configurationRevision } = container.schema
+            .pick({ revision: true, configurationRevision: true })
+            .parse(desired);
+          if (!revision) throw refused(`container ${id}: no revision to confirm`);
+          await started(api(), scriptOf(id), found.state.worker_url, revision, configurationRevision);
+          return { id, state: { ...found.state, healthy: true } };
+        }
       }
       return put(desired, call, sitesOnly);
     },

@@ -20,7 +20,7 @@ import {
   startWorker,
 } from "../src/index.ts";
 import { deadlineRegistry } from "../src/deadlines.ts";
-import { currentGroup, entry, write, writeFailure } from "../src/ledger.ts";
+import { currentGroup, entry, lastInvite, loginRecord, write, writeFailure } from "../src/ledger.ts";
 import type { Run } from "../src/run.ts";
 import { minimal, noop } from "./fixtures/minimal.ts";
 
@@ -302,6 +302,25 @@ const runOn = (ledger: LedgerStore): Run => ({
     stopped: false,
     deadlines: deadlineRegistry(),
   },
+});
+
+/** `by` minting an invite for sam at `at`, good for a second. */
+const minted = (by: string, at: number) =>
+  loginRecord(
+    "acme",
+    { id: by },
+    { type: "invite.minted", person: "sam", by, expiresAt: new Date(at + 1000).toISOString() },
+    at,
+  );
+
+describe("lastInvite", () => {
+  it("reads who minted a person's latest invite, and until when; nothing for one never invited", async () => {
+    const store = memoryLedger();
+    await store.append(minted("dana", 2));
+    await store.append(minted("login", 1));
+    expect(await lastInvite(store, "sam")).toEqual({ by: "dana", at: 2, expiresAt: 1002 });
+    expect(await lastInvite(store, "nobody")).toBeUndefined();
+  });
 });
 
 describe("writing a run's records", () => {

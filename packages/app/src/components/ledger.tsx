@@ -1,20 +1,25 @@
 import type { ErrorInfo, LedgerRecord } from "@sanoma-ai/workflows";
 import type { ConfigDescription, OpEntry } from "@sanoma-ai/workflows/describe";
-import { approverLabel } from "@sanoma-ai/workflows/shared";
+import { approverLabel, LOGIN_CODE_WORKFLOW } from "@sanoma-ai/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { CrosshairIcon } from "@phosphor-icons/react/dist/csr/Crosshair";
 import { memo, type ReactNode } from "react";
 import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from "#/components/ui/item.tsx";
 import { utcText } from "#/lib/time.ts";
-import type { RunCheck } from "../api.ts";
+import { type RunCheck, SEALED_SHOWN } from "../api.ts";
 import { configQuery, opsById } from "../queries.ts";
 import {
   ALONE,
   DecisionBadge,
   DecisionNote,
+  Disclosure,
   Expandable,
+  Fact,
+  Facts,
   ItemTime,
+  Json,
   ledgerTone,
+  None,
   OpName,
   plural,
   RequestedBy,
@@ -97,6 +102,37 @@ function retries(attempt: number, op: OpEntry | undefined, vendors: ConfigDescri
   return `Not retried: this operation is not safe to repeat. Check ${vendor} before starting again.`;
 }
 
+/**
+ * A run's input: an object's fields as facts, a text as it is, anything else as JSON. A
+ * `login-code` run's (`sealed`) shows its code, sealed, as its first few characters only, so the
+ * page never shows what a colleague could try to open; its call's input, the mail, shows open
+ * in the ledger too, its body redacted (`Json`).
+ */
+export function RunInput({ value, sealed = false }: { value: unknown; sealed?: boolean }) {
+  if (value === undefined) return <None />;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return <Json value={value} />;
+  const fields = Object.entries(value);
+  if (fields.length === 0) return <None>No fields.</None>;
+  return (
+    <Facts>
+      {fields.map(([key, field]) => (
+        <Fact key={key} label={key}>
+          {sealed && key === "code" && typeof field === "string" ? (
+            <span>
+              sealed · <code className="text-xs">{field.slice(0, SEALED_SHOWN)}…</code>{" "}
+              <span className="text-muted-foreground">codes never enter the ledger</span>
+            </span>
+          ) : typeof field === "string" ? (
+            field
+          ) : (
+            <code className="text-xs">{JSON.stringify(field)}</code>
+          )}
+        </Fact>
+      ))}
+    </Facts>
+  );
+}
+
 /** A ledger record's item on the page, by the record's id: where a click on the graph leads. */
 const ledgerItemId = (recordId: string) => `ledger-${recordId}`;
 
@@ -135,7 +171,13 @@ export const LedgerRow = memo(function LedgerRow({
               </>
             )}
           </p>
-          <Expandable label="Input" value={record.input} />
+          {record.workflow === LOGIN_CODE_WORKFLOW ? (
+            <Disclosure label="Input" open>
+              <RunInput value={record.input} sealed />
+            </Disclosure>
+          ) : (
+            <Expandable label="Input" value={record.input} />
+          )}
         </>
       );
       break;
@@ -153,7 +195,7 @@ export const LedgerRow = memo(function LedgerRow({
           {record.error && (
             <ErrorText error={record.error} then={retries(record.attempt ?? 1, ops.get(record.op), vendors)} />
           )}
-          <Expandable label="Input" value={record.input} />
+          <Expandable label="Input" value={record.input} open={record.workflow === LOGIN_CODE_WORKFLOW} redacted />
           {"output" in record && <Expandable label="Output" value={record.output} />}
         </>
       );

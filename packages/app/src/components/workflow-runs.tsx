@@ -1,7 +1,7 @@
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { isNotFound, Link, useNavigate } from "@tanstack/react-router";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
-import { approverLabel } from "@sanoma-ai/workflows/shared";
+import { approverLabel, LOGIN_CODE_WORKFLOW } from "@sanoma-ai/workflows/shared";
 import { useMemo } from "react";
 import { CardAction, CardContent, CardFooter, CardHeader } from "#/components/ui/card.tsx";
 import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
@@ -27,7 +27,6 @@ import {
   FLOAT,
   FloatHost,
   FloatingCard,
-  Json,
   None,
   Nothing,
   Notice,
@@ -36,7 +35,7 @@ import {
   ToneBadge,
   When,
 } from "./common.tsx";
-import { LedgerTrace } from "./ledger.tsx";
+import { LedgerTrace, RunInput } from "./ledger.tsx";
 import { RunsTable } from "./runs-table.tsx";
 
 // A workflow's Runs tab: its runs, filtered (`?runs=`), and the one open (`?run=`) over them.
@@ -198,7 +197,7 @@ function RunBody({ run, ledger, ledgerError, approvals }: RunDetail) {
         </Fact>
       </Facts>
       <Section title="Input">
-        <Input value={input} />
+        <RunInput value={input} sealed={run.workflow === LOGIN_CODE_WORKFLOW} />
       </Section>
       <Section title="Ledger">
         {ledgerError ? (
@@ -210,22 +209,5 @@ function RunBody({ run, ledger, ledgerError, approvals }: RunDetail) {
         )}
       </Section>
     </>
-  );
-}
-
-/** A run's input: an object's fields as facts, a text as it is, anything else as JSON. */
-function Input({ value }: { value: unknown }) {
-  if (value === undefined) return <None />;
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return <Json value={value} />;
-  const fields = Object.entries(value);
-  if (fields.length === 0) return <None>No fields.</None>;
-  return (
-    <Facts>
-      {fields.map(([key, field]) => (
-        <Fact key={key} label={key}>
-          {typeof field === "string" ? field : <code className="text-xs">{JSON.stringify(field)}</code>}
-        </Fact>
-      ))}
-    </Facts>
   );
 }

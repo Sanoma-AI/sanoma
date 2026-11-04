@@ -29,7 +29,7 @@ import { loginKey } from "./login/keys.ts";
 import { publicFront } from "./login/public.ts";
 import { sendLoginCode } from "./login/staff.ts";
 import { hostName, loopbackLogin, placeOf } from "./loopback.ts";
-import { type Published, PUBLISHED_FILE, publishedOf } from "./content-files.ts";
+import { type Published, PUBLISHED_FILE, publishedOf, STYLESHEET_FILE } from "./content-files.ts";
 import { seoFile } from "./seo.ts";
 import { siteHost } from "./site-path.ts";
 import { secretValues } from "./server/secrets.ts";
@@ -258,6 +258,7 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   // server, read at each request; else what the build wrote of it.
   let load: () => Promise<Responder>;
   let published: () => Published;
+  let stylesheet: string | undefined;
   if (options.dev) {
     const { repo, onFileChange } = options.dev;
     load = () => devResponder(repo, server, onFileChange);
@@ -274,6 +275,18 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
     );
     published = () => built;
     const files = await staticFiles(join(distDir, "client"));
+    // The kit's theme, which the root route imports as `style.css?url`: what the login's own pages
+    // link, as the build named it. A build without the file (an older one) leaves the pages unstyled.
+    stylesheet = await readFile(join(distDir, STYLESHEET_FILE), "utf8").then(
+      (text) => {
+        const path = JSON.parse(text) as unknown;
+        return typeof path === "string" && files.has(path) ? path : undefined;
+      },
+      (err: unknown) => {
+        if (!isMissing(err)) throw err;
+        return undefined;
+      },
+    );
     const serverEntry = join(distDir, "server", "server.js");
     await mustBeFile(serverEntry);
     load = async () => builtResponder(files, await loadServerEntry(serverEntry));
@@ -306,6 +319,7 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
       return current();
     },
     login,
+    ...(stylesheet && { stylesheet }),
   };
   // Each public site served, by name, with its own context, whose login is its front door: its
   // login half, if it has one, made once the app listens (`openLogins`). A public site whose

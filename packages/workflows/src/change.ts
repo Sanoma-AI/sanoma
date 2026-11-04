@@ -5,7 +5,15 @@ import { type CallContext, defineConnector, defineDriver, type Driver, DriverErr
 import { approve, approvedFor, type Decision, deny } from "./policy.ts";
 import { currentRun } from "./run.ts";
 import type { Secrets } from "./secret.ts";
-import { CHANGE_MERGE, CHANGE_WORKFLOW, DRAFT_ID, errorMessage, groupNamesOf, type PeopleResource } from "./shared.ts";
+import {
+  ADMIN,
+  CHANGE_MERGE,
+  CHANGE_WORKFLOW,
+  DRAFT_ID,
+  errorMessage,
+  groupNamesOf,
+  type PeopleResource,
+} from "./shared.ts";
 import {
   type CheckResult,
   type RemoteContext,
@@ -301,8 +309,7 @@ export function touchesOf(files: readonly string[]): string[] {
   return [...touches].toSorted();
 }
 
-/** The group the runtime holds a change to the rules for. */
-export const ADMIN = "admin";
+export { ADMIN };
 /**
  * Whether a path in `touches` is the rules whatever `rules` says: the policies, the root's or an
  * app's (`apps/crm/policies/`), and the template's people file.

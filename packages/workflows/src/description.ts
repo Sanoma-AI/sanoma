@@ -2,6 +2,7 @@
 // types inferred from them. zod only, no Node: a page can parse a description it is sent, and the
 // app extends `ConfigDescriptionSchema` with what it adds (`AppConfigSchema`).
 import { z } from "zod";
+import { LIFETIMES } from "./host.ts";
 import type { Outline } from "./outline.ts";
 import type { ResourceFields } from "./resource.ts";
 import { EFFECTS, FIELD_TYPES } from "./shared.ts";
@@ -322,6 +323,8 @@ export const ResourceTypeEntrySchema = z.strictObject({
   ops: z.array(z.string()),
   /** The contracts it meets (`CAPABILITIES`), in that order; absent when it meets none. */
   capabilities: z.array(z.enum(CAPABILITIES)).optional(),
+  /** For a host (`HostSpec`), how it keeps the runtime up (`HostLifetime`); absent for any other type. */
+  host: z.strictObject({ lifetime: z.enum(LIFETIMES) }).optional(),
 });
 export type ResourceTypeEntry = z.infer<typeof ResourceTypeEntrySchema>;
 

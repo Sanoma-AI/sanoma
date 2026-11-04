@@ -19,11 +19,12 @@ writeFileSync(
   join(root, "resources", "people.ts"),
   `import { sanoma } from "sanoma/resources";
 
-export const ada = sanoma.person({ id: "ada", email: "ada@acme.test" });
+export const ada = sanoma.person({ id: "ada", name: "Ada Lovelace", email: "ada@acme.test" });
 export const bo = sanoma.person({ id: "bo", github: "bo-gh" });
 export const cy = sanoma.person({ id: "cy" });
-export const dee = sanoma.person({ id: "dee", email: "dee@acme.test" });
+export const dee = sanoma.person({ id: "dee", name: "Dee Park", email: "dee@acme.test" });
 export const admin = sanoma.group({ name: "admin", members: [ada] });
+export const office = sanoma.group({ name: "office", members: [dee] });
 `,
 );
 afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -65,12 +66,17 @@ describe("staffLogin", () => {
     start: vi.fn<(...args: unknown[]) => Promise<string>>(async () => "run-1"),
     recordSignIn: vi.fn<(...args: unknown[]) => Promise<void>>(async () => {}),
     recordInvite: vi.fn<(...args: unknown[]) => Promise<void>>(async () => {}),
+    lastInvite: vi.fn<(...args: unknown[]) => Promise<{ by: string } | undefined>>(async () => ({ by: "ada" })),
     secrets: async () => new Map(),
   };
   let context: LoginContext;
   let login: LoginProvider;
 
-  async function opened(methods: LoginMethod[] = ["code", "invite"], sender = true): Promise<LoginProvider> {
+  async function opened(
+    methods: LoginMethod[] = ["code", "invite"],
+    sender = true,
+    stylesheet?: string,
+  ): Promise<LoginProvider> {
     const provider = staffLogin(
       async (given) => {
         context = given;
@@ -80,11 +86,13 @@ describe("staffLogin", () => {
     );
     await provider.open!({
       resolved: {
+        appName: "acme-plumbing",
         databaseUrl: "postgresql://x/y",
         root,
         ...(sender && { login: { sender: {}, from: "Acme <login@acme.test>" } }),
       },
       client,
+      ...(stylesheet && { stylesheet }),
     } as unknown as AppContext);
     return provider;
   }
@@ -133,24 +141,93 @@ describe("staffLogin", () => {
     expect(admitted.signOut).toBe("/auth/better-auth/sign-out");
   });
 
-  it("shows the sign-in page, or JSON to a server function", async () => {
+  it("shows the sign-in page for the company, or JSON to a server function", async () => {
     const page = (await login.handle!(request("/workflows")))!;
     expect(page.status).toBe(401);
     const html = await page.text();
+    expect(html).toContain("<title>Sign in · Acme Plumbing</title>");
+    expect(html).toContain(">AP</span>");
+    expect(html).toContain("Sign in to Acme Plumbing");
+    expect(html).toContain("We will email you a six-digit code. No password.");
     expect(html).toContain("Send a code");
-    expect(html).not.toContain("Sign in with GitHub");
+    expect(html).toContain("If that address is declared, a code is on its way. It can take a minute.");
+    expect(html).toContain('autocomplete="one-time-code"');
+    expect(html).toContain("3 wrong codes end the attempt. A code lasts five minutes.");
+    expect(html).toContain("Sent again. The earlier code no longer works.");
+    expect(html).toContain("Acme Plumbing · signed in people are declared in <code>resources/people.ts</code>");
+    expect(html).not.toContain("Continue with GitHub");
+    // The app's theme, as its document head sets it, and no stylesheet the dev server has not built.
+    expect(html).toContain('localStorage.getItem("sanoma.theme")');
+    expect(html).not.toContain('rel="stylesheet"');
     const fn = (await login.handle!(request("/_serverFn/abc", { method: "POST" })))!;
     expect(await fn.json()).toEqual({ error: "Sign in first" });
 
-    const github = await opened(["github", "invite"]);
-    expect(await (await github.handle!(request("/")))!.text()).toContain("Sign in with GitHub");
+    const github = await opened(["code", "github", "invite"]);
+    const both = await (await github.handle!(request("/")))!.text();
+    expect(both).toContain("Continue with GitHub");
+    expect(both).toContain('errorCallbackURL:"/auth/login"');
   });
 
-  it("says to ask for an invite when no method but invites is on, naming no file", async () => {
+  it("is the page at /auth/login, and sends someone signed in and declared on to the app", async () => {
+    const page = (await login.handle!(request("/auth/login")))!;
+    expect(page.status).toBe(200);
+    expect(await page.text()).toContain("Sign in to Acme Plumbing");
+    const signedIn = (await login.handle!(request("/auth/login", { cookie: "who=ada@acme.test" })))!;
+    expect(signedIn.status).toBe(302);
+    expect(signedIn.headers.get("location")).toBe("/");
+    // A session of someone no longer declared is not sent on to a 403: the page again, to sign in as someone else.
+    const removed = (await login.handle!(request("/auth/login", { cookie: "who=mallory@acme.test" })))!;
+    expect(removed.status).toBe(200);
+    expect(await removed.text()).toContain("Sign in to Acme Plumbing");
+  });
+
+  /** The sign-in page's HTML when a GitHub sign-in came back with `?error=<error>`. */
+  const errorPage = async (error: string) => await (await login.handle!(request(`/auth/login?error=${error}`)))!.text();
+
+  it("says why a GitHub sign-in came back with ?error=", async () => {
+    expect(await errorPage("email_not_found")).toContain(
+      "GitHub did not share an email. The company&#39;s GitHub App needs the Email addresses permission; ask the person who runs this company.",
+    );
+    expect(await errorPage("account_already_linked_to_different_user")).toContain(
+      "That GitHub account already signs in as someone else.",
+    );
+    expect(await errorPage("account_not_linked")).toContain("that email is not verified on both sides yet");
+    expect(await errorPage("unable_to_link_account")).toContain("GitHub could not be connected to your account.");
+    expect(await errorPage("not_declared")).toContain(
+      "This company&#39;s files declare nobody with that GitHub account.",
+    );
+    expect(await errorPage("<script>")).toContain("GitHub sign-in did not work. Try again, or use a code.");
+    // A code an object inherits (`toString`) is a code the page does not know.
+    expect(await errorPage("toString")).toContain("GitHub sign-in did not work. Try again, or use a code.");
+    expect(await errorPage("constructor")).toContain("GitHub sign-in did not work. Try again, or use a code.");
+  });
+
+  it("links the kit's stylesheet, which loads signed out with its fonts, and nothing else does", async () => {
+    const styled = await opened(["code", "invite"], true, "/assets/style-abc.css");
+    const html = await (await styled.handle!(request("/auth/login")))!.text();
+    expect(html).toContain('<link rel="stylesheet" href="/assets/style-abc.css">');
+    expect(await styled.handle!(request("/assets/style-abc.css"))).toBeUndefined();
+    expect(await styled.handle!(request("/assets/ibm-plex-sans-latin-wght-normal-x.woff2"))).toBeUndefined();
+    expect((await styled.handle!(request("/assets/main-abc.js")))?.status).toBe(401);
+    expect((await login.handle!(request("/assets/style-abc.css")))?.status).toBe(401);
+  });
+
+  it("says to ask for an invite when email sign-in is not set up, naming no file", async () => {
     const invites = await opened(["invite"], false);
     const html = await (await invites.handle!(request("/")))!.text();
-    expect(html).toContain("Ask the person who runs this company for an invite link.");
+    expect(html).toContain("Email sign-in not set up");
+    expect(html).toContain("Ask for an invite link");
+    expect(html).toContain(
+      "Sign-in by email is not set up for Acme Plumbing yet. Ask the person who runs it for an invite link; it signs you in once and expires in 24 hours.",
+    );
+    expect(html).not.toContain("Continue with GitHub");
     expect(html).not.toMatch(/resources\/|sanoma\.config|Resend|SANOMA_/);
+
+    const github = await opened(["github", "invite"], false);
+    const both = await (await github.handle!(request("/")))!.text();
+    expect(both).toContain("Ask for an invite link");
+    expect(both).toContain("Continue with GitHub");
+    expect(both).not.toMatch(/resources\/|sanoma\.config|Resend|SANOMA_/);
   });
 
   it("mints an invite for a declared colleague from someone signed in, on this page", async () => {
@@ -197,13 +274,70 @@ describe("staffLogin", () => {
     expect((await login.handle!(request("/auth/invite", { body: { nope: 1 } })))?.status).toBe(400);
   });
 
-  it("lands an invite on a page that names whom it signs in, and says when it is spent", async () => {
-    const page = (await login.handle!(request("/auth/invite/tok-ada@acme.test")))!;
+  it("lands an invite on a page that names who sent it and whom it signs in, and says when it is spent", async () => {
+    const page = (await login.handle!(request("/auth/invite/tok-dee@acme.test")))!;
     expect(page.status).toBe(200);
+    expect(client.lastInvite).toHaveBeenCalledWith("dee");
     const html = await page.text();
-    expect(html).toContain("Continue as ada@acme.test");
-    expect(html).toContain('href="/auth/better-auth/magic-link/verify?token=tok-ada@acme.test"');
-    expect((await login.handle!(request("/auth/invite/spent")))?.status).toBe(410);
+    expect(html).toContain("Ada invited you to Acme Plumbing");
+    expect(html).toContain("Ada Lovelace declared you in <code>resources/people.ts</code> as Dee Park, in office.");
+    expect(html).toContain(">AL</span>");
+    expect(html).toContain(">DP</span>");
+    expect(html).toContain("Continue as dee@acme.test");
+    expect(html).toContain('href="/auth/better-auth/magic-link/verify?token=tok-dee@acme.test"');
+    expect(html).toContain("This link works once and expires in 24 hours.");
+    expect(html).toContain('Not Dee? <a href="/auth/login">Sign in with your own email</a>');
+
+    // A sealed request's invite was sent by the runtime's agent `login`: nobody to name.
+    client.lastInvite.mockResolvedValueOnce({ by: "login" });
+    const sealed = await (await login.handle!(request("/auth/invite/tok-dee@acme.test")))!.text();
+    expect(sealed).toContain("You were invited to Acme Plumbing");
+    expect(sealed).toContain("You are declared in <code>resources/people.ts</code> as Dee Park, in office.");
+
+    const spent = (await login.handle!(request("/auth/invite/spent")))!;
+    expect(spent.status).toBe(410);
+    const gone = await spent.text();
+    expect(gone).toContain("This invite link has been used, replaced or has expired. Ask for a new one.");
+    expect(gone).toContain("Acme Plumbing");
+  });
+
+  it("lands an invite naming nobody when the people file does not load, or who sent it cannot be read", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    client.lastInvite.mockRejectedValueOnce(new Error("ledger down"));
+    const unsent = await (await login.handle!(request("/auth/invite/tok-dee@acme.test")))!.text();
+    expect(unsent).toContain("You were invited to Acme Plumbing");
+    expect(unsent).toContain("as Dee Park, in office.");
+
+    const broken = mkdtempSync(join(tmpdir(), "sanoma-staff-broken-"));
+    mkdirSync(join(broken, "resources"));
+    writeFileSync(join(broken, "resources", "people.ts"), "export const = ;\n");
+    try {
+      const provider = staffLogin(async () => fakeHalf(["code", "invite"]));
+      await provider.open!({
+        resolved: { appName: "acme-plumbing", databaseUrl: "postgresql://x/y", root: broken },
+        client,
+      } as unknown as AppContext);
+      const page = (await provider.handle!(request("/auth/invite/tok-dee@acme.test")))!;
+      expect(page.status).toBe(200);
+      const html = await page.text();
+      expect(html).toContain("You were invited to Acme Plumbing");
+      expect(html).toContain("Continue as dee@acme.test");
+    } finally {
+      rmSync(broken, { recursive: true, force: true });
+      vi.mocked(console.error).mockRestore();
+    }
+  });
+
+  it("goes back to the page asked for on this host once signed in, never to another a path names", async () => {
+    const html = await (await login.handle!(request("/workflows")))!.text();
+    const line = /const here=[^\n]*?const back=[^;]+;/.exec(html)?.[0];
+    expect(line).toBeDefined();
+    const back = (pathname: string, search = "") =>
+      new Function("location", `${line} return back;`)({ pathname, search }) as string;
+    expect(back("/workflows", "?tab=runs")).toBe("/workflows?tab=runs");
+    expect(back("/auth/login", "?error=x")).toBe("/");
+    expect(back("//evil.example/login")).toBe("/evil.example/login");
+    expect(back("///evil.example")).toBe("/evil.example");
   });
 
   it("listens on any host", () => {

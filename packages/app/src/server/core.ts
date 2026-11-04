@@ -28,7 +28,7 @@ import {
   type SanomaError,
   type Source,
 } from "@sanoma-ai/workflows";
-import { apiNameOf, isVisitor, flatten } from "@sanoma-ai/workflows/shared";
+import { apiNameOf, isVisitor, flatten, LOGIN_CODE_WORKFLOW } from "@sanoma-ai/workflows/shared";
 import {
   type ConfigDescription,
   type DataValue,
@@ -65,6 +65,7 @@ import {
   type PreviewQuery,
   type RunDetail,
   RunsQuery,
+  SEALED_SHOWN,
   type ScenariosResponse,
   type SetCredentialRequest,
   type StartRunRequest,
@@ -245,6 +246,15 @@ function logReadOnce(runId: string, message: string, what: string, err: unknown)
 const notLoaded = (errors: readonly { message: string }[]) =>
   errors.length ? `; these files did not load: ${errors.map((e) => e.message).join("; ")}` : "";
 
+/** A `login-code` run's start with its sealed code cut to what the page shows (`SEALED_SHOWN`), which is all a reader is sent. */
+function sealedShown(record: LedgerRecord): LedgerRecord {
+  if (record.type !== "run.started" || typeof record.input !== "object" || record.input === null) return record;
+  const { code } = record.input as { code?: unknown };
+  return typeof code === "string"
+    ? { ...record, input: { ...record.input, code: code.slice(0, SEALED_SHOWN) } }
+    : record;
+}
+
 /** The run with its ledger and approvals, and a sandbox run's checks, or a 404. */
 export async function runDetail({ client, resolved }: AppContext, runId: string): Promise<RunDetail> {
   const run = await client.run(runId);
@@ -253,6 +263,7 @@ export async function runDetail({ client, resolved }: AppContext, runId: string)
   let ledger: LedgerRecord[];
   try {
     ledger = await client.ledger(runId);
+    if (run.workflow === LOGIN_CODE_WORKFLOW) ledger = ledger.map(sealedShown);
   } catch (err) {
     // A store reads a run nothing has recorded as no records, so this is a real failure (a
     // corrupt file, a permission): logged for the operator once, and the page shows the run and
@@ -873,7 +884,8 @@ export async function callApi(app: AppContext, actor: Principal, { name, input, 
     case "ledger": {
       const { runId } = read(RunRef);
       await runOf(app, workflow, runId);
-      return client.ledger(runId);
+      const ledger = await client.ledger(runId);
+      return workflow === LOGIN_CODE_WORKFLOW ? ledger.map(sealedShown) : ledger;
     }
     default:
       throw notCallable(name);

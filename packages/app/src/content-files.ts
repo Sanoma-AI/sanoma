@@ -21,6 +21,12 @@ export type Published = Record<string, { slug: string; locale?: string }[]>;
 /** The file a build writes its `Published` content to, beside `client/` and `server/`. */
 export const PUBLISHED_FILE = "published.json";
 
+/**
+ * The file a build writes the kit's stylesheet's path to (`/assets/style-<hash>.css`), beside
+ * `client/` and `server/`: what the login's own pages link (`AppContext.stylesheet`).
+ */
+export const STYLESHEET_FILE = "stylesheet.json";
+
 /** `repo`'s published content, each kind's slugs: drafts left out. */
 export const publishedOf = (repo: string): Published =>
   Object.fromEntries(
