@@ -10,10 +10,12 @@ import { CatchBoundary, type ErrorComponentProps, Link } from "@tanstack/react-r
 import { useServerFn } from "@tanstack/react-start";
 import { APPLY_WORKFLOW, errorMessage, isEnded, siteDir } from "@sanoma-ai/workflows/shared";
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/csr/ArrowSquareOut";
+import { CheckIcon } from "@phosphor-icons/react/dist/csr/Check";
 import { PlayIcon } from "@phosphor-icons/react/dist/csr/Play";
 import { RocketIcon } from "@phosphor-icons/react/dist/csr/Rocket";
 import { UploadIcon } from "@phosphor-icons/react/dist/csr/Upload";
-import { Suspense, useState } from "react";
+import { WarningIcon } from "@phosphor-icons/react/dist/csr/Warning";
+import { type ReactNode, Suspense, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "#/components/ui/button.tsx";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "#/components/ui/field.tsx";
@@ -34,6 +36,7 @@ import {
 import { goLiveFn, goLiveHostFn, goLiveSignInFn } from "../functions.ts";
 import { RUN_TONE } from "../lib/tone.ts";
 import {
+  configQuery,
   goLiveChoicesQuery,
   goLiveProgressQuery,
   RUNS_KEY,
@@ -103,6 +106,10 @@ function GoLiveSteps() {
     ...v,
     connected: v.tokens.every(isSet),
   }));
+  // The sign-in sender's connector, when the setup rows above do not list it already.
+  const { data: titles } = useSuspenseQuery({ ...configQuery(), select: (config) => config.vendors });
+  const named = status.signIn.sender?.split(".")[0];
+  const sender = named !== undefined && !vendors.some((v) => v.vendor === named) ? named : undefined;
   const { run, bound } = progress;
   const data = bound.beforeHost;
   // The latest run is the host's once it is past the repository and database, or still going.
@@ -123,7 +130,6 @@ function GoLiveSteps() {
               </ItemDescription>
             </ItemContent>
           </Item>
-          <SignInItem signIn={status.signIn} />
           {vendors.map((v) => (
             <Item key={v.title} role="listitem" variant="outline" size="xs">
               <ItemContent>
@@ -135,6 +141,20 @@ function GoLiveSteps() {
               </ItemContent>
             </Item>
           ))}
+          {sender && (
+            <Item role="listitem" variant="outline" size="xs">
+              <ItemContent>
+                <ItemHeading>
+                  {titles[sender]?.title ?? sender}
+                  <ToneBadge tone={status.signIn.senderConnected ? "ok" : "off"}>
+                    {status.signIn.senderConnected ? "connected" : "not connected"}
+                  </ToneBadge>
+                </ItemHeading>
+                <ItemDescription>Sends email, including sign-in codes, as the sender.</ItemDescription>
+              </ItemContent>
+            </Item>
+          )}
+          <SignInItem signIn={status.signIn} />
         </ItemGroup>
         <div>
           <ButtonLink variant="outline">
@@ -440,65 +460,151 @@ function PushButton() {
 }
 
 /**
- * How people will sign in on the host: by an email code through the config's sender, by GitHub
- * through the App, and always by invite links. With neither a connected sender nor GitHub, a
- * warning that does not block going live, and the two fixes. With GitHub, the public sites whose
+ * How people will sign in on the host, a line a way: you, by the invite going live mints once the
+ * host answers (when your email is declared); an email code through the config's sender; GitHub
+ * through the App. Without a connected sender, a warning that does not block going live, and the
+ * ways to fix it; invite links work whatever this says. With GitHub, the public sites whose
  * visitors can sign in with it too, and the callback URL each needs on the App.
  */
 function SignInItem({ signIn }: { signIn: SetupStatus["signIn"] }) {
   const code = signIn.sender !== null && signIn.senderConnected;
-  const ways = [code && "an email code", signIn.github && "GitHub", "invite links"].filter(Boolean).join(", ");
+  const vendor = signIn.sender?.split(".")[0];
   return (
     <Item role="listitem" variant="outline" size="xs">
-      <ItemContent>
+      <ItemContent className="gap-2">
         <ItemHeading>
           Sign-in
-          {code || signIn.github ? (
-            <ToneBadge tone="ok">{ways}</ToneBadge>
-          ) : (
-            <ToneBadge tone="waiting">warning · not blocking</ToneBadge>
-          )}
+          <ToneBadge tone={code || signIn.github || signIn.you !== null ? "ok" : "waiting"}>
+            {code || signIn.github || signIn.you !== null ? "ready" : "invite links only"}
+          </ToneBadge>
         </ItemHeading>
-        <ItemDescription>
-          {code || signIn.github ? (
-            <>People sign in on the host with {ways}.</>
-          ) : (
-            <>
-              On the host, people can sign in only by an invite link someone signed in there makes. To let them sign in
-              themselves:{" "}
-              {signIn.sender === null ? (
-                <>
-                  name a sender in <code>sanoma.config.ts</code>, such as{" "}
-                  <code>login: {'{ sender: resend.emails.send, from: "Acme <login@acme.example>" }'}</code>, and connect
-                  it
-                </>
-              ) : (
-                <>
-                  connect <code>{signIn.sender.split(".")[0]}</code>, the sender
-                </>
-              )}
-              , for an email code; or create the GitHub App, for Sign in with GitHub.
-            </>
+        <ul className="flex flex-col gap-1.5 text-xs">
+          <SignInLine ok={signIn.you !== null}>
+            {signIn.you !== null ? (
+              <>
+                <span className="font-medium">You</span> · signed in from this machine when the host starts
+              </>
+            ) : (
+              <>
+                <span className="font-medium">You</span> · declare your email in the people file to be signed in on the
+                host when it first answers
+              </>
+            )}
+          </SignInLine>
+          <SignInLine ok={code}>
+            <span className="flex flex-col gap-2">
+              <span className="flex flex-wrap items-center gap-2">
+                <span>
+                  <span className="font-medium">Email code</span> ·{" "}
+                  {code ? (
+                    <>
+                      <code>{vendor}</code> connected
+                    </>
+                  ) : vendor ? (
+                    <>
+                      <code>{vendor}</code>, the sender, not connected yet
+                    </>
+                  ) : (
+                    <>
+                      no sender yet, name one in <code>sanoma.config.ts</code>
+                    </>
+                  )}
+                </span>
+                {!code && <ToneBadge tone="waiting">warning · not blocking</ToneBadge>}
+              </span>
+              {!code && <SignInFixes vendor={vendor} github={signIn.github} />}
+            </span>
+          </SignInLine>
+          {signIn.github && (
+            <SignInLine ok>
+              <span>
+                <span className="font-medium">GitHub</span> · the company&apos;s App
+                {signIn.sites.length > 0 && (
+                  <span className="text-muted-foreground">
+                    . Visitors on {signIn.sites.map((site) => siteDir(site.name)).join(", ")} can sign in with GitHub
+                    too, once the App lists{" "}
+                    <code>
+                      {[
+                        ...new Set(
+                          signIn.sites.map((site) => `https://<site host>/auth/${site.login}/callback/github`),
+                        ),
+                      ].join(", ")}
+                    </code>{" "}
+                    among its callback URLs, for each site&apos;s host.
+                  </span>
+                )}
+              </span>
+            </SignInLine>
           )}
-          {signIn.github && signIn.sites.length > 0 && (
-            <>
-              {" "}
-              Visitors on {signIn.sites.map((site) => siteDir(site.name)).join(", ")} can sign in with GitHub too, once
-              the App lists{" "}
-              <code>
-                {[
-                  ...new Set(signIn.sites.map((site) => `https://<site host>/auth/${site.login}/callback/github`)),
-                ].join(", ")}
-              </code>{" "}
-              among its callback URLs, for each site&apos;s host.
-            </>
-          )}
-          {signIn.you === null && (
-            <> Declare your email in the people file to be signed in on the host when it first answers.</>
-          )}
-        </ItemDescription>
+        </ul>
       </ItemContent>
     </Item>
+  );
+}
+
+/** A line of the Sign-in item: a check when the way works, a warning when it does not yet. */
+function SignInLine({ ok, children }: { ok: boolean; children: ReactNode }) {
+  return (
+    <li className="flex items-start gap-2">
+      {ok ? (
+        <CheckIcon aria-hidden="true" className="mt-0.5 size-3.5 shrink-0 text-tone-ok-foreground" />
+      ) : (
+        <WarningIcon aria-hidden="true" className="mt-0.5 size-3.5 shrink-0 text-tone-waiting-foreground" />
+      )}
+      <span className="min-w-0">{children}</span>
+    </li>
+  );
+}
+
+/**
+ * How to let people sign in themselves without an email code: name a sender (or connect the one
+ * named, `vendor`), and, while the App is not there, connect it for Continue with GitHub.
+ */
+function SignInFixes({ vendor, github }: { vendor: string | undefined; github: boolean }) {
+  const steps = [
+    vendor ? (
+      <>
+        <span className="font-medium">
+          Connect <code>{vendor}</code>, the sender, on <Link to="/hosting/connect">Hosting › Connect</Link>
+        </span>
+        <span className="text-muted-foreground">
+          Codes then go to the emails declared in <code>resources/people.ts</code>.
+        </span>
+      </>
+    ) : (
+      <>
+        <span className="font-medium">
+          Name a sender in <code>sanoma.config.ts</code>
+        </span>
+        <code className="block overflow-x-auto rounded-md border bg-muted px-2 py-1.5 whitespace-pre">
+          {'login: { sender: resend.emails.send, from: "Acme <login@acme.example>" }'}
+        </code>
+        <span className="text-muted-foreground">
+          Codes then go to the emails declared in <code>resources/people.ts</code>.
+        </span>
+      </>
+    ),
+    !github && (
+      <span>
+        Or connect the GitHub App on <Link to="/hosting/connect">Hosting › Connect</Link>: people declared with a GitHub
+        login can use Continue with GitHub.
+      </span>
+    ),
+  ].filter(Boolean);
+  return (
+    <section aria-label="Ways to fix it" className="flex flex-col gap-2 rounded-lg border bg-muted/50 p-2">
+      <h3 className="font-medium">{steps.length > 1 ? "Two ways to fix it" : "How to fix it"}</h3>
+      <ol className="flex flex-col gap-2.5">
+        {steps.map((step, i) => (
+          <li key={i} className="flex items-start gap-2">
+            <span className="flex size-4.5 shrink-0 items-center justify-center rounded-full bg-muted font-semibold">
+              {i + 1}
+            </span>
+            <span className="flex min-w-0 flex-col gap-1">{step}</span>
+          </li>
+        ))}
+      </ol>
+    </section>
   );
 }
 

@@ -12,6 +12,7 @@ import { GitForkIcon } from "@phosphor-icons/react/dist/csr/GitFork";
 import { UserCheckIcon } from "@phosphor-icons/react/dist/csr/UserCheck";
 import {
   type ComponentProps,
+  Fragment,
   lazy,
   type MouseEvent,
   type ReactElement,
@@ -275,13 +276,16 @@ export function ApprovalStatusBadge({ status }: { status: ApprovalState["status"
 
 /**
  * The policy's decision on an operation call. A denial's tooltip is its reason, a hold's its
- * title, each with the rules behind it (`reasons`, the policies' ids).
+ * title, each with the rules behind it (`reasons`, the policies' ids); an allow's, the rules that
+ * allowed it, when any did.
  */
 export function DecisionBadge({ decision }: { decision: RecordedDecision }) {
   const tone = DECISION_TONE[decision.kind];
   const label = decision.kind === "approve" ? `approve · ${approverLabel(decision.approver)}` : decision.kind;
   const said = decision.kind === "deny" ? decision.reason : decision.kind === "approve" ? decision.title : undefined;
-  const rules = decision.kind !== "allow" && decision.reasons?.length ? `By ${decision.reasons.join(", ")}` : undefined;
+  const rules = decision.reasons?.length
+    ? `${decision.kind === "allow" ? "Allowed by" : "By"} ${decision.reasons.join(", ")}`
+    : undefined;
   const tip = [said, rules].filter(Boolean).join(". ");
   const badge = (
     <ToneBadge tone={tone} tabIndex={tip ? 0 : undefined}>
@@ -387,19 +391,54 @@ export function ItemTime({ at }: { at: number }) {
   );
 }
 
-export function Json({ value }: { value: unknown }) {
-  const text = useMemo(() => JSON.stringify(value, null, 2) ?? "undefined", [value]);
+/** What the ledger keeps of a field it never shows: `"<name>"` (an operation's `opaque` field, a sign-in mail's body). */
+const PLACEHOLDER = /^<[a-z]+>$/;
+/** A placeholder's stand-in while the value is made JSON: a private-use character JSON leaves as it is. */
+const REDACTED = "\uE000";
+
+/** `value` with each placeholder string (`PLACEHOLDER`) in it replaced by `REDACTED`. */
+function redact(value: unknown): unknown {
+  if (typeof value === "string") return PLACEHOLDER.test(value) ? REDACTED : value;
+  if (Array.isArray(value)) return value.map(redact);
+  if (typeof value === "object" && value !== null) {
+    return Object.fromEntries(Object.entries(value).map(([key, field]) => [key, redact(field)]));
+  }
+  return value;
+}
+
+/**
+ * A value as JSON. With `redacted`, a string the ledger keeps as a placeholder (`"<text>"`) shows
+ * as a muted "redacted", never as the placeholder, which reads as the value.
+ */
+export function Json({ value, redacted = false }: { value: unknown; redacted?: boolean | undefined }) {
+  const parts = useMemo(() => {
+    const text = JSON.stringify(redacted ? redact(value) : value, null, 2) ?? "undefined";
+    return redacted ? text.split(`"${REDACTED}"`) : [text];
+  }, [value, redacted]);
   return (
     <pre className="mt-1 overflow-x-auto rounded-md bg-muted p-3 font-mono text-xs break-all whitespace-pre-wrap">
-      {text}
+      {parts.map((part, i) => (
+        <Fragment key={i}>
+          {i > 0 && <span className="text-muted-foreground italic">redacted</span>}
+          {part}
+        </Fragment>
+      ))}
     </pre>
   );
 }
 
-/** Something behind a small toggle, closed at first. The content renders only once opened. */
-export function Disclosure({ label, children }: { label: ReactNode; children: ReactNode }) {
+/** Something behind a small toggle, closed at first unless `open`. The content renders only once opened. */
+export function Disclosure({
+  label,
+  open = false,
+  children,
+}: {
+  label: ReactNode;
+  open?: boolean | undefined;
+  children: ReactNode;
+}) {
   return (
-    <Collapsible className="group/disclosure">
+    <Collapsible className="group/disclosure" defaultOpen={open}>
       <CollapsibleTrigger render={<Button variant="ghost" size="xs" className="-ml-2 text-muted-foreground" />}>
         <CaretRightIcon
           aria-hidden="true"
@@ -520,11 +559,24 @@ export function ExternalLink({ href, children }: { href: string; children: React
   );
 }
 
-/** JSON behind a disclosure, for inputs and outputs that are usually too long to show inline. */
-export function Expandable({ label, value }: { label: string; value: unknown }) {
+/**
+ * JSON behind a disclosure, for inputs and outputs that are usually too long to show inline;
+ * `open` at first when it is what the row is for. `redacted` as `Json` takes it.
+ */
+export function Expandable({
+  label,
+  value,
+  open,
+  redacted,
+}: {
+  label: string;
+  value: unknown;
+  open?: boolean | undefined;
+  redacted?: boolean | undefined;
+}) {
   return (
-    <Disclosure label={label}>
-      <Json value={value} />
+    <Disclosure label={label} open={open}>
+      <Json value={value} redacted={redacted} />
     </Disclosure>
   );
 }

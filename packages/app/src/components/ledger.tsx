@@ -1,18 +1,21 @@
 import type { ErrorInfo, LedgerRecord } from "@sanoma-ai/workflows";
 import type { ConfigDescription, OpEntry } from "@sanoma-ai/workflows/describe";
-import { approverLabel } from "@sanoma-ai/workflows/shared";
+import { approverLabel, LOGIN_CODE_WORKFLOW } from "@sanoma-ai/workflows/shared";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { CrosshairIcon } from "@phosphor-icons/react/dist/csr/Crosshair";
 import { memo, type ReactNode } from "react";
 import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from "#/components/ui/item.tsx";
 import { utcText } from "#/lib/time.ts";
-import type { RunCheck } from "../api.ts";
+import { type RunCheck, SEALED_SHOWN } from "../api.ts";
 import { configQuery, opsById } from "../queries.ts";
 import {
   ALONE,
   DecisionBadge,
   DecisionNote,
+  Disclosure,
   Expandable,
+  Fact,
+  Facts,
   ItemTime,
   ledgerTone,
   OpName,
@@ -97,6 +100,31 @@ function retries(attempt: number, op: OpEntry | undefined, vendors: ConfigDescri
   return `Not retried: this operation is not safe to repeat. Check ${vendor} before starting again.`;
 }
 
+/**
+ * A `login-code` run's input, as fields: to whom, and the code, sealed, as its first few
+ * characters only, so the ledger never shows what a colleague could try to open. Its call's
+ * input, the mail, shows open too, its body redacted (`Json`).
+ */
+function LoginCodeInput({ input }: { input: unknown }) {
+  const fields = typeof input === "object" && input !== null ? Object.entries(input) : [];
+  return (
+    <Facts>
+      {fields.map(([field, value]) => (
+        <Fact key={field} label={field}>
+          {field === "code" && typeof value === "string" ? (
+            <span>
+              sealed · <code className="text-xs">{value.slice(0, SEALED_SHOWN)}…</code>{" "}
+              <span className="text-muted-foreground">codes never enter the ledger</span>
+            </span>
+          ) : (
+            <code className="text-xs">{JSON.stringify(value)}</code>
+          )}
+        </Fact>
+      ))}
+    </Facts>
+  );
+}
+
 /** A ledger record's item on the page, by the record's id: where a click on the graph leads. */
 const ledgerItemId = (recordId: string) => `ledger-${recordId}`;
 
@@ -135,7 +163,13 @@ export const LedgerRow = memo(function LedgerRow({
               </>
             )}
           </p>
-          <Expandable label="Input" value={record.input} />
+          {record.workflow === LOGIN_CODE_WORKFLOW ? (
+            <Disclosure label="Input" open>
+              <LoginCodeInput input={record.input} />
+            </Disclosure>
+          ) : (
+            <Expandable label="Input" value={record.input} />
+          )}
         </>
       );
       break;
@@ -153,7 +187,7 @@ export const LedgerRow = memo(function LedgerRow({
           {record.error && (
             <ErrorText error={record.error} then={retries(record.attempt ?? 1, ops.get(record.op), vendors)} />
           )}
-          <Expandable label="Input" value={record.input} />
+          <Expandable label="Input" value={record.input} open={record.workflow === LOGIN_CODE_WORKFLOW} redacted />
           {"output" in record && <Expandable label="Output" value={record.output} />}
         </>
       );

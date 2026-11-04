@@ -7,9 +7,20 @@ import { github as githubConnector } from "@sanoma-ai/connector-github";
 import { resend } from "@sanoma-ai/connector-resend";
 import { supabase } from "@sanoma-ai/connector-supabase";
 import { neon } from "@sanoma-ai/connector-neon";
-import { ensureBuilt, testDatabaseUrl } from "@sanoma-ai/testing";
+import { fakeResend } from "@sanoma-ai/connector-resend/fake";
+import { ensureBuilt, testDatabaseUrl, withFake } from "@sanoma-ai/testing";
 import { fakeHost } from "@sanoma-ai/testing/host";
-import { defineConfig, defineConnector, defineResource, resolveConfig, SanomaClient } from "@sanoma-ai/workflows";
+import {
+  defineConfig,
+  defineConnector,
+  defineResource,
+  LOGIN_AGENT,
+  LOGIN_CODE_WORKFLOW,
+  resolveConfig,
+  SanomaClient,
+  sealLoginCode,
+  startWorker,
+} from "@sanoma-ai/workflows";
 import { describeConfig } from "@sanoma-ai/workflows/describe";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
@@ -17,6 +28,7 @@ import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { type App, startApp } from "../src/index.ts";
+import { noWakeup } from "../src/api.ts";
 import type { AppContext } from "../src/context.ts";
 import { loopbackLogin } from "../src/loopback.ts";
 import { admitting } from "../src/login/admission.ts";
@@ -434,6 +446,12 @@ describe("Connect Cloudflare and Neon", () => {
 const html = async (path: string, url = app.url) =>
   (await (await fetch(new URL(path, url))).text()).replaceAll("<!-- -->", "");
 
+/** Going live's Sign-in item on Hosting: from its heading to step 2's. */
+async function signInItem() {
+  const page = await html("/hosting");
+  return page.slice(page.indexOf(">Sign-in<"), page.indexOf(">2. Choose where it goes</h2>"));
+}
+
 describe("Hosting", () => {
   it("shows going live's steps while no host and no database are declared, and none of the people", async () => {
     const page = await html("/hosting");
@@ -447,7 +465,38 @@ describe("Hosting", () => {
     expect(barLink(page, "/hosting")).toContain('aria-current="page"');
     const people = await html("/people");
     expect(people).toMatch(/<h1[^>]*>People<span[^>]*>1<\/span><\/h1>/);
-    expect(people).toContain('href="/hosting?resource=resources%2Fpeople.ts%23alice"');
+    // Her open card links to her declaration on Hosting.
+    expect(await html("/people?person=alice")).toContain('href="/hosting?resource=resources%2Fpeople.ts%23alice"');
+  });
+
+  it("says how people will sign in on the host, as the Go live board draws it, with the ways to fix a missing email code", async () => {
+    // No App to begin with (an earlier test may have stored one).
+    const db = new Client({ connectionString: config.databaseUrl });
+    await db.connect();
+    await db.query("DELETE FROM sanoma_credentials WHERE name = ANY($1)", [Object.values(GITHUB_APP)]);
+    await db.end();
+    // No sender and no App: the email code warns, not blocking, with both ways to fix it.
+    const bare = await signInItem();
+    expect(bare).toContain(">invite links only<");
+    expect(bare).toContain("declare your email in the people file to be signed in on the host when it first answers");
+    expect(bare).toContain("no sender yet, name one in <code>sanoma.config.ts</code>");
+    expect(bare).toContain(">warning · not blocking<");
+    expect(bare).toContain(">Two ways to fix it</h3>");
+    expect(bare).toContain("login: { sender: resend.emails.send");
+    expect(bare).toContain("Codes then go to the emails declared in <code>resources/people.ts</code>.");
+    expect(bare).toMatch(
+      /Or connect the GitHub App on <a[^>]*href="\/hosting\/connect"[^>]*>Hosting › Connect<\/a>: people declared with a GitHub login can use Continue with GitHub\./,
+    );
+    expect(bare).not.toContain(">GitHub</span> · the company");
+    // The App's client stored: GitHub is a way in, and naming a sender is the one fix left.
+    await client.setSecret(GITHUB_APP.client_id, KEYS.client_id, { by: "alice" });
+    await client.setSecret(GITHUB_APP.client_secret, KEYS.client_secret, { by: "alice" });
+    const withApp = await signInItem();
+    expect(withApp).toContain(">ready<");
+    expect(withApp).toContain(">GitHub</span> · the company&#x27;s App");
+    expect(withApp).toContain(">How to fix it</h3>");
+    expect(withApp).toContain(">warning · not blocking<");
+    expect(withApp).not.toContain("Or connect the GitHub App");
   });
 
   it("puts the repository the host clones, the database and the host in cards, every other resource under Other resources, and going live again until the host is applied", async () => {
@@ -489,6 +538,9 @@ export const host = testhost.app({ name: "acme-ops", source: repo, ref: "main", 
       expect(card("Database")).toMatch(/>region<.*?>eu-west-1</s);
       expect(card("Host")).toContain("testhost.app");
       expect(card("Host")).toMatch(/>port<.*?>8080</s);
+      // The fake host is long-lived: always on, and no Wakeup asked for.
+      expect(card("Host")).toMatch(/>Lifetime<.*?>Always on</s);
+      expect(card("Host")).not.toContain("No connected wakeup");
       // The other repository under Other resources; no people, and no going live.
       expect(page).toContain(">Other resources</h2>");
       expect(page).toContain('href="/hosting?resource=resources%2Fsanoma%2Finfra.ts%23docs"');
@@ -514,6 +566,73 @@ export const host = testhost.app({ name: "acme-ops", source: repo, ref: "main", 
     } finally {
       await resumed.close();
       rmSync(live, { recursive: true, force: true });
+    }
+  });
+
+  it("says a host that stops when quiet does, and that nothing starts it again while no Wakeup is declared", async () => {
+    const live = mkdtempSync(join(tmpdir(), "sanoma-hosting-"));
+    mkdirSync(join(live, "resources", "sanoma"), { recursive: true });
+    writeFileSync(
+      join(live, "resources", "sanoma", "infra.ts"),
+      `import { github } from "@sanoma-ai/connector-github/resources";
+import { testhost } from "@sanoma-ai/testing-host/resources";
+
+export const repo = github.repository({ owner: "acme", name: "acme-ops", visibility: "private" });
+export const host = testhost.app({ name: "acme-ops", source: repo, ref: "main", port: 8080 });
+`,
+    );
+    const host = fakeHost(() => Promise.reject(new Error("not started here")), { lifetime: "stops-when-quiet" });
+    const hosted = await startApp(
+      defineConfig({ ...config, connectors: [githubConnector, host.connector], root: live }),
+      { port: 0 },
+    );
+    try {
+      const page = await html("/hosting", hosted.url);
+      const card = page.match(/<h2>Host<\/h2>(?:(?!<h2>)[\s\S])*/)?.[0];
+      expect(card).toMatch(/>Lifetime<.*?>Stops when quiet</s);
+      expect(card).not.toContain("started by the Wakeup");
+      expect(card).toContain(`${noWakeup("testhost.app")}.`);
+      expect(card).not.toMatch(/scale to zero|cold start|alarm/i);
+    } finally {
+      await hosted.close();
+      rmSync(live, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("a sign-in code's run", () => {
+  it("shows its input as fields, the code sealed, and the mail's body redacted, never the sealed code or the code", async () => {
+    // On a database of its own, with a worker that runs the code's mail on Resend's fake.
+    const mailer = withFake(resend, fakeResend());
+    const sending = defineConfig({
+      ...config,
+      connectors: [mailer],
+      login: { sender: mailer.emails.send, from: "Acme <login@acme.test>" },
+      databaseUrl: testDatabaseUrl("setup_login_code"),
+    });
+    const worker = await startWorker(sending);
+    const started = await startApp(sending, { port: 0 });
+    const runs = await SanomaClient.connect(sending);
+    try {
+      const sealed = sealLoginCode("alice@acme.test", "246810");
+      const runId = await runs.start(
+        LOGIN_CODE_WORKFLOW,
+        { to: "alice@acme.test", code: sealed },
+        { startedBy: LOGIN_AGENT },
+      );
+      await runs.result(runId);
+      const page = await html(`/workflows/${LOGIN_CODE_WORKFLOW}/runs/${runId}`, started.url);
+      expect(page).toContain(`Started by ${LOGIN_AGENT}`);
+      expect(page).toContain(`sealed · <code class="text-xs">${sealed.slice(0, 4)}…</code>`);
+      expect(page).toContain("codes never enter the ledger");
+      expect(page).toMatch(/&quot;text&quot;: <span[^>]*>redacted<\/span>/);
+      expect(page).not.toContain("&quot;&lt;text&gt;&quot;");
+      expect(page).not.toContain(sealed);
+      expect(page).not.toContain("246810");
+    } finally {
+      await runs.close();
+      await started.close();
+      await worker.stop();
     }
   });
 });

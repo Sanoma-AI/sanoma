@@ -189,6 +189,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
           .map((name) => `${id}.${name}`)
           .toSorted(),
         ...(capabilities.length ? { capabilities } : {}),
+        ...(spec.host && { host: { lifetime: spec.host.capabilities.lifetime } }),
       };
     })
     .toSorted((a, b) => a.id.localeCompare(b.id));

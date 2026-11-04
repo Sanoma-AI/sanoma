@@ -370,8 +370,22 @@ export const SETUP_VENDORS: readonly {
   },
 ];
 
+/**
+ * How much of a `login-code` run's sealed code its page is sent and shows (`runDetail`): enough
+ * to tell two runs apart, never what this deployment could open.
+ */
+export const SEALED_SHOWN = 4;
+
 /** The data file going live writes, relative to the config's root. */
 export const INFRA = "resources/sanoma/infra.ts";
+
+/**
+ * Why a host of type `hostType` that stops when quiet has no Wakeup, `wakes` being the connected
+ * wakeups and the host types each wakes, when known: going live's refusal to declare one, and
+ * Hosting's notice on a host declared without one.
+ */
+export const noWakeup = (hostType: string, wakes?: string) =>
+  `No connected wakeup wakes a ${hostType}${wakes ? ` (${wakes})` : ""}: going live declares none, and the host stays up`;
 
 /**
  * What going live chooses (`goLiveFn`): who holds the repository, the database's region (and

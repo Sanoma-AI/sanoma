@@ -1,4 +1,4 @@
-import type { DriftReport, DriftResult, RunSummary } from "@sanoma-ai/workflows";
+import type { DriftReport, DriftResult, HostLifetime, RunSummary } from "@sanoma-ai/workflows";
 import type {
   ConfigDescription,
   DeclaredResource,
@@ -28,7 +28,7 @@ import { Skeleton } from "#/components/ui/skeleton.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/components/ui/table.tsx";
 import { DRIFT_TONE } from "#/lib/tone.ts";
-import { errorBodyOf, INFRA } from "../../api.ts";
+import { errorBodyOf, INFRA, noWakeup } from "../../api.ts";
 import {
   ButtonLink,
   CardHeading,
@@ -242,6 +242,11 @@ function Hosting({
   }, [config.resources, report, slots]);
   const problems = useMemo(() => problemsOf(config.problems, report), [config.problems, report]);
   const titles = useMemo(() => new Map(config.resourceTypes.map((t) => [t.id, t.title])), [config.resourceTypes]);
+  const lifetimes = useMemo(
+    () => new Map(config.resourceTypes.flatMap((t) => (t.host ? [[t.id, t.host.lifetime] as const] : []))),
+    [config.resourceTypes],
+  );
+  const woken = slots.filled.some((slot) => slot.capability === "wakeup");
   const declared = config.resources.find((r) => r.id === selected);
   const chosen = declared ?? config.collections.find((c) => c.declared?.id === selected)?.declared;
 
@@ -258,6 +263,8 @@ function Hosting({
               title={title}
               resource={resource}
               typeTitle={titles.get(`${resource.vendor}.${resource.type}`)}
+              lifetime={capability === "host" ? lifetimes.get(`${resource.vendor}.${resource.type}`) : undefined}
+              woken={woken}
               result={results.get(resource.id)}
               selected={resource.id === selected}
               adopt={adopt}
@@ -330,12 +337,15 @@ const plainValue = (value: unknown) =>
 /**
  * A slot's resource: its name (to its declaration), type, a few of its declared fields, its
  * binding, the latest check's verdict and the fields that differ; the host's with where the last
- * apply that made it says it answers.
+ * apply that made it says it answers, and its `lifetime`: always on, or stops when quiet, with
+ * what starts it again, the Wakeup (`woken`: one is declared), or a notice that none does.
  */
 function SlotCard({
   title,
   resource,
   typeTitle,
+  lifetime,
+  woken,
   result,
   selected,
   adopt,
@@ -343,6 +353,8 @@ function SlotCard({
   title: string;
   resource: DeclaredResource;
   typeTitle: string | undefined;
+  lifetime: HostLifetime | undefined;
+  woken: boolean;
   result: DriftResult | undefined;
   selected: boolean;
   adopt?: Adopt;
@@ -395,7 +407,19 @@ function SlotCard({
             />
           )}
           {title === "Host" && <HostDerivedFacts id={resource.id} />}
+          {lifetime && (
+            <Fact label="Lifetime">
+              {lifetime === "long-lived"
+                ? "Always on"
+                : woken
+                  ? "Stops when quiet; what is due while it sleeps is started by the Wakeup"
+                  : "Stops when quiet"}
+            </Fact>
+          )}
         </Facts>
+        {lifetime === "stops-when-quiet" && !woken && (
+          <Notice>{noWakeup(`${resource.vendor}.${resource.type}`)}.</Notice>
+        )}
         {result?.error !== undefined ? (
           <p className="text-destructive">{result.error}</p>
         ) : (
