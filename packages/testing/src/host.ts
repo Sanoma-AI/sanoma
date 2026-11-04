@@ -13,10 +13,13 @@ import {
   defineDriver,
   defineResource,
   defineWorkflow,
+  deriveHosts,
   type DriftResult,
   errorMessage,
+  type HostFacts,
   type HostLifetime,
   isEnded,
+  isSecret,
   type PlanAction,
   type Resource,
   resolveSecrets,
@@ -24,6 +27,7 @@ import {
   type SanomaConfig,
   superviseWorker,
   type SupervisorOptions,
+  runtimeImage,
   wakeUrlOf,
   withSetup,
 } from "@sanoma-ai/workflows";
@@ -689,4 +693,143 @@ export function testRepository() {
     return git("rev-parse", "HEAD");
   };
   return { url, git, commit, remove: () => rmSync(dir, { recursive: true, force: true }) };
+}
+
+/** What `checkDerivedHost` derives a host from: a fixed set of facts, as an apply would read them. */
+const DERIVED_FACTS = {
+  version: "9.9.9",
+  origin: "https://github.com/acme/company.git",
+  domains: { www: "www.acme.example" },
+  builtInStore: true,
+  githubApp: ["SANOMA_GITHUB_APP_ID"],
+  sourceKey: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC host-check",
+} as const;
+
+/**
+ * The conformance checks for a host type that derives (`HostSpec.derives`), offline: a declaration
+ * of its decisions alone (`name`, and `database` naming a declared database) is filled by apply
+ * (`deriveHosts`) with each derived value, which its type then parses: the installed sanoma's
+ * runtime image, the app's `origin` as its source, the public sites' domains, and (unless it binds
+ * its own bootstrap) its secrets as markers only, its database's URL among them; a declaration
+ * that writes its secrets or its domains is refused. `name` is a valid name for the type.
+ */
+export function checkDerivedHost(
+  type: Pick<Resource, "vendor" | "type" | "host" | "fields" | "schema">,
+  { name = "acme" }: { name?: string } = {},
+): HostCheck[] {
+  const spec = type.host;
+  if (!spec?.derives) throw new Error(`${type.vendor}.${type.type} does not derive: it has no host.derives`);
+  const { inputs } = spec;
+  const results: HostCheck[] = [];
+  const check = (checkName: string, run: () => void) => {
+    try {
+      run();
+      results.push({ name: checkName, ok: true });
+    } catch (err) {
+      results.push({ name: checkName, ok: false, error: errorMessage(err) });
+    }
+  };
+  const file = "resources/sanoma/infra.ts";
+  const at = (exported: string) => ({ file, export: exported });
+  const id = `${file}#host`;
+  const store = {
+    id: `${file}#store`,
+    file,
+    vendor: "db",
+    type: "project",
+    name: "store",
+    at: at("store"),
+    desired: {},
+    refs: {},
+  };
+  const host = {
+    id,
+    file,
+    vendor: type.vendor,
+    type: type.type,
+    name,
+    at: at("host"),
+    desired: { name, ...(inputs.database && { [inputs.database]: "store" }) } as Record<string, unknown>,
+    refs: inputs.database ? { [inputs.database]: store.id } : ({} as Record<string, string>),
+  };
+  const facts: HostFacts = { ...DERIVED_FACTS, carried: new Map([[type.vendor, ["HOST_CHECK_VENDOR_TOKEN"]]]) };
+  const types = new Map([[`${type.vendor}.${type.type}`, type as Resource]]);
+  const resources = [store, host];
+  const problems = deriveHosts(resources, types, {}, facts);
+  const { desired } = host;
+  const valueAt = (path: string) =>
+    path.split(".").reduce<unknown>((v, key) => (v as State | undefined)?.[key], desired);
+
+  check("its decisions alone derive with no problem", () => {
+    if (problems.length) throw new Error(problems.map((p) => p.message).join("; "));
+  });
+  if (inputs.image !== undefined) {
+    check("its image is the installed sanoma's runtime image", () => {
+      const image = valueAt(inputs.image!);
+      if (image !== runtimeImage(DERIVED_FACTS.version)) throw new Error(`its image is ${JSON.stringify(image)}`);
+    });
+  }
+  check("its source is the repository the app runs from", () => {
+    const source = valueAt(inputs.source);
+    if (source !== DERIVED_FACTS.origin) throw new Error(`its source is ${JSON.stringify(source)}`);
+  });
+  check("its ref is left to its repository's default branch", () => {
+    if (valueAt(inputs.ref) != null) throw new Error(`its ref is ${JSON.stringify(valueAt(inputs.ref))}`);
+  });
+  if (inputs.domains !== undefined) {
+    check("its domains are the public sites'", () => {
+      const domains = valueAt(inputs.domains!);
+      if (JSON.stringify(domains) !== JSON.stringify(DERIVED_FACTS.domains))
+        throw new Error(`its domains are ${JSON.stringify(domains)}`);
+    });
+  }
+  if (!spec.bindsBootstrap && inputs.secrets !== undefined) {
+    check("its secrets are markers, its database's URL among them", () => {
+      const secrets = (valueAt(inputs.secrets!) ?? {}) as Record<string, unknown>;
+      const plain = Object.entries(secrets).filter(([, value]) => !isSecret(value));
+      if (plain.length) throw new Error(`${plain.map(([key]) => key).join(", ")} is no secret(...)`);
+      for (const needed of ["SANOMA_DATABASE_URL", "SANOMA_SIGNING_KEY", "HOST_CHECK_VENDOR_TOKEN"]) {
+        if (!(needed in secrets)) throw new Error(`it is not given ${needed}`);
+      }
+    });
+    check("a declaration that writes its secrets is refused", () => {
+      const declare = type as unknown as (desired: State) => unknown;
+      let refused = false;
+      try {
+        declare({ name, secrets: { SANOMA_DATABASE_URL: "postgres://host-check" } });
+      } catch {
+        refused = true;
+      }
+      if (!refused) throw new Error("it took `secrets`");
+    });
+  }
+  check("its type parses what apply derives, its secrets resolved", () => {
+    // As its driver parses it: each marker resolved (`resolveSecrets`), the revision and ref resolved.
+    const resolved = structuredClone(desired);
+    const secrets = inputs.secrets === undefined ? undefined : (valueAt(inputs.secrets) as State | undefined);
+    if (secrets && inputs.secrets) {
+      const keys = inputs.secrets.split(".");
+      let holder = resolved;
+      for (const key of keys.slice(0, -1)) holder = holder[key] as State;
+      holder[keys.at(-1)!] = Object.fromEntries(Object.keys(secrets).map((key) => [key, "host-check-value"]));
+    }
+    const parsed = type.schema.safeParse({ ...resolved, [spec.revision]: "0".repeat(40), [inputs.ref]: "main" });
+    if (!parsed.success)
+      throw new Error(parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
+  });
+  return results;
+}
+
+/**
+ * The check that no secret's value is in what the runtime writes or shows about a host: each of
+ * `values` (at least 8 characters) against each of `texts`, by what it is (a declaration, a plan,
+ * a ledger entry, a page). The host kit's last check, for a host that derives too.
+ */
+export function noSecretIn(values: readonly string[], texts: Readonly<Record<string, string>>): HostCheck {
+  const name = "no secret value is in a declaration, plan, ledger entry or page";
+  const long = values.filter((value) => value.length >= 8);
+  const leaks = Object.entries(texts).filter(([, text]) => long.some((value) => text.includes(value)));
+  return leaks.length
+    ? { name, ok: false, error: `a secret's value is in ${leaks.map(([where]) => where).join(", ")}` }
+    : { name, ok: true };
 }
