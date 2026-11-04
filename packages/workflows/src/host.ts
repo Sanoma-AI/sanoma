@@ -93,6 +93,12 @@ export interface HostSpec {
      * host that derives: apply gives the host that database's URL, as `SANOMA_DATABASE_URL`.
      */
     database?: string;
+    /**
+     * The host's name, for a host that derives: the repository's name (`owner/<name>`, made a
+     * name of lower-case letters, digits and dashes) when a data file leaves it out. Its type's
+     * `find` gives `UNNAMED` until apply fills it.
+     */
+    name?: string;
   };
   /**
    * The field apply fills with the commit `ref` resolves to, before it plans: hidden, as a data
@@ -117,6 +123,9 @@ export const RUNTIME_IMAGE = "ghcr.io/sanoma-ai/runtime";
 
 /** The runtime image of `sanoma` at `version`: `ghcr.io/sanoma-ai/runtime:<version>`. */
 export const runtimeImage = (version: string): string => `${RUNTIME_IMAGE}:${version}`;
+
+/** A deriving host's identity before apply names it after its repository (`HostSpec.inputs.name`): never sent to a vendor. */
+export const UNNAMED = "(the repository's name)";
 
 /** The port the runtime image's app listens on (its `PORT`): a host that derives runs it there. */
 export const RUNTIME_PORT = 3000;
@@ -145,8 +154,8 @@ function unwrap(schema: z.ZodType): z.ZodType {
  * Throws what is wrong with a resource type's `host`: an input or `revision` that names no field,
  * `secrets` that is not write-only, missing (unless the host binds its own bootstrap) or given
  * beside `bindsBootstrap`, a `revision` that is write-only, an unknown lifetime, a type apply
- * cannot change (not `writable`); for a host that does not derive, no `port`, or an `image` or
- * `database` (inputs of a host that derives); for one that does, a `port` (it runs the image's),
+ * cannot change (not `writable`); for a host that does not derive, no `port`, or an `image`, a
+ * `database` or a `name` (inputs of a host that derives); for one that does, a `port` (it runs the image's),
  * or a `database` that is not write-only (it stands for a URL, and is never compared).
  */
 export function checkHost(
@@ -179,7 +188,7 @@ export function checkHost(
     }
   } else {
     if (host.inputs?.port === undefined) problems.push("inputs.port names the port, unless the host derives");
-    for (const input of ["image", "database"] as const) {
+    for (const input of ["image", "database", "name"] as const) {
       if (host.inputs?.[input] !== undefined) problems.push(`inputs.${input} is taken by a host that derives only`);
     }
   }
@@ -203,4 +212,22 @@ export function sourceKeyIds(
   return new Set(
     resources.filter((r) => types.get(`${r.vendor}.${r.type}`)?.host?.derives).map((r) => sourceKeyId(r.id)),
   );
+}
+
+/**
+ * For a host that derives its domains (`inputs.domains`) from the sites: the domains its state
+ * says are attached, `<domain> (<site>)`, when no site declares one, which a change would detach
+ * (a data file of before declared them on the host). Empty otherwise: once a site declares a
+ * domain, the declared ones are attached and the dropped ones detached.
+ */
+export function detaching(host: HostSpec, desired: Record<string, unknown>, state: Record<string, unknown>): string[] {
+  const path = host.inputs.domains;
+  if (!host.derives || path === undefined) return [];
+  const at = (value: Record<string, unknown>) =>
+    path.split(".").reduce<unknown>((o, key) => (o as Record<string, unknown> | null | undefined)?.[key], value);
+  const declared = at(desired);
+  if (declared && typeof declared === "object" && Object.keys(declared).length) return [];
+  const attached = at(state);
+  if (!attached || typeof attached !== "object") return [];
+  return Object.entries(attached as Record<string, unknown>).map(([site, domain]) => `${String(domain)} (${site})`);
 }

@@ -28,6 +28,7 @@ export async function hostDerived({ client, resolved, description }: AppContext)
     drivers: resolved.driversByVendor,
     secrets: read,
     builtInStore: !resolved.secrets.store,
+    signingKeyBound: resolved.secrets.bindings?.SANOMA_SIGNING_KEY !== undefined,
     ...(resolved.login && { sender: resolved.login.sender.vendor }),
     mint: false,
   });

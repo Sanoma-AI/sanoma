@@ -89,14 +89,17 @@ export function tfFake<
   const { fixtures = fixturesDir, missingReply, ...fakeOptions } = options;
   /**
    * The import id of the object `id` names: `id` when there is one under it, else that of the
-   * object whose binding id it is (a repository's `node_id`), as the vendor resolves one, else `id`.
+   * object whose binding id it is (a repository's `node_id`), as the vendor resolves one, or whose
+   * identity it is (a deploy key's repository and key text, what its type's `find` makes), else `id`.
    */
   const importIdIn = (state: TfFakeState, type: keyof T & string, id: string) => {
     const { typeName, shape } = tf.types[type];
     if (state.objects[`${typeName}/${id}`]) return id;
-    const { bindingId } = tf.resources[type];
+    const { bindingId, find } = tf.resources[type];
     for (const [at, o] of Object.entries(state.objects)) {
-      if (at.startsWith(`${typeName}/`) && !("error" in o) && bindingId(fromTfState(shape, o.state)) === id) {
+      if (!at.startsWith(`${typeName}/`) || "error" in o) continue;
+      const found = fromTfState(shape, o.state);
+      if (bindingId(found) === id || find?.(found as never) === id) {
         return at.slice(typeName.length + 1);
       }
     }

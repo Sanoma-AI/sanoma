@@ -206,7 +206,7 @@ export {
   type SourceHost,
 } from "./source.ts";
 export type { HostCapabilities, HostLifetime, HostOutputs, HostSpec } from "./host.ts";
-export { RUNTIME_IMAGE, RUNTIME_PORT, runtimeImage, sourceKeyId, wakeUrlOf } from "./host.ts";
+export { RUNTIME_IMAGE, RUNTIME_PORT, runtimeImage, sourceKeyId, UNNAMED, wakeUrlOf } from "./host.ts";
 export {
   cloneUrl,
   deriveHosts,
@@ -214,8 +214,9 @@ export {
   hostFacts,
   DEPLOY_KEY_TITLE,
   DEPLOY_KEY_TYPE,
-  GITHUB_APP_SECRETS,
+  GITHUB_APP,
   githubRepository,
+  HOST_SIGNING_KEY,
   installedSanoma,
   originUrl,
   SOURCE_KEY,
@@ -343,7 +344,7 @@ export {
 export { checkSecretStore, type SecretStoreCheck } from "./secret-store-check.ts";
 
 export { postgresSecretStore } from "./credentials.ts";
-export { deploymentKey, signingKeyFor } from "./deployment-key.ts";
+export { deploymentKey, keyBytes, signingKeyFor } from "./deployment-key.ts";
 
 export {
   defineConnection,

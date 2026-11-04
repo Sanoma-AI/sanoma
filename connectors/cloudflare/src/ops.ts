@@ -563,8 +563,9 @@ export function containerOps(
     const hostname = declared.hostname ?? undefined;
     checkHostname(name, hostname, domains);
     const secrets = declared.secrets ?? {};
-    if (!image || !source || !ref) {
-      throw refused(`container ${name}: no ${!image ? "image" : !source ? "source" : "ref"}: apply gives a host one`);
+    if (!name || !image || !source || !ref) {
+      const missing = !name ? "name" : !image ? "image" : !source ? "source" : "ref";
+      throw refused(`container ${name ?? ""}: no ${missing}: apply gives a host one`);
     }
     if (!revision) {
       throw refused(

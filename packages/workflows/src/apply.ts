@@ -16,7 +16,7 @@ import {
   sourceUrl,
 } from "./drift.ts";
 import { isRunControlError } from "./errors.ts";
-import { type HostOutputs, wakeUrlOf } from "./host.ts";
+import { detaching, type HostOutputs, wakeUrlOf } from "./host.ts";
 import type { Binding, Bindings, Rebind } from "./lockfile.ts";
 import type { Op } from "./op.ts";
 import {
@@ -73,7 +73,13 @@ export type ApplyInput = z.infer<typeof ApplyInput>;
 export type PlanStep = { id: string; vendor: string; type: string; connection?: ConnectionRef } & (
   | { action: "create"; planned: Record<string, unknown>; unknown: string[] }
   | { action: "update" | "replace"; binding: string; fields: DriftField[]; replace: string[]; unknown?: string[] }
-  | { action: "bind"; binding: string; source: "found" | "given" }
+  | {
+      action: "bind";
+      binding: string;
+      source: "found" | "given";
+      /** The orphaned lockfile key that held the object found, whose binding the declaration takes over. */
+      from?: string;
+    }
   | { action: "gone"; binding: string; answer?: PlanAnswer }
   | { action: "orphan"; key: string; binding: string; answer?: PlanAnswer }
   | { action: "none"; binding: string }
@@ -114,6 +120,8 @@ export interface ApplyReport {
 export interface ApplyDeclared extends DriftDeclared {
   bindings: Bindings;
   orphans: (Binding & { key: string })[];
+  /** The declarations left out with a problem (a host that derives, which apply cannot give all it needs), which an input may still name. */
+  leftOut?: string[];
   rebinds: Rebind[];
 }
 
@@ -134,7 +142,13 @@ export interface ApplySteps {
    * another run made since this one read it stays, and commits it with `message`; a sandbox run
    * writes nothing.
    */
-  write(key: string, binding: Binding | undefined, message: string): Promise<{ written: boolean; revision?: string }>;
+  /** Writes `key`'s binding (none: removed), and removes `moved`, the key it moved from, in the same commit. */
+  write(
+    key: string,
+    binding: Binding | undefined,
+    message: string,
+    moved?: string,
+  ): Promise<{ written: boolean; revision?: string }>;
 }
 
 type State = Record<string, unknown>;
@@ -265,7 +279,7 @@ const cannotChange = (type: Pick<Resource, "vendor" | "type" | "writable"> | und
 const unknown = (what: string, list: readonly string[], known: (id: string) => boolean): ResourceProblem[] =>
   list.filter((id) => !known(id)).map((id) => ({ message: `${what}: ${id} is no declared resource` }));
 
-/** What the input names that is neither declared nor an orphaned binding. */
+/** What the input names that is neither declared nor an orphaned binding (nor a declaration left out with a problem). */
 function inputProblems(
   input: ApplyInput,
   ids: ReadonlyMap<string, unknown>,
@@ -352,6 +366,32 @@ function fromPlan(
   }
   if (!creating && p.action === "none") return { step: { ...head, action: "none", binding: result.binding! } };
   return { problem: problemOf(r.id, `the vendor plans to ${p.action} it, which apply does not do here`) };
+}
+
+/**
+ * An object found by its identity that an orphaned binding holds is that binding moved (an export
+ * renamed, a deploy key apply declares now): its `bind` step takes the binding over (`from`), and
+ * the orphan is none. The orphaned keys taken over.
+ */
+function takeOver(
+  planned: PlanStep[],
+  orphans: ApplyDeclared["orphans"],
+  types: ReadonlyMap<string, Resource>,
+): Set<string> {
+  const taken = new Set<string>();
+  for (const step of planned) {
+    if (step.action !== "bind" || step.source !== "found") continue;
+    const type = `${step.vendor}.${step.type}`;
+    const held = orphans.find(
+      (o) =>
+        !taken.has(o.key) && o.id === step.binding && (o.type === type || types.get(type)?.formerly?.includes(o.type)),
+    );
+    if (held) {
+      step.from = held.key;
+      taken.add(held.key);
+    }
+  }
+  return taken;
 }
 
 /** Each orphaned binding the input wants, after the declarations, and the answers that cannot be done. */
@@ -446,8 +486,9 @@ const exportOf = (key: string) => key.slice(key.indexOf("#") + 1);
 function messageOf(step: PlanStep, before: Binding | undefined, after: Binding | undefined): string {
   const key = keyOf(step);
   if (!after) return `Apply: unbind ${key} (${before?.type} ${before?.id})`;
-  const what = runOf(step) === "create" ? "create" : before ? "rebind" : "bind";
-  return `Apply: ${what} ${key} (${after.type} ${after.id})`;
+  const from = step.action === "bind" ? step.from : undefined;
+  const what = runOf(step) === "create" ? "create" : before || from ? "rebind" : "bind";
+  return `Apply: ${what} ${key} (${after.type} ${after.id})${from ? `, from ${from}` : ""}`;
 }
 
 /**
@@ -520,10 +561,11 @@ export function applyWorkflow(
       ...(hooks.length ? (["sleep"] as const) : []),
     ],
     run: async (ctx, input) => {
-      const { resources, problems: read, bindings: locked, orphans, rebinds } = await steps.declared();
+      const { resources, problems: read, bindings: locked, orphans, rebinds, leftOut } = await steps.declared();
       const wanted = (id: string) => input.only === undefined || input.only.includes(id);
       const declarations = new Map(resources.map((r) => [r.id, r]));
-      const problems = [...read, ...inputProblems(input, declarations, new Set(orphans.map((o) => o.key)))];
+      const nameable = new Set([...orphans.map((o) => o.key), ...(leftOut ?? [])]);
+      const problems = [...read, ...inputProblems(input, declarations, nameable)];
       // Observed as drift does, every import first, by the binding given before the lockfile's.
       const found = new Map<string, Found>();
       for (const resource of resources) {
@@ -635,10 +677,19 @@ export function applyWorkflow(
         if (left.length < unfilled.length) awaited.add(resource.id);
         const unresolved = revisions.get(resource.id);
         // A host whose ref could not be resolved has no commit to run (compare says so only for one it found).
-        const next =
-          unresolved && "error" in unresolved && result.status !== "error"
+        const now = found.get(resource.id)!;
+        const host = types.get(`${resource.vendor}.${resource.type}`)?.host;
+        const attached = host && "state" in now ? detaching(host, fields, now.state) : [];
+        const next = attached.length
+          ? {
+              problem: problemOf(
+                resource.id,
+                `${attached.join(", ")} ${attached.length > 1 ? "are" : "is"} attached and no site declares a domain, so a change would detach ${attached.length > 1 ? "them" : "it"}: put \`domain\` on each site, \`defineSite({ public: true, domain })\` in sites/<site>/site.ts`,
+              ),
+            }
+          : unresolved && "error" in unresolved && result.status !== "error"
             ? { problem: problemOf(resource.id, unresolved.error) }
-            : decide(resource, result, found.get(resource.id)!, input, fields, types, usable);
+            : decide(resource, result, now, input, fields, types, usable);
         if (next.ask !== undefined) {
           try {
             const answered = await ctx[resource.vendor]![resource.type]!.plan(next.ask, {
@@ -655,7 +706,14 @@ export function applyWorkflow(
         if (next.step) add(next.step);
         if (next.problem) problems.push(next.problem);
       }
-      const orphaned = orphansOf(orphans, input, wanted, usable, types);
+      const taken = takeOver(planned, orphans, types);
+      const orphaned = orphansOf(
+        orphans.filter((o) => !taken.has(o.key)),
+        input,
+        wanted,
+        usable,
+        types,
+      );
       const plan: ApplyPlan = {
         problems: [...problems, ...orphaned.problems],
         rebinds,
@@ -736,14 +794,16 @@ export function applyWorkflow(
           } else if (todo === "delete") {
             await ctx[step.vendor]![step.type]!.delete({ id: binding }, { connection: step.connection });
             delete bindings[key];
-          } else if (todo === "bind")
+          } else if (todo === "bind") {
             bindings[key] = { type, id: binding, ...(step.connection && { connection: step.connection }) };
-          else if (todo === "forget") delete bindings[key];
+            if (step.action === "bind" && step.from) delete bindings[step.from];
+          } else if (todo === "forget") delete bindings[key];
           if (state && declared) keep(declared, state);
           const after = bindings[key];
           // A new id, or the same object under its type's new name (`formerly`): written.
           if (after?.id !== before?.id || (after && before && after.type !== before.type)) {
-            const wrote = await steps.write(key, after, messageOf(step, before, after));
+            const moved = step.action === "bind" ? step.from : undefined;
+            const wrote = await steps.write(key, after, messageOf(step, before, after), moved);
             written ||= wrote.written;
             revision = wrote.revision ?? revision;
           }

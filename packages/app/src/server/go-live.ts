@@ -7,7 +7,9 @@ import {
   databaseUrlSecret,
   deploymentKey,
   errorMessage,
+  HOST_SIGNING_KEY,
   isEnded,
+  keyBytes,
   type Principal,
   postInvite,
   sealInvite,
@@ -678,7 +680,8 @@ async function senderSecrets({ client, resolved }: AppContext): Promise<Record<s
 
 /**
  * Signs the person going live in on the host, once it answers: posts an invite request sealed
- * under the signing key the host shares (`sealInvite`) for the email the people file declares for
+ * under the signing key the host shares (`sealInvite`), or the host's own (`HOST_SIGNING_KEY`)
+ * when the config binds none, for the email the people file declares for
  * them to the host's `POST /auth/invite`, and returns the one-use link it mints, for the page to
  * open. Refused before the host answers, and for someone with no email declared.
  */
@@ -689,8 +692,12 @@ export async function goLiveSignIn(app: AppContext, actor: Principal): Promise<{
   if (!email) {
     throw new ApiError(409, { error: `${actor.id} has no email declared in the people file: add one to be signed in` });
   }
+  // With no signing key bound, a host that derives has its own, generated at its create: sealed with that one.
+  const own = app.resolved.secrets.bindings?.SANOMA_SIGNING_KEY
+    ? undefined
+    : (await app.client.secrets([HOST_SIGNING_KEY])).get(HOST_SIGNING_KEY)?.value;
   try {
-    return await postInvite(host.url, sealInvite({ email }));
+    return await postInvite(host.url, sealInvite({ email }, own === undefined ? undefined : keyBytes(own)));
   } catch (err) {
     throw new ApiError(502, { error: `The host did not mint an invite (${errorMessage(err)})` });
   }

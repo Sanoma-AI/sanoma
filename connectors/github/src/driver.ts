@@ -1,7 +1,7 @@
 import { defaultBridge, type ProviderClient } from "@sanoma-ai/bridge";
 import { type CallContext, type Driver, DriverError, defineDriver, retryableStatus } from "@sanoma-ai/workflows";
 import { z } from "zod";
-import { Account, githubApp, githubTf } from "./connector.ts";
+import { Account, githubApp, githubTf, keyText } from "./connector.ts";
 import { owned } from "./owner.ts";
 import {
   appJwtOf,
@@ -91,6 +91,22 @@ async function resolveNode(id: string, token: string) {
   return { owner: repo.owner.login, id: node?.pattern === undefined ? repo.name : `${repo.name}:${node.pattern}` };
 }
 
+const Key = z.object({ id: z.number(), key: z.string() });
+
+/**
+ * The deploy key `<owner>/<repository>:<key text>` names (`isKeyIdentity`), among the repository's
+ * first 100: its owner and the provider's import id, `<repository>:<key id>`; undefined when the
+ * repository has no such key. GitHub keeps a key without its comment.
+ */
+async function resolveKey(identity: string, token: string) {
+  const at = /^([^/]+)\/([^:]+):(.+)$/.exec(identity);
+  if (!at) return undefined;
+  const [, owner = "", name = "", text = ""] = at;
+  const keys = await ok(token, "GET", `${repoPath(owner, name)}/keys?per_page=100`, z.array(Key));
+  const there = keys.find((k) => k.key === keyText(text));
+  return there && { owner, id: `${name}:${there.id}` };
+}
+
 /** The token, from the environment, read on every call. */
 function readToken() {
   const value = process.env.GITHUB_TOKEN;
@@ -117,7 +133,9 @@ export function githubDriver({ bridge = defaultBridge() }: GithubDriverOptions =
     if (!driver) drivers.set(key, (driver = githubTf.driver(bridge, () => ({ owner, token: readToken() }))));
     return driver;
   };
-  const driver = owned(driverFor, (_, id) => resolveNode(id, readToken()));
+  const driver = owned(driverFor, (type, id) =>
+    type === "repository_deploy_key" ? resolveKey(id, readToken()) : resolveNode(id, readToken()),
+  );
   return Object.freeze({ ...driver, ops: Object.freeze({ ...driver.ops, ...appDriver.ops }), env });
 }
 
@@ -160,7 +178,6 @@ const Sha = z.object({ sha: z.string() });
 const Branch = z.object({
   commit: z.object({ sha: z.string(), commit: z.object({ message: z.string(), tree: Sha }) }),
 });
-const Key = z.object({ id: z.number(), key: z.string() });
 
 /** Whether `reply` is GitHub's 422 saying `what` (one of its validation errors). */
 const refused = (reply: { status: number; body: any }, what: RegExp) =>
@@ -284,8 +301,9 @@ const appDriver = defineDriver(githubApp, {
       if (reply.status < 300) return { id: read(Key, reply.body, `POST ${path}`).id };
       // Added already, by an earlier try of the same step whose answer was lost: GitHub keeps the key without its comment.
       if (refused(reply, /already in use/i)) {
-        const bare = key.trim().split(/\s+/).slice(0, 2).join(" ");
-        const there = (await ok(token, "GET", `${path}?per_page=100`, z.array(Key))).find((k) => k.key === bare);
+        const there = (await ok(token, "GET", `${path}?per_page=100`, z.array(Key))).find(
+          (k) => k.key === keyText(key),
+        );
         if (there) return { id: there.id };
       }
       throw failure("POST", path, reply);

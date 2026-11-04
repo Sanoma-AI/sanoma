@@ -710,7 +710,8 @@ const DERIVED_FACTS = {
  * The conformance checks for a host type that derives (`HostSpec.derives`), offline: a declaration
  * of its decisions alone (`name`, and `database` naming a declared database) is filled by apply
  * (`deriveHosts`) with each derived value, which its type then parses: the installed sanoma's
- * runtime image, the app's `origin` as its source, the public sites' domains, and (unless it binds
+ * runtime image, the app's `origin` as its source (and, when its type takes `inputs.name`, its
+ * name left out, the repository's), the public sites' domains, and (unless it binds
  * its own bootstrap) its secrets as markers only, its database's URL among them; a declaration
  * that writes its secrets or its domains is refused. `name` is a valid name for the type.
  */
@@ -772,6 +773,15 @@ export function checkDerivedHost(
     const source = valueAt(desired, inputs.source);
     if (source !== DERIVED_FACTS.origin) throw new Error(`its source is ${JSON.stringify(source)}`);
   });
+  if (inputs.name !== undefined) {
+    check("its name, left out, is its repository's", () => {
+      const unnamed = { ...host, desired: { ...host.desired }, refs: { ...host.refs } };
+      delete unnamed.desired[inputs.name!];
+      deriveHosts([store, unnamed], types, {}, facts);
+      const named = valueAt(unnamed.desired, inputs.name!);
+      if (named !== "company") throw new Error(`its name is ${JSON.stringify(named)}`);
+    });
+  }
   check("its ref is left to its repository's default branch", () => {
     if (valueAt(desired, inputs.ref) != null)
       throw new Error(`its ref is ${JSON.stringify(valueAt(desired, inputs.ref))}`);

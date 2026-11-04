@@ -86,7 +86,7 @@ export function applySteps(
     // The one binding changed on the lockfile as it is now, written whole, then committed, in one
     // step whose output is what it wrote. A sandbox run keeps its lockfile in memory: the run's
     // report has it.
-    write: async (key: string, binding: Binding | undefined, message: string) => {
+    write: async (key: string, binding: Binding | undefined, message: string, moved?: string) => {
       const run = runNow();
       if (run.sandbox !== undefined || root === undefined) return { written: false };
       const { source } = run.state;
@@ -95,6 +95,7 @@ export function applySteps(
           const now = readLockfile(root);
           if (now.problems.length) throw new Error(`${LOCKFILE} cannot be updated: ${now.problems[0]!.message}`);
           const { [key]: _, ...others } = now.bindings;
+          if (moved !== undefined) delete others[moved];
           const bindings = binding ? { ...others, [key]: binding } : others;
           writeLockfile(root, bindings);
           const paths = [

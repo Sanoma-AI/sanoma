@@ -23,15 +23,22 @@ import { mintInstanceToken, WAKEUP_TOKEN } from "./wakeup-service.ts";
 /** The private half of the key a host clones a private GitHub repository with: minted at its first apply, held in the store. */
 export const SOURCE_KEY = "SANOMA_SOURCE_KEY";
 
-/** Where the company's GitHub App's keys are stored by the app's Connect page, which a host carries when they are. */
-export const GITHUB_APP_SECRETS = [
-  "SANOMA_GITHUB_APP_ID",
-  "SANOMA_GITHUB_APP_SLUG",
-  "SANOMA_GITHUB_CLIENT_ID",
-  "SANOMA_GITHUB_CLIENT_SECRET",
-  "SANOMA_GITHUB_WEBHOOK_SECRET",
-  "SANOMA_GITHUB_APP_PEM",
-] as const;
+/**
+ * Where the company's GitHub App's keys are stored, by what GitHub's manifest conversion calls
+ * them: the app's Connect page writes them, the staff login reads the client's, and a host carries
+ * the ones that are stored. The one list of them (a connection of its own is later).
+ */
+export const GITHUB_APP = {
+  id: "SANOMA_GITHUB_APP_ID",
+  slug: "SANOMA_GITHUB_APP_SLUG",
+  client_id: "SANOMA_GITHUB_CLIENT_ID",
+  client_secret: "SANOMA_GITHUB_CLIENT_SECRET",
+  webhook_secret: "SANOMA_GITHUB_WEBHOOK_SECRET",
+  pem: "SANOMA_GITHUB_APP_PEM",
+} as const;
+
+/** The signing key a host is given when the config binds none, generated at its create and kept in the store. */
+export const HOST_SIGNING_KEY = "SANOMA_HOST_SIGNING_KEY";
 
 /** The wakeup service's URL, which a host is given beside its token when `sanoma.wakeup` wakes it. */
 const WAKEUP_URL = "SANOMA_WAKEUP_URL";
@@ -60,10 +67,22 @@ export interface HostFacts {
   carried: ReadonlyMap<string, readonly string[]>;
   /** The login sender's vendor, whose credentials a host carries so it sends sign-in codes. */
   sender?: string;
-  /** The company's GitHub App's keys that are stored (`GITHUB_APP_SECRETS`), which a host carries for sign-in and webhooks. */
+  /** The company's GitHub App's keys that are stored (`GITHUB_APP`), which a host carries for sign-in and webhooks. */
   githubApp: readonly string[];
   /** The public half of the stored `SANOMA_SOURCE_KEY`, when one is: what apply declares on the repository. */
   sourceKey?: string;
+  /**
+   * By vendor, the variables its driver reads that are set in this machine's environment but
+   * neither bound nor stored: the driver runs here, and a host would not be given them.
+   */
+  unbound?: ReadonlyMap<string, readonly string[]>;
+  /** True when the config binds `SANOMA_SIGNING_KEY`: the host is given that key, else its own (`HOST_SIGNING_KEY`). */
+  signingKeyBound?: boolean;
+  /**
+   * For a GitHub `origin` while the config has no deploy-key type: whether GitHub shows the
+   * repository to anyone. Undefined when not asked, or when GitHub did not say.
+   */
+  publicRepository?: boolean;
 }
 
 const run = promisify(execFile);
@@ -171,33 +190,47 @@ function setAt(into: Record<string, unknown>, path: string, value: unknown) {
 /** A declaration's export: `host` of `resources/sanoma/infra.ts#host`. */
 const exportOf = (id: string) => id.slice(id.indexOf("#") + 1);
 
+/** A repository's name as a host's (`HostSpec.inputs.name`): lower-case letters, digits and dashes. */
+const nameOf = (repository: string) =>
+  repository
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9-]+/g, "-")
+    .replaceAll(/^-+|-+$/g, "");
+
 /**
  * Fills, in place, each declared host that derives (`HostSpec.derives`) with what it is not told,
  * and puts the deploy key it clones with before it in `resources`:
  *
+ * - `name`, left out (when its type takes `inputs.name`): its repository's name (`nameOf`);
  * - `image`, left out: the runtime image of the installed `sanoma` (`runtimeImage`);
  * - `source`, left out: the one repository its own data file declares (a reference to it, of a
  *   type its `source` names), else the repository the app runs from (`origin`);
  * - `domains`: each public site's domain (`siteDomains`);
  * - `secrets` (unless it binds its own bootstrap), markers only: the declared `database`'s URL as
- *   `SANOMA_DATABASE_URL`, the runtime's keys (the signing key, and the encryption key with the
- *   built-in store), the source key for a GitHub repository, the wakeup's token (and URL, for
+ *   `SANOMA_DATABASE_URL`, the runtime's keys (the signing key the config binds, else the host's
+ *   own, generated at its create; the encryption key with the built-in store), the source key for
+ *   a GitHub repository it can declare a deploy key on, the wakeup's token (and URL, for
  *   `sanoma.wakeup`) when a wakeup names it, the credentials of its own vendor, its repository's
  *   and the login sender's, and the company's GitHub App's keys that are stored;
  * - for a GitHub repository, a `github.repository_deploy_key` (`sourceKeyId`), read-only, whose
- *   key is the stored source key's public half, when one is and the config has the type.
+ *   key is the stored source key's public half, when one is and the config has the type; found by
+ *   its type's identity (the repository and the key), so a key GitHub holds already is bound, not
+ *   made again.
  *
  * `ref` is resolved by apply (and drift) with the revision: the repository's default branch.
- * `keep` takes the deploy-key ids not declared this read only because no source key is stored
- * yet, which the caller must not orphan.
- * Problems: a host with no `database`, an image or a source that cannot be told.
+ * `out.keep` takes the deploy-key ids not declared this read (no source key stored yet, or its
+ * host left out), which the caller must not orphan; `out.leftOut` the hosts with a problem, which
+ * the caller leaves out, with what names them, so apply changes nothing it cannot give all it needs.
+ * Problems: a host with no `database`, a name, an image or a source that cannot be told, a
+ * credential its vendor's driver reads from this machine's environment that nothing binds, a
+ * private repository it has no deploy key for, two hosts that would attach the sites' domains.
  */
 export function deriveHosts(
   resources: DeclaredResource[],
   types: ReadonlyMap<string, Resource>,
   bindings: Bindings,
   facts: HostFacts,
-  keep?: Set<string>,
+  out: { keep?: Set<string>; leftOut?: Set<string> } = {},
 ): ResourceProblem[] {
   const problems: ResourceProblem[] = [];
   // One host attaches the sites' domains: two would each try to attach them.
@@ -207,19 +240,25 @@ export function deriveHosts(
   });
   if (attaching.length > 1 && Object.keys(facts.domains).length) {
     for (const r of attaching) {
+      out.leftOut?.add(r.id);
       problems.push({
         ...r.at,
         message: `${r.at.export}: ${attaching.length} hosts would attach the public sites' domains: declare one host that derives, the production one`,
       });
     }
   }
+  const deployKey = types.get(DEPLOY_KEY_TYPE);
   // A copy: the deploy keys are put in `resources` as it goes.
   for (const r of resources.slice()) {
     const type = types.get(`${r.vendor}.${r.type}`);
     if (!type?.host?.derives) continue;
     const spec = type.host;
     const { inputs } = spec;
-    const problem = (message: string) => problems.push({ ...r.at, message: `${r.at.export}: ${message}` });
+    let blocked = out.leftOut?.has(r.id) ?? false;
+    const problem = (message: string) => {
+      blocked = true;
+      problems.push({ ...r.at, message: `${r.at.export}: ${message}` });
+    };
     const { desired, refs } = r;
 
     if (inputs.image !== undefined && valueAt(desired, inputs.image) == null) {
@@ -247,19 +286,49 @@ export function deriveHosts(
       ? resources.find((o) => o.id === repositoryId && o.vendor === "github")?.identity
       : githubRepository(valueAt(desired, inputs.source));
 
+    if (inputs.name !== undefined && valueAt(desired, inputs.name) == null) {
+      const source = valueAt(desired, inputs.source);
+      const named = repository ?? (typeof source === "string" ? cloneUrl(source) : undefined);
+      const name =
+        named &&
+        nameOf(
+          named
+            .replace(/\.git$/, "")
+            .split("/")
+            .at(-1)!,
+        );
+      if (name) {
+        setAt(desired, inputs.name, name);
+        const identity = type.find?.(desired);
+        if (identity) Object.assign(r, { identity, name: identity });
+      } else problem("its name is its repository's, and it has none to name it by: declare `name`");
+    }
+
     if (inputs.domains !== undefined && Object.keys(facts.domains).length) {
       setAt(desired, inputs.domains, { ...facts.domains });
     }
 
-    if (spec.bindsBootstrap || inputs.secrets === undefined) continue;
+    if (spec.bindsBootstrap || inputs.secrets === undefined) {
+      if (blocked) out.leftOut?.add(r.id);
+      continue;
+    }
+    // A deploy key is declared for a GitHub repository only where the config has the type.
+    const keyed = repository !== undefined && deployKey !== undefined;
+    if (repository && !keyed && facts.publicRepository === false) {
+      problem(
+        `${repository} is private, and the config has no ${DEPLOY_KEY_TYPE} to give the host a key to clone it with: add the GitHub connector (@sanoma-ai/connector-github) to sanoma.config.ts`,
+      );
+    }
     const secrets: Record<string, Secret> = {};
     const database = inputs.database === undefined ? undefined : refs[inputs.database];
     if (database) secrets.SANOMA_DATABASE_URL = secret(databaseUrlSecret(exportOf(database)));
     else if (inputs.database !== undefined)
       problem("declare the database it runs on, `database: store`: the host is given its URL");
-    secrets.SANOMA_SIGNING_KEY = secret("SANOMA_SIGNING_KEY");
+    secrets.SANOMA_SIGNING_KEY = facts.signingKeyBound
+      ? secret("SANOMA_SIGNING_KEY")
+      : secret(HOST_SIGNING_KEY, { generate: true });
     if (facts.builtInStore) secrets.SANOMA_SECRETS_KEY = secret("SANOMA_SECRETS_KEY");
-    if (repository) secrets[SOURCE_KEY] = secret(SOURCE_KEY);
+    if (keyed) secrets[SOURCE_KEY] = secret(SOURCE_KEY);
     const wakeup = wokenBy(r, resources, types);
     if (wakeup) {
       secrets[WAKEUP_TOKEN] = secret(WAKEUP_TOKEN);
@@ -273,26 +342,39 @@ export function deriveHosts(
     ]);
     const carried = [...vendors].flatMap((vendor) => facts.carried.get(vendor) ?? []);
     for (const name of [...carried, ...facts.githubApp]) secrets[name] = secret(name);
+    // One the driver reads here from the environment alone would be left off the host, and a
+    // Worker updated without it would lose it.
+    for (const vendor of vendors) {
+      for (const name of facts.unbound?.get(vendor) ?? []) {
+        problem(
+          `${name} is read from the environment here, and has no binding, so the host would not be given it: bind it in sanoma.config.ts, \`secrets: { bindings: { ${name}: { env: "${name}" } } }\`, or store it on the ${vendor} connector page`,
+        );
+      }
+    }
     setAt(desired, inputs.secrets, secrets);
 
-    // Kept from orphaning while it cannot be told yet: a GitHub repository, and no source key stored.
-    if (repository && !facts.sourceKey) keep?.add(sourceKeyId(r.id));
+    const id = sourceKeyId(r.id);
+    // Kept from orphaning while it cannot be declared: no source key stored yet, or the host left out.
+    if (keyed && (!facts.sourceKey || blocked)) out.keep?.add(id);
+    if (blocked) out.leftOut?.add(r.id);
     // Not twice: a data file of before may declare the same key itself (GitHub takes a key once).
     const declaredKey = resources.some(
       (o) => `${o.vendor}.${o.type}` === DEPLOY_KEY_TYPE && o.desired.key === facts.sourceKey,
     );
-    if (repository && facts.sourceKey && types.has(DEPLOY_KEY_TYPE) && !declaredKey) {
-      const id = sourceKeyId(r.id);
+    if (keyed && facts.sourceKey && !blocked && !declaredKey) {
       const binding = bindings[id]?.id;
+      const key = { repository, title: DEPLOY_KEY_TITLE, key: facts.sourceKey, read_only: true };
+      const identity = deployKey.find?.(key);
       resources.splice(resources.indexOf(r), 0, {
         id,
         file: r.file,
         vendor: "github",
         type: "repository_deploy_key",
         name: exportOf(id),
+        ...(identity && { identity }),
         ...(binding !== undefined && { binding }),
         at: { file: r.at.file, export: exportOf(id) },
-        desired: { repository, title: DEPLOY_KEY_TITLE, key: facts.sourceKey, read_only: true },
+        desired: key,
         refs: repositoryId ? { repository: repositoryId } : {},
       });
     }
@@ -301,12 +383,31 @@ export function deriveHosts(
 }
 
 /**
+ * Whether GitHub shows `repository` (`owner/name`) to anyone, asked with no token: false for one
+ * that is private (or not there), undefined when GitHub does not say.
+ */
+async function publicOnGithub(repository: string): Promise<boolean | undefined> {
+  try {
+    const res = await fetch(`https://api.github.com/repos/${repository}`, {
+      method: "HEAD",
+      headers: { accept: "application/vnd.github+json" },
+      signal: AbortSignal.timeout(10_000),
+    });
+    return res.status === 200 ? true : res.status === 404 ? false : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * What the declared hosts that derive (`deriveHosts`) are filled from, read now: the installed
  * `sanoma`, `origin`, the public sites' domains, and of `secrets` (none outside a run) which
- * optional credentials, App keys and source key are stored. With `mint` (apply, never drift or a
- * sandbox run), the source key and, when a wakeup is declared, the wakeup's token are minted
- * first when none is stored, so the host is given them from its first apply. Undefined when no
- * declared host derives.
+ * optional credentials, App keys and source key are stored, and which credentials the drivers
+ * read from this machine's environment alone (`unbound`). With `mint` (apply, never drift or a
+ * sandbox run), the source key (where the config has the deploy-key type) and, when a wakeup is
+ * declared, the wakeup's token are minted first when none is stored, so the host is given them
+ * from its first apply. With no deploy-key type, GitHub is asked whether `origin` is public.
+ * Undefined when no declared host derives.
  */
 export async function hostFacts(options: {
   root: string;
@@ -315,6 +416,8 @@ export async function hostFacts(options: {
   drivers: ReadonlyMap<string, Driver>;
   secrets?: Secrets;
   builtInStore: boolean;
+  /** True when the config binds `SANOMA_SIGNING_KEY` (`{ env }` or `{ bootstrap }`). */
+  signingKeyBound?: boolean;
   sender?: string;
   mint: boolean;
 }): Promise<HostFacts | undefined> {
@@ -334,25 +437,34 @@ export async function hostFacts(options: {
   // Only what the store holds: a marker for a name it does not would fail the host's deploy.
   const held = await stored(statuses.map((c) => c.name));
   const carried = new Map<string, string[]>();
+  const unbound = new Map<string, string[]>();
   for (const c of statuses) {
-    if (held.has(c.name)) carried.set(c.vendor, [...(carried.get(c.vendor) ?? []), c.name]);
+    // The driver reads the environment first: set there alone, it runs here and the host is not given it.
+    const into = held.has(c.name) ? carried : secrets && hosts.length && process.env[c.name] ? unbound : undefined;
+    into?.set(c.vendor, [...(into.get(c.vendor) ?? []), c.name]);
   }
-  const githubApp = [...(await stored(GITHUB_APP_SECRETS))];
+  const githubApp = [...(await stored(Object.values(GITHUB_APP)))];
   if (mint && secrets && hosts.some((h) => wokenBy(h, resources, types))) await mintWakeupToken(secrets);
+  const keyed = types.has(DEPLOY_KEY_TYPE);
   const { siteDomains } = await import("./sites.ts");
   const [version, origin, sourceKey] = await Promise.all([
     installedSanoma(root),
     originUrl(root),
-    secrets && hosts.length ? sourceKeyOf(secrets, mint) : undefined,
+    secrets && hosts.length && keyed ? sourceKeyOf(secrets, mint) : undefined,
   ]);
+  const repository = !keyed && hosts.length ? githubRepository(origin) : undefined;
+  const publicRepository = repository === undefined ? undefined : await publicOnGithub(repository);
   return {
     ...(version !== undefined && { version }),
     ...(origin !== undefined && { origin }),
     domains: siteDomains(root),
     builtInStore: options.builtInStore,
     carried,
+    ...(unbound.size > 0 && { unbound }),
+    ...(options.signingKeyBound && { signingKeyBound: true }),
     ...(options.sender !== undefined && { sender: options.sender }),
     githubApp,
     ...(sourceKey !== undefined && { sourceKey }),
+    ...(publicRepository !== undefined && { publicRepository }),
   };
 }

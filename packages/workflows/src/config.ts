@@ -411,6 +411,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
       ...options,
       drivers: driversByVendor,
       builtInStore: !config.secrets?.store,
+      signingKeyBound: config.secrets?.bindings?.SANOMA_SIGNING_KEY !== undefined,
       ...(isOp(config.login?.sender) && { sender: config.login.sender.vendor }),
     });
   if (types.size) {
@@ -734,7 +735,12 @@ async function readDeclared(
   declarable: ReadonlyMap<string, Resource>,
   types: ReadonlyMap<string, Resource>,
   connections: ConnectionRegistry,
-  options: ReadOptions & { drivers: ReadonlyMap<string, Driver>; builtInStore: boolean; sender?: string },
+  options: ReadOptions & {
+    drivers: ReadonlyMap<string, Driver>;
+    builtInStore: boolean;
+    signingKeyBound: boolean;
+    sender?: string;
+  },
 ): Promise<Omit<ApplyDeclared, "rebinds">> {
   // Loaded when a run reads the files, not with the worker.
   const { loadDataFiles } = await import("./resources.ts");
@@ -743,6 +749,7 @@ async function readDeclared(
   // A host that derives is filled with what it is not told (`deriveHosts`), before it is checked
   // or pinned: the deploy key it clones with among them. Minted only by a live apply.
   const keep = new Set<string>();
+  const leftOut = new Set<string>();
   if (root !== undefined) {
     const { deriveHosts, hostFacts } = await import("./host-derive.ts");
     const facts = await hostFacts({
@@ -752,11 +759,16 @@ async function readDeclared(
       drivers: options.drivers,
       ...(run && { secrets: run.state.secrets }),
       builtInStore: options.builtInStore,
+      signingKeyBound: options.signingKeyBound,
       ...(options.sender !== undefined && { sender: options.sender }),
       mint: !!options.mint && !!run && !run.sandbox,
     });
-    if (facts) problems.push(...deriveHosts(resources, types, bindings, facts, keep));
+    if (facts) problems.push(...deriveHosts(resources, types, bindings, facts, { keep, leftOut }));
   }
+  // A host apply cannot give all it needs is left out, with what names it (its wakeup): its
+  // problem says why, and nothing of it changes until it is fixed.
+  const left = resources.filter((o) => leftOut.has(o.id) || Object.values(o.refs).some((id) => leftOut.has(id)));
+  for (const r of left) resources.splice(resources.indexOf(r), 1);
   // A host's deploy key apply declares, or cannot tell yet, is no orphan.
   const declaredIds = new Set(resources.map((r) => r.id));
   const kept = orphans.filter((o) => !declaredIds.has(o.key) && !keep.has(o.key));
@@ -798,6 +810,7 @@ async function readDeclared(
       })),
     bindings,
     orphans: kept,
+    ...(left.length > 0 && { leftOut: left.map((r) => r.id) }),
     problems,
   };
 }

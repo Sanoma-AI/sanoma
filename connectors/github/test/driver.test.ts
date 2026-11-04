@@ -2,6 +2,7 @@ import { BridgeError } from "@sanoma-ai/bridge";
 import { type BridgeCall, fixturesDir, loadReplies, stateBridge } from "@sanoma-ai/bridge/fake";
 import { type Driver, DriverError, memorySecrets } from "@sanoma-ai/workflows";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { githubTf } from "../src/connector.ts";
 import { githubDriver } from "../src/driver.ts";
 import { fakeGithub } from "../src/fake.ts";
 import { github } from "../src/index.ts";
@@ -181,6 +182,68 @@ describe("githubDriver", () => {
     await expect(call(driver, "repository.read", { ...imported, handle: "nope" })).rejects.toMatchObject({
       message: "github: repository.read was given a handle it did not make",
       retryable: false,
+    });
+  });
+});
+
+/** GitHub answering a list of a repository's deploy keys with `listed`. */
+const keys = (listed: { id: number; key: string }[]) =>
+  vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify(listed), { status: 200 }));
+
+describe("a deploy key found by its repository and key", () => {
+  // GitHub keeps a key without its comment; the identity is the key as `find` makes it, without one too.
+  const KEY = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC";
+  const identity = githubTf.resources.repository_deploy_key.find!({
+    repository: "Sanoma-AI/sanoma",
+    key: `${KEY} host@acme`,
+  } as never);
+  let bridge: ReturnType<typeof stateBridge>;
+  beforeEach(() => {
+    vi.stubEnv("GITHUB_TOKEN", "ghx_test");
+    const state = loadReplies(fixturesDir, provider);
+    state.objects["github_repository_deploy_key/sanoma:42"] = {
+      typeName: "github_repository_deploy_key",
+      state: { id: "sanoma:42", repository: "sanoma", title: "Sanoma host", key: KEY, read_only: true },
+      private: "",
+      schemaVersion: 0,
+    };
+    bridge = stateBridge(state);
+  });
+
+  it("is the key GitHub lists with that text, imported by its id", async () => {
+    expect(identity).toBe(`Sanoma-AI/sanoma:${KEY}`);
+    const fetched = keys([
+      { id: 7, key: "ssh-ed25519 AAAAC3other" },
+      { id: 42, key: KEY },
+    ]);
+    const found = await call(githubDriver({ bridge }), "repository_deploy_key.import", { id: identity });
+    expect(String(fetched.mock.calls[0]![0])).toBe("https://api.github.com/repos/Sanoma-AI/sanoma/keys?per_page=100");
+    expect(bridge.calls.find((c) => c.method === "import")).toMatchObject({ id: "sanoma:42" });
+    expect(found).toMatchObject({ gone: false, state: { id: "Sanoma-AI/sanoma:42", repository: "Sanoma-AI/sanoma" } });
+    fetched.mockRestore();
+  });
+
+  it("is none when the repository lists no such key, with no provider to ask", async () => {
+    const fetched = keys([{ id: 7, key: "ssh-ed25519 AAAAC3other" }]);
+    expect(await call(githubDriver({ bridge }), "repository_deploy_key.import", { id: identity })).toEqual({
+      id: identity,
+      gone: true,
+    });
+    expect(bridge.calls.some((c) => c.method === "import")).toBe(false);
+    fetched.mockRestore();
+  });
+
+  it("is found on the fake among its keys, with no lookup", async () => {
+    const fake = fakeGithub();
+    fake.put("repository_deploy_key", "sanoma:42", {
+      repository: "sanoma",
+      title: "Sanoma host",
+      key: KEY,
+      read_only: true,
+    });
+    expect(await call(fake.driver, "repository_deploy_key.import", { id: identity })).toMatchObject({
+      gone: false,
+      state: { id: "Sanoma-AI/sanoma:42" },
     });
   });
 });

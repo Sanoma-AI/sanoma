@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { describeConfig } from "../src/describe.ts";
-import { cloneUrl, deriveHosts, githubRepository, type HostFacts } from "../src/host-derive.ts";
-import { sourceKeyId } from "../src/host.ts";
+import { cloneUrl, deriveHosts, githubRepository, HOST_SIGNING_KEY, type HostFacts } from "../src/host-derive.ts";
+import { detaching, sourceKeyId, UNNAMED } from "../src/host.ts";
 import { loadDataFiles } from "../src/resources.ts";
 import { isSecret } from "../src/secret.ts";
 import { defineConnector, defineResource, type HostSpec, type Resource, RUNTIME_IMAGE } from "../src/index.ts";
@@ -12,7 +12,7 @@ import { tree } from "./tree.ts";
 // rest before it plans (`deriveHosts`), the deploy key it clones with among them.
 
 const hostSchema = z.object({
-  name: z.string(),
+  name: z.string().nullish(),
   image: z.string().nullish(),
   source: z.string().nullish(),
   ref: z.string().nullish(),
@@ -26,6 +26,7 @@ const spec: HostSpec = {
   capabilities: { lifetime: "stops-when-quiet", publicUrl: true, buildsFromGit: false, staticEgress: false },
   derives: true,
   inputs: {
+    name: "name",
     source: "source",
     ref: "ref",
     image: "image",
@@ -53,7 +54,7 @@ const service = defineResource({
       database: { type: "acme.db" },
     },
   },
-  find: ({ name }) => name,
+  find: ({ name }) => name ?? UNNAMED,
   writable: true,
   host: spec,
 });
@@ -85,6 +86,7 @@ const deployKey = defineResource({
     writeOnly: [],
     references: { repository: { type: "github.repository" } },
   },
+  find: (declared) => `${declared.repository}:${declared.key}`,
 });
 const acme = defineConnector("acme", { service, db }, { title: "Acme", package: "@acme/connector" });
 const github = defineConnector(
@@ -247,6 +249,92 @@ describe("a host that derives", () => {
     expect(problems).toContainEqual(
       expect.objectContaining({ message: "www.acme.example is the app's hostname and the domain of www" }),
     );
+  });
+});
+
+/** `files` loaded and derived over `facts(overrides)`: the resources, the problems, what is kept and left out, the host. */
+const derived = (files: Record<string, string>, overrides: Partial<HostFacts> = {}, typesOf = types) => {
+  const { resources, bindings } = load(files);
+  const out = { keep: new Set<string>(), leftOut: new Set<string>() };
+  const problems = deriveHosts(resources, typesOf, bindings, facts(overrides), out);
+  const host = resources.find((r) => r.id === "resources/sanoma/infra.ts#host")!;
+  return { resources, problems, out, host, secrets: host.desired.secrets as Record<string, unknown> };
+};
+
+describe("what a host that derives is given, or refused", () => {
+  it("finds its deploy key by the repository and the key, so a key GitHub holds already is bound", () => {
+    const { resources } = derived({ "resources/sanoma/infra.ts": INFRA });
+    expect(resources.find((r) => r.id === sourceKeyId("resources/sanoma/infra.ts#host"))).toMatchObject({
+      identity: "acme/company:ssh-rsa AAAA public-half",
+      name: "host.sourceKey",
+    });
+  });
+
+  it("is named after its repository when its file leaves out its name", () => {
+    const { host, problems } = derived({
+      "resources/sanoma/infra.ts": INFRA.replace('name: "company", hostname', "hostname"),
+    });
+    expect(problems).toEqual([]);
+    expect(host).toMatchObject({ identity: "company", name: "company", desired: { name: "company" } });
+    // From the origin's URL when no repository is declared, made a name.
+    const fromOrigin = derived(
+      {
+        "resources/sanoma/infra.ts": INFRA.replace(/^export const repo = .*\n/m, "").replace(
+          'name: "company", hostname',
+          "hostname",
+        ),
+      },
+      { origin: "https://github.com/acme/Company_Ops.git" },
+    );
+    expect(fromOrigin.host.desired.name).toBe("company-ops");
+  });
+
+  it("is given the signing key the config binds, else its own, generated at its create", () => {
+    expect(derived({ "resources/sanoma/infra.ts": INFRA }).secrets.SANOMA_SIGNING_KEY).toEqual({
+      $secret: HOST_SIGNING_KEY,
+      generate: true,
+    });
+    expect(
+      derived({ "resources/sanoma/infra.ts": INFRA }, { signingKeyBound: true }).secrets.SANOMA_SIGNING_KEY,
+    ).toEqual({ $secret: "SANOMA_SIGNING_KEY" });
+  });
+
+  it("is left out, saying how to bind it, for a credential read from this machine's environment alone", () => {
+    const { problems, out, secrets } = derived(
+      { "resources/sanoma/infra.ts": INFRA },
+      { unbound: new Map([["acme", ["ACME_REGION_TOKEN"]]]) },
+    );
+    expect(problems.map((p) => p.message)).toEqual([
+      'host: ACME_REGION_TOKEN is read from the environment here, and has no binding, so the host would not be given it: bind it in sanoma.config.ts, `secrets: { bindings: { ACME_REGION_TOKEN: { env: "ACME_REGION_TOKEN" } } }`, or store it on the acme connector page',
+    ]);
+    expect(secrets).not.toHaveProperty("ACME_REGION_TOKEN");
+    expect([...out.leftOut]).toEqual(["resources/sanoma/infra.ts#host"]);
+    // Its deploy key is not declared while it is left out, and its binding is kept.
+    expect([...out.keep]).toEqual([sourceKeyId("resources/sanoma/infra.ts#host")]);
+  });
+
+  it("is given no source key where the config cannot declare a deploy key, and a private repository is a problem", () => {
+    const noKeys = new Map([...types].filter(([id]) => id !== "github.repository_deploy_key"));
+    const files = { "resources/sanoma/infra.ts": INFRA.replace(/^export const repo = .*\n/m, "") };
+    const open = derived(files, { publicRepository: true, sourceKey: undefined }, noKeys);
+    expect(open.problems).toEqual([]);
+    expect(open.secrets).not.toHaveProperty("SANOMA_SOURCE_KEY");
+    expect(open.resources.some((r) => r.type === "repository_deploy_key")).toBe(false);
+    const closed = derived(files, { publicRepository: false, sourceKey: undefined }, noKeys);
+    expect(closed.problems.map((p) => p.message)).toEqual([
+      expect.stringContaining(
+        "acme/company is private, and the config has no github.repository_deploy_key to give the host a key to clone it with: add the GitHub connector",
+      ),
+    ]);
+    expect([...closed.out.leftOut]).toEqual(["resources/sanoma/infra.ts#host"]);
+  });
+
+  it("would detach the domains its Worker has while no site declares one: apply says so instead", () => {
+    const state = { domains: { www: "www.acme.example" } };
+    expect(detaching(spec, {}, state)).toEqual(["www.acme.example (www)"]);
+    expect(detaching(spec, { domains: { docs: "docs.acme.example" } }, state)).toEqual([]);
+    expect(detaching(spec, {}, {})).toEqual([]);
+    expect(detaching({ ...spec, derives: false }, {}, state)).toEqual([]);
   });
 });
 

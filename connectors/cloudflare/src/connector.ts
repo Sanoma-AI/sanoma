@@ -1,6 +1,7 @@
 import {
   compareDeclared,
   RUNTIME_PORT,
+  UNNAMED,
   type Connector,
   defineConnector,
   defineResource,
@@ -89,6 +90,11 @@ const containerSchema = z.object({
  * (`revision`, `secrets`, `domains`), which a data file never declares (`deriveHosts`).
  */
 const hostSchema = containerSchema.extend({
+  name: containerSchema.shape.name
+    .nullish()
+    .describe(
+      "The company's name: the Worker and its application are `sanoma-<name>`; by default the repository's name",
+    ),
   image: containerSchema.shape.image
     .nullish()
     .describe(
@@ -184,7 +190,8 @@ export const container = defineResource({
 
 /**
  * `cloudflare.host({ name, hostname, database })`: the company's Worker, as `cloudflare.container`
- * runs it, declared by its decisions alone. `name` is the Worker's (`sanoma-<name>`), `hostname`
+ * runs it, declared by its decisions alone. `name` is the Worker's (`sanoma-<name>`; by default the
+ * repository's name, which apply fills, its identity `UNNAMED` until then), `hostname`
  * the app's, `database` the declared database it runs on. Apply gives it the rest (`deriveHosts`):
  * the installed sanoma's runtime image, the repository the app runs from at its default branch
  * (`image`, `source` and `ref` are overrides), the image's port, every public site's domain, and
@@ -208,13 +215,14 @@ export const host = defineResource({
       database: { type: ["neon.project", "supabase.project"] },
     },
   },
-  find: ({ name }) => name,
+  find: ({ name }) => name ?? UNNAMED,
   bindingId: (state) => String(state.name),
   writable: true,
   host: {
     capabilities,
     derives: true,
     inputs: {
+      name: "name",
       source: "source",
       ref: "ref",
       image: "image",
