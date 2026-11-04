@@ -158,11 +158,18 @@ const port = (fallback = 3000) => Number(process.env.SANOMA_APP_PORT ?? fallback
  * answers first (`withPostgres`: "start" starts the company's own, "find" only finds it running),
  * so the config resolves on it.
  */
-async function load({ policies = true, postgres }: { policies?: boolean; postgres?: "start" | "find" } = {}): Promise<
+async function load({
+  policies = true,
+  postgres,
+}: { policies?: boolean; postgres?: "serve" | "start" | "find" } = {}): Promise<
   Loaded & { postgres?: EnsuredPostgres }
 > {
   const loaded = await loadConfig();
-  const ensured = postgres && (await withPostgres(namedDatabaseUrl(loaded.config), loaded.root, postgres === "start"));
+  const ensured =
+    postgres &&
+    (await withPostgres(namedDatabaseUrl(loaded.config), loaded.root, postgres !== "find", {
+      adopt: postgres === "serve",
+    }));
   const { resolveConfig } = await import("@sanoma-ai/workflows");
   try {
     const resolved = resolveConfig(loaded.config);
@@ -189,10 +196,10 @@ async function withPostgres(
   named: string | undefined,
   root: string,
   start: boolean,
-  { announce = true } = {},
+  { announce = true, adopt = false } = {},
 ): Promise<EnsuredPostgres> {
   const { ensurePostgres } = await import("./postgres.ts");
-  const postgres = await ensurePostgres(named, { root, log, start });
+  const postgres = await ensurePostgres(named, { root, log, start, adopt });
   process.env.SANOMA_DATABASE_URL = postgres.databaseUrl;
   if (named === undefined && announce) {
     emit({ event: "database", how: postgres.how, url: postgres.databaseUrl, place: "this-computer" });
@@ -239,7 +246,7 @@ async function keep(
  * named), then the worker and the app in this process. With `devServer` (`sanoma`), a repo's sites are served from Vite's dev server, not built.
  */
 async function serveCommand(devServer: boolean): Promise<never> {
-  const loaded = await load({ postgres: "start" });
+  const loaded = await load({ postgres: "serve" });
   return keep(loaded, async (config, resolved) => {
     await (
       await import("./key.ts")
@@ -267,8 +274,8 @@ async function serveStarted(cwd: string): Promise<number> {
  * package reached in the checkout (`linkedPackages`). With sites, the child serves the app's
  * source from Vite's dev server, which updates it in place: a new build of the app's pages (its
  * `dist/client` and `dist/server`) restarts nothing.
- * Each runs in a process group of its own, so a terminal's ctrl-c reaches this process alone, and
- * its `stop` is the one path that ends them. The company's own Postgres, when neither the
+ * Each runs in a process group of its own, so a terminal's ctrl-c reaches this process alone (on
+ * Windows, which has no groups, it reaches them too), and its `stop` is the one path that ends them. The company's own Postgres, when neither the
  * environment nor `.env` names a URL, is this process's (`withPostgres`, the config unread: one
  * the config names is the child's), so a restart keeps it; the child inherits its URL.
  */
@@ -280,7 +287,7 @@ async function dev(repo: string, packages: readonly LinkedPackage[]): Promise<ne
   const named =
     process.env.SANOMA_DATABASE_URL ||
     (existsSync(dotenv) && parseEnv(readFileSync(dotenv, "utf8")).SANOMA_DATABASE_URL);
-  const postgres = named ? undefined : await withPostgres(undefined, cwd, true);
+  const postgres = named ? undefined : await withPostgres(undefined, cwd, true, { adopt: true });
   const fromTarballs = partialLink(cwd);
   if (fromTarballs.length) {
     log(
@@ -302,7 +309,9 @@ async function dev(repo: string, packages: readonly LinkedPackage[]): Promise<ne
         cwd,
         env: process.env,
         stdio: [eventsOn() ? "pipe" : "inherit", "inherit", "inherit"],
-        detached: true,
+        // On Windows `detached` means a console window of its own.
+        detached: process.platform !== "win32",
+        windowsHide: true,
       }),
     watch: packages.map((p) => join(p.dir, "dist")),
     ignore: hot ? [join(app.dir, "dist", "client"), join(app.dir, "dist", "server")] : [],
@@ -425,8 +434,11 @@ async function wakeupAccount(label: string): Promise<number> {
 
 /**
  * On the first SIGINT or SIGTERM, or with `SANOMA_EVENTS=1` the end of stdin (a parent process
- * gone, or done), stops what runs and exits 0; a second signal exits at once. Without the variable
- * stdin is never read. Returns what stops, once, for a caller with a reason of its own to stop.
+ * gone, or done), stops what runs and exits 0; a second signal exits at once. Not with the variable:
+ * the parent has its own deadline, and it may be the same stop reaching this process twice (`pnpm dlx
+ * sanoma` passes on a signal its process group got too), which must not leave Postgres running.
+ * Without the variable stdin is never read. Returns what stops, once, for a caller with a reason of
+ * its own to stop.
  */
 function onSignal(stop: () => Promise<void>): () => void {
   let stopping = false;
@@ -442,7 +454,10 @@ function onSignal(stop: () => Promise<void>): () => void {
       },
     );
   };
-  const handle = () => (stopping ? process.exit(130) : stopOnce());
+  const handle = () => {
+    if (!stopping) stopOnce();
+    else if (!eventsOn()) process.exit(130);
+  };
   // `on`, not `once`: the second signal must find the handler still there, and a dependency's
   // signal-exit (Pi's, in the app) re-sends a signal it finds no other listener for, which would
   // kill the process before `stop` ends.

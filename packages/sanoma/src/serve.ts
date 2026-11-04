@@ -3,7 +3,7 @@ import { realpathSync } from "node:fs";
 import { dirname, extname, isAbsolute, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type AppOptions, type IngressRoute, staffLogin, startApp } from "@sanoma-ai/app";
-import { betterAuthStaffLogin } from "@sanoma-ai/connector-better-auth";
+import { betterAuthStaffLogin, prepareBetterAuthStaff } from "@sanoma-ai/connector-better-auth";
 import {
   deploymentKey,
   errorMessage,
@@ -42,8 +42,16 @@ const rootOf = (config: SanomaConfig) => config.root ?? dirname(config.file!);
 /** The checkout, as the worker's and the app's `source`, a draft's check on the config's database. */
 const sourceOf = (config: SanomaConfig) => localGitSource(rootOf(config), { databaseUrl: resolveDatabaseUrl(config) });
 
-/** What a worker of the launcher's starts with: promoted, since a local worker is always the version to take queued runs, even one seen before, and the checkout as its source. */
-const workerOptions = (config: SanomaConfig) => ({ promote: true, source: sourceOf(config) });
+/**
+ * What a worker of the launcher's starts with: promoted, since a local worker is always the
+ * version to take queued runs, even one seen before; the checkout as its source; and the staff
+ * login's tables among what it prepares, since no config names that login (`appOptions` makes it).
+ */
+const workerOptions = (config: SanomaConfig) => ({
+  promote: true,
+  source: sourceOf(config),
+  prepare: [prepareBetterAuthStaff],
+});
 
 /**
  * Starts the worker, for `sanoma worker`: it never stops itself, since nothing in this process

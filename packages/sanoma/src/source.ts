@@ -1,6 +1,15 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { appendFileSync, existsSync, lstatSync, mkdirSync, realpathSync, symlinkSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+} from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -308,9 +317,12 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
           await git(["worktree", "add", "--quiet", ...over, ...from]);
         }
         const [installed, modules] = [join(root, "node_modules"), join(at, "node_modules")];
-        if (existsSync(installed) && !lstatSync(modules, { throwIfNoEntry: false })) {
-          // Relative, so it holds when the repository moves.
-          symlinkSync(relative(at, installed), modules, "dir");
+        if (existsSync(installed) && !existsSync(modules)) {
+          // A link the repository's move left dangling goes first.
+          rmSync(modules, { force: true });
+          // Relative, so it holds when the repository moves. On Windows a junction, as a symbolic
+          // link needs Developer Mode there, whose target is absolute; the type means nothing elsewhere.
+          symlinkSync(relative(at, installed), modules, "junction");
           // `node_modules/` names a directory, not a link: the repository's own exclude file names it then.
           if (!(await ignores(at, "node_modules"))) {
             const exclude = resolve(at, await gitIn(at, ["rev-parse", "--git-path", "info/exclude"]));
@@ -360,6 +372,9 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
       // Not under a check still running in it.
       await checkingAt.get(at);
       return serial(async () => {
+        // Its link first: Git for Windows takes a junction for a folder, and would empty the company's own node_modules.
+        const modules = join(at, "node_modules");
+        if (lstatSync(modules, { throwIfNoEntry: false })?.isSymbolicLink()) unlinkSync(modules);
         // Forced: whatever it holds uncommitted goes with it, and one whose directory is gone too.
         if ((await listed()).has(id)) await git(["worktree", "remove", "--force", at]);
         if (await branched(branch)) await git(["branch", "--quiet", "-D", branch]);
@@ -423,6 +438,12 @@ interface Ran {
   code?: unknown;
 }
 
+/**
+ * What a draft's check keeps of this process's environment: `PATH` and `HOME`, and on Windows what
+ * a process needs there (Node's sockets and crypto fail without `SystemRoot`) and its home's names.
+ */
+const CHECK_ENV = ["PATH", "HOME", "SystemRoot", "USERPROFILE", "TEMP", "TMP", "LOCALAPPDATA", "APPDATA"];
+
 async function checkNow(root: string, databaseUrl: string | undefined): Promise<CheckResult> {
   // The company's own install (linked into the draft).
   const sanoma = join(root, "node_modules", "sanoma");
@@ -430,7 +451,7 @@ async function checkNow(root: string, databaseUrl: string | undefined): Promise<
     bin: string | { sanoma: string };
   };
   const env: NodeJS.ProcessEnv = { SANOMA_EVENTS: "1", ...(databaseUrl && { SANOMA_DATABASE_URL: databaseUrl }) };
-  for (const name of ["PATH", "HOME"] as const) if (process.env[name]) env[name] = process.env[name];
+  for (const name of CHECK_ENV) if (process.env[name]) env[name] = process.env[name];
   const ran: Ran = await promisify(execFile)(
     process.execPath,
     [join(sanoma, typeof bin === "string" ? bin : bin.sanoma), "check"],

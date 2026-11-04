@@ -1,13 +1,23 @@
 name: Desktop
-# The desktop shell's smoke test (packages/desktop/test/e2e), on Linux under xvfb, and its unit tests
-# on Windows; ci.yml runs its unit tests on Linux.
+# The desktop shell's smoke test (packages/desktop/test/e2e), on Linux under xvfb; its unit tests on
+# Windows, and there the real packaged app: the smoke test, New Company for real and the Squirrel
+# installer. ci.yml runs its unit tests on Linux.
 on:
   push:
     branches: [main]
     paths: &paths
       - packages/desktop/**
-      # Its `engines`, which the shipped Node must satisfy.
-      - packages/sanoma/template/package.json
+      # What New Company runs first: the launcher's process code and the template, whose `engines` the
+      # shipped Node must satisfy. Not the whole workspace it installs, or these jobs would run on most pull requests.
+      - packages/sanoma/src/cli.ts
+      - packages/sanoma/src/dev.ts
+      - packages/sanoma/src/init.ts
+      - packages/sanoma/src/postgres.ts
+      - packages/sanoma/src/postgres-bin.ts
+      - packages/sanoma/src/source.ts
+      - packages/sanoma/src/windows.ts
+      - packages/sanoma/template/**
+      - packages/sanoma/package.json
       # `packageManager`: the pnpm the shell stages and installs companies with.
       - package.json
       - .github/workflows/desktop.yml
@@ -54,3 +64,95 @@ jobs:
           key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
       - run: pnpm install --frozen-lockfile
       - run: pnpm vitest run packages/desktop
+
+  # This commit's packages, as npm would serve them, for New Company below. Here, as `release.yml`
+  # packs on Linux and a prepack is Unix only. PostgreSQL's and the bridge's binaries come from npm.
+  company-packages:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        with:
+          cache: true
+      - id: pnpm
+        run: echo "store=$(pnpm store path)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pnpm.outputs.store }}
+          key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+      - run: pnpm install --frozen-lockfile
+      # What the template depends on, and what that depends on; in dependency order, as each prepack builds against the last.
+      - run: >-
+          pnpm -r --workspace-concurrency=1
+          --filter "sanoma..." --filter "@sanoma-ai/connector-anthropic..." --filter "@sanoma-ai/connector-ghost..."
+          --filter "!@sanoma-ai/postgres-*" --filter "!@sanoma-ai/bridge-*" --filter "!@sanoma-ai/testing"
+          exec pnpm pack --pack-destination "$RUNNER_TEMP/packages"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: company-packages
+          path: ${{ runner.temp }}/packages
+          retention-days: 1
+          compression-level: 0
+
+  # The packaged app, unsigned, as a person on Windows gets it. No Windows machine runs this otherwise:
+  # a failure here is what the job is for.
+  app-windows:
+    needs: company-packages
+    runs-on: windows-latest
+    timeout-minutes: 40
+    env:
+      # Lets Playwright attach to the packaged app (forge.config.mts); a release never sets it.
+      SANOMA_TEST_BUILD: "1"
+      SANOMA_DESKTOP_EXE: ${{ github.workspace }}\packages\desktop\out\Sanoma-win32-x64\Sanoma.exe
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        with:
+          cache: true
+      - id: pnpm
+        shell: bash
+        run: echo "store=$(pnpm store path)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pnpm.outputs.store }}
+          key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @sanoma-ai/desktop run make:windows
+      - name: The smoke test, on the packaged app
+        working-directory: packages/desktop
+        run: pnpm exec playwright test smoke
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: company-packages
+          path: ${{ runner.temp }}/packages
+      - name: A local registry with this commit's packages
+        shell: bash
+        run: |
+          registry="$RUNNER_TEMP/registry"
+          mkdir -p "$registry"
+          cp packages/desktop/test/registry/verdaccio.yaml "$registry/config.yaml"
+          cd "$registry"
+          pnpm dlx verdaccio@7.0.2 --config config.yaml --listen 127.0.0.1:4873 > log.txt 2>&1 < /dev/null &
+          for _ in $(seq 1 60); do curl -sf -m 2 http://127.0.0.1:4873/-/ping > /dev/null && break; sleep 2; done
+          token=$(curl -sf -X PUT -H 'content-type: application/json' -d '{"name":"ci","password":"local-registry"}' \
+            http://127.0.0.1:4873/-/user/org.couchdb.user:ci | jq -r .token)
+          for package in "$RUNNER_TEMP"/packages/*.tgz; do
+            npm publish "$package" --registry http://127.0.0.1:4873 "--//127.0.0.1:4873/:_authToken=$token" --access public
+          done
+      - name: New Company, for real
+        working-directory: packages/desktop
+        env:
+          pnpm_config_registry: http://127.0.0.1:4873/
+          npm_config_registry: http://127.0.0.1:4873/
+        run: pnpm exec playwright test new-company
+      - name: The Squirrel installer, silently, and the installed app
+        run: packages/desktop/scripts/check-windows-install.ps1
+      - name: What the failure left
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-logs
+          retention-days: 7
+          if-no-files-found: ignore
+          path: packages/desktop/test-results

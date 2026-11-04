@@ -68,16 +68,6 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
       return undefined;
     }
   };
-  /** The nonces of sealed invite requests used, until each expires. */
-  const spent = new Map<string, number>();
-  /** Marks a sealed request's nonce used; false when it was already. */
-  const spend = (nonce: string, exp: number) => {
-    const now = Date.now();
-    for (const [n, until] of spent) if (until <= now) spent.delete(n);
-    if (spent.has(nonce)) return false;
-    spent.set(nonce, exp);
-    return true;
-  };
   /** Who the half says is signed in, once per request: `handle` asks, then admission. */
   const verified = new WeakMap<Request, Promise<LoginIdentity | undefined>>();
   const identityOf = (request: Request) => {
@@ -169,8 +159,10 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
     if ("request" in body.data) {
       const opened = openInvite(body.data.request);
       if (!opened) return refuse(403, "That invite request is not one this deployment sealed, or it expired");
-      // Each sealed request mints once: a copy of it, replayed before it expires, mints nothing.
-      if (!spend(opened.nonce, opened.exp)) return refuse(403, "That invite request was used already");
+      // Each sealed request mints once, whichever process answers: a copy of it, replayed before
+      // it expires, mints nothing (its nonce is a row until then).
+      if (!(await app!.client.spendInviteRequest(opened.nonce, new Date(opened.exp))))
+        return refuse(403, "That invite request was used already");
       ({ email } = opened);
       by = LOGIN_AGENT;
     } else {

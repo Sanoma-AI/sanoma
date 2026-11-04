@@ -22,6 +22,7 @@ import { promisify } from "node:util";
 import { Client } from "pg";
 import { UsageError } from "./config.ts";
 import { postgresBin } from "./postgres-bin.ts";
+import { system32 } from "./windows.ts";
 
 export interface EnsuredPostgres {
   /** Postgres answered (at the URL named, or the company's own, run by another launcher); or this call started the company's own; or created it first. */
@@ -29,7 +30,7 @@ export interface EnsuredPostgres {
   /** Where it answers: the URL named, or the company's own, `postgresql://postgres:<password>@127.0.0.1:<port>/sanoma`. */
   databaseUrl: string;
   /**
-   * Stops the company's own Postgres when this call started it and no other client is connected
+   * Stops the company's own Postgres when this call started or adopted it and no other client is connected
    * (another launcher's worker, say), saying so when one is; nothing otherwise.
    */
   stop(): Promise<void>;
@@ -42,6 +43,12 @@ export interface EnsurePostgresOptions {
   log?: (line: string) => void;
   /** Without it, a URL named is taken as it is, unprobed, and only a cluster of the company's own that runs already is found: a `UsageError` when none does. */
   start?: boolean;
+  /**
+   * For a launcher that runs on, its clients soon connected: a cluster found running is its to stop
+   * too, when none is left. Not for a one-off command, which could stop one another launcher has yet
+   * to connect to.
+   */
+  adopt?: boolean;
   /** The directory holding PostgreSQL's `bin/`; default `postgresBin()`, read only to start one. */
   bin?: string;
 }
@@ -74,15 +81,16 @@ export function masked(databaseUrl: string): string {
  * database, as its user) and used as it is, or the call throws, saying what to do. With none, the
  * company's own: a PostgreSQL 18 cluster in `clusterDir(root)` (`password`, mode 0600, `server.log`
  * and `data/`), on 127.0.0.1 alone at a port of its own, as `postgres` with the password. A
- * cluster another launcher runs is used as it is (`answered`); else, unless `start` is false, it
- * is started (`started`), made first with `initdb` when there is no `data/` (`created`), under the
+ * cluster another launcher runs is used as it is (`answered`), and with `adopt` stopped at the end
+ * when no client is left on it, as a launcher that crashed left it so (on Windows, a shell's crash
+ * takes the launcher with it but not `pg_ctl`'s Postgres); else, unless `start` is false, it is started (`started`), made first with `initdb` when there is no `data/` (`created`), under the
  * `starting` lock so two launchers never start it twice. Its port is rewritten when another
- * process took it. `pg_ctl` runs in a process group of its own, so a terminal's ctrl-c reaches
- * the launcher alone, which stops it last (`stop`).
+ * process took it. `pg_ctl` runs in a process group of its own (not on Windows: `runPg`), so a
+ * terminal's ctrl-c reaches the launcher alone, which stops it last (`stop`).
  */
 export async function ensurePostgres(
   databaseUrl: string | undefined,
-  { root, log = () => {}, start = true, bin }: EnsurePostgresOptions,
+  { root, log = () => {}, start = true, adopt = false, bin }: EnsurePostgresOptions,
 ): Promise<EnsuredPostgres> {
   if (databaseUrl !== undefined) {
     // A deployment's worker or app: its database's own to answer, as the runtime retries.
@@ -103,7 +111,20 @@ export async function ensurePostgres(
 
   const cluster = paths(await clusterDir(root));
   const found = await running(cluster);
-  if (found !== undefined) return answered(cluster, found, log);
+  /** What a launcher does with a cluster it did not start. */
+  const answer = (url: string): EnsuredPostgres => {
+    log(`Postgres answers in ${cluster.dir}, started by another launcher`);
+    // Best effort: the launcher that started it may be stopping it too, and the next launch adopts
+    // what stays.
+    const stop = adopt
+      ? () =>
+          stopAlone(() => bin ?? postgresBin(), cluster, url, log).catch((err: unknown) => {
+            log(`could not stop Postgres in ${cluster.dir}: ${String(err)}`);
+          })
+      : noStop;
+    return { how: "answered", databaseUrl: url, stop };
+  };
+  if (found !== undefined) return answer(found);
   if (!start) {
     throw new UsageError(`no Postgres runs in ${cluster.dir}: set SANOMA_DATABASE_URL, or run \`sanoma\``);
   }
@@ -123,7 +144,7 @@ export async function ensurePostgres(
   return locked(cluster, async () => {
     // Started meanwhile, by the launcher that held the lock.
     const meanwhile = await running(cluster);
-    if (meanwhile !== undefined) return answered(cluster, meanwhile, log);
+    if (meanwhile !== undefined) return answer(meanwhile);
     const pg = bin ?? postgresBin();
     const how = existsSync(cluster.data) ? "started" : "created";
     if (how === "created") await initdb(pg, cluster);
@@ -139,7 +160,7 @@ export async function ensurePostgres(
     if (how === "created") {
       log(`created Postgres in ${cluster.dir}: the company's records live there, and deleting it deletes them`);
     }
-    return { how, databaseUrl: url, stop: () => stopAlone(pg, cluster, url, log) };
+    return { how, databaseUrl: url, stop: () => stopAlone(() => pg, cluster, url, log) };
   });
 }
 
@@ -182,11 +203,6 @@ export async function clusterDir(root: string): Promise<string> {
 const urlOf = ({ password }: Cluster, port: number) =>
   `postgresql://postgres:${readFileSync(password, "utf8").trim()}@127.0.0.1:${port}/sanoma`;
 
-function answered(cluster: Cluster, url: string, log: (line: string) => void): EnsuredPostgres {
-  log(`Postgres answers in ${cluster.dir}, started by another launcher`);
-  return { how: "answered", databaseUrl: url, stop: noStop };
-}
-
 /** `data/postmaster.pid`'s process (its first line) and port (its fourth), when there is one. */
 function postmaster({ data }: Cluster): { file: string; pid: number; port: number } | undefined {
   const file = join(data, "postmaster.pid");
@@ -212,12 +228,31 @@ async function running(cluster: Cluster): Promise<string | undefined> {
 function clearStale(cluster: Cluster): void {
   const pm = postmaster(cluster);
   if (!pm || !alive(pm.pid)) return;
-  const ps = spawnSync("ps", ["-o", "comm=", "-p", String(pm.pid)], { encoding: "utf8" });
-  // Without `ps` to tell, the process may be the server: never a second one on its data.
-  if (ps.error || /(^|\/)postgres$/.test(ps.stdout.trim())) {
+  if (mayBePostgres(pm.pid)) {
     throw new Error(`Postgres (pid ${pm.pid}) may run in ${cluster.data} but does not answer; see ${cluster.log}`);
   }
   rmSync(pm.file, { force: true });
+}
+
+/**
+ * Whether the process `pid` may be a Postgres server: what `ps` (on Windows, `tasklist`) says it
+ * runs, or true when there is no telling, as never a second server may start on its data.
+ */
+export function mayBePostgres(
+  pid: number,
+  platform: NodeJS.Platform = process.platform,
+  run: (command: string, args: string[]) => { error?: Error; status: number | null; stdout: string } = (
+    command,
+    args,
+  ) => spawnSync(command, args, { encoding: "utf8", windowsHide: true }),
+): boolean {
+  if (platform === "win32") {
+    // One CSV line, its image name first: "postgres.exe","1234",… (or a line saying there is none).
+    const list = run(system32("tasklist.exe"), ["/FI", `PID eq ${pid}`, "/FO", "CSV", "/NH"]);
+    return Boolean(list.error) || list.status !== 0 || /^"postgres\.exe"/i.test(list.stdout.trim());
+  }
+  const ps = run("ps", ["-o", "comm=", "-p", String(pid)]);
+  return Boolean(ps.error) || /(^|\/)postgres$/.test(ps.stdout.trim());
 }
 
 /** Whether a process runs as `pid` (another user's too). */
@@ -340,7 +375,7 @@ const freePort = () =>
  * Stops the cluster (`pg_ctl stop -m fast`) unless a client but this one is connected: then it
  * stays up for them, and says so. A cluster that no longer answers is left alone.
  */
-async function stopAlone(bin: string, cluster: Cluster, databaseUrl: string, log: (line: string) => void) {
+async function stopAlone(bin: () => string, cluster: Cluster, databaseUrl: string, log: (line: string) => void) {
   const client = serverClient(databaseUrl);
   let others: number;
   try {
@@ -367,7 +402,7 @@ async function stopAlone(bin: string, cluster: Cluster, databaseUrl: string, log
     log(`leaving Postgres running in ${cluster.dir}: ${others} other connection${others === 1 ? "" : "s"}`);
     return;
   }
-  await pgCtl(bin, cluster, ["stop", "-D", cluster.data, "-m", "fast", "-w"]);
+  await pgCtl(bin(), cluster, ["stop", "-D", cluster.data, "-m", "fast", "-w"]);
   log(`stopped Postgres in ${cluster.dir}`);
 }
 
@@ -375,20 +410,34 @@ const pgCtl = (bin: string, cluster: Cluster, args: string[]) => runPg(bin, "pg_
 
 /**
  * Runs PostgreSQL's `program` from `bin`, in a process group of its own (`pg_ctl start` leaves
- * the server in it), its output appended to `server.log`; throws, with the log's last lines,
- * when it fails.
+ * the server in it), its output appended to `pg_ctl.log`; throws, with its and the server's log's
+ * last lines, when it fails. Not `server.log` itself, as `pg_ctl -l` on Windows starts the server
+ * through `cmd`, whose redirect cannot open a file another process has open for writing. Windows
+ * has no groups, and `detached` there leaves it no console, so the `cmd` and the `postgres` it
+ * starts would each open a window; it shares this process's, hidden under the desktop shell
+ * (`windowsHide`).
  */
 async function runPg(bin: string, program: string, cluster: Cluster, args: string[]): Promise<void> {
-  const out = openSync(cluster.log, "a");
+  const log = join(cluster.dir, "pg_ctl.log");
+  const out = openSync(log, "a");
   try {
     const code = await new Promise<number | null>((resolve, reject) => {
-      const child = spawn(join(bin, "bin", program), args, { detached: true, stdio: ["ignore", out, out] });
+      const child = spawn(join(bin, "bin", program), args, {
+        detached: process.platform !== "win32",
+        windowsHide: true,
+        stdio: ["ignore", out, out],
+      });
       child.once("error", reject);
       child.once("exit", resolve);
     });
     if (code === 0) return;
-    const tail = readFileSync(cluster.log, "utf8").trimEnd().split("\n").slice(-5).join("\n");
-    throw new Error(`${program} ${args[0]} failed (exit ${code}); the end of ${cluster.log}:\n${tail}`);
+    const ends = [log, cluster.log]
+      .filter((file) => existsSync(file))
+      .map((file) => {
+        const tail = readFileSync(file, "utf8").trimEnd().split("\n").slice(-5).join("\n");
+        return `the end of ${file}:\n${tail}`;
+      });
+    throw new Error(`${program} ${args[0]} failed (exit ${code}); ${ends.join("\n")}`);
   } finally {
     closeSync(out);
   }

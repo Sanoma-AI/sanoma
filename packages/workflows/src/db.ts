@@ -30,6 +30,8 @@ export const CHATS_TABLE = "sanoma_chats";
 export const CHAT_MESSAGES_TABLE = "sanoma_chat_messages";
 /** The api tokens (`tokens.ts`): each one's SHA-256, never the token, whom it acts for, its groups, and when it was revoked. */
 export const API_TOKENS_TABLE = "sanoma_api_tokens";
+/** The nonces of sealed invite requests spent (`spendInviteRequest`), each until it expires. */
+export const INVITE_REQUESTS_TABLE = "sanoma_invite_requests";
 
 /** The runtime's tables, each with the word the messages name it by. */
 const TABLES: readonly [what: string, ddl: string][] = [
@@ -103,6 +105,10 @@ const TABLES: readonly [what: string, ddl: string][] = [
     "api tokens",
     `CREATE TABLE IF NOT EXISTS ${API_TOKENS_TABLE} (id text PRIMARY KEY, hash text NOT NULL UNIQUE, ` +
       "subject text NOT NULL, groups jsonb NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), revoked_at timestamptz)",
+  ],
+  [
+    "invite requests",
+    `CREATE TABLE IF NOT EXISTS ${INVITE_REQUESTS_TABLE} (nonce text PRIMARY KEY, expires_at timestamptz NOT NULL)`,
   ],
 ];
 
@@ -282,7 +288,7 @@ async function prepare(databaseUrl: string): Promise<void> {
 }
 
 /** The last of the runtime's tables a preparation makes (`TABLES`), so its being there says they all are. */
-const LAST_TABLE = API_TOKENS_TABLE;
+const LAST_TABLE = INVITE_REQUESTS_TABLE;
 
 /** Refuses when the database at `databaseUrl` lacks DBOS's tables or the runtime's: `by` makes them, not this process. */
 async function checkPrepared(databaseUrl: string, by: string): Promise<void> {
@@ -407,4 +413,20 @@ export async function recordWakeupError(db: Db, error: string): Promise<void> {
 /** Records that the worker stops itself now. */
 export async function recordWakeupStop(db: Db): Promise<void> {
   await db.query(`UPDATE ${WAKEUP_TABLE} SET stopped_at = now() WHERE id = 1`);
+}
+
+/**
+ * Marks a sealed invite request's `nonce` spent until `expiresAt`, when the row goes: true the
+ * first time, false for one spent already, whichever process asks. A row, not memory: the app
+ * keeps nothing across requests.
+ */
+export async function spendInviteRequest(db: Db, nonce: string, expiresAt: Date): Promise<boolean> {
+  // Rows go an hour after they expire, not at it: the app's clock decides when a request is
+  // past, and a database clock ahead of it must not forget a nonce the app still accepts.
+  await db.query(`DELETE FROM ${INVITE_REQUESTS_TABLE} WHERE expires_at <= now() - interval '1 hour'`);
+  const { rowCount } = await db.query(
+    `INSERT INTO ${INVITE_REQUESTS_TABLE} (nonce, expires_at) VALUES ($1, $2) ON CONFLICT (nonce) DO NOTHING`,
+    [nonce, expiresAt],
+  );
+  return rowCount === 1;
 }
