@@ -29,7 +29,7 @@ import { type Tokens, tokenStore } from "./tokens.ts";
 import { collectionsDriver } from "./collection.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { configuredSecrets } from "./credentials.ts";
-import { dbosClient, lazyDb, type LazyDb, type LegacyDb, spendInviteRequest, withLegacyQuery } from "./db.ts";
+import { type Db, dbosClient, lazyDb, type LazyDb, spendInviteRequest } from "./db.ts";
 import { type CredentialStatus, credentialsOf } from "./env.ts";
 import { type ApprovalState, Principal, type WorkflowDefinition } from "./define.ts";
 import { APPLY_WORKFLOW, type ApplyInput, type ApplyReport } from "./apply.ts";
@@ -568,14 +568,13 @@ export class SanomaClient {
     const store = await transactionStore.db();
     try {
       return await store.transaction(async (tx) => {
-        const conn = withLegacyQuery(tx);
         const fn = (
           connectionMutation
-            ? connectionDriver(this.config.connections.onDatabase(conn))
-            : collectionsDriver([collections.get(op.resource)!], { db: async () => conn })
+            ? connectionDriver(this.config.connections.onDatabase(tx))
+            : collectionsDriver([collections.get(op.resource)!], { db: async () => tx })
         ).ops[`${op.resource}.${op.name}`]!;
         const result = await output(fn);
-        if (await insertRecord(conn, record({ output: recorded(op, result) }))) return result;
+        if (await insertRecord(tx, record({ output: recorded(op, result) }))) return result;
         duplicate = true;
         tx.rollback();
       });
@@ -1514,7 +1513,7 @@ export class SanomaClient {
   }
 
   /** The pool the runtime's tables are read and written with, on the database once it is prepared. */
-  private db(): Promise<LegacyDb> {
+  private db(): Promise<Db> {
     return this.pool.db();
   }
 

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
-import { connectMaking, type Db, databaseOn, openPool, prepareTables, WAKEUP_MIGRATIONS } from "./db.ts";
+import { type Db, databaseOn, openPool, underPreparationLock } from "./db.ts";
+import { applyMigrations, WAKEUP_MIGRATIONS } from "./db/migrate.ts";
 import { wakeupAccounts, wakeupInstances } from "./db/wakeup.ts";
 import { info, warn } from "./log.ts";
 import { generateSecret, tokenHash as hashOf } from "./secret.ts";
@@ -166,17 +167,17 @@ const waiting = and(
 const live = and(eq(wakeupAccounts.id, wakeupInstances.accountId), isNull(wakeupAccounts.revokedAt));
 
 /**
- * Runs `use` on a connection to `databaseUrl` once the service's two tables are there: the
- * database and the tables made when missing.
+ * Runs `use` on a connection to `databaseUrl` holding the preparation's lock, the database and the
+ * service's two tables made when missing: the service's own migrations folder, with its own journal
+ * table, since the database may be a company's too.
  */
-async function withTables<T>(databaseUrl: string, use: (db: Db) => Promise<T>): Promise<T> {
-  await prepareTables(databaseUrl, WAKEUP_MIGRATIONS, "wakeup service");
-  const conn = await connectMaking(databaseUrl);
-  try {
-    return await use(databaseOn(conn));
-  } finally {
-    await conn.end().catch(() => undefined);
-  }
+function withTables<T>(databaseUrl: string, use: (db: Db) => Promise<T>): Promise<T> {
+  return underPreparationLock(databaseUrl, async (db) => {
+    await applyMigrations(db, WAKEUP_MIGRATIONS).catch((err: unknown) => {
+      throw new Error(`could not prepare the wakeup service tables: ${errorMessage(err)}`, { cause: err });
+    });
+    return use(db);
+  });
 }
 
 async function insertAccount(db: Db, label: string): Promise<{ id: string; token: string }> {

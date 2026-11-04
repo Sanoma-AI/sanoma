@@ -1,8 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { sql } from "drizzle-orm";
-import type { NodePgDatabase, NodePgQueryResultHKT } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
-import type { PgDatabase } from "drizzle-orm/pg-core";
+import type { Db } from "../db.ts";
 import companyJournal from "../../drizzle/company/meta/_journal.json" with { type: "json" };
 import wakeupJournal from "../../drizzle/wakeup/meta/_journal.json" with { type: "json" };
 
@@ -26,16 +25,22 @@ export interface Migrations {
   journal: MigrationsJournal;
 }
 
-const migrations = (name: string, table: string, journal: MigrationsJournal): Migrations => ({ name, table, journal });
-
 /** The folder of `of`, from `src/` and from `dist/` alike; read only when migrating, never in the Worker. */
 const folderOf = (of: Migrations): string => fileURLToPath(new URL(`../../drizzle/${of.name}/`, import.meta.url));
 
 /** The tables every company database gets (`db/company.ts`). */
-export const COMPANY_MIGRATIONS = migrations("company", "__drizzle_migrations", companyJournal);
+export const COMPANY_MIGRATIONS = {
+  name: "company",
+  table: "__drizzle_migrations",
+  journal: companyJournal,
+} satisfies Migrations;
 
 /** The wakeup service's tables (`db/wakeup.ts`). */
-export const WAKEUP_MIGRATIONS = migrations("wakeup", "__drizzle_migrations_wakeup", wakeupJournal);
+export const WAKEUP_MIGRATIONS = {
+  name: "wakeup",
+  table: "__drizzle_migrations_wakeup",
+  journal: wakeupJournal,
+} satisfies Migrations;
 
 /**
  * Applies to `db` the migrations of `of` its database has not had, in one transaction, recording
@@ -44,14 +49,14 @@ export const WAKEUP_MIGRATIONS = migrations("wakeup", "__drizzle_migrations_wake
  * one. Two processes migrating one database at once race (the migrator takes no lock): callers
  * hold `lockPreparation`.
  */
-export const applyMigrations = (db: NodePgDatabase, of: Migrations): Promise<void> =>
+export const applyMigrations = (db: Db, of: Migrations): Promise<void> =>
   migrate(db, { migrationsFolder: folderOf(of), migrationsTable: of.table });
 
 /**
  * Whether the database `db` is on has had every migration of `of`: its journal table's newest
  * `created_at` is the journal's last entry's `when`. False with no journal table.
  */
-export async function migrationsApplied(db: PgDatabase<NodePgQueryResultHKT>, of: Migrations): Promise<boolean> {
+export async function migrationsApplied(db: Db, of: Migrations): Promise<boolean> {
   const last = of.journal.entries.at(-1);
   if (!last) return true;
   const table = sql`drizzle.${sql.identifier(of.table)}`;

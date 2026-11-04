@@ -47,19 +47,18 @@ export function configuredIdentityProvisioning(
     throw new IdentityProvisioningError("invalid");
   }
   const connectionString = url.href;
-  let pool: Pool | undefined;
-  let db: Db | undefined;
+  let db: (Db & { $client: Pool }) | undefined;
   let closed = false;
   let closing: Promise<void> | undefined;
   const store = postgresIdentityProvisioning(async () => {
     if (closed) throw new IdentityProvisioningError("unavailable");
-    if (!pool) {
-      pool = new Pool({ connectionString, max: 5, connectionTimeoutMillis: 10_000, query_timeout: 15_000 });
+    if (!db) {
+      const pool = new Pool({ connectionString, max: 5, connectionTimeoutMillis: 10_000, query_timeout: 15_000 });
       pool.on("error", () => {});
       db = databaseOn(pool);
     }
     // The control plane needs enrollment writes, never schema or database administration.
-    const { rows } = await db!.execute<{ allowed: boolean }>(sql`SELECT
+    const { rows } = await db.execute<{ allowed: boolean }>(sql`SELECT
       NOT EXISTS (SELECT FROM pg_roles WHERE rolname=current_user AND (rolsuper OR rolcreatedb OR rolcreaterole OR rolbypassrls))
       AND has_schema_privilege('sanoma_identity','USAGE') AND NOT has_schema_privilege('sanoma_identity','CREATE')
       AND has_table_privilege('sanoma_identity.deployments','SELECT')
@@ -71,13 +70,13 @@ export function configuredIdentityProvisioning(
       AND NOT has_table_privilege('sanoma_identity.deployments','DELETE,TRUNCATE,REFERENCES,TRIGGER')
       AND NOT has_table_privilege('sanoma_identity.credentials','DELETE,TRUNCATE,REFERENCES,TRIGGER') AS allowed`);
     if (!rows[0]?.allowed) fail("invalid");
-    return db!;
+    return db;
   }, config);
   return {
     store,
     close() {
       closed = true;
-      return (closing ??= pool?.end() ?? Promise.resolve());
+      return (closing ??= db?.$client.end() ?? Promise.resolve());
     },
   };
 }

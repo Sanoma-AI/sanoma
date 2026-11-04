@@ -122,6 +122,7 @@
     "@sanoma-ai/testing": "workspace:*",
     "@sanoma-ai/workflows": "workspace:*",
     "@types/pg": "^8.23.1",
+    "drizzle-orm": "0.45.4",
     "msw": "^3.0.3",
     "pg": "^8.23.1"
   },

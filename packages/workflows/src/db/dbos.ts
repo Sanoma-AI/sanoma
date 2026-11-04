@@ -13,4 +13,5 @@ export const workflowStatus = dbos.table("workflow_status", {
   name: text(),
   applicationName: text(),
   applicationVersion: text(),
+  queueName: text(),
 });

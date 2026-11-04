@@ -92,7 +92,7 @@ export function chatStore(db: () => Promise<Db>): Chats {
         .from(chatMessages)
         .where(eq(chatMessages.chatId, id))
         .orderBy(asc(chatMessages.seq), asc(chatMessages.id));
-      return rows.map((row) => row.message as UIMessage);
+      return rows.map((row) => row.message);
     },
     async get(id) {
       const [row] = await (await db()).select().from(chats).where(eq(chats.id, id));

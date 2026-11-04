@@ -10,12 +10,11 @@ import {
   lazyDb,
   pgCode,
   prepareDatabase,
-  prepareTables,
   spendInviteRequest,
-  WAKEUP_MIGRATIONS,
+  underPreparationLock,
 } from "../src/db.ts";
 import { inviteRequests, wakeup } from "../src/db/company.ts";
-import { COMPANY_MIGRATIONS, migrationsApplied } from "../src/db/migrate.ts";
+import { applyMigrations, COMPANY_MIGRATIONS, migrationsApplied, WAKEUP_MIGRATIONS } from "../src/db/migrate.ts";
 import { wakeupAccounts, wakeupInstances } from "../src/db/wakeup.ts";
 
 const databaseUrl = testDatabaseUrl("db");
@@ -188,13 +187,12 @@ describe("prepareDatabase", () => {
   });
 });
 
-describe("prepareTables", () => {
+describe("underPreparationLock", () => {
   it("makes a service's tables beside a company's, each folder with its own journal table", async () => {
     await prepareDatabase(databaseUrl);
-    await Promise.all([
-      prepareTables(databaseUrl, WAKEUP_MIGRATIONS, "wakeup service"),
-      prepareTables(databaseUrl, WAKEUP_MIGRATIONS, "wakeup service"),
-    ]);
+    const wakeupTables = () =>
+      underPreparationLock(databaseUrl, (locked) => applyMigrations(locked, WAKEUP_MIGRATIONS));
+    await Promise.all([wakeupTables(), wakeupTables()]);
     expect(await migrationsApplied(db, WAKEUP_MIGRATIONS)).toBe(true);
     expect(await migrationsApplied(db, COMPANY_MIGRATIONS)).toBe(true);
     const { rows } = await pool.query<{ t: string | null }>(

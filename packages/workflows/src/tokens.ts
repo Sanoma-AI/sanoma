@@ -70,11 +70,11 @@ export function tokenStore(db: () => Promise<Db>): Tokens {
           .values({ id, hash, subject, groups })
           .onConflictDoUpdate({
             target: apiTokens.id,
-            set: { id: sql`excluded.id` },
+            set: { id },
             setWhere: and(
               eq(apiTokens.hash, hash),
               eq(apiTokens.subject, subject),
-              sql`${apiTokens.groups} @> ${JSON.stringify(groups)}::jsonb AND ${apiTokens.groups} <@ ${JSON.stringify(groups)}::jsonb`,
+              sql`${apiTokens.groups} @> ${sql.param(groups, apiTokens.groups)} AND ${apiTokens.groups} <@ ${sql.param(groups, apiTokens.groups)}`,
               isNull(apiTokens.revokedAt),
             ),
           })

@@ -381,11 +381,11 @@ export function postgresLedger(databaseUrl: string): LedgerStore & { close(): Pr
 
   return {
     async append(record) {
-      const conn = await pool.db();
-      if (await insertRecord(conn, record)) return;
+      const db = await pool.db();
+      if (await insertRecord(db, record)) return;
       // Another write of the id was first: the record it stored stands.
-      const [stored] = await conn.select({ record: ledger.record }).from(ledger).where(eq(ledger.id, record.id));
-      if (stored) warnIfDifferent(stored.record as LedgerRecord, lineOf(record));
+      const [stored] = await db.select({ record: ledger.record }).from(ledger).where(eq(ledger.id, record.id));
+      if (stored) warnIfDifferent(stored.record, lineOf(record));
     },
     async read(runId) {
       const rows = await (
@@ -396,7 +396,7 @@ export function postgresLedger(databaseUrl: string): LedgerStore & { close(): Pr
         .where(eq(ledger.runId, runId))
         .orderBy(ledger.seq, ledger.n);
       // In seq order, as the other stores read; two records of one seq in write order.
-      return rows.map((r) => r.record as LedgerRecord);
+      return rows.map((r) => r.record);
     },
     close: pool.close,
   };
@@ -408,6 +408,7 @@ export function postgresLedger(databaseUrl: string): LedgerStore & { close(): Pr
  * (`SanomaClient.call`) inside the transaction that saves its record.
  */
 export async function insertRecord(db: Db, record: LedgerRecord): Promise<boolean> {
+  // The record as its JSON, so what can't be written as JSON is refused as `jsonlLedger` refuses it.
   const inserted = await db
     .insert(ledger)
     .values({ id: record.id, runId: record.runId, seq: record.seq, record: JSON.parse(serialize(record)) })

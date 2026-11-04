@@ -60,7 +60,7 @@ export interface KmsPostgresOptions {
   database?: () => Promise<Db>;
 }
 
-interface Envelope {
+export interface Envelope {
   format: "sanoma-gcp-kms-v1";
   key: string;
   keyVersion: string;
@@ -250,8 +250,8 @@ export function kmsPostgresStore(options: KmsPostgresOptions): SecretStore | Sec
     }
   };
   const open = async (address: SecretAddress, row: Row): Promise<SecretValue> => {
-    const e = row.envelope as Envelope | null;
-    if (!e || e.format !== FORMAT || !keys.has(e.key) || !versionOf(e.keyVersion, e.key))
+    const e = row.envelope;
+    if (e.format !== FORMAT || !keys.has(e.key) || !versionOf(e.keyVersion, e.key))
       throw new SecretStoreError("invalid_value");
     const nonce = bytes(e.nonce, 12),
       tag = bytes(e.tag, 16),

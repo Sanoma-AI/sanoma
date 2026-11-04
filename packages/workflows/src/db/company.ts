@@ -1,3 +1,4 @@
+import type { UIMessage } from "ai";
 import { sql } from "drizzle-orm";
 import {
   bigserial,
@@ -11,6 +12,9 @@ import {
   text,
   timestamp,
 } from "drizzle-orm/pg-core";
+import type { ConnectionHealth, ConnectionStatus } from "../connection.ts";
+import type { LedgerRecord } from "../ledger.ts";
+import type { SecretLocation } from "../secret-store.ts";
 
 // The runtime's tables in a company's database, beside DBOS's: what `prepareDatabase` makes and
 // every store reads. Column names are the property names in snake_case (`casing` in `db.ts` and
@@ -45,7 +49,7 @@ export const ledger = pgTable(
     id: text().notNull().unique(),
     runId: text().notNull(),
     seq: integer().notNull(),
-    record: jsonb().notNull(),
+    record: jsonb().$type<LedgerRecord>().notNull(),
   },
   (t) => [index("sanoma_ledger_run_seq").on(t.runId, t.seq, t.n)],
 );
@@ -56,7 +60,7 @@ export const data = pgTable(
   {
     collection: text().notNull(),
     key: text().notNull(),
-    record: jsonb().notNull(),
+    record: jsonb().$type<Record<string, unknown>>().notNull(),
     updatedAt: when().notNull().defaultNow(),
     updatedBy: text().notNull(),
   },
@@ -102,7 +106,7 @@ export const chatMessages = pgTable(
       .references(() => chats.id, { onDelete: "cascade" }),
     id: text().notNull(),
     seq: integer().notNull(),
-    message: jsonb().notNull(),
+    message: jsonb().$type<UIMessage>().notNull(),
   },
   (t) => [primaryKey({ columns: [t.chatId, t.id] })],
 );
@@ -131,12 +135,12 @@ export const connections = pgTable("sanoma_connections", {
   owner: text(),
   rule: text(),
   account: text().notNull(),
-  scopes: jsonb().notNull(),
+  scopes: jsonb().$type<string[]>().notNull(),
   revision: text().notNull(),
   definition: text().notNull(),
   credential: text(),
-  location: jsonb(),
-  status: text().notNull().default("connected"),
+  location: jsonb().$type<SecretLocation>(),
+  status: text().$type<ConnectionStatus>().notNull().default("connected"),
   updatedBy: text().notNull(),
   updatedAt: when().notNull().defaultNow(),
 });
@@ -145,7 +149,7 @@ export const connections = pgTable("sanoma_connections", {
 export const connectionHealth = pgTable("sanoma_connection_health", {
   connectionId: text().primaryKey(),
   revision: text().notNull(),
-  health: text().notNull(),
+  health: text().$type<ConnectionHealth["state"]>().notNull(),
   credentialVersion: text(),
   externallyRenewed: boolean().notNull(),
   checkedAt: when().notNull().defaultNow(),

@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
-import { connections } from "../src/db/company.ts";
+import { eq, sql } from "drizzle-orm";
+import { connections, ledger } from "../src/db/company.ts";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -429,9 +430,13 @@ describe("named connection identity", () => {
       for (const result of results) expect(result).toEqual(results[0]);
       expect(await (await pool.db()).select({ id: connections.id }).from(connections)).toHaveLength(1);
       expect(
-        (await (await pool.db()).query("SELECT id FROM sanoma_ledger WHERE run_id=$1", [`direct:alice:${id}`]))
-          .rowCount,
-      ).toBe(1);
+        await (
+          await pool.db()
+        )
+          .select({ id: ledger.id })
+          .from(ledger)
+          .where(eq(ledger.runId, `direct:alice:${id}`)),
+      ).toHaveLength(1);
     } finally {
       await client.close();
     }
@@ -546,7 +551,7 @@ describe("named connection identity", () => {
       });
       const checkpoints = await (
         await pool.db()
-      ).query("SELECT to_jsonb(o) AS record FROM dbos.operation_outputs o WHERE workflow_uuid=$1", [run]);
+      ).execute(sql`SELECT to_jsonb(o) AS record FROM dbos.operation_outputs o WHERE workflow_uuid = ${run}`);
       expect(checkpoints.rowCount).toBeGreaterThan(0);
       expect(JSON.stringify(checkpoints.rows)).not.toContain("private-key");
       expect(JSON.stringify(await client.ledger(run))).not.toContain("private-key");

@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { sql } from "drizzle-orm";
 import { Client, escapeIdentifier, escapeLiteral } from "pg";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
@@ -297,7 +298,9 @@ describe("storage provisioning workflow boundary", () => {
     expect(ledger).toContain("sanoma.secretStore.prepare");
     for (const value of forbidden) expect(ledger).not.toContain(value);
     for (const table of ["dbos.operation_outputs", "dbos.workflow_status"]) {
-      const rows = JSON.stringify((await (await history.db()).query(`SELECT row_to_json(t) FROM ${table} t`)).rows);
+      const rows = JSON.stringify(
+        (await (await history.db()).execute(sql`SELECT row_to_json(t) FROM ${sql.raw(table)} t`)).rows,
+      );
       for (const value of forbidden) expect(rows).not.toContain(value);
     }
     const denied = await app.client.start(

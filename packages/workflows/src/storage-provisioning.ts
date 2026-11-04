@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { Client } from "pg";
 import { databaseOn, type Db } from "./db.ts";
 import { kmsDeployment, kmsSecrets } from "./db/kms.ts";
@@ -162,11 +162,7 @@ export const prepareSecretStore: PrepareStorage = async (input, secrets) => {
         await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('sanoma.prepareSecretStore'))`);
         await tx.execute(sql.raw(KMS_SECRETS_SQL));
         await tx.execute(sql.raw(BINDING_SQL));
-        const [existing] = await tx
-          .select()
-          .from(kmsDeployment)
-          .where(sql`${kmsDeployment.singleton} = true`)
-          .for("update");
+        const [existing] = await tx.select().from(kmsDeployment).where(eq(kmsDeployment.singleton, true)).for("update");
         if (existing) {
           if (
             existing.company !== company ||

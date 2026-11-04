@@ -257,25 +257,10 @@ export function connectionCatalog(
   return { definitions: defined, rules: dynamic, methods };
 }
 
-type ConnectionRow = {
-  id: string;
-  vendor: string;
-  method: string;
-  owner: string | null;
-  rule: string | null;
-  account: string;
-  scopes: string[];
-  revision: string;
-  definition: string;
-  credential: string | null;
-  location?: SecretLocation | null;
-  status: "connected" | "disconnected" | "pending" | "uncertain";
-  updatedBy?: string;
-  updatedAt?: Date;
-  health?: ConnectionHealth["state"] | null;
-  checkedAt?: Date | null;
-  externallyRenewed?: boolean | null;
-};
+/** What a connection's row says of it, as `db/company.ts` declares it. */
+export type ConnectionStatus = "connected" | "disconnected" | "pending" | "uncertain";
+/** A connection's metadata, what `save` writes: its row less what the save sets. */
+type ConnectionRow = Omit<typeof connections.$inferSelect, "location" | "updatedBy" | "updatedAt">;
 const snapshot = (r: ConnectionRow): ConnectionSnapshot => ({
   id: r.id,
   vendor: r.vendor,
@@ -314,7 +299,7 @@ export class ConnectionRegistry {
 
   /** Safe card data only. Listing does not read credential values or contact a vendor. */
   async cards(actor: string): Promise<ConnectionCard[]> {
-    const rows = (await (
+    const rows = await (
       await this.db()
     )
       .select({
@@ -328,7 +313,7 @@ export class ConnectionRegistry {
         connectionHealth,
         and(eq(connections.id, connectionHealth.connectionId), eq(connections.revision, connectionHealth.revision)),
       )
-      .where(or(isNull(connections.owner), eq(connections.owner, actor)))) as ConnectionRow[];
+      .where(or(isNull(connections.owner), eq(connections.owner, actor)));
     const found = new Map(rows.map((r) => [r.id, r]));
     const ids = new Set([...this.catalog.definitions.keys(), ...rows.filter((r) => r.rule).map((r) => r.id)]);
     const cards: ConnectionCard[] = [];
@@ -380,7 +365,7 @@ export class ConnectionRegistry {
    * stable across preview, approval and retry; account allocation is scoped to its principal. */
   async setup(target: ConnectionTarget, actor: Principal, requestId: string): Promise<ConnectionSetup> {
     let declaration: ConnectionDefinition | ConnectionRule | undefined;
-    let row: ConnectionRow | undefined;
+    let row: typeof connections.$inferSelect | undefined;
     let id: string;
     let credential: string | undefined;
     if ("rule" in target) {
@@ -535,10 +520,10 @@ export class ConnectionRegistry {
       .onConflictDoUpdate({
         target: connectionHealth.connectionId,
         set: {
-          revision: sql`excluded.revision`,
-          health: sql`excluded.health`,
-          credentialVersion: sql`excluded.credential_version`,
-          externallyRenewed: sql`excluded.externally_renewed`,
+          revision,
+          health: state,
+          credentialVersion: version ?? previous?.credentialVersion ?? null,
+          externallyRenewed: renewed,
           checkedAt: sql`now()`,
         },
       })
@@ -654,9 +639,9 @@ export class ConnectionRegistry {
     checkAuthenticationStore(method, caps, location.management);
   }
 
-  private async row(id: string): Promise<ConnectionRow | undefined> {
+  private async row(id: string) {
     const [row] = await (await this.db()).select().from(connections).where(eq(connections.id, id));
-    return row as ConnectionRow | undefined;
+    return row;
   }
 
   async select(vendor: string, ref: ConnectionRef | undefined, actor: string): Promise<ConnectionSnapshot | undefined> {

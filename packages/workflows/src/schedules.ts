@@ -2,7 +2,9 @@ import { DBOS, type ScheduledWorkflowFn, type WorkflowSchedule } from "@dbos-inc
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { type Db, lastStopped } from "./db.ts";
+import { eq } from "drizzle-orm";
+import type { Db } from "./db.ts";
+import { wakeup } from "./db/company.ts";
 import type { Principal, WorkflowDefinition } from "./define.ts";
 import { readPeople, admit } from "./resources.ts";
 import type { WorkerState } from "./run.ts";
@@ -77,7 +79,9 @@ export async function applyScheduled(
   await Promise.all([...before.keys()].filter((name) => !names.has(name)).map((name) => DBOS.deleteSchedule(name)));
   const unfired = declared.filter((d) => before.get(d.schedule.scheduleName)?.lastFiredAt === null);
   if (!unfired.length) return;
-  const stoppedAt = await lastStopped(await db());
+  // When the instance's worker last stopped itself, from the wakeup row; never, and nothing was missed.
+  const [row] = await (await db()).select({ stoppedAt: wakeup.stoppedAt }).from(wakeup).where(eq(wakeup.id, 1));
+  const stoppedAt = row?.stoppedAt ?? undefined;
   if (!stoppedAt) return;
   for (const { schedule, since } of unfired) {
     const from = stoppedAt > since ? stoppedAt : since;

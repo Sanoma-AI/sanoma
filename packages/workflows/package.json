@@ -88,6 +88,10 @@
       "types": "./dist/kms-secrets.d.ts",
       "default": "./dist/kms-secrets.js"
     },
+    "./db": {
+      "types": "./dist/db/index.d.ts",
+      "default": "./dist/db/index.js"
+    },
     "./identity-service": {
       "types": "./dist/identity-service.d.ts",
       "default": "./dist/identity-service.js"

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { connectionHealth, connections, connectionSetups, ledger } from "../src/db/company.ts";
+import { workflowStatus } from "../src/db/dbos.ts";
 import { z } from "zod";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
@@ -68,7 +69,7 @@ const pool = lazyDb(dbUrl, "connection-setup-tests");
 afterAll(() => pool.close());
 beforeEach(async () => {
   await (await pool.db()).execute(sql`TRUNCATE ${connections}, ${connectionSetups}, ${connectionHealth}, ${ledger}`);
-  await (await pool.db()).query("TRUNCATE dbos.workflow_status CASCADE");
+  await (await pool.db()).execute(sql`TRUNCATE ${workflowStatus} CASCADE`);
   verify.mockClear();
 });
 const config = () => ({
@@ -442,9 +443,9 @@ describe("secure connection setup", () => {
         { id: "inbox/support", account: "support", status: "connected", updatedBy: "alice" },
         { id: "inbox/sales", account: "sales", status: "connected", updatedBy: "alice" },
       ]);
-      const records = await (await pool.db()).query("SELECT to_jsonb(t) FROM sanoma_ledger t");
-      expect(records.rowCount).toBeGreaterThan(0);
-      expect(JSON.stringify(records.rows)).not.toContain("never-record");
+      const records = await (await pool.db()).select().from(ledger);
+      expect(records.length).toBeGreaterThan(0);
+      expect(JSON.stringify(records)).not.toContain("never-record");
       const read = vi.spyOn(cfg.secrets.store, "read");
       await client.connections({ actor: "alice" });
       expect(read).not.toHaveBeenCalled();
@@ -588,7 +589,7 @@ describe("secure connection setup", () => {
         expect(write).toHaveBeenCalledTimes(1);
         const history = await (
           await pool.db()
-        ).query("SELECT to_jsonb(o) FROM dbos.operation_outputs o WHERE workflow_uuid=$1", [failure.data.runId]);
+        ).execute(sql`SELECT to_jsonb(o) FROM dbos.operation_outputs o WHERE workflow_uuid = ${failure.data.runId}`);
         expect(history.rowCount).toBeGreaterThan(0);
         expect(JSON.stringify(history.rows)).not.toContain("never-record");
         expect(JSON.stringify(await client.ledger(failure.data.runId))).not.toContain("never-record");

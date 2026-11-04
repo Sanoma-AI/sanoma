@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import { dbosStatusesOf } from "./client.ts";
+import { eq, sql } from "drizzle-orm";
 import type { Db } from "./db.ts";
-import { recordWakeupError, recordWakeupRegistration, recordWakeupStop } from "./db.ts";
+import { wakeup as wakeupRow } from "./db/company.ts";
 import type { ResolvedConfig } from "./config.ts";
 import { warn } from "./log.ts";
 import type { CallContext, DriverFn, Op } from "./op.ts";
@@ -171,22 +172,24 @@ export function stopWhenIdle(rule: StopRule): { close(): void } {
     if (!(await rule.idle())) return false;
     const next = rule.deadlines.nextDeadline();
     const at = next?.toISOString() ?? null;
-    const db = await rule.db();
+    // The wakeup row's writes: one worker registers per instance (the supervisor runs one at a
+    // time, and a deploy stops the old container before the new one starts), so none names a worker.
+    const row = (await rule.db()).update(wakeupRow);
     if (at !== null) {
       try {
         await rule.register({ at });
       } catch (err) {
         const message = errorMessage(err);
-        await recordWakeupError(db, message);
+        await row.set({ lastError: message }).where(eq(wakeupRow.id, 1));
         problem(`could not register the wakeup at ${at}, so the worker keeps running: ${message}`);
         return false;
       }
-      await recordWakeupRegistration(db, at);
+      await row.set({ at: new Date(at), lastError: null }).where(eq(wakeupRow.id, 1));
     }
     lastProblem = undefined;
     if (closed || !(await rule.idle()) || rule.deadlines.nextDeadline()?.toISOString() !== next?.toISOString())
       return false;
-    await recordWakeupStop(db);
+    await row.set({ stoppedAt: sql`now()` }).where(eq(wakeupRow.id, 1));
     await rule.stop().catch((err: unknown) => warn(`the worker could not stop cleanly: ${errorMessage(err)}`));
     rule.onStopped?.({ at });
     return true;

@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
-import { and, eq, sql, type SQL } from "drizzle-orm";
+import * as drizzle from "drizzle-orm";
+import { and, eq, or, sql, type SQL } from "drizzle-orm";
 import type { Db } from "./db.ts";
 import { data } from "./db/company.ts";
 import { defineFake, type Fake } from "./fake.ts";
@@ -280,9 +281,9 @@ const recordChanged = () =>
 const sameJson = (a: Record<string, unknown>, b: Record<string, unknown>) =>
   isDeepStrictEqual(JSON.parse(JSON.stringify(a)), JSON.parse(JSON.stringify(b)));
 type SaveInput = { record: Record<string, unknown>; ifAbsent?: boolean; ifRecord?: Record<string, unknown> };
-const RANGE = { gt: sql.raw(">"), gte: sql.raw(">="), lt: sql.raw("<"), lte: sql.raw("<=") } as const;
+const RANGE = { gt: drizzle.gt, gte: drizzle.gte, lt: drizzle.lt, lte: drizzle.lte };
 
-type Row = { key: string; record: unknown; updatedAt: Date; updatedBy: string };
+type Row = Pick<typeof data.$inferSelect, keyof typeof COLUMNS>;
 
 /** A `list` input as its schema parses it. */
 interface Listing {
@@ -302,7 +303,7 @@ export function collectionsDriver(list: readonly Collection[], store: { db(): Pr
     const saved = (row: Row) =>
       answer(c, {
         key: row.key,
-        record: row.record as Record<string, unknown>,
+        record: row.record,
         updatedAt: row.updatedAt.toISOString(),
         updatedBy: row.updatedBy,
       });
@@ -331,11 +332,11 @@ export function collectionsDriver(list: readonly Collection[], store: { db(): Pr
         if (ifRecord !== undefined) {
           // PostgreSQL locks and rechecks the predicate on a concurrent update. A lost-response
           // retry may recover its own identical result, but never overwrite another actor's state.
-          const retry = sql`${data.record} = ${JSON.stringify(record)}::jsonb AND ${data.updatedBy} = ${by}`;
+          const retry = and(eq(data.record, record), eq(data.updatedBy, by))!;
           const [row] = await db
             .update(data)
             .set({ record, updatedAt: sql`CASE WHEN ${retry} THEN ${data.updatedAt} ELSE now() END`, updatedBy: by })
-            .where(and(here(key), sql`(${data.record} = ${JSON.stringify(ifRecord)}::jsonb OR (${retry}))`))
+            .where(and(here(key), or(eq(data.record, ifRecord), retry)))
             .returning(COLUMNS);
           if (!row) throw recordChanged();
           return saved(row);
@@ -343,11 +344,8 @@ export function collectionsDriver(list: readonly Collection[], store: { db(): Pr
         // The conflict row is locked by Postgres: never implement an insert-only claim as get + save.
         // An identical retry by the same actor keeps the first receipt and never overwrites later progress.
         const conflict = ifAbsent
-          ? {
-              set: { record: sql`${data.record}` },
-              setWhere: sql`${data.record} = excluded.record AND ${data.updatedBy} = excluded.updated_by`,
-            }
-          : { set: { record: sql`excluded.record`, updatedAt: sql`now()`, updatedBy: sql`excluded.updated_by` } };
+          ? { set: { record: sql`${data.record}` }, setWhere: and(eq(data.record, record), eq(data.updatedBy, by)) }
+          : { set: { record, updatedAt: sql`now()`, updatedBy: by } };
         const [row] = await db
           .insert(data)
           .values({ collection: c.name, key, record, updatedBy: by })
@@ -395,18 +393,17 @@ function listClauses(
     const type = types[name]!;
     const sqlType = sql.raw(SQL_TYPE[type]);
     const json = sql`${data.record} -> ${name}::text`;
-    const typed = sql`CASE WHEN jsonb_typeof(${json}) = ${sql.raw(`'${type}'`)} THEN (${json} #>> '{}')::${sqlType} END`;
+    const typed = sql`CASE WHEN jsonb_typeof(${json}) = ${type} THEN (${json} #>> '{}')::${sqlType} END`;
     return type === "string" ? sql`(${typed}) COLLATE "C"` : typed;
   };
   const value = (name: string, v: unknown) => sql`${v}::${sql.raw(SQL_TYPE[types[name]!])}`;
   const conditions: SQL[] = [eq(data.collection, c.name)];
   for (const [name, condition] of Object.entries(where)) {
     if (condition === undefined) continue;
-    if (!isObject(condition)) conditions.push(sql`${field(name)} = ${value(name, condition)}`);
+    if (!isObject(condition)) conditions.push(eq(field(name), value(name, condition)));
     else {
       for (const [op, v] of Object.entries(condition)) {
-        const sign = RANGE[op as keyof typeof RANGE];
-        if (v !== undefined) conditions.push(sql`${field(name)} ${sign} ${value(name, v)}`);
+        if (v !== undefined) conditions.push(RANGE[op as keyof typeof RANGE](field(name), value(name, v)));
       }
     }
   }

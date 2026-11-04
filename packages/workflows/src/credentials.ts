@@ -48,7 +48,7 @@ const returned = {
   setBy: credentials.setBy,
   setAt: credentials.setAt,
 };
-type Row = { value: string; version: string; setBy: string; setAt: Date };
+type Row = Pick<typeof credentials.$inferSelect, keyof typeof returned>;
 const at = ({ namespace, path }: SecretAddress) =>
   and(eq(credentials.namespace, namespace), eq(credentials.name, path));
 const identity = ({ namespace, path }: SecretAddress) => JSON.stringify([namespace, path]);

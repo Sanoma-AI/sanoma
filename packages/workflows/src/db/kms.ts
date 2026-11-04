@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { boolean, check, jsonb, pgSchema, primaryKey, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import type { Envelope } from "../kms-secrets.ts";
 
 // The KMS secret store's tables, in the schema `sanoma_kms` an administrator installs with
 // `KMS_SECRETS_SQL` (`kms-secrets.ts`) and `sanoma.secretStore.prepare` (`storage-provisioning.ts`),
@@ -16,7 +17,7 @@ export const kmsSecrets = kms.table(
     namespace: text().notNull(),
     path: text().notNull(),
     version: uuid().notNull(),
-    envelope: jsonb().notNull(),
+    envelope: jsonb().$type<Envelope>().notNull(),
     updatedBy: text().notNull(),
     updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },

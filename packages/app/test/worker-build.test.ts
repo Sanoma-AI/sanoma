@@ -6,6 +6,8 @@ import { buildWorker, prerenderedPages, type WorkerBundle } from "@sanoma-ai/app
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { defineConfig, readRootSnapshot, resolveConfig, SanomaClient } from "@sanoma-ai/workflows";
 import { describeConfig } from "@sanoma-ai/workflows/describe";
+import { databaseOn, workflowStatus } from "@sanoma-ai/workflows/db";
+import { eq } from "drizzle-orm";
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { unstable_startWorker } from "wrangler";
@@ -205,10 +207,11 @@ describe("buildWorker", () => {
     const db = new Client({ connectionString: databaseUrl });
     await db.connect();
     try {
-      const { rows } = await db.query("SELECT status, queue_name FROM dbos.workflow_status WHERE workflow_uuid = $1", [
-        runId,
-      ]);
-      expect(rows).toEqual([{ status: "ENQUEUED", queue_name: "sanoma:company-sites" }]);
+      const rows = await databaseOn(db)
+        .select({ status: workflowStatus.status, queueName: workflowStatus.queueName })
+        .from(workflowStatus)
+        .where(eq(workflowStatus.workflowUuid, runId!));
+      expect(rows).toEqual([{ status: "ENQUEUED", queueName: "sanoma:company-sites" }]);
     } finally {
       await db.end();
     }

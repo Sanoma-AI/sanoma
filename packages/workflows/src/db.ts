@@ -2,12 +2,12 @@ import { DBOS, DBOSClient } from "@dbos-inc/dbos-sdk";
 import { setTimeout as delay } from "node:timers/promises";
 import { and, eq, inArray, lte, ne, sql } from "drizzle-orm";
 import { DrizzleQueryError } from "drizzle-orm/errors";
-import { drizzle, type NodePgClient, type NodePgDatabase, type NodePgQueryResultHKT } from "drizzle-orm/node-postgres";
+import { drizzle, type NodePgClient, type NodePgQueryResultHKT } from "drizzle-orm/node-postgres";
 import { type PgDatabase, PgPreparedQuery } from "drizzle-orm/pg-core";
-import { Client, escapeIdentifier, Pool } from "pg";
-import { inviteRequests, wakeup } from "./db/company.ts";
+import { Client, Pool } from "pg";
+import { inviteRequests } from "./db/company.ts";
 import { workflowStatus } from "./db/dbos.ts";
-import { applyMigrations, COMPANY_MIGRATIONS, type Migrations, migrationsApplied } from "./db/migrate.ts";
+import { applyMigrations, COMPANY_MIGRATIONS, migrationsApplied } from "./db/migrate.ts";
 import { warn } from "./log.ts";
 import { errorMessage } from "./shared.ts";
 
@@ -23,15 +23,15 @@ import { errorMessage } from "./shared.ts";
 export type Db = PgDatabase<NodePgQueryResultHKT>;
 
 /**
- * Drizzle over `client`, a `pg` pool or connection the caller owns and ends. Column names are the
- * schema's properties in snake_case (`casing`), as the generated migrations write them.
+ * Drizzle over `client`, a `pg` pool or connection the caller owns and ends (`db.$client`). Column
+ * names are the schema's properties in snake_case (`casing`), as the generated migrations write them.
  *
  * A statement that fails throws the `pg` error itself, as `client.query` would, not Drizzle's
  * `DrizzleQueryError`, whose message carries the statement and its parameters (a credential's
  * sealed value, a person's email, a record): `pgCode` reads the code, and no message or log
  * repeats what was sent. `db.test.ts` holds Drizzle to this with a sentinel parameter.
  */
-export function databaseOn(client: NodePgClient): NodePgDatabase {
+export function databaseOn<C extends NodePgClient>(client: C) {
   rethrowCause();
   return drizzle(client, { casing: "snake_case" });
 }
@@ -57,31 +57,6 @@ function rethrowCause(): void {
       throw err instanceof DrizzleQueryError && err.cause !== undefined ? err.cause : err;
     }
   };
-}
-
-/**
- * Transitional, until every module is on the query builder: what the modules not yet rewritten
- * take, a `pg` pool or connection's `query`. Deleted with the last `query` caller.
- */
-export type LegacyQuery = Pick<Pool | Client, "query">;
-
-/**
- * Transitional: a `Db` that also answers `query` (and, over a pool, `connect`) as the `pg` pool or
- * connection under it does, so a converted module and one not yet converted share one `lazyDb`.
- */
-export type LegacyDb = Db & LegacyQuery & Pick<Pool, "connect">;
-
-/**
- * Transitional: `db` with `query` on the `pg` client under it (a transaction's connection, or the
- * pool), read from Drizzle's session (drizzle-orm 0.45.4, `NodePgSession.client`). Replaces the
- * relational query API's `db.query`, which the runtime does not use.
- */
-export function withLegacyQuery<T extends Db>(db: T): T & LegacyQuery & Pick<Pool, "connect"> {
-  const { client } = (db as unknown as { session: { client: Pool | Client } }).session;
-  return Object.assign(db, {
-    query: client.query.bind(client),
-    ...(client instanceof Pool && { connect: client.connect.bind(client) }),
-  }) as T & LegacyQuery & Pick<Pool, "connect">;
 }
 
 /** The Postgres error code of `err`, or an empty string when it has none. */
@@ -172,7 +147,7 @@ const NO_DATABASE = "3D000";
 
 /** A database opened on first use, once prepared, and ended by `close`. */
 export interface LazyDb {
-  db(): Promise<LegacyDb>;
+  db(): Promise<Db>;
   close(): Promise<void>;
 }
 
@@ -183,7 +158,7 @@ export interface LazyDb {
  */
 export function lazyDb(databaseUrl: string, what: string): LazyDb {
   let pool: Pool | undefined;
-  let db: LegacyDb | undefined;
+  let db: Db | undefined;
   let closed = false;
   return {
     async db() {
@@ -196,7 +171,7 @@ export function lazyDb(databaseUrl: string, what: string): LazyDb {
         await current.end().catch(() => undefined);
         throw err;
       }
-      return (db ??= withLegacyQuery(databaseOn(current)));
+      return (db ??= databaseOn(current));
     },
     async close() {
       closed = true;
@@ -250,12 +225,11 @@ const unprepared = (err: unknown): Error =>
   new Error(`could not prepare the database: ${errorMessage(err)}`, { cause: err });
 
 async function prepare(databaseUrl: string): Promise<void> {
-  await underPreparationLock(databaseUrl, async (conn) => {
+  await underPreparationLock(databaseUrl, async (db) => {
     await DBOS.migrate(databaseUrl).catch((err: unknown) => {
       // A DBOS table made meanwhile by a release from before the lock, mid-upgrade: it is there.
       if (!madeAlready(err)) throw unprepared(err);
     });
-    const db = databaseOn(conn);
     await applyMigrations(db, COMPANY_MIGRATIONS).catch((err: unknown) => {
       throw unprepared(err);
     });
@@ -268,15 +242,15 @@ async function prepare(databaseUrl: string): Promise<void> {
  * `databaseUrl` (made first when missing), so a second process waits, then finds everything made.
  * For what makes a database's tables: `prepareDatabase`, and the wakeup service's own.
  */
-export async function underPreparationLock<T>(databaseUrl: string, make: (conn: Client) => Promise<T>): Promise<T> {
-  const conn = await lockPreparation(databaseUrl).catch((err: unknown) => {
+export async function underPreparationLock<T>(databaseUrl: string, make: (db: Db) => Promise<T>): Promise<T> {
+  const db = await lockPreparation(databaseUrl).catch((err: unknown) => {
     throw unprepared(err);
   });
   try {
-    return await make(conn);
+    return await make(db);
   } finally {
     // Ending the session releases the lock; a failure to end it must not hide the preparation's.
-    await conn.end().catch(() => undefined);
+    await db.$client.end().catch(() => undefined);
   }
 }
 
@@ -311,14 +285,14 @@ async function checkPrepared(databaseUrl: string, by: string): Promise<void> {
  * on that statement's snapshot, a deadlock Postgres cannot see (the lock's holder is this
  * connection, not the migration's).
  */
-async function lockPreparation(databaseUrl: string): Promise<Client> {
-  const conn = await connectMaking(databaseUrl);
+async function lockPreparation(databaseUrl: string) {
+  const db = databaseOn(await connectMaking(databaseUrl));
   try {
-    const ask = "SELECT pg_try_advisory_lock(hashtext('sanoma.prepareDatabase')) AS locked";
-    while (!(await conn.query<{ locked: boolean }>(ask)).rows[0]!.locked) await delay(50);
-    return conn;
+    const ask = sql`SELECT pg_try_advisory_lock(hashtext('sanoma.prepareDatabase')) AS locked`;
+    while ((await db.execute<{ locked: boolean }>(ask)).rows[0]?.locked !== true) await delay(50);
+    return db;
   } catch (err) {
-    await conn.end().catch(() => undefined);
+    await db.$client.end().catch(() => undefined);
     throw err;
   }
 }
@@ -350,7 +324,7 @@ async function createDatabase(databaseUrl: string): Promise<void> {
   url.pathname = "/postgres";
   const admin = await connect(url.toString());
   try {
-    await admin.query(`CREATE DATABASE ${escapeIdentifier(name)}`);
+    await databaseOn(admin).execute(sql`CREATE DATABASE ${sql.identifier(name)}`);
   } catch (err) {
     if (!madeAlready(err)) throw err;
   } finally {
@@ -381,48 +355,6 @@ async function guardIdleTransactions(db: Db): Promise<void> {
 }
 
 /**
- * Makes the tables of `of` in the database at `databaseUrl` (the database too, when it is not
- * there), under the preparation's lock: for a service with tables of its own, on a database that
- * may also be a company's. Any other failure names `what`, with its cause.
- */
-export async function prepareTables(databaseUrl: string, of: Migrations, what: string): Promise<void> {
-  await underPreparationLock(databaseUrl, async (conn) => {
-    try {
-      await applyMigrations(databaseOn(conn), of);
-    } catch (err) {
-      throw new Error(`could not prepare the ${what} tables: ${errorMessage(err)}`, { cause: err });
-    }
-  });
-}
-
-export type { Migrations } from "./db/migrate.ts";
-export { WAKEUP_MIGRATIONS } from "./db/migrate.ts";
-
-// The wakeup row's writes: one worker registers per instance (the supervisor runs one at a time,
-// and a deploy stops the old container before the new one starts), so none names a worker.
-
-/** Records that the wakeup took `at`. */
-export async function recordWakeupRegistration(db: Db, at: string): Promise<void> {
-  await db
-    .update(wakeup)
-    .set({ at: new Date(at), lastError: null })
-    .where(eq(wakeup.id, 1));
-}
-
-/** Records why the last registration failed. */
-export async function recordWakeupError(db: Db, error: string): Promise<void> {
-  await db.update(wakeup).set({ lastError: error }).where(eq(wakeup.id, 1));
-}
-
-/** Records that the worker stops itself now. */
-export async function recordWakeupStop(db: Db): Promise<void> {
-  await db
-    .update(wakeup)
-    .set({ stoppedAt: sql`now()` })
-    .where(eq(wakeup.id, 1));
-}
-
-/**
  * Marks a sealed invite request's `nonce` spent until `expiresAt`, when the row goes: true the
  * first time, false for one spent already, whichever process asks. A row, not memory: the app
  * keeps nothing across requests.
@@ -437,10 +369,4 @@ export async function spendInviteRequest(db: Db, nonce: string, expiresAt: Date)
     .onConflictDoNothing({ target: inviteRequests.nonce })
     .returning({ nonce: inviteRequests.nonce });
   return spent.length === 1;
-}
-
-/** Whether `db`'s wakeup row says the worker ever stopped itself: for the schedules' backfill. */
-export async function lastStopped(db: Db): Promise<Date | undefined> {
-  const [row] = await db.select({ stoppedAt: wakeup.stoppedAt }).from(wakeup).where(eq(wakeup.id, 1));
-  return row?.stoppedAt ?? undefined;
 }
