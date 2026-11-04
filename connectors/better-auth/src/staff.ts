@@ -11,7 +11,6 @@ import { magicLink } from "better-auth/plugins/magic-link";
 import { createHash } from "node:crypto";
 import {
   emailCode,
-  GITHUB_FIELD,
   identityOf,
   localRedirects,
   openBetterAuth,
@@ -116,7 +115,6 @@ export async function betterAuthStaffLogin({ databaseUrl, key, sendCode, staff }
     options: {
       session: { expiresIn: SESSION_SECONDS },
       user: {
-        additionalFields: GITHUB_FIELD,
         // Nobody the files do not declare gets a row, whatever the route: by the verified email
         // the route proved, or by the login GitHub's own profile names (Better Auth sets no field
         // from a profile that a person may not set, so the login is kept by `keepLogin`), before

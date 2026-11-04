@@ -9,7 +9,7 @@ import {
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { Client } from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { prepareBetterAuth } from "../src/instance.ts";
+import { prepareBetterAuthStaff } from "../src/instance.ts";
 import { betterAuthStaffLogin } from "../src/staff.ts";
 
 // The staff login: codes only to declared emails, no row for anyone else, invites as one-use
@@ -99,7 +99,7 @@ beforeAll(async () => {
   await client.query("DROP SCHEMA IF EXISTS better_auth_staff CASCADE");
   await client.end();
   // The worker's part: the login only opens on a prepared schema.
-  await prepareBetterAuth(databaseUrl);
+  await prepareBetterAuthStaff(databaseUrl);
 });
 
 describe("the staff login", () => {

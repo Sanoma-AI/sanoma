@@ -19,12 +19,6 @@ const context: LoginContext = {
   origins: ["http://account.localhost:*", "https://account.example"],
 };
 
-/** A fresh copy of the module, whose once-per-process migration has not run: a process of its own. */
-async function freshLogin(): Promise<typeof betterAuthLogin> {
-  vi.resetModules();
-  return (await import("../src/login.ts")).betterAuthLogin;
-}
-
 /** `prepareBetterAuth` as another worker's process has it: its own memory of what it migrated. */
 async function freshPrepare(): Promise<typeof prepareBetterAuth> {
   vi.resetModules();
@@ -134,7 +128,7 @@ describe("login", () => {
       await freshPrepare()
     )(databaseUrl);
     expect(await tables()).toEqual(["account", "rateLimit", "session", "user", "verification"]);
-    const half = await (await freshLogin())(context);
+    const half = await betterAuthLogin(context);
     await half.close?.();
   });
 

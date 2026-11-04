@@ -3,7 +3,7 @@ import { betterAuthOps } from "./connector.ts";
 import { prepareBetterAuth } from "./instance.ts";
 import { betterAuthLogin } from "./login.ts";
 
-export { prepareBetterAuth } from "./instance.ts";
+export { prepareBetterAuth, prepareBetterAuthStaff } from "./instance.ts";
 export { betterAuthLogin } from "./login.ts";
 export { betterAuthStaffLogin } from "./staff.ts";
 

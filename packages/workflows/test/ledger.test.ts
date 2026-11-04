@@ -320,9 +320,8 @@ describe("the worker's preparations", () => {
     const prepared: string[] = [];
     const prepare = (name: string) => async (url: string) => {
       // The runtime's own tables are there by then.
-      await new Pool({ connectionString: url }).query("SELECT 1 FROM sanoma_invite_requests").catch((err: unknown) => {
-        throw new Error(`${name} ran before the runtime's tables: ${String(err)}`);
-      });
+      const probe = new Pool({ connectionString: url });
+      await probe.query("SELECT 1 FROM sanoma_invite_requests").finally(() => probe.end());
       prepared.push(`${name}@${url}`);
     };
     const connector = withSetup(defineConnector("prepared", {}), { prepare: prepare("connector") });

@@ -3,7 +3,7 @@ import { realpathSync } from "node:fs";
 import { dirname, extname, isAbsolute, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type AppOptions, type IngressRoute, staffLogin, startApp } from "@sanoma-ai/app";
-import { betterAuthStaffLogin, prepareBetterAuth } from "@sanoma-ai/connector-better-auth";
+import { betterAuthStaffLogin, prepareBetterAuthStaff } from "@sanoma-ai/connector-better-auth";
 import {
   deploymentKey,
   errorMessage,
@@ -50,7 +50,7 @@ const sourceOf = (config: SanomaConfig) => localGitSource(rootOf(config), { data
 const workerOptions = (config: SanomaConfig) => ({
   promote: true,
   source: sourceOf(config),
-  prepare: [prepareBetterAuth],
+  prepare: [prepareBetterAuthStaff],
 });
 
 /**

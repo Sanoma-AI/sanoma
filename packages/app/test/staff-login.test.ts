@@ -69,9 +69,11 @@ describe("staffLogin", () => {
     recordSignIn: vi.fn<(...args: unknown[]) => Promise<void>>(async () => {}),
     recordInvite: vi.fn<(...args: unknown[]) => Promise<void>>(async () => {}),
     lastInvite: vi.fn<(...args: unknown[]) => Promise<{ by: string } | undefined>>(async () => ({ by: "ada" })),
-    spendInviteRequest: vi.fn<(nonce: string) => Promise<boolean>>(
-      async (nonce) => nonces.size < nonces.add(nonce).size,
-    ),
+    spendInviteRequest: vi.fn<(nonce: string) => Promise<boolean>>(async (nonce) => {
+      if (nonces.has(nonce)) return false;
+      nonces.add(nonce);
+      return true;
+    }),
     secrets: async () => new Map(),
   };
   let context: LoginContext;

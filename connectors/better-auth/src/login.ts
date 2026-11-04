@@ -2,7 +2,6 @@ import type { LoginContext, LoginHalf, LoginMethod } from "@sanoma-ai/workflows"
 import { getHostFromSource, matchesHostPattern } from "better-auth";
 import {
   emailCode,
-  GITHUB_FIELD,
   identityOf,
   localRedirects,
   openBetterAuth,
@@ -67,7 +66,6 @@ export async function betterAuthLogin({
     options: {
       emailAndPassword: { enabled: true },
       plugins: sendCode ? [emailCode(sendCode)] : [],
-      user: { additionalFields: GITHUB_FIELD },
       ...(github && {
         socialProviders: { github: { clientId: github.clientId, clientSecret: github.clientSecret } },
         // GitHub stays untrusted, and the account's own email must be verified (Better Auth's
