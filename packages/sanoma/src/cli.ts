@@ -128,8 +128,14 @@ export async function main(argv: string[]): Promise<number> {
       // Hidden: the worker's port runs it in a revision's checkout (`appBundleRoute`).
       if (!values.out || rest.length) throw new UsageError("usage: sanoma app-bundle --out <file>");
       const { config, root } = await loadConfig();
-      const { writeAppBundle } = await import("./app-bundle.ts");
-      await writeAppBundle(config, { root, out: values.out, log });
+      const [{ buildAppBundle }, { parseDomains }, { runtimeFrom }] = await Promise.all([
+        import("@sanoma-ai/app/bundle"),
+        import("./serve.ts"),
+        import("./sites.ts"),
+      ]);
+      const domains = parseDomains(process.env.SANOMA_DOMAINS) ?? {};
+      const bundle = await buildAppBundle(root, { config, domains, runtimeFrom: runtimeFrom(), log });
+      writeFileSync(values.out, JSON.stringify(bundle));
       return 0;
     }
     case "env":

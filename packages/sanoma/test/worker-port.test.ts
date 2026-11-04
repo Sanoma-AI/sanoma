@@ -1,13 +1,17 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fileURLToPath } from "node:url";
+import type { AppBundle } from "@sanoma-ai/app";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import type { Listening } from "../src/listen.ts";
 import { listenWorkerPort, type Run, type WorkerPortOptions } from "../src/worker-port.ts";
+import { copyFixture, ensureBuilt, runCli } from "./fixture.ts";
 
 // The worker's port over a fake `Run`: the checkout (with its install) and the revision's own
-// `sanoma app-bundle` are the commands it is given, the second writing what a build would. `buildWorker`
-// itself runs in `packages/app/test/worker-build.test.ts`, the runtime image in CI's runtime-image job.
+// `sanoma app-bundle` are the commands it is given, the second writing what a build would, or, for
+// a copy of `fixtures/sites`, running this checkout's bin there. `buildAppBundle` itself is tested
+// in `packages/app/test/app-bundle.test.ts`, the runtime image in CI's runtime-image job.
 
 const TOKEN = "swi_the-company-token";
 const R1 = "0123456789abcdef0123456789abcdef01234567";
@@ -15,8 +19,9 @@ const R2 = "89abcdef0123456789abcdef0123456789abcdef";
 const work = mkdtempSync(join(tmpdir(), "sanoma-worker-port-"));
 afterAll(() => rmSync(work, { recursive: true, force: true }));
 const root = join(work, "company");
+const sites = fileURLToPath(new URL("./fixtures/sites/", import.meta.url));
 
-/** What the next `sanoma app-bundle` writes, by revision: a bundle, `null`, or a failure. */
+/** What the next `sanoma app-bundle` writes, by revision: a bundle or a failure. */
 const built = new Map<string, unknown>();
 /** Held until released, so a test sees the 202 while it builds. */
 let hold: Promise<void> = Promise.resolve();
@@ -29,6 +34,17 @@ const run = vi.fn<Run>(async (command, args, cwd) => {
   if (result instanceof Error) throw result;
   writeFileSync(args.at(-1)!, JSON.stringify(result));
 });
+
+/** What a build writes, as far as the route is concerned: it hands the file on as it is. */
+const BUNDLE: AppBundle = {
+  version: "v1",
+  mainModule: "index.js",
+  modules: [],
+  assets: [],
+  compatibilityDate: "2026-01-01",
+  compatibilityFlags: ["nodejs_compat"],
+  prerendered: [],
+};
 
 const onWake = vi.fn<() => void>();
 const log = vi.fn<(line: string) => void>();
@@ -76,8 +92,7 @@ describe("the worker's port", () => {
   });
 
   it("builds a revision's bundle beside the checkout, 202 until built, then 200 from the cache", async () => {
-    const bundle = { sites: ["www"], mainModule: "index.js", modules: [], assets: [] };
-    built.set(R1, bundle);
+    built.set(R1, BUNDLE);
     let release!: () => void;
     hold = new Promise((resolve) => (release = resolve));
     const first = await ask(R1);
@@ -88,27 +103,24 @@ describe("the worker's port", () => {
     const done = await settled(R1);
     expect(done.status).toBe(200);
     expect(done.headers.get("x-sanoma-app-bundle")).toBe("1");
-    expect(await done.json()).toEqual(bundle);
+    expect(await done.json()).toEqual(BUNDLE);
     const dir = `${root}-${R1}`;
     expect(run.mock.calls).toEqual([
       ["checkout", [dir, R1], root],
       ["pnpm", ["exec", "sanoma", "app-bundle", "--out", `${dir}.json`], dir],
     ]);
     // Built once, the checkout gone, the bundle kept beside it.
-    expect(await (await ask(R1)).json()).toEqual(bundle);
+    expect(await (await ask(R1)).json()).toEqual(BUNDLE);
     expect(run).toHaveBeenCalledTimes(2);
     expect([existsSync(dir), existsSync(`${dir}.json`)]).toEqual([false, true]);
   });
 
-  it("answers 404 for a revision with nothing for the Worker, 500 once for a failed build", async () => {
-    built.set(R1, null);
+  it("answers 500 once for a failed build, and builds again on the next ask", async () => {
     built.set(R2, new Error("pnpm exec sanoma app-bundle exited 1: sites/www/routes/index.tsx: Unexpected token"));
-    expect((await settled(R1)).status).toBe(404);
     const failed = await settled(R2);
     expect(failed.status).toBe(500);
     expect((await failed.json()) as { error: string }).toEqual({ error: expect.stringContaining("Unexpected token") });
-    // The next ask builds again.
-    built.set(R2, { sites: [], mainModule: "index.js", modules: [], assets: [] });
+    built.set(R2, BUNDLE);
     expect((await ask(R2)).status).toBe(202);
     expect((await settled(R2)).status).toBe(200);
   });
@@ -123,4 +135,32 @@ describe("the worker's port", () => {
     expect((await ask(R1)).status).toBe(401);
     expect(run).not.toHaveBeenCalled();
   });
+});
+
+describe("the worker's port on a company", () => {
+  beforeAll(ensureBuilt, 600_000);
+
+  it("answers the AppBundle a revision's own `sanoma app-bundle` builds, its site prerendered at its domain", async () => {
+    // The checkout is a link to a copy of `fixtures/sites` (whose install links into the copy), its
+    // build this checkout's bin, as the image's are the company's.
+    const copy = copyFixture(sites);
+    onTestFinished(() => rmSync(copy, { recursive: true, force: true }));
+    const company: Run = async (command, args, cwd) => {
+      if (command === "checkout") return symlinkSync(copy, args[0]!);
+      const done = await runCli(cwd, args.slice(2), { SANOMA_DOMAINS: "hello=hello.example" });
+      if (done.code !== 0) throw new Error(done.stderr);
+    };
+    await port.stop();
+    port = await listen({ run: company });
+    const res = await settled(R1);
+    const body = await res.text();
+    expect(res.status, body).toBe(200);
+    const bundle = JSON.parse(body) as AppBundle;
+    expect(bundle.modules.map((m) => m.name)).toContain(bundle.mainModule);
+    expect(bundle.assets.length).toBeGreaterThan(0);
+    expect(bundle.prerendered).toContainEqual(
+      expect.objectContaining({ site: "hello", domain: "hello.example", path: "/" }),
+    );
+    expect(bundle.assets.map((a) => a.path)).toEqual(expect.arrayContaining(bundle.prerendered.map((p) => p.asset)));
+  }, 600_000);
 });
