@@ -111,10 +111,13 @@ export async function ensurePostgres(
 
   const cluster = paths(await clusterDir(root));
   const found = await running(cluster);
-  if (found !== undefined) {
-    const answer = answered(cluster, found, log);
-    return adopt ? { ...answer, stop: () => stopAlone(bin ?? postgresBin(), cluster, found, log) } : answer;
-  }
+  /** What a launcher does with a cluster it did not start. */
+  const answer = (url: string): EnsuredPostgres => {
+    log(`Postgres answers in ${cluster.dir}, started by another launcher`);
+    const stop = adopt ? () => stopAlone(() => bin ?? postgresBin(), cluster, url, log) : noStop;
+    return { how: "answered", databaseUrl: url, stop };
+  };
+  if (found !== undefined) return answer(found);
   if (!start) {
     throw new UsageError(`no Postgres runs in ${cluster.dir}: set SANOMA_DATABASE_URL, or run \`sanoma\``);
   }
@@ -134,7 +137,7 @@ export async function ensurePostgres(
   return locked(cluster, async () => {
     // Started meanwhile, by the launcher that held the lock.
     const meanwhile = await running(cluster);
-    if (meanwhile !== undefined) return answered(cluster, meanwhile, log);
+    if (meanwhile !== undefined) return answer(meanwhile);
     const pg = bin ?? postgresBin();
     const how = existsSync(cluster.data) ? "started" : "created";
     if (how === "created") await initdb(pg, cluster);
@@ -150,7 +153,7 @@ export async function ensurePostgres(
     if (how === "created") {
       log(`created Postgres in ${cluster.dir}: the company's records live there, and deleting it deletes them`);
     }
-    return { how, databaseUrl: url, stop: () => stopAlone(pg, cluster, url, log) };
+    return { how, databaseUrl: url, stop: () => stopAlone(() => pg, cluster, url, log) };
   });
 }
 
@@ -193,11 +196,6 @@ export async function clusterDir(root: string): Promise<string> {
 const urlOf = ({ password }: Cluster, port: number) =>
   `postgresql://postgres:${readFileSync(password, "utf8").trim()}@127.0.0.1:${port}/sanoma`;
 
-function answered(cluster: Cluster, url: string, log: (line: string) => void): EnsuredPostgres {
-  log(`Postgres answers in ${cluster.dir}, started by another launcher`);
-  return { how: "answered", databaseUrl: url, stop: noStop };
-}
-
 /** `data/postmaster.pid`'s process (its first line) and port (its fourth), when there is one. */
 function postmaster({ data }: Cluster): { file: string; pid: number; port: number } | undefined {
   const file = join(data, "postmaster.pid");
@@ -236,13 +234,15 @@ function clearStale(cluster: Cluster): void {
 export function mayBePostgres(
   pid: number,
   platform: NodeJS.Platform = process.platform,
-  run: (command: string, args: string[]) => { error?: Error; stdout: string } = (command, args) =>
-    spawnSync(command, args, { encoding: "utf8", windowsHide: true }),
+  run: (command: string, args: string[]) => { error?: Error; status: number | null; stdout: string } = (
+    command,
+    args,
+  ) => spawnSync(command, args, { encoding: "utf8", windowsHide: true }),
 ): boolean {
   if (platform === "win32") {
     // One CSV line, its image name first: "postgres.exe","1234",… (or a line saying there is none).
     const list = run(system32("tasklist.exe"), ["/FI", `PID eq ${pid}`, "/FO", "CSV", "/NH"]);
-    return Boolean(list.error) || /^"postgres\.exe"/i.test(list.stdout.trim());
+    return Boolean(list.error) || list.status !== 0 || /^"postgres\.exe"/i.test(list.stdout.trim());
   }
   const ps = run("ps", ["-o", "comm=", "-p", String(pid)]);
   return Boolean(ps.error) || /(^|\/)postgres$/.test(ps.stdout.trim());
@@ -368,7 +368,7 @@ const freePort = () =>
  * Stops the cluster (`pg_ctl stop -m fast`) unless a client but this one is connected: then it
  * stays up for them, and says so. A cluster that no longer answers is left alone.
  */
-async function stopAlone(bin: string, cluster: Cluster, databaseUrl: string, log: (line: string) => void) {
+async function stopAlone(bin: () => string, cluster: Cluster, databaseUrl: string, log: (line: string) => void) {
   const client = serverClient(databaseUrl);
   let others: number;
   try {
@@ -395,7 +395,7 @@ async function stopAlone(bin: string, cluster: Cluster, databaseUrl: string, log
     log(`leaving Postgres running in ${cluster.dir}: ${others} other connection${others === 1 ? "" : "s"}`);
     return;
   }
-  await pgCtl(bin, cluster, ["stop", "-D", cluster.data, "-m", "fast", "-w"]);
+  await pgCtl(bin(), cluster, ["stop", "-D", cluster.data, "-m", "fast", "-w"]);
   log(`stopped Postgres in ${cluster.dir}`);
 }
 

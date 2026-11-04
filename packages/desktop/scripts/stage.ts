@@ -5,7 +5,7 @@
 // workspace pins and needs no pnpm on the computer (one copy serves every architecture).
 //
 //   pnpm --filter @sanoma-ai/desktop run stage:resources [--arch arm64 --arch x64]
-import { cpSync, existsSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { cpSync, existsSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -48,7 +48,10 @@ const versionOf = (dir: string) =>
  * every `.node` in the app, signtool fails on what is no Windows binary (`MZ`), and nothing runs it.
  */
 const foreignBinary = (file: string) =>
-  process.platform === "win32" && file.endsWith(".node") && readFileSync(file).toString("latin1", 0, 2) !== "MZ";
+  process.platform === "win32" &&
+  file.endsWith(".node") &&
+  statSync(file).isFile() &&
+  readFileSync(file).toString("latin1", 0, 2) !== "MZ";
 
 const from = pnpmPackage();
 const to = join(stage, "pnpm");

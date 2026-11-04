@@ -336,7 +336,7 @@ describe("ensurePostgres with none named: the company's own", () => {
   });
 });
 
-const noTasklist = () => ({ stdout: "", error: new Error("no such program") });
+const noTasklist = () => ({ stdout: "", status: null, error: new Error("no such program") });
 
 describe("cacheDir", () => {
   it("on Windows is outside the desktop app's install, %LOCALAPPDATA%\\Sanoma, as names ignore case there", () => {
@@ -351,7 +351,7 @@ describe("mayBePostgres", () => {
     const asked: string[] = [];
     const answering = (stdout: string) => (command: string, args: string[]) => {
       asked.push([command, ...args].join(" "));
-      return { stdout };
+      return { stdout, status: 0 };
     };
     expect(mayBePostgres(7, "win32", answering('"postgres.exe","7","Console","1","20,000 K"\r\n'))).toBe(true);
     expect(asked[0]).toContain("/FI PID eq 7");
@@ -363,6 +363,7 @@ describe("mayBePostgres", () => {
 
   it("assumes it may be when it cannot ask", () => {
     expect(mayBePostgres(7, "win32", noTasklist)).toBe(true);
+    expect(mayBePostgres(7, "win32", () => ({ stdout: "", status: 1 }))).toBe(true);
     expect(mayBePostgres(7, "linux", noTasklist)).toBe(true);
   });
 });

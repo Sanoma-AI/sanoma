@@ -214,7 +214,10 @@ export function end(child: ChildProcess): Promise<void> {
   const pid = child.pid;
   const signal = (name: NodeJS.Signals) => {
     if (process.platform === "win32") {
-      execFile(system32("taskkill.exe"), ["/pid", String(pid), "/T", "/F"], { windowsHide: true }, () => {});
+      // When it cannot, the child alone, so `end` still resolves.
+      execFile(system32("taskkill.exe"), ["/pid", String(pid), "/T", "/F"], { windowsHide: true }, (err) => {
+        if (err) child.kill();
+      });
       return;
     }
     try {

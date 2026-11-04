@@ -783,7 +783,8 @@ async function gitReady(): Promise<boolean> {
   return (
     (await untilThere(() => needsGitForWindows(), {
       message: "Sanoma needs Git for Windows",
-      detail: "Download opens its page in your browser. Once it is installed, choose Check Again.",
+      detail:
+        "Download opens its page in your browser. Once it is installed, choose Check Again; if this still shows, quit Sanoma and open it again.",
       action: "Download",
       act: () => shell.openExternal(GIT_FOR_WINDOWS_URL),
     })) &&
