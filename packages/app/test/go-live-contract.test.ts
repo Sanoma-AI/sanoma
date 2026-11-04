@@ -102,7 +102,41 @@ const hostOf = (vendor: string, type: string, lifetime: HostLifetime, publicUrl:
     },
   });
 
-const container = hostOf("cloudflare", "container", "stops-when-quiet", true);
+/** A host type that derives (`cloudflare.host`): its name, hostname and database declared, apply gives the rest. */
+const container = defineResource({
+  vendor: "cloudflare",
+  type: "host",
+  title: "cloudflare host",
+  identity: "name",
+  schema: z.object({
+    name: z.string(),
+    image: z.string().nullish(),
+    source: z.string().nullish(),
+    ref: z.string().nullish(),
+    database: z.string().nullish(),
+    secrets: z.record(z.string(), z.string()).nullish(),
+    revision: z.string().optional(),
+    url: z.string().optional(),
+  }),
+  fields: {
+    immutable: [],
+    vendorOwned: ["url"],
+    writeOnly: ["secrets", "database"],
+    references: {
+      source: { type: "github.repository", by: ["http_clone_url"] },
+      database: { type: ["neon.project", "supabase.project"] },
+    },
+  },
+  find: ({ name }) => name,
+  writable: true,
+  host: {
+    capabilities: { lifetime: "stops-when-quiet", publicUrl: true, buildsFromGit: false, staticEgress: false },
+    derives: true,
+    inputs: { source: "source", ref: "ref", image: "image", database: "database", secrets: "secrets" },
+    revision: "revision",
+    outputs: (state) => ({ url: String(state.url), healthy: true }),
+  },
+});
 const alarm = defineResource({
   vendor: "cloudflare",
   type: "alarm",
@@ -112,7 +146,7 @@ const alarm = defineResource({
     immutable: [],
     vendorOwned: [],
     writeOnly: [],
-    references: { host: { type: "cloudflare.container", by: ["url"] } },
+    references: { host: { type: "cloudflare.host", by: ["url"] } },
   },
   writable: true,
   wakeup: {
@@ -121,7 +155,7 @@ const alarm = defineResource({
     outputs: () => ({ healthy: true }),
   },
 });
-const cloudflareTypes = defineConnector("cloudflare", { container, alarm }, { package: "@acme/cloudflare" });
+const cloudflareTypes = defineConnector("cloudflare", { host: container, alarm }, { package: "@acme/cloudflare" });
 const register = defineConnector("cloudflare", {
   alarm: {
     register: {
@@ -309,18 +343,18 @@ describe("going live by contract", () => {
       ...SERVICE,
     });
     expect((await goLiveChoices(app)).host).toEqual({
-      type: "cloudflare.container",
-      title: "cloudflare container",
+      type: "cloudflare.host",
+      title: "cloudflare host",
       publicUrl: true,
     });
-    const text = await renderInfra(app, choices, DEPLOY_KEY);
-    expect(text).toContain(
-      `export const host = cloudflare.container({\n  name: "acme-ops",\n  image: "ghcr.io/sanoma-ai/runtime:9.9.9",\n`,
-    );
-    // A wakeup service wakes a Cloudflare container too: the host's own vendor's wakeup comes first.
+    // A host that derives says its decisions alone: apply gives it its image, source, secrets and deploy key.
+    const text = await renderInfra(app, choices);
+    expect(text).toContain(`export const host = cloudflare.host({\n  name: "acme-ops",\n  database: store,\n});\n`);
+    expect(text).not.toContain("deployKey");
+    expect(text).not.toContain("secret(");
+    expect(text).not.toContain("image");
+    // A wakeup service wakes a Cloudflare host too: the host's own vendor's wakeup comes first.
     expect(text).toContain(`export const wakeup = cloudflare.alarm({\n  host: host,\n});\n`);
-    expect(text).toContain(`    SANOMA_WAKEUP_TOKEN: secret("SANOMA_WAKEUP_TOKEN"),\n  },\n`);
-    expect(text).not.toContain("SANOMA_WAKEUP_URL");
     expect(text).not.toContain("sanoma.wakeup");
   });
 
@@ -330,7 +364,7 @@ describe("going live by contract", () => {
     const connected = contextOf(ALL, { CLOUDFLARE_API_TOKEN: "cf", CLOUDFLARE_ACCOUNT_ID: "acct" });
     await expect(renderInfra(connected, { ...choices, host: "docker.container" }, DEPLOY_KEY)).rejects.toMatchObject({
       status: 409,
-      message: "Going live now runs the company on cloudflare.container, not docker.container: reload the page",
+      message: "Going live now runs the company on cloudflare.host, not docker.container: reload the page",
     });
     const supabaseConnected = contextOf(ALL, { SUPABASE_ACCESS_TOKEN: "sb" });
     await expect(
@@ -389,7 +423,7 @@ describe("going live by contract", () => {
   it("says why no wakeup is declared when none connected wakes the host", async () => {
     const app = contextOf([github, neon, fly], SERVICE);
     expect((await goLiveChoices(app)).errors).toEqual([
-      "No connected wakeup wakes a fly.app (Wakeup (sanoma.wakeup) wakes cloudflare.container, docker.container, testhost.app): going live declares none, and the host stays up",
+      "No connected wakeup wakes a fly.app (Wakeup (sanoma.wakeup) wakes cloudflare.host, cloudflare.container, docker.container, testhost.app): going live declares none, and the host stays up",
     ]);
     expect(await renderInfra(app, choices, DEPLOY_KEY)).not.toContain("wakeup");
   });

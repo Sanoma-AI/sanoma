@@ -448,6 +448,26 @@ export interface GoLiveRun {
   error?: string;
 }
 
+/**
+ * What apply gives the declared host that derives (`getHostDerived`), shown read-only on Hosting:
+ * the runtime image, the repository and branch it runs, the sites' domains it attaches, and the
+ * keys it is given, whether each is stored and since when. Never a value.
+ */
+export interface HostDerived {
+  /** The host's declaration id. */
+  id: string;
+  /** The runtime image it runs; undefined when sanoma is not installed. */
+  image?: string;
+  /** The repository it clones: a declared one's `owner/name`, or the app's `origin`. */
+  source?: string;
+  /** The branch it runs: the declared one, else the repository's default branch; undefined when it cannot be told yet. */
+  ref?: string;
+  /** Each public site's domain, by site name. */
+  domains: Record<string, string>;
+  /** The keys it is given: stored or not, and when each was set. */
+  keys: { name: string; stored: boolean; setAt?: string }[];
+}
+
 /** How far going live is (`getGoLiveProgress`): told from the files, the lockfile and the runs, so a reload picks it up. */
 export interface GoLiveProgress {
   /** `resources/sanoma/infra.ts`, once written. */

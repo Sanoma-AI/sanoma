@@ -57,6 +57,7 @@ import {
   configQuery,
   driftReportQuery,
   goLiveProgressQuery,
+  hostDerivedQuery,
   HostingSearch,
   isPeople,
   RUNS_KEY,
@@ -393,6 +394,7 @@ function SlotCard({
               hostname={typeof resource.desired.hostname === "string" ? resource.desired.hostname : undefined}
             />
           )}
+          {title === "Host" && <HostDerivedFacts id={resource.id} />}
         </Facts>
         {result?.error !== undefined ? (
           <p className="text-destructive">{result.error}</p>
@@ -401,6 +403,67 @@ function SlotCard({
         )}
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * What apply gives a host that derives, read-only: its runtime image, the repository and branch
+ * it runs, the public sites' domains it attaches, and whether each key it is given is stored, and
+ * since when. Nothing for a host that does not derive: its data file says all of it.
+ */
+function HostDerivedFacts({ id }: { id: string }) {
+  const { data } = useQuery(hostDerivedQuery());
+  if (!data || data.id !== id) return null;
+  const domains = Object.entries(data.domains);
+  return (
+    <>
+      <Fact label="Image">
+        {data.image ? (
+          <code className="text-xs">{data.image}</code>
+        ) : (
+          <span className="text-muted-foreground">sanoma not installed</span>
+        )}
+      </Fact>
+      <Fact label="Source">
+        {data.source ? (
+          <code className="text-xs">{data.source}</code>
+        ) : (
+          <span className="text-muted-foreground">no origin</span>
+        )}
+        {" at "}
+        {data.ref ? (
+          <code className="text-xs">{data.ref}</code>
+        ) : (
+          <span className="text-muted-foreground">its default branch</span>
+        )}
+      </Fact>
+      <Fact label="Domains">
+        {domains.length ? (
+          domains.map(([site, domain]) => (
+            <span key={site} className="mr-2 inline-block">
+              <code className="text-xs">{domain}</code> <span className="text-muted-foreground">({site})</span>
+            </span>
+          ))
+        ) : (
+          <span className="text-muted-foreground">none: a public site declares its own</span>
+        )}
+      </Fact>
+      {data.keys.map((key) => (
+        <Fact key={key.name} label={key.name}>
+          {key.stored ? (
+            key.setAt ? (
+              <span>
+                stored, set <When at={Date.parse(key.setAt)} />
+              </span>
+            ) : (
+              "stored"
+            )
+          ) : (
+            <span className="text-muted-foreground">not stored</span>
+          )}
+        </Fact>
+      ))}
+    </>
   );
 }
 

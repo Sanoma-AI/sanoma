@@ -57,6 +57,7 @@ import {
 } from "./server/core.ts";
 import { availableConnectors } from "./server/available.ts";
 import { goLive, goLiveChoices, goLiveHost, goLiveProgress, goLiveSignIn } from "./server/go-live.ts";
+import { hostDerived } from "./server/host-derived.ts";
 import { invitePerson, peopleSignIns } from "./server/people.ts";
 import { connectExisting, setSetupToken, setupStatus } from "./server/setup.ts";
 import { withPrincipal } from "./middleware.ts";
@@ -238,6 +239,9 @@ export const getGoLiveChoices = createServerFn(READ).handler(async ({ context })
 
 /** How far going live is: `infra.ts`, the bindings, the latest apply run, the host. */
 export const getGoLiveProgress = createServerFn(READ).handler(({ context }) => goLiveProgress(context.app));
+
+/** What apply gives the declared host that derives: its image, source, branch, domains and keys (never a value). */
+export const getHostDerived = createServerFn(READ).handler(({ context }) => hostDerived(context.app));
 
 /** Writes `infra.ts` for the choices and applies the repository and the database. */
 export const goLiveFn = createServerFn(CHANGE)
