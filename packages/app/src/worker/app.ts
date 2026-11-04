@@ -1,0 +1,186 @@
+// The app on the Worker (`worker/main.ts` imports it on the first request): the app's handler
+// (`appHandler`) over the snapshot and config the bundle was built with, a client of each
+// request's own on the company's database, and the Worker's assets for the client build and the
+// prerendered pages. What needs the checkout is not in the bundle (`server/local/none.ts`).
+import { AsyncLocalStorage } from "node:async_hooks";
+import {
+  CLIENT_IP_HEADER,
+  checkPreparedOnly,
+  type ResolvedConfig,
+  resolveConfig,
+  SanomaClient,
+  useCedarWasm,
+  useRootSnapshot,
+} from "@sanoma-ai/workflows";
+import { domainsOf } from "@sanoma-ai/workflows/shared";
+import start from "@tanstack/react-start/server-entry";
+import { cedar, config, root, snapshot } from "virtual:sanoma/app-bundle";
+import {
+  type AppBundleContext,
+  type AppBundleEnv,
+  type AppHost,
+  PRERENDERED,
+  prerenderedAsset,
+} from "../app-bundle.ts";
+import type { AdmittingLogin } from "../context.ts";
+import { type AppHandler, appHandler } from "../handler.ts";
+import { publicFront } from "../login/public.ts";
+import { servedOnWorker } from "../snapshot.ts";
+
+// The runtime, bundled: the root's people, policies, app name and version as data, Cedar's web
+// build on first use, and a database the worker prepares, never this Worker.
+useRootSnapshot(root, snapshot);
+useCedarWasm(cedar);
+checkPreparedOnly("the company's worker, at its start,");
+
+/** What each request's client is made from: its own connection (a Worker's sockets are its request's), on its first call. */
+const requests = new AsyncLocalStorage<() => Promise<SanomaClient>>();
+
+/** A path into the request's client: each property another path, a call awaiting the client and calling its namesake. Not a thenable. */
+const member = (path: string[]): unknown =>
+  new Proxy(() => undefined, {
+    get: (_target, key) => (typeof key === "string" && key !== "then" ? member([...path, key]) : undefined),
+    apply: async (_target, _this, args: unknown[]) => {
+      const connect = requests.getStore();
+      if (!connect) throw new Error("the app's client was called outside a request");
+      let owner = (await connect()) as unknown as Record<string, unknown>;
+      for (const key of path.slice(0, -1)) owner = owner[key] as Record<string, unknown>;
+      return (owner[path.at(-1)!] as (...args: unknown[]) => unknown).apply(owner, args);
+    },
+  });
+
+/** The client the handler is given: each call made on the request's own client (`requests`), `tokens.resolve` too. */
+const requestClient = () => member([]) as SanomaClient;
+
+/**
+ * The staff's login on the Worker: none yet (the staff's sign-in on the Worker is #609), so the
+ * app's own pages and server functions answer 503 there. A public site's host never reaches it.
+ */
+const noStaffLogin: AdmittingLogin = {
+  name: "worker",
+  check() {},
+  resolveActor: async () => undefined,
+  handle: () =>
+    new Response("Signing in to the app is not available on this host yet: use the app where the company runs.\n", {
+      status: 503,
+      headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" },
+    }),
+};
+
+/** The handler, made on the first request from the Worker's bindings, which do not change in an isolate. */
+let made: { app: AppHandler; resolved: ResolvedConfig } | undefined;
+
+function handlerOf(env: AppBundleEnv) {
+  if (made) return made;
+  const databaseUrl = env.DATABASE?.connectionString;
+  if (!databaseUrl) throw new Error("the Worker has no DATABASE binding with a connection string");
+  const resolved = resolveConfig({ ...config, root, databaseUrl });
+  const client = requestClient();
+  // Each site the Worker serves; another public site answers 503 on its hosts here.
+  const sites = new Map<string, AdmittingLogin>();
+  for (const site of snapshot.description.sites) {
+    if (!servedOnWorker(site)) continue;
+    sites.set(
+      site.name,
+      publicFront(site, undefined, (token) => client.tokens.resolve(token)),
+    );
+  }
+  const domains = env.SANOMA_DOMAINS ? domainsOf(env.SANOMA_DOMAINS) : {};
+  const app = appHandler(
+    {
+      resolved,
+      snapshot: () => snapshot,
+      client,
+      login: noStaffLogin,
+      sites,
+      domains,
+      entry: start,
+      files: (request, site) => assetFor(request, site, env),
+    },
+    snapshot,
+  );
+  return (made = { app, resolved });
+}
+
+/**
+ * A GET's or HEAD's file from the Worker's assets: one of the client build at a path with an
+ * extension (a site's public files too; `/assets/*` is the assets' own, never the Worker's), else
+ * on a public site's domain the page prerendered there, unless a query, which the page may read,
+ * asks otherwise. Undefined when the assets have none.
+ */
+async function assetFor(request: Request, site: string | undefined, env: AppBundleEnv) {
+  if (request.method !== "GET" && request.method !== "HEAD") return undefined;
+  const url = new URL(request.url);
+  const path = assetPath(url, site);
+  if (path === undefined) return undefined;
+  const asset = await env.ASSETS.fetch(new Request(new URL(path, url), request));
+  if (asset.ok) return asset;
+  await asset.body?.cancel();
+  return undefined;
+}
+
+/** Where in the assets the request's file is: none for the prerendered pages' own path, nor a page with a query. */
+function assetPath(url: URL, site: string | undefined): string | undefined {
+  if (/\.[^/]+$/.test(url.pathname)) return url.pathname.startsWith(`${PRERENDERED}/`) ? undefined : url.pathname;
+  if (site === undefined || url.search) return undefined;
+  return prerenderedAsset(url.hostname, url.pathname);
+}
+
+/** `response`, its body passed on as it streams, then `close` called once it is sent (or failed). */
+function closingAfter(response: Response, close: () => Promise<void>, ctx: AppBundleContext): Response {
+  if (!response.body) {
+    ctx.waitUntil(close());
+    return response;
+  }
+  const { readable, writable } = new TransformStream();
+  ctx.waitUntil(response.body.pipeTo(writable).finally(close));
+  return new Response(readable, response);
+}
+
+/** Answers one request: the app's handler, with a client of the request's own; a run queued has the host start the worker. */
+export async function serve(
+  request: Request,
+  env: AppBundleEnv,
+  ctx: AppBundleContext,
+  host: AppHost | undefined,
+): Promise<Response> {
+  const { app, resolved } = handlerOf(env);
+  const { hostname } = new URL(request.url);
+  if (env.SANOMA_HOSTNAME && hostname !== env.SANOMA_HOSTNAME.toLowerCase() && !app.hosts.has(hostname)) {
+    return new Response("Not found\n", { status: 404, headers: { "content-type": "text/plain; charset=utf-8" } });
+  }
+  // The visitor's address, from Cloudflare's header alone, for a login's rate limits: never a client's copy.
+  const headers = new Headers(request.headers);
+  headers.set(CLIENT_IP_HEADER, request.headers.get("cf-connecting-ip") ?? "");
+  const asked = new Request(request, { headers });
+  let client: Promise<SanomaClient> | undefined;
+  // Once per request, however many writes it makes: the worker starts once.
+  let starting: Promise<unknown> | undefined;
+  const connect = () =>
+    (client ??= SanomaClient.connect(
+      { ...config, root, databaseUrl: resolved.databaseUrl },
+      {
+        // A run waits for a worker of this bundle's code, which may not be live yet.
+        appVersion: snapshot.version,
+        onWrite: () => {
+          if (starting || !host) return;
+          starting = host.startNow().catch((err: unknown) => console.error("sanoma: starting the worker failed:", err));
+          ctx.waitUntil(starting);
+        },
+      },
+    ));
+  const close = async () => {
+    if (!client) return;
+    await (
+      await client
+    )
+      .close()
+      .catch((err: unknown) => console.error("sanoma: closing the request's client failed:", err));
+  };
+  try {
+    return closingAfter(await requests.run(connect, () => app.fetch(asked)), close, ctx);
+  } catch (err) {
+    ctx.waitUntil(close());
+    throw err;
+  }
+}

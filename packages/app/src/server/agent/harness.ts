@@ -174,7 +174,7 @@ async function authFor(app: AppContext): Promise<Record<string, string>> {
   if (!value) {
     const message = `${VENDOR} is not configured: ${KEY}`;
     throw new LoadAPIKeyError({
-      message: app.description.vendors[VENDOR]
+      message: app.snapshot.description.vendors[VENDOR]
         ? noKeyText(VENDOR, `${message}; set it on the connector page`)
         : `${message}; no connector gives it yet`,
     });

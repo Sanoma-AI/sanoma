@@ -28,17 +28,12 @@ declare module "virtual:sanoma/icons" {
 }
 
 /**
- * The sites bundle's company, as the Worker's build makes it (`workerModule` in `build.ts`): its
- * config, root, description (each site's domain set), content as published, the sites it serves,
- * the root's people and policies, and Cedar's web build, initialized.
+ * The app bundle's company, as the Worker's build makes it (`bundleModule` in `bundle-build.ts`):
+ * its config and root, the snapshot of its files, and Cedar's web build, initialised on first use.
  */
-declare module "virtual:sanoma/worker" {
+declare module "virtual:sanoma/app-bundle" {
   export const config: import("@sanoma-ai/workflows").SanomaConfig;
   export const root: string;
-  /** The sites it serves, as the description has them: public, on a domain, with no login. */
-  export const served: import("@sanoma-ai/workflows/describe").SiteEntry[];
-  export const snapshot: import("@sanoma-ai/workflows").RootSnapshot;
-  export const description: import("@sanoma-ai/workflows/describe").ConfigDescription;
-  export const published: import("./content-files.ts").Published;
-  export const cedar: import("@sanoma-ai/workflows").CedarWasm;
+  export const snapshot: import("./snapshot.ts").AppSnapshot;
+  export const cedar: () => import("@sanoma-ai/workflows").CedarWasm;
 }

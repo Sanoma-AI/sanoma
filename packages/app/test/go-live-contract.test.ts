@@ -21,7 +21,9 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import { secret } from "@sanoma-ai/workflows/resources";
 import { z } from "zod";
 import type { AppContext } from "../src/context.ts";
-import { goLiveChoices, renderInfra } from "../src/server/go-live.ts";
+import { goLiveChoices } from "../src/server/go-live.ts";
+import { renderInfra } from "../src/server/local/go-live.ts";
+import type { AppSnapshot } from "../src/snapshot.ts";
 
 // Going live chooses the database, the host and the wakeup by their contracts, among the config's
 // types: among those whose vendor is connected, Neon's database first, Cloudflare's host first,
@@ -180,12 +182,16 @@ const fly = defineConnector("fly", { app: hostOf("fly", "app", "stops-when-quiet
 /** A deploy key's public half, as `renderInfra` takes it. */
 const DEPLOY_KEY = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC0deploykey";
 
+/** What going live reads of the snapshot, for a config of no files: its description, no infra.ts, nothing bound. */
+const snapshotOf = (config: SanomaConfig) =>
+  ({ description: describeConfig(config), infra: null, bound: [] }) as unknown as AppSnapshot;
+
 /** Going live's context for a config, with `stored` the secrets the client says are stored. */
 function contextOf(connectors: Connector<any, any>[], stored: Record<string, string> = {}): AppContext {
   const config: SanomaConfig = { workflows: [], connectors, root };
   return {
     resolved: resolveConfig(config),
-    description: describeConfig(config),
+    snapshot: snapshotOf(config),
     client: {
       secrets: async (names: readonly string[]) =>
         new Map(names.filter((n) => stored[n]).map((n) => [n, { value: stored[n]!, source: "stored" as const }])),
@@ -227,7 +233,7 @@ describe("going live by contract", () => {
     const config = { workflows: [], connectors: [github, named, docker], connections: [primary], root };
     const app = contextOf(config.connectors);
     app.resolved = resolveConfig(config);
-    app.description = describeConfig(config);
+    app.snapshot = snapshotOf(config);
     const read = vi.spyOn(app.client, "secrets");
     const cards = vi.fn<AppContext["client"]["connections"]>().mockResolvedValue([
       {

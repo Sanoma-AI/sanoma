@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { createCsrfMiddleware } from "@tanstack/react-start";
-import { postChat } from "../../server/agent/turn.ts";
+import { notHere } from "../../server/core.ts";
+import { local } from "../../server/local/index.ts";
 
 /**
  * The operator agent's chat: a turn as a UI message stream (server/agent/turn.ts). A server route,
@@ -9,6 +10,11 @@ import { postChat } from "../../server/agent/turn.ts";
 export const Route = createFileRoute("/api/chat")({
   server: {
     middleware: [createCsrfMiddleware()],
-    handlers: { POST: ({ request, context }) => postChat(request, context) },
+    handlers: {
+      POST: ({ request, context }) =>
+        local
+          ? local.postChat(request, context)
+          : Response.json({ error: notHere("The agent's chat") }, { status: 501 }),
+    },
   },
 });

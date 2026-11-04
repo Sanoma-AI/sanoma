@@ -34,13 +34,15 @@ describe("check", () => {
       grid: FIXTURE_GRID,
     });
     // The generated SDK first, before tsc: the sites' tsc reads it.
-    expect(log.slice(0, 7)).toEqual([
+    // Then the app bundle for the Worker, built to find an import it does not have.
+    expect(log.slice(0, 8)).toEqual([
       "config",
       "wrote .sanoma/api.ts",
       "wrote .sanoma/schema.cedarschema",
       "tsc",
       "wrote .oxlintrc.json",
       "oxlint workflows",
+      "build the app bundle",
       "scenarios",
     ]);
     expect(readFileSync(join(dir, ".sanoma/api.ts"), "utf8")).toContain("hello: WorkflowFn<");

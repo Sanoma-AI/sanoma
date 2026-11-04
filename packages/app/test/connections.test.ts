@@ -23,9 +23,9 @@ import {
 import { secret } from "../../workflows/src/secret.ts";
 import { lazyPool } from "../../workflows/src/db.ts";
 import { tree } from "../../workflows/test/tree.ts";
-import { describeConfig } from "@sanoma-ai/workflows/describe";
 import { PreviewConnectionRequest, ConnectConnectionRequest } from "../src/api.ts";
 import type { AppContext } from "../src/context.ts";
+import { appSnapshot } from "../src/snapshot-build.ts";
 import { admitting } from "../src/login/admission.ts";
 import { loopbackLogin } from "../src/loopback.ts";
 import { startApp } from "../src/index.ts";
@@ -109,7 +109,7 @@ beforeEach(async () => {
   app = {
     resolved,
     client,
-    description: describeConfig(cfg),
+    snapshot: await appSnapshot(cfg),
     place: "this-computer",
     login: admitting(loopbackLogin(), () => ({ people: [], problems: [] })),
   };

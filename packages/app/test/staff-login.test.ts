@@ -99,6 +99,7 @@ describe("staffLogin", () => {
         ...(sender && { login: { sender: {}, from: "Acme <login@acme.test>" } }),
       },
       client,
+      snapshot: { people: readPeople(root) },
       ...(stylesheet && { stylesheet }),
     } as unknown as AppContext);
     return provider;
@@ -323,6 +324,7 @@ describe("staffLogin", () => {
       await provider.open!({
         resolved: { appName: "acme-plumbing", databaseUrl: "postgresql://x/y", root: broken },
         client,
+        snapshot: { people: readPeople(broken) },
       } as unknown as AppContext);
       const page = (await provider.handle!(request("/auth/invite/tok-dee@acme.test")))!;
       expect(page.status).toBe(200);

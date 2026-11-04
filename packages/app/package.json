@@ -41,6 +41,10 @@
       "types": "./dist/build.d.ts",
       "default": "./dist/build.js"
     },
+    "./bundle": {
+      "types": "./dist/bundle-build.d.ts",
+      "default": "./dist/bundle-build.js"
+    },
     "./site": {
       "types": "./src/site.ts",
       "default": "./src/site.ts"

@@ -6,7 +6,8 @@ import type { AppContext } from "../context.ts";
  * draft's card and the agent that drafts: its problems and warnings, without the grid, which a
  * change's review reads.
  */
-export async function checks({ source }: Pick<AppContext, "source">, id: string): Promise<CheckResult> {
+export async function checks({ local }: Pick<AppContext, "local">, id: string): Promise<CheckResult> {
+  const source = local?.source;
   if (!source?.check) {
     return { ok: false, problems: ["sanoma check: this instance's repository cannot check a draft"], warnings: [] };
   }

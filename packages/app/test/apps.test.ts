@@ -3,7 +3,6 @@ import { fileURLToPath } from "node:url";
 import { ensureBuilt, testDatabaseUrl } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
 import { memoryLedger, type SanomaConfig, type Source } from "@sanoma-ai/workflows";
-import { describeConfig } from "@sanoma-ai/workflows/describe";
 import { APPS_LIST, type AvailableApps } from "@sanoma-ai/workflows/shared";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
@@ -18,7 +17,8 @@ import introduce from "../../workflows/test/fixtures/company-apps/workflows/intr
 import { ACTOR_COOKIE, ACTOR_KEY } from "../src/api.ts";
 import { type App, startApp } from "../src/index.ts";
 import { takeAppPrompt, updateAppPrompt } from "../src/lib/apps.ts";
-import { appBehind } from "../src/server/core.ts";
+import { appBehind } from "../src/server/local/behind.ts";
+import { appSnapshot } from "../src/snapshot-build.ts";
 import { barLink } from "./bar-helpers.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built app (built when stale). The Apps page on the
@@ -163,10 +163,10 @@ describe("the Apps page", () => {
   });
 
   it("tells how far a taken app is behind its source, or why it cannot", async () => {
-    const description = describeConfig(testApp.config);
+    const snapshot = await appSnapshot(testApp.config);
     // Only `behind` is read.
     const behind = (folder: string, source?: Pick<Source, "behind">) =>
-      appBehind({ description, source: source as Source | undefined }, folder);
+      appBehind({ snapshot, local: { ...(source && { source: source as Source }) } }, folder);
     const fetched = { behind: async (folder: string) => (folder === "crm" ? 3 : 0) };
     expect(await behind("crm", fetched)).toEqual({ behind: 3 });
     expect(await behind("shop", fetched)).toEqual({ error: "No app apps/shop/ taken from a source" });

@@ -1,4 +1,7 @@
 import { randomBytes } from "node:crypto";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { decrypt, encrypt } from "../src/credentials.ts";
 import { deploymentKey } from "../src/deployment-key.ts";
@@ -98,6 +101,28 @@ describe("encrypt and decrypt", () => {
       for (const bad of [randomBytes(16).toString("base64url"), `${"-".repeat(43)}=`, "x".repeat(44)]) {
         expect(() => deploymentKey(name, { [name]: bad })).toThrow(`${name} must be 32 random bytes`);
       }
+    }
+  });
+
+  it("reads a key's _FILE only where there is a file system, and refuses it on a host without one", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sanoma-key-"));
+    try {
+      const bytes = randomBytes(32);
+      const file = join(dir, "key");
+      writeFileSync(file, `${bytes.toString("base64")}\n`);
+      expect(deploymentKey("SANOMA_SIGNING_KEY", { SANOMA_SIGNING_KEY_FILE: file })).toEqual(bytes);
+      // workerd's `process` finds no `node:fs`.
+      const found = vi.spyOn(process, "getBuiltinModule").mockReturnValue(undefined as never);
+      try {
+        expect(() => deploymentKey("SANOMA_SIGNING_KEY", { SANOMA_SIGNING_KEY_FILE: file })).toThrow(
+          "SANOMA_SIGNING_KEY_FILE names a file, and this host has no file system: set SANOMA_SIGNING_KEY",
+        );
+        expect(deploymentKey("SANOMA_SIGNING_KEY", { SANOMA_SIGNING_KEY: bytes.toString("base64") })).toEqual(bytes);
+      } finally {
+        found.mockRestore();
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

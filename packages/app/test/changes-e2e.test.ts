@@ -13,7 +13,6 @@ import {
   type SanomaConfig,
   type Worker,
 } from "@sanoma-ai/workflows";
-import { describeConfig } from "@sanoma-ai/workflows/describe";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { localGitSource } from "../../sanoma/src/source.ts";
@@ -24,7 +23,9 @@ import { freshDatabase } from "../../workflows/test/harness.ts";
 import type { AppContext } from "../src/context.ts";
 import { type App, startApp } from "../src/index.ts";
 import { tellCommits } from "../src/server/agent/checkout.ts";
-import { change, hasRemote, openChange, patch } from "../src/server/core.ts";
+import { change, hasRemote, openChange } from "../src/server/core.ts";
+import { patch } from "../src/server/local/writes.ts";
+import { appSnapshot } from "../src/snapshot-build.ts";
 import { checks } from "../src/server/drafts.ts";
 import { PEOPLE, pageOf, publishedAgain, publishOf, renderDraftCard } from "./fixtures/change.ts";
 
@@ -147,14 +148,19 @@ describe("a change, from a chat's draft to main", { timeout: 2 * ROUND_MS }, () 
       draft: "rules",
       branch: draft.branch,
       ...(await source.diff!("rules")),
-      checks: await checks({ source }, "rules"),
+      checks: await checks({ local: { source } }, "rules"),
     };
     expect(card.files).toEqual(["policies/hello.cedar", "resources/people.ts"]);
     expect(card.checks).toMatchObject({ ok: true, problems: [] });
     // The app's own answers, as its root loader and the card's query read them.
-    const context = { client, resolved: resolveConfig(config), source } as unknown as AppContext;
+    const context = {
+      client,
+      resolved: resolveConfig(config),
+      snapshot: await appSnapshot(config, { source }),
+      local: { source },
+    } as unknown as AppContext;
     const html = await renderDraftCard(card, {
-      remote: await hasRemote(context),
+      remote: hasRemote(context),
       change: await change(context, "rules"),
     });
     expect(html).toMatch(/<button[^>]*aria-disabled="false"[^>]*>Send for review<\/button>/);
@@ -273,8 +279,8 @@ describe("a change, from a chat's draft to main", { timeout: 2 * ROUND_MS }, () 
     const context = {
       client,
       resolved: resolveConfig(config),
-      source,
-      description: describeConfig(config),
+      local: { source },
+      snapshot: await appSnapshot(config, { source }),
     } as unknown as AppContext;
     const at = { file: "resources/people.ts", export: "alice" };
     const landed = await patch(context, { id: "alice" }, { at, fields: { name: "Alice Liddell" } }, app.url);

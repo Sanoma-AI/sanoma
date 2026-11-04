@@ -49,9 +49,13 @@ describe("checkPreparedOnly", () => {
 });
 
 describe("useCedarWasm", () => {
-  it("is the Cedar the runtime calls from then on", () => {
+  it("is the Cedar the runtime calls from then on, loaded on its first use", () => {
     const web = { validate: () => ({ type: "success" }) } as unknown as CedarWasm;
-    useCedarWasm(web);
+    let loads = 0;
+    useCedarWasm(() => (loads++, web));
+    expect(loads).toBe(0);
     expect(cedarWasm()).toBe(web);
+    expect(cedarWasm()).toBe(web);
+    expect(loads).toBe(1);
   });
 });

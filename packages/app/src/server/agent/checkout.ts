@@ -64,7 +64,7 @@ export type Drafting = Source & Required<Pick<Source, "draft" | "diff">>;
 
 /** The instance's repository, as every engine drafts in it; an error when it has none to draft in. */
 export function drafting(app: AppContext): Drafting {
-  const repo = app.source;
+  const repo = app.local?.source;
   if (!repo?.draft || !repo.diff) throw new Error("This instance has no repository to draft a change in");
   return repo as Drafting;
 }

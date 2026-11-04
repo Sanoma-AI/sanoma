@@ -20,7 +20,7 @@ import {
   type Worker,
   withSetup,
 } from "@sanoma-ai/workflows";
-import { describeConfig, outlineWorkflow, svgDataUrl } from "@sanoma-ai/workflows/describe";
+import { outlineWorkflow, svgDataUrl } from "@sanoma-ai/workflows/describe";
 import { isNotFound } from "@tanstack/react-router";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
@@ -52,7 +52,6 @@ import { barLabels, barLink } from "./bar-helpers.ts";
 import {
   type ActorContext,
   actorOf,
-  adopt,
   appConfig,
   asApiError,
   clearCredential,
@@ -63,7 +62,6 @@ import {
   listRuns,
   nextFires,
   parse,
-  patch,
   readStartRun,
   requireActor,
   runDetail,
@@ -74,8 +72,10 @@ import {
   setCredential,
   startRun,
   validate,
-  withoutSources,
 } from "../src/server/core.ts";
+import { local } from "../src/server/local/index.ts";
+import { adopt, patch } from "../src/server/local/writes.ts";
+import { appSnapshot, scenariosOf } from "../src/snapshot-build.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built app: the tests build it when
 // dist/server/server.js is missing or older than a file under src/.
@@ -209,7 +209,7 @@ async function contextOf(cfg: SanomaConfig, login = loopbackLogin()): Promise<Ap
   const resolved = resolveConfig(cfg);
   return {
     resolved,
-    description: describeConfig(cfg),
+    snapshot: await appSnapshot(cfg),
     client,
     place: placeOf(resolved.databaseUrl),
     login: admitting(login, () => ({ people: [], problems: [] })),
@@ -314,7 +314,7 @@ const runsOf = (query: Record<string, unknown> = {}) =>
   answer("GET", async () => listRuns(ctx, validate(RunsQuery)(query as RunsQuery)));
 
 /** `getRun`: one run, its ledger, its approvals and a sandbox run's checks. */
-const detail = (id: string, context = ctx) => runDetail(context, id);
+const detail = (id: string, context = ctx) => runDetail(context, id, local!.scenarioChecks);
 
 /** `startRunFn` with this argument, as tester. */
 const postRun = (data: unknown) => startAs(data, { actor: "tester" });
@@ -447,7 +447,7 @@ describe("the server functions", () => {
       { name: "hourly", trigger: { schedule: "0 * * * *" } },
       { name: "by-hand", trigger: "manual" },
     ];
-    expect(nextFires({ description: { workflows } as never }, new Date("2026-10-25T10:30:00Z"))).toEqual({
+    expect(nextFires({ workflows } as never, new Date("2026-10-25T10:30:00Z"))).toEqual({
       nightly: "2026-10-26T08:00:00.000Z",
       hourly: "2026-10-25T11:00:00.000Z",
     });
@@ -761,8 +761,11 @@ describe("scenarios that no longer load", () => {
     const before = await detail(sandboxId);
     expect(before.checks).toBeDefined();
     const text = readFileSync(featureFile, "utf8");
+    const was = ctx;
     try {
       writeFileSync(featureFile, "Feature: Broken\n  Scenario: Broken\n    Then nothing\n");
+      // The app's own snapshot is made again once the file changed (`liveSnapshot`); this one by hand.
+      ctx = { ...ctx, snapshot: await appSnapshot(config) };
       const broken = await detail(sandboxId);
       expect(broken.checks).toBeUndefined();
       expect(broken.checksError).toMatch(
@@ -791,6 +794,7 @@ describe("scenarios that no longer load", () => {
       );
     } finally {
       writeFileSync(featureFile, text);
+      ctx = was;
     }
     expect((await detail(sandboxId)).checks).toEqual(before.checks);
   });
@@ -802,7 +806,7 @@ describe("scenarios that no longer load", () => {
         throw new Error("the ops are gone");
       },
     };
-    expect(await scenarios({ resolved } as never)).toEqual({
+    expect(await scenariosOf(resolved as never)).toEqual({
       scenarios: [],
       errors: [{ file: "", message: "the ops are gone" }],
     });
@@ -835,22 +839,21 @@ describe("errors the app answers with", () => {
 
 describe("a file's source", () => {
   it("is served for a file the description names, a workflow's or a data file, a collection's too, apart from the config", async () => {
-    const description = describeConfig(config);
-    const context = { resolved: { root: companyDir } as never, description };
-    expect(await fileSource(context, announce.file!)).toEqual({
+    const snapshot = await appSnapshot(config);
+    expect(fileSource(snapshot, announce.file!)).toEqual({
       source: readFileSync(announce.file!, "utf8").replaceAll("\r\n", "\n"),
     });
-    expect(await fileSource(context, "resources/identity/rules.ts")).toEqual({
+    expect(fileSource(snapshot, "resources/identity/rules.ts")).toEqual({
       source: readFileSync(join(companyDir, "resources/identity/rules.ts"), "utf8"),
     });
     // A collection's, resources/data.ts, which declares no resource.
-    expect(await fileSource({ ...context, resolved: { root: appRoot } as never }, "resources/data.ts")).toEqual({
+    expect(fileSource(snapshot, "resources/data.ts")).toEqual({
       source: readFileSync(join(appRoot, "resources/data.ts"), "utf8"),
     });
-    expect(withoutSources(description).workflows.find((wf) => wf.name === "announce")).not.toHaveProperty("source");
+    expect(snapshot.description.workflows.find((wf) => wf.name === "announce")).not.toHaveProperty("source");
     // Nothing else, and not a 404: the page asking would take it for its own not-found.
     for (const file of ["sanoma.config.ts", "resources/../sanoma.config.ts", join(companyDir, "sanoma.config.ts")]) {
-      expect(await fileSource(context, file)).toEqual({ source: null });
+      expect(fileSource(snapshot, file)).toEqual({ source: null });
     }
   });
 });
@@ -1093,7 +1096,7 @@ describe("the page", () => {
   });
 
   it("renders the workflows on the server: a row for each linking to its page, whose About has its operations and input", async () => {
-    const { version } = ctx.description;
+    const { version } = ctx.snapshot.description;
     const workflows = await page("/workflows");
     expect(workflows.status).toBe(200);
     expect(workflows.text).toContain(`>${version}</code>`);
@@ -1787,7 +1790,7 @@ describe("resources and drift", () => {
       },
       head: () => "0123456789abcdef",
     };
-    const adopting: AppContext = { ...ctx, resolved: { ...ctx.resolved, root }, source };
+    const adopting: AppContext = { ...ctx, resolved: { ...ctx.resolved, root }, local: { source } };
     const alice = { id: "alice" };
     const github = "resources/identity/github.ts";
     const before = readFileSync(join(root, github), "utf8");
@@ -1801,7 +1804,7 @@ describe("resources and drift", () => {
     // Without a source, the file is written and nothing committed.
     const stripe = "resources/billing/stripe.ts";
     const pro = { runId: driftRun, id: `${stripe}#pro`, paths: ["name"] };
-    expect(await adopt({ ...adopting, source: undefined }, alice, pro)).toEqual({ file: stripe });
+    expect(await adopt({ ...adopting, local: {} }, alice, pro)).toEqual({ file: stripe });
     expect(readFileSync(join(root, stripe), "utf8")).toContain('name: "Sanoma Professional",');
     expect(commits).toHaveLength(1);
 
@@ -1812,7 +1815,7 @@ describe("resources and drift", () => {
         throw new Error("index.lock exists");
       },
     };
-    await expect(adopt({ ...adopting, source: failing }, alice, pro)).rejects.toMatchObject({
+    await expect(adopt({ ...adopting, local: { source: failing } }, alice, pro)).rejects.toMatchObject({
       status: 500,
       body: { error: `Wrote ${stripe}, but could not commit it: index.lock exists` },
     });
@@ -1844,7 +1847,7 @@ describe("resources and drift", () => {
       },
       head: () => "fedcba9876543210",
     };
-    const patching: AppContext = { ...ctx, resolved: { ...ctx.resolved, root }, source };
+    const patching: AppContext = { ...ctx, resolved: { ...ctx.resolved, root }, local: { source } };
     const alice = { id: "alice" };
     const github = "resources/identity/github.ts";
     const before = readFileSync(join(root, github), "utf8");
@@ -2100,7 +2103,7 @@ describe("an app configured otherwise", () => {
     expect(warned).toEqual([
       expect.stringMatching(/^sanoma app: the config's files have problems.*\n {2}resources\/bad\.ts:2:28: /s),
     ]);
-    const body = withoutSources(otherCtx.description);
+    const body = otherCtx.snapshot.description;
     expect(body.resources.map((r) => r.id)).toEqual(["resources/good.ts#web"]);
     expect(body.problems).toEqual([
       {
@@ -2387,7 +2390,7 @@ describe("an app whose drivers declare environment variables", () => {
   });
 
   it("carries the statuses in getCredentials; the config's description names the variables alone; never a value", async () => {
-    const body = withoutSources(declaringCtx.description);
+    const body = declaringCtx.snapshot.description;
     expect(body.vendors.ghost?.credentials).toEqual([
       { name: URL_VAR, description: "the made-up site's URL" },
       { name: KEY_VAR, description: "a made-up key" },

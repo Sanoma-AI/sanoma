@@ -21,8 +21,6 @@ import {
   SetCredentialRequest,
 } from "./api.ts";
 import {
-  adopt,
-  appBehind,
   appConfig,
   callApi,
   change,
@@ -42,8 +40,9 @@ import {
   lastRuns,
   listRuns,
   nextFires,
+  notHere,
+  notOnThisHost,
   openChange,
-  patch,
   permissions,
   preview,
   readStartRun,
@@ -56,12 +55,13 @@ import {
   validate,
 } from "./server/core.ts";
 import { availableConnectors } from "./server/available.ts";
-import { goLive, goLiveChoices, goLiveHost, goLiveProgress, goLiveSignIn } from "./server/go-live.ts";
+import { goLiveChoices, goLiveProgress, goLiveSignIn } from "./server/go-live.ts";
 import { hostDerived } from "./server/host-derived.ts";
 import { invitePerson, peopleSignIns } from "./server/people.ts";
-import { connectExisting, setSetupToken, setupStatus } from "./server/setup.ts";
+import { local } from "./server/local/index.ts";
+import { setSetupToken, setupStatus } from "./server/setup.ts";
 import { withPrincipal } from "./middleware.ts";
-import { chatFor } from "./server/agent/turn.ts";
+import { chatFor } from "./server/agent/transcript.ts";
 import { chatModel } from "./server/models.ts";
 
 // The page's reads and changes, as server functions: the app's only HTTP surface. Each parses its
@@ -75,12 +75,18 @@ import { chatModel } from "./server/models.ts";
 const READ = { method: "GET", strict: { output: false } } as const;
 const CHANGE = { method: "POST", strict: { output: false } } as const;
 
+/** The checkout's actions (`server/local/`), or the 501 that `what` is not available on a host without them. */
+function checkout(what: string) {
+  if (!local) throw notOnThisHost(what);
+  return local;
+}
+
 export const getConfig = createServerFn(READ).handler(({ context }) => appConfig(context.app));
 
 /** A file the config names (a workflow's or a data file), as it is now; `null` for any other. */
 export const getSource = createServerFn(READ)
   .validator(validate(z.object({ file: z.string().min(1) })))
-  .handler(({ data, context }) => fileSource(context.app, data.file));
+  .handler(({ data, context }) => fileSource(context.app.snapshot, data.file));
 
 /**
  * Who the server resolves this request to, and whether the deployment says so itself; nobody for
@@ -98,7 +104,7 @@ export const getActor = createServerFn(READ).handler(async ({ context }): Promis
   }
 });
 
-/** The config's scenarios, read again from their feature files whenever one has changed: the agent may be editing them. */
+/** The config's scenarios, as the snapshot read them from their feature files: the Node adapter's is read again once one changed. */
 export const getScenarios = createServerFn(READ).handler(({ context }) => scenarios(context.app));
 
 export const getRuns = createServerFn(READ)
@@ -106,7 +112,7 @@ export const getRuns = createServerFn(READ)
   .handler(({ data, context }) => listRuns(context.app, data));
 
 /** When each workflow on a schedule fires next, ISO 8601 by name. */
-export const getNextFires = createServerFn(READ).handler(({ context }) => nextFires(context.app));
+export const getNextFires = createServerFn(READ).handler(({ context }) => nextFires(context.app.snapshot.description));
 
 /** Each workflow's latest run, by name. */
 export const getLastRuns = createServerFn(READ).handler(({ context }) => lastRuns(context.app));
@@ -114,7 +120,7 @@ export const getLastRuns = createServerFn(READ).handler(({ context }) => lastRun
 /** The run, or the router's not-found when there is none. */
 export const getRun = createServerFn(READ)
   .validator(validate(z.object({ id: z.string().min(1) })))
-  .handler(({ data, context }) => runDetail(context.app, data.id));
+  .handler(({ data, context }) => runDetail(context.app, data.id, local?.scenarioChecks));
 
 /** The changes, newest first: the open ones, the done ones, or all (`ChangesQuery`). */
 export const getChanges = createServerFn(READ)
@@ -169,7 +175,7 @@ export const getDriftReport = createServerFn(READ)
 export const adoptFn = createServerFn(CHANGE)
   .middleware([withPrincipal])
   .validator(validate(AdoptRequest))
-  .handler(({ data, context }) => adopt(context.app, context.principal, data));
+  .handler(({ data, context }) => checkout("Adopting a value").adopt(context.app, context.principal, data));
 
 /**
  * A form's Save: sets fields of a declaration in its file, landed as a change for review when the
@@ -178,7 +184,9 @@ export const adoptFn = createServerFn(CHANGE)
 export const patchFn = createServerFn(CHANGE)
   .middleware([withPrincipal])
   .validator(validate(PatchRequest))
-  .handler(({ data, context }) => patch(context.app, context.principal, data, context.origin));
+  .handler(({ data, context }) =>
+    checkout("Saving a data file").patch(context.app, context.principal, data, context.origin),
+  );
 
 /** Each vendor's credential statuses now: they change as people set them, and with the environment. */
 export const getCredentials = createServerFn(READ).handler(({ context }) => credentials(context.app));
@@ -230,7 +238,9 @@ export const getAvailableConnectors = createServerFn(READ).handler(() => availab
 /** How many commits a taken app is behind its source, fetched now; or why that cannot be told. */
 export const getAppBehind = createServerFn(READ)
   .validator(validate(z.object({ folder: z.string().min(1) })))
-  .handler(({ data, context }) => appBehind(context.app, data.folder));
+  .handler(({ data, context }) =>
+    local ? local.appBehind(context.app, data.folder) : { error: notHere("Fetching an app's source") },
+  );
 
 /** What going live can choose from: GitHub accounts, Supabase organizations and regions, the host. */
 export const getGoLiveChoices = createServerFn(READ).handler(async ({ context }) =>
@@ -247,12 +257,12 @@ export const getHostDerived = createServerFn(READ).handler(({ context }) => host
 export const goLiveFn = createServerFn(CHANGE)
   .middleware([withPrincipal])
   .validator(validate(GoLiveRequest))
-  .handler(({ data, context }) => goLive(context.app, context.principal, data));
+  .handler(({ data, context }) => checkout("Going live").goLive(context.app, context.principal, data));
 
 /** Pushes the local repository, then applies the host. */
 export const goLiveHostFn = createServerFn(CHANGE)
   .middleware([withPrincipal])
-  .handler(({ context }) => goLiveHost(context.app, context.principal));
+  .handler(({ context }) => checkout("Going live").goLiveHost(context.app, context.principal));
 /** Signs the person going live in on the host, by a sealed invite request: the link to open. */
 export const goLiveSignInFn = createServerFn(CHANGE)
   .middleware([withPrincipal])
@@ -271,7 +281,9 @@ export const inviteFn = createServerFn(CHANGE)
 export const connectExistingFn = createServerFn(CHANGE)
   .middleware([withPrincipal])
   .validator(validate(ConnectExistingRequest))
-  .handler(({ data, context }) => connectExisting(context.app, context.principal, data));
+  .handler(({ data, context }) =>
+    checkout("Connecting an existing repository").connectExisting(context.app, context.principal, data),
+  );
 
 /** Whether the chat has a model to answer on, its connector's key set: the composer says "Connect a model" until then. */
 export const getChatModel = createServerFn(READ).handler(({ context }) => chatModel(context.app));
