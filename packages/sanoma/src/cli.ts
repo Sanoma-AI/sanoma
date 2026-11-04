@@ -23,7 +23,8 @@ Runs the repo in the working directory, from its sanoma.config.ts (after its .en
                                       and the repo's sites/, when it has any, from a dev server that shows each
                                       edit as it is saved. In an empty directory, first starts a company there: the
                                       template, .env, an install and a git repository
-  sanoma worker                       the worker alone, for a deployment
+  sanoma worker                       the worker alone, for a deployment; with PORT set, its port answers there:
+                                      /healthz, /wake and the app bundle a host's Worker script runs
   sanoma app                          the app alone (built with the sites), for a deployment
   sanoma identity                     standalone runtime/provisioning identity broker from protected host configuration
   sanoma wakeup                       the wakeup service alone, on the config's database: it calls each instance
@@ -93,8 +94,8 @@ export async function main(argv: string[]): Promise<number> {
       // --dev (hidden): the child dev mode supervises, serving the sites as `sanoma` does.
       return serveCommand(values.dev ?? false);
     case "worker": {
-      const { runWorker } = await import("./serve.ts");
-      return keep(await load({ postgres: "find" }), runWorker);
+      const { runWorker } = await import("./worker-port.ts");
+      return keep(await load({ postgres: "find" }), (config) => runWorker(config, log));
     }
     case "app": {
       const { runApp } = await import("./serve.ts");
@@ -123,6 +124,14 @@ export async function main(argv: string[]): Promise<number> {
     case "api":
       // Hidden: the dev server runs it when the config's files change.
       return writeApiCommand();
+    case "app-bundle": {
+      // Hidden: the worker's port runs it in a revision's checkout (`appBundleRoute`).
+      if (!values.out || rest.length) throw new UsageError("usage: sanoma app-bundle --out <file>");
+      const { config, root } = await loadConfig();
+      const { writeAppBundle } = await import("./app-bundle.ts");
+      await writeAppBundle(config, { root, out: values.out, log });
+      return 0;
+    }
     case "env":
       return env(values.check ?? false);
     case "ledger": {

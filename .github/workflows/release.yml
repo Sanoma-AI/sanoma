@@ -79,6 +79,10 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
+      # Node and pnpm for scripts/runtime-packages.ts; no install. No cache, as in the publish job.
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        with:
+          cache: false
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
@@ -91,6 +95,8 @@ jobs:
         id: image
         run: |
           tag="ghcr.io/sanoma-ai/runtime:$(jq -r .version packages/sanoma/package.json)"
+          # The store's template: this commit's public packages, which the publish job just put on npm.
+          echo "packages=$(node scripts/runtime-packages.ts)" >> "$GITHUB_OUTPUT"
           if docker buildx imagetools inspect "$tag" > /dev/null 2> "$RUNNER_TEMP/inspect.err"; then
             echo "::notice title=Runtime image skipped::$tag is already on ghcr.io."
           # Only a missing tag (or, before the first push, a missing package, which ghcr.io answers
@@ -112,3 +118,4 @@ jobs:
           provenance: false
           push: true
           tags: ${{ steps.image.outputs.tag }}
+          build-args: PACKAGES=${{ steps.image.outputs.packages }}
