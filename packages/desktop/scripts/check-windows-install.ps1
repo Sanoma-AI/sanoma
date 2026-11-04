@@ -9,6 +9,8 @@ param(
   [switch] $Signed
 )
 $ErrorActionPreference = "Stop"
+# What Squirrel says about an install that failed.
+trap { Get-Content (Join-Path $env:LOCALAPPDATA "SquirrelTemp/SquirrelSetup.log") -Tail 50 -ErrorAction Ignore; break }
 
 $setup = Join-Path $Out "make/squirrel.windows/x64/Sanoma-Setup.exe"
 $root = Join-Path $env:LOCALAPPDATA "Sanoma"

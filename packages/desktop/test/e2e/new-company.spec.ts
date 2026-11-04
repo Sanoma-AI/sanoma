@@ -146,8 +146,12 @@ test("New Company, from an empty folder to the app, then Quit, then a crash", as
     throw err;
   } finally {
     await shell?.close().catch(() => {});
-    // Windows holds a file a moment after the process using it exited.
-    rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
-    rmSync(log, { force: true });
+    // Best effort: on Windows a new company's folder can resist it, and the temporary folder is the runner's.
+    try {
+      rmSync(log, { force: true });
+      rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
+    } catch (err) {
+      console.error(`left ${work}: ${String(err)}`);
+    }
   }
 });
