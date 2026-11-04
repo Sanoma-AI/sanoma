@@ -96,7 +96,7 @@ function PeoplePage() {
   const { data } = useSuspenseQuery({ ...configQuery(), select: directory });
   const rows = data.views[show];
   const open = person === undefined ? undefined : rows.find((r) => r.name === person);
-  const invite = useInviteCard();
+  const invite = useInviteCard(`${show}/${person ?? ""}`);
   return (
     <>
       <CrumbHeader count={data.views.people.length} />
@@ -386,17 +386,19 @@ function SignsIn({ person }: { person: DeclaredResource }) {
 /**
  * Minting a person's invite link, and the card that shows it over the list: `start` mints one
  * (each replacing that person's last), `person` is whom the card is for while it is open, and
- * `card` the card. A refusal is a toast, and the card closes.
+ * `card` the card. The card belongs to the view it was opened in (`where`, the page's search):
+ * opening someone else or another tab puts it away. A refusal is a toast, and the card closes.
  */
-function useInviteCard() {
+function useInviteCard(where: string) {
   const invite = useServerFn(inviteFn);
   const mutation = useMutation({
-    mutationFn: (person: DeclaredResource) => invite({ data: { person: person.name } }),
+    mutationFn: ({ person }: { person: DeclaredResource; where: string }) => invite({ data: { person: person.name } }),
     onError: (err) => toast.error(errorBodyOf(err)?.error ?? err.message),
   });
-  const person = mutation.isError ? undefined : mutation.variables;
+  const shown = mutation.isError || mutation.variables?.where !== where ? undefined : mutation.variables;
+  const person = shown?.person;
   return {
-    start: mutation.mutate,
+    start: (whom: DeclaredResource) => mutation.mutate({ person: whom, where }),
     person,
     card: person && <InviteCard key={person.id} person={person} url={mutation.data?.url} onClose={mutation.reset} />,
   };

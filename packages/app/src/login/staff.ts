@@ -48,7 +48,7 @@ const InviteBody = z.union([z.object({ email: z.string().email() }), z.object({ 
  * (`open`): `resolveActor` returns what it verified (`{ email, github }`), which the app matches to
  * a declared person (`admitting`). A request without a session gets the sign-in page (a 401), or
  * JSON for a server function; `GET /auth/login` is the page itself (a 200, or back to `/` when
- * signed in), and the kit's stylesheet and fonts load signed out for it. Besides the half's
+ * signed in as someone declared), and the kit's stylesheet and fonts load signed out for it. Besides the half's
  * routes: `GET /auth/invite/<token>`, an invite's
  * landing page, and `POST /auth/invite`, which mints one (`invite`) for `{ email }` from someone
  * signed in, or for `{ request }` sealed under `SANOMA_SIGNING_KEY` (`sealInvite`): `{ url }`.
@@ -137,7 +137,8 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
       if (lookFile(pathname, app?.stylesheet)) return undefined;
       const signedIn = await identityOf(request);
       if (pathname === LOGIN && request.method === "GET") {
-        if (signedIn)
+        // On to the app only for someone it admits: a session of someone no longer declared signs in again here.
+        if (signedIn && admitted(signedIn))
           return new Response(null, { status: 302, headers: { location: "/", "cache-control": "no-store" } });
         return signInPage(half, frame(), 200, url.searchParams.get("error"));
       }

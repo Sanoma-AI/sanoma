@@ -246,7 +246,7 @@ function logReadOnce(runId: string, message: string, what: string, err: unknown)
 const notLoaded = (errors: readonly { message: string }[]) =>
   errors.length ? `; these files did not load: ${errors.map((e) => e.message).join("; ")}` : "";
 
-/** A `login-code` run's start with its sealed code cut to what the page shows (`SEALED_SHOWN`), which is all it is sent. */
+/** A `login-code` run's start with its sealed code cut to what the page shows (`SEALED_SHOWN`), which is all a reader is sent. */
 function sealedShown(record: LedgerRecord): LedgerRecord {
   if (record.type !== "run.started" || typeof record.input !== "object" || record.input === null) return record;
   const { code } = record.input as { code?: unknown };
@@ -884,7 +884,8 @@ export async function callApi(app: AppContext, actor: Principal, { name, input, 
     case "ledger": {
       const { runId } = read(RunRef);
       await runOf(app, workflow, runId);
-      return client.ledger(runId);
+      const ledger = await client.ledger(runId);
+      return workflow === LOGIN_CODE_WORKFLOW ? ledger.map(sealedShown) : ledger;
     }
     default:
       throw notCallable(name);

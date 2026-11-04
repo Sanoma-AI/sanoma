@@ -476,7 +476,7 @@ describe("a company's app with its sites", () => {
     }
   });
 
-  it("links a site's own stylesheet, Tailwind's theme and utilities with the site's classes, and every stylesheet the server links is one the build wrote", async () => {
+  it("links a site's own stylesheet, Tailwind's theme and utilities with the site's classes, every stylesheet the server links is one the build wrote, and stylesheet.json names the kit's", async () => {
     const html = await (await fetch(new URL("/sites/hello/styled", app.url))).text();
     const hrefs = stylesheets(html);
     // The app's and the site's: the server's render and the client's build agree on each file's
@@ -505,6 +505,10 @@ describe("a company's app with its sites", () => {
     expect(site).toMatch(/\.bg-hello\{background-color:var\(--color-hello\)\}/);
     expect(site).toMatch(/\[data-site=hello\]\{--primary:red\}/);
     expect(site).not.toContain("tab-size");
+    // The kit's, named so for the login's own pages, though the site's file is `style-<hash>.css` too.
+    const kit = hrefs.find((_, i) => css[i]!.includes("--bar-width"));
+    expect(hrefs.every((href) => /^\/assets\/style-[\w-]+\.css$/.test(href))).toBe(true);
+    expect(JSON.parse(readFileSync(join(result.distDir, "stylesheet.json"), "utf8"))).toBe(kit);
   });
 
   it("renders content from content/: the list and a post's HTML, from a chunk of its own, and never a draft", async () => {

@@ -33,6 +33,7 @@ import type { AppContext } from "../src/context.ts";
 import { loopbackLogin } from "../src/loopback.ts";
 import { admitting } from "../src/login/admission.ts";
 import { barLink } from "./bar-helpers.ts";
+import { callApi } from "../src/server/core.ts";
 import { GITHUB_APP, githubManifest, mintWakeupToken, setSetupToken, setupStatus } from "../src/server/setup.ts";
 
 // Connecting GitHub and the vendors (/hosting/connect): the GitHub App's manifest page, its callback
@@ -569,39 +570,54 @@ export const host = testhost.app({ name: "acme-ops", source: repo, ref: "main", 
     }
   });
 
-  it("says a host that stops when quiet does, and that nothing starts it again while no Wakeup is declared", async () => {
-    const live = mkdtempSync(join(tmpdir(), "sanoma-hosting-"));
-    mkdirSync(join(live, "resources", "sanoma"), { recursive: true });
-    writeFileSync(
-      join(live, "resources", "sanoma", "infra.ts"),
-      `import { github } from "@sanoma-ai/connector-github/resources";
+  it("says a host that stops when quiet does, and that nothing starts it again while no Wakeup names it", async () => {
+    const host = fakeHost(() => Promise.reject(new Error("not started here")), { lifetime: "stops-when-quiet" });
+    /** The Host card's text with infra.ts declaring the repository, the host and then `more`. */
+    const hostCard = async (more = "") => {
+      const live = mkdtempSync(join(tmpdir(), "sanoma-hosting-"));
+      mkdirSync(join(live, "resources", "sanoma"), { recursive: true });
+      writeFileSync(
+        join(live, "resources", "sanoma", "infra.ts"),
+        `import { github } from "@sanoma-ai/connector-github/resources";
 import { testhost } from "@sanoma-ai/testing-host/resources";
+import { sanoma } from "sanoma/resources";
 
 export const repo = github.repository({ owner: "acme", name: "acme-ops", visibility: "private" });
 export const host = testhost.app({ name: "acme-ops", source: repo, ref: "main", port: 8080 });
+${more}`,
+      );
+      const hosted = await startApp(
+        defineConfig({ ...config, connectors: [githubConnector, host.connector], root: live }),
+        { port: 0 },
+      );
+      try {
+        return (await html("/hosting", hosted.url)).match(/<h2>Host<\/h2>(?:(?!<h2>)[\s\S])*/)?.[0];
+      } finally {
+        await hosted.close();
+        rmSync(live, { recursive: true, force: true });
+      }
+    };
+    const card = await hostCard();
+    expect(card).toMatch(/>Lifetime<.*?>Stops when quiet</s);
+    expect(card).not.toContain("started by the Wakeup");
+    expect(card).toContain(`${noWakeup("testhost.app")}.`);
+    expect(card).not.toMatch(/scale to zero|cold start|alarm/i);
+    // A Wakeup for another host starts this one no more than none.
+    const other = await hostCard(
+      `export const other = testhost.app({ name: "other", source: repo, ref: "main", port: 8081 });
+export const wakeup = sanoma.wakeup({ host: other });
 `,
     );
-    const host = fakeHost(() => Promise.reject(new Error("not started here")), { lifetime: "stops-when-quiet" });
-    const hosted = await startApp(
-      defineConfig({ ...config, connectors: [githubConnector, host.connector], root: live }),
-      { port: 0 },
-    );
-    try {
-      const page = await html("/hosting", hosted.url);
-      const card = page.match(/<h2>Host<\/h2>(?:(?!<h2>)[\s\S])*/)?.[0];
-      expect(card).toMatch(/>Lifetime<.*?>Stops when quiet</s);
-      expect(card).not.toContain("started by the Wakeup");
-      expect(card).toContain(`${noWakeup("testhost.app")}.`);
-      expect(card).not.toMatch(/scale to zero|cold start|alarm/i);
-    } finally {
-      await hosted.close();
-      rmSync(live, { recursive: true, force: true });
-    }
+    expect(other).not.toContain("started by the Wakeup");
+    expect(other).toContain(`${noWakeup("testhost.app")}.`);
+    const woken = await hostCard("export const wakeup = sanoma.wakeup({ host });\n");
+    expect(woken).toMatch(/>Lifetime<.*?>Stops when quiet; what is due while it sleeps is started by the Wakeup</s);
+    expect(woken).not.toContain("No connected wakeup");
   });
 });
 
 describe("a sign-in code's run", () => {
-  it("shows its input as fields, the code sealed, and the mail's body redacted, never the sealed code or the code", async () => {
+  it("shows its input as fields, the code sealed, and the mail's body redacted, never the sealed code or the code, on its page or to an api read", async () => {
     // On a database of its own, with a worker that runs the code's mail on Resend's fake.
     const mailer = withFake(resend, fakeResend());
     const sending = defineConfig({
@@ -629,6 +645,13 @@ describe("a sign-in code's run", () => {
       expect(page).not.toContain("&quot;&lt;text&gt;&quot;");
       expect(page).not.toContain(sealed);
       expect(page).not.toContain("246810");
+      // A site's api read of the run's ledger is sent no more of the sealed code than the page.
+      const read = { ...ctx, resolved: resolveConfig(sending), description: describeConfig(sending), client: runs };
+      const ledger = JSON.stringify(
+        await callApi(read, { id: "alice" }, { name: "loginCode.ledger", input: { runId } }),
+      );
+      expect(ledger).toContain(`"code":"${sealed.slice(0, 4)}"`);
+      expect(ledger).not.toContain(sealed);
     } finally {
       await runs.close();
       await started.close();

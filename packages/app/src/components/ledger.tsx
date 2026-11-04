@@ -17,7 +17,9 @@ import {
   Fact,
   Facts,
   ItemTime,
+  Json,
   ledgerTone,
+  None,
   OpName,
   plural,
   RequestedBy,
@@ -101,23 +103,29 @@ function retries(attempt: number, op: OpEntry | undefined, vendors: ConfigDescri
 }
 
 /**
- * A `login-code` run's input, as fields: to whom, and the code, sealed, as its first few
- * characters only, so the ledger never shows what a colleague could try to open. Its call's
- * input, the mail, shows open too, its body redacted (`Json`).
+ * A run's input: an object's fields as facts, a text as it is, anything else as JSON. A
+ * `login-code` run's (`sealed`) shows its code, sealed, as its first few characters only, so the
+ * page never shows what a colleague could try to open; its call's input, the mail, shows open
+ * in the ledger too, its body redacted (`Json`).
  */
-function LoginCodeInput({ input }: { input: unknown }) {
-  const fields = typeof input === "object" && input !== null ? Object.entries(input) : [];
+export function RunInput({ value, sealed = false }: { value: unknown; sealed?: boolean }) {
+  if (value === undefined) return <None />;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return <Json value={value} />;
+  const fields = Object.entries(value);
+  if (fields.length === 0) return <None>No fields.</None>;
   return (
     <Facts>
-      {fields.map(([field, value]) => (
-        <Fact key={field} label={field}>
-          {field === "code" && typeof value === "string" ? (
+      {fields.map(([key, field]) => (
+        <Fact key={key} label={key}>
+          {sealed && key === "code" && typeof field === "string" ? (
             <span>
-              sealed · <code className="text-xs">{value.slice(0, SEALED_SHOWN)}…</code>{" "}
+              sealed · <code className="text-xs">{field.slice(0, SEALED_SHOWN)}…</code>{" "}
               <span className="text-muted-foreground">codes never enter the ledger</span>
             </span>
+          ) : typeof field === "string" ? (
+            field
           ) : (
-            <code className="text-xs">{JSON.stringify(value)}</code>
+            <code className="text-xs">{JSON.stringify(field)}</code>
           )}
         </Fact>
       ))}
@@ -165,7 +173,7 @@ export const LedgerRow = memo(function LedgerRow({
           </p>
           {record.workflow === LOGIN_CODE_WORKFLOW ? (
             <Disclosure label="Input" open>
-              <LoginCodeInput input={record.input} />
+              <RunInput value={record.input} sealed />
             </Disclosure>
           ) : (
             <Expandable label="Input" value={record.input} />

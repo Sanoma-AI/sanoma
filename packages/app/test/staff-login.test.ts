@@ -168,13 +168,17 @@ describe("staffLogin", () => {
     expect(both).toContain('errorCallbackURL:"/auth/login"');
   });
 
-  it("is the page at /auth/login, and sends someone signed in on to the app", async () => {
+  it("is the page at /auth/login, and sends someone signed in and declared on to the app", async () => {
     const page = (await login.handle!(request("/auth/login")))!;
     expect(page.status).toBe(200);
     expect(await page.text()).toContain("Sign in to Acme Plumbing");
     const signedIn = (await login.handle!(request("/auth/login", { cookie: "who=ada@acme.test" })))!;
     expect(signedIn.status).toBe(302);
     expect(signedIn.headers.get("location")).toBe("/");
+    // A session of someone no longer declared is not sent on to a 403: the page again, to sign in as someone else.
+    const removed = (await login.handle!(request("/auth/login", { cookie: "who=mallory@acme.test" })))!;
+    expect(removed.status).toBe(200);
+    expect(await removed.text()).toContain("Sign in to Acme Plumbing");
   });
 
   /** The sign-in page's HTML when a GitHub sign-in came back with `?error=<error>`. */
