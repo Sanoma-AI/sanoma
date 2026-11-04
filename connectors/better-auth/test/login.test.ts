@@ -269,8 +269,8 @@ const answer = (body: unknown, status = 200) => Response.json(body, { status });
 
 describe("the login half with the company's GitHub client", () => {
   const codes = new Map<string, string>();
-  /** GitHub's side: each code it handed out, the token it is worth, and whose account that is. */
-  const github = new Map<string, { token: string; id: number; login: string; email: string }>();
+  /** GitHub's side: each code it handed out, the token it is worth, and whose account that is (its email verified unless said). */
+  const github = new Map<string, { token: string; id: number; login: string; email: string; verified?: boolean }>();
   let half: LoginHalf;
   beforeAll(async () => {
     const fetch = globalThis.fetch;
@@ -287,7 +287,9 @@ describe("the login half with the company's GitHub client", () => {
       if (url.href === "https://api.github.com/user")
         return holder ? answer({ id: holder.id, login: holder.login, name: null, email: null }) : answer({}, 401);
       if (url.href === "https://api.github.com/user/emails")
-        return holder ? answer([{ email: holder.email, primary: true, verified: true }]) : answer({}, 401);
+        return holder
+          ? answer([{ email: holder.email, primary: true, verified: holder.verified ?? true }])
+          : answer({}, 401);
       return fetch(input, init);
     });
     half = await betterAuthLogin({
@@ -335,6 +337,12 @@ describe("the login half with the company's GitHub client", () => {
     return (await half.handle(request(`/auth/better-auth/callback/github?${query}`, { cookie: cookies.join("; ") })))!;
   }
 
+  /** The visitor a GitHub sign-in's redirect back signed in, by its session cookie; null for none. */
+  async function signedInBy(back: Response) {
+    const session = back.headers.getSetCookie().find((c) => c.startsWith("better-auth.session_token="));
+    return session ? half.verify(request("/", { cookie: session.split(";")[0] })) : null;
+  }
+
   it("offers GitHub beside the password and the code", () => {
     expect(half.methods).toEqual(["password", "code", "github"]);
   });
@@ -353,6 +361,10 @@ describe("the login half with the company's GitHub client", () => {
     // The page reads it from the session, as `@login`.
     const session = (await half.handle(request("/auth/better-auth/get-session", { cookie })))!;
     expect(((await session.json()) as { user: { github?: string } }).user.github).toBe("Ada-Lovelace");
+    // Signed out, the linked GitHub account signs them in, whatever its email.
+    github.set("code-1b", { token: "gho_one_b", id: 4101, login: "Ada-Lovelace", email: "ada@users.github.test" });
+    const signIn = await viaGitHub("code-1b", undefined, "sign-in/social");
+    expect(await signedInBy(signIn)).toEqual(await half.verify(request("/", { cookie })));
   });
 
   it("links one GitHub account to one visitor only", async () => {
@@ -393,29 +405,63 @@ describe("the login half with the company's GitHub client", () => {
     expect((await half.verify(request("/", { cookie })))?.github).toBeUndefined();
   });
 
-  it("signs in with GitHub only a visitor who linked it, and makes no account for anyone else", async () => {
+  it("signs a new visitor up with GitHub, says their login and verified email, and keeps no token", async () => {
     const hopper = { token: "gho_four", id: 4104, login: "hopper", email: "hopper@users.github.test" };
     github.set("code-4", hopper);
-    const refused = await viaGitHub("code-4", undefined, "sign-in/social");
-    expect(refused.headers.get("location")).toMatch(/error=signup_disabled/);
-    expect(refused.headers.getSetCookie().some((c) => c.startsWith("better-auth.session_token="))).toBe(false);
-    // Nor does it join the account of the same email: only a link does.
-    const sameEmail = await signedIn(hopper.email);
-    github.set("code-8", { ...hopper, token: "gho_eight" });
-    const unlinked = await viaGitHub("code-8", undefined, "sign-in/social");
-    expect(unlinked.headers.get("location")).toMatch(/error=account_not_linked/);
-    // Linked, the same GitHub account signs them in.
-    github.set("code-9", { ...hopper, token: "gho_nine" });
-    await viaGitHub("code-9", sameEmail.cookie);
-    github.set("code-10", { ...hopper, token: "gho_ten" });
-    const back = await viaGitHub("code-10", undefined, "sign-in/social");
+    const back = await viaGitHub("code-4", undefined, "sign-in/social");
     expect(back.headers.get("location")).toBe("/account");
-    const session = back.headers.getSetCookie().find((c) => c.startsWith("better-auth.session_token="))!;
-    expect(await half.verify(request("/", { cookie: session.split(";")[0] }))).toEqual({
-      subject: (await half.verify(request("/", { cookie: sameEmail.cookie })))!.subject,
-      email: hopper.email,
-      github: "hopper",
+    const visitor = await signedInBy(back);
+    expect(visitor).toEqual({ subject: expect.any(String), email: hopper.email, github: "hopper" });
+    expect(await tokensOf(4104)).toEqual([{ access_token: null, refresh_token: null }]);
+    // Again, the same account.
+    github.set("code-8", { ...hopper, token: "gho_eight" });
+    const again = await viaGitHub("code-8", undefined, "sign-in/social");
+    expect(await signedInBy(again)).toEqual(visitor);
+  });
+
+  it("signs a visitor in by code and by GitHub of the same verified email into one account", async () => {
+    const turing = { token: "gho_nine", id: 4109, login: "turing", email: `${randomUUID()}@example.com` };
+    const byCode = await signedIn(turing.email);
+    github.set("code-9", turing);
+    const back = await viaGitHub("code-9", undefined, "sign-in/social");
+    expect(back.headers.get("location")).toBe("/account");
+    const { subject } = (await half.verify(request("/", { cookie: byCode.cookie })))!;
+    expect(await signedInBy(back)).toEqual({ subject, email: turing.email, github: "turing" });
+    expect(await half.verify(request("/", { cookie: byCode.cookie }))).toEqual({
+      subject,
+      email: turing.email,
+      github: "turing",
     });
+  });
+
+  it("joins no account by an email GitHub has not verified, or one the account has not", async () => {
+    // GitHub's email unverified: not the code-login visitor's account of that email.
+    const mallory = { token: "gho_ten", id: 4110, login: "mallory", email: `${randomUUID()}@example.com` };
+    const byCode = await signedIn(mallory.email);
+    github.set("code-10", { ...mallory, verified: false });
+    const refused = await viaGitHub("code-10", undefined, "sign-in/social");
+    expect(refused.headers.get("location")).toMatch(/error=account_not_linked/);
+    expect(await signedInBy(refused)).toBeNull();
+    expect((await half.verify(request("/", { cookie: byCode.cookie })))?.github).toBeUndefined();
+    // The account's email unverified (signed up by password): not that account either.
+    const { email, cookie } = await signUp(half);
+    github.set("code-11", { token: "gho_eleven", id: 4111, login: "eve", email });
+    const unproven = await viaGitHub("code-11", undefined, "sign-in/social");
+    expect(unproven.headers.get("location")).toMatch(/error=account_not_linked/);
+    expect((await half.verify(request("/", { cookie })))?.github).toBeUndefined();
+  });
+
+  it("signs a visitor up by an unverified GitHub email without saying it, until a code proves it", async () => {
+    const email = `${randomUUID()}@example.com`;
+    github.set("code-12", { token: "gho_twelve", id: 4112, login: "unproven", email, verified: false });
+    const back = await viaGitHub("code-12", undefined, "sign-in/social");
+    expect(back.headers.get("location")).toBe("/account");
+    const visitor = await signedInBy(back);
+    expect(visitor).toEqual({ subject: expect.any(String), github: "unproven" });
+    // Whoever proves the email by a code takes the account, without the GitHub account that did not.
+    const byCode = await signedIn(email);
+    expect(await half.verify(request("/", { cookie: byCode.cookie }))).toEqual({ subject: visitor!.subject, email });
+    expect(await signedInBy(back)).toBeNull();
   });
 
   it("never takes a GitHub login a visitor gives, nor a redirect off the site", async () => {

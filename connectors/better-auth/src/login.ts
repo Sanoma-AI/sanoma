@@ -39,9 +39,9 @@ interface HookContext {
 /**
  * Better Auth's login half for one public site: email and password, and an email code when the
  * app can send one (`context.sendCode`); every email may sign up. With the company's GitHub client
- * (`context.social.github`), a visitor signed in links their GitHub account
- * (`/link-social`), then may sign in with it (`/sign-in/social`, which never makes an account), and is then said to be that GitHub
- * login (`verify`'s `github`). Its tables are in schema `better_auth` on the company's database,
+ * (`context.social.github`), a visitor also signs up and in with GitHub (`/sign-in/social`, which
+ * joins the account of GitHub's verified email), or links it once signed in (`/link-social`), and
+ * is then said to be that GitHub login (`verify`'s `github`). Its tables are in schema `better_auth` on the company's database,
  * migrated here before the first site starts, its cookies signed with the app's key for it
  * (`context.key`). The site's origins are its allowed hosts (a request for another host is
  * refused) and set the cookie's `Secure` flag: an `https` origin's is.
@@ -68,14 +68,12 @@ export async function betterAuthLogin({
       plugins: sendCode ? [emailCode(sendCode)] : [],
       user: { additionalFields: GITHUB_FIELD },
       ...(github && {
-        // GitHub never makes an account, nor joins one by its email: a visitor signs up by email,
-        // links GitHub (`/link-social`), and may then sign in with it.
-        socialProviders: {
-          github: { clientId: github.clientId, clientSecret: github.clientSecret, disableSignUp: true },
-        },
-        // A visitor's GitHub email is seldom the one they signed in with. Linking still needs
-        // GitHub to have verified its email (GitHub is no trusted provider).
-        account: { accountLinking: { allowDifferentEmails: true, disableImplicitLinking: true } },
+        // GitHub signs a visitor up and in (`/sign-in/social`), and a signed-in visitor links it (`/link-social`).
+        socialProviders: { github: { clientId: github.clientId, clientSecret: github.clientSecret } },
+        // A sign-in joins the account of its email only when GitHub verified that email and the
+        // account's own is verified (GitHub stays untrusted: a trusted provider's unverified email
+        // would join it too). A link's GitHub email may differ from the visitor's, verified all the same.
+        account: { accountLinking: { allowDifferentEmails: true } },
         databaseHooks: {
           account: {
             create: { before: oneGitHub, after: noteLogin },
@@ -130,7 +128,7 @@ async function oneGitHub(account: LinkedAccount, ctx: HookContext | null): Promi
 }
 
 /**
- * Keeps a GitHub account's login on its user, once Better Auth has linked it or signed its user
+ * Keeps a GitHub account's login on its user, once Better Auth has made, linked or signed its user
  * in with it (GitHub's redirect back, `/callback/:id`), then drops the account's tokens, which
  * nothing here uses again: a GitHub App's user token reaches what the App and the person both
  * reach. The login is the provider's profile for that token, since Better Auth sets no field from
