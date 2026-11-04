@@ -48,6 +48,7 @@ import {
   getDriftReport,
   getGoLiveChoices,
   getGoLiveProgress,
+  getHostDerived,
   getHostEnforcement,
   getLastRuns,
   getNextFires,
@@ -308,6 +309,10 @@ export const appBehindQuery = (folder: string) =>
 /** What going live can choose from: read once a minute at most, as each list asks GitHub or Supabase. */
 export const goLiveChoicesQuery = () =>
   queryOptions({ queryKey: ["credentials", "go-live"], queryFn: () => getGoLiveChoices(), staleTime: 60_000 });
+
+/** What apply gives the declared host that derives: read once a minute at most, as its branch asks the repository. */
+export const hostDerivedQuery = () =>
+  queryOptions({ queryKey: ["hosting", "derived"], queryFn: () => getHostDerived(), staleTime: 60_000 });
 
 /** How far going live is: read every 2 s while a run goes on or the host is not answering yet. */
 export const goLiveProgressQuery = () =>

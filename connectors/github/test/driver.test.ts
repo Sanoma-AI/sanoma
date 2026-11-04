@@ -2,6 +2,7 @@ import { BridgeError } from "@sanoma-ai/bridge";
 import { type BridgeCall, fixturesDir, loadReplies, stateBridge } from "@sanoma-ai/bridge/fake";
 import { type Driver, DriverError, memorySecrets } from "@sanoma-ai/workflows";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { githubTf } from "../src/connector.ts";
 import { githubDriver } from "../src/driver.ts";
 import { fakeGithub } from "../src/fake.ts";
 import { github } from "../src/index.ts";
@@ -93,6 +94,11 @@ describe("githubDriver", () => {
       message: "github: repository_deploy_key sanoma:1 names no owner: write it <owner>/…",
       retryable: false,
     });
+    await expect(
+      call(driver, "repository_collaborator.plan", {
+        desired: { repository: "sanoma", username: "octocat", permission: "push" },
+      }),
+    ).rejects.toMatchObject({ message: "github: its desired's repository sanoma names no owner: write it <owner>/…" });
     // A name that is not a node id is not taken for one.
     await expect(call(driver, "repository.import", { id: "sanoma" })).rejects.toMatchObject({
       message: "github: repository sanoma names no owner: write it <owner>/…",
@@ -140,6 +146,34 @@ describe("githubDriver", () => {
     }
   });
 
+  it("imports a collaborator by `<owner>/<repository>:<username>`, accepted or invited, and none as gone", async () => {
+    // Recorded: an accepted one and none. The invitation is synthetic (sanoma-apply-test_octocat).
+    const driver = githubDriver({ bridge });
+    // Accepted: the provider finds a collaborator among the repository's, not only its invitations.
+    expect(
+      await call(driver, "repository_collaborator.import", { id: "Sanoma-AI/provider-bridge:notsaltylol" }),
+    ).toMatchObject({
+      id: "Sanoma-AI/provider-bridge:notsaltylol",
+      gone: false,
+      state: { repository: "Sanoma-AI/provider-bridge", username: "notsaltylol", permission: "admin" },
+    });
+    expect(
+      await call(driver, "repository_collaborator.import", { id: "sanoma-test/sanoma-apply-test:octocat" }),
+    ).toMatchObject({
+      state: { repository: "sanoma-test/sanoma-apply-test", permission: "push", invitation_id: "1000000201" },
+    });
+    // Neither: the provider's `not_found` (recorded).
+    expect(await call(driver, "repository_collaborator.import", { id: "Sanoma-AI/provider-bridge:octocat" })).toEqual({
+      id: "Sanoma-AI/provider-bridge:octocat",
+      gone: true,
+    });
+    expect(
+      calls()
+        .filter(([method]) => method === "import")
+        .map(([, , id]) => id),
+    ).toEqual(["provider-bridge:notsaltylol", "sanoma-apply-test:octocat", "provider-bridge:octocat"]);
+  });
+
   it("is retryable when the provider has exited, and configures it again", async () => {
     const driver = githubDriver({ bridge });
     await call(driver, "repository.import", { id: "Sanoma-AI/sanoma" });
@@ -181,6 +215,79 @@ describe("githubDriver", () => {
     await expect(call(driver, "repository.read", { ...imported, handle: "nope" })).rejects.toMatchObject({
       message: "github: repository.read was given a handle it did not make",
       retryable: false,
+    });
+  });
+});
+
+/** GitHub answering a list of a repository's deploy keys with `listed`. */
+const keys = (listed: { id: number; key: string }[]) =>
+  vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify(listed), { status: 200 }));
+
+describe("a deploy key found by its repository and key", () => {
+  // GitHub keeps a key without its comment; the identity is the key as `find` makes it, without one too.
+  const KEY = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC";
+  const identity = githubTf.resources.repository_deploy_key.find!({
+    repository: "Sanoma-AI/sanoma",
+    key: `${KEY} host@acme`,
+  } as never);
+  let bridge: ReturnType<typeof stateBridge>;
+  beforeEach(() => {
+    vi.stubEnv("GITHUB_TOKEN", "ghx_test");
+    const state = loadReplies(fixturesDir, provider);
+    state.objects["github_repository_deploy_key/sanoma:42"] = {
+      typeName: "github_repository_deploy_key",
+      state: { id: "sanoma:42", repository: "sanoma", title: "Sanoma host", key: KEY, read_only: true },
+      private: "",
+      schemaVersion: 0,
+    };
+    bridge = stateBridge(state);
+  });
+
+  it("is the key GitHub lists with that text, imported by its id", async () => {
+    expect(identity).toBe(`Sanoma-AI/sanoma:${KEY}`);
+    const fetched = keys([
+      { id: 7, key: "ssh-ed25519 AAAAC3other" },
+      { id: 42, key: KEY },
+    ]);
+    const found = await call(githubDriver({ bridge }), "repository_deploy_key.import", { id: identity });
+    expect(String(fetched.mock.calls[0]![0])).toBe("https://api.github.com/repos/Sanoma-AI/sanoma/keys?per_page=100");
+    expect(bridge.calls.find((c) => c.method === "import")).toMatchObject({ id: "sanoma:42" });
+    expect(found).toMatchObject({ gone: false, state: { id: "Sanoma-AI/sanoma:42", repository: "Sanoma-AI/sanoma" } });
+    fetched.mockRestore();
+  });
+
+  it("is none when the repository lists no such key, with no provider to ask", async () => {
+    const fetched = keys([{ id: 7, key: "ssh-ed25519 AAAAC3other" }]);
+    expect(await call(githubDriver({ bridge }), "repository_deploy_key.import", { id: identity })).toEqual({
+      id: identity,
+      gone: true,
+    });
+    expect(bridge.calls.some((c) => c.method === "import")).toBe(false);
+    fetched.mockRestore();
+  });
+
+  it("is none for a repository not made yet, so it is made after it", async () => {
+    const fetched = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => new Response(JSON.stringify({ message: "Not Found" }), { status: 404 }));
+    expect(await call(githubDriver({ bridge }), "repository_deploy_key.import", { id: identity })).toEqual({
+      id: identity,
+      gone: true,
+    });
+    fetched.mockRestore();
+  });
+
+  it("is found on the fake among its keys, with no lookup", async () => {
+    const fake = fakeGithub();
+    fake.put("repository_deploy_key", "sanoma:42", {
+      repository: "sanoma",
+      title: "Sanoma host",
+      key: KEY,
+      read_only: true,
+    });
+    expect(await call(fake.driver, "repository_deploy_key.import", { id: identity })).toMatchObject({
+      gone: false,
+      state: { id: "Sanoma-AI/sanoma:42" },
     });
   });
 });
@@ -231,6 +338,27 @@ describe("fakeGithub", () => {
     fake.put("repository", "fresh-start", { description: "New" });
     const bare = await call(fake.driver, "repository.import", { id: "Sanoma-AI/fresh-start" });
     expect(bare).toMatchObject({ gone: false, state: { id: "fresh-start", description: "New", full_name: null } });
+  });
+
+  it("plans a collaborator's new permission or user as a replace, and diff suppression in place", async () => {
+    const fake = fakeGithub();
+    const desired = { repository: "Sanoma-AI/provider-bridge", username: "notsaltylol", permission: "admin" };
+    const found = await call(fake.driver, "repository_collaborator.import", {
+      id: `${desired.repository}:notsaltylol`,
+    });
+    const plan = (change: object) =>
+      call(fake.driver, "repository_collaborator.plan", { ...found, desired: { ...desired, ...change } });
+    expect(await plan({})).toMatchObject({ action: "none" });
+    expect(await plan({ permission: "push" })).toMatchObject({ action: "replace", replace: ["permission"] });
+    expect(await plan({ username: "octocat" })).toMatchObject({ action: "replace", replace: ["username"] });
+    expect(await plan({ permission_diff_suppression: true })).toMatchObject({ action: "update", replace: [] });
+    const updated = await call(fake.driver, "repository_collaborator.update", {
+      ...found,
+      desired: { ...desired, permission_diff_suppression: true },
+    });
+    expect(updated).toMatchObject({ id: found.id, state: { permission_diff_suppression: true } });
+    expect(await call(fake.driver, "repository_collaborator.delete", updated)).toEqual({ id: found.id, gone: true });
+    expect(await call(fake.driver, "repository_collaborator.read", found)).toEqual({ id: found.id, gone: true });
   });
 
   it("makes a fake that holds resources of its own each time, as each sandbox run's does", async () => {

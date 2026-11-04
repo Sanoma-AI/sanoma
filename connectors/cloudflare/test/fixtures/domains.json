@@ -249,6 +249,36 @@
   },
   {
     "method": "GET",
+    "path": "/__sanoma/sites-bundle",
+    "status": 404,
+    "body": {
+      "error": "no public site without a login has a domain"
+    },
+    "headers": {
+      "x-sanoma-sites-bundle": "1"
+    }
+  },
+  {
+    "method": "PUT",
+    "path": "/client/v4/accounts/0123456789abcdef0123456789abcdef/workers/scripts/sanoma-company",
+    "status": 200,
+    "body": {
+      "success": true,
+      "errors": [],
+      "messages": [],
+      "result": {
+        "id": "sanoma-company",
+        "etag": "9b1e8f2c",
+        "created_on": "2026-10-26T12:00:00.000000Z",
+        "modified_on": "2026-10-26T12:00:00.000000Z",
+        "compatibility_date": "2026-10-01",
+        "has_modules": true,
+        "usage_model": "standard"
+      }
+    }
+  },
+  {
+    "method": "GET",
     "path": "/client/v4/accounts/0123456789abcdef0123456789abcdef/workers/scripts/sanoma-company/settings",
     "status": 200,
     "body": {

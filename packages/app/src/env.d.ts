@@ -26,3 +26,19 @@ declare module "virtual:sanoma/icons" {
   const icons: ReadonlyMap<string, import("lucide-react").LucideIcon>;
   export default icons;
 }
+
+/**
+ * The sites bundle's company, as the Worker's build makes it (`workerModule` in `build.ts`): its
+ * config, root, description (each site's domain set), content as published, the sites it serves,
+ * the root's people and policies, and Cedar's web build, initialized.
+ */
+declare module "virtual:sanoma/worker" {
+  export const config: import("@sanoma-ai/workflows").SanomaConfig;
+  export const root: string;
+  /** The sites it serves, as the description has them: public, on a domain, with no login. */
+  export const served: import("@sanoma-ai/workflows/describe").SiteEntry[];
+  export const snapshot: import("@sanoma-ai/workflows").RootSnapshot;
+  export const description: import("@sanoma-ai/workflows/describe").ConfigDescription;
+  export const published: import("./content-files.ts").Published;
+  export const cedar: import("@sanoma-ai/workflows").CedarWasm;
+}

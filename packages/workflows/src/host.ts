@@ -29,15 +29,33 @@ export interface HostCapabilities {
 /** What a host's state says of it: where the app answers, which commit it runs, and whether it is up. */
 export interface HostOutputs {
   url: string;
+  /**
+   * Where a wakeup (and a check of its process) reaches it, `url` when left out: the vendor's own
+   * URL of a host whose `url` may be its `hostname`, so a wake never depends on a custom domain's DNS and certificate, and a
+   * hostname declared or dropped leaves its wakeup as it was. Apply gives a wakeup this one.
+   */
+  wakeUrl?: string;
   /** The commit it runs, when its state says. */
   revision?: string;
   healthy: boolean;
 }
 
+/** Where a wakeup, and a check of the host's own process, reaches it: its `wakeUrl`, else its `url`. */
+export const wakeUrlOf = (outputs: HostOutputs): string => outputs.wakeUrl ?? outputs.url;
+
 /**
  * A resource type's `host`: the fields it takes the runtime's inputs in, by dotted path into its
  * declared fields, and how its state reads as `HostOutputs`. A host is drifted when
  * `outputs(state).revision` differs from what `sanoma.source.resolve` says `ref` is now.
+ *
+ * A host that `derives` (`cloudflare.host`, `cloud.host`) is declared with the decisions only: its
+ * name, its `hostname` and the `database` it runs on. Apply fills the rest before it plans
+ * (`deriveHosts`): `image` from the installed `sanoma`, `source` and `ref` from the repository the
+ * app runs from and its default branch (each declarable as an override), `secrets` (markers only,
+ * never a value) and `domains` from the decisions, the config and the sites, which a data file may
+ * not declare; the port is the image's (`RUNTIME_PORT`). One that does not derive is declared
+ * whole, its `secrets` and `port` named in its data file (`docker.container`, the deprecated
+ * `cloudflare.container`).
  */
 export interface HostSpec {
   capabilities: HostCapabilities;
@@ -48,13 +66,39 @@ export interface HostSpec {
     ref: string;
     /**
      * The secrets it passes the runtime (`SANOMA_DATABASE_URL`, `SANOMA_SECRETS_KEY`): a write-only
-     * field. Absent for a host that binds its own bootstrap (`bindsBootstrap`).
+     * field. Absent for a host that binds its own bootstrap (`bindsBootstrap`). A host that derives
+     * has it filled by apply, never declared.
      */
     secrets?: string;
-    /** The port the app listens on. */
-    port: string;
-    /** A public site's domain, by site name: the app serves each site at the root of its domain (`SANOMA_DOMAINS`). */
+    /** The port the app listens on, for a host that does not derive: one that does runs the image's, `RUNTIME_PORT`. */
+    port?: string;
+    /**
+     * A public site's domain, by site name: the app serves each site at the root of its domain
+     * (`SANOMA_DOMAINS`). A host that derives has it filled from the sites' `domain`, never declared.
+     */
     domains?: string;
+    /**
+     * The hostname the app is served at. A host with one reports `url` as `https://<hostname>` (its
+     * vendor's URL otherwise), so the links made from it use the stable name, and its vendor's URL
+     * as `wakeUrl`, where its wakeup reaches it. It is never one of `domains`' values.
+     */
+    hostname?: string;
+    /**
+     * The runtime image, for a host that derives: the installed `sanoma`'s (`runtimeImage`) when a
+     * data file leaves it out, an override otherwise.
+     */
+    image?: string;
+    /**
+     * A reference to the declared database the host runs the company on (`database: store`), for a
+     * host that derives: apply gives the host that database's URL, as `SANOMA_DATABASE_URL`.
+     */
+    database?: string;
+    /**
+     * The host's name, for a host that derives: the repository's name (`owner/<name>`, made a
+     * name of lower-case letters, digits and dashes) when a data file leaves it out. Its type's
+     * `find` gives `UNNAMED` until apply fills it.
+     */
+    name?: string;
   };
   /**
    * The field apply fills with the commit `ref` resolves to, before it plans: hidden, as a data
@@ -66,8 +110,25 @@ export interface HostSpec {
    * tokens) and binds it itself, as Sanoma Cloud's does: such a type takes no `secrets`.
    */
   bindsBootstrap?: boolean;
+  /**
+   * True for a host whose declaration says only the decisions (see above): apply derives its
+   * image, source, ref, secrets and domains, and a data file may not declare `secrets` or `domains`.
+   */
+  derives?: boolean;
   outputs: (state: Record<string, unknown>) => HostOutputs;
 }
+
+/** The runtime image a host runs, tagged with the installed `sanoma`'s version: GitHub's registry. */
+export const RUNTIME_IMAGE = "ghcr.io/sanoma-ai/runtime";
+
+/** The runtime image of `sanoma` at `version`: `ghcr.io/sanoma-ai/runtime:<version>`. */
+export const runtimeImage = (version: string): string => `${RUNTIME_IMAGE}:${version}`;
+
+/** A deriving host's identity before apply names it after its repository (`HostSpec.inputs.name`): never sent to a vendor. */
+export const UNNAMED = "(the repository's name)";
+
+/** The port the runtime image's app listens on (its `PORT`): a host that derives runs it there. */
+export const RUNTIME_PORT = 3000;
 
 const LIFETIMES: readonly HostLifetime[] = ["long-lived", "stops-when-quiet"];
 
@@ -93,7 +154,9 @@ function unwrap(schema: z.ZodType): z.ZodType {
  * Throws what is wrong with a resource type's `host`: an input or `revision` that names no field,
  * `secrets` that is not write-only, missing (unless the host binds its own bootstrap) or given
  * beside `bindsBootstrap`, a `revision` that is write-only, an unknown lifetime, a type apply
- * cannot change (not `writable`).
+ * cannot change (not `writable`); for a host that does not derive, no `port`, or an `image`, a
+ * `database` or a `name` (inputs of a host that derives); for one that does, a `port` (it runs the image's),
+ * or a `database` that is not write-only (it stands for a URL, and is never compared).
  */
 export function checkHost(
   what: string,
@@ -116,7 +179,55 @@ export function checkHost(
   } else if (secrets === undefined || !type.fields.writeOnly.includes(secrets)) {
     problems.push("inputs.secrets must be a write-only field, unless the host binds its own bootstrap");
   }
+  if (host.derives) {
+    if (host.inputs?.port !== undefined)
+      problems.push("inputs.port is not taken by a host that derives: it runs the image's");
+    const database = host.inputs?.database;
+    if (database !== undefined && !type.fields.writeOnly.includes(database)) {
+      problems.push("inputs.database must be a write-only field: it stands for the database's URL, never compared");
+    }
+  } else {
+    if (host.inputs?.port === undefined) problems.push("inputs.port names the port, unless the host derives");
+    for (const input of ["image", "database", "name"] as const) {
+      if (host.inputs?.[input] !== undefined) problems.push(`inputs.${input} is taken by a host that derives only`);
+    }
+  }
   if (type.fields.writeOnly.includes(host.revision)) problems.push("revision must not be write-only: drift reads it");
   if (typeof host.outputs !== "function") problems.push("outputs must be a function of the state");
   if (problems.length) throw new Error(`${what}: its host: ${problems.join("; ")}`);
+}
+
+/** The id apply gives the deploy key it declares for the host `hostId`: `resources/sanoma/infra.ts#host.sourceKey`. */
+export const sourceKeyId = (hostId: string) => `${hostId}.sourceKey`;
+
+/**
+ * The lockfile keys that are a deriving host's deploy key (`sourceKeyId`) among `resources`: never
+ * an orphan, whether or not apply declares the key this read (before its source key is stored, or
+ * where the store does not hold it), so apply never deletes the key a host clones with.
+ */
+export function sourceKeyIds(
+  resources: readonly { id: string; vendor: string; type: string }[],
+  types: ReadonlyMap<string, { host?: HostSpec }>,
+): Set<string> {
+  return new Set(
+    resources.filter((r) => types.get(`${r.vendor}.${r.type}`)?.host?.derives).map((r) => sourceKeyId(r.id)),
+  );
+}
+
+/**
+ * For a host that derives its domains (`inputs.domains`) from the sites: the domains its state
+ * says are attached, `<domain> (<site>)`, when no site declares one, which a change would detach
+ * (a data file of before declared them on the host). Empty otherwise: once a site declares a
+ * domain, the declared ones are attached and the dropped ones detached.
+ */
+export function detaching(host: HostSpec, desired: Record<string, unknown>, state: Record<string, unknown>): string[] {
+  const path = host.inputs.domains;
+  if (!host.derives || path === undefined) return [];
+  const at = (value: Record<string, unknown>) =>
+    path.split(".").reduce<unknown>((o, key) => (o as Record<string, unknown> | null | undefined)?.[key], value);
+  const declared = at(desired);
+  if (declared && typeof declared === "object" && Object.keys(declared).length) return [];
+  const attached = at(state);
+  if (!attached || typeof attached !== "object") return [];
+  return Object.entries(attached as Record<string, unknown>).map(([site, domain]) => `${String(domain)} (${site})`);
 }

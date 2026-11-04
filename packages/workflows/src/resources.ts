@@ -9,6 +9,7 @@ import { APPS_DIR, COLLECTIONS_FILE, filesUnder, kindDirs, relPath } from "./pat
 import { peopleConnector, sanoma } from "./person.ts";
 import { wakeupOps } from "./wakeup-type.ts";
 import { DECLARED, type Declared, isDeclared, isObject, type Resource, resourceTypesOf } from "./resource.ts";
+import { rootSnapshot } from "./bundled.ts";
 import { Principal } from "./define.ts";
 import { NotAdmittedError } from "./errors.ts";
 import {
@@ -89,10 +90,12 @@ export const peopleSources = (root: string): ReadonlySet<string> => filesRead(pe
  * Only the files that may declare them (`mayDeclarePeople`) are loaded, with the people's and the
  * wakeup's constructors, which the same `sanoma` declares; loaded again only when one of them
  * changed (by its size and time), so a new colleague is admitted once their file is saved, and a
- * request costs a `stat` per file.
+ * request costs a `stat` per file. A root with a bundled snapshot (`useRootSnapshot`) answers its people.
  */
 export function readPeople(root: string | undefined): DeclaredPeople {
   if (root === undefined) return { people: [], problems: [] };
+  const bundled = rootSnapshot(root);
+  if (bundled) return bundled.people;
   const loaded = peopleLoad(root);
   const cached = peopleRead.get(loaded);
   if (cached) return cached;
@@ -356,7 +359,7 @@ function declarationsOf(
     const why =
       value.connection !== undefined && binding.connection?.$connection !== value.connection.$connection
         ? `${id} changes the connection of a bound resource: explicitly unbind it before selecting another account`
-        : binding.type !== value[DECLARED]
+        : binding.type !== value[DECLARED] && !types.get(value[DECLARED])?.formerly?.includes(binding.type)
           ? `${id} is bound to a ${binding.type} in ${LOCKFILE}, but declares a ${value[DECLARED]}`
           : first !== undefined
             ? `${id} is bound to the same ${object} as ${first} in ${LOCKFILE}: bind each object once`

@@ -226,6 +226,19 @@ export function lazyPool(databaseUrl: string, what: string): LazyPool {
 /** Each database prepared, or being prepared, by its URL. A failed preparation is forgotten. */
 const prepared = new Map<string, Promise<void>>();
 
+/** What prepares the databases instead of this process (`checkPreparedOnly`), which a refusal names. */
+let preparedBy: string | undefined;
+
+/**
+ * From now on, `prepareDatabase` makes nothing: it only checks that DBOS's tables and the
+ * runtime's are there, and refuses, naming `by`, what prepares them, when they are not. For a
+ * process beside the one that prepares the database, which must never migrate it: the Cloudflare
+ * host's Worker, whose container prepares it at its start.
+ */
+export function checkPreparedOnly(by: string): void {
+  preparedBy = by;
+}
+
 /**
  * Makes the database at `databaseUrl` ready for the runtime, once per process and URL: the
  * database itself and DBOS's tables when they are not there yet (as a worker's launch makes
@@ -237,7 +250,8 @@ const prepared = new Map<string, Promise<void>>();
 export function prepareDatabase(databaseUrl: string): Promise<void> {
   let preparing = prepared.get(databaseUrl);
   if (!preparing) {
-    preparing = prepare(databaseUrl).catch((err: unknown) => {
+    const made = preparedBy === undefined ? prepare(databaseUrl) : checkPrepared(databaseUrl, preparedBy);
+    preparing = made.catch((err: unknown) => {
       if (prepared.get(databaseUrl) === preparing) prepared.delete(databaseUrl);
       throw err;
     });
@@ -263,6 +277,26 @@ async function prepare(databaseUrl: string): Promise<void> {
     await guardIdleTransactions(conn);
   } finally {
     // Ending the session releases the lock; a failure to end it must not hide the preparation's.
+    await conn.end().catch(() => undefined);
+  }
+}
+
+/** The last of the runtime's tables a preparation makes (`TABLES`), so its being there says they all are. */
+const LAST_TABLE = API_TOKENS_TABLE;
+
+/** Refuses when the database at `databaseUrl` lacks DBOS's tables or the runtime's: `by` makes them, not this process. */
+async function checkPrepared(databaseUrl: string, by: string): Promise<void> {
+  const conn = await connect(databaseUrl);
+  try {
+    const { rows } = await conn.query<{ dbos: boolean; ours: boolean }>(
+      `SELECT to_regclass('dbos.workflow_status') IS NOT NULL AS dbos, to_regclass('${LAST_TABLE}') IS NOT NULL AS ours`,
+    );
+    const { dbos, ours } = rows[0]!;
+    if (!dbos || !ours) {
+      const missing = [...(dbos ? [] : ["DBOS's"]), ...(ours ? [] : ["Sanoma's"])].join(" and ");
+      throw new Error(`the database has no ${missing} tables yet: ${by} makes them, and this process never does`);
+    }
+  } finally {
     await conn.end().catch(() => undefined);
   }
 }

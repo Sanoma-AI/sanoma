@@ -1,5 +1,6 @@
 import { createMiddleware } from "@tanstack/react-start";
 import { ApiError } from "./api.ts";
+import { PUBLIC_FNS } from "./public-fns.ts";
 import type { AppContext } from "./context.ts";
 import { type ActorContext, requireActor } from "./server/core.ts";
 
@@ -15,9 +16,6 @@ import { type ActorContext, requireActor } from "./server/core.ts";
 export const withPrincipal = createMiddleware({ type: "function" }).server(async ({ context, next }) =>
   next({ context: { principal: await requireActor(context as unknown as ActorContext) } }),
 );
-
-/** The server functions a public site's host answers: a site's `api`, and who is asking. */
-export const PUBLIC_FNS: ReadonlySet<string> = new Set(["callFn", "getActor"]);
 
 /** On a public site's host (`AppContext.site`) only `PUBLIC_FNS` answer: any other is a 404, as if it were not there. */
 export const publicOnly = createMiddleware({ type: "function" }).server(({ next, context, serverFnMeta }) => {

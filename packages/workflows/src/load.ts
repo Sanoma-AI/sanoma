@@ -89,7 +89,8 @@ const registry = ((globalThis as Record<symbol, unknown>)[Symbol.for("sanoma.loa
   made: new WeakMap(),
 }) as Registry;
 
-const require = createRequire(import.meta.url);
+/** This module's `require`, made on first use: a bundle with no file URL (the Cloudflare host's Worker) never loads a file. */
+let require: NodeJS.Require | undefined;
 
 /** Where `value` was made, when a company file made it with a constructor the loader served. */
 export const madeOf = (value: unknown): Made | undefined =>
@@ -205,7 +206,9 @@ function loadOne(gen: Generation, file: string, rel: string): Loaded {
   if (done) return done;
   let loaded: Loaded;
   try {
-    const { ns } = require(`${SCHEME}${gen.id}/${pathToFileURL(file).href}`) as { ns: Record<string, unknown> };
+    const { ns } = (require ??= createRequire(import.meta.url))(`${SCHEME}${gen.id}/${pathToFileURL(file).href}`) as {
+      ns: Record<string, unknown>;
+    };
     loaded = { exports: Object.entries(ns) };
   } catch (error) {
     // A file that imports one that threw throws the same object: reported once, where it was thrown.

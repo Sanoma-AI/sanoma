@@ -59,6 +59,7 @@ export {
   type ResourceFields,
   type ResourceOps,
   type ResourceSpec,
+  valueAt,
   withoutWriteOnly,
 } from "./resource.ts";
 export { type DnsRecord, dnsRecord } from "./dns.ts";
@@ -67,6 +68,7 @@ export {
   defineConfig,
   envWakeup,
   type Login,
+  readRootSnapshot,
   resolveConfig,
   resolveDatabaseUrl,
   type ResolvedConfig,
@@ -189,6 +191,7 @@ export {
   type Draft,
   draftBranch,
   type DraftDiff,
+  defaultBranch,
   draftOf,
   type HostEnforcement,
   type PullRequest,
@@ -203,6 +206,23 @@ export {
   type SourceHost,
 } from "./source.ts";
 export type { HostCapabilities, HostLifetime, HostOutputs, HostSpec } from "./host.ts";
+export { RUNTIME_IMAGE, RUNTIME_PORT, runtimeImage, sourceKeyId, UNNAMED, wakeUrlOf } from "./host.ts";
+export {
+  cloneUrl,
+  deriveHosts,
+  type HostFacts,
+  hostFacts,
+  DEPLOY_KEY_TITLE,
+  DEPLOY_KEY_TYPE,
+  GITHUB_APP,
+  githubRepository,
+  HOST_SIGNING_KEY,
+  installedSanoma,
+  originUrl,
+  SOURCE_KEY,
+  sourceRepository,
+  wokenBy,
+} from "./host-derive.ts";
 export {
   checkDatabase,
   type DatabaseCapabilities,
@@ -241,6 +261,11 @@ export {
 } from "./client.ts";
 // A raw DBOS client on the runtime's database, for tests and tools that read DBOS directly.
 export { dbosClient } from "./db.ts";
+// The runtime bundled where a company's files are not (the Cloudflare host's Worker): the root's
+// people, policies and app name as data, Cedar's web build, and a database it only checks.
+export { type RootSnapshot, useRootSnapshot } from "./bundled.ts";
+export { checkPreparedOnly } from "./db.ts";
+export { type CedarWasm, useCedarWasm } from "./schema.ts";
 // Also at `@sanoma-ai/workflows/shared`, which a browser bundle can import.
 export {
   AGENTS,
@@ -319,7 +344,7 @@ export {
 export { checkSecretStore, type SecretStoreCheck } from "./secret-store-check.ts";
 
 export { postgresSecretStore } from "./credentials.ts";
-export { deploymentKey, signingKeyFor } from "./deployment-key.ts";
+export { deploymentKey, keyBytes, signingKeyFor } from "./deployment-key.ts";
 
 export {
   defineConnection,

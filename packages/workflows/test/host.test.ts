@@ -7,6 +7,7 @@ import { tree } from "./tree.ts";
 import { secret } from "../src/secret.ts";
 import { fakeSourceDriver } from "../src/source.ts";
 import {
+  defaultBranch,
   defineConnector,
   defineResource,
   DRIFT_WORKFLOW,
@@ -64,6 +65,11 @@ describe("a host type", () => {
       { inputs: { ...host.inputs, domains: "domains" } },
       /domains names no field \(domains\)/,
     ],
+    [
+      "a hostname that names no field",
+      { inputs: { ...host.inputs, hostname: "hostname" } },
+      /hostname names no field \(hostname\)/,
+    ],
     ["secrets that are not write-only", { writeOnly: [] }, /inputs\.secrets must be a write-only field/],
     [
       "no secrets, when it does not bind its own bootstrap",
@@ -100,8 +106,9 @@ describe("a host type", () => {
     ).toThrow(/one of sanoma's own: only a host's secrets may/);
   });
 
-  it("may take a public site's domains in a field of its own", () => {
+  it("may take a public site's domains and the app's hostname in fields of its own", () => {
     expect(hostOf({ inputs: { ...host.inputs, domains: "sites" } }).host?.inputs.domains).toBe("sites");
+    expect(hostOf({ inputs: { ...host.inputs, hostname: "name" } }).host?.inputs.hostname).toBe("name");
   });
 
   it("is described with a problem at its declaration for each of its domains that names no public site", () => {
@@ -175,6 +182,63 @@ describe("a host type", () => {
     ]);
   });
 
+  it("is described with a problem at its declaration when its hostname is a site's domain too", () => {
+    const service = hostOf({ inputs: { ...host.inputs, domains: "sites", hostname: "name" } });
+    const acme = defineConnector("acme", { service }, { title: "Acme", package: "@acme/connector" });
+    const problems = (hostname: string) => {
+      const root = tree(`hostname-${hostname}`, {
+        "resources/infra.ts": [
+          'import { acme } from "@acme/connector/resources";',
+          `export const host = acme.service({ name: "${hostname}", repo: { url: "u", branch: "main" }, sites: { www: "sanoma.example" } });`,
+          "",
+        ].join("\n"),
+        "sites/www/site.ts":
+          'import { defineSite } from "sanoma/site";\n\nexport default defineSite({ public: true });\n',
+        "sites/www/routes/index.tsx": 'import { createFileRoute } from "@tanstack/react-router";\n',
+      });
+      return describeConfig({ workflows: [], connectors: [acme], root }).problems;
+    };
+    expect(problems("Sanoma.example")).toEqual([
+      {
+        file: "resources/infra.ts",
+        export: "host",
+        message: "Sanoma.example is the app's hostname and the domain of www",
+      },
+    ]);
+    expect(problems("app.sanoma.example")).toEqual([]);
+  });
+
+  it("is described with a problem at each host whose hostname another host serves too", () => {
+    const service = hostOf({ inputs: { ...host.inputs, domains: "sites", hostname: "name" } });
+    const acme = defineConnector("acme", { service }, { title: "Acme", package: "@acme/connector" });
+    const root = tree("hostname-two-hosts", {
+      "resources/infra.ts": [
+        'import { acme } from "@acme/connector/resources";',
+        'export const prod = acme.service({ name: "app.sanoma.example", repo: { url: "u", branch: "main" } });',
+        'export const staging = acme.service({ name: "App.sanoma.example", repo: { url: "u", branch: "main" } });',
+        'export const site = acme.service({ name: "other.sanoma.example", repo: { url: "u", branch: "main" }, sites: { www: "app.sanoma.example" } });',
+        "",
+      ].join("\n"),
+      "sites/www/site.ts":
+        'import { defineSite } from "sanoma/site";\n\nexport default defineSite({ public: true });\n',
+      "sites/www/routes/index.tsx": 'import { createFileRoute } from "@tanstack/react-router";\n',
+    });
+    expect(describeConfig({ workflows: [], connectors: [acme], root }).problems).toEqual([
+      {
+        file: "resources/infra.ts",
+        export: "prod",
+        message:
+          "app.sanoma.example is the app's hostname here and is served by resources/infra.ts#staging, resources/infra.ts#site too",
+      },
+      {
+        file: "resources/infra.ts",
+        export: "staging",
+        message:
+          "App.sanoma.example is the app's hostname here and is served by resources/infra.ts#prod, resources/infra.ts#site too",
+      },
+    ]);
+  });
+
   it("takes sanoma's own secrets in its secrets map, and no other type does", () => {
     const service = hostOf({});
     const env = { SANOMA_DATABASE_URL: secret("SANOMA_DATABASE_URL_STORE"), TOKEN: secret("TOKEN") };
@@ -215,12 +279,20 @@ describe("sanoma.source.resolve", () => {
     expect(await resolveRevision(repo.url, first)).toBe(first);
   });
 
-  it("has a fake for sandbox runs: a commit id is itself, any other ref the SHA-1 of the URL and the ref", async () => {
-    const resolve = (ref: string) =>
-      fakeSourceDriver.ops["source.resolve"]!({ url: repo.url, ref }, {} as never) as Promise<{ revision: string }>;
+  it("has a fake for sandbox runs: a commit id is itself, any other ref the SHA-1 of the URL and the ref, the default branch main", async () => {
+    const resolve = (ref?: string) =>
+      fakeSourceDriver.ops["source.resolve"]!({ url: repo.url, ...(ref && { ref }) }, {} as never) as Promise<{
+        revision: string;
+      }>;
     const commit = "a".repeat(40);
-    expect(await resolve(commit)).toEqual({ revision: commit });
-    expect(await resolve("main")).toEqual({ revision: createHash("sha1").update(`${repo.url}#main`).digest("hex") });
+    const main = createHash("sha1").update(`${repo.url}#main`).digest("hex");
+    expect(await resolve(commit)).toEqual({ revision: commit, ref: commit });
+    expect(await resolve("main")).toEqual({ revision: main, ref: "main" });
+    expect(await resolve()).toEqual({ revision: main, ref: "main" });
+  });
+
+  it("resolves a repository's default branch, and the commit it names", async () => {
+    expect(await defaultBranch(repo.url)).toEqual({ revision: await resolveRevision(repo.url, "HEAD"), ref: "main" });
   });
 
   it("refuses a ref the repository does not have, for good, and a repository it cannot read, to retry", async () => {

@@ -1,5 +1,5 @@
 import { type Driver, type DriverFn, DriverError } from "@sanoma-ai/workflows";
-import { githubTf } from "./connector.ts";
+import { githubTf, isKeyIdentity } from "./connector.ts";
 
 /**
  * The node ids a binding keeps that the provider cannot import by, by type: a repository's
@@ -15,15 +15,20 @@ const NODE: Readonly<Record<string, RegExp>> = {
 const isNode = (type: string, id: string, live: boolean) =>
   type in NODE && (NODE[type]!.test(id) || (!live && !id.includes("/")));
 
-/** A node id resolved: its repository's owner, and the provider's import id; undefined when GitHub has no such node. */
+/**
+ * A node id (or a deploy key's identity, `isKeyIdentity`) resolved: its repository's owner, and
+ * the provider's import id; undefined when GitHub has no such node (or key).
+ */
 export type Resolve = (type: string, id: string) => Promise<{ owner: string; id: string } | undefined>;
 
 /**
  * The fields that hold `<owner>/<…>` in a type's shape and the provider's name without its owner:
- * a deploy key's repository and its `<repository>:<key id>`, a team membership's `<team>:<user>`.
+ * a deploy key's and a collaborator's repository and `<repository>:<…>` id, a team membership's
+ * `<team>:<user>`.
  */
 const QUALIFIED: Readonly<Record<string, readonly string[]>> = {
   repository_deploy_key: ["id", "repository"],
+  repository_collaborator: ["id", "repository"],
   team_membership: ["id"],
 };
 /** The types whose shape has the `owner` field. */
@@ -93,7 +98,15 @@ export function owned(driverFor: (owner: string | undefined) => Driver, resolve?
         // A node id passed on as it is: one GitHub does not know, one the provider reads the state
         // that comes with it by (which names the owner, so no lookup), or any given to the fake.
         let node: string | undefined;
-        if (given.id !== undefined) {
+        // A deploy key's identity is resolved to its id by its key text (the fake finds it by its own).
+        const keyed = type === "repository_deploy_key" && given.id !== undefined && isKeyIdentity(given.id);
+        if (given.id !== undefined && keyed && resolve) {
+          const found = await resolve(type, given.id);
+          if (!found)
+            return op === "plan" ? { action: "none", unknown: [], replace: [] } : { id: given.id, gone: true };
+          note(found.owner);
+          sent.id = found.id;
+        } else if (given.id !== undefined) {
           if (!isNode(type, given.id, resolve !== undefined)) sent.id = bare(given.id, type);
           else if (owner !== undefined && given.state?.id != null) node = given.id;
           else {

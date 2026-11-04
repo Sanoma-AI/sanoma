@@ -39,8 +39,10 @@ import {
   type PeopleResource,
   principalOf,
   problemLine,
+  siteAtHostname,
 } from "./shared.ts";
-import { readSites, type SiteEntry } from "./sites.ts";
+import { readSites, type SiteEntry, siteDomains } from "./sites.ts";
+import { sourceKeyIds } from "./host.ts";
 
 // `@sanoma-ai/workflows/describe`: what a UI renders from, apart from the main entry.
 // What `describeConfig` answers, as zod schemas and the types they infer (`./description`).
@@ -84,7 +86,7 @@ export {
 // The apps under `apps/`, with what their `app.ts` declares.
 export { crossAppImports, readApps } from "./apps.ts";
 // What the sites call, read from their source: a workflow's Used by.
-export { readSites, siteContentPages, siteIcons, siteLocales, sitesUnder } from "./sites.ts";
+export { readSites, siteContentPages, siteDomains, siteIcons, siteLocales, sitesUnder } from "./sites.ts";
 // The generated SDK, `.sanoma/api.ts`: a site's `api` typed from this description.
 export { API_FILE, generateApi, writeApi, writeGenerated } from "./sdk.ts";
 // The Cedar schema, `.sanoma/schema.cedarschema`: what a company's policies are validated and decided against.
@@ -192,6 +194,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     .toSorted((a, b) => a.id.localeCompare(b.id));
 
   const dataFiles = loadDataFiles(resolved.root, connectorsOf(config), resources);
+  const sourceKeys = sourceKeyIds(dataFiles.resources, resources);
   const declared = new Map(dataFiles.collections.map((d) => [d.name, d]));
   const collections: CollectionEntry[] = [...resolved.collections.values()]
     .map((c) => ({
@@ -288,12 +291,18 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
     collections,
     // An app's people are refused (`readPeople`), so the grid and the People page never show them.
     resources: dataFiles.resources.filter((r) => !inAppPeople(r)),
-    orphans: dataFiles.orphans,
+    // A host's deploy key, which apply declares, is no orphan.
+    orphans: dataFiles.orphans.filter((o) => !sourceKeys.has(o.key)),
     problems: [
       ...dataFiles.problems,
       ...appProblems,
       ...appClashes(apps, collections, sites),
-      ...domainProblems(dataFiles.resources, resources, sites),
+      ...domainProblems(
+        dataFiles.resources,
+        resources,
+        sites,
+        resolved.root === undefined ? {} : siteDomains(resolved.root),
+      ),
       ...loginProblems(resolved, dataFiles.resources),
     ],
     apps,
@@ -360,20 +369,33 @@ function appClashes(
 }
 
 /**
- * Each site a host's `domains` (its type's `host.inputs.domains`) names that is not a public
- * site, and each domain it gives more than one site, at the host's declaration: the app serves
- * only a public site at a domain, and one site at each.
+ * Each site a host's `domains` (its type's `host.inputs.domains`; for a host that derives, the
+ * public sites' own, `declaredDomains`) names that is not a public site, each domain it gives more
+ * than one site, and a domain that is the host's `hostname` too, or another host's hostname or
+ * domain, at the host's declaration: the app serves only a public site at a domain, one site at
+ * each, and itself at another, and one host holds each.
  */
 function domainProblems(
   declared: readonly DeclaredResource[],
   types: ReadonlyMap<string, Resource>,
   sites: readonly SiteEntry[],
+  declaredDomains: Readonly<Record<string, string>>,
 ): ResourceProblem[] {
   const isPublic = new Set(sites.filter((site) => site.public).map((site) => site.name));
   const problems: ResourceProblem[] = [];
+  // Each hostname a host serves the app at, and each host's domains, lowercased: one host attaches each.
+  const hostnames: [string, DeclaredResource][] = [];
+  const held = new Map<string, Set<DeclaredResource>>();
+  const hold = (name: string, resource: DeclaredResource) =>
+    held.set(name.toLowerCase(), (held.get(name.toLowerCase()) ?? new Set()).add(resource));
   for (const resource of declared) {
-    const path = types.get(`${resource.vendor}.${resource.type}`)?.host?.inputs.domains;
-    const domains = (path === undefined ? {} : (valueAt(resource.desired, path) ?? {})) as Record<string, unknown>;
+    const host = types.get(`${resource.vendor}.${resource.type}`)?.host;
+    const inputs = host?.inputs;
+    const path = inputs?.domains;
+    const domains = (
+      path === undefined ? {} : host?.derives ? declaredDomains : (valueAt(resource.desired, path) ?? {})
+    ) as Record<string, unknown>;
+    const hostname = inputs?.hostname === undefined ? undefined : valueAt(resource.desired, inputs.hostname);
     const messages = Object.keys(domains)
       .filter((name) => !isPublic.has(name))
       .map((name) => `domains names "${name}", which is not a public site (defineSite({ public: true }))`);
@@ -385,7 +407,20 @@ function domainProblems(
       const others = `${names.length === 2 ? "both " : ""}${names.slice(0, -1).join(", ")}`;
       messages.push(`${domain} is the domain of ${others} and ${names.at(-1)}`);
     }
+    const site = typeof hostname === "string" ? siteAtHostname(hostname, domains) : undefined;
+    if (site) messages.push(`${hostname as string} is the app's hostname and the domain of ${site}`);
     problems.push(...messages.map((message) => ({ ...resource.at, message })));
+    for (const [, domain] of named) hold(domain as string, resource);
+    if (typeof hostname === "string") {
+      hostnames.push([hostname, resource]);
+      hold(hostname, resource);
+    }
+  }
+  for (const [hostname, resource] of hostnames) {
+    const others = [...(held.get(hostname.toLowerCase()) ?? [])].filter((other) => other !== resource);
+    if (others.length === 0) continue;
+    const message = `${hostname} is the app's hostname here and is served by ${others.map((o) => o.id).join(", ")} too`;
+    problems.push({ ...resource.at, message });
   }
   return problems;
 }

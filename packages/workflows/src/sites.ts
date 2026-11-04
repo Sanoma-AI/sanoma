@@ -15,6 +15,7 @@ import {
   apiNameOf,
   BUILT_IN_WORKFLOWS,
   DATA_VENDOR,
+  DOMAIN_NAME,
   LOCALE,
   SITE_NAME,
   siteKey,
@@ -129,7 +130,9 @@ export function readSites(
     const read = readSiteFiles(root, dir);
     const resolved = read.flatMap(({ uses }) => uses.filter((use) => !isAppCollection(use)).map(resolve));
     const pages = pagesOf(read);
-    const { problems: optionProblems, ...options } = siteDefinitionOf(root, dir, connectors);
+    // Its declared domain is the production host's to attach (`siteDomains`): where the site answers
+    // is `domain`, which only the app sets, from the `SANOMA_DOMAINS` that host hands it.
+    const { problems: optionProblems, domain: _declared, ...options } = siteDefinitionOf(root, dir, connectors);
     const calls = resolved.map((r) => r.call);
     const problems = [
       ...resolved.flatMap(({ call, problem }) => {
@@ -221,6 +224,21 @@ export function siteIcons(root: string): Record<string, string> {
     sitesUnder(root).flatMap(({ name, dir }) => {
       const { icon } = siteDefinitionOf(root, dir, { vendors: none, logins: none });
       return icon === undefined ? [] : [[name, icon]];
+    }),
+  );
+}
+
+/**
+ * Each public site's domain (`defineSite({ public: true, domain })`) under `root`, by name, for
+ * the sites whose `site.ts` gives one without a problem there: what the production host attaches
+ * and hands the app as `SANOMA_DOMAINS` (`deriveHosts`). Loaded as `readSites` loads it.
+ */
+export function siteDomains(root: string): Record<string, string> {
+  const none = new Set<string>();
+  return Object.fromEntries(
+    sitesUnder(root).flatMap(({ name, dir }) => {
+      const { domain } = siteDefinitionOf(root, dir, { vendors: none, logins: none });
+      return domain === undefined ? [] : [[name, domain]];
     }),
   );
 }
@@ -427,10 +445,14 @@ const SiteDefinitionSchema = z.strictObject({
   public: z.boolean().optional(),
   login: z.string().optional(),
   locales: z.array(z.string()).optional(),
+  domain: z
+    .string()
+    .regex(DOMAIN_NAME, "a host name of two labels or more, lower case, such as `www.acme.example`")
+    .optional(),
 });
 
 /** What `site.ts` says of who may see a site: read together or not at all. */
-const ACCESS = ["public", "login", "locales"];
+const ACCESS = ["public", "login", "locales", "domain"];
 
 /**
  * What the site in `dir` (relative to `root`) says of itself in its `site.ts`, loaded
@@ -445,6 +467,8 @@ function siteDefinitionOf(
   dir: string,
   connectors: SiteConnectors,
 ): Pick<SiteEntry, "at" | "title" | "icon" | "public" | "login" | "locales"> & {
+  /** `defineSite({ domain })`, kept only on a public site. */
+  domain?: string;
   problems: (ResourceProblem & { file: string })[];
 } {
   const file = `${dir}/site.ts`;
@@ -474,7 +498,7 @@ function siteDefinitionOf(
     );
     if (!parsed.success) return { problems };
   }
-  const { title, icon, public: isPublic, login, locales } = parsed.data;
+  const { title, icon, public: isPublic, login, locales, domain } = parsed.data;
   const loginProblem = (): string | undefined => {
     if (!isPublic) return "a login is for a public site: add `public: true`, or remove `login`";
     if (!connectors.vendors.has(login!)) return `login names "${login}", which is not a connector in sanoma.config.ts`;
@@ -496,6 +520,11 @@ function siteDefinitionOf(
   };
   const localesMessage = locales && localesProblem(locales);
   if (localesMessage) problems.push(problem(localesMessage));
+  const domainMessage =
+    domain !== undefined && !isPublic
+      ? "a domain is for a public site: add `public: true`, or remove `domain`"
+      : undefined;
+  if (domainMessage) problems.push(problem(domainMessage));
   return {
     at: { file, export: "default" },
     ...(title !== undefined && { title }),
@@ -503,6 +532,7 @@ function siteDefinitionOf(
     ...(isPublic && { public: true as const }),
     ...(login !== undefined && { login }),
     ...(locales && !localesMessage && { locales }),
+    ...(domain !== undefined && !domainMessage && { domain }),
     problems,
   };
 }

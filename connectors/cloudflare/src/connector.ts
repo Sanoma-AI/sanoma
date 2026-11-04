@@ -1,5 +1,7 @@
 import {
   compareDeclared,
+  RUNTIME_PORT,
+  UNNAMED,
   type Connector,
   defineConnector,
   defineResource,
@@ -14,8 +16,9 @@ import { z } from "zod";
 
 /*
  * Cloudflare, over its official SDK (`cloudflare`): one Worker per company that runs the company
- * in a Container behind its one Durable Object (`cloudflare.container`, a host), and the same
- * object's alarm, which wakes it (`cloudflare.alarm`, a wakeup). Cloudflare's OpenTofu provider
+ * in a Container behind its one Durable Object (`cloudflare.host`, a host; `cloudflare.container`
+ * is its earlier, deprecated form), and the same object's alarm, which wakes it (`cloudflare.alarm`,
+ * a wakeup). Cloudflare's OpenTofu provider
  * has no container resource, so the schemas are a cut of the API's own fields, by hand.
  */
 
@@ -60,12 +63,82 @@ const containerSchema = z.object({
     .refine((domains) => Object.keys(domains).length > 0, "leave `domains` out rather than empty")
     .nullish()
     .describe("A public site's domain, by site name"),
-  url: z.string().nullish().describe("The Worker's URL on workers.dev, which Cloudflare sets"),
+  hostname: z
+    .string()
+    .regex(DOMAIN_NAME)
+    .nullish()
+    .describe(
+      "The hostname the app is served at, such as `internal.acme.example`: attached to the Worker as a custom domain, and its `url`",
+    ),
+  url: z
+    .string()
+    .nullish()
+    .describe("Where the app answers: `https://<hostname>` once attached, or the Worker's URL on workers.dev"),
+  worker_url: z
+    .string()
+    .nullish()
+    .describe("The Worker's URL on workers.dev, which Cloudflare sets: where its alarm and health checks reach it"),
   healthy: z
     .boolean()
     .nullish()
     .describe("Whether the application exists and the Worker answers /__sanoma/health, which starts the container"),
 });
+
+/**
+ * `cloudflare.host`'s fields: the decisions a data file makes (`name`, `hostname`, `database`),
+ * and what apply fills when it is left out (`image`, `source`, `ref`, `port`) or always
+ * (`revision`, `secrets`, `domains`), which a data file never declares (`deriveHosts`).
+ */
+const hostSchema = containerSchema.extend({
+  name: containerSchema.shape.name
+    .nullish()
+    .describe(
+      "The company's name: the Worker and its application are `sanoma-<name>`; by default the repository's name",
+    ),
+  image: containerSchema.shape.image
+    .nullish()
+    .describe(
+      "The runtime image, an override: by default `ghcr.io/sanoma-ai/runtime:<version>` of the installed sanoma",
+    ),
+  source: z
+    .string()
+    .min(1)
+    .nullish()
+    .describe(
+      "The company repository, an override: by default the one the app runs from (its `origin`, or the GitHub repository its data file declares)",
+    ),
+  ref: z
+    .string()
+    .min(1)
+    .nullish()
+    .describe("The branch it runs, an override: by default the repository's default branch"),
+  port: z
+    .number()
+    .int()
+    .min(1)
+    .max(65_535)
+    .nullish()
+    .describe(`The port the runtime listens on, the image's own (${RUNTIME_PORT}): never declared`),
+  database: z
+    .string()
+    .min(1)
+    .nullish()
+    .describe("The declared database it runs on, such as `store`: apply gives the host its URL"),
+  secrets: containerSchema.shape.secrets.describe(
+    "What apply gives the host, never declared: its database's URL, its keys and the credentials it deploys with, each a `secret(...)` naming a stored value",
+  ),
+  domains: containerSchema.shape.domains.describe(
+    "Each public site's domain, by site name, never declared: from `defineSite({ public: true, domain })`",
+  ),
+});
+
+/** The host contract both types meet, of which `cloudflare.host` derives what it is not told. */
+const capabilities = {
+  lifetime: "stops-when-quiet",
+  publicUrl: true,
+  buildsFromGit: false,
+  staticEgress: false,
+} as const;
 
 /**
  * `cloudflare.container`: the company's Worker, `sanoma-<name>`, on the account's workers.dev
@@ -75,16 +148,19 @@ const containerSchema = z.object({
  * container running. A deploy uploads the Worker again; a new image is copied into the account's
  * registry (one there by a tag is pinned to its digest) and named by the upload, and the object
  * starts the container again at it.
+ *
+ * Deprecated: declare `cloudflare.host`, the same Worker, which takes the decisions alone. A
+ * declaration renamed to it keeps its lockfile binding, and nothing is made again.
  */
 export const container = defineResource({
   vendor: "cloudflare",
   type: "container",
-  title: "Container",
+  title: "Container (deprecated: cloudflare.host)",
   identity: "name",
   schema: containerSchema,
   fields: {
     immutable: ["name"],
-    vendorOwned: ["id", "url", "healthy"],
+    vendorOwned: ["id", "url", "worker_url", "healthy"],
     writeOnly: ["secrets"],
     references: { source: { type: "github.repository", by: ["http_clone_url"] } },
   },
@@ -92,14 +168,71 @@ export const container = defineResource({
   bindingId: (state) => String(state.name),
   writable: true,
   host: {
-    capabilities: { lifetime: "stops-when-quiet", publicUrl: true, buildsFromGit: false, staticEgress: false },
-    inputs: { source: "source", ref: "ref", secrets: "secrets", port: "port", domains: "domains" },
+    capabilities,
+    inputs: {
+      source: "source",
+      ref: "ref",
+      secrets: "secrets",
+      port: "port",
+      domains: "domains",
+      hostname: "hostname",
+    },
     revision: "revision",
     outputs: (state) => ({
       url: String(state.url ?? ""),
+      // The alarm reaches the Worker on workers.dev, whatever hostname the app is served at.
+      ...(typeof state.worker_url === "string" && { wakeUrl: state.worker_url }),
       ...(typeof state.revision === "string" && { revision: state.revision }),
       healthy: state.healthy === true,
     }),
+  },
+});
+
+/**
+ * `cloudflare.host({ name, hostname, database })`: the company's Worker, as `cloudflare.container`
+ * runs it, declared by its decisions alone. `name` is the Worker's (`sanoma-<name>`; by default the
+ * repository's name, which apply fills, its identity `UNNAMED` until then), `hostname`
+ * the app's, `database` the declared database it runs on. Apply gives it the rest (`deriveHosts`):
+ * the installed sanoma's runtime image, the repository the app runs from at its default branch
+ * (`image`, `source` and `ref` are overrides), the image's port, every public site's domain, and
+ * as secrets its database's URL, its keys, the source key it clones with (whose public half apply
+ * declares on the repository) and the credentials it deploys itself with: names only, never a value.
+ */
+export const host = defineResource({
+  vendor: "cloudflare",
+  type: "host",
+  title: "Host",
+  identity: "name",
+  schema: hostSchema,
+  // A `cloudflare.container` of the lockfile is this Worker: renamed, the declaration keeps its binding.
+  formerly: ["cloudflare.container"],
+  fields: {
+    immutable: ["name"],
+    vendorOwned: ["id", "url", "worker_url", "healthy"],
+    writeOnly: ["secrets", "database"],
+    references: {
+      source: { type: "github.repository", by: ["http_clone_url"] },
+      database: { type: ["neon.project", "supabase.project"] },
+    },
+  },
+  find: ({ name }) => name ?? UNNAMED,
+  bindingId: (state) => String(state.name),
+  writable: true,
+  host: {
+    capabilities,
+    derives: true,
+    inputs: {
+      name: "name",
+      source: "source",
+      ref: "ref",
+      image: "image",
+      database: "database",
+      secrets: "secrets",
+      domains: "domains",
+      hostname: "hostname",
+    },
+    revision: "revision",
+    outputs: container.host!.outputs,
   },
 });
 
@@ -140,7 +273,8 @@ export const alarm = defineResource({
     immutable: ["host"],
     vendorOwned: ["at", "rang", "healthy"],
     writeOnly: ["token"],
-    references: { host: { type: ["cloudflare.container"], by: ["url"] } },
+    // The host's wake URL (`worker_url`, its outputs' `wakeUrl`), as apply gives it: its `url` is its hostname once attached.
+    references: { host: { type: ["cloudflare.host", "cloudflare.container"], by: ["worker_url", "url"] } },
   },
   bindingId: (state) => String(state.host),
   writable: true,
@@ -273,7 +407,7 @@ export const records = defineResource({
   stateless: true,
 });
 
-const types = defineConnector("cloudflare", { container, alarm, records }, vendorInfo(import.meta.url));
+const types = defineConnector("cloudflare", { host, container, alarm, records }, vendorInfo(import.meta.url));
 
 /** `alarm.register`, in the alarm type's own group, beside its resource operations. */
 const registerSpec = {
@@ -291,6 +425,7 @@ const register = defineConnector("cloudflare", { alarm: registerSpec });
 
 /** The connector's specs: each type's operations, and `register` in the alarm's group. */
 type CloudflareSpecs = {
+  host: (typeof host)["ops"];
   container: (typeof container)["ops"];
   records: (typeof records)["ops"];
   alarm: (typeof alarm)["ops"] & typeof registerSpec;
@@ -305,5 +440,5 @@ export const cloudflareOps = {
   alarm: { ...types.alarm, ...register.alarm },
 } as unknown as Connector<"cloudflare", CloudflareSpecs>;
 
-/** The connector's type: the three types, with `alarm.register`. */
+/** The connector's type: the four types, with `alarm.register`. */
 export type CloudflareOps = typeof cloudflareOps;

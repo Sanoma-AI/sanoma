@@ -7,6 +7,7 @@ import { betterAuthStaffLogin } from "@sanoma-ai/connector-better-auth";
 import {
   deploymentKey,
   errorMessage,
+  GITHUB_APP,
   isLoopback,
   type ResolvedConfig,
   resolveConfig,
@@ -21,6 +22,7 @@ import { domainsOf } from "@sanoma-ai/workflows/shared";
 import type { WakeupService } from "@sanoma-ai/workflows/wakeup-service";
 import { UsageError } from "./config.ts";
 import { runtimeFrom, siteBuild } from "./sites.ts";
+import { sitesBundleRoute } from "./sites-bundle.ts";
 import { localGitSource } from "./source.ts";
 
 export interface Stoppable {
@@ -191,7 +193,8 @@ function apiWriter(config: SanomaConfig, log: (line: string) => void): (file: st
   };
 }
 
-const GITHUB = ["SANOMA_GITHUB_CLIENT_ID", "SANOMA_GITHUB_CLIENT_SECRET"] as const;
+/** The GitHub App's client the staff login signs in with, as the app's Connect page stores it. */
+const GITHUB = [GITHUB_APP.client_id, GITHUB_APP.client_secret] as const;
 
 /** Reads stored secrets by name (`SanomaClient.secrets`): the values found, the environment's first. */
 export type ReadSecrets = (names: string[]) => Promise<Map<string, string>>;
@@ -284,9 +287,16 @@ export async function serve(config: SanomaConfig, serveOptions: ServeOptions): P
       const { startWakeupService } = await import("@sanoma-ai/workflows/wakeup-service");
       wakeup = await startWakeupService({ databaseUrl, log: { info: log, warn: log } });
     }
+    // On a host with public domains and an instance token (Cloudflare's), the sites its Worker serves.
+    const token = process.env.SANOMA_WAKEUP_TOKEN;
+    const bundle =
+      options.domains &&
+      token &&
+      sitesBundleRoute(config, { root: rootOf(config), domains: options.domains, token, log });
     app = await served(config, { ...options, onWrite: () => void supervised.resume() }, [
       wakeRoute({ log, onWake: () => supervised.wake() }),
       ...(wakeup?.routes ?? []),
+      ...(bundle ? [bundle] : []),
     ]);
   } catch (err) {
     await wakeup?.stop().catch(() => {});

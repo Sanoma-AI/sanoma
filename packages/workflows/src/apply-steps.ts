@@ -46,19 +46,19 @@ async function lastWritten(appName: string): Promise<Bindings | undefined> {
 
 /**
  * The apply workflow's steps for a config: `read`, the data files and the lockfile as drift reads
- * them, under `root`; `appName` scopes the search for the lockfile apply last wrote.
+ * them, under `root`, minting what a deriving host is given; `appName` scopes the search for the lockfile apply last wrote.
  */
 export function applySteps(
   appName: string,
   root: string | undefined,
-  read: () => Promise<Omit<ApplyDeclared, "rebinds">>,
+  read: (options?: { mint?: boolean }) => Promise<Omit<ApplyDeclared, "rebinds">>,
 ): ApplySteps {
   return {
     // The data files, and the lockfile against the one apply last wrote: a change someone else made.
     declared: () =>
       DBOS.runStep(
         async () => {
-          const declared = await read();
+          const declared = await read({ mint: true });
           const before = await lastWritten(appName);
           return { ...declared, rebinds: before ? diffLockfiles(before, declared.bindings) : [] };
         },
@@ -86,7 +86,7 @@ export function applySteps(
     // The one binding changed on the lockfile as it is now, written whole, then committed, in one
     // step whose output is what it wrote. A sandbox run keeps its lockfile in memory: the run's
     // report has it.
-    write: async (key: string, binding: Binding | undefined, message: string) => {
+    write: async (key: string, binding: Binding | undefined, message: string, moved?: string) => {
       const run = runNow();
       if (run.sandbox !== undefined || root === undefined) return { written: false };
       const { source } = run.state;
@@ -95,6 +95,7 @@ export function applySteps(
           const now = readLockfile(root);
           if (now.problems.length) throw new Error(`${LOCKFILE} cannot be updated: ${now.problems[0]!.message}`);
           const { [key]: _, ...others } = now.bindings;
+          if (moved !== undefined) delete others[moved];
           const bindings = binding ? { ...others, [key]: binding } : others;
           writeLockfile(root, bindings);
           const paths = [

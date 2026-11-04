@@ -5,7 +5,14 @@ import type {
   ResourceProblem,
   ResourceTypeEntry,
 } from "@sanoma-ai/workflows/describe";
-import { APPLY_WORKFLOW, DRIFT_WORKFLOW, exportSpan, isEnded, problemAt } from "@sanoma-ai/workflows/shared";
+import {
+  APPLY_WORKFLOW,
+  DRIFT_WORKFLOW,
+  exportSpan,
+  hostnameUrl,
+  isEnded,
+  problemAt,
+} from "@sanoma-ai/workflows/shared";
 import { type QueryClient, useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
@@ -50,6 +57,7 @@ import {
   configQuery,
   driftReportQuery,
   goLiveProgressQuery,
+  hostDerivedQuery,
   HostingSearch,
   isPeople,
   RUNS_KEY,
@@ -340,8 +348,10 @@ function SlotCard({
   adopt?: Adopt;
 }) {
   const binding = result?.binding ?? resource.binding;
+  const isHost = resource.id === `${INFRA}#host`;
   const fields = Object.entries(resource.desired)
-    .filter(([field]) => field !== "name")
+    // The host's hostname is shown where it serves (`HostServes`), not twice.
+    .filter(([field]) => field !== "name" && !(isHost && field === "hostname"))
     .flatMap(([field, value]) => {
       const shown = plainValue(value);
       return shown === undefined ? [] : [[field, shown] as const];
@@ -379,7 +389,12 @@ function SlotCard({
               <span className="text-muted-foreground">unbound</span>
             )}
           </Fact>
-          {resource.id === `${INFRA}#host` && <HostServes />}
+          {isHost && (
+            <HostServes
+              hostname={typeof resource.desired.hostname === "string" ? resource.desired.hostname : undefined}
+            />
+          )}
+          {title === "Host" && <HostDerivedFacts id={resource.id} />}
         </Facts>
         {result?.error !== undefined ? (
           <p className="text-destructive">{result.error}</p>
@@ -391,18 +406,97 @@ function SlotCard({
   );
 }
 
-/** Where the host answers, from the last apply that made or changed it (going live's progress), once it does. */
-function HostServes() {
+/**
+ * What apply gives a host that derives, read-only: its runtime image, the repository and branch
+ * it runs, the public sites' domains it attaches, and whether each key it is given is stored, and
+ * since when. Nothing for a host that does not derive: its data file says all of it.
+ */
+function HostDerivedFacts({ id }: { id: string }) {
+  const { data } = useQuery(hostDerivedQuery());
+  if (!data || data.id !== id) return null;
+  const domains = Object.entries(data.domains);
+  return (
+    <>
+      <Fact label="Image">
+        {data.image ? (
+          <code className="text-xs">{data.image}</code>
+        ) : (
+          <span className="text-muted-foreground">sanoma not installed</span>
+        )}
+      </Fact>
+      <Fact label="Source">
+        {data.source ? (
+          <code className="text-xs">{data.source}</code>
+        ) : (
+          <span className="text-muted-foreground">no origin</span>
+        )}
+        {" at "}
+        {data.ref ? (
+          <code className="text-xs">{data.ref}</code>
+        ) : (
+          <span className="text-muted-foreground">its default branch</span>
+        )}
+      </Fact>
+      <Fact label="Domains">
+        {domains.length ? (
+          domains.map(([site, domain]) => (
+            <span key={site} className="mr-2 inline-block">
+              <code className="text-xs">{domain}</code> <span className="text-muted-foreground">({site})</span>
+            </span>
+          ))
+        ) : (
+          <span className="text-muted-foreground">none: a public site declares its own</span>
+        )}
+      </Fact>
+      {data.keys.map((key) => (
+        <Fact key={key.name} label={key.name}>
+          {key.stored ? (
+            key.setAt ? (
+              <span>
+                stored, set <When at={Date.parse(key.setAt)} />
+              </span>
+            ) : (
+              "stored"
+            )
+          ) : (
+            <span className="text-muted-foreground">not stored</span>
+          )}
+        </Fact>
+      ))}
+    </>
+  );
+}
+
+/**
+ * Where the host answers, from the last apply that made or changed it (going live's progress),
+ * once it does; and the hostname it declares, beside it until an apply serves the app there.
+ */
+function HostServes({ hostname }: { hostname: string | undefined }) {
   const { data } = useQuery(goLiveProgressQuery());
   const host = data?.host;
-  if (!host) return null;
+  // Where it serves not known (loading, or failed): the hostname shown, never said to be pending.
+  const pending = data !== undefined && hostname !== undefined && host?.url !== hostnameUrl(hostname);
+  const shown = hostname !== undefined && (pending || data === undefined);
+  if (!host && !shown) return null;
   return (
-    <Fact label="Serves">
-      <span className="inline-flex flex-wrap items-center gap-2">
-        <ExternalLink href={host.url}>{host.url}</ExternalLink>
-        <ToneBadge tone={host.healthy ? "ok" : "off"}>{host.healthy ? "healthy" : "not answering yet"}</ToneBadge>
-      </span>
-    </Fact>
+    <>
+      {host && (
+        <Fact label="Serves">
+          <span className="inline-flex flex-wrap items-center gap-2">
+            <ExternalLink href={host.url}>{host.url}</ExternalLink>
+            <ToneBadge tone={host.healthy ? "ok" : "off"}>{host.healthy ? "healthy" : "not answering yet"}</ToneBadge>
+          </span>
+        </Fact>
+      )}
+      {shown && (
+        <Fact label="Hostname">
+          <span className="inline-flex flex-wrap items-center gap-2">
+            <code className="text-xs">{hostname}</code>
+            {pending && <span className="text-muted-foreground">once applied</span>}
+          </span>
+        </Fact>
+      )}
+    </>
   );
 }
 

@@ -57,7 +57,8 @@ import {
   VENDOR,
   withSetup,
 } from "./op.ts";
-import { type CedarPolicySource, policyAt } from "./cedar.ts";
+import { rootSnapshot, type RootSnapshot } from "./bundled.ts";
+import { type CedarPolicySource, policyAt, readPolicyFiles } from "./cedar.ts";
 import type { Policy } from "./policy.ts";
 import { checkFromRefs, type Resource, resourceTypesOf, withoutWriteOnly } from "./resource.ts";
 import { codeMail, loginCodeWorkflow } from "./login-code.ts";
@@ -76,7 +77,7 @@ import { tokenStore } from "./tokens.ts";
 import type { Steps } from "./steps.ts";
 import { checkSchedule } from "./schedules.ts";
 import { changeCodeOf, computeVersion } from "./version.ts";
-import type { DeclaredResource, ResourceProblem } from "./resources.ts";
+import { type DeclaredResource, readPeople, type ResourceProblem } from "./resources.ts";
 import { checkWakeupOps, type DeclaredWakeup, type EnvWakeup, HOST_URL } from "./wakeup.ts";
 import { instanceUrl, WAKEUP_TOKEN } from "./wakeup-service.ts";
 import { sanomaWakeupDriver, wakeupSteps } from "./wakeup-driver.ts";
@@ -405,7 +406,14 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   const connectors = connectorsOf(config);
   // The types the data files may declare: the vendors' and the people's, whose resources are left out.
   const declarable = resourceTypesOf(connectors);
-  const read = () => readDeclared(root, connectors, declarable, types, connections);
+  const read = (options: ReadOptions = {}) =>
+    readDeclared(root, connectors, declarable, types, connections, {
+      ...options,
+      drivers: driversByVendor,
+      builtInStore: !config.secrets?.store,
+      signingKeyBound: config.secrets?.bindings?.SANOMA_SIGNING_KEY !== undefined,
+      ...(isOp(config.login?.sender) && { sender: config.login.sender.vendor }),
+    });
   if (types.size) {
     names.set(
       DRIFT_WORKFLOW,
@@ -414,8 +422,13 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     names.set(APPLY_WORKFLOW, applyWorkflow(types, ops, drivers, applySteps(appName, root, read)));
   }
   // Built-in, in every config: the life of a change, which deploys to the declared hosts after its merge.
-  const hosts = async () =>
-    (await read()).resources.filter((r) => types.get(`${r.vendor}.${r.type}`)?.host).map((r) => r.id);
+  // The declared hosts' ids, as the files say them: nothing derived, nothing minted.
+  const hosts = async () => {
+    const { loadDataFiles } = await import("./resources.ts");
+    return loadDataFiles(root, connectors, declarable)
+      .resources.filter((r) => types.get(`${r.vendor}.${r.type}`)?.host)
+      .map((r) => r.id);
+  };
   names.set(CHANGE_WORKFLOW, changeWorkflow(changeOps, changeSteps({ remotes, hosts })));
   const declaredObjects = () => readDeclaredObjects(root, connectors, declarable);
   // Built-in: a direct call the policy holds for an approval, made a run, when any operation may be called directly.
@@ -425,6 +438,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   const login = config.login && checkLogin(config.login, ops, drivers, appName);
   if (login) names.set(LOGIN_CODE_WORKFLOW, loginCodeWorkflow(login, appName));
   const { policy, policies, problems: policyProblems } = policyAt(root, { ops, workflows: names, collections });
+  const bundled = rootSnapshot(root);
   return {
     secrets: config.secrets ?? {},
     connections,
@@ -432,9 +446,10 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     identityProvisioning,
     appName,
     databaseUrl,
-    // The built-in's code and operations are part of the app's version, like the config's own.
-    version: computeVersion({ appName, workflows: [...names.values()] }),
-    changeCode: changeCodeOf(names.get(CHANGE_WORKFLOW)!),
+    // The built-in's code and operations are part of the app's version, like the config's own. A
+    // bundle's code is not the source's: it carries the hashes of the root it was read from.
+    version: bundled?.version ?? computeVersion({ appName, workflows: [...names.values()] }),
+    changeCode: bundled?.changeCode ?? changeCodeOf(names.get(CHANGE_WORKFLOW)!),
     queueName: `sanoma:${appName}`,
     ...(login && { login }),
     ops,
@@ -594,11 +609,25 @@ function makersOf<K extends keyof ConnectorSetup>(
 }
 
 /**
+ * What the runtime reads from `config`'s root that a bundle carries where the files are not
+ * (`useRootSnapshot`): the app's name and versions as `resolved` has them, the policy files and
+ * the people the data files declare.
+ */
+export function readRootSnapshot(config: SanomaConfig, resolved: ResolvedConfig = resolveConfig(config)): RootSnapshot {
+  const root = rootOf(config);
+  if (root === undefined) throw new Error("A config with no root has no files to carry");
+  const { appName, version, changeCode } = resolved;
+  return { appName, version, changeCode, policies: readPolicyFiles(root), people: readPeople(root) };
+}
+
+/**
  * The `name` of `<root>/package.json`, kept whole (`@acme/ops`), when that file exists and names
  * one; else "sanoma", as for a config with no `root`. Never a `package.json` above the root: a
  * parent project's name must not become the app's. A file that is not JSON is refused, naming it.
  */
 function appNameAt(root: string | undefined): string {
+  const bundled = rootSnapshot(root);
+  if (bundled) return bundled.appName;
   const file = root === undefined ? undefined : join(root, "package.json");
   if (file === undefined || !existsSync(file)) return "sanoma";
   let manifest: unknown;
@@ -689,6 +718,11 @@ async function readDeclaredObjects(
   return { keys: new Map([...named, ...bound]), problems };
 }
 
+/** How a run reads the data files: `mint`, apply's, mints the keys a deriving host is given (`hostFacts`). */
+export interface ReadOptions {
+  mint?: boolean;
+}
+
 /**
  * The data files under `root` and the lockfile beside them, in one read, as a drift or apply run
  * records them: each resource with its binding, without its write-only values (a secret marker
@@ -701,12 +735,48 @@ async function readDeclared(
   declarable: ReadonlyMap<string, Resource>,
   types: ReadonlyMap<string, Resource>,
   connections: ConnectionRegistry,
+  options: ReadOptions & {
+    drivers: ReadonlyMap<string, Driver>;
+    builtInStore: boolean;
+    signingKeyBound: boolean;
+    sender?: string;
+  },
 ): Promise<Omit<ApplyDeclared, "rebinds">> {
   // Loaded when a run reads the files, not with the worker.
   const { loadDataFiles } = await import("./resources.ts");
   const { resources, bindings, orphans, problems } = loadDataFiles(root, connectors, declarable);
-  // Read inside the data-file durable step: every operation of the plan uses one pinned account.
   const run = currentRun.getStore();
+  // A host that derives is filled with what it is not told (`deriveHosts`), before it is checked
+  // or pinned: the deploy key it clones with among them. Minted only by a live apply.
+  const keep = new Set<string>();
+  const leftOut = new Set<string>();
+  if (root !== undefined) {
+    const { deriveHosts, hostFacts } = await import("./host-derive.ts");
+    const facts = await hostFacts({
+      root,
+      resources,
+      types,
+      drivers: options.drivers,
+      ...(run && { secrets: run.state.secrets }),
+      builtInStore: options.builtInStore,
+      signingKeyBound: options.signingKeyBound,
+      ...(options.sender !== undefined && { sender: options.sender }),
+      mint: !!options.mint && !!run && !run.sandbox,
+    });
+    if (facts) problems.push(...deriveHosts(resources, types, bindings, facts, { keep, leftOut }));
+  }
+  // A host apply cannot give all it needs is left out, with what names it (its wakeup), and what
+  // names that in turn: its problem says why, and nothing of it changes until it is fixed.
+  for (let grew = leftOut.size > 0; grew;) {
+    const before = leftOut.size;
+    for (const o of resources) if (Object.values(o.refs).some((id) => leftOut.has(id))) leftOut.add(o.id);
+    grew = leftOut.size > before;
+  }
+  for (const r of resources.filter((o) => leftOut.has(o.id))) resources.splice(resources.indexOf(r), 1);
+  // A host's deploy key apply declares, or cannot tell yet, is no orphan.
+  const declaredIds = new Set(resources.map((r) => r.id));
+  const kept = orphans.filter((o) => !declaredIds.has(o.key) && !keep.has(o.key));
+  // Read inside the data-file durable step: every operation of the plan uses one pinned account.
   if (run && !run.sandbox) {
     for (const resource of resources.filter((r) => types.has(`${r.vendor}.${r.type}`))) {
       try {
@@ -743,7 +813,8 @@ async function readDeclared(
         ...(connection && { connection }),
       })),
     bindings,
-    orphans,
+    orphans: kept,
+    ...(leftOut.size > 0 && { leftOut: [...leftOut] }),
     problems,
   };
 }

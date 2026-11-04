@@ -141,6 +141,33 @@ export const domainsText = (domains: Readonly<Record<string, string>>): string =
     .map((site) => `${site}=${domains[site]}`)
     .join(",");
 
+/**
+ * Where a hosted container answers, with its instance token (`SANOMA_WAKEUP_TOKEN`), the bundle
+ * of its public sites that a host's Worker serves: the Cloudflare host downloads it at a deploy.
+ */
+export const SITES_BUNDLE_PATH = "/__sanoma/sites-bundle";
+/** The header every answer of that route carries: a runtime without the route answers without it. */
+export const SITES_BUNDLE_HEADER = "x-sanoma-sites-bundle";
+
+/** What that route answers: what a host's Worker runs a company's public sites from (`buildWorker` in `@sanoma-ai/app/build`). */
+export interface SitesBundle {
+  /** The sites it serves, by key: public, with a domain and no login. */
+  sites: string[];
+  /** The main module, among `modules`. */
+  mainModule: string;
+  /** The Worker's modules, by name relative to the main module, each base64. */
+  modules: { name: string; type: "esm" | "wasm" | "text" | "data"; content: string }[];
+  /** The Worker's static assets, by path from `/`, each base64: the client build and the prerendered pages. */
+  assets: { path: string; content: string }[];
+}
+
+/** Where a host with a `hostname` serves the app (`HostSpec`'s `hostname`): `https://<hostname>`. */
+export const hostnameUrl = (hostname: string): string => `https://${hostname}`;
+
+/** The site whose domain is also the app's `hostname`, compared in lower case; undefined when none is. */
+export const siteAtHostname = (hostname: string, domains: Readonly<Record<string, unknown>>): string | undefined =>
+  Object.entries(domains).find(([, domain]) => typeof domain === "string" && same(domain, hostname))?.[0];
+
 /** The domains `domainsText` wrote, by site name; throws for a pair that is not `<site>=<hostname>`, or a site named twice. */
 export function domainsOf(text: string): Record<string, string> {
   const domains: Record<string, string> = {};
@@ -469,7 +496,7 @@ export function approverOf(name: string, resources: readonly PeopleResource[]): 
   return principalOf(name, resources) && name;
 }
 
-/** True for two strings the same but for case: an email or a GitHub login. */
+/** True for two strings the same but for case: an email, a GitHub login or a hostname. */
 const same = (a: string | undefined, b: string | undefined) =>
   a !== undefined && b !== undefined && a.toLowerCase() === b.toLowerCase();
 

@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import { DriverError, errorMessage, retryableStatus } from "@sanoma-ai/workflows";
 import { defineFake, type FakeOptions } from "@sanoma-ai/workflows/fake";
 import { NodeRequest, sendNodeResponse } from "srvx/node";
-import { caaContent, cloudflareOps } from "./connector.ts";
+import { caaContent, cloudflareOps, host } from "./connector.ts";
 import {
   alarmOps,
   type Application,
@@ -49,8 +49,24 @@ export interface FakeCloudflareOptions extends FakeOptions {
 
 export interface FakeCloudflareState extends Record<string, unknown> {
   seq: number;
-  /** The Workers, by script name: their bindings, a secret's without its text, and the images their object may start, by name. */
-  scripts: Record<string, { bindings: ReadBinding[]; subdomain: boolean; images: Record<string, string> }>;
+  /**
+   * The Workers, by script name: their bindings, a secret's without its text, the images their
+   * object may start, by name, their entry and modules' names, and the assets their last upload
+   * redeemed, each path's hash.
+   */
+  scripts: Record<
+    string,
+    {
+      bindings: ReadBinding[];
+      subdomain: boolean;
+      images: Record<string, string>;
+      main_module?: string;
+      modules?: string[];
+      assets?: Record<string, string>;
+    }
+  >;
+  /** The account's assets, by hash: the type each was uploaded with (the content is not kept). */
+  assets: Record<string, string>;
   /** The container applications, by id. */
   applications: Record<string, Application & { name: string }>;
   /** The account's registry: each image copied in, by its pinned reference there, and the image it was copied from. */
@@ -262,6 +278,7 @@ function fakeObject(
       get: async <T>(key: string) => structuredClone(storage.get(key)) as T | undefined,
       put: async (key, value) => void storage.set(key, structuredClone(value)),
       delete: async (key) => storage.delete(key),
+      getAlarm: async () => alarm?.at ?? null,
       async setAlarm(at) {
         disarm();
         alarm = { at };
@@ -279,6 +296,7 @@ function fakeObject(
       instance = made;
     },
     fetch: (request: Request) => active(() => instance!.fetch(request)),
+    startNow: () => instance!.startNow(),
     /** Stops its container, as Cloudflare does once the object is quiet; its storage and alarm stay. */
     stop: destroy,
     /** Rings its alarm now, whatever its time; resolves once it rang. */
@@ -315,7 +333,10 @@ type FakeObject = ReturnType<typeof fakeObject>;
  * An upload restarts the object over the new bindings and images, its container, storage and
  * alarm kept: a new image starts the container again at the next request, as the object finds its
  * label changed. `copyImage` pins its copy by a made-up digest, and `prepareImage` answers ready
- * for an image pinned in the account's registry. `stop(name)` stops a company's
+ * for an image pinned in the account's registry. An assets upload session asks for the hashes
+ * `state.assets` lacks, in one bucket, and an upload that redeems its completion jwt keeps each
+ * path's hash on the Worker (`state.scripts[…].assets`); the Worker's requests still go to its
+ * object, as the fake runs no sites bundle. `stop(name)` stops a company's
  * container as ten quiet minutes would, `fire()` rings every alarm now, `wakes()` lists the
  * `/wake`s the containers answered, `close()` (and `reset()`) stops everything.
  */
@@ -326,6 +347,10 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
   /** Each Worker's env: its bindings' text, the secrets' with it, which the state does not keep. */
   const envs = new Map<string, Record<string, unknown>>();
   const started: FakeContainer[] = [];
+  /** The open assets upload sessions, by jwt: the Worker's name, its manifest and the hashes still to upload. */
+  const sessions = new Map<string, { script: string; manifest: Record<string, string>; missing: Set<string> }>();
+  /** The completion jwts an upload may redeem: the Worker's name and its manifest, each path's hash. */
+  const completed = new Map<string, { script: string; manifest: Record<string, string> }>();
 
   /** The request to the Worker named `script`, as workers.dev passes it on. */
   const dispatch = async (state: FakeCloudflareState, script: string, request: Request): Promise<Response> => {
@@ -378,8 +403,15 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
       async bindings(script) {
         return structuredClone(state.scripts[script]?.bindings);
       },
-      async upload(script, { modules, main_module, bindings, containers, migrations }) {
+      async upload(script, { modules, main_module, bindings, containers, migrations, assets }) {
         if (!modules.some((m) => m.name === main_module)) throw fail(400, 10021, `no module named ${main_module}`);
+        const redeemed = assets && completed.get(assets.jwt);
+        if (assets && redeemed?.script !== script) {
+          throw fail(400, 10203, "the assets' completion jwt is not one this Worker's upload session gave");
+        }
+        if (bindings.some((b) => b.type === "assets") !== Boolean(assets)) {
+          throw fail(400, 10021, "an assets binding needs assets, and assets an assets binding");
+        }
         const runs = containers.find((c) => c.class_name === OBJECT_CLASS);
         if (!runs) throw fail(400, 10021, `${OBJECT_CLASS} is no container's: its object would have no ctx.container`);
         const unpinned = Object.values(runs.images).filter((image) => !accountPinned(image, FAKE_ACCOUNT));
@@ -394,9 +426,12 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
         for (const binding of bindings) {
           if (binding.type === "durable_object_namespace") {
             env[binding.name] = {
-              getByName: () => ({ fetch: (request: Request) => objects.get(script)!.fetch(request) }),
+              getByName: () => ({
+                fetch: (request: Request) => objects.get(script)!.fetch(request),
+                startNow: () => objects.get(script)!.startNow(),
+              }),
             };
-          } else env[binding.name] = binding.text;
+          } else if (binding.type !== "assets") env[binding.name] = binding.text;
         }
         envs.set(script, env);
         // The namespace the first upload made, kept across uploads as Cloudflare keeps it.
@@ -411,7 +446,11 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
           ),
           subdomain: state.scripts[script]?.subdomain ?? false,
           images: { ...runs.images },
+          main_module,
+          modules: modules.map((m) => m.name),
+          ...(redeemed && { assets: { ...redeemed.manifest } }),
         };
+        if (assets) completed.delete(assets.jwt);
         const object =
           objects.get(script) ??
           fakeObject(
@@ -530,6 +569,32 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
         state.dns[zone] = held;
         return structuredClone({ patches: patched, posts: posted });
       },
+      async assetsSession(script, manifest) {
+        const jwt = `session-${++state.seq}`;
+        // A state saved before the fake kept assets has none.
+        state.assets ??= {};
+        const hashes = Object.fromEntries(Object.entries(manifest).map(([path, { hash }]) => [path, hash]));
+        const missing = new Set(Object.values(hashes).filter((hash) => !(hash in state.assets)));
+        if (!missing.size) {
+          completed.set(jwt, { script, manifest: hashes });
+          return { jwt, buckets: [] };
+        }
+        sessions.set(jwt, { script, manifest: hashes, missing });
+        return { jwt, buckets: [[...missing]] };
+      },
+      async uploadAssets(jwt, files) {
+        const session = sessions.get(jwt);
+        if (!session) throw fail(401, 10000, "workers/assets/upload: the jwt is no open upload session's");
+        for (const { hash, contentType } of files) {
+          if (!session.missing.delete(hash)) throw fail(400, 10203, `workers/assets/upload: ${hash} is not asked for`);
+          (state.assets ??= {})[hash] = contentType;
+        }
+        if (session.missing.size) return undefined;
+        sessions.delete(jwt);
+        const completion = `completion-${++state.seq}`;
+        completed.set(completion, { script: session.script, manifest: session.manifest });
+        return completion;
+      },
       async send(url, init) {
         const script = scriptAt(url);
         if (!script) throw new TypeError(`fetch failed: nothing answers at ${new URL(url).origin}`);
@@ -544,6 +609,7 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
       initial: (): FakeCloudflareState => ({
         seq: 0,
         scripts: {},
+        assets: {},
         applications: {},
         images: {},
         zones: {},
@@ -551,6 +617,7 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
         dns: {},
       }),
       ops: (state) => ({
+        host: containerOps(() => api(state), { startTimeoutMs: 60_000, pollMs: 50 }, host),
         container: containerOps(() => api(state), { startTimeoutMs: 60_000, pollMs: 50 }),
         alarm: alarmOps(() => api(state)),
         records: recordsOps(() => api(state)),
@@ -564,6 +631,8 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
     for (const object of objects.values()) await object.remove();
     objects.clear();
     envs.clear();
+    sessions.clear();
+    completed.clear();
     for (const { server } of servers.values()) {
       server.closeAllConnections();
       await new Promise<void>((done) => server.close(() => done()));

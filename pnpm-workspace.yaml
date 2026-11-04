@@ -15,6 +15,10 @@ allowBuilds:
   # Pi's model providers (through @ai-sdk/harness-pi): their install scripts are not needed.
   "@google/genai": false
   protobufjs: false
+  # The app's Worker build for the Cloudflare host (@cloudflare/vite-plugin, wrangler): their
+  # binaries come as platform packages, so the checks their scripts make are not needed.
+  esbuild: false
+  workerd: false
 overrides:
   # One AI SDK: @ai-sdk/harness 1.0.158 pins ai 7.0.147. Its later releases' Claude Code and Codex
   # adapters ship without their bridges' lockfiles (vercel/ai#23829); drop this once one does.

@@ -16,6 +16,9 @@ describe("loadReplies", () => {
       "github_branch_protection/provider-bridge:main",
       "github_repository/provider-bridge",
       "github_repository/sanoma",
+      "github_repository_collaborator/provider-bridge:notsaltylol",
+      "github_repository_collaborator/provider-bridge:octocat",
+      "github_repository_collaborator/sanoma-apply-test:octocat",
       "github_repository_deploy_key/sanoma-apply-test:1000000101",
     ]);
     expect(objects["github_repository/sanoma"]).toMatchObject({

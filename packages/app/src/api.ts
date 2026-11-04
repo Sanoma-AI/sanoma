@@ -301,7 +301,7 @@ export interface SetupStatus {
    * invite that signs them in once the host answers goes to it); `sender`, the config's
    * `login.sender` operation, and whether its connector's credentials are set; whether the GitHub
    * App's client is stored, for "Sign in with GitHub"; and the public sites with a login
-   * (`sites`), whose visitors that client lets connect GitHub too. Neither a sender nor GitHub
+   * (`sites`), whose visitors that client lets sign in with GitHub too. Neither a sender nor GitHub
    * leaves invite links alone: a warning, not blocking.
    */
   signIn: {
@@ -446,6 +446,26 @@ export interface GoLiveRun {
   pending?: { approvalId: string; plan?: ApplyPlan };
   results?: ApplyResult[];
   error?: string;
+}
+
+/**
+ * What apply gives the declared host that derives (`getHostDerived`), shown read-only on Hosting:
+ * the runtime image, the repository and branch it runs, the sites' domains it attaches, and the
+ * keys it is given, whether each is stored and since when. Never a value.
+ */
+export interface HostDerived {
+  /** The host's declaration id. */
+  id: string;
+  /** The runtime image it runs; undefined when sanoma is not installed. */
+  image?: string;
+  /** The repository it clones: a declared one's `owner/name`, or the app's `origin`. */
+  source?: string;
+  /** The branch it runs: the declared one, else the repository's default branch; undefined when it cannot be told yet. */
+  ref?: string;
+  /** Each public site's domain, by site name. */
+  domains: Record<string, string>;
+  /** The keys it is given: stored or not, and when each was set. */
+  keys: { name: string; stored: boolean; setAt?: string }[];
 }
 
 /** How far going live is (`getGoLiveProgress`): told from the files, the lockfile and the runs, so a reload picks it up. */

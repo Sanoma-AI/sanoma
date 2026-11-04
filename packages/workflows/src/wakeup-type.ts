@@ -15,7 +15,7 @@ import { defineResource } from "./resource.ts";
  * The host types a wakeup may name: each one a data file declares a wakeup for. A new host type
  * is added here. `testhost.app` is `@sanoma-ai/testing`'s, for the conformance kits.
  */
-const HOSTS = ["cloudflare.container", "docker.container", "testhost.app"] as const;
+const HOSTS = ["cloudflare.host", "cloudflare.container", "docker.container", "testhost.app"] as const;
 
 /** An instance of the wakeup service, as `GET /wakeup/instances/{id}` shows it. */
 const wakeupSchema = z.object({
@@ -49,7 +49,9 @@ export const wakeup = defineResource({
     immutable: [],
     vendorOwned: ["id", "at", "lastError"],
     writeOnly: [],
-    references: { host: { type: HOSTS, by: ["url"] } },
+    // Where each host's wakeup reaches it, as apply gives it (`wakeUrlOf`): a Cloudflare host's
+    // `worker_url` once its `url` is its hostname, else its `url`.
+    references: { host: { type: HOSTS, by: ["worker_url", "url"] } },
   },
   writable: true,
   // The service holds its registered wake: apply asks before it deletes one.

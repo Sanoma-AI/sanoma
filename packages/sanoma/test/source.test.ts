@@ -665,7 +665,8 @@ describe("localGitSource's check", () => {
         join(crm.at, "apps/crm"),
         {
           recursive: true,
-          filter: (path) => !path.includes("/sites") && !path.endsWith("app.ts"),
+          // The crm's own sites folder, not a checkout whose path has "/sites" in it.
+          filter: (path) => !/\/crm\/sites(\/|$)/.test(path) && !path.endsWith("app.ts"),
         },
       );
       crm.commit({}, "The CRM");

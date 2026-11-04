@@ -78,6 +78,7 @@ function hostState(c: Company & { revision: string }): HostState {
     port: PORT,
     // The Cloud serves a company at its own address, whatever `url` the list gives.
     domains: c.domains ?? { app: `${c.slug}.sanoma.work` },
+    hostname: c.domains?.app ?? `${c.slug}.sanoma.work`,
     url,
     healthy: c.healthy ?? c.status !== "failed",
   };
@@ -111,7 +112,7 @@ function slugOf(want: HostState): string {
   const slug = hostSlug(want);
   if (!SLUG.test(slug)) {
     throw refused(
-      `a cloud.host's slug, made from its name, domains.app or repository, is ${slug ? `"${slug}"` : "empty"}, not ${SLUG_RULE}: declare \`name\``,
+      `a cloud.host's slug, made from its name, hostname or repository, is ${slug ? `"${slug}"` : "empty"}, not ${SLUG_RULE}: declare \`name\``,
       "no_slug",
     );
   }
@@ -259,9 +260,10 @@ export function cloudOperations(api: (call: CallContext) => CloudApi) {
           name: slug,
           part: "host",
           repository,
-          ref: want.ref,
+          ...(want.ref && { ref: want.ref }),
           ...(want.revision && { revision: want.revision }),
-          ...(want.domains && { domains: want.domains }),
+          // The address as the Cloud takes it: `domains.app`, which `hostname` now declares.
+          ...((want.hostname ?? want.domains) && { domains: want.hostname ? { app: want.hostname } : want.domains }),
         });
         let found = await company(cloud, slug);
         // A workflow that drops `revision` runs the host at its own: moved to apply's.

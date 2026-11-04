@@ -10,6 +10,7 @@ import { parse, serialize } from "cookie-es";
 import {
   type CredentialStatus,
   errorMessage,
+  GITHUB_APP,
   isLoopback,
   memorySecrets,
   type Principal,
@@ -41,15 +42,8 @@ import { escapeHtml } from "../login/page.ts";
 // keys are stored as encrypted credentials; or, for a personal account, a token of the person's
 // own. The others through a pasted token. Nothing here sends a stored value to a page.
 
-/** Where the App's keys are stored, by what GitHub's conversion calls them. The staff login reads the client's. */
-export const GITHUB_APP = {
-  id: "SANOMA_GITHUB_APP_ID",
-  slug: "SANOMA_GITHUB_APP_SLUG",
-  client_id: "SANOMA_GITHUB_CLIENT_ID",
-  client_secret: "SANOMA_GITHUB_CLIENT_SECRET",
-  webhook_secret: "SANOMA_GITHUB_WEBHOOK_SECRET",
-  pem: "SANOMA_GITHUB_APP_PEM",
-} as const;
+/** Where the App's keys are stored, by what GitHub's conversion calls them: the one list, `@sanoma-ai/workflows`'. */
+export { GITHUB_APP };
 
 /** A wakeup service's account token, which "Connect a wakeup service" stores. */
 export const WAKEUP_ACCOUNT_TOKEN = "SANOMA_WAKEUP_ACCOUNT_TOKEN";
