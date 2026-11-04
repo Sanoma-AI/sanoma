@@ -196,7 +196,7 @@ describe("readResources", () => {
 
     it("a resource type the connector does not declare", () => {
       expect(problems({ "a.ts": `${GH}export const r = github.repo({ name: "x" });\n` })).toEqual([
-        "resources/a.ts:2:25: github has no resource type repo: its types are repository, branch_protection, team_membership, repository_deploy_key",
+        "resources/a.ts:2:25: github has no resource type repo: its types are repository, branch_protection, team_membership, repository_deploy_key, repository_collaborator",
       ]);
     });
 

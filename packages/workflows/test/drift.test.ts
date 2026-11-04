@@ -383,6 +383,7 @@ describe("the built-in drift workflow in a config", () => {
     expect(entry?.ops).toEqual([
       "github.branch_protection.import",
       "github.repository.import",
+      "github.repository_collaborator.import",
       "github.repository_deploy_key.import",
       "github.team_membership.import",
       "stripe.product.import",
@@ -395,6 +396,10 @@ describe("the built-in drift workflow in a config", () => {
     expect(apply).toMatchObject({ title: "Apply resources", builtin: true, builtins: ["approval"], problems: [] });
     expect(apply?.ops).toEqual([
       ...entry!.ops,
+      "github.repository_collaborator.create",
+      "github.repository_collaborator.delete",
+      "github.repository_collaborator.plan",
+      "github.repository_collaborator.update",
       "github.repository_deploy_key.create",
       "github.repository_deploy_key.delete",
       "github.repository_deploy_key.plan",

@@ -40,6 +40,22 @@ describe("the generated GitHub resource types", () => {
     expect(declare.repository_deploy_key.bindingId(state)).toBe("sanoma-apply-test:1000000101");
   });
 
+  it("parse the recorded read of a collaborator, by `<repository>:<username>` at the provider", () => {
+    const state = TYPES.repository_collaborator.schema.parse(
+      fromTfState(
+        TYPES.repository_collaborator.shape,
+        recorded("github_repository_collaborator/provider-bridge_notsaltylol/read.json"),
+      ),
+    );
+    // Accepted (an organization's owner, here): no invitation left.
+    expect(state).toMatchObject({ repository: "provider-bridge", username: "notsaltylol", invitation_id: null });
+    expect(declare.repository_collaborator.bindingId(state)).toBe("provider-bridge:notsaltylol");
+    expect(TYPES.repository_collaborator.fields).toMatchObject({
+      immutable: ["permission", "repository", "username"],
+      vendorOwned: ["invitation_id"],
+    });
+  });
+
   it("flag what GitHub owns, keep computed and optional attributes the user's, and mark sets", () => {
     expect(TYPES.repository.fields.vendorOwned).toEqual(expect.arrayContaining(["html_url", "repo_id", "node_id"]));
     expect(TYPES.repository.fields.vendorOwned).not.toContain("etag");
@@ -60,6 +76,7 @@ describe("the github connector", () => {
     ["repository", "owner/name"],
     ["branch_protection", "repository_id:pattern"],
     ["team_membership", "owner/team_id:username"],
+    ["repository_collaborator", "repository:username"],
   ] as const)("reads and imports %s, effect read, by its %s", (type, identity) => {
     for (const op of [github[type].read, github[type].import]) {
       expect(op).toMatchObject({ vendor: "github", resource: type, effect: "read", idempotent: true });
@@ -74,6 +91,7 @@ describe("the github connector", () => {
       "branch_protection",
       "team_membership",
       "repository_deploy_key",
+      "repository_collaborator",
     ]);
     expect(declare.repository.vendor).toBe("github");
   });
@@ -116,6 +134,24 @@ describe("the github connector", () => {
       refs: { repository: "github.repository:acme/website" },
     });
     expect(declare.repository_deploy_key.identity).toBeUndefined();
+    // A collaborator too, and is found by `<owner>/<repository>:<username>`.
+    expect(
+      declare.repository_collaborator({ repository: site, username: "octocat", permission: "push" }),
+    ).toMatchObject({
+      name: "acme/website:octocat",
+      desired: { repository: "acme/website", username: "octocat", permission: "push" },
+      refs: { repository: "github.repository:acme/website" },
+    });
+    expect(() =>
+      declare.repository_collaborator({
+        repository: site,
+        username: "octocat",
+        permission: "push",
+        invitation_id: "1",
+      }),
+    ).toThrow("github.repository_collaborator: leave out invitation_id: the vendor sets it");
+    // @ts-expect-error the permission is stated: the provider's default would demote an admin
+    expect(() => declare.repository_collaborator({ repository: site, username: "octocat" })).toThrow(/permission/);
   });
 
   it("compares a repository's topics, a set, in any order, and only declared fields", () => {

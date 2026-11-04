@@ -20,10 +20,12 @@ export type Resolve = (type: string, id: string) => Promise<{ owner: string; id:
 
 /**
  * The fields that hold `<owner>/<…>` in a type's shape and the provider's name without its owner:
- * a deploy key's repository and its `<repository>:<key id>`, a team membership's `<team>:<user>`.
+ * a deploy key's and a collaborator's repository and `<repository>:<…>` id, a team membership's
+ * `<team>:<user>`.
  */
 const QUALIFIED: Readonly<Record<string, readonly string[]>> = {
   repository_deploy_key: ["id", "repository"],
+  repository_collaborator: ["id", "repository"],
   team_membership: ["id"],
 };
 /** The types whose shape has the `owner` field. */

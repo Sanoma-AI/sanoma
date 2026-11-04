@@ -1328,7 +1328,7 @@ describe("the page", () => {
     const githubPage = await page("/connectors/github");
     expect(githubPage.text).not.toContain("Its connector attaches no fake.");
     expect(githubPage.html).toMatch(
-      /Resources: <\/span>Branch protection rule, Repository, Deploy key, Team membership</,
+      /Resources: <\/span>Branch protection rule, Repository, Collaborator, Deploy key, Team membership</,
     );
 
     // One with workflow operations whose connector attaches no fake says so, once.

@@ -60,7 +60,8 @@ const resourceOf = (r: Reply): ResourceState => ({
  * A bridge that replays the `plan.json`, `apply.json` and `apply-delete.json` recordings of a
  * release (`replies/<release>/<type>/<slug>/`), matching each request on its type, prior state,
  * config and plan, and fails one it has no recording of. `read` answers with the state it is
- * given (as `hashicorp/null` does), or `gone` once an apply deleted the object with that `id`.
+ * given (as `hashicorp/null` does), or `gone` once an apply deleted the object with that `id`
+ * and none made another with it.
  *
  * Unlike `fakeBridge`, it needs no recorded read, and it records the calls it gets, so the change
  * operations' tests can check their order.
@@ -120,6 +121,8 @@ export function changeReplay(fixtures: string | URL, ref: ProviderRef): Provider
       const r = reply("apply", typeName, asRequest(request));
       if (!request.configJson && request.priorStateJson) gone.add(`${typeName}/${stateId(request.priorStateJson)}`);
       const resource = r.resource as Reply | undefined;
+      // A replace's create may make its new object under the old one's id (GitHub's collaborator).
+      if (resource && !request.priorStateJson) gone.delete(`${typeName}/${stateId(resource.stateJson)}`);
       return { ...(resource && { resource: resourceOf(resource) }), errors: [], warnings: [] };
     },
     async close() {
