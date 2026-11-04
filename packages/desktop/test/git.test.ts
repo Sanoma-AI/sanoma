@@ -218,7 +218,9 @@ describe("a new company", () => {
       onProgress: (step) => progress.push(step),
     });
     await expect(session.ready).resolves.toBe(`http://localhost:${port}`);
-    expect(readFileSync(calls, "utf8")).toBe("dlx sanoma\n");
+    expect(readFileSync(calls, "utf8")).toBe(
+      "--config.minimumReleaseAgeExclude=sanoma --config.minimumReleaseAgeExclude=@sanoma-ai/* dlx sanoma\n",
+    );
     expect(existsSync(join(repo, "sanoma.config.ts"))).toBe(true);
     expect(Object.keys(shims("node", "pnpm")).every((name) => existsSync(join(bin, name)))).toBe(true);
     expect(lines).toContain(`env ${port} 1 ${bin}`);

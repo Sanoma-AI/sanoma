@@ -92,6 +92,7 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@sanoma-ai/connector-anthropic": "workspace:*",
     "@sanoma-ai/connector-ghost": "workspace:*",
     "@sanoma-ai/testing": "workspace:*",
     "@types/pg": "^8.23.1"
