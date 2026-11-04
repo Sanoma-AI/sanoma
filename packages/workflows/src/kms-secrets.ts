@@ -295,11 +295,40 @@ export function kmsPostgresStore(options: KmsPostgresOptions): SecretStore | Sec
     capabilities,
     validate: (namespace) =>
       safe(async () => {
-        const address = { namespace, path: "__validation__" },
-          version = randomUUID();
-        const envelope = await seal(address, "validation", version);
-        await open(address, { envelope, version, updated_by: "validation", updated_at: new Date() });
-        await (await database()).query("SELECT version FROM sanoma_kms.secrets WHERE company=$1 LIMIT 0", [company]);
+        const address = { namespace, path: `__validation__/${randomUUID()}` },
+          version = randomUUID(),
+          value = randomUUID();
+        const envelope = await seal(address, value, version);
+        const db = await database();
+        const scope = [company, namespace, address.path, version];
+        let removed = false;
+        try {
+          const created = await db.query(
+            "INSERT INTO sanoma_kms.secrets(company,namespace,path,version,envelope,updated_by) VALUES($1,$2,$3,$4,$5,'validation') ON CONFLICT(company,namespace,path) DO NOTHING RETURNING version",
+            [...scope, JSON.stringify(envelope)],
+          );
+          if (created.rowCount !== 1) throw new SecretStoreError("conflict");
+          const updated = await db.query(
+            "UPDATE sanoma_kms.secrets SET envelope=$5,version=$4,updated_by='validation',updated_at=now() WHERE company=$1 AND namespace=$2 AND path=$3 AND version=$4 RETURNING version",
+            [...scope, JSON.stringify(envelope)],
+          );
+          if (updated.rowCount !== 1) throw new SecretStoreError("unavailable");
+          const stored = await db.query<Row>(
+            "SELECT version,envelope,updated_by,updated_at FROM sanoma_kms.secrets WHERE company=$1 AND namespace=$2 AND path=$3 AND version=$4",
+            scope,
+          );
+          if (!stored.rows[0] || (await open(address, stored.rows[0])).value !== value)
+            throw new SecretStoreError("invalid_value");
+        } finally {
+          // Also clean up a committed INSERT whose response was lost. The random address and
+          // exact version prevent one concurrent probe from deleting another probe or a secret.
+          const cleanup = await db.query(
+            "DELETE FROM sanoma_kms.secrets WHERE company=$1 AND namespace=$2 AND path=$3 AND version=$4",
+            scope,
+          );
+          removed = cleanup.rowCount === 1;
+        }
+        if (!removed) throw new SecretStoreError("unavailable");
         // Own-key usability only. Cross-company authorization requires live IAM proof with another existing key.
       }),
     read: (address) =>

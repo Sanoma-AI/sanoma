@@ -120,7 +120,9 @@ A shared key can be safe behind a trusted broker that independently authorizes e
 
 GCP additional authenticated data (AAD) protects ciphertext binding; it is **not tenant authorization**. Unlike an AWS policy conditioned on encryption context, this GCP design does not claim an IAM restriction on the company string in AAD. A caller with permission to decrypt a shared key can supply another company's known AAD. See [GCP AAD](https://cloud.google.com/kms/docs/additional-authenticated-data).
 
-`validate` checks an own-key encryption/decryption round trip and database schema access. It cannot certify that the identity lacks permission on every other company's key. Deployment evidence must inspect grants and prove cross-company denial using existing keys, including inherited permissions. The live test checks encrypt/decrypt denial in both directions between two test identities.
+`validate` checks the selected store with a unique synthetic value: encrypt it, insert and update its envelope, read the persisted row and decrypt it, then delete that exact probe version. Client and worker startup fail if a required KMS operation or database permission fails, including cleanup. Only ciphertext reaches Postgres; a successful probe leaves no row. Concurrent probes use different addresses. An abrupt process exit or a dependency failure during cleanup can leave an encrypted synthetic probe row under `__validation__/<uuid>`; this is not a customer credential.
+
+This proves own-store usability at that moment, not ongoing health or permission isolation from other companies. Deployment evidence must separately inspect grants and prove cross-company denial using existing keys, including inherited permissions. The live test checks encrypt/decrypt denial in both directions between two test identities.
 
 The database login must separately prevent cross-company access. The company column and key allowlist are defense in depth, not a replacement for database permissions or IAM. The SQL installer uses a private schema and removes public/API-role grants; never expose it through a browser Data API. Keep database/SDK payloads and credentials out of tracing and logs.
 
