@@ -6,7 +6,9 @@ import { fakeHost } from "@sanoma-ai/testing/host";
 import { Pool } from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { DATA_TABLE, LEDGER_TABLE } from "../src/db.ts";
+import { asc, eq, like } from "drizzle-orm";
+import { type Db, databaseOn } from "../src/db.ts";
+import { data, ledger } from "../src/db/company.ts";
 import { describeConfig } from "../src/describe.ts";
 import {
   CALL_WORKFLOW,
@@ -114,27 +116,32 @@ describe("a direct call", () => {
   // A worker for the call runs, its own client on a memory ledger, and this client on the default ledger.
   const app = useTestApp(config, { databaseUrl });
   let client: SanomaClient;
-  let db: Pool;
+  let pool: Pool;
+  let db: Db;
   beforeAll(async () => {
     client = await SanomaClient.connect({ ...config, databaseUrl });
-    db = new Pool({ connectionString: databaseUrl, max: 1 });
+    pool = new Pool({ connectionString: databaseUrl, max: 1 });
+    db = databaseOn(pool);
   });
   afterAll(async () => {
     await client?.close();
-    await db?.end();
+    await pool?.end();
   });
   beforeEach(async () => {
-    await db.query(`DELETE FROM ${DATA_TABLE} WHERE collection = 'outbound'`);
-    await db.query(`DELETE FROM ${LEDGER_TABLE} WHERE run_id LIKE 'direct:%'`);
+    await db.delete(data).where(eq(data.collection, "outbound"));
+    await db.delete(ledger).where(like(ledger.runId, "direct:%"));
   });
 
   const records = async () =>
-    (
-      await db.query<{ record: LedgerRecord }>(`SELECT record FROM ${LEDGER_TABLE} WHERE run_id LIKE 'direct:%'`)
-    ).rows.map((r) => r.record);
+    (await db.select({ record: ledger.record }).from(ledger).where(like(ledger.runId, "direct:%"))).map(
+      (r) => r.record as LedgerRecord,
+    );
   const rows = async () =>
-    (await db.query(`SELECT key, record, updated_by FROM ${DATA_TABLE} WHERE collection = 'outbound' ORDER BY key`))
-      .rows;
+    db
+      .select({ key: data.key, record: data.record, updatedBy: data.updatedBy })
+      .from(data)
+      .where(eq(data.collection, "outbound"))
+      .orderBy(asc(data.key));
   const dbos = () => (client as unknown as { dbos: DBOSClient }).dbos;
 
   it("reads as the person under the policy, records nothing, and never reaches DBOS", async () => {
@@ -169,7 +176,7 @@ describe("a direct call", () => {
   it("writes one op.called record and the record it saves, made by the person", async () => {
     const saved = await client.call("data.outbound.save", { record: lead("Acme") }, { actor: ada, id: "w1" });
     expect(saved).toMatchObject({ key: "Acme", record: lead("Acme"), updatedBy: "ada" });
-    expect(await rows()).toEqual([{ key: "Acme", record: lead("Acme"), updated_by: "ada" }]);
+    expect(await rows()).toEqual([{ key: "Acme", record: lead("Acme"), updatedBy: "ada" }]);
     expect(await records()).toEqual([
       {
         v: 1,
@@ -223,7 +230,7 @@ describe("a direct call", () => {
         ),
       ),
     ).toMatchObject({ code: "policy_denied" });
-    expect(await rows()).toEqual([{ key: "Acme", record, updated_by: "ada" }]);
+    expect(await rows()).toEqual([{ key: "Acme", record, updatedBy: "ada" }]);
     const events = await records();
     expect(events).toHaveLength(3);
     expect(events.find((event) => event.runId === "direct:ada:conditional-stale")).toMatchObject({
@@ -241,10 +248,10 @@ describe("a direct call", () => {
 
   it("returns what the first write with an id returned, and refuses that id with another input", async () => {
     const first = await client.call("data.outbound.save", { record: lead("Acme") }, { actor: ada, id: "w2" });
-    await db.query(`UPDATE ${DATA_TABLE} SET updated_by = 'someone' WHERE collection = 'outbound'`);
+    await db.update(data).set({ updatedBy: "someone" }).where(eq(data.collection, "outbound"));
     expect(await client.call("data.outbound.save", { record: lead("Acme") }, { actor: ada, id: "w2" })).toEqual(first);
     // Not written again: the row keeps what was set since.
-    expect((await rows())[0]).toMatchObject({ updated_by: "someone" });
+    expect((await rows())[0]).toMatchObject({ updatedBy: "someone" });
     const other = await failure(
       client.call("data.outbound.save", { record: lead("Acme", "contacted") }, { actor: ada, id: "w2" }),
     );
@@ -304,7 +311,7 @@ describe("a direct call", () => {
     expect((await client.run(runId))?.startedBy).toEqual(ada);
     await client.decide(runId, { decision: "approve", by: { id: "lead" } });
     expect(await client.result(runId)).toMatchObject({ key: "Acme", record: won, updatedBy: "ada" });
-    expect(await rows()).toEqual([{ key: "Acme", record: won, updated_by: "ada" }]);
+    expect(await rows()).toEqual([{ key: "Acme", record: won, updatedBy: "ada" }]);
     // The same call once its run has ended answers with what the run returned, and writes nothing more.
     expect(await client.call("data.outbound.save", { record: won }, { actor: ada, id: held })).toMatchObject({
       key: "Acme",

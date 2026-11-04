@@ -3,9 +3,11 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { appendFile, mkdir, readFile, truncate } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { eq } from "drizzle-orm";
 import { setTimeout as delay } from "node:timers/promises";
 import { isDeepStrictEqual } from "node:util";
-import { type LegacyDb as Db, LEDGER_TABLE as TABLE, lazyDb, pgCode } from "./db.ts";
+import { type Db, lazyDb, pgCode } from "./db.ts";
+import { ledger } from "./db/company.ts";
 import type { Approver, Principal } from "./define.ts";
 import { type ErrorInfo, isFinal, keepCode } from "./errors.ts";
 import { shown, warn } from "./log.ts";
@@ -382,17 +384,19 @@ export function postgresLedger(databaseUrl: string): LedgerStore & { close(): Pr
       const conn = await pool.db();
       if (await insertRecord(conn, record)) return;
       // Another write of the id was first: the record it stored stands.
-      const { rows } = await conn.query<{ record: LedgerRecord }>(`SELECT record FROM ${TABLE} WHERE id = $1`, [
-        record.id,
-      ]);
-      if (rows[0]) warnIfDifferent(rows[0].record, lineOf(record));
+      const [stored] = await conn.select({ record: ledger.record }).from(ledger).where(eq(ledger.id, record.id));
+      if (stored) warnIfDifferent(stored.record as LedgerRecord, lineOf(record));
     },
     async read(runId) {
-      const { rows } = await (
+      const rows = await (
         await pool.db()
-      ).query<{ record: LedgerRecord }>(`SELECT record FROM ${TABLE} WHERE run_id = $1 ORDER BY seq, n`, [runId]);
+      )
+        .select({ record: ledger.record })
+        .from(ledger)
+        .where(eq(ledger.runId, runId))
+        .orderBy(ledger.seq, ledger.n);
       // In seq order, as the other stores read; two records of one seq in write order.
-      return rows.map((r) => r.record);
+      return rows.map((r) => r.record as LedgerRecord);
     },
     close: pool.close,
   };
@@ -405,17 +409,17 @@ export function postgresLedger(databaseUrl: string): LedgerStore & { close(): Pr
  */
 export async function insertRecord(db: Db, record: LedgerRecord): Promise<boolean> {
   const inserted = await db
-    .query(
-      `INSERT INTO ${TABLE} (id, run_id, seq, record) VALUES ($1, $2, $3, $4::jsonb) ON CONFLICT (id) DO NOTHING RETURNING n`,
-      [record.id, record.runId, record.seq, lineOf(record)],
-    )
+    .insert(ledger)
+    .values({ id: record.id, runId: record.runId, seq: record.seq, record: JSON.parse(serialize(record)) })
+    .onConflictDoNothing({ target: ledger.id })
+    .returning({ n: ledger.n })
     .catch((err: unknown) => {
       if (DATA_EXCEPTION.test(pgCode(err))) {
         throw final(`Ledger record ${record.id} can't be stored: ${errorMessage(err)}`, err);
       }
       throw err;
     });
-  return inserted.rows.length > 0;
+  return inserted.length > 0;
 }
 
 /** Keeps records in memory, for tests. */
