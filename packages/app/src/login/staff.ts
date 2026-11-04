@@ -273,6 +273,8 @@ const GITHUB_ERRORS: Record<string, string> = {
   account_already_linked_to_different_user:
     "That GitHub account already signs in as someone else. Use a code, or another GitHub account.",
   unable_to_link_account: "GitHub could not be connected to your account. Sign in with a code and try again.",
+  not_declared:
+    "This company's files declare nobody with that GitHub account. Ask the person who runs this company to add you, or sign in with a code.",
 };
 const GITHUB_FAILED = "GitHub sign-in did not work. Try again, or use a code.";
 /** What the page says for `?error=<code>`: its own line for a code it knows (never one an object inherits), else `GITHUB_FAILED`. */

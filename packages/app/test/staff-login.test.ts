@@ -193,6 +193,9 @@ describe("staffLogin", () => {
     );
     expect(await errorPage("account_not_linked")).toContain("that email is not verified on both sides yet");
     expect(await errorPage("unable_to_link_account")).toContain("GitHub could not be connected to your account.");
+    expect(await errorPage("not_declared")).toContain(
+      "This company&#39;s files declare nobody with that GitHub account.",
+    );
     expect(await errorPage("<script>")).toContain("GitHub sign-in did not work. Try again, or use a code.");
     // A code an object inherits (`toString`) is a code the page does not know.
     expect(await errorPage("toString")).toContain("GitHub sign-in did not work. Try again, or use a code.");
