@@ -1,22 +1,24 @@
 # sanoma
 
-Sanoma is a framework for building full-stack business apps you can fully customize: pages, data, workflows and the services they call, all TypeScript in your own repo. This monorepo is its source-available core, the runtime, the app and the connectors, which anyone can read and self-host. Status: early.
+Sanoma is a framework for building highly customizable full-stack business apps: pages, data, workflows and the services they call, all TypeScript in your own repo.
 
-**For developers:** work with the people who run the business the way you already ship software. Every change is a commit someone reviews, and its tests pass before it goes live.
+**For developers:** work with the people who run the business the way you already ship software. Each change is a branch you can review and test before it goes live.
 
-**For people who don't write code:** tell the agent what you need and it builds it. You approve each change before it goes live, and work that needs a person waits for them. It's the rigor of a software team, without the code.
+**For people who don't write code:** tell the agent what you need and it drafts it. Nothing goes live until a person accepts it, and work that needs a person waits for them. It's the rigor of a software team, without the code.
+
+This repo is the code behind it: the runtime, the app and the connectors. Anyone can read it and host it themselves ([license](#license)). Status: early.
 
 ## How it fits together
 
 - **One repo per business:** `sanoma.config.ts` with `sites/`, `workflows/`, `resources/` and `policies/` beside it. The [`sanoma`](packages/sanoma/README.md) command runs all of it, with the app, on your machine.
 - **[Sites](packages/sanoma/README.md#sites):** React pages for your team or for the public, with sign-in. A page calls the workflows and the data directly.
-- **Workflows:** TypeScript functions for the work behind the pages. A step, an approval or a wait of a week picks up where it left off after a restart (they run on [DBOS](https://dbos.dev) with Postgres).
+- **Workflows:** TypeScript functions for the work behind the pages. A step, an approval or a wait of a week picks up where it left off after a restart (they run on [DBOS](https://dbos.dev) with Postgres). A run stays on the [version](packages/workflows/README.md#versions) of the code it started on, and a lint keeps workflows [safe to replay](packages/workflows/README.md#keeping-workflows-replay-safe).
 - **[Data](packages/workflows/README.md#collections):** collections in the business's own Postgres, declared in `resources/data.ts`.
-- **Connectors:** typed calls to services like Stripe, Resend and GitHub. A workflow can call only the ones it lists.
+- **Connectors:** typed access to services like Stripe, Resend and GitHub. Each workflow lists the operations it may call.
 - **Rules and records:** [policies](packages/workflows/README.md#policies) in the repo, written in [Cedar](https://docs.cedarpolicy.com), let each call through, refuse it or hold it for a person's approval, and the [ledger](packages/workflows/README.md#ledger) records every run.
-- **The agent:** tell the app's chat what to change. Sanoma's agent, or one you bring (Claude Code, Codex and others), edits a draft copy of the repo and tests it, and in a new repo an admin [publishes each change](packages/workflows/README.md#changes).
+- **The agent:** tell the app's chat what to change. Sanoma's agent, or one you bring (Claude Code, Codex and others), edits a draft copy of the repo and tests it. Once the repo has a remote, each change is [published in the app](packages/workflows/README.md#changes), by an admin in a new company; without one, you merge the draft's branch by hand.
 
-It runs on your machine, in the [desktop app](#desktop-preview), or on your own Cloudflare and Neon accounts. The connectors so far are listed under [Contents](#contents).
+It runs on your machine, in the [desktop app](#desktop-preview), or on [a host of your own](packages/sanoma/README.md#hosting-it-yourself), such as Cloudflare with Neon. The connectors so far are listed under [Contents](#contents).
 
 ![The app: dana starts a run of announce, marketing-lead approves its launch copy in the Inbox, then the run finishes](.github/assets/demo.gif)
 
