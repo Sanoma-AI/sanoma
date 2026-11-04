@@ -52,6 +52,18 @@ const repo = defineResource({
 
 const acme = defineConnector("acme", { repo }, { title: "Acme", package: "@acme/sanoma-connector" });
 
+// A listing that names a product, which has no identity, in `product`: write-only or not, as the test says.
+const listing = (writeOnly: string[]) =>
+  defineResource({
+    vendor: "acme",
+    type: "listing",
+    title: "Listing",
+    identity: "slug",
+    schema: z.object({ slug: z.string(), product: z.string().nullish() }),
+    fields: { immutable: [], vendorOwned: [], writeOnly, references: { product: { type: "acme.product" } } },
+    find: ({ slug }) => slug,
+  });
+
 describe("defineResource", () => {
   it("derives read and import operations, effect read and idempotent, targeting the import id", () => {
     expect(acme.repo.read).toMatchObject({ id: "acme.repo.read", effect: "read", idempotent: true });
@@ -199,19 +211,12 @@ describe("defineResource", () => {
       expect(byNode.bindingId({ id: "x", node: "N_1" })).toBe("N_1");
     });
 
-    it("cannot be named by another resource: a reference stands for an identity", () => {
-      const listing = defineResource({
-        vendor: "acme",
-        type: "listing",
-        title: "Listing",
-        identity: "slug",
-        schema: z.object({ slug: z.string(), product: z.string().nullish() }),
-        fields: { immutable: [], vendorOwned: [], writeOnly: [], references: { product: { type: "acme.product" } } },
-        find: ({ slug }) => slug,
-      });
-      expect(() => listing({ slug: "pro", product: product({ title: "Pro" }) })).toThrow(
-        "acme.listing: product names a acme.product, which has no identity to name it by",
-      );
+    it("cannot be named by a field the vendor reads, write-only or not: a reference stands for an identity", () => {
+      for (const writeOnly of [[], ["product"]]) {
+        expect(() => listing(writeOnly)({ slug: "pro", product: product({ title: "Pro" }) })).toThrow(
+          "acme.listing: product names a acme.product, which has no identity to name it by: only a host's database or a `from` reference may",
+        );
+      }
     });
   });
 
