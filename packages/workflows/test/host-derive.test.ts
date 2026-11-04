@@ -51,7 +51,7 @@ const service = defineResource({
     writeOnly: ["secrets", "database"],
     references: {
       source: { type: "github.repository", by: ["http_clone_url"] },
-      database: { type: "acme.db" },
+      database: { type: ["acme.db", "acme.pool"] },
     },
   },
   find: ({ name }) => name ?? UNNAMED,
@@ -66,6 +66,14 @@ const db = defineResource({
   schema: z.object({ name: z.string() }),
   fields: { immutable: [], vendorOwned: [], writeOnly: [] },
   find: ({ name }) => name,
+});
+// A database the vendor names itself: no identity, so a host names it by the reference alone.
+const pool = defineResource({
+  vendor: "acme",
+  type: "pool",
+  title: "Pool",
+  schema: z.object({ id: z.string().nullish(), region: z.string() }),
+  fields: { immutable: [], vendorOwned: ["id"], writeOnly: [] },
 });
 const repository = defineResource({
   vendor: "github",
@@ -88,14 +96,17 @@ const deployKey = defineResource({
   },
   find: (declared) => `${declared.repository}:${declared.key}`,
 });
-const acme = defineConnector("acme", { service, db }, { title: "Acme", package: "@acme/connector" });
+const acme = defineConnector("acme", { service, db, pool }, { title: "Acme", package: "@acme/connector" });
 const github = defineConnector(
   "github",
   { repository, repository_deploy_key: deployKey },
   { title: "GitHub", package: "@acme/github" },
 );
 const types = new Map<string, Resource>(
-  [service, db, repository, deployKey].map((type) => [`${type.vendor}.${type.type}`, type as unknown as Resource]),
+  [service, db, pool, repository, deployKey].map((type) => [
+    `${type.vendor}.${type.type}`,
+    type as unknown as Resource,
+  ]),
 );
 
 const facts = (overrides: Partial<HostFacts> = {}): HostFacts => ({
@@ -177,6 +188,23 @@ describe("a host that derives", () => {
       type: "repository_deploy_key",
       desired: { repository: "acme/company", title: "Sanoma host", key: "ssh-rsa AAAA public-half", read_only: true },
       refs: { repository: "resources/sanoma/infra.ts#repo" },
+    });
+  });
+
+  it("runs on a database with no identity, named by the reference alone", () => {
+    const declared = service({ name: "a", database: pool({ region: "eu" }) });
+    expect(declared.desired.database).toBeUndefined();
+    expect(declared.refs).toEqual({ database: "acme.pool" });
+    const { resources, bindings, problems } = load({
+      "resources/sanoma/infra.ts": INFRA.replace('acme.db({ name: "company" })', 'acme.pool({ region: "eu" })'),
+    });
+    expect(problems).toEqual([]);
+    expect(deriveHosts(resources, types, bindings, facts())).toEqual([]);
+    const host = resources.find((r) => r.id.endsWith("#host"))!;
+    expect(host.refs.database).toBe("resources/sanoma/infra.ts#store");
+    expect(host.desired.database).toBeUndefined();
+    expect((host.desired.secrets as Record<string, unknown>).SANOMA_DATABASE_URL).toEqual({
+      $secret: "SANOMA_DATABASE_URL_STORE",
     });
   });
 
