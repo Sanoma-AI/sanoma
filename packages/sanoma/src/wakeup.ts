@@ -3,8 +3,6 @@ import { type Listening, listenRoutes } from "./listen.ts";
 
 // `sanoma wakeup`: the wakeup service alone, over a plain Node server: its routes and `/healthz`.
 
-export type WakeupServed = Listening;
-
 /**
  * Starts the wakeup service on `databaseUrl` and serves it on `host` and `port`: its routes, and
  * `GET /healthz` for a host's probe; anything else is a 404. `stop` closes the server, then the service.
@@ -12,7 +10,7 @@ export type WakeupServed = Listening;
 export async function runWakeup(
   databaseUrl: string,
   { host, port, log }: { host: string; port: number; log: (line: string) => void },
-): Promise<WakeupServed> {
+): Promise<Listening> {
   const service = await startWakeupService({ databaseUrl, log: { info: log, warn: log } });
   let served: Listening;
   try {

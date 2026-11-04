@@ -1,12 +1,12 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Listening } from "../src/listen.ts";
-import { listenWorkerPort, type Run } from "../src/worker-port.ts";
+import { listenWorkerPort, type Run, type WorkerPortOptions } from "../src/worker-port.ts";
 
-// The worker's port over a fake `Run`: the checkout, the install and the revision's own
-// `sanoma app-bundle` are commands it records, the last writing what a build would. `buildWorker`
+// The worker's port over a fake `Run`: the checkout (with its install) and the revision's own
+// `sanoma app-bundle` are the commands it is given, the second writing what a build would. `buildWorker`
 // itself runs in `packages/app/test/worker-build.test.ts`, the runtime image in CI's runtime-image job.
 
 const TOKEN = "swi_the-company-token";
@@ -18,30 +18,23 @@ const root = join(work, "company");
 
 /** What the next `sanoma app-bundle` writes, by revision: a bundle, `null`, or a failure. */
 const built = new Map<string, unknown>();
-const calls: string[] = [];
 /** Held until released, so a test sees the 202 while it builds. */
 let hold: Promise<void> = Promise.resolve();
 const run = vi.fn<Run>(async (command, args, cwd) => {
-  calls.push(`${command} ${args.join(" ")} @ ${cwd}`);
   if (command === "checkout") return void mkdirSync(args[0]!, { recursive: true });
   if (args[0] !== "exec") return;
   await hold;
   const revision = cwd.slice(`${root}-`.length);
   const result = built.get(revision);
   if (result instanceof Error) throw result;
-  const out = args.at(-1)!;
-  mkdirSync(dirname(out), { recursive: true });
-  writeFileSync(out, JSON.stringify(result));
+  writeFileSync(args.at(-1)!, JSON.stringify(result));
 });
 
 const onWake = vi.fn<() => void>();
 const log = vi.fn<(line: string) => void>();
 let port: Listening;
-beforeEach(async () => {
-  built.clear();
-  calls.length = 0;
-  run.mockClear();
-  port = await listenWorkerPort(root, {
+const listen = (options: Partial<WorkerPortOptions> = {}) =>
+  listenWorkerPort(root, {
     host: "127.0.0.1",
     port: 0,
     onWake,
@@ -49,7 +42,12 @@ beforeEach(async () => {
     checkout: "checkout",
     log,
     run,
+    ...options,
   });
+beforeEach(async () => {
+  built.clear();
+  run.mockClear();
+  port = await listen();
 });
 afterEach(() => port.stop());
 
@@ -92,15 +90,14 @@ describe("the worker's port", () => {
     expect(done.headers.get("x-sanoma-app-bundle")).toBe("1");
     expect(await done.json()).toEqual(bundle);
     const dir = `${root}-${R1}`;
-    expect(calls).toEqual([
-      `checkout ${dir} ${R1} @ ${root}`,
-      `pnpm install --frozen-lockfile --prefer-offline @ ${dir}`,
-      `pnpm exec sanoma app-bundle --out ${join(dir, ".sanoma", "app-bundle.json")} @ ${dir}`,
+    expect(run.mock.calls).toEqual([
+      ["checkout", [dir, R1], root],
+      ["pnpm", ["exec", "sanoma", "app-bundle", "--out", `${dir}.json`], dir],
     ]);
-    // Built once, the checkout gone.
+    // Built once, the checkout gone, the bundle kept beside it.
     expect(await (await ask(R1)).json()).toEqual(bundle);
-    expect(run).toHaveBeenCalledTimes(3);
-    expect(() => mkdirSync(dir)).not.toThrow();
+    expect(run).toHaveBeenCalledTimes(2);
+    expect([existsSync(dir), existsSync(`${dir}.json`)]).toEqual([false, true]);
   });
 
   it("answers 404 for a revision with nothing for the Worker, 500 once for a failed build", async () => {
@@ -122,15 +119,7 @@ describe("the worker's port", () => {
     expect((await ask("main")).status).toBe(400);
     expect((await ask("../etc")).status).toBe(400);
     await port.stop();
-    port = await listenWorkerPort(root, {
-      host: "127.0.0.1",
-      port: 0,
-      onWake,
-      token: undefined,
-      checkout: "x",
-      log,
-      run,
-    });
+    port = await listen({ token: undefined });
     expect((await ask(R1)).status).toBe(401);
     expect(run).not.toHaveBeenCalled();
   });

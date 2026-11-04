@@ -1,7 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { readRootSnapshot, type SanomaConfig } from "@sanoma-ai/workflows";
 import { describeConfig } from "@sanoma-ai/workflows/describe";
-import { domainsOf } from "@sanoma-ai/workflows/shared";
+import { parseDomains } from "./serve.ts";
 import { siteBuild } from "./sites.ts";
 
 /**
@@ -14,7 +14,7 @@ export async function writeAppBundle(
   config: SanomaConfig,
   { root, out, log }: { root: string; out: string; log: (line: string) => void },
 ): Promise<void> {
-  const domains = process.env.SANOMA_DOMAINS ? domainsOf(process.env.SANOMA_DOMAINS) : {};
+  const domains = parseDomains(process.env.SANOMA_DOMAINS) ?? {};
   const described = describeConfig(config);
   const description = {
     ...described,

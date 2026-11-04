@@ -9,7 +9,7 @@ import { type Loaded, type LoadedConfig, loadConfig, UsageError } from "./config
 import type { LinkedPackage } from "./dev.ts";
 import { emit, eventsOn } from "./events.ts";
 import type { EnsuredPostgres } from "./postgres.ts";
-import type { WakeupServed } from "./wakeup.ts";
+import type { Listening } from "./listen.ts";
 
 // Only Node's modules, ./config.ts and ./events.ts are imported here: each command imports what it runs, so
 // `--help`, `env`, `ledger export` and the dev-mode parent load neither the worker nor the app (the
@@ -410,7 +410,7 @@ async function ledgerExport(runId: string, out: string | undefined): Promise<num
 async function wakeupCommand(): Promise<never> {
   const loaded = await loadConfig();
   const postgres = await withPostgres(namedDatabaseUrl(loaded.config), loaded.root, false);
-  let served: WakeupServed;
+  let served: Listening;
   try {
     const { runWakeup } = await import("./wakeup.ts");
     const host = process.env.SANOMA_APP_HOST || "127.0.0.1";

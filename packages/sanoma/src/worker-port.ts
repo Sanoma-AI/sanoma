@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createHash, timingSafeEqual } from "node:crypto";
-import { readFileSync, rmSync } from "node:fs";
+import { readFile, rm } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import type { IngressRoute } from "@sanoma-ai/app";
 import { errorMessage, isLoopback, type SanomaConfig, startWorker, superviseWorker } from "@sanoma-ai/workflows";
@@ -13,11 +13,13 @@ export type Run = (command: string, args: string[], cwd: string) => Promise<void
 
 /** The last part of what a command printed that a failure carries. */
 const TAIL = 4_000;
+/** How long one command may take: a checkout, install or build that hangs would hold every later build. */
+const TIMEOUT_MS = 20 * 60_000;
 
 /** `Run` as a child process, its output passed on to this process's stderr and the end of it kept for a failure. */
 const runChild: Run = (command, args, cwd) =>
   new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(command, args, { cwd, stdio: ["ignore", "pipe", "pipe"], timeout: TIMEOUT_MS });
     let tail = "";
     const keep = (chunk: Buffer) => {
       process.stderr.write(chunk);
@@ -43,7 +45,7 @@ export interface AppBundleOptions {
   /** The instance token (`SANOMA_WAKEUP_TOKEN`) the route takes as a bearer; unset, it refuses every request. */
   token: string | undefined;
   /**
-   * The command that checks a revision of the source out into a directory, as
+   * The command that checks a revision of the source out into a directory and installs it, as
    * `<checkout> <dir> <revision>` (`SANOMA_CHECKOUT`: the runtime image's `sanoma-checkout`).
    */
   checkout: string | undefined;
@@ -57,6 +59,9 @@ const REVISION = /^[0-9a-f]{7,64}$/;
 
 const digest = (text: string) => createHash("sha256").update(text).digest();
 
+/** A built revision's answer: its status, and the body, or the file beside the root that holds it (a bundle is megabytes). */
+type Answer = { status: number; body: string } | { status: 200; file: string };
+
 /** An answer of the route, as JSON, never cached, and marked as the route's (`APP_BUNDLE_HEADER`). */
 const answered = (status: number, body: unknown) =>
   new Response(typeof body === "string" ? body : JSON.stringify(body), {
@@ -67,35 +72,33 @@ const answered = (status: number, body: unknown) =>
 /**
  * `GET /__sanoma/app-bundle?revision=R` with the instance token: the app bundle the Cloudflare
  * host's Worker script runs at R, which a deploy downloads before it uploads the script. Built on
- * the first ask, in the background and one revision at a time: R checked out beside the worker's
- * checkout (`checkout`), installed from its lockfile against the store, and built there by its own
- * `sanoma app-bundle` (`buildWorker`), the checkout removed after. 202 while it builds, then 200
- * with the bundle as JSON, kept for the process's lifetime; 404 when R has nothing for the Worker.
- * A failed build answers 500 with why, once, and the next ask builds again.
+ * the first ask, in the background and one revision at a time: R checked out and installed beside
+ * the worker's checkout (`checkout`), and built there by its own `sanoma app-bundle`
+ * (`buildWorker`) into a file beside it, the checkout removed after. 202 while it builds, then 200
+ * with the bundle as JSON, the file kept for the process's lifetime; 404 when R has nothing for
+ * the Worker. A failed build answers 500 with why, once, and the next ask builds again.
  */
 export function appBundleRoute({ root, token, checkout, log, run = runChild }: AppBundleOptions): IngressRoute {
   const expected = token && digest(`Bearer ${token}`);
-  const answers = new Map<string, { status: number; body: string }>();
-  const building = new Set<string>();
+  const answers = new Map<string, Answer | "building">();
   // One build at a time: each is a Vite build of the whole app, on a container's memory.
   let queue = Promise.resolve();
 
-  const build = async (revision: string) => {
+  const build = async (revision: string): Promise<Answer> => {
     if (!checkout) throw new Error("SANOMA_CHECKOUT is not set: the app bundle is built in the runtime image");
     const dir = join(dirname(root), `${basename(root)}-${revision}`);
+    const file = `${dir}.json`;
     try {
       await run(checkout, [dir, revision], root);
-      await run("pnpm", ["install", "--frozen-lockfile", "--prefer-offline"], dir);
-      const out = join(dir, ".sanoma", "app-bundle.json");
-      await run("pnpm", ["exec", "sanoma", "app-bundle", "--out", out], dir);
-      const body = readFileSync(out, "utf8");
-      if (body === "null")
-        return { status: 404, body: JSON.stringify({ error: `${revision} has nothing for the Worker` }) };
-      log(`built the app bundle at ${revision}`);
-      return { status: 200, body };
+      await run("pnpm", ["exec", "sanoma", "app-bundle", "--out", file], dir);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true });
     }
+    if ((await readFile(file, "utf8")) === "null") {
+      return { status: 404, body: JSON.stringify({ error: `${revision} has nothing for the Worker` }) };
+    }
+    log(`built the app bundle at ${revision}`);
+    return { status: 200, file };
   };
 
   return {
@@ -108,22 +111,19 @@ export function appBundleRoute({ root, token, checkout, log, run = runChild }: A
       const revision = new URL(request.url).searchParams.get("revision") ?? "";
       if (!REVISION.test(revision)) return answered(400, { error: "revision must be a commit id (?revision=<sha>)" });
       const answer = answers.get(revision);
-      if (answer) {
-        if (answer.status === 500) answers.delete(revision);
-        return answered(answer.status, answer.body);
-      }
-      if (!building.has(revision)) {
-        building.add(revision);
+      if (answer === undefined) {
+        answers.set(revision, "building");
         queue = queue
           .then(() => build(revision))
-          .catch((err: unknown) => {
+          .catch((err: unknown): Answer => {
             log(`building the app bundle at ${revision} failed: ${errorMessage(err)}`);
             return { status: 500, body: JSON.stringify({ error: errorMessage(err) }) };
           })
-          .then((built) => void answers.set(revision, built))
-          .finally(() => building.delete(revision));
+          .then((built) => void answers.set(revision, built));
       }
-      return answered(202, { building: revision });
+      if (answer === undefined || answer === "building") return answered(202, { building: revision });
+      if (answer.status === 500) answers.delete(revision);
+      return answered(answer.status, "file" in answer ? await readFile(answer.file, "utf8") : answer.body);
     },
   };
 }

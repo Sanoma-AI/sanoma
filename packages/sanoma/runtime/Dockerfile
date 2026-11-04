@@ -11,8 +11,8 @@
 #   docker build --build-arg PACKAGES="$(node scripts/runtime-packages.ts)" -t sanoma-runtime packages/sanoma/runtime
 #
 # A cold start, measured locally at half a CPU and 4 GiB (2026-11-04; the pull not included): the
-# checkout under a second, the install 6 s for a lockfile the store matches and 14 s for one a
-# `pnpm update --latest` behind, the worker's /healthz 9 s after.
+# checkout under a second, the install 7-10 s for a lockfile the store matches and 14-30 s for one
+# a `pnpm update --latest` behind, the worker's /healthz 6-16 s after.
 #
 # The bridge release matches @sanoma-ai/bridge's isolated-session protocol. Source builds
 # remain available with --build-arg BRIDGE_FROM=source at the same release's commit.
@@ -61,31 +61,24 @@ COPY --from=bridge /out/provider-bridge /usr/local/bin/provider-bridge
 # provider and cache are temporary; no company configuration or credentials are involved.
 RUN --mount=type=bind,source=check-bridge.mjs,target=/tmp/check-bridge.mjs \
     node /tmp/check-bridge.mjs /usr/local/bin/provider-bridge
-# A company's install links into a global virtual store (`<store>/links`, a directory per package
-# and dependency graph): its node_modules is symlinks, so a package the store has is not copied.
-# pnpm settings from the environment win over a company's pnpm-workspace.yaml.
+# A company's install links into a global virtual store (`<store>/links`): node_modules is
+# symlinks, so what the store has is not copied. These settings win over a company's own.
 ENV pnpm_config_store_dir=/pnpm/store \
     pnpm_config_enable_global_virtual_store=true \
     pnpm_config_pm_on_fail=ignore \
     pnpm_config_strict_dep_builds=false
 RUN mkdir /pnpm && chown node:node /pnpm
 USER node
-# The store, filled by installing a template project of this release: `sanoma` and every public
-# @sanoma-ai package beside it at the release's versions (`node scripts/runtime-packages.ts`, from
-# npm: the release pushes the image after it publishes them), resolved as a company's is (pnpm's
-# minimum release age, Sanoma's own packages excepted). The project and pnpm's metadata cache go;
-# the store stays.
+# The store, from a template project of this release (`node scripts/runtime-packages.ts`: from npm,
+# which the release fills before it builds the image), resolved as a company's is.
 ARG PACKAGES=sanoma
 RUN mkdir /tmp/template && cd /tmp/template && echo '{"private":true}' > package.json \
  && printf 'minimumReleaseAgeExclude:\n  - sanoma\n  - "@sanoma-ai/*"\n' > pnpm-workspace.yaml \
  && pnpm add $PACKAGES \
  && cd / && rm -rf /tmp/template "$HOME/.cache/pnpm"
-# At start, two settings for a company's install. A lockfile that differs from the template's
-# somewhere below a package puts that package in a directory of its own, its files taken from
-# the store, in the image's lower layers: a hard link there copies the file up anyway, and copying
-# outright is faster (pnpm's settings, "Docker"). And the lockfile is trusted: the company's pnpm
-# applied its release-age policy when it resolved it, and checking it again asks the registry
-# about every entry.
+# At start: a package whose dependencies differ from the template's is copied out of the store,
+# faster than a hard link into a lower layer, which overlayfs copies up anyway; and the lockfile
+# is trusted, its release ages checked when the company resolved it, not again per entry online.
 ENV pnpm_config_package_import_method=copy \
     pnpm_config_trust_lockfile=true
 # GitHub's SSH host keys, read at start, and the copy committed beside it for when GitHub's API cannot answer.
@@ -98,7 +91,7 @@ ENV SANOMA_BRIDGE_BIN=/usr/local/bin/provider-bridge \
     PORT=3000
 WORKDIR /home/node
 EXPOSE 3000
-HEALTHCHECK --interval=5s --timeout=3s --start-period=120s \
+HEALTHCHECK --interval=10s --timeout=10s --start-period=300s \
   CMD node -e "fetch('http://127.0.0.1:' + process.env.PORT + '/healthz').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
 ENTRYPOINT ["/usr/local/bin/sanoma-runtime"]
 CMD ["worker"]
