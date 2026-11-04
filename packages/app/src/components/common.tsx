@@ -391,24 +391,24 @@ export function ItemTime({ at }: { at: number }) {
   );
 }
 
-/** What the ledger keeps of a field it never shows: `"<name>"` (an operation's `opaque` field, a sign-in mail's body). */
-const PLACEHOLDER = /^<[a-z]+>$/;
 /** A placeholder's stand-in while the value is made JSON: a private-use character JSON leaves as it is. */
 const REDACTED = "\uE000";
 
-/** `value` with each placeholder string (`PLACEHOLDER`) in it replaced by `REDACTED`. */
+/**
+ * `value` with each field the ledger never shows replaced by `REDACTED`: a top-level field that
+ * holds its own name as `"<name>"`, as the runtime records an operation's `opaque` field and a
+ * sign-in mail's body (`recorded`), so any other string that looks like one is left as it is.
+ */
 function redact(value: unknown): unknown {
-  if (typeof value === "string") return PLACEHOLDER.test(value) ? REDACTED : value;
-  if (Array.isArray(value)) return value.map(redact);
-  if (typeof value === "object" && value !== null) {
-    return Object.fromEntries(Object.entries(value).map(([key, field]) => [key, redact(field)]));
-  }
-  return value;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, field]) => [key, field === `<${key}>` ? REDACTED : field]),
+  );
 }
 
 /**
- * A value as JSON. With `redacted`, a string the ledger keeps as a placeholder (`"<text>"`) shows
- * as a muted "redacted", never as the placeholder, which reads as the value.
+ * A value as JSON. With `redacted`, a field the ledger keeps as a placeholder (`"text": "<text>"`)
+ * shows as a muted "redacted", never as the placeholder, which reads as the value.
  */
 export function Json({ value, redacted = false }: { value: unknown; redacted?: boolean | undefined }) {
   const parts = useMemo(() => {

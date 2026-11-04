@@ -190,6 +190,9 @@ describe("staffLogin", () => {
     expect(await errorPage("account_not_linked")).toContain("that email is not verified on both sides yet");
     expect(await errorPage("unable_to_link_account")).toContain("GitHub could not be connected to your account.");
     expect(await errorPage("<script>")).toContain("GitHub sign-in did not work. Try again, or use a code.");
+    // A code an object inherits (`toString`) is a code the page does not know.
+    expect(await errorPage("toString")).toContain("GitHub sign-in did not work. Try again, or use a code.");
+    expect(await errorPage("constructor")).toContain("GitHub sign-in did not work. Try again, or use a code.");
   });
 
   it("links the kit's stylesheet, which loads signed out with its fonts, and nothing else does", async () => {
@@ -289,6 +292,45 @@ describe("staffLogin", () => {
     const gone = await spent.text();
     expect(gone).toContain("This invite link has been used, replaced or has expired. Ask for a new one.");
     expect(gone).toContain("Acme Plumbing");
+  });
+
+  it("lands an invite naming nobody when the people file does not load, or who sent it cannot be read", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    client.lastInvite.mockRejectedValueOnce(new Error("ledger down"));
+    const unsent = await (await login.handle!(request("/auth/invite/tok-dee@acme.test")))!.text();
+    expect(unsent).toContain("You were invited to Acme Plumbing");
+    expect(unsent).toContain("as Dee Park, in office.");
+
+    const broken = mkdtempSync(join(tmpdir(), "sanoma-staff-broken-"));
+    mkdirSync(join(broken, "resources"));
+    writeFileSync(join(broken, "resources", "people.ts"), "export const = ;\n");
+    try {
+      const provider = staffLogin(async () => fakeHalf(["code", "invite"]));
+      await provider.open!({
+        resolved: { appName: "acme-plumbing", databaseUrl: "postgresql://x/y", root: broken },
+        client,
+      } as unknown as AppContext);
+      const page = (await provider.handle!(request("/auth/invite/tok-dee@acme.test")))!;
+      expect(page.status).toBe(200);
+      const html = await page.text();
+      expect(html).toContain("You were invited to Acme Plumbing");
+      expect(html).toContain("Continue as dee@acme.test");
+    } finally {
+      rmSync(broken, { recursive: true, force: true });
+      vi.mocked(console.error).mockRestore();
+    }
+  });
+
+  it("goes back to the page asked for on this host once signed in, never to another a path names", async () => {
+    const html = await (await login.handle!(request("/workflows")))!.text();
+    const line = /const here=[^\n]*?const back=[^;]+;/.exec(html)?.[0];
+    expect(line).toBeDefined();
+    const back = (pathname: string, search = "") =>
+      new Function("location", `${line} return back;`)({ pathname, search }) as string;
+    expect(back("/workflows", "?tab=runs")).toBe("/workflows?tab=runs");
+    expect(back("/auth/login", "?error=x")).toBe("/");
+    expect(back("//evil.example/login")).toBe("/evil.example/login");
+    expect(back("///evil.example")).toBe("/evil.example");
   });
 
   it("listens on any host", () => {

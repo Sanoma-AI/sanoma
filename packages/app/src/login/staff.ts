@@ -21,7 +21,7 @@ import { z } from "zod";
 import type { AppContext, LoginProvider } from "../context.ts";
 import { secretValues } from "../server/secrets.ts";
 import { loginKey } from "./keys.ts";
-import { initialsOf } from "../lib/names.ts";
+import { firstWordOf, initialsOf } from "../lib/names.ts";
 import { type Company, companyOf, escapeHtml, type PageFrame, smallPage, wantsJson } from "./page.ts";
 
 // The staff login on a host: a login half (Better Auth's, `betterAuthStaffLogin`) made once the app
@@ -206,22 +206,30 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
         frame(),
       );
     }
+    // Whom it names is the page's words only: when the people file does not load, the link still
+    // shows, without them.
+    const { person, sender } = await named(invitation.email).catch((err: unknown): Invited => {
+      console.error(`sanoma app: whom an invite names could not be read: ${errorMessage(err)}`);
+      return {};
+    });
+    const look = frame();
+    return smallPage(200, "Invite", invitePage(look.company!, invitation, person, sender), look);
+  }
+
+  /** The declared person an invite for `email` signs in, with their groups, and who sent it (none for a sealed request's). */
+  async function named(email: string): Promise<Invited> {
     const declared = people().people;
     const persons = personsOf(declared);
-    const id = personOf({ email: invitation.email }, declared);
-    const invited = persons.find((p) => p.id === id);
-    const sent =
-      id === undefined
-        ? undefined
-        : await app!.client.lastInvite(id).catch((err: unknown) => {
-            console.error(`sanoma app: who sent ${id}'s invite could not be read: ${errorMessage(err)}`);
-            return undefined;
-          });
+    const invited = persons.find((p) => p.id === personOf({ email }, declared));
+    if (!invited) return {};
+    const sent = await app!.client.lastInvite(invited.id).catch((err: unknown) => {
+      console.error(`sanoma app: who sent ${invited.id}'s invite could not be read: ${errorMessage(err)}`);
+      return undefined;
+    });
     const sender =
       sent && sent.by !== LOGIN_AGENT ? (persons.find((p) => p.id === sent.by) ?? { id: sent.by }) : undefined;
-    const look = frame();
-    const person = invited && { ...invited, groups: principalOf(invited.id, declared)?.groups ?? [] };
-    return smallPage(200, "Invite", invitePage(look.company!, invitation, person, sender), look);
+    const person = { ...invited, groups: principalOf(invited.id, declared)?.groups ?? [] };
+    return { person, ...(sender && { sender }) };
   }
 
   return provider;
@@ -243,7 +251,9 @@ const refuse = (status: number, error: string) =>
 /** What a page names a declared person by: their name, else their id. */
 type Named = { id: string; name?: string };
 const nameOf = (person: Named) => person.name ?? person.id;
-const firstNameOf = (person: Named) => nameOf(person).split(/\s+/)[0]!;
+/** Whom an invite signs in, as declared with their groups, and who sent it: what its landing page names. */
+type Invited = { person?: Named & { groups: string[] }; sender?: Named };
+const firstNameOf = (person: Named) => firstWordOf(nameOf(person));
 
 /** `a`, `a and b`, `a, b and c`. */
 const listOf = (items: readonly string[]) =>
@@ -264,6 +274,8 @@ const GITHUB_ERRORS: Record<string, string> = {
   unable_to_link_account: "GitHub could not be connected to your account. Sign in with a code and try again.",
 };
 const GITHUB_FAILED = "GitHub sign-in did not work. Try again, or use a code.";
+/** What the page says for `?error=<code>`: its own line for a code it knows (never one an object inherits), else `GITHUB_FAILED`. */
+const githubError = (code: string) => (Object.hasOwn(GITHUB_ERRORS, code) ? GITHUB_ERRORS[code]! : GITHUB_FAILED);
 
 /**
  * The sign-in page: an email, then the six-digit code sent to it, and GitHub when the company has
@@ -277,7 +289,7 @@ function signInPage(half: LoginHalf, frame: PageFrame, status: number, error?: s
   const github = methods.includes("github")
     ? `<div class="or">or</div><button id="github" type="button" class="button outline">${GITHUB_ICON}<span>Continue with GitHub</span></button>`
     : "";
-  const message = `<p id="message" class="message" role="status">${error ? escapeHtml(GITHUB_ERRORS[error] ?? GITHUB_FAILED) : ""}</p>`;
+  const message = `<p id="message" class="message" role="status">${error ? escapeHtml(githubError(error)) : ""}</p>`;
   const script = `<script>${SIGN_IN_SCRIPT}</script>`;
   if (!methods.includes("code")) {
     return smallPage(
@@ -353,13 +365,14 @@ const CLOCK_ICON = `<svg aria-hidden="true" width="14" height="14" viewBox="0 0 
 /**
  * What the sign-in page does: it posts JSON to the login's routes (Better Auth's email code and
  * GitHub), says what went wrong by Better Auth's error codes, and once signed in goes back to the
- * page asked for (`/` from the sign-in page itself). A GitHub sign-in that fails comes back to
+ * page asked for on this host (`/` from the sign-in page itself; leading slashes count as one, so
+ * a path like `//elsewhere` never leads off it). A GitHub sign-in that fails comes back to
  * `/auth/login?error=<code>`.
  */
 const SIGN_IN_SCRIPT = `
 const post=(path,body)=>fetch("/auth/better-auth"+path,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)});
 const $=(id)=>document.getElementById(id);const message=$("message");const say=(text)=>{message.textContent=text};
-const back=location.pathname===${JSON.stringify(LOGIN)}?"/":location.pathname+location.search;
+const here="/"+location.pathname.replace(/^[/]+/,"");const back=here===${JSON.stringify(LOGIN)}?"/":here+location.search;
 const AGAIN="That did not work. Try again in a moment.";let email="";let wrong=0;
 const send=()=>post("/email-otp/send-verification-otp",{email,type:"sign-in"}).then((r)=>r.ok,()=>false);
 $("email")?.addEventListener("submit",async(e)=>{e.preventDefault();email=String(new FormData(e.target).get("email"));
