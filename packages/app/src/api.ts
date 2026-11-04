@@ -294,24 +294,26 @@ export type SetCredentialRequest = z.infer<typeof SetCredentialRequest>;
 
 /** What the connect page shows (`getSetupStatus`): the GitHub App, once created, and the pasted tokens' statuses. Never a value. */
 export interface SetupStatus {
-  githubApp: { slug: string; setBy?: string; setAt?: string } | null;
+  /**
+   * The company's GitHub App, once its keys are stored, with `missing`: the permissions the
+   * manifest asks for that GitHub's listing of the App lacks (one made before the manifest asked
+   * for them, or by hand), as `<name>: <level>`; null when GitHub did not say.
+   */
+  githubApp: { slug: string; setBy?: string; setAt?: string; missing: string[] | null } | null;
   tokens: CredentialStatus[];
   /**
    * How people will sign in on the host: `you`, the email declared for the person asking (the
    * invite that signs them in once the host answers goes to it); `sender`, the config's
    * `login.sender` operation, and whether its connector's credentials are set; whether the GitHub
-   * App's client is stored, for "Sign in with GitHub", and whether that App may read the
-   * person's email addresses (`githubEmails`, which a sign-in needs when their GitHub email is
-   * private; null when GitHub did not say); and the public sites with a login (`sites`), whose
-   * visitors that client lets sign in with GitHub too. Neither a sender nor GitHub leaves invite
-   * links alone: a warning, not blocking.
+   * App's client is stored, for "Sign in with GitHub"; and the public sites with a login
+   * (`sites`), whose visitors that client lets sign in with GitHub too. Neither a sender nor GitHub
+   * leaves invite links alone: a warning, not blocking.
    */
   signIn: {
     you: string | null;
     sender: string | null;
     senderConnected: boolean;
     github: boolean;
-    githubEmails: boolean | null;
     sites: { name: string; login: string }[];
   };
 }

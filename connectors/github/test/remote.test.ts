@@ -539,4 +539,12 @@ describe("githubRemote.owners", () => {
     ]);
     expect(await githubRemote.owners!(only({}))).toEqual([]);
   });
+
+  it.skipIf(live)("lists the App's permissions, and none without its keys", async () => {
+    play("permissions", [
+      { method: "GET", path: "/app", status: 200, body: { permissions: { contents: "write", emails: "read" } } },
+    ]);
+    expect(await githubRemote.permissions!(only(app))).toEqual({ contents: "write", emails: "read" });
+    expect(await githubRemote.permissions!(only({}))).toBeUndefined();
+  });
 });

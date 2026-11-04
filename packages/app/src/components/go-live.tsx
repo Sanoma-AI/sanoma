@@ -444,7 +444,7 @@ function PushButton() {
  * through the App, and always by invite links. With neither a connected sender nor GitHub, a
  * warning that does not block going live, and the two fixes. With GitHub, the public sites whose
  * visitors can sign in with it too, and the callback URL each needs on the App; and, when the App
- * may not read email addresses (one made elsewhere), the permission to add.
+ * lacks the permission to read email addresses, where to add it.
  */
 function SignInItem({ signIn, app }: { signIn: SetupStatus["signIn"]; app: SetupStatus["githubApp"] }) {
   const code = signIn.sender !== null && signIn.senderConnected;
@@ -481,13 +481,11 @@ function SignInItem({ signIn, app }: { signIn: SetupStatus["signIn"]; app: Setup
               , for an email code; or create the GitHub App, for Sign in with GitHub.
             </>
           )}
-          {signIn.github && signIn.githubEmails === false && (
+          {signIn.github && app?.missing?.some((p) => p.startsWith("emails:")) && (
             <>
               {" "}
-              The App{app ? <code> {app.slug}</code> : null} may not read email addresses, which Sign in with GitHub
-              needs when someone&apos;s GitHub email is private: in its settings on GitHub, under Permissions &amp;
-              events, set the account permission <strong>Email addresses</strong> to Read-only, then accept the update
-              on its installation.
+              The App may not read email addresses, which Sign in with GitHub needs when someone&apos;s GitHub email is
+              private: <Link to="/hosting/connect">Connect</Link> says what to add.
             </>
           )}
           {signIn.github && signIn.sites.length > 0 && (
