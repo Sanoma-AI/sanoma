@@ -59,7 +59,15 @@ import {
   SanomaError,
   vendorCodeOf,
 } from "./errors.ts";
-import { insertRecord, lastSignIns, type LedgerRecord, loginRecord, type OwnedLedger, ownedLedger } from "./ledger.ts";
+import {
+  insertRecord,
+  lastInvite,
+  lastSignIns,
+  type LedgerRecord,
+  loginRecord,
+  type OwnedLedger,
+  ownedLedger,
+} from "./ledger.ts";
 import { warn } from "./log.ts";
 import type { CallContext, Driver, Op, SignInMethod } from "./op.ts";
 import { allowAll, type RecordedDecision } from "./policy.ts";
@@ -670,6 +678,11 @@ export class SanomaClient {
   /** When each of `people` last signed in to the staff login, and how, by id (`recordSignIn`); one who never did is left out. */
   lastSignIns(people: readonly string[]): Promise<Record<string, { at: number; method: SignInMethod }>> {
     return lastSignIns(this.audit.store, people);
+  }
+
+  /** Who minted the latest invite for the declared `person`, when, and until when (`recordInvite`); undefined when nobody did. */
+  lastInvite(person: string): Promise<{ by: string; at: number; expiresAt: number } | undefined> {
+    return lastInvite(this.audit.store, person);
   }
 
   /** The run's audit record, in order, from the ledger store. */

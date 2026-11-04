@@ -35,6 +35,7 @@ import {
   type GoLiveProgress,
   type GoLiveRequest,
   type GoLiveRun,
+  noWakeup,
   SETUP_VENDORS,
 } from "../api.ts";
 import type { AppContext } from "../context.ts";
@@ -367,7 +368,7 @@ function hostWakeup(
   if (!type) {
     const wakes = connected.map((t) => `${t.title} (${idOf(t)}) wakes ${wakeupHostTypes(t).join(", ")}`);
     return {
-      cannot: `No connected wakeup wakes a ${id} (${wakes.join("; ")}): going live declares none, and the host stays up`,
+      cannot: noWakeup(id, wakes.join("; ")),
     };
   }
   const service = type.vendor === "sanoma";

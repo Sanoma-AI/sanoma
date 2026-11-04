@@ -17,7 +17,7 @@ import {
 } from "node:fs";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { createRequire, registerHooks } from "node:module";
-import { dirname, isAbsolute, join, relative, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { APP_NAME, problemLine, SITE_NAME, type SitesBundle, siteDir, siteKey } from "@sanoma-ai/workflows/shared";
 import type { ConfigDescription, SiteEntry } from "@sanoma-ai/workflows/describe";
@@ -30,6 +30,7 @@ import {
   PUBLISHED_FILE,
   publishedOf,
   readContent,
+  STYLESHEET_FILE,
 } from "./content-files.ts";
 import type { ServerEntry } from "./context.ts";
 import { PUBLIC_FNS } from "./public-fns.ts";
@@ -276,6 +277,7 @@ function packageConfig(): InlineConfig {
       tailwindcss(),
       contentPlugin(),
       sitesPlugin(),
+      stylesheetPlugin(),
       tanstackStart({ importProtection: { behavior: "error", client: { specifiers: [CLIENT_DENIED] } } }),
       react(),
     ],
@@ -376,6 +378,7 @@ function repoConfig(repo: string, runtimeFrom = defaultRuntimeFrom, worker?: Wor
       ...(worker?.plugins ?? []),
       contentPlugin(repo),
       sitesPlugin(repo),
+      stylesheetPlugin(),
       tailwindcss(),
       tanstackStart({
         srcDirectory,
@@ -411,6 +414,30 @@ function repoConfig(repo: string, runtimeFrom = defaultRuntimeFrom, worker?: Wor
         { find: /^tailwindcss$/, replacement: join(tailwind, "index.css") },
         { find: /^tailwindcss\/(index|theme|preflight|utilities)(\.css)?$/, replacement: join(tailwind, "$1.css") },
       ],
+    },
+  };
+}
+
+/**
+ * `sanoma:stylesheet`: the client build's file for the kit's `style.css`, its path written to
+ * `STYLESHEET_FILE` beside `client/`. A public site's own `style.css` is named `style-<hash>.css`
+ * too, so the name alone does not say which is the kit's.
+ */
+function stylesheetPlugin(): Plugin {
+  const css = join(appSources().src, "style.css");
+  let path: string | undefined;
+  return {
+    name: "sanoma:stylesheet",
+    applyToEnvironment: (env) => env.name === "client",
+    generateBundle(_, bundle) {
+      const root = this.environment.config.root;
+      const sheet = Object.values(bundle).find(
+        (file) => file.type === "asset" && file.originalFileNames.some((name) => resolve(root, name) === css),
+      );
+      path = sheet && `/${sheet.fileName}`;
+    },
+    writeBundle({ dir }) {
+      if (path && dir) writeFileSync(join(dir, "..", STYLESHEET_FILE), JSON.stringify(path));
     },
   };
 }

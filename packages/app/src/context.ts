@@ -64,6 +64,11 @@ export interface AppContext {
   /** The company's repository, which Adopt commits a data file's change to; without one, it only writes the file. */
   source?: Source;
   /**
+   * The built kit's stylesheet's path (`/assets/style-<hash>.css`), which a login's own pages link
+   * to look like the app; none on the dev server, which builds nothing.
+   */
+  stylesheet?: string;
+  /**
    * On a public site's own host, the site: its copy of the context, whose `login` is the site's
    * front door (`publicFront`), so only `callFn` and `getActor` answer there, as a visitor.
    */

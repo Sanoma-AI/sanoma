@@ -9,6 +9,7 @@ import { resend } from "@sanoma-ai/connector-resend";
 import { stripe } from "@sanoma-ai/connector-stripe";
 import { supabase } from "@sanoma-ai/connector-supabase";
 import { withFake } from "@sanoma-ai/testing";
+import { fakeHost } from "@sanoma-ai/testing/host";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { defineConfig, defineConnector, defineWorkflow, memoryLedger, vendorInfo } from "../src/index.ts";
@@ -507,6 +508,19 @@ describe("ConfigDescriptionSchema", () => {
       "github.repository": ["source"],
     });
     expect(capabilities["github.team"]).toBeUndefined();
+  });
+
+  it("says how a host keeps the runtime up, from its capabilities, and nothing of the sort for any other type", () => {
+    const quiet = fakeHost(async () => ({ url: "", stop: async () => undefined }), { lifetime: "stops-when-quiet" });
+    const description = describeConfig({ ...base, workflows: [], connectors: [github, docker, quiet.connector] });
+    const hosts = Object.fromEntries(description.resourceTypes.map((t) => [t.id, t.host]));
+    expect(hosts["docker.container"]).toEqual({ lifetime: "long-lived" });
+    expect(hosts["testhost.app"]).toEqual({ lifetime: "stops-when-quiet" });
+    expect(hosts["github.repository"]).toBeUndefined();
+    expect(ConfigDescriptionSchema.parse(description)).toEqual(description);
+    const [type] = description.resourceTypes;
+    const unknown = { ...type!, host: { lifetime: "forever" } };
+    expect(ConfigDescriptionSchema.safeParse({ ...description, resourceTypes: [unknown] }).success).toBe(false);
   });
 
   it("names each variable a vendor's driver declares, with its manual, never a value or a status", () => {

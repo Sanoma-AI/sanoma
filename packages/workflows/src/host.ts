@@ -130,7 +130,8 @@ export const UNNAMED = "(the repository's name)";
 /** The port the runtime image's app listens on (its `PORT`): a host that derives runs it there. */
 export const RUNTIME_PORT = 3000;
 
-const LIFETIMES: readonly HostLifetime[] = ["long-lived", "stops-when-quiet"];
+/** Every `HostLifetime`, for a schema of one. */
+export const LIFETIMES = ["long-lived", "stops-when-quiet"] as const satisfies readonly HostLifetime[];
 
 /** True when `schema` has a field at the dotted `path`, looking through optional, nullable and default wrappers. */
 export function hasPath(schema: z.ZodType, path: string): boolean {

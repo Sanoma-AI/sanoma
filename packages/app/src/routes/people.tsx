@@ -1,18 +1,21 @@
 import type { ConfigDescription, DeclaredResource } from "@sanoma-ai/workflows/describe";
 import { useMutation, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { CopyIcon } from "@phosphor-icons/react/dist/csr/Copy";
 import { LinkIcon } from "@phosphor-icons/react/dist/csr/Link";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import { useServerFn } from "@tanstack/react-start";
-import { AGENTS } from "@sanoma-ai/workflows/shared";
+import { ADMIN, AGENTS } from "@sanoma-ai/workflows/shared";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Button } from "#/components/ui/button.tsx";
+import { Field, FieldLabel } from "#/components/ui/field.tsx";
 import { Input } from "#/components/ui/input.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
 import { CardAction, CardContent, CardDescription, CardHeader } from "#/components/ui/card.tsx";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/components/ui/table.tsx";
+import { firstWordOf } from "#/lib/names.ts";
 import { cn } from "#/lib/utils.ts";
 import {
   ButtonLink,
@@ -28,8 +31,10 @@ import {
   Nothing,
   pageTitle,
   Problems,
+  Tip,
   When,
 } from "../components/common.tsx";
+import { useActor } from "../actor.ts";
 import { DeclarationForm } from "../components/declaration-form.tsx";
 import { errorBodyOf } from "../api.ts";
 import { inviteFn } from "../functions.ts";
@@ -91,6 +96,7 @@ function PeoplePage() {
   const { data } = useSuspenseQuery({ ...configQuery(), select: directory });
   const rows = data.views[show];
   const open = person === undefined ? undefined : rows.find((r) => r.name === person);
+  const invite = useInviteCard(`${show}/${person ?? ""}`);
   return (
     <>
       <CrumbHeader count={data.views.people.length} />
@@ -107,7 +113,12 @@ function PeoplePage() {
         ))}
       </LinkTabs>
       {data.problems.length > 0 && <Problems problems={data.problems} />}
-      <FloatHost float={open && <Opened key={open.id} resource={open} show={show} people={data} />}>
+      <FloatHost
+        float={
+          invite.card ??
+          (open && <Opened key={open.id} resource={open} show={show} people={data} onInvite={invite.start} />)
+        }
+      >
         <p className="border-b p-3 text-sm text-muted-foreground">
           Declared in data files under <code>resources/</code>. Signing in admits these people and nobody else; a change
           to them waits for someone in <code>admin</code>.
@@ -118,8 +129,15 @@ function PeoplePage() {
           </Nothing>
         ) : show === "groups" ? (
           <GroupsTable groups={rows} agents={data.views.agents} open={open?.id} />
+        ) : show === "agents" ? (
+          <AgentsTable agents={rows} groupsOf={data.groupsOf} open={open?.id} />
         ) : (
-          <PeopleTable rows={rows} show={show} groupsOf={data.groupsOf} open={open?.id} />
+          <PeopleTable
+            people={rows}
+            groupsOf={data.groupsOf}
+            open={(invite.person ?? open)?.id}
+            onInvite={invite.start}
+          />
         )}
       </FloatHost>
     </>
@@ -203,24 +221,86 @@ const BuiltIn = ({ name }: { name: string }) => (
 /** The groups the runtime gives a principal of this type, beside those declared: `agents` to every agent. */
 const builtInGroups = (type: string): string[] => (type === "agent" ? [AGENTS] : []);
 
-/** How a person signs in, by what their declaration gives a sign-in to match: their GitHub login, their email. */
-function signsIn(person: DeclaredResource): string[] {
-  const { github, email } = person.desired;
-  return [
-    ...(typeof github === "string" ? [`GitHub · ${github}`] : []),
-    ...(typeof email === "string" ? [`Email · ${email}`] : []),
-  ];
+/** A person's declared email, what a sign-in code goes to and an invite is for. */
+const emailOf = (person: DeclaredResource): string | undefined =>
+  typeof person.desired.email === "string" ? person.desired.email : undefined;
+
+/** Opens a person's invite card, minting their link (`useInviteCard`). */
+type OnInvite = (person: DeclaredResource) => void;
+
+/** Why a person has no invite link: nothing to send its code to. */
+const NO_EMAIL = "Declare an email to make an invite link for them";
+
+/** A person's declared name, else their id. */
+const nameOf = (person: DeclaredResource): string =>
+  typeof person.desired.name === "string" ? person.desired.name : person.name;
+
+/** The people's table: name, email, groups, how they sign in, when they last did, and their invite link. */
+function PeopleTable({
+  people,
+  groupsOf,
+  open,
+  onInvite,
+}: {
+  people: DeclaredResource[];
+  groupsOf: Directory["groupsOf"];
+  open: string | undefined;
+  onInvite: OnInvite;
+}) {
+  // Invite links are the host's staff login's: on this machine the picker signs anyone in.
+  const { data } = useQuery(peopleSignInsQuery());
+  const invites = data?.invites === true;
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Name</TableHead>
+          <TableHead>Email</TableHead>
+          <TableHead>Groups</TableHead>
+          <TableHead>Signs in</TableHead>
+          <TableHead>Last signed in</TableHead>
+          {invites && (
+            <TableHead>
+              <span className="sr-only">Actions</span>
+            </TableHead>
+          )}
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {people.map((row) => (
+          <TableRow key={row.id} data-state={row.id === open ? "selected" : undefined}>
+            <TableCell>
+              <OpenLink resource={row} show="people" />
+            </TableCell>
+            <TableCell>{emailOf(row) ?? <span className="text-muted-foreground">none</span>}</TableCell>
+            <TableCell>
+              <Names names={groupsOf.get(row.name) ?? []} none="none" />
+            </TableCell>
+            <TableCell>
+              <SignsIn person={row} />
+            </TableCell>
+            <TableCell>
+              <LastSignIn person={row.name} />
+            </TableCell>
+            {invites && (
+              <TableCell className="text-right">
+                <InviteButton person={row} onInvite={onInvite} />
+              </TableCell>
+            )}
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  );
 }
 
-/** The people's or the agents' table: name, id, how they sign in (or whom an agent acts for), groups, declaration. */
-function PeopleTable({
-  rows,
-  show,
+/** The agents' table: name, whom each acts for, groups, declaration. */
+function AgentsTable({
+  agents,
   groupsOf,
   open,
 }: {
-  rows: DeclaredResource[];
-  show: "people" | "agents";
+  agents: DeclaredResource[];
   groupsOf: Directory["groupsOf"];
   open: string | undefined;
 }) {
@@ -229,41 +309,27 @@ function PeopleTable({
       <TableHeader>
         <TableRow>
           <TableHead>Name</TableHead>
-          <TableHead>Id</TableHead>
-          <TableHead>{show === "agents" ? "Acts for" : "Signs in with"}</TableHead>
+          <TableHead>Acts for</TableHead>
           <TableHead>Groups</TableHead>
-          {show === "people" && <TableHead>Last signed in</TableHead>}
           <TableHead>Declared in</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
-        {rows.map((row) => (
+        {agents.map((row) => (
           <TableRow key={row.id} data-state={row.id === open ? "selected" : undefined}>
             <TableCell>
-              <OpenLink resource={row} show={show} />
+              <OpenLink resource={row} show="agents" />
             </TableCell>
             <TableCell>
-              <code className="text-xs">{row.name}</code>
-            </TableCell>
-            <TableCell>
-              {show === "agents" ? (
-                typeof row.desired.onBehalfOf === "string" ? (
-                  row.desired.onBehalfOf
-                ) : (
-                  <span className="text-muted-foreground">nobody: itself</span>
-                )
+              {typeof row.desired.onBehalfOf === "string" ? (
+                row.desired.onBehalfOf
               ) : (
-                <SignsIn person={row} />
+                <span className="text-muted-foreground">nobody: itself</span>
               )}
             </TableCell>
             <TableCell>
               <Names names={groupsOf.get(row.name) ?? []} builtIn={builtInGroups(row.type)} none="none" />
             </TableCell>
-            {show === "people" && (
-              <TableCell>
-                <LastSignIn person={row.name} />
-              </TableCell>
-            )}
             <TableCell>
               <DeclaredIn resource={row} />
             </TableCell>
@@ -274,11 +340,11 @@ function PeopleTable({
   );
 }
 
-/** When the person last signed in on this app and how, from the ledger; `never` until they do. */
+/** When the person last signed in on this app and how, from the ledger; `Never` until they do. */
 function LastSignIn({ person }: { person: string }) {
   const { data } = useQuery(peopleSignInsQuery());
   const last = data?.last[person];
-  if (!last) return <span className="text-muted-foreground">{data ? "never" : ""}</span>;
+  if (!last) return <span className="text-muted-foreground">{data ? "Never" : ""}</span>;
   return (
     <span>
       <When at={last.at} />{" "}
@@ -291,58 +357,149 @@ function LastSignIn({ person }: { person: string }) {
 const SIGN_IN_METHOD: Record<string, string> = {
   code: "email code",
   github: "GitHub",
-  invite: "invite link",
+  invite: "invite",
 };
 
-/**
- * A one-use link that signs the person in, for 24 hours, replacing their last: minted by the
- * host's sign-in for someone with an email declared, to send them however you like.
- */
-function InviteLink({ person, email }: { person: string; email: string | undefined }) {
-  const { data } = useQuery(peopleSignInsQuery());
-  const invite = useServerFn(inviteFn);
-  const mutation = useMutation({
-    mutationFn: () => invite({ data: { person } }),
-    onError: (err) => toast.error(errorBodyOf(err)?.error ?? err.message),
-  });
-  if (!data?.invites) return null;
-  if (email === undefined) {
-    return <p className="text-sm text-muted-foreground">Declare an email to make an invite link for them.</p>;
+/** How a person may sign in, by what their declaration gives a sign-in to match: their email (shortened), their GitHub login. */
+function SignsIn({ person }: { person: DeclaredResource }) {
+  const email = emailOf(person);
+  const { github } = person.desired;
+  if (email === undefined && typeof github !== "string") {
+    return <span className="text-muted-foreground">cannot sign in</span>;
   }
   return (
-    <div className="flex flex-col gap-2">
-      <div>
-        <Button variant="outline" size="sm" onClick={() => mutation.mutate()} disabled={mutation.isPending}>
-          {mutation.isPending ? (
-            <Spinner data-icon="inline-start" />
-          ) : (
-            <LinkIcon aria-hidden="true" data-icon="inline-start" />
-          )}
-          Invite link
-        </Button>
-      </div>
-      {mutation.data && (
-        <>
-          <Input readOnly value={mutation.data.url} aria-label="Invite link" onFocus={(e) => e.target.select()} />
-          <p className="text-sm text-muted-foreground">
-            Signs in {email} once, until <When at={Date.parse(mutation.data.expiresAt)} />. A new link replaces this
-            one.
-          </p>
-        </>
+    <span className="flex flex-col">
+      {email !== undefined && (
+        <span>
+          Email code · <span className="text-muted-foreground">{email.replace(/@.*$/, "@…")}</span>
+        </span>
       )}
-    </div>
+      {typeof github === "string" && (
+        <span>
+          GitHub · <code className="text-xs">{github}</code>
+        </span>
+      )}
+    </span>
   );
 }
 
-function SignsIn({ person }: { person: DeclaredResource }) {
-  const ways = signsIn(person);
-  if (ways.length === 0) return <span className="text-muted-foreground">cannot sign in</span>;
+/**
+ * Minting a person's invite link, and the card that shows it over the list: `start` mints one
+ * (each replacing that person's last), `person` is whom the card is for while it is open, and
+ * `card` the card. The card belongs to the view it was opened in (`where`, the page's search):
+ * opening someone else or another tab puts it away. A refusal is a toast, and the card closes.
+ */
+function useInviteCard(where: string) {
+  const invite = useServerFn(inviteFn);
+  const mutation = useMutation({
+    mutationFn: ({ person }: { person: DeclaredResource; where: string }) => invite({ data: { person: person.name } }),
+    onError: (err) => toast.error(errorBodyOf(err)?.error ?? err.message),
+  });
+  const shown = mutation.isError || mutation.variables?.where !== where ? undefined : mutation.variables;
+  const person = shown?.person;
+  return {
+    start: (whom: DeclaredResource) => mutation.mutate({ person: whom, where }),
+    person,
+    card: person && <InviteCard key={person.id} person={person} url={mutation.data?.url} onClose={mutation.reset} />,
+  };
+}
+
+/**
+ * A person's Invite link button: for someone in `admin` (the server refuses anyone else too), and
+ * a person with an email declared; otherwise disabled, with why as its tip.
+ */
+function InviteButton({
+  person,
+  onInvite,
+  size = "xs",
+}: {
+  person: DeclaredResource;
+  onInvite: OnInvite;
+  size?: "xs" | "sm";
+}) {
+  const { groups } = useActor();
+  const why = !groups.includes(ADMIN)
+    ? `Only someone in ${ADMIN} makes an invite link`
+    : emailOf(person) === undefined
+      ? NO_EMAIL
+      : undefined;
+  const button = (
+    <Button
+      variant="outline"
+      size={size}
+      disabled={why !== undefined}
+      focusableWhenDisabled
+      className="data-disabled:opacity-50"
+      onClick={() => onInvite(person)}
+    >
+      <LinkIcon aria-hidden="true" data-icon="inline-start" />
+      Invite link
+    </Button>
+  );
+  return why === undefined ? button : <Tip tip={why}>{button}</Tip>;
+}
+
+/**
+ * The invite link just minted for `person`, over the list: a one-use link that signs them in, for
+ * 24 hours, to send however you like, with Copy; `url` is undefined while it is being made.
+ */
+function InviteCard({
+  person,
+  url,
+  onClose,
+}: {
+  person: DeclaredResource;
+  url: string | undefined;
+  onClose: () => void;
+}) {
+  const name = nameOf(person);
+  const first = firstWordOf(name);
+  const title = `Invite link for ${name}`;
+  const copy = (link: string) =>
+    navigator.clipboard.writeText(link).then(
+      () => toast.success(`Copied ${first}'s invite link`),
+      () => toast.error("Could not copy: select the link and copy it"),
+    );
   return (
-    <span className="flex flex-col">
-      {ways.map((way) => (
-        <span key={way}>{way}</span>
-      ))}
-    </span>
+    <FloatingCard role="region" aria-label={title} className={cn(FLOAT, "order-first")}>
+      <CardHeader>
+        <CardHeading>{title}</CardHeading>
+        <CardDescription>Works once, 24 hours.</CardDescription>
+        <CardAction>
+          <Button variant="ghost" size="icon-sm" onClick={onClose}>
+            <XIcon aria-hidden="true" />
+            <span className="sr-only">Close</span>
+          </Button>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        <Field>
+          <FieldLabel htmlFor="invite-url">Link</FieldLabel>
+          <div className="flex gap-2">
+            <Input
+              id="invite-url"
+              readOnly
+              value={url ?? ""}
+              placeholder="Making the link…"
+              className="min-w-0 flex-1 font-mono text-xs"
+              onFocus={(e) => e.target.select()}
+            />
+            <Button disabled={url === undefined} onClick={() => url !== undefined && copy(url)}>
+              {url === undefined ? (
+                <Spinner data-icon="inline-start" />
+              ) : (
+                <CopyIcon aria-hidden="true" data-icon="inline-start" />
+              )}
+              Copy
+            </Button>
+          </div>
+        </Field>
+        <p className="text-sm text-muted-foreground">Send it any way you like: text, Slack, email.</p>
+        <p className="border-t pt-3 text-xs text-muted-foreground">
+          Opening it signs {first} in as {emailOf(person)}. A new link replaces this one.
+        </p>
+      </CardContent>
+    </FloatingCard>
   );
 }
 
@@ -399,7 +556,17 @@ function GroupsTable({
  * The one open, over the list: its name, its file and export, its groups (written on each group,
  * not here), and its declaration's form (its identity read-only: `DeclarationForm`).
  */
-function Opened({ resource, show, people }: { resource: DeclaredResource; show: PeopleView; people: Directory }) {
+function Opened({
+  resource,
+  show,
+  people,
+  onInvite,
+}: {
+  resource: DeclaredResource;
+  show: PeopleView;
+  people: Directory;
+  onInvite: OnInvite;
+}) {
   const type = people.types.find((t) => t.type === resource.type);
   const groups = people.groupsOf.get(resource.name) ?? [];
   return (
@@ -407,9 +574,13 @@ function Opened({ resource, show, people }: { resource: DeclaredResource; show: 
       <CardHeader className="border-b">
         <CardHeading>{resource.name}</CardHeading>
         <CardDescription>
-          <code className="text-xs">
+          <Link
+            to="/hosting"
+            search={{ resource: resource.id }}
+            className="font-mono text-xs underline-offset-4 hover:underline"
+          >
             {resource.at.file} · export {resource.at.export}
-          </code>
+          </Link>
         </CardDescription>
         <CardAction>
           <ButtonLink variant="ghost" size="icon-sm">
@@ -431,14 +602,23 @@ function Opened({ resource, show, people }: { resource: DeclaredResource; show: 
             <p className="text-sm text-muted-foreground">Written on each group: open it under Groups to change it.</p>
           </div>
         )}
-        {resource.type === "person" && (
-          <InviteLink
-            person={resource.name}
-            email={typeof resource.desired.email === "string" ? resource.desired.email : undefined}
-          />
-        )}
+        {resource.type === "person" && <InviteEntry person={resource} onInvite={onInvite} />}
         <DeclarationForm resource={resource} type={type} />
       </CardContent>
     </FloatingCard>
+  );
+}
+
+/** The open person's Invite link, where this app mints them: it opens the same card as the row's. */
+function InviteEntry({ person, onInvite }: { person: DeclaredResource; onInvite: OnInvite }) {
+  const { data } = useQuery(peopleSignInsQuery());
+  if (!data?.invites) return null;
+  if (emailOf(person) === undefined) {
+    return <p className="text-sm text-muted-foreground">{NO_EMAIL}.</p>;
+  }
+  return (
+    <div>
+      <InviteButton person={person} onInvite={onInvite} size="sm" />
+    </div>
   );
 }
