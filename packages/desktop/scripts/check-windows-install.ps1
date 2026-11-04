@@ -40,10 +40,14 @@ if ($Signed) {
     Get-ChildItem -Recurse -File -Include *.exe, *.dll, *.node, *.sys, *.scr, *.efi `
       -Path (Join-Path $Out "Sanoma-win32-x64"), $root
   )
-  $unsigned = $files | Where-Object { (Get-AuthenticodeSignature $_.FullName).Status -ne "Valid" }
+  # A timestamp too: Artifact Signing's certificates last three days, and without one the signature dies with them.
+  $unsigned = $files | Where-Object {
+    $signature = Get-AuthenticodeSignature $_.FullName
+    $signature.Status -ne "Valid" -or -not $signature.TimeStamperCertificate
+  }
   if ($unsigned) {
-    $unsigned | ForEach-Object { Write-Output "::error::not validly signed: $($_.FullName)" }
-    throw "$(@($unsigned).Count) of $($files.Count) executables are not validly signed"
+    $unsigned | ForEach-Object { Write-Output "::error::not validly signed and timestamped: $($_.FullName)" }
+    throw "$(@($unsigned).Count) of $($files.Count) executables are not validly signed and timestamped"
   }
   $signer = (Get-AuthenticodeSignature (Join-Path $root "app-$Version/Sanoma.exe")).SignerCertificate.Subject
   Write-Output "all $($files.Count) executables are signed, by $signer"

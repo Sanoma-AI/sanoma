@@ -220,8 +220,8 @@ jobs:
               "AzureDeveloperCliCredential", "InteractiveBrowserCredential"
             )
           } | ConvertTo-Json | Set-Content $metadata
-          $dlib = Join-Path $tools "microsoft.artifactsigning.client/bin/x64/Azure.CodeSigning.Dlib.dll"
-          $signtool = Join-Path $tools "microsoft.windows.sdk.buildtools/bin/10.0.28000.0/x64/signtool.exe"
+          $dlib = Join-Path $tools "microsoft.artifactsigning.client\bin\x64\Azure.CodeSigning.Dlib.dll"
+          $signtool = Join-Path $tools "microsoft.windows.sdk.buildtools\bin\10.0.28000.0\x64\signtool.exe"
           foreach ($file in $dlib, $signtool) { if (-not (Test-Path $file)) { throw "$file is not in its package" } }
           "WINDOWS_SIGN_WITH_PARAMS=/v /debug /dlib $dlib /dmdf $metadata" >> $env:GITHUB_ENV
           "WINDOWS_SIGNTOOL_PATH=$signtool" >> $env:GITHUB_ENV

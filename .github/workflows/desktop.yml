@@ -148,3 +148,30 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
           path: packages/desktop/test-results
+
+  # TEMPORARY, removed before merge: the signing plumbing of desktop-release.yml's windows job, with a
+  # throwaway self-signed certificate in place of Azure Artifact Signing's dlib.
+  signing-dry-run:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        with:
+          cache: true
+      - run: pnpm install --frozen-lockfile
+      - name: A throwaway certificate, trusted on this runner
+        run: |
+          $password = [guid]::NewGuid().ToString("N")
+          $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=Sanoma dry run" -CertStoreLocation Cert:\CurrentUser\My
+          $pfx = Join-Path $env:RUNNER_TEMP "dry-run.pfx"
+          Export-PfxCertificate -Cert $cert -FilePath $pfx -Password (ConvertTo-SecureString $password -AsPlainText -Force) | Out-Null
+          $cer = Join-Path $env:RUNNER_TEMP "dry-run.cer"
+          Export-Certificate -Cert $cert -FilePath $cer | Out-Null
+          Import-Certificate -FilePath $cer -CertStoreLocation Cert:\LocalMachine\Root | Out-Null
+          Import-Certificate -FilePath $cer -CertStoreLocation Cert:\LocalMachine\TrustedPublisher | Out-Null
+          "WINDOWS_SIGN_WITH_PARAMS=/v /f $pfx /p $password" >> $env:GITHUB_ENV
+          "WINDOWS_TIMESTAMP_SERVER=http://timestamp.acs.microsoft.com" >> $env:GITHUB_ENV
+      - run: pnpm --filter @sanoma-ai/desktop run make:windows
+      - working-directory: packages/desktop
+        run: ./scripts/check-windows-install.ps1 -Out out -Version (Get-Content package.json | ConvertFrom-Json).version -Signed

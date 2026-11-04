@@ -131,6 +131,27 @@ test("New Company, from an empty folder to the app, then Quit, then a crash", as
     process.kill(crashing, "SIGKILL");
     await expect.poll(() => alive(crashing), { timeout: 30_000 }).toBe(false);
     shell = undefined;
+    await new Promise((resolve) => setTimeout(resolve, 20_000));
+    // TEMPORARY diagnostics
+    if (process.platform === "win32") {
+      console.error(
+        execFileSync(
+          "powershell.exe",
+          [
+            "-NoProfile",
+            "-Command",
+            "Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'node|postgres|Sanoma|cmd|pg_ctl' } | ForEach-Object { '{0} {1} {2} {3}' -f $_.ProcessId, $_.ParentProcessId, $_.Name, $_.CommandLine }",
+          ],
+          { encoding: "utf8" },
+        ),
+      );
+      console.error(
+        `server.log:\n${readFileSync(join(folder, ".sanoma", "postgres", "server.log"), "utf8").slice(-1500)}`,
+      );
+      console.error(
+        `pg_ctl.log:\n${readFileSync(join(folder, ".sanoma", "postgres", "pg_ctl.log"), "utf8").slice(-500)}`,
+      );
+    }
     await expect.poll(() => alive(second), { timeout: 60_000, intervals: [500] }).toBe(false);
     await expect
       .poll(
