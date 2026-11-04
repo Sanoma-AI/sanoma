@@ -66,7 +66,6 @@ import {
   requireActor,
   runDetail,
   saysWho,
-  scenarios,
   serverFnFailure,
   signOutUrl,
   setCredential,
@@ -631,7 +630,7 @@ describe("the server functions", () => {
 
 describe("scenarios and sandbox runs", () => {
   it("lists the scenarios in the config's feature files, with their steps", async () => {
-    const body = await scenarios(ctx);
+    const body = ctx.snapshot.scenarios;
     expect(body.errors).toEqual([]);
     expect(body.scenarios.map((s) => s.name)).toEqual([SCENARIO, "Publish retried", "Copy rejected"]);
     const launch = body.scenarios[0]!;
@@ -1667,7 +1666,7 @@ describe("the page", () => {
   });
   // wave 2 B: New run
   it("renders a workflow's page in Sandbox mode: the scenario's input read-only, and the scenario", async () => {
-    const launch = (await scenarios(ctx)).scenarios.find((s) => s.name === SCENARIO)!;
+    const launch = ctx.snapshot.scenarios.scenarios.find((s) => s.name === SCENARIO)!;
     // Only the fields its When sets: the rest are made up.
     expect(launch.input).toMatchObject({ title: "Acme Pro", launchAt: "2030-01-01T09:00:00Z" });
     const { title } = launch.input as { title: string };

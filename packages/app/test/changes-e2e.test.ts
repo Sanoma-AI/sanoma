@@ -23,7 +23,7 @@ import { freshDatabase } from "../../workflows/test/harness.ts";
 import type { AppContext } from "../src/context.ts";
 import { type App, startApp } from "../src/index.ts";
 import { tellCommits } from "../src/server/agent/checkout.ts";
-import { change, hasRemote, openChange } from "../src/server/core.ts";
+import { change, openChange } from "../src/server/core.ts";
 import { patch } from "../src/server/local/writes.ts";
 import { appSnapshot } from "../src/snapshot-build.ts";
 import { checks } from "../src/server/drafts.ts";
@@ -160,7 +160,7 @@ describe("a change, from a chat's draft to main", { timeout: 2 * ROUND_MS }, () 
       local: { source },
     } as unknown as AppContext;
     const html = await renderDraftCard(card, {
-      remote: hasRemote(context),
+      remote: context.snapshot.repository?.remote !== undefined,
       change: await change(context, "rules"),
     });
     expect(html).toMatch(/<button[^>]*aria-disabled="false"[^>]*>Send for review<\/button>/);

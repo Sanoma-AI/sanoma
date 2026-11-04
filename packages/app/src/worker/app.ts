@@ -49,9 +49,6 @@ const member = (path: string[]): unknown =>
     },
   });
 
-/** The client the handler is given: each call made on the request's own client (`requests`), `tokens.resolve` too. */
-const requestClient = () => member([]) as SanomaClient;
-
 /**
  * The staff's login on the Worker: none yet (the staff's sign-in on the Worker is #609), so the
  * app's own pages and server functions answer 503 there. A public site's host never reaches it.
@@ -75,7 +72,8 @@ function handlerOf(env: AppBundleEnv) {
   const databaseUrl = env.DATABASE?.connectionString;
   if (!databaseUrl) throw new Error("the Worker has no DATABASE binding with a connection string");
   const resolved = resolveConfig({ ...config, root, databaseUrl });
-  const client = requestClient();
+  // Each call made on the request's own client (`requests`), `tokens.resolve` too.
+  const client = member([]) as SanomaClient;
   // Each site the Worker serves; another public site answers 503 on its hosts here.
   const sites = new Map<string, AdmittingLogin>();
   for (const site of snapshot.description.sites) {

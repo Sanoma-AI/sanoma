@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
   type ActorInfo,
   AdoptRequest,
+  ApiError,
   CallRequest,
   ChangesQuery,
   ClearCredentialRequest,
@@ -35,20 +36,17 @@ import {
   decide,
   driftReport,
   fileSource,
-  hasRemote,
   hostEnforcement,
   lastRuns,
   listRuns,
   nextFires,
   notHere,
-  notOnThisHost,
   openChange,
   permissions,
   preview,
   readStartRun,
   runDetail,
   saysWho,
-  scenarios,
   setCredential,
   signOutUrl,
   startRun,
@@ -77,7 +75,7 @@ const CHANGE = { method: "POST", strict: { output: false } } as const;
 
 /** The checkout's actions (`server/local/`), or the 501 that `what` is not available on a host without them. */
 function checkout(what: string) {
-  if (!local) throw notOnThisHost(what);
+  if (!local) throw new ApiError(501, { error: notHere(what) });
   return local;
 }
 
@@ -105,7 +103,7 @@ export const getActor = createServerFn(READ).handler(async ({ context }): Promis
 });
 
 /** The config's scenarios, as the snapshot read them from their feature files: the Node adapter's is read again once one changed. */
-export const getScenarios = createServerFn(READ).handler(({ context }) => scenarios(context.app));
+export const getScenarios = createServerFn(READ).handler(({ context }) => context.app.snapshot.scenarios);
 
 export const getRuns = createServerFn(READ)
   .validator(validate(RunsQuery))
@@ -133,7 +131,9 @@ export const getChange = createServerFn(READ)
   .handler(({ data, context }) => change(context.app, data.id));
 
 /** Whether the repository has a remote, where its changes are reviewed: the bar's Changes. */
-export const getRemote = createServerFn(READ).handler(({ context }) => hasRemote(context.app));
+export const getRemote = createServerFn(READ).handler(
+  ({ context }) => context.app.snapshot.repository?.remote !== undefined,
+);
 
 /** Sends the person's chat's draft for review: its change opened, its run's id. */
 export const openChangeFn = createServerFn(CHANGE)

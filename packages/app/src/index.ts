@@ -141,11 +141,10 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
       }
     });
   });
-  const load = options.dev
-    ? () => devResponder(options.dev!, server, sockets)
-    : () => builtResponder(resolve(options.distDir ?? defaultDistDir()));
   const [loaded, connected] = await Promise.allSettled([
-    load(),
+    options.dev
+      ? devResponder(options.dev, server, sockets)
+      : builtResponder(resolve(options.distDir ?? defaultDistDir())),
     SanomaClient.connect(config, { onWrite: options.onWrite, ...(options.source && { source: options.source }) }),
   ]);
   if (loaded.status === "rejected" && connected.status === "rejected") {

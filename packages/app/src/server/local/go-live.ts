@@ -1,6 +1,7 @@
 // oxlint-disable-next-line import/no-unassigned-import
 import "@tanstack/react-start/server-only";
-import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
   deploymentKey,
@@ -42,12 +43,6 @@ import { mintWakeupToken } from "../setup.ts";
 
 // Going live's writes, where the checkout is: `infra.ts` rendered from the choices and written,
 // committed, and the repository pushed to the one apply made (`go-live.ts` has the rest).
-
-const exists = (path: string) =>
-  access(path).then(
-    () => true,
-    () => false,
-  );
 
 /** The version of `sanoma` the company's repository installs (`installedSanoma`), which the host's runtime image is tagged with. */
 async function sanomaVersion(root: string): Promise<string> {
@@ -205,7 +200,7 @@ export async function goLive(app: AppContext, actor: Principal, choices: GoLiveR
   const source = app.local?.source;
   if (resolved.root === undefined) throw new Error("The config has no root, so its data files cannot be written");
   const path = join(resolved.root, INFRA);
-  if (await exists(path)) throw writtenAlready();
+  if (existsSync(path)) throw writtenAlready();
   // Host bootstrap follows the same direct-or-mounted-file rules as the runtime. An external
   // store has its own authority and does not need the built-in store's encryption key.
   const bootstrap: ("SANOMA_SIGNING_KEY" | "SANOMA_SECRETS_KEY")[] = ["SANOMA_SIGNING_KEY"];

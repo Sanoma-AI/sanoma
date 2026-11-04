@@ -5,15 +5,6 @@ export const DEPLOYMENT_KEYS: readonly string[] = ["SANOMA_SIGNING_KEY", "SANOMA
 export type DeploymentKeyName = "SANOMA_SIGNING_KEY" | "SANOMA_SECRETS_KEY";
 
 /**
- * Node's `fs` where there is a file system (Node), found at the call rather than imported: workerd
- * has no files to mount a key in, so there a `_FILE` input is refused.
- */
-const fileSystem = () =>
-  (globalThis.process as { getBuiltinModule?: (id: string) => unknown } | undefined)?.getBuiltinModule?.("node:fs") as
-    | typeof import("node:fs")
-    | undefined;
-
-/**
  * Bootstrap only: never resolves through the secret store that the key unlocks. `<name>` from the
  * environment, or the file `<name>_FILE` names where there is a file system.
  */
@@ -23,7 +14,11 @@ export function deploymentKey(name: DeploymentKeyName, env: NodeJS.ProcessEnv = 
   if (value && file) throw new Error(`Set only one of ${name} and ${name}_FILE`);
   let encoded = value;
   if (file) {
-    const fs = fileSystem();
+    // Node's `fs` where there is a file system (Node), found at the call rather than imported:
+    // workerd has no files to mount a key in, so there a `_FILE` input is refused.
+    const fs = (globalThis.process as { getBuiltinModule?: (id: string) => unknown } | undefined)?.getBuiltinModule?.(
+      "node:fs",
+    ) as typeof import("node:fs") | undefined;
     if (!fs) throw new Error(`${name}_FILE names a file, and this host has no file system: set ${name}`);
     try {
       encoded = fs.readFileSync(file, "utf8").trim();

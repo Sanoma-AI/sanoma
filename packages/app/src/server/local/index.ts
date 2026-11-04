@@ -2,7 +2,7 @@
 // child process (git, Cucumber, a coding agent), and so only where the company's files are. The
 // Node adapter's app imports this module; the Worker's bundle replaces it with `none.ts`, so none
 // of it, or what it imports, is in the bundle, and each caller answers "not available on this
-// host" (`notOnThisHost`) when `local` is undefined.
+// host" (501, `notHere`) when `local` is undefined.
 // oxlint-disable-next-line import/no-unassigned-import
 import "@tanstack/react-start/server-only";
 import type { LedgerRecord, RunStatus } from "@sanoma-ai/workflows";

@@ -46,7 +46,6 @@ import {
   type RunDetail,
   RunsQuery,
   SEALED_SHOWN,
-  type ScenariosResponse,
   type SetCredentialRequest,
   type StartRunRequest,
   type StartRunResponse,
@@ -239,15 +238,6 @@ export type ScenarioChecks = (
 export const notHere = (what: string) =>
   `${what} is not available on this host, which does not have the company's files: use the app where the company's repository is checked out`;
 
-/** The 501 for such an action, called on such a host. */
-export const notOnThisHost = (what: string) => new ApiError(501, { error: notHere(what) });
-
-/**
- * Every scenario in the config's feature files, as the page lists them, as the snapshot read them:
- * none, with why as the one error, when they could not be read, so the page says so and stays up.
- */
-export const scenarios = ({ snapshot }: Pick<AppContext, "snapshot">): ScenariosResponse => snapshot.scenarios;
-
 /** Refuses the request with a 400 `invalid_input`, its issue at `field`, as a form shows it beside the field. */
 export function invalid(field: string, error: string): never {
   throw new ApiError(400, {
@@ -320,13 +310,6 @@ export async function change({ client, snapshot }: AppContext, id: string): Prom
   const files = Object.entries(snapshot.repository?.workflows ?? {});
   return { ...view, edits: files.filter(([, file]) => touched.has(file)).map(([name]) => name) };
 }
-
-/**
- * Whether the repository has a remote: where a change is reviewed, so the bar shows Changes. Not
- * the URL itself.
- */
-export const hasRemote = ({ snapshot }: Pick<AppContext, "snapshot">): boolean =>
-  snapshot.repository?.remote !== undefined;
 
 /** The connector whose remote half is for the repository's remote (`remoteFor`); none without a remote, or without such a connector. */
 export const remoteOf = ({ resolved, snapshot }: Pick<AppContext, "resolved" | "snapshot">) => {

@@ -153,9 +153,6 @@ async function bundlePlugins(root: string, configFile: string, snapshot: AppSnap
   const { src } = appSources();
   const missing = join(pkgDir, "src", "worker", "missing.js");
   const local = join(src, "server", "local", "index.ts");
-  /** Where a module id's file is, said from the repo, or for the app's own from its package. */
-  const named = (file: string) =>
-    companyFile(file, root) ? relative(root, file) : `@sanoma-ai/app/${relative(pkgDir, file)}`;
   return [
     bundleModule(root, configFile, snapshot),
     {
@@ -228,7 +225,9 @@ async function bundlePlugins(root: string, configFile: string, snapshot: AppSnap
                 : used.type === "ImportNamespaceSpecifier"
                   ? "*"
                   : (used.imported?.name ?? used.imported?.value ?? "?");
-          throw new NodeOnlyImport(named(file), symbol, module);
+          // Said from the repo, or for the app's own from its package.
+          const named = companyFile(file, root) ? relative(root, file) : `@sanoma-ai/app/${relative(pkgDir, file)}`;
+          throw new NodeOnlyImport(named, symbol, module);
         }
       },
     },
@@ -259,13 +258,6 @@ const filesIn = (dir: string): string[] =>
     .toSorted();
 
 const MODULE_TYPES: Record<string, AppBundle["modules"][number]["type"]> = { js: "esm", mjs: "esm", wasm: "wasm" };
-
-/** Cloudflare's hash of an asset: the first 32 hex digits of the SHA-256 of its base64 and its extension. */
-const assetHash = (content: string, path: string) =>
-  createHash("sha256")
-    .update(content + extname(path).slice(1))
-    .digest("hex")
-    .slice(0, 32);
 
 /** The pages to prerender: each public site's with no login, on its domain, that no call is made from. */
 function pagesToPrerender(snapshot: AppSnapshot, domains: Readonly<Record<string, string>>) {
@@ -418,7 +410,11 @@ export async function buildAppBundle(repo: string, options: BuildAppBundleOption
           return {
             path: `/${path}`,
             content,
-            hash: assetHash(content, path),
+            // Cloudflare's: the first 32 hex digits of the SHA-256 of the base64 and the extension.
+            hash: createHash("sha256")
+              .update(content + extname(path).slice(1))
+              .digest("hex")
+              .slice(0, 32),
             size: Buffer.byteLength(content, "base64"),
           };
         }),

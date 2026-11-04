@@ -39,6 +39,7 @@ interface Made {
   stamps: Map<string, string>;
 }
 
+// Kept beside `made`: it resolves the config and drops the stamps, for the bundle's build and the tests.
 /** The company as the app reads it (`AppSnapshot`), from its files now. */
 export async function appSnapshot(config: SanomaConfig, options: SnapshotOptions = {}): Promise<AppSnapshot> {
   return (await made(config, resolveConfig(config), options)).snapshot;
@@ -63,7 +64,8 @@ export async function liveSnapshot(
   let making: Promise<Made> | undefined;
   return async () => {
     const description = describe();
-    if (description !== described || !fresh(now.stamps)) {
+    // Made again once the description is another, or a path's stamp is not the one it had.
+    if (description !== described || [...now.stamps].some(([path, stamp]) => stampOf(path) !== stamp)) {
       described = description;
       making ??= make(description).finally(() => (making = undefined));
       now = await making;
@@ -267,6 +269,3 @@ function stampOf(path: string): string {
     return "gone";
   }
 }
-
-/** True when each path's stamp is still the one it had. */
-const fresh = (stamps: ReadonlyMap<string, string>) => [...stamps].every(([path, stamp]) => stampOf(path) === stamp);
