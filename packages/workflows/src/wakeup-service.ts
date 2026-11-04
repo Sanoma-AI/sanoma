@@ -14,7 +14,7 @@ import { errorMessage } from "./shared.ts";
  * before it stops, `PUT`s with that token when it wants waking, replacing what it asked before;
  * the service then calls `GET {url}/wake`, retrying until an answer is a 2xx. It makes its two
  * tables itself, in the database it is given (sanoma-ops's own, when it hosts it): never among
- * `db.ts`'s, which every company's database gets.
+ * `db/company.ts`'s, which every company's database gets.
  */
 
 /** How long a call to an instance's `/wake` may take. */
@@ -256,7 +256,7 @@ export async function startWakeupService({
     // The token names the instance: a new one is a new row, one of this account's is moved to the
     // URL given, and another account's is refused (no row returned).
     const id = randomUUID();
-    const sameUrl = sql`${wakeupInstances.url} = ${checked.url}`;
+    const sameUrl = eq(wakeupInstances.url, checked.url);
     const [row] = await db
       .insert(wakeupInstances)
       .values({ id, accountId, url: checked.url, tokenHash: hashOf(token) })
@@ -272,11 +272,11 @@ export async function startWakeupService({
         },
         setWhere: eq(wakeupInstances.accountId, accountId),
       })
-      .returning({ id: wakeupInstances.id, made: sql<boolean>`${wakeupInstances.id} = ${id}::uuid` });
+      .returning({ id: wakeupInstances.id });
     if (!row) {
       return problem(409, "the token is another account's instance's");
     }
-    return json(row.made ? 201 : 200, { id: row.id });
+    return json(row.id === id ? 201 : 200, { id: row.id });
   }
 
   async function wake(request: Request): Promise<Response> {
@@ -341,11 +341,8 @@ export async function startWakeupService({
   };
 }
 
-interface Due {
-  id: string;
-  url: string;
-  at: Date;
-}
+/** A row due for its call: one waiting, so its `at` is set. */
+type Due = Pick<InstanceRow, "id" | "url"> & { at: Date };
 
 /**
  * The one loop: calls every row that is due, at most `CONCURRENCY` at once, then sleeps until the
@@ -424,7 +421,7 @@ function startLoop({
       .for("update", { of: wakeupInstances, skipLocked: true });
     const rows = await db
       .update(wakeupInstances)
-      .set({ nextAttemptAt: sql`${at.toISOString()}::timestamptz + ${sql.raw(String(CLAIM_S))} * interval '1 second'` })
+      .set({ nextAttemptAt: new Date(at.getTime() + CLAIM_S * 1000) })
       .where(inArray(wakeupInstances.id, due))
       .returning({ id: wakeupInstances.id, url: wakeupInstances.url, at: wakeupInstances.at });
     const queue = rows.flatMap((r): Due[] => (r.at ? [{ ...r, at: r.at }] : []));

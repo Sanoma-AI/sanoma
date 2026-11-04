@@ -281,6 +281,7 @@ const recordChanged = () =>
 const sameJson = (a: Record<string, unknown>, b: Record<string, unknown>) =>
   isDeepStrictEqual(JSON.parse(JSON.stringify(a)), JSON.parse(JSON.stringify(b)));
 type SaveInput = { record: Record<string, unknown>; ifAbsent?: boolean; ifRecord?: Record<string, unknown> };
+// By namespace: the fake names a range's bounds `gt`, `gte`, `lt` and `lte`.
 const RANGE = { gt: drizzle.gt, gte: drizzle.gte, lt: drizzle.lt, lte: drizzle.lte };
 
 type Row = Pick<typeof data.$inferSelect, keyof typeof COLUMNS>;
@@ -314,7 +315,7 @@ export function collectionsDriver(list: readonly Collection[], store: { db(): Pr
         return row ? saved(row) : null;
       },
       list: async (listing: Listing) => {
-        const { where, order, limit } = listClauses(c, listing);
+        const { where, order } = listClauses(c, listing);
         const rows = await (
           await store.db()
         )
@@ -322,7 +323,7 @@ export function collectionsDriver(list: readonly Collection[], store: { db(): Pr
           .from(data)
           .where(where)
           .orderBy(...order)
-          .limit(limit);
+          .limit(listing.limit);
         return rows.map(saved);
       },
       save: async ({ record, ifAbsent, ifRecord }: SaveInput, call) => {
@@ -384,10 +385,7 @@ const SQL_TYPE = { string: "text", number: "numeric", boolean: "boolean" } as co
  * compares it); a missing value, or one of another type, is SQL's null: it matches no filter and
  * sorts last.
  */
-function listClauses(
-  c: Collection,
-  { where = {}, order, limit }: Listing,
-): { where: SQL | undefined; order: SQL[]; limit: number } {
+function listClauses(c: Collection, { where = {}, order }: Listing): { where: SQL | undefined; order: SQL[] } {
   const types = jsonTypesOf(c);
   const field = (name: string) => {
     const type = types[name]!;
@@ -411,11 +409,8 @@ function listClauses(
   const by =
     order === undefined
       ? [byKey]
-      : [
-          sql`${field(order.replace(/^-/, ""))} ${order.startsWith("-") ? sql.raw("DESC") : sql.raw("ASC")} NULLS LAST`,
-          byKey,
-        ];
-  return { where: and(...conditions), order: by, limit };
+      : [sql`${field(order.replace(/^-/, ""))} ${sql.raw(order.startsWith("-") ? "DESC" : "ASC")} NULLS LAST`, byKey];
+  return { where: and(...conditions), order: by };
 }
 
 /** Orders two values of one type as Postgres does under `COLLATE "C"`: strings by their UTF-8 bytes. */

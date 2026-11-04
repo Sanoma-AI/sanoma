@@ -550,7 +550,7 @@ describe("KMS encrypted Postgres", () => {
         .select({ envelope: kmsSecrets.envelope })
         .from(kmsSecrets)
         .where(eq(kmsSecrets.path, at.path));
-      expect((current!.envelope as { keyVersion: string }).keyVersion).toBe(`${KEY}/cryptoKeyVersions/2`);
+      expect(current!.envelope.keyVersion).toBe(`${KEY}/cryptoKeyVersions/2`);
       kms.state.disabledVersions.add(1);
       expect((await store().read(at))?.value).toBe("after rotation");
       await (

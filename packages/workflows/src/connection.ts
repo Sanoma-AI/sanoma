@@ -449,7 +449,7 @@ export class ConnectionRegistry {
       await this.db()
     )
       .update(connections)
-      .set({ status: "uncertain", updatedBy: actor, updatedAt: sql`now()` })
+      .set({ status: "uncertain", updatedBy: actor })
       .where(
         and(eq(connections.id, ref.$connection), eq(connections.revision, revision), eq(connections.status, "pending")),
       );
@@ -500,6 +500,7 @@ export class ConnectionRegistry {
       previous?.credentialVersion != null &&
       version !== undefined &&
       previous.credentialVersion !== version;
+    const credentialVersion = version ?? previous?.credentialVersion ?? null;
     const [checked] = await db
       .insert(connectionHealth)
       .select(
@@ -508,9 +509,7 @@ export class ConnectionRegistry {
             connectionId: connections.id,
             revision: connections.revision,
             health: sql<string>`${state}`.as("health"),
-            credentialVersion: sql<string | null>`${version ?? previous?.credentialVersion ?? null}`.as(
-              "credential_version",
-            ),
+            credentialVersion: sql<string | null>`${credentialVersion}`.as("credential_version"),
             externallyRenewed: sql<boolean>`${renewed}`.as("externally_renewed"),
             checkedAt: sql<Date>`now()`.as("checked_at"),
           })
@@ -522,7 +521,7 @@ export class ConnectionRegistry {
         set: {
           revision,
           health: state,
-          credentialVersion: version ?? previous?.credentialVersion ?? null,
+          credentialVersion,
           externallyRenewed: renewed,
           checkedAt: sql`now()`,
         },
@@ -603,7 +602,7 @@ export class ConnectionRegistry {
       await this.db()
     )
       .update(connections)
-      .set({ status: "connected", revision: next, updatedBy: actor.id, updatedAt: sql`now()` })
+      .set({ status: "connected", revision: next, updatedBy: actor.id })
       .where(and(eq(connections.id, row.id), eq(connections.revision, revision)))
       .returning({ id: connections.id });
     if (!activated) refuse("The connection changed; review it again before activating");
@@ -799,7 +798,7 @@ export class ConnectionRegistry {
       await this.db()
     )
       .update(connections)
-      .set({ status: "disconnected", revision, updatedBy: actor, updatedAt: sql`now()` })
+      .set({ status: "disconnected", revision, updatedBy: actor })
       .where(and(eq(connections.id, row.id), eq(connections.revision, expectedRevision)))
       .returning({ id: connections.id });
     if (!changed) refuse("The connection changed; reload before disconnecting it");
@@ -831,7 +830,7 @@ export class ConnectionRegistry {
             .returning({ id: connections.id })
         : await db
             .update(connections)
-            .set({ ...values, updatedAt: sql`now()` })
+            .set(values)
             .where(and(eq(connections.id, row.id), eq(connections.revision, expected)))
             .returning({ id: connections.id });
     if (!saved) refuse("The connection changed; reload before binding it");

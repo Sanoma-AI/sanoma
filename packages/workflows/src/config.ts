@@ -174,7 +174,7 @@ export interface Login {
 export interface ResolvedConfig {
   secrets: SecretConfiguration;
   connections: ConnectionRegistry;
-  connectionPool: LazyDb;
+  connectionStore: LazyDb;
   identityProvisioning: ReturnType<typeof configuredIdentityProvisioning>;
   /**
    * Scopes workflows, queues and versions in the system database: the `name` of
@@ -237,7 +237,7 @@ export interface ResolvedConfig {
   /** The config's collections, by name: their operations are in `ops` and `drivers`, their fake in `fakes`, under `DATA_VENDOR`. */
   collections: ReadonlyMap<string, Collection>;
   /**
-   * The pool the collections' driver keeps their records through, when there are any: opened on
+   * The database the collections' driver keeps their records in, when there are any: opened on
    * its first call, and closed by whoever calls the driver (the worker, and the client, which
    * calls it directly, when each stops).
    */
@@ -349,12 +349,12 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   const hostTyped = [...types.values()].some((type) => type.host);
   // Built-in: the collections' operations, `data.<name>.<op>`, on the config's database.
   const databaseUrl = resolveDatabaseUrl(config);
-  const connectionPool = lazyDb(databaseUrl, "connections");
+  const connectionStore = lazyDb(databaseUrl, "connections");
   const identityProvisioning = configuredIdentityProvisioning(config.identityProvisioning);
   const connections = new ConnectionRegistry(
     connectionCatalog(config.connectors, config.connections, config.connectionRules),
-    () => connectionPool.db(),
-    configuredSecrets(config.secrets ?? {}, () => connectionPool.db()),
+    () => connectionStore.db(),
+    configuredSecrets(config.secrets ?? {}, () => connectionStore.db()),
   );
   const declared = [...collections.values()];
   const dataStore = declared.length ? lazyDb(databaseUrl, "data") : undefined;
@@ -382,9 +382,9 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
       connectionDriver(connections),
       appsListDriver,
       runtimeDriver({
-        tokens: tokenStore(() => connectionPool.db()),
+        tokens: tokenStore(() => connectionStore.db()),
         identities: identityProvisioning.store,
-        inspect: inspectRun(() => connectionPool.db(), appName),
+        inspect: inspectRun(() => connectionStore.db(), appName),
       }),
       ...(hostTyped ? [sourceDriver] : []),
       ...(dataStore ? [collectionsDriver(declared, dataStore)] : []),
@@ -454,7 +454,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   return {
     secrets: config.secrets ?? {},
     connections,
-    connectionPool,
+    connectionStore,
     identityProvisioning,
     appName,
     databaseUrl,

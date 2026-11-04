@@ -47,14 +47,15 @@ export const WAKEUP_MIGRATIONS = {
  * each in the journal table. Drizzle's migrator compares only the newest timestamp, so a migration
  * older than the newest applied is skipped: `scripts/check-journal.ts` keeps a branch from adding
  * one. Two processes migrating one database at once race (the migrator takes no lock): callers
- * hold `lockPreparation`.
+ * hold `underPreparationLock`.
  */
 export const applyMigrations = (db: Db, of: Migrations): Promise<void> =>
   migrate(db, { migrationsFolder: folderOf(of), migrationsTable: of.table });
 
 /**
  * Whether the database `db` is on has had every migration of `of`: its journal table's newest
- * `created_at` is the journal's last entry's `when`. False with no journal table.
+ * `created_at` is the journal's last entry's `when`, or later (a database a newer release
+ * migrated serves this one, as after a rollback). False with no journal table.
  */
 export async function migrationsApplied(db: Db, of: Migrations): Promise<boolean> {
   const last = of.journal.entries.at(-1);
@@ -67,5 +68,6 @@ export async function migrationsApplied(db: Db, of: Migrations): Promise<boolean
   const { rows } = await db.execute<{ newest: string | null }>(
     sql`SELECT max(created_at)::text AS newest FROM ${table}`,
   );
-  return rows[0]?.newest === String(last.when);
+  const newest = rows[0]?.newest;
+  return newest != null && Number(newest) >= last.when;
 }

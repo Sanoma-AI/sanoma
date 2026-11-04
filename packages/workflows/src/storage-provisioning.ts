@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { Client } from "pg";
-import { databaseOn, type Db } from "./db.ts";
+import { databaseOn, type Db, pgCode } from "./db.ts";
 import { kmsDeployment, kmsSecrets } from "./db/kms.ts";
 import { KMS_SECRETS_SQL } from "./kms-secrets.ts";
 import { generateSecret, type Secrets } from "./secret.ts";
@@ -229,7 +229,7 @@ export const prepareSecretStore: PrepareStorage = async (input, secrets) => {
   } catch (error) {
     const known = storageProvisioningCode(error);
     if (known) throw new StorageProvisioningError(known);
-    const code = (error as { code?: string } | null)?.code;
+    const code = pgCode(error);
     throw new StorageProvisioningError(
       code === "42501" ? "denied" : code === "23505" || code === "42710" ? "conflict" : "unavailable",
     );

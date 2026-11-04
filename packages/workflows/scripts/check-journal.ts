@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { COMPANY_MIGRATIONS, type MigrationsJournal, WAKEUP_MIGRATIONS } from "../src/db/migrate.ts";
 
 // Drizzle's migrator applies a migration only when it is newer than the newest one a database has
 // had, so a migration generated on a branch before another merged to `main` is skipped, silently,
@@ -10,26 +10,26 @@ import { fileURLToPath } from "node:url";
 const pkg = fileURLToPath(new URL("..", import.meta.url));
 const base = process.argv[2] ?? "origin/main";
 
-interface Journal {
-  entries: { idx: number; when: number; tag: string }[];
+const git = (...args: string[]) =>
+  execFileSync("git", args, { cwd: pkg, stdio: ["ignore", "pipe", "pipe"] }).toString();
+
+// The base must resolve: a check against a ref the checkout lacks would pass every journal.
+try {
+  git("rev-parse", "--verify", "--quiet", `${base}^{commit}`);
+} catch {
+  console.error(`${base} does not resolve: fetch it before the check`);
+  process.exit(1);
 }
 
-const journalAt = (ref: string, path: string): Journal | undefined => {
-  try {
-    return JSON.parse(
-      execFileSync("git", ["show", `${ref}:${path}`], { cwd: pkg, stdio: ["ignore", "pipe", "ignore"] }).toString(),
-    );
-  } catch {
-    return undefined;
-  }
-};
+/** The journal at `ref`, or undefined while the folder is not there. */
+const journalAt = (ref: string, path: string): MigrationsJournal | undefined =>
+  git("ls-tree", "--full-tree", "--name-only", ref, "--", path).trim()
+    ? JSON.parse(git("show", `${ref}:${path}`))
+    : undefined;
 
 const problems: string[] = [];
-for (const folder of ["company", "wakeup"]) {
-  const path = `packages/workflows/drizzle/${folder}/meta/_journal.json`;
-  const head: Journal = JSON.parse(
-    readFileSync(new URL(`../drizzle/${folder}/meta/_journal.json`, import.meta.url), "utf8"),
-  );
+for (const { name, journal: head } of [COMPANY_MIGRATIONS, WAKEUP_MIGRATIONS]) {
+  const path = `packages/workflows/drizzle/${name}/meta/_journal.json`;
   const before = journalAt(base, path);
   if (!before) continue;
   const known = new Set(before.entries.map((e) => e.tag));

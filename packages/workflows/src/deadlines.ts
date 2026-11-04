@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import { dbosStatusesOf } from "./client.ts";
 import { eq, sql } from "drizzle-orm";
+import type { PgUpdateSetSource } from "drizzle-orm/pg-core";
 import type { Db } from "./db.ts";
 import { wakeup as wakeupRow } from "./db/company.ts";
 import type { ResolvedConfig } from "./config.ts";
@@ -174,22 +175,24 @@ export function stopWhenIdle(rule: StopRule): { close(): void } {
     const at = next?.toISOString() ?? null;
     // The wakeup row's writes: one worker registers per instance (the supervisor runs one at a
     // time, and a deploy stops the old container before the new one starts), so none names a worker.
-    const row = (await rule.db()).update(wakeupRow);
+    const db = await rule.db();
+    const record = (set: PgUpdateSetSource<typeof wakeupRow>) =>
+      db.update(wakeupRow).set(set).where(eq(wakeupRow.id, 1));
     if (at !== null) {
       try {
         await rule.register({ at });
       } catch (err) {
         const message = errorMessage(err);
-        await row.set({ lastError: message }).where(eq(wakeupRow.id, 1));
+        await record({ lastError: message });
         problem(`could not register the wakeup at ${at}, so the worker keeps running: ${message}`);
         return false;
       }
-      await row.set({ at: new Date(at), lastError: null }).where(eq(wakeupRow.id, 1));
+      await record({ at: new Date(at), lastError: null });
     }
     lastProblem = undefined;
     if (closed || !(await rule.idle()) || rule.deadlines.nextDeadline()?.toISOString() !== next?.toISOString())
       return false;
-    await row.set({ stoppedAt: sql`now()` }).where(eq(wakeupRow.id, 1));
+    await record({ stoppedAt: sql`now()` });
     await rule.stop().catch((err: unknown) => warn(`the worker could not stop cleanly: ${errorMessage(err)}`));
     rule.onStopped?.({ at });
     return true;

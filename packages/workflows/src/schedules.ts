@@ -81,7 +81,7 @@ export async function applyScheduled(
   if (!unfired.length) return;
   // When the instance's worker last stopped itself, from the wakeup row; never, and nothing was missed.
   const [row] = await (await db()).select({ stoppedAt: wakeup.stoppedAt }).from(wakeup).where(eq(wakeup.id, 1));
-  const stoppedAt = row?.stoppedAt ?? undefined;
+  const stoppedAt = row?.stoppedAt;
   if (!stoppedAt) return;
   for (const { schedule, since } of unfired) {
     const from = stoppedAt > since ? stoppedAt : since;

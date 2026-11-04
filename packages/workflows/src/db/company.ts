@@ -33,7 +33,10 @@ export const credentials = pgTable(
     value: text().notNull(),
     version: text().notNull(),
     setBy: text().notNull(),
-    setAt: when().notNull().defaultNow(),
+    setAt: when()
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => sql`now()`),
   },
   (t) => [primaryKey({ columns: [t.namespace, t.name] })],
 );
@@ -142,7 +145,10 @@ export const connections = pgTable("sanoma_connections", {
   location: jsonb().$type<SecretLocation>(),
   status: text().$type<ConnectionStatus>().notNull().default("connected"),
   updatedBy: text().notNull(),
-  updatedAt: when().notNull().defaultNow(),
+  updatedAt: when()
+    .notNull()
+    .defaultNow()
+    .$onUpdate(() => sql`now()`),
 });
 
 /** Each connection's last health check. */

@@ -69,15 +69,17 @@ export interface Envelope {
   ciphertext: string;
   tag: string;
 }
-type Row = Pick<typeof kmsSecrets.$inferSelect, "version" | "envelope" | "updatedBy" | "updatedAt">;
 const columns = {
   version: kmsSecrets.version,
   envelope: kmsSecrets.envelope,
   updatedBy: kmsSecrets.updatedBy,
   updatedAt: kmsSecrets.updatedAt,
 };
+type Row = Pick<typeof kmsSecrets.$inferSelect, keyof typeof columns>;
 const at = (company: string, address: SecretAddress) =>
   and(eq(kmsSecrets.company, company), eq(kmsSecrets.namespace, address.namespace), eq(kmsSecrets.path, address.path));
+/** The row of `version`, compared as text: an expected version that is no uuid matches nothing. */
+const versionIs = (version: string) => sql`${kmsSecrets.version}::text = ${version}`;
 const FORMAT = "sanoma-gcp-kms-v1";
 const MAX_BYTES = 65_536;
 const capabilities = Object.freeze({
@@ -250,8 +252,9 @@ export function kmsPostgresStore(options: KmsPostgresOptions): SecretStore | Sec
     }
   };
   const open = async (address: SecretAddress, row: Row): Promise<SecretValue> => {
-    const e = row.envelope;
-    if (e.format !== FORMAT || !keys.has(e.key) || !versionOf(e.keyVersion, e.key))
+    // A JSON `null` is a jsonb value the column takes: an envelope written by hand, not one of ours.
+    const e = row.envelope as Envelope | null;
+    if (!e || e.format !== FORMAT || !keys.has(e.key) || !versionOf(e.keyVersion, e.key))
       throw new SecretStoreError("invalid_value");
     const nonce = bytes(e.nonce, 12),
       tag = bytes(e.tag, 16),
@@ -323,7 +326,7 @@ export function kmsPostgresStore(options: KmsPostgresOptions): SecretStore | Sec
           if (created.length !== 1) throw new SecretStoreError("conflict");
           const updated = await db
             .update(kmsSecrets)
-            .set({ envelope, version, updatedBy: "validation", updatedAt: sql`now()` })
+            .set({ envelope, version, updatedBy: "validation" })
             .where(exact)
             .returning({ version: kmsSecrets.version });
           if (updated.length !== 1) throw new SecretStoreError("unavailable");
@@ -360,8 +363,8 @@ export function kmsPostgresStore(options: KmsPostgresOptions): SecretStore | Sec
                 .returning({ updatedAt: kmsSecrets.updatedAt })
             : await db
                 .update(kmsSecrets)
-                .set({ version, envelope, updatedBy: by, updatedAt: sql`now()` })
-                .where(and(at(company, address), sql`${kmsSecrets.version}::text = ${expectedVersion}`))
+                .set({ version, envelope, updatedBy: by })
+                .where(and(at(company, address), versionIs(expectedVersion)))
                 .returning({ updatedAt: kmsSecrets.updatedAt });
         if (!row) throw new SecretStoreError("conflict");
         // Return the caller's value, never make a second decrypt after a successful commit.
@@ -374,7 +377,7 @@ export function kmsPostgresStore(options: KmsPostgresOptions): SecretStore | Sec
           await database()
         )
           .delete(kmsSecrets)
-          .where(and(at(company, address), sql`${kmsSecrets.version}::text = ${expectedVersion}`))
+          .where(and(at(company, address), versionIs(expectedVersion)))
           .returning({ version: kmsSecrets.version });
         if (!deleted.length) throw new SecretStoreError("conflict");
       }),

@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from "node:crypto";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { Db } from "./db.ts";
 import { credentials } from "./db/company.ts";
 import {
@@ -93,7 +93,7 @@ export function postgresSecretStore(db: () => Promise<Db>): SecretStore {
               .returning(returned)
           : await database
               .update(credentials)
-              .set({ value: sealed, version, setBy: by, setAt: sql`now()` })
+              .set({ value: sealed, version, setBy: by })
               .where(and(at(address), eq(credentials.version, expectedVersion)))
               .returning(returned);
       if (!row) throw new SecretStoreError("conflict");

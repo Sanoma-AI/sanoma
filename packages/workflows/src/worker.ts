@@ -189,7 +189,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
           () => resolved.connections.close(),
           () => resolved.identityProvisioning.close(),
           () => secrets.close(),
-          () => resolved.connectionPool.close(),
+          () => resolved.connectionStore.close(),
           () => ledger.close(),
           async () => resolved.dataStore?.close(),
         ]) {
@@ -292,7 +292,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
         secrets.close(),
         ledger.close(),
         resolved.dataStore?.close(),
-        resolved.connectionPool.close(),
+        resolved.connectionStore.close(),
       ]);
     }
     current = previous;

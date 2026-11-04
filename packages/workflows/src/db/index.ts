@@ -2,7 +2,7 @@
 // with, for the packages that share them (the connectors' stores, the app's tests). Never a
 // workflow's import: the shipped `oxlint.json` refuses it, as it does `/wakeup-service`.
 
-export { type Db, databaseOn } from "../db.ts";
+export { type Db, databaseOn, pgCode } from "../db.ts";
 export * from "./company.ts";
 export * from "./dbos.ts";
 export * from "./identity.ts";

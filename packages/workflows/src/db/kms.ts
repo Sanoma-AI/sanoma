@@ -5,7 +5,7 @@ import type { Envelope } from "../kms-secrets.ts";
 // The KMS secret store's tables, in the schema `sanoma_kms` an administrator installs with
 // `KMS_SECRETS_SQL` (`kms-secrets.ts`) and `sanoma.secretStore.prepare` (`storage-provisioning.ts`),
 // with their grants: the runtime never makes them, so no migration is generated from this model.
-// `kms-schema.test.ts` holds the install SQL to it.
+// `installed-schemas.test.ts` holds the install SQL to it.
 
 export const kms = pgSchema("sanoma_kms");
 
@@ -19,7 +19,10 @@ export const kmsSecrets = kms.table(
     version: uuid().notNull(),
     envelope: jsonb().$type<Envelope>().notNull(),
     updatedBy: text().notNull(),
-    updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp({ withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => sql`now()`),
   },
   (t) => [primaryKey({ columns: [t.company, t.namespace, t.path] })],
 );

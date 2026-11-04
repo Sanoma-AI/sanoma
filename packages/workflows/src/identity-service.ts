@@ -105,11 +105,11 @@ export async function startIdentityService(options: IdentityServiceOptions): Pro
       // Fixed columns only: no tokens, hashes, headers or arbitrary caller fields.
       await auditDb.insert(identityAuditEvents).values({
         result: event.result,
-        deployment: e?.deployment ?? null,
-        company: e?.company ?? null,
-        environment: e?.environment ?? null,
-        serviceAccount: e?.serviceAccount ?? null,
-        generation: e?.generation ?? null,
+        deployment: e?.deployment,
+        company: e?.company,
+        environment: e?.environment,
+        serviceAccount: e?.serviceAccount,
+        generation: e?.generation,
         expiresAt: event.expiresAt === undefined ? null : new Date(event.expiresAt),
       });
     };

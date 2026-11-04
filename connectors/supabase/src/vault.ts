@@ -1,5 +1,5 @@
 import { SecretStoreError, type SecretAddress, type SecretStore, type SecretValue } from "@sanoma-ai/workflows";
-import { type Db, databaseOn } from "@sanoma-ai/workflows/db";
+import { type Db, databaseOn, pgCode } from "@sanoma-ai/workflows/db";
 import { sql } from "drizzle-orm";
 import { Pool } from "pg";
 
@@ -65,7 +65,7 @@ export function supabaseVault(options: SupabaseVaultOptions = {}): SecretStore &
     } catch (error) {
       if (error instanceof SecretStoreError) throw error;
       // The driver's `code` classifies the failure; its message (the statement and its parameters) is never kept.
-      const code = (error as { code?: string } | null)?.code;
+      const code = pgCode(error);
       throw new SecretStoreError(
         code === "42501"
           ? "denied"

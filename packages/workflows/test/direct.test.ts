@@ -16,7 +16,6 @@ import {
   defineDriver,
   defineWorkflow,
   isDirect,
-  type LedgerRecord,
   resolveConfig,
   SanomaClient,
   type SanomaConfig,
@@ -134,7 +133,7 @@ describe("a direct call", () => {
 
   const records = async () =>
     (await db.select({ record: ledger.record }).from(ledger).where(like(ledger.runId, "direct:%"))).map(
-      (r) => r.record as LedgerRecord,
+      (r) => r.record,
     );
   const rows = async () =>
     db
