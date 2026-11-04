@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import { DriverError, errorMessage, retryableStatus } from "@sanoma-ai/workflows";
 import { defineFake, type FakeOptions } from "@sanoma-ai/workflows/fake";
 import { NodeRequest, sendNodeResponse } from "srvx/node";
-import { caaContent, cloudflareOps } from "./connector.ts";
+import { caaContent, cloudflareOps, host } from "./connector.ts";
 import {
   alarmOps,
   type Application,
@@ -617,6 +617,7 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
         dns: {},
       }),
       ops: (state) => ({
+        host: containerOps(() => api(state), { startTimeoutMs: 60_000, pollMs: 50 }, host),
         container: containerOps(() => api(state), { startTimeoutMs: 60_000, pollMs: 50 }),
         alarm: alarmOps(() => api(state)),
         records: recordsOps(() => api(state)),

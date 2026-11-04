@@ -1,5 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
 import {
+  RUNTIME_PORT,
   type CallContext,
   DriverError,
   errorMessage,
@@ -13,7 +14,7 @@ import {
 } from "@sanoma-ai/workflows";
 import { domainsOf, domainsText, hostnameUrl, siteAtHostname } from "@sanoma-ai/workflows/shared";
 import { instanceUrl, mintInstanceToken, WAKEUP_TOKEN } from "@sanoma-ai/workflows/wakeup-service";
-import { alarm, container } from "./connector.ts";
+import { alarm, container, type host } from "./connector.ts";
 import { refused } from "./errors.ts";
 import { accountPinned } from "./registry.ts";
 import { serveSites, SITES_PENDING } from "./sites.ts";
@@ -383,7 +384,9 @@ export interface ContainerOptions {
 }
 
 /**
- * `cloudflare.container`'s operations over `api()`, made on each call. A create and an update
+ * `cloudflare.host`'s and `cloudflare.container`'s operations over `api()`, made on each call: the
+ * one Worker either declares, `type` the one whose fields a call is parsed by (the container's by
+ * default). A host is given by apply what its data file leaves out; its port is the image's. A create and an update
  * are one upsert, in Wrangler's order: the image copied and pinned, then prepared, the Worker
  * uploaded with the declared bindings and that image (the migration on its first upload), its
  * workers.dev URL turned on, the application made when there is none, and then a wait until the
@@ -391,7 +394,11 @@ export interface ContainerOptions {
  * the object destroys a container started at another and starts it again. With domains and the
  * instance token, the public sites the container built go on the Worker last (`serveSites`).
  */
-export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs }: ContainerOptions) {
+export function containerOps(
+  api: () => CloudflareApi,
+  { startTimeoutMs, pollMs }: ContainerOptions,
+  type: typeof container | typeof host = container,
+) {
   /** The Worker `name` runs, from its bindings and its application; `checkHealth` asks it too. None for a Worker that is not Sanoma's. */
   const inspect = async (name: string, checkHealth: boolean) => {
     const cf = api();
@@ -450,7 +457,7 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
     const found = id === undefined ? undefined : await inspect(id, false);
     if (!desired) return { planned: { action: found ? "delete" : "none", ...NONE }, sitesOnly: false };
     const { secrets, ...declared } = desired;
-    const unknown = [...container.fields.vendorOwned];
+    const unknown = [...type.fields.vendorOwned];
     // A create plans without the account: it needs no credentials yet.
     if (!found) return { planned: { action: "create", planned: declared, unknown, replace: [] }, sitesOnly: false };
     const planned: Record<string, unknown> = declared;
@@ -550,11 +557,15 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
    * not follow), the public sites' upload alone.
    */
   const put = async (desired: Record<string, unknown>, { secrets: store }: CallContext, sitesOnly = false) => {
-    const declared = container.schema.parse(await resolveSecrets(desired, store));
-    const { name, image, source, ref, revision, configurationRevision, port, domains } = declared;
+    const declared = type.schema.parse(await resolveSecrets(desired, store));
+    const { name, image, source, ref, revision, configurationRevision, domains } = declared;
+    const port = declared.port ?? RUNTIME_PORT;
     const hostname = declared.hostname ?? undefined;
     checkHostname(name, hostname, domains);
     const secrets = declared.secrets ?? {};
+    if (!image || !source || !ref) {
+      throw refused(`container ${name}: no ${!image ? "image" : !source ? "source" : "ref"}: apply gives a host one`);
+    }
     if (!revision) {
       throw refused(
         `container ${name}: no revision: apply sets it from ${ref} once its source exists (apply again after a repository it creates)`,
@@ -686,7 +697,7 @@ export function containerOps(api: () => CloudflareApi, { startTimeoutMs, pollMs 
       call: CallContext,
     ) => {
       const { planned: fresh, sitesOnly } = await diff({ id, desired });
-      replanned("container.update", fresh, expect);
+      replanned(`${type.type}.update`, fresh, expect);
       if (fresh.action === "none") {
         const found = await read({ id });
         if (found.state) return { id, state: found.state };

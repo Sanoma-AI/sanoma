@@ -60,13 +60,13 @@ const slugged = (name: string) =>
     .replaceAll(/^-+|-+$/g, "");
 
 /**
- * A host's slug, as a declaration gives it: its `name`, else `<slug>` of a `domains.app` of
- * `<slug>.sanoma.work` (another domain names no slug), else its repository's name, made a slug.
- * Empty when it gives none of them.
+ * A host's slug, as a declaration gives it: its `name`, else `<slug>` of its `hostname` (or the
+ * deprecated `domains.app`) of `<slug>.sanoma.work` (another domain names no slug), else its
+ * repository's name, made a slug. Empty when it gives none of them.
  */
-export function hostSlug(desired: { name?: unknown; source?: unknown; domains?: unknown }): string {
+export function hostSlug(desired: { name?: unknown; source?: unknown; domains?: unknown; hostname?: unknown }): string {
   if (typeof desired.name === "string" && desired.name) return desired.name;
-  const app = (desired.domains as Record<string, unknown> | null | undefined)?.app;
+  const app = desired.hostname ?? (desired.domains as Record<string, unknown> | null | undefined)?.app;
   if (typeof app === "string" && app.endsWith(".sanoma.work")) return app.slice(0, -".sanoma.work".length);
   const repository = repositoryOf(desired.source);
   return repository ? slugged(repository.name) : "";
@@ -125,30 +125,53 @@ const hostSchema = z.object({
   name: slugField
     .optional()
     .describe(
-      "The company's slug, its address `<slug>.sanoma.work`: by default the slug of `domains.app`, else the repository's name",
+      "The company's slug, its address `<slug>.sanoma.work`: by default the slug of `hostname`, else the repository's name",
     ),
-  source: z.string().min(1).describe("The company repository's clone URL, or a declared GitHub repository"),
-  ref: z.string().min(1).describe("The branch it runs, such as `main`, never a commit"),
+  hostname: z
+    .string()
+    .regex(DOMAIN_NAME)
+    .optional()
+    .describe(
+      "The company's address, `<slug>.sanoma.work` (the only one for now), which names its slug when `name` is left out",
+    ),
+  database: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("The declared Cloud database it runs on, such as `store`: the Cloud binds its URL to the host itself"),
+  source: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      "The company repository, an override: by default the one the app runs from (its `origin`, or the GitHub repository its data file declares)",
+    ),
+  ref: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("The branch it runs, an override: by default the repository's default branch"),
   revision: z.string().nullish().describe("The commit it runs, which apply sets from `ref`"),
-  port: z.literal(PORT).optional().describe(`The port the runtime listens on: the Cloud's, ${PORT}`),
+  port: z.literal(PORT).optional().describe(`The port the runtime listens on: the Cloud's, ${PORT}; never declared`),
   domains: z
     .record(z.string().regex(SITE_KEY), z.string().regex(DOMAIN_NAME))
     // Empty, it would read back as `<slug>.sanoma.work`, a change on every plan.
     .refine((domains) => Object.keys(domains).length > 0, "leave `domains` out rather than empty")
     .optional()
-    .describe(
-      "The company's address as `app` (`<slug>.sanoma.work`, the only one for now), which names its slug when `name` is left out",
-    ),
+    .describe("Deprecated: declare `hostname`. The company's address as `app` (`<slug>.sanoma.work`)"),
   url: z.string().nullish().describe("Where the company answers, `https://<slug>.sanoma.work`, which the Cloud sets"),
   healthy: z.boolean().nullish().describe("Whether the Cloud says it runs"),
 });
 
 /** A host's fields: what the Cloud sets, and what it cannot change in place (a deploy moves only the revision). */
 const hostFields = {
-  immutable: ["name", "source", "ref", "port", "domains"],
+  immutable: ["name", "source", "ref", "port", "domains", "hostname"],
   vendorOwned: ["url", "healthy"],
-  writeOnly: [],
-  references: { source: { type: "github.repository", by: ["http_clone_url"] } },
+  writeOnly: ["database"],
+  references: {
+    source: { type: "github.repository", by: ["http_clone_url"] },
+    database: { type: "cloud.database" },
+  },
 } as const;
 
 /** A state or declaration with its `source` as `repositoryKey`. */
@@ -158,12 +181,14 @@ const sourceKey = (state: Record<string, unknown>) => {
 };
 
 /**
- * `cloud.host({ name?, source, ref, port?, domains? })`: the company's host at Sanoma Cloud, a
+ * `cloud.host({ name, hostname?, database? })`: the company's host at Sanoma Cloud, a
  * Worker and container in Sanoma's Cloudflare account at `<slug>.sanoma.work`, which meets the
  * `Host` contract: it stops when quiet and starts on the next request, its URL is public, and it
  * wakes itself through its own Worker's alarm. It binds its own bootstrap (the database URL, keys
- * and tokens are the Cloud's to mint and place), so it takes no `secrets`. A deploy moves it to
- * the revision apply resolves from `ref`; nothing else changes in place. Its binding is the slug.
+ * and tokens are the Cloud's to mint and place), so it takes no `secrets`. Apply gives it the
+ * repository the app runs from (`source`, an override) and that repository's default branch
+ * (`ref`, an override), as `cloudflare.host`; its port is the Cloud's. A deploy moves it to the
+ * revision apply resolves from `ref`; nothing else changes in place. Its binding is the slug.
  */
 export const host = defineResource({
   vendor: "cloud",
@@ -180,8 +205,9 @@ export const host = defineResource({
   host: {
     capabilities: { lifetime: "stops-when-quiet", publicUrl: true, buildsFromGit: false, staticEgress: false },
     bindsBootstrap: true,
+    derives: true,
     // `domains` is the type's own, not the contract's: its `app` is the company's address, no public site.
-    inputs: { source: "source", ref: "ref", port: "port" },
+    inputs: { source: "source", ref: "ref", hostname: "hostname", database: "database" },
     revision: "revision",
     outputs: (state) => ({
       url: String(state.url ?? ""),

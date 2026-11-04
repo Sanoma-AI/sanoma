@@ -1,7 +1,7 @@
 import { defineDriver, DriverError, retryableStatus } from "@sanoma-ai/workflows";
 import type { Cloudflare } from "cloudflare";
 import { z } from "zod";
-import { cloudflareOps } from "./connector.ts";
+import { cloudflareOps, host } from "./connector.ts";
 import { refused } from "./errors.ts";
 import { alarmOps, type CloudflareApi, containerOps, type ReadBinding, type ZoneRecord } from "./ops.ts";
 import type { WorkerModule } from "./worker.ts";
@@ -316,6 +316,7 @@ export function cloudflareDriver(options: CloudflareDriverOptions = {}) {
   return defineDriver(
     cloudflareOps,
     {
+      host: containerOps(api, { startTimeoutMs, pollMs }, host),
       container: containerOps(api, { startTimeoutMs, pollMs }),
       alarm: alarmOps(() => worker),
       records: recordsOps(api),

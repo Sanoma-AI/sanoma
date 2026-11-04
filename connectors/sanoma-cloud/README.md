@@ -24,15 +24,15 @@ import { cloud } from "@sanoma-ai/connector-sanoma-cloud/resources";
 
 export const repo = github.repository({ owner: "acme", name: "acme-ops", visibility: "private" });
 export const store = cloud.database({ region: "us-east" });
-export const host = cloud.host({ source: repo, ref: "main", domains: { app: "acme.sanoma.work" } });
+export const host = cloud.host({ name: "acme", database: store });
 export default [repo, store, host];
 ```
 
-There is no `secrets` block and no wakeup: the Cloud mints the instance's bootstrap (its database URL, keys and tokens) and binds it to the host itself, and the host wakes itself through its own Worker's alarm.
+The host says only its decisions, as `cloudflare.host` does: apply gives it the repository the app runs from (the declared `github.repository` that is its `origin`, else the one its data file declares, else `origin`'s URL) and that repository's default branch. There is no `secrets` block and no wakeup: the Cloud mints the instance's bootstrap (its database URL, keys and tokens) and binds it to the host itself, and the host wakes itself through its own Worker's alarm.
 
 ### The company's slug
 
-One company is one slug, its address `<slug>.sanoma.work`, and both declarations are bound to it. The host's slug is its `name`, else `<slug>` of a `domains.app` of `<slug>.sanoma.work`, else its repository's name (lower case, each run of other characters a dash); plan refuses one that is no slug the Cloud takes (`no_slug`: lower case letters, digits and dashes, a dash at neither end, one of them or 3 to 40). The database's is its `name`, else the one Cloud company the token holds: the one the wizard made, or the one the host makes, so a file whose token holds no company yet, or several (an account with a second company), declares `name` on the database, the same as the host's: an unnamed one is refused at plan (`no_slug`) until it is bound. Go live does not offer Sanoma Cloud yet (#514 G1): it leaves out the types of a vendor whose host binds its own bootstrap.
+One company is one slug, its address `<slug>.sanoma.work`, and both declarations are bound to it. The host's slug is its `name`, else `<slug>` of a `hostname` (or the deprecated `domains.app`) of `<slug>.sanoma.work`, else its repository's name (lower case, each run of other characters a dash); plan refuses one that is no slug the Cloud takes (`no_slug`: lower case letters, digits and dashes, a dash at neither end, one of them or 3 to 40). The database's is its `name`, else the one Cloud company the token holds: the one the wizard made, or the one the host makes, so a file whose token holds no company yet, or several (an account with a second company), declares `name` on the database, the same as the host's: an unnamed one is refused at plan (`no_slug`) until it is bound. Go live does not offer Sanoma Cloud yet (#514 G1): it leaves out the types of a vendor whose host binds its own bootstrap.
 
 ### `cloud.database`
 
@@ -45,15 +45,16 @@ Its state adds what the Cloud sets: `id` (the database's id there) and `healthy`
 
 ### `cloud.host`
 
-| Field     | What it is                                                                                                                                          |
-| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`    | Optional: the company's slug (above).                                                                                                               |
-| `source`  | The company repository's clone URL, or a declared `github.repository`.                                                                              |
-| `ref`     | The branch it runs, such as `main`. Apply resolves it to the commit it runs (`revision`, which a data file may not declare), so a merge deploys it. |
-| `port`    | Optional: the Cloud's, `3000`.                                                                                                                      |
-| `domains` | Optional: the company's address as `app`, `<slug>.sanoma.work` (the only one for now). Customers' own domains come later.                           |
+| Field      | What it is                                                                                                                                                       |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`     | The company's slug (above).                                                                                                                                      |
+| `hostname` | Optional: the company's address, `<slug>.sanoma.work` (the only one for now), which the Cloud takes as `domains.app`. Customers' own domains come later.         |
+| `database` | Optional: the declared `cloud.database` it runs on. The Cloud binds its URL to the host itself.                                                                  |
+| `source`   | Optional override of the derived repository: a clone URL, or a declared `github.repository`.                                                                     |
+| `ref`      | Optional override of the derived branch. Apply resolves the branch to the commit it runs (`revision`, which a data file may not declare), so a merge deploys it. |
+| `domains`  | Deprecated: declare `hostname`. The company's address as `app`.                                                                                                  |
 
-Its state adds `revision`, `url` and `healthy`. It meets the [`Host` contract](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#hosts) as a host that binds its own bootstrap (`bindsBootstrap`, so it takes no `secrets`): it stops when quiet and starts on the next request, its URL is public, it runs the Cloud's runtime image rather than building from git, and it has no fixed egress. A deploy moves it to another revision; another `source`, `ref`, `port`, `domains` or `name` plans a replace, which `update` refuses: delete it and declare it again.
+Its state adds `revision`, `url` and `healthy`. It meets the [`Host` contract](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#hosts) as a host that binds its own bootstrap (`bindsBootstrap`, so it takes no `secrets`): it stops when quiet and starts on the next request, its URL is public, it runs the Cloud's runtime image rather than building from git, and it has no fixed egress. A deploy moves it to another revision; another `source`, `ref`, `hostname`, `domains` or `name` plans a replace, which `update` refuses: delete it and declare it again.
 
 | Operation                                     | Effect  | What it does                                                                                                                |
 | --------------------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------- |
