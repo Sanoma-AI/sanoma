@@ -1,32 +1,32 @@
 # sanoma
 
-Sanoma is a framework for building highly customizable full-stack business apps: pages, data, workflows and the services they call, all TypeScript in your own repo.
+Sanoma is a TypeScript framework for building business apps. Your pages, data, workflows and service integrations live together in your own repo.
 
-**For developers:** work with the people who run the business the way you already ship software. Each change is a branch you can review and test before it goes live.
+**For developers:** build apps with the people who run the business. Use branches, tests and code review to make changes before they go live.
 
-**For people who don't write code:** tell the agent what you need and it drafts it. Nothing goes live until a person accepts it, and work that needs a person waits for them. It's the rigor of a software team, without the code.
+**If you don't write code:** describe what you need in chat. The agent drafts the change, and your team reviews and accepts it before it goes live.
 
-This repo is the code behind it: the runtime, the app and the connectors. Anyone can read it and host it themselves ([license](#license)). Status: early.
+Sanoma is early. This repo contains the runtime, the app and the connectors. You can read the source and host it yourself under the [license](#license).
 
 ## How it fits together
 
-- **One repo per business:** `sanoma.config.ts` with `sites/`, `workflows/`, `resources/` and `policies/` beside it. The [`sanoma`](packages/sanoma/README.md) command runs all of it, with the app, on your machine.
-- **[Sites](packages/sanoma/README.md#sites):** React pages for your team or for the public, with sign-in. A page calls the workflows and the data directly.
-- **Workflows:** TypeScript functions for the work behind the pages. A step, an approval or a wait of a week picks up where it left off after a restart (they run on [DBOS](https://dbos.dev) with Postgres). A run stays on the [version](packages/workflows/README.md#versions) of the code it started on, and a lint keeps workflows [safe to replay](packages/workflows/README.md#keeping-workflows-replay-safe).
-- **[Data](packages/workflows/README.md#collections):** collections in the business's own Postgres, declared in `resources/data.ts`.
-- **Connectors:** typed access to services like Stripe, Resend and GitHub. Each workflow lists the operations it may call.
-- **Rules and records:** [policies](packages/workflows/README.md#policies) in the repo, written in [Cedar](https://docs.cedarpolicy.com), let each call through, refuse it or hold it for a person's approval, and the [ledger](packages/workflows/README.md#ledger) records every run.
-- **The agent:** tell the app's chat what to change. Sanoma's agent, or one you bring (Claude Code, Codex and others), edits a draft copy of the repo and tests it. Once the repo has a remote, each change is [published in the app](packages/workflows/README.md#changes), by an admin in a new company; without one, you merge the draft's branch by hand.
+- **One repo per business.** Keep `sanoma.config.ts` alongside `sites/`, `workflows/`, `resources/` and `policies/`. The [`sanoma`](packages/sanoma/README.md) command runs the business's code and serves the app on your machine.
+- **[Sites](packages/sanoma/README.md#sites).** Build React pages for your team or the public, with sign-in. Pages can call workflows and access data directly.
+- **Workflows.** Write TypeScript functions for the work behind your pages. They run on [DBOS](https://dbos.dev) with Postgres, so steps, approvals and scheduled waits survive a restart. Each run stays on the [code version](packages/workflows/README.md#versions) it started with. Lint checks help keep workflows [safe to replay](packages/workflows/README.md#keeping-workflows-replay-safe).
+- **[Data](packages/workflows/README.md#collections).** Define collections in `resources/data.ts` and store them in your business's own Postgres database.
+- **Connectors.** Call services like Stripe, Resend and GitHub through typed APIs. Each workflow declares which operations it can call.
+- **Policies and the ledger.** Write [policies](packages/workflows/README.md#policies) in [Cedar](https://docs.cedarpolicy.com) to allow a call, deny it or require someone's approval. The [ledger](packages/workflows/README.md#ledger) records every run.
+- **The agent.** Ask for changes in chat. Sanoma's agent edits and tests a draft copy of the repo. You can also work with Claude Code, Codex or another agent. With a Git remote connected, you [publish changes in the app](packages/workflows/README.md#changes); new companies require an admin's approval. Without a remote, merge the draft branch by hand.
 
-It runs on your machine, in the [desktop app](#desktop-preview), or on [a host of your own](packages/sanoma/README.md#hosting-it-yourself), such as Cloudflare with Neon. The connectors so far are listed under [Contents](#contents).
+Run Sanoma locally from the command line or the [desktop app](#desktop-preview), or deploy it to [your own host](packages/sanoma/README.md#hosting-it-yourself), such as Cloudflare with Neon. See [Contents](#contents) for the available connectors.
 
 ![The app: dana starts a run of announce, marketing-lead approves its launch copy in the Inbox, then the run finishes](.github/assets/demo.gif)
 
-A run of the workflow below: dana starts it, marketing-lead approves the copy, and it sleeps until a launch time a minute away, then publishes. For the recording Ghost is answered by its in-memory fake, though the form still shows Live vendors and "Calls Ghost for real".
+Dana starts the workflow below. The marketing lead approves the copy, then the workflow waits until launch time and publishes. This recording uses a fake Ghost service, even though the form says "Live vendors" and "Calls Ghost for real".
 
 ## What a workflow looks like
 
-This workflow drafts a blog post, waits for the marketing lead, sleeps until launch, then publishes:
+This workflow drafts a blog post, asks the marketing lead to approve it, then publishes at the scheduled time:
 
 ```ts
 // workflows/announce.ts
@@ -51,19 +51,19 @@ export default defineWorkflow({
 });
 ```
 
-The app draws this file as a graph before it runs, lists the approval in its Inbox, and shows each run's calls, decisions and replies in its ledger. A developer changes the workflow by changing the file. [`@sanoma-ai/workflows`](packages/workflows/README.md) has the whole API.
+The app turns the workflow into a graph you can inspect before running it. Approvals appear in the Inbox, and the ledger records each call, policy decision and response. To change the workflow, edit the file. See [`@sanoma-ai/workflows`](packages/workflows/README.md) for the full API.
 
 ![The announce workflow's page: its graph, with the ghost.post.create step selected and its details floating over the graph](.github/assets/workflow.png)
 
-The workflow's page: the graph is drawn from the file, and picking a step says what it does and finds its lines under Code.
+Select a step to see what it does and find its source under Code.
 
 ![The Inbox with "Review launch copy" approvals waiting for marketing-lead, the chat column beside it](.github/assets/inbox.png)
 
-The Inbox as marketing-lead: the approvals waiting for them, with the draft's link and what approving lets through. Beside it, the chat column, where you talk with the agent.
+The marketing lead's Inbox shows pending approvals, links to the drafts and the actions each approval allows. Chat with the agent in the column beside it.
 
 ![A finished run of announce: its graph, the approval and its note, and its ledger](.github/assets/run.png)
 
-A finished run: the graph shows how each step went, and the ledger records each call with the policy's decision and the approval with its note.
+After a run finishes, the graph shows the result of each step. The ledger keeps the calls, policy decisions and approval notes.
 
 ## Contents
 
@@ -112,19 +112,29 @@ Connectors live here under `connectors/`; one moves to its own repo only when so
 
 ## Desktop (preview)
 
-The [desktop app](packages/desktop/README.md) opens a company folder, runs that company's own `sanoma` launcher and shows the app in a window, for people who will not open a terminal. Its macOS preview builds are released on [GitHub Releases](https://github.com/Sanoma-AI/sanoma/releases) as `v*`, from 0.5.0 (the first, 0.1.0, as `desktop-v0.1.0`).
+The [desktop app](packages/desktop/README.md) lets you use Sanoma without a terminal. Open a company folder, and it starts that company's `sanoma` launcher in a window. macOS preview builds are on [GitHub Releases](https://github.com/Sanoma-AI/sanoma/releases). Releases from 0.5.0 use `v*` tags; the first preview was `desktop-v0.1.0`.
 
-Download the arm64 build (`Sanoma-<version>-arm64.dmg`) on an Apple silicon Mac, or the x64 one on an Intel Mac, drag Sanoma to Applications and open it. The builds are signed with a Developer ID and notarized by Apple, so macOS opens them without the unidentified-developer warning ([signing](packages/desktop/README.md#signing-and-notarization)).
+Download the arm64 build (`Sanoma-<version>-arm64.dmg`) for an Apple silicon Mac or the x64 build for an Intel Mac. Drag Sanoma to Applications and open it. The builds are signed with a Developer ID and notarized by Apple, so macOS opens them without the unidentified-developer warning. See [signing](packages/desktop/README.md#signing-and-notarization) for details.
 
-The app needs nothing else installed: it ships the Node and the pnpm it runs a company with. git comes with Apple's command line tools, which macOS offers to install the first time `git` runs. It updates itself from 0.5.0: in Applications, it downloads a newer release in the background and installs it when it next quits (or at Help → Restart to Update); run from the dmg or anywhere else, it checks once a day and links to the release instead. 0.1.0 has no updater: replace it by hand once.
+The app includes Node and pnpm. It also needs Git; macOS offers to install Apple's command line tools the first time Git runs.
 
-To release it, bump `version` in [`packages/desktop/package.json`](packages/desktop/package.json) (its own version line, apart from npm's) and the notes in [`RELEASE_NOTES.md`](packages/desktop/RELEASE_NOTES.md) in a pull request, merge, wait for CI on `main`, then run `gh workflow run desktop-release.yml --ref main`. [`desktop-release.yml`](.github/workflows/desktop-release.yml) builds the arm64 and x64 dmg and zip on a macOS runner, signs and notarizes them, and uploads them to a draft release `v<version>`, each dmg also as `Sanoma-mac-<arch>.dmg`, the name the website's download buttons ask GitHub's `releases/latest/download/` for; download it in a browser, try it, then publish the draft as the latest release.
+From version 0.5.0, Sanoma updates itself when installed in Applications. It downloads a new release in the background and installs it when you quit, or when you choose Help → Restart to Update. If you run it from the dmg or another location, it checks once a day and links to the release instead. Version 0.1.0 has no updater, so replace it manually once.
 
-Once published, it is the installed apps' update: [update.electronjs.org](https://github.com/electron/update.electronjs.org) offers the newest release here that is neither a draft nor a prerelease, tagged with a semver version, for each architecture's `-darwin-<arch>` zip (Forge's `Sanoma-darwin-<arch>-<version>.zip`). So `v*` tags and releases are the desktop's alone; the npm packages make none. Their old `v0.2.0` to `v0.4.2` tags are why the desktop's versions resume at 0.5.0, and the workflow refuses a version not later than every `v*` tag.
+To release the desktop app:
+
+1. Open a pull request that bumps `version` in [`packages/desktop/package.json`](packages/desktop/package.json) and updates [`RELEASE_NOTES.md`](packages/desktop/RELEASE_NOTES.md). The desktop version is separate from the npm package versions.
+2. Merge and wait for CI on `main` to pass, then run `gh workflow run desktop-release.yml --ref main`.
+3. Download the draft release in a browser and try it before publishing it as the latest release.
+
+[`desktop-release.yml`](.github/workflows/desktop-release.yml) builds arm64 and x64 dmg and zip files on a macOS runner, signs and notarizes them, and uploads them to a draft release tagged `v<version>`. It also uploads each dmg as `Sanoma-mac-<arch>.dmg`. The website's download buttons use those stable filenames through GitHub's `releases/latest/download/` URL.
+
+Publishing the release makes it available to installed apps through [update.electronjs.org](https://github.com/electron/update.electronjs.org). The service offers the newest release with a semver tag that is neither a draft nor a prerelease. Each architecture needs a `-darwin-<arch>` zip, named `Sanoma-darwin-<arch>-<version>.zip` by Forge.
+
+The `v*` tags and releases belong to the desktop app; npm releases create none. Older npm releases used `v0.2.0` through `v0.4.2`, which is why desktop versions resume at 0.5.0. The release workflow requires a version newer than every existing `v*` tag.
 
 ## Develop
 
-Needs Node 26 or later, pnpm, and Docker for the workflow tests. With [mise](https://mise.jdx.dev), `mise install` sets up Node and pnpm from `.mise.toml`.
+Install Node 26 or later, pnpm, and Docker for the workflow tests. If you use [mise](https://mise.jdx.dev), run `mise install` to set up Node and pnpm from `.mise.toml`.
 
 ```sh
 pnpm install
@@ -135,32 +145,68 @@ pnpm lint && pnpm format:check
 pnpm build          # compiles each package to dist/ for publishing
 ```
 
-Inside the repo, `@sanoma-ai/*` imports resolve to each package's `src/` (via `paths` in `tsconfig.json` and aliases in `vitest.config.ts`), so tests and typechecks need no build. Published packages ship the compiled `dist/`, not the sources (`@sanoma-ai/workflows` also ships `src/`, which its source maps point at).
+Inside the repo, `@sanoma-ai/*` imports resolve to each package's `src/` through `tsconfig.json` paths and `vitest.config.ts` aliases. You can run tests and typechecks without building first. Published packages ship compiled code in `dist/`; `@sanoma-ai/workflows` also includes `src/` for its source maps.
 
-To dogfood a change from a Sanoma repo of your own before it is published, link this checkout into it with [`@sanoma-ai/dev`](packages/dev/README.md) (`sanoma-dev link`, and `sanoma-dev unlink` before a commit).
+To try an unpublished change in your own Sanoma repo, use [`@sanoma-ai/dev`](packages/dev/README.md) to link this checkout with `sanoma-dev link`. Run `sanoma-dev unlink` before committing.
 
 ## Release
 
-[`release.yml`](.github/workflows/release.yml) publishes `sanoma` and the `@sanoma-ai/*` packages to npm with [trusted publishing](https://docs.npmjs.com/trusted-publishers) (no npm token). Each package has its own version, and a release ships only the packages whose version changed. To release:
+[`release.yml`](.github/workflows/release.yml) publishes `sanoma` and the `@sanoma-ai/*` packages to npm using [trusted publishing](https://docs.npmjs.com/trusted-publishers), without an npm token. Each package has its own version. A release publishes versions that are not already on npm.
 
-1. In a pull request, bump `version` in the `package.json` of each public package that changed since its last release (not a private one, such as `@sanoma-ai/testing`); a breaking change in a 0.x package is a minor bump, and a provider-bridge release (`RELEASE` in `packages/bridge/scripts/download-bridge.ts`) is a change to the `@sanoma-ai/bridge-<platform>` packages, as a PostgreSQL release (`RELEASE` in `packages/sanoma/scripts/download-postgres.ts`) is to the `@sanoma-ai/postgres-<platform>` packages. Packages that depend on one you bumped need a new version too when their published range leaves the new one out: an exact pin (`workspace:*`, as `sanoma` pins the runtime and `@sanoma-ai/bridge` its binaries), or a peer range (`workspace:^`, published as `^` on the version at that time) after a minor bump. `node scripts/release-check.ts` names each one it finds, counting the ones that pin those in turn, and the workflow runs it first. It also names a public version whose effective shipped inputs differ from the commit that set its version (excluding tests, `AGENTS.md` and manifest-only `devDependencies` changes), which needs a new version too, and a package npm does not have yet. Merged historical commits alone require no bump when those inputs are unchanged. The pull request's description carries the release notes. To inspect a package's history since the commit that last set its version (this log alone is not the release check):
+### Prepare the versions
 
-   ```sh
-   dir=connectors/ghost; git log --oneline "$(git log -1 --format=%H -G'"version":' -- "$dir/package.json")".. -- "$dir"
-   ```
+Open a pull request that bumps `version` in each public package's `package.json` when its shipped contents have changed. Private packages, such as `@sanoma-ai/testing`, do not need a release version. Put the release notes in the PR description.
 
-2. Merge, wait for CI on `main` to pass, then push a `release/<version>` branch at the merge commit (a name not used before, such as the new `sanoma` version) and run the workflow on it, never on `main`:
+- A breaking change in a 0.x package requires a minor version bump.
+- A provider-bridge release (`RELEASE` in `packages/bridge/scripts/download-bridge.ts`) requires new versions of the `@sanoma-ai/bridge-<platform>` packages. A PostgreSQL release (`RELEASE` in `packages/sanoma/scripts/download-postgres.ts`) requires new versions of the `@sanoma-ai/postgres-<platform>` packages.
+- Bump dependent packages when their published dependency ranges exclude the new version. This includes exact pins (`workspace:*`, used by `sanoma` for the runtime and by `@sanoma-ai/bridge` for its binaries) and peer ranges after a minor bump (`workspace:^`, published as `^` on the version at that time).
+
+Run `node scripts/release-check.ts` to find packages that still need a bump, including dependencies that pin other bumped packages. The release workflow runs this check first. It also reports packages missing from npm and public packages whose shipped inputs differ from the commit that set their version. Tests, `AGENTS.md` and manifest-only `devDependencies` changes are excluded. Historical commits alone do not require a bump if the shipped inputs are unchanged.
+
+To inspect a package's history since its version was last set, use the command below. This log does not replace the release check.
+
+```sh
+dir=connectors/ghost; git log --oneline "$(git log -1 --format=%H -G'"version":' -- "$dir/package.json")".. -- "$dir"
+```
+
+### Publish the release
+
+Merge the PR and wait for CI on `main` to pass. Create a `release/<version>` branch at the merge commit, using a name that has not been used before, such as the new `sanoma` version. Run the workflow on that branch:
 
 ```sh
 git push origin <sha>:refs/heads/release/<version>
 gh workflow run release.yml --ref release/<version>   # or Actions → Release → Run workflow
 ```
 
-The workflow fails on a ref not named `release/*`, if the commit is not on `main` or its CI did not pass, or if the check above names a package. Its job summary names the commit and the versions it will publish, each package whose version is not yet on npm (`pnpm publish -r`, in dependency order). The first package that fails to publish stops the rest: the publish step's log shows what went public. Fix what failed and run the workflow again on the same branch, which skips versions already public and publishes the rest from the same commit (a fix in a package already public needs a new version). Then delete the branch: `git push origin --delete release/<version>`.
+The workflow requires a `release/*` branch, a commit on `main` with passing CI, and a passing release check. Its job summary lists the commit and versions it will publish. It runs `pnpm publish -r` in dependency order and skips versions already on npm.
 
-Each package needs a trusted publisher on npmjs.com, added once by an owner of the `sanoma-ai` organization under the package's Settings → Trusted publishing → GitHub Actions: owner `Sanoma-AI`, repository `sanoma`, workflow `release.yml`, with "Allow npm publish" on (not "Allow npm dist-tag"), and the package's Publishing access set to "Require two-factor authentication and disallow tokens" (a trusted publisher is not a token). A new package, such as a connector under `connectors/`, needs no change to `release.yml` or any list (`pnpm publish -r` takes every workspace package that is not `private`): it starts at a version of its own (`0.1.0`) and names the `@sanoma-ai/*` packages it peers on as `workspace:^`. npm adds a trusted publisher only to a package that already exists, and the workflow stops at the first package it cannot publish, so a new package is published once by hand on the day it merges, and its trusted publisher set then (a new configuration expires unless it is first used within two days).
+If one package fails to publish, publishing stops. Check the publish log to see which versions reached npm, fix the failure and rerun the workflow on the same branch. It publishes the remaining versions from the same commit. Changing a package that is already public requires a new version.
 
-By hand, as that first publish or as a fallback, from a clean checkout of the merge commit and logged in to npm as a member of the organization (`npm login --auth-type=web`): pack with pnpm, which runs the prepack and writes the `workspace:` ranges and `publishConfig` into the tarball, then publish the tarball with npm in your own terminal, which asks for the 2FA. `pnpm publish` fails there with E404 under pnpm 11 (sanoma #343).
+After the release succeeds, delete the branch with `git push origin --delete release/<version>`.
+
+### Set up a new package
+
+A new public package starts at its own version (`0.1.0`) and declares its `@sanoma-ai/*` peer dependencies as `workspace:^`. No change to `release.yml` or a package list is needed: `pnpm publish -r` includes every workspace package that is not private.
+
+Publish the package by hand on the day it merges, then configure its trusted publisher on npmjs.com. npm requires the package to exist before adding a trusted publisher. A new publisher configuration expires unless first used within two days.
+
+An owner of the `sanoma-ai` npm organization sets this up once per package. Under Settings → Trusted publishing → GitHub Actions, use:
+
+| Setting            | Value         |
+| ------------------ | ------------- |
+| Owner              | `Sanoma-AI`   |
+| Repository         | `sanoma`      |
+| Workflow           | `release.yml` |
+| Allow npm publish  | On            |
+| Allow npm dist-tag | Off           |
+
+Set the package's Publishing access to "Require two-factor authentication and disallow tokens." A trusted publisher does not use a token.
+
+### Publish by hand
+
+For a first publish or a manual fallback, start from a clean checkout of the merge commit. Log in as a member of the npm organization with `npm login --auth-type=web`.
+
+Pack with pnpm so prepack runs and the tarball includes the resolved `workspace:` ranges and `publishConfig`. Then publish the tarball with npm in your own terminal, where it prompts for 2FA. Direct `pnpm publish` fails with E404 under pnpm 11 (sanoma #343).
 
 ```sh
 pnpm install --frozen-lockfile
@@ -170,20 +216,32 @@ pnpm --filter <name> pack --pack-destination "$TMPDIR"
 npm publish "$TMPDIR"/<file>.tgz --access public
 ```
 
-The [runtime image](packages/sanoma/README.md#hosting-it-yourself) a container host runs is [`ghcr.io/sanoma-ai/runtime`](https://github.com/orgs/Sanoma-AI/packages/container/package/runtime) on GitHub's registry, public, tagged with the `sanoma` version and never `latest`, one linux/amd64 manifest. After the packages publish, `release.yml` pushes the tag when the registry does not have it, with the job's `GITHUB_TOKEN` (`packages: write`); the package was made public once by hand in its GitHub settings. A tag is never replaced, so a change to `packages/sanoma/runtime/` ships with a new `sanoma` version. The image build verifies its embedded bridge’s session protocol independently of npm publication. Runtime `0.10.1` contains an incompatible older bridge; skip that image and use the corrected `0.10.2` image once published. By hand, after `docker login ghcr.io`, when `docker buildx imagetools inspect ghcr.io/sanoma-ai/runtime:<version>` finds no such tag:
+### Publish the runtime image
+
+Container hosts use the public [runtime image](packages/sanoma/README.md#hosting-it-yourself) at [`ghcr.io/sanoma-ai/runtime`](https://github.com/orgs/Sanoma-AI/packages/container/package/runtime). It has one linux/amd64 manifest and is tagged with the `sanoma` version, never `latest`.
+
+After the npm packages publish, `release.yml` pushes the image if its tag is missing. It uses the job's `GITHUB_TOKEN` with `packages: write`; the registry package was made public manually in GitHub's settings. Tags are never replaced, so changes to `packages/sanoma/runtime/` require a new `sanoma` version.
+
+The image build checks its embedded bridge's session protocol independently of npm publication. Runtime `0.10.1` contains an incompatible older bridge. Skip it and use the corrected `0.10.2` image once published.
+
+To publish manually, run `docker login ghcr.io` and check for the tag with `docker buildx imagetools inspect ghcr.io/sanoma-ai/runtime:<version>`. If the tag does not exist, build and push it:
 
 ```sh
 docker buildx build --platform linux/amd64 --provenance=false -t ghcr.io/sanoma-ai/runtime:<version> --push packages/sanoma/runtime
 ```
 
-A Cloudflare container runs the image from its account's own registry: apply copies it there from ghcr.io ([the connector](connectors/cloudflare/README.md#the-image)). To put an image there by hand instead, build it and push it with Wrangler, then declare the reference it prints (`registry.cloudflare.com/<account id>/sanoma-runtime:<version>`), which apply runs as it is:
+Cloudflare containers use an image in the account's own registry. Apply copies it there from ghcr.io; see [the connector](connectors/cloudflare/README.md#the-image). To upload it manually, build and push with Wrangler:
 
 ```sh
 docker build --platform linux/amd64 -t sanoma-runtime:<version> packages/sanoma/runtime
 npx wrangler containers push sanoma-runtime:<version>
 ```
 
-The container is not what a visitor of a public site waits for: on Cloudflare the company's Worker serves each public site without a login on its domain itself, from a bundle the container builds at the deploy (`buildWorker` in `@sanoma-ai/app/build`), its pages prerendered or rendered on the Worker over the company's database, and only a run a page starts wakes the container ([the connector](connectors/cloudflare/README.md#public-sites-on-the-worker)). Building it needs `workerd`, which `@sanoma-ai/app` installs with `wrangler` and `@cloudflare/vite-plugin`.
+Declare the image reference Wrangler prints (`registry.cloudflare.com/<account id>/sanoma-runtime:<version>`). Apply uses that reference directly.
+
+On Cloudflare, the company's Worker serves public sites on their own domains without a login. Pages are prerendered or rendered on the Worker using the company's database. A page only wakes the container when it starts a workflow run. See [public sites on the Worker](connectors/cloudflare/README.md#public-sites-on-the-worker).
+
+The container builds the site bundle at deploy time using `buildWorker` from `@sanoma-ai/app/build`. The build needs `workerd`, which `@sanoma-ai/app` installs alongside `wrangler` and `@cloudflare/vite-plugin`.
 
 ## License
 
