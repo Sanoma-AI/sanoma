@@ -184,12 +184,20 @@ export const sanoma = defineConnector("sanoma", {
       idempotent: true,
       description:
         "Mint an api token acting for a subject in groups, store it under a name, and answer its id (never the token)",
-      input: z.object({
-        id: z.uuid().optional().describe("A recorded provisioning UUID for recovery across workflow runs"),
-        subject: z.string().regex(/^\S+$/, "a principal's id, such as visitor:better-auth:<id>"),
-        groups: z.array(z.string().min(1)),
-        store: SecretName.describe("The secret the token is stored under"),
-      }),
+      input: z
+        .object({
+          id: z.guid().optional().describe("A recorded UUID-shaped token ID for recovery across workflow runs"),
+          reference: z
+            .string()
+            .min(1)
+            .max(1024)
+            .optional()
+            .describe("A stable non-secret provisioning reference, recorded before minting; alternative to id"),
+          subject: z.string().regex(/^\S+$/, "a principal's id, such as visitor:better-auth:<id>"),
+          groups: z.array(z.string().min(1)),
+          store: SecretName.describe("The secret the token is stored under"),
+        })
+        .refine(({ id, reference }) => id === undefined || reference === undefined, "Pass id or reference, not both"),
       output: z.object({ id: z.string() }),
       target: ({ subject }: { subject: string }) => subject,
       createsSecrets: ({ store }: { store: string }) => [store],
@@ -208,9 +216,10 @@ export const sanoma = defineConnector("sanoma", {
 /** A `DriverError` that a retry would not change. */
 const refuse = (message: string) => new DriverError(`sanoma: ${message}`, { retryable: false });
 
-/** The token id a call mints, from its idempotency key: the same on every try of one call, so a retry finds its own. */
-function tokenIdOf(call: CallContext) {
-  const hex = createHash("sha256").update(call.idempotencyKey).digest("hex");
+/** Stable identity from a recorded reference, or this call's idempotency key when none was supplied. */
+function tokenIdOf(call: CallContext, reference?: string) {
+  const key = reference === undefined ? call.idempotencyKey : JSON.stringify(["sanoma.token.reference", reference]);
+  const hex = createHash("sha256").update(key).digest("hex");
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
 }
 
@@ -343,8 +352,8 @@ export function runtimeDriver({
       },
     },
     token: {
-      async mint({ id: requestedId, subject, groups, store }, call) {
-        const id = requestedId ?? tokenIdOf(call);
+      async mint({ id: requestedId, reference, subject, groups, store }, call) {
+        const id = requestedId ?? tokenIdOf(call, reference);
         // Persist the bearer before registration. A lost store or database response can then
         // retry the same value; no live token is created whose only copy was in this process.
         const token = await call.secrets.ensure(store, newApiToken);
