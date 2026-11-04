@@ -59,6 +59,7 @@ export const FIXTURE_GRID = {
     "sanoma.connection.disconnect",
     "sanoma.connection.prepare",
     "sanoma.connection.test",
+    "sanoma.run.inspect",
   ].map((id) => ({ id, cells: [allow, allow] })),
 };
 
