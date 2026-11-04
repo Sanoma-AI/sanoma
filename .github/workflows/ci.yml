@@ -1,8 +1,13 @@
 name: CI
 on:
+  # Every commit on main, whatever it changes: the release workflows refuse a commit CI did not pass.
   push:
     branches: [main]
+  # docs.yml checks these files' format; nothing here reads them.
   pull_request:
+    paths-ignore:
+      - "**/README.md"
+      - "**/AGENTS.md"
 
 jobs:
   test:
