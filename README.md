@@ -112,13 +112,13 @@ Connectors live here under `connectors/`; one moves to its own repo only when so
 
 ## Desktop (preview)
 
-The [desktop app](packages/desktop/README.md) lets you use Sanoma without a terminal. Open a company folder, and it starts that company's `sanoma` launcher in a window. macOS preview builds are on [GitHub Releases](https://github.com/Sanoma-AI/sanoma/releases). Releases from 0.5.0 use `v*` tags; the first preview was `desktop-v0.1.0`.
+The [desktop app](packages/desktop/README.md) lets you use Sanoma without a terminal. Open a company folder, and it starts that company's `sanoma` launcher in a window. macOS and Windows x64 preview builds are on [GitHub Releases](https://github.com/Sanoma-AI/sanoma/releases). Releases from 0.5.0 use `v*` tags; the first preview was `desktop-v0.1.0`.
 
-Download the arm64 build (`Sanoma-<version>-arm64.dmg`) for an Apple silicon Mac or the x64 build for an Intel Mac. Drag Sanoma to Applications and open it. The builds are signed with a Developer ID and notarized by Apple, so macOS opens them without the unidentified-developer warning. See [signing](packages/desktop/README.md#signing-and-notarization) for details.
+Download the arm64 build (`Sanoma-<version>-arm64.dmg`) for an Apple silicon Mac or the x64 build for an Intel Mac. Drag Sanoma to Applications and open it. The builds are signed with a Developer ID and notarized by Apple, so macOS opens them without the unidentified-developer warning. See [signing](packages/desktop/README.md#signing-and-notarization) for details. On Windows, run `Sanoma-windows-x64.exe`, signed with Azure Artifact Signing. It installs for you alone and opens from the Start menu.
 
-The app includes Node and pnpm. It also needs Git; macOS offers to install Apple's command line tools the first time Git runs.
+The app includes Node and pnpm. It also needs Git; macOS offers to install Apple's command line tools the first time Git runs, and on Windows the app asks for Git for Windows.
 
-From version 0.5.0, Sanoma updates itself when installed in Applications. It downloads a new release in the background and installs it when you quit, or when you choose Help → Restart to Update. If you run it from the dmg or another location, it checks once a day and links to the release instead. Version 0.1.0 has no updater, so replace it manually once.
+From version 0.5.0, Sanoma updates itself when installed in Applications, or on Windows by its installer. It downloads a new release in the background, which the next launch runs, or you can choose Help → Restart to Update. If you run it from the dmg or another location, it checks once a day and links to the release instead. Version 0.1.0 has no updater, so replace it manually once.
 
 To release the desktop app:
 
@@ -126,9 +126,9 @@ To release the desktop app:
 2. Merge and wait for CI on `main` to pass, then run `gh workflow run desktop-release.yml --ref main`.
 3. Download the draft release in a browser and try it before publishing it as the latest release.
 
-[`desktop-release.yml`](.github/workflows/desktop-release.yml) builds arm64 and x64 dmg and zip files on a macOS runner, signs and notarizes them, and uploads them to a draft release tagged `v<version>`. It also uploads each dmg as `Sanoma-mac-<arch>.dmg`. The website's download buttons use those stable filenames through GitHub's `releases/latest/download/` URL.
+[`desktop-release.yml`](.github/workflows/desktop-release.yml) builds arm64 and x64 dmg and zip files on a macOS runner, signs and notarizes them, and builds and signs the Windows x64 installer on a Windows runner. Once both pass their checks, it uploads them to one draft release tagged `v<version>`. It also uploads each dmg as `Sanoma-mac-<arch>.dmg` and the installer as `Sanoma-windows-x64.exe`. The website's download buttons use those stable filenames through GitHub's `releases/latest/download/` URL.
 
-Publishing the release makes it available to installed apps through [update.electronjs.org](https://github.com/electron/update.electronjs.org). The service offers the newest release with a semver tag that is neither a draft nor a prerelease. Each architecture needs a `-darwin-<arch>` zip, named `Sanoma-darwin-<arch>-<version>.zip` by Forge.
+Publishing the release makes it available to installed apps through [update.electronjs.org](https://github.com/electron/update.electronjs.org). The service offers the newest release with a semver tag that is neither a draft nor a prerelease. Each Mac architecture needs a `-darwin-<arch>` zip, named `Sanoma-darwin-<arch>-<version>.zip` by Forge. Windows x64 needs an asset named `-win32-x64` (`Sanoma-<version>-win32-x64-Setup.exe`), `RELEASES`, and the nupkg that names (`Sanoma-<version>-full.nupkg`).
 
 The `v*` tags and releases belong to the desktop app; npm releases create none. Older npm releases used `v0.2.0` through `v0.4.2`, which is why desktop versions resume at 0.5.0. The release workflow requires a version newer than every existing `v*` tag.
 

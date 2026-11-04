@@ -66,8 +66,9 @@ function processGroup(child: ChildProcess): Tree {
 /**
  * On Windows, which has no process groups and no SIGTERM: nothing to ask (the launcher stops on
  * stdin's end), and `taskkill /T /F` for the child and every process under it while the child
- * runs. Once it exited, Windows no longer links what it left to it, and its pid may be another
- * process's, so nothing is killed then.
+ * runs. Once it exited, nothing is left to kill: Node puts each child it spawns, not `detached`, in
+ * a job object that ends them all when the parent dies, however it dies. The company's Postgres
+ * alone leaves it (`pg_ctl` breaks away), and is the next launcher's to stop (sanoma's `ensurePostgres`).
  */
 function processTree(child: ChildProcess): Tree {
   const alive = () => child.exitCode === null && child.signalCode === null;

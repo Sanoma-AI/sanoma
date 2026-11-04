@@ -337,8 +337,14 @@ export interface ConnectorSetup {
   /** The connector's steps for Gherkin tests (`defineSteps`): a config's scenarios and the connector's own features can use them. */
   steps?: Steps;
   /**
+   * Makes the connector's tables on the company's database (a login's): by the worker at its
+   * start, after the runtime's own tables, on the database's direct URL (`DatabasePreparation`);
+   * idempotent. The app never makes them: a login opened before they are there refuses.
+   */
+  prepare?: DatabasePreparation;
+  /**
    * Makes the connector's login half for one public site: once per site, by the app, when it
-   * starts; a login that needs tables migrates them here (serialized, idempotent).
+   * starts, on the tables `prepare` made.
    */
   login?: (context: LoginContext) => LoginHalf | Promise<LoginHalf>;
   /**
@@ -369,6 +375,14 @@ export interface LoginIdentity {
   email?: string;
   github?: string;
 }
+
+/**
+ * Makes what a connector keeps on the company's database (`ConnectorSetup.prepare`): run by the
+ * worker at its start, once the runtime's own tables are there, with the database's direct URL,
+ * never through a pooler (an advisory lock is one connection's); idempotent, and safe for two
+ * workers at once.
+ */
+export type DatabasePreparation = (databaseUrl: string) => Promise<void>;
 
 /** How a login half lets a person in: an email code, GitHub, an invite link, an email and a password. */
 export type LoginMethod = "code" | "github" | "invite" | "password";
@@ -455,7 +469,8 @@ export function sameOrigin(request: Request): boolean {
  * A connector's login half: how a public site tells who a visitor is, and, made with
  * `LoginContext.staff`, how the app's staff sign in. The app makes one with `login(context)` once
  * per public site (and once for staff), when it starts; a login that keeps tables in the database
- * migrates them itself there, serialized and idempotent. It answers the provider's subject and
+ * has its connector's `prepare` make them, which the worker runs, and only checks for them. It
+ * answers the provider's subject and
  * what it verified; the app makes the principal from it (`visitor:<connector>:<subject>`, in
  * `visitors`, or the declared person the identity matches), so a connector never sets groups. A
  * visitor's address, for rate limits, is the `CLIENT_IP_HEADER` header.

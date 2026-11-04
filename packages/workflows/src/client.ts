@@ -30,7 +30,7 @@ import { type Tokens, tokenStore } from "./tokens.ts";
 import { collectionsDriver } from "./collection.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { configuredSecrets } from "./credentials.ts";
-import { dbosClient, lazyPool, type LazyPool } from "./db.ts";
+import { dbosClient, lazyPool, type LazyPool, spendInviteRequest } from "./db.ts";
 import { type CredentialStatus, credentialsOf } from "./env.ts";
 import { type ApprovalState, Principal, type WorkflowDefinition } from "./define.ts";
 import { APPLY_WORKFLOW, type ApplyInput, type ApplyReport } from "./apply.ts";
@@ -673,6 +673,14 @@ export class SanomaClient {
         expiresAt: options.expiresAt.toISOString(),
       }),
     );
+  }
+
+  /**
+   * Spends a sealed invite request's `nonce` (`openInvite`), good until `expiresAt`: true the first
+   * time, false when it was spent already, in this process or another.
+   */
+  async spendInviteRequest(nonce: string, expiresAt: Date): Promise<boolean> {
+    return spendInviteRequest(await this.db(), nonce, expiresAt);
   }
 
   /** When each of `people` last signed in to the staff login, and how, by id (`recordSignIn`); one who never did is left out. */
