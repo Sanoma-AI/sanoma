@@ -45,6 +45,7 @@ const terminal = new Terminal({
   fontSize: 12,
   minimumContrastRatio: 4.5,
   reflowCursorLine: true,
+  screenReaderMode: true,
   theme: terminalTheme(),
 });
 const fit = new FitAddon();
@@ -58,15 +59,19 @@ new ResizeObserver(() => fit.fit()).observe($("log"));
 let shownStart = 0;
 let written = 0;
 
-// Only what is new, so that scrolling back and a selection survive more output.
+// Only what is new, so that scrolling back and a selection survive more output. A new start's reset
+// goes in as a write, so that it follows what is still queued. Lines that left the tail unseen (the
+// page gets none while the app shows) are said to be missing, not joined up as if they ran on.
 function writeLog({ start, skipped, lines }) {
   if (start !== shownStart) {
-    terminal.reset();
+    terminal.write("\x1bc");
     shownStart = start;
     written = 0;
   }
   const fresh = lines.slice(Math.max(0, written - skipped));
   if (!fresh.length) return;
+  const missed = skipped - written;
+  if (missed > 0) fresh.unshift(`… ${missed} lines not shown: Company → Show Log has them all`);
   terminal.write(`${written ? "\r\n" : ""}${fresh.join("\r\n")}`);
   written = skipped + lines.length;
 }

@@ -25,7 +25,7 @@ export interface LogTail {
   start: number;
   /** How many lines came before `lines`. */
   skipped: number;
-  /** As the process printed them, colours included, their URLs without passwords. */
+  /** As the process printed them, colours included, but for the passwords in their URLs. */
   lines: string[];
 }
 
@@ -62,11 +62,13 @@ export function openLog(dir: string, slug: string): CompanyLog {
     file,
     write(from, line) {
       if (closed) return;
-      // No password reaches the file or the start window: the `database` event's URL carries one.
-      const shown = hidePasswords(line);
-      appendFileSync(file, `${new Date().toISOString()} ${from} ${stripVTControlCharacters(shown)}\n`);
+      // No password reaches the file or the page: the `database` event's URL carries one. Looked for
+      // without escape codes, which can split a URL; a line with one hidden loses its colours.
+      const plain = stripVTControlCharacters(line);
+      const hidden = hidePasswords(plain);
+      appendFileSync(file, `${new Date().toISOString()} ${from} ${hidden}\n`);
       if (isEventLine(line)) return;
-      lines.push(shown);
+      lines.push(hidden === plain ? line : hidden);
       if (lines.length > TAIL_LINES) {
         lines.shift();
         skipped++;

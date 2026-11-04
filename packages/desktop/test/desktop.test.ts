@@ -507,6 +507,13 @@ describe("logs", () => {
     expect(log.tail().lines).toEqual(["connect failed for postgresql://***@host/db"]);
   });
 
+  test("hides a password that escape codes split, in the file and on the page", () => {
+    const log = openLog(temp(), "acme");
+    log.write("stderr", "\x1b[2mpostgresql:\x1b[22m//u:s3cret@host/db");
+    expect(readFileSync(log.file, "utf8")).toMatch(/Z stderr postgresql:\/\/\*\*\*@host\/db\n$/);
+    expect(log.tail().lines).toEqual(["postgresql://***@host/db"]);
+  });
+
   test("the page gets the colours and no event lines; the file gets every line, without escape codes", () => {
     const log = openLog(temp(), "acme");
     log.write("stdout", '{"event":"ready","sanoma":1,"url":"http://127.0.0.1:3100"}');
