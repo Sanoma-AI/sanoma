@@ -783,10 +783,10 @@ async function gitReady(): Promise<boolean> {
   return (
     (await untilThere(() => needsGitForWindows(), {
       message: "Sanoma needs Git for Windows",
-      detail:
-        "Download opens its page in your browser. Once it is installed, choose Check Again; if this still shows, quit Sanoma and open it again.",
+      detail: `Download opens ${GIT_FOR_WINDOWS_URL} in your browser. Once it is installed, choose Check Again; if this still shows, quit Sanoma and open it again.`,
       action: "Download",
-      act: () => shell.openExternal(GIT_FOR_WINDOWS_URL),
+      // A browser that does not open leaves the dialog, which comes back, with the address in it.
+      act: () => shell.openExternal(GIT_FOR_WINDOWS_URL).catch(() => {}),
     })) &&
     untilThere(() => needsCommandLineTools(), {
       message: "Sanoma needs Apple's command line tools for git",

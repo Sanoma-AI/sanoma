@@ -585,7 +585,7 @@ describe("the runtime", () => {
   test("an x64 build translated on Arm is told so, in its platform's words", () => {
     expect(archWarnings(false, "win32")).toEqual([]);
     expect(archWarnings(true, "darwin")).toEqual([expect.stringMatching(/Apple silicon Mac/)]);
-    expect(archWarnings(true, "win32")).toEqual([expect.stringMatching(/Arm PC/)]);
+    expect(archWarnings(true, "win32")).toEqual([]);
   });
 });
 

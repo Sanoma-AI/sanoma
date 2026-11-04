@@ -257,6 +257,14 @@ describe("ensurePostgres with none named: the company's own", () => {
     expect(ran().filter((call) => call.startsWith("pg_ctl stop"))).toHaveLength(1);
   });
 
+  it("exits cleanly when stopping an adopted cluster fails: another launcher may be stopping it", async () => {
+    const root = repo();
+    postmasterPid(root, process.pid, 54321);
+    stubPostgres({ up: [54321] });
+    const ensured = await ensurePostgres(undefined, { root, bin: join(dir, "no-such-bin"), adopt: true });
+    await expect(ensured.stop()).resolves.toBeUndefined();
+  });
+
   it("leaves up a cluster another launcher is connected to", async () => {
     const root = repo();
     postmasterPid(root, process.pid, 54321);

@@ -35,8 +35,8 @@ jobs:
           ci=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$GITHUB_SHA" --branch main --json conclusion -q '.[0].conclusion')
           [ "$ci" = success ] || { echo "::error::CI on $GITHUB_SHA is '${ci:-not run}', not success"; exit 1; }
           # The desktop's own proof, where the commit changed what it covers.
-          desktop=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow desktop.yml --commit "$GITHUB_SHA" --branch main --json conclusion -q '.[0].conclusion')
-          [ -z "$desktop" ] || [ "$desktop" = success ] || { echo "::error::Desktop on $GITHUB_SHA is '$desktop', not success"; exit 1; }
+          desktop=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow desktop.yml --commit "$GITHUB_SHA" --branch main --json status,conclusion -q '.[0] // empty | "\(.status)/\(.conclusion)"')
+          [ -z "$desktop" ] || [ "$desktop" = completed/success ] || { echo "::error::Desktop on $GITHUB_SHA is '$desktop', not completed/success"; exit 1; }
       - name: The version is not released yet
         id: version
         env:

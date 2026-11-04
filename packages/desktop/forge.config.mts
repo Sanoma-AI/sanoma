@@ -35,6 +35,9 @@ const notarizeWith = process.env.APPLE_API_KEY
 const windowsSign: object | undefined = process.env.WINDOWS_SIGN_WITH_PARAMS
   ? { signWithParams: process.env.WINDOWS_SIGN_WITH_PARAMS, hashes: ["sha256"] }
   : undefined;
+// The test build's inspector (the fuses below) would run anything under Sanoma's signature.
+if (process.env.SANOMA_TEST_BUILD && (identity || windowsSign))
+  throw new Error("SANOMA_TEST_BUILD is set on a signed build");
 
 function required(name: string): string {
   const value = process.env[name];

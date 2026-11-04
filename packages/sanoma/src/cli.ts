@@ -274,8 +274,8 @@ async function serveStarted(cwd: string): Promise<number> {
  * package reached in the checkout (`linkedPackages`). With sites, the child serves the app's
  * source from Vite's dev server, which updates it in place: a new build of the app's pages (its
  * `dist/client` and `dist/server`) restarts nothing.
- * Each runs in a process group of its own, so a terminal's ctrl-c reaches this process alone, and
- * its `stop` is the one path that ends them. The company's own Postgres, when neither the
+ * Each runs in a process group of its own, so a terminal's ctrl-c reaches this process alone (on
+ * Windows, which has no groups, it reaches them too), and its `stop` is the one path that ends them. The company's own Postgres, when neither the
  * environment nor `.env` names a URL, is this process's (`withPostgres`, the config unread: one
  * the config names is the child's), so a restart keeps it; the child inherits its URL.
  */

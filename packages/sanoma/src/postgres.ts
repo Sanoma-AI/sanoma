@@ -114,7 +114,14 @@ export async function ensurePostgres(
   /** What a launcher does with a cluster it did not start. */
   const answer = (url: string): EnsuredPostgres => {
     log(`Postgres answers in ${cluster.dir}, started by another launcher`);
-    const stop = adopt ? () => stopAlone(() => bin ?? postgresBin(), cluster, url, log) : noStop;
+    // Best effort: the launcher that started it may be stopping it too, and the next launch adopts
+    // what stays.
+    const stop = adopt
+      ? () =>
+          stopAlone(() => bin ?? postgresBin(), cluster, url, log).catch((err: unknown) => {
+            log(`could not stop Postgres in ${cluster.dir}: ${String(err)}`);
+          })
+      : noStop;
     return { how: "answered", databaseUrl: url, stop };
   };
   if (found !== undefined) return answer(found);
@@ -405,9 +412,10 @@ const pgCtl = (bin: string, cluster: Cluster, args: string[]) => runPg(bin, "pg_
  * Runs PostgreSQL's `program` from `bin`, in a process group of its own (`pg_ctl start` leaves
  * the server in it), its output appended to `pg_ctl.log`; throws, with its and the server's log's
  * last lines, when it fails. Not `server.log` itself, as `pg_ctl -l` on Windows starts the server
- * through `cmd`, whose redirect cannot open a file another process has open for writing. Windows has no groups, and `detached` there leaves it no console, so the `cmd` and
- * the `postgres` it starts would each open a window; it shares this process's, hidden under the
- * desktop shell (`windowsHide`).
+ * through `cmd`, whose redirect cannot open a file another process has open for writing. Windows
+ * has no groups, and `detached` there leaves it no console, so the `cmd` and the `postgres` it
+ * starts would each open a window; it shares this process's, hidden under the desktop shell
+ * (`windowsHide`).
  */
 async function runPg(bin: string, program: string, cluster: Cluster, args: string[]): Promise<void> {
   const log = join(cluster.dir, "pg_ctl.log");

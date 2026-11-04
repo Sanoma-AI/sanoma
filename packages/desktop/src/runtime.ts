@@ -24,14 +24,12 @@ export function runtimeOf(
 }
 
 /**
- * What to say when this is the x64 build translated on an Arm computer (Electron's
- * `runningUnderARM64Translation`): the arm64 build runs faster.
+ * What to say when this is the Intel build translated on an Apple silicon Mac (Electron's
+ * `runningUnderARM64Translation`): the arm64 build runs faster. Windows has no arm64 build to offer.
  */
 export function archWarnings(translated: boolean, platform: NodeJS.Platform = process.platform): string[] {
-  if (!translated) return [];
+  if (!translated || platform === "win32") return [];
   return [
-    platform === "win32"
-      ? "This is the x64 build of Sanoma on an Arm PC: download the arm64 build, which runs faster."
-      : "This is the Intel build of Sanoma on an Apple silicon Mac: download the Apple silicon (arm64) build, which runs faster.",
+    "This is the Intel build of Sanoma on an Apple silicon Mac: download the Apple silicon (arm64) build, which runs faster.",
   ];
 }
