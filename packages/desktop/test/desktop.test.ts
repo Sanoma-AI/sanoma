@@ -512,6 +512,8 @@ describe("logs", () => {
     log.write("stderr", "\x1b[2mpostgresql:\x1b[22m//u:s3cret@host/db");
     expect(readFileSync(log.file, "utf8")).toMatch(/Z stderr postgresql:\/\/\*\*\*@host\/db\n$/);
     expect(log.tail().lines).toEqual(["postgresql://***@host/db"]);
+    log.write("stderr", "\x1b]8;;postgresql://u:s3cret@host/db\x07the database\x1b]8;;\x07");
+    expect(log.tail().lines.at(-1)).toBe("the database");
   });
 
   test("the page gets the colours and no event lines; the file gets every line, without escape codes", () => {

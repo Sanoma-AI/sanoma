@@ -63,12 +63,13 @@ export function openLog(dir: string, slug: string): CompanyLog {
     write(from, line) {
       if (closed) return;
       // No password reaches the file or the page: the `database` event's URL carries one. Looked for
-      // without escape codes, which can split a URL; a line with one hidden loses its colours.
+      // without escape codes, which can split a URL, and with them, as a hyperlink's URL is one; a
+      // line with one hidden loses its colours.
       const plain = stripVTControlCharacters(line);
       const hidden = hidePasswords(plain);
       appendFileSync(file, `${new Date().toISOString()} ${from} ${hidden}\n`);
       if (isEventLine(line)) return;
-      lines.push(hidden === plain ? line : hidden);
+      lines.push(hidden === plain && hidePasswords(line) === line ? line : hidden);
       if (lines.length > TAIL_LINES) {
         lines.shift();
         skipped++;
