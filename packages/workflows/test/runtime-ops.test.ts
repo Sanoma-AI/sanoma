@@ -1,4 +1,4 @@
-import { createPublicKey, generateKeyPairSync, randomBytes } from "node:crypto";
+import { createPublicKey, generateKeyPairSync, randomBytes, randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
@@ -18,7 +18,7 @@ import {
 } from "../src/index.ts";
 import { databaseUrlSecret, storeDatabaseUrl } from "../src/database.ts";
 import { runtimeDriver, sandboxRuntimeDriver } from "../src/runtime-ops.ts";
-import { memoryTokens } from "../src/tokens.ts";
+import { memoryTokens, newApiToken } from "../src/tokens.ts";
 import { rootWith } from "./harness.ts";
 
 // Needs Postgres: `pnpm db:up`. The runtime's own operations a workflow calls (`sanoma.secret.*`,
@@ -58,10 +58,10 @@ const invite = defineWorkflow({
 const token = defineWorkflow({
   name: "token",
   trigger: "manual",
-  input: z.object({ subject: z.string(), store: z.string() }),
+  input: z.object({ id: z.uuid().optional(), subject: z.string(), store: z.string() }),
   uses: [sanoma.token.mint],
-  run: async (ctx, { subject, store }) => {
-    return await ctx.sanoma.token.mint({ subject, groups: ["visitors"], store });
+  run: async (ctx, { id, subject, store }) => {
+    return await ctx.sanoma.token.mint({ id, subject, groups: ["visitors"], store });
   },
 });
 
@@ -321,10 +321,90 @@ describe("the runtime's own operations", () => {
     });
     // A name holding a value already is refused, and nothing is minted over it.
     await expect(run("token", { subject, store: "ACME_CLOUD_TOKEN" })).rejects.toThrow(
-      /ACME_CLOUD_TOKEN holds a value/,
+      /ACME_CLOUD_TOKEN holds a token with conflicting/,
     );
     expect(await run("revoke", { id })).toEqual({});
     expect(await app.client.tokens.resolve(value)).toBeUndefined();
+  });
+
+  it("recovers a recorded token ID across workflow runs without changing authority or reviving revocation", async () => {
+    const input = { id: randomUUID(), subject: "visitor:recovery:owner", store: "RECOVERED_CLOUD_TOKEN" };
+    const first = await ledgerOf("token", input);
+    const value = (await stored(input.store))!;
+    expect(first.output).toEqual({ id: input.id });
+    const again = await ledgerOf("token", input);
+    expect(again.output).toEqual(first.output);
+    expect(await stored(input.store)).toBe(value);
+    expect(first.ledger + again.ledger).not.toContain(value);
+    await expect(run("token", { ...input, subject: "visitor:recovery:other" })).rejects.toThrow(/conflicting/);
+    await expect(run("token", { ...input, id: randomUUID() })).rejects.toThrow(/conflicting/);
+    expect(await app.client.tokens.resolve(value)).toMatchObject({ subject: input.subject });
+    await run("revoke", { id: input.id });
+    await expect(run("token", input)).rejects.toThrow(/revoked/);
+    expect(await app.client.tokens.resolve(value)).toBeUndefined();
+    expect(await stored(input.store)).toBe(value);
+  });
+
+  it("atomically registers one saved bearer and refuses changed grants, IDs and revoked registrations", async () => {
+    const registration = {
+      id: randomUUID(),
+      token: newApiToken(),
+      subject: "visitor:registered:owner",
+      groups: ["z", "a"],
+    };
+    expect(await Promise.all(Array.from({ length: 8 }, () => app.client.tokens.register(registration)))).toEqual(
+      Array(8).fill(true),
+    );
+    expect(await app.client.tokens.register({ ...registration, groups: ["a", "z", "a"] })).toBe(true);
+    for (const changed of [
+      { token: newApiToken() },
+      { subject: "another" },
+      { groups: ["admin"] },
+      { id: randomUUID() },
+    ])
+      expect(await app.client.tokens.register({ ...registration, ...changed })).toBe(false);
+    await app.client.tokens.revoke({ id: registration.id });
+    expect(await app.client.tokens.register(registration)).toBe(false);
+    expect(await app.client.tokens.resolve(registration.token)).toBeUndefined();
+  });
+
+  it("reuses the stored bearer after a lost registration response from Postgres", async () => {
+    const registration = app.client.tokens.register.bind(app.client.tokens);
+    let lose = true;
+    const driver = runtimeDriver({
+      tokens: {
+        ...app.client.tokens,
+        register: async (input) => {
+          const result = await registration(input);
+          if (lose) {
+            lose = false;
+            throw new Error("synthetic lost database response");
+          }
+          return result;
+        },
+      },
+    });
+    const secrets = memorySecrets();
+    const call = {
+      idempotencyKey: "registration-loss:1",
+      runId: "registration-loss",
+      opId: "sanoma.token.mint",
+      attempt: 1,
+      secrets,
+    };
+    const input = {
+      id: randomUUID(),
+      subject: "visitor:lost:owner",
+      groups: ["visitors"],
+      store: "LOST_RECEIPT_TOKEN",
+    };
+    await expect(driver.ops["token.mint"]!(input, call)).rejects.toMatchObject({ retryable: true });
+    const value = (await secrets.get(input.store))!;
+    expect(await app.client.tokens.resolve(value)).toMatchObject({ subject: input.subject });
+    expect(
+      await driver.ops["token.mint"]!(input, { ...call, runId: "recovery", idempotencyKey: "recovery:1" }),
+    ).toEqual({ id: input.id });
+    expect(await secrets.get(input.store)).toBe(value);
   });
 
   it("is refused a direct call, as any operation that is not a read", async () => {
@@ -482,7 +562,7 @@ describe("the runtime's own operations in a config", () => {
     }
   });
 
-  it("revokes a token an earlier try minted and never stored, and refuses the call", async () => {
+  it("refuses a missing saved bearer without replacing or revoking another registration", async () => {
     const tokens = memoryTokens();
     const driver = runtimeDriver({ tokens });
     const call = {
@@ -494,12 +574,46 @@ describe("the runtime's own operations in a config", () => {
     };
     const input = { subject: "visitor:x:1", groups: [], store: "ACME_TOKEN" };
     const { id } = (await driver.ops["token.mint"]!(input, call)) as { id: string };
-    // The try that minted it stopped before the store write: the store holds nothing.
+    const original = (await call.secrets.get(input.store))!;
+    // Deleting a saved bearer does not authorize another value for the existing token ID.
     await call.secrets.delete!("ACME_TOKEN");
-    await expect(driver.ops["token.mint"]!(input, { ...call, attempt: 2 })).rejects.toThrow(
-      new RegExp(`minted token ${id} and stopped before storing it: it is revoked`),
-    );
-    expect(await tokens.subjectOf(id)).toBeUndefined();
+    await expect(driver.ops["token.mint"]!(input, { ...call, attempt: 2 })).rejects.toThrow(/conflicting/);
+    expect(await tokens.resolve(original)).toMatchObject({ principal: { id: `token:${id}` } });
+    expect(await tokens.resolve((await call.secrets.get(input.store))!)).toBeUndefined();
+  });
+
+  it("does not register before the bearer is durably saved and reuses a lost store response", async () => {
+    const tokens = memoryTokens(),
+      stored = memorySecrets();
+    const register = vi.spyOn(tokens, "register");
+    let lose = true;
+    const secrets = {
+      ...stored,
+      ensure: async (name: string, make: () => string) => {
+        const value = await stored.ensure(name, make);
+        if (lose) {
+          lose = false;
+          throw new Error("synthetic lost store response");
+        }
+        return value;
+      },
+    };
+    const driver = runtimeDriver({ tokens });
+    const input = { id: randomUUID(), subject: "visitor:stored:owner", groups: [], store: "STORED_FIRST_TOKEN" };
+    const call = {
+      idempotencyKey: "store-loss:1",
+      runId: "store-loss",
+      opId: "sanoma.token.mint",
+      attempt: 1,
+      secrets,
+    };
+    await expect(driver.ops["token.mint"]!(input, call)).rejects.toThrow(/lost store/);
+    expect(register).not.toHaveBeenCalled();
+    const value = (await stored.get(input.store))!;
+    expect(await tokens.resolve(value)).toBeUndefined();
+    expect(await driver.ops["token.mint"]!(input, { ...call, attempt: 2 })).toEqual({ id: input.id });
+    expect(await stored.get(input.store)).toBe(value);
+    expect(await tokens.resolve(value)).toMatchObject({ subject: input.subject });
   });
 
   it("derives no public half from a public key", () => {

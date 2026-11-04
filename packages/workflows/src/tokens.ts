@@ -11,6 +11,22 @@ import { generateSecret, tokenHash as hashOf } from "./secret.ts";
 /** What every token starts with, so a bearer that is not one is told at a glance. */
 const PREFIX = "sca_";
 
+/** Register only a generated bearer retained by trusted provisioning, never a workflow value. */
+export interface TokenRegistration {
+  id: string;
+  token: string;
+  subject: string;
+  groups: readonly string[];
+}
+
+export const newApiToken = () => `${PREFIX}${generateSecret()}`;
+const groupsOf = (groups: readonly string[]) => [...new Set(groups)].toSorted();
+const registrationOf = (input: TokenRegistration) => {
+  if (!input.id || !input.subject || !/^sca_[A-Za-z0-9_-]{43}$/.test(input.token))
+    throw new Error("Invalid token registration");
+  return { ...input, hash: hashOf(input.token), groups: groupsOf(input.groups) };
+};
+
 /** The api tokens' store, `SanomaClient.tokens`. */
 export interface Tokens {
   /**
@@ -19,6 +35,8 @@ export interface Tokens {
    * shown only here. An id another token has is refused.
    */
   mint(token: { id?: string; subject: string; groups: readonly string[] }): Promise<{ id: string; token: string }>;
+  /** Register a saved bearer, or confirm the identical active registration. Conflicts and revocation return false. */
+  register(token: TokenRegistration): Promise<boolean>;
   /** Revokes the token `id`: it resolves to nobody from now on. Revoking one revoked or missing does nothing. */
   revoke(token: { id: string }): Promise<void>;
   /**
@@ -33,7 +51,7 @@ export interface Tokens {
 export function tokenStore(db: () => Promise<Pool>): Tokens {
   return {
     async mint({ id = randomUUID(), subject, groups }) {
-      const token = `${PREFIX}${generateSecret()}`;
+      const token = newApiToken();
       await (
         await db()
       ).query(`INSERT INTO ${TABLE} (id, hash, subject, groups) VALUES ($1, $2, $3, $4::jsonb)`, [
@@ -43,6 +61,27 @@ export function tokenStore(db: () => Promise<Pool>): Tokens {
         JSON.stringify(groups),
       ]);
       return { id, token };
+    },
+    async register(input) {
+      const { id, hash, subject, groups } = registrationOf(input);
+      try {
+        const result = await (
+          await db()
+        ).query(
+          `INSERT INTO ${TABLE} (id, hash, subject, groups) VALUES ($1,$2,$3,$4::jsonb)
+           ON CONFLICT (id) DO UPDATE SET id=EXCLUDED.id
+           WHERE ${TABLE}.hash=EXCLUDED.hash AND ${TABLE}.subject=EXCLUDED.subject
+             AND ${TABLE}.groups @> EXCLUDED.groups AND ${TABLE}.groups <@ EXCLUDED.groups
+             AND ${TABLE}.revoked_at IS NULL
+           RETURNING id`,
+          [id, hash, subject, JSON.stringify(groups)],
+        );
+        return result.rowCount === 1;
+      } catch (error) {
+        // A bearer already registered under another ID cannot acquire a second identity.
+        if ((error as { code?: string }).code === "23505") return false;
+        throw error;
+      }
     },
     async revoke({ id }) {
       await (await db()).query(`UPDATE ${TABLE} SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL`, [id]);
@@ -75,9 +114,23 @@ export function memoryTokens(): Tokens {
   return {
     async mint({ id = randomUUID(), subject, groups }) {
       if (rows.has(id)) throw new Error(`A token with the id ${id} exists`);
-      const token = `${PREFIX}${generateSecret()}`;
+      const token = newApiToken();
       rows.set(id, { hash: hashOf(token), subject, groups: [...groups], revoked: false });
       return { id, token };
+    },
+    async register(input) {
+      const { id, hash, subject, groups } = registrationOf(input);
+      const row = rows.get(id);
+      if (row)
+        return (
+          !row.revoked &&
+          row.hash === hash &&
+          row.subject === subject &&
+          JSON.stringify(groupsOf(row.groups)) === JSON.stringify(groups)
+        );
+      if ([...rows.values()].some((other) => other.hash === hash)) return false;
+      rows.set(id, { hash, subject, groups, revoked: false });
+      return true;
     },
     async revoke({ id }) {
       const row = rows.get(id);

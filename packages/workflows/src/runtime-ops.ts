@@ -6,7 +6,7 @@ import { generateSecret, SECRET_NAME } from "./secret.ts";
 import { sealInvite } from "./seal.ts";
 import { errorMessage } from "./shared.ts";
 import { sourceKeyPair, sshPublicKey } from "./ssh-key.ts";
-import { memoryTokens, type Tokens } from "./tokens.ts";
+import { memoryTokens, newApiToken, type Tokens } from "./tokens.ts";
 import type { InspectRun } from "./run-status.ts";
 import {
   identityProvisioningCode,
@@ -181,9 +181,11 @@ export const sanoma = defineConnector("sanoma", {
   token: {
     mint: {
       effect: "access",
+      idempotent: true,
       description:
         "Mint an api token acting for a subject in groups, store it under a name, and answer its id (never the token)",
       input: z.object({
+        id: z.uuid().optional().describe("A recorded provisioning UUID for recovery across workflow runs"),
         subject: z.string().regex(/^\S+$/, "a principal's id, such as visitor:better-auth:<id>"),
         groups: z.array(z.string().min(1)),
         store: SecretName.describe("The secret the token is stored under"),
@@ -341,27 +343,19 @@ export function runtimeDriver({
       },
     },
     token: {
-      async mint({ subject, groups, store }, call) {
-        const id = tokenIdOf(call);
-        const held = await call.secrets.get(store);
-        if (held !== undefined) {
-          // This call's own, stored by a try whose answer was lost.
-          if ((await tokens.resolve(held))?.principal.id === `token:${id}`) return { id };
-          throw refuse(`${store} holds a value already: delete it, or store the token under another name`);
-        }
-        let token: string;
+      async mint({ id: requestedId, subject, groups, store }, call) {
+        const id = requestedId ?? tokenIdOf(call);
+        // Persist the bearer before registration. A lost store or database response can then
+        // retry the same value; no live token is created whose only copy was in this process.
+        const token = await call.secrets.ensure(store, newApiToken);
+        if (!/^sca_[A-Za-z0-9_-]{43}$/.test(token)) throw refuse(`${store} holds a value that is not an api token`);
+        let registered: boolean;
         try {
-          ({ token } = await tokens.mint({ id, subject, groups }));
-        } catch (err) {
-          // A try that minted this id and stopped before storing it left a token nobody holds: revoked here.
-          if ((await tokens.subjectOf(id)) === undefined) throw err;
-          await tokens.revoke({ id });
-          throw refuse(`an earlier try minted token ${id} and stopped before storing it: it is revoked, start again`);
+          registered = await tokens.register({ id, token, subject, groups });
+        } catch {
+          throw new DriverError("sanoma: token registration unavailable", { retryable: true });
         }
-        if ((await call.secrets.ensure(store, () => token)) !== token) {
-          await tokens.revoke({ id });
-          throw refuse(`${store} was stored by someone else meanwhile: the token minted is revoked`);
-        }
+        if (!registered) throw refuse(`${store} holds a token with conflicting or revoked registration`);
         return { id };
       },
       async revoke({ id }) {
