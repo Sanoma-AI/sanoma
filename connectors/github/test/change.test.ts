@@ -102,9 +102,7 @@ describe("github.repository_deploy_key's change operations", () => {
 });
 
 // Synthetic until recorded in the test org (an invitation goes to a real account), in the provider's
-// shape (its `id` is `<repository>:<username>`, which the driver gives as
-// `<owner>/<repository>:<username>`; `permission` is ForceNew in 6.13.0, as are `repository` and
-// `username`): `@sanoma-ai/bridge`'s testdata/replies/integrations_github_6.13.0/github_repository_collaborator/sanoma-apply-test*.
+// shape: `@sanoma-ai/bridge`'s testdata/replies/integrations_github_6.13.0/github_repository_collaborator/sanoma-apply-test*.
 describe("github.repository_collaborator's change operations", () => {
   let bridge: ReturnType<typeof changeReplay>;
   let driver: Driver;

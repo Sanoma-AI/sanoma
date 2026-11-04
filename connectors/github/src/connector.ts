@@ -11,6 +11,15 @@ import {
 } from "./resources.gen.ts";
 
 /**
+ * A collaborator whose `permission` a data file always states: the provider's default (`push`)
+ * would otherwise demote an `admin`, as a new permission is a replace.
+ */
+const collaborator = {
+  ...github_repository_collaborator,
+  schema: github_repository_collaborator.schema.extend({ permission: z.string().min(1) }),
+};
+
+/**
  * `type` with an `owner` field: the organization or user it belongs to, which the provider takes
  * as its configuration, not as an attribute. A data file always declares it; the driver
  * configures the provider for it on each call (`owned`).
@@ -60,10 +69,9 @@ export const githubTf = tfConnector({
       title: "Deploy key",
       writable: true,
     },
-    // Who may push to (or pull, triage, maintain, administer) one repository. Apply invites them:
-    // until they accept, GitHub holds the invitation (`invitation_id`), and delete withdraws it.
+    // Who may push to one repository (or pull, triage, ...): apply invites them (see the README).
     repository_collaborator: {
-      tf: github_repository_collaborator,
+      tf: collaborator,
       title: "Collaborator",
       identity: "repository:username",
       // The repository as `<owner>/<name>`; the driver gives the provider `<name>:<username>`.

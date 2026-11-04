@@ -93,6 +93,11 @@ describe("githubDriver", () => {
       message: "github: repository_deploy_key sanoma:1 names no owner: write it <owner>/…",
       retryable: false,
     });
+    await expect(
+      call(driver, "repository_collaborator.plan", {
+        desired: { repository: "sanoma", username: "octocat", permission: "push" },
+      }),
+    ).rejects.toMatchObject({ message: "github: its desired's repository sanoma names no owner: write it <owner>/…" });
     // A name that is not a node id is not taken for one.
     await expect(call(driver, "repository.import", { id: "sanoma" })).rejects.toMatchObject({
       message: "github: repository sanoma names no owner: write it <owner>/…",
@@ -141,6 +146,7 @@ describe("githubDriver", () => {
   });
 
   it("imports a collaborator by `<owner>/<repository>:<username>`, accepted or invited, and none as gone", async () => {
+    // Recorded: an accepted one and none. The invitation is synthetic (sanoma-apply-test_octocat).
     const driver = githubDriver({ bridge });
     // Accepted: the provider finds a collaborator among the repository's, not only its invitations.
     expect(

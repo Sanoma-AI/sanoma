@@ -121,8 +121,8 @@ export function changeReplay(fixtures: string | URL, ref: ProviderRef): Provider
       const r = reply("apply", typeName, asRequest(request));
       if (!request.configJson && request.priorStateJson) gone.add(`${typeName}/${stateId(request.priorStateJson)}`);
       const resource = r.resource as Reply | undefined;
-      // A replace may make its new object under the old one's id (GitHub's collaborator).
-      if (resource) gone.delete(`${typeName}/${stateId(resource.stateJson)}`);
+      // A replace's create may make its new object under the old one's id (GitHub's collaborator).
+      if (resource && !request.priorStateJson) gone.delete(`${typeName}/${stateId(resource.stateJson)}`);
       return { ...(resource && { resource: resourceOf(resource) }), errors: [], warnings: [] };
     },
     async close() {

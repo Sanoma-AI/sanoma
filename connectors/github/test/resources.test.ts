@@ -143,8 +143,15 @@ describe("the github connector", () => {
       refs: { repository: "github.repository:acme/website" },
     });
     expect(() =>
-      declare.repository_collaborator({ repository: site, username: "octocat", invitation_id: "1" }),
+      declare.repository_collaborator({
+        repository: site,
+        username: "octocat",
+        permission: "push",
+        invitation_id: "1",
+      }),
     ).toThrow("github.repository_collaborator: leave out invitation_id: the vendor sets it");
+    // @ts-expect-error the permission is stated: the provider's default would demote an admin
+    expect(() => declare.repository_collaborator({ repository: site, username: "octocat" })).toThrow(/permission/);
   });
 
   it("compares a repository's topics, a set, in any order, and only declared fields", () => {
