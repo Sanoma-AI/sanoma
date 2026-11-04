@@ -7,6 +7,7 @@ import { betterAuthStaffLogin } from "@sanoma-ai/connector-better-auth";
 import {
   deploymentKey,
   errorMessage,
+  GITHUB_APP,
   isLoopback,
   type ResolvedConfig,
   resolveConfig,
@@ -192,7 +193,8 @@ function apiWriter(config: SanomaConfig, log: (line: string) => void): (file: st
   };
 }
 
-const GITHUB = ["SANOMA_GITHUB_CLIENT_ID", "SANOMA_GITHUB_CLIENT_SECRET"] as const;
+/** The GitHub App's client the staff login signs in with, as the app's Connect page stores it. */
+const GITHUB = [GITHUB_APP.client_id, GITHUB_APP.client_secret] as const;
 
 /** Reads stored secrets by name (`SanomaClient.secrets`): the values found, the environment's first. */
 export type ReadSecrets = (names: string[]) => Promise<Map<string, string>>;

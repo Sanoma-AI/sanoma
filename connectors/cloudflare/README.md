@@ -8,49 +8,67 @@
 npm install @sanoma-ai/connector-cloudflare
 ```
 
-The three types are writable: `read` and `import` (effect `read`), and the change operations only the apply workflow may call, `plan` (effect `read`), `create`, `update` and `delete` (effect `write`). The container is a host ([Hosts](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#hosts)) and the alarm a wakeup, with one more operation, `register`, which the worker calls:
+The four types are writable: `read` and `import` (effect `read`), and the change operations only the apply workflow may call, `plan` (effect `read`), `create`, `update` and `delete` (effect `write`). The host is a host ([Hosts](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#hosts)) and the alarm a wakeup, with one more operation, `register`, which the worker calls. `container` is the host's earlier form, deprecated, the same Worker with every field declared:
 
 | Type        | Operations                                                                                | Import id       |
 | ----------- | ----------------------------------------------------------------------------------------- | --------------- |
+| `host`      | `cloudflare.host.read`, `.import`, `.plan`, `.create`, `.update`, `.delete`               | its name        |
 | `container` | `cloudflare.container.read`, `.import`, `.plan`, `.create`, `.update`, `.delete`          | its name        |
 | `alarm`     | `cloudflare.alarm.read`, `.import`, `.plan`, `.create`, `.update`, `.delete`, `.register` | its host's URL  |
 | `records`   | `cloudflare.records.read`, `.import`, `.plan`, `.create`, `.update`, `.delete`            | `<zone>/<name>` |
 
-A data file declares them with the constructors in `@sanoma-ai/connector-cloudflare/resources`. Declaring the alarm is the whole switch for scaling to zero: without it, nothing starts a stopped container at a deadline, and a sleeping run waits for the next request.
+A data file declares them with the constructors in `@sanoma-ai/connector-cloudflare/resources`. The host says only the decisions: its name, its hostname and the database it runs on. Declaring the alarm is the whole switch for scaling to zero: without it, nothing starts a stopped container at a deadline, and a sleeping run waits for the next request.
 
 ```ts
-// resources/infra.ts
+// resources/sanoma/infra.ts
 import { cloudflare } from "@sanoma-ai/connector-cloudflare/resources";
-import { secret } from "sanoma/resources";
+import { neon } from "@sanoma-ai/connector-neon/resources";
 
-export const host = cloudflare.container({
+export const store = neon.project({ name: "acme", region: "aws-us-east-1" });
+export const host = cloudflare.host({
   name: "acme", // the Worker sanoma-acme, at https://sanoma-acme.<subdomain>.workers.dev
-  image: "ghcr.io/sanoma-ai/runtime:0.7.0", // copied into the account's registry at apply
-  source: repo, // a declared github.repository, or a clone URL
-  ref: "main",
-  port: 3000,
   hostname: "app.acme.example", // optional: the app at its own domain, instead of workers.dev
-  secrets: {
-    SANOMA_DATABASE_URL: secret("DATABASE_URL"),
-    SANOMA_SECRETS_KEY: secret("SECRETS_KEY"),
-    SANOMA_WAKEUP_TOKEN: secret("SANOMA_WAKEUP_TOKEN", { generate: true }), // made at the first apply
-  },
+  database: store, // the declared database it runs on: apply gives the host its URL
 });
 export const wakeup = cloudflare.alarm({ host });
 ```
 
-| Field                                | What it is                                                                                                                                                                                       |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `name`                               | The company's name, its identity: lowercase letters, digits and dashes, up to 56; the Worker and its application are `sanoma-<name>`                                                             |
-| `image`                              | The Sanoma runtime image, pinned to a tag or digest, never `latest`: any registry's, which apply copies into the account's and pins by digest ([The image](#the-image))                          |
-| `source`                             | The company repository: a clone URL, or a declared `github.repository`                                                                                                                           |
-| `ref`                                | The branch it runs, never a commit: apply resolves it and sets the hidden `revision`, so a merge is drift on the container                                                                       |
-| `configurationRevision`              | Optional non-secret configuration version: 1–63 ASCII letters, digits, `.`, `_` or `-`; advance it to restart with rotated bootstrap or environment values at the same source revision and image |
-| `port`                               | The port the runtime listens on in the container (its `PORT`)                                                                                                                                    |
-| `secrets`                            | Environment variables, each a `secret(...)`: the Worker's secret bindings, write-only, never in an output, the ledger or a checkpoint                                                            |
-| `domains`                            | Optional: a public site's domain, by site name, passed as `SANOMA_DOMAINS` and attached to the Worker by apply as a custom domain ([Custom domains](#custom-domains))                            |
-| `hostname`                           | Optional: the hostname the app is served at (`internal.acme.example`), attached like a site's domain; the host's `url` is then `https://<hostname>`                                              |
-| `id`, `url`, `worker_url`, `healthy` | Cloudflare's: the application's id, where the app answers (`https://<hostname>` once attached, else the Worker's workers.dev URL), the workers.dev URL, and whether it answers                   |
+Apply gives the host the rest before it plans (`deriveHosts` in `@sanoma-ai/workflows`), and a data file never writes it:
+
+| Derived        | From                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`         | The name it is bound by, else the repository's name, made lower-case letters, digits and dashes; declare `name` to override it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `image`        | `ghcr.io/sanoma-ai/runtime:<version>` of the `sanoma` the repository installs; declare `image` to override it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `source`       | The repository the app runs from: the `github.repository` the data files declare that is its `origin` (else the one its own data file declares), else `origin`'s URL; declare `source` to override it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `ref`          | The repository's default branch, which apply resolves with the revision (`sanoma.source.resolve`); declare `ref` to override it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `port`         | The image's own, 3000                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `domains`      | Each public site's domain, `defineSite({ public: true, domain })`: attached in production, passed as `SANOMA_DOMAINS` ([Custom domains](#custom-domains))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `secrets`      | Markers only, each a `secret("NAME")` its driver resolves at the call: `SANOMA_DATABASE_URL` (the declared database's stored URL), `SANOMA_SIGNING_KEY` (the config's binding when it has one, else the host's own, `SANOMA_HOST_SIGNING_KEY`, generated into the store at its create), with the built-in store `SANOMA_SECRETS_KEY` (always bound: it unlocks the store), `SANOMA_SOURCE_KEY` (where the config has the GitHub connector), the wakeup's token, the credentials of the vendors its data file declares and the login's sender's, and the GitHub App's stored keys. A credential a driver reads from this machine's environment that nothing binds or stores stops the plan: bind it `{ env }` in `sanoma.config.ts` |
+| the deploy key | For a GitHub repository, `<file>#host.sourceKey`, a read-only `github.repository_deploy_key` whose key is the public half of `SANOMA_SOURCE_KEY`, which apply mints at the host's first apply and keeps in the store. Found by the repository and the key, so a key GitHub holds already (a data file's `deployKey` of before) is bound, its binding taken over, never made again. Without the GitHub connector the host clones over HTTPS, a public repository only; a private one stops the plan                                                                                                                                                                                                                                 |
+
+A `cloudflare.container` in the lockfile binds a `cloudflare.host` declaration of the same export: renaming the constructor recreates nothing, and the next change apply writes records the new type.
+
+### Moving from `cloudflare.container`
+
+As sanoma-ops moves, in one commit, then one apply from Resources:
+
+1. **The host.** Replace `cloudflare.container({ … })` with `cloudflare.host({ name, hostname, database: store })` (`name` may go too: it defaults to the repository's), and drop `image`, `source`, `ref`, `port`, `secrets` and `domains`.
+2. **The domains.** Put each one of `domains` on its site, `defineSite({ public: true, domain: "www.sanoma.work" })` in `sites/www/site.ts`. While the Worker has domains attached and no site declares one, the plan says so and changes nothing on the host, so a partial move never detaches them.
+3. **The deploy key.** Remove the `deployKey` export (and from the default list). Keep `SANOMA_SOURCE_KEY` where it is (sanoma-ops binds it `{ env }`): the derived `#host.sourceKey` has the same public half, so apply finds the key GitHub holds by its text and takes over the `#deployKey` binding (a `bind` step `from` it, one lockfile commit), and makes no second key.
+4. **The credentials.** Each credential the host is given must reach it from a binding or the store: one only in `.env` stops the plan, naming it, until it is bound `{ env }` in `sanoma.config.ts` (sanoma-ops binds `GITHUB_TOKEN`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `RESEND_API_KEY`, `SANOMA_SOURCE_KEY` and the GitHub App's keys already). `SANOMA_SIGNING_KEY` keeps its `{ bootstrap }` binding, so the host keeps its key and sessions; with none, the host gets its own, generated at its create.
+
+The plan then binds `#host.sourceKey` from `#deployKey` and updates the host in place: the same Worker, its type recorded as `cloudflare.host`.
+
+| Field                                | What it is                                                                                                                                                                                                 |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`                               | The company's name, its identity: lowercase letters, digits and dashes, up to 56; the Worker and its application are `sanoma-<name>`                                                                       |
+| `hostname`                           | Optional: the hostname the app is served at (`internal.acme.example`), attached like a site's domain; the host's `url` is then `https://<hostname>`                                                        |
+| `database`                           | The declared database it runs on (a `neon.project` or `supabase.project`): apply gives the host its URL                                                                                                    |
+| `image`, `source`, `ref`             | Optional overrides of what apply derives (above). `image` is pinned to a tag or digest, never `latest`: any registry's, which apply copies into the account's and pins by digest ([The image](#the-image)) |
+| `configurationRevision`              | Optional non-secret configuration version: 1–63 ASCII letters, digits, `.`, `_` or `-`; advance it to restart with rotated bootstrap or environment values at the same source revision and image           |
+| `id`, `url`, `worker_url`, `healthy` | Cloudflare's: the application's id, where the app answers (`https://<hostname>` once attached, else the Worker's workers.dev URL), the workers.dev URL, and whether it answers                             |
+
+`cloudflare.container`, deprecated, declares every field itself: `image`, `source`, `ref`, `port`, `secrets` (each a `secret(...)`) and `domains` (by site name). Workflows that make a host for each of several companies (Sanoma Cloud's) call its operations with those fields filled.
 
 The host's outputs are `{ url, wakeUrl, revision, healthy }` (`wakeUrl` its `worker_url`). Its capabilities: stops when quiet, a public URL, it runs an image rather than building one, no fixed egress. `healthy` is the application existing and the Worker answering `/__sanoma/health`, which does not start a stopped container: a stopped host is healthy, and a read or a drift check leaves it stopped.
 
@@ -83,10 +101,10 @@ The Worker's `SANOMA_IMAGE` binding holds the declared image and its upload the 
 
 1. **The connector.** Add `cloudflare` to the connectors in `sanoma.config.ts`: the worker on the host calls `cloudflare.alarm.register` through it.
 2. **Credentials.** On the connector's page, `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` (below).
-3. **Go live.** `infra.ts` declares the host with `SANOMA_WAKEUP_TOKEN: secret("SANOMA_WAKEUP_TOKEN", { generate: true })` among its secrets (apply makes it), and, after it, `export const wakeup = cloudflare.alarm({ host })`. One apply makes the Worker, waits for it, then the alarm, which checks the Worker holds the token.
+3. **Go live.** `infra.ts` declares the host and, after it, `export const wakeup = cloudflare.alarm({ host })`: apply mints `SANOMA_WAKEUP_TOKEN` when none is stored and gives it to the host. One apply makes the Worker, waits for it, then the alarm, which checks the Worker holds the token.
 4. **A sleeping run.** Start a workflow that sleeps past ten quiet minutes. Before the container stops the worker registers the sleep's end; at `at` the object's alarm starts the container and calls `/wake`, and the run continues.
 
-To stop scaling to zero, delete the `wakeup` line and `SANOMA_WAKEUP_TOKEN` from the host's secrets, and apply: the alarm is deleted, and the next request still starts the container. With the token left among the host's secrets, the runtime registers with the Worker's wake route itself (`envWakeup`), as a Sanoma Cloud company's does.
+To stop scaling to zero, delete the `wakeup` line (from a `cloudflare.container`, its `SANOMA_WAKEUP_TOKEN` too), and apply: the alarm is deleted, and the next request still starts the container. With the token left among the host's secrets, the runtime registers with the Worker's wake route itself (`envWakeup`), as a Sanoma Cloud company's does.
 
 ## Custom domains
 

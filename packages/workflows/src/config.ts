@@ -406,7 +406,14 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   const connectors = connectorsOf(config);
   // The types the data files may declare: the vendors' and the people's, whose resources are left out.
   const declarable = resourceTypesOf(connectors);
-  const read = () => readDeclared(root, connectors, declarable, types, connections);
+  const read = (options: ReadOptions = {}) =>
+    readDeclared(root, connectors, declarable, types, connections, {
+      ...options,
+      drivers: driversByVendor,
+      builtInStore: !config.secrets?.store,
+      signingKeyBound: config.secrets?.bindings?.SANOMA_SIGNING_KEY !== undefined,
+      ...(isOp(config.login?.sender) && { sender: config.login.sender.vendor }),
+    });
   if (types.size) {
     names.set(
       DRIFT_WORKFLOW,
@@ -415,8 +422,13 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     names.set(APPLY_WORKFLOW, applyWorkflow(types, ops, drivers, applySteps(appName, root, read)));
   }
   // Built-in, in every config: the life of a change, which deploys to the declared hosts after its merge.
-  const hosts = async () =>
-    (await read()).resources.filter((r) => types.get(`${r.vendor}.${r.type}`)?.host).map((r) => r.id);
+  // The declared hosts' ids, as the files say them: nothing derived, nothing minted.
+  const hosts = async () => {
+    const { loadDataFiles } = await import("./resources.ts");
+    return loadDataFiles(root, connectors, declarable)
+      .resources.filter((r) => types.get(`${r.vendor}.${r.type}`)?.host)
+      .map((r) => r.id);
+  };
   names.set(CHANGE_WORKFLOW, changeWorkflow(changeOps, changeSteps({ remotes, hosts })));
   const declaredObjects = () => readDeclaredObjects(root, connectors, declarable);
   // Built-in: a direct call the policy holds for an approval, made a run, when any operation may be called directly.
@@ -706,6 +718,11 @@ async function readDeclaredObjects(
   return { keys: new Map([...named, ...bound]), problems };
 }
 
+/** How a run reads the data files: `mint`, apply's, mints the keys a deriving host is given (`hostFacts`). */
+export interface ReadOptions {
+  mint?: boolean;
+}
+
 /**
  * The data files under `root` and the lockfile beside them, in one read, as a drift or apply run
  * records them: each resource with its binding, without its write-only values (a secret marker
@@ -718,12 +735,48 @@ async function readDeclared(
   declarable: ReadonlyMap<string, Resource>,
   types: ReadonlyMap<string, Resource>,
   connections: ConnectionRegistry,
+  options: ReadOptions & {
+    drivers: ReadonlyMap<string, Driver>;
+    builtInStore: boolean;
+    signingKeyBound: boolean;
+    sender?: string;
+  },
 ): Promise<Omit<ApplyDeclared, "rebinds">> {
   // Loaded when a run reads the files, not with the worker.
   const { loadDataFiles } = await import("./resources.ts");
   const { resources, bindings, orphans, problems } = loadDataFiles(root, connectors, declarable);
-  // Read inside the data-file durable step: every operation of the plan uses one pinned account.
   const run = currentRun.getStore();
+  // A host that derives is filled with what it is not told (`deriveHosts`), before it is checked
+  // or pinned: the deploy key it clones with among them. Minted only by a live apply.
+  const keep = new Set<string>();
+  const leftOut = new Set<string>();
+  if (root !== undefined) {
+    const { deriveHosts, hostFacts } = await import("./host-derive.ts");
+    const facts = await hostFacts({
+      root,
+      resources,
+      types,
+      drivers: options.drivers,
+      ...(run && { secrets: run.state.secrets }),
+      builtInStore: options.builtInStore,
+      signingKeyBound: options.signingKeyBound,
+      ...(options.sender !== undefined && { sender: options.sender }),
+      mint: !!options.mint && !!run && !run.sandbox,
+    });
+    if (facts) problems.push(...deriveHosts(resources, types, bindings, facts, { keep, leftOut }));
+  }
+  // A host apply cannot give all it needs is left out, with what names it (its wakeup), and what
+  // names that in turn: its problem says why, and nothing of it changes until it is fixed.
+  for (let grew = leftOut.size > 0; grew;) {
+    const before = leftOut.size;
+    for (const o of resources) if (Object.values(o.refs).some((id) => leftOut.has(id))) leftOut.add(o.id);
+    grew = leftOut.size > before;
+  }
+  for (const r of resources.filter((o) => leftOut.has(o.id))) resources.splice(resources.indexOf(r), 1);
+  // A host's deploy key apply declares, or cannot tell yet, is no orphan.
+  const declaredIds = new Set(resources.map((r) => r.id));
+  const kept = orphans.filter((o) => !declaredIds.has(o.key) && !keep.has(o.key));
+  // Read inside the data-file durable step: every operation of the plan uses one pinned account.
   if (run && !run.sandbox) {
     for (const resource of resources.filter((r) => types.has(`${r.vendor}.${r.type}`))) {
       try {
@@ -760,7 +813,8 @@ async function readDeclared(
         ...(connection && { connection }),
       })),
     bindings,
-    orphans,
+    orphans: kept,
+    ...(leftOut.size > 0 && { leftOut: [...leftOut] }),
     problems,
   };
 }

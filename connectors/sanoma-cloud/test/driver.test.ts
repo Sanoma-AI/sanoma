@@ -117,6 +117,7 @@ describe("cloud's host through the workflows", () => {
         revision: "abc123",
         port: 3000,
         domains: { app: "acme.sanoma.work" },
+        hostname: "acme.sanoma.work",
         url: "https://acme.sanoma.work",
         healthy: true,
       },

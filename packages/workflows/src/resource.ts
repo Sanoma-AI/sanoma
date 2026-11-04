@@ -131,6 +131,13 @@ export interface ResourceSpec<S extends z.ZodObject = z.ZodObject> {
    * Supabase project's health, until it is healthy, then its database URL stored.
    */
   afterCreate?: readonly AfterCreate[];
+  /**
+   * The ids (`<vendor>.<type>`) this type was known by before a rename: a lockfile binding under
+   * one of them binds a declaration of this type to the same object, so a rename recreates nothing
+   * (`cloudflare.host`, formerly `cloudflare.container`). Apply writes the new id with its next
+   * change to that binding.
+   */
+  formerly?: readonly string[];
 }
 
 /** One operation apply calls after a create (`ResourceSpec.afterCreate`). */
@@ -352,11 +359,20 @@ export interface Resource<
       Required<
         Omit<
           ResourceSpec<S>,
-          "identity" | "find" | "writable" | "host" | "wakeup" | "database" | "stateless" | "afterCreate" | "vendorless"
+          | "identity"
+          | "find"
+          | "writable"
+          | "host"
+          | "wakeup"
+          | "database"
+          | "stateless"
+          | "afterCreate"
+          | "vendorless"
+          | "formerly"
         >
       >
     >,
-    Readonly<Pick<ResourceSpec<S>, "identity" | "find" | "host" | "wakeup" | "database" | "afterCreate">> {
+    Readonly<Pick<ResourceSpec<S>, "identity" | "find" | "host" | "wakeup" | "database" | "afterCreate" | "formerly">> {
   (
     desired: Declaring<z.input<S>, R>,
     options?: { connection?: ConnectionRef<Id extends `${infer V}.${string}` ? V : string> },
@@ -836,6 +852,20 @@ export function defineResource<
     if (host && pathsIn(desired, new Set([host.revision])).length) {
       throw new Error(`${what}: leave out ${host.revision}: apply sets it from ${host.inputs.ref}`);
     }
+    // A host that derives is given its secrets and its sites' domains: a data file names neither.
+    if (host?.derives) {
+      const { secrets, domains } = host.inputs;
+      if (secrets !== undefined && pathsIn(desired, new Set([secrets])).length) {
+        throw new Error(
+          `${what}: leave out ${secrets}: apply gives the host its database's URL, its keys and the connections it deploys with, and no secret is written in a file`,
+        );
+      }
+      if (domains !== undefined && pathsIn(desired, new Set([domains])).length) {
+        throw new Error(
+          `${what}: leave out ${domains}: a public site's domain is declared on the site, \`defineSite({ public: true, domain })\`, and the host attaches it`,
+        );
+      }
+    }
     const vendors = pathsIn(desired, owned);
     if (vendors.length) {
       throw new Error(
@@ -874,6 +904,7 @@ export function defineResource<
     stateless: spec.stateless ?? host !== undefined,
     vendorless: spec.vendorless ?? false,
     ...(spec.afterCreate && { afterCreate: spec.afterCreate }),
+    ...(spec.formerly?.length && { formerly: Object.freeze([...spec.formerly]) }),
     ops,
     // A symbol, so `defineConnector` tells a resource type from a group of operations.
     [RESOURCE]: true as const,

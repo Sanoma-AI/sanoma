@@ -29,6 +29,15 @@ const withOwner = <T extends typeof github_repository | typeof github_team_membe
   schema: type.schema.extend({ owner: z.string().min(1).describe(what) }),
 });
 
+/** A public key as GitHub keeps it: its type and its key, without a comment (`ssh-rsa AAAA…`). */
+export const keyText = (key: string) => key.trim().split(/\s+/).slice(0, 2).join(" ");
+
+/**
+ * A deploy key's identity, `<owner>/<repository>:<key text>`, before it is bound: told from its
+ * binding, `<owner>/<repository>:<key id>`, by what follows the colon, never only digits.
+ */
+export const isKeyIdentity = (id: string) => !/:\d+$/.test(id);
+
 /**
  * GitHub, through the `integrations/github` OpenTofu provider: the generated resource types,
  * what their schema does not say (how each is found), and who GitHub is. The connector, the
@@ -62,11 +71,14 @@ export const githubTf = tfConnector({
       identity: "owner/team_id:username",
       find: ({ owner, team_id, username }) => `${owner}/${team_id}:${username}`,
     },
-    // An SSH key that may clone one repository: a host's, read-only. Found only by its binding,
-    // `<owner>/<repository>:<key id>`; apply creates and deletes it (GitHub changes none).
+    // An SSH key that may clone one repository: a host's, read-only. Bound by `<owner>/<repository>:<key id>`,
+    // and found before it is by its repository and key text (GitHub takes a key once), so a key
+    // GitHub holds already is bound, not made again; apply creates and deletes it (GitHub changes none).
     repository_deploy_key: {
       tf: github_repository_deploy_key,
       title: "Deploy key",
+      identity: "repository:key",
+      find: ({ repository, key }) => (repository && key ? `${repository}:${keyText(key)}` : ""),
       writable: true,
     },
     // Who may push to one repository (or pull, triage, ...): apply invites them (see the README).

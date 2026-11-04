@@ -59,6 +59,7 @@ export {
   type ResourceFields,
   type ResourceOps,
   type ResourceSpec,
+  valueAt,
   withoutWriteOnly,
 } from "./resource.ts";
 export { type DnsRecord, dnsRecord } from "./dns.ts";
@@ -190,6 +191,7 @@ export {
   type Draft,
   draftBranch,
   type DraftDiff,
+  defaultBranch,
   draftOf,
   type HostEnforcement,
   type PullRequest,
@@ -204,7 +206,23 @@ export {
   type SourceHost,
 } from "./source.ts";
 export type { HostCapabilities, HostLifetime, HostOutputs, HostSpec } from "./host.ts";
-export { wakeUrlOf } from "./host.ts";
+export { RUNTIME_IMAGE, RUNTIME_PORT, runtimeImage, sourceKeyId, UNNAMED, wakeUrlOf } from "./host.ts";
+export {
+  cloneUrl,
+  deriveHosts,
+  type HostFacts,
+  hostFacts,
+  DEPLOY_KEY_TITLE,
+  DEPLOY_KEY_TYPE,
+  GITHUB_APP,
+  githubRepository,
+  HOST_SIGNING_KEY,
+  installedSanoma,
+  originUrl,
+  SOURCE_KEY,
+  sourceRepository,
+  wokenBy,
+} from "./host-derive.ts";
 export {
   checkDatabase,
   type DatabaseCapabilities,
@@ -326,7 +344,7 @@ export {
 export { checkSecretStore, type SecretStoreCheck } from "./secret-store-check.ts";
 
 export { postgresSecretStore } from "./credentials.ts";
-export { deploymentKey, signingKeyFor } from "./deployment-key.ts";
+export { deploymentKey, keyBytes, signingKeyFor } from "./deployment-key.ts";
 
 export {
   defineConnection,

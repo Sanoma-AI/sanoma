@@ -23,6 +23,11 @@ export interface SiteDefinition {
   public?: boolean;
   login?: string;
   locales?: readonly [string, ...string[]];
+  /**
+   * A public site's domain (`www.acme.example`): the production host attaches it and serves the
+   * site at its root there; in a preview and locally the site stays at `/sites/<name>`.
+   */
+  domain?: string;
 }
 
 /** Declares a site in its folder's `site.ts`, its default export: `defineSite({ title: "Help desk" })`. */

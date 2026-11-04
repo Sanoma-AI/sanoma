@@ -15,7 +15,7 @@ import { defineResource } from "./resource.ts";
  * The host types a wakeup may name: each one a data file declares a wakeup for. A new host type
  * is added here. `testhost.app` is `@sanoma-ai/testing`'s, for the conformance kits.
  */
-const HOSTS = ["cloudflare.container", "docker.container", "testhost.app"] as const;
+const HOSTS = ["cloudflare.host", "cloudflare.container", "docker.container", "testhost.app"] as const;
 
 /** An instance of the wakeup service, as `GET /wakeup/instances/{id}` shows it. */
 const wakeupSchema = z.object({

@@ -1,17 +1,23 @@
 // oxlint-disable-next-line import/no-unassigned-import
 import "@tanstack/react-start/server-only";
 import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { findPackageJSON } from "node:module";
 import { dirname, join } from "node:path";
 import {
   APPLY_WORKFLOW,
   databaseUrlSecret,
   deploymentKey,
   errorMessage,
+  HOST_SIGNING_KEY,
   isEnded,
+  keyBytes,
   type Principal,
   postInvite,
   sealInvite,
+  DEPLOY_KEY_TITLE,
+  installedSanoma,
+  runtimeImage,
+  SOURCE_KEY,
+  sourceKeyId,
   sourceKeyPair,
   type RepoRef,
   type Resource,
@@ -46,20 +52,28 @@ import { mintWakeupToken, WAKEUP_URL } from "./setup.ts";
 // wakeup are chosen by their contracts (`database`, `host`, `wakeup`) among the config's resource
 // types, never named but to prefer one.
 
-/** What `infra.ts` declares, by export: the lockfile's keys. */
+/** What `infra.ts` declares, by export, and the deploy key apply declares for its host: the lockfile's keys. */
 const KEYS = {
   repo: `${INFRA}#repo`,
   deployKey: `${INFRA}#deployKey`,
   store: `${INFRA}#store`,
   host: `${INFRA}#host`,
+  sourceKey: sourceKeyId(`${INFRA}#host`),
   wakeup: `${INFRA}#wakeup`,
 } as const;
+/** The host's type in `infra.ts`, as `renderInfra` writes it. */
+const HOST_LINE = /^export const host = (\w+)\.(\w+)\(/m;
 /**
  * What the first apply makes (step 3), and what must be bound before the host's, of what `infra`
- * declares: a file written before deploy keys declares none, and its host clones as it did.
+ * declares: the deploy key a host that derives is given by apply (minted then), or the one an
+ * earlier file declares; a file written before deploy keys declares none, and its host clones as
+ * it did.
  */
-const beforeHost = (infra: string) =>
-  /^export const deployKey\b/m.test(infra) ? [KEYS.repo, KEYS.deployKey, KEYS.store] : [KEYS.repo, KEYS.store];
+const beforeHost = ({ resolved }: AppContext, infra: string) => {
+  const [, vendor, type] = HOST_LINE.exec(infra) ?? [];
+  if (resolved.types.get(`${vendor}.${type}`)?.host?.derives) return [KEYS.repo, KEYS.sourceKey, KEYS.store];
+  return /^export const deployKey\b/m.test(infra) ? [KEYS.repo, KEYS.deployKey, KEYS.store] : [KEYS.repo, KEYS.store];
+};
 
 /** The repository type going live declares, and its deploy key's. */
 const REPOSITORY = "github.repository";
@@ -70,22 +84,15 @@ const NEON = "neon.project";
 /** Supabase's project, the database type that takes an organization (`DATABASE_EXTRAS`). */
 const SUPABASE = "supabase.project";
 /** The host type going live prefers once Cloudflare is connected, then a container on this machine. */
-const CLOUDFLARE = "cloudflare.container";
+const CLOUDFLARE = "cloudflare.host";
 const DOCKER = "docker.container";
 
 /** The runtime image a container on this machine runs: `docker build -t sanoma-runtime packages/sanoma/runtime`. */
 export const RUNTIME_IMAGE = "sanoma-runtime";
-/**
- * The runtime image every other host runs, tagged with the version of `sanoma` the company
- * installs: GitHub's registry, which Cloudflare's container copies into its account at apply.
- */
-const PUBLISHED_IMAGE = "ghcr.io/sanoma-ai/runtime";
 
 /** The secret the database's URL is stored in: its `storeUrl` for the export `store`. */
 const DATABASE_URL = databaseUrlSecret("store");
 const SECRETS_KEY = "SANOMA_SECRETS_KEY";
-/** The private half of the `deployKey` going live declares: stored, and given to the host (see `goLive`). */
-const SOURCE_KEY = "SANOMA_SOURCE_KEY";
 
 /**
  * What going live fills in a database type beyond its contract's inputs, by type, from the
@@ -370,32 +377,28 @@ function hostWakeup(
   };
 }
 
-/**
- * The version of `sanoma` the company's repository installs (resolved from its root, so a
- * hoisted install counts), which the host's runtime image is tagged with.
- */
+/** The version of `sanoma` the company's repository installs (`installedSanoma`), which the host's runtime image is tagged with. */
 async function sanomaVersion(root: string): Promise<string> {
-  const version = await Promise.resolve()
-    .then(() => readFile(findPackageJSON("sanoma", join(root, "package.json"))!, "utf8"))
-    .then((read) => (JSON.parse(read) as { version?: unknown }).version)
-    .catch(() => undefined);
-  if (typeof version !== "string") {
+  const version = await installedSanoma(root);
+  if (version === undefined) {
     throw new ApiError(409, { error: `sanoma is not installed in the company's repository (${root}): install it` });
   }
   return version;
 }
 
 /**
- * `infra.ts`'s text for the choices: the repository, with the owner chosen, and its read-only
- * deploy key (`deployKey`, the public half of `SANOMA_SOURCE_KEY`, which the host is given to
- * clone with), the database, the host that runs the company from them and, once a wakeup for
- * the host is connected, the wakeup that starts the host again, whose instance token the host is
- * given from the first apply (`hostWakeup`).
+ * `infra.ts`'s text for the choices: the repository, with the owner chosen, the database, the
+ * host that runs the company from them and, once a wakeup for the host is connected, the wakeup
+ * that starts the host again. A host that derives (`cloudflare.host`) is declared by its
+ * decisions alone, its name and its database: apply gives it the rest, the read-only deploy key
+ * it clones with among them (`deriveHosts`). Any other host (`docker.container`) names its image,
+ * source, ref, port and secrets, and its deploy key is declared beside it (`deployKey`, the public
+ * half of `SANOMA_SOURCE_KEY`).
  */
 export async function renderInfra(
   app: AppContext,
   { owner, name, organization, region, size, database: shownDatabase, host: shown, port }: GoLiveRequest,
-  deployKey: string,
+  deployKey?: string,
   chosen?: Awaited<ReturnType<typeof choose>>,
 ) {
   const { database, host, wakeup } = chosen ?? (await choose(app));
@@ -432,27 +435,15 @@ export async function renderInfra(
   if (size) setPath(store, dbInputs.size!, size);
   Object.assign(store, DATABASE_EXTRAS[idOf(database)]?.({ ...(organization && { organization }) }));
 
-  const { inputs } = host.host!;
+  const { inputs, derives } = host.host!;
   const hosted: Record<string, DataValue> = { ...(hasField(host, "name") && { name }) };
-  if (hasField(host, "image")) {
-    hosted.image =
-      idOf(host) === DOCKER ? RUNTIME_IMAGE : `${PUBLISHED_IMAGE}:${await sanomaVersion(app.resolved.root!)}`;
+  if (derives) {
+    if (inputs.database) setPath(hosted, inputs.database, new Reference("store"));
+    // The installed sanoma is what the host's image is tagged with: refused here when there is none.
+    await sanomaVersion(app.resolved.root!);
   }
-  setPath(hosted, inputs.source, new Reference("repo"));
-  setPath(hosted, inputs.ref, "main");
-  // `offered` leaves out a host that binds its own bootstrap, the one kind with no secrets.
-  if (!inputs.secrets) {
-    throw new ApiError(409, { error: `${host.title} binds its own bootstrap: going live does not write its file yet` });
-  }
-  setPath(hosted, inputs.secrets, {
-    SANOMA_DATABASE_URL: secret(DATABASE_URL),
-    SANOMA_SIGNING_KEY: secret("SANOMA_SIGNING_KEY"),
-    ...(!app.resolved.secrets.store && { SANOMA_SECRETS_KEY: secret(SECRETS_KEY) }),
-    [SOURCE_KEY]: secret(SOURCE_KEY),
-    ...wakeup.secrets,
-    ...(await senderSecrets(app)),
-  });
-  setPath(hosted, inputs.port, port);
+  const declared = derives ? hosted : await declaredHost(app, host, hosted, port, wakeup.secrets);
+  if (!derives && !deployKey) throw new Error("A host that does not derive is declared with its deploy key");
   const woken = wakeup.type;
   return renderDataFile(
     {
@@ -461,19 +452,23 @@ export async function renderInfra(
       ),
       exports: [
         { name: "repo", vendor: "github", type: "repository", desired: { owner, name, visibility: "private" } },
-        {
-          name: "deployKey",
-          vendor: "github",
-          type: "repository_deploy_key",
-          desired: {
-            repository: new Reference("repo"),
-            title: "Sanoma host",
-            key: deployKey,
-            read_only: true,
-          },
-        },
+        ...(derives
+          ? []
+          : [
+              {
+                name: "deployKey",
+                vendor: "github",
+                type: "repository_deploy_key",
+                desired: {
+                  repository: new Reference("repo"),
+                  title: DEPLOY_KEY_TITLE,
+                  key: deployKey!,
+                  read_only: true,
+                },
+              },
+            ]),
         { name: "store", vendor: database.vendor, type: database.type, desired: store },
-        { name: "host", vendor: host.vendor, type: host.type, desired: hosted },
+        { name: "host", vendor: host.vendor, type: host.type, desired: declared },
         ...(woken
           ? [
               {
@@ -491,11 +486,47 @@ export async function renderInfra(
 }
 
 /**
- * Step 3 and 4: writes `infra.ts` for the choices (the repository with its owner) with a new
- * deploy key, whose private half it stores as `SANOMA_SOURCE_KEY`, commits it, and starts apply
- * on the repository, its deploy key and the database. Apply creates them, binds them in the
- * lockfile and, once the project is healthy, stores its database URL (its `afterCreate`).
- * Refused once the file is written: going live writes it once.
+ * A host that does not derive, as `infra.ts` declares it: its image (this machine's for Docker's,
+ * else the published one of the installed sanoma), its source and ref, its secrets (each a
+ * `secret(...)`, never a value) and its port.
+ */
+async function declaredHost(
+  app: AppContext,
+  host: Resource,
+  hosted: Record<string, DataValue>,
+  port: number | undefined,
+  wakeupSecrets: Record<string, DataValue> | undefined,
+): Promise<Record<string, DataValue>> {
+  const { inputs } = host.host!;
+  if (hasField(host, "image")) {
+    hosted.image = idOf(host) === DOCKER ? RUNTIME_IMAGE : runtimeImage(await sanomaVersion(app.resolved.root!));
+  }
+  setPath(hosted, inputs.source, new Reference("repo"));
+  setPath(hosted, inputs.ref, "main");
+  // `offered` leaves out a host that binds its own bootstrap, the one kind with no secrets.
+  if (!inputs.secrets) {
+    throw new ApiError(409, { error: `${host.title} binds its own bootstrap: going live does not write its file yet` });
+  }
+  setPath(hosted, inputs.secrets, {
+    SANOMA_DATABASE_URL: secret(DATABASE_URL),
+    SANOMA_SIGNING_KEY: secret("SANOMA_SIGNING_KEY"),
+    ...(!app.resolved.secrets.store && { SANOMA_SECRETS_KEY: secret(SECRETS_KEY) }),
+    [SOURCE_KEY]: secret(SOURCE_KEY),
+    ...wakeupSecrets,
+    ...(await senderSecrets(app)),
+  });
+  if (inputs.port && port !== undefined) setPath(hosted, inputs.port, port);
+  return hosted;
+}
+
+/**
+ * Step 3 and 4: writes `infra.ts` for the choices (the repository with its owner), commits it,
+ * and starts apply on the repository, the deploy key the host clones it with and the database.
+ * For a host that derives, apply mints the key (its private half stored as `SANOMA_SOURCE_KEY`)
+ * and declares its public half on the repository; for any other, going live mints it here and
+ * the file declares it. Apply creates them, binds them in the lockfile and, once the project is
+ * healthy, stores its database URL (its `afterCreate`). Refused once the file is written: going
+ * live writes it once.
  */
 export async function goLive(app: AppContext, actor: Principal, choices: GoLiveRequest): Promise<{ runId: string }> {
   const { client, resolved, source } = app;
@@ -524,9 +555,10 @@ export async function goLive(app: AppContext, actor: Principal, choices: GoLiveR
   // The database's and the host's vendors connected: their tokens are what apply makes them with.
   const connect = toConnect(chosen);
   if (connect.length) throw new ApiError(409, { error: `Connect ${connect.join(" and ")} first` });
-  // A new key each time: GitHub takes a key for one repository only, and none declares this one yet.
-  const key = await sourceKeyPair();
-  const text = await renderInfra(app, choices, key.publicKey, chosen);
+  // A host that derives is given its deploy key by apply, which mints it. Any other: a new key each
+  // time, since GitHub takes a key for one repository only, and none declares this one yet.
+  const key = chosen.host?.host?.derives ? undefined : await sourceKeyPair();
+  const text = await renderInfra(app, choices, key?.publicKey, chosen);
   await mkdir(dirname(path), { recursive: true });
   // Exclusive, before the key is stored: of two requests at once, one writes its public half and
   // stores its private half, and the other is refused.
@@ -534,7 +566,7 @@ export async function goLive(app: AppContext, actor: Principal, choices: GoLiveR
     throw err.code === "EEXIST" ? writtenAlready() : err;
   });
   try {
-    await client.setSecret(SOURCE_KEY, key.privateKey, { by: actor.id });
+    if (key) await client.setSecret(SOURCE_KEY, key.privateKey, { by: actor.id });
     // Once the request is good: a wakeup's token may be the environment's or its connector page's, which mint nothing.
     if (chosen.wakeup.type) await mintWakeupToken(client, actor);
   } catch (err) {
@@ -547,7 +579,7 @@ export async function goLive(app: AppContext, actor: Principal, choices: GoLiveR
     message: "Go live: declare the repository, its deploy key, the database and the host",
     author: actor.id,
   });
-  const runId = await client.apply({ only: beforeHost(text) }, { startedBy: actor });
+  const runId = await client.apply({ only: beforeHost(app, text) }, { startedBy: actor });
   return { runId };
 }
 
@@ -583,7 +615,7 @@ export async function goLiveHost(app: AppContext, actor: Principal): Promise<{ r
   const { client, resolved, source } = app;
   const { bindings } = readLockfile(resolved.root!);
   const infra = await readFile(join(resolved.root!, INFRA), "utf8").catch(() => "");
-  if (beforeHost(infra).some((key) => !bindings[key])) {
+  if (beforeHost(app, infra).some((key) => !bindings[key])) {
     throw new ApiError(409, { error: "Apply the repository, its deploy key and the database first" });
   }
   if (!source?.push) throw new ApiError(409, { error: "The app has no repository to push from" });
@@ -648,7 +680,8 @@ async function senderSecrets({ client, resolved }: AppContext): Promise<Record<s
 
 /**
  * Signs the person going live in on the host, once it answers: posts an invite request sealed
- * under the signing key the host shares (`sealInvite`) for the email the people file declares for
+ * under the signing key the host shares (`sealInvite`), or the host's own (`HOST_SIGNING_KEY`)
+ * when the config binds none, for the email the people file declares for
  * them to the host's `POST /auth/invite`, and returns the one-use link it mints, for the page to
  * open. Refused before the host answers, and for someone with no email declared.
  */
@@ -659,8 +692,12 @@ export async function goLiveSignIn(app: AppContext, actor: Principal): Promise<{
   if (!email) {
     throw new ApiError(409, { error: `${actor.id} has no email declared in the people file: add one to be signed in` });
   }
+  // With no signing key bound, a host that derives has its own, generated at its create: sealed with that one.
+  const own = app.resolved.secrets.bindings?.SANOMA_SIGNING_KEY
+    ? undefined
+    : (await app.client.secrets([HOST_SIGNING_KEY])).get(HOST_SIGNING_KEY)?.value;
   try {
-    return await postInvite(host.url, sealInvite({ email }));
+    return await postInvite(host.url, sealInvite({ email }, own === undefined ? undefined : keyBytes(own)));
   } catch (err) {
     throw new ApiError(502, { error: `The host did not mint an invite (${errorMessage(err)})` });
   }
@@ -692,7 +729,7 @@ export async function goLiveProgress(app: AppContext): Promise<GoLiveProgress> {
   const root = app.resolved.root;
   const infra = root === undefined ? null : await readFile(join(root, INFRA), "utf8").catch(() => null);
   const bindings = root === undefined ? {} : readLockfile(root).bindings;
-  const before = beforeHost(infra ?? "");
+  const before = beforeHost(app, infra ?? "");
   const bound = { beforeHost: before.every((key) => !!bindings[key]), host: !!bindings[KEYS.host] };
   const run = await latestRun(app);
   return {

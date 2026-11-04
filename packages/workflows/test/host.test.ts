@@ -7,6 +7,7 @@ import { tree } from "./tree.ts";
 import { secret } from "../src/secret.ts";
 import { fakeSourceDriver } from "../src/source.ts";
 import {
+  defaultBranch,
   defineConnector,
   defineResource,
   DRIFT_WORKFLOW,
@@ -278,12 +279,20 @@ describe("sanoma.source.resolve", () => {
     expect(await resolveRevision(repo.url, first)).toBe(first);
   });
 
-  it("has a fake for sandbox runs: a commit id is itself, any other ref the SHA-1 of the URL and the ref", async () => {
-    const resolve = (ref: string) =>
-      fakeSourceDriver.ops["source.resolve"]!({ url: repo.url, ref }, {} as never) as Promise<{ revision: string }>;
+  it("has a fake for sandbox runs: a commit id is itself, any other ref the SHA-1 of the URL and the ref, the default branch main", async () => {
+    const resolve = (ref?: string) =>
+      fakeSourceDriver.ops["source.resolve"]!({ url: repo.url, ...(ref && { ref }) }, {} as never) as Promise<{
+        revision: string;
+      }>;
     const commit = "a".repeat(40);
-    expect(await resolve(commit)).toEqual({ revision: commit });
-    expect(await resolve("main")).toEqual({ revision: createHash("sha1").update(`${repo.url}#main`).digest("hex") });
+    const main = createHash("sha1").update(`${repo.url}#main`).digest("hex");
+    expect(await resolve(commit)).toEqual({ revision: commit, ref: commit });
+    expect(await resolve("main")).toEqual({ revision: main, ref: "main" });
+    expect(await resolve()).toEqual({ revision: main, ref: "main" });
+  });
+
+  it("resolves a repository's default branch, and the commit it names", async () => {
+    expect(await defaultBranch(repo.url)).toEqual({ revision: await resolveRevision(repo.url, "HEAD"), ref: "main" });
   });
 
   it("refuses a ref the repository does not have, for good, and a repository it cannot read, to retry", async () => {

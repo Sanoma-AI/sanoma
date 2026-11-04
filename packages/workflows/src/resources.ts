@@ -359,7 +359,7 @@ function declarationsOf(
     const why =
       value.connection !== undefined && binding.connection?.$connection !== value.connection.$connection
         ? `${id} changes the connection of a bound resource: explicitly unbind it before selecting another account`
-        : binding.type !== value[DECLARED]
+        : binding.type !== value[DECLARED] && !types.get(value[DECLARED])?.formerly?.includes(binding.type)
           ? `${id} is bound to a ${binding.type} in ${LOCKFILE}, but declares a ${value[DECLARED]}`
           : first !== undefined
             ? `${id} is bound to the same ${object} as ${first} in ${LOCKFILE}: bind each object once`

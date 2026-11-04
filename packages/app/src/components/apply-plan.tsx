@@ -128,7 +128,13 @@ function StepBody({ step, noun }: { step: PlanStep; noun: string }) {
       return (
         <p className="text-muted-foreground">
           Binds it to the {noun} <Id id={step.binding} />,{" "}
-          {step.source === "found" ? "which its identity found at the vendor" : "as given"}.
+          {step.source === "found" ? "which its identity found at the vendor" : "as given"}
+          {step.from && (
+            <>
+              : a rebind, the binding <Id id={step.from} /> held, which no declaration has now
+            </>
+          )}
+          .
         </p>
       );
     case "gone":

@@ -130,7 +130,8 @@ export interface CheckResult {
 
 /**
  * The built-in operation `sanoma.source.resolve`: the commit `ref` names in the repository at
- * `url` now, by `git ls-remote` (a branch first, then a tag, peeled; a full commit id is itself).
+ * `url` now, by `git ls-remote` (a branch first, then a tag, peeled; a full commit id is itself),
+ * and the ref; with no `ref`, the repository's default branch (its `HEAD`) and the commit it names.
  * Apply calls it to fill a host's revision before it plans, and drift to see a merge. `resolveConfig`
  * registers it when a connector declares a host type.
  */
@@ -139,10 +140,11 @@ export const sourceOps = defineConnector("sanoma", {
     resolve: {
       effect: "read",
       idempotent: true,
-      description: "Resolve a branch or tag of a git repository to the commit it names now",
-      input: z.object({ url: z.string().min(1), ref: z.string().min(1) }),
-      output: z.object({ revision: z.string() }),
-      target: ({ url, ref }: { url: string; ref: string }) => `${url}#${ref}`,
+      description:
+        "Resolve a branch or tag of a git repository, its default branch by default, to the commit it names now",
+      input: z.object({ url: z.string().min(1), ref: z.string().min(1).optional() }),
+      output: z.object({ revision: z.string(), ref: z.string() }),
+      target: ({ url, ref }: { url: string; ref?: string }) => `${url}#${ref ?? "HEAD"}`,
     },
   },
 });
@@ -151,7 +153,10 @@ export const SOURCE_RESOLVE = "sanoma.source.resolve" satisfies typeof sourceOps
 
 /** The driver of `sanoma.source.resolve`: git on this machine, with its own credential helpers. */
 export const sourceDriver = defineDriver(sourceOps, {
-  source: { resolve: async ({ url, ref }) => ({ revision: await resolveRevision(url, ref) }) },
+  source: {
+    resolve: async ({ url, ref }) =>
+      ref === undefined ? defaultBranch(url) : { revision: await resolveRevision(url, ref), ref },
+  },
 });
 
 const COMMIT = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
@@ -159,20 +164,20 @@ const COMMIT = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
 /**
  * The fake of `sanoma.source.resolve`, which a sandbox run calls (`sandboxDrivers`): no git and no
  * network, a full commit id is itself as the driver has it, and any other ref the SHA-1 of
- * `<url>#<ref>`, so a scenario's revisions are the same on every run.
+ * `<url>#<ref>`, so a scenario's revisions are the same on every run; the default branch is `main`.
  */
 export const fakeSourceDriver = defineDriver(sourceOps, {
   source: {
-    resolve: async ({ url, ref }) => ({
+    resolve: async ({ url, ref = "main" }) => ({
       revision: COMMIT.test(ref) ? ref : createHash("sha1").update(`${url}#${ref}`).digest("hex"),
+      ref,
     }),
   },
 });
 
-/** The commit `ref` (a branch, a tag, `HEAD`, a full ref or a commit id) names in the repository at `url`. */
-export async function resolveRevision(url: string, ref: string): Promise<string> {
-  if (COMMIT.test(ref)) return ref;
-  const { stdout } = await promisify(execFile)("git", ["ls-remote", "--", url, ref, `${ref}^{}`], {
+/** `git ls-remote` of `patterns` in the repository at `url`, with `options`, never prompting for credentials. */
+async function lsRemote(url: string, patterns: string[], options: string[] = []): Promise<string> {
+  const { stdout } = await promisify(execFile)("git", ["ls-remote", ...options, "--", url, ...patterns], {
     // Never a prompt for credentials: a repository that needs them and has none fails.
     env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
     timeout: 30_000,
@@ -182,6 +187,24 @@ export async function resolveRevision(url: string, ref: string): Promise<string>
       cause: err,
     });
   });
+  return stdout;
+}
+
+/** The default branch of the repository at `url` (the branch its `HEAD` names) and the commit it names now. */
+export async function defaultBranch(url: string): Promise<{ revision: string; ref: string }> {
+  const stdout = await lsRemote(url, ["HEAD"], ["--symref"]);
+  const branch = /^ref: refs\/heads\/(\S+)\tHEAD$/m.exec(stdout)?.[1];
+  const revision = /^([0-9a-f]{40,64})\tHEAD$/m.exec(stdout)?.[1];
+  if (!branch || !revision) {
+    throw new DriverError(`${url} names no default branch`, { retryable: false, vendorCode: "no_such_ref" });
+  }
+  return { revision, ref: branch };
+}
+
+/** The commit `ref` (a branch, a tag, `HEAD`, a full ref or a commit id) names in the repository at `url`. */
+export async function resolveRevision(url: string, ref: string): Promise<string> {
+  if (COMMIT.test(ref)) return ref;
+  const stdout = await lsRemote(url, [ref, `${ref}^{}`]);
   const refs = new Map(
     stdout.split("\n").flatMap((line) => {
       const [sha, name] = line.split("\t");
