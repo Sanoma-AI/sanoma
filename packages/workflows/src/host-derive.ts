@@ -78,6 +78,8 @@ export interface HostFacts {
   unbound?: ReadonlyMap<string, readonly string[]>;
   /** True when the config binds `SANOMA_SIGNING_KEY`: the host is given that key, else its own (`HOST_SIGNING_KEY`). */
   signingKeyBound?: boolean;
+  /** Explicit environment delivery: destination variable to logical secret name, never values. */
+  hostEnvironment?: Readonly<Record<string, string>>;
   /**
    * While the config has no deploy-key type, the GitHub repositories a host may clone (`origin`'s,
    * a declared `source`'s) that GitHub shows to no one: private (or not there). One GitHub does
@@ -352,10 +354,17 @@ export function deriveHosts(
     ]);
     const carried = [...vendors].flatMap((vendor) => facts.carried.get(vendor) ?? []);
     for (const name of [...carried, ...facts.githubApp]) secrets[name] = secret(name);
+    for (const [environment, name] of Object.entries(facts.hostEnvironment ?? {})) {
+      if (Object.hasOwn(secrets, environment) && secrets[environment]!.$secret !== name)
+        problem(`${environment} has a derived host binding and cannot be replaced by ${name}`);
+      else if (!Object.hasOwn(secrets, environment))
+        Object.defineProperty(secrets, environment, { value: secret(name), enumerable: true });
+    }
     // One the driver reads here from the environment alone would be left off the host, and a
     // Worker updated without it would lose it.
     for (const vendor of vendors) {
       for (const name of facts.unbound?.get(vendor) ?? []) {
+        if (Object.hasOwn(facts.hostEnvironment ?? {}, name)) continue;
         problem(
           `${name} is read from the environment here, and has no binding, so the host would not be given it: bind it in sanoma.config.ts, \`secrets: { bindings: { ${name}: { env: "${name}" } } }\`, or store it on the ${vendor} connector page`,
         );
@@ -428,6 +437,7 @@ export async function hostFacts(options: {
   builtInStore: boolean;
   /** True when the config binds `SANOMA_SIGNING_KEY` (`{ env }` or `{ bootstrap }`). */
   signingKeyBound?: boolean;
+  hostEnvironment?: Readonly<Record<string, string>>;
   sender?: string;
   mint: boolean;
 }): Promise<HostFacts | undefined> {
@@ -484,6 +494,7 @@ export async function hostFacts(options: {
     carried,
     ...(unbound.size > 0 && { unbound }),
     ...(options.signingKeyBound && { signingKeyBound: true }),
+    ...(options.hostEnvironment && { hostEnvironment: options.hostEnvironment }),
     ...(options.sender !== undefined && { sender: options.sender }),
     githubApp,
     ...(sourceKey !== undefined && { sourceKey }),

@@ -79,9 +79,16 @@ export const isSecretStoreFactory = (store: SecretStore | SecretStoreFactory): s
   "kind" in store && store.kind === "runtime";
 
 export type SecretBinding =
-  | { path: string; management: "sanoma" | "external"; env?: never; bootstrap?: never }
-  | { env: string; management?: "external"; path?: never; bootstrap?: never }
-  | { bootstrap: DeploymentKeyName; management?: "external"; env?: never; path?: never };
+  | { path: string; management: "sanoma" | "external"; env?: never; bootstrap?: never; host?: never }
+  | {
+      env: string;
+      /** Deliver this binding to declared deriving hosts under its environment name. */
+      host?: boolean;
+      management?: "external";
+      path?: never;
+      bootstrap?: never;
+    }
+  | { bootstrap: DeploymentKeyName; management?: "external"; env?: never; path?: never; host?: never };
 
 export interface SecretConfiguration {
   /** Omitted: built-in encrypted Postgres, supplied by the runtime. */
@@ -161,8 +168,10 @@ export function checkSecretConfiguration(config: SecretConfiguration): void {
     (!config.bindings || typeof config.bindings !== "object" || Array.isArray(config.bindings))
   )
     invalid();
+  const hostEnvironment = new Set<string>();
   for (const [name, b] of Object.entries(config.bindings ?? {})) {
     if (!namePattern.test(name) || !b || typeof b !== "object") invalid();
+    if (b.host !== undefined && (typeof b.env !== "string" || typeof b.host !== "boolean")) invalid();
     if (DEPLOYMENT_KEYS.includes(name) && !("env" in b) && !("bootstrap" in b)) invalid();
     if ("bootstrap" in b) {
       if (
@@ -180,6 +189,10 @@ export function checkSecretConfiguration(config: SecretConfiguration): void {
         (b.management !== undefined && b.management !== "external")
       )
         invalid();
+      if (b.host) {
+        if (hostEnvironment.has(b.env!)) invalid();
+        hostEnvironment.add(b.env!);
+      }
     } else if (!nonempty(b.path) || !["sanoma", "external"].includes(b.management)) invalid();
   }
 }
