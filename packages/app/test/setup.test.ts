@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { generateKeyPairSync, randomBytes } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -37,7 +37,7 @@ writeFileSync(
 );
 const config = defineConfig({
   workflows: [],
-  connectors: [supabase],
+  connectors: [supabase, githubConnector],
   databaseUrl: testDatabaseUrl("setup"),
   root,
 });
@@ -49,11 +49,34 @@ const KEYS = {
   client_id: "Iv1.clientid",
   client_secret: "client-secret-value",
   webhook_secret: "webhook-secret-value",
-  pem: "-----BEGIN RSA PRIVATE KEY-----\nmade-up\n-----END RSA PRIVATE KEY-----\n",
+  // A key that signs, since the status asks GitHub for the App's listing as the App.
+  pem: generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({
+    type: "pkcs1",
+    format: "pem",
+  }) as string,
   owner: { login: "acme" },
 };
 const conversions: string[] = [];
+/** What GitHub lists for the App the manifest makes: a write where read was asked covers it. */
+const LISTED = {
+  administration: "write",
+  contents: "write",
+  emails: "write",
+  metadata: "read",
+  pull_requests: "write",
+  statuses: "write",
+};
 const github = setupServer(
+  // Each App's listing, as the App (its JWT names it): the one the callback stores has every
+  // permission the manifest asks for; App 1 was made before the manifest asked for most; for App
+  // 2, GitHub does not answer.
+  http.get("https://api.github.com/app", ({ request }) => {
+    const jwt = request.headers.get("authorization")?.replace(/^Bearer /, "") ?? "";
+    const { iss } = JSON.parse(Buffer.from(jwt.split(".")[1] ?? "", "base64url").toString()) as { iss?: string };
+    if (iss === String(KEYS.id)) return HttpResponse.json({ permissions: LISTED });
+    if (iss === "1") return HttpResponse.json({ permissions: { contents: "write", metadata: "read" } });
+    return HttpResponse.json({ message: "down" }, { status: 503 });
+  }),
   http.post("https://api.github.com/app-manifests/:code/conversions", ({ params }) => {
     conversions.push(String(params.code));
     return params.code === "good"
@@ -244,6 +267,27 @@ describe("sign-in on the host", () => {
     expect((await setupStatus(withSites)).signIn.sites).toEqual([{ name: "www", login: "better-auth" }]);
   });
 
+  it("holds the stored App to the manifest's permissions, by GitHub's listing of it, or says GitHub did not", async () => {
+    expect((await setupStatus(ctx)).githubApp?.missing).toEqual([]);
+    // Each case is another App: the listing is kept a while by slug.
+    try {
+      await client.setSecret(GITHUB_APP.slug, "lacking", { by: "alice" });
+      await client.setSecret(GITHUB_APP.id, "1", { by: "alice" });
+      expect((await setupStatus(ctx)).githubApp?.missing).toEqual([
+        "administration: write",
+        "emails: read",
+        "pull_requests: write",
+        "statuses: write",
+      ]);
+      await client.setSecret(GITHUB_APP.slug, "down", { by: "alice" });
+      await client.setSecret(GITHUB_APP.id, "2", { by: "alice" });
+      expect((await setupStatus(ctx)).githubApp?.missing).toBeNull();
+    } finally {
+      await client.setSecret(GITHUB_APP.slug, KEYS.slug, { by: "alice" });
+      await client.setSecret(GITHUB_APP.id, String(KEYS.id), { by: "alice" });
+    }
+  });
+
   it("names the config's sender, connected once its connector's credentials are stored", async () => {
     const withSender = defineConfig({
       ...config,
@@ -272,7 +316,7 @@ describe("sign-in on the host", () => {
 describe("the connect page", () => {
   it("says what is connected, and stores a pasted token, never showing a value", async () => {
     expect(await setupStatus(ctx)).toEqual({
-      githubApp: { slug: KEYS.slug, setBy: "alice", setAt: expect.any(String) },
+      githubApp: { slug: KEYS.slug, setBy: "alice", setAt: expect.any(String), missing: [] },
       tokens: [
         expect.objectContaining({ name: "GITHUB_TOKEN", status: "missing" }),
         expect.objectContaining({ name: "SUPABASE_ACCESS_TOKEN", status: "missing" }),

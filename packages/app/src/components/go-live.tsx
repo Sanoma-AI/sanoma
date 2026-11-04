@@ -123,7 +123,7 @@ function GoLiveSteps() {
               </ItemDescription>
             </ItemContent>
           </Item>
-          <SignInItem signIn={status.signIn} />
+          <SignInItem signIn={status.signIn} app={status.githubApp} />
           {vendors.map((v) => (
             <Item key={v.title} role="listitem" variant="outline" size="xs">
               <ItemContent>
@@ -443,9 +443,10 @@ function PushButton() {
  * How people will sign in on the host: by an email code through the config's sender, by GitHub
  * through the App, and always by invite links. With neither a connected sender nor GitHub, a
  * warning that does not block going live, and the two fixes. With GitHub, the public sites whose
- * visitors can sign in with it too, and the callback URL each needs on the App.
+ * visitors can sign in with it too, and the callback URL each needs on the App; and, when the App
+ * lacks the permission to read email addresses, where to add it.
  */
-function SignInItem({ signIn }: { signIn: SetupStatus["signIn"] }) {
+function SignInItem({ signIn, app }: { signIn: SetupStatus["signIn"]; app: SetupStatus["githubApp"] }) {
   const code = signIn.sender !== null && signIn.senderConnected;
   const ways = [code && "an email code", signIn.github && "GitHub", "invite links"].filter(Boolean).join(", ");
   return (
@@ -478,6 +479,13 @@ function SignInItem({ signIn }: { signIn: SetupStatus["signIn"] }) {
                 </>
               )}
               , for an email code; or create the GitHub App, for Sign in with GitHub.
+            </>
+          )}
+          {signIn.github && app?.missing?.some((p) => p.startsWith("emails:")) && (
+            <>
+              {" "}
+              The App may not read email addresses, which Sign in with GitHub needs when someone&apos;s GitHub email is
+              private: <Link to="/hosting/connect">Connect</Link> says what to add.
             </>
           )}
           {signIn.github && signIn.sites.length > 0 && (

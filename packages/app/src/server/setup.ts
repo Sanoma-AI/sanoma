@@ -35,6 +35,7 @@ import { type ActorContext, invalid } from "./core.ts";
 import { declaredEmail } from "./people.ts";
 import { signer } from "../login/keys.ts";
 import { escapeHtml } from "../login/page.ts";
+import { secretValues } from "./secrets.ts";
 
 // Going live, step 1: connect GitHub, and each vendor of a database, host or wakeup the config
 // declares: Supabase or Neon, Cloudflare, a wakeup service. GitHub through an App the company creates
@@ -111,6 +112,57 @@ const CONNECT = "/hosting/connect";
 const STATE = "sanoma_setup_state";
 const STATE_PATH = "/setup/github";
 const API = "https://api.github.com";
+const GITHUB_HEADERS = {
+  accept: "application/vnd.github+json",
+  "x-github-api-version": "2022-11-28",
+  "user-agent": "sanoma",
+};
+
+/** The permissions the manifest asks for, which `missingPermissions` holds a stored App to. */
+const GITHUB_APP_PERMISSIONS = {
+  administration: "write",
+  contents: "write",
+  // The staff login's "Sign in with GitHub" reads the person's verified emails.
+  emails: "read",
+  metadata: "read",
+  pull_requests: "write",
+  // The `sanoma` commit status a change's review sets.
+  statuses: "write",
+} as const;
+const LEVEL = { none: 0, read: 1, write: 2 } as const;
+/** GitHub's listing of each stored App, by slug, kept a while: it changes only when someone edits the App. */
+const listings = new Map<string, { at: number; missing: string[] }>();
+const LISTING_MS = 10 * 60_000;
+
+/**
+ * The permissions of `GITHUB_APP_PERMISSIONS` that the stored App `slug` lacks (a granted write
+ * covers a needed read), as `<name>: <level>`, from the GitHub connector's remote half, which
+ * reads GitHub's listing as the App with its stored keys; null when the connector has no remote
+ * half here, the keys are not stored, or GitHub did not say in time.
+ */
+async function missingPermissions(app: AppContext, slug: string): Promise<string[] | null> {
+  const known = listings.get(slug);
+  if (known && Date.now() - known.at < LISTING_MS) return known.missing;
+  const remote = app.resolved.remotes.get("github");
+  if (!remote?.permissions) return null;
+  try {
+    const permissions = await Promise.race([
+      remote.permissions({ secrets: secretValues(app.client) }),
+      new Promise<undefined>((resolve) =>
+        AbortSignal.timeout(2_000).addEventListener("abort", () => resolve(undefined)),
+      ),
+    ]);
+    if (!permissions) return null;
+    const level = (name: string) => LEVEL[(permissions[name] ?? "none") as keyof typeof LEVEL] ?? 0;
+    const missing = Object.entries(GITHUB_APP_PERMISSIONS)
+      .filter(([name, needed]) => level(name) < LEVEL[needed])
+      .map(([name, needed]) => `${name}: ${needed}`);
+    listings.set(slug, { at: Date.now(), missing });
+    return missing;
+  } catch {
+    return null;
+  }
+}
 
 const cookies = (request: Request) => parse(request.headers.get("cookie") ?? "");
 
@@ -130,9 +182,14 @@ const cookie = (request: Request, name: string, value: string, path: string, max
 /** What the page shows: the App's slug, each token's status and how people will sign in on the host (`signIn`); never a value. */
 export async function setupStatus(app: AppContext, actor?: Principal): Promise<SetupStatus> {
   const names = setupTokens(app);
-  const [found, signIn] = await Promise.all([
-    app.client.secrets([GITHUB_APP.slug, GITHUB_APP.client_id, GITHUB_APP.client_secret, ...names]),
+  const secrets = app.client.secrets([GITHUB_APP.slug, GITHUB_APP.client_id, GITHUB_APP.client_secret, ...names]);
+  const [found, signIn, missing] = await Promise.all([
+    secrets,
     signInStatus(app, actor),
+    secrets.then((f) => {
+      const slug = f.get(GITHUB_APP.slug);
+      return slug ? missingPermissions(app, slug.value) : null;
+    }),
   ]);
   const slug = found.get(GITHUB_APP.slug);
   const tokens = names.map((name): CredentialStatus => {
@@ -143,7 +200,7 @@ export async function setupStatus(app: AppContext, actor?: Principal): Promise<S
     return { name, description, optional, status: "set", source, ...(setBy && { setBy, setAt }) };
   });
   return {
-    githubApp: slug ? { slug: slug.value, setBy: slug.setBy, setAt: slug.setAt } : null,
+    githubApp: slug ? { slug: slug.value, setBy: slug.setBy, setAt: slug.setAt, missing } : null,
     tokens,
     signIn: { ...signIn, github: found.has(GITHUB_APP.client_id) && found.has(GITHUB_APP.client_secret) },
   };
@@ -209,16 +266,7 @@ export function githubManifest(origin: string, name: string) {
     // `remoteWebhook` answers it: a push deploys or plans a change again, a closed pull request ends one.
     hook_attributes: { url: `${origin}/webhooks/github`, active: !isLoopback(new URL(origin).hostname) },
     public: false,
-    default_permissions: {
-      administration: "write",
-      contents: "write",
-      // The staff login's "Sign in with GitHub" reads the person's verified emails.
-      emails: "read",
-      metadata: "read",
-      pull_requests: "write",
-      // The `sanoma` commit status a change's review sets.
-      statuses: "write",
-    },
+    default_permissions: GITHUB_APP_PERMISSIONS,
     default_events: ["push", "pull_request"],
   };
 }
@@ -281,7 +329,7 @@ export async function githubCallback(app: AppContext, request: Request): Promise
   try {
     const res = await fetch(`${API}/app-manifests/${encodeURIComponent(code)}/conversions`, {
       method: "POST",
-      headers: { accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", "user-agent": "sanoma" },
+      headers: GITHUB_HEADERS,
     });
     if (!res.ok) throw new Error(`GitHub answered ${res.status}`);
     const keys = (await res.json()) as Record<keyof typeof GITHUB_APP, unknown>;
