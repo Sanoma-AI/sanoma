@@ -216,7 +216,8 @@ export interface Declared<Id extends string = string, T = State> {
   readonly connection?: ConnectionRef;
   /**
    * Where it names another resource: the field's dotted path (a list item's with its index,
-   * `teams.0`) to that resource's `<vendor>.<type>:<name>`.
+   * `teams.0`) to that resource's `<vendor>.<type>:<name>`, or its `<vendor>.<type>` alone when it
+   * has no identity (then `desired` holds nothing there until the loader puts the declaration's id).
    */
   readonly refs: Readonly<Record<string, string>>;
 }
@@ -828,8 +829,19 @@ export function defineResource<
         const types = [wants.type].flat();
         if (!types.includes(id))
           throw new Error(`${what}: ${at} names a resource of type ${types.join(" or ")}, not ${id} (${value.name})`);
-        if (value.name === undefined)
-          throw new Error(`${what}: ${at} names a ${id}, which has no identity to name it by`);
+        if (value.name === undefined) {
+          // A resource with no identity (a Neon project) stands for nothing the vendor reads: only a
+          // field the vendor is never sent, or one that takes its state (`from`), may name it, and
+          // the loader puts the declaration's id there (`readResources`).
+          if (!underAny(path, writeOnly) && wants.from === undefined) {
+            throw new Error(
+              `${what}: ${at} names a ${id}, which has no identity to name it by: only a write-only field or a \`from\` reference may`,
+            );
+          }
+          unjudged.add(at);
+          refs[at] = id;
+          return undefined;
+        }
         if (wants.from !== undefined) unjudged.add(at);
         refs[at] = `${id}:${value.name}`;
         return value.name;

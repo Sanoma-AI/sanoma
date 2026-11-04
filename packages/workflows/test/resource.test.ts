@@ -52,6 +52,18 @@ const repo = defineResource({
 
 const acme = defineConnector("acme", { repo }, { title: "Acme", package: "@acme/sanoma-connector" });
 
+// A listing of a product, naming it in `product`: write-only or not, as the test says.
+const listing = (writeOnly: string[]) =>
+  defineResource({
+    vendor: "acme",
+    type: "listing",
+    title: "Listing",
+    identity: "slug",
+    schema: z.object({ slug: z.string(), product: z.string().nullish() }),
+    fields: { immutable: [], vendorOwned: [], writeOnly, references: { product: { type: "acme.product" } } },
+    find: ({ slug }) => slug,
+  });
+
 describe("defineResource", () => {
   it("derives read and import operations, effect read and idempotent, targeting the import id", () => {
     expect(acme.repo.read).toMatchObject({ id: "acme.repo.read", effect: "read", idempotent: true });
@@ -199,19 +211,14 @@ describe("defineResource", () => {
       expect(byNode.bindingId({ id: "x", node: "N_1" })).toBe("N_1");
     });
 
-    it("cannot be named by another resource: a reference stands for an identity", () => {
-      const listing = defineResource({
-        vendor: "acme",
-        type: "listing",
-        title: "Listing",
-        identity: "slug",
-        schema: z.object({ slug: z.string(), product: z.string().nullish() }),
-        fields: { immutable: [], vendorOwned: [], writeOnly: [], references: { product: { type: "acme.product" } } },
-        find: ({ slug }) => slug,
-      });
-      expect(() => listing({ slug: "pro", product: product({ title: "Pro" }) })).toThrow(
-        "acme.listing: product names a acme.product, which has no identity to name it by",
+    it("is named only by a field the vendor never reads: a reference stands for an identity", () => {
+      expect(() => listing([])({ slug: "pro", product: product({ title: "Pro" }) })).toThrow(
+        "acme.listing: product names a acme.product, which has no identity to name it by: only a write-only field or a `from` reference may",
       );
+      // Write-only: nothing stands there until the loader puts the declaration's id; `refs` has the type.
+      const pro = listing(["product"])({ slug: "pro", product: product({ title: "Pro" }) });
+      expect(pro.desired).toEqual({ slug: "pro", product: undefined });
+      expect(pro.refs).toEqual({ product: "acme.product" });
     });
   });
 
