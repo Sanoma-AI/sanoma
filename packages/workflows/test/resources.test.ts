@@ -27,7 +27,7 @@ const widget = defineResource({
   fields: { immutable: [], vendorOwned: ["url"], writeOnly: ["token"] },
   find: ({ name }) => name,
 });
-// A type the vendor names itself (no identity), and one that runs on it, naming it in a field the vendor is never sent.
+// A type the vendor names itself (no identity), and one that takes a field of its state (`from`), naming it.
 const store = defineResource({
   vendor: "acme",
   type: "store",
@@ -41,7 +41,7 @@ const box = defineResource({
   title: "Box",
   identity: "name",
   schema: z.object({ name: z.string(), store: z.string().nullish() }),
-  fields: { immutable: [], vendorOwned: [], writeOnly: ["store"], references: { store: { type: "acme.store" } } },
+  fields: { immutable: [], vendorOwned: [], writeOnly: [], references: { store: { type: "acme.store", from: "id" } } },
   find: ({ name }) => name,
 });
 const acme = defineConnector("acme", { widget, store, box }, { package: "@acme/sanoma-connector" });
@@ -138,7 +138,7 @@ describe("readResources", () => {
     });
   });
 
-  it("holds a reference to a resource with no identity as that declaration's id", () => {
+  it("holds a `from` reference to a resource with no identity in refs alone", () => {
     const dir = project({
       "infra.ts":
         'import { acme } from "@acme/sanoma-connector/resources";\n' +
@@ -148,11 +148,10 @@ describe("readResources", () => {
     try {
       const { resources, problems } = loadDataFiles(dir, base.connectors);
       expect(problems).toEqual([]);
-      expect(resources.find((r) => r.id === "resources/infra.ts#box")).toMatchObject({
-        name: "main",
-        desired: { name: "main", store: "resources/infra.ts#store" },
-        refs: { store: "resources/infra.ts#store" },
-      });
+      const main = resources.find((r) => r.id === "resources/infra.ts#box")!;
+      expect(main.name).toBe("main");
+      expect(main.desired).toEqual({ name: "main" });
+      expect(main.refs).toEqual({ store: "resources/infra.ts#store" });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

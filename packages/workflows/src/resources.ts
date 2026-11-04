@@ -8,7 +8,7 @@ import type { Connector } from "./op.ts";
 import { APPS_DIR, COLLECTIONS_FILE, filesUnder, kindDirs, relPath } from "./paths.ts";
 import { peopleConnector, sanoma } from "./person.ts";
 import { wakeupOps } from "./wakeup-type.ts";
-import { DECLARED, type Declared, holderOf, isDeclared, isObject, type Resource, resourceTypesOf } from "./resource.ts";
+import { DECLARED, type Declared, isDeclared, isObject, type Resource, resourceTypesOf } from "./resource.ts";
 import { rootSnapshot } from "./bundled.ts";
 import { Principal } from "./define.ts";
 import { NotAdmittedError } from "./errors.ts";
@@ -311,8 +311,6 @@ function declarationsOf(
   // Each declaration after the ones it names; one with a problem is left out, and so is any that names it.
   const done = new Map<string, Record<string, string> | undefined>();
   const byName = new Map<string, string>();
-  // Each reference to a resource with no identity, by `<id> <path>`: filled with the target's id below.
-  const unnamed = new Map<string, string>();
   const leaveOut = (id: string, message?: string) => {
     if (message !== undefined) problems.push({ ...declarations.get(id)!.at, message });
     done.set(id, undefined);
@@ -334,8 +332,6 @@ function declarationsOf(
       }
       if (!declare(targetId)) return void done.set(id, undefined);
       refs[path] = targetId;
-      // A resource with no identity stands for nothing in `desired`: its declaration's id does.
-      if (target.name === undefined) unnamed.set(`${id} ${path}`, targetId);
     }
     if (value.name !== undefined) {
       const key = `${value[DECLARED]} ${JSON.stringify(value.name)}${value.connection ? ` (${value.connection.$connection})` : ""}`;
@@ -392,13 +388,6 @@ function declarationsOf(
     if (!refs) continue;
     const { vendor, type, name: identity, desired, connection } = value;
     const binding = lock.bindings[id]?.id;
-    // A copy: the loaded value is the generation's, read again while no file changes.
-    const fields = structuredClone(desired) as Record<string, unknown>;
-    for (const path of Object.keys(refs)) {
-      const target = unnamed.get(`${id} ${path}`);
-      const place = target === undefined ? undefined : holderOf(fields, path);
-      if (place) place.holder[place.key] = target;
-    }
     resources.push({
       id,
       file: at.file,
@@ -408,7 +397,8 @@ function declarationsOf(
       ...(identity !== undefined && { identity }),
       ...(binding !== undefined && { binding }),
       at,
-      desired: fields,
+      // A copy: the loaded value is the generation's, read again while no file changes.
+      desired: structuredClone(desired) as Record<string, unknown>,
       ...(connection && { connection: { ...connection } }),
       refs,
     });
