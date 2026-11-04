@@ -424,6 +424,7 @@ describe("the built-in drift workflow in a config", () => {
           "sanoma.connection.disconnect",
           "sanoma.connection.prepare",
           "sanoma.connection.test",
+          "sanoma.run.inspect",
         ],
       },
       { name: "change", builtin: true },

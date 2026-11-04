@@ -7,6 +7,7 @@ import { sealInvite } from "./seal.ts";
 import { errorMessage } from "./shared.ts";
 import { sourceKeyPair, sshPublicKey } from "./ssh-key.ts";
 import { memoryTokens, type Tokens } from "./tokens.ts";
+import type { InspectRun } from "./run-status.ts";
 import {
   identityProvisioningCode,
   memoryIdentityProvisioning,
@@ -59,6 +60,21 @@ async function identityWrite(write: () => Promise<void>): Promise<void> {
  * `uses: [sanoma.secret.generate]` and `ctx.sanoma.secret.generate({ name, kind })`.
  */
 export const sanoma = defineConnector("sanoma", {
+  run: {
+    inspect: {
+      effect: "read",
+      idempotent: true,
+      description:
+        "Inspect a run's status in this application without its input, output or error. A snapshot, not a lock or proof that cancelled vendor calls have stopped",
+      input: z.object({ runId: z.string().min(1).max(512) }),
+      output: z.object({
+        runId: z.string(),
+        status: z.enum(["missing", "active", "finished", "failed", "cancelled", "interrupted"]),
+        workflow: z.string().optional(),
+      }),
+      target: ({ runId }: { runId: string }) => runId,
+    },
+  },
   secretStore: {
     prepare: {
       effect: "access",
@@ -235,15 +251,27 @@ export async function postInvite(host: string, request: string): Promise<{ url: 
 export function runtimeDriver({
   tokens,
   identities,
+  inspect,
   storage = prepareSecretStore,
   invite = postInvite,
 }: {
   tokens: Tokens;
   identities?: IdentityProvisioning;
+  inspect?: InspectRun;
   storage?: PrepareStorage;
   invite?: (host: string, request: string, call: CallContext) => Promise<{ url: string }>;
 }) {
   return defineDriver(sanoma, {
+    run: {
+      async inspect({ runId }) {
+        if (!inspect) throw refuse("run inspection is not configured");
+        try {
+          return await inspect(runId);
+        } catch {
+          throw new DriverError("Run inspection unavailable", { retryable: true });
+        }
+      },
+    },
     secretStore: {
       async prepare(input, call) {
         try {
@@ -344,6 +372,7 @@ export function runtimeDriver({
 export const sandboxRuntimeDriver = () =>
   runtimeDriver({
     tokens: memoryTokens(),
+    inspect: async (runId) => ({ runId, status: "missing" }),
     identities: memoryIdentityProvisioning(),
     storage: memoryStorageProvisioning(),
     invite: async (host, _request, call) => ({ url: new URL(`/auth/invite/sandbox-${tokenIdOf(call)}`, host).href }),
