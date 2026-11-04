@@ -95,6 +95,12 @@ describe("the login-code workflow", () => {
     await app.client.recordInvite("alice", { by: "alice", expiresAt: new Date(Date.now() + INVITE_SECONDS * 1000) });
     const last = await app.client.lastSignIns(["alice", "nobody"]);
     expect(last).toEqual({ alice: { at: expect.any(Number), method: "invite" } });
+    expect(await app.client.lastInvite("alice")).toEqual({
+      by: "alice",
+      at: expect.any(Number),
+      expiresAt: expect.any(Number),
+    });
+    expect(await app.client.lastInvite("nobody")).toBeUndefined();
     await expect(app.client.recordSignIn("mallory", "code")).rejects.toThrow(/not admitted|declared/i);
   });
 

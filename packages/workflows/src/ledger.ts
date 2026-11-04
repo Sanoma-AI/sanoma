@@ -190,6 +190,18 @@ export async function lastSignIns(
   return Object.fromEntries(last.flat());
 }
 
+/** Who minted the latest invite for `person`, and until when (ms since the epoch): from their `invite:<person>` records; undefined when none was. */
+export async function lastInvite(
+  store: LedgerStore,
+  person: string,
+): Promise<{ by: string; at: number; expiresAt: number } | undefined> {
+  const records = await store.read(`invite:${person}`);
+  const latest = records.reduce<LedgerRecord | undefined>((a, r) => (a && a.at > r.at ? a : r), undefined);
+  return latest?.type === "invite.minted"
+    ? { by: latest.by, at: latest.at, expiresAt: Date.parse(latest.expiresAt) }
+    : undefined;
+}
+
 /**
  * The `ctx.all` member a record was written in. `id` is `all:<seq>`, the run's next `seq` when
  * the `ctx.all` began, so a replay names it the same; `index` is the member's position, `size`

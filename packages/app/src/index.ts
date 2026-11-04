@@ -258,6 +258,7 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   // server, read at each request; else what the build wrote of it.
   let load: () => Promise<Responder>;
   let published: () => Published;
+  let stylesheet: string | undefined;
   if (options.dev) {
     const { repo, onFileChange } = options.dev;
     load = () => devResponder(repo, server, onFileChange);
@@ -274,6 +275,8 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
     );
     published = () => built;
     const files = await staticFiles(join(distDir, "client"));
+    // The kit's theme, which the root route imports as `style.css?url`: what the login's own pages link.
+    stylesheet = [...files.keys()].find((path) => /^\/assets\/style-[\w-]+\.css$/.test(path));
     const serverEntry = join(distDir, "server", "server.js");
     await mustBeFile(serverEntry);
     load = async () => builtResponder(files, await loadServerEntry(serverEntry));
@@ -306,6 +309,7 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
       return current();
     },
     login,
+    ...(stylesheet && { stylesheet }),
   };
   // Each public site served, by name, with its own context, whose login is its front door: its
   // login half, if it has one, made once the app listens (`openLogins`). A public site whose
