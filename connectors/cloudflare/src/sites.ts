@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { extname } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { errorMessage } from "@sanoma-ai/workflows";
+import { DriverError, errorMessage } from "@sanoma-ai/workflows";
 import { SITES_BUNDLE_HEADER, SITES_BUNDLE_PATH, type SitesBundle } from "@sanoma-ai/workflows/shared";
 import mime from "mime";
 import { refused } from "./errors.ts";
@@ -17,6 +17,11 @@ import { SITES_MODULE, sitesRouter } from "./worker.ts";
 
 /** The binding the bundle reads its assets through (`WorkerEnv.ASSETS`). */
 export const ASSETS = "ASSETS";
+/**
+ * The plain-text binding of a Worker whose sites upload is still to be made: the deploy's upload
+ * sets it, `serveSites`' takes it off. A read that finds it plans an update, which makes that upload.
+ */
+export const SITES_PENDING = "SANOMA_SITES_PENDING";
 
 /**
  * How the Worker serves its assets: the client build under `/assets/` straight from them (a path
@@ -46,10 +51,12 @@ interface Polling {
 
 /**
  * The bundle the container at `url` built, asked with the instance token until it answers it
- * (202 while it builds, or the object's 503 while the container starts again); undefined when
- * it has no site to serve on the Worker (404), or the runtime has no such route (an answer
- * without `SITES_BUNDLE_HEADER`: an image from before it). A failed build, or a token it
- * refuses, is a refusal.
+ * (202 while it builds); undefined when it has no site to serve on the Worker (404), or the
+ * runtime has no such route: a 401 or a 404 without `SITES_BUNDLE_HEADER`, an image from before
+ * it, whose staff login refuses the path (or whose app has no page there). A failed build, or a
+ * token it refuses, is a refusal; any other answer (the object's 503 while the container starts
+ * again, an error of Cloudflare's, a body cut off) is asked again, and still one at the timeout
+ * is a retryable `DriverError`.
  */
 export async function sitesBundle(
   cf: CloudflareApi,
@@ -67,28 +74,42 @@ export async function sitesBundle(
         headers: { authorization: `Bearer ${token}` },
       });
       const route = res.headers.has(SITES_BUNDLE_HEADER);
-      if (route && res.status === 200) return (await res.json()) as SitesBundle;
-      const body = (await res.json().catch(() => undefined)) as { error?: unknown } | undefined;
-      const said = typeof body?.error === "string" ? body.error : `${SITES_BUNDLE_PATH} answered ${res.status}`;
-      if (!route && res.status !== 503) return undefined;
+      if (!route && (res.status === 401 || res.status === 404)) return void (await res.body?.cancel());
+      const text = await res.text();
+      const body = parsed(text);
+      if (route && res.status === 200 && body !== undefined) return body as SitesBundle;
+      const error = (body as { error?: unknown } | undefined)?.error;
+      const said = typeof error === "string" ? error : `${SITES_BUNDLE_PATH} answered ${res.status}`;
       if (route && res.status === 404) return undefined;
-      if (route && res.status !== 202) {
+      if (route && res.status !== 200 && res.status !== 202) {
         throw refused(
           `${script}: its container did not give the sites bundle (its sites are served from the container meanwhile): ${said}`,
         );
       }
-      last = route ? "it is building the bundle" : said;
+      last = !route ? said : res.status === 202 ? "it is building the bundle" : "its bundle was cut off";
     } catch (error) {
       if (!(error instanceof TypeError || (error instanceof Error && error.name === "TimeoutError"))) throw error;
-      // No answer this time (the container stopped under it, a timeout): the next ask starts it again.
+      // No answer this time (the container stopped under it, a timeout, a body cut off): the next ask starts it again.
       last = errorMessage(error);
     }
     if (Date.now() >= until) {
-      throw refused(`${script}: no sites bundle from its container in ${Math.round(startTimeoutMs / 1000)} s: ${last}`);
+      throw new DriverError(
+        `cloudflare: ${script}: no sites bundle from its container in ${Math.round(startTimeoutMs / 1000)} s (its sites are served from the container meanwhile): ${last}`,
+        { retryable: true },
+      );
     }
     await delay(pollMs);
   }
 }
+
+/** `text` as JSON; undefined when it is none (a body cut off where the JSON is). */
+const parsed = (text: string): unknown => {
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return undefined;
+  }
+};
 
 /** Puts `assets` in through an upload session for `script`'s next upload: the completion jwt that upload redeems. */
 export async function uploadAssets(cf: CloudflareApi, script: string, assets: SitesBundle["assets"]): Promise<string> {
@@ -131,14 +152,17 @@ interface Deployed extends Polling {
  * The public sites on the Worker: the bundle the container built, its assets uploaded, and the
  * Worker uploaded again with them and the sites router as its entry (its bindings, image and
  * revision as they were, so its container keeps running). When the container has none to give,
- * the Worker stays as the deploy uploaded it.
+ * the Worker is uploaded again as the deploy uploaded it. Either way without `SITES_PENDING`,
+ * which the deploy's upload carries: a Worker whose sites upload failed keeps it, which a read
+ * sees, so the next apply makes this upload again.
  */
 export async function serveSites(
   cf: CloudflareApi,
   { script, url, token, metadata, ...polling }: Deployed,
 ): Promise<void> {
   const bundle = await sitesBundle(cf, script, url, token, polling);
-  if (!bundle) return;
+  const bindings = metadata.bindings.filter((b) => b.name !== SITES_PENDING);
+  if (!bundle) return cf.upload(script, { ...metadata, bindings });
   if (bundle.mainModule !== "index.js") {
     throw refused(`${script}: the sites bundle's entry is ${bundle.mainModule}; the router imports sites/index.js`);
   }
@@ -146,7 +170,7 @@ export async function serveSites(
   await cf.upload(script, {
     ...metadata,
     main_module: SITES_MODULE,
-    bindings: [...metadata.bindings, { type: "assets", name: ASSETS }],
+    bindings: [...bindings, { type: "assets", name: ASSETS }],
     assets: { jwt, config: ASSETS_CONFIG },
     modules: [
       ...metadata.modules,

@@ -99,6 +99,9 @@ function stubCtx({
   return { ctx, container, calls, sent, storage, alarm: () => alarm };
 }
 
+/** The labels of a container started at the Worker's revision and image, serving the sites' `domains`. */
+const labelled = async (domains: string) => ({ revision: "r2", image: IMAGE, domains: await imageLabel(domains) });
+
 const wake = (method: string, { token = TOKEN, body }: { token?: string; body?: unknown } = {}) =>
   new Request("https://sanoma-company.acme.workers.dev/__sanoma/wake", {
     method,
@@ -290,6 +293,19 @@ describe("the Worker's object", () => {
     expect(container.start).not.toHaveBeenCalled();
   });
 
+  it("starts the container again when the sites' domains change, which its environment and its sites bundle name", async () => {
+    const env = { ...ENV, SANOMA_DOMAINS: "www=new.acme.example" };
+    const moved = stubCtx({ running: true, labels: await labelled("www=old.acme.example") });
+    expect((await new Instance(moved.ctx, env).fetch(new Request("https://x.workers.dev/healthz"))).status).toBe(200);
+    expect(moved.calls).toContain("destroy");
+    expect(moved.container.start).toHaveBeenCalledWith(
+      expect.objectContaining({ labels: await labelled("www=new.acme.example") }),
+    );
+    const kept = stubCtx({ running: true, labels: await labelled("www=new.acme.example") });
+    expect((await new Instance(kept.ctx, env).fetch(new Request("https://x.workers.dev/healthz"))).status).toBe(200);
+    expect(kept.container.destroy).not.toHaveBeenCalled();
+  });
+
   it("keeps a running container at the Worker's revision and image", async () => {
     const { ctx, container } = stubCtx({ running: true });
     expect((await new Instance(ctx, ENV).fetch(new Request("https://x.workers.dev/healthz"))).status).toBe(200);
@@ -323,7 +339,7 @@ describe("the Worker's object", () => {
     await expect(object.alarm()).rejects.toThrow("the container answered /wake with 503");
   });
 
-  it("starts the container from an alarm at startNow, without the caller waiting, and sets a later wake again", async () => {
+  it("starts the container from an alarm at startNow, without the caller waiting, wakes it and sets a later wake again", async () => {
     const { ctx, calls, sent, alarm } = stubCtx();
     const object = new Instance(ctx, ENV);
     const later = new Date(Date.now() + 60 * 60_000).toISOString();
@@ -333,8 +349,20 @@ describe("the Worker's object", () => {
     expect(alarm()).toBeLessThanOrEqual(Date.now());
     await object.alarm();
     expect(calls).toEqual(["start r2", `timeout ${INACTIVITY_MS}`]);
+    expect(sent.at(-1)!.url).toBe("http://container/wake");
     expect(alarm()).toBe(Date.parse(later));
-    expect(sent.map((r) => new URL(r.url).pathname)).not.toContain("/wake");
+    expect(await (await object.fetch(wake("GET"))).json()).toEqual({ at: later });
+  });
+
+  it("sends /wake at startNow to a container that is up, whose worker may have stopped itself", async () => {
+    const { ctx, container, sent } = stubCtx({ running: true });
+    const object = new Instance(ctx, ENV);
+    expect((await object.fetch(new Request("https://x.workers.dev/healthz"))).status).toBe(200);
+    sent.length = 0;
+    await object.startNow();
+    await object.alarm();
+    expect(container.start).not.toHaveBeenCalled();
+    expect(sent.map((r) => r.url)).toEqual(["http://container/wake"]);
   });
 
   it("keeps the alarm of a start asked for when a wake is registered or cleared meanwhile", async () => {
@@ -365,18 +393,24 @@ describe("the Worker's object", () => {
     expect(alarm()).toBe(Date.parse(later));
   });
 
-  it("leaves an alarm due sooner than now as it is at startNow, and never rings a wake twice", async () => {
+  it("leaves an alarm due sooner than now as it is at startNow, sends one /wake for both, and never rings a wake twice", async () => {
     const { ctx, sent, alarm } = stubCtx({
       answer: (r) => new Response(null, { status: new URL(r.url).pathname === "/wake" ? 204 : 200 }),
     });
     const object = new Instance(ctx, ENV);
+    const wakes = () => sent.filter((r) => new URL(r.url).pathname === "/wake").length;
     await object.fetch(wake("PUT", { body: { at: "2000-01-01T00:00:00Z" } }));
     await object.startNow();
     expect(alarm()).toBe(Date.parse("2000-01-01T00:00:00Z"));
     await object.alarm();
+    expect(wakes()).toBe(1);
+    await object.alarm();
+    expect(wakes()).toBe(1);
+    const { rang } = (await (await object.fetch(wake("GET"))).json()) as { rang: string };
     await object.startNow();
     await object.alarm();
-    expect(sent.filter((r) => new URL(r.url).pathname === "/wake")).toHaveLength(1);
+    expect(wakes()).toBe(2);
+    expect(await (await object.fetch(wake("GET"))).json()).toEqual({ at: "2000-01-01T00:00:00.000Z", rang });
   });
 
   it("answers a site's page from the sites bundle on the Worker, the rest from the object, and has the object start the container", async () => {

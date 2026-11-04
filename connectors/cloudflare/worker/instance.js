@@ -10,7 +10,7 @@
 // runs), and holds the company's one wake (`/__sanoma/wake`) as an alarm, which starts the
 // container at `at` and calls its `/wake`. `startNow`, which the sites router calls over RPC
 // when a page on the Worker queued a run, starts the container from an alarm too, without the
-// caller waiting for it.
+// caller waiting for it, and calls its `/wake`: a worker that stopped itself runs the queued run.
 
 /** The object's own route: the wake it holds. */
 export const WAKE_PATH = "/__sanoma/wake";
@@ -53,7 +53,7 @@ function containerEnv(env) {
   return Object.fromEntries(Object.entries(env).filter(([, value]) => typeof value === "string"));
 }
 
-/** The label naming an image: a digest of it, as a label holds 64 bytes and a pinned image is longer. */
+/** The label naming an image (or the sites' domains): a digest of it, as a label holds 64 bytes and a pinned image is longer. */
 export async function imageLabel(image) {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(image));
   return [...new Uint8Array(digest).slice(0, 8)].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -161,6 +161,8 @@ export class Instance {
       revision: this.env.SANOMA_REVISION ?? "",
       image: await imageLabel(image),
       ...(this.env.SANOMA_CONFIG_REVISION && { configuration: this.env.SANOMA_CONFIG_REVISION }),
+      // The sites' domains, which its environment and the sites bundle it built name.
+      ...(this.env.SANOMA_DOMAINS && { domains: await imageLabel(this.env.SANOMA_DOMAINS) }),
     };
     const until = Date.now() + START_TIMEOUT_MS;
     let last;
@@ -187,8 +189,9 @@ export class Instance {
             info &&
             info.labels?.revision === labels.revision &&
             (info.labels?.image ?? "") === labels.image &&
-            (info.labels?.configuration ?? "") === (labels.configuration ?? "");
-          if (!same) await container.destroy("a new revision, image or configuration");
+            (info.labels?.configuration ?? "") === (labels.configuration ?? "") &&
+            (info.labels?.domains ?? "") === (labels.domains ?? "");
+          if (!same) await container.destroy("a new revision, image, configuration or domains");
         }
         checked = true;
         if (!container.running) {
@@ -262,9 +265,9 @@ export class Instance {
   }
 
   /**
-   * Starts the container soon, without waiting for it: a run was queued for it (the sites
-   * router's call, over RPC, once a page on the Worker started one). An alarm now, which outlives
-   * the request that asked, makes the start; a wake held for later is set again once it is made.
+   * Starts the container soon and sends it `/wake`, without waiting for it: a run was queued for
+   * it (the sites router's call, over RPC, once a page on the Worker started one). An alarm now,
+   * which outlives the request that asked, makes the start; a wake held for later is set again once it is made.
    */
   async startNow() {
     const storage = this.ctx.storage;
@@ -274,14 +277,16 @@ export class Instance {
 
   /**
    * A start `startNow` asked for, then the wake if it is due: start the container and send it
-   * `/wake`, then note when. A wake not due yet is set again. A throw makes Cloudflare retry the
+   * `/wake` (once for both), then note when the wake rang. A wake not due yet is set again. A throw makes Cloudflare retry the
    * alarm; a start that still fails after `START_RETRIES` is given up, the wake kept.
    */
   async alarm(info) {
     const storage = this.ctx.storage;
+    let woke = false;
     if (await storage.get(START_KEY)) {
       try {
-        await this.ensureRunning();
+        await this.#wakeContainer();
+        woke = true;
       } catch (error) {
         if ((info?.retryCount ?? 0) < START_RETRIES) throw error;
         console.error(`starting the container for a queued run failed: ${error?.message ?? error}`);
@@ -292,6 +297,17 @@ export class Instance {
     if (!wake || wake.rang) return;
     const at = Date.parse(wake.at);
     if (at > Date.now()) return storage.setAlarm(at);
+    if (!woke) await this.#wakeContainer();
+    // When it rang, which a GET shows: unless another wake replaced it meanwhile.
+    const held = await this.ctx.storage.get(WAKE_KEY);
+    if (held?.at === wake.at) await this.ctx.storage.put(WAKE_KEY, { ...held, rang: new Date().toISOString() });
+  }
+
+  /**
+   * Starts the container unless it runs, then sends it `/wake`: a container that is up may hold a
+   * worker that stopped itself, which only a wake (or a write through its app) starts again.
+   */
+  async #wakeContainer() {
     await this.ensureRunning();
     const res = await this.ctx.container.getTcpPort(this.port).fetch("http://container/wake");
     await res.body?.cancel();
@@ -299,9 +315,6 @@ export class Instance {
       console.error(`GET /wake answered ${res.status}`);
       throw new Error(`the container answered /wake with ${res.status}`);
     }
-    // When it rang, which a GET shows: unless another wake replaced it meanwhile.
-    const held = await this.ctx.storage.get(WAKE_KEY);
-    if (held?.at === wake.at) await this.ctx.storage.put(WAKE_KEY, { ...held, rang: new Date().toISOString() });
   }
 }
 
