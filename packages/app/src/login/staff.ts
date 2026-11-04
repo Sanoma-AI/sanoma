@@ -21,7 +21,8 @@ import { z } from "zod";
 import type { AppContext, LoginProvider } from "../context.ts";
 import { secretValues } from "../server/secrets.ts";
 import { loginKey } from "./keys.ts";
-import { type Company, companyOf, escapeHtml, initialsOf, type PageFrame, smallPage, wantsJson } from "./page.ts";
+import { initialsOf } from "../lib/names.ts";
+import { type Company, companyOf, escapeHtml, type PageFrame, smallPage, wantsJson } from "./page.ts";
 
 // The staff login on a host: a login half (Better Auth's, `betterAuthStaffLogin`) made once the app
 // listens, given what only the app has: who the files declare, the sender (a `login-code` run as

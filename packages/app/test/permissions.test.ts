@@ -271,15 +271,13 @@ describe("the Permissions page", () => {
       await tab.setViewport({ width: 1440, height: 900 });
       await tab.goto(new URL("/permissions", app.url).href, { waitUntil: "networkidle0" });
       // No name yet: the declared people to choose from, not the agent.
-      const picker = await tab.waitForSelector("select#who-name");
-      expect(await picker!.evaluate((s) => [...s.options].map((o) => [o.value, o.textContent]))).toEqual([
-        ["", "Choose a person"],
-        ["ada", "Ada Lovelace (ada)"],
-        ["bo", "bo"],
-      ]);
-      await tab.select("select#who-name", "ada");
-      await tab.click('[role="dialog"] button[type="submit"]');
-      await tab.waitForFunction(`!document.querySelector("select#who-name")`);
+      // Each a row to pick: initials, name and groups.
+      await tab.waitForSelector('[role="dialog"] button[data-slot="item"]');
+      expect(
+        await tab.$$eval('[role="dialog"] button[data-slot="item"]', (rows) => rows.map((row) => row.textContent)),
+      ).toEqual(["ALAda Lovelace· finance", "BObo"]);
+      await tab.click('[role="dialog"] button[data-slot="item"]::-p-text(Ada Lovelace)');
+      await tab.waitForFunction(`!document.querySelector('[role="dialog"]')`);
       // Your groups under your name, on the user menu at the bar's foot.
       // By its text, not `::-p-text`, which matches the deepest element only: here a span inside.
       await tab.waitForFunction(

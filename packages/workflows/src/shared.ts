@@ -387,6 +387,9 @@ export function refusalOf(
 /** A declared resource as the people functions read it: only the runtime's people types count. */
 export type PeopleResource = Pick<DeclaredResource, "vendor" | "type" | "desired">;
 
+/** The group the runtime holds a change to the rules for, and the one that hands out invite links. */
+export const ADMIN = "admin";
+
 /** The group every agent is in, the runtime's own among them: no data file declares it. */
 export const AGENTS = "agents";
 

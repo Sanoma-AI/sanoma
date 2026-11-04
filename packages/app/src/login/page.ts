@@ -1,3 +1,5 @@
+import { initialsOf } from "../lib/names.ts";
+
 // What a login answers before the app's own pages: a small page of its own, or JSON for the page's
 // server functions and any change. The page has the app's look without its shell: it links the
 // kit's stylesheet (`AppContext.stylesheet`) and is written against its tokens.
@@ -26,13 +28,6 @@ export function companyOf(appName: string): Company {
     .map((word) => word[0]!.toUpperCase() + word.slice(1));
   const name = words.join(" ") || "Sanoma";
   return { name, initials: initialsOf(name) };
-}
-
-/** Two initials of a name: its first two words' first letters, or a single word's first two. */
-export function initialsOf(name: string): string {
-  const words = name.split(/\s+/).filter(Boolean);
-  const letters = words.length > 1 ? words[0]![0]! + words[1]![0]! : (words[0] ?? "").slice(0, 2);
-  return letters.toUpperCase();
 }
 
 /** What a small page shows around its card: the kit's stylesheet, the company and a line under the card. */
