@@ -293,6 +293,23 @@ describe("the staff login with GitHub", () => {
     });
     expect(await rows("user")).toBe(users);
     expect(await tokensOf(4103)).toEqual([{ access_token: null }]);
+    // Her GitHub email moves: the row's verified email still vouches on the next sign-in.
+    github.set("code-alice-2", { token: "gho_alice_2", id: 4103, login: "alice", email: "alice@elsewhere.example" });
+    const again = await viaGitHub("code-alice-2");
+    expect(again.headers.get("location")).toBe("/");
+    expect(await half.verify(request("/", { cookie: cookieOf(again) }))).toMatchObject({
+      email: DECLARED,
+      github: "alice",
+    });
+  });
+
+  it("refuses a new GitHub account under a login a row already carries", async () => {
+    const users = await rows("user");
+    github.set("code-squat", { token: "gho_squat", id: 4109, login: GITHUB_ONLY, email: "squat@users.github.test" });
+    const landed = await viaGitHub("code-squat");
+    expect(landed.headers.get("location")).toMatch(/error=not_declared/);
+    expect(cookieOf(landed)).toBe("");
+    expect(await rows("user")).toBe(users);
   });
 
   it("makes no user for a GitHub account the files do not declare, and says so", async () => {

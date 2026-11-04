@@ -53,6 +53,7 @@ const CODE_ROUTES = new Set([SEND_CODE, "/sign-in/email-otp"]);
 interface HookContext {
   path?: string;
   context: {
+    adapter: { findOne(query: { model: string; where: { field: string; value: string }[] }): Promise<unknown> };
     internalAdapter: {
       findUserById(id: string): Promise<User | null>;
       updateUser(id: string, data: Record<string, unknown>): Promise<unknown>;
@@ -67,6 +68,11 @@ interface Account {
 
 /** GitHub's tokens are never kept: a GitHub App's user token reaches what the App and the person both reach. */
 const dropTokens = async () => ({ data: { accessToken: null, refreshToken: null, idToken: null } });
+/** A GitHub account gone (a code proves an email its unverified row had, and drops its accounts): its user is no longer that login. */
+const forgetLogin = async (account: Account | null, ctx: HookContext | null) => {
+  if (account?.providerId === "github" && ctx)
+    await ctx.context.internalAdapter.updateUser(account.userId, { github: null });
+};
 
 /** How a session was made, by the route that made it. */
 const METHOD_OF: Record<string, SignInMethod> = {
@@ -114,12 +120,29 @@ export async function betterAuthStaffLogin({ databaseUrl, key, sendCode, staff }
         // the route proved, or by the login GitHub's own profile names (Better Auth sets no field
         // from a profile that a person may not set, so the login is kept by `keepLogin`), before
         // anything is written. A GitHub sign-in is checked again each time, with the fresh profile.
-        validateUserInfo: ({ user, source }, ctx) => {
-          const login = source.oauth?.providerId === "github" ? source.oauth.profile?.login : undefined;
-          if (typeof login === "string") logins.set(ctx, login);
-          const identity = { ...identityOf(user as User), ...(typeof login === "string" && { github: login }) };
-          if (staff.admits(identity)) return;
-          return { error: "not_declared", errorDescription: "This company's files declare nobody with that account" };
+        validateUserInfo: async ({ user, source }, ctx) => {
+          const refused = {
+            error: "not_declared",
+            errorDescription: "This company's files declare nobody with that account",
+          };
+          const said = source.oauth?.providerId === "github" ? source.oauth.profile?.login : undefined;
+          const login = typeof said === "string" ? said : undefined;
+          if (login) logins.set(ctx, login);
+          const { adapter, internalAdapter } = ctx.context;
+          // A new GitHub account under a login a row already carries is another account (GitHub
+          // frees a renamed login): it is not the declared person, whatever the files say.
+          if (login && source.action === "create-user") {
+            const holder = await adapter.findOne({ model: "user", where: [{ field: "github", value: login }] });
+            if (holder) return refused;
+          }
+          // Signing in again, or linking: GitHub's email may have moved; the row's verified one still vouches.
+          const row = typeof user.id === "string" ? await internalAdapter.findUserById(user.id) : null;
+          const identity = {
+            ...identityOf(user as User),
+            ...(row && row.emailVerified && { email: row.email }),
+            ...(login && { github: login }),
+          };
+          return staff.admits(identity) ? undefined : refused;
         },
       },
       advanced: { cookiePrefix: "sanoma" },
@@ -152,6 +175,7 @@ export async function betterAuthStaffLogin({ databaseUrl, key, sendCode, staff }
         account: {
           create: { before: dropTokens, after: keepLogin },
           update: { before: dropTokens, after: keepLogin },
+          delete: { after: forgetLogin },
         },
         session: {
           create: {
