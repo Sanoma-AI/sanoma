@@ -6,7 +6,7 @@ import {
   sameOrigin,
   type SignInMethod,
 } from "@sanoma-ai/workflows";
-import { createAuthMiddleware } from "better-auth/api";
+import { APIError, createAuthMiddleware } from "better-auth/api";
 import { magicLink } from "better-auth/plugins/magic-link";
 import { createHash } from "node:crypto";
 import {
@@ -32,6 +32,8 @@ const SCHEMA = "better_auth_staff";
 const BASE_PATH = "/auth/better-auth";
 const SIGN_OUT = `${BASE_PATH}/sign-out`;
 const SEND_CODE = "/email-otp/send-verification-otp";
+/** GitHub's redirect back, as Better Auth names the route in a hook's context. */
+const CALLBACK = "/callback/:id";
 /** How long a staff session lasts: seven days. Who may sign in is read on every request, so removing someone takes effect at once. */
 const SESSION_SECONDS = 7 * 24 * 60 * 60;
 
@@ -49,16 +51,30 @@ const ROUTES = new Set([
 /** The routes of the email code, which answer only when the app can send one. */
 const CODE_ROUTES = new Set([SEND_CODE, "/sign-in/email-otp"]);
 
-/** What the session hook reads of Better Auth's endpoint context: the route, and the user's row. */
-interface SessionContext {
+/** What the hooks read of Better Auth's endpoint context: the route, and the rows. */
+interface HookContext {
   path?: string;
-  context: { internalAdapter: { findUserById(id: string): Promise<User | null> } };
+  context: {
+    internalAdapter: {
+      findUserById(id: string): Promise<(User & { id: string }) | null>;
+      updateUser(id: string, data: Record<string, unknown>): Promise<unknown>;
+      updateAccount(id: string, data: Record<string, unknown>): Promise<unknown>;
+      deleteUser(id: string): Promise<void>;
+    };
+  };
+}
+/** What the GitHub account hook reads of Better Auth's account row. */
+interface GitHubAccount {
+  id: string;
+  providerId: string;
+  userId: string;
+  accessToken?: string | null;
 }
 
 /** How a session was made, by the route that made it. */
 const METHOD_OF: Record<string, SignInMethod> = {
   "/sign-in/email-otp": "code",
-  "/callback/:id": "github",
+  [CALLBACK]: "github",
   "/magic-link/verify": "invite",
 };
 
@@ -76,6 +92,43 @@ export async function betterAuthStaffLogin({ databaseUrl, key, sendCode, staff }
   const github = staff.social.github;
   /** Each invite's token as Better Auth hands it over, by email, until `invite` takes it. */
   const minted = new Map<string, string>();
+  /** The emails of user rows made on GitHub's redirect back, until `admitByGitHub` decides each. */
+  const pending = new Set<string>();
+
+  /**
+   * Keeps a GitHub account's login on its user and admits the user by it, once Better Auth has
+   * made or linked the user with it (GitHub's redirect back): GitHub's `/user` for the fresh
+   * token says whose login it is, then the token goes, which nothing here uses again. A row made
+   * for this sign-in that the files declare by neither email nor login goes too, and the sign-in
+   * ends in Better Auth's redirect with `error=not_declared`.
+   */
+  const admitByGitHub = async (account: GitHubAccount | null, ctx: HookContext | null): Promise<void> => {
+    if (account?.providerId !== "github" || ctx?.path !== CALLBACK) return;
+    const { internalAdapter } = ctx.context;
+    let login: string | undefined;
+    try {
+      if (account.accessToken) {
+        const answer = await fetch("https://api.github.com/user", {
+          headers: { authorization: `Bearer ${account.accessToken}`, "user-agent": "sanoma" },
+        });
+        const said = answer.ok ? ((await answer.json()) as { login?: unknown }).login : undefined;
+        if (typeof said === "string") login = said;
+      }
+    } finally {
+      await internalAdapter.updateAccount(account.id, { accessToken: null, refreshToken: null, idToken: null });
+    }
+    const user = await internalAdapter.findUserById(account.userId);
+    if (!user) return;
+    const made = pending.delete(user.email.toLowerCase());
+    if (!staff.admits({ ...identityOf(user), ...(login && { github: login }) })) {
+      if (made) await internalAdapter.deleteUser(user.id);
+      throw new APIError("FORBIDDEN", {
+        code: "not_declared",
+        message: "This company's files declare nobody with that GitHub account",
+      });
+    }
+    if (login && user.github !== login) await internalAdapter.updateUser(user.id, { github: login });
+  };
   const { auths, close } = await openBetterAuth({
     databaseUrl,
     key,
@@ -95,7 +148,6 @@ export async function betterAuthStaffLogin({ databaseUrl, key, sendCode, staff }
           github: {
             clientId: github.clientId,
             clientSecret: github.clientSecret,
-            mapProfileToUser: (profile: { login: string }) => ({ github: profile.login }),
           },
         },
       }),
@@ -119,13 +171,22 @@ export async function betterAuthStaffLogin({ databaseUrl, key, sendCode, staff }
       databaseHooks: {
         user: {
           create: {
-            // Nobody the files do not declare gets a row, whatever the route.
-            before: async (user: User) => (staff.admits(identityOf(user)) ? undefined : false),
+            // Nobody the files do not declare gets a row, whatever the route. On GitHub's redirect
+            // back the row is made first and the account hook decides, once GitHub has said whose
+            // login it is: Better Auth sets no field from a profile that a person may not set.
+            before: async (user: User, ctx: HookContext | null) => {
+              if (ctx?.path === CALLBACK) {
+                pending.add(user.email.toLowerCase());
+                return;
+              }
+              return staff.admits(identityOf(user)) ? undefined : false;
+            },
           },
         },
+        account: { create: { after: admitByGitHub } },
         session: {
           create: {
-            after: async (session: { userId: string }, ctx: SessionContext | null) => {
+            after: async (session: { userId: string }, ctx: HookContext | null) => {
               const method = ctx?.path === undefined ? undefined : METHOD_OF[ctx.path];
               if (!method || !ctx) return;
               const user = await ctx.context.internalAdapter.findUserById(session.userId);
