@@ -74,7 +74,7 @@ export function tokenStore(db: () => Promise<Db>): Tokens {
             setWhere: and(
               eq(apiTokens.hash, hash),
               eq(apiTokens.subject, subject),
-              sql`${apiTokens.groups} @> excluded.groups AND ${apiTokens.groups} <@ excluded.groups`,
+              sql`${apiTokens.groups} @> ${sql.param(groups, apiTokens.groups)} AND ${apiTokens.groups} <@ ${sql.param(groups, apiTokens.groups)}`,
               isNull(apiTokens.revokedAt),
             ),
           })

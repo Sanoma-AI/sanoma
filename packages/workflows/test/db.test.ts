@@ -181,6 +181,17 @@ describe("prepareDatabase", () => {
       );
       await expect(checking.prepareDatabase(url)).rejects.toThrow("the database has no Sanoma's tables yet");
       expect(await migrationsApplied(databaseOn(admin), COMPANY_MIGRATIONS)).toBe(false);
+      // Ahead of the journal (a newer release migrated it): prepared, since every entry is there.
+      const last = COMPANY_MIGRATIONS.journal.entries.at(-1)!.when;
+      await admin.query(
+        "INSERT INTO drizzle.__drizzle_migrations (hash, created_at) VALUES ('ours', $1), ('later', $2)",
+        [last, last + 1],
+      );
+      expect(await migrationsApplied(databaseOn(admin), COMPANY_MIGRATIONS)).toBe(true);
+      await checking.prepareDatabase(url);
+      // An empty journal table: nothing applied.
+      await admin.query("DELETE FROM drizzle.__drizzle_migrations");
+      expect(await migrationsApplied(databaseOn(admin), COMPANY_MIGRATIONS)).toBe(false);
     } finally {
       await admin.end();
     }

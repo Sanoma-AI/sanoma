@@ -580,7 +580,9 @@ export class SanomaClient {
       });
     } catch (err) {
       if (!is(err, TransactionRollbackError)) throw err;
-      return (await this.recordedCall(runId, op.id, logged, context.connection))!.output;
+      const first = await this.recordedCall(runId, op.id, logged, context.connection);
+      if (!first) throw err;
+      return first.output;
     }
   }
 

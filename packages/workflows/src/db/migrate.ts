@@ -53,21 +53,18 @@ export const applyMigrations = (db: Db, of: Migrations): Promise<void> =>
   migrate(db, { migrationsFolder: folderOf(of), migrationsTable: of.table });
 
 /**
- * Whether the database `db` is on has had every migration of `of`: its journal table's newest
- * `created_at` is the journal's last entry's `when`, or later (a database a newer release
- * migrated serves this one, as after a rollback). False with no journal table.
+ * Whether the database `db` is on has had every migration of `of`: each journal entry's `when`
+ * is a `created_at` of its journal table, whatever else the table holds (a database a newer
+ * release migrated serves this one, as after a rollback). False with no journal table.
  */
 export async function migrationsApplied(db: Db, of: Migrations): Promise<boolean> {
-  const last = of.journal.entries.at(-1);
-  if (!last) return true;
-  const table = sql`drizzle.${sql.identifier(of.table)}`;
   const present = await db.execute<{ present: boolean }>(
     sql`SELECT to_regclass(${`drizzle.${of.table}`}) IS NOT NULL AS present`,
   );
   if (present.rows[0]?.present !== true) return false;
-  const { rows } = await db.execute<{ newest: string | null }>(
-    sql`SELECT max(created_at)::text AS newest FROM ${table}`,
+  const { rows } = await db.execute<{ at: string }>(
+    sql`SELECT created_at::text AS at FROM drizzle.${sql.identifier(of.table)}`,
   );
-  const newest = rows[0]?.newest;
-  return newest != null && Number(newest) >= last.when;
+  const applied = new Set(rows.map((row) => Number(row.at)));
+  return of.journal.entries.every((entry) => applied.has(entry.when));
 }
