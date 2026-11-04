@@ -23,15 +23,7 @@ export function defaultParent(
 }
 
 /** Whether `dir` holds anything but dotfiles: the launcher's init starts only where it does not. */
-const hasFiles = (dir: string) => readdirSync(dir).some((name) => !name.startsWith("."));
-
-/**
- * Why a new company cannot start in `dir`, in one line; undefined when it can: the folder is
- * empty, dotfiles aside, as the launcher's init requires (anywhere else it does nothing).
- */
-export function newCompanyProblem(dir: string): string | undefined {
-  return hasFiles(dir) ? `${dir} has files in it already: a new company starts in an empty folder.` : undefined;
-}
+export const hasFiles = (dir: string) => readdirSync(dir).some((name) => !name.startsWith("."));
 
 /**
  * The folder a new company called `name` goes in, under `parent` (made by whoever starts it), or
@@ -62,7 +54,7 @@ export function newCompanyTarget(name: string, parent: string): { dir: string } 
  * Its progress: this start, then the launcher's `database` event once the company is set up.
  */
 export function createSession(options: SessionOptions): Session {
-  if (newCompanyProblem(options.repo)) return startSession(options);
+  if (hasFiles(options.repo)) return startSession(options);
   const { repo, port, node, pnpm, bin, onLine, onProgress, killAfterMs, pollMs } = options;
   const env = launcherEnv(options.env, writeShims(bin, node, pnpm), port);
   onProgress("Starting a new company with sanoma from npm");

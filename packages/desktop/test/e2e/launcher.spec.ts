@@ -154,38 +154,33 @@ test("a new company's form asks its name and says where it goes, making nothing 
 
   // Another place: what is typed stays, and the problem, about the last try, goes.
   const elsewhere = realpathSync(join(work, "elsewhere"));
-  const answering = (dir: string) =>
-    shell.evaluate(({ dialog }, answer) => {
-      dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [answer] })) as typeof dialog.showOpenDialog;
-    }, dir);
-  await answering(elsewhere);
+  await shell.evaluate(({ dialog }, dir) => {
+    dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [dir] })) as typeof dialog.showOpenDialog;
+  }, elsewhere);
   await page.click("#new-change");
   await expect(page.locator("#new-place")).toContainText(join("elsewhere", "…"));
   await expect(page.locator("#new-name")).toHaveValue("...");
   await expect(page.locator("#new-problem")).toBeHidden();
 
   // A refusal from the menu shows over the form it leaves open.
-  await shell.evaluate(({ Menu }) =>
-    Menu.getApplicationMenu()
-      ?.items.flatMap((item) => item.submenu?.items ?? [])
-      .find((item) => item.label === "Open Company…")
-      ?.click(),
-  );
+  await shell.evaluate(({ Menu }) => Menu.getApplicationMenu()!.getMenuItemById("open-company")!.click());
   await expect(page.locator("#notice")).toContainText("elsewhere");
   await expect(page.locator("#new-form")).toBeVisible();
 
   await page.click("#new-form [data-cancel]");
   await expect(page.locator("#home")).toBeVisible();
+  expect(existsSync(join(work, "home", "Companies"))).toBe(false);
+});
 
-  // A link in a company's output goes to the browser; anything else on these pages goes nowhere.
+test("a link on the shell's pages goes to the browser, and only a web or mail link goes anywhere", async () => {
+  await launch();
+  const page = await pageNamed("index.html");
+  type Opened = { opened?: string[] };
   await shell.evaluate(({ shell: desktop }) => {
     const opened: string[] = [];
-    (globalThis as { opened?: string[] }).opened = opened;
+    (globalThis as Opened).opened = opened;
     desktop.openExternal = async (url) => void opened.push(url);
   });
   await page.evaluate(`window.open("https://example.com/"); window.open("file:///etc/hosts"); true`);
-  await expect
-    .poll(() => shell.evaluate(() => (globalThis as { opened?: string[] }).opened))
-    .toEqual(["https://example.com/"]);
-  expect(existsSync(join(work, "home", "Companies"))).toBe(false);
+  await expect.poll(() => shell.evaluate(() => (globalThis as Opened).opened)).toEqual(["https://example.com/"]);
 });

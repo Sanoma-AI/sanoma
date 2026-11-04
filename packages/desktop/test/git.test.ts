@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, test } from "vitest";
 import type { Company } from "../src/companies.ts";
 import {
+  hasFiles,
   addressProblem,
   cloneCompany,
   cloneSession,
@@ -14,7 +15,6 @@ import {
   createSession,
   defaultParent,
   isCloneUrl,
-  newCompanyProblem,
   newCompanyTarget,
   repoNameOf,
 } from "../src/create.ts";
@@ -231,9 +231,9 @@ describe("a new company", () => {
   test("needs an empty folder, dotfiles aside", () => {
     const dir = temp();
     writeFileSync(join(dir, ".DS_Store"), "");
-    expect(newCompanyProblem(dir)).toBeUndefined();
+    expect(hasFiles(dir)).toBe(false);
     writeFileSync(join(dir, "notes.txt"), "");
-    expect(newCompanyProblem(dir)).toMatch(/has files in it already/);
+    expect(hasFiles(dir)).toBe(true);
   });
 
   test("runs the launcher's init with pnpm dlx through the shims, and serves the company it started", async () => {

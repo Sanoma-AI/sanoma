@@ -21,7 +21,7 @@ import {
 } from "../src/companies.ts";
 import { eventOf, listeningUrlOf } from "../src/events.ts";
 import { launch, launcherEnv, launcherOf, type Stream, USAGE_EXIT } from "../src/launcher.ts";
-import { isAppPage, linkTarget } from "../src/links.ts";
+import { isAppPage, linkTarget, opensInBrowser } from "../src/links.ts";
 import { detailsOf, hidePasswords, openLog, TAIL_LINES } from "../src/logs.ts";
 import { folderArgument, realPathOf, syncedFolderWarning, withTilde } from "../src/places.ts";
 import { type QuitSteps, quitOrder } from "../src/quit.ts";
@@ -472,6 +472,13 @@ describe("the link rule", () => {
     ["not a url", "deny"],
   ])("%s: %s", (url, target) => {
     expect(linkTarget(url, app)).toBe(target);
+  });
+
+  test("web and mail links go to the browser, and nothing else", () => {
+    expect(opensInBrowser("https://example.com/")).toBe(true);
+    expect(opensInBrowser("mailto:a@example.com")).toBe(true);
+    expect(opensInBrowser("file:///etc/hosts")).toBe(false);
+    expect(opensInBrowser("not a url")).toBe(false);
   });
 });
 

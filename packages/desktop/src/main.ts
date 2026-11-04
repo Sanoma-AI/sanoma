@@ -52,7 +52,7 @@ import {
   needsGitForWindows,
   setIdentity,
 } from "./git.ts";
-import { isAppPage, linkTarget } from "./links.ts";
+import { isAppPage, linkTarget, opensInBrowser } from "./links.ts";
 import { type CompanyLog, detailsOf, hidePasswords, NO_TAIL, openLog } from "./logs.ts";
 import type { CompanyState, Kind } from "./pages.ts";
 import { folderArgument, isCompanyFolder, realPathOf, syncedFolderWarning, withTilde } from "./places.ts";
@@ -252,7 +252,7 @@ function shellPage(contents: WebContents) {
   contents.on("will-navigate", (event) => event.preventDefault());
   contents.setWindowOpenHandler(({ url }) => {
     // A link in a company's output; nothing else on these pages opens a window.
-    if (/^https?:/.test(url)) void shell.openExternal(url);
+    if (opensInBrowser(url)) void shell.openExternal(url);
     return { action: "deny" };
   });
 }
@@ -1122,7 +1122,7 @@ function buildMenu() {
       label: "File",
       submenu: [
         { label: "New Company…", accelerator: "CmdOrCtrl+N", click: () => void newCompany() },
-        { label: "Open Company…", accelerator: "CmdOrCtrl+O", click: () => void chooseFolder() },
+        { id: "open-company", label: "Open Company…", accelerator: "CmdOrCtrl+O", click: () => void chooseFolder() },
         { label: "Copy from GitHub…", click: () => void cloneCompanyFlow() },
         {
           label: "Open Recent",
