@@ -1,17 +1,14 @@
 import { testDatabaseUrl } from "@sanoma-ai/testing";
+import { eq, getTableName, sql } from "drizzle-orm";
 import { Client, escapeIdentifier, Pool } from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import {
-  mintInstanceToken,
-  mintWakeupAccount,
-  startWakeupService,
-  WAKEUP_ACCOUNTS_TABLE,
-  WAKEUP_INSTANCES_TABLE,
-  type WakeupService,
-} from "../src/wakeup-service.ts";
+import { databaseOn } from "../src/db.ts";
+import { wakeupAccounts, wakeupInstances } from "../src/db/wakeup.ts";
+import { mintInstanceToken, mintWakeupAccount, startWakeupService, type WakeupService } from "../src/wakeup-service.ts";
 
 const databaseUrl = testDatabaseUrl("wakeup_service");
 const pool = new Pool({ connectionString: databaseUrl });
+const db = databaseOn(pool);
 
 /** Drops the test's database, so the service's first start makes it and its tables. */
 beforeAll(async () => {
@@ -60,7 +57,7 @@ afterEach(async () => {
   answer = async () => new Response(null, { status: 204 });
   clock = undefined;
   lines.length = 0;
-  await pool.query(`TRUNCATE ${WAKEUP_INSTANCES_TABLE}, ${WAKEUP_ACCOUNTS_TABLE}`).catch(() => undefined);
+  await db.execute(sql`TRUNCATE ${wakeupInstances}, ${wakeupAccounts}`).catch(() => undefined);
 });
 
 /** A request to the service's one route. */
@@ -111,11 +108,10 @@ const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
 describe("startWakeupService", () => {
   it("makes its database and its two tables when missing, and starts again over them", async () => {
     await start();
-    const { rows } = await pool.query("SELECT to_regclass($1)::text AS accounts, to_regclass($2)::text AS instances", [
-      WAKEUP_ACCOUNTS_TABLE,
-      WAKEUP_INSTANCES_TABLE,
-    ]);
-    expect(rows).toEqual([{ accounts: WAKEUP_ACCOUNTS_TABLE, instances: WAKEUP_INSTANCES_TABLE }]);
+    const { rows } = await db.execute(
+      sql`SELECT to_regclass(${getTableName(wakeupAccounts)})::text AS accounts, to_regclass(${getTableName(wakeupInstances)})::text AS instances`,
+    );
+    expect(rows).toEqual([{ accounts: getTableName(wakeupAccounts), instances: getTableName(wakeupInstances) }]);
     await service!.stop();
     await start();
   });
@@ -125,11 +121,16 @@ describe("startWakeupService", () => {
     const { account, id, token } = await instance();
     expect(account.token).toMatch(/^swa_[A-Za-z0-9_-]{43}$/);
     expect(token).toMatch(/^swi_[A-Za-z0-9_-]{43}$/);
-    const stored = await pool.query(
-      `SELECT a.token_hash AS account, a.label, i.token_hash AS instance, i.url FROM ${WAKEUP_INSTANCES_TABLE} i ` +
-        `JOIN ${WAKEUP_ACCOUNTS_TABLE} a ON a.id = i.account_id`,
-    );
-    expect(stored.rows).toEqual([
+    const stored = await db
+      .select({
+        account: wakeupAccounts.tokenHash,
+        label: wakeupAccounts.label,
+        instance: wakeupInstances.tokenHash,
+        url: wakeupInstances.url,
+      })
+      .from(wakeupInstances)
+      .innerJoin(wakeupAccounts, eq(wakeupAccounts.id, wakeupInstances.accountId));
+    expect(stored).toEqual([
       {
         account: expect.stringMatching(/^[0-9a-f]{64}$/),
         label: "acme",
@@ -137,7 +138,7 @@ describe("startWakeupService", () => {
         url: "http://instance.test/base",
       },
     ]);
-    expect(JSON.stringify(stored.rows)).not.toContain(token.slice(4));
+    expect(JSON.stringify(stored)).not.toContain(token.slice(4));
     const shown = await send("GET", `/wakeup/instances/${id}`, { token: account.token });
     expect(shown).toMatchObject({
       status: 200,
@@ -217,9 +218,10 @@ describe("startWakeupService", () => {
       ["http://x.test:8080/a/b/", "http://x.test:8080/a/b"],
     ]) {
       const { json } = await register(given);
-      const { rows } = await pool.query(`SELECT url FROM ${WAKEUP_INSTANCES_TABLE} WHERE id = $1`, [
-        (json as { id: string }).id,
-      ]);
+      const rows = await db
+        .select({ url: wakeupInstances.url })
+        .from(wakeupInstances)
+        .where(eq(wakeupInstances.id, (json as { id: string }).id));
       expect(rows).toEqual([{ url: kept }]);
     }
   });
@@ -257,8 +259,7 @@ describe("startWakeupService", () => {
       json: { error: "the token is another account's instance's" },
     });
     expect(await shown()).toMatchObject({ url: "https://moved.test" });
-    const { rows } = await pool.query(`SELECT count(*)::int AS n FROM ${WAKEUP_INSTANCES_TABLE}`);
-    expect(rows).toEqual([{ n: 1 }]);
+    expect(await db.$count(wakeupInstances)).toBe(1);
   });
 
   it("takes each registration, replacing the one before, an earlier one too, and refuses a bad one", async () => {
@@ -325,38 +326,43 @@ describe("startWakeupService", () => {
       },
     ];
     answer = async () => (failing.shift() ?? (async () => new Response(null, { status: 200 })))();
-    const row = async () =>
-      (
-        await pool.query(
-          `SELECT attempts, last_error, next_attempt_at, called_at FROM ${WAKEUP_INSTANCES_TABLE} WHERE id = $1`,
-          [id],
-        )
-      ).rows[0];
+    const row = async () => {
+      const [found] = await db
+        .select({
+          attempts: wakeupInstances.attempts,
+          lastError: wakeupInstances.lastError,
+          nextAttemptAt: wakeupInstances.nextAttemptAt,
+          calledAt: wakeupInstances.calledAt,
+        })
+        .from(wakeupInstances)
+        .where(eq(wakeupInstances.id, id));
+      return found!;
+    };
     // Its registration, then another instance's, far off, to wake the loop without replacing it.
     const waker = await instance("http://waker.test");
     const poke = () => wake(waker.token, plus(3_600));
     await wake(token, plus(-1));
-    await vi.waitFor(async () => expect(await row()).toMatchObject({ attempts: 1, last_error: "answered 503" }));
-    expect((await row()).next_attempt_at).toEqual(plus(1));
+    await vi.waitFor(async () => expect(await row()).toMatchObject({ attempts: 1, lastError: "answered 503" }));
+    expect((await row()).nextAttemptAt).toEqual(plus(1));
     // Not due until then, however often it is woken.
     await poke();
     await pause(300);
     expect(calls).toHaveLength(1);
     now = plus(1);
     await poke();
-    await vi.waitFor(async () => expect(await row()).toMatchObject({ attempts: 2, last_error: "connection refused" }));
-    expect((await row()).next_attempt_at).toEqual(plus(3));
+    await vi.waitFor(async () => expect(await row()).toMatchObject({ attempts: 2, lastError: "connection refused" }));
+    expect((await row()).nextAttemptAt).toEqual(plus(3));
     // Many failures later, the wait is at most five minutes.
-    await pool.query(`UPDATE ${WAKEUP_INSTANCES_TABLE} SET attempts = 20 WHERE id = $1`, [id]);
+    await db.update(wakeupInstances).set({ attempts: 20 }).where(eq(wakeupInstances.id, id));
     failing.push(async () => new Response(null, { status: 500 }));
     now = plus(3);
     await poke();
-    await vi.waitFor(async () => expect(await row()).toMatchObject({ attempts: 21, last_error: "answered 500" }));
-    expect((await row()).next_attempt_at).toEqual(plus(303));
+    await vi.waitFor(async () => expect(await row()).toMatchObject({ attempts: 21, lastError: "answered 500" }));
+    expect((await row()).nextAttemptAt).toEqual(plus(303));
     now = plus(303);
     await poke();
     await vi.waitFor(async () =>
-      expect(await row()).toMatchObject({ attempts: 0, last_error: null, called_at: plus(303) }),
+      expect(await row()).toMatchObject({ attempts: 0, lastError: null, calledAt: plus(303) }),
     );
     expect(calls).toHaveLength(4);
     expect((await send("GET", `/wakeup/instances/${id}`, { token: account.token })).json).toMatchObject({
@@ -418,7 +424,10 @@ describe("startWakeupService", () => {
       const { id } = made.json as { id: string };
       // Due, unknown to either sleeping loop, then both woken at once, by another instance's
       // registration, far off.
-      await pool.query(`UPDATE ${WAKEUP_INSTANCES_TABLE} SET at = $2 WHERE id = $1`, [id, ago(1_000)]);
+      await db
+        .update(wakeupInstances)
+        .set({ at: ago(1_000) })
+        .where(eq(wakeupInstances.id, id));
       const waker = await instance("http://waker.test");
       const put = (route: (typeof second.routes)[number]) =>
         route.handle(
@@ -455,7 +464,10 @@ describe("startWakeupService", () => {
       });
       const { id } = made.json as { id: string };
       // Due, unknown to the sleeping loop.
-      await pool.query(`UPDATE ${WAKEUP_INSTANCES_TABLE} SET at = $2 WHERE id = $1`, [id, ago(1_000)]);
+      await db
+        .update(wakeupInstances)
+        .set({ at: ago(1_000) })
+        .where(eq(wakeupInstances.id, id));
     }
     // One registration wakes the loop for all twelve.
     const last = await instance("http://i12.test");
@@ -474,10 +486,15 @@ describe("startWakeupService", () => {
     const started = Date.now();
     await service!.stop();
     expect(Date.now() - started).toBeLessThan(1_000);
-    const { rows } = await pool.query(
-      `SELECT called_at, attempts, last_error, next_attempt_at - at > interval '25 seconds' AS claimed FROM ${WAKEUP_INSTANCES_TABLE}`,
-    );
-    expect(rows).toEqual([{ called_at: null, attempts: 0, last_error: null, claimed: true }]);
+    const rows = await db
+      .select({
+        calledAt: wakeupInstances.calledAt,
+        attempts: wakeupInstances.attempts,
+        lastError: wakeupInstances.lastError,
+        claimed: sql<boolean>`${wakeupInstances.nextAttemptAt} - ${wakeupInstances.at} > interval '25 seconds'`,
+      })
+      .from(wakeupInstances);
+    expect(rows).toEqual([{ calledAt: null, attempts: 0, lastError: null, claimed: true }]);
     await expect(service!.mintAccount("late")).rejects.toThrow("Cannot use a pool after calling end on the pool");
     service = undefined;
   });
