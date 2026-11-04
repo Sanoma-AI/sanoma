@@ -87,16 +87,16 @@ window.location.assign(url); // GitHub, then back on this page signed in
 
 Each `callbackURL` (and `errorCallbackURL`, where an error goes as `?error=<code>`, and `newUserCallbackURL`, where a new account goes) is a path on the site's host.
 
-- **One person, one account.** A GitHub sign-in whose email matches a visitor's account signs into that account when GitHub verified the email and the account's own is verified (by a code); otherwise it is refused, so an email nobody proved never joins someone's account.
+- **One person, one account.** A GitHub sign-in whose email matches a visitor's account signs into that account when GitHub verified the email and the account's own is verified (by a code, or by GitHub at sign-up); otherwise it is refused, so an email nobody proved never joins someone's account.
 - **A new account by GitHub** has its email verified only when GitHub verified it, and `verify` says the email only then. An email code to that address later proves it, and drops the GitHub account that had not.
 - **A link** may use a GitHub account of another email, which GitHub must have verified.
 - **The login** is GitHub's answer for the account's own token at each sign-in or link (Better Auth sets no field a person may not set from a provider's profile), and is cleared when the visitor unlinks it (`POST /unlink-account { accountId }`, the account's id in `GET /list-accounts`). The account's tokens are dropped then, as a GitHub App's user token reaches what the App and the person both reach.
 
-| `?error=`                                  | When                                                                       |
-| ------------------------------------------ | -------------------------------------------------------------------------- |
-| `account_not_linked`                       | A sign-in's email matches an account, but one side has not verified it.    |
-| `account_already_linked_to_different_user` | A link of a GitHub account that is another visitor's.                      |
-| `unable_to_link_account`                   | A second GitHub account for a visitor who has one (by link or by sign-in). |
+| `?error=`                                  | When                                                                                                                             |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| `account_not_linked`                       | A sign-in's email matches an account, but one side has not verified it.                                                          |
+| `account_already_linked_to_different_user` | A link of a GitHub account that is another visitor's.                                                                            |
+| `unable_to_link_account`                   | A second GitHub account for a visitor who has one (by link or by sign-in), or a link whose GitHub email GitHub has not verified. |
 
 ## The staff sign-in
 

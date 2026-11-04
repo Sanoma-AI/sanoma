@@ -444,7 +444,7 @@ describe("the login half with the company's GitHub client", () => {
     github.set("code-10", { ...mallory, verified: false });
     const refused = await viaGitHub("code-10");
     expect(refused.headers.get("location")).toMatch(/error=account_not_linked/);
-    expect(await whoIs(cookieOf(refused))).toBeNull();
+    expect(refused.headers.getSetCookie().some((c) => c.includes("session_token="))).toBe(false);
     expect((await whoIs(byCode.cookie))?.github).toBeUndefined();
     // The account's email unverified (signed up by password): not that account either.
     const { email, cookie } = await signUp(half);
