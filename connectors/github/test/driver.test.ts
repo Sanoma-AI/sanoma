@@ -94,6 +94,11 @@ describe("githubDriver", () => {
       message: "github: repository_deploy_key sanoma:1 names no owner: write it <owner>/…",
       retryable: false,
     });
+    await expect(
+      call(driver, "repository_collaborator.plan", {
+        desired: { repository: "sanoma", username: "octocat", permission: "push" },
+      }),
+    ).rejects.toMatchObject({ message: "github: its desired's repository sanoma names no owner: write it <owner>/…" });
     // A name that is not a node id is not taken for one.
     await expect(call(driver, "repository.import", { id: "sanoma" })).rejects.toMatchObject({
       message: "github: repository sanoma names no owner: write it <owner>/…",
@@ -139,6 +144,34 @@ describe("githubDriver", () => {
         gone: true,
       });
     }
+  });
+
+  it("imports a collaborator by `<owner>/<repository>:<username>`, accepted or invited, and none as gone", async () => {
+    // Recorded: an accepted one and none. The invitation is synthetic (sanoma-apply-test_octocat).
+    const driver = githubDriver({ bridge });
+    // Accepted: the provider finds a collaborator among the repository's, not only its invitations.
+    expect(
+      await call(driver, "repository_collaborator.import", { id: "Sanoma-AI/provider-bridge:notsaltylol" }),
+    ).toMatchObject({
+      id: "Sanoma-AI/provider-bridge:notsaltylol",
+      gone: false,
+      state: { repository: "Sanoma-AI/provider-bridge", username: "notsaltylol", permission: "admin" },
+    });
+    expect(
+      await call(driver, "repository_collaborator.import", { id: "sanoma-test/sanoma-apply-test:octocat" }),
+    ).toMatchObject({
+      state: { repository: "sanoma-test/sanoma-apply-test", permission: "push", invitation_id: "1000000201" },
+    });
+    // Neither: the provider's `not_found` (recorded).
+    expect(await call(driver, "repository_collaborator.import", { id: "Sanoma-AI/provider-bridge:octocat" })).toEqual({
+      id: "Sanoma-AI/provider-bridge:octocat",
+      gone: true,
+    });
+    expect(
+      calls()
+        .filter(([method]) => method === "import")
+        .map(([, , id]) => id),
+    ).toEqual(["provider-bridge:notsaltylol", "sanoma-apply-test:octocat", "provider-bridge:octocat"]);
   });
 
   it("is retryable when the provider has exited, and configures it again", async () => {
@@ -294,6 +327,27 @@ describe("fakeGithub", () => {
     fake.put("repository", "fresh-start", { description: "New" });
     const bare = await call(fake.driver, "repository.import", { id: "Sanoma-AI/fresh-start" });
     expect(bare).toMatchObject({ gone: false, state: { id: "fresh-start", description: "New", full_name: null } });
+  });
+
+  it("plans a collaborator's new permission or user as a replace, and diff suppression in place", async () => {
+    const fake = fakeGithub();
+    const desired = { repository: "Sanoma-AI/provider-bridge", username: "notsaltylol", permission: "admin" };
+    const found = await call(fake.driver, "repository_collaborator.import", {
+      id: `${desired.repository}:notsaltylol`,
+    });
+    const plan = (change: object) =>
+      call(fake.driver, "repository_collaborator.plan", { ...found, desired: { ...desired, ...change } });
+    expect(await plan({})).toMatchObject({ action: "none" });
+    expect(await plan({ permission: "push" })).toMatchObject({ action: "replace", replace: ["permission"] });
+    expect(await plan({ username: "octocat" })).toMatchObject({ action: "replace", replace: ["username"] });
+    expect(await plan({ permission_diff_suppression: true })).toMatchObject({ action: "update", replace: [] });
+    const updated = await call(fake.driver, "repository_collaborator.update", {
+      ...found,
+      desired: { ...desired, permission_diff_suppression: true },
+    });
+    expect(updated).toMatchObject({ id: found.id, state: { permission_diff_suppression: true } });
+    expect(await call(fake.driver, "repository_collaborator.delete", updated)).toEqual({ id: found.id, gone: true });
+    expect(await call(fake.driver, "repository_collaborator.read", found)).toEqual({ id: found.id, gone: true });
   });
 
   it("makes a fake that holds resources of its own each time, as each sandbox run's does", async () => {

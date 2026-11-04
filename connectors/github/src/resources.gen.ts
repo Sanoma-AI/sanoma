@@ -570,6 +570,39 @@ export const github_repository = {
   },
 } satisfies TfResourceType;
 
+export const github_repository_collaborator = {
+  typeName: "github_repository_collaborator",
+  schemaVersion: 0,
+  schema: z.object({
+    id: z.string().nullish(),
+    invitation_id: z
+      .string()
+      .nullish()
+      .describe("ID of the invitation to be used in 'github_user_invitation_accepter'"),
+    permission: z
+      .string()
+      .nullish()
+      .describe(
+        "The permission of the outside collaborator for the repository. Must be one of 'pull', 'push', 'maintain', 'triage' or 'admin' or the name of an existing custom repository role within the organization for organization-owned repositories. Must be 'push' for personal repositories. Defaults to 'push'.",
+      ),
+    permission_diff_suppression: z
+      .boolean()
+      .nullish()
+      .describe("Suppress plan diffs for triage and maintain. Defaults to 'false'."),
+    repository: z.string().describe("The GitHub repository"),
+    username: z.string().describe("The user to add to the repository as a collaborator."),
+  }),
+  fields: {
+    immutable: ["permission", "repository", "username"],
+    vendorOwned: ["invitation_id"],
+    writeOnly: [],
+    unordered: [],
+  },
+  shape: {
+    attributes: ["id", "invitation_id", "permission", "permission_diff_suppression", "repository", "username"],
+  },
+} satisfies TfResourceType;
+
 export const github_repository_deploy_key = {
   typeName: "github_repository_deploy_key",
   schemaVersion: 0,

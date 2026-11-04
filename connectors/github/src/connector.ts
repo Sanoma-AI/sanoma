@@ -4,10 +4,20 @@ import { z } from "zod";
 import {
   github_branch_protection,
   github_repository,
+  github_repository_collaborator,
   github_repository_deploy_key,
   github_team_membership,
   provider,
 } from "./resources.gen.ts";
+
+/**
+ * A collaborator whose `permission` a data file always states: the provider's default (`push`)
+ * would otherwise demote an `admin`, as a new permission is a replace.
+ */
+const collaborator = {
+  ...github_repository_collaborator,
+  schema: github_repository_collaborator.schema.extend({ permission: z.string().min(1) }),
+};
 
 /**
  * `type` with an `owner` field: the organization or user it belongs to, which the provider takes
@@ -71,13 +81,24 @@ export const githubTf = tfConnector({
       find: ({ repository, key }) => (repository && key ? `${repository}:${keyText(key)}` : ""),
       writable: true,
     },
+    // Who may push to one repository (or pull, triage, ...): apply invites them (see the README).
+    repository_collaborator: {
+      tf: collaborator,
+      title: "Collaborator",
+      identity: "repository:username",
+      // The repository as `<owner>/<name>`; the driver gives the provider `<name>:<username>`.
+      find: ({ repository, username }) => `${repository}:${username}`,
+      writable: true,
+    },
   },
   // A data file names a repository by the declared one, which stands for `<owner>/<name>`: so a
-  // rule and a deploy key take their owner from it. GitHub holds a rule's repository by its node
-  // id (`R_…`); a deploy key's `repository` is `<owner>/<name>`, the provider's name with its owner.
+  // rule, a deploy key and a collaborator take their owner from it. GitHub holds a rule's
+  // repository by its node id (`R_…`); a deploy key's and a collaborator's `repository` is
+  // `<owner>/<name>`, the provider's name with its owner.
   references: {
     branch_protection: { repository_id: { type: "github.repository", by: ["name", "node_id"] } },
     repository_deploy_key: { repository: { type: "github.repository" } },
+    repository_collaborator: { repository: { type: "github.repository" } },
   },
   // The provider answers an import of a rule that is not there `failed_precondition`, saying it
   // "could not find" it (recorded: testdata/replies/…/github_branch_protection/provider-bridge_main).
