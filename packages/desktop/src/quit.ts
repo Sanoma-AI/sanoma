@@ -42,11 +42,14 @@ export function quitOrder(steps: QuitSteps): QuitOrder {
   return {
     hold() {
       if (stopped || !(update || steps.busy())) return false;
-      stopping ??= steps.stopAll().finally(() => {
-        stopped = true;
-        if (update) install();
-        else steps.quit();
-      });
+      stopping ??= steps
+        .stopAll()
+        .catch((err: unknown) => console.error("quit: a company did not stop:", err))
+        .finally(() => {
+          stopped = true;
+          if (update) install();
+          else steps.quit();
+        });
       return true;
     },
     restartToUpdate() {
