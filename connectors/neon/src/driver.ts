@@ -84,6 +84,7 @@ function sdkApi(timeoutMs: number, key: string): NeonApi {
       }),
     );
   return {
+    listProjects: (query) => send("GET /projects", (api) => api.listProjects(query)),
     createProject: (body) => send("POST /projects", (api) => api.createProject(body)),
     getProject: async (id) => (await sendOrAbsent(`GET /projects/${id}`, (api) => api.getProject(id)))?.project,
     async updateProject(id, body) {

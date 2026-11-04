@@ -58,10 +58,15 @@ const invite = defineWorkflow({
 const token = defineWorkflow({
   name: "token",
   trigger: "manual",
-  input: z.object({ id: z.uuid().optional(), subject: z.string(), store: z.string() }),
+  input: z.object({
+    id: z.guid().optional(),
+    reference: z.string().optional(),
+    subject: z.string(),
+    store: z.string(),
+  }),
   uses: [sanoma.token.mint],
-  run: async (ctx, { id, subject, store }) => {
-    return await ctx.sanoma.token.mint({ id, subject, groups: ["visitors"], store });
+  run: async (ctx, { id, reference, subject, store }) => {
+    return await ctx.sanoma.token.mint({ id, reference, subject, groups: ["visitors"], store });
   },
 });
 
@@ -345,6 +350,36 @@ describe("the runtime's own operations", () => {
     expect(await stored(input.store)).toBe(value);
   });
 
+  it("recovers a persisted non-UUID provisioning reference across runs and refuses changed authority", async () => {
+    const input = {
+      reference: `company:acme/signup:custom-run-${randomUUID()}`,
+      subject: "visitor:reference:owner",
+      store: "REFERENCE_TOKEN",
+    };
+    const first = await ledgerOf("token", input);
+    const id = (first.output as { id: string }).id;
+    const value = (await stored(input.store))!;
+    const recovered = await ledgerOf("token", input);
+    expect(recovered.output).toEqual({ id });
+    expect(await stored(input.store)).toBe(value);
+    expect(first.ledger + recovered.ledger).not.toContain(value);
+    await expect(run("token", { ...input, reference: "another-intent" })).rejects.toThrow(/conflicting/);
+    await expect(run("token", { ...input, subject: "visitor:reference:other" })).rejects.toThrow(/conflicting/);
+    await expect(run("token", { ...input, id })).rejects.toThrow(/Pass id or reference/);
+    expect(await app.client.tokens.resolve(value)).toMatchObject({ subject: input.subject });
+    await run("revoke", { id });
+    await expect(run("token", input)).rejects.toThrow(/revoked/);
+  });
+
+  it("accepts UUID-shaped default token IDs as recorded recovery IDs", async () => {
+    // Default IDs are truncated hashes, not RFC version/variant-constrained UUIDs.
+    const id = randomUUID().replace(/-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-/, "-0123-0123-");
+    expect(z.uuid().safeParse(id).success).toBe(false);
+    const input = { id, subject: "visitor:guid:owner", store: "GUID_TOKEN" };
+    expect(await run("token", input)).toEqual({ id: input.id });
+    expect(await run("token", input)).toEqual({ id: input.id });
+  });
+
   it("atomically registers one saved bearer and refuses changed grants, IDs and revoked registrations", async () => {
     const registration = {
       id: randomUUID(),
@@ -368,44 +403,48 @@ describe("the runtime's own operations", () => {
     expect(await app.client.tokens.resolve(registration.token)).toBeUndefined();
   });
 
-  it("reuses the stored bearer after a lost registration response from Postgres", async () => {
-    const registration = app.client.tokens.register.bind(app.client.tokens);
-    let lose = true;
-    const driver = runtimeDriver({
-      tokens: {
-        ...app.client.tokens,
-        register: async (input) => {
-          const result = await registration(input);
-          if (lose) {
-            lose = false;
-            throw new Error("synthetic lost database response");
-          }
-          return result;
+  it.each(["id", "reference"] as const)(
+    "reuses the stored bearer after a lost Postgres response with %s",
+    async (mode) => {
+      const registration = app.client.tokens.register.bind(app.client.tokens);
+      let lose = true;
+      const driver = runtimeDriver({
+        tokens: {
+          ...app.client.tokens,
+          register: async (input) => {
+            const result = await registration(input);
+            if (lose) {
+              lose = false;
+              throw new Error("synthetic lost database response");
+            }
+            return result;
+          },
         },
-      },
-    });
-    const secrets = memorySecrets();
-    const call = {
-      idempotencyKey: "registration-loss:1",
-      runId: "registration-loss",
-      opId: "sanoma.token.mint",
-      attempt: 1,
-      secrets,
-    };
-    const input = {
-      id: randomUUID(),
-      subject: "visitor:lost:owner",
-      groups: ["visitors"],
-      store: "LOST_RECEIPT_TOKEN",
-    };
-    await expect(driver.ops["token.mint"]!(input, call)).rejects.toMatchObject({ retryable: true });
-    const value = (await secrets.get(input.store))!;
-    expect(await app.client.tokens.resolve(value)).toMatchObject({ subject: input.subject });
-    expect(
-      await driver.ops["token.mint"]!(input, { ...call, runId: "recovery", idempotencyKey: "recovery:1" }),
-    ).toEqual({ id: input.id });
-    expect(await secrets.get(input.store)).toBe(value);
-  });
+      });
+      const secrets = memorySecrets();
+      const call = {
+        idempotencyKey: "registration-loss:1",
+        runId: "registration-loss",
+        opId: "sanoma.token.mint",
+        attempt: 1,
+        secrets,
+      };
+      const input = {
+        [mode]: mode === "id" ? randomUUID() : `lost-registration:intent-${randomUUID()}`,
+        subject: "visitor:lost:owner",
+        groups: ["visitors"],
+        store: "LOST_RECEIPT_TOKEN",
+      };
+      await expect(driver.ops["token.mint"]!(input, call)).rejects.toMatchObject({ retryable: true });
+      const value = (await secrets.get(input.store))!;
+      const registered = await app.client.tokens.resolve(value);
+      expect(registered).toMatchObject({ subject: input.subject });
+      expect(
+        await driver.ops["token.mint"]!(input, { ...call, runId: "recovery", idempotencyKey: "recovery:1" }),
+      ).toEqual({ id: registered!.principal.id.slice("token:".length) });
+      expect(await secrets.get(input.store)).toBe(value);
+    },
+  );
 
   it("is refused a direct call, as any operation that is not a read", async () => {
     await expect(
