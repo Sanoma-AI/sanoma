@@ -1,6 +1,19 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { type DatabaseSpec, defineConnector, defineResource, resolveConfig } from "../src/index.ts";
+import { databaseUrlSecret } from "../src/database.ts";
+
+it.each([
+  ["store", "STORE"],
+  ["mainStore", "MAIN_STORE"],
+  ["store2West", "STORE2_WEST"],
+  ["STORE2_WEST", "STORE2_WEST"],
+  ["DB2PROD", "DB2PROD"],
+  ["CLOUD_S532_CONSUMER_97F9CE47", "CLOUD_S532_CONSUMER_97F9CE47"],
+])("exports %s under the stable database secret suffix %s", (name, suffix) => {
+  expect(databaseUrlSecret(name)).toBe(`SANOMA_DATABASE_URL_${suffix}`);
+  expect(databaseUrlSecret(suffix)).toBe(`SANOMA_DATABASE_URL_${suffix}`);
+});
 
 // The `Database` contract: what `defineResource` refuses of a database type by itself, and what
 // `resolveConfig` refuses once the connector's operations are merged in.

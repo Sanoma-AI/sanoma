@@ -54,8 +54,10 @@ export interface DatabaseSpec {
  * The secret a database's `storeUrl` stores its URL in, for the data file's export that declares
  * it: `store` → `SANOMA_DATABASE_URL_STORE`, `mainStore` → `SANOMA_DATABASE_URL_MAIN_STORE`.
  */
-export const databaseUrlSecret = (exportName: string): string =>
-  `SANOMA_DATABASE_URL_${exportName.replaceAll(/([a-z0-9])([A-Z])/g, "$1_$2").toUpperCase()}`;
+export const databaseUrlSecret = (exportName: string): string => {
+  const upper = exportName.toUpperCase();
+  return `SANOMA_DATABASE_URL_${exportName === upper ? upper : exportName.replaceAll(/([a-z0-9])([A-Z])/g, "$1_$2").toUpperCase()}`;
+};
 
 /**
  * A `storeUrl`'s store: `url` as `databaseUrlSecret(exportName)`, whose name it returns. The store
