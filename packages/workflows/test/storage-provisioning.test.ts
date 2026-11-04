@@ -10,6 +10,7 @@ import { runtimeDriver, sandboxRuntimeDriver } from "../src/runtime-ops.ts";
 import { memoryTokens } from "../src/tokens.ts";
 import { lazyPool } from "../src/db.ts";
 import { rootWith } from "./harness.ts";
+import { storeDatabaseUrl } from "../src/database.ts";
 
 const rootUrl = new URL(testDatabaseUrl("storage"));
 rootUrl.pathname = "/postgres";
@@ -62,6 +63,23 @@ async function using<T>(url: string, run: (db: Client) => Promise<T>): Promise<T
 }
 
 describe("trusted KMS database preparation", () => {
+  it("prepares and retries storage from an uppercase database export containing digits", async () => {
+    const f = await fixture();
+    const exported = await storeDatabaseUrl(f.secrets, "CLOUD_S532_CONSUMER_97F9CE47", f.url, {
+      where: "test database",
+      others: "another database",
+    });
+    expect(exported).toEqual({ secret: "SANOMA_DATABASE_URL_CLOUD_S532_CONSUMER_97F9CE47" });
+    const input = { ...f.input, database: { $secret: "SANOMA_DATABASE_URL_CLOUD_S532_CONSUMER_97F9CE47" } };
+    const prepared = await prepareSecretStore(input, f.secrets);
+    const runtimeUrl = await f.secrets.get("RUNTIME");
+    expect(await prepareSecretStore(input, f.secrets)).toEqual(prepared);
+    expect(await f.secrets.get("RUNTIME")).toBe(runtimeUrl);
+    expect(await using(runtimeUrl!, async (db) => (await db.query("SELECT current_user AS role")).rows[0]?.role)).toBe(
+      f.role,
+    );
+  });
+
   it("binds the login password outside SQL statement text and lets Postgres store a SCRAM verifier", async () => {
     const f = await fixture();
     const query = vi.spyOn(Client.prototype, "query");
