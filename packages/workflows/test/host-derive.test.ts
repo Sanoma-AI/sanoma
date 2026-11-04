@@ -292,6 +292,78 @@ const derived = (files: Record<string, string>, overrides: Partial<HostFacts> = 
 };
 
 describe("what a host that derives is given, or refused", () => {
+  it("delivers explicitly selected environment names using logical secret references", () => {
+    const { secrets, problems } = derived(
+      { "resources/sanoma/infra.ts": INFRA },
+      { hostEnvironment: { SANOMA_PROVISIONING_CREDENTIAL: "PROVISIONING_BOOTSTRAP" } },
+    );
+    expect(problems).toEqual([]);
+    expect(secrets.SANOMA_PROVISIONING_CREDENTIAL).toEqual({ $secret: "PROVISIONING_BOOTSTRAP" });
+    expect(secrets).not.toHaveProperty("PROVISIONING_BOOTSTRAP");
+  });
+
+  it.each(["SANOMA_SIGNING_KEY", "SANOMA_DATABASE_URL", "SANOMA_SECRETS_KEY"])(
+    "refuses an explicit environment binding that would replace derived %s",
+    (environment) => {
+      const { problems, out } = derived(
+        { "resources/sanoma/infra.ts": INFRA },
+        { hostEnvironment: { [environment]: "OTHER_AUTHORITY" } },
+      );
+      expect(problems).toContainEqual(
+        expect.objectContaining({
+          message: `host: ${environment} has a derived host binding and cannot be replaced by OTHER_AUTHORITY`,
+        }),
+      );
+      expect(out.leftOut.has("resources/sanoma/infra.ts#host")).toBe(true);
+    },
+  );
+
+  it("retains a derived marker's generation behavior when explicitly bound to the same name", () => {
+    const { secrets, problems } = derived(
+      { "resources/sanoma/infra.ts": INFRA },
+      { hostEnvironment: { SANOMA_SIGNING_KEY: HOST_SIGNING_KEY } },
+    );
+    expect(problems).toEqual([]);
+    expect(secrets.SANOMA_SIGNING_KEY).toEqual({ $secret: HOST_SIGNING_KEY, generate: true });
+  });
+
+  it("accepts an explicit alias for a vendor environment value that has no same-name binding", () => {
+    const { secrets, problems } = derived(
+      { "resources/sanoma/infra.ts": INFRA },
+      {
+        carried: new Map(),
+        unbound: new Map([["acme", ["ACME_TOKEN"]]]),
+        hostEnvironment: { ACME_TOKEN: "DEPLOYMENT_ACCOUNT" },
+      },
+    );
+    expect(problems).toEqual([]);
+    expect(secrets.ACME_TOKEN).toEqual({ $secret: "DEPLOYMENT_ACCOUNT" });
+  });
+
+  it("keeps special environment names as own properties without changing the prototype", () => {
+    const { secrets } = derived(
+      { "resources/sanoma/infra.ts": INFRA },
+      { hostEnvironment: Object.fromEntries([["__proto__", "BOOTSTRAP"]]) },
+    );
+    expect(Object.getPrototypeOf(secrets)).toBe(Object.prototype);
+    expect(Object.hasOwn(secrets, "__proto__")).toBe(true);
+    expect(JSON.parse(JSON.stringify(secrets)).__proto__).toEqual({ $secret: "BOOTSTRAP" });
+  });
+
+  it.each([false, true])("leaves separately bootstrapped and non-deriving hosts alone (derives=%s)", (derives) => {
+    const ownTypes = new Map(types);
+    ownTypes.set(
+      "acme.service",
+      Object.assign(() => {}, types.get("acme.service")!, { host: { ...spec, derives, bindsBootstrap: true } }),
+    );
+    const { secrets } = derived(
+      { "resources/sanoma/infra.ts": INFRA },
+      { hostEnvironment: { SANOMA_PROVISIONING_CREDENTIAL: "PROVISIONING_BOOTSTRAP" } },
+      ownTypes,
+    );
+    expect(secrets).toBeUndefined();
+  });
+
   it("finds its deploy key by the repository and the key, so a key GitHub holds already is bound", () => {
     const { resources } = derived({ "resources/sanoma/infra.ts": INFRA });
     expect(resources.find((r) => r.id === sourceKeyId("resources/sanoma/infra.ts#host"))).toMatchObject({

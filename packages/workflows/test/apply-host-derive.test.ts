@@ -5,7 +5,8 @@ import { github as githubConnector } from "@sanoma-ai/connector-github";
 import { fakeGithub } from "@sanoma-ai/connector-github/fake";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { testRepository } from "@sanoma-ai/testing/host";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { LOCKFILE, writeLockfile } from "../src/describe.ts";
 import { defineFake } from "../src/fake.ts";
@@ -17,7 +18,9 @@ import {
   sourceKeyId,
   sourceKeyPair,
   withSetup,
+  resolveSecrets,
 } from "../src/index.ts";
+import { memorySecretStore } from "../src/secret-store.ts";
 import { ALICE, rootWith } from "./harness.ts";
 
 // Needs Postgres: `pnpm db:up`. Apply on a host that derives (`deriveHosts`), as sanoma-ops
@@ -63,8 +66,8 @@ const unexpected = async () => {
   throw new Error("acmehost: no change was expected");
 };
 
-/** The host's fake: its apps by name, only read here (a change would fail the test). */
-function fakeAcmeHost() {
+/** Apps by name; writes are refused unless a test captures trusted secret delivery. */
+function fakeAcmeHost(delivered?: Record<string, unknown>) {
   const fake = defineFake(types, {
     initial: () => ({ apps: new Map<string, State>() }),
     ops: (state) => {
@@ -73,7 +76,31 @@ function fakeAcmeHost() {
         return held ? { id, gone: false, state: held } : { id, gone: true };
       };
       return {
-        app: { import: read, read, plan: unexpected, create: unexpected, update: unexpected, delete: unexpected },
+        app: {
+          import: read,
+          read,
+          plan: delivered
+            ? async ({ desired }: { desired: State }) => ({
+                action: "update",
+                planned: { name: desired.name, source: desired.source, ref: desired.ref, revision: desired.revision },
+                unknown: [],
+                replace: [],
+              })
+            : unexpected,
+          create: unexpected,
+          update: delivered
+            ? async (
+                { id, desired }: { id: string; desired: State },
+                ctx: { secrets: Parameters<typeof resolveSecrets>[1] },
+              ) => {
+                Object.assign(delivered, await resolveSecrets(desired.secrets, ctx.secrets));
+                const { secrets: _secrets, ...safe } = desired;
+                state.apps.set(id, safe);
+                return { id, state: safe };
+              }
+            : unexpected,
+          delete: unexpected,
+        },
       } as never;
     },
   });
@@ -212,5 +239,74 @@ describe("the apply workflow on a host that derives", () => {
         ),
       }),
     ]);
+  });
+});
+
+describe("explicit host environment delivery through apply", () => {
+  const repository = testRepository();
+  beforeAll(() => repository.commit());
+  afterAll(() => repository.remove());
+  const root = rootWith({
+    "resources/people.ts": ALICE,
+    "resources/sanoma/infra.ts": INFRA.replace(
+      'name: "company"',
+      `name: "company", source: ${JSON.stringify(repository.url)}, ref: "main"`,
+    ),
+  });
+  const delivered: Record<string, unknown> = {};
+  const host = fakeAcmeHost(delivered);
+  const value = "provisioning-bootstrap-never-in-history";
+  const before = process.env.TEST_HOST_BOOTSTRAP;
+  afterAll(() => {
+    if (before === undefined) delete process.env.TEST_HOST_BOOTSTRAP;
+    else process.env.TEST_HOST_BOOTSTRAP = before;
+  });
+  const harness = useTestApp(
+    {
+      workflows: [],
+      connectors: [host.connector],
+      root,
+      secrets: {
+        store: memorySecretStore(),
+        bindings: {
+          PROVISIONING_BOOTSTRAP: { env: "TEST_HOST_BOOTSTRAP", host: true },
+          LOCAL_ONLY: { env: "TEST_LOCAL_ONLY" },
+          NOT_DELIVERED: { env: "TEST_NOT_DELIVERED", host: false },
+        },
+      },
+    },
+    { databaseUrl: testDatabaseUrl("host-environment") },
+  );
+
+  beforeEach(() => {
+    process.env.TEST_HOST_BOOTSTRAP = value;
+    for (const name of Object.keys(delivered)) delete delivered[name];
+    rmSync(join(root, LOCKFILE), { force: true });
+    host.reset();
+    host.update((state) => state.apps.set("company", { name: "company" }));
+    writeLockfile(root, { "resources/sanoma/infra.ts#host": { type: "acmehost.app", id: "company" } });
+  });
+
+  it("delivers an alias only at the driver boundary and excludes values from durable history", async () => {
+    const run = await harness.client.apply({}, { startedBy: { id: "alice" } });
+    const report = await harness.client.applyReport(run);
+    expect(report.plan.problems).toEqual([]);
+    expect(report.results).toContainEqual(expect.objectContaining({ status: "done" }));
+    expect(delivered.TEST_HOST_BOOTSTRAP).toBe(value);
+    expect(delivered).not.toHaveProperty("TEST_LOCAL_ONLY");
+    expect(delivered).not.toHaveProperty("TEST_NOT_DELIVERED");
+    const ledger = JSON.stringify(await harness.client.ledger(run));
+    expect(ledger).toContain('"$secret":"PROVISIONING_BOOTSTRAP"');
+    for (const history of [ledger, JSON.stringify(report), JSON.stringify(await harness.raw.listWorkflowSteps(run))])
+      expect(history).not.toContain(value);
+  });
+
+  it("refuses missing explicit values instead of silently omitting them", async () => {
+    delete process.env.TEST_HOST_BOOTSTRAP;
+    const run = await harness.client.apply({}, { startedBy: { id: "alice" } });
+    const report = await harness.client.applyReport(run);
+    expect(report.results).toContainEqual(expect.objectContaining({ status: "failed" }));
+    expect(delivered).toEqual({});
+    expect(JSON.stringify(report)).toContain("PROVISIONING_BOOTSTRAP");
   });
 });

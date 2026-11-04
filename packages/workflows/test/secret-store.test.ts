@@ -144,6 +144,11 @@ describe("secret store contract", () => {
     { bindings: { TOKEN: { path: "secret", env: "TOKEN", management: "sanoma" } } },
     { bindings: { TOKEN: { path: "secret" } } },
     { bindings: { TOKEN: { env: "TOKEN", management: "sanoma" } } },
+    { bindings: { TOKEN: { env: "TOKEN", host: "true" } } },
+    { bindings: { TOKEN: { path: "token", management: "sanoma", host: true } } },
+    { bindings: { TOKEN: { bootstrap: "SANOMA_SIGNING_KEY", host: true } } },
+    { bindings: { TOKEN: { bootstrap: "SANOMA_SIGNING_KEY", env: undefined, host: true } } },
+    { bindings: { FIRST: { env: "TOKEN", host: true }, SECOND: { env: "TOKEN", host: true } } },
   ])("rejects ambiguous config without repeating its contents: %j", (config) => {
     expect(() => checkSecretConfiguration(config as never)).toThrow("Secret store: invalid_configuration");
   });
