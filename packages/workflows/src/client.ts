@@ -26,10 +26,22 @@ import {
   topicOf,
   withdrawalRefusal,
 } from "./approvals.ts";
-import { beforeOf, decideCall, decideStart, recorded, startHoldOf, targetOf } from "./call.ts";
+import {
+  beforeOf,
+  type Call,
+  callsOf,
+  decideCall,
+  decideStart,
+  decisionOf,
+  deniedKeys,
+  outputsOf,
+  recorded,
+  startHoldOf,
+  targetOf,
+} from "./call.ts";
 import { type Chats, chatStore } from "./chats.ts";
 import { type Tokens, tokenStore } from "./tokens.ts";
-import { collectionsDriver } from "./collection.ts";
+import { collectionsDriver, isBatch } from "./collection.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { configuredSecrets } from "./credentials.ts";
 import {
@@ -483,23 +495,37 @@ export class SanomaClient {
     const runId = `direct:${actor.id}:${id}`;
     const heldId = `call:${actor.id}:${id}`;
     const held: RunArgs = { input: { op: op.id, input, ...(selected && { connection: selected }) }, startedBy: actor };
-    const logged = recorded(op, parsed);
+    // The calls this one makes (a batch's entries), each decided and recorded on its own.
+    const calls = callsOf(op, parsed, ops);
     const write = op.effect !== "read";
     // Only an id the caller gave can have been used: a write made, or held, with it settles it.
     if (write && options.id !== undefined) {
       const first =
-        (await this.recordedCall(runId, op.id, logged, connection)) ?? (await this.heldCall(op.id, heldId, held));
+        (await this.recordedCall(runId, op, calls, connection)) ?? (await this.heldCall(op.id, heldId, held));
       if (first) return first.output;
     }
-    const before = await beforeOf(policy, op, parsed, this.config.collections, (get, key) =>
-      drivers.get(get)?.(
-        { key },
-        { idempotencyKey: `${runId}:before`, runId, opId: get, attempt: 1, secrets: this.storedSecrets, by: actor.id },
-      ),
-    );
     const run = { id: runId, workflow: CALL_WORKFLOW, approvals: [] };
-    const decision = decideCall(policy, op, parsed, actor, run, { ...before, ...(connection && { connection }) });
-    if (decision.kind === "deny") throw new PolicyDeniedError(op.id, decision.reason);
+    const decisions: RecordedDecision[] = [];
+    for (const [i, c] of calls.entries()) {
+      const before = await beforeOf(policy, c.op, c.input, this.config.collections, (get, key) =>
+        drivers.get(get)?.(
+          { key },
+          {
+            idempotencyKey: `${runId}:before${i ? `:${i}` : ""}`,
+            runId,
+            opId: get,
+            attempt: 1,
+            secrets: this.storedSecrets,
+            by: actor.id,
+          },
+        ),
+      );
+      decisions.push(decideCall(policy, c.op, c.input, actor, run, { ...before, ...(connection && { connection }) }));
+    }
+    const decision = decisionOf(op, calls, decisions, this.config.collections);
+    if (decision.kind === "deny") {
+      throw new PolicyDeniedError(op.id, decision.reason, deniedKeys(op, calls, decisions, this.config.collections));
+    }
     if (decision.kind === "approve") {
       await this.start(CALL_WORKFLOW, held.input, { startedBy: actor, runId: heldId });
       // A read held before, whose run has ended since, answers with that run's result.
@@ -517,26 +543,27 @@ export class SanomaClient {
     };
     await this.config.connections.assertCurrent(connection, actor.id);
     if (!write) return outputOf(op, () => fn(parsed, context));
-    return this.directWrite({ op, fn, parsed, logged, actor, decision, context });
+    return this.directWrite({ op, fn, parsed, calls, actor, decisions, context });
   }
 
   /**
    * A direct write, made once and recorded once: with the default ledger, a collection's write
-   * and its record in one transaction on the database both are in, so both are kept or neither;
-   * otherwise the driver's call, then the record in the config's ledger. The first record of the
-   * call's id stands: a write that finds one already there (two calls with one id at once) is
-   * undone, and answers as `recordedCall` does.
+   * and its records in one transaction on the database both are in, so both are kept or neither;
+   * otherwise the driver's call, then the records in the config's ledger. A write is recorded as
+   * one `op.called` per call it makes (`callsOf`: one, or a batch's entries), numbered from 0.
+   * The first records of the call's id stand: a write that finds one already there (two calls
+   * with one id at once) is undone, and answers as `recordedCall` does.
    */
   private async directWrite(call: {
     op: Op;
     fn: (input: unknown, context: CallContext) => Promise<unknown>;
     parsed: unknown;
-    logged: unknown;
+    calls: readonly Call[];
     actor: Principal;
-    decision: RecordedDecision;
+    decisions: readonly RecordedDecision[];
     context: CallContext;
   }): Promise<unknown> {
-    const { op, parsed, logged, actor, decision, context } = call;
+    const { op, parsed, calls, actor, decisions, context } = call;
     const { runId } = context;
     const { dataStore, collections, ledger } = this.config;
     const connectionMutation = op.id.startsWith("sanoma.connection.");
@@ -546,40 +573,45 @@ export class SanomaClient {
         ? dataStore
         : undefined;
     const at = Date.now();
-    const record = (outcome: { output: unknown } | { error: ErrorInfo }): LedgerRecord => ({
-      v: 1,
-      app: this.config.appName,
-      id: `${runId}:op.called:0`,
-      runId,
-      seq: 0,
-      at,
-      actor,
-      workflow: CALL_WORKFLOW,
-      type: "op.called",
-      op: op.id,
-      ...targetOf(op, parsed),
-      effect: op.effect,
-      input: logged,
-      decision,
-      ...(context.connection && { connection: context.connection }),
-      ...outcome,
-      durationMs: Date.now() - at,
-    });
+    const records = (outcome: (i: number) => { output: unknown } | { error: ErrorInfo }): LedgerRecord[] =>
+      calls.map((c, i) => ({
+        v: 1,
+        app: this.config.appName,
+        id: `${runId}:op.called:${i}`,
+        runId,
+        seq: i,
+        at,
+        actor,
+        workflow: CALL_WORKFLOW,
+        type: "op.called",
+        op: c.op.id,
+        ...targetOf(c.op, c.input),
+        effect: c.op.effect,
+        input: recorded(c.op, c.input),
+        decision: decisions[i]!,
+        ...(context.connection && { connection: context.connection }),
+        ...outcome(i),
+        durationMs: Date.now() - at,
+      }));
+    const made = (result: unknown) => {
+      const outputs = outputsOf(op, result);
+      return records((i) => ({ output: recorded(calls[i]!.op, outputs[i]) }));
+    };
     /** Runs the call through `fn`; a failure is recorded on the store's own connection, outside any transaction. */
     const output = async (fn: typeof call.fn): Promise<unknown> => {
       try {
         return await outputOf(op, () => fn(parsed, context));
       } catch (err) {
-        await this.audit.store.append(record({ error: errorInfo(err) }));
+        for (const record of records(() => ({ error: errorInfo(err) }))) await this.audit.store.append(record);
         throw err;
       }
     };
     if (ledger || !transactionStore) {
       const result = await output(call.fn);
-      await this.audit.store.append(record({ output: recorded(op, result) }));
+      for (const record of made(result)) await this.audit.store.append(record);
       return result;
     }
-    // The write and its record in one transaction: the metadata or collection driver runs on the
+    // The write and its records in one transaction: the metadata or collection driver runs on the
     // transaction's connection (neither has an env guard), and a record another write of the id
     // was first with rolls the write back, for the recorded output to stand.
     const store = await transactionStore.db();
@@ -591,33 +623,36 @@ export class SanomaClient {
             : collectionsDriver([collections.get(op.resource)!], { db: async () => tx })
         ).ops[`${op.resource}.${op.name}`]!;
         const result = await output(fn);
-        if (await insertRecord(tx, record({ output: recorded(op, result) }))) return result;
-        tx.rollback();
+        for (const record of made(result)) if (!(await insertRecord(tx, record))) tx.rollback();
+        return result;
       });
     } catch (err) {
       if (!is(err, TransactionRollbackError)) throw err;
-      const first = await this.recordedCall(runId, op.id, logged, context.connection);
+      const first = await this.recordedCall(runId, op, calls, context.connection);
       if (!first) throw err;
       return first.output;
     }
   }
 
   /**
-   * What the direct write recorded as `runId` returned, when one did: refused (`invalid_input`)
-   * when it was of another operation or input, and its failure again (`driver_failed`) when it failed.
+   * What the direct write recorded as `runId` returned, when one did (a batch's output from its
+   * entries' records): refused (`invalid_input`) when it was of another operation or input, and
+   * its failure again (`driver_failed`) when it failed.
    */
   private async recordedCall(
     runId: string,
-    opId: string,
-    input: unknown,
+    op: Op,
+    calls: readonly Call[],
     connection?: ConnectionSnapshot,
   ): Promise<{ output: unknown } | undefined> {
-    const first = (await this.audit.store.read(runId)).find((r) => r.type === "op.called");
-    if (!first) return undefined;
+    const made = (await this.audit.store.read(runId)).filter((r) => r.type === "op.called");
+    if (!made.length) return undefined;
+    const same = (what: (record: (typeof made)[number], call: Call) => boolean) =>
+      made.length === calls.length && made.every((r, i) => what(r, calls[i]!));
     const differs = [
-      ...(first.op === opId ? [] : ["op"]),
-      ...(sameJson(first.input, input) ? [] : ["input"]),
-      ...(sameJson(first.connection ?? null, connection ?? null) ? [] : ["connection"]),
+      ...(same((r, c) => r.op === c.op.id) ? [] : ["op"]),
+      ...(same((r, c) => sameJson(r.input, recorded(c.op, c.input))) ? [] : ["input"]),
+      ...(sameJson(made[0]!.connection ?? null, connection ?? null) ? [] : ["connection"]),
     ];
     if (differs.length) {
       throw new SanomaError(
@@ -626,18 +661,15 @@ export class SanomaClient {
         { runId, differs },
       );
     }
-    if (first.error) {
+    const failed = made.find((r) => r.error);
+    if (failed?.error) {
       throw new SanomaError(
         "driver_failed",
-        `${opId} failed when first called as ${runId}: ${first.error.message}; call again with another id`,
-        {
-          runId,
-          op: opId,
-          error: first.error,
-        },
+        `${op.id} failed when first called as ${runId}: ${failed.error.message}; call again with another id`,
+        { runId, op: op.id, error: failed.error },
       );
     }
-    return { output: first.output };
+    return { output: isBatch(op) ? made.map((r) => r.output) : made[0]!.output };
   }
 
   /**

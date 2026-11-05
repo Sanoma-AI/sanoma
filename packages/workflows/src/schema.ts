@@ -9,7 +9,7 @@ import type {
   TypeOfAttribute,
 } from "@cedar-policy/cedar-wasm/nodejs";
 import { ChangeFacts } from "./change.ts";
-import { recordSchemaOf } from "./collection.ts";
+import { isBatch, recordSchemaOf } from "./collection.ts";
 import type { ResolvedConfig } from "./config.ts";
 import { jsonSchemaOf } from "./define.ts";
 import { isObject } from "./resource.ts";
@@ -90,7 +90,8 @@ const WRITES = new Set(["save", "delete"]);
  * - `entity Group enum [...]`, the declared groups, `agents` and `visitors`, so a policy naming another fails
  *   validation; `entity Principal in [Group] { onBehalfOf?: Principal }`; `Collection`;
  *   `Target in [Collection]`; `Workflow`;
- * - an action per operation id, in its effect's group (`effect:money`), on a `Target`, with
+ * - an action per operation id (a collection's `saveMany` excepted: the policy decides each of
+ *   its entries as a `save` or `delete`), in its effect's group (`effect:money`), on a `Target`, with
  *   `context` `{ input, before? }`: `input` from the operation's input schema, `before` the record
  *   as it was for a collection's `save` and `delete`; `sanoma.change.merge` on a `Change`, whose
  *   attributes are a change's facts (`ChangeFacts`), so a rule reads `resource.touches`;
@@ -112,7 +113,9 @@ function buildSchema(
   });
   const actions: CedarSchemaJson[string]["actions"] = { [START]: {} };
   for (const effect of EFFECTS) actions[`effect:${effect}`] = {};
-  for (const op of [...resolved.ops.values()].toSorted((a, b) => a.id.localeCompare(b.id))) {
+  // A collection's batch is no action: the policy decides each of its entries as a save or a delete.
+  const ops = [...resolved.ops.values()].filter((op) => !isBatch(op));
+  for (const op of ops.toSorted((a, b) => a.id.localeCompare(b.id))) {
     const collection =
       op.vendor === DATA_VENDOR && WRITES.has(op.name) ? resolved.collections.get(op.resource) : undefined;
     const before = collection && typeOf(recordSchemaOf(collection));
