@@ -170,22 +170,10 @@ export function runNow(what: string): Run {
   return run;
 }
 
-/** Each sandbox run's latest record of its checks, which the next waits for, so the last written is the latest. */
-const recording = new WeakMap<Run, Promise<void>>();
-
 /**
- * A sandbox run's checks recorded for the app (`recordChecks`, which never throws), after the
- * record before it; nothing for a live run, which never loads `sandbox.ts`, and with it Cucumber.
+ * A sandbox run's checks recorded for the app (`recordChecks`, which never throws); nothing for a
+ * live run, which never loads `sandbox.ts`, and with it Cucumber.
  */
-export function recordSandboxChecks(run: Run): Promise<void> {
-  const name = run.sandbox;
-  if (name === undefined) return Promise.resolve();
-  const next = (recording.get(run) ?? Promise.resolve()).then(async () =>
-    (await import("./sandbox.ts")).recordChecks(run, name),
-  );
-  recording.set(
-    run,
-    next.catch(() => undefined),
-  );
-  return next;
+export async function recordSandboxChecks(run: Run): Promise<void> {
+  if (run.sandbox !== undefined) await (await import("./sandbox.ts")).recordChecks(run, run.sandbox);
 }
