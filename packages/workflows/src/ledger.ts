@@ -49,9 +49,8 @@ export type LedgerRecord = {
       connection?: ConnectionSnapshot;
       op: string;
       /**
-       * The instance the call acted on, from the operation's `target` (`data:outbound/Acme`), as
-       * the policy saw it: what `readByTarget` finds the record by. Absent for an operation that
-       * declares no target.
+       * The instance the call acted on (`data:outbound/Acme`), from the operation's `target`: what
+       * `readByTarget` finds the record by. Absent for an operation that declares none.
        */
       target?: string;
       /**
@@ -240,10 +239,7 @@ export interface LedgerStore {
   append(record: LedgerRecord): Promise<void>;
   /** A run's records in `seq` order. */
   read(runId: string): Promise<LedgerRecord[]>;
-  /**
-   * The calls that acted on `target` (`op.called` records whose `target` it is), across every run,
-   * newest first (by `at`, then `seq`), at most `limit` of them: a record's history.
-   */
+  /** The `op.called` records whose `target` it is, across every run, newest first, at most `limit`: a record's history. */
   readByTarget(target: string, limit: number): Promise<LedgerRecord[]>;
   /**
    * Releases what the store holds (a connection pool), for good. Called by the one owner of the
@@ -272,14 +268,11 @@ export function ownedLedger(config: { ledger?: LedgerStore; databaseUrl: string 
 
 const bySeq = (a: LedgerRecord, b: LedgerRecord) => a.seq - b.seq;
 
-/** Newest first, as `readByTarget` reads: by `at`, then `seq`. */
-const newestFirst = (a: LedgerRecord, b: LedgerRecord) => b.at - a.at || b.seq - a.seq;
-
-/** The records of the calls that acted on `target`, as `readByTarget` picks them from `records`. */
-const actedOn = (records: Iterable<LedgerRecord>, target: string, limit: number): LedgerRecord[] =>
-  [...records]
+/** The calls among `records` that acted on `target`, as `readByTarget` reads them: newest first, by `at`, then `seq`. */
+const actedOn = (records: LedgerRecord[], target: string, limit: number): LedgerRecord[] =>
+  records
     .filter((r) => r.type === "op.called" && r.target === target)
-    .toSorted(newestFirst)
+    .toSorted((a, b) => b.at - a.at || b.seq - a.seq)
     .slice(0, limit);
 
 /** An error that trying again would only repeat. */
@@ -392,11 +385,8 @@ export function jsonlLedger(dir: string): LedgerStore {
         throw err;
       });
       const runs = await Promise.all(files.filter((f) => f.endsWith(".jsonl")).map((f) => load(join(root, f))));
-      return actedOn(
-        runs.flatMap((run) => run.records),
-        target,
-        limit,
-      );
+      const records = runs.flatMap((run) => run.records);
+      return actedOn(records, target, limit);
     },
   };
 }
@@ -485,11 +475,8 @@ export function memoryLedger(): LedgerStore {
       return [...(runs.get(runId)?.values() ?? [])].map((r) => structuredClone(r)).toSorted(bySeq);
     },
     async readByTarget(target, limit) {
-      return actedOn(
-        [...runs.values()].flatMap((run) => [...run.values()]),
-        target,
-        limit,
-      ).map((r) => structuredClone(r));
+      const records = [...runs.values()].flatMap((run) => [...run.values()]);
+      return actedOn(records, target, limit).map((r) => structuredClone(r));
     },
   };
 }

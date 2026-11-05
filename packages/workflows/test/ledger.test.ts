@@ -78,14 +78,9 @@ describe.each<[string, () => LedgerStore]>([
     const key = randomUUID();
     const target = `data:leads/${key}`;
     const called = (runId: string, seq: number, at: number, on = target): LedgerRecord => ({
-      v: 1,
-      app: "test",
+      ...rec(runId, seq),
       id: `${runId}:op.called:${seq}`,
-      runId,
-      seq,
       at,
-      actor: { id: "a" },
-      workflow: "w",
       type: "op.called",
       op: "data.leads.save",
       target: on,
@@ -302,8 +297,7 @@ const flaky = (failures: number) => {
   return {
     calls: () => calls,
     store: {
-      read: store.read,
-      readByTarget: store.readByTarget,
+      ...store,
       async append(record: LedgerRecord) {
         if (++calls <= failures) throw new Error(`disk full (${calls})`);
         await store.append(record);
@@ -437,8 +431,7 @@ describe("writing a run's records", () => {
 
     let tries = 0;
     const corrupt: LedgerStore = {
-      read: store.read,
-      readByTarget: store.readByTarget,
+      ...store,
       async append() {
         tries++;
         throw Object.assign(new Error("corrupt ledger line"), { retryable: false });

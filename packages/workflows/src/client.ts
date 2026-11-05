@@ -91,6 +91,7 @@ import {
   isEnded,
   isToken,
   isVisitor,
+  LIST_LIMIT,
   refusalOf,
   type RunStatus,
   SCHEDULE_AGENT,
@@ -119,9 +120,6 @@ const PrincipalOrId = z.union([
  * only the approvals tell it from `running`. Keyed by every DBOS status, so one a later DBOS
  * adds fails to compile here until it is mapped.
  */
-/** How many of a target's records `history` reads when not told a `limit`. */
-const HISTORY_LIMIT = 100;
-
 const FROM_DBOS: Record<WorkflowStatusString, Exclude<RunStatus, "waiting">> = {
   ENQUEUED: "queued",
   DELAYED: "queued",
@@ -713,11 +711,10 @@ export class SanomaClient {
   }
 
   /**
-   * What acted on `target` (a collection's record, `data:outbound/Acme`; a resource instance), from
-   * the ledger store: the `op.called` records with that target across every run, a direct write's
-   * among them, newest first, at most `limit`.
+   * The calls that acted on `target` (a collection's record, `data:outbound/Acme`; a resource
+   * instance) across every run, direct writes among them, newest first, at most `limit`.
    */
-  history(target: string, limit = HISTORY_LIMIT): Promise<LedgerRecord[]> {
+  history(target: string, limit: number = LIST_LIMIT.default): Promise<LedgerRecord[]> {
     return this.audit.store.readByTarget(target, limit);
   }
 

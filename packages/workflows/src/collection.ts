@@ -272,7 +272,7 @@ export function collectionsConnector(list: readonly Collection[]): Connector<typ
 const COLUMNS = { key: data.key, record: data.record, updatedAt: data.updatedAt, updatedBy: data.updatedBy };
 const recordExists = () =>
   new DriverError("Collection record already exists", { retryable: false, status: 409, vendorCode: "record_exists" });
-/** The refusal of an `ifRecord` save, carrying the record as it stands (`current`), or `null` once it is gone. */
+/** The refusal of an `ifRecord` save, carrying the record as it stands (`current`), or `null` when it is gone. */
 const recordChanged = (current: Saved | null) =>
   Object.assign(
     new DriverError(current ? "Collection record changed" : "Collection record is missing", {

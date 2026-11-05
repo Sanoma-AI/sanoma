@@ -1,5 +1,5 @@
 {
-  "id": "3a20c247-25c3-4af5-bddd-5ef1903b8df6",
+  "id": "c11a8727-f078-464c-9825-74699afbf0ff",
   "prevId": "4eeb061d-222d-4dd5-bef6-c719b07f0556",
   "version": "7",
   "dialect": "postgresql",
@@ -600,6 +600,7 @@
             }
           ],
           "isUnique": false,
+          "where": "\"sanoma_ledger\".\"target\" is not null",
           "concurrently": false,
           "method": "btree",
           "with": {}
