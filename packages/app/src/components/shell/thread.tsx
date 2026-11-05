@@ -2,9 +2,11 @@ import { SparkleIcon } from "@phosphor-icons/react/dist/csr/Sparkle";
 import { Link } from "@tanstack/react-router";
 import type { ChatStatus } from "ai";
 import { memo, type ReactNode } from "react";
+import { Alert, AlertDescription } from "#/components/ui/alert.tsx";
 import { Bubble, BubbleContent } from "#/components/ui/bubble.tsx";
 import { Button } from "#/components/ui/button.tsx";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "#/components/ui/empty.tsx";
+import { Marker, MarkerContent } from "#/components/ui/marker.tsx";
 import { Message, MessageContent } from "#/components/ui/message.tsx";
 import {
   MessageScroller,
@@ -14,7 +16,7 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
 } from "#/components/ui/message-scroller.tsx";
-import { Spinner } from "#/components/ui/spinner.tsx";
+import { Trace, TraceLine, TraceTitle } from "#/components/ui/trace.tsx";
 import { type ChatMessage, errorParts, textOf, unfinished } from "../../lib/chat.ts";
 import { Reply } from "./chat-parts.tsx";
 
@@ -44,23 +46,41 @@ export function Thread({
 }) {
   const busy = isBusy(status);
   return (
-    <MessageScrollerProvider autoScroll>
+    <MessageScrollerProvider autoScroll defaultScrollPosition="last-anchor">
       <MessageScroller className="h-auto min-h-0 flex-1">
         <MessageScrollerViewport aria-label="Conversation">
           <MessageScrollerContent className="gap-4 p-4">
-            {messages.length === 0 && <EmptyChat />}
+            {messages.length === 0 && (
+              <MessageScrollerItem className="flex flex-1 flex-col">
+                <EmptyChat />
+              </MessageScrollerItem>
+            )}
             {messages.map((message, i) => (
               <Turn key={message.id} message={message} live={busy && i === messages.length - 1} chat={chat} />
             ))}
-            {status === "submitted" && <Spinner aria-label="Waiting for the agent" />}
-            {error && <TurnError message={error.message} />}
+            {status === "submitted" && (
+              <MessageScrollerItem>
+                <Trace>
+                  <TraceLine status="running" className="text-xs">
+                    <TraceTitle>Waiting for the agent</TraceTitle>
+                  </TraceLine>
+                </Trace>
+              </MessageScrollerItem>
+            )}
+            {error && (
+              <MessageScrollerItem>
+                <TurnError message={error.message} />
+              </MessageScrollerItem>
+            )}
             {!busy && !error && onContinue && stoppedShort(messages) && (
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <span>The last turn stopped before it finished.</span>
-                <Button variant="secondary" size="sm" onClick={onContinue}>
-                  Continue
-                </Button>
-              </div>
+              <MessageScrollerItem>
+                <Marker>
+                  <MarkerContent>The last turn stopped before it finished.</MarkerContent>
+                  <Button variant="secondary" size="sm" onClick={onContinue}>
+                    Continue
+                  </Button>
+                </Marker>
+              </MessageScrollerItem>
             )}
           </MessageScrollerContent>
         </MessageScrollerViewport>
@@ -80,7 +100,7 @@ const Turn = memo(function Turn({ message, live, chat }: { message: ChatMessage;
       {message.role === "user" ? (
         <Message align="end">
           <MessageContent>
-            <Bubble align="end" variant="outline" className="*:data-[slot=bubble-content]:bg-card">
+            <Bubble align="end" variant="outline">
               <BubbleContent className="whitespace-pre-wrap">{textOf(message, "\n")}</BubbleContent>
             </Bubble>
           </MessageContent>
@@ -109,15 +129,17 @@ function TurnError({ message }: { message: string }) {
   }
   const { text, vendor } = errorParts(said);
   return (
-    <p className="text-destructive">
-      {text}
-      {vendor && (
-        <>
-          {" "}
-          <ConnectorPageLink vendor={vendor}>Set it on its connector page</ConnectorPageLink>.
-        </>
-      )}
-    </p>
+    <Alert variant="destructive">
+      <AlertDescription>
+        {text}
+        {vendor && (
+          <>
+            {" "}
+            <ConnectorPageLink vendor={vendor}>Set it on its connector page</ConnectorPageLink>.
+          </>
+        )}
+      </AlertDescription>
+    </Alert>
   );
 }
 

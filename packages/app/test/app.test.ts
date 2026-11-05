@@ -938,18 +938,8 @@ describe("the page", () => {
     expect(column?.replaceAll("<!-- -->", "")).toMatch(
       /Connect a model to start: <a[^>]*href="\/connectors\?add=%40sanoma-ai%2Fconnector-anthropic"[^>]*>add the Anthropic connector<\/a>\./,
     );
-    // A new chat's engine, chosen in the composer: our loop first, a person's own agents last.
-    const engines = column?.match(/<select[^>]*aria-label="Engine"[^>]*>([\s\S]*?)<\/select>/)?.[1] ?? "";
-    expect([...engines.matchAll(/<option[^>]*>([^<]*)<\/option>/g)].map((option) => option[1])).toEqual([
-      "Sanoma",
-      "Pi",
-      "Claude Code",
-      "Copilot (your plan)",
-      "OpenCode (your plan)",
-      "Pi (your plan)",
-      "Claude Code (your plan)",
-      "Codex (your plan)",
-    ]);
+    // A new chat's engine, chosen in the composer: our loop to start with (chat-thread.test.tsx opens the menu).
+    expect(column).toMatch(/<button[^>]*aria-label="Engine"[^>]*>Sanoma</);
     expect(html).toContain('href="/workflows/announce"');
     expect(html).not.toContain('href="/runs"');
     expect(html).not.toContain('href="/start');

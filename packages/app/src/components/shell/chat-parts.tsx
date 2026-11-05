@@ -7,6 +7,7 @@ import { type FormEvent, lazy, Suspense, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "#/components/ui/button.tsx";
 import { Card, CardContent, CardHeader } from "#/components/ui/card.tsx";
+import { CodeBlock, CodeBlockContent } from "#/components/ui/code-block.tsx";
 import { Input } from "#/components/ui/input.tsx";
 import { Message, MessageContent, MessageFooter } from "#/components/ui/message.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
@@ -114,7 +115,7 @@ function ReplyPart({ part, live }: { part: Part; live: boolean }) {
 /** The agent's thinking and steps as a quiet trace, a line each. */
 function ReplyTrace({ parts, live }: { parts: TracePart[]; live: boolean }) {
   return (
-    <Trace aria-label="Steps" className="gap-1">
+    <Trace role="group" aria-label="Steps" className="gap-1">
       {parts.map((part, i) =>
         part.type === "reasoning" ? (
           <Reasoning key={i} part={part} live={live} />
@@ -167,7 +168,17 @@ function Step({ step, live }: { step: ToolPart; live: boolean }) {
   return (
     <TraceCollapsible defaultOpen>
       <TraceCollapsibleTrigger>{line}</TraceCollapsibleTrigger>
-      <TraceCollapsibleContent className="text-xs">{why}</TraceCollapsibleContent>
+      <TraceCollapsibleContent className="text-xs">
+        {status === "error" ? (
+          <CodeBlock size="sm" variant="destructive">
+            <CodeBlockContent wrap className="max-h-64">
+              {why}
+            </CodeBlockContent>
+          </CodeBlock>
+        ) : (
+          why
+        )}
+      </TraceCollapsibleContent>
     </TraceCollapsible>
   );
 }

@@ -106,6 +106,17 @@ describe("the chat's thread", () => {
     await within(log).findByRole("button", { name: "Copy" });
   });
 
+  it("draws a fenced block as a code block, with its copy", async () => {
+    await play(createChat<ChatMessage>().user("Show me").assistant("Here:\n\n```ts\nconst a = 1;\n```"));
+    const block = await waitFor(() => {
+      const found = document.querySelector('[data-slot="code-block"]');
+      expect(found).not.toBeNull();
+      return found as HTMLElement;
+    });
+    expect(block.textContent).toContain("const a = 1;");
+    expect(within(block).getByRole("button", { name: "Copy" })).toBeTruthy();
+  });
+
   it("loads no image a reply names, by Markdown or by HTML", async () => {
     await play(
       createChat<ChatMessage>()
@@ -141,7 +152,7 @@ describe("the chat's thread", () => {
     expect(lines.getByText("Read a.ts").textContent).toBe("Done: Read a.ts");
     expect(lines.getByText("Edited b.ts").textContent).toBe("Failed: Edited b.ts");
     // Why a step failed is open under it; the thinking folded once it finished.
-    expect(lines.getByText("no such text")).toBeTruthy();
+    expect(lines.getByText("no such text").closest('[data-slot="code-block"]')).not.toBeNull();
     expect(screen.queryByText(/^Looking/)).toBeNull();
   });
 
@@ -203,7 +214,20 @@ describe("the chat's composer", () => {
     const trigger = await screen.findByRole("button", { name: "Engine" });
     expect(trigger.textContent).toBe("Sanoma");
     fireEvent.click(trigger);
-    fireEvent.click(await screen.findByRole("menuitemradio", { name: "Codex (your plan)" }));
+    // Our loop first, a person's own agents last, under a label of their own.
+    const engines = await screen.findAllByRole("menuitemradio");
+    expect(engines.map((engine) => engine.textContent)).toEqual([
+      "Sanoma",
+      "Pi",
+      "Claude Code",
+      "Copilot (your plan)",
+      "OpenCode (your plan)",
+      "Pi (your plan)",
+      "Claude Code (your plan)",
+      "Codex (your plan)",
+    ]);
+    expect(screen.getByText("Your own plan")).toBeTruthy();
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Codex (your plan)" }));
     await waitFor(() => expect(trigger.textContent).toBe("Codex (your plan)"));
   });
 });

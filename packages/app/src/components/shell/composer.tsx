@@ -1,6 +1,7 @@
 import { ArrowUpIcon } from "@phosphor-icons/react/dist/csr/ArrowUp";
 import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
 import { type FormEvent, type ReactNode, useId, useState } from "react";
+import { Badge } from "#/components/ui/badge.tsx";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -10,13 +11,7 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "#/components/ui/dropdown-menu.tsx";
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupButton,
-  InputGroupText,
-  InputGroupTextarea,
-} from "#/components/ui/input-group.tsx";
+import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea } from "#/components/ui/input-group.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
 import { ENGINE_NAMES, type EngineName, ownPlan } from "../../lib/chat.ts";
 
@@ -71,12 +66,12 @@ export function Composer({
   };
   return (
     <form onSubmit={submit}>
-      <InputGroup className="rounded-xl bg-card text-card-foreground dark:bg-card">
+      <InputGroup className="rounded-xl">
         {page && (
           <InputGroupAddon align="block-start" className="pt-3">
-            <InputGroupText className="h-6 max-w-full rounded-md px-2 text-xs text-foreground ring-1 ring-border">
+            <Badge variant="outline" className="max-w-full">
               <span className="truncate">{page}</span>
-            </InputGroupText>
+            </Badge>
           </InputGroupAddon>
         )}
         <InputGroupTextarea

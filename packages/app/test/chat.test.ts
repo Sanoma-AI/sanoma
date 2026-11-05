@@ -519,9 +519,9 @@ describe("the composer and a model", () => {
     it("says to connect a model, linking to the connector page, with Send off; and refuses a turn before the chat opens", async () => {
       const column = await chatColumn(bare!.url);
       expect(column).toMatch(
-        /<div id="[^"]+"><p[^>]*>Connect a model to start: <a[^>]*href="\/connectors\/anthropic"[^>]*>set its key on the Anthropic connector page<\/a>\.<\/p>/,
+        /<div id="[^"]+"[^>]*><p[^>]*>Connect a model to start: <a[^>]*href="\/connectors\/anthropic"[^>]*>set its key on the Anthropic connector page<\/a>\.<\/p>/,
       );
-      const note = /<div id="([^"]+)"><p[^>]*>Connect a model/.exec(column)![1]!;
+      const note = /<div id="([^"]+)"[^>]*><p[^>]*>Connect a model/.exec(column)![1]!;
       expect(column).toMatch(new RegExp(`<button[^>]*disabled=""[^>]*aria-label="Send" aria-describedby="${note}"`));
 
       const chatId = `bare-${RUN}`;
