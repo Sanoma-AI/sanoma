@@ -1,6 +1,15 @@
 /** Where a link opened from a company's window goes: that window, the default browser, or nowhere. */
 export type LinkTarget = "window" | "browser" | "deny";
 
+/** Whether the default browser (or mail app) takes `link`: web and mail links, and nothing else. */
+export function opensInBrowser(link: string): boolean {
+  try {
+    return ["http:", "https:", "mailto:"].includes(new URL(link).protocol);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * The link rule. In the window: the app's own origin, its public sites (`<name>.localhost` on the
  * app's port) and GitHub (the GitHub App manifest round trip needs the window's cookies on both
@@ -19,7 +28,7 @@ export function linkTarget(link: string, appUrl: string): LinkTarget {
   if (isAppPage(link, appUrl)) return "window";
   if (url.protocol === app.protocol && url.port === app.port && url.hostname.endsWith(".localhost")) return "window";
   if (url.protocol === "https:" && url.host === "github.com") return "window";
-  return ["http:", "https:", "mailto:"].includes(url.protocol) ? "browser" : "deny";
+  return opensInBrowser(link) ? "browser" : "deny";
 }
 
 /**

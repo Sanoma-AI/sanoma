@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, test } from "vitest";
 import type { Company } from "../src/companies.ts";
 import {
+  hasFiles,
   addressProblem,
   cloneCompany,
   cloneSession,
@@ -14,7 +15,7 @@ import {
   createSession,
   defaultParent,
   isCloneUrl,
-  newCompanyProblem,
+  newCompanyTarget,
   repoNameOf,
 } from "../src/create.ts";
 import {
@@ -30,6 +31,7 @@ import {
   type Run,
   setIdentity,
 } from "../src/git.ts";
+import { STARTING } from "../src/pages.ts";
 import type { SessionOptions } from "../src/session.ts";
 import { shims } from "../src/shims.ts";
 import { fastForward, LOCAL_CHANGES, ownChanges, prepareUpdate } from "../src/update-company.ts";
@@ -185,18 +187,53 @@ describe("git's prerequisites", () => {
 });
 
 describe("a new company", () => {
-  test("starts from the last company's folder, else the home folder", () => {
-    expect(defaultParent([], "/Users/a")).toBe("/Users/a");
+  test("goes in a folder named after it, under where it was asked to go", () => {
+    const parent = temp();
+    expect(newCompanyTarget("Northside Plumbing", parent)).toEqual({ dir: join(parent, "northside-plumbing") });
+    expect(newCompanyTarget("  ...  ", parent)).toEqual({
+      problem: expect.stringContaining("Give the company a name"),
+    });
+    mkdirSync(join(parent, "empty"));
+    writeFileSync(join(parent, "empty", ".DS_Store"), "");
+    expect(newCompanyTarget("empty", parent)).toEqual({ dir: join(parent, "empty") });
+    mkdirSync(join(parent, "full"));
+    writeFileSync(join(parent, "full", "notes.txt"), "");
+    expect(newCompanyTarget("full", parent)).toEqual({ problem: expect.stringContaining("has files in it already") });
+    mkdirSync(join(parent, "acme"));
+    writeFileSync(join(parent, "acme", "sanoma.config.ts"), "");
+    expect(newCompanyTarget("acme", parent)).toEqual({ problem: expect.stringContaining("holds a company already") });
+    writeFileSync(join(parent, "plain"), "");
+    expect(newCompanyTarget("plain", parent)).toEqual({ problem: expect.stringContaining("is a file") });
+  });
+
+  // Permissions a test can take away only off Windows, and not as root.
+  test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "says so when it cannot read the folder",
+    () => {
+      const parent = temp();
+      const locked = join(parent, "locked");
+      mkdirSync(locked);
+      chmodSync(locked, 0o000);
+      try {
+        expect(newCompanyTarget("locked", parent)).toEqual({ problem: expect.stringContaining("could not read") });
+      } finally {
+        chmodSync(locked, 0o700);
+      }
+    },
+  );
+
+  test("starts from the last company's folder, else ~/Companies", () => {
+    expect(defaultParent([], "/Users/a")).toBe(join("/Users/a", "Companies"));
     expect(defaultParent([company("/Users/a/Companies/acme")], "/Users/a", () => true)).toBe("/Users/a/Companies");
-    expect(defaultParent([company("/Volumes/gone/acme")], "/Users/a", () => false)).toBe("/Users/a");
+    expect(defaultParent([company("/Volumes/gone/acme")], "/Users/a", () => false)).toBe(join("/Users/a", "Companies"));
   });
 
   test("needs an empty folder, dotfiles aside", () => {
     const dir = temp();
     writeFileSync(join(dir, ".DS_Store"), "");
-    expect(newCompanyProblem(dir)).toBeUndefined();
+    expect(hasFiles(dir)).toBe(false);
     writeFileSync(join(dir, "notes.txt"), "");
-    expect(newCompanyProblem(dir)).toMatch(/has files in it already/);
+    expect(hasFiles(dir)).toBe(true);
   });
 
   test("runs the launcher's init with pnpm dlx through the shims, and serves the company it started", async () => {
@@ -224,7 +261,8 @@ describe("a new company", () => {
     expect(existsSync(join(repo, "sanoma.config.ts"))).toBe(true);
     expect(Object.keys(shims("node", "pnpm")).every((name) => existsSync(join(bin, name)))).toBe(true);
     expect(lines).toContain(`env ${port} 1 ${bin}`);
-    expect(progress).toEqual(["Starting a new company with sanoma from npm"]);
+    // The launcher's database event: the company is set up, and starting.
+    expect(progress).toEqual(["Starting a new company with sanoma from npm", STARTING]);
     await session.stop();
     await expect(session.ended).resolves.toMatchObject({ code: 143 });
   });
@@ -236,6 +274,13 @@ describe("a new company", () => {
     const session = createSession(options(repo, await freePort(), { FAKE_PNPM_EXIT: "1" }, progress));
     await expect(session.ended).resolves.toMatchObject({ error: expect.stringContaining("pnpm install failed") });
     expect(progress).toEqual(["Installing packages"]);
+  });
+
+  test("makes the folder again when Start again finds it gone", async () => {
+    const repo = join(temp(), "gone");
+    const session = createSession(options(repo, await freePort(), { FAKE_PNPM_EXIT: "1" }));
+    await session.ended;
+    expect(existsSync(repo)).toBe(true);
   });
 });
 

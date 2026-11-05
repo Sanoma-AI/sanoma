@@ -5,4 +5,5 @@ import { appendFileSync, writeFileSync } from "node:fs";
 if (process.env.FAKE_PNPM_LOG) appendFileSync(process.env.FAKE_PNPM_LOG, `${process.argv.slice(2).join(" ")}\n`);
 console.error(`starting a Sanoma company in ${process.cwd()}`);
 writeFileSync("sanoma.config.ts", "export default {};\n");
+console.log(JSON.stringify({ sanoma: 1, event: "database", how: "started" }));
 await import("./launcher.mjs");

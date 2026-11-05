@@ -78,6 +78,8 @@ export interface Settings {
   updateCheckedAt?: string;
   /** What that check found, kept for the Help menu between checks and notified once per version. */
   newer?: Newer;
+  /** Whether a start shows its output: Show details, kept for every company and every start. */
+  details?: boolean;
 }
 
 /** The settings, or none when the file is missing or is not a JSON object. */

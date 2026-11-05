@@ -1,12 +1,14 @@
 // The shell's main process: wiring only. What it runs and how is in the modules it imports, which
 // never import electron and are tested on their own.
 import { randomUUID } from "node:crypto";
+import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, join, sep } from "node:path";
 import {
   app,
   autoUpdater,
   BaseWindow,
+  clipboard,
   dialog,
   ipcMain,
   Menu,
@@ -36,14 +38,7 @@ import {
   updated,
   writeCompanies,
 } from "./companies.ts";
-import {
-  addressProblem,
-  cloneSession,
-  cloneTarget,
-  createSession,
-  defaultParent,
-  newCompanyProblem,
-} from "./create.ts";
+import { addressProblem, cloneSession, cloneTarget, createSession, defaultParent, newCompanyTarget } from "./create.ts";
 import {
   GIT_FOR_WINDOWS_URL,
   gitEnv,
@@ -57,14 +52,14 @@ import {
   needsGitForWindows,
   setIdentity,
 } from "./git.ts";
-import { USAGE_EXIT } from "./launcher.ts";
-import { isAppPage, linkTarget } from "./links.ts";
-import { type CompanyLog, hidePasswords, openLog } from "./logs.ts";
-import { folderArgument, isCompanyFolder, realPathOf, syncedFolderWarning } from "./places.ts";
+import { isAppPage, linkTarget, opensInBrowser } from "./links.ts";
+import { type CompanyLog, detailsOf, hidePasswords, NO_TAIL, openLog } from "./logs.ts";
+import type { CompanyState, Kind } from "./pages.ts";
+import { folderArgument, isCompanyFolder, realPathOf, syncedFolderWarning, withTilde } from "./places.ts";
 import { archWarnings, runtimeOf } from "./runtime.ts";
 import { quitOrder } from "./quit.ts";
 import { firstCheckDelay, installedBySquirrel, REPOSITORY, updatesItself, WINDOWS_APP_ID } from "./self-update.ts";
-import { type Session, type SessionOptions, startSession } from "./session.ts";
+import { failureOf, type Session, type SessionOptions, startSession } from "./session.ts";
 import { type Newer, patchSettings, readSettings, runCheck, savedNewer } from "./update-check.ts";
 import { fastForward, prepareUpdate } from "./update-company.ts";
 import { nextShown, windowBounds } from "./window-state.ts";
@@ -87,26 +82,26 @@ const patchCompany = (path: string, patch: Partial<Company>) =>
 
 /** What the start screen shows: the recent companies, marked when they run, and a form. */
 export interface StartState {
-  recent: RecentCompany[];
+  /** Each with its folder as a person reads it. */
+  recent: (RecentCompany & { place: string })[];
   warnings: string[];
   /** One line the start screen shows: why what was asked did not happen (`problem`), or what did. */
   notice?: { text: string; problem: boolean };
-  /** A form the start screen shows: a repository's address to clone, or who commits. */
-  ask?: { kind: "clone"; url?: string; problem?: string } | ({ kind: "identity"; problem?: string } & Identity);
+  /** A form the start screen shows: a new company's name and place, a repository's address to clone, or who commits. */
+  ask?:
+    | NewCompanyForm
+    | { kind: "clone"; url?: string; problem?: string }
+    | ({ kind: "identity"; problem?: string } & Identity);
 }
 
-/** What a company's own page shows (`start/company.html`): its start, or why it stopped. */
-export interface CompanyState {
-  path: string;
+/** The new company form: its name so far, the folder it goes under and that as a person reads it. */
+interface NewCompanyForm {
+  kind: "new";
   name: string;
-  /** `running`: the app answers, and the window shows it once it has loaded (`showsApp`). */
-  phase: "starting" | "running" | "failed" | "stopped";
-  progress: string[];
-  log: string[];
-  message?: string;
-  warnings: string[];
-  /** Whether the next launch opens it again (`Company.open`): a failed one offers not to. */
-  reopens: boolean;
+  parent: string;
+  place: string;
+  warning?: string;
+  problem?: string;
 }
 
 /** A company in the window as its app's account menu lists it (`app-preload.ts`): an opaque id, never its path. */
@@ -148,6 +143,8 @@ interface CompanyViews {
   appView: WebContentsView;
   /** Whether it shows its app, else the shell's page: the app answers and has loaded. */
   showsApp: boolean;
+  /** Whether the app has loaded in its view at `url`, which then shows once nothing holds it back (`showAppIfFree`). */
+  loaded: boolean;
   /** Where its app answers now: the link rule reads it, as Restart may move the port. */
   url: string;
   state: CompanyState;
@@ -193,7 +190,7 @@ function sendStart() {
 }
 
 const startState = (): StartState => ({
-  recent: recentOf(readCompanies(companiesFile()), live()),
+  recent: recentOf(readCompanies(companiesFile()), live()).map((c) => ({ ...c, place: withTilde(c.path, homedir()) })),
   warnings: archWarning(),
   notice,
   ask,
@@ -250,10 +247,14 @@ async function makeTray() {
   tray.on("click", showWindow);
 }
 
-/** One of the shell's own pages: it never navigates and opens nothing. */
+/** One of the shell's own pages: it never navigates, and only a web or mail link leaves it, for the browser. */
 function shellPage(contents: WebContents) {
   contents.on("will-navigate", (event) => event.preventDefault());
-  contents.setWindowOpenHandler(() => ({ action: "deny" }));
+  contents.setWindowOpenHandler(({ url }) => {
+    // A link in a company's output; nothing else on these pages opens a window.
+    if (opensInBrowser(url)) void shell.openExternal(url);
+    return { action: "deny" };
+  });
 }
 
 /** A view showing one of the shell's own pages. */
@@ -401,9 +402,15 @@ function setCompanyState(views: CompanyViews, next: Partial<CompanyState>) {
   }, 100);
 }
 
-/** Loads the app at `url` into the company's app view, and shows it there once it has loaded. */
+/** Shows the company's app, once it has loaded and the person has read what its page has to say about its folder. */
+function showAppIfFree(views: CompanyViews) {
+  if (views.loaded && views.state.phase === "running" && !views.state.warning) reveal(views, true);
+}
+
+/** Loads the app at `url` into the company's app view, and shows it there once nothing holds it back. */
 function showApp(views: CompanyViews, url: string) {
   views.url = url;
+  views.loaded = false;
   setCompanyState(views, { phase: "running" });
   void views.appView.webContents
     .loadURL(url)
@@ -411,7 +418,8 @@ function showApp(views: CompanyViews, url: string) {
     .finally(() => {
       // It may have stopped meanwhile, started again, or left the window.
       if (views.state.phase === "running" && views.url === url && !views.appView.webContents.isDestroyed()) {
-        reveal(views, true);
+        views.loaded = true;
+        showAppIfFree(views);
       }
     });
 }
@@ -439,15 +447,20 @@ function viewsFor(path: string): CompanyViews {
     shellView: shellView("company.html"),
     appView,
     showsApp: false,
+    loaded: false,
     url: "",
     state: {
-      path,
       name: companyName(path),
+      place: withTilde(path, homedir()),
+      kind: "open",
       phase: "starting",
       progress: [],
-      log: [],
-      warnings: [],
+      log: NO_TAIL,
+      startedAt: Date.now(),
+      lastOutputAt: Date.now(),
+      details: detailsShown(),
       reopens: true,
+      bringsBack: process.platform === "darwin" ? "Dock" : "tray",
     },
   };
   const { contentView } = windowOf().window;
@@ -500,8 +513,14 @@ async function openCompany(dir: string) {
   await begin(path);
 }
 
-/** How a session begins (`startSession`, `createSession`, `cloneSession`). */
-type Begin = (options: SessionOptions) => Session;
+/** How a session begins (`startSession`, `createSession`, `cloneSession`), and what the page calls that. */
+interface Begin {
+  kind: Kind;
+  how: (options: SessionOptions) => Session;
+  /** The form that started it has said what `syncedFolderWarning` says. */
+  warned?: boolean;
+}
+const OPEN: Begin = { kind: "open", how: startSession };
 
 /**
  * How each company's next start begins while it is not the usual one: a new company's init or a
@@ -510,26 +529,46 @@ type Begin = (options: SessionOptions) => Session;
 const beginnings = new Map<string, Begin>();
 
 /**
- * Starts the company unless it runs or is starting, with `how` (else as it began last, until that
- * was ready, else `startSession`), in the window, whose page for it shows the start and then the
+ * Starts the company unless it runs or is starting, as `beginAs` says (else as it began last, until
+ * that was ready, else `startSession`), in the window, whose page for it shows the start and then the
  * app; a failure to start says why there. A company new to the window shows at once; one starting
  * again (Restart, Start again, Get Updates) stays where it is.
  */
-async function begin(path: string, how?: Begin) {
+async function begin(path: string, beginAs?: Begin) {
   // Stopped a moment ago (Company → Stop takes it out of the window at once): its session is ending.
   const ending = running.get(path);
   if (ending?.stopping) await ending.session.ended;
   if (isLive(path) || quitting) return;
-  if (how) beginnings.set(path, how);
+  if (beginAs) beginnings.set(path, beginAs);
   const added = !inWindow.has(path);
   const views = viewsFor(path);
-  setCompanyState(views, { phase: "starting", progress: [], log: [], message: undefined, reopens: true });
+  const beginning = beginnings.get(path) ?? OPEN;
+  const now = Date.now();
+  setCompanyState(views, {
+    kind: beginning.kind,
+    phase: "starting",
+    progress: [],
+    log: NO_TAIL,
+    startedAt: now,
+    lastOutputAt: now,
+    message: undefined,
+    pill: undefined,
+    reopens: true,
+  });
   views.log = undefined;
   if (added) show(path);
-  const started = start(path, views, beginnings.get(path) ?? startSession).catch((err: unknown) => {
+  const started = start(path, views, beginning).catch((err: unknown) => {
     // Before its session (no Node staged, an unreadable folder): its page says why.
-    const message = hidePasswords(`The company could not start: ${messageOf(err)}`);
-    setCompanyState(views, { phase: "failed", message, progress: [], log: [], reopens: reopensAfterEnd(path) });
+    const error = `The company could not start: ${messageOf(err)}`;
+    const { message, pill } = failureOf({ code: null, signal: null, error }, views.state);
+    setCompanyState(views, {
+      phase: "failed",
+      message: hidePasswords(message),
+      pill,
+      progress: [],
+      log: NO_TAIL,
+      reopens: reopensAfterEnd(path),
+    });
   });
   opening.set(path, started);
   sendStart();
@@ -575,18 +614,20 @@ async function claimPort(path: string) {
   return { company, moved };
 }
 
-async function start(path: string, views: CompanyViews, how: Begin) {
+async function start(path: string, views: CompanyViews, { how, warned }: Begin) {
   const claimed = claiming.then(() => claimPort(path));
   claiming = claimed.catch(() => {});
   const { company, moved } = await claimed;
   const { port } = company;
   if (quitting) return;
   const log = openLog(app.getPath("logs"), slugOf(path));
-  const warnings = [...archWarning(), syncedFolderWarning(path, homedir()) ?? []].flat();
-  for (const warning of warnings) log.write("shell", `warning: ${warning}`);
+  // Said in the page's own words: on its banner once per folder, and for the Intel build on the start screen.
+  const warning = syncedFolderWarning(path, homedir());
+  for (const said of [...archWarning(), warning ?? []].flat()) log.note("shell", `warning: ${said}`);
   if (moved) log.write("shell", `the remembered port is taken: the app moves to ${port}, and asks who you are again`);
+  if (warned) patchCompany(path, { warned });
   views.log = log;
-  setCompanyState(views, { name: company.name, warnings });
+  setCompanyState(views, { name: company.name, warning: company.warned || warned ? undefined : warning });
   windowChanged();
   /** Whether the company's page shows this start: a later one replaces it, and Stop takes the page away. */
   const current = () => views.log === log && inWindow.get(path) === views;
@@ -600,7 +641,7 @@ async function start(path: string, views: CompanyViews, how: Begin) {
     onLine(stream, line) {
       log.write(stream, line);
       // The page gets the log's tail while it shows; once it shows again, the next state carries it.
-      if (current() && views.state.phase !== "running") setCompanyState(views, {});
+      if (current() && !views.showsApp) setCompanyState(views, { lastOutputAt: Date.now() });
     },
     onProgress(step) {
       log.write("shell", step);
@@ -629,16 +670,13 @@ async function start(path: string, views: CompanyViews, how: Begin) {
       if (current()) setCompanyState(views, { phase: "stopped", progress: [], reopens });
       return;
     }
-    const said = exit.error ?? "the log below says what";
-    const why =
-      exit.code === USAGE_EXIT
-        ? `The company's configuration has a problem (${said}). Fix it, then start again.`
-        : (exit.error ?? `The company stopped (${exit.signal ?? `exit code ${exit.code}`}).`);
-    log.write("shell", why);
+    const { message, pill } = failureOf(exit, views.state);
+    // The page leads with it: its terminal keeps what the company printed, so it does not end by repeating that.
+    log.note("shell", message);
     log.close();
     const reopens = reopensAfterEnd(path);
     if (!current()) return;
-    setCompanyState(views, { phase: "failed", message: hidePasswords(why), progress: [], reopens });
+    setCompanyState(views, { phase: "failed", message: hidePasswords(message), pill, progress: [], reopens });
     // A company that stops on its own says why on its page. The window comes back on it when
     // hidden, or switches to it from an idle start screen; it never takes the window from another
     // company or from a form on the start screen: its page waits until it is switched to.
@@ -652,6 +690,28 @@ async function stop(path: string) {
   if (!entry) return;
   entry.stopping = true;
   await entry.session.stop();
+}
+
+/** Whether a start shows its output (`Settings.details`). */
+const detailsShown = () => readSettings(settingsFile()).details === true;
+
+/** Show details or Hide details, for every company in the window and every start after this. */
+function setDetails(details: boolean) {
+  patchSettings(settingsFile(), { details });
+  for (const views of inWindow.values()) setCompanyState(views, { details });
+}
+
+/** Got it: its folder's warning is read, for good, and the app no longer waits for that. */
+function warningRead(path: string, views: CompanyViews) {
+  patchCompany(path, { warned: true });
+  setCompanyState(views, { warning: undefined });
+  showAppIfFree(views);
+}
+
+/** What the company's page says of a failure, and the output under it, for pasting to whoever can help. */
+function copyDetails({ state, log }: CompanyViews) {
+  const said = [state.name, state.pill, state.message].filter((line) => line !== undefined);
+  clipboard.writeText(detailsOf(said, log?.tail() ?? NO_TAIL));
 }
 
 /** The next launch does not open the company (`Company.open`), and its page says so. */
@@ -727,7 +787,7 @@ async function chooseFolder() {
 
 const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
-/** Where the folder dialogs of New Company and Clone Company start. */
+/** Where New Company's form and Copy from GitHub's folder dialog start. */
 const parentFolder = () => defaultParent(readCompanies(companiesFile()), homedir());
 
 /** Answers the form the start screen shows (`ask`), once: with what was typed, or undefined (Cancel, another form). */
@@ -750,6 +810,9 @@ function askFor(form: NonNullable<StartState["ask"]>): Promise<unknown> {
 
 const isIdentity = (value: unknown): value is Identity =>
   typeof (value as Identity)?.name === "string" && typeof (value as Identity)?.email === "string";
+
+const isNewCompanyAnswer = (value: unknown): value is { name: string; parent: string } =>
+  typeof (value as NewCompanyForm)?.name === "string" && typeof (value as NewCompanyForm)?.parent === "string";
 
 /**
  * Whether git has someone to commit as from `cwd`: `user.name` and `user.email`, asked for once on
@@ -817,37 +880,69 @@ async function untilThere(
   return true;
 }
 
-/** File → New Company…: an empty folder (made in the dialog, or chosen), then the launcher's init there. */
-async function newCompany(): Promise<void> {
-  notice = undefined;
+/** The new company form for a company called `name` under `parent`, where a synced folder warns before anything starts. */
+const newCompanyForm = (name: string, parent: string, problem?: string): NewCompanyForm => {
+  const warning = syncedFolderWarning(parent, homedir());
+  return {
+    kind: "new",
+    name,
+    parent,
+    place: `${withTilde(parent, homedir())}${sep}`,
+    ...(warning && { warning }),
+    ...(problem && { problem }),
+  };
+};
+
+/** The form's Change…: today's folder dialog for where it goes; what is typed in the form stays. */
+async function changePlace() {
+  if (ask?.kind !== "new") return;
   const { canceled, filePaths } = await dialog.showOpenDialog({
-    title: "Choose or make an empty folder for the new company",
-    buttonLabel: "Start Company Here",
-    defaultPath: parentFolder(),
+    title: "Choose where the new company goes",
+    buttonLabel: "Choose",
+    defaultPath: ask.parent,
     properties: ["openDirectory", "createDirectory"],
   });
-  const dir = filePaths[0];
-  if (canceled || !dir) return;
-  const problem = isCompanyFolder(dir) ? `${dir} holds a company already: open it instead.` : newCompanyProblem(dir);
-  if (problem) return tell(problem);
-  const warning = syncedFolderWarning(dir, homedir());
-  if (warning) {
-    const { response } = await dialog.showMessageBox({
-      type: "warning",
-      message: "This folder is synced",
-      detail: warning,
-      buttons: ["Choose Another Folder", "Use This Folder"],
-      defaultId: 0,
-      cancelId: 0,
-    });
-    if (response === 0) return newCompany();
-  }
-  if (!(await gitReady()) || !(await identityReady(dir))) return;
-  await begin(realPathOf(dir), createSession);
+  if (canceled || !filePaths[0] || ask?.kind !== "new") return;
+  ask = newCompanyForm(ask.name, filePaths[0]);
+  sendStart();
 }
 
 /**
- * File → Clone Company…: the repository's address (the start screen asks), the folder to clone
+ * File → New Company…: its name and where it goes (the start screen asks), then the shell makes
+ * its folder and runs the launcher's init there. Nothing is made until every question has its answer.
+ */
+async function newCompany(): Promise<void> {
+  notice = undefined;
+  let name = "";
+  let parent = parentFolder();
+  let problem: string | undefined;
+  for (;;) {
+    const value = await askFor(newCompanyForm(name, parent, problem));
+    if (!isNewCompanyAnswer(value)) return;
+    ({ name, parent } = value);
+    const target = newCompanyTarget(name, parent);
+    if ("problem" in target) {
+      problem = target.problem;
+      continue;
+    }
+    if (!(await gitReady()) || !(await identityReady(homedir()))) return;
+    try {
+      mkdirSync(target.dir, { recursive: true });
+    } catch (err) {
+      problem = `Sanoma could not make that folder: ${messageOf(err)}`;
+      continue;
+    }
+    // What the form said of a synced place is said: the page does not say it again.
+    const warned = !!syncedFolderWarning(parent, homedir());
+    const dir = realPathOf(target.dir);
+    // Asked for again while it starts, its folder still empty: it is there already.
+    if (inWindow.has(dir)) return show(dir);
+    return begin(dir, { kind: "new", how: createSession, warned });
+  }
+}
+
+/**
+ * File → Copy from GitHub…: the repository's address (the start screen asks), the folder to clone
  * into (a dialog), then the clone, as the company's session (`cloneSession`), so its page shows
  * it and a failure, and Start again clones again.
  */
@@ -863,8 +958,8 @@ async function cloneCompanyFlow(): Promise<void> {
   } while (problem);
   if (!(await gitReady())) return;
   const { canceled, filePaths } = await dialog.showOpenDialog({
-    title: "Choose the folder to clone the company into",
-    buttonLabel: "Clone Here",
+    title: "Choose the folder to copy the company into",
+    buttonLabel: "Copy Here",
     defaultPath: parentFolder(),
     properties: ["openDirectory", "createDirectory"],
   });
@@ -873,7 +968,7 @@ async function cloneCompanyFlow(): Promise<void> {
   const target = cloneTarget(url, parent);
   if ("problem" in target) return tell(target.problem);
   if (!(await identityReady(parent))) return;
-  await begin(target.dir, cloneSession(url));
+  await begin(target.dir, { kind: "clone", how: cloneSession(url) });
 }
 
 /** The companies Get Updates runs for now: a second click meanwhile does nothing. */
@@ -1027,8 +1122,8 @@ function buildMenu() {
       label: "File",
       submenu: [
         { label: "New Company…", accelerator: "CmdOrCtrl+N", click: () => void newCompany() },
-        { label: "Open Company…", accelerator: "CmdOrCtrl+O", click: () => void chooseFolder() },
-        { label: "Clone Company…", click: () => void cloneCompanyFlow() },
+        { id: "open-company", label: "Open Company…", accelerator: "CmdOrCtrl+O", click: () => void chooseFolder() },
+        { label: "Copy from GitHub…", click: () => void cloneCompanyFlow() },
         {
           label: "Open Recent",
           submenu: recent.length
@@ -1138,19 +1233,31 @@ if (squirrelStartup || !app.requestSingleInstanceLock()) {
   });
   ipcMain.handle("start:choose", () => chooseFolder());
   ipcMain.handle("start:open", (_event, path: unknown) => typeof path === "string" && openCompany(path));
-  ipcMain.handle("start:again", ({ sender }) => {
-    const [path] = companyOf(sender) ?? [];
-    if (path) void begin(path);
-  });
+  /** A message from a company's own page, about that company. */
+  const fromCompany = (channel: string, act: (path: string, views: CompanyViews) => unknown) =>
+    ipcMain.handle(channel, ({ sender }) => {
+      const company = companyOf(sender);
+      if (company) void act(...company);
+    });
+  fromCompany("start:again", (path) => begin(path));
   // A company that failed: the next launch does not open it.
-  ipcMain.handle("start:skip", ({ sender }) => {
-    const [path] = companyOf(sender) ?? [];
-    if (path) dontReopen(path);
-  });
+  fromCompany("start:skip", dontReopen);
+  fromCompany("start:stop", stopCompany);
+  fromCompany("start:got-it", warningRead);
+  fromCompany("start:copy-details", (_path, views) => copyDetails(views));
+  fromCompany("start:show-log", (path) => shell.openPath(logFile(path)));
   ipcMain.handle("start:create", () => newCompany());
   ipcMain.handle("start:clone", () => cloneCompanyFlow());
-  ipcMain.handle("start:answer", (_event, value: unknown) => answer?.(value));
-  ipcMain.handle("start:cancel", () => answer?.(undefined));
+  // For the form it was typed in: a double-click's second answer must not land on the form that followed.
+  ipcMain.handle("start:answer", (_event, kind: unknown, value: unknown) => {
+    if (ask?.kind === kind) answer?.(value);
+  });
+  ipcMain.handle("start:cancel", (_event, kind: unknown) => {
+    if (ask?.kind === kind) answer?.(undefined);
+  });
+  ipcMain.handle("start:change-place", () => changePlace());
+  ipcMain.handle("start:download", () => shell.openExternal(`https://github.com/${REPOSITORY}/releases/latest`));
+  ipcMain.handle("start:details", (_event, details: unknown) => setDetails(details === true));
 
   /**
    * The company whose app sent a `desktop:` message from its own page, in its top frame: nothing

@@ -4,7 +4,7 @@
 // same window, the first kept running and loaded; ⌘1 and the apps' companies API (the account
 // menu's) switch, Company → Stop stops the shown one and shows the other, Quit stops that, and the
 // next launch opens it again.
-import { cpSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { once } from "node:events";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -69,6 +69,9 @@ test("one window: a company from progress to app, a second beside it, switching,
     cpSync(fileURLToPath(new URL("../fixtures/company", import.meta.url)), dir, { recursive: true });
   }
   const userData = join(work, "user-data");
+  // Show details left on, so that the start's output is there to read as it comes.
+  mkdirSync(userData);
+  writeFileSync(join(userData, "settings.json"), JSON.stringify({ details: true }));
   const launchShell = (...args: string[]) =>
     electron.launch({ executablePath, args: [...(packaged ? [] : [pkg]), ...args, `--user-data-dir=${userData}`] });
   let shell: ElectronApplication | undefined;
@@ -93,6 +96,17 @@ test("one window: a company from progress to app, a second beside it, switching,
     logs.push(...[company, second].map((dir) => join(logsFolder, `${slugOf(dir)}.log`)));
     // The window shows the company's start: the install and the launcher on their way…
     await expect.poll(shownNow, { timeout: 30_000, intervals: [50] }).toMatch(/company\.html$/);
+    // Its output in the page's terminal, the colour codes read as colours.
+    const terminalText = () =>
+      shell!.evaluate(
+        ({ webContents }) =>
+          webContents
+            .getAllWebContents()
+            .find((contents) => contents.getURL().endsWith("company.html"))!
+            .executeJavaScript("document.querySelector('#log .xterm-rows')?.textContent ?? ''") as Promise<string>,
+      );
+    await expect.poll(terminalText, { timeout: 45_000 }).toContain("fixture waiting");
+    expect(await terminalText()).not.toContain("[32m");
     const [progress] = await windowsNow();
     writeFileSync(join(company, "go"), "");
     // …then the app, in that same window, alone: none other was made, and nothing beside it.

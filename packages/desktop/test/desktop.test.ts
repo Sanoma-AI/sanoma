@@ -21,9 +21,9 @@ import {
 } from "../src/companies.ts";
 import { eventOf, listeningUrlOf } from "../src/events.ts";
 import { launch, launcherEnv, launcherOf, type Stream, USAGE_EXIT } from "../src/launcher.ts";
-import { isAppPage, linkTarget } from "../src/links.ts";
-import { hidePasswords, openLog, TAIL_LINES } from "../src/logs.ts";
-import { folderArgument, realPathOf, syncedFolderWarning } from "../src/places.ts";
+import { isAppPage, linkTarget, opensInBrowser } from "../src/links.ts";
+import { detailsOf, hidePasswords, openLog, TAIL_LINES } from "../src/logs.ts";
+import { folderArgument, realPathOf, syncedFolderWarning, withTilde } from "../src/places.ts";
 import { type QuitSteps, quitOrder } from "../src/quit.ts";
 import { archWarnings, runtimeOf } from "../src/runtime.ts";
 import { firstCheckDelay, installedBySquirrel, updatesItself } from "../src/self-update.ts";
@@ -380,6 +380,14 @@ describe("companies.json", () => {
     expect(readCompanies(file)).toEqual([at("/a", 3100, "2")]);
   });
 
+  test("keeps that a synced folder's warning was read", () => {
+    const file = join(temp(), "companies.json");
+    writeCompanies(file, updated([at("/a", 3100, "2"), at("/b", 3101, "1")], "/a", { warned: true }));
+    expect(readCompanies(file)).toEqual([{ ...at("/a", 3100, "2"), warned: true }, at("/b", 3101, "1")]);
+    writeFileSync(file, JSON.stringify([{ ...at("/a", 3100, "2"), warned: "yes" }]));
+    expect(readCompanies(file)).toEqual([at("/a", 3100, "2")]);
+  });
+
   test("opens at launch the companies open at the last Quit whose folders hold one", () => {
     const list = [
       { ...at("/a", 3100, "3"), open: true },
@@ -465,6 +473,13 @@ describe("the link rule", () => {
   ])("%s: %s", (url, target) => {
     expect(linkTarget(url, app)).toBe(target);
   });
+
+  test("web and mail links go to the browser, and nothing else", () => {
+    expect(opensInBrowser("https://example.com/")).toBe(true);
+    expect(opensInBrowser("mailto:a@example.com")).toBe(true);
+    expect(opensInBrowser("file:///etc/hosts")).toBe(false);
+    expect(opensInBrowser("not a url")).toBe(false);
+  });
 });
 
 describe("the companies API", () => {
@@ -502,8 +517,40 @@ describe("logs", () => {
     }
     const log = openLog(temp(), "acme");
     log.write("stdout", database);
+    log.write("stderr", "connect failed for postgresql://u:s3cret@host/db");
     expect(readFileSync(log.file, "utf8")).not.toContain("s3cret");
-    expect(log.tail().join("\n")).not.toContain("s3cret");
+    expect(log.tail().lines).toEqual(["connect failed for postgresql://***@host/db"]);
+  });
+
+  test("hides a password that escape codes split, in the file and on the page", () => {
+    const log = openLog(temp(), "acme");
+    log.write("stderr", "\x1b[2mpostgresql:\x1b[22m//u:s3cret@host/db");
+    expect(readFileSync(log.file, "utf8")).toMatch(/Z stderr postgresql:\/\/\*\*\*@host\/db\n$/);
+    expect(log.tail().lines).toEqual(["postgresql://***@host/db"]);
+    log.write("stderr", "\x1b]8;;postgresql://u:s3cret@host/db\x07the database\x1b]8;;\x07");
+    expect(log.tail().lines.at(-1)).toBe("the database");
+  });
+
+  test("a note goes to the file alone, without its passwords", () => {
+    const log = openLog(temp(), "acme");
+    log.note("shell", "could not reach postgresql://u:s3cret@host/db");
+    expect(log.tail().lines).toEqual([]);
+    expect(readFileSync(log.file, "utf8")).toMatch(/Z shell could not reach postgresql:\/\/\*\*\*@host\/db\n$/);
+  });
+
+  test("Copy is what the page says, then the tail without colours", () => {
+    const tail = { start: 1, skipped: 0, lines: ["Packages: \x1b[32m+693\x1b[39m", "done"] };
+    expect(detailsOf(["acme", "Did not start"], tail)).toBe("acme\nDid not start\n\nPackages: +693\ndone");
+  });
+
+  test("the page gets the colours and no event lines; the file gets every line, without escape codes", () => {
+    const log = openLog(temp(), "acme");
+    log.write("stdout", '{"event":"ready","sanoma":1,"url":"http://127.0.0.1:3100"}');
+    log.write("stdout", "Packages: \x1b[32m+693\x1b[39m");
+    expect(log.tail().lines).toEqual(["Packages: \x1b[32m+693\x1b[39m"]);
+    const file = readFileSync(log.file, "utf8");
+    expect(file).toContain('"event":"ready"');
+    expect(file).toMatch(/Z stdout Packages: \+693\n$/);
   });
 
   test("timestamps each line, keeps the previous start's log as .1.log, and the last lines", () => {
@@ -514,8 +561,10 @@ describe("logs", () => {
     for (let i = 0; i < TAIL_LINES + 5; i++) second.write("stderr", `line ${i}`);
     expect(readFileSync(join(dir, "acme.1.log"), "utf8")).toMatch(/^\d{4}-\d\d-\d\dT[\d:.]+Z stdout first start\n$/);
     expect(readFileSync(second.file, "utf8").split("\n")).toHaveLength(TAIL_LINES + 6);
-    expect(second.tail()).toHaveLength(TAIL_LINES);
-    expect(second.tail().at(-1)).toMatch(/stderr line 204$/);
+    expect(second.tail().skipped).toBe(5);
+    expect(second.tail().lines).toHaveLength(TAIL_LINES);
+    expect(second.tail().lines.at(-1)).toBe("line 204");
+    expect(second.tail().start).not.toBe(first.tail().start);
     second.close();
     second.write("stdout", "after the end");
     expect(readFileSync(second.file, "utf8")).not.toContain("after the end");
@@ -541,6 +590,13 @@ describe("places", () => {
     expect(realPathOf(dir).endsWith("Acme")).toBe(true);
   });
 
+  test("shows the home folder as ~, except on Windows", () => {
+    expect(withTilde("/Users/a/acme", "/Users/a", "darwin")).toBe("~/acme");
+    expect(withTilde("/Users/a", "/Users/a", "darwin")).toBe("~");
+    expect(withTilde("/Users/ab/acme", "/Users/a", "darwin")).toBe("/Users/ab/acme");
+    expect(withTilde("C:\\Users\\a\\acme", "C:\\Users\\a", "win32")).toBe("C:\\Users\\a\\acme");
+  });
+
   test("warns about folders iCloud syncs", () => {
     const home = join("/", "Users", "a");
     const icloud = join(home, "Library", "Mobile Documents", "com~apple~CloudDocs");
@@ -557,9 +613,9 @@ describe("places", () => {
     const home = join("/", "Users", "a");
     const env = { OneDrive: join(home, "OneDrive"), OneDriveCommercial: join(home, "OneDrive - Acme") };
     const onWindows = (path: string) => syncedFolderWarning(path, home, { platform: "win32", env });
-    expect(onWindows(join(home, "OneDrive", "Documents", "acme"))).toMatch(/OneDrive syncs/);
-    expect(onWindows(join(home, "OneDrive - Acme", "acme"))).toMatch(/OneDrive syncs/);
-    expect(onWindows(join(home, "iCloudDrive", "acme"))).toMatch(/iCloud syncs/);
+    expect(onWindows(join(home, "OneDrive", "Documents", "acme"))).toMatch(/in OneDrive/);
+    expect(onWindows(join(home, "OneDrive - Acme", "acme"))).toMatch(/in OneDrive/);
+    expect(onWindows(join(home, "iCloudDrive", "acme"))).toMatch(/in iCloud/);
     // Desktop and Documents sync only when OneDrive keeps them, and then they are in its folder.
     expect(onWindows(join(home, "Documents", "acme"))).toBeUndefined();
     expect(onWindows(join(home, "Companies", "acme"))).toBeUndefined();

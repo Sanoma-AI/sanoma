@@ -1,149 +1,513 @@
-/* The shell's own pages: the start screen (index.html) and a company's progress (company.html). */
+/* The shell's own pages: the start screen (index.html) and a company's page (company.html). On the
+ * app's paper, type and pine (packages/app/src/ui.css), so that the page becomes the app in place. */
+@import "@fontsource-variable/ibm-plex-sans";
+@import "@fontsource-variable/fraunces";
+@import "@fontsource/ibm-plex-mono/400.css";
+
 :root {
   color-scheme: light dark;
-  --bg: #fafaf9;
-  --fg: #1c1917;
-  --muted: #78716c;
-  --line: #e7e5e4;
-  --card: #ffffff;
-  --accent: #1c1917;
-  --accent-fg: #fafaf9;
-  --warn: #b45309;
-  --bad: #b91c1c;
+  --bg: oklch(0.975 0.006 153.8);
+  --fg: oklch(0.219 0.011 163.8);
+  --card: oklch(0.995 0.003 145.6);
+  --pri: oklch(0.49 0.08 176.5);
+  --pri-fg: oklch(1 0 0);
+  --sec: oklch(0.931 0.009 150.7);
+  --mut: oklch(0.5 0.015 164.4);
+  --line: oklch(0.895 0.009 150.7);
+  --ok: oklch(0.498 0.101 153.8);
+  --ok-bg: oklch(0.948 0.02 154.9);
+  --wait: oklch(0.514 0.105 74.7);
+  --wait-bg: oklch(0.953 0.027 87.9);
+  --bad: oklch(0.518 0.163 27.5);
+  --bad-bg: oklch(0.937 0.022 24.4);
+  --off-bg: oklch(0.95 0 0);
   font:
-    14px/1.5 -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
+    14px/20px "IBM Plex Sans Variable",
     sans-serif;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #1c1917;
-    --fg: #f5f5f4;
-    --muted: #a8a29e;
-    --line: #44403c;
-    --card: #292524;
-    --accent: #f5f5f4;
-    --accent-fg: #1c1917;
-    --warn: #fbbf24;
-    --bad: #f87171;
+    --bg: oklch(0.173 0.006 156.5);
+    --fg: oklch(0.941 0.009 145.5);
+    --card: oklch(0.216 0.01 159.2);
+    --pri: oklch(0.7 0.101 175.1);
+    --pri-fg: oklch(0.205 0.018 177);
+    --sec: oklch(0.261 0.011 156.3);
+    --mut: oklch(0.72 0.012 158.7);
+    --line: oklch(0.299 0.009 159.5);
+    --ok: oklch(0.751 0.116 155.4);
+    --ok-bg: oklch(0.284 0.034 157.1);
+    --wait: oklch(0.792 0.12 83.3);
+    --wait-bg: oklch(0.269 0.037 86.7);
+    --bad: oklch(0.741 0.123 25.3);
+    --bad-bg: oklch(0.275 0.043 24.7);
+    --off-bg: oklch(0.28 0 0);
   }
+}
+
+* {
+  box-sizing: border-box;
+}
+[hidden] {
+  display: none !important;
 }
 body {
   margin: 0;
-  padding: 32px;
   background: var(--bg);
   color: var(--fg);
 }
 h1 {
-  font-size: 22px;
-  margin: 0 0 4px;
-}
-h2 {
-  font-size: 13px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted);
-  margin: 28px 0 8px;
+  margin: 0;
+  font:
+    400 30px/38px "Fraunces Variable",
+    Georgia,
+    serif;
+  overflow-wrap: anywhere;
 }
 p {
-  margin: 0 0 8px;
+  margin: 0;
 }
 .muted {
-  color: var(--muted);
+  color: var(--mut);
 }
-.actions {
+.small {
+  font-size: 12px;
+  line-height: 16px;
+}
+.problem {
+  color: var(--bad);
+}
+
+/* The two kinds of page: a narrow column well down the window, or all of it for the output. */
+.column {
   display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-top: 20px;
+  flex-direction: column;
+  gap: 24px;
+  width: min(520px, 100%);
+  margin: 0 auto;
+  padding: clamp(32px, 14vh, 112px) 16px 32px;
 }
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  margin-bottom: 16px;
+  border-radius: 8px;
+  background: #1f6f5f;
+  color: #fff;
+  font:
+    400 20px/1 "Fraunces Variable",
+    Georgia,
+    serif;
+}
+
 button {
-  font: inherit;
-  padding: 6px 14px;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
   border-radius: 6px;
-  border: 1px solid var(--line);
-  background: var(--card);
+  background: var(--sec);
   color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
 }
 button.primary {
-  background: var(--accent);
-  color: var(--accent-fg);
-  border-color: var(--accent);
+  background: var(--pri);
+  color: var(--pri-fg);
 }
-ul {
-  list-style: none;
+button.quiet {
+  padding: 0 6px;
+  background: none;
+}
+button.link {
+  height: auto;
+  padding: 0;
+  background: none;
+  color: inherit;
+  text-decoration: underline;
+}
+:focus-visible {
+  outline: 2px solid var(--pri);
+  outline-offset: 2px;
+}
+input:focus-visible {
+  outline-offset: -1px;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.card {
   margin: 0;
   padding: 0;
+  overflow: hidden;
+  list-style: none;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 11px;
   background: var(--card);
 }
-li + li {
+/* A list's rows; a form's fields have only space between them. */
+.card:not(.fields) > * + * {
   border-top: 1px solid var(--line);
 }
-li button {
+
+/* A row of the start screen: its whole width is a button. */
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   width: 100%;
-  text-align: left;
-  border: 0;
+  height: auto;
+  padding: 12px 16px;
   border-radius: 0;
   background: none;
-  padding: 10px 14px;
+  font-size: 14px;
+  font-weight: 400;
+  text-align: left;
 }
-li small {
-  display: block;
-  color: var(--muted);
+/* Inside, as the card clips what is outside it. */
+.row:focus-visible {
+  outline-offset: -2px;
+}
+.row:hover {
+  background: var(--sec);
+}
+.row-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+.row-name {
+  font-weight: 500;
+}
+.row small {
+  color: var(--mut);
+  font-size: 12px;
+  line-height: 16px;
+  overflow-wrap: anywhere;
+}
+.icon {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  background: var(--sec);
+}
+.icon.primary {
+  background: var(--pri);
+  color: var(--pri-fg);
+}
+.icon svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .running {
-  float: right;
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  color: var(--mut);
   font-size: 12px;
-  color: var(--muted);
+  line-height: 16px;
 }
-.warning {
-  color: var(--warn);
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ok);
 }
-.failed {
-  color: var(--bad);
+/* With companies, the list leads and the choices shrink to buttons. */
+body.returning #choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  overflow: visible;
+  border: 0;
+  background: none;
 }
-pre {
-  font:
-    11px/1.45 ui-monospace,
-    Menlo,
-    monospace;
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 10px 12px;
-  max-height: 280px;
-  overflow: auto;
-  white-space: pre-wrap;
-  word-break: break-all;
+body.returning #choices > * {
+  width: auto;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--sec);
+  font-size: 12px;
 }
-form {
-  margin-top: 20px;
-  padding: 14px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--card);
+body.returning #choices .icon,
+body.returning #choices small {
+  display: none;
 }
-label {
-  display: block;
-  margin: 8px 0 2px;
+
+/* A form: one card and its buttons. */
+.fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+label,
+.label {
+  font-weight: 500;
 }
 input {
-  font: inherit;
-  box-sizing: border-box;
   width: 100%;
-  padding: 6px 8px;
-  border-radius: 6px;
+  height: 32px;
+  padding: 0 10px;
   border: 1px solid var(--line);
+  border-radius: 6px;
   background: var(--bg);
   color: var(--fg);
+  font: inherit;
 }
-form .actions {
-  margin-top: 12px;
+.place {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
-[hidden] {
-  display: none !important;
+.place span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.banner {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--wait-bg);
+  color: var(--wait);
+}
+.banner button {
+  border: 1px solid var(--wait);
+  background: none;
+  color: inherit;
+}
+
+/* A company's page. */
+#page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+body[data-layout="column"] #page {
+  width: min(480px, 100%);
+  margin: 0 auto;
+  padding: clamp(32px, 18vh, 160px) 16px 32px;
+}
+/* A fixed height, so that the output takes what is left, and the page scrolls only once that is its least. */
+body[data-layout="wide"] #page {
+  position: relative;
+  gap: 16px;
+  height: 100vh;
+  overflow: auto;
+  padding: 24px 32px 32px;
+}
+body[data-layout="wide"] h1 {
+  font-size: 24px;
+  line-height: 32px;
+}
+/* Up beside the name, once the output is under it. */
+body[data-layout="wide"] #controls {
+  position: absolute;
+  top: 24px;
+  right: 32px;
+  gap: 8px;
+}
+body[data-layout="wide"] #name-row {
+  padding-right: 200px;
+}
+#heading {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+body[data-layout="wide"] #heading {
+  gap: 8px;
+}
+#name-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+#reason,
+#send-details {
+  max-width: 720px;
+}
+.pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--bad-bg);
+  color: var(--bad);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+}
+.pill.off {
+  background: var(--off-bg);
+  color: var(--mut);
+}
+.pill::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+#current {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+#current-step {
+  font-weight: 500;
+}
+#steps li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  color: var(--mut);
+}
+#steps li.now {
+  color: var(--fg);
+  font-weight: 500;
+}
+.step {
+  flex: none;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+}
+.step .ring {
+  stroke: var(--line);
+}
+.step .arc {
+  stroke: var(--pri);
+  stroke-width: 2;
+  transform-origin: 8px 8px;
+  animation: spin 1s linear infinite;
+}
+.step .tick-bg {
+  fill: var(--ok-bg);
+  stroke: none;
+}
+.step .tick {
+  stroke: var(--ok);
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .step .arc {
+    animation-duration: 4s;
+  }
+}
+#controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+#details {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+body[data-layout="column"] #details {
+  margin-left: -6px;
+}
+#details svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+#details[aria-expanded="true"] svg {
+  transform: rotate(90deg);
+}
+
+#output {
+  display: flex;
+  flex: 1 0 160px;
+  flex-direction: column;
+}
+#output-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  height: 40px;
+  padding: 0 8px 0 16px;
+}
+#output-head > span {
+  color: var(--mut);
+  font-size: 12px;
+  font-weight: 500;
+}
+#output-head .actions {
+  gap: 4px;
+}
+#output-head button {
+  padding: 0 8px;
+  background: none;
+}
+/* What the terminal gives up last, once the window is small: then the page scrolls. */
+#log {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 120px;
+  overflow: hidden;
+}
+/* Out of the flow: its rows follow the space (`fit`), and must not make it. */
+#log .xterm {
+  position: absolute;
+  inset: 0;
+  padding: 12px 16px;
+}
+/* xterm.css paints it black, which shows in the padding, and gives it an empty native scrollbar: xterm draws its own. */
+#log .xterm-viewport {
+  overflow: hidden;
+  background-color: var(--card);
 }

@@ -19,6 +19,8 @@ export interface Company {
    * again (`toReopen`).
    */
   open?: boolean;
+  /** Whether the person has read that its folder is a synced one (`syncedFolderWarning`), which is said once. */
+  warned?: boolean;
 }
 
 /** The first port tried for a new company: clear of the launcher's own default, 3000. */
@@ -40,9 +42,10 @@ const isCompany = (value: unknown): value is Company => {
  * A company as read: what is not one of its fields' kind is dropped, not the company, as is the
  * window bounds each company had before the shell had one window (`Settings.bounds` now).
  */
-const cleaned = ({ open, bounds: _bounds, ...company }: Company & { bounds?: unknown }): Company => ({
+const cleaned = ({ open, warned, bounds: _bounds, ...company }: Company & { bounds?: unknown }): Company => ({
   ...company,
   ...(open === true && { open }),
+  ...(warned === true && { warned }),
 });
 
 /** The companies `file` remembers, most recently opened first; none when it is missing or unreadable. */

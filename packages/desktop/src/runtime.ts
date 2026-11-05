@@ -29,7 +29,5 @@ export function runtimeOf(
  */
 export function archWarnings(translated: boolean, platform: NodeJS.Platform = process.platform): string[] {
   if (!translated || platform === "win32") return [];
-  return [
-    "This is the Intel build of Sanoma on an Apple silicon Mac: download the Apple silicon (arm64) build, which runs faster.",
-  ];
+  return ["This is the Intel build of Sanoma on an Apple silicon Mac. The Apple silicon build runs faster."];
 }

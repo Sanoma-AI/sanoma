@@ -5,7 +5,7 @@
 // packaged app; the smoke test covers the rest with a fake launcher.
 import { execFileSync } from "node:child_process";
 import { once } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { _electron as electron, type ElectronApplication, expect, test } from "@playwright/test";
@@ -47,8 +47,8 @@ const alive = (pid: number) => {
 
 test("New Company, from an empty folder to the app, then Quit, then a crash", async () => {
   const work = realpathSync.native(mkdtempSync(join(tmpdir(), "sanoma-desktop-new-")));
+  // Made by the shell, where the form says, and in `work` rather than the real home folder.
   const folder = join(work, "acme");
-  mkdirSync(folder);
   const postmasterPid = join(folder, ".sanoma", "postgres", "data", "postmaster.pid");
   const postgresPid = () => Number(readFileSync(postmasterPid, "utf8").split("\n")[0]);
   // A git with no identity, as a new computer's, so the form asks; the setting goes to this file.
@@ -81,14 +81,29 @@ test("New Company, from an empty folder to the app, then Quit, then a crash", as
   };
   const log = join(await shell.evaluate(({ app }) => app.getPath("logs")), `${slugOf(folder)}.log`);
   try {
-    // The folder dialog is the operating system's; the person's answer is the empty folder.
+    // The folder dialog behind the form's Change… is the operating system's; the person's answer is `work`.
     await shell.evaluate(({ dialog }, dir) => {
       dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [dir] })) as typeof dialog.showOpenDialog;
-    }, folder);
+    }, work);
     await expect
       .poll(() => inPage(shell!, "start", `Boolean(document.getElementById("create"))`), { timeout: 30_000 })
       .toBe(true);
     await inPage(shell, "start", `document.getElementById("create").click(), true`);
+    await expect
+      .poll(() => inPage(shell!, "start", `document.getElementById("new-form").hidden`), { timeout: 30_000 })
+      .toBe(false);
+    await inPage(
+      shell,
+      "start",
+      `const name = document.getElementById("new-name");
+       name.value = "Acme";
+       name.dispatchEvent(new Event("input"));
+       document.getElementById("new-change").click(); true`,
+    );
+    await expect
+      .poll(() => inPage(shell!, "start", `document.getElementById("new-place").textContent`), { timeout: 30_000 })
+      .toBe(folder);
+    await inPage(shell, "start", `document.getElementById("new-form").requestSubmit(), true`);
     await expect
       .poll(() => inPage(shell!, "start", `document.getElementById("identity-form").hidden`), { timeout: 30_000 })
       .toBe(false);
@@ -111,6 +126,11 @@ test("New Company, from an empty folder to the app, then Quit, then a crash", as
       )
       .toMatch(/^http:\/\/127/);
     const url = (await appUrl(shell))!;
+
+    // The event that moves a new company's page from setting up to starting; read now, as the next start begins a new log.
+    const firstStart = readFileSync(log, "utf8");
+    expect(firstStart).toContain(`"event":"database"`);
+    expect(firstStart).toContain(`"how":"created"`);
 
     // The launcher's init did its part: the commit, under the name given; the install; the Postgres.
     expect(gitIn("log", "-1", "--format=%s|%an|%ae")).toBe("Start a Sanoma company|Ada Lovelace|ada@example.com");

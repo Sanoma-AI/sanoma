@@ -6,17 +6,58 @@
     <title>Sanoma</title>
     <link rel="stylesheet" href="style.css" />
   </head>
-  <body>
-    <h1 id="company-name"></h1>
-    <p id="company-message"></p>
-    <div id="warnings"></div>
-    <ul id="progress" class="muted"></ul>
-    <div class="actions" id="again-actions" hidden><button class="primary" id="again">Start again</button></div>
-    <p class="muted" id="reopens" hidden>
-      Sanoma opens it again when it starts next.
-      <button id="skip">Don't open it at launch</button>
-    </p>
-    <pre id="log" hidden></pre>
+  <body data-layout="column">
+    <main id="page">
+      <div id="heading">
+        <div id="name-row">
+          <h1 id="company-name"></h1>
+          <span class="pill" id="pill" hidden></span>
+        </div>
+        <p class="muted small" id="place" hidden></p>
+        <div id="current" hidden>
+          <span id="current-step"></span>
+          <span class="muted" id="current-note" hidden></span>
+        </div>
+        <p id="reason" hidden></p>
+        <p class="muted" id="send-details" hidden>
+          If you did not set this up yourself, copy the details below and send them to whoever did.
+        </p>
+        <div class="actions" id="again-actions" hidden>
+          <button class="primary" id="again">Start again</button>
+          <span class="muted small" id="reopens" hidden>Sanoma opens it again when it starts next.</span>
+          <button class="link" id="skip" hidden>Don't open it at launch</button>
+        </div>
+      </div>
+      <p id="note" hidden></p>
+      <div class="banner" id="warning" role="status" hidden>
+        <span id="warning-text"></span>
+        <button id="got-it">Got it</button>
+      </div>
+      <div class="banner" id="quiet" role="status" hidden>
+        This is taking longer than usual: nothing new in the last 2 minutes. It may still finish. A slow connection can
+        do this.
+      </div>
+      <ol class="card" id="steps" hidden></ol>
+      <div id="controls" hidden>
+        <button class="quiet" id="details" aria-expanded="false">
+          <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M4.5 2.5 8 6l-3.5 3.5" /></svg>
+          <span id="details-label">Show details</span>
+        </button>
+        <button id="stop">Stop</button>
+      </div>
+      <p class="muted small" id="closing" hidden></p>
+      <section class="card" id="output" aria-label="Output" hidden>
+        <div id="output-head">
+          <span>Output</span>
+          <div class="actions">
+            <button id="copy">Copy</button>
+            <button id="show-log">Show log file</button>
+            <button id="hide" hidden>Hide</button>
+          </div>
+        </div>
+        <div id="log"></div>
+      </section>
+    </main>
     <script type="module" src="./company.js"></script>
   </body>
 </html>
