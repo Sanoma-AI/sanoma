@@ -247,6 +247,8 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     if (isLatest) await carryBuiltInRuns(resolved, () => secrets.db());
     // How often it looks for queued runs: DBOS's default second, unless a test suite asks for less.
     const pollMs = process.env.SANOMA_QUEUE_POLL_MS;
+    if (pollMs && !(Number(pollMs) > 0))
+      throw new Error(`SANOMA_QUEUE_POLL_MS is milliseconds above zero, not "${pollMs}"`);
     await DBOS.registerQueue(resolved.queueName, pollMs ? { minPollingIntervalMs: Number(pollMs) } : undefined);
     // The schedules are the latest version's: an older worker leaves them as the newer set them.
     if (isLatest && options.schedules !== false) {

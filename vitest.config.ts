@@ -44,7 +44,7 @@ export default defineConfig({
     include: ["packages/*/test/**/*.test.ts", "connectors/*/test/**/*.test.ts", "scripts/*.test.ts"],
     testTimeout: 60_000,
     hookTimeout: 60_000,
-    // Four files at once peak near 60 connections, within the 100 a default Postgres takes.
+    // Four files at once peak near 60 connections; docker-compose.yml leaves room for several gates.
     maxWorkers: 4,
     // Every spy is undone before the next test, so a test needs no try/finally to put one back.
     restoreMocks: true,
