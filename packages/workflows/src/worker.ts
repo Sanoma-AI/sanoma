@@ -417,9 +417,18 @@ function register(name: string): ScheduledWorkflowFn {
  */
 async function runWorkflow(name: string, start: RunArgs | Date): Promise<unknown> {
   const state = current;
-  // A stopped worker's state stays current while DBOS shuts down.
-  if (!state || state.stopped) throw new Error(`Run of "${name}" started with no worker running`);
-  return state.deadlines.running(DBOS.workflowID!, () => runOn(state, name, start));
+  const runId = DBOS.workflowID!;
+  if (!state) throw new Error(`Run of "${name}" started with no worker running`);
+  try {
+    // A stopped worker's state stays current while DBOS shuts down.
+    if (state.stopped) throw new Error(`Run of "${name}" started as its worker stopped`);
+    return await state.deadlines.running(runId, () => runOn(state, name, start));
+  } catch (err) {
+    // A stop's failure is not the run's outcome, but DBOS would record it as one, for good, while
+    // its pool is still open. A run's own cancellation it records nothing for: the next worker recovers it.
+    if (state.stopped && isInfrastructureError(err, state)) throw new DBOSErrors.DBOSWorkflowCancelledError(runId);
+    throw err;
+  }
 }
 
 async function runOn(state: WorkerState, name: string, start: RunArgs | Date): Promise<unknown> {
@@ -497,12 +506,8 @@ async function runOn(state: WorkerState, name: string, start: RunArgs | Date): P
     }
   } catch (err) {
     const record = entry(run, { type: "run.failed", error: errorInfo(err) });
-    if (isInfrastructureError(err, state)) {
-      skipped(record, `the run was interrupted (${errorMessage(err)})`);
-      // A stop's failure is not the run's outcome, but DBOS would record it as one, for good, while
-      // its pool is still open. A run's own cancellation it records nothing for: the next worker recovers it.
-      if (state.stopped) throw new DBOSErrors.DBOSWorkflowCancelledError(run.id);
-    } else await writeFailure(run, record, err);
+    if (isInfrastructureError(err, state)) skipped(record, `the run was interrupted (${errorMessage(err)})`);
+    else await writeFailure(run, record, err);
     throw err;
   }
   await write(run, entry(run, { type: "run.finished", output }));
