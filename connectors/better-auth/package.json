@@ -50,7 +50,6 @@
     "pg": "^8.23.1"
   },
   "devDependencies": {
-    "@sanoma-ai/app": "workspace:*",
     "@sanoma-ai/testing": "workspace:*",
     "@sanoma-ai/workflows": "workspace:*",
     "@types/pg": "^8.23.1"

@@ -10,8 +10,11 @@ import { Client, Pool } from "pg";
 // tables in a schema of its own, which the worker makes at its start (`prepareBetterAuth`) and the
 // app only checks, its cookies signed with the key the app derives for it, its rate limit in a
 // table rather than memory, and one instance per protocol, since a cookie's `Secure` flag is one
-// per instance. Nothing is cached in the cookie: every request reads its session row, so a
-// revoked session, or a `github` a sign-in just wrote, is seen at once.
+// per instance. It runs on the pool the app's client gives it (`LoginContext.database`), an
+// instance per pool, made on first use: on Node the app's one pool, on a Worker each request's
+// own, so nothing of a login lives in the process between requests. Nothing is cached in the
+// cookie either: every request reads its session row, so a revoked session, or a `github` a
+// sign-in just wrote, is seen at once.
 
 export type Protocol = "http" | "https";
 
@@ -26,7 +29,8 @@ export const SCHEMAS = { visitors: "better_auth", staff: "better_auth_staff" } a
 type Schema = (typeof SCHEMAS)[keyof typeof SCHEMAS];
 
 export interface BetterAuthSetup<O extends ExtraOptions> {
-  databaseUrl: string;
+  /** The pool the app's client runs on (`LoginContext.database`): one instance per pool it gives. */
+  database(): Promise<Pool>;
   /** The app's key for this login, 32 bytes as hex (`LoginContext.key`). */
   key: string;
   /** The schema its tables are in (`SCHEMAS`). */
@@ -72,7 +76,7 @@ function once(memo: Map<string, Promise<void>>, key: string, run: () => Promise<
   return done;
 }
 
-/** Each database and schema checked for its tables, once per process. */
+/** Each schema checked for its tables, once per process (a process has one database). */
 const checked = new Map<string, Promise<void>>();
 
 /** How long an opening login waits for a worker starting beside it to prepare the schema, and how often it looks. */
@@ -80,13 +84,15 @@ const PREPARED_WAIT_MS = 60_000;
 const PREPARED_POLL_MS = 1_000;
 
 /**
- * Opens one Better Auth per protocol on the company's database: `auths` by protocol, the `pool`
- * they share, and `close`, which ends it. Throws, the pool ended, when the key is not one the app
- * derived, or when the schema's tables are still not there, or behind this version's, a minute
- * after a worker starting beside the app should have made them (`prepareBetterAuth`).
+ * Better Auth on the company's database, as a function of the request's protocol: the instance
+ * for that protocol on the pool `database` gives now, made on its first use (one per pool and
+ * protocol, kept as long as the pool is). Throws when the key is not one the app derived; its
+ * first use on a pool throws when the schema's tables are still not there, or behind this
+ * version's, a minute after a worker starting beside the app should have made them
+ * (`prepareBetterAuth`).
  */
-export async function openBetterAuth<O extends ExtraOptions>({
-  databaseUrl,
+export function openBetterAuth<O extends ExtraOptions>({
+  database,
   key,
   schema,
   basePath,
@@ -95,9 +101,7 @@ export async function openBetterAuth<O extends ExtraOptions>({
 }: BetterAuthSetup<O>) {
   // Never Better Auth's own fallback (an environment variable, or its default secret).
   if (!/^[0-9a-f]{64}$/.test(key)) throw new Error("better-auth: the app gives no key to sign cookies with");
-  const pool = new Pool({ connectionString: databaseUrl });
-  pool.on("error", (err) => console.warn(`better-auth: a database connection failed: ${err.message}`));
-  const optionsFor = (protocol: Protocol) => ({
+  const optionsFor = (pool: Pool, protocol: Protocol) => ({
     // On only in production by default; its counts in the schema's table, never in memory.
     rateLimit: { enabled: true, ...TABLE_OPTIONS.rateLimit },
     logger: { level: "warn" as const },
@@ -121,14 +125,19 @@ export async function openBetterAuth<O extends ExtraOptions>({
       ...options.advanced,
     },
   });
-  try {
-    await once(checked, `${databaseUrl}#${schema}`, () => checkPrepared(pool, schema));
-    const auths = new Map([...hosts.keys()].map((protocol) => [protocol, betterAuth(optionsFor(protocol))]));
-    return { auths, pool, close: () => pool.end() };
-  } catch (err) {
-    await pool.end();
-    throw err;
-  }
+  type Auth = ReturnType<typeof betterAuth<ReturnType<typeof optionsFor>>>;
+  /** Each pool's instances, by protocol, for as long as the pool is referenced. */
+  const made = new WeakMap<Pool, Map<Protocol, Auth>>();
+  return async (protocol: Protocol): Promise<Auth> => {
+    const pool = await database();
+    // One database per process: checked on the first pool, for every pool after.
+    await once(checked, schema, () => checkPrepared(pool, schema));
+    let auths = made.get(pool);
+    if (!auths) made.set(pool, (auths = new Map()));
+    let auth = auths.get(protocol);
+    if (!auth) auths.set(protocol, (auth = betterAuth(optionsFor(pool, protocol))));
+    return auth;
+  };
 }
 
 /**

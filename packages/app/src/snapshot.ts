@@ -52,8 +52,8 @@ export interface AppSnapshot extends RootSnapshot {
 export const siteFileBroken = (site: SiteEntry) =>
   site.problems.some((p) => p.file === `${siteDir(site.name)}/site.ts`);
 
-/** What the Worker serves of the public sites: one with no login (the visitors' sign-in there is #609) whose `site.ts` reads. */
-export const servedOnWorker = (site: SiteEntry) => site.public && site.login === undefined && !siteFileBroken(site);
+/** What the Worker serves of the public sites: each whose `site.ts` reads, with its login when it has one. */
+export const servedOnWorker = (site: SiteEntry) => site.public && !siteFileBroken(site);
 
 /**
  * The description as the page gets it: without the source of a workflow read from its file, which

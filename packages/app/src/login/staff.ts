@@ -25,13 +25,15 @@ import { firstWordOf, initialsOf } from "../lib/names.ts";
 import { type Company, companyOf, escapeHtml, type PageFrame, smallPage, wantsJson } from "./page.ts";
 
 // The staff login on a host: a login half (Better Auth's, `betterAuthStaffLogin`) made once the app
-// listens, given what only the app has: who the files declare, the sender (a `login-code` run as
-// the runtime's agent `login`), the company's GitHub client, and the ledger a sign-in goes to.
+// listens, given what only the app has: the client's pool, who the files declare, the sender (a
+// `login-code` run as the runtime's agent `login`), the company's GitHub client, and the ledger a
+// sign-in goes to. On Node and on a Worker alike: the half reaches the database through the
+// request's client, and keeps nothing between requests.
 // Here too: the sign-in page (`/auth/login`, and any page asked for signed out), an invite's
 // landing page and `POST /auth/invite`.
 
 /** Makes the staff login half from the app's context: `betterAuthStaffLogin`. */
-export type MakeStaffLogin = (context: LoginContext) => Promise<LoginHalf>;
+export type MakeStaffLogin = (context: LoginContext) => LoginHalf | Promise<LoginHalf>;
 
 /** The company's own OAuth clients, each a sign-in method when given. */
 export type StaffSocial = SocialClients;
@@ -93,7 +95,7 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
       app = context;
       const { client, resolved } = context;
       half = await make({
-        databaseUrl: resolved.databaseUrl,
+        database: () => client.pool(),
         key: loginKey("staff"),
         secrets: secretValues(client),
         origins: [],
@@ -110,9 +112,6 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
           },
         },
       });
-    },
-    async close() {
-      await half?.close?.();
     },
     resolveActor: identityOf,
     async handle(request) {
