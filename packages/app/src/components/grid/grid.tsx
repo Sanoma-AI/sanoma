@@ -398,7 +398,8 @@ export function DataGrid({
           aria-colcount={visible.length}
           data-slot="table"
           className="table-fixed border-separate border-spacing-0 text-sm"
-          style={{ width: table.getTotalSize() }}
+          // The columns fill the page, their sizes as proportions, and scroll only once they cannot.
+          style={{ width: "100%", minWidth: table.getTotalSize() }}
           onKeyDown={(event: KeyboardEvent) => {
             // On a cell itself: not its link, nor an editor.
             const typed = editing ? undefined : typedCharacter(event);
