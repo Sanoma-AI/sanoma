@@ -5,6 +5,26 @@ import { join } from "node:path";
 /** A lock older than this is a build that was killed: no package's build takes so long. */
 const LOCK_STALE_MS = 5 * 60_000;
 
+/** Runs `fn` holding the lock `dir`, waiting for any other process that holds it. */
+function withLock(dir: string, fn: () => void): void {
+  for (;;) {
+    try {
+      mkdirSync(dir);
+      break;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      const taken = statSync(dir, { throwIfNoEntry: false })?.mtimeMs ?? Date.now();
+      if (Date.now() - taken > LOCK_STALE_MS) rmdirSync(dir);
+      else Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200);
+    }
+  }
+  try {
+    fn();
+  } finally {
+    rmdirSync(dir);
+  }
+}
+
 /**
  * Runs `build` (a command and its arguments) in `pkgDir` when one of `outputs` (paths in it) is
  * missing or older than a file under its `src/`: for tests of what a package ships, from its
@@ -23,23 +43,9 @@ export function ensureBuilt(pkgDir: string, outputs: readonly string[], build: r
     });
   };
   if (!stale()) return;
-  const lock = join(pkgDir, "node_modules", ".ensure-built.lock");
-  for (;;) {
-    try {
-      mkdirSync(lock);
-      break;
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
-      if (Date.now() - (statSync(lock, { throwIfNoEntry: false })?.mtimeMs ?? Date.now()) > LOCK_STALE_MS)
-        rmdirSync(lock);
-      else Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200);
-    }
-  }
-  try {
+  withLock(join(pkgDir, "node_modules", ".ensure-built.lock"), () => {
     if (stale()) execFileSync(build[0], build.slice(1), { cwd: pkgDir, stdio: "inherit" });
-  } finally {
-    rmdirSync(lock);
-  }
+  });
 }
 
 /**

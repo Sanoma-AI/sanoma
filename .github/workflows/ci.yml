@@ -82,7 +82,7 @@ jobs:
       - if: steps.postgres.outputs.cache-hit != 'true'
         run: pnpm --filter "./packages/postgres-bin/*" run prepack
       - run: pnpm postgres:download --check
-      - run: pnpm test --shard=${{ matrix.shard }}/4
+      - run: pnpm test --shard=${{ matrix.shard }}/${{ strategy.job-total }}
 
   # The one result a pull request reads, whatever the number of shards.
   test:
