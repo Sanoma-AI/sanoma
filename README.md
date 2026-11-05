@@ -242,7 +242,7 @@ Declare the image reference Wrangler prints (`registry.cloudflare.com/<account i
 
 On Cloudflare, the company's Worker serves public sites on their own domains without a login. Pages are prerendered or rendered on the Worker using the company's database. A page only wakes the container when it starts a workflow run. See [public sites on the Worker](connectors/cloudflare/README.md#public-sites-on-the-worker).
 
-The container's worker builds the bundle for a deploy's revision, in a checkout of its own (`GET /__sanoma/app-bundle?revision=<commit>`, [the worker's port](packages/sanoma/README.md#the-workers-port)), using `buildWorker` from `@sanoma-ai/app/build`. The build needs `workerd`, which `@sanoma-ai/app` installs alongside `wrangler` and `@cloudflare/vite-plugin`.
+The container's worker builds the app bundle for a deploy's revision, in a checkout of its own (`GET /__sanoma/app-bundle?revision=<commit>`, [the worker's port](packages/sanoma/README.md#the-workers-port)), using `buildAppBundle` from `@sanoma-ai/app/bundle`. The build needs `workerd`, which `@sanoma-ai/app` installs alongside `wrangler` and `@cloudflare/vite-plugin`.
 
 ## License
 

@@ -6,7 +6,6 @@ import { ensureBuilt, testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
 import { memoryLedger, resolveConfig, SanomaClient, type SanomaConfig } from "@sanoma-ai/workflows";
 import { collection } from "@sanoma-ai/workflows/data";
-import { describeConfig } from "@sanoma-ai/workflows/describe";
 import { executablePath, launch } from "puppeteer-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { outbound } from "../../workflows/test/fixtures/outbound/resources/data.ts";
@@ -16,6 +15,7 @@ import { type App, startApp } from "../src/index.ts";
 import { loopbackLogin } from "../src/loopback.ts";
 import { admitting } from "../src/login/admission.ts";
 import { callApi, serverFnFailure, validate } from "../src/server/core.ts";
+import { appSnapshot } from "../src/snapshot-build.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built app: the tests build it when dist/server/server.js
 // is missing or older than a file under src/. The Data section: `/data`, a collection's grid and
@@ -116,7 +116,7 @@ const searchOf = (search: Record<string, unknown>) =>
 async function callAs(actor: string, data: CallRequest) {
   const context = {
     resolved: resolveConfig(testApp.config),
-    description: describeConfig(testApp.config),
+    snapshot: await appSnapshot(testApp.config),
     client: testApp.client,
     place: "this-computer" as const,
     login: admitting(loopbackLogin(), () => ({ people: [], problems: [] })),

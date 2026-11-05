@@ -10,7 +10,7 @@ import { fakeSupabase } from "@sanoma-ai/connector-supabase/fake";
 import { ensureBuilt, testDatabaseUrl } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
 import { resolveConfig, withSetup } from "@sanoma-ai/workflows";
-import { describeConfig, LOCKFILE, readLockfile } from "@sanoma-ai/workflows/describe";
+import { LOCKFILE, readLockfile } from "@sanoma-ai/workflows/describe";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { localGitSource } from "../../sanoma/src/source.ts";
 import { ApiError, INFRA } from "../src/api.ts";
@@ -18,7 +18,8 @@ import type { AppContext } from "../src/context.ts";
 import { type App, startApp } from "../src/index.ts";
 import { loopbackLogin } from "../src/loopback.ts";
 import { admitting } from "../src/login/admission.ts";
-import { CONNECT_BRANCH, connectExisting } from "../src/server/setup.ts";
+import { CONNECT_BRANCH, connectExisting } from "../src/server/local/connect.ts";
+import { appSnapshot } from "../src/snapshot-build.ts";
 
 // Connecting an existing repository or database (/hosting/existing) in a git repository of its
 // own, with and without a remote, on the GitHub and Supabase fakes: the file rendered from what
@@ -38,13 +39,14 @@ const config = {
 };
 const test = useTestApp(config, { databaseUrl: testDatabaseUrl("existing"), source });
 const alice = { id: "alice" };
-const context = (): AppContext => ({
+/** The app's context as a request reads it: the snapshot of the files as they are now. */
+const context = async (): Promise<AppContext> => ({
   resolved: resolveConfig(test.config),
-  description: describeConfig(test.config),
+  snapshot: await appSnapshot(test.config, { source }),
   client: test.client,
   place: "this-computer",
   login: admitting(loopbackLogin(), () => ({ people: [], problems: [] })),
-  source,
+  local: { source },
 });
 
 const git = (...args: string[]) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
@@ -67,12 +69,12 @@ beforeEach(() => {
 });
 
 /** What connecting answers when it refuses. */
-const refused = (request: { repository?: string; project?: string }) =>
-  connectExisting(context(), alice, request).catch((err: unknown) => err);
+const refused = async (request: { repository?: string; project?: string }) =>
+  connectExisting(await context(), alice, request).catch((err: unknown) => err);
 
 /** Connects, then waits for the apply it started. */
 async function connect(request: { repository?: string; project?: string }) {
-  const done = await connectExisting(context(), alice, request);
+  const done = await connectExisting(await context(), alice, request);
   return { done, report: await test.client.applyReport(done.runId) };
 }
 

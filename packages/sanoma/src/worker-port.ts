@@ -74,9 +74,9 @@ const answered = (status: number, body: unknown) =>
  * host's Worker script runs at R, which a deploy downloads before it uploads the script. Built on
  * the first ask, in the background and one revision at a time: R checked out and installed beside
  * the worker's checkout (`checkout`), and built there by its own `sanoma app-bundle`
- * (`buildWorker`) into a file beside it, the checkout removed after. 202 while it builds, then 200
- * with the bundle as JSON, the file kept for the process's lifetime; 404 when R has nothing for
- * the Worker. A failed build answers 500 with why, once, and the next ask builds again.
+ * (`buildAppBundle`) into a file beside it, the checkout removed after. 202 while it builds, then
+ * 200 with the bundle (`AppBundle`) as JSON, the file kept for the process's lifetime. A failed
+ * build answers 500 with why, once, and the next ask builds again.
  */
 export function appBundleRoute({ root, token, checkout, log, run = runChild }: AppBundleOptions): IngressRoute {
   const expected = token && digest(`Bearer ${token}`);
@@ -93,9 +93,6 @@ export function appBundleRoute({ root, token, checkout, log, run = runChild }: A
       await run("pnpm", ["exec", "sanoma", "app-bundle", "--out", file], dir);
     } finally {
       await rm(dir, { recursive: true, force: true });
-    }
-    if ((await readFile(file, "utf8")) === "null") {
-      return { status: 404, body: JSON.stringify({ error: `${revision} has nothing for the Worker` }) };
     }
     log(`built the app bundle at ${revision}`);
     return { status: 200, file };

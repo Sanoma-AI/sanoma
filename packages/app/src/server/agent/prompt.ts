@@ -51,7 +51,7 @@ const actingFor = (appName: string, principal: Principal, chat: Chat) =>
  * the chat's earlier messages (`history`, their text), since each turn starts a new session of it.
  */
 export function harnessInstructions(app: AppContext, principal: Principal, chat: Chat, history: ChatMessage[]): string {
-  const sections = [HARNESS_RULES, actingFor(app.description.appName, principal, chat)];
+  const sections = [HARNESS_RULES, actingFor(app.snapshot.description.appName, principal, chat)];
   // Whole messages, the latest first, until the limit (the latest one always).
   const said: string[] = [];
   let size = 0;
@@ -75,7 +75,7 @@ function spoken(message: ChatMessage): string {
 
 /** The loop's instructions for `principal`'s turn in `chat`. */
 export async function instructions(app: AppContext, principal: Principal, chat: Chat): Promise<string> {
-  const { description } = app;
+  const { description } = app.snapshot;
   const sections = [RULES, actingFor(description.appName, principal, chat)];
   const [guide, drafts] = await Promise.all([companyGuide(app), openDrafts(app, principal)]);
   if (guide) sections.push(`The company's AGENTS.md:\n\n${guide}`);
@@ -98,14 +98,15 @@ export async function instructions(app: AppContext, principal: Principal, chat: 
 }
 
 /** The repository's AGENTS.md, cut to its limit; none without one. */
-async function companyGuide({ source, resolved }: AppContext): Promise<string | undefined> {
-  const root = source?.root ?? resolved.root;
+async function companyGuide({ local, resolved }: AppContext): Promise<string | undefined> {
+  const root = local?.source?.root ?? resolved.root;
   const text = root && (await readFile(join(root, "AGENTS.md"), "utf8").catch(() => undefined));
   return text && text.length > AGENTS_LIMIT ? `${text.slice(0, AGENTS_LIMIT)}\n[cut]` : text;
 }
 
 /** The person's chats whose drafts are still open (`Source.drafts`). */
-async function openDrafts({ source, client }: AppContext, principal: Principal): Promise<Chat[]> {
+async function openDrafts({ local, client }: AppContext, principal: Principal): Promise<Chat[]> {
+  const source = local?.source;
   if (!source?.drafts) return [];
   const [open, chats] = await Promise.all([
     source.drafts().then((ids) => new Set(ids)),

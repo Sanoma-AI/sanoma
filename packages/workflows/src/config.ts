@@ -765,9 +765,9 @@ async function readDeclared(
   const keep = new Set<string>();
   const leftOut = new Set<string>();
   if (root !== undefined) {
-    const { deriveHosts, hostFacts } = await import("./host-derive.ts");
+    const { deriveHosts, hostFacts, hostRootFacts } = await import("./host-derive.ts");
     const facts = await hostFacts({
-      root,
+      rootFacts: () => hostRootFacts(root),
       resources,
       types,
       drivers: options.drivers,
