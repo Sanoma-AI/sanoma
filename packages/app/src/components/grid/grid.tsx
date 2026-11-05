@@ -187,7 +187,7 @@ export function DataGrid({
   useEffect(() => {
     if (wasHeld.current?.some((k) => !held?.includes(k))) void records.utils.refetch();
     wasHeld.current = held;
-  });
+  }, [held, records]);
   const [conflicts, setConflicts] = useState<ReadonlyMap<string, Conflict>>(new Map());
   const dropConflict = (conflict: Conflict) =>
     setConflicts((all) => {
@@ -253,11 +253,11 @@ export function DataGrid({
         return void toast.error(`Could not read ${conflict.key}`, { description: errorMessage(err) });
       }
     }
-    dropConflict(conflict);
     if (!current) {
       toast.error(`${conflict.key} is gone`, { description: "Someone else deleted the record." });
-      return void records.utils.refetch();
+      return keepTheirs(conflict);
     }
+    dropConflict(conflict);
     // The record as it is now is what the edit is saved over (`ifRecord`).
     await records.utils.writeUpsert(current);
     save(conflict.key, conflict.field, withValue(current.record, conflict.field, conflict.mine));
@@ -302,15 +302,15 @@ export function DataGrid({
     const cell = editingNow.current;
     if (!cell) return;
     const field = fields.get(cell.field) as ScalarField;
-    const row = rows.find((r) => r.id === cell.key);
+    // Over the record as it shows, the edits before it still saving included.
+    const shown = records.get(cell.key);
     refocus.current = fromKeyboard;
     setEditing(null);
     if (then) table.moveCellSelection(then);
     // Left as it opened: never a save, even of a value the editor cannot hold (an enum's value
     // its options no longer have), which it would drop.
-    if (!row || cell.draft === cell.start) return;
-    // Over the row as it shows, the edits before it still saving included.
-    const next = recordWith(field, row.original.record, cell.draft);
+    if (!shown || cell.draft === cell.start) return;
+    const next = recordWith(field, shown.record, cell.draft);
     if ("error" in next) return void toast.error(`${cell.field}: ${next.error}`);
     save(cell.key, cell.field, next.record);
   };
@@ -457,7 +457,7 @@ export function DataGrid({
                   {row.getVisibleCells().map((cell, c) => {
                     const id = cell.column.id;
                     const field = fields.get(id);
-                    const conflict = conflicts.get(conflictId({ key: saved.key, field: id }));
+                    const conflict = rowConflicts.find((other) => other.field === id);
                     const isEditing = editing?.key === saved.key && editing.field === id && field;
                     // Before anything is focused, the first cell is the grid's one stop for Tab.
                     const tabIndex = !focused && index === 0 && c === 0 ? 0 : cell.getTabIndex();

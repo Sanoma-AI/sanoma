@@ -13,14 +13,12 @@ import { hashKey, type QueryClient, type QueryKey } from "@tanstack/react-query"
 // It imports nothing that defines a server function (`queries.ts`, `common.tsx`): the page hands
 // it those, so a test can hand it fakes.
 
-/** By transaction, the records as its calls left them, by key: null once deleted. */
-const savedBy = new WeakMap<object, Map<string, Saved | null>>();
-
 /**
- * The record `key` as a transaction's call left it, null once deleted: undefined while no call
- * answered, or when the call is held for an approval.
+ * The record `key` as a transaction's call left it (`persist` keeps it in the transaction's
+ * metadata, by key), null once deleted: undefined while no call answered, or when the call is
+ * held for an approval.
  */
-export const savedIn = (tx: object, key: string): Saved | null | undefined => savedBy.get(tx)?.get(key);
+export const savedIn = (tx: Pick<Transaction, "metadata">, key: string) => tx.metadata[key] as Saved | null | undefined;
 
 /** A grid edit: the record `key` names, as the edit leaves it. */
 export interface RecordEdit {
@@ -49,17 +47,17 @@ export interface RecordsSource {
 function createRecordsView(queryClient: QueryClient, { query, calls, held }: RecordsSource) {
   // The record `key` as the collection last read or saved it (the query's rows, which its writes
   // keep): what an update is saved over, never an edit before it still on screen, which its
-  // call may have held or saved reshaped.
+  // call may have held or saved reshaped. Not the collection's `base`, which holds a save's
+  // answer back while another record's save is under way.
   const stored = (key: string) =>
     queryClient.getQueryData<Saved[]>(query.queryKey)?.find((row) => row.key === key)?.record;
   const persist = async ({ transaction }: { transaction: Transaction<Saved> }) => {
-    const saved = new Map<string, Saved | null>();
     for (const mutation of transaction.mutations) {
       try {
         if (mutation.type === "delete") {
           await calls.delete({ key: mutation.key });
           await collection.utils.writeDelete(mutation.key);
-          saved.set(mutation.key, null);
+          transaction.metadata[mutation.key] = null;
           continue;
         }
         const { record } = mutation.modified;
@@ -69,7 +67,7 @@ function createRecordsView(queryClient: QueryClient, { query, calls, held }: Rec
             : { record, ifRecord: stored(mutation.key) ?? (mutation.original as Saved).record },
         );
         await collection.utils.writeUpsert(answer);
-        saved.set(answer.key, answer);
+        transaction.metadata[answer.key] = answer;
       } catch (err) {
         // A call held for an approval is not refused: it waits, as a run of `call`. Nothing is
         // written, so the row shows the record as it is stored, not the change, until that run
@@ -77,7 +75,6 @@ function createRecordsView(queryClient: QueryClient, { query, calls, held }: Rec
         if (!held(err, queryClient)) throw err;
       }
     }
-    savedBy.set(transaction, saved);
   };
   const collection = createCollection({
     ...queryCollectionOptions({
@@ -134,13 +131,12 @@ export function recordsView(queryClient: QueryClient, source: RecordsSource): Re
   let byKey = views.get(queryClient);
   if (!byKey) views.set(queryClient, (byKey = new Map()));
   const id = hashKey(source.query.queryKey);
-  let view = byKey.get(id);
-  if (!view) {
-    const made = (view = createRecordsView(queryClient, source));
-    byKey.set(id, made);
-    made.collection.on("status:cleaned-up", () => {
-      if (byKey.get(id) === made) byKey.delete(id);
-    });
-  }
+  const cached = byKey.get(id);
+  if (cached) return cached;
+  const view = createRecordsView(queryClient, source);
+  byKey.set(id, view);
+  view.collection.on("status:cleaned-up", () => {
+    if (byKey.get(id) === view) byKey.delete(id);
+  });
   return view;
 }

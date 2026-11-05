@@ -38,9 +38,18 @@ function viewOf(...rows: Saved[]) {
   queryClient.setQueryData(["data", "leads", QUERY], rows);
   const view = recordsView(queryClient, sourceOf(QUERY));
   // Kept syncing, as a mounted grid keeps it.
-  view.collection.subscribeChanges(() => {});
-  return { queryClient, ...view };
+  const subscription = view.collection.subscribeChanges(() => {});
+  return { queryClient, subscription, ...view };
 }
+
+/** A change of `key`'s stage, as the collection's own update makes it. */
+const setStage = ({ collection }: ReturnType<typeof viewOf>, key: string, stage: string) =>
+  collection.update(key, (draft) => {
+    draft.record = { ...draft.record, stage };
+  });
+
+const HELD = new ApiError(409, { error: "Held for approval", code: "approval_pending", runId: "call:ada:1" });
+const DENIED = new ApiError(403, { error: "leads are not lost", code: "policy_denied" });
 
 /** What `save` answers for `input`: the record as saved, by ada. */
 const savedBy = (input: { record: Record<string, unknown> }): Promise<Saved> =>
@@ -58,10 +67,8 @@ describe("the Data page's records collection", () => {
 
   it("lets a view go once nothing shows it, query and all, and makes it again for the search", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
-    const queryClient = new QueryClient();
-    queryClient.setQueryData(["data", "leads", QUERY], [row("Acme", {})]);
-    const view = recordsView(queryClient, sourceOf(QUERY));
-    view.collection.subscribeChanges(() => {}).unsubscribe();
+    const { queryClient, subscription, ...view } = viewOf(row("Acme", {}));
+    subscription.unsubscribe();
     // Its 10 s, and the moment the library takes to start counting them.
     await vi.advanceTimersByTimeAsync(11_000);
     vi.useRealTimers();
@@ -75,11 +82,10 @@ describe("the Data page's records collection", () => {
   });
 
   it("saves an update over the record it found (ifRecord), and keeps what the save answered", async () => {
-    const { collection } = viewOf(row("Acme", { stage: "new" }));
+    const view = viewOf(row("Acme", { stage: "new" }));
+    const { collection } = view;
     calls.save.mockImplementationOnce(savedBy);
-    const tx = collection.update("Acme", (draft) => {
-      draft.record = { ...draft.record, stage: "replied" };
-    });
+    const tx = setStage(view, "Acme", "replied");
     // At once, before the call answers.
     expect(collection.get("Acme")?.record.stage).toBe("replied");
     await tx.when("settled");
@@ -117,8 +123,7 @@ describe("the Data page's records collection", () => {
     calls.save.mockImplementationOnce(
       () =>
         new Promise((_, reject) => {
-          hold = () =>
-            reject(new ApiError(409, { error: "Held for approval", code: "approval_pending", runId: "call:ada:1" }));
+          hold = () => reject(HELD);
         }),
     );
     const first = edit({ key: "Acme", record: { company: "Acme", stage: "won" } });
@@ -141,11 +146,10 @@ describe("the Data page's records collection", () => {
 
   it("rolls the edits made on a refused one back with it, and saves the next edit after them", async () => {
     const { collection, edit } = viewOf(row("Acme", { stage: "new" }));
-    const denied = new ApiError(403, { error: "leads are not lost", code: "policy_denied" });
-    calls.save.mockRejectedValueOnce(denied);
+    calls.save.mockRejectedValueOnce(DENIED);
     const first = edit({ key: "Acme", record: { company: "Acme", stage: "lost" } });
     const second = edit({ key: "Acme", record: { company: "Acme", stage: "lost", contact: "a@acme.test" } });
-    await expect(first.when("settled")).rejects.toBe(denied);
+    await expect(first.when("settled")).rejects.toBe(DENIED);
     await expect(second.when("settled")).rejects.toBeUndefined();
     expect(collection.get("Acme")?.record).toEqual({ company: "Acme", stage: "new" });
     calls.save.mockImplementationOnce(savedBy);
@@ -158,43 +162,35 @@ describe("the Data page's records collection", () => {
   });
 
   it("rolls a denied save back, failing with the policy's error", async () => {
-    const { collection } = viewOf(row("Acme", { stage: "new" }));
-    const denied = new ApiError(403, { error: "leads are not lost", code: "policy_denied" });
-    calls.save.mockRejectedValueOnce(denied);
-    const tx = collection.update("Acme", (draft) => {
-      draft.record = { ...draft.record, stage: "lost" };
-    });
-    await expect(tx.when("settled")).rejects.toBe(denied);
-    expect(collection.get("Acme")?.record.stage).toBe("new");
-    expect(held).toHaveBeenCalledWith(denied, expect.any(QueryClient));
+    const view = viewOf(row("Acme", { stage: "new" }));
+    calls.save.mockRejectedValueOnce(DENIED);
+    const tx = setStage(view, "Acme", "lost");
+    await expect(tx.when("settled")).rejects.toBe(DENIED);
+    expect(view.collection.get("Acme")?.record.stage).toBe("new");
+    expect(held).toHaveBeenCalledWith(DENIED, expect.any(QueryClient));
   });
 
   it("rolls a save over a changed record back, failing with record_changed and the record as it stands", async () => {
-    const { collection } = viewOf(row("Acme", { stage: "new" }));
+    const view = viewOf(row("Acme", { stage: "new" }));
     const current = { ...row("Acme", {}, "cy"), record: { company: "Acme", stage: "meeting" } };
     calls.save.mockRejectedValueOnce(
       new ApiError(409, { error: "Collection record changed or is missing", code: "record_changed", current }),
     );
-    const tx = collection.update("Acme", (draft) => {
-      draft.record = { ...draft.record, stage: "replied" };
-    });
-    const err = await tx.when("settled").catch((e: unknown) => e);
+    const err = await setStage(view, "Acme", "replied")
+      .when("settled")
+      .catch((e: unknown) => e);
     expect(errorBodyOf(err)).toMatchObject({ code: "record_changed", current });
-    expect(collection.get("Acme")?.record.stage).toBe("new");
+    expect(view.collection.get("Acme")?.record.stage).toBe("new");
   });
 
   it("resolves a save held for an approval, showing the record as stored until the run ends", async () => {
-    const { queryClient, collection } = viewOf(row("Acme", { stage: "new" }));
-    calls.save.mockRejectedValueOnce(
-      new ApiError(409, { error: "Held for approval", code: "approval_pending", runId: "call:ada:1" }),
-    );
-    const tx = collection.update("Acme", (draft) => {
-      draft.record = { ...draft.record, stage: "won" };
-    });
+    const view = viewOf(row("Acme", { stage: "new" }));
+    calls.save.mockRejectedValueOnce(HELD);
+    const tx = setStage(view, "Acme", "won");
     await expect(tx.when("settled")).resolves.toBe(tx);
     expect(savedIn(tx, "Acme")).toBeUndefined();
-    expect(held).toHaveBeenCalledWith(expect.any(ApiError), queryClient);
-    expect(collection.get("Acme")?.record.stage).toBe("new");
+    expect(held).toHaveBeenCalledWith(HELD, view.queryClient);
+    expect(view.collection.get("Acme")?.record.stage).toBe("new");
   });
 
   it("adds a record only where none is (ifAbsent), and deletes one", async () => {

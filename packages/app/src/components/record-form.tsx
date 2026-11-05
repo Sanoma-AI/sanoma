@@ -142,19 +142,16 @@ function DeleteRecord({
   onDeleted: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  // What the dialog shows while the delete is under way, or once it failed.
-  const call = useMutation({ mutationFn: () => records.delete(recordKey).when("settled") });
-  const remove = async () => {
-    try {
+  // What the dialog shows while the delete is under way, or once it failed (a denial stays in it).
+  const call = useMutation({
+    mutationFn: () => records.delete(recordKey).when("settled"),
+    onSuccess: (tx) => {
       // A held delete leaves the record, marked as waiting, until its run ends: its toast said so.
-      if (savedIn(await call.mutateAsync(), recordKey) === null) toast.success(`Deleted ${recordKey}`);
-    } catch {
-      // A denial, or any other failure, stays in the dialog.
-      return;
-    }
-    setOpen(false);
-    onDeleted();
-  };
+      if (savedIn(tx, recordKey) === null) toast.success(`Deleted ${recordKey}`);
+      setOpen(false);
+      onDeleted();
+    },
+  });
   return (
     <>
       <Button type="button" variant="outline" className="ml-auto" disabled={disabled} onClick={() => setOpen(true)}>
@@ -182,7 +179,7 @@ function DeleteRecord({
             <DialogClose render={<Button type="button" variant="outline" disabled={call.isPending} />}>
               Cancel
             </DialogClose>
-            <Button type="button" variant="destructive" disabled={call.isPending} onClick={() => void remove()}>
+            <Button type="button" variant="destructive" disabled={call.isPending} onClick={() => call.mutate()}>
               {call.isPending && <Spinner data-icon="inline-start" />}
               Delete
             </Button>

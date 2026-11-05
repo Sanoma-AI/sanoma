@@ -92,14 +92,14 @@ function CollectionPage() {
   });
   // The search whose rows are on screen: this one once its records are read, the one before
   // while they are (`placeholderData`). Its collection is what the grid and the form change.
-  const [shown, setShown] = useState({ name, query });
-  if (!records.isPlaceholderData && hashKey([name, query]) !== hashKey([shown.name, shown.query]))
-    setShown({ name, query });
+  const [lastRead, setLastRead] = useState(query);
+  const shown = records.isPlaceholderData ? lastRead : query;
+  if (hashKey([shown]) !== hashKey([lastRead])) setLastRead(shown);
   const queryClient = useQueryClient();
   const view = records.data
     ? recordsView(queryClient, {
-        query: recordsQuery(shown.name, shown.query),
-        calls: (api as UntypedApi).data[shown.name],
+        query: recordsQuery(name, shown),
+        calls: (api as UntypedApi).data[name],
         held: toastIfHeld,
       })
     : undefined;
@@ -147,10 +147,10 @@ function CollectionPage() {
                 key={name}
                 collection={collection}
                 view={view}
-                order={shown.query.order}
+                order={shown.order}
                 open={search.record}
-                filtered={shown.query.where !== undefined}
-                limit={shown.query.limit}
+                filtered={shown.where !== undefined}
+                limit={shown.limit}
                 hide={search.hide}
                 people={people}
               />

@@ -1,11 +1,9 @@
 import type { CellSelectionDirection } from "@tanstack/react-table";
 import { type UseHotkeyDefinition, useHotkeys } from "@tanstack/react-hotkeys";
 
-// The grid's keyboard, scoped to the grid's body (its cells, not its headings): arrows move the
-// selection, Shift and an arrow extend it, Enter starts editing the cell or commits the edit, Esc
-// cancels it, Tab moves right (and out of the grid past the last column), Space expands the
-// record, Cmd/Ctrl+C copies the selection. Typing a character on a cell starts editing it with that character
-// (`typedCharacter`, which the grid's own key handler reads, as no hotkey names every key).
+// The grid's keyboard, scoped to the grid's body, so a heading's sort link keeps Tab, the arrows
+// and Space. Typing a character on a cell starts editing it with that character: the grid's own
+// key handler reads it (`typedCharacter`), as no hotkey names every key.
 
 /** What the keys do: the grid's to say. */
 interface GridKeys {
@@ -29,10 +27,10 @@ const ARROWS = [
   ["ArrowRight", "right"],
 ] as const;
 
-/** Tab's move: the browser's own move of the focus, out of the grid, once the selection cannot move. */
-const tab = (direction: CellSelectionDirection, move: GridKeys["move"]) => (event: KeyboardEvent) => {
-  if (move(direction)) event.preventDefault();
-};
+const TABS = [
+  ["Tab", "right"],
+  ["Shift+Tab", "left"],
+] as const;
 
 /** Registers the grid's keys on `target`, the grid's body (none while it is not mounted). */
 export function useGridKeys(target: HTMLElement | null, keys: GridKeys) {
@@ -48,13 +46,19 @@ export function useGridKeys(target: HTMLElement | null, keys: GridKeys) {
     { hotkey: "F2", callback: keys.edit, options: browsing },
     { hotkey: "Space", callback: keys.expand, options: browsing },
     { hotkey: "Mod+C", callback: keys.copy, options: browsing },
-    // Past the last cell, Tab leaves the grid: never a trap for the keyboard.
-    { hotkey: "Tab", callback: tab("right", keys.move), options: { ...browsing, preventDefault: false } },
-    { hotkey: "Shift+Tab", callback: tab("left", keys.move), options: { ...browsing, preventDefault: false } },
     { hotkey: "Enter", callback: () => keys.commit(), options: editing },
     { hotkey: "Escape", callback: keys.cancel, options: editing },
-    { hotkey: "Tab", callback: () => keys.commit("right"), options: editing },
-    { hotkey: "Shift+Tab", callback: () => keys.commit("left"), options: editing },
+    ...TABS.flatMap(([key, direction]) => [
+      // Past the last cell, the browser's own Tab takes the focus out of the grid: never a trap.
+      {
+        hotkey: key,
+        callback: (event: KeyboardEvent) => {
+          if (keys.move(direction)) event.preventDefault();
+        },
+        options: { ...browsing, preventDefault: false },
+      },
+      { hotkey: key, callback: () => keys.commit(direction), options: editing },
+    ]),
   ];
   useHotkeys(definitions, { target, conflictBehavior: "allow" });
 }
