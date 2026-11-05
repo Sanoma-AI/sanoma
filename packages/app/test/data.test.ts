@@ -325,7 +325,7 @@ describe("the Data section", () => {
     ).toMatchObject({ body: { record: { stage: "replied" }, updatedBy: "bo" } });
     expect(
       await callAs("cy", { name: "data.outbound.delete", input: { key: "Hooli" }, id: crypto.randomUUID() }),
-    ).toEqual({ body: { deleted: true } });
+    ).toEqual({ body: { key: "Hooli", deleted: true } });
     expect(rowKeys((await page(`/data/outbound${searchOf({ key: "Hoo" })}`)).html)).toEqual([]);
   });
 
