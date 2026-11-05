@@ -189,6 +189,7 @@ describe("a direct call", () => {
         workflow: "call",
         type: "op.called",
         op: "data.outbound.save",
+        target: "data:outbound/Acme",
         effect: "write",
         input: { record: lead("Acme") },
         decision: { kind: "allow", reasons: ["allow-by-default"], policyVersion: expect.any(String) },
@@ -196,6 +197,27 @@ describe("a direct call", () => {
         durationMs: expect.any(Number),
       },
     ]);
+  });
+
+  it("reads a record's history from the ledger by its target, newest first, the refused write among them", async () => {
+    await client.call("data.outbound.save", { record: lead("Acme") }, { actor: ada, id: "h1" });
+    await client.call("data.outbound.save", { record: lead("Acme", "contacted") }, { actor: ada, id: "h2" });
+    await client.call("data.outbound.save", { record: lead("Other") }, { actor: ada, id: "h3" });
+    await failure(
+      client.call(
+        "data.outbound.save",
+        { record: { ...lead("Acme", "contacted"), contact: "changed@acme.test" }, ifRecord: lead("Acme") },
+        { actor: ada, id: "h4" },
+      ),
+    );
+    const history = await client.history("data:outbound/Acme");
+    expect(history.map((r) => [r.runId, r.type === "op.called" && r.error ? "failed" : "ok"])).toEqual([
+      ["direct:ada:h4", "failed"],
+      ["direct:ada:h2", "ok"],
+      ["direct:ada:h1", "ok"],
+    ]);
+    expect(await client.history("data:outbound/Acme", 1)).toMatchObject([{ runId: "direct:ada:h4" }]);
+    expect(await client.history("data:outbound/Nobody")).toEqual([]);
   });
 
   it("enforces conditional writes through policy and audits success and stale refusal", async () => {

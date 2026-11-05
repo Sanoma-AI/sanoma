@@ -12,6 +12,7 @@ import {
   type Step as GherkinStep,
 } from "@cucumber/messages";
 import type { z } from "zod";
+import { targetOf } from "./call.ts";
 import type { RunSummary, SanomaClient } from "./client.ts";
 import type { Approver, Principal } from "./define.ts";
 import type { ResolvedConfig } from "./config.ts";
@@ -1190,6 +1191,7 @@ function testWorld(built: Built, { driver, fake, live }: FeatureTarget) {
             record({
               type: "op.called",
               op: op.id,
+              ...targetOf(op, input),
               effect: op.effect,
               input,
               decision: { kind: "allow" },

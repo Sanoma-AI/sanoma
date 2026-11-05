@@ -73,6 +73,40 @@ describe.each<[string, () => LedgerStore]>([
     expect(await store.read("never-ran")).toEqual([]);
   });
 
+  it("reads the calls that acted on a target across runs, newest first, at most the limit", async () => {
+    const store = make();
+    const key = randomUUID();
+    const target = `data:leads/${key}`;
+    const called = (runId: string, seq: number, at: number, on = target): LedgerRecord => ({
+      v: 1,
+      app: "test",
+      id: `${runId}:op.called:${seq}`,
+      runId,
+      seq,
+      at,
+      actor: { id: "a" },
+      workflow: "w",
+      type: "op.called",
+      op: "data.leads.save",
+      target: on,
+      effect: "write",
+      input: {},
+      decision: { kind: "allow" },
+      durationMs: 0,
+    });
+    const [a, b] = [randomUUID(), randomUUID()];
+    await store.append(called(a, 1, 10));
+    await store.append(called(a, 2, 30));
+    await store.append(called(b, 0, 20));
+    await store.append(called(b, 1, 20));
+    await store.append(called(b, 2, 40, `data:leads/${key}-other`));
+    await store.append(rec(b, 3, "run.finished"));
+    const ids = (records: LedgerRecord[]) => records.map((r) => `${r.runId === a ? "a" : "b"}:${r.seq}`);
+    expect(ids(await store.readByTarget(target, 10))).toEqual(["a:2", "b:1", "b:0", "a:1"]);
+    expect(ids(await store.readByTarget(target, 2))).toEqual(["a:2", "b:1"]);
+    expect(await store.readByTarget(`data:leads/${key}-none`, 10)).toEqual([]);
+  });
+
   it("names the record when it can't be written as JSON, and warns when a repeat id differs", async () => {
     const store = make();
     const run = randomUUID();
@@ -269,6 +303,7 @@ const flaky = (failures: number) => {
     calls: () => calls,
     store: {
       read: store.read,
+      readByTarget: store.readByTarget,
       async append(record: LedgerRecord) {
         if (++calls <= failures) throw new Error(`disk full (${calls})`);
         await store.append(record);
@@ -403,6 +438,7 @@ describe("writing a run's records", () => {
     let tries = 0;
     const corrupt: LedgerStore = {
       read: store.read,
+      readByTarget: store.readByTarget,
       async append() {
         tries++;
         throw Object.assign(new Error("corrupt ledger line"), { retryable: false });

@@ -133,18 +133,21 @@ describe("the collections' driver on Postgres", () => {
       call(leads.save, { record: { ...record, seats: 1 }, ifRecord: record }, "ada"),
       call(leads.save, { record: { ...record, seats: 2 }, ifRecord: record }, "bo"),
     ]);
-    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const won = results.find((result) => result.status === "fulfilled");
+    expect(won).toBeDefined();
+    // The refusal carries the record as the winner left it, so the loser settles the conflict without another read.
     expect(results.find((result) => result.status === "rejected")).toMatchObject({
-      reason: { status: 409, retryable: false, vendorCode: "record_changed" },
+      reason: { status: 409, retryable: false, vendorCode: "record_changed", current: won!.value },
     });
     const current = await call(leads.get, { key: "Acme" });
     await expect(call(leads.save, { record, ifRecord: record }, "late")).rejects.toMatchObject({
       vendorCode: "record_changed",
+      current,
     });
     expect(await call(leads.get, { key: "Acme" })).toEqual(current);
     await expect(
       call(leads.save, { record: { company: "Missing", stage: "new" }, ifRecord: {} }),
-    ).rejects.toMatchObject({ vendorCode: "record_changed" });
+    ).rejects.toMatchObject({ vendorCode: "record_changed", current: null });
     expect(await call(leads.get, { key: "Missing" })).toBeNull();
   });
 

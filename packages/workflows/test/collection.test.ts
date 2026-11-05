@@ -156,19 +156,23 @@ describe("the collections' fake", () => {
     fake.reset();
     await expect(call(outbound.save, { record: lead, ifRecord: lead }, "ada")).rejects.toMatchObject({
       vendorCode: "record_changed",
+      current: null,
     });
     await call(outbound.save, { record: { ...lead, seats: undefined } }, "owner");
     const record = { ...lead, stage: "won" };
     const transition = await call(outbound.save, { record, ifRecord: lead }, "ada");
     expect(await call(outbound.save, { record, ifRecord: lead }, "ada")).toEqual(transition);
+    // The refusal says what the record is now, for the caller to settle the conflict without another read.
     await expect(call(outbound.save, { record, ifRecord: lead }, "bo")).rejects.toMatchObject({
       status: 409,
       retryable: false,
       vendorCode: "record_changed",
+      current: transition,
     });
     const later = await call(outbound.save, { record: { ...record, seats: 3 }, ifRecord: record }, "owner");
     await expect(call(outbound.save, { record, ifRecord: lead }, "ada")).rejects.toMatchObject({
       vendorCode: "record_changed",
+      current: later,
     });
     expect(await call(outbound.get, { key: "Acme" })).toEqual(later);
   });

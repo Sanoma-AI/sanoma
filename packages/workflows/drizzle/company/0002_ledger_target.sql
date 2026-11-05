@@ -1,0 +1,2 @@
+ALTER TABLE "sanoma_ledger" ADD COLUMN "target" text GENERATED ALWAYS AS ("record" ->> 'target') STORED;--> statement-breakpoint
+CREATE INDEX "sanoma_ledger_target" ON "sanoma_ledger" USING btree ("target");
