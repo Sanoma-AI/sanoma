@@ -63,11 +63,15 @@ function localBox(id: string, home: string, base: Record<string, string>): Box {
       let ended = false;
       const exited = new Promise<{ exitCode: number }>((done) => {
         child.on("error", () => done({ exitCode: 127 }));
-        child.on("close", (code) => {
+        // Exited when it exits, not when its pipes close: what it left running may hold them. What
+        // it printed last still arrives, so the end waits a moment for that.
+        child.on("exit", (code) => {
           ended = true;
           // Forgotten once none of its group is left, so `stop` kills no group its pid leads later.
           if (group !== undefined && !groupAlive(group)) groups.delete(group);
-          done({ exitCode: code ?? 1 });
+          const end = () => done({ exitCode: code ?? 1 });
+          child.on("close", end);
+          setTimeout(end, PIPES_WAIT).unref();
         });
       });
       const kill = (sig: NodeJS.Signals = "SIGKILL") => {
@@ -103,10 +107,13 @@ function localBox(id: string, home: string, base: Record<string, string>): Box {
   };
 }
 
+/** How long a command's last output may take to arrive after it exits, in ms. */
+const PIPES_WAIT = 200;
+
 const web = (stream: Readable) => Readable.toWeb(stream) as ReadableStream<Uint8Array>;
 
 /** Whether any process of the group `group` is left. */
-export function groupAlive(group: number): boolean {
+function groupAlive(group: number): boolean {
   try {
     process.kill(-group, 0);
     return true;
@@ -116,7 +123,7 @@ export function groupAlive(group: number): boolean {
 }
 
 /** Kills the process group `group` (a `detached` child's pid). */
-export function killGroup(group: number, signal: NodeJS.Signals = "SIGKILL") {
+function killGroup(group: number, signal: NodeJS.Signals = "SIGKILL") {
   try {
     process.kill(-group, signal);
   } catch {

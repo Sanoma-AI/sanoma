@@ -13,9 +13,9 @@ import {
 import { type ChatMessage, ENGINE_NAMES, noKeyText, pathOf, textOf } from "../../lib/chat.ts";
 import { modelRegistry } from "../../server/models.ts";
 import { secretValues } from "../../server/secrets.ts";
-import { boxSession, homeOf } from "./box-session.ts";
-import { agentHome, allowedPath, boxName, commitTurn, NO_SHELL, openDraft, outsideCheckout } from "./checkout.ts";
-import { freePort, localBackend } from "./local-box.ts";
+import { boxSession, homeOf, openBox } from "./box-session.ts";
+import { allowedPath, commitTurn, NO_SHELL, openDraft, outsideCheckout } from "./checkout.ts";
+import { freePort } from "./local-box.ts";
 import { harnessInstructions } from "./prompt.ts";
 import type { Engine, EngineTurn } from "./transcript.ts";
 
@@ -90,13 +90,7 @@ async function runTurn(name: RuntimeName, turn: EngineTurn, writer: UIMessageStr
   // The agent works in the chat's draft from its first turn, in the person's box, opened last
   // so that nothing that fails before leaves it running.
   const [draft, model, port] = await Promise.all([openDraft(step, chat), modelFor(step, RUNTIMES[name]), freePort()]);
-  // S5: the declared sandbox's backend (`resolved.sandboxes()`, its connector's `sandbox`), when there is one.
-  const box = await localBackend(agentHome(step, "boxes")).open({
-    name: boxName(step.resolved.appName, step.by.id),
-    // This machine is the local box's image and size.
-    image: "",
-    size: 0,
-  });
+  const box = await openBox(step);
   try {
     // Kept across turns: a bridge installs its agent under it once.
     const home = await homeOf(box);
