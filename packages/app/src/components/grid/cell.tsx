@@ -79,39 +79,33 @@ export function CellEditor({
   const text = typeof draft === "string" ? draft : "";
   const common = { ref: focusEditor, "aria-label": label, onBlur };
   const onText = (e: { target: { value: string } }) => onDraft(e.target.value);
-  const choices = (values: readonly unknown[]) => (
-    <>
-      <NativeSelectOption value="" disabled={field.required}>
-        {field.required ? "Choose…" : "(none)"}
-      </NativeSelectOption>
-      {values.map((value, i) => (
-        <NativeSelectOption key={String(value)} value={field.kind === "enum" ? String(i) : String(value)}>
-          {String(value)}
-        </NativeSelectOption>
-      ))}
-    </>
-  );
   switch (field.kind) {
     case "boolean":
       return <Checkbox {...common} checked={draft === true} onCheckedChange={(checked) => onDraft(checked === true)} />;
     case "enum":
+    case "person": {
+      // A person is a choice of the people while some are declared, whoever the record names
+      // among them, declared or not; else their id, typed.
+      if (field.kind === "person" && people.length === 0) break;
+      const values: readonly unknown[] =
+        field.kind === "enum"
+          ? (field.options ?? [])
+          : people.includes(text) || text === ""
+            ? people
+            : [text, ...people];
       return (
         <NativeSelect {...common} size="sm" className="w-full" value={text} onChange={onText}>
-          {choices(field.options ?? [])}
+          <NativeSelectOption value="" disabled={field.required}>
+            {field.required ? "Choose…" : "(none)"}
+          </NativeSelectOption>
+          {values.map((value, i) => (
+            <NativeSelectOption key={String(value)} value={field.kind === "enum" ? String(i) : String(value)}>
+              {String(value)}
+            </NativeSelectOption>
+          ))}
         </NativeSelect>
       );
-    case "person":
-      // A choice of the people while some are declared; else their id, typed.
-      if (people.length > 0) {
-        // Whoever the record names stays a choice, declared or not.
-        const ids = people.includes(text) || text === "" ? people : [text, ...people];
-        return (
-          <NativeSelect {...common} size="sm" className="w-full" value={text} onChange={onText}>
-            {choices(ids)}
-          </NativeSelect>
-        );
-      }
-      break;
+    }
     case "date":
       if (text === "" || DATE_ONLY.test(text)) {
         return <Input {...common} type="date" className="h-7" value={text} onChange={onText} />;

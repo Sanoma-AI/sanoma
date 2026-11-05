@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cellText, delimited } from "../src/components/grid/clipboard.ts";
+import { cellText, csv, delimited } from "../src/components/grid/clipboard.ts";
 
 // The grid's cells as text (`components/grid/clipboard.ts`): pure, no browser.
 
@@ -40,5 +40,11 @@ describe("the grid's cells as text", () => {
       ),
     ).toBe('company,note\r\n"a,b",plain\r\nTab\there,"cr\rhere"');
     expect(delimited([], ",")).toBe("");
+  });
+
+  it("writes a download's text cell that a spreadsheet would read as a formula as text", () => {
+    expect(csv([["=SUM(A1)", "+1", "-x", "@me", "\tpad", "plain", -5, "a=b"]])).toBe(
+      "'=SUM(A1),'+1,'-x,'@me,'\tpad,plain,-5,a=b",
+    );
   });
 });

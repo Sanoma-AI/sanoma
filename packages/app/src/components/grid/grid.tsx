@@ -31,13 +31,12 @@ import {
   heldQuery,
   type RecordCall,
   recordCallKey,
-  toastIfHeld,
   useRecordCall,
 } from "../../queries.ts";
-import { Nothing, StatusDot, When } from "../common.tsx";
+import { Nothing, StatusDot, toastIfHeld, When } from "../common.tsx";
 import { FROM, IssuesFlag, SortHead, Value } from "../data-grid.tsx";
 import { CellEditor, draftOf, recordWith } from "./cell.tsx";
-import { delimited } from "./clipboard.ts";
+import { csv, delimited } from "./clipboard.ts";
 import { type Conflict, conflictId, ConflictRow } from "./conflicts.tsx";
 import { typedCharacter, useGridKeys } from "./keys.ts";
 
@@ -92,9 +91,6 @@ interface Editing {
   draft: ScalarValue;
   start: ScalarValue;
 }
-
-/** A cell a spreadsheet would read as a formula: written as text in a download. */
-const FORMULA = /^[=+\-@\t\r]/;
 
 /**
  * The grid: `records` as `list` read them for the page's search, `order` its sort, `open` the
@@ -188,14 +184,15 @@ export function DataGrid({
       return record ? [[String(record[keyField]), record] as const] : [];
     }),
   );
-  const held = useQuery(heldQuery(collection)).data;
+  const reread = () => void queryClient.invalidateQueries({ queryKey: [...DATA_KEY, name] });
+  // Built once per collection: a new `select` would run again over the waiting runs every render.
+  const held = useQuery(useMemo(() => heldQuery({ name, key: keyField }), [name, keyField])).data;
   // Once a held save's run ends (approved, or not), its record is read again.
   const wasHeld = useRef<string[]>(undefined);
   useEffect(() => {
-    if (wasHeld.current?.some((k) => !held?.includes(k)))
-      void queryClient.invalidateQueries({ queryKey: [...DATA_KEY, name] });
+    if (wasHeld.current?.some((k) => !held?.includes(k))) reread();
     wasHeld.current = held;
-  }, [held, name, queryClient]);
+  });
   const [conflicts, setConflicts] = useState<ReadonlyMap<string, Conflict>>(new Map());
   const dropConflict = (conflict: Conflict) =>
     setConflicts((all) => {
@@ -257,7 +254,7 @@ export function DataGrid({
     dropConflict(conflict);
     if (!current) {
       toast.error(`${conflict.key} is gone`, { description: "Someone else deleted the record." });
-      return void queryClient.invalidateQueries({ queryKey: [...DATA_KEY, name] });
+      return reread();
     }
     const { [conflict.field]: _, ...rest } = current.record;
     const record = conflict.mine === undefined ? rest : { ...rest, [conflict.field]: conflict.mine };
@@ -266,7 +263,7 @@ export function DataGrid({
 
   const keepTheirs = (conflict: Conflict) => {
     dropConflict(conflict);
-    void queryClient.invalidateQueries({ queryKey: [...DATA_KEY, name] });
+    reread();
   };
 
   const [editing, setEditingState] = useState<Editing | null>(null);
@@ -292,7 +289,7 @@ export function DataGrid({
     const saved = focused.row.original;
     const value = (savingRecords.get(saved.key) ?? saved.record)[editable.key];
     const start = draftOf(editable, value, undefined, people);
-    const draft = typed === undefined ? start : draftOf(editable, value, typed, people);
+    const draft = draftOf(editable, value, typed, people);
     // At once, so the editor has the focus before the next key arrives.
     flushSync(() => setEditing({ key: saved.key, field: editable.key, draft, start }));
   };
@@ -370,9 +367,11 @@ export function DataGrid({
     initialRect: INITIAL_RECT,
   });
   // On the server, and as the browser hydrates, every row of the page; then only those in view.
-  const items = hydrated ? virtualizer.getVirtualItems() : rows.map((_, index) => ({ index, start: index * ROW_PX }));
-  const before = hydrated ? (items[0]?.start ?? 0) : 0;
-  const after = hydrated ? virtualizer.getTotalSize() - (items.length ? items.at(-1)!.start + ROW_PX : 0) : 0;
+  const items = hydrated
+    ? virtualizer.getVirtualItems()
+    : rows.map((_, index) => ({ index, start: index * ROW_PX, end: (index + 1) * ROW_PX }));
+  const before = items[0]?.start ?? 0;
+  const after = hydrated ? virtualizer.getTotalSize() - (items.at(-1)?.end ?? 0) : 0;
   const visible = table.getVisibleLeafColumns();
 
   if (records.length === 0) {
@@ -385,13 +384,8 @@ export function DataGrid({
 
   const exportCsv = () => {
     const heads = visible.map((c) => HEADS[c.id] ?? c.id);
-    const values = rows.map((row) =>
-      row.getVisibleCells().map((cell) => {
-        const value = cell.getValue();
-        return typeof value === "string" && FORMULA.test(value) ? `'${value}` : value;
-      }),
-    );
-    const url = URL.createObjectURL(new Blob([delimited([heads, ...values], ",")], { type: "text/csv" }));
+    const values = rows.map((row) => row.getVisibleCells().map((cell) => cell.getValue()));
+    const url = URL.createObjectURL(new Blob([csv([heads, ...values])], { type: "text/csv" }));
     const link = Object.assign(document.createElement("a"), { href: url, download: `${name}.csv` });
     link.click();
     setTimeout(() => URL.revokeObjectURL(url));
@@ -420,28 +414,29 @@ export function DataGrid({
           <TableHeader>
             <TableRow aria-rowindex={1} className="hover:bg-transparent">
               {table.getFlatHeaders().map((header) => {
-                if (!header.column.getIsVisible()) return null;
                 const head = {
                   style: { width: header.getSize() },
                   className: "sticky top-0 z-10 border-b bg-background",
-                  children: (
-                    <div
-                      aria-hidden
-                      data-resizing={header.column.getIsResizing() || undefined}
-                      className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize touch-none select-none hover:bg-border data-resizing:bg-ring"
-                      onMouseDown={header.getResizeHandler()}
-                      onTouchStart={header.getResizeHandler()}
-                      onDoubleClick={() => header.column.resetSize()}
-                    />
-                  ),
                 };
+                const resizer = (
+                  <div
+                    aria-hidden
+                    data-resizing={header.column.getIsResizing() || undefined}
+                    className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize touch-none select-none hover:bg-border data-resizing:bg-ring"
+                    onMouseDown={header.getResizeHandler()}
+                    onTouchStart={header.getResizeHandler()}
+                    onDoubleClick={() => header.column.resetSize()}
+                  />
+                );
                 return HEADS[header.id] ? (
                   <TableHead key={header.id} {...head}>
                     {HEADS[header.id]}
-                    {head.children}
+                    {resizer}
                   </TableHead>
                 ) : (
-                  <SortHead key={header.id} field={header.id} order={order} {...head} />
+                  <SortHead key={header.id} field={header.id} order={order} {...head}>
+                    {resizer}
+                  </SortHead>
                 );
               })}
             </TableRow>
@@ -575,10 +570,13 @@ export function DataGrid({
           </>
         )}
         <span className="ml-auto" role="status">
-          {focused &&
-            `Row ${rows.findIndex((r) => r.id === focused.row.id) + 1}, ${HEADS[focused.column.id] ?? focused.column.id}`}
-          {focused && editable && (editing ? " · Enter to save · Esc to cancel" : " · Enter to change")}
-          {focused && !editing && " · Space expands"}
+          {focused && (
+            <>
+              Row {focused.row.getDisplayIndex() + 1}, {HEADS[focused.column.id] ?? focused.column.id}
+              {editable && (editing ? " · Enter to save · Esc to cancel" : " · Enter to change")}
+              {!editing && " · Space expands"}
+            </>
+          )}
         </span>
         <Button variant="ghost" size="sm" onClick={exportCsv}>
           <DownloadSimpleIcon aria-hidden="true" data-icon="inline-start" />

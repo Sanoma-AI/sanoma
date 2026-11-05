@@ -19,8 +19,8 @@ import { Spinner } from "#/components/ui/spinner.tsx";
 import type { UntypedApi } from "../api-client.ts";
 import { buildInput, fieldsOf, initialValues } from "../form/schema.ts";
 import { errorsOf, FieldView, FormFoot, useSchemaForm } from "../form/start-form.tsx";
-import { api, toastIfHeld, useRecordCall } from "../queries.ts";
-import { Notice } from "./common.tsx";
+import { api, useRecordCall } from "../queries.ts";
+import { Notice, toastIfHeld } from "./common.tsx";
 
 // A collection's record form: one form, drawn from the record's JSON Schema as the start form is
 // from a workflow's input, to add a record or edit one; and Delete. Every call is the collection's

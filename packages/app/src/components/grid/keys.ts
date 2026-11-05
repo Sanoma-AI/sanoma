@@ -8,7 +8,7 @@ import { type UseHotkeyDefinition, useHotkeys } from "@tanstack/react-hotkeys";
 // (`typedCharacter`, which the grid's own key handler reads, as no hotkey names every key).
 
 /** What the keys do: the grid's to say. */
-export interface GridKeys {
+interface GridKeys {
   /** Whether a cell is being edited: its editor has the keys, but Enter, Esc and Tab. */
   editing: boolean;
   /** Moves the selection a cell, answering whether it moved. */
@@ -40,16 +40,10 @@ export function useGridKeys(target: HTMLElement | null, keys: GridKeys) {
   // An editor is a text field, select or checkbox, whose own keys the hotkeys leave to it unless told.
   const editing = { enabled: keys.editing, ignoreInputs: false };
   const definitions: UseHotkeyDefinition[] = [
-    ...ARROWS.map(([key, direction]) => ({
-      hotkey: key,
-      callback: () => void keys.move(direction),
-      options: browsing,
-    })),
-    ...ARROWS.map(([key, direction]) => ({
-      hotkey: `Shift+${key}` as const,
-      callback: () => keys.extend(direction),
-      options: browsing,
-    })),
+    ...ARROWS.flatMap(([key, direction]) => [
+      { hotkey: key, callback: () => void keys.move(direction), options: browsing },
+      { hotkey: `Shift+${key}` as const, callback: () => keys.extend(direction), options: browsing },
+    ]),
     { hotkey: "Enter", callback: keys.edit, options: browsing },
     { hotkey: "F2", callback: keys.edit, options: browsing },
     { hotkey: "Space", callback: keys.expand, options: browsing },
@@ -59,16 +53,8 @@ export function useGridKeys(target: HTMLElement | null, keys: GridKeys) {
     { hotkey: "Shift+Tab", callback: tab("left", keys.move), options: { ...browsing, preventDefault: false } },
     { hotkey: "Enter", callback: () => keys.commit(), options: editing },
     { hotkey: "Escape", callback: keys.cancel, options: editing },
-    {
-      hotkey: "Tab",
-      callback: () => keys.commit("right"),
-      options: editing,
-    },
-    {
-      hotkey: "Shift+Tab",
-      callback: () => keys.commit("left"),
-      options: editing,
-    },
+    { hotkey: "Tab", callback: () => keys.commit("right"), options: editing },
+    { hotkey: "Shift+Tab", callback: () => keys.commit("left"), options: editing },
   ];
   useHotkeys(definitions, { target, conflictBehavior: "allow" });
 }

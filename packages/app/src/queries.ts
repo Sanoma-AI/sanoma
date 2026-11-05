@@ -17,9 +17,8 @@ import {
   type Saved,
 } from "@sanoma-ai/workflows/shared";
 import { type QueryClient, queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { Link, type LinkComponentProps, linkOptions, type RegisteredRouter, useNavigate } from "@tanstack/react-router";
+import { linkOptions, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { createElement } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
 import {
@@ -682,23 +681,6 @@ export function useRecordCall(name: string) {
       if (errorBodyOf(err)?.code === "approval_pending") void queryClient.invalidateQueries({ queryKey: RUNS_KEY });
     },
   });
-}
-
-/**
- * When `err` is a call the policy holds for an approval, says so with a toast linking to the run
- * of the built-in `call` workflow that makes it once approved, and answers true.
- */
-export function toastIfHeld(err: unknown): boolean {
-  const body = errorBodyOf(err);
-  if (body?.code !== "approval_pending" || !body.runId) return false;
-  toast.info("Held for approval", {
-    description: createElement<LinkComponentProps<"a", RegisteredRouter, string, "/workflows/$name/runs/$id">>(
-      Link,
-      { ...runLink({ workflow: CALL_WORKFLOW, runId: body.runId }), className: "underline underline-offset-4" },
-      "Open the run",
-    ),
-  });
-  return true;
 }
 
 /**
