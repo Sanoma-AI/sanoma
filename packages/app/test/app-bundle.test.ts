@@ -285,6 +285,10 @@ describe("buildAppBundle", () => {
 
   it("serves a site with a login on the Worker, its half made on the request's client", async () => {
     expect((await get("https://members.example/")).status).toBe(200);
+    // The half's own route, on its site's host alone: the fixture login's sign-out clears its cookie.
+    const signOut = await get("https://members.example/auth/fixture-login/sign-out", { method: "POST" });
+    expect([signOut.status, signOut.headers.get("set-cookie")]).toEqual([204, "x-fixture-visitor=; Max-Age=0; Path=/"]);
+    expect((await get("https://hello.example/auth/fixture-login/sign-out", { method: "POST" })).status).toBe(404);
   });
 
   it("answers 404 for a host that is neither the app's nor a site's domain", async () => {

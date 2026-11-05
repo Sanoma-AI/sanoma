@@ -99,11 +99,11 @@ export function betterAuthLogin({ database, key, origins, sendCode, social }: Lo
     async handle(request) {
       const { pathname } = new URL(request.url);
       if (pathname !== BASE_PATH && !pathname.startsWith(`${BASE_PATH}/`)) return undefined;
+      // Better Auth checks a redirect in a body against the site's hosts; one in the query must be a path here.
+      if (!localRedirects(new URL(request.url))) return new Response("Bad Request", { status: 400 });
       // Better Auth throws for a host it does not allow, which would be a 500.
       const own = authFor(request);
       if (!own) return new Response("Misdirected Request", { status: 421 });
-      // Better Auth checks a redirect in a body against the site's hosts; one in the query must be a path here.
-      if (!localRedirects(new URL(request.url))) return new Response("Bad Request", { status: 400 });
       return (await own).handler(withSignOutBody(request, SIGN_OUT));
     },
     signOut: SIGN_OUT,

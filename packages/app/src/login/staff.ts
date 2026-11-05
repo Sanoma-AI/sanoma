@@ -58,6 +58,8 @@ const InviteBody = z.union([z.object({ email: z.string().email() }), z.object({ 
 export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): LoginProvider {
   let app: AppContext | undefined;
   let half: LoginHalf | undefined;
+  /** Whether `open` failed: the half is then never made, and the pages say so rather than "starting". */
+  let failed = false;
   const people = () => app!.snapshot.people;
   /** How the login's pages look: the kit's stylesheet, and the company they are for. */
   const frame = (): PageFrame =>
@@ -94,28 +96,37 @@ export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): Logi
     async open(context) {
       app = context;
       const { client, resolved } = context;
-      half = await make({
-        database: () => client.pool(),
-        key: loginKey("staff"),
-        secrets: secretValues(client),
-        origins: [],
-        ...(resolved.login && { sendCode: (email, code) => sendLoginCode(client, email, code) }),
-        staff: {
-          admits: (identity) => admitted(identity) !== undefined,
-          social,
-          async record(method, identity) {
-            const person = personOf(identity, people().people);
-            if (person === undefined) return;
-            await client
-              .recordSignIn(person, method)
-              .catch((err: unknown) => console.error(`sanoma app: ${person}'s sign-in was not recorded:`, err));
+      try {
+        half = await make({
+          database: () => client.pool(),
+          key: loginKey("staff"),
+          secrets: secretValues(client),
+          origins: [],
+          ...(resolved.login && { sendCode: (email, code) => sendLoginCode(client, email, code) }),
+          staff: {
+            admits: (identity) => admitted(identity) !== undefined,
+            social,
+            async record(method, identity) {
+              const person = personOf(identity, people().people);
+              if (person === undefined) return;
+              await client
+                .recordSignIn(person, method)
+                .catch((err: unknown) => console.error(`sanoma app: ${person}'s sign-in was not recorded:`, err));
+            },
           },
-        },
-      });
+        });
+      } catch (err) {
+        failed = true;
+        throw err;
+      }
     },
     resolveActor: identityOf,
     async handle(request) {
-      if (!half) return smallPage(503, "Starting", "<p>The app is starting. Try again in a moment.</p>");
+      if (!half) {
+        return failed
+          ? smallPage(503, "Sign-in", "<p>Sign-in is not available on this host. The app's log says why.</p>")
+          : smallPage(503, "Starting", "<p>The app is starting. Try again in a moment.</p>");
+      }
       const own = await half.handle(request);
       if (own) return own;
       const url = new URL(request.url);

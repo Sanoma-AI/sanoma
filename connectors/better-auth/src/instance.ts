@@ -63,21 +63,19 @@ const databaseOn = (pool: Pool, schema: Schema) => ({
   transaction: true,
 });
 
-/** `run` once per `key` in this process, again after it fails. */
-function once(memo: Map<string, Promise<void>>, key: string, run: () => Promise<void>): Promise<void> {
-  let done = memo.get(key);
-  if (!done) {
-    done = run().catch((err: unknown) => {
-      memo.delete(key);
-      throw err;
-    });
-    memo.set(key, done);
-  }
-  return done;
-}
+/**
+ * Each database and schema found prepared, for the process's life: a pool that finds its schema
+ * prepared spares every pool on that database the check after it. A check in flight is its own
+ * pool's and no one else's (on a Worker a request's pool goes with the request), so nothing waits
+ * on another request's work, and a failed check leaves nothing behind.
+ */
+const prepared = new Set<string>();
 
-/** Each schema checked for its tables, once per process (a process has one database). */
-const checked = new Map<string, Promise<void>>();
+/** What a pool connects to, as the key a check is remembered by: its connection string, else its host and database. */
+function databaseOf(pool: Pool): string {
+  const { connectionString, host, port, database } = pool.options;
+  return connectionString ?? `${host}:${port}/${database}`;
+}
 
 /** How long an opening login waits for a worker starting beside it to prepare the schema, and how often it looks. */
 const PREPARED_WAIT_MS = 60_000;
@@ -130,8 +128,11 @@ export function openBetterAuth<O extends ExtraOptions>({
   const made = new WeakMap<Pool, Map<Protocol, Auth>>();
   return async (protocol: Protocol): Promise<Auth> => {
     const pool = await database();
-    // One database per process: checked on the first pool, for every pool after.
-    await once(checked, schema, () => checkPrepared(pool, schema));
+    const found = `${databaseOf(pool)}#${schema}`;
+    if (!prepared.has(found)) {
+      await checkPrepared(pool, schema);
+      prepared.add(found);
+    }
     let auths = made.get(pool);
     if (!auths) made.set(pool, (auths = new Map()));
     let auth = auths.get(protocol);
@@ -156,6 +157,19 @@ async function checkPrepared(pool: Pool, schema: Schema): Promise<void> {
         `better-auth: the database's ${schema} tables are missing or behind this version's: the worker makes them at its start, and the app never does`,
       );
   }
+}
+
+/** `run` once per `key` in this process, again after it fails. */
+function once(memo: Map<string, Promise<void>>, key: string, run: () => Promise<void>): Promise<void> {
+  let done = memo.get(key);
+  if (!done) {
+    done = run().catch((err: unknown) => {
+      memo.delete(key);
+      throw err;
+    });
+    memo.set(key, done);
+  }
+  return done;
 }
 
 /** Each database and schema's migration, once per process however many workers run on it. */

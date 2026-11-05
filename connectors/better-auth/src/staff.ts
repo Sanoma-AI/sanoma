@@ -21,6 +21,9 @@ import {
   withSignOutBody,
 } from "./instance.ts";
 
+/** Says nothing: a listener for a checked-out client's `error`, whose query fails on its own. */
+const quiet = () => undefined;
+
 // The staff login: Better Auth again, as a second instance in a schema of its own, signing in only
 // the people the files declare. An email code to a declared email, GitHub through the company's
 // own client, and invites (one-use magic links the app mints for a declared email); no password.
@@ -197,17 +200,30 @@ export function betterAuthStaffLogin({ database, key, sendCode, staff }: LoginCo
     "invite",
   ];
 
+  /** The mints of this process, one after another. */
+  let mints: Promise<unknown> = Promise.resolve();
+
   /**
    * Mints `email`'s invite, server-side, its token from `minted`; a new one replaces the last. One
    * at a time per email, whichever process asks: a transaction of its own holds Postgres's lock
    * for the email while the old row goes and the new one is written on the pool's other
    * connections (a transaction's lock is one connection's for the transaction, safe through a
-   * pooler), so two mints at once leave one invite, and `minted` hands over the right token.
+   * pooler), so two mints at once leave one invite, and `minted` hands over the right token. One
+   * at a time in the process as well (`mints`): the lock's connection is one of the pool's, and
+   * many held at once, each waiting for another of the pool's, would leave none for Better Auth.
    */
-  async function mint(email: string, request: Request): Promise<string> {
+  function mint(email: string, request: Request): Promise<string> {
+    const minting = mints.then(() => mintNow(email, request));
+    mints = minting.catch(() => undefined);
+    return minting;
+  }
+
+  async function mintNow(email: string, request: Request): Promise<string> {
     const own = await authFor(request);
     const normalized = email.toLowerCase();
     const lock = await (await database()).connect();
+    // A checked-out client with no listener would throw its connection's error as uncaught; the query fails instead.
+    lock.on("error", quiet);
     try {
       await lock.query("BEGIN");
       await lock.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`sanoma.login.invite.${normalized}`]);
@@ -223,6 +239,7 @@ export function betterAuthStaffLogin({ database, key, sendCode, staff }: LoginCo
       await lock.query("ROLLBACK").catch(() => undefined);
       throw err;
     } finally {
+      lock.off("error", quiet);
       lock.release();
     }
     const token = minted.get(normalized);
