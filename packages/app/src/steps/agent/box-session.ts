@@ -4,8 +4,9 @@ import {
   harnessStateDirectoryPath,
   type HarnessV1NetworkSandboxSession,
 } from "@ai-sdk/harness";
-import type { Box } from "@sanoma-ai/workflows";
-import { allowedPath, realWithin, within } from "./checkout.ts";
+import type { AppStepContext, Box } from "@sanoma-ai/workflows";
+import { agentHome, allowedPath, boxName, realWithin, within } from "./checkout.ts";
+import { localBackend } from "./local-box.ts";
 
 // The sandbox session `HarnessAgent` runs a coding agent in, over a box of the `Sandbox` contract:
 // its commands are the box's, in the draft's checkout; its files that checkout's and the box's
@@ -30,6 +31,22 @@ export interface BoxSessionOptions {
   /** The ports its bridge listens on (`freePort`). */
   ports: readonly number[];
 }
+
+/** The directory under a box's home that is a person's own agents' HOME (`acp.ts`): their installs, shims and sign-ins. */
+export const OWN_AGENTS_DIR = ".acp";
+
+/**
+ * The box of the person `step` is run by, for the company (`boxName`), opened: where every coding
+ * agent of theirs works, a turn's engine stopping it when the turn ends.
+ */
+export const openBox = (step: Pick<AppStepContext, "source" | "resolved" | "by">): Promise<Box> =>
+  // S5: the declared sandbox's backend (`resolved.sandboxes()`, its connector's `sandbox`), when there is one.
+  localBackend(agentHome(step, "boxes")).open({
+    name: boxName(step.resolved.appName, step.by.id),
+    // This machine is the local box's image and size.
+    image: "",
+    size: 0,
+  });
 
 /** The box's home, `$HOME` as its commands see it. */
 export async function homeOf(box: Box): Promise<string> {
@@ -73,9 +90,10 @@ class BoxSession implements HarnessV1NetworkSandboxSession {
   async #path(path: string): Promise<string> {
     const full = resolve(this.defaultWorkingDirectory, path);
     // Its home, by real paths (a link there leads nowhere else), but no other session's run files
-    // (a bridge's start config holds the key), in any case (macOS's file system ignores it), and
-    // not the checkout when the home holds it (the box's clone), nor a link there into it: those
-    // are the checkout rule's.
+    // (a bridge's start config holds the key) and nothing of the person's own agents (`OWN_AGENTS_DIR`:
+    // their sign-ins, and what they run), in any case (macOS's file system ignores it), and not the
+    // checkout when the home holds it (the box's clone), nor a link there into it: those are the
+    // checkout rule's.
     const home =
       within(this.#home, full) && !within(this.defaultWorkingDirectory, full)
         ? await realWithin(this.#home, full)
@@ -83,7 +101,8 @@ class BoxSession implements HarnessV1NetworkSandboxSession {
     if (home !== undefined && !(await realWithin(this.defaultWorkingDirectory, home.full))) {
       const inside = home.inside.toLowerCase();
       const runs = relative(this.#home, this.#runs).toLowerCase();
-      if (!within(dirname(runs), inside) || within(runs, inside)) return home.full;
+      const own = within(OWN_AGENTS_DIR, inside);
+      if (!own && (!within(dirname(runs), inside) || within(runs, inside))) return home.full;
     }
     const allowed = await allowedPath(this.defaultWorkingDirectory, full);
     if (allowed === undefined) throw new Error(`${path} is outside the checkout, or under .git or node_modules`);

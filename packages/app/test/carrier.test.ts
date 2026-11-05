@@ -68,29 +68,33 @@ describe("the carrier", () => {
     const draft = await source.draft!("d1");
     const before = await source.head(draft.branch);
     let root = "";
-    const moved = await boxTurn(sandbox.backend, opening, async (box) => {
-      const home = await homeOf(box);
-      const carried = await carryIn(box, source, "d1", { home });
-      root = carried.root;
-      expect(carried).toEqual({ root: join(home, "repo"), head: before });
-      expect(
-        await inBox(box, "git branch --show-current; git remote; git config --get-regexp '^remote' || true", root),
-      ).toBe("draft/d1");
-      expect(readFileSync(join(root, "offboarding.ts"), "utf8")).toContain("accounts");
-      // The agent's edit, in the box.
-      writeFileSync(join(root, "offboarding.ts"), "export const steps = ['accounts', 'laptop'];\n");
-      writeFileSync(join(root, "laptop.ts"), "export const laptop = true;\n");
-      // Git settings the agent wrote in the box's home run nothing when the box commits.
-      writeFileSync(join(home, "fsmonitor"), `#!/bin/sh\ntouch "${join(home, "ran")}"\n`, { mode: 0o755 });
-      writeFileSync(join(home, ".gitconfig"), `[core]\n\tfsmonitor = ${join(home, "fsmonitor")}\n`);
-      expect(await carryOut(box, source, "d1", { since: carried.head, ...turn })).toBe(true);
-      expect(existsSync(join(home, "ran"))).toBe(false);
-      // The box's whole environment, as a command there sees it.
-      const env = await inBox(box, "env");
-      expect(env).not.toContain(TOKEN);
-      expect(env).not.toContain(SECRET);
-      return true;
-    });
+    const moved = await boxTurn(
+      opening.name,
+      () => sandbox.backend.open(opening),
+      async (box) => {
+        const home = await homeOf(box);
+        const carried = await carryIn(box, source, "d1", { home });
+        root = carried.root;
+        expect(carried).toEqual({ root: join(home, "repo"), head: before });
+        expect(
+          await inBox(box, "git branch --show-current; git remote; git config --get-regexp '^remote' || true", root),
+        ).toBe("draft/d1");
+        expect(readFileSync(join(root, "offboarding.ts"), "utf8")).toContain("accounts");
+        // The agent's edit, in the box.
+        writeFileSync(join(root, "offboarding.ts"), "export const steps = ['accounts', 'laptop'];\n");
+        writeFileSync(join(root, "laptop.ts"), "export const laptop = true;\n");
+        // Git settings the agent wrote in the box's home run nothing when the box commits.
+        writeFileSync(join(home, "fsmonitor"), `#!/bin/sh\ntouch "${join(home, "ran")}"\n`, { mode: 0o755 });
+        writeFileSync(join(home, ".gitconfig"), `[core]\n\tfsmonitor = ${join(home, "fsmonitor")}\n`);
+        expect(await carryOut(box, source, "d1", { since: carried.head, ...turn })).toBe(true);
+        expect(existsSync(join(home, "ran"))).toBe(false);
+        // The box's whole environment, as a command there sees it.
+        const env = await inBox(box, "env");
+        expect(env).not.toContain(TOKEN);
+        expect(env).not.toContain(SECRET);
+        return true;
+      },
+    );
     expect(moved).toBe(true);
 
     // One commit, the person's through Sanoma, in the draft's checkout; the live checkout left alone.
@@ -110,12 +114,16 @@ describe("the carrier", () => {
     // The next turn: our loop's commit on the draft meanwhile arrives; a turn that changes nothing brings none back.
     writeFileSync(join(draft.root, "notes.md"), "Laptops go back to IT.\n");
     await draft.commit({ paths: ["notes.md"], message: "Notes", author: "ada" });
-    await boxTurn(sandbox.backend, opening, async (box) => {
-      const { head } = await carryIn(box, source, "d1", { home: await homeOf(box) });
-      expect(head).toBe(await source.head(draft.branch));
-      expect(readFileSync(join(root, "notes.md"), "utf8")).toBe("Laptops go back to IT.\n");
-      expect(await carryOut(box, source, "d1", { since: head, ...turn })).toBe(false);
-    });
+    await boxTurn(
+      opening.name,
+      () => sandbox.backend.open(opening),
+      async (box) => {
+        const { head } = await carryIn(box, source, "d1", { home: await homeOf(box) });
+        expect(head).toBe(await source.head(draft.branch));
+        expect(readFileSync(join(root, "notes.md"), "utf8")).toBe("Laptops go back to IT.\n");
+        expect(await carryOut(box, source, "d1", { since: head, ...turn })).toBe(false);
+      },
+    );
     expect(git("log", "-1", "--format=%s", draft.branch)).toBe("Notes");
   });
 
@@ -125,28 +133,40 @@ describe("the carrier", () => {
     const head = await source.head(draft.branch);
     // A box that dies mid-turn, its disk with it.
     await expect(
-      boxTurn(sandbox.backend, opening, async (box) => {
-        const carried = await carryIn(box, source, "d2", { home: await homeOf(box) });
-        writeFileSync(join(carried.root, "lost.ts"), "export {};\n");
-        await sandbox.backend.discard(opening);
-        await carryOut(box, source, "d2", { since: carried.head, ...turn });
-      }),
+      boxTurn(
+        opening.name,
+        () => sandbox.backend.open(opening),
+        async (box) => {
+          const carried = await carryIn(box, source, "d2", { home: await homeOf(box) });
+          writeFileSync(join(carried.root, "lost.ts"), "export {};\n");
+          await sandbox.backend.discard(opening);
+          await carryOut(box, source, "d2", { since: carried.head, ...turn });
+        },
+      ),
     ).rejects.toThrow(/could not be brought back from your box, which may have stopped mid-turn, so they are lost/);
     expect(await source.head(draft.branch)).toBe(head);
 
     // One that died with its disk kept, an edit left uncommitted: the next turn starts clean from the draft.
-    await boxTurn(sandbox.backend, opening, async (box) => {
-      const carried = await carryIn(box, source, "d2", { home: await homeOf(box) });
-      writeFileSync(join(carried.root, "offboarding.ts"), "broken(\n");
-      writeFileSync(join(carried.root, "stray.ts"), "export {};\n");
-    });
-    await boxTurn(sandbox.backend, opening, async (box) => {
-      const carried = await carryIn(box, source, "d2", { home: await homeOf(box) });
-      expect(carried.head).toBe(head);
-      expect(await inBox(box, "git status --porcelain", carried.root)).toBe("");
-      expect(existsSync(join(carried.root, "stray.ts"))).toBe(false);
-      expect(existsSync(join(carried.root, "lost.ts"))).toBe(false);
-    });
+    await boxTurn(
+      opening.name,
+      () => sandbox.backend.open(opening),
+      async (box) => {
+        const carried = await carryIn(box, source, "d2", { home: await homeOf(box) });
+        writeFileSync(join(carried.root, "offboarding.ts"), "broken(\n");
+        writeFileSync(join(carried.root, "stray.ts"), "export {};\n");
+      },
+    );
+    await boxTurn(
+      opening.name,
+      () => sandbox.backend.open(opening),
+      async (box) => {
+        const carried = await carryIn(box, source, "d2", { home: await homeOf(box) });
+        expect(carried.head).toBe(head);
+        expect(await inBox(box, "git status --porcelain", carried.root)).toBe("");
+        expect(existsSync(join(carried.root, "stray.ts"))).toBe(false);
+        expect(existsSync(join(carried.root, "lost.ts"))).toBe(false);
+      },
+    );
   });
 
   it("refuses a second turn in a box while one runs there, and stops the box at each turn's end however it ends", async () => {
@@ -159,19 +179,45 @@ describe("the carrier", () => {
       },
     };
     let release: (() => void) | undefined;
-    const first = boxTurn(backend, opening, () => new Promise<void>((done) => (release = done)));
-    await expect(boxTurn(backend, opening, async () => "second")).rejects.toThrow(BOX_BUSY);
+    const first = boxTurn(
+      opening.name,
+      () => backend.open(opening),
+      () => new Promise<void>((done) => (release = done)),
+    );
+    await expect(
+      boxTurn(
+        opening.name,
+        () => backend.open(opening),
+        async () => "second",
+      ),
+    ).rejects.toThrow(BOX_BUSY);
     // Another person's box is free.
-    expect(await boxTurn(backend, { ...opening, name: "sanoma-acme-bob" }, async () => "bob")).toBe("bob");
+    expect(
+      await boxTurn(
+        "sanoma-acme-bob",
+        () => backend.open({ ...opening, name: "sanoma-acme-bob" }),
+        async () => "bob",
+      ),
+    ).toBe("bob");
     await vi.waitFor(() => expect(release).toBeDefined());
     release!();
     await first;
     await expect(
-      boxTurn(backend, opening, async () => {
-        throw new Error("the agent failed");
-      }),
+      boxTurn(
+        opening.name,
+        () => backend.open(opening),
+        async () => {
+          throw new Error("the agent failed");
+        },
+      ),
     ).rejects.toThrow("the agent failed");
-    expect(await boxTurn(backend, opening, async () => "again")).toBe("again");
+    expect(
+      await boxTurn(
+        opening.name,
+        () => backend.open(opening),
+        async () => "again",
+      ),
+    ).toBe("again");
     expect(stopped).toEqual(["sanoma-acme-bob", opening.name, opening.name, opening.name]);
   });
 
@@ -195,7 +241,11 @@ describe("the clone's install", () => {
     const draft = await source.draft!("d3");
     const boxes = localBackend(join(dir, ".sanoma/agent-home/boxes"));
     const open = () =>
-      boxTurn(boxes, opening, async (box) => (await carryIn(box, source, "d3", { home: await homeOf(box) })).root);
+      boxTurn(
+        opening.name,
+        () => boxes.open(opening),
+        async (box) => (await carryIn(box, source, "d3", { home: await homeOf(box) })).root,
+      );
     const root = await open();
     const installed = join(root, "node_modules");
     expect(existsSync(installed)).toBe(true);

@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { type Box, draftBranch, type SandboxBackend, type Source } from "@sanoma-ai/workflows";
+import { type Box, draftBranch, type Source } from "@sanoma-ai/workflows";
 import { errorMessage } from "@sanoma-ai/workflows/shared";
 
 // Git between the live instance and a person's box: before a turn, the draft's branch carried into
@@ -24,25 +24,21 @@ export const BOX_BUSY = "A turn is already running in your box: wait for it to e
 const busy = new Set<string>();
 
 /**
- * Runs `use` in the box `spec.name` of `backend`, opened for it and stopped at its end however it
- * ends, alone: a second turn in the same box while one runs is refused (`BOX_BUSY`).
+ * Runs `use` in the box `name`, opened for it (`open`) and stopped at its end however it ends,
+ * alone: a second turn in the same box while one runs is refused (`BOX_BUSY`).
  */
-export async function boxTurn<T>(
-  backend: SandboxBackend,
-  spec: Parameters<SandboxBackend["open"]>[0],
-  use: (box: Box) => Promise<T>,
-): Promise<T> {
-  if (busy.has(spec.name)) throw new Error(BOX_BUSY);
-  busy.add(spec.name);
+export async function boxTurn<T>(name: string, open: () => Promise<Box>, use: (box: Box) => Promise<T>): Promise<T> {
+  if (busy.has(name)) throw new Error(BOX_BUSY);
+  busy.add(name);
   try {
-    const box = await backend.open(spec);
+    const box = await open();
     try {
       return await use(box);
     } finally {
       await box.stop();
     }
   } finally {
-    busy.delete(spec.name);
+    busy.delete(name);
   }
 }
 

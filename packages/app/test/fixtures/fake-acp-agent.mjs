@@ -4,6 +4,7 @@
 //   signIn: "terminal" | "url" | "once" | "none" — how it asks to be signed in until `$HOME/.signed-in-<agent>` exists
 //   mode: "work" | "hello" | "die" | "hang" — what a prompt does
 //   code: the code its terminal sign-in takes on stdin; log: where it appends what it saw (JSON lines)
+//   other: another person's sign-in, which it tries to read through the client
 //   method: its terminal sign-in's id (default "fake-login"); loginFails: what its sign-in prints as it fails at once
 // With `login` among its arguments it is its own terminal sign-in instead.
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -111,10 +112,9 @@ async function work(client, sessionId, cwd) {
     log({ wroteOutside: false, error: err.message });
   }
 
-  // Another person's home, beside its own, read through the client: refused, as outside the draft.
+  // Another person's box, beside its own, read through the client: refused, as outside the draft.
   try {
-    const other = join(dirname(process.env.HOME), "lead", ".credentials.json");
-    const { content: read } = await client.request("fs/read_text_file", { sessionId, path: other });
+    const { content: read } = await client.request("fs/read_text_file", { sessionId, path: config.other });
     log({ readOther: read });
   } catch (err) {
     log({ readOther: false, error: err.message });

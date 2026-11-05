@@ -13,19 +13,10 @@ import {
 import { type ChatMessage, ENGINE_NAMES, noKeyText, pathOf, textOf } from "../../lib/chat.ts";
 import { modelRegistry } from "../../server/models.ts";
 import { secretValues } from "../../server/secrets.ts";
-import { boxSession, homeOf } from "./box-session.ts";
+import { boxSession, homeOf, openBox } from "./box-session.ts";
 import { boxTurn, carryIn, carryOut } from "./carrier.ts";
-import {
-  agentHome,
-  allowedPath,
-  boxName,
-  NO_SHELL,
-  openDraft,
-  outsideCheckout,
-  showCommits,
-  turnMessage,
-} from "./checkout.ts";
-import { freePort, localBackend } from "./local-box.ts";
+import { allowedPath, boxName, NO_SHELL, openDraft, outsideCheckout, showCommits, turnMessage } from "./checkout.ts";
+import { freePort } from "./local-box.ts";
 import { harnessInstructions } from "./prompt.ts";
 import type { Engine, EngineTurn } from "./transcript.ts";
 
@@ -101,36 +92,36 @@ async function runTurn(name: RuntimeName, turn: EngineTurn, writer: UIMessageStr
   // The agent works in the chat's draft from its first turn, in the person's box, opened last
   // so that nothing that fails before leaves it running.
   const [draft, model, port] = await Promise.all([openDraft(step, chat), modelFor(step, RUNTIMES[name]), freePort()]);
-  // S5: the declared sandbox's backend (`resolved.sandboxes()`, its connector's `sandbox`), when there is one.
-  const backend = localBackend(agentHome(step, "boxes"));
-  // This machine is the local box's image and size.
-  const spec = { name: boxName(step.resolved.appName, step.by.id), image: "", size: 0 };
   /** Whether the box's commits reached the draft. */
   let carried = false;
   try {
-    await boxTurn(backend, spec, async (box) => {
-      // Kept across turns: a bridge installs its agent under it once, and the clone stays.
-      const home = await homeOf(box);
-      const { root, head } = await carryIn(box, step.source, chat.id, { home, signal: step.signal });
-      const sandbox = boxSession(box, { id: `${chat.id}-${generateId()}`, root, home, ports: [port] });
-      // However the turn ended (an error too): the session destroyed, so nothing in the box writes
-      // again, then what it changed committed in the box and carried back to the draft. A failed
-      // carry is the turn's error (its edits are lost); a failed destroy, otherwise.
-      await converse(name, turn, writer, sandbox, { auth, model, home, box: box.id }).finally(async () => {
-        const destroyed = await Promise.resolve(sandbox.destroy()).then(
-          () => undefined,
-          (err: unknown) => err,
-        );
-        try {
-          const message = turnMessage(turn, ENGINE_NAMES[name]);
-          carried = await carryOut(box, step.source, chat.id, { since: head, message, author: step.by.id });
-        } catch (err) {
-          if (destroyed) console.error(`sanoma app: destroying the session in the box ${box.id} failed:`, destroyed);
-          throw err;
-        }
-        if (destroyed) throw destroyed;
-      });
-    });
+    await boxTurn(
+      boxName(step.resolved.appName, step.by.id),
+      () => openBox(step),
+      async (box) => {
+        // Kept across turns: a bridge installs its agent under it once, and the clone stays.
+        const home = await homeOf(box);
+        const { root, head } = await carryIn(box, step.source, chat.id, { home, signal: step.signal });
+        const sandbox = boxSession(box, { id: `${chat.id}-${generateId()}`, root, home, ports: [port] });
+        // However the turn ended (an error too): the session destroyed, so nothing in the box writes
+        // again, then what it changed committed in the box and carried back to the draft. A failed
+        // carry is the turn's error (its edits are lost); a failed destroy, otherwise.
+        await converse(name, turn, writer, sandbox, { auth, model, home, box: box.id }).finally(async () => {
+          const destroyed = await Promise.resolve(sandbox.destroy()).then(
+            () => undefined,
+            (err: unknown) => err,
+          );
+          try {
+            const message = turnMessage(turn, ENGINE_NAMES[name]);
+            carried = await carryOut(box, step.source, chat.id, { since: head, message, author: step.by.id });
+          } catch (err) {
+            if (destroyed) console.error(`sanoma app: destroying the session in the box ${box.id} failed:`, destroyed);
+            throw err;
+          }
+          if (destroyed) throw destroyed;
+        });
+      },
+    );
   } finally {
     // Checked once the box is free: the turn's error, if any, follows the card.
     if (carried) await showCommits(turn, draft, writer);

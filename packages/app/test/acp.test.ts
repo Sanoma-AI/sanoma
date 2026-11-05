@@ -24,6 +24,7 @@ import { ACTOR_HEADER } from "../src/api.ts";
 import { type App, startApp } from "../src/index.ts";
 import { type ChatMessage, chatTransport, type EngineName, type SignInCard } from "../src/lib/chat.ts";
 import { OWN_AGENTS, type OwnAgentName } from "../src/steps/agent/acp.ts";
+import { boxName } from "../src/steps/agent/checkout.ts";
 import { appSteps } from "../src/steps/index.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built app. The chat's third engine, end to end: a person's
@@ -66,8 +67,9 @@ const testApp = useTestApp({ workflows: [], connectors: [], root }, { databaseUr
 let dir = "";
 const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim();
 let app: App | undefined;
-const home = () => join(dir, ".sanoma/agent-home");
-const install = (agent: OwnAgentName) => join(home(), "acp", agent);
+/** A person's own agents' HOME, `.acp` in their box (the local backend's, for the app the root's package.json names). */
+const agentsHome = (person: string) => join(dir, ".sanoma/agent-home/boxes", boxName("acp-test", person), ".acp");
+const install = (agent: OwnAgentName) => join(agentsHome("ada"), agent);
 const logOf = (agent: OwnAgentName) => join(install(agent), "fake.log");
 
 /** Plants the fake as `agent`'s install, as installed: its marker, its bin, and its config. */
@@ -82,7 +84,10 @@ function plant(agent: OwnAgentName, config: FakeConfig) {
 }
 
 const configure = (agent: OwnAgentName, config: FakeConfig) =>
-  writeFileSync(join(install(agent), "fake.json"), JSON.stringify({ ...config, code: CODE, log: logOf(agent) }));
+  writeFileSync(
+    join(install(agent), "fake.json"),
+    JSON.stringify({ ...config, code: CODE, log: logOf(agent), other: join(agentsHome("lead"), ".credentials.json") }),
+  );
 
 /** What the fake `agent` logged, entry by entry. */
 const logged = (agent: OwnAgentName): Record<string, unknown>[] =>
@@ -132,9 +137,9 @@ export default defineWorkflow({
   git("init", "--quiet", "--initial-branch=main");
   git("add", "--all");
   git("commit", "--quiet", "-m", "First");
-  // Another person's sign-in, which nothing of ours reads for ada's agent.
-  mkdirSync(join(home(), "people/lead"), { recursive: true });
-  writeFileSync(join(home(), "people/lead/.credentials.json"), `lead's token ${RUN}`);
+  // Another person's sign-in, in their box, which nothing of ours reads for ada's agent.
+  mkdirSync(agentsHome("lead"), { recursive: true });
+  writeFileSync(join(agentsHome("lead"), ".credentials.json"), `lead's token ${RUN}`);
   plant("opencode", { signIn: "none", mode: "work" });
   plant("copilot", { signIn: "terminal", mode: "hello" });
   plant("pi", { signIn: "once", mode: "hello" });
@@ -195,9 +200,11 @@ const paste = (chat: string, code: string, actor = "ada") =>
   });
 
 describe("the chat on a person's own agent", () => {
-  it("edits the draft as the checkout rule answers, relays the agent's updates, commits and checks the draft, and shows its card", async () => {
+  it("edits the box's clone of the draft as the checkout rule answers, relays the agent's updates, carries its commit back, checks the draft, and shows its card", async () => {
     const id = `work-${RUN}`;
     const draftRoot = join(dir, ".sanoma/drafts", id);
+    // The draft's clone in the person's box, where the agent works.
+    const clone = join(dir, ".sanoma/agent-home/boxes", boxName("acp-test", "ada"), "repo");
     const reply = await send(id, "acp-opencode", "Add a laptop step to offboarding");
     expect(textOfReply(reply)).toBe("Drafted: offboarding now collects the laptop.");
 
@@ -215,7 +222,7 @@ describe("the chat on a person's own agent", () => {
       errorText: expect.stringContaining("is outside your checkout, or under .git or node_modules"),
     });
     expect(steps[2]).toMatchObject({ errorText: expect.stringMatching(/^No shell commands in this chat/) });
-    expect(steps[3]!.output).toBe(`Changed ${join(draftRoot, "workflows/offboarding.ts")}`);
+    expect(steps[3]!.output).toBe(`Changed ${join(clone, "workflows/offboarding.ts")}`);
 
     // The checkout rule's answers: only an option offered, never allow_always.
     const log = logged("opencode");
@@ -230,11 +237,13 @@ describe("the chat on a person's own agent", () => {
       readOther: false,
       error: expect.stringContaining("is outside your checkout"),
     });
+    expect(existsSync(join(clone, "node_modules/evil.js"))).toBe(false);
     expect(existsSync(join(draftRoot, "node_modules/evil.js"))).toBe(false);
 
-    // The agent ran in the draft with the person's own home, signs in and reads files as the client
-    // says it can, and none of this process's credentials reached it or its terminal.
-    const personal = join(home(), "people/ada");
+    // The agent ran in the person's box, in its clone of the draft, with the box's home as its own, signs in and
+    // reads files as the client says it can, and none of this process's credentials reached it or
+    // its terminal.
+    const personal = agentsHome("ada");
     const start = log.find((entry) => "start" in entry)!;
     expect(start).toMatchObject({ start: ["acp"], home: personal });
     // The planted bin is a shell script, which adds its own (and macOS's).
@@ -246,7 +255,10 @@ describe("the chat on a person's own agent", () => {
       "LANG",
       "PATH",
     ]);
-    expect(String(start.path).split(":")[0]).toBe(join(home(), "acp/shims"));
+    expect(String(start.path).split(":").slice(0, 2)).toEqual([
+      join(personal, "shims"),
+      join(install("opencode"), "node_modules/.bin"),
+    ]);
     expect(log.find((entry) => "initialize" in entry)!.initialize).toEqual({
       fs: { readTextFile: true, writeTextFile: true },
       terminal: true,
@@ -255,16 +267,16 @@ describe("the chat on a person's own agent", () => {
       _meta: { "terminal-auth": true },
     });
     expect(log.find((entry) => "terminal" in entry)).toEqual({
-      terminal: `home=${personal} token=none\n${draftRoot}\n`,
-      exit: { exitCode: 0, signal: null },
+      terminal: `home=${personal} token=none\n${clone}\n`,
+      exit: { exitCode: 0 },
     });
-    expect(log.find((entry) => "session" in entry)).toEqual({ session: draftRoot });
+    expect(log.find((entry) => "session" in entry)).toEqual({ session: clone });
     // The rules and who asks, then the message, as one prompt.
     expect(String(log.find((entry) => "prompt" in entry)!.prompt)).toMatch(
       /^You are the operator agent[\s\S]*You act for ada\.[\s\S]*\n\nada: Add a laptop step to offboarding$/,
     );
 
-    // The edit is the draft's commit, checked; the live checkout is as it was.
+    // The edit is the draft's commit, carried back from the box and checked; the live checkout is as it was.
     expect(reply!.parts.filter((part) => part.type === "data-draft").map((part) => part.data)).toEqual([
       {
         draft: id,
@@ -340,17 +352,17 @@ describe("the chat on a person's own agent", () => {
     expect(asked).toMatchObject({ agent: "Copilot", state: "waiting", url: "https://example.test/login/device" });
     expect(asked!.text).toContain("enter code FAKE-0001");
     expect(await pasted).toEqual([404, 400, 204]);
-    // The sign-in ran our terminal: Copilot's device flow, as the person's own HOME.
+    // The sign-in ran in the box: Copilot's device flow, with the box's home as its HOME.
     expect(logged("copilot").find((entry) => "login" in entry)).toEqual({ login: ["login", "--device-code"] });
-    expect(existsSync(join(home(), "people/ada/.signed-in-copilot"))).toBe(true);
+    expect(existsSync(join(agentsHome("ada"), ".signed-in-copilot"))).toBe(true);
     // The card says it is done, and keeps neither the link nor the code.
     expect(cardOf(reply)).toEqual({ agent: "Copilot", state: "done" });
     await waitFor(async () => (await testApp.client.chats.load(id)).length === 2);
     expect(JSON.stringify(await testApp.client.chats.load(id))).not.toContain("FAKE-0001");
     // Signed in: the next message is answered.
     expect(textOfReply(await send(id, "acp-copilot", "Hi again"))).toBe("Hello.");
-    // A code with no sign-in waiting is refused.
-    expect((await paste(id, CODE)).status).toBe(404);
+    // A code with no sign-in waiting is refused, once the turn's run has ended after its reply.
+    await waitFor(async () => (await paste(id, CODE)).status === 404);
   }, 120_000);
 
   it("shows the command to run once on this computer for a vendor whose sign-in needs a terminal", async () => {
@@ -358,7 +370,7 @@ describe("the chat on a person's own agent", () => {
     expect(cardOf(reply)).toEqual({
       agent: "Pi",
       state: "once",
-      command: `HOME=${join(home(), "people/ada")} ${join(install("pi"), "node_modules/.bin/pi")}`,
+      command: `HOME=${agentsHome("ada")} ${join(install("pi"), "node_modules/.bin/pi")}`,
       after: "/login",
     });
     expect(textOfReply(reply)).toBe("");
