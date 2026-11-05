@@ -59,6 +59,8 @@ export function agent37Backend(
       return box;
     },
     async discard({ name }) {
+      // An open in flight may yet make the instance: wait for it, so this removes it.
+      await opening.get(name)?.catch(() => undefined);
       const api = agent37Api(await keyOf());
       await Promise.all((await holding(api, name)).map(({ id }) => api.remove(id)));
     },
@@ -73,7 +75,13 @@ export function agent37Backend(
     let known = registered.get(key);
     if (!known) {
       const ssh = sshKey(key);
-      known = { ssh, registering: api.registerKey(ssh.publicKey, "sanoma") };
+      known = {
+        ssh,
+        registering: api.registerKey(
+          ssh.publicKey,
+          `sanoma-${createHash("sha256").update(ssh.publicKey).digest("hex").slice(0, 8)}`,
+        ),
+      };
       registered.set(key, known);
       known.registering.catch(() => registered.delete(key));
     }
@@ -101,7 +109,11 @@ export function agent37Backend(
       deadline,
       () => connect(edge(made.id, 22022), headers, ssh.privateKey, Math.max(1, deadline - Date.now())),
       (error) => !(error instanceof RefusedError),
-    );
+    ).catch((error: unknown) => {
+      // The key may have been removed from the workspace: the next open registers it again.
+      if (error instanceof RefusedError) registered.delete(key);
+      throw error;
+    });
     const { end, ...commands } = sshBox(client);
     return {
       id: made.id,
@@ -159,12 +171,14 @@ async function running(api: Agent37Api, instance: Instance, deadline: number): P
   }
 }
 
-/** Puts the instance to sleep, its memory checkpointed; stops it when Agent37 refuses the sleep (not running, or the checkpoint failed). */
+/** Puts the instance to sleep, its memory checkpointed; stops it when Agent37 refuses the sleep of a running instance (the checkpoint failed). */
 async function asleep(api: Agent37Api, id: string, deadline: number): Promise<void> {
   try {
     await retrying(deadline, () => api.sleep(id));
   } catch (error) {
     if (!isCode(error, "invalid_request") && !isCode(error, "provisioning_failed")) throw error;
+    // Asleep already (it slept when idle) or stopped: nothing to do, and a stop would lose its memory.
+    if (["sleeping", "stopped"].includes((await api.get(id)).status)) return;
     // Its disk is kept either way.
     await retrying(deadline, () => api.stop(id));
   }

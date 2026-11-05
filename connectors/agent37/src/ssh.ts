@@ -72,7 +72,7 @@ export class RefusedError extends Error {}
  * An SSH connection as `USER` to the server behind the WebSocket at `url` (`https://`, sent with
  * `headers`), within `timeoutMs`. The host key is not checked: the instance makes a new one when
  * Agent37 moves it, and the tunnel is TLS to Agent37's edge, which checked the API key. Fails
- * with a `RefusedError` when the edge refuses the key (401, 403, 404) or the server the SSH key.
+ * with a `RefusedError` when the edge refuses the key (401, 403) or the server the SSH key.
  */
 export function connect(
   url: string,
@@ -80,6 +80,7 @@ export function connect(
   privateKey: string,
   timeoutMs: number,
 ): Promise<Client> {
+  const deadline = Date.now() + timeoutMs;
   return new Promise((resolve, reject) => {
     // A dropped connection, or one torn down here, ends the commands on it: each one's `wait` says so.
     const client = new Client().on("error", () => {});
@@ -88,7 +89,7 @@ export function connect(
       client.end();
       ws.terminate();
       const refused =
-        error.level === "client-authentication" || /Unexpected server response: 40[134]\b/.test(error.message);
+        error.level === "client-authentication" || /Unexpected server response: 40[13]\b/.test(error.message);
       const message = `the SSH tunnel to ${new URL(url).host} failed: ${error.message}`;
       reject(refused ? new RefusedError(message) : new Error(message));
     };
@@ -104,7 +105,8 @@ export function connect(
         sock: createWebSocketStream(ws),
         username: USER,
         privateKey,
-        readyTimeout: timeoutMs,
+        // What the WebSocket's handshake left of the time.
+        readyTimeout: Math.max(1, deadline - Date.now()),
         // Bytes through the tunnel keep the instance awake while a box is open.
         keepaliveInterval: 30_000,
         hostVerifier: () => true,
@@ -180,8 +182,9 @@ export function sshBox(client: Client): Pick<Box, "run" | "read" | "write"> & { 
   const running = new Set<string>();
   return {
     async end() {
-      const groups = [...running].map((f) => `kill -s KILL -- -"$(cat ${quote(f)} 2>/dev/null)" 2>/dev/null`);
-      if (groups.length) await once(client, `${groups.join("; ")}; true`).catch(() => undefined);
+      // A command just started may not have written its pidfile yet: `killLine` waits for it.
+      const groups = [...running].map((f) => killLine(f, "KILL"));
+      if (groups.length) await once(client, groups.join("; ")).catch(() => undefined);
       client.end();
     },
     async run(command, { cwd, env, stdin, signal } = {}): Promise<Process> {
