@@ -1782,11 +1782,10 @@ describe("resources and drift", () => {
 
   it("reads each workflow's latest run, by name", async () => {
     const last = await lastRuns(ctx);
-    // Adopt and Save ran before, as runs of the app's built-ins.
-    expect(Object.keys(last).toSorted()).toEqual(["adopt", "announce", "drift", "patch"]);
     const { body: announced } = await runsOf({ workflow: "announce", limit: 1 });
-    expect(last.announce?.runId).toBe(announced[0]?.runId);
-    expect(last.drift?.runId).toBe(driftRun);
+    expect(last).toMatchObject({ announce: { runId: announced[0]?.runId }, drift: { runId: driftRun } });
+    // A workflow never run has none. The built-ins Adopt and Save are read once run, below.
+    expect(last).not.toHaveProperty("call");
   });
 
   it("refuses a drift run given any input: it reads the data files itself", async () => {
@@ -1885,6 +1884,8 @@ describe("resources and drift", () => {
       expect(readFileSync(join(bare, stripe), "utf8")).toContain('name: "Sanoma Professional",');
     });
     expect(commits).toHaveLength(1);
+    // Adopt is a run of the app's built-in, read as any workflow's latest is.
+    expect((await lastRuns(ctx)).adopt).toMatchObject({ workflow: "adopt", startedBy: { id: "alice" } });
   });
 
   it("patches a declaration's literal fields without a remote: written and committed, the rules by admin only", async () => {
@@ -1953,6 +1954,8 @@ describe("resources and drift", () => {
       expect(readFileSync(join(root, people), "utf8")).toContain('sanoma.person({ id: "alice", name: "Alice A." })');
       expect(commits).toHaveLength(3);
     });
+    // Save is a run of the app's built-in, read as any workflow's latest is.
+    expect((await lastRuns(ctx)).patch).toMatchObject({ workflow: "patch", startedBy: { id: "tester" } });
   });
 
   it("renders each resource on Hosting with its drift badge, the fields that differ, and a link to the run", async () => {
