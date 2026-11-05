@@ -1,4 +1,6 @@
 import { SecretStoreError, type SecretAddress, type SecretStore, type SecretValue } from "@sanoma-ai/workflows";
+import { type Db, databaseOn, pgCode } from "@sanoma-ai/workflows/db";
+import { sql } from "drizzle-orm";
 import { Pool } from "pg";
 
 export interface SupabaseVaultOptions {
@@ -25,7 +27,7 @@ export function supabaseVault(options: SupabaseVaultOptions = {}): SecretStore &
   const env = options.databaseUrlEnv ?? "SUPABASE_VAULT_DATABASE_URL";
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(env)) throw new SecretStoreError("invalid_configuration");
   const writable = options.writable ?? true;
-  let pool: Pool | undefined;
+  let db: (Db & { $client: Pool }) | undefined;
   const invoke = async (
     operation: string,
     namespace: string,
@@ -41,10 +43,10 @@ export function supabaseVault(options: SupabaseVaultOptions = {}): SecretStore &
     )
       throw new SecretStoreError("invalid_configuration");
     try {
-      if (!pool) {
+      if (!db) {
         const connectionString = process.env[env];
         if (!connectionString) throw new SecretStoreError("invalid_configuration");
-        pool = new Pool({
+        const pool = new Pool({
           connectionString,
           max: 4,
           idleTimeoutMillis: 1000,
@@ -54,15 +56,16 @@ export function supabaseVault(options: SupabaseVaultOptions = {}): SecretStore &
         });
         // Idle connection errors must not surface provider payloads through an unhandled EventEmitter error.
         pool.on("error", () => {});
+        db = databaseOn(pool);
       }
-      const result = await pool.query<{ result: unknown }>(
-        "SELECT sanoma_vault.access($1, $2, $3, $4, $5, $6) AS result",
-        [operation, namespace, path ?? null, value ?? null, expected ?? null, by ?? null],
+      const { rows } = await db.execute<{ result: unknown }>(
+        sql`SELECT sanoma_vault.access(${operation}, ${namespace}, ${path ?? null}, ${value ?? null}, ${expected ?? null}, ${by ?? null}) AS result`,
       );
-      return result.rows[0]?.result;
+      return rows[0]?.result;
     } catch (error) {
       if (error instanceof SecretStoreError) throw error;
-      const code = (error as { code?: string } | null)?.code;
+      // The driver's `code` classifies the failure; its message (the statement and its parameters) is never kept.
+      const code = pgCode(error);
       throw new SecretStoreError(
         code === "42501"
           ? "denied"
@@ -109,9 +112,9 @@ export function supabaseVault(options: SupabaseVaultOptions = {}): SecretStore &
       await invoke("delete", namespace, path, undefined, expectedVersion, by);
     },
     async close() {
-      const current = pool;
-      pool = undefined;
-      await current?.end();
+      const current = db;
+      db = undefined;
+      await current?.$client.end();
     },
   };
 }

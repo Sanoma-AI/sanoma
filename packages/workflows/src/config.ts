@@ -35,7 +35,7 @@ import {
   collectionsFake,
   isCollection,
 } from "./collection.ts";
-import { lazyPool, type LazyPool } from "./db.ts";
+import { lazyDb, type LazyDb } from "./db.ts";
 import { isDirectory, kindDirs, SCENARIOS_DIR } from "./paths.ts";
 import { callerFile, type Use, type WorkflowDefinition } from "./define.ts";
 import { DRIFT_WORKFLOW, driftWorkflow } from "./drift.ts";
@@ -174,7 +174,7 @@ export interface Login {
 export interface ResolvedConfig {
   secrets: SecretConfiguration;
   connections: ConnectionRegistry;
-  connectionPool: LazyPool;
+  connectionStore: LazyDb;
   identityProvisioning: ReturnType<typeof configuredIdentityProvisioning>;
   /**
    * Scopes workflows, queues and versions in the system database: the `name` of
@@ -237,11 +237,11 @@ export interface ResolvedConfig {
   /** The config's collections, by name: their operations are in `ops` and `drivers`, their fake in `fakes`, under `DATA_VENDOR`. */
   collections: ReadonlyMap<string, Collection>;
   /**
-   * The pool the collections' driver keeps their records through, when there are any: opened on
+   * The database the collections' driver keeps their records in, when there are any: opened on
    * its first call, and closed by whoever calls the driver (the worker, and the client, which
    * calls it directly, when each stops).
    */
-  dataStore?: LazyPool;
+  dataStore?: LazyDb;
   /**
    * By name; each checked against `ops` and `drivers`. The config's, the built-ins `drift`
    * (`DRIFT_WORKFLOW`) and `apply` (`APPLY_WORKFLOW`) when its connectors declare resource types,
@@ -349,15 +349,15 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   const hostTyped = [...types.values()].some((type) => type.host);
   // Built-in: the collections' operations, `data.<name>.<op>`, on the config's database.
   const databaseUrl = resolveDatabaseUrl(config);
-  const connectionPool = lazyPool(databaseUrl, "connections");
+  const connectionStore = lazyDb(databaseUrl, "connections");
   const identityProvisioning = configuredIdentityProvisioning(config.identityProvisioning);
   const connections = new ConnectionRegistry(
     connectionCatalog(config.connectors, config.connections, config.connectionRules),
-    () => connectionPool.db(),
-    configuredSecrets(config.secrets ?? {}, () => connectionPool.db()),
+    () => connectionStore.db(),
+    configuredSecrets(config.secrets ?? {}, () => connectionStore.db()),
   );
   const declared = [...collections.values()];
-  const dataStore = declared.length ? lazyPool(databaseUrl, "data") : undefined;
+  const dataStore = declared.length ? lazyDb(databaseUrl, "data") : undefined;
   // Built-in, in every config: a change's operations, which the template's policy names
   // (`sanoma.change.merge`), the listing of apps a page may call (`sanoma.apps.list`), and what a
   // workflow asks the runtime to do for it (`sanoma`, runtime-ops.ts).
@@ -382,9 +382,9 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
       connectionDriver(connections),
       appsListDriver,
       runtimeDriver({
-        tokens: tokenStore(() => connectionPool.db()),
+        tokens: tokenStore(() => connectionStore.db()),
         identities: identityProvisioning.store,
-        inspect: inspectRun(() => connectionPool.db(), appName),
+        inspect: inspectRun(() => connectionStore.db(), appName),
       }),
       ...(hostTyped ? [sourceDriver] : []),
       ...(dataStore ? [collectionsDriver(declared, dataStore)] : []),
@@ -454,7 +454,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   return {
     secrets: config.secrets ?? {},
     connections,
-    connectionPool,
+    connectionStore,
     identityProvisioning,
     appName,
     databaseUrl,

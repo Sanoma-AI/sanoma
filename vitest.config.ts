@@ -19,6 +19,7 @@ export default defineConfig({
         replacement: src("./packages/workflows/src/$1.ts"),
       },
       { find: /^@sanoma-ai\/workflows\/resources$/, replacement: src("./packages/workflows/src/constructors.ts") },
+      { find: /^@sanoma-ai\/workflows\/db$/, replacement: src("./packages/workflows/src/db/index.ts") },
       {
         find: /^@sanoma-ai\/testing\/(database|features|harness|host|replay|scenarios|wakeup)$/,
         replacement: src("./packages/testing/src/$1.ts"),

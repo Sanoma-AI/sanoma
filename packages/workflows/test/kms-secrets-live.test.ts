@@ -3,7 +3,9 @@ import { KeyManagementServiceClient } from "@google-cloud/kms";
 import crc32c from "crc-32/crc32c.js";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { lazyPool } from "../src/db.ts";
+import { eq, sql } from "drizzle-orm";
+import { lazyDb } from "../src/db.ts";
+import { kmsSecrets } from "../src/db/kms.ts";
 import { KMS_SECRETS_SQL, kmsPostgresStore } from "../src/kms-secrets.ts";
 import { checkSecretStore } from "../src/secret-store-check.ts";
 
@@ -20,7 +22,7 @@ const company = `proof-${randomUUID()}`,
 let kms: KeyManagementServiceClient;
 let other: KeyManagementServiceClient;
 let installed = false;
-const pool = lazyPool(testDatabaseUrl("kms_live"), "kms-live-proof");
+const pool = lazyDb(testDatabaseUrl("kms_live"), "kms-live-proof");
 const rpc = async <T>(request: Promise<T>): Promise<T> => {
   try {
     return await request;
@@ -34,12 +36,12 @@ describe.runIf(enabled)("GCP KMS IAM proof", () => {
       throw new Error("Missing two distinct test keys and explicit identity configurations");
     kms = new KeyManagementServiceClient({ keyFilename: credentials });
     other = new KeyManagementServiceClient({ keyFilename: otherCredentials });
-    await (await pool.db()).query(KMS_SECRETS_SQL);
+    await (await pool.db()).execute(sql.raw(KMS_SECRETS_SQL));
     installed = true;
   });
   afterAll(async () => {
     try {
-      if (installed) await (await pool.db()).query("DELETE FROM sanoma_kms.secrets WHERE company=$1", [company]);
+      if (installed) await (await pool.db()).delete(kmsSecrets).where(eq(kmsSecrets.company, company));
     } finally {
       await Promise.all([pool.close(), kms?.close(), other?.close()]);
     }

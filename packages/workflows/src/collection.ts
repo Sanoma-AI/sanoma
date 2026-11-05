@@ -1,6 +1,9 @@
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
-import { DATA_TABLE, type Db } from "./db.ts";
+import * as drizzle from "drizzle-orm";
+import { and, eq, or, sql, type SQL } from "drizzle-orm";
+import type { Db } from "./db.ts";
+import { data } from "./db/company.ts";
 import { defineFake, type Fake } from "./fake.ts";
 import { isObject } from "./resource.ts";
 import {
@@ -29,7 +32,7 @@ import {
 // A company's own records: a collection is declared with plain values (a name, a key and typed
 // fields), and its `get`, `list`, `save` and `delete` are operations of the vendor `data`, under
 // the policy and in the ledger like any connector's. The records are JSON rows of one table the
-// runtime owns (`DATA_TABLE`), in the config's database; a sandbox run keeps them in memory.
+// runtime owns (`data`), in the config's database; a sandbox run keeps them in memory.
 
 export type FieldType = (typeof FIELD_TYPES)[number];
 
@@ -266,7 +269,7 @@ export function collectionsConnector(list: readonly Collection[]): Connector<typ
   return { ...defineConnector(DATA_VENDOR, {}), ...Object.fromEntries(ops) } as Connector<typeof DATA_VENDOR, DataOps>;
 }
 
-const COLUMNS = "key, record, updated_at, updated_by";
+const COLUMNS = { key: data.key, record: data.record, updatedAt: data.updatedAt, updatedBy: data.updatedBy };
 const recordExists = () =>
   new DriverError("Collection record already exists", { retryable: false, status: 409, vendorCode: "record_exists" });
 const recordChanged = () =>
@@ -278,14 +281,10 @@ const recordChanged = () =>
 const sameJson = (a: Record<string, unknown>, b: Record<string, unknown>) =>
   isDeepStrictEqual(JSON.parse(JSON.stringify(a)), JSON.parse(JSON.stringify(b)));
 type SaveInput = { record: Record<string, unknown>; ifAbsent?: boolean; ifRecord?: Record<string, unknown> };
-const RANGE = { gt: ">", gte: ">=", lt: "<", lte: "<=" } as const;
+// By namespace: the fake names a range's bounds `gt`, `gte`, `lt` and `lte`.
+const RANGE = { gt: drizzle.gt, gte: drizzle.gte, lt: drizzle.lt, lte: drizzle.lte };
 
-interface Row {
-  key: string;
-  record: Record<string, unknown>;
-  updated_at: Date;
-  updated_by: string;
-}
+type Row = Pick<typeof data.$inferSelect, keyof typeof COLUMNS>;
 
 /** A `list` input as its schema parses it. */
 interface Listing {
@@ -295,58 +294,70 @@ interface Listing {
 }
 
 /**
- * The collections' driver: their records in `DATA_TABLE` of the database `store` is on, through
+ * The collections' driver: their records in the `data` table of the database `store` is on, through
  * the pool a run's calls share, or one connection in a transaction (a direct write, with its
  * ledger record). Every value reaches Postgres as a parameter, field names included; the field
  * names and operators are the ones the input's schema accepts.
  */
 export function collectionsDriver(list: readonly Collection[], store: { db(): Promise<Db> }): Driver {
-  const query = async (sql: string, params: unknown[]) => (await store.db()).query<Row>(sql, params);
   const impl = list.map((c) => {
     const saved = (row: Row) =>
       answer(c, {
         key: row.key,
         record: row.record,
-        updatedAt: row.updated_at.toISOString(),
-        updatedBy: row.updated_by,
+        updatedAt: row.updatedAt.toISOString(),
+        updatedBy: row.updatedBy,
       });
+    const here = (key: string) => and(eq(data.collection, c.name), eq(data.key, key));
     const ops: Record<string, (input: any, call: CallContext) => Promise<unknown>> = {
       get: async ({ key }: { key: string }) => {
-        const sql = `SELECT ${COLUMNS} FROM ${DATA_TABLE} WHERE collection = $1 AND key = $2`;
-        const [row] = (await query(sql, [c.name, key])).rows;
+        const [row] = await (await store.db()).select(COLUMNS).from(data).where(here(key));
         return row ? saved(row) : null;
       },
-      list: async (listing: Listing) => (await query(...listSql(c, listing))).rows.map(saved),
+      list: async (listing: Listing) => {
+        const { where, order } = listClauses(c, listing);
+        const rows = await (
+          await store.db()
+        )
+          .select(COLUMNS)
+          .from(data)
+          .where(where)
+          .orderBy(...order)
+          .limit(listing.limit);
+        return rows.map(saved);
+      },
       save: async ({ record, ifAbsent, ifRecord }: SaveInput, call) => {
+        const db = await store.db();
+        const key = record[c.key] as string;
+        const by = updatedBy(call);
         if (ifRecord !== undefined) {
           // PostgreSQL locks and rechecks the predicate on a concurrent update. A lost-response
           // retry may recover its own identical result, but never overwrite another actor's state.
-          const retry = "record = $3::jsonb AND updated_by = $4";
-          const sql = `UPDATE ${DATA_TABLE} SET record = $3::jsonb,
-            updated_at = CASE WHEN ${retry} THEN updated_at ELSE now() END, updated_by = $4
-            WHERE collection = $1 AND key = $2 AND (record = $5::jsonb OR (${retry}))
-            RETURNING ${COLUMNS}`;
-          const params = [c.name, record[c.key], JSON.stringify(record), updatedBy(call), JSON.stringify(ifRecord)];
-          const row = (await query(sql, params)).rows[0];
+          const retry = and(eq(data.record, record), eq(data.updatedBy, by))!;
+          const [row] = await db
+            .update(data)
+            .set({ record, updatedAt: sql`CASE WHEN ${retry} THEN ${data.updatedAt} ELSE now() END`, updatedBy: by })
+            .where(and(here(key), or(eq(data.record, ifRecord), retry)))
+            .returning(COLUMNS);
           if (!row) throw recordChanged();
           return saved(row);
         }
         // The conflict row is locked by Postgres: never implement an insert-only claim as get + save.
         // An identical retry by the same actor keeps the first receipt and never overwrites later progress.
         const conflict = ifAbsent
-          ? `record = ${DATA_TABLE}.record WHERE ${DATA_TABLE}.record = EXCLUDED.record AND ${DATA_TABLE}.updated_by = EXCLUDED.updated_by`
-          : "record = EXCLUDED.record, updated_at = now(), updated_by = EXCLUDED.updated_by";
-        const sql =
-          `INSERT INTO ${DATA_TABLE} (collection, key, record, updated_by) VALUES ($1, $2, $3, $4) ` +
-          `ON CONFLICT (collection, key) DO UPDATE SET ${conflict} RETURNING ${COLUMNS}`;
-        const params = [c.name, record[c.key], JSON.stringify(record), updatedBy(call)];
-        const row = (await query(sql, params)).rows[0];
+          ? { set: { record: sql`${data.record}` }, setWhere: and(eq(data.record, record), eq(data.updatedBy, by)) }
+          : { set: { record, updatedAt: sql`now()`, updatedBy: by } };
+        const [row] = await db
+          .insert(data)
+          .values({ collection: c.name, key, record, updatedBy: by })
+          .onConflictDoUpdate({ target: [data.collection, data.key], ...conflict })
+          .returning(COLUMNS);
         if (!row) throw recordExists();
         return saved(row);
       },
       delete: async ({ key }: { key: string }) => {
-        const sql = `DELETE FROM ${DATA_TABLE} WHERE collection = $1 AND key = $2`;
-        return { deleted: ((await query(sql, [c.name, key])).rowCount ?? 0) > 0 };
+        const gone = await (await store.db()).delete(data).where(here(key)).returning({ key: data.key });
+        return { deleted: gone.length > 0 };
       },
     };
     return [c.name, ops];
@@ -369,40 +380,37 @@ const jsonTypesOf = (c: Collection): Record<string, JsonType> =>
 const SQL_TYPE = { string: "text", number: "numeric", boolean: "boolean" } as const;
 
 /**
- * The `list` query on Postgres, and its parameters. A field's value is compared as its declared
+ * The `list` query's filter and order on Postgres. A field's value is compared as its declared
  * type, text byte by byte (`COLLATE "C"`, whatever the database's collation, as the fake
  * compares it); a missing value, or one of another type, is SQL's null: it matches no filter and
  * sorts last.
  */
-function listSql(c: Collection, { where = {}, order, limit }: Listing): [string, unknown[]] {
+function listClauses(c: Collection, { where = {}, order }: Listing): { where: SQL | undefined; order: SQL[] } {
   const types = jsonTypesOf(c);
-  const params: unknown[] = [c.name];
-  const param = (value: unknown) => `$${params.push(value)}`;
   const field = (name: string) => {
     const type = types[name]!;
-    const json = `record -> ${param(name)}::text`;
-    const typed = `CASE WHEN jsonb_typeof(${json}) = '${type}' THEN (${json} #>> '{}')::${SQL_TYPE[type]} END`;
-    return type === "string" ? `(${typed}) COLLATE "C"` : typed;
+    const sqlType = sql.raw(SQL_TYPE[type]);
+    const json = sql`${data.record} -> ${name}::text`;
+    const typed = sql`CASE WHEN jsonb_typeof(${json}) = ${type} THEN (${json} #>> '{}')::${sqlType} END`;
+    return type === "string" ? sql`(${typed}) COLLATE "C"` : typed;
   };
-  const value = (name: string, v: unknown) => `${param(v)}::${SQL_TYPE[types[name]!]}`;
-  const conditions = ["collection = $1"];
+  const value = (name: string, v: unknown) => sql`${v}::${sql.raw(SQL_TYPE[types[name]!])}`;
+  const conditions: SQL[] = [eq(data.collection, c.name)];
   for (const [name, condition] of Object.entries(where)) {
     if (condition === undefined) continue;
-    if (!isObject(condition)) conditions.push(`${field(name)} = ${value(name, condition)}`);
+    if (!isObject(condition)) conditions.push(eq(field(name), value(name, condition)));
     else {
       for (const [op, v] of Object.entries(condition)) {
-        const sign = RANGE[op as keyof typeof RANGE];
-        if (v !== undefined) conditions.push(`${field(name)} ${sign} ${value(name, v)}`);
+        if (v !== undefined) conditions.push(RANGE[op as keyof typeof RANGE](field(name), value(name, v)));
       }
     }
   }
-  const byKey = `key COLLATE "C"`;
+  const byKey = sql`${data.key} COLLATE "C"`;
   const by =
     order === undefined
-      ? byKey
-      : `${field(order.replace(/^-/, ""))} ${order.startsWith("-") ? "DESC" : "ASC"} NULLS LAST, ${byKey}`;
-  const sql = `SELECT ${COLUMNS} FROM ${DATA_TABLE} WHERE ${conditions.join(" AND ")} ORDER BY ${by} LIMIT ${param(limit)}`;
-  return [sql, params];
+      ? [byKey]
+      : [sql`${field(order.replace(/^-/, ""))} ${sql.raw(order.startsWith("-") ? "DESC" : "ASC")} NULLS LAST`, byKey];
+  return { where: and(...conditions), order: by };
 }
 
 /** Orders two values of one type as Postgres does under `COLLATE "C"`: strings by their UTF-8 bytes. */

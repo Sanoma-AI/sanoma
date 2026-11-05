@@ -66,7 +66,10 @@ const sites = {
       "error",
       {
         paths: [
-          ...[own, "@sanoma-ai/workflows", "@sanoma-ai/bridge", "pg"].map((name) => ({ name, message: SERVER })),
+          ...[own, "@sanoma-ai/workflows", "@sanoma-ai/bridge", "pg", "drizzle-orm"].map((name) => ({
+            name,
+            message: SERVER,
+          })),
           { name: "@sanoma-ai/app", message: APP },
           {
             name: "@tanstack/react-start",
@@ -84,6 +87,7 @@ const sites = {
               "@sanoma-ai/bridge/**",
               "@dbos-inc/**",
               "pg/**",
+              "drizzle-orm/**",
               "@tanstack/react-start/**",
             ],
             message: SERVER,

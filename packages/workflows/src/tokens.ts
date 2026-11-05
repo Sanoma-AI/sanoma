@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
-import type { Pool } from "pg";
-import { API_TOKENS_TABLE as TABLE } from "./db.ts";
+import { and, eq, isNull, type SQL, sql } from "drizzle-orm";
+import { pgCode, type Db } from "./db.ts";
+import { apiTokens } from "./db/company.ts";
 import type { Principal } from "./define.ts";
 import { generateSecret, tokenHash as hashOf } from "./secret.ts";
 
@@ -48,62 +49,71 @@ export interface Tokens {
   subjectOf(id: string): Promise<string | undefined>;
 }
 
-export function tokenStore(db: () => Promise<Pool>): Tokens {
+const active = (where: SQL | undefined) => and(where, isNull(apiTokens.revokedAt));
+
+export function tokenStore(db: () => Promise<Db>): Tokens {
   return {
     async mint({ id = randomUUID(), subject, groups }) {
       const token = newApiToken();
-      await (
-        await db()
-      ).query(`INSERT INTO ${TABLE} (id, hash, subject, groups) VALUES ($1, $2, $3, $4::jsonb)`, [
-        id,
-        hashOf(token),
-        subject,
-        JSON.stringify(groups),
-      ]);
+      await (await db()).insert(apiTokens).values({ id, hash: hashOf(token), subject, groups: [...groups] });
       return { id, token };
     },
     async register(input) {
       const { id, hash, subject, groups } = registrationOf(input);
       try {
-        const result = await (
+        // A duplicate id changes nothing unless it is this same active registration (the no-op
+        // update makes the row come back).
+        const registered = await (
           await db()
-        ).query(
-          `INSERT INTO ${TABLE} (id, hash, subject, groups) VALUES ($1,$2,$3,$4::jsonb)
-           ON CONFLICT (id) DO UPDATE SET id=EXCLUDED.id
-           WHERE ${TABLE}.hash=EXCLUDED.hash AND ${TABLE}.subject=EXCLUDED.subject
-             AND ${TABLE}.groups @> EXCLUDED.groups AND ${TABLE}.groups <@ EXCLUDED.groups
-             AND ${TABLE}.revoked_at IS NULL
-           RETURNING id`,
-          [id, hash, subject, JSON.stringify(groups)],
-        );
-        return result.rowCount === 1;
+        )
+          .insert(apiTokens)
+          .values({ id, hash, subject, groups })
+          .onConflictDoUpdate({
+            target: apiTokens.id,
+            set: { id },
+            setWhere: and(
+              eq(apiTokens.hash, hash),
+              eq(apiTokens.subject, subject),
+              sql`${apiTokens.groups} @> ${sql.param(groups, apiTokens.groups)} AND ${apiTokens.groups} <@ ${sql.param(groups, apiTokens.groups)}`,
+              isNull(apiTokens.revokedAt),
+            ),
+          })
+          .returning({ id: apiTokens.id });
+        return registered.length === 1;
       } catch (error) {
         // A bearer already registered under another ID cannot acquire a second identity.
-        if ((error as { code?: string }).code === "23505") return false;
+        if (pgCode(error) === "23505") return false;
         throw error;
       }
     },
     async revoke({ id }) {
-      await (await db()).query(`UPDATE ${TABLE} SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL`, [id]);
+      await (
+        await db()
+      )
+        .update(apiTokens)
+        .set({ revokedAt: sql`now()` })
+        .where(active(eq(apiTokens.id, id)));
     },
     async resolve(token) {
       if (!token.startsWith(PREFIX)) return undefined;
       // Looked up by its hash: the token itself is never stored, so there is nothing to compare it to.
-      const { rows } = await (
+      const [row] = await (
         await db()
-      ).query<{ id: string; subject: string; groups: string[] }>(
-        `SELECT id, subject, groups FROM ${TABLE} WHERE hash = $1 AND revoked_at IS NULL`,
-        [hashOf(token)],
-      );
-      const row = rows[0];
+      )
+        .select({ id: apiTokens.id, subject: apiTokens.subject, groups: apiTokens.groups })
+        .from(apiTokens)
+        .where(active(eq(apiTokens.hash, hashOf(token))));
       if (!row) return undefined;
       return { principal: { id: `token:${row.id}`, groups: row.groups }, subject: row.subject };
     },
     async subjectOf(id) {
-      const { rows } = await (
+      const [row] = await (
         await db()
-      ).query<{ subject: string }>(`SELECT subject FROM ${TABLE} WHERE id = $1 AND revoked_at IS NULL`, [id]);
-      return rows[0]?.subject;
+      )
+        .select({ subject: apiTokens.subject })
+        .from(apiTokens)
+        .where(active(eq(apiTokens.id, id)));
+      return row?.subject;
     },
   };
 }

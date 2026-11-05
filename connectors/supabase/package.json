@@ -65,6 +65,7 @@
     "watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput"
   },
   "dependencies": {
+    "drizzle-orm": "0.45.4",
     "pg": "^8.23.1"
   },
   "devDependencies": {

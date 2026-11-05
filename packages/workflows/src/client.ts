@@ -13,7 +13,8 @@ import { encodeCredentials, decodeCredentials, verifyAuthentication, Authenticat
 import { createHash, randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { type DBOSClient, Error as DBOSErrors, type WorkflowStatusString } from "@dbos-inc/dbos-sdk";
-import type { Pool } from "pg";
+import { is } from "drizzle-orm";
+import { TransactionRollbackError } from "drizzle-orm/errors";
 import { z } from "zod";
 import {
   APPROVALS_EVENT,
@@ -30,7 +31,7 @@ import { type Tokens, tokenStore } from "./tokens.ts";
 import { collectionsDriver } from "./collection.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { configuredSecrets } from "./credentials.ts";
-import { dbosClient, lazyPool, type LazyPool, spendInviteRequest } from "./db.ts";
+import { dbosClient, lazyDb, type LazyDb, spendInviteRequest } from "./db.ts";
 import { type CredentialStatus, credentialsOf } from "./env.ts";
 import { type ApprovalState, Principal, type WorkflowDefinition } from "./define.ts";
 import { APPLY_WORKFLOW, type ApplyInput, type ApplyReport } from "./apply.ts";
@@ -279,7 +280,7 @@ export class SanomaClient {
   /** The config's own ledger store, or a Postgres one made for this client, which `close` then closes. */
   private readonly audit: OwnedLedger;
   /** On the config's database, for the runtime's tables (the credentials, the chats): opened on first use. */
-  private readonly pool: LazyPool;
+  private readonly database: LazyDb;
   /** What a direct call's driver reads secrets from, as a worker's live driver does. */
   private readonly storedSecrets: SecretAccess;
   /** The operator agent's chats: their rows and their transcripts, in the config's database. */
@@ -299,10 +300,10 @@ export class SanomaClient {
     this.drivers = drivers;
     this.options = options;
     this.audit = ownedLedger(config);
-    this.pool = lazyPool(config.databaseUrl, "client");
-    this.storedSecrets = configuredSecrets(config.secrets, () => this.db());
-    this.chats = chatStore(() => this.db());
-    this.tokens = tokenStore(() => this.db());
+    this.database = lazyDb(config.databaseUrl, "client");
+    this.storedSecrets = configuredSecrets(config.secrets, () => this.database.db());
+    this.chats = chatStore(() => this.database.db());
+    this.tokens = tokenStore(() => this.database.db());
   }
 
   /**
@@ -533,64 +534,63 @@ export class SanomaClient {
     const { dataStore, collections, ledger } = this.config;
     const connectionMutation = op.id.startsWith("sanoma.connection.");
     const transactionStore = connectionMutation
-      ? this.config.connectionPool
+      ? this.config.connectionStore
       : op.vendor === DATA_VENDOR
         ? dataStore
         : undefined;
-    const conn = !ledger && transactionStore ? await (await transactionStore.db()).connect() : undefined;
-    let broken: Error | undefined;
-    try {
-      await conn?.query("BEGIN");
-      // The metadata or collection driver shares the ledger transaction; neither has an env guard.
-      const fn = conn
-        ? (connectionMutation
-            ? connectionDriver(this.config.connections.onDatabase(conn))
-            : collectionsDriver([collections.get(op.resource)!], { db: async () => conn })
-          ).ops[`${op.resource}.${op.name}`]!
-        : call.fn;
-      const at = Date.now();
-      const record = (outcome: { output: unknown } | { error: ErrorInfo }): LedgerRecord => ({
-        v: 1,
-        app: this.config.appName,
-        id: `${runId}:op.called:0`,
-        runId,
-        seq: 0,
-        at,
-        actor,
-        workflow: CALL_WORKFLOW,
-        type: "op.called",
-        op: op.id,
-        effect: op.effect,
-        input: logged,
-        decision,
-        ...(context.connection && { connection: context.connection }),
-        ...outcome,
-        durationMs: Date.now() - at,
-      });
-      let output: unknown;
+    const at = Date.now();
+    const record = (outcome: { output: unknown } | { error: ErrorInfo }): LedgerRecord => ({
+      v: 1,
+      app: this.config.appName,
+      id: `${runId}:op.called:0`,
+      runId,
+      seq: 0,
+      at,
+      actor,
+      workflow: CALL_WORKFLOW,
+      type: "op.called",
+      op: op.id,
+      effect: op.effect,
+      input: logged,
+      decision,
+      ...(context.connection && { connection: context.connection }),
+      ...outcome,
+      durationMs: Date.now() - at,
+    });
+    /** Runs the call through `fn`; a failure is recorded on the store's own connection, outside any transaction. */
+    const output = async (fn: typeof call.fn): Promise<unknown> => {
       try {
-        output = await outputOf(op, () => fn(parsed, context));
+        return await outputOf(op, () => fn(parsed, context));
       } catch (err) {
-        // Recorded on the store's own connection; the transaction is rolled back below.
         await this.audit.store.append(record({ error: errorInfo(err) }));
         throw err;
       }
-      const done = record({ output: recorded(op, output) });
-      if (!conn) {
-        await this.audit.store.append(done);
-        return output;
-      }
-      if (await insertRecord(conn, done)) {
-        await conn.query("COMMIT");
-        return output;
-      }
-      await conn.query("ROLLBACK");
-      return (await this.recordedCall(runId, op.id, logged, context.connection))!.output;
+    };
+    if (ledger || !transactionStore) {
+      const result = await output(call.fn);
+      await this.audit.store.append(record({ output: recorded(op, result) }));
+      return result;
+    }
+    // The write and its record in one transaction: the metadata or collection driver runs on the
+    // transaction's connection (neither has an env guard), and a record another write of the id
+    // was first with rolls the write back, for the recorded output to stand.
+    const store = await transactionStore.db();
+    try {
+      return await store.transaction(async (tx) => {
+        const fn = (
+          connectionMutation
+            ? connectionDriver(this.config.connections.onDatabase(tx))
+            : collectionsDriver([collections.get(op.resource)!], { db: async () => tx })
+        ).ops[`${op.resource}.${op.name}`]!;
+        const result = await output(fn);
+        if (await insertRecord(tx, record({ output: recorded(op, result) }))) return result;
+        tx.rollback();
+      });
     } catch (err) {
-      await conn?.query("ROLLBACK").catch((e: Error) => (broken = e));
-      throw err;
-    } finally {
-      conn?.release(broken);
+      if (!is(err, TransactionRollbackError)) throw err;
+      const first = await this.recordedCall(runId, op.id, logged, context.connection);
+      if (!first) throw err;
+      return first.output;
     }
   }
 
@@ -688,7 +688,7 @@ export class SanomaClient {
    * time, false when it was spent already, in this process or another.
    */
   async spendInviteRequest(nonce: string, expiresAt: Date): Promise<boolean> {
-    return spendInviteRequest(await this.db(), nonce, expiresAt);
+    return spendInviteRequest(await this.database.db(), nonce, expiresAt);
   }
 
   /** When each of `people` last signed in to the staff login, and how, by id (`recordSignIn`); one who never did is left out. */
@@ -1495,10 +1495,10 @@ export class SanomaClient {
       this.config.connections.close(),
       this.config.identityProvisioning.close(),
       this.dbos.destroy(),
-      this.pool.close(),
+      this.database.close(),
       this.audit.close(),
       this.config.dataStore?.close(),
-      this.config.connectionPool.close(),
+      this.config.connectionStore.close(),
     ]);
   }
 
@@ -1520,11 +1520,6 @@ export class SanomaClient {
       ...(named && { name }),
       issues: [{ path: ["name"], message, code: "custom" }],
     });
-  }
-
-  /** The pool the runtime's tables are read and written with, on the database once it is prepared. */
-  private db(): Promise<Pool> {
-    return this.pool.db();
   }
 
   /**

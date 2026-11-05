@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
-import { afterAll, describe, expect, it, vi } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { lazyPool, type Db } from "../src/db.ts";
+import { eq, sql } from "drizzle-orm";
+import { lazyDb } from "../src/db.ts";
+import { workflowStatus } from "../src/db/dbos.ts";
 import {
   defineConnector,
   defineDriver,
@@ -55,7 +57,7 @@ const waiting = defineWorkflow({
   run: async (ctx) => await ctx.approval("Wait", { approver: "operator" }),
 });
 const databaseUrl = testDatabaseUrl("run_status");
-const pool = lazyPool(databaseUrl, "run-status-test");
+const pool = lazyDb(databaseUrl, "run-status-test");
 afterAll(() => pool.close());
 const root = rootWith({
   "policies/policy.cedar": `forbid (principal, action == Sanoma::Action::"sanoma.run.inspect", resource)
@@ -81,7 +83,7 @@ describe("run inspection through the runtime", () => {
     });
     expect(JSON.stringify(await app.client.ledger(inspection))).not.toContain(marker);
     const db = await pool.db();
-    const { rows } = await db.query("SELECT * FROM dbos.operation_outputs WHERE workflow_uuid=$1", [inspection]);
+    const { rows } = await db.execute(sql`SELECT * FROM dbos.operation_outputs WHERE workflow_uuid = ${inspection}`);
     expect(JSON.stringify(rows)).not.toContain(marker);
   });
 
@@ -103,21 +105,17 @@ describe("run inspection through the runtime", () => {
     const runId = await app.client.start(target, { marker: "other-application", fail: false }, { startedBy: actor });
     await app.client.result(runId);
     const db = await pool.db();
-    const { rows } = await db.query<{ application_name: string }>(
-      "SELECT application_name FROM dbos.workflow_status WHERE workflow_uuid=$1",
-      [runId],
-    );
-    await db.query("UPDATE dbos.workflow_status SET application_name=$2 WHERE workflow_uuid=$1", [
-      runId,
-      "other-application",
-    ]);
+    const [original] = await db
+      .select({ applicationName: workflowStatus.applicationName })
+      .from(workflowStatus)
+      .where(eq(workflowStatus.workflowUuid, runId));
+    const renameTo = (name: string | null) =>
+      db.update(workflowStatus).set({ applicationName: name }).where(eq(workflowStatus.workflowUuid, runId));
+    await renameTo("other-application");
     try {
       expect(await app.client.call("sanoma.run.inspect", { runId }, { actor })).toEqual({ runId, status: "missing" });
     } finally {
-      await db.query("UPDATE dbos.workflow_status SET application_name=$2 WHERE workflow_uuid=$1", [
-        runId,
-        rows[0]!.application_name,
-      ]);
+      await renameTo(original!.applicationName);
     }
   });
 
@@ -154,28 +152,24 @@ describe("inspection failure and sandbox boundaries", () => {
       status: "missing",
     });
   });
-  it("distinguishes exhausted recovery from an ordinary failed execution", async () => {
-    const query = vi
-      .fn<(sql: string, values: unknown[]) => Promise<{ rows: { name: string; status: string }[] }>>()
-      .mockResolvedValue({ rows: [{ name: "owner", status: "MAX_RECOVERY_ATTEMPTS_EXCEEDED" }] });
-    expect(await inspectRun(async () => ({ query }) as unknown as Db, "company")("owner-id")).toEqual({
-      runId: "owner-id",
-      workflow: "owner",
-      status: "interrupted",
-    });
-  });
-  it("treats future DBOS states as active, without loading payload columns", async () => {
-    const query = vi
-      .fn<(sql: string, values: unknown[]) => Promise<{ rows: { name: string; status: string }[] }>>()
-      .mockResolvedValue({ rows: [{ name: "owner", status: "FUTURE_STATE" }] });
-    expect(await inspectRun(async () => ({ query }) as unknown as Db, "company")("owner-id")).toEqual({
-      runId: "owner-id",
-      workflow: "owner",
-      status: "active",
-    });
-    expect(query).toHaveBeenCalledWith(
-      "SELECT name,status FROM dbos.workflow_status WHERE workflow_uuid=$1 AND application_name=$2",
-      ["owner-id", "company"],
-    );
+  // Exhausted recovery is told apart from an ordinary failure; a DBOS state this runtime does not know stays active.
+  it.each([
+    ["MAX_RECOVERY_ATTEMPTS_EXCEEDED", "interrupted"],
+    ["FUTURE_STATE", "active"],
+  ])("reads a run DBOS has as %s as %s", async (dbosStatus, status) => {
+    const runId = await app.client.start(target, { marker: "status", fail: false }, { startedBy: actor });
+    await app.client.result(runId);
+    const db = await pool.db();
+    const own = eq(workflowStatus.workflowUuid, runId);
+    const [row] = await db
+      .select({ app: workflowStatus.applicationName, status: workflowStatus.status })
+      .from(workflowStatus)
+      .where(own);
+    await db.update(workflowStatus).set({ status: dbosStatus }).where(own);
+    try {
+      expect(await inspectRun(() => pool.db(), row!.app!)(runId)).toEqual({ runId, workflow: "target-run", status });
+    } finally {
+      await db.update(workflowStatus).set({ status: row!.status }).where(own);
+    }
   });
 });

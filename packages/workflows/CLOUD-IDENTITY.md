@@ -75,8 +75,10 @@ Trusted composition that already owns a writer pool may instead supply the low-l
 
 ```ts
 import { postgresIdentityProvisioning } from "@sanoma-ai/workflows/cloud-identity";
+import { databaseOn } from "@sanoma-ai/workflows/db";
 
-const identityProvisioning = postgresIdentityProvisioning(async () => enrollmentWriterPool, {
+const enrollmentWriter = databaseOn(enrollmentWriterPool);
+const identityProvisioning = postgresIdentityProvisioning(async () => enrollmentWriter, {
   maxValidityMs: 24 * 60 * 60 * 1000,
 });
 // Supply this adapter as defineConfig's identityProvisioning value.
@@ -111,9 +113,11 @@ import {
   postgresIdentityEnrollments,
   attachedGoogleTokenIssuer,
 } from "@sanoma-ai/workflows/cloud-identity";
+import { databaseOn } from "@sanoma-ai/workflows/db";
 
+const brokerReader = databaseOn(brokerReadOnlyPool);
 const handle = identityBroker({
-  enrollments: postgresIdentityEnrollments(async () => brokerReadOnlyPool),
+  enrollments: postgresIdentityEnrollments(async () => brokerReader),
   issue: attachedGoogleTokenIssuer(),
   audit: writeDurableIdentityAudit,
 });
@@ -131,8 +135,10 @@ The following composition joins D1 to the separate [#470 KMS adapter](https://gi
 import { readFile } from "node:fs/promises";
 import { KeyManagementServiceClient } from "@google-cloud/kms";
 import { cloudIdentityAuth } from "@sanoma-ai/workflows/cloud-identity";
+import { databaseOn } from "@sanoma-ai/workflows/db";
 import { kmsPostgresStore } from "@sanoma-ai/workflows/kms-secrets";
 
+const companyDatabase = databaseOn(companyScopedPool);
 const authClient = cloudIdentityAuth({
   endpoint: "https://identity.example.test/token",
   credential: async () => (await readFile("/run/sanoma/deployment-credential", "utf8")).trim(),
@@ -142,7 +148,7 @@ const store = kmsPostgresStore({
   company: "example-company", // Fixed by trusted bootstrap.
   keyName: "projects/example-project/locations/us-central1/keyRings/production/cryptoKeys/example-company",
   kms,
-  database: async () => companyScopedPool,
+  database: async () => companyDatabase,
 });
 // Supply store to defineConfig's secrets configuration.
 // The deployment owns kms.close() and the database pool lifecycle.
@@ -208,7 +214,9 @@ import {
   attachedGoogleIdTokenIssuer,
   postgresIdentityEnrollments,
 } from "@sanoma-ai/workflows/cloud-identity";
+import { databaseOn } from "@sanoma-ai/workflows/db";
 
+const provisioningReader = databaseOn(provisioningReadOnlyPool);
 const identity = {
   serviceAccount: "provision-source@example-project.iam.gserviceaccount.com",
   subject: "123456789012345678901",
@@ -217,7 +225,7 @@ const identity = {
 };
 const handle = provisioningIdentityBroker({
   identity,
-  enrollments: postgresIdentityEnrollments(async () => provisioningReadOnlyPool),
+  enrollments: postgresIdentityEnrollments(async () => provisioningReader),
   issue: attachedGoogleIdTokenIssuer(identity),
   audit: writeDurableProvisioningAudit,
 });

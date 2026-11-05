@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { and, eq } from "drizzle-orm";
+import { credentials } from "../src/db/company.ts";
 import { Client } from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -16,11 +18,11 @@ import {
   withSetup,
 } from "../src/index.ts";
 import { configuredSecrets, postgresSecretStore } from "../src/credentials.ts";
-import { lazyPool } from "../src/db.ts";
+import { databaseOn, lazyDb } from "../src/db.ts";
 import { credentialsOf } from "../src/env.ts";
 
 const databaseUrl = testDatabaseUrl("credentials_v2");
-const pool = lazyPool(databaseUrl, "secret-tests");
+const pool = lazyDb(databaseUrl, "secret-tests");
 const store = postgresSecretStore(() => pool.db());
 afterAll(() => pool.close());
 afterEach(() => vi.unstubAllEnvs());
@@ -68,7 +70,7 @@ describe("encrypted Postgres store", () => {
       const a = new SecretAccess({ namespace }, store);
       const b = new SecretAccess(
         { namespace },
-        postgresSecretStore(async () => db2),
+        postgresSecretStore(async () => databaseOn(db2)),
       );
       const values = await Promise.all([a.ensure("TOKEN", () => "first"), b.ensure("TOKEN", () => "second")]);
       expect(values[0]).toBe(values[1]);
@@ -86,13 +88,14 @@ describe("encrypted Postgres store", () => {
     const a = new SecretAccess({ namespace }, store);
     await a.ensure("TOKEN", () => "never-plaintext");
     const db = await pool.db();
-    const row = (
-      await db.query("SELECT value FROM sanoma_credentials WHERE namespace=$1 AND name=$2", [namespace, "TOKEN"])
-    ).rows[0];
-    expect(row.value).not.toContain("never-plaintext");
-    await db.query("UPDATE sanoma_credentials SET name=$2 WHERE namespace=$1", [namespace, "MOVED"]);
+    const [row] = await db
+      .select({ value: credentials.value })
+      .from(credentials)
+      .where(and(eq(credentials.namespace, namespace), eq(credentials.name, "TOKEN")));
+    expect(row!.value).not.toContain("never-plaintext");
+    await db.update(credentials).set({ name: "MOVED" }).where(eq(credentials.namespace, namespace));
     await expect(a.get("MOVED")).rejects.toMatchObject({ code: "invalid_value" });
-    await db.query("UPDATE sanoma_credentials SET value=$2 WHERE namespace=$1", [namespace, "never-plaintext"]);
+    await db.update(credentials).set({ value: "never-plaintext" }).where(eq(credentials.namespace, namespace));
     await expect(a.get("MOVED")).rejects.toMatchObject({ code: "invalid_value" });
   });
   it("does not override values from the selected store with process environment", async () => {
@@ -132,7 +135,10 @@ describe("runtime uses the selected store", () => {
       });
       const db = await pool.db();
       expect(
-        (await db.query("SELECT name FROM sanoma_credentials WHERE namespace=$1", [config.secrets.namespace])).rows,
+        await db
+          .select({ name: credentials.name })
+          .from(credentials)
+          .where(eq(credentials.namespace, config.secrets.namespace)),
       ).toEqual([]);
       expect(JSON.stringify(await client.ledger(run))).not.toContain("stored-key");
       await client.clearSecret("API_KEY", { by: "tester" });
