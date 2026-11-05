@@ -31,10 +31,13 @@ declare module "virtual:sanoma/icons" {
  * The app bundle's company, as the Worker's build makes it (`bundleModule` in `bundle-build.ts`):
  * its config and root, the snapshot of its files, and Cedar's web build, initialised on first use.
  */
-declare module "virtual:sanoma/app-bundle" {
-  export const config: import("@sanoma-ai/workflows").SanomaConfig;
+declare module "virtual:sanoma/app-root" {
   export const root: string;
   export const snapshot: import("./snapshot.ts").AppSnapshot;
+}
+
+declare module "virtual:sanoma/app-bundle" {
+  export const config: import("@sanoma-ai/workflows").SanomaConfig;
   export const cedar: () => import("@sanoma-ai/workflows").CedarWasm;
   export const TimeMatcher: import("@sanoma-ai/workflows").TimeMatcherClass;
 }

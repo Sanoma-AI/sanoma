@@ -4,6 +4,8 @@
 // composed as the `sanoma` bin composes them on Node) on that client's pool, and the Worker's
 // assets for the client build and the prerendered pages. What needs the checkout is the worker's
 // (`steps/`), not in the bundle.
+// First: the root and its snapshot, registered before any company file evaluates, through the routes too.
+import { root, snapshot } from "virtual:sanoma/app-root";
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
   checkPreparedOnly,
@@ -18,7 +20,7 @@ import {
 import { domainsOf } from "@sanoma-ai/workflows/shared";
 import { betterAuthStaffLogin } from "@sanoma-ai/connector-better-auth";
 import start from "@tanstack/react-start/server-entry";
-import { cedar, config, root, snapshot, TimeMatcher } from "virtual:sanoma/app-bundle";
+import { cedar, config, TimeMatcher } from "virtual:sanoma/app-bundle";
 import {
   type AppBundleContext,
   type AppBundleEnv,

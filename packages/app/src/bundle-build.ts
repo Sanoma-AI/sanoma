@@ -124,10 +124,10 @@ const BUNDLE = "virtual:sanoma/app-bundle";
 const ROOT = "virtual:sanoma/app-root";
 
 /**
- * `virtual:sanoma/app-bundle`, which `worker/app.ts` imports: the company's root and snapshot,
- * registered first (`virtual:sanoma/app-root`), its config as `sanoma` loads it (its file's, with
- * each workflow file's default export and each data file's exports joined to what it lists, once
- * each), Cedar's web build on first use, and DBOS's cron parser.
+ * `virtual:sanoma/app-bundle`, which `worker/app.ts` imports after `virtual:sanoma/app-root` (the
+ * company's root and snapshot, registered before any company file evaluates): its config as
+ * `sanoma` loads it (its file's, with each workflow file's default export and each data file's
+ * exports joined to what it lists, once each), Cedar's web build on first use, and DBOS's cron parser.
  */
 function bundleModule(root: string, configFile: string, snapshot: AppSnapshot): Plugin {
   const id = `\0${BUNDLE}`;
@@ -159,7 +159,7 @@ function bundleModule(root: string, configFile: string, snapshot: AppSnapshot): 
       const workflowFiles = files.workflows.filter((_, i) => modules[i]!.default !== undefined);
       return [
         // First, so the root is registered before the config's files are evaluated.
-        `export { root, snapshot } from ${JSON.stringify(ROOT)};\n`,
+        `import ${JSON.stringify(ROOT)};\n`,
         `import config from ${specifier(configFile)};\n`,
         ...workflowFiles.map((file, i) => `import workflow${i} from ${specifier(file)};\n`),
         ...files.data.map((file, i) => `import * as data${i} from ${specifier(file)};\n`),
@@ -213,7 +213,9 @@ async function bundlePlugins(root: string, configFile: string, snapshot: AppSnap
         const edits: { start: number; end: number; text: string }[] = [];
         for (const node of nodesOf(this.parse(code, { lang: langOf(file) }))) {
           if (node.type === "CallExpression" && isVendorInfo(node)) {
-            edits.push({ start: node.start, end: node.end, text: JSON.stringify(vendorInfo(url)) });
+            // In parentheses, an expression wherever the call was; its lines kept, so the lines after it keep theirs.
+            const lines = "\n".repeat(code.slice(node.start, node.end).split("\n").length - 1);
+            edits.push({ start: node.start, end: node.end, text: `(${JSON.stringify(vendorInfo(url))}${lines})` });
           } else if (isImportMetaUrl(node) && !edits.some((edit) => edit.start <= node.start && node.end <= edit.end)) {
             edits.push({ start: node.start, end: node.end, text: JSON.stringify(url) });
           }
@@ -223,7 +225,7 @@ async function bundlePlugins(root: string, configFile: string, snapshot: AppSnap
         for (const { start, end, text } of edits.toSorted((a, b) => b.start - a.start)) {
           out = out.slice(0, start) + text + out.slice(end);
         }
-        // Each edit is within its line: no mapping moves to another line.
+        // No edit adds or removes a line: no mapping moves to another line.
         return { code: out, map: null };
       },
     },
@@ -421,13 +423,14 @@ function framesOf(stack: string, server: string, root: string): { at: string; to
 }
 
 /**
- * What a request the probe answered with a throw says: the module whose evaluation threw (the
- * outermost frame that is a module's body), else where it threw, then the error's first line,
+ * What a request the probe answered with a throw says: the module whose evaluation threw (when
+ * the outermost frame is a module's body), else where it threw, then the error's first line,
  * then each frame of the build's own modules by its source.
  */
 function thrownOn(stack: string, server: string, root: string): Error {
   const frames = framesOf(stack, server, root);
-  const evaluating = frames.findLast((frame) => frame.top);
+  // A module's evaluation is the outermost frame of a throw as it is evaluated; a request's handler is outside any it throws in.
+  const evaluating = frames.at(-1)?.top ? frames.at(-1) : undefined;
   const where = evaluating
     ? `${evaluating.at} throws as the Cloudflare Worker evaluates it`
     : `the app throws on the Cloudflare Worker${frames[0] ? ` at ${frames[0].at}` : ""}`;
@@ -505,7 +508,12 @@ async function runOnWorkerd(
         return { response, text };
       };
       // Any host but a site's is the app's.
-      await answer("https://app.invalid/healthz");
+      const health = await answer("https://app.invalid/healthz");
+      if (!health.response.ok) {
+        throw new Error(
+          `the app on the Cloudflare Worker answered /healthz ${health.response.status}: ${health.text.slice(0, 200)}`,
+        );
+      }
       const rendered: AppBundle["prerendered"] = [];
       for (const page of pages) {
         const { response, text: html } = await answer(`https://${page.domain}${page.path}`);
