@@ -72,17 +72,19 @@ describe("the app's built-in workflows", () => {
 describe("on a worker given the app's steps", () => {
   /** What each step was given, by the run it ran in. */
   const given: Record<string, Omit<AppStepContext, "client"> & { client: boolean }> = {};
-  /** How many steps run at once, at most. */
+  /** How many steps write at once, at most: each under the worker's lock, as the app's do. */
   let running = 0;
   let most = 0;
   const source: Source = { root, head: () => "0000000000000000", commit: () => ({ revision: "0000000000000000" }) };
   const record = async (step: AppStepContext) => {
     const { client, ...rest } = step;
     given[step.runId] = { ...rest, client: client !== undefined };
-    running += 1;
-    most = Math.max(most, running);
-    await new Promise((done) => setTimeout(done, 50));
-    running -= 1;
+    await step.serially(async () => {
+      running += 1;
+      most = Math.max(most, running);
+      await new Promise((done) => setTimeout(done, 50));
+      running -= 1;
+    });
   };
   const steps: AppSteps = {
     adopt: async (step, input) => {
@@ -113,7 +115,7 @@ describe("on a worker given the app's steps", () => {
   };
   const app = useTestApp(config(), { databaseUrl: testDatabaseUrl("app_workflows"), source, app: steps });
 
-  it("runs each in a step given the worker's client, repository and config, and the run's actor and id, one at a time", async () => {
+  it("runs each in a step given the worker's client, repository, lock and config, and the run's actor and id, its writes one at a time", async () => {
     const inputs = [
       { runId: "drift-1", id: "resources/a.ts#a", paths: ["name"] },
       { runId: "drift-1", id: "resources/b.ts#b", paths: ["name"] },
