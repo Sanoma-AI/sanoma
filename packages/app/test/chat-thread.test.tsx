@@ -146,15 +146,19 @@ describe("the chat's thread", () => {
     open.mockRestore();
   });
 
-  it("opens an address as a plain link, and asks for any other, however it is written", async () => {
+  it("asks before any link opens, however it is written, but an in-page anchor", async () => {
     await play(
       createChat<ChatMessage>()
         .user("Who?")
-        .assistant("Write to [us](mailto:hello@example.com), or see [this](//example.com/x) and [that](/inbox)."),
+        .assistant(
+          "Write to [us](mailto:hello@example.com), or see [this](//example.com/x), [that](/inbox) and [below](#end).",
+        ),
     );
-    expect((await screen.findByRole("link", { name: "us" })).getAttribute("href")).toBe("mailto:hello@example.com");
-    expect(screen.getByRole("button", { name: "this" })).toBeTruthy();
+    expect((await screen.findByRole("link", { name: "below" })).getAttribute("href")).toBe("#end");
+    expect(screen.getByRole("button", { name: "us" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "that" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "this" }));
+    expect(await screen.findByRole("dialog", { name: "Open this link?" })).toBeTruthy();
   });
 
   it("loads no image a reply names, by Markdown or by HTML", async () => {

@@ -25,8 +25,9 @@ import { Table, TableCell, TableHead } from "#/components/ui/table.tsx";
 // classes: a company's Tailwind does not scan Streamdown's install, so every element it draws with
 // a class of its own is given here, and `space-y-0` takes its root's away. No image is ever loaded:
 // what a reply says can come from what the agent read, and an image's address would carry data out
-// without anyone clicking. Links are Streamdown's hardened ones, asking before they open (bar an address or an anchor); a fenced block is the kit's
-// CodeBlock, its highlighter and each language loaded the first time one is shown.
+// without anyone clicking. Links are Streamdown's hardened ones, asking before they open (bar an
+// in-page anchor); a fenced block is the kit's CodeBlock, its highlighter and each language loaded
+// the first time one is shown.
 
 /** An element as `tag` with `className`, without the `node` Streamdown passes a component. */
 const styled =
@@ -39,19 +40,13 @@ const Fence = lazy(() => import("./fence.tsx"));
 
 /** A fenced block's code. */
 const FencedCode: Components["code"] = ({ node: _node, className, children }) => {
-  if (typeof children !== "string") {
-    return (
-      <CodeBlock>
-        <CodeBlockContent>{children}</CodeBlockContent>
-      </CodeBlock>
-    );
-  }
-  const text = children.replace(/\n$/, "");
+  const text = typeof children === "string" ? children.replace(/\n$/, "") : undefined;
   const plain = (
     <CodeBlock>
-      <CodeBlockContent>{text}</CodeBlockContent>
+      <CodeBlockContent className={className}>{text ?? children}</CodeBlockContent>
     </CodeBlock>
   );
+  if (text === undefined) return plain;
   // A chunk that does not come leaves the block plain, the rest of the reply as it is.
   return (
     <CatchBoundary getResetKey={() => "fence"} errorComponent={() => plain}>
@@ -114,9 +109,11 @@ const ELEMENTS: Components = {
   li: "li",
   strong: styled("strong", "font-medium"),
   // Streamdown's, so an unfinished link is not followed and a click asks first (`LINK_SAFETY`); only
-  // an email address and an in-page anchor, which leave nothing, are plain links.
+  // an in-page anchor, which leaves nothing, is a plain link, and one with no address is its text.
   a: ({ node: _node, href, ...props }) =>
-    !href || /^(mailto:|#)/i.test(href) ? (
+    !href ? (
+      <span>{props.children}</span>
+    ) : href.startsWith("#") ? (
       <a {...props} href={href} className="underline underline-offset-4" />
     ) : (
       <StreamdownLink
