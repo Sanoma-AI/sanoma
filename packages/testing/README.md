@@ -246,4 +246,4 @@ const results = await checkSandbox({ backend, capabilities: type.sandbox!.capabi
 expect(results.every((r) => r.ok)).toBe(true);
 ```
 
-`fakeSandbox(root?)` is a backend on this machine (`testsandbox.box`, which snapshots and exposes ports): a box is the directory `<root>/<name>`, its home, its commands `bash -c` children in process groups of their own, its ports loopback's. `connector` is for a config, `backend` and `capabilities` for the kit; `remove()` deletes `root`.
+`fakeSandbox(root?)` is `localBackend` (from `@sanoma-ai/workflows`) under a temporary `root`, with its type `testsandbox.box`: a box is the directory `<root>/<name>`, its home, its commands `bash -c` children in process groups of their own, its ports loopback's. `connector` is for a config, `backend` and `capabilities` for the kit; `remove()` deletes `root`.

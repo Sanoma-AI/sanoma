@@ -1,17 +1,12 @@
 import { spawn as spawnChild } from "node:child_process";
-import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { homedir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { Readable, Writable } from "node:stream";
-import type { Box, Process, SandboxBackend, SandboxCapabilities } from "@sanoma-ai/workflows";
+import { groupAlive, killGroup, localBackend as localSandbox, type SandboxBackend } from "@sanoma-ai/workflows";
 
-// The local backend of the `Sandbox` contract: boxes on this machine. A box is a directory, its
-// home, kept across turns; its commands are child processes, each in a process group of its own;
-// its ports are on loopback. No vendor account, nothing reached from outside.
-
-/** What the local backend can do: its boxes are this machine's directories, which `stop` leaves. */
-export const LOCAL_SANDBOX: SandboxCapabilities = { snapshot: true, pause: false, port: true };
+// The coding agents' processes on this machine: the local backend of the `Sandbox` contract with
+// their environment, and `Command`, a child an ACP agent's turn runs.
 
 /**
  * A box's environment, the whole of it (never this process's): `PATH` (this Node first, then
@@ -29,109 +24,12 @@ export const sessionEnv = (home: string): Record<string, string> => ({
 });
 
 /**
- * The boxes under `dir` (`agentHome(step, "boxes")`): the box `name` is the directory
- * `<dir>/<name>`, its home, made on its first `open`, deleted by `discard`. This machine is its
- * image and its size, so it takes neither.
+ * The local backend's boxes under `dir` (`agentHome(step, "boxes")`), their commands in
+ * `sessionEnv` of the box's home.
  */
-export const localBackend = (dir: string): SandboxBackend => ({
-  async open({ name }) {
-    const home = boxDir(dir, name);
-    await mkdir(home, { recursive: true });
-    return localBox(name, home);
-  },
-  discard: ({ name }) => rm(boxDir(dir, name), { recursive: true, force: true }),
-});
-
-function boxDir(dir: string, name: string): string {
-  if (!name || name !== basename(name) || name.startsWith(".")) throw new Error(`${name} is no box's name`);
-  return join(dir, name);
-}
-
-/**
- * The box at `home`, over `node:child_process` and `node:fs`: a command is `bash -c` in a process
- * group of its own (killed whole by `kill`, and by `stop`), with `sessionEnv(home)` under the
- * caller's `env`; a relative path or `cwd` is under `home`, any other this machine's.
- */
-function localBox(id: string, home: string): Box {
-  /** The process groups its commands lead, killed by `stop` whether or not their leader has exited. */
-  const groups = new Set<number>();
-  const at = (path: string) => resolve(home, path);
-  return {
-    id,
-    async run(command, { cwd, env, stdin, signal } = {}): Promise<Process> {
-      const child = spawnChild("bash", ["-c", command], {
-        cwd: at(cwd ?? "."),
-        env: { ...sessionEnv(home), ...env },
-        stdio: "pipe",
-        // Its own process group, so a bridge and what it starts are killed together.
-        detached: true,
-      });
-      const group = child.pid;
-      if (group !== undefined) groups.add(group);
-      child.stdin.on("error", () => {});
-      if (!stdin) child.stdin.end();
-      const exited = new Promise<{ exitCode: number }>((done) => {
-        child.on("error", () => done({ exitCode: 127 }));
-        child.on("close", (code) => {
-          // Forgotten once none of its group is left, so `stop` kills no group its pid leads later.
-          if (group !== undefined && !groupAlive(group)) groups.delete(group);
-          done({ exitCode: code ?? 1 });
-        });
-      });
-      const kill = (sig: NodeJS.Signals = "SIGKILL") => {
-        if (group !== undefined) killGroup(group, sig);
-      };
-      const onAbort = () => kill();
-      if (signal?.aborted) onAbort();
-      signal?.addEventListener("abort", onAbort, { once: true });
-      void exited.then(() => signal?.removeEventListener("abort", onAbort));
-      return {
-        stdin: Writable.toWeb(child.stdin) as WritableStream<Uint8Array>,
-        stdout: web(child.stdout),
-        stderr: web(child.stderr),
-        wait: () => exited,
-        kill,
-      };
-    },
-    read: async (path) => {
-      const bytes = await readFile(at(path)).catch(() => null);
-      return bytes && new Uint8Array(bytes);
-    },
-    async write(path, bytes, { mode } = {}) {
-      await mkdir(dirname(at(path)), { recursive: true });
-      await writeFile(at(path), bytes);
-      if (mode !== undefined) await chmod(at(path), mode);
-    },
-    /** A port on loopback. */
-    expose: async (port) => ({ url: `http://127.0.0.1:${port}` }),
-    /** Kills every command's process group: what a bridge started too. */
-    async stop() {
-      for (const group of groups) killGroup(group);
-      groups.clear();
-    },
-  };
-}
+export const localBackend = (dir: string): SandboxBackend => localSandbox(dir, sessionEnv);
 
 const web = (stream: Readable) => Readable.toWeb(stream) as ReadableStream<Uint8Array>;
-
-/** Whether any process of the group `group` is left. */
-function groupAlive(group: number): boolean {
-  try {
-    process.kill(-group, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** Kills the process group `group` (a `detached` child's pid). */
-function killGroup(group: number, signal: NodeJS.Signals = "SIGKILL") {
-  try {
-    process.kill(-group, signal);
-  } catch {
-    // Gone already.
-  }
-}
 
 /** How a `Command` ended: its exit code, or the signal that killed it. */
 export interface Exit {

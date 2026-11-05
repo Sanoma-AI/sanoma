@@ -65,7 +65,7 @@ const RUNTIMES: Readonly<Record<RuntimeName, Runtime>> = {
   // `allow-all`, which the checkout rule could not answer for. Then a vendor per runtime.
 };
 
-/** A bridge's first session in a box, by its runtime and the box's home: it installs the bridge there, so the next ones wait for it. */
+/** A bridge's first session in a box, by its runtime and the box's id: it installs the bridge there, so the next ones wait for it. */
 const installing = new Map<string, Promise<unknown>>();
 
 /** The engine for `name`: a turn of a chat through that runtime. */
@@ -97,23 +97,20 @@ async function runTurn(name: RuntimeName, turn: EngineTurn, writer: UIMessageStr
     image: "",
     size: 0,
   });
-  let failed: { err: unknown } | undefined;
   try {
     // Kept across turns: a bridge installs its agent under it once.
     const home = await homeOf(box);
     const sandbox = boxSession(box, { id: `${chat.id}-${generateId()}`, root: draft.root, home, ports: [port] });
     try {
-      await converse(name, turn, writer, { auth, model, root: draft.root, home, sandbox });
+      await converse(name, turn, writer, sandbox, { auth, model, home, box: box.id });
     } finally {
       await sandbox.destroy();
     }
-  } catch (err) {
-    failed = { err };
   } finally {
     await box.stop();
+    // However the turn ended (an error too): its error, if any, follows the commit.
+    await commitTurn(turn, draft, ENGINE_NAMES[name], writer);
   }
-  await commitTurn(turn, draft, ENGINE_NAMES[name], writer);
-  if (failed) throw failed.err;
   writer.write({ type: "finish" });
 }
 
@@ -122,19 +119,8 @@ async function converse(
   name: RuntimeName,
   { step, chat, messages }: EngineTurn,
   writer: UIMessageStreamWriter<ChatMessage>,
-  {
-    auth,
-    model,
-    root,
-    home,
-    sandbox,
-  }: {
-    auth: Record<string, string>;
-    model: string | undefined;
-    root: string;
-    home: string;
-    sandbox: HarnessV1NetworkSandboxSession;
-  },
+  sandbox: HarnessV1NetworkSandboxSession,
+  { auth, model, home, box }: { auth: Record<string, string>; model: string | undefined; home: string; box: string },
 ) {
   const { by: principal, signal } = step;
   const runtime: Runtime = RUNTIMES[name];
@@ -150,7 +136,7 @@ async function converse(
   });
   const said = messages.at(-1)!;
   const create = () => agent.createSession({ sessionId: sandbox.id, sandboxSession: sandbox, abortSignal: signal });
-  const key = `${name} ${home}`;
+  const key = `${name} ${box}`;
   const installed = installing.get(key);
   const started = installed ? installed.then(create) : create();
   // Kept as whether it started (not the session); a failed first start is tried again by the next.
@@ -181,7 +167,13 @@ async function converse(
       const kinds = harness.builtinTools as Record<string, { toolUseKind?: string } | undefined>;
       const answers = await Promise.all(
         asked.map(({ approvalId, toolCall }) =>
-          answer(root, approvalId, toolCall.toolName, kinds[toolCall.toolName]?.toolUseKind, toolCall.input),
+          answer(
+            sandbox.defaultWorkingDirectory,
+            approvalId,
+            toolCall.toolName,
+            kinds[toolCall.toolName]?.toolUseKind,
+            toolCall.input,
+          ),
         ),
       );
       result = await agent.continueStream({ session, toolApprovalContinuations: answers, abortSignal: signal });

@@ -1,16 +1,15 @@
-import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { Readable, Writable } from "node:stream";
+import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import {
   type Box,
   defineConnector,
   defineResource,
   errorMessage,
-  type Process,
+  LOCAL_SANDBOX,
+  localBackend,
   type SandboxBackend,
   type SandboxCapabilities,
   withSetup,
@@ -163,8 +162,6 @@ export async function checkSandbox(s: SandboxUnderTest): Promise<SandboxCheck[]>
   return results;
 }
 
-const delay = (ms: number) => new Promise((done) => setTimeout(done, ms));
-
 /** `promise`, or an error naming `what` after `ms`. */
 async function timed<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
@@ -186,8 +183,7 @@ const fakeSchema = z.object({ name: z.string().min(1), image: z.string().min(1),
 
 /**
  * The fake sandbox's type, `testsandbox.box`: boxes on this machine, which `fakeSandbox`'s
- * backend opens. It snapshots (a box is a directory) and exposes ports (on loopback); it does
- * not pause.
+ * backend opens, with the local backend's capabilities (`LOCAL_SANDBOX`).
  */
 export const fakeSandboxType = defineResource({
   vendor: "testsandbox",
@@ -200,7 +196,7 @@ export const fakeSandboxType = defineResource({
   bindingId: (state) => String(state.name),
   writable: true,
   sandbox: {
-    capabilities: { snapshot: true, pause: false, port: true },
+    capabilities: LOCAL_SANDBOX,
     inputs: { image: "image", size: "size" },
     outputs: (state) => ({ id: String(state.name), healthy: typeof state.name === "string" }),
   },
@@ -217,103 +213,19 @@ const types = defineConnector(
 );
 
 /**
- * A sandbox backend on this machine: the box `name` is the directory `<root>/<name>`, its home,
- * and its commands are `bash -c` children of this process with that `HOME`, each in a process
- * group of its own (`stop` kills them all); `expose` is loopback; `discard` deletes the directory.
- * `root` is made by the first `open`. `connector` is `testsandbox` with this backend attached, for
- * a config; `remove()` deletes `root`.
+ * A sandbox backend on this machine, `localBackend` under `root`: the box `name` is the directory
+ * `<root>/<name>`, its home (made by its first `open`), its commands `bash -c` children of this
+ * process with that `HOME`. `connector` is `testsandbox` with this backend attached, for a config;
+ * `remove()` deletes `root`.
  */
-export function fakeSandbox(root = join(tmpdir(), `sanoma-sandbox-${randomBytes(6).toString("hex")}`)) {
-  const homeOf = (name: string) => {
-    if (!/^[\w%-]+$/.test(name)) throw new Error(`testsandbox: ${name} is no box name`);
-    return join(root, name);
-  };
-  const backend: SandboxBackend = {
-    async open({ name }) {
-      const home = homeOf(name);
-      await mkdir(home, { recursive: true });
-      return localBox(name, home);
-    },
-    discard: async ({ name }) => rm(homeOf(name), { recursive: true, force: true }),
-  };
+export function fakeSandbox(root = mkdtempSync(join(tmpdir(), "sanoma-sandbox-"))) {
+  const backend = localBackend(root);
   return {
     type: fakeSandboxType,
-    capabilities: fakeSandboxType.sandbox!.capabilities,
+    capabilities: LOCAL_SANDBOX,
     backend,
     connector: withSetup(types, { sandbox: () => backend }),
     root,
     remove: () => rmSync(root, { recursive: true, force: true }),
   };
-}
-
-/** The box at `home`: its files those of this machine, a relative path under `home`. */
-function localBox(id: string, home: string): Box {
-  const groups = new Set<number>();
-  const at = (path: string) => resolve(home, path);
-  return {
-    id,
-    async run(command, { cwd, env, stdin, signal } = {}): Promise<Process> {
-      const child = spawn("bash", ["-c", command], {
-        cwd: at(cwd ?? "."),
-        env: { PATH: [dirname(process.execPath), process.env.PATH].join(":"), HOME: home, ...env },
-        stdio: "pipe",
-        detached: true,
-      });
-      const group = child.pid;
-      if (group !== undefined) groups.add(group);
-      child.stdin.on("error", () => undefined);
-      if (!stdin) child.stdin.end();
-      const exited = new Promise<{ exitCode: number }>((done) => {
-        child.on("error", () => done({ exitCode: 127 }));
-        child.on("close", (code) => {
-          // Kept while any of its group is left, so `stop` kills what it left running.
-          if (group !== undefined && !groupAlive(group)) groups.delete(group);
-          done({ exitCode: code ?? 1 });
-        });
-      });
-      const kill = (sig: NodeJS.Signals = "SIGKILL") => {
-        if (group !== undefined) killGroup(group, sig);
-      };
-      signal?.addEventListener("abort", () => kill(), { once: true });
-      return {
-        stdin: Writable.toWeb(child.stdin) as WritableStream<Uint8Array>,
-        stdout: Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
-        stderr: Readable.toWeb(child.stderr) as ReadableStream<Uint8Array>,
-        wait: () => exited,
-        kill,
-      };
-    },
-    read: (path) =>
-      readFile(at(path)).then(
-        (bytes) => new Uint8Array(bytes),
-        () => null,
-      ),
-    async write(path, bytes, { mode } = {}) {
-      await mkdir(dirname(at(path)), { recursive: true });
-      await writeFile(at(path), bytes);
-      if (mode !== undefined) await chmod(at(path), mode);
-    },
-    expose: async (port) => ({ url: `http://127.0.0.1:${port}` }),
-    async stop() {
-      for (const group of groups) killGroup(group, "SIGKILL");
-      groups.clear();
-    },
-  };
-}
-
-function groupAlive(group: number): boolean {
-  try {
-    process.kill(-group, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function killGroup(group: number, signal: NodeJS.Signals) {
-  try {
-    process.kill(-group, signal);
-  } catch {
-    // Gone already.
-  }
 }

@@ -59,6 +59,6 @@ describe("fakeSandbox", () => {
   });
 
   it("refuses a name that is not one path segment", async () => {
-    await expect(sandbox.backend.open({ name: "../out", image: "local", size: 1 })).rejects.toThrow(/no box name/);
+    await expect(sandbox.backend.open({ name: "../out", image: "local", size: 1 })).rejects.toThrow(/no box.s name/);
   });
 });

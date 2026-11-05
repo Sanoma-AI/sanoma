@@ -4,11 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { waitFor } from "@sanoma-ai/testing";
 import { checkSandbox } from "@sanoma-ai/testing/sandbox";
-import type { Box } from "@sanoma-ai/workflows";
+import { type Box, LOCAL_SANDBOX } from "@sanoma-ai/workflows";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { boxSession, homeOf } from "../src/steps/agent/box-session.ts";
 import { boxName } from "../src/steps/agent/checkout.ts";
-import { freePort, LOCAL_SANDBOX, localBackend } from "../src/steps/agent/local-box.ts";
+import { freePort, localBackend } from "../src/steps/agent/local-box.ts";
 
 // The local backend's boxes, and the session `HarnessAgent` runs a coding agent in over one: their
 // members on their own, no agent.
