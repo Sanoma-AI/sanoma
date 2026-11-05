@@ -54,15 +54,15 @@ export async function loadConfig(cwd = process.cwd()): Promise<LoadedConfig> {
   config.file ??= file;
   const root = config.root ?? dirname(file);
   // Imported here, not at the top: `cli.ts` loads this module before any command needs the runtime.
-  const { filesUnder, isCollection, kindDirs } = await import("@sanoma-ai/workflows");
+  const { declarationFiles, isCollection } = await import("@sanoma-ai/workflows");
+  const files = declarationFiles(root);
   // A `workflows` or `collections` that is no list is resolveConfig's to explain.
   if (config.workflows === undefined || Array.isArray(config.workflows)) {
     const workflows = new Set(config.workflows);
-    const paths = kindDirs(root, "workflows").flatMap((dir) => filesUnder(dir, isSource));
     // Imported at once, added in the files' order.
-    const modules = (await Promise.all(paths.map(importReal))) as { default?: unknown }[];
+    const modules = (await Promise.all(files.workflows.map(importReal))) as { default?: unknown }[];
     for (const [i, { default: wf }] of modules.entries()) {
-      const path = paths[i]!;
+      const path = files.workflows[i]!;
       if (wf === undefined) continue;
       if (!isWorkflow(wf)) {
         throw new UsageError(
@@ -75,8 +75,7 @@ export async function loadConfig(cwd = process.cwd()): Promise<LoadedConfig> {
   }
   if (config.collections === undefined || Array.isArray(config.collections)) {
     const collections = new Set<Collection>(config.collections);
-    for (const path of kindDirs(root, "resources").map((dir) => join(dir, "data.ts"))) {
-      if (!existsSync(path)) continue;
+    for (const path of files.data) {
       for (const [name, value] of Object.entries((await importReal(path)) as Record<string, unknown>)) {
         if (!isCollection(value)) {
           throw new UsageError(
@@ -93,9 +92,6 @@ export async function loadConfig(cwd = process.cwd()): Promise<LoadedConfig> {
 
 /** The module at `path`, imported by its real path: the module a relative import of it is. */
 const importReal = (path: string): Promise<unknown> => import(pathToFileURL(realpathSync(path)).href);
-
-/** A workflow file's name: `.ts`, but a test (`.test.ts`, `.spec.ts`) or a declaration. */
-const isSource = (name: string) => name.endsWith(".ts") && !/\.(test|spec|d)\.ts$/.test(name);
 
 const isWorkflow = (x: unknown): x is WorkflowDefinition =>
   typeof x === "object" && x !== null && (x as { kind?: unknown }).kind === "workflow";

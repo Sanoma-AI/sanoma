@@ -5,10 +5,11 @@
 // checkout is the worker's (`steps/`), which no module of the app imports. `@sanoma-ai/app/bundle`.
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
+import { createRequire, SourceMap, type SourceMapPayload } from "node:module";
 import { tmpdir } from "node:os";
-import { dirname, extname, join, relative, sep } from "node:path";
-import { filesUnder, type SanomaConfig } from "@sanoma-ai/workflows";
+import { dirname, extname, join, relative, resolve, sep } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { declarationFiles, filesUnder, type SanomaConfig, vendorInfo } from "@sanoma-ai/workflows";
 import { domainsText } from "@sanoma-ai/workflows/shared";
 import type { SiteEntry } from "@sanoma-ai/workflows/describe";
 import type { InlineConfig, Plugin, PluginOption } from "vite";
@@ -119,26 +120,58 @@ export function prerenderedPages(site: Pick<SiteEntry, "pages" | "calls">): Site
 }
 
 const BUNDLE = "virtual:sanoma/app-bundle";
+/** The root and its snapshot, registered (`useRootSnapshot`) before any company file is evaluated: `appOfFile` finds a file's app by it. */
+const ROOT = "virtual:sanoma/app-root";
 
-/** `virtual:sanoma/app-bundle`, which `worker/app.ts` imports: the company's config and root, its snapshot, and Cedar's web build on first use. */
+/**
+ * `virtual:sanoma/app-bundle`, which `worker/app.ts` imports: the company's root and snapshot,
+ * registered first (`virtual:sanoma/app-root`), its config as `sanoma` loads it (its file's, with
+ * each workflow file's default export and each data file's exports joined to what it lists, once
+ * each), Cedar's web build on first use, and DBOS's cron parser.
+ */
 function bundleModule(root: string, configFile: string, snapshot: AppSnapshot): Plugin {
   const id = `\0${BUNDLE}`;
+  const rootId = `\0${ROOT}`;
   // The runtime's Cedar, its web build beside its Node one (`./web` is import-only, so no require resolves it).
   const fromRuntime = createRequire(createRequire(defaultRuntimeFrom).resolve("@sanoma-ai/workflows"));
   const cedar = join(dirname(fromRuntime.resolve("@cedar-policy/cedar-wasm/nodejs")), "..", "web");
+  // DBOS's cron parser, which its exports leave out, by its file (as `timeMatcher` requires it on Node).
+  const crontab = join(dirname(fromRuntime.resolve("@dbos-inc/dbos-sdk")), "scheduler", "crontab.js");
   return {
     name: "sanoma:app-bundle",
     enforce: "pre",
-    resolveId: (source) => (source === BUNDLE ? id : undefined),
-    load(loaded) {
+    resolveId: (source) => (source === BUNDLE ? id : source === ROOT ? rootId : undefined),
+    async load(loaded) {
+      if (loaded === rootId) {
+        return [
+          'import { useRootSnapshot } from "@sanoma-ai/workflows";\n',
+          `export const root = ${JSON.stringify(root)};\n`,
+          `export const snapshot = JSON.parse(${JSON.stringify(JSON.stringify(snapshot))});\n`,
+          "useRootSnapshot(root, snapshot);\n",
+        ].join("");
+      }
       if (loaded !== id) return;
+      const files = declarationFiles(root);
+      // The workflow files with a default export, as `sanoma` imported them (the rest are helpers).
+      const modules = (await Promise.all(files.workflows.map((file) => import(pathToFileURL(file).href)))) as {
+        default?: unknown;
+      }[];
+      const workflowFiles = files.workflows.filter((_, i) => modules[i]!.default !== undefined);
       return [
-        `export { default as config } from ${specifier(configFile)};\n`,
+        // First, so the root is registered before the config's files are evaluated.
+        `export { root, snapshot } from ${JSON.stringify(ROOT)};\n`,
+        `import config from ${specifier(configFile)};\n`,
+        ...workflowFiles.map((file, i) => `import workflow${i} from ${specifier(file)};\n`),
+        ...files.data.map((file, i) => `import * as data${i} from ${specifier(file)};\n`),
+        `const workflows = new Set([...(config.workflows ?? []), ${workflowFiles.map((_, i) => `workflow${i}`).join(", ")}]);\n`,
+        `const collections = new Set([...(config.collections ?? []), ${files.data.map((_, i) => `...Object.values(data${i})`).join(", ")}]);\n`,
+        "if (workflows.size) config.workflows = [...workflows];\n",
+        "if (collections.size) config.collections = [...collections];\n",
+        "export { config };\n",
         `import * as cedarWeb from ${specifier(join(cedar, "cedar_wasm.js"))};\n`,
         `import cedarModule from ${specifier(join(cedar, "cedar_wasm_bg.wasm"))};\n`,
         "export const cedar = () => (cedarWeb.initSync({ module: cedarModule }), cedarWeb);\n",
-        `export const root = ${JSON.stringify(root)};\n`,
-        `export const snapshot = JSON.parse(${JSON.stringify(JSON.stringify(snapshot))});\n`,
+        `export { TimeMatcher } from ${specifier(crontab)};\n`,
       ].join("");
     },
   };
@@ -168,6 +201,33 @@ async function bundlePlugins(root: string, configFile: string, snapshot: AppSnap
       },
     },
     {
+      // workerd gives a module no `import.meta.url`: each is given its file's, as Node gives it,
+      // and what `vendorInfo(import.meta.url)` reads of a connector's package (which the Worker
+      // does not have) is read here. A connector's module calls it as it is evaluated.
+      name: "sanoma:import-meta-url",
+      applyToEnvironment: ssr,
+      transform(code, id) {
+        const file = id.split("?")[0]!;
+        if (!code.includes("import.meta.url") || !/\.[cm]?[jt]sx?$/.test(file)) return;
+        const url = pathToFileURL(file).href;
+        const edits: { start: number; end: number; text: string }[] = [];
+        for (const node of nodesOf(this.parse(code, { lang: langOf(file) }))) {
+          if (node.type === "CallExpression" && isVendorInfo(node)) {
+            edits.push({ start: node.start, end: node.end, text: JSON.stringify(vendorInfo(url)) });
+          } else if (isImportMetaUrl(node) && !edits.some((edit) => edit.start <= node.start && node.end <= edit.end)) {
+            edits.push({ start: node.start, end: node.end, text: JSON.stringify(url) });
+          }
+        }
+        if (!edits.length) return;
+        let out = code;
+        for (const { start, end, text } of edits.toSorted((a, b) => b.start - a.start)) {
+          out = out.slice(0, start) + text + out.slice(end);
+        }
+        // Each edit is within its line: no mapping moves to another line.
+        return { code: out, map: null };
+      },
+    },
+    {
       // Each company file says it is the one evaluating, for what V8's call sites name in a bundle
       // no longer (`callerFile` in the runtime): a workflow's file, a collection's app.
       name: "sanoma:company-files",
@@ -175,8 +235,9 @@ async function bundlePlugins(root: string, configFile: string, snapshot: AppSnap
       transform(code, id) {
         const file = id.split("?")[0]!;
         if (!companyFile(id, root) || !/\.[cm]?[jt]sx?$/.test(file)) return;
-        // One line ahead of the code: no mapping moves but by a line, and the bundle's maps are not uploaded.
-        return { code: `globalThis[Symbol.for("sanoma.file")] = ${JSON.stringify(file)};\n${code}`, map: null };
+        // On the code's first line: no mapping moves to another line, so the source map still names
+        // a line of the file (`runOnWorkerd`).
+        return { code: `globalThis[Symbol.for("sanoma.file")] = ${JSON.stringify(file)};${code}`, map: null };
       },
     },
     {
@@ -234,6 +295,49 @@ async function bundlePlugins(root: string, configFile: string, snapshot: AppSnap
   ];
 }
 
+/** A parsed module's node, as far as the Worker's build reads it. */
+interface AstNode {
+  type: string;
+  start: number;
+  end: number;
+  [key: string]: unknown;
+}
+
+/** Every node of a parsed module, parents first. */
+function* nodesOf(value: unknown): Generator<AstNode> {
+  if (Array.isArray(value)) {
+    for (const item of value) yield* nodesOf(item);
+  } else if (value !== null && typeof value === "object") {
+    if (typeof (value as AstNode).type === "string") yield value as AstNode;
+    for (const child of Object.values(value)) if (child !== null && typeof child === "object") yield* nodesOf(child);
+  }
+}
+
+/** `import.meta.url`. */
+const isImportMetaUrl = (node: AstNode) => {
+  const { object, property } = node as {
+    object?: AstNode & { meta?: { name?: string } };
+    property?: { name?: string };
+  };
+  return (
+    node.type === "MemberExpression" &&
+    object?.type === "MetaProperty" &&
+    object.meta?.name === "import" &&
+    property?.name === "url"
+  );
+};
+
+/** `vendorInfo(import.meta.url)`. */
+const isVendorInfo = (node: AstNode) => {
+  const { callee, arguments: args } = node as { callee?: AstNode & { name?: string }; arguments?: AstNode[] };
+  return (
+    callee?.type === "Identifier" && callee.name === "vendorInfo" && args?.length === 1 && isImportMetaUrl(args[0]!)
+  );
+};
+
+/** The parser's language for a module's file. */
+const langOf = (file: string) => extname(file).slice(1).replace(/^[cm]/, "") as "js" | "jsx" | "ts" | "tsx";
+
 /** The Worker's environment: Cloudflare's plugin builds Start's server environment for workerd. */
 const ssr = (environment: { name: string }) => environment.name === "ssr";
 
@@ -258,12 +362,88 @@ function pagesToPrerender(snapshot: AppSnapshot, domains: Readonly<Record<string
   });
 }
 
+/** The module the build runs the bundle from, beside its main module: the main module's fetch, a throw answered with its stack. */
+const PROBE = "__sanoma_probe.js";
+
+/** The header the probe marks a thrown request's answer with. */
+const THROWN = "x-sanoma-thrown";
+
+const probeModule = (main: string) =>
+  [
+    `import main from ${JSON.stringify(`./${main}`)};\n`,
+    "export default {\n",
+    "  async fetch(request, env, ctx) {\n",
+    "    try {\n",
+    "      return await main.fetch(request, env, ctx);\n",
+    "    } catch (err) {\n",
+    `      return new Response(String(err?.stack ?? err), { status: 500, headers: { ${JSON.stringify(THROWN)}: "1" } });\n`,
+    "    }\n",
+    "  },\n",
+    "};\n",
+  ].join("");
+
 /**
- * Renders each page on the bundle as built, on workerd (`unstable_startWorker`), at its site's
- * domain, into `client/` (`prerenderedAsset`). A page renders with no database: the build's
- * DATABASE names none, and a page that would call one is not prerendered.
+ * Where a stack's frames are in the build's own modules, each by its source map: the module's
+ * file, from the repo for a company's own, else from its `node_modules` (`@sanoma-ai/…/dist/x.js`),
+ * and the line. `top`: whether the frame is a module's own body (V8 names no function there).
  */
-async function prerender(
+function framesOf(stack: string, server: string, root: string): { at: string; top: boolean }[] {
+  const frames: { at: string; top: boolean }[] = [];
+  // Each module's map, read once: most frames are in the one large chunk.
+  const maps = new Map<string, SourceMap | undefined>();
+  const mapOf = (file: string) => {
+    if (!maps.has(file)) {
+      const path = `${file}.map`;
+      maps.set(
+        file,
+        existsSync(path) ? new SourceMap(JSON.parse(readFileSync(path, "utf8")) as SourceMapPayload) : undefined,
+      );
+    }
+    return maps.get(file);
+  };
+  for (const [, named, url, line, column] of stack.matchAll(
+    /^\s*at (?:(.*?) \()?(file:\/\/[^\s)]+):(\d+):(\d+)\)?$/gm,
+  )) {
+    const file = fileURLToPath(url!);
+    const map = file.startsWith(`${server}${sep}`) ? mapOf(file) : undefined;
+    if (!map) continue;
+    const entry = map.findEntry(Number(line) - 1, Number(column) - 1);
+    if (!("originalSource" in entry)) continue;
+    const source = entry.originalSource.startsWith("file:")
+      ? fileURLToPath(entry.originalSource)
+      : resolve(dirname(file), entry.originalSource);
+    const module = companyFile(source, root)
+      ? relative(root, source).split(sep).join("/")
+      : source.split(`${sep}node_modules${sep}`).at(-1)!.split(sep).join("/");
+    frames.push({ at: `${module}:${entry.originalLine + 1}`, top: named === undefined });
+  }
+  return frames;
+}
+
+/**
+ * What a request the probe answered with a throw says: the module whose evaluation threw (the
+ * outermost frame that is a module's body), else where it threw, then the error's first line,
+ * then each frame of the build's own modules by its source.
+ */
+function thrownOn(stack: string, server: string, root: string): Error {
+  const frames = framesOf(stack, server, root);
+  const evaluating = frames.findLast((frame) => frame.top);
+  const where = evaluating
+    ? `${evaluating.at} throws as the Cloudflare Worker evaluates it`
+    : `the app throws on the Cloudflare Worker${frames[0] ? ` at ${frames[0].at}` : ""}`;
+  return new Error([`${where}: ${stack.split("\n")[0]}`, ...frames.map((frame) => `    at ${frame.at}`)].join("\n"));
+}
+
+/**
+ * Runs the bundle as built on workerd (`unstable_startWorker`), from `PROBE` beside its main
+ * module: once to `/healthz`, which loads the app as a Worker's first request does, so a module
+ * that throws as it is evaluated (one that needs what workerd does not have, such as Node's
+ * `import.meta.url` or a file) fails the build naming it; then each page to prerender, at its
+ * site's domain, into `client/` (`prerenderedAsset`). A page renders with no database: the
+ * build's DATABASE names none, and a page that would call one is not prerendered.
+ */
+async function runOnWorkerd(
+  root: string,
   server: string,
   client: string,
   main: string,
@@ -278,16 +458,17 @@ async function prerender(
       path: new URL(loc).pathname,
     })),
   );
-  if (!pages.length) return [];
   const { unstable_startWorker } = await import("wrangler");
   const dir = mkdtempSync(join(tmpdir(), "sanoma-prerender-"));
+  const probe = join(server, PROBE);
+  writeFileSync(probe, probeModule(main));
   try {
     const config = join(dir, "wrangler.json");
     writeFileSync(
       config,
       JSON.stringify({
         name: "sanoma-prerender",
-        main: join(server, main),
+        main: probe,
         compatibility_date: COMPATIBILITY_DATE,
         compatibility_flags: COMPATIBILITY_FLAGS,
         no_bundle: true,
@@ -311,15 +492,23 @@ async function prerender(
         inspector: false,
         persist: false,
         watch: false,
-        logLevel: "error",
+        // What the build needs of a run it reads from the answers: a throw's stack, a page's status.
+        logLevel: "none",
       },
     });
     try {
       await worker.ready;
+      const answer = async (url: string) => {
+        const response = (await worker.fetch(url)) as unknown as Response;
+        const text = await response.text();
+        if (response.headers.has(THROWN)) throw thrownOn(text, server, root);
+        return { response, text };
+      };
+      // Any host but a site's is the app's.
+      await answer("https://app.invalid/healthz");
       const rendered: AppBundle["prerendered"] = [];
       for (const page of pages) {
-        const response = (await worker.fetch(`https://${page.domain}${page.path}`)) as unknown as Response;
-        const html = await response.text();
+        const { response, text: html } = await answer(`https://${page.domain}${page.path}`);
         if (!response.ok)
           throw new Error(`prerendering ${page.site}${page.path} answered ${response.status}: ${html.slice(0, 200)}`);
         const asset = prerenderedAsset(page.domain, page.path);
@@ -334,6 +523,7 @@ async function prerender(
       await worker.dispose();
     }
   } finally {
+    rmSync(probe, { force: true });
     rmSync(dir, { recursive: true, force: true });
   }
 }
@@ -379,7 +569,8 @@ export async function buildAppBundle(repo: string, options: BuildAppBundleOption
     const client = join(outDir, "client");
     const server = join(outDir, "server");
     const { main } = JSON.parse(readFileSync(join(server, "wrangler.json"), "utf8")) as { main: string };
-    const prerendered = await prerender(
+    const prerendered = await runOnWorkerd(
+      root,
       server,
       client,
       main,

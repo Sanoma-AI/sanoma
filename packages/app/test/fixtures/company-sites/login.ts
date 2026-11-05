@@ -1,13 +1,14 @@
-import { defineConnector, type LoginContext, withSetup } from "@sanoma-ai/workflows";
+import { defineConnector, type LoginContext, vendorInfo, withSetup } from "@sanoma-ai/workflows";
 
 /** What the app gave each login half it made, for the tests to read. */
 export const loginContexts: LoginContext[] = [];
 
 /**
  * A visitor login for the tests: whoever sends the `x-fixture-visitor` cookie is that subject.
- * Its one route signs out, clearing the cookie.
+ * Its one route signs out, clearing the cookie. Its vendor is read from its package.json, as a
+ * published connector's is.
  */
-export const fixtureLogin = withSetup(defineConnector("fixture-login", {}), {
+export const fixtureLogin = withSetup(defineConnector("fixture-login", {}, vendorInfo(import.meta.url)), {
   login: (context) => {
     loginContexts.push(context);
     return {

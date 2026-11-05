@@ -13,12 +13,12 @@ import {
   SanomaClient,
   type SocialClients,
   useCedarWasm,
-  useRootSnapshot,
+  useTimeMatcher,
 } from "@sanoma-ai/workflows";
 import { domainsOf } from "@sanoma-ai/workflows/shared";
 import { betterAuthStaffLogin } from "@sanoma-ai/connector-better-auth";
 import start from "@tanstack/react-start/server-entry";
-import { cedar, config, root, snapshot } from "virtual:sanoma/app-bundle";
+import { cedar, config, root, snapshot, TimeMatcher } from "virtual:sanoma/app-bundle";
 import {
   type AppBundleContext,
   type AppBundleEnv,
@@ -34,10 +34,11 @@ import { staffLogin } from "../login/staff.ts";
 import { plain } from "../server/webhooks.ts";
 import { servedOnWorker } from "../snapshot.ts";
 
-// The runtime, bundled: the root's people, policies, app name and version as data, Cedar's web
-// build on first use, and a database the worker prepares, never this Worker.
-useRootSnapshot(root, snapshot);
+// The runtime, bundled: the root's people, policies, app name and version as data (registered by
+// the bundle's module, ahead of the company's files), Cedar's web build on first use, DBOS's cron
+// parser by its file, and a database the worker prepares, never this Worker.
 useCedarWasm(cedar);
+useTimeMatcher(TimeMatcher);
 checkPreparedOnly("the company's worker, at its start,");
 
 /** What each request's client is made from: its own connection (a Worker's sockets are its request's), on its first call. */

@@ -36,4 +36,5 @@ declare module "virtual:sanoma/app-bundle" {
   export const root: string;
   export const snapshot: import("./snapshot.ts").AppSnapshot;
   export const cedar: () => import("@sanoma-ai/workflows").CedarWasm;
+  export const TimeMatcher: import("@sanoma-ai/workflows").TimeMatcherClass;
 }

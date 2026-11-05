@@ -140,7 +140,7 @@ interface TimeMatcher {
   /** The first instant strictly after `date` that matches; one that does not at the end of its search horizon. */
   nextWakeupTime(date: Date | number): Date;
 }
-type TimeMatcherClass = new (pattern: string, timezone?: string) => TimeMatcher;
+export type TimeMatcherClass = new (pattern: string, timezone?: string) => TimeMatcher;
 
 let matcherClass: TimeMatcherClass | undefined;
 
@@ -155,6 +155,14 @@ export function timeMatcher(): TimeMatcherClass {
   const loaded = (require(file) as { TimeMatcher?: unknown }).TimeMatcher;
   if (typeof loaded !== "function") throw new Error(`DBOS's cron parser is not in ${file} any more`);
   return (matcherClass = loaded as TimeMatcherClass);
+}
+
+/**
+ * From now on, DBOS's cron parser is `matcher`, where it cannot be required by path: workerd,
+ * which bundles the runtime, and imports it by its file.
+ */
+export function useTimeMatcher(matcher: TimeMatcherClass): void {
+  matcherClass = matcher;
 }
 
 /**
