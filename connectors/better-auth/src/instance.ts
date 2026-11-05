@@ -1,10 +1,21 @@
 import { CLIENT_IP_HEADER, requestOrigin } from "@sanoma-ai/workflows";
+import {
+  applyMigrations,
+  databaseOn,
+  type Migrations,
+  migrationsApplied,
+  underPreparationLock,
+} from "@sanoma-ai/workflows/db";
 import { type BetterAuthOptions, betterAuth } from "better-auth";
-import { getMigrations } from "better-auth/db/migration";
+import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { emailOTP } from "better-auth/plugins/email-otp";
-import { PostgresDialect } from "kysely";
 import { setTimeout as delay } from "node:timers/promises";
-import { Client, Pool } from "pg";
+import type { Pool } from "pg";
+import * as staff from "./db/staff.ts";
+import type { loginTables } from "./db/tables.ts";
+import * as visitors from "./db/visitors.ts";
+import staffJournal from "../drizzle/staff/meta/_journal.json" with { type: "json" };
+import visitorsJournal from "../drizzle/visitors/meta/_journal.json" with { type: "json" };
 
 // One Better Auth on the company's database, as the visitor and the staff logins both run it: its
 // tables in a schema of its own, which the worker makes at its start (`prepareBetterAuth`) and the
@@ -24,9 +35,44 @@ export type ExtraOptions = Omit<
   "database" | "secret" | "secrets" | "basePath" | "baseURL" | "rateLimit"
 >;
 
-/** The schema each login's tables are in, on the company's database. */
-export const SCHEMAS = { visitors: "better_auth", staff: "better_auth_staff" } as const;
+/** The schema each login's tables are in, on the company's database (`db/visitors.ts`, `db/staff.ts`). */
+export const SCHEMAS = { visitors: visitors.schema.schemaName, staff: staff.schema.schemaName } as const;
 type Schema = (typeof SCHEMAS)[keyof typeof SCHEMAS];
+
+/** A login's tables by Better Auth's model names, as its Drizzle adapter takes them, and their generated migrations. */
+interface Login {
+  models: ReturnType<typeof modelsOf>;
+  migrations: Migrations;
+}
+
+/** The tables of one of the `db/` modules, without the schema itself. */
+const modelsOf = ({ user, session, account, verification, rateLimit }: ReturnType<typeof loginTables>) => ({
+  user,
+  session,
+  account,
+  verification,
+  rateLimit,
+});
+
+/** Each schema's login: the journal tables are the runtime's neighbours in the schema `drizzle`. */
+const LOGINS = {
+  [SCHEMAS.visitors]: {
+    models: modelsOf(visitors),
+    migrations: {
+      folder: () => new URL("../drizzle/visitors/", import.meta.url),
+      table: "__drizzle_migrations_better_auth",
+      journal: visitorsJournal,
+    },
+  },
+  [SCHEMAS.staff]: {
+    models: modelsOf(staff),
+    migrations: {
+      folder: () => new URL("../drizzle/staff/", import.meta.url),
+      table: "__drizzle_migrations_better_auth_staff",
+      journal: staffJournal,
+    },
+  },
+} satisfies Record<Schema, Login>;
 
 export interface BetterAuthSetup<O extends ExtraOptions> {
   /** The pool the app's client runs on (`LoginContext.database`): one instance per pool it gives. */
@@ -44,24 +90,16 @@ export interface BetterAuthSetup<O extends ExtraOptions> {
 }
 
 /**
- * What shapes the tables, the same for both logins and laid over theirs: the user's `github`
- * column (the GitHub login: never a person's input, so only the login sets it), and the rate
- * limit's table (`rateLimit.storage: "database"`, so a limit holds across processes and
- * requests). The plugins they run (the email code, magic links) keep no tables of their own.
+ * What shapes the tables beyond Better Auth's own, the same for both logins and laid over theirs,
+ * as `db/tables.ts` declares them: the user's `github` column (the GitHub login: never a person's
+ * input, so only the login sets it), and the rate limit's table (`rateLimit.storage: "database"`,
+ * so a limit holds across processes and requests). The plugins they run (the email code, magic
+ * links) keep no tables of their own.
  */
 const TABLE_OPTIONS = {
   user: { additionalFields: { github: { type: "string" as const, required: false, input: false } } },
   rateLimit: { storage: "database" as const },
 };
-
-/** Better Auth's database options for `schema`, on `pool`: the migrations' and the instances' the same. */
-const databaseOn = (pool: Pool, schema: Schema) => ({
-  dialect: new PostgresDialect({ pool }),
-  type: "postgres" as const,
-  // Schema-qualified queries, not a search_path, which the URL's own `options` could undo.
-  schemaName: schema,
-  transaction: true,
-});
 
 /**
  * Each database and schema found prepared, for the process's life: a pool that finds its schema
@@ -105,7 +143,8 @@ export function openBetterAuth<O extends ExtraOptions>({
     logger: { level: "warn" as const },
     ...options,
     user: { ...options.user, ...TABLE_OPTIONS.user },
-    database: databaseOn(pool, schema),
+    // The schema's own tables, so no search_path, which the URL's own `options` could undo.
+    database: drizzleAdapter(databaseOn(pool), { provider: "pg", schema: LOGINS[schema].models, transaction: true }),
     // `secrets` over `secret`, else BETTER_AUTH_SECRETS in the environment would win.
     secrets: [{ version: 1, value: key }],
     secret: key,
@@ -142,16 +181,15 @@ export function openBetterAuth<O extends ExtraOptions>({
 }
 
 /**
- * Waits for `schema` to hold every table and column this version's migrations would make (Better
- * Auth's own migration plan, read and never run), looking every second for a minute, since a
+ * Waits for the database to have had every migration of `schema`'s tables (by its journal, as
+ * `prepareDatabase` checks the runtime's own), looking every second for a minute, since a
  * deployment's worker starts beside its app; then refuses: the worker makes them, and the app
  * never does.
  */
 async function checkPrepared(pool: Pool, schema: Schema): Promise<void> {
-  const database = databaseOn(pool, schema);
+  const db = databaseOn(pool);
   for (const deadline = Date.now() + PREPARED_WAIT_MS; ; await delay(PREPARED_POLL_MS)) {
-    const { toBeCreated, toBeAdded } = await getMigrations({ ...TABLE_OPTIONS, database });
-    if (toBeCreated.length === 0 && toBeAdded.length === 0) return;
+    if (await migrationsApplied(db, LOGINS[schema].migrations)) return;
     if (Date.now() >= deadline)
       throw new Error(
         `better-auth: the database's ${schema} tables are missing or behind this version's: the worker makes them at its start, and the app never does`,
@@ -175,11 +213,18 @@ function once(memo: Map<string, Promise<void>>, key: string, run: () => Promise<
 /** Each database and schema's migration, once per process however many workers run on it. */
 const migrated = new Map<string, Promise<void>>();
 
-/** The preparation of one login's `schema`: its migrations, once per process, under an advisory lock across processes. */
+/**
+ * The preparation of one login's `schema`: the migrations its database has not had, once per
+ * process, under the preparation's lock across processes (the runtime's own, which makes the
+ * database first when missing): two workers starting at once both succeed, the second finding
+ * everything made.
+ */
 const preparing =
   (schema: Schema) =>
   (databaseUrl: string): Promise<void> =>
-    once(migrated, `${databaseUrl}#${schema}`, () => migrate(databaseUrl, schema));
+    once(migrated, `${databaseUrl}#${schema}`, () =>
+      underPreparationLock(databaseUrl, (db) => applyMigrations(db, LOGINS[schema].migrations)),
+    );
 
 /**
  * Makes the visitor login's tables (`better_auth`) on the company's database: the connector's
@@ -190,27 +235,6 @@ export const prepareBetterAuth = preparing(SCHEMAS.visitors);
 
 /** Makes the staff login's tables (`better_auth_staff`), as `prepareBetterAuth` the visitors': the launcher's worker runs it, since no config names that login. */
 export const prepareBetterAuthStaff = preparing(SCHEMAS.staff);
-
-/**
- * Holds the lock on a session of its own until that ends, whatever fails; polled, never waited
- * for by a blocked statement, as the runtime's own preparation does. The migrations make the
- * schema, on a pool of their own, ended after.
- */
-async function migrate(databaseUrl: string, schema: Schema): Promise<void> {
-  const conn = new Client({ connectionString: databaseUrl, connectionTimeoutMillis: 10_000 });
-  // An error nobody listens for ends the process; the query in flight fails with it.
-  conn.on("error", (err) => console.warn(`better-auth: the migration's connection failed: ${err.message}`));
-  await conn.connect();
-  const pool = new Pool({ connectionString: databaseUrl, max: 1 });
-  try {
-    const ask = "SELECT pg_try_advisory_lock(hashtext($1)) AS locked";
-    while (!(await conn.query<{ locked: boolean }>(ask, [`sanoma.login.better-auth.${schema}`])).rows[0]!.locked)
-      await delay(50);
-    await (await getMigrations({ ...TABLE_OPTIONS, database: databaseOn(pool, schema) })).runMigrations();
-  } finally {
-    await Promise.allSettled([conn.end(), pool.end()]);
-  }
-}
 
 /** A request's protocol: https when it came over TLS or through a proxy that says so (`x-forwarded-proto`). */
 export const protocolOf = (request: Request): Protocol =>

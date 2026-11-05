@@ -1,17 +1,24 @@
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { COMPANY_MIGRATIONS, type MigrationsJournal, WAKEUP_MIGRATIONS } from "../src/db/migrate.ts";
 
 // Drizzle's migrator applies a migration only when it is newer than the newest one a database has
 // had, so a migration generated on a branch before another merged to `main` is skipped, silently,
-// on every database already past it. CI runs this on a pull request against `origin/main`: every
-// entry a journal gains must be newer than the base's newest, with the next index.
+// on every database already past it. CI runs this on a pull request against `origin/main`, over
+// every migrations folder in the repository (`drizzle/<folder>/meta/_journal.json`, wherever git
+// tracks one): every entry a journal gains must be newer than the base's newest, with the next index.
 
-const pkg = fileURLToPath(new URL("..", import.meta.url));
+/** Drizzle's journal, `meta/_journal.json` of a migrations folder. */
+interface Journal {
+  entries: { idx: number; when: number; tag: string }[];
+}
+
+const repo = fileURLToPath(new URL("..", import.meta.url));
 const base = process.argv[2] ?? "origin/main";
 
 const git = (...args: string[]) =>
-  execFileSync("git", args, { cwd: pkg, stdio: ["ignore", "pipe", "pipe"] }).toString();
+  execFileSync("git", args, { cwd: repo, stdio: ["ignore", "pipe", "pipe"] }).toString();
 
 // The base must resolve: a check against a ref the checkout lacks would pass every journal.
 try {
@@ -22,14 +29,20 @@ try {
 }
 
 /** The journal at `ref`, or undefined while the folder is not there. */
-const journalAt = (ref: string, path: string): MigrationsJournal | undefined =>
+const journalAt = (ref: string, path: string): Journal | undefined =>
   git("ls-tree", "--full-tree", "--name-only", ref, "--", path).trim()
     ? JSON.parse(git("show", `${ref}:${path}`))
     : undefined;
 
+const journals = git("ls-files", "--", "*/drizzle/*/meta/_journal.json").trim().split("\n").filter(Boolean);
+if (journals.length === 0) {
+  console.error("no migration journal is tracked: the check would pass nothing");
+  process.exit(1);
+}
+
 const problems: string[] = [];
-for (const { name, journal: head } of [COMPANY_MIGRATIONS, WAKEUP_MIGRATIONS]) {
-  const path = `packages/workflows/drizzle/${name}/meta/_journal.json`;
+for (const path of journals) {
+  const head: Journal = JSON.parse(readFileSync(join(repo, path), "utf8"));
   const before = journalAt(base, path);
   if (!before) continue;
   const known = new Set(before.entries.map((e) => e.tag));
@@ -53,4 +66,4 @@ if (problems.length) {
   console.error(problems.join("\n"));
   process.exit(1);
 }
-console.log(`migration journals follow ${base}`);
+console.log(`${journals.length} migration journals follow ${base}`);

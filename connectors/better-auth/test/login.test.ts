@@ -33,12 +33,15 @@ async function rateLimits(): Promise<string[]> {
   const client = new Client({ connectionString: databaseUrl });
   await client.connect();
   try {
-    const { rows } = await client.query<{ key: string }>('SELECT key FROM better_auth."rateLimit"');
+    const { rows } = await client.query<{ key: string }>("SELECT key FROM better_auth.rate_limit");
     return rows.map((row) => row.key.split("|")[0] ?? "");
   } finally {
     await client.end();
   }
 }
+
+/** The schema's tables once prepared, as `information_schema` lists them. */
+const TABLES = ["account", "rate_limit", "session", "user", "verification"];
 
 async function tables(): Promise<string[]> {
   const client = new Client({ connectionString: databaseUrl });
@@ -108,7 +111,9 @@ beforeAll(async () => {
   await admin.end();
   const client = new Client({ connectionString: databaseUrl });
   await client.connect();
+  // The schema and its journal: a database as the worker first finds it.
   await client.query("DROP SCHEMA IF EXISTS better_auth CASCADE");
+  await client.query("DROP TABLE IF EXISTS drizzle.__drizzle_migrations_better_auth");
   await client.end();
 });
 
@@ -123,7 +128,7 @@ describe("login", () => {
       await freshPrepare()
     )(databaseUrl);
     expect(await verifying).toBeNull();
-    expect(await tables()).toEqual(["account", "rateLimit", "session", "user", "verification"]);
+    expect(await tables()).toEqual(TABLES);
   });
 
   it("is prepared by the worker: schema better_auth and its tables, from two workers at once", async () => {
@@ -131,14 +136,14 @@ describe("login", () => {
     const second = await freshPrepare();
     expect(first).not.toBe(second);
     await Promise.all([first(databaseUrl), second(databaseUrl)]);
-    expect(await tables()).toEqual(["account", "rateLimit", "session", "user", "verification"]);
+    expect(await tables()).toEqual(TABLES);
   });
 
   it("is prepared again on the migrated schema, the same tables", async () => {
     await (
       await freshPrepare()
     )(databaseUrl);
-    expect(await tables()).toEqual(["account", "rateLimit", "session", "user", "verification"]);
+    expect(await tables()).toEqual(TABLES);
   });
 
   it("runs on whichever pool the app gives, an instance per pool, on the one set of tables", async () => {
@@ -298,8 +303,8 @@ async function tokensOf(id: number) {
   const client = new Client({ connectionString: databaseUrl });
   await client.connect();
   try {
-    const sql = `SELECT "accessToken" AS access_token, "refreshToken" AS refresh_token FROM better_auth.account
-      WHERE "providerId" = 'github' AND "accountId" = $1`;
+    const sql = `SELECT access_token, refresh_token FROM better_auth.account
+      WHERE provider_id = 'github' AND account_id = $1`;
     return (await client.query(sql, [String(id)])).rows;
   } finally {
     await client.end();

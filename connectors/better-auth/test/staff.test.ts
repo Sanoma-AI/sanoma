@@ -70,7 +70,7 @@ async function tokensOf(id: number): Promise<{ access_token: string | null }[]> 
   const client = new Client({ connectionString: databaseUrl });
   await client.connect();
   try {
-    const sql = `SELECT "accessToken" AS access_token FROM better_auth_staff.account WHERE "providerId" = 'github' AND "accountId" = $1`;
+    const sql = `SELECT access_token FROM better_auth_staff.account WHERE provider_id = 'github' AND account_id = $1`;
     return (await client.query(sql, [String(id)])).rows as { access_token: string | null }[];
   } finally {
     await client.end();
@@ -99,7 +99,9 @@ beforeAll(async () => {
   await admin.end();
   const client = new Client({ connectionString: databaseUrl });
   await client.connect();
+  // The schema and its journal: a database as the worker first finds it.
   await client.query("DROP SCHEMA IF EXISTS better_auth_staff CASCADE");
+  await client.query("DROP TABLE IF EXISTS drizzle.__drizzle_migrations_better_auth_staff");
   await client.end();
   // The worker's part: the login only opens on a prepared schema.
   await prepareBetterAuthStaff(databaseUrl);

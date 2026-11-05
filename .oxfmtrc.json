@@ -11,6 +11,7 @@
     "skills-lock.json",
     "packages/bridge/src/gen",
     "packages/bridge/testdata",
-    "packages/workflows/drizzle/*/meta"
+    "packages/workflows/drizzle/*/meta",
+    "connectors/better-auth/drizzle/*/meta"
   ]
 }
