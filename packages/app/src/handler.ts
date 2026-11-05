@@ -6,7 +6,7 @@
 import { type ResolvedConfig, requestOrigin, type SanomaClient } from "@sanoma-ai/workflows";
 import type { ConfigDescription, SiteEntry } from "@sanoma-ai/workflows/describe";
 import { siteDir } from "@sanoma-ai/workflows/shared";
-import type { AdmittingLogin, AppContext, LocalHost, RequestContext, ServerEntry } from "./context.ts";
+import type { AdmittingLogin, AppContext, RequestContext, ServerEntry } from "./context.ts";
 import { hostName, placeOf } from "./loopback.ts";
 import { seoFile } from "./seo.ts";
 import { siteHost } from "./site-path.ts";
@@ -63,8 +63,6 @@ export interface AppHandlerOptions {
   files?: (request: Request, site: string | undefined) => Promise<Response | undefined>;
   /** The built kit's stylesheet's path (`AppContext.stylesheet`). */
   stylesheet?: string;
-  /** The checkout, on a host that has one (`AppContext.local`). */
-  local?: LocalHost;
 }
 
 export interface AppHandler {
@@ -117,7 +115,6 @@ export function appHandler(options: AppHandlerOptions, first: AppSnapshot): AppH
     place: placeOf(resolved.databaseUrl),
     client,
     ...(options.stylesheet && { stylesheet: options.stylesheet }),
-    ...(options.local && { local: options.local }),
   };
   const context: AppContext = {
     ...shared,

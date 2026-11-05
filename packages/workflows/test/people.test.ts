@@ -90,6 +90,7 @@ describe("the people types", () => {
       "go-live",
       "go-live-host",
       "connect-existing",
+      "chat",
       "call",
     ]);
   });

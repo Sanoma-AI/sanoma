@@ -5,18 +5,15 @@ import * as acp from "@agentclientprotocol/sdk";
 import type { Principal } from "@sanoma-ai/workflows";
 import { AGENTS as AGENTS_GROUP, errorMessage, isVisitor } from "@sanoma-ai/workflows/shared";
 import { createUIMessageStream, generateId, type UIMessageStreamWriter } from "ai";
-import { z } from "zod";
-import { ApiError } from "../../api.ts";
 import { type ChatMessage, pathOf, type SignInCard, textOf } from "../../lib/chat.ts";
-import { type ActorContext, parse, requireActor, toApiError } from "../core.ts";
 import { agentHome, allowedPath, commitTurn, mustAllow, NO_SHELL, openDraft, outsideCheckout } from "./checkout.ts";
 import { Command, type Exit, exitText, sessionEnv } from "./local-session.ts";
 import { harnessInstructions } from "./prompt.ts";
-import { chatResponse, type Engine, type EngineTurn } from "./transcript.ts";
+import type { Engine, EngineTurn } from "./transcript.ts";
 
 // The chat's third engine: a person's own coding agent, driven over the Agent Client Protocol by
 // this client of ours, in the chat's draft, on that person's own subscription. The agent is a child
-// of the app (its ACP entry, installed on first use under `.sanoma/agent-home/acp/<agent>`), with
+// of the worker (its ACP entry, installed on first use under `.sanoma/agent-home/acp/<agent>`), with
 // an explicit environment whose HOME is the person's own (`.sanoma/agent-home/people/<id>`), so a
 // sign-in lives there, never the company's, and nothing of ours reads it (every person's agent runs
 // as this machine's user: what an agent runs itself can reach other people's). One child per turn:
@@ -158,36 +155,32 @@ const SIGN_IN_FAILURES: [said: RegExp, words: string][] = [
   [/Couldn['’]t save your login/, "could not save its sign-in on this computer"],
 ];
 
-/** Each agent's install under way or done, by its directory. */
+/** Each agent's install under way, by its directory: this process's cache, so two turns install it once. */
 const installs = new Map<string, Promise<void>>();
 
-/** The sign-ins waiting for a code their person pastes back, by chat id. */
-const pasting = new Map<string, { person: string; paste: (code: string) => void }>();
-
-/** The engine for `name` (`acp-<name>`): a turn of a chat through that person's own agent, its transcript written as it goes. */
+/** The engine for `name` (`acp-<name>`): a turn of a chat through that person's own agent. */
 export const acpEngine =
   (name: OwnAgentName): Engine =>
-  async (turn) => {
-    const stream = createUIMessageStream<ChatMessage>({
+  (turn) =>
+    createUIMessageStream<ChatMessage>({
       onError: errorMessage,
       execute: ({ writer }) => runTurn(name, turn, writer),
     });
-    return chatResponse(turn.app, turn.chat, stream);
-  };
 
 /** Whether `principal` is a person: not an agent, nor acting for someone, nor a visitor. Only a person's own plan is spent. */
 const isPerson = (principal: Principal) =>
   !isVisitor(principal) && !principal.groups?.includes(AGENTS_GROUP) && principal.onBehalfOf === undefined;
 
 async function runTurn(name: OwnAgentName, engineTurn: EngineTurn, writer: UIMessageStreamWriter<ChatMessage>) {
-  const { app, chat, messages, principal, signal } = engineTurn;
+  const { step, chat, messages } = engineTurn;
+  const { by: principal, signal } = step;
   const agent: OwnAgent = OWN_AGENTS[name];
   if (!isPerson(principal)) {
     throw new Error(`${agent.title} runs on a person's own plan, and ${principal.id} is not a person`);
   }
   // Kept across restarts, apart: the installs, and each person's sign-ins.
-  const agents = agentHome(app, "acp");
-  const draft = await openDraft(app, chat);
+  const agents = agentHome(step, "acp");
+  const draft = await openDraft(step, chat);
   writer.write({ type: "start", messageId: generateId() });
   const relay = new Relay(writer);
   let turn: AcpTurn | undefined;
@@ -195,18 +188,18 @@ async function runTurn(name: OwnAgentName, engineTurn: EngineTurn, writer: UIMes
     const dir = join(agents, name);
     // A new message does not wait for a first install: it goes on, for the next turn.
     await untilAborted(install(agent, dir, agents), signal);
-    const personal = join(agentHome(app, "people"), personDir(principal.id));
+    const personal = join(agentHome(step, "people"), personDir(principal.id));
     const bins = join(dir, "node_modules", ".bin");
     const [shimmed] = await Promise.all([shims(agents), mkdir(personal, { recursive: true })]);
     const env = sessionEnv(personal);
     turn = new AcpTurn(agent, relay, signal, {
       chatId: chat.id,
-      person: principal.id,
+      onCode: step.onCode,
       root: draft.root,
       bins,
       env: { ...env, PATH: [shimmed, bins, env.PATH].join(":") },
     });
-    const instructions = harnessInstructions(app, principal, chat, messages.slice(0, -1));
+    const instructions = harnessInstructions(step, principal, chat, messages.slice(0, -1));
     await turn.run(`${instructions}\n\n${principal.id}: ${textOf(messages.at(-1)!)}`);
   } catch (err) {
     // A dead or missing agent is said in the reply; a stopped turn says nothing.
@@ -225,7 +218,8 @@ class AcpTurn {
   readonly relay: Relay;
   readonly signal: AbortSignal;
   readonly chatId: string;
-  readonly person: string;
+  /** Takes the codes the person pastes for this turn (`ChatTurnContext.onCode`). */
+  readonly onCode: (listener: (code: string) => void) => () => void;
   /** The draft's checkout: where the agent works. */
   readonly root: string;
   /** The install's bins, and the child's environment. */
@@ -241,17 +235,23 @@ class AcpTurn {
     signal: AbortSignal,
     {
       chatId,
-      person,
+      onCode,
       root,
       bins,
       env,
-    }: { chatId: string; person: string; root: string; bins: string; env: Record<string, string> },
+    }: {
+      chatId: string;
+      onCode: (listener: (code: string) => void) => () => void;
+      root: string;
+      bins: string;
+      env: Record<string, string>;
+    },
   ) {
     this.agent = agent;
     this.relay = relay;
     this.signal = signal;
     this.chatId = chatId;
-    this.person = person;
+    this.onCode = onCode;
     this.root = root;
     this.bins = bins;
     this.env = env;
@@ -485,8 +485,7 @@ class AcpTurn {
     login.onOutput = () => {
       timer ??= setTimeout(show, CARD_EVERY);
     };
-    const waiting = { person: this.person, paste: (code: string) => login.write(`${code}\n`) };
-    pasting.set(this.chatId, waiting);
+    const forget = this.onCode((code) => login.write(`${code}\n`));
     try {
       const exit = await this.#waiting(login.exited);
       if (exit.exitCode !== 0) {
@@ -499,8 +498,7 @@ class AcpTurn {
       }
     } finally {
       clearTimeout(timer);
-      // Its own entry only: a later turn of the chat may be waiting for a code by now.
-      if (pasting.get(this.chatId) === waiting) pasting.delete(this.chatId);
+      forget();
       login.kill();
     }
   }
@@ -740,36 +738,4 @@ export function shims(agents: string): Promise<string> {
     writing.catch(() => shimmed.delete(dir));
   }
   return writing;
-}
-
-/** What `POST /api/sign-in` takes: the chat, and the code its person pastes back to the vendor's sign-in. */
-const SignInCode = z.object({
-  chat: z.string().min(1),
-  // One line: the vendor's sign-in reads it as one answer.
-  code: z
-    .string()
-    .trim()
-    .min(1)
-    .max(512)
-    .regex(/^[^\r\n]+$/, "one line"),
-});
-
-/**
- * `POST /api/sign-in`: the code the person pastes on their sign-in card, written to the vendor's
- * sign-in waiting in their chat (never stored or logged). A chat with none waiting, or someone
- * else's, is a 404.
- */
-export async function postSignInCode(request: Request, context: ActorContext): Promise<Response> {
-  try {
-    const principal = await requireActor(context);
-    const { chat, code } = parse(SignInCode, await request.json().catch(() => undefined), "The request");
-    const waiting = pasting.get(chat);
-    if (waiting?.person !== principal.id)
-      throw new ApiError(404, { error: `No sign-in waits for a code in chat ${chat}` });
-    waiting.paste(code);
-    return new Response(null, { status: 204 });
-  } catch (err) {
-    const { status, body } = toApiError(err, "a sign-in code");
-    return Response.json(body, { status });
-  }
 }

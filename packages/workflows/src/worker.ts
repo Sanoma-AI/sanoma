@@ -202,6 +202,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     },
     stopped: false,
     deadlines: deadlineRegistry(),
+    turns: new Map(),
   };
   const worker: Worker = {
     unconfigured: [...credentialsOf(resolved.driversByVendor, (name) => process.env[name])]
@@ -220,6 +221,10 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
         let failed: { error: unknown } | undefined;
         for (const close of [
           () => DBOS.shutdown(),
+          // Once DBOS is down, so a turn's step cut short is recorded nowhere: the next worker settles it.
+          async () => {
+            for (const turn of state.turns.values()) turn.stop.abort();
+          },
           async () => (await client?.catch(() => undefined))?.close(),
           // Before the pool it writes to closes.
           () => behind,

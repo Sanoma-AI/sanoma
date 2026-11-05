@@ -20,13 +20,15 @@ import { ACTOR_HEADER } from "../src/api.ts";
 import { type App, startApp } from "../src/index.ts";
 import { takeAppPrompt } from "../src/lib/apps.ts";
 import { type ChatMessage, chatTransport } from "../src/lib/chat.ts";
-import { allowedPath } from "../src/server/agent/checkout.ts";
+import { allowedPath } from "../src/steps/agent/checkout.ts";
+import { appSteps } from "../src/steps/index.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built app. The chat's route, end to end, on our loop: a mock
 // model (a connector's model half, as models.test.ts attaches one) that answers each request by a
 // script, the sanoma package's fixture company as the repository (its own git repository, with an
-// offboarding workflow), and a lookup the policy holds for a lead. No fake stream layer: the route's
-// stream as the browser's transport reads it.
+// offboarding workflow), and a lookup the policy holds for a lead. Each turn is a run the test
+// worker executes with the app's steps; the route streams its reply from the database. No fake
+// stream layer: the route's stream as the browser's transport reads it.
 
 /** This file's run, so its chats and held runs are new on a test database used before. */
 const RUN = randomUUID().slice(0, 8);
@@ -50,6 +52,8 @@ const SCRIPT: Record<string, Step[]> = {
     { text: "Drafted: offboarding now collects the laptop. Merge the branch to apply it." },
   ],
   "Look up Acme": [{ tool: "lookup", input: { op: "crm.customer.find", input: { name: "Acme" } } }, { text: "Acme." }],
+  "Look up Beta": [{ tool: "lookup", input: { op: "crm.customer.find", input: { name: "Beta" } } }, { text: "Beta." }],
+  "Never mind": [{ text: "Fine." }],
   continue: [{ text: "Acme Ltd is a customer since 2019." }],
   [takeAppPrompt("file:///srv/crm")]: [
     { tool: "take_app", input: { url: "file:///srv/crm" } },
@@ -191,6 +195,8 @@ export default defineWorkflow({
   git("init", "--quiet", "--initial-branch=main");
   git("add", "--all");
   git("commit", "--quiet", "-m", "First");
+  // The worker runs the turns, in the repository.
+  await testApp.restart({ source: localGitSource(dir, { databaseUrl: testApp.config.databaseUrl! }), app: appSteps });
   await start();
 }, 600_000);
 
@@ -293,7 +299,7 @@ describe("the chat", () => {
     expect(((await chats.load(id)) as ChatMessage[]).map((m) => m.role)).toEqual(["user", "assistant"]);
   }, 300_000);
 
-  it("shows a held lookup as its approval, and after a restart reloads the chat, settles it and continues", async () => {
+  it("shows a held lookup as its approval, and after the worker's restart settles the turn it cut short and continues", async () => {
     const { chats } = testApp.client;
     const history = (await chats.load(id)) as ChatMessage[];
     // The lookup is held: its part shows the run waiting, and the transcript keeps it as it waits.
@@ -318,15 +324,17 @@ describe("the chat", () => {
     expect(await testApp.client.approvals(runId!)).toEqual([
       expect.objectContaining({ approver: "lead", status: "pending" }),
     ]);
+    const turnId = (await testApp.client.turn(id))!.runId;
 
-    // The server stops mid-turn; the lead approves; the server starts again.
-    await app!.close();
-    app = undefined;
+    // The worker stops mid-turn; the lead approves; another worker takes the runs over: the turn,
+    // begun already, settles what it left and runs nothing again, and the stream ends.
+    await testApp.stop();
+    await testApp.client.decide(runId!, { decision: "approve", by: { id: "lead" } }, undefined, { timeoutSeconds: 1 });
+    await testApp.restart();
     const cut = await turn;
     expect(toolParts(cut)[0]).toMatchObject({ preliminary: true, output: { held: { runId } } });
-    await testApp.client.decide(runId!, { decision: "approve", by: { id: "lead" } });
+    expect(await testApp.client.result(turnId)).toEqual({ interrupted: true });
     await waitFor(async () => isEnded((await testApp.client.run(runId!))?.status ?? "running"), Boolean, 30_000);
-    await start();
 
     // The chat reloads from its transcript, its turn cut short where it was; "continue" settles the
     // lookup from its run and picks up.
@@ -343,6 +351,24 @@ describe("the chat", () => {
     });
     // The model saw the settled lookup's result before it answered.
     expect(JSON.stringify(model.doStreamCalls.at(-1)!.prompt)).toContain("Acme Ltd");
+  }, 300_000);
+
+  it("stops a turn under way for the person's next message, which answers once it has stopped", async () => {
+    const other = `stops-${RUN}`;
+    let held: string | undefined;
+    const first = send(other, [], "Look up Beta", (reply) => {
+      held ??= (toolParts(reply)[0]?.output as { held?: { runId: string } } | undefined)?.held?.runId;
+    });
+    await waitFor(() => held, Boolean, 30_000);
+    const turnId = (await testApp.client.turn(other))!.runId;
+    const stored = (await testApp.client.chats.load(other)) as ChatMessage[];
+    const reply = await send(other, stored, "Never mind");
+    expect(reply!.parts.at(-1)).toMatchObject({ type: "text", text: "Fine." });
+    // The first turn ended for it: its stream too, where it was.
+    expect(toolParts(await first)[0]).toMatchObject({ output: { held: { runId: held } } });
+    expect((await testApp.client.run(turnId))?.status).toBe("finished");
+    const roles = ((await testApp.client.chats.load(other)) as ChatMessage[]).map((m) => m.role);
+    expect(roles).toEqual(["user", "assistant", "user", "assistant"]);
   }, 300_000);
 
   it("takes an app only from a public repository: the Apps page's prompt and the source's refusal", async () => {

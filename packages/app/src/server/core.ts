@@ -59,7 +59,8 @@ import { secretValues } from "./secrets.ts";
 
 // What the server functions do. Server-only: each takes the app context the app hands every
 // request, and reads the company from its snapshot, never a file. Every expected failure is an
-// ApiError. What writes the repository or runs a child process is `local/`'s.
+// ApiError. What writes the repository or runs a child process is a run the worker executes
+// (`steps/`): a server function starts it.
 
 /** A request's context once start.ts's `actor` middleware has run: the app, and who is asking. */
 export interface ActorContext {
@@ -236,10 +237,6 @@ export async function appBehind(
     }
   );
 }
-
-/** What an action that needs the company's checkout says on a host that has none (the Worker). */
-export const notHere = (what: string) =>
-  `${what} is not available on this host, which does not have the company's files: use the app where the company's repository is checked out`;
 
 /**
  * Refuses the request with `invalid_input`, its issue at `field`, as a form shows it beside the

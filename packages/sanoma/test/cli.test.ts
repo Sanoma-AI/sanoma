@@ -52,6 +52,7 @@ describe("sanoma serve", () => {
         "adopt",
         "call",
         "change",
+        "chat",
         "connect-existing",
         "follow",
         "go-live",

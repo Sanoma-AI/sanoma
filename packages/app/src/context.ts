@@ -1,4 +1,4 @@
-import type { LoginIdentity, Principal, ResolvedConfig, SanomaClient, Source } from "@sanoma-ai/workflows";
+import type { LoginIdentity, Principal, ResolvedConfig, SanomaClient } from "@sanoma-ai/workflows";
 import type { Place } from "./api.ts";
 import type { AppSnapshot } from "./snapshot.ts";
 
@@ -62,12 +62,6 @@ export interface AppContext {
   /** The staff login (`AppOptions.login`, or `loopbackLogin()`), admitting only a declared person (`admitting`). */
   login: AdmittingLogin;
   /**
-   * The company's checkout, on a host that has one (the Node adapter's): what the actions that
-   * write the repository or run a child process work in (`server/local/`). None on the Worker,
-   * where those answer that they are not available on this host.
-   */
-  local?: LocalHost;
-  /**
    * The built kit's stylesheet's path (`/assets/style-<hash>.css`), which a login's own pages link
    * to look like the app; none on the dev server, which builds nothing.
    */
@@ -77,12 +71,6 @@ export interface AppContext {
    * front door (`publicFront`), so only `callFn` and `getActor` answer there, as a visitor.
    */
   site?: string;
-}
-
-/** What the Node adapter gives the actions that need the checkout (`AppContext.local`). */
-export interface LocalHost {
-  /** The company's repository, which Adopt commits a data file's change to; without one, it only writes the file. */
-  source?: Source;
 }
 
 /**

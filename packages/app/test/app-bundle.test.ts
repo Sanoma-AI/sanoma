@@ -174,10 +174,10 @@ describe("buildAppBundle", () => {
     expect(bundle.version).toMatch(/\S/);
   });
 
-  it("leaves out what needs the checkout: the coding agents, and the worker's steps (going live, connecting a repository)", () => {
+  it("leaves out the worker's steps: the chat's agents, going live, connecting a repository", () => {
     for (const { name, type, content } of bundle.modules) {
       if (type !== "esm") continue;
-      // Each of `server/local/`'s, `server/agent/`'s and `steps/`'s, by a text only it has.
+      // Each of `steps/`'s, by a text only it has.
       expect(Buffer.from(content, "base64").toString(), name).not.toMatch(
         /setup\/connect-existing|Go live: declare the repository|"\.agent-runs"|@ai-sdk\/harness|@agentclientprotocol/,
       );

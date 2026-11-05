@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { OWN_AGENTS, shims } from "../src/server/agent/acp.ts";
+import { OWN_AGENTS, shims } from "../src/steps/agent/acp.ts";
 
 // The shims first on a person's own agent's PATH (`shims` in acp.ts), run as the agent runs them:
 // `gh`, `open` and `xdg-open` refuse; `security` is a Keychain that is there, empty, and takes

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { waitFor } from "@sanoma-ai/testing";
 import { afterAll, describe, expect, it } from "vitest";
-import { freePort, LocalSession } from "../src/server/agent/local-session.ts";
+import { freePort, LocalSession } from "../src/steps/agent/local-session.ts";
 
 // The local session `HarnessAgent` runs a coding agent in: its members on their own, no agent.
 

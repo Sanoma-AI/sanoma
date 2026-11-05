@@ -23,7 +23,8 @@ import { localGitSource } from "../../sanoma/src/source.ts";
 import { ACTOR_HEADER } from "../src/api.ts";
 import { type App, startApp } from "../src/index.ts";
 import { type ChatMessage, chatTransport, type EngineName, type SignInCard } from "../src/lib/chat.ts";
-import { OWN_AGENTS, type OwnAgentName } from "../src/server/agent/acp.ts";
+import { OWN_AGENTS, type OwnAgentName } from "../src/steps/agent/acp.ts";
+import { appSteps } from "../src/steps/index.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built app. The chat's third engine, end to end: a person's
 // own coding agent over ACP, through `POST /api/chat` as the browser's transport reads it. No vendor
@@ -139,10 +140,10 @@ export default defineWorkflow({
   plant("pi", { signIn: "once", mode: "hello" });
   plant("codex", { signIn: "url", mode: "hello" });
   plant("claude-code", { signIn: "none", mode: "hello" });
-  app = await startApp(testApp.config, {
-    port: 0,
-    source: localGitSource(dir, { databaseUrl: testApp.config.databaseUrl! }),
-  });
+  const source = localGitSource(dir, { databaseUrl: testApp.config.databaseUrl! });
+  // The worker runs the turns: with the checkout and the app's steps.
+  await testApp.restart({ source, app: appSteps });
+  app = await startApp(testApp.config, { port: 0, source });
 }, 600_000);
 
 afterAll(async () => {

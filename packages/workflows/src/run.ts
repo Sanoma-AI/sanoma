@@ -108,6 +108,18 @@ export interface WorkerState {
   stopped: boolean;
   /** Which of its runs are executing and which wait, until when: what the worker's `idle` reads. */
   deadlines: DeadlineRegistry;
+  /**
+   * Each chat turn under way on this worker, by its run's id: what a message to the run is handed
+   * to (`chat-steps.ts`), its stop and its sign-in's listener for a pasted code. Each is stopped
+   * once the worker has stopped, so no agent goes on without it.
+   */
+  turns: Map<string, LiveTurn>;
+}
+
+/** A chat turn under way (`WorkerState.turns`): how to stop it, and who takes a code pasted for its sign-in. */
+export interface LiveTurn {
+  stop: AbortController;
+  code?: (code: string) => void;
 }
 
 /** What a run keeps in memory. Rebuilt the same way when DBOS replays the run. */

@@ -36,6 +36,19 @@ interface CompanyApi {
     body?: string;
     page?: string;
   }, unknown>;
+  /** A chat turn: the workflow `chat`, built in. */
+  chat: WorkflowFn<{
+    chat: string;
+    message: {
+      id: string;
+      role: "user";
+      parts: {
+        type: "text";
+        text: string;
+      }[];
+    };
+    after?: string;
+  }, unknown>;
   /** Connect an existing repository or database: the workflow `connect-existing`, built in. */
   connectExisting: WorkflowFn<{
     repository?: string;

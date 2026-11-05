@@ -430,6 +430,7 @@ describe("the built-in drift workflow in a config", () => {
         ],
       },
       { name: "change", builtin: true },
+      { name: "chat", builtin: true, ops: [] },
       { name: "connect-existing", builtin: true, ops: [] },
       { name: "drift", builtin: true, ops: [] },
       { name: "follow", builtin: true, ops: [] },

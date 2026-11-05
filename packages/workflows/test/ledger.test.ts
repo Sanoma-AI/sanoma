@@ -307,6 +307,7 @@ const runOn = (ledger: LedgerStore): Run => ({
     startRun: () => Promise.reject(new Error("no runs here")),
     stopped: false,
     deadlines: deadlineRegistry(),
+    turns: new Map(),
   },
 });
 

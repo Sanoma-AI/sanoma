@@ -1,10 +1,17 @@
 import { lstat, realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { type Chat, type Draft, errorCode, type Principal, type SanomaClient, type Source } from "@sanoma-ai/workflows";
+import {
+  type AppStepContext,
+  type Chat,
+  type CheckResult,
+  type Draft,
+  errorCode,
+  type Principal,
+  type SanomaClient,
+  type Source,
+} from "@sanoma-ai/workflows";
 import type { UIMessageStreamWriter } from "ai";
-import type { AppContext } from "../../context.ts";
 import { type ChatMessage, textOf } from "../../lib/chat.ts";
-import { checks } from "../drafts.ts";
 import type { EngineTurn } from "./transcript.ts";
 
 /** Where an agent may never write in a checkout: git's own files, and the install (`node_modules`, a link to the live one in a draft). */
@@ -62,11 +69,22 @@ export function within(dir: string, full: string): boolean {
 /** A repository a chat can draft in. */
 export type Drafting = Source & Required<Pick<Source, "draft" | "diff">>;
 
-/** The instance's repository, as every engine drafts in it; an error when it has none to draft in. */
-export function drafting(app: AppContext): Drafting {
-  const repo = app.local?.source;
-  if (!repo?.draft || !repo.diff) throw new Error("This instance has no repository to draft a change in");
-  return repo as Drafting;
+/** The worker's repository, as every engine drafts in it; an error when it has none to draft in. */
+export function drafting({ source }: Pick<AppStepContext, "source">): Drafting {
+  if (!source?.draft || !source.diff) throw new Error("This instance has no repository to draft a change in");
+  return source as Drafting;
+}
+
+/**
+ * `sanoma check` on the draft `id`, as the repository runs it (`Source.check`), for a draft's card
+ * and the agent that drafts: its problems and warnings, without the grid, which a change's review reads.
+ */
+export async function checks({ source }: Pick<AppStepContext, "source">, id: string): Promise<CheckResult> {
+  if (!source?.check) {
+    return { ok: false, problems: ["sanoma check: this instance's repository cannot check a draft"], warnings: [] };
+  }
+  const { grid: _, ...checked } = await source.check(id);
+  return checked;
 }
 
 /**
@@ -76,14 +94,14 @@ export function drafting(app: AppContext): Drafting {
  * agents' installs (`acp/<agent>`, the shims, pnpm's store); `people`, each person's own `HOME`
  * (`people/<id>`), where only that person's agent keeps its sign-in and nothing of ours reads.
  */
-export const agentHome = (app: AppContext, kind: "harness" | "acp" | "people") =>
-  join(drafting(app).root, ".sanoma", "agent-home", kind);
+export const agentHome = (step: Pick<AppStepContext, "source">, kind: "harness" | "acp" | "people") =>
+  join(drafting(step).root, ".sanoma", "agent-home", kind);
 
 /** The chat's draft, opened (or found open), and attached to the chat's row the first time. */
-export async function openDraft(app: AppContext, chat: Chat): Promise<Draft> {
-  const opened = await drafting(app).draft(chat.id);
+export async function openDraft(step: Pick<AppStepContext, "source" | "client">, chat: Chat): Promise<Draft> {
+  const opened = await drafting(step).draft(chat.id);
   if (chat.draftId !== chat.id) {
-    await app.client.chats.attach(chat.id, chat.id);
+    await step.client.chats.attach(chat.id, chat.id);
     chat.draftId = chat.id;
   }
   return opened;
@@ -114,18 +132,19 @@ const NO_CHANGE = new Set(["run_not_found", "run_ended"]);
  * (`data-draft`) from its checks and its diff.
  */
 export async function commitTurn(
-  { app, chat, messages, principal, signal }: EngineTurn,
+  { step, chat, messages }: EngineTurn,
   draft: Draft,
   title: string,
   writer: UIMessageStreamWriter<ChatMessage>,
 ) {
+  const { by } = step;
   const message = `${title}: ${textOf(messages.at(-1)!, " ").trim().slice(0, 72)}`;
-  const committed = (await draft.commit({ paths: ["."], message, author: principal.id })) !== undefined;
+  const committed = (await draft.commit({ paths: ["."], message, author: by.id })) !== undefined;
   if (!committed) return;
   // Told even when the turn was stopped: the commit has landed.
-  const told = tellCommits(app.client, chat.id, principal);
-  if (signal.aborted) return told;
-  const [checked, diff] = await Promise.all([checks(app, chat.id), drafting(app).diff(chat.id), told]);
+  const told = tellCommits(step.client, chat.id, by);
+  if (step.signal.aborted) return told;
+  const [checked, diff] = await Promise.all([checks(step, chat.id), drafting(step).diff(chat.id), told]);
   writer.write({
     type: "data-draft",
     id: "draft",

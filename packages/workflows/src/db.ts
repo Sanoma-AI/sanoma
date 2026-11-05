@@ -26,10 +26,16 @@ export const DATA_TABLE = "sanoma_data";
  * `last_error` why the last registration failed.
  */
 export const WAKEUP_TABLE = "sanoma_wakeup";
-/** The operator agent's chats (`chats.ts`): who each is for, its engine and its draft. */
+/** The operator agent's chats (`chats.ts`): who each is for, its engine, its draft and the turn last begun. */
 export const CHATS_TABLE = "sanoma_chats";
 /** Each chat's messages, the AI SDK's UI messages as JSON, in `seq` order. */
 export const CHAT_MESSAGES_TABLE = "sanoma_chat_messages";
+/**
+ * The reply a chat turn streams, as the worker writes it (`Chats.append`): its UI message stream's
+ * chunks in `seq` order, then a row with none, its end. The app streams them to the browser; a
+ * chat's turn's rows go when its next turn begins.
+ */
+export const CHAT_CHUNKS_TABLE = "sanoma_chat_chunks";
 /** The api tokens (`tokens.ts`): each one's SHA-256, never the token, whom it acts for, its groups, and when it was revoked. */
 export const API_TOKENS_TABLE = "sanoma_api_tokens";
 /** The nonces of sealed invite requests spent (`spendInviteRequest`), each until it expires. */
@@ -103,7 +109,8 @@ const TABLES: readonly [what: string, ddl: string][] = [
     "chats",
     `CREATE TABLE IF NOT EXISTS ${CHATS_TABLE} (id text PRIMARY KEY, person text NOT NULL, engine text NOT NULL, ` +
       "draft_id text, title text NOT NULL, created_at timestamptz NOT NULL DEFAULT now()); " +
-      `CREATE INDEX IF NOT EXISTS ${CHATS_TABLE}_person ON ${CHATS_TABLE} (person, created_at)`,
+      `CREATE INDEX IF NOT EXISTS ${CHATS_TABLE}_person ON ${CHATS_TABLE} (person, created_at); ` +
+      `ALTER TABLE ${CHATS_TABLE} ADD COLUMN IF NOT EXISTS turn text`,
   ],
   [
     "chat messages",
@@ -128,6 +135,12 @@ const TABLES: readonly [what: string, ddl: string][] = [
     "run checks",
     `CREATE TABLE IF NOT EXISTS ${RUN_CHECKS_TABLE} (run_id text PRIMARY KEY, checks jsonb, error text, ` +
       "checked_at timestamptz NOT NULL DEFAULT now(), CHECK ((checks IS NULL) <> (error IS NULL)))",
+  ],
+  [
+    "chat chunks",
+    `CREATE TABLE IF NOT EXISTS ${CHAT_CHUNKS_TABLE} (chat_id text NOT NULL REFERENCES ${CHATS_TABLE} (id) ` +
+      "ON DELETE CASCADE, run_id text NOT NULL, seq integer NOT NULL, chunk jsonb, PRIMARY KEY (run_id, seq)); " +
+      `CREATE INDEX IF NOT EXISTS ${CHAT_CHUNKS_TABLE}_chat ON ${CHAT_CHUNKS_TABLE} (chat_id)`,
   ],
 ];
 
@@ -307,7 +320,7 @@ async function prepare(databaseUrl: string): Promise<void> {
 }
 
 /** The last of the runtime's tables a preparation makes (`TABLES`), so its being there says they all are. */
-const LAST_TABLE = RUN_CHECKS_TABLE;
+const LAST_TABLE = CHAT_CHUNKS_TABLE;
 
 /** Refuses when the database at `databaseUrl` lacks DBOS's tables or the runtime's: `by` makes them, not this process. */
 async function checkPrepared(databaseUrl: string, by: string): Promise<void> {

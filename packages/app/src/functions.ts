@@ -53,7 +53,7 @@ import { hostDerived } from "./server/host-derived.ts";
 import { invitePerson, peopleSignIns } from "./server/people.ts";
 import { setSetupToken, setupStatus } from "./server/setup.ts";
 import { withPrincipal } from "./middleware.ts";
-import { chatFor } from "./server/agent/transcript.ts";
+import { chatFor } from "./server/chat.ts";
 import { chatModel } from "./server/models.ts";
 
 // The page's reads and changes, as server functions: the app's only HTTP surface. Each parses its

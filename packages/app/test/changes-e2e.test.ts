@@ -24,10 +24,9 @@ import { type FakeRemote, fakeRemote } from "../../workflows/test/fakes/remote.t
 import { freshDatabase } from "../../workflows/test/harness.ts";
 import type { AppContext } from "../src/context.ts";
 import { type App, startApp } from "../src/index.ts";
-import { tellCommits } from "../src/server/agent/checkout.ts";
+import { checks, tellCommits } from "../src/steps/agent/checkout.ts";
 import { change, openChange } from "../src/server/core.ts";
 import { appSnapshot } from "../src/snapshot-build.ts";
-import { checks } from "../src/server/drafts.ts";
 import { appSteps } from "../src/steps/index.ts";
 import { PEOPLE, pageOf, publishedAgain, publishOf, renderDraftCard } from "./fixtures/change.ts";
 
@@ -150,7 +149,7 @@ describe("a change, from a chat's draft to main", { timeout: 2 * ROUND_MS }, () 
       draft: "rules",
       branch: draft.branch,
       ...(await source.diff!("rules")),
-      checks: await checks({ local: { source } }, "rules"),
+      checks: await checks({ source }, "rules"),
     };
     expect(card.files).toEqual(["policies/hello.cedar", "resources/people.ts"]);
     expect(card.checks).toMatchObject({ ok: true, problems: [] });

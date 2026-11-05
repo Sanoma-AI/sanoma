@@ -30,6 +30,8 @@ import { appRunner } from "./app-steps.ts";
 import { appWorkflows } from "./app-workflows.ts";
 import { changeSteps } from "./change-steps.ts";
 import { changeWorkflow } from "./change-workflow.ts";
+import { chatSteps } from "./chat-steps.ts";
+import { chatWorkflow } from "./chat-workflow.ts";
 import { followSteps } from "./follow-steps.ts";
 import { followWorkflow } from "./follow-workflow.ts";
 import {
@@ -72,6 +74,7 @@ import {
   BUILT_IN_WORKFLOWS,
   CALL_WORKFLOW,
   CHANGE_WORKFLOW,
+  CHAT_WORKFLOW,
   DATA_VENDOR,
   FOLLOW_WORKFLOW,
   LOGIN_CODE_WORKFLOW,
@@ -451,6 +454,8 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   names.set(FOLLOW_WORKFLOW, followWorkflow(followSteps({ remotes, hosts })));
   // Built-in, in every config: the app's own actions on the repository, which a worker given the app's steps runs.
   for (const wf of appWorkflows(appRunner)) names.set(wf.name, wf);
+  // Built-in, in every config: a chat turn, which a worker given the app's steps runs.
+  names.set(CHAT_WORKFLOW, chatWorkflow(chatSteps()));
   const declaredObjects = () => readDeclaredObjects(root, connectors, declarable);
   // Built-in: a direct call the policy holds for an approval, made a run, when any operation may be called directly.
   const call = callWorkflow(ops, drivers, types);

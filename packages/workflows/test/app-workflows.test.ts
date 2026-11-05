@@ -104,6 +104,9 @@ describe("on a worker given the app's steps", () => {
       await record(step);
       return { file: "resources/sanoma/infra.ts", text: "export default [];\n", apply: { only: [] } };
     },
+    chat: async () => {
+      throw new Error("No chat turns here");
+    },
   };
   const app = useTestApp(config(), { databaseUrl: testDatabaseUrl("app_workflows"), source, app: steps });
 

@@ -908,7 +908,7 @@ describe("the page", () => {
     expect(res.headers.get("content-type")).toMatch(/text\/html/);
     const html = await res.text();
     expect(html).toContain('<div id="app">');
-    expect(html).toMatch(/<h1[^>]*>Workflows<span[^>]*>11<\/span><\/h1>/);
+    expect(html).toMatch(/<h1[^>]*>Workflows<span[^>]*>12<\/span><\/h1>/);
     // The bar: Chat, then Inbox and Workflows, no site tiles (the package's own build has no
     // sites), then Setup (with Data and Permissions, as the config has collections and a policy),
     // the current lit.
@@ -2002,10 +2002,10 @@ describe("resources and drift", () => {
   it("tabs the overview by filter, All runs last, and heads it with New workflow, each view its own link", async () => {
     const overview = await page("/workflows");
     expect(tabs(overview.html)).toEqual([
-      { label: "All", href: "/workflows", count: 11, selected: true },
+      { label: "All", href: "/workflows", count: 12, selected: true },
       { label: "Waiting on you", href: "/workflows?filter=waiting", count: 0, selected: false },
       { label: "Failed last run", href: "/workflows?filter=failed", count: 0, selected: false },
-      { label: "Built-in", href: "/workflows?filter=builtin", count: 10, selected: false },
+      { label: "Built-in", href: "/workflows?filter=builtin", count: 11, selected: false },
       { label: "All runs", href: "/workflows?view=runs", count: undefined, selected: false },
     ]);
     expect(overview.html).toMatch(/<button[^>]*aria-haspopup="dialog"[^>]*>(<svg.*?<\/svg>)?New workflow<\/button>/);
@@ -2036,7 +2036,7 @@ describe("resources and drift", () => {
     expect(builtin.html).not.toMatch(/<td[^>]*><div[^>]*><a[^>]*href="\/workflows\/announce"/);
     expect(builtin.html).toMatch(/<td[^>]*><div[^>]*><a[^>]*href="\/workflows\/change"/);
     expect(builtin.html).toMatch(/<td[^>]*><div[^>]*><a[^>]*href="\/workflows\/go-live"/);
-    expect(tabNamed(builtin.html, "Built-in")).toMatchObject({ count: 10, selected: true });
+    expect(tabNamed(builtin.html, "Built-in")).toMatchObject({ count: 11, selected: true });
     expect(builtin.html).not.toMatch(/<a [^>]*role="tab"[^>]*aria-selected="false"[^>]*aria-current="page"/);
   });
 

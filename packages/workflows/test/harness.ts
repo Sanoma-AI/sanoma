@@ -42,7 +42,7 @@ export function rootWith(files: Record<string, string>, from?: string): string {
 
 /** A people file declaring `alice` alone, for a root's `resources/people.ts`. */
 /** The built-ins every config has after `change`, in that order: `follow`, then the app's actions (`app-workflows.ts`). */
-export const AFTER_CHANGE = ["follow", "adopt", "patch", "go-live", "go-live-host", "connect-existing"];
+export const AFTER_CHANGE = ["follow", "adopt", "patch", "go-live", "go-live-host", "connect-existing", "chat"];
 
 export const ALICE = `import { sanoma } from "sanoma/resources";
 

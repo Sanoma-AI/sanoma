@@ -27,6 +27,7 @@ export {
   retryableStatus,
   type SignInMethod,
   type SocialClients,
+  VENDOR,
   type VendorInfo,
   withSetup,
 } from "./op.ts";
@@ -97,6 +98,7 @@ export {
   AdoptInput,
   type AppStepContext,
   type AppSteps,
+  type ChatTurnContext,
   ConnectExistingInput,
   type ConnectExistingOutput,
   GoLiveHostInput,
@@ -108,6 +110,8 @@ export {
 } from "./app-workflows.ts";
 export { NO_APP_STEPS } from "./app-steps.ts";
 export { type FollowOutput, RemoteEventSchema } from "./follow-workflow.ts";
+export { ChatTurnInput, type ChatTurnOutput } from "./chat-workflow.ts";
+export { NO_CHAT_STEPS } from "./chat-steps.ts";
 export {
   ADMIN,
   type ChangeDecision,
@@ -299,6 +303,8 @@ export {
   CHANGE_REVIEW,
   CHANGE_TOPIC,
   CHANGE_WORKFLOW,
+  CHAT_WORKFLOW,
+  chatRunId,
   CONNECT_EXISTING_WORKFLOW,
   declaresPeople,
   FOLLOW_WORKFLOW,

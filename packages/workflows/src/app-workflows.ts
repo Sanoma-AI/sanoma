@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ApplyInput } from "./apply.ts";
+import type { ChatTurnInput, ChatTurnOutput } from "./chat-workflow.ts";
 import type { ResolvedConfig, SanomaConfig } from "./config.ts";
 import type { SanomaClient } from "./client.ts";
 import { defineWorkflow, type Principal, type WorkflowDefinition } from "./define.ts";
@@ -124,9 +125,22 @@ export interface AppStepContext {
 }
 
 /**
+ * What a chat turn's step is given besides an app step's: when to stop (a new message came, or the
+ * worker stopped), a way to take the sign-in codes the person pastes for this turn, and whether
+ * the turn had begun before, on a worker that restarted under it.
+ */
+export interface ChatTurnContext extends AppStepContext {
+  signal: AbortSignal;
+  /** Hands each code pasted for this turn (`SanomaClient.turnCode`) to `listener`, until the function it returns is called. */
+  onCode(listener: (code: string) => void): () => void;
+  /** The turn had begun (`Chats.begin`) before the worker restarted: it settles what it left, and runs nothing again. */
+  resumed: boolean;
+}
+
+/**
  * The app's own actions, which a worker runs (`WorkerOptions.app`): one method per built-in
  * workflow of the app's, each called in a DBOS step of its run, one at a time on the worker, since
- * each writes the repository. A step refuses by throwing: a `SanomaError` with the code the page
+ * each writes the repository (but a chat turn, `chat`). A step refuses by throwing: a `SanomaError` with the code the page
  * branches on (`invalid_input` with its `issues`, or a `field`; `not_approver`), else an error
  * whose message the page shows. What a step returns is checkpointed, so it is JSON. One that
  * applies after its write returns what apply plans (`apply`), which its run starts as a child.
@@ -145,6 +159,12 @@ export interface AppSteps {
     step: AppStepContext,
     input: ConnectExistingInput,
   ): Promise<Omit<ConnectExistingOutput, "runId"> & { apply: ApplyInput }>;
+  /**
+   * A chat turn: the reply to the person's message, by the chat's engine, written to the chat's
+   * transcript and, as it streams, to its chunks (`Chats.append`, then `Chats.end`). Not one at a
+   * time: a turn writes its own draft, not the checkout.
+   */
+  chat(step: ChatTurnContext, input: ChatTurnInput): Promise<ChatTurnOutput>;
 }
 
 /** What a built-in of the app's runs its work through (`appRunner`, in `app-steps.ts`). */

@@ -41,7 +41,7 @@ const testApp = useTestApp(
   { databaseUrl: freshDatabase("webhooks"), source: source.source },
 );
 let app: App;
-/** The app's handler with no checkout (`local`), as the Worker's bundle makes it: its pages answer nothing here. */
+/** The app's handler alone, as the Worker's bundle makes it: its pages answer nothing here. */
 let portable: AppHandler;
 
 beforeAll(async () => {

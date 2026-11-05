@@ -418,6 +418,7 @@ describe("a workflow's name in a site's api", () => {
       ["apply", []],
       ["call", []],
       ["change", []],
+      ["chat", []],
       ["connect-existing", []],
       ["data", [[1, 1, "A site calls this workflow api.data, which is the collections': rename it"]]],
       ["drift", []],

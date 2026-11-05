@@ -143,7 +143,7 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
     options.dev
       ? devResponder(options.dev, server, sockets)
       : builtResponder(resolve(options.distDir ?? defaultDistDir())),
-    SanomaClient.connect(config, { onWrite: options.onWrite, ...(options.source && { source: options.source }) }),
+    SanomaClient.connect(config, { onWrite: options.onWrite }),
   ]);
   if (loaded.status === "rejected" && connected.status === "rejected") {
     throw new AggregateError(
@@ -195,7 +195,6 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
       entry: responder.entry,
       files: responder.files,
       ...(responder.stylesheet && { stylesheet: responder.stylesheet }),
-      local: { ...(options.source && { source: options.source }) },
     },
     current,
   );

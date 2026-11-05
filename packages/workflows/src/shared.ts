@@ -338,7 +338,24 @@ export const CONNECT_EXISTING_WORKFLOW = "connect-existing";
  */
 export const FOLLOW_WORKFLOW = "follow";
 
-/** The workflows the runtime adds itself, which a config's own may not be named: drift, apply, call, change, login-code, follow and the app's actions. */
+/**
+ * A turn of a person's chat with the operator agent, run by the worker with the app's steps
+ * (`chat-workflow.ts`): started by the app as the chat's person (`SanomaClient.startTurn`), one run
+ * per message, `chat:<chat>:<message>`.
+ */
+export const CHAT_WORKFLOW = "chat";
+
+/** The run id of the chat `chat`'s turn for the message `message`. */
+export const chatRunId = (chat: string, message: string) => `chat:${chat}:${message}`;
+
+/** The chat a turn's run is of (`chatRunId`); undefined for any other run id. */
+export const chatOfRun = (runId: string): string | undefined => CHAT_RUN.exec(runId)?.[1];
+const CHAT_RUN = new RegExp(`^chat:(${DRAFT_ID.source.slice(1, -1)}):${DRAFT_ID.source.slice(1, -1)}$`);
+
+/** The `recv` topic a turn's run is told on (`ChatTell`): a stop, a sign-in code, its own turn's end. */
+export const CHAT_TOPIC = "chat:tell";
+
+/** The workflows the runtime adds itself, which a config's own may not be named: drift, apply, call, change, login-code, follow, chat and the app's actions. */
 export const BUILT_IN_WORKFLOWS: ReadonlySet<string> = new Set([
   DRIFT_WORKFLOW,
   APPLY_WORKFLOW,
@@ -346,6 +363,7 @@ export const BUILT_IN_WORKFLOWS: ReadonlySet<string> = new Set([
   CHANGE_WORKFLOW,
   LOGIN_CODE_WORKFLOW,
   FOLLOW_WORKFLOW,
+  CHAT_WORKFLOW,
   ADOPT_WORKFLOW,
   PATCH_WORKFLOW,
   GO_LIVE_WORKFLOW,
