@@ -1,6 +1,22 @@
 import { createElement, type ElementType, lazy, Suspense } from "react";
-import { type Components, Streamdown } from "streamdown";
+import {
+  type Components,
+  defaultComponents,
+  defaultRehypePlugins,
+  type LinkSafetyModalProps,
+  Streamdown,
+} from "streamdown";
+import { Button } from "#/components/ui/button.tsx";
 import { CodeBlock, CodeBlockContent } from "#/components/ui/code-block.tsx";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "#/components/ui/dialog.tsx";
 import { Separator } from "#/components/ui/separator.tsx";
 import { Table, TableCell, TableHead } from "#/components/ui/table.tsx";
 
@@ -8,7 +24,7 @@ import { Table, TableCell, TableHead } from "#/components/ui/table.tsx";
 // classes: a company's Tailwind does not scan Streamdown's install, so every element it draws with
 // a class of its own is given here, and `space-y-0` takes its root's away. No image is ever loaded:
 // what a reply says can come from what the agent read, and an image's address would carry data out
-// without anyone clicking. Links are Streamdown's hardened ones; a fenced block is the kit's
+// without anyone clicking. Links are Streamdown's hardened ones, asking before they open; a fenced block is the kit's
 // CodeBlock, its highlighter and each language loaded the first time one is shown.
 
 /** An element as `tag` with `className`, without the `node` Streamdown passes a component. */
@@ -20,10 +36,9 @@ const styled =
 /** Shiki's core with it, so a reply with no code does not load it. */
 const Fence = lazy(() => import("./fence.tsx"));
 
-/** A fenced block's code; `<code>` with markup inside, which only raw HTML writes, stays as it came. */
+/** A fenced block's code. */
 const FencedCode: Components["code"] = ({ node: _node, className, children }) => {
-  if (typeof children !== "string") return <code className={className}>{children}</code>;
-  const text = children.replace(/\n$/, "");
+  const text = String(children).replace(/\n$/, "");
   return (
     <Suspense
       fallback={
@@ -36,6 +51,40 @@ const FencedCode: Components["code"] = ({ node: _node, className, children }) =>
     </Suspense>
   );
 };
+
+const StreamdownLink = defaultComponents.a;
+
+/** Before a link leaves the app: the agent wrote it, and a page it reads can steer what it writes. */
+function LinkCheck({ url, isOpen, onClose, onConfirm }: LinkSafetyModalProps) {
+  return (
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Open this link?</DialogTitle>
+          <DialogDescription>The agent wrote it. It opens in a new tab.</DialogDescription>
+        </DialogHeader>
+        <p className="font-mono text-xs break-all">{url}</p>
+        <DialogFooter>
+          <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
+          <Button
+            onClick={() => {
+              onConfirm();
+              onClose();
+            }}
+          >
+            Open
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+const LINK_SAFETY = { enabled: true, renderModal: (props: LinkSafetyModalProps) => <LinkCheck {...props} /> };
+
+// Raw HTML is left out (its tags show as the text they are, as `Array<string>` must), so the
+// sanitizer and Streamdown's hardening are the rest of its defaults.
+const PLUGINS = [defaultRehypePlugins.sanitize, defaultRehypePlugins.harden].filter((plugin) => plugin !== undefined);
 
 const HEADING = "mt-1 font-medium first:mt-0";
 const TITLE = styled("h3", `${HEADING} text-base`);
@@ -52,9 +101,17 @@ const ELEMENTS: Components = {
   ol: styled("ol", "flex list-decimal flex-col gap-1 pl-5"),
   li: "li",
   strong: styled("strong", "font-medium"),
-  a: ({ node: _node, ...props }) => (
-    <a {...props} target="_blank" rel="noopener noreferrer" className="underline underline-offset-4" />
-  ),
+  // Streamdown's link, so an unfinished one is not followed and a click asks first (`LINK_SAFETY`).
+  a: ({ node: _node, href, ...props }) =>
+    href?.startsWith("#") ? (
+      <a {...props} href={href} className="underline underline-offset-4" />
+    ) : (
+      <StreamdownLink
+        {...props}
+        href={href}
+        className="text-left font-normal text-current wrap-anywhere underline underline-offset-4"
+      />
+    ),
   blockquote: styled("blockquote", "border-l pl-3 text-muted-foreground"),
   hr: () => <Separator />,
   inlineCode: styled("code", "rounded-sm bg-muted px-1 py-0.5 font-mono text-[0.875em]"),
@@ -75,6 +132,8 @@ export default function Markdown({ text, live }: { text: string; live: boolean }
       components={ELEMENTS}
       disallowedElements={["img"]}
       isAnimating={live}
+      linkSafety={LINK_SAFETY}
+      rehypePlugins={PLUGINS}
     >
       {text}
     </Streamdown>

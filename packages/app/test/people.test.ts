@@ -244,7 +244,9 @@ describe("People", () => {
     expect(ops).toMatch(/<fieldset disabled=""[^>]*>(?:(?!<\/fieldset>)[\s\S])*Names another declared resource/);
     // A name no row of the tab has opens nothing.
     const nobody = (await page("/people?person=nobody")).html;
-    expect(nobody.slice(nobody.indexOf('<main data-slot="page"'))).not.toContain('role="region"');
+    const main = nobody.indexOf('<main data-slot="page"');
+    expect(main).toBeGreaterThan(0);
+    expect(nobody.slice(main)).not.toContain('role="region"');
   });
 
   it("is Hosting's Edit on a declaration: the same form above its file", async () => {

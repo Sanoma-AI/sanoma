@@ -3,6 +3,7 @@ import { CopyIcon } from "@phosphor-icons/react/dist/csr/Copy";
 import { SparkleIcon } from "@phosphor-icons/react/dist/csr/Sparkle";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import { getToolName, isToolUIPart } from "ai";
+import { CatchBoundary } from "@tanstack/react-router";
 import { type FormEvent, lazy, Suspense, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "#/components/ui/button.tsx";
@@ -22,7 +23,7 @@ import {
 } from "#/components/ui/trace.tsx";
 import { actorHeaders } from "../../actor.ts";
 import { type ChatMessage, type DraftCard, heldRunOf, pathOf, type SignInCard, textOf } from "../../lib/chat.ts";
-import { CardHeading, TipButton } from "../kit.tsx";
+import { CardHeading, Notice, TipButton } from "../kit.tsx";
 import { DraftCardView } from "./draft-card.tsx";
 
 // What the chat draws of the agent's reply, per app.md's Chat: Markdown at the reply size, its
@@ -93,23 +94,33 @@ export function Reply({ message, live, chat }: { message: ChatMessage; live: boo
 
 function ReplyPart({ part, live }: { part: Part; live: boolean }) {
   if (part.type === "text") {
+    const plain = <p className="text-reply whitespace-pre-wrap">{part.text}</p>;
     return (
-      <Suspense fallback={<p className="text-reply whitespace-pre-wrap">{part.text}</p>}>
-        <Markdown text={part.text} live={live && part.state === "streaming"} />
-      </Suspense>
+      // A chunk that does not come (a deploy since the page loaded) leaves the text as it is.
+      <CatchBoundary getResetKey={() => "markdown"} errorComponent={() => plain}>
+        <Suspense fallback={plain}>
+          <Markdown text={part.text} live={live && part.state === "streaming"} />
+        </Suspense>
+      </CatchBoundary>
     );
   }
   if (isToolUIPart(part)) {
     const runId = heldRunOf(part.output);
     if (runId !== undefined) {
       return (
-        <Suspense fallback={<Spinner />}>
-          <HeldCard runId={runId} />
-        </Suspense>
+        <CatchBoundary getResetKey={() => runId} errorComponent={HeldCardMissing}>
+          <Suspense fallback={<Spinner />}>
+            <HeldCard runId={runId} />
+          </Suspense>
+        </CatchBoundary>
       );
     }
   }
   return null;
+}
+
+function HeldCardMissing() {
+  return <Notice variant="destructive">This approval did not load. Reload the page to see it.</Notice>;
 }
 
 /** The agent's thinking and steps as a quiet trace, a line each. */
