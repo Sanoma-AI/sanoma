@@ -3,7 +3,7 @@ import { errorMessage, type Saved } from "@sanoma-ai/workflows/shared";
 import { useMutation } from "@tanstack/react-query";
 import { FloppyDiskIcon } from "@phosphor-icons/react/dist/csr/FloppyDisk";
 import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 import { Button } from "#/components/ui/button.tsx";
 import {
@@ -29,7 +29,8 @@ import { type RecordsView, savedIn } from "./grid/collection.ts";
 // records collection, the grid's (`grid/collection.ts`; an edit in its queue of the record's
 // edits, after the grid's), whose handler calls the collection's operation, `data.<name>.save`
 // (`ifAbsent` for a new record, `ifRecord` for an edit) or `.delete`, through `api` as the
-// person; a held call's toast is the collection's.
+// person; a held call's toast is the collection's. While the grid has a change staged, Save and
+// Delete wait for it: the grid's bar saves or discards it.
 
 /** An issue's path in a save's input (`record.<field>`), as the form's. */
 const inRecord = (path: (string | number)[]) => (path[0] === "record" ? path.slice(1) : path);
@@ -43,7 +44,7 @@ const inRecord = (path: (string | number)[]) => (path[0] === "record" ? path.sli
  */
 export function RecordForm({
   collection: { name, key, record },
-  view: { collection: records, edit },
+  view: { collection: records, edit, stage },
   saved,
   actor,
   onDone,
@@ -55,6 +56,8 @@ export function RecordForm({
   onDone: () => void;
 }) {
   const fields = useMemo(() => fieldsOf(record) ?? [], [record]);
+  // While the grid has a change staged, its bar is the one way to save: the form waits for it.
+  const staged = useSyncExternalStore(stage.subscribe, stage.current, stage.current) !== undefined;
   const defaultValues = useMemo(() => {
     if (saved) return initialValues(fields, saved.record);
     const people = actor ? fields.filter((f) => f.kind === "person").map((f) => [f.key, actor]) : [];
@@ -106,10 +109,11 @@ export function RecordForm({
             <FieldView key={field.key} form={form} field={field} path={[field.key]} />
           ),
         )}
+        {staged && <Notice>The grid has a change staged: save it or discard it there first.</Notice>}
         <FormFoot form={form}>
           {(submitting) => (
             <>
-              <Button type="submit" disabled={submitting}>
+              <Button type="submit" disabled={submitting || staged}>
                 {submitting ? (
                   <Spinner data-icon="inline-start" />
                 ) : (
@@ -118,7 +122,12 @@ export function RecordForm({
                 {submitting ? "Saving…" : "Save"}
               </Button>
               {saved && (
-                <DeleteRecord records={records} recordKey={saved.key} disabled={submitting} onDeleted={onDone} />
+                <DeleteRecord
+                  records={records}
+                  recordKey={saved.key}
+                  disabled={submitting || staged}
+                  onDeleted={onDone}
+                />
               )}
             </>
           )}

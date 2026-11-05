@@ -5,7 +5,8 @@ import { TableCell, TableRow } from "#/components/ui/table.tsx";
 import { When } from "../common.tsx";
 import { cellText } from "./clipboard.ts";
 
-// A cell whose save found its record changed since the grid read it (`record_changed`): the
+// A cell whose save found its record changed since the grid read it (`record_changed`), or, for
+// a staged change, since it was staged over it (Save's read first, or `saveMany`'s 409): the
 // grid never writes over someone else's change. The cell shows what you typed, in the waiting
 // tone, and a row under the record's says what is there now and asks which stands.
 
@@ -16,6 +17,8 @@ export interface Conflict {
   mine: unknown;
   /** The record as it stands, when the runtime said; null once it is gone. */
   current?: Saved | null | undefined;
+  /** A staged change's, which settling changes and Save saves, not a save of its own. */
+  staged?: true;
 }
 
 /** A conflict's cell, as the grid keys its cells. */

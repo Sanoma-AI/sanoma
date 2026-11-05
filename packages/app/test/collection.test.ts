@@ -2,16 +2,22 @@ import type { Saved } from "@sanoma-ai/workflows/shared";
 import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
 import { ApiError, errorBodyOf } from "../src/api.ts";
-import { recordsView, savedIn } from "../src/components/grid/collection.ts";
+import { type ManyAnswer, newKey, recordsView, savedIn, type Step } from "../src/components/grid/collection.ts";
 
 // The Data page's records collection (`components/grid/collection.ts`) over a fake `api`: each
 // change's handler makes the one call, with `ifRecord` the record as the change found it, and
-// answers as the grid and the record form read it. No browser, no server: the calls, the query
-// and the held call's toast are fakes, as the page hands it its own.
+// answers as the grid and the record form read it; a staged change's steps are one transaction,
+// saved as one `saveMany`. No browser, no server: the calls, the query and the held call's toast
+// are fakes, as the page hands it its own.
 
+type SaveMany = (input: {
+  records: { record: Record<string, unknown>; ifRecord?: Record<string, unknown> }[];
+  deletes?: { key: string; ifRecord?: Record<string, unknown> }[];
+}) => Promise<ManyAnswer[]>;
 const calls = {
   save: vi.fn<(input: { record: Record<string, unknown> }) => Promise<Saved>>(),
   delete: vi.fn<(input: { key: string }) => Promise<unknown>>(),
+  saveMany: vi.fn<SaveMany>(),
 };
 const list = vi.fn<() => Promise<Saved[]>>();
 /** Says a call is held as `toastIfHeld` does: what it was told, and whether it was. */
@@ -208,5 +214,169 @@ describe("the Data page's records collection", () => {
     expect(savedIn(deleted, "Acme")).toBeNull();
     expect(collection.has("Acme")).toBe(false);
     expect(collection.has("Hooli")).toBe(true);
+  });
+});
+
+/** What `saveMany` answers for `input`, as the runtime does: each record saved by ada, each delete at its place. */
+const savedManyBy: SaveMany = (input) =>
+  Promise.resolve([
+    ...input.records.map(({ record }) => ({ ...row(String(record.company), {}), record, updatedBy: "ada" })),
+    ...(input.deletes ?? []).map(({ key }) => ({ key, deleted: true })),
+  ]);
+
+/** A cell's change, for a step. */
+const cell = (key: string, field: string, value: unknown) => ({ key, field, value });
+
+describe("a staged change of the Data page's records", () => {
+  const ACME = row("Acme", { stage: "new" });
+  const GLOBEX = row("Globex", { stage: "contacted" });
+  const GIZMO = row("Gizmo", { stage: "meeting" });
+
+  /** The view over Acme, Globex and Gizmo, which Save's read finds as they were unless told. */
+  function staged(...stored: Saved[]) {
+    const view = viewOf(ACME, GLOBEX, GIZMO);
+    list.mockResolvedValue(stored.length ? stored : [ACME, GLOBEX, GIZMO]);
+    return view;
+  }
+  const paste: Step = {
+    what: "paste",
+    said: "Pasted 2 rows × 1 column at row 1, stage",
+    cells: [cell("Acme", "stage", "replied"), cell("Globex", "stage", "won")],
+  };
+
+  it("shows its steps at once, saves nothing until Save, then saves them all in one saveMany, in order", async () => {
+    const { collection, stage } = staged();
+    const added = newKey();
+    stage.add(paste);
+    stage.add({ what: "new record", said: "Added a record", adds: [added] });
+    stage.add({ what: "edit", said: "Changed company", cells: [cell(added, "company", "Hooli")] });
+    stage.add({ what: "delete", said: "Deleted 1 record", deletes: ["Gizmo"] });
+    expect(collection.get("Acme")?.record.stage).toBe("replied");
+    expect(collection.get(added)?.record).toEqual({ company: "Hooli" });
+    // A delete stays on screen, struck, until it is saved.
+    expect(collection.has("Gizmo")).toBe(true);
+    expect(stage.current()?.tx.mutations.map((m) => [m.key, m.type])).toEqual([
+      ["Acme", "update"],
+      ["Globex", "update"],
+      [added, "insert"],
+      ["Gizmo", "delete"],
+    ]);
+    expect(calls.saveMany).not.toHaveBeenCalled();
+    expect(calls.save).not.toHaveBeenCalled();
+
+    calls.saveMany.mockImplementationOnce(savedManyBy);
+    await expect(stage.save()).resolves.toEqual({ saved: 4 });
+    expect(calls.saveMany).toHaveBeenCalledTimes(1);
+    expect(calls.saveMany).toHaveBeenCalledWith({
+      records: [
+        { record: { company: "Acme", stage: "replied" }, ifRecord: ACME.record },
+        { record: { company: "Globex", stage: "won" }, ifRecord: GLOBEX.record },
+        { record: { company: "Hooli" } },
+      ],
+      deletes: [{ key: "Gizmo", ifRecord: GIZMO.record }],
+    });
+    expect(stage.current()).toBeUndefined();
+    expect(collection.get("Acme")).toMatchObject({ record: { stage: "replied" }, updatedBy: "ada" });
+    expect(collection.get("Hooli")).toMatchObject({ record: { company: "Hooli" }, updatedBy: "ada" });
+    expect(collection.has(added)).toBe(false);
+    expect(collection.has("Gizmo")).toBe(false);
+  });
+
+  it("takes back the last step, and discards them all", () => {
+    const { collection, stage } = staged();
+    stage.add(paste);
+    stage.add({ what: "edit", said: "Changed contact", cells: [cell("Acme", "contact", "a@acme.test")] });
+    stage.undo();
+    expect(collection.get("Acme")?.record).toEqual({ company: "Acme", stage: "replied" });
+    expect(stage.current()?.steps).toEqual([paste]);
+    stage.discard();
+    expect(stage.current()).toBeUndefined();
+    expect(collection.get("Acme")?.record).toEqual(ACME.record);
+    expect(collection.get("Globex")?.record).toEqual(GLOBEX.record);
+  });
+
+  it("rolls the whole change back when saveMany fails: nothing changed", async () => {
+    const { collection, stage } = staged();
+    stage.add(paste);
+    const failure = new Error("The network is down");
+    calls.saveMany.mockRejectedValueOnce(failure);
+    await expect(stage.save()).rejects.toBe(failure);
+    expect(stage.current()).toBeUndefined();
+    expect(collection.get("Acme")?.record).toEqual(ACME.record);
+    expect(collection.get("Globex")?.record).toEqual(GLOBEX.record);
+  });
+
+  it("drops the records the policy denied and keeps the rest staged", async () => {
+    const { collection, stage } = staged();
+    stage.add(paste);
+    calls.saveMany.mockRejectedValueOnce(
+      new ApiError(403, { error: "leads are not won", code: "policy_denied", keys: ["Globex"] }),
+    );
+    const outcome = await stage.save();
+    expect(outcome).toMatchObject({ denied: ["Globex"] });
+    expect(collection.get("Globex")?.record).toEqual(GLOBEX.record);
+    expect(collection.get("Acme")?.record.stage).toBe("replied");
+    expect(stage.current()?.tx.mutations.map((m) => m.key)).toEqual(["Acme"]);
+  });
+
+  it("keeps the change through a conflict, the record as it stands now, and saves over it once settled", async () => {
+    const { collection, stage, queryClient } = staged();
+    stage.add(paste);
+    const current = {
+      ...row("Acme", {}, "cy"),
+      record: { company: "Acme", stage: "meeting" },
+      updatedAt: "2026-11-04T11:00:00.000Z",
+    };
+    calls.saveMany.mockRejectedValueOnce(
+      new ApiError(409, { error: "Changed", code: "record_changed", conflicts: [{ key: "Acme", current }] }),
+    );
+    await expect(stage.save()).resolves.toEqual({ conflicts: [{ key: "Acme", current }] });
+    // Nothing saved, everything still staged, over the record as it stands now.
+    expect(stage.current()?.tx.mutations.map((m) => m.key)).toEqual(["Acme", "Globex"]);
+    expect(collection.get("Acme")?.record.stage).toBe("replied");
+    expect(queryClient.getQueryData<Saved[]>(["data", "leads", QUERY])?.find((r) => r.key === "Acme")).toEqual(current);
+
+    // Use mine: saved over theirs, which Save's read finds as it is.
+    stage.rebase("Acme", current);
+    list.mockResolvedValue([current, GLOBEX, GIZMO]);
+    calls.saveMany.mockImplementationOnce(savedManyBy);
+    await expect(stage.save()).resolves.toEqual({ saved: 2 });
+    expect(calls.saveMany.mock.calls[1]![0].records[0]).toEqual({
+      record: { company: "Acme", stage: "replied" },
+      ifRecord: current.record,
+    });
+  });
+
+  it("finds a record changed since it was staged a conflict before it sends anything", async () => {
+    const changed = { ...row("Globex", { stage: "lost" }, "bo"), updatedAt: "2026-11-04T12:00:00.000Z" };
+    const { stage } = staged(ACME, changed, GIZMO);
+    stage.add(paste);
+    await expect(stage.save()).resolves.toEqual({ conflicts: [{ key: "Globex", current: changed }] });
+    expect(calls.saveMany).not.toHaveBeenCalled();
+    expect(stage.current()?.steps).toEqual([paste]);
+    // Keep theirs: the cell's change dropped, the rest still staged.
+    stage.drop("Globex", "stage");
+    expect(stage.current()?.tx.mutations.map((m) => m.key)).toEqual(["Acme"]);
+  });
+
+  it("saves only the records it is told, leaving the rest staged", async () => {
+    const { collection, stage } = staged();
+    stage.add(paste);
+    calls.saveMany.mockImplementationOnce(savedManyBy);
+    await expect(stage.save(new Set(["Acme"]))).resolves.toEqual({ saved: 1 });
+    expect(calls.saveMany.mock.calls[0]![0].records.map((r) => r.record.company)).toEqual(["Acme"]);
+    expect(stage.current()?.tx.mutations.map((m) => m.key)).toEqual(["Globex"]);
+    expect(collection.get("Globex")?.record.stage).toBe("won");
+    expect(collection.get("Acme")).toMatchObject({ record: { stage: "replied" }, updatedBy: "ada" });
+  });
+
+  it("resolves a batch held for an approval as sent, the records as stored until its run ends", async () => {
+    const { collection, stage, queryClient } = staged();
+    stage.add(paste);
+    calls.saveMany.mockRejectedValueOnce(HELD);
+    await expect(stage.save()).resolves.toEqual({ held: 2, runId: "call:ada:1" });
+    expect(held).toHaveBeenCalledWith(HELD, queryClient);
+    expect(stage.current()).toBeUndefined();
+    expect(collection.get("Acme")?.record).toEqual(ACME.record);
   });
 });

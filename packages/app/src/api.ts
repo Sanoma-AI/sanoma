@@ -568,6 +568,10 @@ export interface ErrorResponse {
   field?: string;
   /** For `record_changed`, when the runtime says: the record as it stands now, or null once it is gone. */
   current?: Saved<Record<string, Json>> | null;
+  /** For a `saveMany`'s `record_changed`: every record it found changed, or gone, as it stands now. */
+  conflicts?: { key: string; current: Saved<Record<string, Json>> | null }[];
+  /** For a `saveMany`'s `policy_denied`: the keys of the records the policy denied. */
+  keys?: string[];
 }
 
 /** A JSON value, as a record's fields hold them. */

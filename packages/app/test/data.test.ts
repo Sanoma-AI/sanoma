@@ -487,4 +487,59 @@ describe("the Data section", () => {
       await browser.close();
     }
   }, 60_000);
+
+  it("stages a pasted range in Chrome: the bar counts it, its cells tinted, and Discard takes it back", async (ctx) => {
+    const chrome = process.env.CHROME_PATH ?? (await executablePath("chrome").catch(() => ""));
+    if (!existsSync(chrome)) ctx.skip("no Chrome: install Google Chrome or set CHROME_PATH");
+    // Keys of their own each run, which the grid's key filter shows alone.
+    const prefix = `Paste ${crypto.randomUUID().slice(0, 8)}`;
+    const keys = ["A", "B", "C"].map((letter) => `${prefix} ${letter}`);
+    for (const key of keys) await seed(lead(key));
+    const stored = async () =>
+      Promise.all(
+        keys.map(
+          async (key) =>
+            (
+              (await testApp.client.call("data.outbound.get", { key }, { actor: { id: "ada" } })) as {
+                record: Record<string, unknown>;
+              }
+            ).record,
+        ),
+      );
+    const before = await stored();
+    const browser = await launch({ executablePath: chrome, headless: true });
+    try {
+      const tab = await browser.newPage();
+      await tab.setViewport({ width: 1440, height: 900 });
+      await tab.evaluateOnNewDocument(() => localStorage.setItem("sanoma.actor", "ada"));
+      await tab.goto(new URL(`/data/outbound${searchOf({ key: prefix })}`, app.url).href, {
+        waitUntil: "networkidle0",
+      });
+      await tab.click(`td[data-cell="${keys[0]}_contact"]`);
+      // Three rows of two cells, as a spreadsheet copies them, pasted from the contact cell.
+      const text = "a@paste.test\tcontacted\r\nb@paste.test\treplied\r\nc@paste.test\tmeeting\r\n";
+      await tab.evaluate(`{
+        const data = new DataTransfer();
+        data.setData("text/plain", ${JSON.stringify(text)});
+        document.activeElement.dispatchEvent(
+          new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }),
+        );
+      }`);
+      const bar = '[role="region"][aria-label="Staged changes"]';
+      await tab.waitForSelector(`${bar}::-p-text(6 changes in 3 records)`);
+      expect(await tab.evaluate(`document.querySelector('${bar}').textContent`)).toContain("from your paste");
+      const tinted = await tab.$$eval("td[data-changed]", (cells) => cells.map((td) => td.getAttribute("data-cell")));
+      expect(tinted).toEqual(keys.flatMap((key) => [`${key}_contact`, `${key}_stage`]));
+      await tab.waitForSelector(`td[data-cell="${keys[1]}_stage"]::-p-text(replied)`);
+      // Nothing is saved until Save.
+      expect(await stored()).toEqual(before);
+
+      await (await tab.waitForSelector(`${bar} button::-p-text(Discard)`))!.click();
+      await tab.waitForFunction(`!document.querySelector('${bar}') && !document.querySelector("td[data-changed]")`);
+      await tab.waitForSelector(`td[data-cell="${keys[1]}_stage"]::-p-text(researched)`);
+      expect(await stored()).toEqual(before);
+    } finally {
+      await browser.close();
+    }
+  }, 60_000);
 });

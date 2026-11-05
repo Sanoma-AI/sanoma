@@ -669,8 +669,9 @@ export const recordsQuery = (name: string, query: ListQuery<Record<string, unkno
 
 /**
  * The keys of a collection's records whose save or delete waits for an approval: the pending
- * policy holds of `data.<name>.save` and `.delete` among the runs waiting (`waitingRunsQuery`,
- * the Inbox's), so a decision, or the run ending, takes the key off.
+ * policy holds of `data.<name>.save`, `.delete` and `.saveMany` (each of its records and
+ * deletes) among the runs waiting (`waitingRunsQuery`, the Inbox's), so a decision, or the run
+ * ending, takes the key off.
  */
 export const heldQuery = ({ name, key }: Pick<CollectionEntry, "name" | "key">) =>
   queryOptions({
@@ -680,10 +681,20 @@ export const heldQuery = ({ name, key }: Pick<CollectionEntry, "name" | "key">) 
         .filter((run) => run.workflow === CALL_WORKFLOW)
         .flatMap(pendingApprovals)
         .flatMap(({ op, input }) => {
-          const held = input as { key?: unknown; record?: Record<string, unknown> } | undefined;
+          type Entry = { key?: unknown; record?: Record<string, unknown> } | undefined;
+          const held = input as (Entry & { records?: Entry[]; deletes?: Entry[] }) | undefined;
           const at =
-            op === `data.${name}.save` ? held?.record?.[key] : op === `data.${name}.delete` ? held?.key : undefined;
-          return typeof at === "string" ? [at] : [];
+            op === `data.${name}.save`
+              ? [held?.record?.[key]]
+              : op === `data.${name}.delete`
+                ? [held?.key]
+                : op === `data.${name}.saveMany`
+                  ? [
+                      ...(held?.records ?? []).map((entry) => entry?.record?.[key]),
+                      ...(held?.deletes ?? []).map((entry) => entry?.key),
+                    ]
+                  : [];
+          return at.filter((k): k is string => typeof k === "string");
         }),
   });
 

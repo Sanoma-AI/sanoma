@@ -739,11 +739,12 @@ export function asApiError(err: unknown): ApiError {
   // A collection's record changed since the caller read it (`ifRecord`): the caller's to resolve,
   // with the record as it stands when the error carries it.
   if (vendorCodeOf(err) === "record_changed") {
-    const { current } = err as { current?: ErrorResponse["current"] };
+    const { current, conflicts } = err as Pick<ErrorResponse, "current" | "conflicts">;
     return new ApiError(409, {
       error: errorMessage(err),
       code: "record_changed",
       ...(current !== undefined && { current }),
+      ...(Array.isArray(conflicts) && { conflicts }),
     });
   }
   const code = errorCode(err);
@@ -753,6 +754,7 @@ export function asApiError(err: unknown): ApiError {
   // Read by property, not instanceof: DBOS hands a run's errors back as copies.
   const data: Record<string, unknown> = (err as Partial<SanomaError>).data ?? {};
   if (Array.isArray(data.issues)) body.issues = data.issues as InputIssue[];
+  if (code === "policy_denied" && Array.isArray(data.keys)) body.keys = data.keys.map(String);
   if (typeof data.field === "string") body.field = data.field;
   if (code === "not_approver") {
     body.approver = data.approver as ErrorResponse["approver"];

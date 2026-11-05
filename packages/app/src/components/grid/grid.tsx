@@ -16,7 +16,7 @@ import {
 } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { DownloadSimpleIcon } from "@phosphor-icons/react/dist/csr/DownloadSimple";
-import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type KeyboardEvent, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { flushSync } from "react-dom";
 import { toast } from "sonner";
 import { Button } from "#/components/ui/button.tsx";
@@ -25,21 +25,27 @@ import { cn } from "#/lib/utils.ts";
 import { errorBodyOf } from "../../api.ts";
 import type { UntypedApi } from "../../api-client.ts";
 import { fieldsOf, type ScalarField, type ScalarValue } from "../../form/schema.ts";
+import { plural } from "../../lib/utils.ts";
 import { api, type DataSearch, heldQuery } from "../../queries.ts";
-import { Nothing, StatusDot, When } from "../common.tsx";
+import { FLOAT_CARD, Nothing, StatusDot, When } from "../common.tsx";
 import { FROM, IssuesFlag, SortHead, Value } from "../data-grid.tsx";
-import { CellEditor, draftOf, recordWith, withValue } from "./cell.tsx";
-import { csv, delimited } from "./clipboard.ts";
-import { type RecordsView, savedIn } from "./collection.ts";
+import { CellEditor, draftOf, recordWith, valueOf } from "./cell.tsx";
+import { cellText, csv, delimited, pastedCells } from "./clipboard.ts";
+import { type CellChange, isNew, newKey, type RecordsView, savedIn, type Step, withValue } from "./collection.ts";
 import { type Conflict, conflictId, ConflictRow } from "./conflicts.tsx";
 import { typedCharacter, useGridKeys } from "./keys.ts";
+import { changesOf, countsOf, HeldBar, issuesOf, ReviewCard, StagedBar, StagedNote } from "./staged.tsx";
 
 // A collection's records as a spreadsheet: a column per field, in the collection's order, then
 // when each record was saved and by whom. Click or arrow to a cell, type or press Enter to edit
 // it, Enter to save it: one edit is an optimistic update of the page's records collection
 // (`collection.ts`), saved with `ifRecord`, the record as the edit found it, so a record someone
-// changed since comes back as a conflict, never overwritten. The first page renders on the
-// server as rows; the selection, the editors and the virtual rows mount in the browser.
+// changed since comes back as a conflict, never overwritten. A paste, the fill handle, an edit
+// of a selection, Delete and Shift+Enter are staged instead, as one change (`collection.ts`'s
+// `stage`): its cells tinted, its new rows marked, its deleted ones struck, counted in the bar
+// above the footer, which saves it as one `saveMany` or discards it; while one is staged, an
+// edit of a cell is a step of it too. The first page renders on the server as rows; the
+// selection, the editors and the virtual rows mount in the browser.
 // Sorting, filtering and hiding are the page's search (`DataSearch`).
 
 const features = tableFeatures({
@@ -82,6 +88,16 @@ function writeWidths(name: string, widths: ColumnSizingState) {
   }
 }
 
+/** The indexes from `from` to `to`, both included. */
+const span = (from: number, to: number) => Array.from({ length: Math.max(0, to - from + 1) }, (_, i) => from + i);
+
+/** A new record's row, staged: its key one no record has (`newKey`), added to `adds`. */
+function newRow(adds: string[]): Saved {
+  const key = newKey();
+  adds.push(key);
+  return { key, record: {}, updatedAt: "", updatedBy: "" };
+}
+
 /** The cell being edited, what its editor holds, and what it started with but a typed character. */
 interface Editing {
   key: string;
@@ -97,7 +113,7 @@ interface Editing {
  */
 export function DataGrid({
   collection,
-  view: { collection: records, edit },
+  view: { collection: records, edit, stage },
   order,
   open,
   filtered,
@@ -132,6 +148,15 @@ export function DataGrid({
       return sorted.orderBy(({ saved }) => saved.key, { direction: "asc", stringSort: "lexical" });
     },
   }).data;
+  const staged = useSyncExternalStore(stage.subscribe, stage.current, stage.current);
+  // New records, staged, after the rest, in the order they were added.
+  const ordered = useMemo(
+    () => [
+      ...listed.filter((saved) => !isNew(saved.key)),
+      ...listed.filter((saved) => isNew(saved.key)).toSorted((a, b) => (a.key < b.key ? -1 : 1)),
+    ],
+    [listed],
+  );
   const navigate = useNavigate({ from: FROM });
   const hydrated = useHydrated();
   const fields = useMemo(
@@ -169,7 +194,7 @@ export function DataGrid({
   const table = useTable({
     features,
     columns,
-    data: listed,
+    data: ordered,
     getRowId: (saved) => saved.key,
     state: { columnVisibility, columnSizing: widths },
     onColumnSizingChange: setWidths,
@@ -199,6 +224,92 @@ export function DataGrid({
       return next;
     });
   const [savedAt, setSavedAt] = useState<number>();
+
+  // The change staged: each record's changes, the cells to fix first, what waits on them.
+  const changes = useMemo(() => changesOf(staged, keyField), [staged, keyField]);
+  const counts = countsOf(changes);
+  const changeOfKey = new Map(changes.map((change) => [change.key, change]));
+  const changedCells = new Set(
+    changes.flatMap(({ key, fields: changed }) => changed.map(({ field }) => conflictId({ key, field }))),
+  );
+  const required = useMemo(() => [...fields.values()].filter((f) => f.required).map((f) => f.key), [fields]);
+  const issues = useMemo(
+    () => issuesOf(staged, keyField, required, (key) => records.has(key)),
+    [staged, keyField, required, records],
+  );
+  const issueAt = new Map(issues.map((issue) => [conflictId(issue), issue]));
+  // A staged change's conflicts while its record is still in it.
+  const stagedConflicts = [...conflicts.values()].filter((c) => c.staged && changeOfKey.has(c.key));
+  const blocked = new Set([...issues, ...stagedConflicts].map((c) => c.key));
+  const [saving, setSaving] = useState(false);
+  const [reviewing, setReviewing] = useState(false);
+  // A change held for an approval: how many records, and its run of `call`.
+  const [heldBatch, setHeldBatch] = useState<{ held: number; runId: string | undefined }>();
+  // The records the policy refused in the last Save, dropped from the change.
+  const [denied, setDenied] = useState<ReadonlySet<string>>(new Set());
+
+  /** Stages `step`, unless it changes nothing: what the last Save said gives way to it. */
+  const stageStep = (step: Step) => {
+    if (!step.adds?.length && !step.cells?.length && !step.deletes?.length) return;
+    // The change being saved takes no more steps.
+    if (saving) return void toast.info("Saving the change: try again once it is saved");
+    setHeldBatch(undefined);
+    setDenied(new Set());
+    stage.add(step);
+  };
+
+  /** Saves the change, or the records `only` names, as one `saveMany`, and says what came of it. */
+  async function saveStaged(only?: ReadonlySet<string>) {
+    setSaving(true);
+    try {
+      const outcome = await stage.save(only);
+      if ("conflicts" in outcome) {
+        // Each changed field of each record found changed since is a conflict to settle, a delete's on its key.
+        const now = new Map(changesOf(stage.current(), keyField).map((change) => [change.key, change]));
+        setConflicts((all) => {
+          const next = new Map(all);
+          for (const { key, current } of outcome.conflicts) {
+            const change = now.get(key);
+            const cells = change?.fields.length ? change.fields : [{ field: keyField, after: undefined }];
+            for (const { field, after } of cells) {
+              const conflict = { key, field, mine: after, current, staged: true as const };
+              next.set(conflictId(conflict), conflict);
+            }
+          }
+          return next;
+        });
+        toast.warning(`${plural(outcome.conflicts.length, "record")} changed since you staged them`, {
+          description: "Nothing was saved: settle each one, then save again.",
+        });
+      } else if ("denied" in outcome) {
+        setDenied(new Set(outcome.denied));
+        toast.error(
+          outcome.denied.length ? `Could not save ${outcome.denied.join(", ")}` : "Could not save the change",
+          { description: errorMessage(outcome.error) },
+        );
+      } else if ("held" in outcome) {
+        setReviewing(false);
+        setHeldBatch(outcome);
+      } else {
+        setReviewing(false);
+        setSavedAt(Date.now());
+        toast.success(`Saved ${plural(outcome.saved, "record")}`);
+      }
+    } catch (err) {
+      toast.error("Could not save: nothing changed", { description: errorMessage(err) });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  /** A staged conflict settled: Keep theirs drops your change to the cell; the last settled, the change is saved over theirs. */
+  const settle = (conflict: Conflict, keep: "theirs" | "mine") => {
+    dropConflict(conflict);
+    if (keep === "theirs")
+      stage.drop(conflict.key, changeOfKey.get(conflict.key)?.type === "delete" ? undefined : conflict.field);
+    const others = stagedConflicts.some((c) => c.key === conflict.key && conflictId(c) !== conflictId(conflict));
+    if (!others) stage.rebase(conflict.key, conflict.current ?? null);
+  };
 
   /**
    * Edits `key`'s record to `record`, the one cell `field` changed, after the grid's edits before
@@ -291,8 +402,142 @@ export function DataGrid({
   const share = (size: number) => `${(size / total) * 100}%`;
   const focused = table.getFocusedCell();
   const focusedField = focused && fields.get(focused.column.id);
-  /** The field the focused cell edits: none for the key, Updated and By, or a field the form cannot hold. */
-  const editable = focusedField && focusedField.key !== keyField ? focusedField : undefined;
+  const visible = table.getVisibleLeafColumns();
+
+  /** Whether a gesture changes `saved`'s cell `id`: a field the form holds, a new record's key too, never a record staged to be deleted. */
+  const changeable = (saved: Saved, id: string) =>
+    fields.has(id) && (id !== keyField || isNew(saved.key)) && changeOfKey.get(saved.key)?.type !== "delete";
+  /** The field the focused cell edits: none for an existing record's key, Updated and By, or a field the form cannot hold. */
+  const editable =
+    focused && focusedField && changeable(focused.row.original, focusedField.key) ? focusedField : undefined;
+
+  /** The change of `saved`'s cell `id` to `text`, read as its field reads it; none where no gesture changes it, or it holds that already. */
+  const changeOf = (saved: Saved, id: string, text: string): CellChange[] => {
+    const field = fields.get(id);
+    if (!field || !changeable(saved, id)) return [];
+    const read = valueOf(field, text);
+    if ("error" in read) return [{ key: saved.key, field: id, value: text, error: read.error }];
+    // What it holds already, a value or none: no change.
+    return read.value === saved.record[id] ? [] : [{ key: saved.key, field: id, value: read.value }];
+  };
+
+  /** The selected cells, each its row's record and its column. */
+  const selectedCells = () =>
+    table.getCellSelectionBounds().flatMap((bounds) =>
+      span(bounds.minRowIndex, bounds.maxRowIndex).flatMap((r) =>
+        span(bounds.minColumnIndex, bounds.maxColumnIndex).flatMap((c) => {
+          const saved = rows[r]?.original;
+          const id = visible[c]?.id;
+          return saved && id ? [{ saved, id }] : [];
+        }),
+      ),
+    );
+
+  /**
+   * Pastes `text` (tab-separated, as spreadsheets copy a range) from the focused cell: over the
+   * rows there, and as new records past the last; one value into a selection fills it.
+   */
+  const paste = (text: string) => {
+    const pasted = pastedCells(text);
+    if (!focused || pasted.length === 0) return;
+    const [only] = pasted.length === 1 && pasted[0]!.length === 1 ? pasted[0]! : [];
+    if (only !== undefined && table.getSelectedCellCount() > 1) {
+      const cells = selectedCells().flatMap(({ saved, id }) => changeOf(saved, id, only));
+      return stageStep({ what: "paste", said: `Pasted into ${plural(cells.length, "cell")}`, cells });
+    }
+    const top = focused.row.getDisplayIndex();
+    const left = visible.findIndex((c) => c.id === focused.column.id);
+    const width = Math.min(Math.max(...pasted.map((line) => line.length)), visible.length - left);
+    const adds: string[] = [];
+    const keys: string[] = [];
+    const cells = pasted.flatMap((line, i) => {
+      const saved = rows[top + i]?.original ?? newRow(adds);
+      keys.push(saved.key);
+      return line.slice(0, width).flatMap((value, j) => changeOf(saved, visible[left + j]!.id, value));
+    });
+    stageStep({
+      what: "paste",
+      said: `Pasted ${plural(pasted.length, "row")} × ${plural(width, "column")} at row ${top + 1}, ${focused.column.id}`,
+      adds,
+      cells,
+    });
+    // What was pasted is the selection.
+    table.selectCellRange({
+      anchorRowId: focused.row.id,
+      anchorColumnId: focused.column.id,
+      focusRowId: keys.at(-1)!,
+      focusColumnId: visible[left + width - 1]!.id,
+    });
+  };
+
+  // The selection's one range, which the fill handle drags down from its bottom-right corner;
+  // while it drags, the last row it fills.
+  const ranges = table.getCellSelectionBounds();
+  const fillFrom = ranges.length === 1 ? ranges[0] : undefined;
+  const [fillTo, setFillTo] = useState<number>();
+  /** Fills the rows under the selection down to `to`, repeating its rows' values, as spreadsheets do. */
+  const fill = (to: number) => {
+    if (!fillFrom || to <= fillFrom.maxRowIndex) return;
+    const height = fillFrom.maxRowIndex - fillFrom.minRowIndex + 1;
+    const cells = span(fillFrom.maxRowIndex + 1, to).flatMap((r) =>
+      span(fillFrom.minColumnIndex, fillFrom.maxColumnIndex).flatMap((c) => {
+        const id = visible[c]!.id;
+        const source = rows[fillFrom.minRowIndex + ((r - fillFrom.maxRowIndex - 1) % height)]!.original;
+        return changeOf(rows[r]!.original, id, cellText(source.record[id]));
+      }),
+    );
+    stageStep({
+      what: "fill",
+      said: `Filled ${plural(to - fillFrom.maxRowIndex, "row")} down from row ${fillFrom.maxRowIndex + 1}`,
+      cells,
+    });
+    table.selectCellRange({
+      anchorRowId: rows[fillFrom.minRowIndex]!.id,
+      anchorColumnId: visible[fillFrom.minColumnIndex]!.id,
+      focusRowId: rows[to]!.id,
+      focusColumnId: visible[fillFrom.maxColumnIndex]!.id,
+    });
+  };
+  // A drag of the fill handle ends where the mouse is let go, in the grid or not.
+  useEffect(() => {
+    if (fillTo === undefined) return;
+    const end = () => {
+      setFillTo(undefined);
+      fill(fillTo);
+    };
+    document.addEventListener("mouseup", end, { once: true });
+    return () => document.removeEventListener("mouseup", end);
+  });
+
+  /** Delete: clears the selected cells, and deletes the records whose key is among them. */
+  const clear = () => {
+    const cells = selectedCells();
+    const deletes = [
+      ...new Set(
+        cells.flatMap(({ saved, id }) =>
+          id === keyField && changeOfKey.get(saved.key)?.type !== "delete" ? [saved.key] : [],
+        ),
+      ),
+    ];
+    const cleared = cells.flatMap(({ saved, id }) => (deletes.includes(saved.key) ? [] : changeOf(saved, id, "")));
+    stageStep({
+      what: "delete",
+      said: deletes.length
+        ? `Deleted ${plural(deletes.length, "record")}`
+        : `Cleared ${plural(cleared.length, "cell")}`,
+      cells: cleared,
+      deletes,
+    });
+  };
+
+  /** Shift+Enter: a new record below the rows, its key cell focused. */
+  const addRecord = () => {
+    const adds: string[] = [];
+    newRow(adds);
+    stageStep({ what: "new record", said: "Added a record", adds });
+    refocus.current = true;
+    table.setFocusedCell(adds[0]!, keyField);
+  };
 
   const startEditing = (typed?: string) => {
     if (!focused || !editable) return;
@@ -310,6 +555,8 @@ export function DataGrid({
     const field = fields.get(cell.field) as ScalarField;
     // Over the record as it shows, the edits before it still saving included.
     const shown = records.get(cell.key);
+    // The cells the edit is typed into, before the selection moves.
+    const targets = selectedCells();
     refocus.current = fromKeyboard;
     setEditing(null);
     if (then) table.moveCellSelection(then);
@@ -318,6 +565,22 @@ export function DataGrid({
     if (!shown || cell.draft === cell.start) return;
     const next = recordWith(field, shown.record, cell.draft);
     if ("error" in next) return void toast.error(`${cell.field}: ${next.error}`);
+    const value = next.record[cell.field];
+    if (targets.length > 1) {
+      // Typed once, into every selected cell.
+      const text = cellText(value);
+      const cells = targets.flatMap(({ saved, id }) => changeOf(saved, id, text));
+      return stageStep({ what: "edit", said: `Set ${plural(cells.length, "cell")} to ${text || "nothing"}`, cells });
+    }
+    // While a change is staged, an edit is a step of it: Save saves it with the rest.
+    if (staged) {
+      const called = isNew(cell.key) ? cellText(shown.record[keyField]) || "the new record" : cell.key;
+      return stageStep({
+        what: "edit",
+        said: `Changed ${cell.field} of ${called}`,
+        cells: [{ key: cell.key, field: cell.field, value }],
+      });
+    }
     save(cell.key, cell.field, next.record);
   };
 
@@ -348,16 +611,12 @@ export function DataGrid({
         .then(() => navigator.clipboard.writeText(text))
         .catch(() => toast.error("Could not copy the cells"));
     },
+    clear,
+    undo: () => {
+      if (!saving) stage.undo();
+    },
+    add: addRecord,
   });
-
-  // The focused cell has the focus while the grid has it, or when an edit ends from the keyboard.
-  const focusedId = focused?.id;
-  useEffect(() => {
-    if (!grid || !focusedId || editing) return;
-    if (!refocus.current && !grid.contains(document.activeElement)) return;
-    refocus.current = false;
-    grid.querySelector<HTMLElement>(`[data-cell="${CSS.escape(focusedId)}"]`)?.focus();
-  }, [grid, focusedId, editing]);
 
   const virtualizer = useVirtualizer({
     count: rows.length,
@@ -373,8 +632,22 @@ export function DataGrid({
     : rows.map((_, index) => ({ index, start: index * ROW_PX, end: (index + 1) * ROW_PX }));
   const before = items[0]?.start ?? 0;
   const after = hydrated ? virtualizer.getTotalSize() - (items.at(-1)?.end ?? 0) : 0;
-  const visible = table.getVisibleLeafColumns();
-  const conflictsByKey = Map.groupBy(conflicts.values(), (conflict) => conflict.key);
+  // The focused cell has the focus while the grid has it, or when an edit ends from the keyboard;
+  // a row out of the virtual rows' window (a record added at the end) is scrolled to first.
+  const focusedId = focused?.id;
+  const focusedIndex = focused?.row.getDisplayIndex();
+  useEffect(() => {
+    if (!grid || !focusedId || editing) return;
+    if (!refocus.current && !grid.contains(document.activeElement)) return;
+    const cell = grid.querySelector<HTMLElement>(`[data-cell="${CSS.escape(focusedId)}"]`);
+    if (!cell) return void (focusedIndex !== undefined && virtualizer.scrollToIndex(focusedIndex));
+    refocus.current = false;
+    cell.focus();
+  }, [grid, focusedId, focusedIndex, editing, before, virtualizer]);
+  const conflictsByKey = Map.groupBy(
+    [...conflicts.values()].filter((c) => !c.staged || changeOfKey.has(c.key)),
+    (conflict) => conflict.key,
+  );
 
   if (listed.length === 0) {
     return (
@@ -394,7 +667,17 @@ export function DataGrid({
   };
 
   return (
-    <div className="flex flex-col overflow-hidden rounded-lg border">
+    <div className={cn(FLOAT_CARD, "flex flex-col overflow-hidden rounded-lg border")}>
+      {staged && reviewing && (
+        <ReviewCard
+          changes={changes}
+          issues={issues.map((issue) => ({ ...issue, name: changeOfKey.get(issue.key)?.name ?? issue.key }))}
+          blocked={blocked}
+          saving={saving}
+          onSave={() => void saveStaged(new Set(changes.flatMap((c) => (blocked.has(c.key) ? [] : [c.key]))))}
+          onClose={() => setReviewing(false)}
+        />
+      )}
       <div ref={scroller} className="max-h-[min(70vh,48rem)] overflow-auto">
         <table
           ref={setGrid}
@@ -413,6 +696,12 @@ export function DataGrid({
             if (typed === undefined || !editable || (event.target as HTMLElement).dataset.cell === undefined) return;
             event.preventDefault();
             startEditing(typed);
+          }}
+          onPaste={(event) => {
+            // An editor's own paste is its own.
+            if (editing) return;
+            event.preventDefault();
+            paste(event.clipboardData.getData("text/plain"));
           }}
         >
           <TableHeader>
@@ -455,17 +744,33 @@ export function DataGrid({
               const row = rows[index]!;
               const saved = row.original;
               const rowConflicts = conflictsByKey.get(saved.key) ?? [];
+              const change = changeOfKey.get(saved.key)?.type;
               return [
                 <TableRow
                   key={row.id}
                   aria-rowindex={index + 2}
                   data-state={saved.key === open ? "selected" : undefined}
-                  className="hover:bg-transparent"
+                  data-staged={change}
+                  className={cn(
+                    "hover:bg-transparent",
+                    change === "insert" && "bg-tone-ok/10 hover:bg-tone-ok/10",
+                    change === "delete" && "line-through opacity-60",
+                  )}
                 >
                   {row.getVisibleCells().map((cell, c) => {
                     const id = cell.column.id;
                     const field = fields.get(id);
                     const conflict = rowConflicts.find((other) => other.field === id);
+                    const issue = issueAt.get(conflictId({ key: saved.key, field: id }));
+                    const changed = changedCells.has(conflictId({ key: saved.key, field: id }));
+                    const filling =
+                      fillFrom !== undefined &&
+                      fillTo !== undefined &&
+                      index > fillFrom.maxRowIndex &&
+                      index <= fillTo &&
+                      c >= fillFrom.minColumnIndex &&
+                      c <= fillFrom.maxColumnIndex;
+                    const edges = cell.getSelectionEdges();
                     const isEditing = editing?.key === saved.key && editing.field === id && field;
                     // Before anything is focused, the first cell is the grid's one stop for Tab.
                     const tabIndex = !focused && index === 0 && c === 0 ? 0 : cell.getTabIndex();
@@ -475,14 +780,20 @@ export function DataGrid({
                         data-cell={cell.id}
                         tabIndex={tabIndex}
                         aria-selected={cell.getIsSelected()}
-                        aria-invalid={conflict ? true : undefined}
+                        aria-invalid={conflict || issue ? true : undefined}
+                        data-changed={changed || undefined}
+                        title={issue?.error}
                         style={{ width: share(cell.column.getSize()) }}
                         className={cn(
-                          "h-9 truncate border-b px-2 py-0 outline-none select-none",
+                          "relative h-9 truncate border-b px-2 py-0 outline-none select-none",
                           id === keyField && "font-medium",
                           (id === UPDATED || id === BY) && "text-muted-foreground",
                           cell.getIsSelected() && "bg-primary/5",
+                          // Staged, not saved: the waiting tone with its bar at the left; a cell to fix, the bad tone.
+                          changed && "bg-tone-waiting shadow-[inset_3px_0_0_var(--color-tone-waiting-foreground)]",
+                          issue && "bg-tone-bad shadow-[inset_3px_0_0_var(--color-tone-bad-foreground)]",
                           conflict && "bg-tone-waiting text-tone-waiting-foreground",
+                          filling && "bg-primary/5 shadow-[inset_0_0_0_1px_var(--color-ring)]",
                           cell.getIsFocused() && "shadow-[inset_0_0_0_2px_var(--color-ring)]",
                           isEditing && "px-0.5",
                         )}
@@ -490,7 +801,11 @@ export function DataGrid({
                           if (e.target === e.currentTarget && !cell.getIsFocused()) table.setFocusedCell(row.id, id);
                         }}
                         onMouseDown={isEditing ? undefined : cell.getSelectionStartHandler()}
-                        onMouseEnter={cell.getSelectionExtendHandler()}
+                        onMouseEnter={
+                          fillTo === undefined
+                            ? cell.getSelectionExtendHandler()
+                            : () => setFillTo(Math.max(index, fillFrom?.maxRowIndex ?? index))
+                        }
                         onDoubleClick={() => startEditing()}
                       >
                         {isEditing ? (
@@ -502,6 +817,10 @@ export function DataGrid({
                             onDraft={(draft) => setEditing({ ...editing, draft })}
                             onBlur={() => commit(undefined, false)}
                           />
+                        ) : id === keyField && isNew(saved.key) ? (
+                          cellText(saved.record[id]) || (
+                            <span className="font-normal text-muted-foreground italic">needs a key</span>
+                          )
                         ) : id === keyField ? (
                           <span className="flex items-center gap-2">
                             <Link
@@ -526,13 +845,33 @@ export function DataGrid({
                                 <span className="truncate">waits for approval</span>
                               </span>
                             )}
+                            {denied.has(saved.key) && (
+                              <span className="truncate text-xs font-normal text-tone-bad-foreground">refused</span>
+                            )}
                           </span>
                         ) : id === UPDATED ? (
-                          <When at={Date.parse(saved.updatedAt)} />
+                          saved.updatedAt === "" ? (
+                            <span className="italic">new</span>
+                          ) : (
+                            <When at={Date.parse(saved.updatedAt)} />
+                          )
                         ) : id === BY ? (
                           saved.updatedBy
                         ) : (
                           <Value value={conflict ? conflict.mine : saved.record[id]} />
+                        )}
+                        {hydrated && !editing && fillFrom && edges.bottom && edges.right && (
+                          // The fill handle: drag it down to repeat the selection's values.
+                          <span
+                            aria-hidden
+                            data-fill-handle
+                            className="absolute right-0 bottom-0 size-2 cursor-crosshair bg-ring"
+                            onMouseDown={(e) => {
+                              e.stopPropagation();
+                              e.preventDefault();
+                              setFillTo(fillFrom.maxRowIndex);
+                            }}
+                          />
                         )}
                       </TableCell>
                     );
@@ -543,8 +882,8 @@ export function DataGrid({
                     key={`${row.id}:conflicts`}
                     conflicts={rowConflicts}
                     columns={visible.length}
-                    onKeep={keepTheirs}
-                    onUseMine={(conflict) => void takeMine(conflict)}
+                    onKeep={(conflict) => (conflict.staged ? settle(conflict, "theirs") : keepTheirs(conflict))}
+                    onUseMine={(conflict) => (conflict.staged ? settle(conflict, "mine") : void takeMine(conflict))}
                   />
                 ),
               ];
@@ -557,6 +896,20 @@ export function DataGrid({
           </TableBody>
         </table>
       </div>
+      {staged ? (
+        <StagedBar
+          staged={staged}
+          counts={counts}
+          issues={issues.length}
+          conflicts={stagedConflicts.length}
+          saving={saving}
+          onReview={() => setReviewing(true)}
+          onDiscard={() => stage.discard()}
+          onSave={() => void saveStaged()}
+        />
+      ) : (
+        heldBatch && <HeldBar count={heldBatch.held} runId={heldBatch.runId} onClose={() => setHeldBatch(undefined)} />
+      )}
       <footer className="flex flex-wrap items-center gap-x-2 gap-y-1 border-t px-3 py-2 text-xs text-muted-foreground">
         <span>
           {listed.length >= limit
@@ -573,6 +926,7 @@ export function DataGrid({
             </span>
           </>
         )}
+        {staged && <StagedNote staged={staged} changes={counts.changes} />}
         <span className="ml-auto" role="status">
           {focused && (
             <>
