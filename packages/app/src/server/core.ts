@@ -19,6 +19,7 @@ import {
   remoteFor,
   type RunSummary,
   type SanomaError,
+  vendorCodeOf,
 } from "@sanoma-ai/workflows";
 import { apiNameOf, isVisitor, flatten, LOGIN_CODE_WORKFLOW } from "@sanoma-ai/workflows/shared";
 import { type ConfigDescription, permissionsGrid } from "@sanoma-ai/workflows/describe";
@@ -719,6 +720,16 @@ export function asApiError(err: unknown): ApiError {
     ];
     const reason = codes.includes(failure.code ?? "") ? failure.code! : "unavailable";
     return new ApiError(reason === "conflict" ? 409 : 400, { error: `Secret store: ${reason.replaceAll("_", " ")}` });
+  }
+  // A collection's record changed since the caller read it (`ifRecord`): the caller's to resolve,
+  // with the record as it stands when the error carries it.
+  if (vendorCodeOf(err) === "record_changed") {
+    const { current } = err as { current?: ErrorResponse["current"] };
+    return new ApiError(409, {
+      error: errorMessage(err),
+      code: "record_changed",
+      ...(current !== undefined && { current }),
+    });
   }
   const code = errorCode(err);
   const status = (code && STATUS[code]) || 500;
