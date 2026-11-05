@@ -304,13 +304,18 @@ describe("sanoma with sites: the dev server", () => {
     const types = join(repo, ".sanoma/content.ts");
     expect(readFileSync(types, "utf8")).toContain("posts: ContentKind<{ title: string }>;");
     const post = join(repo, "content/posts/hello.md");
-    writeFileSync(
-      post,
-      readFileSync(post, "utf8")
-        .replace("title: The first post", "title: The first post\nsummary: Edited")
-        .replace("Read from", "Edited in"),
+    const edited = readFileSync(post, "utf8")
+      .replace("title: The first post", "title: The first post\nsummary: Edited")
+      .replace("Read from", "Edited in");
+    // Written at each look: a watcher still scanning takes one write for how the file always was.
+    await waitFor(
+      () => {
+        writeFileSync(post, edited);
+        return page();
+      },
+      (html) => html.includes("Edited in <strong>"),
+      20_000,
     );
-    await waitFor(page, (html) => html.includes("Edited in <strong>"), 20_000);
     expect(readFileSync(types, "utf8")).toContain("posts: ContentKind<{ title: string; summary: string }>;");
   }, 60_000);
 
