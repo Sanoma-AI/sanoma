@@ -61,14 +61,31 @@ export async function liveSnapshot(
   const make = (description: ConfigDescription) => made(config, resolved, { ...options, description, branches });
   let described = describe();
   let now = await make(described);
-  let making: Promise<Made> | undefined;
+  /** The make under way, and the description it is of. */
+  let making: { description: ConfigDescription; made: Promise<Made> } | undefined;
+  const remake = (description: ConfigDescription) => {
+    const started = {
+      description,
+      // The snapshot moves on only with a make that finished, so a failed one is tried again.
+      made: make(description)
+        .then((next) => {
+          described = description;
+          now = next;
+          return next;
+        })
+        .finally(() => {
+          if (making === started) making = undefined;
+        }),
+    };
+    return (making = started).made;
+  };
   return async () => {
     const description = describe();
     // Made again once the description is another, or a path's stamp is not the one it had.
     if (description !== described || [...now.stamps].some(([path, stamp]) => stampOf(path) !== stamp)) {
-      described = description;
-      making ??= make(description).finally(() => (making = undefined));
-      now = await making;
+      // A make of what was there before is waited for, then this one made after it.
+      if (making && making.description !== description) await making.made.catch(() => undefined);
+      await (making?.description === description ? making.made : remake(description));
     }
     return now.snapshot;
   };
@@ -221,9 +238,10 @@ async function hostOf(
     [...urls].map(async (url) => {
       let branch = branches.get(url);
       if (!branch) {
+        // A lookup that failed (offline, a rate limit) is asked again by the next snapshot.
         branch = defaultBranch(url).then(
           ({ ref }) => ref,
-          () => undefined,
+          () => void branches.delete(url),
         );
         branches.set(url, branch);
       }

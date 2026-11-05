@@ -166,10 +166,9 @@ export async function serve(
     ));
   const close = async () => {
     if (!client) return;
-    await (
-      await client
-    )
-      .close()
+    // A client that never connected (its connect rejected) has nothing to close, and says so here too.
+    await client
+      .then((connected) => connected.close())
       .catch((err: unknown) => console.error("sanoma: closing the request's client failed:", err));
   };
   try {

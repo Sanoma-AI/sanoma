@@ -8,7 +8,7 @@ import { secretValues } from "./secrets.ts";
 // a draft's branch plans its change again, a closed pull request ends it.
 
 /** A plain-text answer, never cached. */
-export const plain = (status: number, text: string) =>
+export const plain = (status: number, text: string): Response =>
   new Response(text, { status, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
 
 /**

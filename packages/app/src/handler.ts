@@ -87,9 +87,10 @@ export function appHandler(options: AppHandlerOptions, first: AppSnapshot): AppH
   const { resolved, client, login } = options;
   const ingressAt = ingressOf([
     ...(options.ingress ?? []),
-    // A git host's webhooks.
+    // A git host's webhooks, where the checkout is: a host without one (the Worker) would answer
+    // a push and do nothing, so there they are not routes.
     ...[...resolved.remotes]
-      .filter(([, half]) => half.webhook)
+      .filter(([, half]) => options.local && half.webhook)
       .map(([vendor]): IngressRoute => ({
         method: "POST",
         path: `/webhooks/${vendor}`,

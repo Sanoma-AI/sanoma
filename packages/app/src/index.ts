@@ -161,8 +161,8 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   }
   const responder = loaded.value;
   const client = connected.value;
-  // The people as the latest request read them: `app` is made below, before any request.
-  const login = admitting(given, () => app.context.snapshot.people);
+  // The people as the files say now, so a person taken out is refused at their next request.
+  const login = admitting(given, async () => (await live()).people);
   // Each public site served, by name, with its own front door: its login half, if it has one,
   // made once the app listens (`openLogins`). A public site whose site.ts has a problem is not
   // served, as its login could be one not read.
