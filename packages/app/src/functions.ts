@@ -11,6 +11,7 @@ import {
   TestConnectionRequest,
   DisconnectConnectionRequest,
   DecideCall,
+  HistoryRequest,
   InviteRequest,
   PreviewQuery,
   RunsQuery,
@@ -40,6 +41,7 @@ import {
   permissions,
   preview,
   readStartRun,
+  recordHistory,
   runDetail,
   saysWho,
   setCredential,
@@ -249,6 +251,12 @@ export const getChat = createServerFn(READ)
   .middleware([withPrincipal])
   .validator(validate(z.object({ id: z.string().min(1) })))
   .handler(({ data, context }) => chatFor(context.app, context.principal, data.id));
+
+/** A collection's record's writes, newest first, from the ledger: for someone the policy lets read the record. */
+export const getHistory = createServerFn(READ)
+  .middleware([withPrincipal])
+  .validator(validate(HistoryRequest))
+  .handler(({ data, context }) => recordHistory(context.app, context.principal, data));
 
 /**
  * A site's `api` (api-client.ts): an operation called directly, or a workflow started or its runs
