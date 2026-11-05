@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { ensureBuilt } from "../src/build.ts";
+import { buildLock, ensureBuilt } from "../src/build.ts";
 
 const run = promisify(execFile);
 const module = new URL("../src/build.ts", import.meta.url).href;
@@ -18,7 +18,6 @@ describe("ensureBuilt", () => {
   beforeEach(() => {
     pkg = mkdtempSync(join(tmpdir(), "sanoma-ensure-built-"));
     mkdirSync(join(pkg, "src"));
-    mkdirSync(join(pkg, "node_modules"));
     writeFileSync(join(pkg, "src/index.ts"), "");
   });
   afterEach(() => rmSync(pkg, { recursive: true, force: true }));
@@ -30,7 +29,7 @@ describe("ensureBuilt", () => {
   });
 
   it("takes over the lock of a build that was killed", () => {
-    const lock = join(pkg, "node_modules/.ensure-built.lock");
+    const lock = buildLock(pkg);
     writeFileSync(lock, String(spawnSync("true").pid));
     ensureBuilt(pkg, ["out"], build);
     expect(builds()).toBe(1);

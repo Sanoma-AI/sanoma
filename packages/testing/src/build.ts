@@ -1,5 +1,7 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 /** Whether the process `pid` is running; yes when it is another user's. */
@@ -44,14 +46,18 @@ function withLock(file: string, fn: () => void): void {
   }
 }
 
+/** The file `ensureBuilt` locks for `pkgDir`: outside the checkout, where tests watch what a build writes. */
+export const buildLock = (pkgDir: string): string =>
+  join(tmpdir(), `sanoma-ensure-built-${createHash("sha256").update(pkgDir).digest("hex").slice(0, 16)}.lock`);
+
 /**
  * Runs `build` (a command and its arguments) in `pkgDir` when one of `outputs` (paths in it) is
  * missing or older than a file under its `src/`: for tests of what a package ships, from its
- * `dist/`. Test files run at once, so each looks under a lock in the package's `node_modules`:
- * one builds, and the rest wait and find it built.
+ * `dist/`. Test files run at once, so each looks under a lock: one builds, and the rest wait and
+ * find it built.
  */
 export function ensureBuilt(pkgDir: string, outputs: readonly string[], build: readonly [string, ...string[]]): void {
-  withLock(join(pkgDir, "node_modules", ".ensure-built.lock"), () => {
+  withLock(buildLock(pkgDir), () => {
     const src = join(pkgDir, "src");
     const changed = Math.max(
       ...readdirSync(src, { recursive: true, encoding: "utf8" }).map((file) => statSync(join(src, file)).mtimeMs),
