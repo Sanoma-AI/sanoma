@@ -89,20 +89,18 @@ export async function checks({ source }: Pick<AppStepContext, "source">, id: str
 
 /**
  * The coding agents' state of the kind `kind`, kept across restarts under `.sanoma/agent-home`,
- * one directory per kind so that no engine's files cover another's: `boxes`, the local backend's
- * boxes (`boxes/<name>`, each the home of a person's company-key sessions: its bridges' installs
- * and run files, Pi's settings); `acp`, a person's own agents' installs (`acp/<agent>`, the shims,
- * pnpm's store); `people`, each person's own `HOME` (`people/<id>`), where only that person's
- * agent keeps its sign-in and nothing of ours reads.
+ * one directory per kind: `boxes`, the local backend's boxes (`boxes/<name>`, each a person's
+ * home for the company: their company-key sessions' bridges' installs and run files, Pi's
+ * settings, and their own agents' installs, shims and sign-ins under `.acp`).
  */
-export const agentHome = (step: Pick<AppStepContext, "source">, kind: "boxes" | "acp" | "people") =>
+export const agentHome = (step: Pick<AppStepContext, "source">, kind: "boxes") =>
   join(drafting(step).root, ".sanoma", "agent-home", kind);
 
 /**
  * An id as a directory name: never `.`, `..` or a path, and capitals escaped, so ids that differ
  * only in case never share a HOME on a case-insensitive file system (macOS's default).
  */
-export const personDir = (id: string) =>
+const personDir = (id: string) =>
   encodeURIComponent(id).replaceAll(/[.A-Z]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
 
 /**

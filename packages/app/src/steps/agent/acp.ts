@@ -1,34 +1,25 @@
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import * as acp from "@agentclientprotocol/sdk";
-import type { Principal } from "@sanoma-ai/workflows";
+import type { Box, Principal, Process } from "@sanoma-ai/workflows";
 import { AGENTS as AGENTS_GROUP, errorMessage, isVisitor } from "@sanoma-ai/workflows/shared";
 import { createUIMessageStream, generateId, type UIMessageStreamWriter } from "ai";
 import { type ChatMessage, pathOf, type SignInCard, textOf } from "../../lib/chat.ts";
-import {
-  agentHome,
-  allowedPath,
-  commitTurn,
-  mustAllow,
-  NO_SHELL,
-  openDraft,
-  outsideCheckout,
-  personDir,
-} from "./checkout.ts";
-import { Command, type Exit, exitText, sessionEnv } from "./local-box.ts";
+import { homeOf, openBox } from "./box-session.ts";
+import { allowedPath, commitTurn, mustAllow, NO_SHELL, openDraft, outsideCheckout } from "./checkout.ts";
 import { harnessInstructions } from "./prompt.ts";
 import type { Engine, EngineTurn } from "./transcript.ts";
 
 // The chat's third engine: a person's own coding agent, driven over the Agent Client Protocol by
-// this client of ours, in the chat's draft, on that person's own subscription. The agent is a child
-// of the worker (its ACP entry, installed on first use under `.sanoma/agent-home/acp/<agent>`), with
-// an explicit environment whose HOME is the person's own (`.sanoma/agent-home/people/<id>`), so a
-// sign-in lives there, never the company's, and nothing of ours reads it (every person's agent runs
-// as this machine's user: what an agent runs itself can reach other people's). One child per turn:
-// started, told the chat's earlier messages as text, prompted, killed. Its permission requests,
-// file reads and writes are answered by the checkout rule; the commands it runs through our
-// terminal are its own. A sign-in it asks for is shown in the chat as the vendor's own flow.
+// this client of ours, in the chat's draft, on that person's own subscription. The agent runs in
+// the person's box (`openBox`, the harness engine's too), installed on first use under the box's
+// home (`.acp/<agent>`), which is its HOME, so a sign-in lives in the box and nowhere else, and
+// nothing of ours reads it (on the local backend a box is a directory of this machine and every
+// person's agent runs as its user: what an agent runs itself can reach other people's). One
+// process per turn: the box opened, the agent started, told the chat's earlier messages as text,
+// prompted, killed, the box stopped. Its permission requests, file reads and writes are answered
+// by the checkout rule; the commands it runs through our terminal are its own, in the box. A
+// sign-in it asks for is shown in the chat as the vendor's own flow.
 
 /** How a person signs in to their agent from the chat. */
 type SignIn =
@@ -125,6 +116,9 @@ const CARD_EVERY = 250;
 /** Why a turn or its sign-in ended early: the person sent another message. */
 const STOPPED = "a new message stopped it";
 
+/** The directory under a box's home that holds the agents' installs (`<agent>`) and the shims. */
+const ACP = ".acp";
+
 /** A shim's refusal: what it says, and its exit. */
 const refusal = (name: string) => `echo "${name} is not available to a person's own agent in Sanoma" >&2\nexit 1\n`;
 
@@ -132,7 +126,7 @@ const refusal = (name: string) => `echo "${name} is not available to a person's 
 const refusing = (name: string) => `#!/bin/sh\n${refusal(name)}`;
 
 /**
- * Commands on this machine the agent and what it starts must not reach (a vendor CLI's token, the
+ * Commands of the box the agent and what it starts must not reach (a vendor CLI's token, the
  * Keychain, a browser), each a shim of ours first on its `PATH`. To the agent the Keychain is there
  * and empty, and takes nothing: `security` answers a lookup or a removal as macOS does for an item
  * it does not hold (44), and refuses the rest. So Claude Code keeps its sign-in in its own file
@@ -164,7 +158,7 @@ const SIGN_IN_FAILURES: [said: RegExp, words: string][] = [
   [/Couldn['’]t save your login/, "could not save its sign-in on this computer"],
 ];
 
-/** Each agent's install under way, by its directory: this process's cache, so two turns install it once. */
+/** Each agent's install under way, by its box and directory: this process's cache, so two turns install it once. */
 const installs = new Map<string, Promise<void>>();
 
 /** The engine for `name` (`acp-<name>`): a turn of a chat through that person's own agent. */
@@ -187,99 +181,115 @@ async function runTurn(name: OwnAgentName, engineTurn: EngineTurn, writer: UIMes
   if (!isPerson(principal)) {
     throw new Error(`${agent.title} runs on a person's own plan, and ${principal.id} is not a person`);
   }
-  // Kept across restarts, apart: the installs, and each person's sign-ins.
-  const agents = agentHome(step, "acp");
   const draft = await openDraft(step, chat);
   writer.write({ type: "start", messageId: generateId() });
   const relay = new Relay(writer);
-  let turn: AcpTurn | undefined;
+  // Opened last, so that nothing that fails before leaves it running; stopped however the turn ends.
+  const box = await openBox(step);
   try {
-    const dir = join(agents, name);
-    // A new message does not wait for a first install: it goes on, for the next turn.
-    await untilAborted(install(agent, dir, agents), signal);
-    const personal = join(agentHome(step, "people"), personDir(principal.id));
-    const bins = join(dir, "node_modules", ".bin");
-    const [shimmed] = await Promise.all([shims(agents), mkdir(personal, { recursive: true })]);
-    const env = sessionEnv(personal);
-    turn = new AcpTurn(agent, relay, signal, {
-      chatId: chat.id,
-      onCode: step.onCode,
-      root: draft.root,
-      bins,
-      env: { ...env, PATH: [shimmed, bins, env.PATH].join(":") },
-    });
-    const instructions = harnessInstructions(step, principal, chat, messages.slice(0, -1));
-    await turn.run(`${instructions}\n\n${principal.id}: ${textOf(messages.at(-1)!)}`);
-  } catch (err) {
-    // A dead or missing agent is said in the reply; a stopped turn says nothing.
-    if (!signal.aborted) relay.say(`${agent.title} could not answer: ${errorMessage(err)}`);
+    let turn: AcpTurn | undefined;
+    try {
+      // Kept across turns, the box's: the installs, and the person's sign-ins.
+      const home = await homeOf(box);
+      const dir = join(home, ACP, name);
+      // A new message does not wait for a first install: the box's stop ends it, and the next turn installs again.
+      const [, shimmed] = await Promise.all([untilAborted(install(box, agent, dir), signal), shims(box, home)]);
+      turn = new AcpTurn(agent, relay, signal, {
+        box,
+        chatId: chat.id,
+        onCode: step.onCode,
+        // S3: the draft's clone in the box; until then the box is this machine and its worktree is the draft's.
+        root: draft.root,
+        home,
+        shimsDir: shimmed,
+        bins: join(dir, "node_modules", ".bin"),
+      });
+      const instructions = harnessInstructions(step, principal, chat, messages.slice(0, -1));
+      await turn.run(`${instructions}\n\n${principal.id}: ${textOf(messages.at(-1)!)}`);
+    } catch (err) {
+      // A dead or missing agent is said in the reply; a stopped turn says nothing.
+      if (!signal.aborted) relay.say(`${agent.title} could not answer: ${errorMessage(err)}`);
+    } finally {
+      await turn?.stop();
+    }
+    relay.finish();
+    await commitTurn(engineTurn, draft, agent.title, writer);
   } finally {
-    await turn?.stop();
+    await box.stop();
   }
-  relay.finish();
-  await commitTurn(engineTurn, draft, agent.title, writer);
   writer.write({ type: "finish" });
 }
 
-/** A turn's child and what it asked for: one ACP connection, its terminals and its sign-in. */
+/** A turn's agent in the box and what it asked for: one ACP connection, its terminals and its sign-in. */
 class AcpTurn {
   readonly agent: OwnAgent;
   readonly relay: Relay;
   readonly signal: AbortSignal;
+  readonly box: Box;
   readonly chatId: string;
   /** Takes the codes the person pastes for this turn (`ChatTurnContext.onCode`). */
   readonly onCode: (listener: (code: string) => void) => () => void;
-  /** The draft's checkout: where the agent works. */
+  /** The draft's checkout in the box: where the agent works. */
   readonly root: string;
-  /** The install's bins, and the child's environment. */
+  /** The box's home, the agent's HOME. */
+  readonly home: string;
+  /** The shims' directory and the install's bins: first on the `PATH` of everything the turn runs. */
+  readonly shimsDir: string;
   readonly bins: string;
-  readonly env: Record<string, string>;
   /** Every process the turn started (the agent, its terminals, a sign-in), killed when it ends. */
-  readonly #commands = new Set<Command>();
-  readonly #terminals = new Map<string, Command>();
+  readonly #started = new Set<Started>();
+  readonly #terminals = new Map<string, Started>();
 
   constructor(
     agent: OwnAgent,
     relay: Relay,
     signal: AbortSignal,
     {
+      box,
       chatId,
       onCode,
       root,
+      home,
+      shimsDir,
       bins,
-      env,
     }: {
+      box: Box;
       chatId: string;
       onCode: (listener: (code: string) => void) => () => void;
       root: string;
+      home: string;
+      shimsDir: string;
       bins: string;
-      env: Record<string, string>;
     },
   ) {
     this.agent = agent;
     this.relay = relay;
     this.signal = signal;
+    this.box = box;
     this.chatId = chatId;
     this.onCode = onCode;
     this.root = root;
+    this.home = home;
+    this.shimsDir = shimsDir;
     this.bins = bins;
-    this.env = env;
   }
 
   /** Starts the agent, opens a session in the draft and prompts it with `text`; a sign-in it asks for instead is the card. */
   async run(text: string) {
     if (this.signal.aborted) return;
-    const child = this.#start(join(this.bins, this.agent.bin), this.agent.args, { protocol: true });
-    const connection = this.#client().connect(acp.ndJsonStream(child.stdin!, child.stdout!));
-    const died = (exit: Exit) => new Error(`it stopped (${exitText(exit)})${tail(child.output())}`);
-    // A dead child fails what waits on it, not a hang (its stdout ends only after this).
-    void child.exited.then((exit) => connection.close(died(exit)));
+    const child = await this.#start(commandLine(join(this.bins, this.agent.bin), this.agent.args), { protocol: true });
+    // Its stdout's end waits for its exit, so the connection sees how it ended first.
+    const stdout = child.process.stdout.pipeThrough(new TransformStream({ flush: () => child.exited.then(() => {}) }));
+    const connection = this.#client().connect(acp.ndJsonStream(child.process.stdin, stdout));
+    const died = (exitCode: number) => new Error(`it stopped (${exitText(exitCode)})${tail(child.output())}`);
+    // A dead agent fails what waits on it, not a hang (its stdout ends only after this).
+    void child.exited.then((exitCode) => connection.close(died(exitCode)));
     const { agent } = connection;
     let sessionId: string | undefined;
     let grace: NodeJS.Timeout | undefined;
     const cancel = () => {
       if (sessionId !== undefined) void agent.notify("session/cancel", { sessionId }).catch(() => {});
-      grace = setTimeout(() => child.kill(), CANCEL_GRACE);
+      grace = setTimeout(() => child.process.kill(), CANCEL_GRACE);
     };
     this.signal.addEventListener("abort", cancel, { once: true });
     try {
@@ -308,24 +318,34 @@ class AcpTurn {
 
   /** Kills every process the turn started, and waits for them to go, so nothing writes after the commit. */
   async stop() {
-    const commands = [...this.#commands];
-    this.#commands.clear();
-    for (const command of commands) command.kill();
-    await Promise.all(commands.map((command) => command.exited));
+    const started = [...this.#started];
+    this.#started.clear();
+    for (const process of started) process.process.kill();
+    await Promise.all(started.map((process) => process.exited));
   }
 
-  /** `args` run as `command` (in the draft unless `cwd` says), with the turn's environment and `env`, in a process group of its own. */
-  #start(
-    command: string,
-    args: readonly string[],
+  /**
+   * `line` run in the box by `bash` (in the draft unless `cwd` says), with the box's environment and
+   * `env`, the shims and the install's bins first on its `PATH`.
+   */
+  async #start(
+    line: string,
     {
       cwd = this.root,
       env,
-      ...options
+      stdin,
+      protocol,
+      limit,
     }: { cwd?: string; env?: Record<string, string>; stdin?: boolean; protocol?: boolean; limit?: number } = {},
   ) {
-    const started = new Command(command, args, { cwd, env: { ...this.env, ...env }, ...options });
-    this.#commands.add(started);
+    const path = `${quote(this.shimsDir)}:${quote(this.bins)}:"$PATH"`;
+    const process = await this.box.run(`export PATH=${path}\n${line}`, {
+      cwd,
+      ...(env && { env }),
+      stdin: stdin || protocol,
+    });
+    const started = new Started(process, { protocol, limit });
+    this.#started.add(started);
     return started;
   }
 
@@ -336,39 +356,47 @@ class AcpTurn {
       .onNotification("session/update", ({ params }) => this.relay.update(params.update))
       .onRequest("session/request_permission", ({ params }) => this.#permit(params))
       .onRequest("fs/read_text_file", async ({ params }) => {
-        const text = await readFile(await this.#allowed(params.path), "utf8");
+        const full = await this.#allowed(params.path);
+        const bytes = await this.box.read(full);
+        if (bytes === null) throw acp.RequestError.resourceNotFound(full);
+        const text = new TextDecoder().decode(bytes);
         if (params.line == null && params.limit == null) return { content: text };
         const from = Math.max(0, (params.line ?? 1) - 1);
         const lines = text.split("\n");
         return { content: lines.slice(from, params.limit == null ? undefined : from + params.limit).join("\n") };
       })
       .onRequest("fs/write_text_file", async ({ params }) => {
-        const full = await this.#allowed(params.path);
-        await mkdir(dirname(full), { recursive: true });
-        await writeFile(full, params.content);
+        await this.box.write(await this.#allowed(params.path), new TextEncoder().encode(params.content));
         return {};
       })
       .onRequest("terminal/create", async ({ params }) => {
         const cwd = params.cwd ? await this.#allowed(params.cwd) : this.root;
         const env = Object.fromEntries((params.env ?? []).map(({ name, value }) => [name, value]));
         // A command line with no arguments is bash's to read, as an agent's shell tool writes one.
-        const [command, args] = params.args?.length ? [params.command, params.args] : ["bash", ["-c", params.command]];
-        const terminal = this.#start(command, args, { cwd, env, limit: params.outputByteLimit ?? undefined });
+        const line = params.args?.length ? commandLine(params.command, params.args) : params.command;
+        const terminal = await this.#start(line, { cwd, env, limit: params.outputByteLimit ?? undefined });
         const terminalId = generateId();
         this.#terminals.set(terminalId, terminal);
         return { terminalId };
       })
       .onRequest("terminal/output", ({ params }) => {
         const terminal = this.#terminal(params.terminalId);
-        return { output: terminal.output(), truncated: terminal.truncated, exitStatus: terminal.status ?? null };
+        const { exitCode } = terminal;
+        return {
+          output: terminal.output(),
+          truncated: terminal.truncated,
+          exitStatus: exitCode === undefined ? null : { exitCode },
+        };
       })
-      .onRequest("terminal/wait_for_exit", ({ params }) => this.#terminal(params.terminalId).exited)
+      .onRequest("terminal/wait_for_exit", async ({ params }) => ({
+        exitCode: await this.#terminal(params.terminalId).exited,
+      }))
       .onRequest("terminal/kill", ({ params }) => {
-        this.#terminal(params.terminalId).kill();
+        this.#terminal(params.terminalId).process.kill();
         return {};
       })
       .onRequest("terminal/release", ({ params }) => {
-        this.#terminal(params.terminalId).kill();
+        this.#terminal(params.terminalId).process.kill();
         this.#terminals.delete(params.terminalId);
         return {};
       })
@@ -418,14 +446,17 @@ class AcpTurn {
       : refuse("Only an edit allowed once is accepted in this chat");
   }
 
-  /** `path` as the checkout rule allows it in the draft; a request error naming it otherwise. */
+  /**
+   * `path` as the checkout rule allows it in the draft; a request error naming it otherwise. The
+   * rule reads this machine's file system, which on the local backend is the box's.
+   */
   #allowed(path: string): Promise<string> {
     return mustAllow(this.root, path).catch((err: Error) => {
       throw acp.RequestError.invalidParams(undefined, err.message);
     });
   }
 
-  #terminal(id: string): Command {
+  #terminal(id: string): Started {
     const terminal = this.#terminals.get(id);
     if (!terminal) throw acp.RequestError.invalidParams(undefined, `No terminal ${id}`);
     return terminal;
@@ -448,8 +479,8 @@ class AcpTurn {
     const { signIn, title } = this.agent;
     if ("once" in signIn) {
       const { bin, args, after } = signIn.once;
-      const line = [`HOME=${quote(this.env.HOME!)}`, quote(join(this.bins, bin)), ...args.map(quote)];
-      this.#card({ state: "once", command: line.join(" "), ...(after && { after }) });
+      const command = `HOME=${quote(this.home)} ${quoted([join(this.bins, bin), ...args])}`;
+      this.#card({ state: "once", command, ...(after && { after }) });
       return;
     }
     this.#card({ state: "waiting" });
@@ -474,7 +505,7 @@ class AcpTurn {
 
   /** Runs the agent's sign-in with `args`, relaying what it prints (now and then) and taking a code pasted on the card. */
   async #login(args: readonly string[], env?: Record<string, string>) {
-    const login = this.#start(join(this.bins, this.agent.bin), args, { env, stdin: true });
+    const login = await this.#start(commandLine(join(this.bins, this.agent.bin), args), { env, stdin: true });
     let shown = "";
     let timer: NodeJS.Timeout | undefined;
     const show = () => {
@@ -497,7 +528,7 @@ class AcpTurn {
     const forget = this.onCode((code) => login.write(`${code}\n`));
     try {
       const exit = await this.#waiting(login.exited);
-      if (exit.exitCode !== 0) {
+      if (exit !== 0) {
         // The card says what happened in words where the vendor's message is known, and how it exited
         // otherwise; the exit is this machine's log's either way.
         console.error(`sanoma app: ${this.agent.title}'s sign-in in chat ${this.chatId} stopped (${exitText(exit)})`);
@@ -508,7 +539,7 @@ class AcpTurn {
     } finally {
       clearTimeout(timer);
       forget();
-      login.kill();
+      login.process.kill();
     }
   }
 
@@ -655,44 +686,55 @@ const tail = (output: string) => {
   return last ? `: ${last}` : "";
 };
 
-const quote = (word: string) => (/^[\w./=:-]+$/.test(word) ? word : `'${word.replaceAll("'", `'\\''`)}'`);
+const quote = (word: string) => (/^[\w./=:@%-]+$/.test(word) ? word : `'${word.replaceAll("'", `'\\''`)}'`);
+
+/** `words` as a command line for a shell. */
+const quoted = (words: readonly string[]) => words.map(quote).join(" ");
+
+/** `command` and `args` as one command line for `bash`, which it `exec`s. */
+const commandLine = (command: string, args: readonly string[]) => `exec ${quoted([command, ...args])}`;
+
+/** How a process ended, as a reply says it. */
+const exitText = (exitCode: number) => `exit code ${exitCode}`;
 
 /**
- * Installs `agent` into `dir`, once: its packages at their versions by the `pnpm` on the session's
- * `PATH`, as the HarnessAgent bridges run it (the desktop shell ships no npm), with `home` (the
- * installs' `acp`) as its `HOME`, so pnpm's store and cache stay with the installs, outside the
- * company's workspace and with no install script run but the vendor's own `setup`, as
- * `installed.json` records. The last install's `node_modules` goes first: pnpm refuses one made
- * from another store (the repo moved) or by another major version. Another turn waits for an
- * install under way; a failed one is tried again by the next.
+ * Installs `agent` into `dir` in `box`, once: its packages at their versions by the `pnpm` on the
+ * box's `PATH`, as the HarnessAgent bridges run it (the desktop shell ships no npm), with the box's
+ * home as its `HOME`, so pnpm's store and cache stay in the box, outside the company's workspace
+ * and with no install script run but the vendor's own `setup`, as `installed.json` records. The
+ * last install's `node_modules` goes first: pnpm refuses one made from another store (the repo
+ * moved) or by another major version. Another turn waits for an install under way; a failed one is
+ * tried again by the next.
  */
-async function install(agent: OwnAgent, dir: string, home: string): Promise<void> {
+export async function install(box: Box, agent: OwnAgent, dir: string): Promise<void> {
   const marker = join(dir, "installed.json");
   const wanted = JSON.stringify(agent.packages);
-  if ((await readFile(marker, "utf8").catch(() => undefined)) === wanted) return;
-  let running = installs.get(dir);
+  const found = await box.read(marker);
+  if (found && new TextDecoder().decode(found) === wanted) return;
+  const key = `${box.id} ${dir}`;
+  let running = installs.get(key);
   if (!running) {
     running = (async () => {
-      await rm(join(dir, "node_modules"), { recursive: true, force: true });
-      await mkdir(dir, { recursive: true });
-      await writeFile(join(dir, "package.json"), '{ "private": true }\n');
-      const env = sessionEnv(home);
+      await box.write(join(dir, "package.json"), new TextEncoder().encode('{ "private": true }\n'));
       const pnpm = ["add", "--ignore-scripts", "--ignore-workspace", "--loglevel=error", ...agent.packages];
-      await new Command("pnpm", pnpm, { cwd: dir, env }).done();
+      await ran(box, `rm -rf node_modules && ${commandLine("pnpm", pnpm)}`, dir);
       if (agent.setup) {
         const setup = join(dir, agent.setup);
-        await new Command("node", [setup], { cwd: dirname(setup), env }).done();
+        await ran(box, commandLine("node", [basename(setup)]), dirname(setup));
       }
-      await writeFile(marker, wanted);
+      await box.write(marker, new TextEncoder().encode(wanted));
     })();
-    installs.set(dir, running);
+    installs.set(key, running);
     void running.then(
-      () => installs.delete(dir),
-      () => installs.delete(dir),
+      () => installs.delete(key),
+      () => installs.delete(key),
     );
   }
   await running;
 }
+
+/** Runs `line` in `box`, in `cwd`: an error with the end of what it printed unless it exits 0. */
+const ran = async (box: Box, line: string, cwd: string) => new Started(await box.run(line, { cwd })).done();
 
 /** `promise`, or a failure when the turn stops (or `timeout` passes) first; `promise` goes on. */
 function untilAborted<T>(promise: Promise<T>, signal: AbortSignal, timeout?: { ms: number; text: string }): Promise<T> {
@@ -713,31 +755,107 @@ function untilAborted<T>(promise: Promise<T>, signal: AbortSignal, timeout?: { m
   });
 }
 
-/** The shims written by this process, by their directory. */
+/** The shims written by this process, by their box and directory. */
 const shimmed = new Map<string, Promise<string>>();
 
 /**
- * The shims' directory (`acp/shims`), first on the agent's PATH: each of `SHIMS`, so nothing of
- * this machine's user signs the agent in. Written once per process, each aside and then renamed
- * into place: an earlier process's agent may be running one now.
+ * The shims' directory (`.acp/shims` under the box's `home`), first on the agent's PATH: each of
+ * `SHIMS`, so nothing of the box's signs the agent in. Written once per process and box, each
+ * aside and then moved into place: an earlier process's agent may be running one now.
  */
-export function shims(agents: string): Promise<string> {
-  const dir = join(agents, "shims");
-  let writing = shimmed.get(dir);
+export function shims(box: Box, home: string): Promise<string> {
+  const dir = join(home, ACP, "shims");
+  const key = `${box.id} ${dir}`;
+  let writing = shimmed.get(key);
   if (!writing) {
     writing = (async () => {
-      await mkdir(dir, { recursive: true });
+      const names = Object.keys(SHIMS);
       await Promise.all(
-        Object.entries(SHIMS).map(async ([name, script]) => {
-          const aside = join(dir, `.${name}.new`);
-          await writeFile(aside, script, { mode: 0o755 });
-          await rename(aside, join(dir, name));
-        }),
+        names.map((name) =>
+          box.write(join(dir, `.${name}.new`), new TextEncoder().encode(SHIMS[name]!), { mode: 0o755 }),
+        ),
       );
+      await ran(box, names.map((name) => `mv -f .${name}.new ${name}`).join(" && "), dir);
       return dir;
     })();
-    shimmed.set(dir, writing);
-    writing.catch(() => shimmed.delete(dir));
+    shimmed.set(key, writing);
+    writing.catch(() => shimmed.delete(key));
   }
   return writing;
+}
+
+/** The most of a process's output kept when it is given no limit, in bytes. */
+const OUTPUT_KEPT = 1 << 20;
+
+/**
+ * A process started in the box (`Box.run`), what it prints kept (the last `limit` bytes, from a
+ * character's start), or, as a `protocol`, its stdin and stdout left to the caller and only its
+ * stderr kept. An ACP agent, a terminal it asks for, a vendor's sign-in, an install.
+ */
+class Started {
+  readonly process: Process;
+  /** Resolves to its exit code once it has exited. */
+  readonly exited: Promise<number>;
+  /** Its exit code, once it has exited. */
+  exitCode?: number;
+  /** The most of its output kept, in bytes. */
+  readonly limit: number;
+  /** Called whenever it prints. */
+  onOutput?: () => void;
+  #writer?: WritableStreamDefaultWriter<Uint8Array>;
+  readonly #chunks: Uint8Array[] = [];
+  #kept = 0;
+  #dropped = false;
+  #text?: string;
+
+  constructor(process: Process, { protocol, limit }: { protocol?: boolean; limit?: number } = {}) {
+    this.process = process;
+    this.limit = limit ?? OUTPUT_KEPT;
+    this.exited = process.wait().then(({ exitCode }) => (this.exitCode = exitCode));
+    const keep = (stream: ReadableStream<Uint8Array>) =>
+      void stream.pipeTo(new WritableStream({ write: (chunk) => this.#print(chunk) })).catch(() => {});
+    keep(process.stderr);
+    if (!protocol) keep(process.stdout);
+  }
+
+  #print(chunk: Uint8Array) {
+    this.#chunks.push(chunk);
+    this.#kept += chunk.length;
+    this.#text = undefined;
+    // Whole chunks past the limit go now; `output` cuts the rest to it.
+    while (this.#chunks.length > 1 && this.#kept - this.#chunks[0]!.length >= this.limit) {
+      this.#kept -= this.#chunks.shift()!.length;
+      this.#dropped = true;
+    }
+    this.onOutput?.();
+  }
+
+  /** Whether output was dropped to keep within `limit`. */
+  get truncated() {
+    return this.#dropped || this.#kept > this.limit;
+  }
+
+  /** What it printed and was kept, as text. */
+  output = () => {
+    if (this.#text !== undefined) return this.#text;
+    const kept = Buffer.concat(this.#chunks);
+    let start = Math.max(0, kept.length - this.limit);
+    // Not from the middle of a character: past its continuation bytes.
+    while (start < kept.length && start > 0 && (kept[start]! & 0xc0) === 0x80) start++;
+    return (this.#text = kept.subarray(start).toString("utf8"));
+  };
+
+  /** Writes `text` to its stdin, when it was given one. */
+  write(text: string) {
+    this.#writer ??= this.process.stdin.getWriter();
+    void this.#writer.write(new TextEncoder().encode(text)).catch(() => {});
+  }
+
+  /** Resolves when it exits 0; an error with the end of what it printed otherwise. */
+  async done(): Promise<void> {
+    const exitCode = await this.exited;
+    if (exitCode === 0) return;
+    const said = this.output().trim().split("\n").slice(-5).join("\n");
+    throw new Error(`${exitText(exitCode)}${said ? `: ${said}` : ""}`);
+  }
 }

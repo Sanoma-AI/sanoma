@@ -4,8 +4,9 @@ import {
   harnessStateDirectoryPath,
   type HarnessV1NetworkSandboxSession,
 } from "@ai-sdk/harness";
-import type { Box } from "@sanoma-ai/workflows";
-import { allowedPath, realWithin, within } from "./checkout.ts";
+import type { AppStepContext, Box } from "@sanoma-ai/workflows";
+import { agentHome, allowedPath, boxName, realWithin, within } from "./checkout.ts";
+import { localBackend } from "./local-box.ts";
 
 // The sandbox session `HarnessAgent` runs a coding agent in, over a box of the `Sandbox` contract:
 // its commands are the box's, in the draft's checkout; its files that checkout's and the box's
@@ -30,6 +31,19 @@ export interface BoxSessionOptions {
   /** The ports its bridge listens on (`freePort`). */
   ports: readonly number[];
 }
+
+/**
+ * The box of the person `step` is run by, for the company (`boxName`), opened: where every coding
+ * agent of theirs works, a turn's engine stopping it when the turn ends.
+ */
+export const openBox = (step: Pick<AppStepContext, "source" | "resolved" | "by">): Promise<Box> =>
+  // S5: the declared sandbox's backend (`resolved.sandboxes()`, its connector's `sandbox`), when there is one.
+  localBackend(agentHome(step, "boxes")).open({
+    name: boxName(step.resolved.appName, step.by.id),
+    // This machine is the local box's image and size.
+    image: "",
+    size: 0,
+  });
 
 /** The box's home, `$HOME` as its commands see it. */
 export async function homeOf(box: Box): Promise<string> {
