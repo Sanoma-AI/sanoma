@@ -42,7 +42,7 @@ export default defineConfig({
     ],
   },
   test: {
-    include: ["packages/*/test/**/*.test.ts", "connectors/*/test/**/*.test.ts", "scripts/*.test.ts"],
+    include: ["packages/*/test/**/*.test.{ts,tsx}", "connectors/*/test/**/*.test.ts", "scripts/*.test.ts"],
     testTimeout: 60_000,
     hookTimeout: 60_000,
     // Four files at once peak near 60 connections; docker-compose.yml leaves room for several gates.

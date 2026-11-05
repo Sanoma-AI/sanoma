@@ -19,10 +19,18 @@
       }
     ]
   },
-  "ignorePatterns": ["**/node_modules", "**/.sanoma", "**/dist", "**/generated", "packages/bridge/src/gen"],
+  "ignorePatterns": [
+    "**/node_modules",
+    "**/.sanoma",
+    "**/dist",
+    "**/generated",
+    "packages/bridge/src/gen",
+    ".agents/skills",
+    ".claude/skills"
+  ],
   "overrides": [
     {
-      "files": ["packages/app/src/components/ui/**"],
+      "files": ["packages/app/src/components/ui/**", "packages/app/src/lib/highlighter.tsx"],
       "rules": {
         "eslint/no-shadow": "off",
         "eslint/no-underscore-dangle": "off"

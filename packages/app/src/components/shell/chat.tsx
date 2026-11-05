@@ -1,12 +1,10 @@
 import { useChat } from "@ai-sdk/react";
-import { ArrowUpIcon } from "@phosphor-icons/react/dist/csr/ArrowUp";
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/csr/ChatCircle";
 import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
-import { SparkleIcon } from "@phosphor-icons/react/dist/csr/Sparkle";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { generateId } from "ai";
-import { type FormEvent, type ReactNode, useId, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Button } from "#/components/ui/button.tsx";
 import {
   DropdownMenu,
@@ -16,10 +14,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "#/components/ui/dropdown-menu.tsx";
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "#/components/ui/empty.tsx";
-import { NativeSelect, NativeSelectOptGroup, NativeSelectOption } from "#/components/ui/native-select.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
-import { Textarea } from "#/components/ui/textarea.tsx";
 import { cn } from "#/lib/utils.ts";
 import { actorHeaders, useActor } from "../../actor.ts";
 import {
@@ -27,17 +22,14 @@ import {
   chatTransport,
   ENGINE_NAMES,
   type EngineName,
-  errorParts,
   MODEL_CONNECTOR,
   onModelConnector,
-  ownPlan,
-  textOf,
-  unfinished,
 } from "../../lib/chat.ts";
 import { CHATS_KEY, chatModelQuery, chatQuery, chatsQuery, configQuery } from "../../queries.ts";
 import { useCrumbs } from "../common.tsx";
-import { Reply } from "./chat-parts.tsx";
 import type { Prompt } from "./chat-prompt.ts";
+import { Composer } from "./composer.tsx";
+import { ConnectorPageLink, isBusy, Thread } from "./thread.tsx";
 
 // The chat column, beside the bar on the same surface: the operator agent (POST /api/chat, its
 // stream read by the AI SDK's useChat), your chats, and the composer carrying the page you are on.
@@ -151,12 +143,15 @@ function Conversation({
     id,
     messages: initial,
     transport,
+    // A reply's Markdown is parsed again per update: at most 20 a second, however fast it streams.
+    throttle: 50,
     // Its title in the list (the open transcript is useChat's own, read again when next opened).
     onFinish: () => void queryClient.invalidateQueries({ queryKey: CHATS_KEY, exact: true }),
     // A refused turn may be one the model's status here was too old to stop: read it again.
     onError: () => void queryClient.invalidateQueries({ queryKey: chatModelQuery().queryKey }),
   });
-  const busy = status === "submitted" || status === "streaming";
+  const busy = isBusy(status);
+  const page = useCrumbs().at(-1)?.label;
   // The chat's own engine; a new chat opens on the one chosen in the composer and keeps it after.
   const [engine, setEngine] = useState<EngineName>(() => (openedOn as EngineName | undefined) ?? "loop");
   const fresh = messages.length === 0;
@@ -170,30 +165,16 @@ function Conversation({
   };
   return (
     <>
-      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4" aria-live="polite">
-        {messages.length === 0 && <EmptyChat />}
-        {messages.map((message, i) =>
-          message.role === "user" ? (
-            <div key={message.id} className="ml-8 self-end rounded-xl bg-card px-3 py-2 ring-1 ring-border">
-              <p className="whitespace-pre-wrap">{textOf(message, "\n")}</p>
-            </div>
-          ) : (
-            <Reply key={message.id} message={message} live={busy && i === messages.length - 1} chat={id} />
-          ),
-        )}
-        {status === "submitted" && <Spinner aria-label="Waiting for the agent" />}
-        {error && <TurnError message={error.message} />}
-        {!busy && !error && !noModel && stoppedShort(messages) && (
-          <div className="flex items-center gap-2 text-muted-foreground">
-            <span>The last turn stopped before it finished.</span>
-            <Button variant="secondary" size="sm" onClick={() => send("continue")}>
-              Continue
-            </Button>
-          </div>
-        )}
-      </div>
+      <Thread
+        chat={id}
+        messages={messages}
+        status={status}
+        error={error}
+        onContinue={noModel ? undefined : () => send("continue")}
+      />
       <div className="p-3">
         <Composer
+          page={page}
           busy={busy}
           onSend={send}
           draft={draft}
@@ -204,61 +185,6 @@ function Conversation({
     </>
   );
 }
-
-/** A turn that stopped before it finished (a restart, say): no reply to the last message, or a step or text still under way. */
-function stoppedShort(messages: ChatMessage[]): boolean {
-  const last = messages.at(-1);
-  if (!last) return false;
-  return last.role === "user" || last.parts.some(unfinished);
-}
-
-/** A turn's error as text: the server's own message when it sent one, and the connector page where a missing key is set. */
-function TurnError({ message }: { message: string }) {
-  let said = message;
-  try {
-    said = (JSON.parse(message) as { error?: string }).error ?? message;
-  } catch {
-    // Not the app's JSON error: the text as it came.
-  }
-  const { text, vendor } = errorParts(said);
-  return (
-    <p className="text-destructive">
-      {text}
-      {vendor && (
-        <>
-          {" "}
-          <ConnectorPageLink vendor={vendor}>Set it on its connector page</ConnectorPageLink>.
-        </>
-      )}
-    </p>
-  );
-}
-
-/** Focuses a text box with its caret after its text: where a prompt's words go on. */
-const focusAtEnd = (box: HTMLTextAreaElement | null) => {
-  if (!box) return;
-  box.focus();
-  box.setSelectionRange(box.value.length, box.value.length);
-};
-
-/** The engines, the composer's choices: ours on the company's key, then a person's own (`ownPlan`). */
-const NAMES = Object.keys(ENGINE_NAMES) as EngineName[];
-const OURS = NAMES.filter((name) => !ownPlan(name));
-const OWN = NAMES.filter(ownPlan);
-
-/** An engine as the composer's choice. */
-const engineOption = (name: EngineName) => (
-  <NativeSelectOption key={name} value={name}>
-    {ENGINE_NAMES[name]}
-  </NativeSelectOption>
-);
-
-/** A link to a connector's page, where its credentials are set. */
-const ConnectorPageLink = ({ vendor, children }: { vendor: string; children: ReactNode }) => (
-  <Link to="/connectors/$vendor" params={{ vendor }} className="underline underline-offset-4">
-    {children}
-  </Link>
-);
 
 /** The composer's note while the chat has no model: where to set its connector's key, or to add one (its sheet on the Connectors page). */
 function ConnectModel({ vendor }: { vendor?: string }) {
@@ -275,101 +201,5 @@ function ConnectModel({ vendor }: { vendor?: string }) {
       )}
       .
     </p>
-  );
-}
-
-function EmptyChat() {
-  return (
-    <Empty className="p-6">
-      <EmptyHeader>
-        <EmptyMedia variant="icon">
-          <SparkleIcon aria-hidden="true" />
-        </EmptyMedia>
-        <EmptyTitle className="font-display text-2xl font-normal">What should change?</EmptyTitle>
-        <EmptyDescription>
-          Ask the agent: it drafts the change on a branch of its own and checks it. You merge it.
-        </EmptyDescription>
-      </EmptyHeader>
-    </Empty>
-  );
-}
-
-/**
- * The composer: the page as a chip, the message (starting as `draft`, focused at its end, when a
- * page opened the chat with it), the engine a new chat opens on (`engine`, only then: a person's
- * own agents in a group of their own), Send (Enter; Shift+Enter for a new line), and while there
- * is a `note` (where to connect a model), the note, Send off.
- */
-function Composer({
-  busy,
-  onSend,
-  draft,
-  engine,
-  note,
-}: {
-  busy: boolean;
-  onSend: (text: string) => void;
-  draft?: string;
-  engine?: { value: EngineName; set: (engine: EngineName) => void };
-  note?: ReactNode;
-}) {
-  const page = useCrumbs().at(-1)?.label;
-  const [text, setText] = useState(draft ?? "");
-  const noteId = useId();
-
-  const submit = (e?: FormEvent) => {
-    e?.preventDefault();
-    if (busy || note || !text.trim()) return;
-    onSend(text.trim());
-    setText("");
-  };
-  return (
-    <form
-      onSubmit={submit}
-      className="flex flex-col gap-2 rounded-xl bg-card p-3 text-card-foreground ring-1 ring-border"
-    >
-      {page && (
-        <span className="inline-flex h-6 w-fit max-w-full items-center rounded-md px-2 text-xs font-medium ring-1 ring-border">
-          <span className="truncate">{page}</span>
-        </span>
-      )}
-      <Textarea
-        rows={2}
-        ref={draft ? focusAtEnd : undefined}
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) submit(e);
-        }}
-        aria-label="Message the agent"
-        placeholder="Ask anything…"
-        className="min-h-0 resize-none rounded-none border-0 bg-transparent p-0 shadow-none focus-visible:ring-0 dark:bg-transparent"
-      />
-      {note && <div id={noteId}>{note}</div>}
-      <div className="flex items-center justify-end gap-2">
-        {engine && (
-          <NativeSelect
-            size="sm"
-            className="mr-auto"
-            aria-label="Engine"
-            value={engine.value}
-            onChange={(e) => engine.set(e.target.value as EngineName)}
-          >
-            {OURS.map(engineOption)}
-            <NativeSelectOptGroup label="Your own plan">{OWN.map(engineOption)}</NativeSelectOptGroup>
-          </NativeSelect>
-        )}
-        <Button
-          type="submit"
-          size="icon-sm"
-          variant="secondary"
-          disabled={busy || !!note || !text.trim()}
-          aria-label="Send"
-          aria-describedby={note ? noteId : undefined}
-        >
-          {busy ? <Spinner /> : <ArrowUpIcon aria-hidden="true" />}
-        </Button>
-      </div>
-    </form>
   );
 }

@@ -1,131 +1,217 @@
 import { CheckIcon } from "@phosphor-icons/react/dist/csr/Check";
 import { CopyIcon } from "@phosphor-icons/react/dist/csr/Copy";
+import { SparkleIcon } from "@phosphor-icons/react/dist/csr/Sparkle";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
-import { approverLabel } from "@sanoma-ai/workflows/shared";
-import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
 import { getToolName, isToolUIPart } from "ai";
-import { type FormEvent, memo, Suspense, useState } from "react";
+import { CatchBoundary } from "@tanstack/react-router";
+import { type FormEvent, lazy, Suspense, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "#/components/ui/button.tsx";
-import { Card, CardContent, CardFooter, CardHeader } from "#/components/ui/card.tsx";
+import { Card, CardContent, CardHeader } from "#/components/ui/card.tsx";
+import { CodeBlock, CodeBlockContent } from "#/components/ui/code-block.tsx";
 import { Input } from "#/components/ui/input.tsx";
+import { Message, MessageContent, MessageFooter } from "#/components/ui/message.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
-import { actorHeaders, useActor } from "../../actor.ts";
-import { pendingApprovals } from "../../api.ts";
+import {
+  Trace,
+  TraceCollapsible,
+  TraceCollapsibleContent,
+  TraceCollapsibleTrigger,
+  TraceIcon,
+  TraceLine,
+  TraceTitle,
+} from "#/components/ui/trace.tsx";
+import { actorHeaders } from "../../actor.ts";
 import { type ChatMessage, type DraftCard, heldRunOf, pathOf, type SignInCard, textOf } from "../../lib/chat.ts";
-import { decidableBy } from "../../lib/decidable.ts";
-import { approvalKey, configQuery, runQuery } from "../../queries.ts";
-import { ApprovalDecision, ApprovalDetails } from "../approval.tsx";
-import { CardHeading, TipButton } from "../common.tsx";
+import { CardHeading, Notice, TipButton } from "../kit.tsx";
 import { DraftCardView } from "./draft-card.tsx";
 
-// What the chat draws of the agent's reply, per app.md's Chat: plain text at the reply size, the
-// steps as a quiet checked list, a held lookup as the Inbox's approval card, and the draft as a
-// small card, and a person's own agent's sign-in as its card. Any engine's reply: a tool part of
-// another engine is a step by its title or name.
+// What the chat draws of the agent's reply, per app.md's Chat: Markdown at the reply size, its
+// thinking and steps as one quiet trace (AI Elements' Reasoning and Tool), a held lookup as the
+// Inbox's approval card, and the draft as a small card, and a person's own agent's sign-in as its
+// card. Any engine's reply: a tool part of another engine is a step by its title or name.
+
+/** Off the chrome's chunk, which every page loads: until it comes, a reply's text as it is. */
+const Markdown = lazy(() => import("./markdown.tsx"));
+const HeldCard = lazy(() => import("./held-card.tsx"));
 
 type Part = ChatMessage["parts"][number];
 type ToolPart = Extract<Part, { toolCallId: string }>;
+type ReasoningPart = Extract<Part, { type: "reasoning" }>;
+type TracePart = ToolPart | ReasoningPart;
 
 /**
- * The agent's reply in the chat `chat`: its parts in order (steps grouped into one list), a
- * sign-in's card, its draft's card last, and Copy. Memoized: a streamed chunk redraws only the
- * reply it belongs to.
+ * The agent's reply in the chat `chat`: its parts in order (thinking and steps side by side
+ * grouped into one trace), a sign-in's card, its draft's card last, and Copy.
  */
-export const Reply = memo(function Reply({
-  message,
-  live,
-  chat,
-}: {
-  message: ChatMessage;
-  live: boolean;
-  chat: string;
-}) {
-  const blocks: ({ steps: ToolPart[] } | { part: Part })[] = [];
+export function Reply({ message, live, chat }: { message: ChatMessage; live: boolean; chat: string }) {
+  const blocks: ({ trace: TracePart[] } | { part: Part })[] = [];
   let draft: DraftCard | undefined;
   let signIn: SignInCard | undefined;
   for (const part of message.parts) {
     if (part.type === "data-draft") draft = part.data;
     else if (part.type === "data-signIn") signIn = part.data;
-    else if (isToolUIPart(part) && heldRunOf(part.output) === undefined) {
+    else if (part.type === "step-start") continue;
+    else if (part.type === "reasoning" || (isToolUIPart(part) && heldRunOf(part.output) === undefined)) {
       const last = blocks.at(-1);
-      if (last && "steps" in last) last.steps.push(part);
-      else blocks.push({ steps: [part] });
+      if (last && "trace" in last) last.trace.push(part);
+      else blocks.push({ trace: [part] });
     } else blocks.push({ part });
   }
   const text = textOf(message);
   return (
-    <div className="flex flex-col gap-3">
-      {blocks.map((block, i) =>
-        "steps" in block ? <Steps key={i} steps={block.steps} live={live} /> : <ReplyPart key={i} part={block.part} />,
-      )}
-      {signIn && <SignInCardView card={signIn} chat={chat} live={live} />}
-      {draft && <DraftCardView draft={draft} />}
-      {text && !live && (
-        <div className="-ml-1.5 flex">
-          <TipButton
-            tip="Copy"
-            size="icon-xs"
-            onClick={() =>
-              void navigator.clipboard.writeText(text).then(
-                () => toast.success("Copied"),
-                () => toast.error("Could not copy"),
-              )
-            }
-          >
-            <CopyIcon aria-hidden="true" />
-          </TipButton>
-        </div>
-      )}
-    </div>
+    <Message>
+      <MessageContent className="gap-3">
+        {blocks.map((block, i) =>
+          "trace" in block ? (
+            <ReplyTrace key={i} parts={block.trace} live={live} />
+          ) : (
+            <ReplyPart key={i} part={block.part} live={live} />
+          ),
+        )}
+        {signIn && <SignInCardView card={signIn} chat={chat} live={live} />}
+        {draft && <DraftCardView draft={draft} />}
+        {text && !live && (
+          <MessageFooter className="-ml-1.5 px-0">
+            <TipButton
+              tip="Copy"
+              size="icon-xs"
+              onClick={() =>
+                void navigator.clipboard.writeText(text).then(
+                  () => toast.success("Copied"),
+                  () => toast.error("Could not copy"),
+                )
+              }
+            >
+              <CopyIcon aria-hidden="true" />
+            </TipButton>
+          </MessageFooter>
+        )}
+      </MessageContent>
+    </Message>
   );
-});
+}
 
-function ReplyPart({ part }: { part: Part }) {
-  if (part.type === "text") return <p className="text-reply whitespace-pre-wrap">{part.text}</p>;
+function ReplyPart({ part, live }: { part: Part; live: boolean }) {
+  if (part.type === "text") {
+    const plain = <p className="text-reply whitespace-pre-wrap">{part.text}</p>;
+    return (
+      // A chunk that does not come (a deploy since the page loaded) leaves the text as it is.
+      <CatchBoundary getResetKey={() => "markdown"} errorComponent={() => plain}>
+        <Suspense fallback={plain}>
+          <Markdown text={part.text} live={live && part.state === "streaming"} />
+        </Suspense>
+      </CatchBoundary>
+    );
+  }
   if (isToolUIPart(part)) {
     const runId = heldRunOf(part.output);
     if (runId !== undefined) {
       return (
-        <Suspense fallback={<Spinner />}>
-          <HeldCard runId={runId} />
-        </Suspense>
+        <CatchBoundary getResetKey={() => runId} errorComponent={HeldCardMissing}>
+          <Suspense fallback={<Spinner />}>
+            <HeldCard runId={runId} />
+          </Suspense>
+        </CatchBoundary>
       );
     }
   }
   return null;
 }
 
-/** The steps as a quiet checked list: each done, failed or refused (with why), or under way. */
-function Steps({ steps, live }: { steps: ToolPart[]; live: boolean }) {
+function HeldCardMissing() {
+  return <Notice variant="destructive">This approval did not load. Reload the page to see it.</Notice>;
+}
+
+/** The agent's thinking and steps as a quiet trace, a line each. */
+function ReplyTrace({ parts, live }: { parts: TracePart[]; live: boolean }) {
   return (
-    <ul aria-label="Steps" className="flex flex-col gap-1 text-xs text-muted-foreground">
-      {steps.map((step) => (
-        <li key={step.toolCallId} className="flex items-start gap-1.5">
-          <StepIcon step={step} live={live} />
-          <span className="min-w-0">
-            <span className="break-words">{stepLabel(step)}</span>
-            {step.state === "output-error" && <span className="block text-destructive">{step.errorText}</span>}
-            {refused(step) && step.approval?.reason && <span className="block">{step.approval.reason}</span>}
-          </span>
-        </li>
-      ))}
-    </ul>
+    <Trace role="group" aria-label="Steps" className="gap-1">
+      {parts.map((part, i) =>
+        part.type === "reasoning" ? (
+          <Reasoning key={i} part={part} live={live} />
+        ) : (
+          <Step key={part.toolCallId} step={part} live={live} />
+        ),
+      )}
+    </Trace>
   );
 }
 
-function StepIcon({ step, live }: { step: ToolPart; live: boolean }) {
-  const icon = "mt-0.5 size-3.5 shrink-0";
-  if (step.state === "output-error") return <XIcon aria-label="Failed" className={`${icon} text-destructive`} />;
-  if (refused(step)) return <XIcon aria-label="Refused" className={icon} />;
-  if (step.state === "output-available" && !step.preliminary) return <CheckIcon aria-label="Done" className={icon} />;
-  // A step that was under way when the turn stopped is neither: it stopped there.
-  return live ? <Spinner aria-label="Under way" className={icon} /> : <XIcon aria-label="Stopped" className={icon} />;
+/**
+ * Thinking, open while it streams and folded once it is done, unless the person chose otherwise.
+ * Thinking with no text (a model that keeps it to itself) shows only while it is under way.
+ */
+function Reasoning({ part, live }: { part: ReasoningPart; live: boolean }) {
+  const running = live && part.state === "streaming";
+  const [open, setOpen] = useState<boolean>();
+  const title = (
+    <TraceLine status={running ? "running" : undefined} className="text-xs">
+      <TraceIcon>
+        <SparkleIcon aria-hidden="true" />
+      </TraceIcon>
+      <TraceTitle>{running ? "Thinking" : "Thought"}</TraceTitle>
+    </TraceLine>
+  );
+  if (!part.text) return running ? title : null;
+  return (
+    <TraceCollapsible open={open ?? running} onOpenChange={setOpen}>
+      <TraceCollapsibleTrigger>{title}</TraceCollapsibleTrigger>
+      <TraceCollapsibleContent className="text-xs whitespace-pre-wrap">{part.text}</TraceCollapsibleContent>
+    </TraceCollapsible>
+  );
 }
 
-/** A coding agent's step its checkout rule refused (`HarnessAgent`'s built-in tool, answered no). */
-const refused = (step: ToolPart) => step.approval?.approved === false;
+/** A step: done, under way or stopped as a line, and failed or refused with why, open beneath it. */
+function Step({ step, live }: { step: ToolPart; live: boolean }) {
+  const label = stepLabel(step);
+  const { word, status, icon, why } = stepState(step, live);
+  const line = (
+    <TraceLine status={status} className="text-xs">
+      <TraceIcon>{icon}</TraceIcon>
+      <TraceTitle title={label}>
+        <span className="sr-only">{word}: </span>
+        {label}
+      </TraceTitle>
+    </TraceLine>
+  );
+  if (!why) return line;
+  return (
+    <TraceCollapsible defaultOpen>
+      <TraceCollapsibleTrigger>{line}</TraceCollapsibleTrigger>
+      <TraceCollapsibleContent className="text-xs">
+        {status === "error" ? (
+          <CodeBlock size="sm" variant="destructive">
+            <CodeBlockContent wrap className="max-h-64">
+              {why}
+            </CodeBlockContent>
+          </CodeBlock>
+        ) : (
+          why
+        )}
+      </TraceCollapsibleContent>
+    </TraceCollapsible>
+  );
+}
+
+/**
+ * A step's state: in a word for a screen reader (the trace's icons are hidden from one), its line's
+ * status, its icon, and why when it failed or was refused (a coding agent's step its checkout rule
+ * answered no, `HarnessAgent`'s built-in tool).
+ */
+function stepState(step: ToolPart, live: boolean) {
+  const stopped = <XIcon aria-hidden="true" />;
+  if (step.state === "output-error") {
+    return { word: "Failed", status: "error" as const, icon: stopped, why: step.errorText };
+  }
+  if (step.approval?.approved === false) return { word: "Refused", icon: stopped, why: step.approval.reason };
+  if (step.state === "output-available" && !step.preliminary) {
+    return { word: "Done", icon: <CheckIcon aria-hidden="true" /> };
+  }
+  // A step that was under way when the turn stopped is neither: it stopped there.
+  if (!live) return { word: "Stopped", icon: stopped };
+  return { word: "Under way", status: "running" as const, icon: <Spinner aria-hidden="true" /> };
+}
 
 /** A step in words: what the tool did, from its input; a coding agent's by its tool's name and the file it names. */
 function stepLabel(step: ToolPart): string {
@@ -274,53 +360,6 @@ function SignInCardView({ card, chat, live }: { card: SignInCard; chat: string; 
           </p>
         )}
       </CardContent>
-    </Card>
-  );
-}
-
-/**
- * A held lookup: the Inbox's approval card while you may decide it, else who it waits for with a
- * link to the Inbox; once decided, its status.
- */
-function HeldCard({ runId }: { runId: string }) {
-  const { actor, groups } = useActor();
-  const { data: people } = useSuspenseQuery({ ...configQuery(), select: (config) => config.resources });
-  const { data } = useQuery(runQuery(runId));
-  if (!data) {
-    return (
-      <p className="flex items-center gap-2 text-muted-foreground">
-        <Spinner /> Asking for an approval…
-      </p>
-    );
-  }
-  const { run } = data;
-  const approval = pendingApprovals(data)[0] ?? data.approvals.at(-1);
-  if (!approval) return null;
-  const entry = { run, approval };
-  if (approval.status === "pending" && decidableBy(actor, groups, people)([entry]).length === 0) {
-    return (
-      <p className="text-muted-foreground">
-        Waiting for {approverLabel(approval.approver)}:{" "}
-        <Link to="/inbox" search={{ approval: approvalKey(entry) }} className="underline underline-offset-4">
-          in the Inbox
-        </Link>
-        .
-      </p>
-    );
-  }
-  return (
-    <Card size="sm" role="region" aria-label={approval.title}>
-      <CardHeader>
-        <CardHeading>{approval.title}</CardHeading>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
-        <ApprovalDetails run={run} approval={approval} showRun />
-      </CardContent>
-      {approval.status === "pending" && (
-        <CardFooter className="flex-wrap gap-2">
-          <ApprovalDecision run={run} approval={approval} />
-        </CardFooter>
-      )}
     </Card>
   );
 }
