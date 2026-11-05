@@ -419,13 +419,13 @@ async function runWorkflow(name: string, start: RunArgs | Date): Promise<unknown
   const state = current;
   const runId = DBOS.workflowID!;
   if (!state) throw new Error(`Run of "${name}" started with no worker running`);
+  // A stop's failure is not the run's outcome, but DBOS would record it as one, for good, while
+  // its pool is still open. A run's own cancellation it records nothing for: the next worker recovers it.
+  // A stopped worker's state stays current while DBOS shuts down.
+  if (state.stopped) throw new DBOSErrors.DBOSWorkflowCancelledError(runId);
   try {
-    // A stopped worker's state stays current while DBOS shuts down.
-    if (state.stopped) throw new Error(`Run of "${name}" started as its worker stopped`);
     return await state.deadlines.running(runId, () => runOn(state, name, start));
   } catch (err) {
-    // A stop's failure is not the run's outcome, but DBOS would record it as one, for good, while
-    // its pool is still open. A run's own cancellation it records nothing for: the next worker recovers it.
     if (state.stopped && isInfrastructureError(err, state)) throw new DBOSErrors.DBOSWorkflowCancelledError(runId);
     throw err;
   }
