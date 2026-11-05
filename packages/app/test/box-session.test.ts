@@ -3,29 +3,40 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { waitFor } from "@sanoma-ai/testing";
-import { afterAll, describe, expect, it } from "vitest";
-import { freePort, LocalSession } from "../src/steps/agent/local-session.ts";
+import { checkSandbox } from "@sanoma-ai/testing/sandbox";
+import { type Box, LOCAL_SANDBOX } from "@sanoma-ai/workflows";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { boxSession, homeOf } from "../src/steps/agent/box-session.ts";
+import { boxName } from "../src/steps/agent/checkout.ts";
+import { freePort, localBackend } from "../src/steps/agent/local-box.ts";
 
-// The local session `HarnessAgent` runs a coding agent in: its members on their own, no agent.
+// The local backend's boxes, and the session `HarnessAgent` runs a coding agent in over one: their
+// members on their own, no agent.
 
 const base = realpathSync(mkdtempSync(join(tmpdir(), "sanoma-session-")));
 const root = join(base, "draft");
-// The agents' state as `agentHome` lays it out: the session's home beside a person's own agents'
-// installs and each person's sign-ins.
+// The agents' state as `agentHome` lays it out: the boxes beside a person's own agents' installs
+// and each person's sign-ins.
 const agentHome = join(base, "agent-home");
-const home = join(agentHome, "harness");
+const boxes = localBackend(join(agentHome, "boxes"));
+const name = boxName("acme", "ada");
+const home = join(agentHome, "boxes", name);
 mkdirSync(join(root, "workflows"), { recursive: true });
 mkdirSync(join(root, ".git"));
 mkdirSync(join(root, "node_modules"));
-mkdirSync(home, { recursive: true });
 mkdirSync(join(agentHome, "people/ada"), { recursive: true });
 writeFileSync(join(agentHome, "people/ada/.credentials.json"), "{}");
 mkdirSync(join(agentHome, "acp/opencode/node_modules"), { recursive: true });
+mkdirSync(join(agentHome, "boxes/sanoma-acme-bob"), { recursive: true });
 execFileSync("ln", ["-s", tmpdir(), join(root, "out")]);
 
-const session = (id = "s1") => new LocalSession({ id, root, home, port: 4321 });
-
+let box: Box;
+beforeAll(async () => {
+  box = await boxes.open({ name, image: "", size: 0 });
+});
 afterAll(() => rmSync(base, { recursive: true, force: true }));
+
+const session = (id = "s1") => boxSession(box, { id, root, home, ports: [4321] });
 
 /** Whether a process `pid` is alive. */
 const alive = (pid: number) => {
@@ -37,7 +48,32 @@ const alive = (pid: number) => {
   }
 };
 
-describe("LocalSession", () => {
+describe("the local backend", () => {
+  it("passes the sandbox conformance kit", async () => {
+    const results = await checkSandbox({ backend: boxes, capabilities: LOCAL_SANDBOX, image: "", size: 0 });
+    expect(results).toEqual([
+      { name: "a box opens", ok: true },
+      { name: "stdout arrives before the command exits", ok: true },
+      { name: "stdin reaches cat", ok: true },
+      { name: "a written file reads back, and runs with its mode", ok: true },
+      { name: "a file and the home directory survive a stop and the next open", ok: true },
+      { name: "an exposed port answers from outside the box", ok: true },
+      { name: "a command killed mid-run exits non-zero", ok: true },
+      { name: "discard leaves the next open empty", ok: true },
+    ]);
+  });
+
+  it("names a box by the company and the person, escaped as a directory, and keeps it under its own directory", async () => {
+    expect(boxName("@acme", "Ada.Lovelace")).toBe("sanoma-%40acme-%41da%2E%4Covelace");
+    expect(boxName("acme-ada", "x")).not.toBe(boxName("acme", "ada-x"));
+    expect(await homeOf(box)).toBe(home);
+    for (const bad of ["../out", ".hidden", ""]) {
+      await expect(boxes.open({ name: bad, image: "", size: 0 }), bad).rejects.toThrow(/no box's name/);
+    }
+  });
+});
+
+describe("boxSession over a local box", () => {
   it("runs commands in bash, in the checkout, with its own environment and none of this process's", async () => {
     process.env.SANOMA_SESSION_SECRET = "from this process";
     try {
@@ -47,7 +83,7 @@ describe("LocalSession", () => {
       expect(cwd).toBe(root);
       const names = env
         .map((line) => line.split("=")[0])
-        .filter((name) => !["PWD", "SHLVL", "_", "OLDPWD"].includes(name!));
+        .filter((variable) => !["PWD", "SHLVL", "_", "OLDPWD"].includes(variable!));
       expect(names.toSorted()).toEqual([
         "COREPACK_ENABLE_DOWNLOAD_PROMPT",
         "COREPACK_HOME",
@@ -66,9 +102,10 @@ describe("LocalSession", () => {
   it("reaches its bridge on loopback, on the port it leases", async () => {
     const port = await freePort();
     expect(port).toBeGreaterThan(0);
-    const local = new LocalSession({ id: "p", root, home, port });
+    const local = boxSession(box, { id: "p", root, home, ports: [port] });
     expect(local.ports).toEqual([port]);
     expect(await local.getPortEndpoint({ port, protocol: "ws" })).toEqual({ url: `ws://127.0.0.1:${port}` });
+    expect(await local.getPortEndpoint({ port })).toEqual({ url: `http://127.0.0.1:${port}` });
   });
 
   it("confines its files to the checkout by the checkout rule, and to its home", async () => {
@@ -99,18 +136,19 @@ describe("LocalSession", () => {
     expect(existsSync(join(base, "outside.txt"))).toBe(false);
   });
 
-  it("never reaches a person's own-agent sign-ins or the own agents' installs beside its home", async () => {
+  it("never reaches another person's box, a person's own-agent sign-ins or the own agents' installs beside its home", async () => {
     const local = session();
     // A link in its home leads nowhere else.
     execFileSync("ln", ["-s", join(agentHome, "people/ada"), join(home, "ada")]);
     for (const path of [
       join(agentHome, "people/ada/.credentials.json"),
-      join(home, "../people/ada/.credentials.json"),
+      join(home, "../../people/ada/.credentials.json"),
       join(home, "ada/.credentials.json"),
+      join(home, "../sanoma-acme-bob/.ai-sdk-harness/x.json"),
     ]) {
       await expect(local.readTextFile({ path }), path).rejects.toThrow(/outside the checkout/);
     }
-    for (const path of [join(agentHome, "acp/opencode/node_modules/x.js"), join(home, "../acp/shims/gh")]) {
+    for (const path of [join(agentHome, "acp/opencode/node_modules/x.js"), join(home, "../../acp/shims/gh")]) {
       await expect(local.writeTextFile({ path, content: "no" }), path).rejects.toThrow(/outside the checkout/);
     }
     expect(existsSync(join(agentHome, "acp/opencode/node_modules/x.js"))).toBe(false);

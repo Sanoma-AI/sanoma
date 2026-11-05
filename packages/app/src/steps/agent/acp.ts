@@ -6,8 +6,17 @@ import type { Principal } from "@sanoma-ai/workflows";
 import { AGENTS as AGENTS_GROUP, errorMessage, isVisitor } from "@sanoma-ai/workflows/shared";
 import { createUIMessageStream, generateId, type UIMessageStreamWriter } from "ai";
 import { type ChatMessage, pathOf, type SignInCard, textOf } from "../../lib/chat.ts";
-import { agentHome, allowedPath, commitTurn, mustAllow, NO_SHELL, openDraft, outsideCheckout } from "./checkout.ts";
-import { Command, type Exit, exitText, sessionEnv } from "./local-session.ts";
+import {
+  agentHome,
+  allowedPath,
+  commitTurn,
+  mustAllow,
+  NO_SHELL,
+  openDraft,
+  outsideCheckout,
+  personDir,
+} from "./checkout.ts";
+import { Command, type Exit, exitText, sessionEnv } from "./local-box.ts";
 import { harnessInstructions } from "./prompt.ts";
 import type { Engine, EngineTurn } from "./transcript.ts";
 
@@ -645,13 +654,6 @@ const tail = (output: string) => {
   const last = stripVTControlCharacters(output).trim().split("\n").at(-1)?.slice(0, 300);
   return last ? `: ${last}` : "";
 };
-
-/**
- * A person's id as a directory name: never `.`, `..` or a path, and capitals escaped, so ids that
- * differ only in case never share a HOME on a case-insensitive file system (macOS's default).
- */
-const personDir = (id: string) =>
-  encodeURIComponent(id).replaceAll(/[.A-Z]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
 
 const quote = (word: string) => (/^[\w./=:-]+$/.test(word) ? word : `'${word.replaceAll("'", `'\\''`)}'`);
 

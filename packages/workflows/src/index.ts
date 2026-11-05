@@ -252,6 +252,16 @@ export {
   databaseUrlSecret,
   storeDatabaseUrl,
 } from "./database.ts";
+export {
+  type Box,
+  type Process,
+  type SandboxBackend,
+  type SandboxCapabilities,
+  type SandboxContext,
+  type SandboxOutputs,
+  type SandboxSpec,
+} from "./sandbox-contract.ts";
+export { groupAlive, killGroup, LOCAL_SANDBOX, localBackend } from "./local-sandbox.ts";
 export type { Chat, Chats } from "./chats.ts";
 export type { Tokens } from "./tokens.ts";
 export { type InviteRequest, openInvite, sealInvite, sealLoginCode } from "./seal.ts";
