@@ -14,7 +14,8 @@ Feature: Cloudflare containers and alarms
           "source": "https://github.com/acme/company.git",
           "ref": "main",
           "revision": "abc123",
-          "port": 3000
+          "port": 3000,
+          "secrets": { "SANOMA_DATABASE_URL": "postgresql://sanoma:test@db.acme.example:5432/company" }
         }
       }
       """
@@ -56,7 +57,10 @@ Feature: Cloudflare containers and alarms
           "ref": "main",
           "revision": "abc123",
           "port": 3000,
-          "secrets": { "SANOMA_WAKEUP_TOKEN": { "$secret": "SANOMA_WAKEUP_TOKEN" } }
+          "secrets": {
+            "SANOMA_WAKEUP_TOKEN": { "$secret": "SANOMA_WAKEUP_TOKEN" },
+            "SANOMA_DATABASE_URL": "postgresql://sanoma:test@db.acme.example:5432/company"
+          }
         }
       }
       """

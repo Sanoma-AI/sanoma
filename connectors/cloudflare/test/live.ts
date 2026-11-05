@@ -22,7 +22,7 @@ import { mintInstanceToken } from "@sanoma-ai/workflows/wakeup-service";
 import { alarm, container } from "../src/connector.ts";
 import { cloudflareDriver } from "../src/driver.ts";
 import { cloudflare } from "../src/index.ts";
-import { HEALTH_PATH, INACTIVITY_MS } from "../src/worker.ts";
+import { HEALTH_PATH, INACTIVITY_MS } from "../worker/instance.js";
 
 const NEEDS = [
   "CLOUDFLARE_API_TOKEN",
@@ -199,7 +199,7 @@ try {
 
   await quiet();
   const begun = Date.now();
-  const res = await fetch(`${url}${HEALTH_PATH}?start=1`);
+  const res = await fetch(`${url}${HEALTH_PATH}?start=1`, { headers: { authorization: `Bearer ${token}` } });
   console.log(`cold wake: ${HEALTH_PATH} answered ${res.status} after ${((Date.now() - begun) / 1000).toFixed(1)} s`);
 } finally {
   if (url) await op("alarm.delete", { id: url }).catch((error) => console.error(`alarm.delete: ${error}`));

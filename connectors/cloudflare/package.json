@@ -68,6 +68,7 @@
     "srvx": "^0.11.22"
   },
   "devDependencies": {
+    "@sanoma-ai/app": "workspace:*",
     "@sanoma-ai/testing": "workspace:*",
     "@sanoma-ai/workflows": "workspace:*",
     "msw": "^3.0.3",

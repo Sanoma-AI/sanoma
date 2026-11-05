@@ -154,10 +154,10 @@ async function made(config: SanomaConfig, resolved: ResolvedConfig, options: Sna
 }
 
 /** A config with no root's part of the snapshot: no files, so no policies or people. */
-const rootless = ({ appName, version, changeCode }: ResolvedConfig) => ({
+const rootless = ({ appName, version, builtInCodes }: ResolvedConfig) => ({
   appName,
   version,
-  changeCode,
+  builtInCodes,
   policies: [],
   people: { people: [], problems: [] },
 });

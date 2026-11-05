@@ -1,30 +1,43 @@
-// The company's Durable Object, `SanomaInstance`, without the platform: `index.js` extends
-// `DurableObject` from `cloudflare:workers` with it, and the connector's fake runs it in Node over
-// a stubbed `ctx`, so both kits check this code. No imports, so Node loads it as it is.
+// The company's Worker script without the platform: its fetch handler (`serve`) and its Durable
+// Object (`Instance`). `index.js` binds them to `cloudflare:workers` and to the app bundle the
+// deploy uploaded under `app/`; the connector's fake runs this file in Node over a stubbed `ctx`,
+// so both kits check the code Cloudflare runs. No imports, so Node loads it as it is.
 //
-// The object runs the company's container (`ctx.container`): it starts it on a request, at the
-// Worker's `SANOMA_REVISION` and the image its upload names (`ctx.container.images.runtime`, as
-// the `durable_object` scheduling policy has it: the object says what runs), a running one at
-// another destroyed and started again (a deploy); it waits for `/healthz`, and proxies every
-// request to it. It answers `/__sanoma/health` without starting it (with `?start=1`, once it
-// runs), and holds the company's one wake (`/__sanoma/wake`) as an alarm, which starts the
-// container at `at` and calls its `/wake`. `startNow`, which the sites router calls over RPC
-// when a page on the Worker queued a run, starts the container from an alarm too, without the
-// caller waiting for it, and calls its `/wake`: a worker that stopped itself runs the queued run.
+// The Worker script is the app: every request but the object's own routes and `/wake` goes to the
+// app bundle's fetch, with the visitor's address from `cf-connecting-ip` and the object's
+// `startNow` as its host. The object runs the company's worker in its container (`ctx.container`),
+// never a visitor's request: it starts it at the Worker's `SANOMA_REVISION` and the image its upload
+// names (`ctx.container.images.runtime`, as the `durable_object` scheduling policy has it), drains
+// and replaces one running at another (a deploy's restart), holds the company's one wake as an
+// alarm, and answers three routes: its health, its wake, and the app bundle the worker builds,
+// pulled from the container's port with the instance token.
 
-/** The object's own route: the wake it holds. */
+/** The object's route that holds the company's wake, with the instance token. */
 export const WAKE_PATH = "/__sanoma/wake";
-/** The object's route that answers `{ revision, running }`; with `?start=1`, once the container answers `/healthz`: what a deploy waits for. */
+/** The object's route that answers what the Worker runs; with `?start=1` and the instance token, it starts the container at it. */
 export const HEALTH_PATH = "/__sanoma/health";
-/** How long the container keeps running after the last request: Cloudflare stops it then. */
+/** The worker port's route of the app bundle at `?revision=`, which the object passes on with the instance token (`APP_BUNDLE_PATH` in `@sanoma-ai/workflows/shared`). */
+export const APP_BUNDLE_PATH = "/__sanoma/app-bundle";
+/** The Host contract's wake: the Worker has the worker started now (a wakeup's `GET {url}/wake`). */
+const HOST_WAKE_PATH = "/wake";
+/** The header the app reads the visitor's address from (`CLIENT_IP_HEADER` in `@sanoma-ai/workflows`). */
+export const CLIENT_IP_HEADER = "x-sanoma-client-ip";
+/** How long the container keeps running after the object's last request: Cloudflare stops it then. */
 export const INACTIVITY_MS = 10 * 60 * 1000;
-/** How long a start may take to answer `/healthz`: a cold start clones the source and installs it. */
+/** The binding that names the object, in the Worker's env. */
+export const NAMESPACE = "SANOMA_INSTANCE";
+/** The name the upload gives the runtime image (`containers[].images`), which the object starts. */
+export const IMAGE = "runtime";
+/** How long a start may take to answer `/healthz`: the image pulled, the source cloned and installed. */
 const START_TIMEOUT_MS = 10 * 60 * 1000;
+/** How long a drained worker has to stop on its own before its container is destroyed. */
+const DRAIN_MS = 30 * 1000;
+/** SIGTERM: the worker's own stop (it stops dequeuing, closes and exits). */
+const SIGTERM = 15;
 /** How long one try of a starting container's `/healthz` may take. */
 const TRY_MS = 5_000;
-/** How long between two tries of a starting container's `/healthz`. */
+/** How long between two tries of a starting container's `/healthz`, doubling to `MAX_POLL_MS`. */
 const POLL_MS = 250;
-/** The longest wait between two tries. */
 const MAX_POLL_MS = 1_000;
 /** Where the wake is kept, in the object's storage. */
 const WAKE_KEY = "wake";
@@ -35,10 +48,6 @@ const START_KEY = "start";
  * held for later is set again: Cloudflare retries an alarm that throws up to six times, then drops it.
  */
 const START_RETRIES = 5;
-/** The binding that names the object, in the Worker's env. */
-export const NAMESPACE = "SANOMA_INSTANCE";
-/** The name the upload gives the runtime image (`containers[].images`), which the object starts. */
-export const IMAGE = "runtime";
 /** The container's size, one of the named types `start` takes: ½ vCPU, 4 GiB (`basic`, ¼ vCPU, is refused under this policy). */
 const INSTANCE_TYPE = "standard-1";
 
@@ -53,9 +62,9 @@ function containerEnv(env) {
   return Object.fromEntries(Object.entries(env).filter(([, value]) => typeof value === "string"));
 }
 
-/** The label naming an image (or the sites' domains): a digest of it, as a label holds 64 bytes and a pinned image is longer. */
-export async function imageLabel(image) {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(image));
+/** A label of a value too long for one (a label holds 64 bytes; a pinned image is longer): a digest of it. */
+export async function digestLabel(value) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return [...new Uint8Array(digest).slice(0, 8)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
@@ -75,7 +84,7 @@ function parseRegistration(body) {
 }
 
 export class Instance {
-  /** The start in progress, which every request waits on. */
+  /** The start in progress, which every caller waits on. */
   #starting;
   /** True once a container this object started (or found) answered `/healthz`. */
   #ready = false;
@@ -98,46 +107,59 @@ export class Instance {
     return Number(this.env.PORT);
   }
 
+  /** The object's routes; never a visitor's request, which the app answers on the Worker. */
   async fetch(request) {
     const url = new URL(request.url);
     if (url.pathname === WAKE_PATH) return this.wake(request);
-    const health = url.pathname === HEALTH_PATH;
-    // A read asks without starting the container: a stopped host is a healthy one.
-    if (health && !url.searchParams.has("start")) return this.health();
-    try {
-      await this.ensureRunning();
-    } catch (error) {
-      return problem(503, `the company's container did not start: ${error?.message ?? error}`, this.#exit);
+    if (url.pathname === HEALTH_PATH && !url.searchParams.has("start")) return this.health(200);
+    if (url.pathname !== HEALTH_PATH && url.pathname !== APP_BUNDLE_PATH) {
+      return problem(404, `the object answers ${WAKE_PATH}, ${HEALTH_PATH} and ${APP_BUNDLE_PATH} alone`);
     }
-    if (health) return this.health();
-    const headers = new Headers(request.headers);
-    // The port's fetch reaches the container whatever the URL's host, which becomes the request's
-    // Host header: the one asked for, so the company serves the public site declared on it.
-    headers.set("x-forwarded-proto", url.protocol.slice(0, -1));
-    const body = request.method === "GET" || request.method === "HEAD" ? undefined : request.body;
-    const forwarded = new Request(new URL(url.pathname + url.search, `http://${url.host}`), {
-      method: request.method,
-      headers,
-      body,
-      redirect: "manual",
-      ...(body && { duplex: "half" }),
-    });
+    const refused = this.#refuse(request);
+    if (refused) return refused;
+    // A container that started and ended is the answer: asking again would only start it again.
+    // Told once: the next ask starts it again.
+    const exit = this.#starting ? undefined : this.#exit;
+    if (exit) {
+      this.#exit = undefined;
+      return problem(503, `the company's container did not start: ${exit}`, exit);
+    }
+    if (!this.#ready || !this.ctx.container.running) {
+      // Started from an alarm, which outlives this request (the caller may be the worker this
+      // start drains): the caller asks again until it is ready. One already under way is not asked again.
+      if (!this.#starting) await this.startNow();
+      return url.pathname === HEALTH_PATH ? this.health(202) : json(202, { starting: true });
+    }
+    if (url.pathname === HEALTH_PATH) return this.health(200);
+    // The worker builds the bundle at the revision asked for, in a checkout of its own.
     try {
-      return await this.ctx.container.getTcpPort(this.port).fetch(forwarded);
+      return await this.ctx.container.getTcpPort(this.port).fetch(`http://container${url.pathname}${url.search}`, {
+        headers: { authorization: `Bearer ${this.env.SANOMA_WAKEUP_TOKEN}` },
+      });
     } catch (error) {
-      // Stopped since it started (it crashed, or Cloudflare stopped it): the next request starts it again.
+      // Stopped since it answered (Cloudflare's own stop, a crash): the next ask starts it again.
       this.#ready = false;
       return problem(503, `the company's container did not answer: ${error?.message ?? error}`);
     }
   }
 
-  /** What the Worker runs, and whether its container does. */
-  health() {
-    return json(200, {
+  /** Why a request without the company's instance token is refused, if it is. */
+  #refuse(request) {
+    const token = this.env.SANOMA_WAKEUP_TOKEN;
+    if (!token) return problem(404, "no instance token here: SANOMA_WAKEUP_TOKEN is not among the host's secrets");
+    if (!sameToken(request.headers.get("authorization") ?? "", `Bearer ${token}`)) {
+      return problem(401, "the token is not this host's SANOMA_WAKEUP_TOKEN");
+    }
+    return undefined;
+  }
+
+  /** What the Worker runs, and whether its container does and answered at it. */
+  health(status) {
+    return json(status, {
       revision: this.env.SANOMA_REVISION ?? "",
       ...(this.env.SANOMA_CONFIG_REVISION && { configurationRevision: this.env.SANOMA_CONFIG_REVISION }),
       running: this.ctx.container.running,
-      ready: this.#ready,
+      ready: this.#ready && this.ctx.container.running,
       ...(this.#last !== undefined && !this.#ready && { last: this.#last }),
       ...(this.#exit !== undefined && { exit: this.#exit }),
     });
@@ -159,10 +181,10 @@ export class Instance {
     if (!image) throw new Error(`the Worker names no "${IMAGE}" image among its containers' images`);
     const labels = {
       revision: this.env.SANOMA_REVISION ?? "",
-      image: await imageLabel(image),
+      image: await digestLabel(image),
       ...(this.env.SANOMA_CONFIG_REVISION && { configuration: this.env.SANOMA_CONFIG_REVISION }),
-      // The sites' domains, which its environment and the sites bundle it built name.
-      ...(this.env.SANOMA_DOMAINS && { domains: await imageLabel(this.env.SANOMA_DOMAINS) }),
+      // The sites' domains, which the worker's environment, and the bundles it builds, name.
+      ...(this.env.SANOMA_DOMAINS && { domains: await digestLabel(this.env.SANOMA_DOMAINS) }),
     };
     const until = Date.now() + START_TIMEOUT_MS;
     let last;
@@ -183,7 +205,8 @@ export class Instance {
       }
       try {
         if (!checked && container.running) {
-          // One running from before: kept only if it says it started at these (a deploy otherwise).
+          // One running from before: kept only if it says it started at these; else the deploy's
+          // restart, its worker drained first, so it stops dequeuing before its container goes.
           const info = await container.inspect();
           const same =
             info &&
@@ -191,7 +214,7 @@ export class Instance {
             (info.labels?.image ?? "") === labels.image &&
             (info.labels?.configuration ?? "") === (labels.configuration ?? "") &&
             (info.labels?.domains ?? "") === (labels.domains ?? "");
-          if (!same) await container.destroy("a new revision, image, configuration or domains");
+          if (!same) await this.#replace(container);
         }
         checked = true;
         if (!container.running) {
@@ -206,7 +229,7 @@ export class Instance {
           // that exits, is what `monitor` tells, and the next try reports it. Only this start's, and
           // only until it answered: an earlier container's monitor may settle after this one started,
           // and one that answered and then stopped (Cloudflare's own stop, a crash) is started again
-          // by the next request, not reported as a start that failed.
+          // by the next ask, not reported as a start that failed.
           this.#exit = undefined;
           const started = (this.#started = {});
           const ended = (how) => void (this.#started === started && !this.#ready && (this.#exit = how));
@@ -215,7 +238,7 @@ export class Instance {
             (error) => ended(`the container failed: ${error?.message ?? error}`),
           );
         }
-        // A try of its own time: a hung one would hold every request past the deadline.
+        // A try of its own time: a hung one would hold every caller past the deadline.
         const res = await container
           .getTcpPort(this.port)
           .fetch("http://container/healthz", { signal: AbortSignal.timeout(TRY_MS) });
@@ -235,16 +258,23 @@ export class Instance {
       wait = Math.min(wait * 2, MAX_POLL_MS);
     }
     const ended = this.#exit ? `; ${this.#exit}` : "";
-    throw new Error(`no answer from /healthz on port ${this.port} in ${START_TIMEOUT_MS / 1000} s (${last}${ended})`);
+    throw new Error(
+      `still starting after ${START_TIMEOUT_MS / 1000} s: no answer from /healthz on port ${this.port} (${last}${ended})`,
+    );
+  }
+
+  /** Drains the running container's worker (SIGTERM: its own stop), then destroys what is left of it. */
+  async #replace(container) {
+    container.signal(SIGTERM);
+    const until = Date.now() + DRAIN_MS;
+    while (container.running && Date.now() < until) await sleep(POLL_MS);
+    if (container.running) await container.destroy("a new revision, image, configuration or domains");
   }
 
   /** `/__sanoma/wake`, with the company's `SANOMA_WAKEUP_TOKEN`: the wake this object holds. */
   async wake(request) {
-    const token = this.env.SANOMA_WAKEUP_TOKEN;
-    if (!token) return problem(404, "no wakeup here: SANOMA_WAKEUP_TOKEN is not among the host's secrets");
-    if (!sameToken(request.headers.get("authorization") ?? "", `Bearer ${token}`)) {
-      return problem(401, "the token is not this host's SANOMA_WAKEUP_TOKEN");
-    }
+    const refused = this.#refuse(request);
+    if (refused) return refused;
     const storage = this.ctx.storage;
     if (request.method === "GET") return json(200, (await storage.get(WAKE_KEY)) ?? { at: null });
     // A start `startNow` asked for keeps its alarm, which sets the wake's once it rang.
@@ -266,8 +296,9 @@ export class Instance {
 
   /**
    * Starts the container soon and sends it `/wake`, without waiting for it: a run was queued for
-   * it (the sites router's call, over RPC, once a page on the Worker started one). An alarm now,
-   * which outlives the request that asked, makes the start; a wake held for later is set again once it is made.
+   * it (the app's call over RPC), a wake came, or a deploy asks for its bundle or its restart. An
+   * alarm now, which outlives the request that asked, makes the start; a wake held for later is set
+   * again once it is made.
    */
   async startNow() {
     const storage = this.ctx.storage;
@@ -277,8 +308,9 @@ export class Instance {
 
   /**
    * A start `startNow` asked for, then the wake if it is due: start the container and send it
-   * `/wake` (once for both), then note when the wake rang. A wake not due yet is set again. A throw makes Cloudflare retry the
-   * alarm; a start that still fails after `START_RETRIES` is given up, the wake kept.
+   * `/wake` (once for both), then note when the wake rang. A wake not due yet is set again. A throw
+   * makes Cloudflare retry the alarm; a start that still fails after `START_RETRIES` is given up,
+   * the wake kept.
    */
   async alarm(info) {
     const storage = this.ctx.storage;
@@ -299,13 +331,13 @@ export class Instance {
     if (at > Date.now()) return storage.setAlarm(at);
     if (!woke) await this.#wakeContainer();
     // When it rang, which a GET shows: unless another wake replaced it meanwhile.
-    const held = await this.ctx.storage.get(WAKE_KEY);
-    if (held?.at === wake.at) await this.ctx.storage.put(WAKE_KEY, { ...held, rang: new Date().toISOString() });
+    const held = await storage.get(WAKE_KEY);
+    if (held?.at === wake.at) await storage.put(WAKE_KEY, { ...held, rang: new Date().toISOString() });
   }
 
   /**
    * Starts the container unless it runs, then sends it `/wake`: a container that is up may hold a
-   * worker that stopped itself, which only a wake (or a write through its app) starts again.
+   * worker that stopped itself, which only a wake starts again.
    */
   async #wakeContainer() {
     await this.ensureRunning();
@@ -324,10 +356,28 @@ async function alarmBy(storage, at) {
   if (set === null || set > at) await storage.setAlarm(at);
 }
 
-/** The Worker's one object, which every request and the sites router's `startNow` go to. */
-export const instanceOf = (env) => env[NAMESPACE].getByName("instance");
+/** The Worker's one object. */
+const instanceOf = (env) => env[NAMESPACE].getByName("instance");
 
-/** The Worker's default export: every request goes to the one object. */
-export const worker = {
-  fetch: (request, env) => instanceOf(env).fetch(request),
-};
+/**
+ * The Worker script's fetch: the object's routes to the object, the Host contract's `/wake` as a
+ * start now, and everything else to the app bundle (`loadApp`, imported on the first request, so
+ * the object's isolate never evaluates it), its visitor's address set from Cloudflare's
+ * `cf-connecting-ip`, a client's own copy overwritten: the one trust decision the app relies on.
+ */
+export async function serve(request, env, ctx, loadApp) {
+  const url = new URL(request.url);
+  const object = instanceOf(env);
+  if (url.pathname === WAKE_PATH || url.pathname === HEALTH_PATH || url.pathname === APP_BUNDLE_PATH) {
+    return object.fetch(request);
+  }
+  if (url.pathname === HOST_WAKE_PATH && request.method === "GET") {
+    await object.startNow();
+    return new Response(null, { status: 204, headers: { "cache-control": "no-store" } });
+  }
+  const headers = new Headers(request.headers);
+  headers.set(CLIENT_IP_HEADER, request.headers.get("cf-connecting-ip") ?? "");
+  const { default: app } = await loadApp();
+  // The object's stub is the app's host: its `startNow` over RPC.
+  return app.fetch(new Request(request, { headers }), env, ctx, object);
+}

@@ -77,7 +77,7 @@ import { runtimeDriver, sandboxRuntimeDriver, sanoma } from "./runtime-ops.ts";
 import { tokenStore } from "./tokens.ts";
 import type { Steps } from "./steps.ts";
 import { checkSchedule } from "./schedules.ts";
-import { changeCodeOf, computeVersion } from "./version.ts";
+import { builtInCodeOf, computeVersion } from "./version.ts";
 import { type DeclaredResource, readPeople, type ResourceProblem } from "./resources.ts";
 import { checkWakeupOps, type DeclaredWakeup, type EnvWakeup, HOST_URL } from "./wakeup.ts";
 import { instanceUrl, WAKEUP_TOKEN } from "./wakeup-service.ts";
@@ -184,8 +184,11 @@ export interface ResolvedConfig {
   databaseUrl: string;
   /** The DBOS application version: `<appName>@<DBOS__APPVERSION, or a hash of the workflows>`. */
   version: string;
-  /** The hash of the built-in change workflow's own code (`changeCodeOf`), which each change run carries. */
-  changeCode: string;
+  /**
+   * Each built-in workflow's code hash (`builtInCodeOf`), by its name, which each of its runs carries:
+   * a worker on another version of the app takes over a run whose code is its own (`carryBuiltInRuns`).
+   */
+  builtInCodes: Readonly<Record<string, string>>;
   /** The DBOS queue runs are started on: `sanoma:<appName>`. */
   queueName: string;
   /** The config's `login`, checked (`checkLogin`); the built-in `login-code` workflow sends through its `sender`, from its `from`. */
@@ -461,7 +464,11 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
     // The built-in's code and operations are part of the app's version, like the config's own. A
     // bundle's code is not the source's: it carries the hashes of the root it was read from.
     version: bundled?.version ?? computeVersion({ appName, workflows: [...names.values()] }),
-    changeCode: bundled?.changeCode ?? changeCodeOf(names.get(CHANGE_WORKFLOW)!),
+    builtInCodes:
+      bundled?.builtInCodes ??
+      Object.fromEntries(
+        [...names.values()].filter((wf) => BUILT_IN_WORKFLOWS.has(wf.name)).map((wf) => [wf.name, builtInCodeOf(wf)]),
+      ),
     queueName: `sanoma:${appName}`,
     ...(login && { login }),
     ops,
@@ -629,8 +636,8 @@ function makersOf<K extends keyof ConnectorSetup>(
 export function readRootSnapshot(config: SanomaConfig, resolved: ResolvedConfig = resolveConfig(config)): RootSnapshot {
   const root = rootOf(config);
   if (root === undefined) throw new Error("A config with no root has no files to carry");
-  const { appName, version, changeCode } = resolved;
-  return { appName, version, changeCode, policies: readPolicyFiles(root), people: readPeople(root) };
+  const { appName, version, builtInCodes } = resolved;
+  return { appName, version, builtInCodes, policies: readPolicyFiles(root), people: readPeople(root) };
 }
 
 /**

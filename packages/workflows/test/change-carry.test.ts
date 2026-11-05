@@ -19,9 +19,9 @@ import {
 import { fakeRemote, memorySource } from "./fakes/remote.ts";
 import { freshDatabase, pending, rootWith, waitFor } from "./harness.ts";
 
-// Needs Postgres: `pnpm db:up`. A change run outlives the restart its own deploy causes: a worker
-// on new company code (another version of the app) takes over the change runs whose change code
-// is its own, keeping their ids, histories and unread messages; nothing else moves.
+// Needs Postgres: `pnpm db:up`. A built-in run outlives the restart its own deploy causes: a worker
+// on new company code (another version of the app) takes over the built-in runs (a change run
+// here) whose code is its own, keeping their ids, histories and unread messages; nothing else moves.
 
 const here = dirname(fileURLToPath(import.meta.url));
 const PEOPLE = `import { sanoma } from "sanoma/resources";
@@ -54,7 +54,7 @@ function carriedLines() {
   return () => spy.mock.calls.map(([m]) => String(m)).filter((m) => m.startsWith("sanoma: carried"));
 }
 
-describe("carrying change runs onto a new version", () => {
+describe("carrying built-in runs onto a new version", () => {
   const databaseUrl = freshDatabase("change-carry");
   const root = rootWith({ "resources/people.ts": PEOPLE });
   const remote = fakeRemote();
@@ -101,10 +101,12 @@ describe("carrying change runs onto a new version", () => {
   const row = (runId: string) => raw.getWorkflow(runId);
   const open = async (id: string) => client.openChange({ id, title: `Change ${id}` }, { startedBy: "alice" });
 
-  it("keeps the change code apart from the company's workflows", () => {
+  it("keeps each built-in workflow's code apart from the company's workflows", () => {
     expect(one.version).not.toBe(two.version);
-    expect(one.changeCode).toBe(two.changeCode);
-    expect(one.changeCode).toMatch(/^[0-9a-f]{64}$/);
+    expect(one.builtInCodes).toEqual(two.builtInCodes);
+    expect(one.builtInCodes.change).toMatch(/^[0-9a-f]{64}$/);
+    // Only the built-ins: none of the company's workflows has a code of its own to be carried by.
+    expect(Object.keys(two.builtInCodes)).not.toContain("added");
   });
 
   it("carries a change run waiting at Publish onto a worker on new company code, which finishes it", async () => {
@@ -118,7 +120,7 @@ describe("carrying change runs onto a new version", () => {
     expect(await row(runId)).toMatchObject({
       status: "PENDING",
       applicationVersion: one.version,
-      attributes: { changeCode: one.changeCode },
+      attributes: { builtInCode: one.builtInCodes.change },
     });
     await stop(worker);
 
@@ -131,7 +133,7 @@ describe("carrying change runs onto a new version", () => {
     const carried = carriedLines();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     await start(v2, { logLevel: "info" });
-    expect(carried()).toEqual([`sanoma: carried 1 change run(s) onto version ${two.version}: ${runId}`]);
+    expect(carried()).toEqual([`sanoma: carried 1 built-in run(s) onto version ${two.version}: ${runId}`]);
     expect(await client.result(runId)).toMatchObject({ outcome: "merged", head });
     expect(await row(runId)).toMatchObject({ status: "SUCCESS", applicationVersion: two.version });
     expect(remote.merges).toHaveLength(1);
@@ -140,7 +142,7 @@ describe("carrying change runs onto a new version", () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining(company));
   });
 
-  it("leaves a change run whose change code differs, and warns about it", async () => {
+  it("leaves a change run whose code differs, and warns about it", async () => {
     repo.edit("other", { "notes/other.md": "\n" });
     const worker = await start(v1);
     const runId = await open("other");
@@ -151,7 +153,7 @@ describe("carrying change runs onto a new version", () => {
     const db = new Pool({ connectionString: databaseUrl });
     try {
       await databaseOn(db).execute(
-        sql`UPDATE dbos.workflow_status SET attributes = attributes || '{"changeCode":"other"}' WHERE workflow_uuid = ${runId}`,
+        sql`UPDATE dbos.workflow_status SET attributes = attributes || '{"builtInCode":"other"}' WHERE workflow_uuid = ${runId}`,
       );
     } finally {
       await db.end();
