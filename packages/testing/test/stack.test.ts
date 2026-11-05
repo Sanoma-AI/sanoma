@@ -54,7 +54,7 @@ describe("scale to zero, the stack on fakes", () => {
     databaseUrl,
   };
   // Idle once nothing is due within a second, looked at four times a second: the schedule's next
-  // tick is never more than a minute away, the default horizon. Every worker's stop, in order.
+  // tick is never more than ten seconds away, within the default horizon. Every worker's stop, in order.
   const stops: SelfStop[] = [];
   const options = { idleHorizonMs: 1_000, stopCheckMs: 250, onStopped: (s: SelfStop) => stops.push(s) };
   const host = fakeHost(inProcessHost(config, databaseUrl, options), { lifetime: "stops-when-quiet" });

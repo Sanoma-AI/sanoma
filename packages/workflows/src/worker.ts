@@ -245,7 +245,9 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     }
     // Built-in runs move to the latest version only: a rollback's worker, unless promoted, leaves them be.
     if (isLatest) await carryBuiltInRuns(resolved, () => secrets.db());
-    await DBOS.registerQueue(resolved.queueName);
+    // How often it looks for queued runs: DBOS's default second, unless a test suite asks for less.
+    const pollMs = process.env.SANOMA_QUEUE_POLL_MS;
+    await DBOS.registerQueue(resolved.queueName, pollMs ? { minPollingIntervalMs: Number(pollMs) } : undefined);
     // The schedules are the latest version's: an older worker leaves them as the newer set them.
     if (isLatest && options.schedules !== false) {
       await applyScheduled(resolved, registered, () => secrets.db());

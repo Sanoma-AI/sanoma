@@ -61,7 +61,7 @@ const config: SanomaConfig = {
   collections: [outbound],
   root,
 };
-const testApp = useTestApp(config, { databaseUrl: testDatabaseUrl("data") });
+const testApp = useTestApp(config, { databaseUrl: testDatabaseUrl("app_data") });
 let app: App;
 
 beforeAll(async () => {

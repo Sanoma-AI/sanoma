@@ -44,13 +44,16 @@ export default defineConfig({
     include: ["packages/*/test/**/*.test.ts", "connectors/*/test/**/*.test.ts", "scripts/*.test.ts"],
     testTimeout: 60_000,
     hookTimeout: 60_000,
-    fileParallelism: false,
+    // Four files at once peak near 60 connections, within the 100 a default Postgres takes.
+    maxWorkers: 4,
     // Every spy is undone before the next test, so a test needs no try/finally to put one back.
     restoreMocks: true,
     // The key stored credentials are encrypted with: made up for each run.
     env: {
       SANOMA_SECRETS_KEY: randomBytes(32).toString("base64"),
       SANOMA_SIGNING_KEY: randomBytes(32).toString("base64"),
+      // A queued run starts within 50 ms, not DBOS's second, which the tests would otherwise wait out.
+      SANOMA_QUEUE_POLL_MS: "50",
     },
   },
 });
