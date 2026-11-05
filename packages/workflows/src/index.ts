@@ -94,6 +94,20 @@ export {
 } from "./apply.ts";
 export { CALL_WORKFLOW, CallInput } from "./call-workflow.ts";
 export {
+  AdoptInput,
+  type AppStepContext,
+  type AppSteps,
+  ConnectExistingInput,
+  type ConnectExistingOutput,
+  GoLiveHostInput,
+  GoLiveInput,
+  type GoLiveOutput,
+  PatchInput,
+  type PatchOutput,
+  type Written,
+} from "./app-workflows.ts";
+export { NO_APP_STEPS } from "./app-steps.ts";
+export {
   ADMIN,
   type ChangeDecision,
   type ChangeDeploy,
@@ -271,6 +285,7 @@ export { checkPreparedOnly } from "./db.ts";
 export { type CedarWasm, useCedarWasm } from "./schema.ts";
 // Also at `@sanoma-ai/workflows/shared`, which a browser bundle can import.
 export {
+  ADOPT_WORKFLOW,
   AGENTS,
   ANONYMOUS,
   ANONYMOUS_PRINCIPAL,
@@ -283,7 +298,11 @@ export {
   CHANGE_REVIEW,
   CHANGE_TOPIC,
   CHANGE_WORKFLOW,
+  CONNECT_EXISTING_WORKFLOW,
   declaresPeople,
+  GO_LIVE_HOST_WORKFLOW,
+  GO_LIVE_WORKFLOW,
+  PATCH_WORKFLOW,
   type PeopleResource,
   personOf,
   principalOf,

@@ -1,23 +1,22 @@
+import type { PatchInput, PatchOutput } from "@sanoma-ai/workflows";
 import type { DeclaredResource, ResourceTypeEntry } from "@sanoma-ai/workflows/describe";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { useServerFn } from "@tanstack/react-start";
 import { FloppyDiskIcon } from "@phosphor-icons/react/dist/csr/FloppyDisk";
 import { useMemo, useState } from "react";
 import { Button } from "#/components/ui/button.tsx";
 import { FieldGroup } from "#/components/ui/field.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
-import { ApiError, type PatchRequest, type PatchResponse } from "../api.ts";
+import { errorBodyOf } from "../api.ts";
 import { buildInput, type Field, fieldsOf, initialValues } from "../form/schema.ts";
 import { errorsOf, FieldView, FormFoot, type SubmitErrors, useSchemaForm } from "../form/start-form.tsx";
-import { patchFn } from "../functions.ts";
-import { isPeople, refreshWritten } from "../queries.ts";
+import { appApi, isPeople, refreshWritten } from "../queries.ts";
 import { Notice } from "./kit.tsx";
 
 // A declaration's form: its literal fields, drawn from its type's JSON Schema as a record form is
 // from a collection's, prefilled with what its data file declares, and Save writing the fields it
-// changed into the file (`patchFn`): a change for review with a remote, a commit without one. The
-// writer refuses a field the file computes (409, with its reason): that field turns read-only,
+// changed into the file (a run of the built-in `patch`): a change for review with a remote, a
+// commit without one. The writer refuses a field the file computes (its reason, with the `field`): that field turns read-only,
 // with the reason under it, and stays the code's to change. A person's, agent's or group's
 // identity is read-only wherever the form shows (People, Hosting's Edit).
 
@@ -71,13 +70,12 @@ function SchemaDeclarationForm({
   identity: string | undefined;
 }) {
   const queryClient = useQueryClient();
-  const patch = useServerFn(patchFn);
   const defaultValues = useMemo(() => initialValues(fields, desired), [fields, desired]);
   /** What the file declares, as the form reads its fields: what a Save compares against, moved on by each one. */
   const [declared, setDeclared] = useState(() => buildInput(fields, defaultValues).input);
   /** The fields the writer refused, by key, each with its reason. */
   const [refused, setRefused] = useState<Record<string, string>>({});
-  const [saved, setSaved] = useState<PatchResponse>();
+  const [saved, setSaved] = useState<PatchOutput>();
   const readOnly = useMemo(() => {
     const why: Record<string, string> = identity ? { [identity]: IDENTITY } : {};
     for (const path of Object.keys(refs)) {
@@ -105,20 +103,23 @@ function SchemaDeclarationForm({
     if (!Object.keys(changed).length) return { form: "Nothing has changed.", fields: {} };
     try {
       // What `buildInput` reads from the form is JSON.
-      const answer = await patch({ data: { at, fields: changed as PatchRequest["fields"] } });
+      const answer = await appApi.patch({
+        at,
+        fields: changed as PatchInput["fields"],
+        origin: window.location.origin,
+      });
       setDeclared((prev) => ({ ...prev, ...changed }));
       setSaved(answer);
       if ("file" in answer) await refreshWritten(queryClient, file);
       return undefined;
     } catch (err) {
-      if (err instanceof ApiError && err.status === 409) {
-        const key = err.body.field === undefined ? undefined : fieldAt(fields, err.body.field);
-        // Not a field's (the declaration, or the file not read or written this time): said, and Save stays.
-        if (!key) return { form: err.body.error, fields: {} };
-        // Read-only from now on, with the reason under it, and back to what the file declares.
-        setRefused((prev) => ({ ...prev, [key]: err.body.error }));
+      // A field the file computes: read-only from now on, with the reason under it, and back to what the file declares.
+      const body = errorBodyOf(err);
+      const key = body?.field === undefined ? undefined : fieldAt(fields, body.field);
+      if (body && key) {
+        setRefused((prev) => ({ ...prev, [key]: body.error }));
         form.setFieldValue(key, defaultValues[key]);
-        return { form: `Not saved: ${err.body.error}.`, fields: {} };
+        return { form: `Not saved: ${body.error}.`, fields: {} };
       }
       return errorsOf(err, fields, {
         mismatch: "The fields do not match the resource's type",
@@ -170,7 +171,7 @@ function SchemaDeclarationForm({
 }
 
 /** Where a Save landed: a change for review, linking to it, or the file written and its commit. */
-function SavedNotice({ saved }: { saved: PatchResponse }) {
+function SavedNotice({ saved }: { saved: PatchOutput }) {
   if ("change" in saved) {
     return (
       <Notice>

@@ -45,6 +45,10 @@
       "types": "./dist/bundle-build.d.ts",
       "default": "./dist/bundle-build.js"
     },
+    "./steps": {
+      "types": "./dist/steps/index.d.ts",
+      "default": "./dist/steps/index.js"
+    },
     "./site": {
       "types": "./src/site.ts",
       "default": "./src/site.ts"

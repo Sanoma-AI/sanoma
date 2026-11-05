@@ -1,7 +1,9 @@
 import { DBOS, type ScheduledWorkflowFn } from "@dbos-inc/dbos-sdk";
+import { serialWrites, type WorkerApp } from "./app-steps.ts";
+import type { AppSteps } from "./app-workflows.ts";
 import { awaitApproval } from "./approvals.ts";
 import { buildCtx, decideStart, isInfrastructureError, startHoldOf } from "./call.ts";
-import { dbosStatusesOf } from "./client.ts";
+import { dbosStatusesOf, SanomaClient } from "./client.ts";
 import { declaredWakeup, envWakeup, type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { configuredSecrets } from "./credentials.ts";
 import { type Db, DBOS_DATABASE_OPTIONS, lazyPool, prepareDatabase, stampVersion } from "./db.ts";
@@ -85,6 +87,12 @@ export interface WorkerOptions {
   /** The company's repository, which apply commits the lockfile to; the launcher passes its checkout. */
   source?: Source;
   /**
+   * The app's own actions (`@sanoma-ai/app/steps`), which its built-in workflows run (Adopt, a
+   * form's Save, going live, connecting an existing repository): the launcher passes them. Without
+   * them, a run of one fails, saying this worker runs none of them (`NO_APP_STEPS`).
+   */
+  app?: AppSteps;
+  /**
    * How soon a deadline keeps the worker up (`idle`): 60 s by default, so apply's short sleeps
    * and other short waits never stop it.
    */
@@ -141,6 +149,20 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
   let stopRule: { close(): void } | undefined;
   let stopping: Promise<void> | undefined;
   const horizonMs = options.idleHorizonMs ?? 60_000;
+  // The app's steps' client, connected by the first that runs, for the worker's version: what it starts runs on.
+  let appClient: Promise<SanomaClient> | undefined;
+  const appSteps: WorkerApp | undefined = options.app && {
+    steps: options.app,
+    config,
+    resolved,
+    client: () =>
+      (appClient ??= SanomaClient.connect(config, { appVersion: resolved.version }).catch((err: unknown) => {
+        // Tried again by the next step: a client that failed to connect is none.
+        appClient = undefined;
+        throw err;
+      })),
+    serially: serialWrites(),
+  };
   const state: WorkerState = {
     app: resolved.appName,
     connections: resolved.connections,
@@ -149,6 +171,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     fakes: resolved.fakes,
     ...(resolved.scenarios && { scenarios: resolved.scenarios }),
     ...(options.source && { source: options.source }),
+    ...(appSteps && { appSteps }),
     types: resolved.types,
     declaredObjects: resolved.declaredObjects,
     collections: resolved.collections,
@@ -185,6 +208,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
         let failed: { error: unknown } | undefined;
         for (const close of [
           () => DBOS.shutdown(),
+          async () => (await appClient?.catch(() => undefined))?.close(),
           () => storedSecrets.close(),
           () => resolved.connections.close(),
           () => resolved.identityProvisioning.close(),

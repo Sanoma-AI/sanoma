@@ -1,14 +1,14 @@
 import { useMutation } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useServerFn } from "@tanstack/react-start";
+import type { ConnectExistingInput } from "@sanoma-ai/workflows";
 import { useState } from "react";
 import { Button } from "#/components/ui/button.tsx";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "#/components/ui/field.tsx";
 import { Input } from "#/components/ui/input.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
-import { type ConnectExistingRequest, errorBodyOf, PASSWORD_NOTE } from "../../api.ts";
+import { errorBodyOf, PASSWORD_NOTE } from "../../api.ts";
 import { CrumbHeader, Notice, pageTitle, Region } from "../../components/common.tsx";
-import { connectExistingFn } from "../../functions.ts";
+import { appApi } from "../../queries.ts";
 
 export const Route = createFileRoute("/hosting/existing")({
   staticData: { crumb: "Connect an existing repository or database" },
@@ -23,9 +23,8 @@ export const Route = createFileRoute("/hosting/existing")({
 function ExistingPage() {
   const [repository, setRepository] = useState("");
   const [project, setProject] = useState("");
-  const connect = useServerFn(connectExistingFn);
   const mutation = useMutation({
-    mutationFn: (data: ConnectExistingRequest) => connect({ data }),
+    mutationFn: (input: ConnectExistingInput) => appApi.connectExisting(input),
   });
   const body = errorBodyOf(mutation.error);
   const issue = (field: string) => body?.issues?.find((i) => i.path[0] === field)?.message;

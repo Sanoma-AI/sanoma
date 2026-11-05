@@ -463,7 +463,7 @@ describe("a company's app with its sites", () => {
       ])
       .map(([, specifier]) => specifier!)
       .filter((specifier) => !specifier.startsWith("."));
-    expect(imported).toContain("node:fs");
+    expect(imported.some((specifier) => specifier.startsWith("node:"))).toBe(true);
     expect(imported.filter((specifier) => !/^(node:|file:\/\/)|^module$/.test(specifier))).toEqual([]);
     expect(imported.some((specifier) => /^file:.*\/workflows\/dist\/index\.js$/.test(specifier))).toBe(true);
     const client = join(result.distDir, "client", "assets");

@@ -18,7 +18,7 @@ import {
   Principal,
   remoteFor,
   type RunSummary,
-  type SanomaError,
+  SanomaError,
 } from "@sanoma-ai/workflows";
 import { apiNameOf, isVisitor, flatten, LOGIN_CODE_WORKFLOW } from "@sanoma-ai/workflows/shared";
 import { type ConfigDescription, permissionsGrid } from "@sanoma-ai/workflows/describe";
@@ -238,13 +238,12 @@ export type ScenarioChecks = (
 export const notHere = (what: string) =>
   `${what} is not available on this host, which does not have the company's files: use the app where the company's repository is checked out`;
 
-/** Refuses the request with a 400 `invalid_input`, its issue at `field`, as a form shows it beside the field. */
+/**
+ * Refuses the request with `invalid_input`, its issue at `field`, as a form shows it beside the
+ * field: a 400 from a server function (`asApiError`), and from a run's `.result` (an app step's).
+ */
 export function invalid(field: string, error: string): never {
-  throw new ApiError(400, {
-    error,
-    code: "invalid_input",
-    issues: [{ path: [field], message: error, code: "custom" }],
-  });
+  throw new SanomaError("invalid_input", error, { issues: [{ path: [field], message: error, code: "custom" }] });
 }
 
 /** A 404 `invalid_input` for a name the request gives that the config does not have, with an issue at its field. */
@@ -727,6 +726,7 @@ export function asApiError(err: unknown): ApiError {
   // Read by property, not instanceof: DBOS hands a run's errors back as copies.
   const data: Record<string, unknown> = (err as Partial<SanomaError>).data ?? {};
   if (Array.isArray(data.issues)) body.issues = data.issues as InputIssue[];
+  if (typeof data.field === "string") body.field = data.field;
   if (code === "not_approver") {
     body.approver = data.approver as ErrorResponse["approver"];
     if (typeof data.reason === "string") body.reason = data.reason;

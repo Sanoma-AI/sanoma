@@ -8,6 +8,8 @@ import { startTestWorker } from "@sanoma-ai/testing";
 import {
   defineWorkflow,
   memoryLedger,
+  PATCH_WORKFLOW,
+  type PatchOutput,
   resolveConfig,
   SanomaClient,
   type SanomaConfig,
@@ -24,9 +26,9 @@ import type { AppContext } from "../src/context.ts";
 import { type App, startApp } from "../src/index.ts";
 import { tellCommits } from "../src/server/agent/checkout.ts";
 import { change, openChange } from "../src/server/core.ts";
-import { patch } from "../src/server/local/writes.ts";
 import { appSnapshot } from "../src/snapshot-build.ts";
 import { checks } from "../src/server/drafts.ts";
+import { appSteps } from "../src/steps/index.ts";
 import { PEOPLE, pageOf, publishedAgain, publishOf, renderDraftCard } from "./fixtures/change.ts";
 
 // The life of a change, end to end, as a person drives it through the app: the sanoma package's
@@ -111,7 +113,7 @@ beforeAll(async () => {
     databaseUrl,
   };
   source = localGitSource(dir, { databaseUrl });
-  worker = await startTestWorker(config, { databaseUrl, source });
+  worker = await startTestWorker(config, { databaseUrl, source, app: appSteps });
   client = await SanomaClient.connect(config, { source });
   app = await startApp(config, { port: 0, source });
 }, 600_000);
@@ -276,14 +278,11 @@ describe("a change, from a chat's draft to main", { timeout: 2 * ROUND_MS }, () 
 
   it("lands a form's Save as a change: a draft of its own, committed, sent for review and held for admin", async () => {
     const main = git("rev-parse", "main");
-    const context = {
-      client,
-      resolved: resolveConfig(config),
-      local: { source },
-      snapshot: await appSnapshot(config, { source }),
-    } as unknown as AppContext;
     const at = { file: "resources/people.ts", export: "alice" };
-    const landed = await patch(context, { id: "alice" }, { at, fields: { name: "Alice Liddell" } }, app.url);
+    const input = { at, fields: { name: "Alice Liddell" }, origin: app.url };
+    const landed = (await client.result(
+      await client.start(PATCH_WORKFLOW, input, { startedBy: "alice" }),
+    )) as PatchOutput;
     expect(landed).toEqual({ change: expect.stringMatching(/^change:ui-[\da-f]{8}$/) });
     const saved = (landed as { change: string }).change;
     const id = saved.slice("change:".length);

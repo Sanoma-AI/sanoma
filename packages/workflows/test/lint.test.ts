@@ -23,7 +23,7 @@ describe("lintWorkflow", () => {
     expect(lintWorkflow(src)).toEqual([]);
   });
 
-  it.each(["drift", "apply", "call-workflow", "change-workflow"])(
+  it.each(["drift", "apply", "call-workflow", "change-workflow", "app-workflows"])(
     "passes the built-in %s workflow, which is held to the same rules",
     (name) => {
       const path = fileURLToPath(new URL(`../src/${name}.ts`, import.meta.url));

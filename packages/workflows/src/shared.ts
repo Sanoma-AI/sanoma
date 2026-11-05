@@ -320,13 +320,30 @@ export const APPS_LIST = "sanoma.apps.list";
  */
 export const LOGIN_CODE_WORKFLOW = "login-code";
 
-/** The workflows the runtime adds itself, which a config's own may not be named: drift, apply, call, change and login-code. */
+/**
+ * The app's own actions on the company's repository, each a built-in workflow the app starts and
+ * the worker runs with the app's steps (`WorkerOptions.app`, `app-workflows.ts`): Adopt (a drifted
+ * field's value at the vendor into its data file), a form's Save, going live (`infra.ts` written,
+ * then the push and the host's apply) and connecting an existing repository or database.
+ */
+export const ADOPT_WORKFLOW = "adopt";
+export const PATCH_WORKFLOW = "patch";
+export const GO_LIVE_WORKFLOW = "go-live";
+export const GO_LIVE_HOST_WORKFLOW = "go-live-host";
+export const CONNECT_EXISTING_WORKFLOW = "connect-existing";
+
+/** The workflows the runtime adds itself, which a config's own may not be named: drift, apply, call, change, login-code and the app's actions. */
 export const BUILT_IN_WORKFLOWS: ReadonlySet<string> = new Set([
   DRIFT_WORKFLOW,
   APPLY_WORKFLOW,
   CALL_WORKFLOW,
   CHANGE_WORKFLOW,
   LOGIN_CODE_WORKFLOW,
+  ADOPT_WORKFLOW,
+  PATCH_WORKFLOW,
+  GO_LIVE_WORKFLOW,
+  GO_LIVE_HOST_WORKFLOW,
+  CONNECT_EXISTING_WORKFLOW,
 ]);
 
 /**

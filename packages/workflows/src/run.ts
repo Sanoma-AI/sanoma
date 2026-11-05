@@ -1,5 +1,6 @@
 import type { ConnectionRef, ConnectionRegistry, ConnectionSnapshot } from "./connection.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
+import type { WorkerApp } from "./app-steps.ts";
 import type { Collection } from "./collection.ts";
 import type { DeclaredObjects } from "./config.ts";
 import type { DeadlineRegistry } from "./deadlines.ts";
@@ -53,6 +54,8 @@ export interface WorkerState {
   scenarios?: URL;
   /** The worker's `source`, when it was given one. */
   source?: Source;
+  /** The app's steps (`WorkerOptions.app`), with the worker's own client for them: what the app's built-ins run; none without them. */
+  appSteps?: WorkerApp;
   types: ReadonlyMap<string, Resource>;
   /** The objects the data files declare, read at each call: a workflow's change operation may not aim at one (`refuseDeclared`). */
   declaredObjects(): Promise<DeclaredObjects>;

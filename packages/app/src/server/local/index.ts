@@ -1,5 +1,6 @@
-// The seam for what needs the company's checkout: actions that write the repository or run a
-// child process (git, Cucumber, a coding agent), and so only where the company's files are. The
+// The seam for what still needs the company's checkout in the app's own process: what reads it or
+// runs a child process (git, Cucumber, a coding agent), and so only where the company's files are
+// (what writes the repository is the worker's, in the runs of the app's built-ins: `steps/`). The
 // Node adapter's app imports this module; the Worker's bundle replaces it with `none.ts`, so none
 // of it, or what it imports, is in the bundle, and each caller answers "not available on this
 // host" (501, `notHere`) when `local` is undefined.
@@ -14,9 +15,6 @@ import { postSignInCode } from "../agent/acp.ts";
 import { postChat } from "../agent/turn.ts";
 import { notLoaded } from "../core.ts";
 import { appBehind } from "./behind.ts";
-import { connectExisting } from "./connect.ts";
-import { goLive, goLiveHost } from "./go-live.ts";
-import { adopt, patch } from "./writes.ts";
 
 /**
  * A sandbox run's checks: Cucumber runs its scenario's Then steps against the ledger, over the
@@ -41,17 +39,7 @@ async function scenarioChecks(
   return { checks };
 }
 
-const actions = {
-  adopt,
-  patch,
-  appBehind,
-  scenarioChecks,
-  goLive,
-  goLiveHost,
-  connectExisting,
-  postChat,
-  postSignInCode,
-};
+const actions = { appBehind, scenarioChecks, postChat, postSignInCode };
 
 /** What needs the checkout, as one object. */
 export type Local = typeof actions;

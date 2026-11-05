@@ -9,22 +9,25 @@ import { supabase } from "@sanoma-ai/connector-supabase";
 import { fakeSupabase } from "@sanoma-ai/connector-supabase/fake";
 import { ensureBuilt, testDatabaseUrl } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
-import { resolveConfig, withSetup } from "@sanoma-ai/workflows";
+import {
+  CONNECT_EXISTING_WORKFLOW,
+  type ConnectExistingInput,
+  type ConnectExistingOutput,
+  withSetup,
+} from "@sanoma-ai/workflows";
 import { LOCKFILE, readLockfile } from "@sanoma-ai/workflows/describe";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { localGitSource } from "../../sanoma/src/source.ts";
-import { ApiError, INFRA } from "../src/api.ts";
-import type { AppContext } from "../src/context.ts";
+import { INFRA } from "../src/api.ts";
 import { type App, startApp } from "../src/index.ts";
-import { loopbackLogin } from "../src/loopback.ts";
-import { admitting } from "../src/login/admission.ts";
-import { CONNECT_BRANCH, connectExisting } from "../src/server/local/connect.ts";
-import { appSnapshot } from "../src/snapshot-build.ts";
+import { appSteps } from "../src/steps/index.ts";
+import { CONNECT_BRANCH } from "../src/steps/connect.ts";
 
 // Connecting an existing repository or database (/hosting/existing) in a git repository of its
-// own, with and without a remote, on the GitHub and Supabase fakes: the file rendered from what
-// each import read, where it is committed, and the apply that only binds. Needs Postgres and the
-// built app, as app.test.ts does.
+// own, with and without a remote, on the GitHub and Supabase fakes, as runs of the built-in
+// `connect-existing` on a worker given the app's steps: the file rendered from what each import
+// read, where it is committed, and the apply that only binds, the run's child. Needs Postgres and
+// the built app, as app.test.ts does.
 
 const appDir = fileURLToPath(new URL("..", import.meta.url));
 const root = mkdtempSync(join(tmpdir(), "sanoma-existing-"));
@@ -37,17 +40,8 @@ const config = {
   connectors: [withSetup(github, { driver: () => gh.driver }), withSetup(supabase, { driver: () => sb.driver })],
   root,
 };
-const test = useTestApp(config, { databaseUrl: testDatabaseUrl("existing"), source });
+const test = useTestApp(config, { databaseUrl: testDatabaseUrl("existing"), source, app: appSteps });
 const alice = { id: "alice" };
-/** The app's context as a request reads it: the snapshot of the files as they are now. */
-const context = async (): Promise<AppContext> => ({
-  resolved: resolveConfig(test.config),
-  snapshot: await appSnapshot(test.config, { source }),
-  client: test.client,
-  place: "this-computer",
-  login: admitting(loopbackLogin(), () => ({ people: [], problems: [] })),
-  local: { source },
-});
 
 const git = (...args: string[]) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
 /** The fake's recorded repository and project, as GitHub and Supabase name them. */
@@ -68,13 +62,18 @@ beforeEach(() => {
   sb.reset();
 });
 
-/** What connecting answers when it refuses. */
-const refused = async (request: { repository?: string; project?: string }) =>
-  connectExisting(await context(), alice, request).catch((err: unknown) => err);
+/** A run of `connect-existing` as alice, and what it answers. */
+const connected = async (input: ConnectExistingInput) =>
+  (await test.client.result(
+    await test.client.start(CONNECT_EXISTING_WORKFLOW, input, { startedBy: alice }),
+  )) as ConnectExistingOutput;
+
+/** What connecting fails with when it refuses. */
+const refused = (input: ConnectExistingInput) => connected(input).catch((err: unknown) => err);
 
 /** Connects, then waits for the apply it started. */
-async function connect(request: { repository?: string; project?: string }) {
-  const done = await connectExisting(await context(), alice, request);
+async function connect(input: ConnectExistingInput) {
+  const done = await connected(input);
   return { done, report: await test.client.applyReport(done.runId) };
 }
 
@@ -153,18 +152,15 @@ describe("connecting an existing repository and database", () => {
 
   it("refuses a file already there, a branch already there, and nothing found", async () => {
     expect(await refused({ repository: "Sanoma-AI/never-recorded" })).toMatchObject({
-      status: 400,
       message: "There is no github.repository Sanoma-AI/never-recorded to connect",
     });
     expect(await refused({ project: "sanomamissingproject" })).toMatchObject({
-      status: 400,
       message: "There is no supabase.project sanomamissingproject to connect",
     });
     git("remote", "add", "origin", "https://github.com/acme/ops.git");
     // A commit that fails leaves the checkout as it was: no file, back on main, no branch.
     writeFileSync(join(root, ".git/hooks/pre-commit"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
     expect(await refused({ project: REF })).toMatchObject({
-      status: 500,
       message: expect.stringContaining(`Could not commit ${INFRA}`),
     });
     expect(existsSync(join(root, INFRA))).toBe(false);
@@ -173,14 +169,13 @@ describe("connecting an existing repository and database", () => {
     rmSync(join(root, ".git/hooks/pre-commit"));
     git("branch", CONNECT_BRANCH);
     expect(await refused({ project: REF })).toMatchObject({
-      status: 409,
       message: expect.stringContaining(`Could not start the branch ${CONNECT_BRANCH}`),
     });
     mkdirSync(join(root, "resources/sanoma"), { recursive: true });
     writeFileSync(join(root, INFRA), "export default [];\n");
-    const there = await refused({ project: REF });
-    expect(there).toBeInstanceOf(ApiError);
-    expect(there).toMatchObject({ status: 409 });
+    expect(await refused({ project: REF })).toMatchObject({
+      message: `${INFRA} is there already: declare what to connect in it instead`,
+    });
     // Nothing written, committed or started by any of them.
     expect(existsSync(join(root, LOCKFILE))).toBe(false);
     expect(git("log", "--format=%s", "--all")).toBe("Start");

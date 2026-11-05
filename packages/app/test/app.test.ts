@@ -73,7 +73,8 @@ import {
   validate,
 } from "../src/server/core.ts";
 import { local } from "../src/server/local/index.ts";
-import { adopt, patch } from "../src/server/local/writes.ts";
+import { appSteps } from "../src/steps/index.ts";
+import { pageApi } from "./page-api.ts";
 import { appSnapshot, scenariosOf } from "../src/snapshot-build.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built app: the tests build it when
@@ -213,6 +214,36 @@ async function contextOf(cfg: SanomaConfig, login = loopbackLogin()): Promise<Ap
     place: placeOf(resolved.databaseUrl),
     login: admitting(login, () => ({ people: [], problems: [] })),
   };
+}
+
+/** A copy of the app's root (its resources), so a test that writes files leaves the fixture's as they are. */
+function copiedRoot(prefix: string): string {
+  const root = mkdtempSync(join(tmpdir(), prefix));
+  cpSync(join(appRoot, "resources"), join(root, "resources"), { recursive: true });
+  return root;
+}
+
+/**
+ * Runs `work` with the app's built-ins (Adopt, Save) run by a worker over `root`, a copy of the
+ * app's files, given the app's steps and `source` (none for none), and an app's context over the
+ * same root, as the page calls them: the file's own worker stopped meanwhile, and started again after.
+ */
+async function onWorkerOver(root: string, source: Source | undefined, work: (over: AppContext) => Promise<void>) {
+  await worker.stop();
+  const copy = { ...config, root };
+  const over = await startWorker(copy, { app: appSteps, ...(source && { source }) });
+  try {
+    await work(await contextOf(copy));
+  } finally {
+    await over.stop();
+    worker = await startWorker(config);
+    // What the stop left in flight is recovered queued: wait until the worker has taken it up again.
+    await waitFor(
+      async () => (await ctx.client.runs({ status: "queued" })).length,
+      (queued) => queued === 0,
+      30_000,
+    );
+  }
 }
 
 beforeAll(async () => {
@@ -864,7 +895,7 @@ describe("the page", () => {
     expect(res.headers.get("content-type")).toMatch(/text\/html/);
     const html = await res.text();
     expect(html).toContain('<div id="app">');
-    expect(html).toMatch(/<h1[^>]*>Workflows<span[^>]*>5<\/span><\/h1>/);
+    expect(html).toMatch(/<h1[^>]*>Workflows<span[^>]*>10<\/span><\/h1>/);
     // The bar: Chat, then Inbox and Workflows, no site tiles (the package's own build has no
     // sites), then Setup (with Data and Permissions, as the config has collections and a policy),
     // the current lit.
@@ -1738,7 +1769,8 @@ describe("resources and drift", () => {
 
   it("reads each workflow's latest run, by name", async () => {
     const last = await lastRuns(ctx);
-    expect(Object.keys(last).toSorted()).toEqual(["announce", "drift"]);
+    // Adopt and Save ran before, as runs of the app's built-ins.
+    expect(Object.keys(last).toSorted()).toEqual(["adopt", "announce", "drift", "patch"]);
     const { body: announced } = await runsOf({ workflow: "announce", limit: 1 });
     expect(last.announce?.runId).toBe(announced[0]?.runId);
     expect(last.drift?.runId).toBe(driftRun);
@@ -1776,67 +1808,80 @@ describe("resources and drift", () => {
     ]);
   });
 
-  it("adopts a drifted field: the vendor's value into the data file, committed through the source", async () => {
-    // A root of its own, so the other tests read the fixture's files as they are.
-    const root = mkdtempSync(join(tmpdir(), "sanoma-adopt-"));
-    cpSync(join(appRoot, "resources"), join(root, "resources"), { recursive: true });
+  it("adopts a drifted field: the vendor's value into the data file, committed through the worker's repository", async () => {
     const commits: unknown[] = [];
-    const source: Source = {
+    let failing = false;
+    const source = (root: string): Source => ({
       root,
       commit: (made) => {
+        if (failing) throw new Error("index.lock exists");
         commits.push(made);
         return { revision: "0123456789abcdef" };
       },
       head: () => "0123456789abcdef",
-    };
-    const adopting: AppContext = { ...ctx, resolved: { ...ctx.resolved, root }, local: { source } };
+    });
     const alice = { id: "alice" };
     const github = "resources/identity/github.ts";
-    const before = readFileSync(join(root, github), "utf8");
     const website = { runId: driftRun, id: `${github}#website`, paths: ["has_wiki"] };
-    expect(await adopt(adopting, alice, website)).toEqual({ file: github, revision: "0123456789abcdef" });
-    expect(readFileSync(join(root, github), "utf8")).toBe(before.replace("has_wiki: false", "has_wiki: true"));
-    expect(commits).toEqual([
-      { paths: [github], message: "Adopt has_wiki of Sanoma-AI/website from github", author: "alice" },
-    ]);
-
-    // Without a source, the file is written and nothing committed.
     const stripe = "resources/billing/stripe.ts";
     const pro = { runId: driftRun, id: `${stripe}#pro`, paths: ["name"] };
-    expect(await adopt({ ...adopting, local: {} }, alice, pro)).toEqual({ file: stripe });
-    expect(readFileSync(join(root, stripe), "utf8")).toContain('name: "Sanoma Professional",');
-    expect(commits).toHaveLength(1);
+    const root = copiedRoot("sanoma-adopt-");
+    const before = readFileSync(join(root, github), "utf8");
+    await onWorkerOver(root, source(root), async (over) => {
+      const adopt = (request: unknown) => pageApi(over, alice).adopt(request);
+      expect(await adopt(website)).toEqual({ file: github, revision: "0123456789abcdef" });
+      expect(readFileSync(join(root, github), "utf8")).toBe(before.replace("has_wiki: false", "has_wiki: true"));
+      expect(commits).toEqual([
+        { paths: [github], message: "Adopt has_wiki of Sanoma-AI/website from github", author: "alice" },
+      ]);
 
-    // A commit that fails says so, with the file written.
-    const failing: Source = {
-      ...source,
-      commit: () => {
-        throw new Error("index.lock exists");
-      },
-    };
-    await expect(adopt({ ...adopting, local: { source: failing } }, alice, pro)).rejects.toMatchObject({
-      status: 500,
-      body: { error: `Wrote ${stripe}, but could not commit it: index.lock exists` },
+      // A commit that fails says so, with the file written.
+      failing = true;
+      await expect(adopt(pro)).rejects.toMatchObject({
+        status: 422,
+        body: { error: `Wrote ${stripe}, but could not commit it: index.lock exists` },
+      });
+      failing = false;
+
+      // Only a field the run found drifted, and only while the file still declares it.
+      await expect(adopt({ ...website, paths: ["name"] })).rejects.toMatchObject({
+        status: 400,
+        body: { code: "invalid_input", error: `name of ${github}#website has not drifted` },
+      });
+      await expect(adopt({ ...website, id: `${github}#docs` })).rejects.toMatchObject({
+        status: 400,
+        body: { error: `Run ${driftRun} found no drift on ${github}#docs` },
+      });
+      // Refused at its start: no path to adopt.
+      await expect(adopt({ ...website, paths: [] })).rejects.toMatchObject({
+        status: 400,
+        body: { code: "invalid_input", issues: [{ path: ["paths"] }] },
+      });
+      writeFileSync(join(root, github), before.replaceAll("website", "site"));
+      await expect(adopt(website)).rejects.toMatchObject({
+        status: 422,
+        body: { error: `Could not adopt into ${github}: The data file declares no resource website` },
+      });
+      expect(commits).toHaveLength(1);
     });
 
-    // Only a field the run found drifted, and only while the file still declares it.
-    await expect(adopt(adopting, alice, { ...website, paths: ["name"] })).rejects.toMatchObject({
-      status: 400,
-      body: { error: `name of ${github}#website has not drifted` },
-    });
-    await expect(adopt(adopting, alice, { ...website, id: `${github}#docs` })).rejects.toMatchObject({ status: 404 });
-    writeFileSync(join(root, github), before.replaceAll("website", "site"));
-    await expect(adopt(adopting, alice, website)).rejects.toMatchObject({
-      status: 409,
-      body: { error: `Could not adopt into ${github}: The data file declares no resource website` },
+    // On a worker without a repository, the file is written and nothing committed.
+    const bare = copiedRoot("sanoma-adopt-");
+    await onWorkerOver(bare, undefined, async (over) => {
+      expect(await pageApi(over, alice).adopt(pro)).toEqual({ file: stripe });
+      expect(readFileSync(join(bare, stripe), "utf8")).toContain('name: "Sanoma Professional",');
     });
     expect(commits).toHaveLength(1);
   });
 
   it("patches a declaration's literal fields without a remote: written and committed, the rules by admin only", async () => {
-    // A root of its own, as Adopt's test has, and a source that commits and drafts nowhere.
-    const root = mkdtempSync(join(tmpdir(), "sanoma-patch-"));
-    cpSync(join(appRoot, "resources"), join(root, "resources"), { recursive: true });
+    // A copy whose people file has an admin, and a repository that commits and drafts nowhere.
+    const root = copiedRoot("sanoma-patch-");
+    const people = "resources/people.ts";
+    writeFileSync(
+      join(root, people),
+      `${readFileSync(join(root, people), "utf8")}export const admin = sanoma.group({ name: "admin", members: [p2] });\n`,
+    );
     const commits: unknown[] = [];
     const source: Source = {
       root,
@@ -1846,48 +1891,55 @@ describe("resources and drift", () => {
       },
       head: () => "fedcba9876543210",
     };
-    const patching: AppContext = { ...ctx, resolved: { ...ctx.resolved, root }, local: { source } };
     const alice = { id: "alice" };
     const github = "resources/identity/github.ts";
     const before = readFileSync(join(root, github), "utf8");
     const website = { file: github, export: "website" };
-    expect(await patch(patching, alice, { at: website, fields: { description: "Our site" } })).toEqual({
-      file: github,
-      revision: "fedcba9876543210",
-    });
-    expect(readFileSync(join(root, github), "utf8")).toBe(
-      before.replace('description: "The company website"', 'description: "Our site"'),
-    );
-    expect(commits).toEqual([{ paths: [github], message: "Change description of website", author: "alice" }]);
+    await onWorkerOver(root, source, async (over) => {
+      const patch = (actor: Principal, request: unknown) => pageApi(over, actor).patch(request);
+      expect(await patch(alice, { at: website, fields: { description: "Our site" } })).toEqual({
+        file: github,
+        revision: "fedcba9876543210",
+      });
+      expect(readFileSync(join(root, github), "utf8")).toBe(
+        before.replace('description: "The company website"', 'description: "Our site"'),
+      );
+      expect(commits).toEqual([{ paths: [github], message: "Change description of website", author: "alice" }]);
 
-    // A collection, where data.ts declares it.
-    const data = "resources/data.ts";
-    await patch(patching, alice, { at: { file: data, export: "outbound" }, fields: { title: "Pipeline" } });
-    expect(readFileSync(join(root, data), "utf8")).toContain('title: "Pipeline",');
+      // A collection, where data.ts declares it.
+      const data = "resources/data.ts";
+      await patch(alice, { at: { file: data, export: "outbound" }, fields: { title: "Pipeline" } });
+      expect(readFileSync(join(root, data), "utf8")).toContain('title: "Pipeline",');
 
-    // A field the file computes, or a declaration the description does not name, is refused.
-    await expect(
-      patch(patching, alice, { at: { file: github, export: "websiteMain" }, fields: { repository_id: "R_1" } }),
-    ).rejects.toMatchObject({
-      status: 409,
-      body: { error: "the value of repository_id is computed in the file", field: "repository_id" },
-    });
-    await expect(
-      patch(patching, alice, { at: { file: github, export: "nope" }, fields: { name: "x" } }),
-    ).rejects.toMatchObject({ status: 404 });
+      // A field the file computes, or a declaration the description does not name, is refused.
+      await expect(
+        patch(alice, { at: { file: github, export: "websiteMain" }, fields: { repository_id: "R_1" } }),
+      ).rejects.toMatchObject({
+        status: 400,
+        body: { error: "the value of repository_id is computed in the file", field: "repository_id" },
+      });
+      await expect(patch(alice, { at: { file: github, export: "nope" }, fields: { name: "x" } })).rejects.toMatchObject(
+        {
+          status: 400,
+          body: { code: "invalid_input", error: `${github}#nope is not a declaration` },
+        },
+      );
 
-    // The people are the rules: with no remote to review on, only someone in admin writes them.
-    const people = "resources/people.ts";
-    const peopleBefore = readFileSync(join(root, people), "utf8");
-    const p0 = { at: { file: people, export: "p0" }, fields: { name: "Alice A." } };
-    await expect(patch(patching, alice, p0)).rejects.toMatchObject({
-      status: 403,
-      body: { error: `A change to ${people} waits for an admin, and this company has no remote to review on` },
+      // The people are the rules: with no remote to review on, only someone in admin writes them.
+      const peopleBefore = readFileSync(join(root, people), "utf8");
+      const p0 = { at: { file: people, export: "p0" }, fields: { name: "Alice A." } };
+      await expect(patch(alice, p0)).rejects.toMatchObject({
+        status: 403,
+        body: {
+          code: "not_approver",
+          error: `A change to ${people} waits for an admin, and this company has no remote to review on`,
+        },
+      });
+      expect(readFileSync(join(root, people), "utf8")).toBe(peopleBefore);
+      expect(await patch({ id: "tester" }, p0)).toMatchObject({ file: people });
+      expect(readFileSync(join(root, people), "utf8")).toContain('sanoma.person({ id: "alice", name: "Alice A." })');
+      expect(commits).toHaveLength(3);
     });
-    expect(readFileSync(join(root, people), "utf8")).toBe(peopleBefore);
-    expect(await patch(patching, { id: "ada", groups: ["admin"] }, p0)).toMatchObject({ file: people });
-    expect(readFileSync(join(root, people), "utf8")).toContain('sanoma.person({ id: "alice", name: "Alice A." })');
-    expect(commits).toHaveLength(3);
   });
 
   it("renders each resource on Hosting with its drift badge, the fields that differ, and a link to the run", async () => {
@@ -1937,10 +1989,10 @@ describe("resources and drift", () => {
   it("tabs the overview by filter, All runs last, and heads it with New workflow, each view its own link", async () => {
     const overview = await page("/workflows");
     expect(tabs(overview.html)).toEqual([
-      { label: "All", href: "/workflows", count: 5, selected: true },
+      { label: "All", href: "/workflows", count: 10, selected: true },
       { label: "Waiting on you", href: "/workflows?filter=waiting", count: 0, selected: false },
       { label: "Failed last run", href: "/workflows?filter=failed", count: 0, selected: false },
-      { label: "Built-in", href: "/workflows?filter=builtin", count: 4, selected: false },
+      { label: "Built-in", href: "/workflows?filter=builtin", count: 9, selected: false },
       { label: "All runs", href: "/workflows?view=runs", count: undefined, selected: false },
     ]);
     expect(overview.html).toMatch(/<button[^>]*aria-haspopup="dialog"[^>]*>(<svg.*?<\/svg>)?New workflow<\/button>/);
@@ -1963,14 +2015,15 @@ describe("resources and drift", () => {
     for (const title of ["Ghost", "Resend", "Bluesky"]) expect(announceRow).toMatch(new RegExp(`/>${title}</span>`));
     // The tests before leave announce with runs, so it has a last run.
     expect(announceRow).toMatch(/>(finished|failed|waiting|running|sleeping)/);
-    // ?filter=builtin keeps drift, apply, call (the config has a collection) and change (every config has it) alone.
+    // ?filter=builtin keeps drift, apply, call (the config has a collection), and change and the app's actions (every config has them) alone.
     const builtin = await page("/workflows?filter=builtin");
     expect(builtin.html).toMatch(/<td[^>]*><div[^>]*><a[^>]*href="\/workflows\/drift"/);
     expect(builtin.html).toMatch(/<td[^>]*><div[^>]*><a[^>]*href="\/workflows\/apply"/);
     expect(builtin.html).toMatch(/<td[^>]*><div[^>]*><a[^>]*href="\/workflows\/call"/);
     expect(builtin.html).not.toMatch(/<td[^>]*><div[^>]*><a[^>]*href="\/workflows\/announce"/);
     expect(builtin.html).toMatch(/<td[^>]*><div[^>]*><a[^>]*href="\/workflows\/change"/);
-    expect(tabNamed(builtin.html, "Built-in")).toMatchObject({ count: 4, selected: true });
+    expect(builtin.html).toMatch(/<td[^>]*><div[^>]*><a[^>]*href="\/workflows\/go-live"/);
+    expect(tabNamed(builtin.html, "Built-in")).toMatchObject({ count: 9, selected: true });
     expect(builtin.html).not.toMatch(/<a [^>]*role="tab"[^>]*aria-selected="false"[^>]*aria-current="page"/);
   });
 

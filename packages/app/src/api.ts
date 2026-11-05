@@ -17,7 +17,7 @@ import type {
   RunSummary,
 } from "@sanoma-ai/workflows";
 import type { ConfigDescription, PermissionsGrid, Span } from "@sanoma-ai/workflows/describe";
-import { AtSchema, ConfigDescriptionSchema } from "@sanoma-ai/workflows/description";
+import { ConfigDescriptionSchema } from "@sanoma-ai/workflows/description";
 import type { Check, Scenario } from "@sanoma-ai/workflows/scenario";
 import { EFFECTS, RUN_STATUSES } from "@sanoma-ai/workflows/shared";
 import { z } from "zod";
@@ -392,27 +392,6 @@ export const INFRA = "resources/sanoma/infra.ts";
 export const noWakeup = (hostType: string, wakes?: string) =>
   `No connected wakeup wakes a ${hostType}${wakes ? ` (${wakes})` : ""}: going live declares none, and the host stays up`;
 
-/**
- * What going live chooses (`goLiveFn`): who holds the repository, the database's region (and
- * size, when it takes one), Supabase's organization for a Supabase project, the host's port.
- */
-export const GoLiveRequest = z.object({
-  owner: z.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/, "Choose a GitHub account or organization"),
-  /** The repository's name, and the database's and the host's. */
-  name: z
-    .string()
-    .regex(/^[a-z0-9][a-z0-9-]{0,62}$/, "Lower case letters, digits and hyphens, starting with a letter or digit"),
-  organization: z.string().min(1, "Choose a Supabase organization").optional(),
-  region: z.string().min(1, "Choose a region"),
-  size: z.string().min(1).optional(),
-  /** The database type the page showed (`GoLiveChoices.database`): refused when going live would now choose another. */
-  database: z.string().min(1).optional(),
-  /** The host type the page showed (`GoLiveChoices.host`): refused when going live would now choose another. */
-  host: z.string().min(1).optional(),
-  port: z.number().int().min(1024, "A port from 1024").max(65535, "A port up to 65535"),
-});
-export type GoLiveRequest = z.infer<typeof GoLiveRequest>;
-
 /** A connector package on npm (`getAvailableConnectors`). */
 export interface AvailableConnector {
   /** The npm package name, what `pnpm add` takes. */
@@ -500,40 +479,6 @@ export interface GoLiveProgress {
   /** Where the host answers, from the last apply that made or changed it, and whether `/healthz` answers. */
   host: { url: string; healthy: boolean } | null;
 }
-/**
- * What `connectExistingFn` takes: a GitHub repository (`owner/name`: the owner is always written)
- * and a Supabase project's ref, either or both.
- */
-export const ConnectExistingRequest = z
-  .object({
-    repository: z
-      .string()
-      .trim()
-      .regex(/^[\w-]+\/(?!\.\.?$)[\w.-]+$/, "Enter a repository as owner/name")
-      .optional(),
-    project: z
-      .string()
-      .trim()
-      .regex(/^[a-z0-9]+$/, "Enter a project's ref: lowercase letters and digits")
-      .optional(),
-  })
-  .refine((r) => r.repository || r.project, { message: "Enter a repository, a project's ref, or both" });
-export type ConnectExistingRequest = z.infer<typeof ConnectExistingRequest>;
-
-/**
- * What `connectExistingFn` answers: the data file it wrote, relative to the root, and its text;
- * its commit, on `branch` (with its `diff`) when the repository has a remote and the change waits
- * for a person to merge it; and the apply run that binds what it declares.
- */
-export interface ConnectExistingResponse {
-  file: string;
-  text: string;
-  revision?: string;
-  branch?: string;
-  diff?: string;
-  runId: string;
-}
-
 /** Said at the top of `infra.ts` when it declares an existing database, and on the page. */
 export const PASSWORD_NOTE = [
   "The database password is declared as a generated secret, since Supabase never reads it back.",
@@ -543,40 +488,6 @@ export const PASSWORD_NOTE = [
 /** What `clearCredentialFn` takes: a declared variable, whose stored value it deletes. */
 export const ClearCredentialRequest = z.object({ name: z.string().min(1, "Name a variable") });
 export type ClearCredentialRequest = z.infer<typeof ClearCredentialRequest>;
-
-/**
- * What `adoptFn` takes: a drift run, a resource it found drifted, and the fields whose value at
- * the vendor to write into the resource's data file.
- */
-export const AdoptRequest = z.object({
-  runId: z.string().min(1),
-  id: z.string().min(1),
-  paths: z.array(z.string().min(1)).min(1),
-});
-export type AdoptRequest = z.infer<typeof AdoptRequest>;
-
-/** What `adoptFn` answers: the data file it wrote, relative to the root, and the commit, when the app has a source. */
-export interface AdoptResponse {
-  file: string;
-  revision?: string;
-}
-
-/**
- * What `patchFn` takes: a declaration the description names (a resource, a collection, a site or
- * an app, by its `at`), and the fields to set in it, by dotted path as `setFields` takes them, each
- * to a JSON value.
- */
-export const PatchRequest = z.object({
-  at: AtSchema,
-  fields: z.record(z.string().min(1), z.json()).refine((fields) => Object.keys(fields).length > 0, "Set a field"),
-});
-export type PatchRequest = z.infer<typeof PatchRequest>;
-
-/**
- * What `patchFn` answers: the change it opened for review (its run id), when the repository has a
- * remote; otherwise the file it wrote, relative to the root, and the commit, when the app has a source.
- */
-export type PatchResponse = { change: string } | { file: string; revision?: string };
 
 /**
  * What `callFn` takes, as a site's `api` sends it: an operation's id (`data.outbound.list`), a
@@ -644,7 +555,7 @@ export interface ErrorResponse {
   reason?: string;
   /** For `approval_pending`: the run of the built-in `call` workflow the call waits in; for `run_running`, the run. */
   runId?: string;
-  /** For a form's Save refused with a 409 (`patchFn`): the field its file computes, by dotted path, which only the code changes. */
+  /** For a form's Save refused (`invalid_input` from a `patch` run): the field its file computes, by dotted path, which only the code changes. */
   field?: string;
 }
 

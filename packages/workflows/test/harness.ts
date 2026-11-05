@@ -41,6 +41,9 @@ export function rootWith(files: Record<string, string>, from?: string): string {
 }
 
 /** A people file declaring `alice` alone, for a root's `resources/people.ts`. */
+/** The app's actions, built in every config after `change` (`app-workflows.ts`), in that order. */
+export const APP_ACTIONS = ["adopt", "patch", "go-live", "go-live-host", "connect-existing"];
+
 export const ALICE = `import { sanoma } from "sanoma/resources";
 
 export const alice = sanoma.person({ id: "alice" });

@@ -13,6 +13,12 @@ type OutboundRecord = {
 };
 
 interface CompanyApi {
+  /** Adopt a vendor's value: the workflow `adopt`, built in. */
+  adopt: WorkflowFn<{
+    runId: string;
+    id: string;
+    paths: string[];
+  }, unknown>;
   /** Call an operation: the workflow `call`, built in. */
   call: WorkflowFn<{
     op: string;
@@ -30,9 +36,36 @@ interface CompanyApi {
     body?: string;
     page?: string;
   }, unknown>;
+  /** Connect an existing repository or database: the workflow `connect-existing`, built in. */
+  connectExisting: WorkflowFn<{
+    repository?: string;
+    project?: string;
+  }, unknown>;
+  /** Go live: the workflow `go-live`, built in. */
+  goLive: WorkflowFn<{
+    owner: string;
+    name: string;
+    organization?: string;
+    region: string;
+    size?: string;
+    database?: string;
+    host?: string;
+    port: number;
+  }, unknown>;
+  /** Push and run the host: the workflow `go-live-host`, built in. */
+  goLiveHost: WorkflowFn<{}, unknown>;
   /** Move a lead on: the workflow `outbound-next`. */
   outboundNext: WorkflowFn<{
     company: string;
+  }, unknown>;
+  /** Save a declaration: the workflow `patch`, built in. */
+  patch: WorkflowFn<{
+    at: {
+      file: string;
+      export: string;
+    };
+    fields: Record<string, unknown>;
+    origin?: string;
   }, unknown>;
   /** Plan a launch: the workflow `plan-launch`. */
   planLaunch: WorkflowFn<{
