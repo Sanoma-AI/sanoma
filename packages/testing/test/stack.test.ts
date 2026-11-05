@@ -79,7 +79,7 @@ describe("scale to zero, the stack on fakes", () => {
 
   /** Whether the schedule's tick for `at` ran and finished. */
   const tickRan = async (at: string) => {
-    for (const run of await client.runs({ workflow: "wakeup-check-tick", limit: 10 })) {
+    for (const run of await client.runs({ workflow: "wakeup-check-tick", limit: 100 })) {
       const records = await client.ledger(run.runId);
       const [started] = records;
       if (

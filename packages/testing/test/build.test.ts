@@ -1,5 +1,5 @@
-import { execFile } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { execFile, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -31,10 +31,9 @@ describe("ensureBuilt", () => {
 
   it("takes over the lock of a build that was killed", () => {
     const lock = join(pkg, "node_modules/.ensure-built.lock");
-    mkdirSync(lock);
-    const long = new Date(Date.now() - 10 * 60_000);
-    utimesSync(lock, long, long);
+    writeFileSync(lock, String(spawnSync("true").pid));
     ensureBuilt(pkg, ["out"], build);
     expect(builds()).toBe(1);
+    expect(existsSync(lock)).toBe(false);
   });
 });
