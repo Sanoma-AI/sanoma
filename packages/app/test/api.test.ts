@@ -353,6 +353,18 @@ describe("callFn for a visitor", () => {
       body: { code: "policy_denied" },
     });
   });
+
+  it("starts none of the app's own actions on the repository, nor does an api token, whatever its groups", async () => {
+    const token: Principal = { id: "token:t1", groups: ["admin"] };
+    for (const principal of [visitor, token]) {
+      for (const name of ["adopt", "patch", "goLive", "goLiveHost", "connectExisting"]) {
+        expect(await visit({ name, input: {} }, principal), `${principal.id} ${name}`).toMatchObject({
+          status: 400,
+          body: { code: "invalid_input", error: expect.stringContaining("is neither an operation nor a workflow") },
+        });
+      }
+    }
+  });
 });
 
 /** An `api` whose transport records each request and answers with the next of `answers` (thrown when an Error). */

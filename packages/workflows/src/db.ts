@@ -1,17 +1,20 @@
 import { DBOS, DBOSClient } from "@dbos-inc/dbos-sdk";
 import { setTimeout as delay } from "node:timers/promises";
-import { and, eq, inArray, lte, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, lte, ne, notInArray, sql } from "drizzle-orm";
 import { DrizzleQueryError } from "drizzle-orm/errors";
 import { drizzle, type NodePgClient, type NodePgQueryResultHKT } from "drizzle-orm/node-postgres";
 import { type PgDatabase, PgPreparedQuery } from "drizzle-orm/pg-core";
 import { Client, Pool } from "pg";
-import { inviteRequests } from "./db/company.ts";
+import { appBehind, inviteRequests, runChecks } from "./db/company.ts";
 import { workflowStatus } from "./db/dbos.ts";
 import { applyMigrations, COMPANY_MIGRATIONS, migrationsApplied } from "./db/migrate.ts";
 import { warn } from "./log.ts";
+import type { RunChecks } from "./scenario.ts";
 import { errorMessage } from "./shared.ts";
 
-// The runtime's own tables live in the config's database, beside DBOS's (`db/company.ts`). What
+// The runtime's own tables live in the config's database, beside DBOS's (`db/company.ts`), among
+// them what the worker tells the app (how far each app is behind its source, a sandbox run's
+// checks). What
 // the stores share is here: Drizzle over a `pg` pool or connection (`databaseOn`), the one
 // preparation of a database, which applies the generated migrations under a lock, and a pool that
 // opens once it is prepared and survives a dropped connection.
@@ -376,4 +379,49 @@ export async function spendInviteRequest(db: Db, nonce: string, expiresAt: Date)
     .onConflictDoNothing({ target: inviteRequests.nonce })
     .returning({ nonce: inviteRequests.nonce });
   return spent.length === 1;
+}
+
+/** How far an app is behind its source (`Source.behind`), or why that could not be told. */
+export type AppBehind = { behind: number } | { error: string };
+
+/** Sets each app's row to what was told of it now, and drops the rows of apps no longer listed. */
+export async function writeAppsBehind(db: Db, told: ReadonlyMap<string, AppBehind>): Promise<void> {
+  const folders = [...told.keys()];
+  await db.delete(appBehind).where(folders.length ? notInArray(appBehind.folder, folders) : undefined);
+  for (const [folder, answer] of told) {
+    const row = "behind" in answer ? { behind: answer.behind, error: null } : { behind: null, error: answer.error };
+    await db
+      .insert(appBehind)
+      .values({ folder, ...row })
+      .onConflictDoUpdate({ target: appBehind.folder, set: { ...row, checkedAt: sql`now()` } });
+  }
+}
+
+/** The app `folder`'s row: how far it is behind its source, or why not; undefined when the worker has not told it. */
+export async function readAppBehind(db: Db, folder: string): Promise<AppBehind | undefined> {
+  const [row] = await db
+    .select({ behind: appBehind.behind, error: appBehind.error })
+    .from(appBehind)
+    .where(eq(appBehind.folder, folder));
+  if (!row) return undefined;
+  return row.error === null ? { behind: row.behind! } : { error: row.error };
+}
+
+/** Sets the run's checks (`RunChecks`), replacing what was there. */
+export async function writeRunChecks(db: Db, runId: string, checks: RunChecks): Promise<void> {
+  const row = "checks" in checks ? { checks: checks.checks, error: null } : { checks: null, error: checks.error };
+  await db
+    .insert(runChecks)
+    .values({ runId, ...row })
+    .onConflictDoUpdate({ target: runChecks.runId, set: { ...row, checkedAt: sql`now()` } });
+}
+
+/** The run's checks as the worker last ran them; undefined when it has run none. */
+export async function readRunChecks(db: Db, runId: string): Promise<RunChecks | undefined> {
+  const [row] = await db
+    .select({ checks: runChecks.checks, error: runChecks.error })
+    .from(runChecks)
+    .where(eq(runChecks.runId, runId));
+  if (!row) return undefined;
+  return row.error === null ? { checks: row.checks! } : { error: row.error };
 }

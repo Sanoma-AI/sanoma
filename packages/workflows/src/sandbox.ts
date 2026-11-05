@@ -9,8 +9,10 @@ import { entry, type LedgerRecord, write } from "./ledger.ts";
 import type { DriverFn } from "./op.ts";
 import type { Run } from "./run.ts";
 import { memorySecrets } from "./secret.ts";
-import { type Given, loadScenarios, type Scenario } from "./scenario.ts";
-import { errorMessage } from "./shared.ts";
+import { writeRunChecks } from "./db.ts";
+import { warn } from "./log.ts";
+import { check, type Given, loadScenarios, type RunChecks, type Scenario } from "./scenario.ts";
+import { errorMessage, notLoaded } from "./shared.ts";
 
 /*
  * What a worker does for a sandbox run, imported only when it starts one: kept apart from
@@ -125,8 +127,9 @@ export async function seedSandbox(run: Run, name: string, input: unknown): Promi
       const { scenarios, errors } = await loadScenarios(state);
       const scenario = scenarios.find((s) => s.name === name);
       if (!scenario) {
-        const why = errors.length ? `; these files did not load: ${errors.map((e) => e.message).join("; ")}` : "";
-        throw new SanomaError("invalid_input", `No scenario named "${name}"${why}`, { scenario: name });
+        throw new SanomaError("invalid_input", `No scenario named "${name}"${notLoaded(errors)}`, {
+          scenario: name,
+        });
       }
       if (scenario.workflow !== run.workflow) {
         throw new SanomaError("invalid_input", `Scenario "${name}" runs ${scenario.workflow}, not ${run.workflow}`, {
@@ -213,4 +216,38 @@ export async function seedSandbox(run: Run, name: string, input: unknown): Promi
   run.fakeDrivers = copies;
   run.fakeSecrets = secrets;
   await write(run, entry(run, { type: "scenario.seeded", scenario: name, seeds }));
+}
+
+/**
+ * A seeded sandbox run's checks against its ledger so far, written for the app (`writeRunChecks`):
+ * Cucumber runs its scenario's Then steps over the feature file as it reads now, which the agent
+ * may have changed since. Called when the run waits and when it ends (`recordSandboxChecks`); a
+ * check met is settled when what it expects stays so (a call made, a decision recorded), and every
+ * one once the run has ended, which the app reads from the run's status. No step and no ledger
+ * record, so a replay neither depends on it nor differs by it: a failure is warned about, and the
+ * run goes on.
+ */
+export async function recordChecks(run: Run, name: string): Promise<void> {
+  if (!run.fakeDrivers) return;
+  const { state } = run;
+  try {
+    const checks = await checksOf(run, name).catch((err: unknown): RunChecks => ({ error: errorMessage(err) }));
+    await writeRunChecks(await state.db(), run.id, checks);
+  } catch (err) {
+    warn(`run ${run.id}: could not record its checks against scenario "${name}": ${errorMessage(err)}`);
+  }
+}
+
+async function checksOf({ id, state }: Run, name: string): Promise<RunChecks> {
+  const loaded = await loadScenarios(state);
+  const scenario = loaded.scenarios.find((s) => s.name === name);
+  if (!scenario) return { error: `The feature files no longer have scenario "${name}"${notLoaded(loaded.errors)}` };
+  const checks = await check(state, scenario, await state.ledger.read(id));
+  return {
+    checks: checks.map((c, i) => {
+      const e = scenario.expect[i]!;
+      // Met once: a call made, or a decision recorded, stays made. Every one is, once the run has ended (`runDetail`).
+      return { ...c, settled: c.ok && (("called" in e && e.called === true) || "decision" in e) };
+    }),
+  };
 }

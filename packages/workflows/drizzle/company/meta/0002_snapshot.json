@@ -1,5 +1,5 @@
 {
-  "id": "c11a8727-f078-464c-9825-74699afbf0ff",
+  "id": "74ad8f94-1d95-46c2-89c2-0263af5bcc8b",
   "prevId": "4eeb061d-222d-4dd5-bef6-c719b07f0556",
   "version": "7",
   "dialect": "postgresql",
@@ -58,6 +58,124 @@
           ]
         }
       },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.sanoma_app_behind": {
+      "name": "sanoma_app_behind",
+      "schema": "",
+      "columns": {
+        "folder": {
+          "name": "folder",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "behind": {
+          "name": "behind",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "error": {
+          "name": "error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "checked_at": {
+          "name": "checked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "sanoma_app_behind_one_answer": {
+          "name": "sanoma_app_behind_one_answer",
+          "value": "(\"sanoma_app_behind\".\"behind\" IS NULL) <> (\"sanoma_app_behind\".\"error\" IS NULL)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.sanoma_chat_chunks": {
+      "name": "sanoma_chat_chunks",
+      "schema": "",
+      "columns": {
+        "chat_id": {
+          "name": "chat_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "seq": {
+          "name": "seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "chunk": {
+          "name": "chunk",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "sanoma_chat_chunks_chat": {
+          "name": "sanoma_chat_chunks_chat",
+          "columns": [
+            {
+              "expression": "chat_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "sanoma_chat_chunks_chat_id_sanoma_chats_id_fk": {
+          "name": "sanoma_chat_chunks_chat_id_sanoma_chats_id_fk",
+          "tableFrom": "sanoma_chat_chunks",
+          "tableTo": "sanoma_chats",
+          "columnsFrom": [
+            "chat_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "sanoma_chat_chunks_run_id_seq_pk": {
+          "name": "sanoma_chat_chunks_run_id_seq_pk",
+          "columns": [
+            "run_id",
+            "seq"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -161,6 +279,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "turn": {
+          "name": "turn",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -549,16 +673,6 @@
           "type": "jsonb",
           "primaryKey": false,
           "notNull": true
-        },
-        "target": {
-          "name": "target",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "generated": {
-            "as": "\"record\" ->> 'target'",
-            "type": "stored"
-          }
         }
       },
       "indexes": {
@@ -588,22 +702,6 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
-        },
-        "sanoma_ledger_target": {
-          "name": "sanoma_ledger_target",
-          "columns": [
-            {
-              "expression": "target",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"sanoma_ledger\".\"target\" is not null",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
         }
       },
       "foreignKeys": {},
@@ -619,6 +717,49 @@
       },
       "policies": {},
       "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.sanoma_run_checks": {
+      "name": "sanoma_run_checks",
+      "schema": "",
+      "columns": {
+        "run_id": {
+          "name": "run_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "checks": {
+          "name": "checks",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "error": {
+          "name": "error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "checked_at": {
+          "name": "checked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "sanoma_run_checks_one_answer": {
+          "name": "sanoma_run_checks_one_answer",
+          "value": "(\"sanoma_run_checks\".\"checks\" IS NULL) <> (\"sanoma_run_checks\".\"error\" IS NULL)"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.sanoma_wakeup": {

@@ -327,11 +327,16 @@ const runOn = (ledger: LedgerStore): Run => ({
     policy: allowAll,
     ledger,
     secrets: memorySecrets(),
+    client: () => Promise.reject(new Error("no client here")),
+    serially: (next) => next(),
+    followMain: () => Promise.reject(new Error("no checkout here")),
+    db: () => Promise.reject(new Error("no database here")),
     workflows: new Map(),
     outlines: new Map(),
     startRun: () => Promise.reject(new Error("no runs here")),
     stopped: false,
     deadlines: deadlineRegistry(),
+    shutdown: new AbortController().signal,
   },
 });
 

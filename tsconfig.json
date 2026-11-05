@@ -44,6 +44,7 @@
       "@sanoma-ai/app": ["./packages/app/src/index.ts"],
       "@sanoma-ai/app/build": ["./packages/app/src/build.ts"],
       "@sanoma-ai/app/bundle": ["./packages/app/src/bundle-build.ts"],
+      "@sanoma-ai/app/steps": ["./packages/app/src/steps/index.ts"],
       "@sanoma-ai/bridge": ["./packages/bridge/src/index.ts"],
       "@sanoma-ai/bridge/fake": ["./packages/bridge/src/fake.ts"],
       "@sanoma-ai/bridge/connector": ["./packages/bridge/src/connector.ts"],

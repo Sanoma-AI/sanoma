@@ -1,7 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { Chat, Principal } from "@sanoma-ai/workflows";
-import type { AppContext } from "../../context.ts";
+import { type AppStepContext, type Chat, isDirect, type Principal, VENDOR } from "@sanoma-ai/workflows";
 import { type ChatMessage, textOf } from "../../lib/chat.ts";
 
 // Our loop's system prompt: the rules, then what it is told of the company: its AGENTS.md, its
@@ -50,8 +49,13 @@ const actingFor = (appName: string, principal: Principal, chat: Chat) =>
  * A coding agent's instructions for `principal`'s turn in `chat`: the rules, who it acts for, and
  * the chat's earlier messages (`history`, their text), since each turn starts a new session of it.
  */
-export function harnessInstructions(app: AppContext, principal: Principal, chat: Chat, history: ChatMessage[]): string {
-  const sections = [HARNESS_RULES, actingFor(app.snapshot.description.appName, principal, chat)];
+export function harnessInstructions(
+  { resolved }: Pick<AppStepContext, "resolved">,
+  principal: Principal,
+  chat: Chat,
+  history: ChatMessage[],
+): string {
+  const sections = [HARNESS_RULES, actingFor(resolved.appName, principal, chat)];
   // Whole messages, the latest first, until the limit (the latest one always).
   const said: string[] = [];
   let size = 0;
@@ -74,18 +78,23 @@ function spoken(message: ChatMessage): string {
 }
 
 /** The loop's instructions for `principal`'s turn in `chat`. */
-export async function instructions(app: AppContext, principal: Principal, chat: Chat): Promise<string> {
-  const { description } = app.snapshot;
-  const sections = [RULES, actingFor(description.appName, principal, chat)];
-  const [guide, drafts] = await Promise.all([companyGuide(app), openDrafts(app, principal)]);
+export async function instructions(step: AppStepContext, principal: Principal, chat: Chat): Promise<string> {
+  const { config, resolved } = step;
+  const sections = [RULES, actingFor(resolved.appName, principal, chat)];
+  const [guide, drafts] = await Promise.all([companyGuide(step), openDrafts(step, principal)]);
   if (guide) sections.push(`The company's AGENTS.md:\n\n${guide}`);
-  const byVendor = Map.groupBy(description.ops, (op) => op.vendor);
-  const connectors = [...byVendor].map(([vendor, ops]) => {
-    const title = description.vendors[vendor]?.title ?? vendor;
-    const listed = ops.map(
-      (op) => `  - ${op.id} (${op.effect}${op.effect === "read" && op.direct ? ", a lookup" : ""})`,
+  // A vendor's title is its first connector's, as the app's pages name it.
+  const titles = new Map<string, string>();
+  for (const connector of config.connectors) {
+    const { id, info } = connector[VENDOR];
+    if (!titles.has(id)) titles.set(id, info?.title ?? id);
+  }
+  const ops = [...resolved.ops.values()].toSorted((a, b) => a.id.localeCompare(b.id));
+  const connectors = [...Map.groupBy(ops, (op) => op.vendor)].map(([vendor, of]) => {
+    const listed = of.map(
+      (op) => `  - ${op.id} (${op.effect}${op.effect === "read" && isDirect(op, resolved.types) ? ", a lookup" : ""})`,
     );
-    return `- ${title} (${vendor}):\n${listed.join("\n")}`;
+    return `- ${titles.get(vendor) ?? vendor} (${vendor}):\n${listed.join("\n")}`;
   });
   if (connectors.length)
     sections.push(`The installed connectors and their operations' effects:\n${connectors.join("\n")}`);
@@ -98,15 +107,14 @@ export async function instructions(app: AppContext, principal: Principal, chat: 
 }
 
 /** The repository's AGENTS.md, cut to its limit; none without one. */
-async function companyGuide({ local, resolved }: AppContext): Promise<string | undefined> {
-  const root = local?.source?.root ?? resolved.root;
+async function companyGuide({ source, resolved }: AppStepContext): Promise<string | undefined> {
+  const root = source?.root ?? resolved.root;
   const text = root && (await readFile(join(root, "AGENTS.md"), "utf8").catch(() => undefined));
   return text && text.length > AGENTS_LIMIT ? `${text.slice(0, AGENTS_LIMIT)}\n[cut]` : text;
 }
 
 /** The person's chats whose drafts are still open (`Source.drafts`). */
-async function openDrafts({ local, client }: AppContext, principal: Principal): Promise<Chat[]> {
-  const source = local?.source;
+async function openDrafts({ source, client }: AppStepContext, principal: Principal): Promise<Chat[]> {
   if (!source?.drafts) return [];
   const [open, chats] = await Promise.all([
     source.drafts().then((ids) => new Set(ids)),

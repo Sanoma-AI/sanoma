@@ -6,7 +6,7 @@ import { appRoot } from "./tree.ts";
 
 // The operator agent's chats through `SanomaClient.chats`, on Postgres: a chat opened, its draft
 // attached, its messages written as a turn writes them (the person's, then the reply's snapshots
-// in place) and read back in order, and the person's list.
+// in place, and messages moved after the rest) and read back in order, and the person's list.
 
 let client: SanomaClient;
 beforeAll(async () => {
@@ -47,6 +47,11 @@ describe("chats", () => {
       text("u2", "user", "continue"),
       text("a2", "assistant", "Nothing left."),
     ]);
+    // Moved after the rest, in the order given.
+    await client.chats.upsert(first, [text("a1", "assistant", "Done."), text("u1", "user", "add a laptop step")], {
+      last: true,
+    });
+    expect((await client.chats.load(first)).map((m) => m.id)).toEqual(["u2", "a2", "a1", "u1"]);
     expect(await client.chats.load(second)).toEqual([]);
     await expect(client.chats.upsert(first, [{ ...text("", "user", "no id") }])).rejects.toThrow("needs an id");
 

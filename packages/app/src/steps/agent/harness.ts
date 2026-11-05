@@ -2,6 +2,7 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { HarnessV1 } from "@ai-sdk/harness";
 import { HarnessAgent } from "@ai-sdk/harness/agent";
+import type { AppStepContext } from "@sanoma-ai/workflows";
 import { errorMessage } from "@sanoma-ai/workflows/shared";
 import {
   createUIMessageStream,
@@ -10,14 +11,13 @@ import {
   LoadAPIKeyError,
   type UIMessageStreamWriter,
 } from "ai";
-import type { AppContext } from "../../context.ts";
 import { type ChatMessage, ENGINE_NAMES, noKeyText, pathOf, textOf } from "../../lib/chat.ts";
-import { modelRegistry } from "../models.ts";
-import { secretValues } from "../secrets.ts";
+import { modelRegistry } from "../../server/models.ts";
+import { secretValues } from "../../server/secrets.ts";
 import { agentHome, allowedPath, commitTurn, NO_SHELL, openDraft, outsideCheckout } from "./checkout.ts";
 import { freePort, LocalSession } from "./local-session.ts";
 import { harnessInstructions } from "./prompt.ts";
-import { chatResponse, type Engine, type EngineTurn } from "./transcript.ts";
+import type { Engine, EngineTurn } from "./transcript.ts";
 
 // The chat's second engine: an existing coding agent driven by the AI SDK's `HarnessAgent` in a
 // local session of ours (`LocalSession`), in the chat's draft, on the company's model key. Pi runs
@@ -40,7 +40,10 @@ interface Runtime {
   harness(auth: Record<string, string>, home: string): Promise<HarnessV1>;
 }
 
-const RUNTIMES = {
+/** The runtimes' names, each an engine a chat's row keeps. */
+export type RuntimeName = "pi" | "claude-code";
+
+const RUNTIMES: Readonly<Record<RuntimeName, Runtime>> = {
   pi: {
     qualified: true,
     bridge: false,
@@ -59,20 +62,16 @@ const RUNTIMES = {
   },
   // Later: Codex, once its adapter asks before an edit or a command (vercel/ai#22550); it runs only
   // `allow-all`, which the checkout rule could not answer for. Then a vendor per runtime.
-} satisfies Record<string, Runtime>;
-
-/** The runtimes' names, each an engine a chat's row keeps. */
-export type RuntimeName = keyof typeof RUNTIMES;
+};
 
 /** A bridge's first session, by its runtime: it installs the bridge under the shared home, so the next ones wait for it. */
 const installing = new Map<RuntimeName, Promise<unknown>>();
 
-/** The engine for `name`: a turn of a chat through that runtime, its transcript written as it goes. */
+/** The engine for `name`: a turn of a chat through that runtime. */
 export const harnessEngine =
   (name: RuntimeName): Engine =>
-  async (turn) => {
-    const { app, chat } = turn;
-    const stream = createUIMessageStream<ChatMessage>({
+  (turn) =>
+    createUIMessageStream<ChatMessage>({
       onError: (err) => {
         // A missing key (`authFor`'s words); the adapter's or the bridge's own otherwise (a bootstrap
         // that failed, say).
@@ -82,21 +81,20 @@ export const harnessEngine =
       },
       execute: ({ writer }) => runTurn(name, turn, writer),
     });
-    return chatResponse(app, chat, stream);
-  };
 
 async function runTurn(name: RuntimeName, turn: EngineTurn, writer: UIMessageStreamWriter<ChatMessage>) {
-  const { app, chat, messages, principal, signal } = turn;
+  const { step, chat, messages } = turn;
+  const { by: principal, signal } = step;
   const runtime: Runtime = RUNTIMES[name];
   // Kept across restarts: a bridge installs its agent under it once. Its own, beside the own
   // agents' installs and people's sign-ins, which its files never reach.
-  const home = agentHome(app, "harness");
+  const home = agentHome(step, "harness");
   // The key first: a turn without it opens no draft.
-  const auth = await authFor(app);
+  const auth = await authFor(step);
   // The agent works in the chat's draft from its first turn.
   const [draft, model, port] = await Promise.all([
-    openDraft(app, chat),
-    modelFor(app, runtime),
+    openDraft(step, chat),
+    modelFor(step, runtime),
     freePort(),
     mkdir(home, { recursive: true }),
   ]);
@@ -106,7 +104,7 @@ async function runTurn(name: RuntimeName, turn: EngineTurn, writer: UIMessageStr
   const agent = new HarnessAgent({
     harness,
     model,
-    instructions: harnessInstructions(app, principal, chat, messages.slice(0, -1)),
+    instructions: harnessInstructions(step, principal, chat, messages.slice(0, -1)),
     // Edits and commands ask first, and the checkout rule answers.
     permissionMode: "allow-reads",
     // The draft's checkout itself, not a directory per session under it.
@@ -169,12 +167,12 @@ async function runTurn(name: RuntimeName, turn: EngineTurn, writer: UIMessageStr
  * sets one (a stand-in's, in tests). Without it, `LoadAPIKeyError` says so, with the connector's
  * page when the company has the connector (`noKeyText`).
  */
-async function authFor(app: AppContext): Promise<Record<string, string>> {
-  const value = (await secretValues(app.client)([KEY])).get(KEY);
+async function authFor({ client, resolved }: AppStepContext): Promise<Record<string, string>> {
+  const value = (await secretValues(client)([KEY])).get(KEY);
   if (!value) {
     const message = `${VENDOR} is not configured: ${KEY}`;
     throw new LoadAPIKeyError({
-      message: app.snapshot.description.vendors[VENDOR]
+      message: resolved.models.has(VENDOR)
         ? noKeyText(VENDOR, `${message}; set it on the connector page`)
         : `${message}; no connector gives it yet`,
     });
@@ -184,9 +182,9 @@ async function authFor(app: AppContext): Promise<Record<string, string>> {
 }
 
 /** The model `<vendor>/default` names, as the runtime takes it; the runtime's own default without that connector. */
-async function modelFor(app: AppContext, { qualified }: Runtime): Promise<string | undefined> {
-  if (!app.resolved.models.has(VENDOR)) return undefined;
-  const { modelId } = (await modelRegistry(app)).languageModel(`${VENDOR}/default`);
+async function modelFor(step: AppStepContext, { qualified }: Runtime): Promise<string | undefined> {
+  if (!step.resolved.models.has(VENDOR)) return undefined;
+  const { modelId } = (await modelRegistry(step)).languageModel(`${VENDOR}/default`);
   return qualified ? `${VENDOR}/${modelId}` : modelId;
 }
 

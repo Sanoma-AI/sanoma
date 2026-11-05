@@ -5,7 +5,7 @@ import { RejectedError, WithdrawnError } from "./errors.ts";
 import { entry, write } from "./ledger.ts";
 import { warn } from "./log.ts";
 import type { Placed } from "./call.ts";
-import type { Run } from "./run.ts";
+import { recordSandboxChecks, type Run } from "./run.ts";
 import { readPeople } from "./resources.ts";
 import { approverLabel, isVisitor, OWN_CHANGE, refusalOf } from "./shared.ts";
 
@@ -140,6 +140,8 @@ export async function awaitApproval(
       { key: state.id, at: state.requestedAt },
     ),
   );
+  // A sandbox run's checks as it starts to wait, for the app: awaited, since Cucumber runs one at a time in a process.
+  await recordSandboxChecks(run);
   for (;;) {
     // A decision comes from a request (`SanomaClient.decide`), which wakes a stopped worker: no deadline.
     const raw = await run.state.deadlines.waiting(run.id, { kind: "approval" }, () =>

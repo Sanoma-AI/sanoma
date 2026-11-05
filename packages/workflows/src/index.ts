@@ -27,6 +27,7 @@ export {
   retryableStatus,
   type SignInMethod,
   type SocialClients,
+  VENDOR,
   type VendorInfo,
   withSetup,
 } from "./op.ts";
@@ -93,6 +94,23 @@ export {
   type PlanStep,
 } from "./apply.ts";
 export { CALL_WORKFLOW, CallInput } from "./call-workflow.ts";
+export {
+  AdoptInput,
+  type AppApi,
+  type AppStepContext,
+  type AppSteps,
+  type ChatTurnContext,
+  ConnectExistingInput,
+  type ConnectExistingOutput,
+  GoLiveHostInput,
+  GoLiveInput,
+  type GoLiveOutput,
+  PatchInput,
+  type PatchOutput,
+  type Written,
+} from "./app-workflows.ts";
+export { type FollowOutput } from "./follow-workflow.ts";
+export { ChatTurnInput, type ChatTurnOutput } from "./chat-workflow.ts";
 export {
   ADMIN,
   type ChangeDecision,
@@ -263,7 +281,7 @@ export {
   type StoredSecret,
 } from "./client.ts";
 // A raw DBOS client on the runtime's database, for tests and tools that read DBOS directly.
-export { dbosClient } from "./db.ts";
+export { type AppBehind, dbosClient } from "./db.ts";
 // The runtime bundled where a company's files are not (the Cloudflare host's Worker): the root's
 // people, policies and app name as data, Cedar's web build, and a database it only checks.
 export { type RootSnapshot, useRootSnapshot } from "./bundled.ts";

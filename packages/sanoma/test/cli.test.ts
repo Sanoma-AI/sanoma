@@ -47,8 +47,19 @@ describe("sanoma serve", () => {
       expect(res.status).toBe(200);
       const html = await res.text();
       const rows = html.matchAll(/<td[^>]*><div[^>]*><a[^>]*href="\/workflows\/([^"?]+)"/g);
-      // The company's workflow, and the change and call workflows every config has.
-      expect([...rows].map(([, name]) => name)).toEqual(["call", "change", "hello"]);
+      // The company's workflow, and the change and call workflows and the app's actions every config has.
+      expect([...rows].map(([, name]) => name)).toEqual([
+        "adopt",
+        "call",
+        "change",
+        "chat",
+        "connect-existing",
+        "follow",
+        "go-live",
+        "go-live-host",
+        "hello",
+        "patch",
+      ]);
       // On a config without problems: startApp warns about any it finds in the files before it listens.
       expect(output().stderr).not.toContain("the config's files have problems");
       // No sites: the build the app ships, and nothing written under .sanoma but the generated files.

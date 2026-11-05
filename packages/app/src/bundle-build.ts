@@ -1,8 +1,8 @@
 // The app bundle's build, Node only (`buildAppBundle`): the app with its sites built once more,
 // for Cloudflare's workerd, by `@cloudflare/vite-plugin`, over the same route tree as the Node
 // build (`buildApp`). The bundle carries the company's config, the snapshot of its files and the
-// runtime; what needs the checkout (`server/local/`) is left out, and the pages no call is made
-// from are prerendered into its assets. `@sanoma-ai/app/bundle`.
+// runtime, and the pages no call is made from are prerendered into its assets. What needs the
+// checkout is the worker's (`steps/`), which no module of the app imports. `@sanoma-ai/app/bundle`.
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -144,21 +144,13 @@ function bundleModule(root: string, configFile: string, snapshot: AppSnapshot): 
   };
 }
 
-/** The Worker's plugins: the bundle's module, the checkout's actions left out, the runtime's version and files, DBOS's optional packages stubbed, Node-only imports refused, and Cloudflare's over the ssr environment. */
+/** The Worker's plugins: the bundle's module, the runtime's version and files, DBOS's optional packages stubbed, Node-only imports refused, and Cloudflare's over the ssr environment. */
 async function bundlePlugins(root: string, configFile: string, snapshot: AppSnapshot): Promise<PluginOption[]> {
   const { cloudflare } = await import("@cloudflare/vite-plugin");
   const { src } = appSources();
   const missing = join(pkgDir, "src", "worker", "missing.js");
-  const local = join(src, "server", "local", "index.ts");
   return [
     bundleModule(root, configFile, snapshot),
-    {
-      // What needs the checkout (`server/local/index.ts`) is `none.ts` here: each caller says it is not available.
-      name: "sanoma:no-checkout",
-      enforce: "pre",
-      applyToEnvironment: ssr,
-      load: (id) => (id.split("?")[0] === local ? readFileSync(join(dirname(local), "none.ts"), "utf8") : undefined),
-    },
     {
       // The runtime reads its version from a package.json beside it: inlined from the build's.
       name: "sanoma:runtime-version",

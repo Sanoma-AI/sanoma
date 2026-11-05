@@ -2,8 +2,8 @@
 // (`appHandler`) over the snapshot and config the bundle was built with, a client of each
 // request's own on the company's database, the staff's and the sites' sign-ins (Better Auth,
 // composed as the `sanoma` bin composes them on Node) on that client's pool, and the Worker's
-// assets for the client build and the prerendered pages. What needs the checkout is not in the
-// bundle (`server/local/none.ts`).
+// assets for the client build and the prerendered pages. What needs the checkout is the worker's
+// (`steps/`), not in the bundle.
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
   checkPreparedOnly,

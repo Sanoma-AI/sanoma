@@ -2,6 +2,7 @@
 import "@tanstack/react-start/server-only";
 import { setTimeout as sleep } from "node:timers/promises";
 import {
+  type AppBehind,
   type ApprovalState,
   type DriftReport,
   deploymentKey,
@@ -18,9 +19,10 @@ import {
   Principal,
   remoteFor,
   type RunSummary,
-  type SanomaError,
+  SanomaError,
+  vendorCodeOf,
 } from "@sanoma-ai/workflows";
-import { apiNameOf, isVisitor, flatten, LOGIN_CODE_WORKFLOW } from "@sanoma-ai/workflows/shared";
+import { apiNameOf, isVisitor, flatten, LOGIN_CODE_WORKFLOW, notLoaded } from "@sanoma-ai/workflows/shared";
 import { type ConfigDescription, permissionsGrid } from "@sanoma-ai/workflows/describe";
 import { isNotFound, isRedirect, notFound } from "@tanstack/react-router";
 import { z } from "zod";
@@ -59,7 +61,8 @@ import { secretValues } from "./secrets.ts";
 
 // What the server functions do. Server-only: each takes the app context the app hands every
 // request, and reads the company from its snapshot, never a file. Every expected failure is an
-// ApiError. What writes the repository or runs a child process is `local/`'s.
+// ApiError. What writes the repository or runs a child process is a run the worker executes
+// (`steps/`): a server function starts it.
 
 /** A request's context once start.ts's `actor` middleware has run: the app, and who is asking. */
 export interface ActorContext {
@@ -171,10 +174,6 @@ function logReadOnce(runId: string, message: string, what: string, err: unknown)
   console.error(`sanoma app: could not read ${what} of run ${runId}:`, err);
 }
 
-/** The feature files that did not load, as `seedSandbox` names them: appended to a scenario not found. */
-export const notLoaded = (errors: readonly { message: string }[]) =>
-  errors.length ? `; these files did not load: ${errors.map((e) => e.message).join("; ")}` : "";
-
 /** A `login-code` run's start with its sealed code cut to what the page shows (`SEALED_SHOWN`), which is all a reader is sent. */
 function sealedShown(record: LedgerRecord): LedgerRecord {
   if (record.type !== "run.started" || typeof record.input !== "object" || record.input === null) return record;
@@ -184,24 +183,33 @@ function sealedShown(record: LedgerRecord): LedgerRecord {
     : record;
 }
 
-/** The run with its ledger and approvals, and a sandbox run's checks where they can be run, or a 404. */
-export async function runDetail(app: AppContext, runId: string, checks?: ScenarioChecks): Promise<RunDetail> {
-  const { client } = app;
+/** The run with its ledger and approvals, and a sandbox run's checks as the worker last ran them, or a 404. */
+export async function runDetail(app: AppContext, runId: string): Promise<RunDetail> {
+  const { client, snapshot } = app;
   const run = await client.run(runId);
   if (!run) throw new ApiError(404, { error: `No run ${runId}`, code: "run_not_found" });
   const { approvals } = run;
-  let ledger: LedgerRecord[];
-  try {
-    ledger = await client.ledger(runId);
-    if (run.workflow === LOGIN_CODE_WORKFLOW) ledger = ledger.map(sealedShown);
-  } catch (err) {
+  const [read, told] = await Promise.all([
+    client.ledger(runId).then(
+      (records) => ({ records }),
+      (err: unknown) => ({ err }),
+    ),
+    // Beside the ledger: the worker writes them for a seeded run only, each time it waits and when it ends.
+    client.runChecks(runId).catch((err: unknown) => {
+      const error = errorMessage(err);
+      logReadOnce(runId, error, "the checks", err);
+      return { error };
+    }),
+  ]);
+  if ("err" in read) {
     // A store reads a run nothing has recorded as no records, so this is a real failure (a
     // corrupt file, a permission): logged for the operator once, and the page shows the run and
     // why its ledger is missing.
-    const ledgerError = errorMessage(err);
-    logReadOnce(runId, ledgerError, "the ledger", err);
+    const ledgerError = errorMessage(read.err);
+    logReadOnce(runId, ledgerError, "the ledger", read.err);
     return { run, ledger: [], ledgerError, approvals };
   }
+  const ledger = run.workflow === LOGIN_CODE_WORKFLOW ? read.records.map(sealedShown) : read.records;
   // A run that has started records run.started first. Seeing none, the likeliest cause is an
   // app on another ledger than the worker's (another database, or a jsonl directory relative to
   // another cwd).
@@ -210,41 +218,49 @@ export async function runDetail(app: AppContext, runId: string, checks?: Scenari
   }
   const seeded = ledger.find((r) => r.type === "scenario.seeded");
   if (!seeded) return { run, ledger, approvals };
-  // Cucumber runs the scenario's Then steps against the ledger, over the feature file as it reads
-  // now: where the files are.
-  if (!checks) return { run, ledger, approvals, checksError: notHere("Checking a sandbox run") };
-  try {
-    return { run, ledger, approvals, ...(await checks(app, seeded.scenario, run.status, ledger)) };
-  } catch (err) {
-    // The scenarios could not be read at all (an operation's phrase names a field it lacks).
-    const checksError = errorMessage(err);
-    logReadOnce(runId, checksError, "the scenario", err);
-    return { run, ledger, approvals, checksError };
+  if (!told) {
+    // Not checked yet (the worker checks a seeded run when it first waits): its scenario's Then
+    // steps, each not answered yet.
+    const scenario = snapshot.scenarios.scenarios.find((s) => s.name === seeded.scenario);
+    const pending = scenario?.steps.filter((step) => step.kind === "then");
+    return {
+      run,
+      ledger,
+      approvals,
+      ...(pending && { checks: pending.map(({ text }) => ({ step: text, ok: false, settled: false })) }),
+    };
   }
+  if ("error" in told) return { run, ledger, approvals, checksError: told.error };
+  // Every answer is final once the run has ended.
+  const ended = isEnded(run.status);
+  return { run, ledger, approvals, checks: told.checks.map((c) => ({ ...c, settled: ended || c.settled })) };
 }
 
 /**
- * A sandbox run's checks against its ledger (`local.scenarioChecks`): Cucumber over the feature
- * files, so only where they are; `runDetail` says why there are none without it.
+ * How many commits the taken app `folder` is behind its source, or why that cannot be told, as
+ * the worker last checked (at its start and after the checkout follows `main`). Only an app the
+ * description lists, taken from a source.
  */
-export type ScenarioChecks = (
-  app: Pick<AppContext, "resolved">,
-  scenario: string,
-  status: RunSummary["status"],
-  ledger: LedgerRecord[],
-) => Promise<Pick<RunDetail, "checks" | "checksError">>;
+export async function appBehind(
+  { client, snapshot }: Pick<AppContext, "client" | "snapshot">,
+  folder: string,
+): Promise<AppBehind> {
+  if (!snapshot.description.apps.some((app) => app.name === folder && app.source !== undefined)) {
+    return { error: `No app apps/${folder}/ taken from a source` };
+  }
+  return (
+    (await client.appBehind(folder)) ?? {
+      error: "Not told yet: the worker checks each app's source when it starts and after each push to main",
+    }
+  );
+}
 
-/** What an action that needs the company's checkout says on a host that has none (the Worker). */
-export const notHere = (what: string) =>
-  `${what} is not available on this host, which does not have the company's files: use the app where the company's repository is checked out`;
-
-/** Refuses the request with a 400 `invalid_input`, its issue at `field`, as a form shows it beside the field. */
+/**
+ * Refuses the request with `invalid_input`, its issue at `field`, as a form shows it beside the
+ * field: a 400 from a server function (`asApiError`), and from a run's `.result` (an app step's).
+ */
 export function invalid(field: string, error: string): never {
-  throw new ApiError(400, {
-    error,
-    code: "invalid_input",
-    issues: [{ path: [field], message: error, code: "custom" }],
-  });
+  throw new SanomaError("invalid_input", error, { issues: [{ path: [field], message: error, code: "custom" }] });
 }
 
 /** A 404 `invalid_input` for a name the request gives that the config does not have, with an issue at its field. */
@@ -720,6 +736,16 @@ export function asApiError(err: unknown): ApiError {
     const reason = codes.includes(failure.code ?? "") ? failure.code! : "unavailable";
     return new ApiError(reason === "conflict" ? 409 : 400, { error: `Secret store: ${reason.replaceAll("_", " ")}` });
   }
+  // A collection's record changed since the caller read it (`ifRecord`): the caller's to resolve,
+  // with the record as it stands when the error carries it.
+  if (vendorCodeOf(err) === "record_changed") {
+    const { current } = err as { current?: ErrorResponse["current"] };
+    return new ApiError(409, {
+      error: errorMessage(err),
+      code: "record_changed",
+      ...(current !== undefined && { current }),
+    });
+  }
   const code = errorCode(err);
   const status = (code && STATUS[code]) || 500;
   if (status === 500) return new ApiError(500, { error: "Something went wrong", ...(code ? { code } : {}) });
@@ -727,6 +753,7 @@ export function asApiError(err: unknown): ApiError {
   // Read by property, not instanceof: DBOS hands a run's errors back as copies.
   const data: Record<string, unknown> = (err as Partial<SanomaError>).data ?? {};
   if (Array.isArray(data.issues)) body.issues = data.issues as InputIssue[];
+  if (typeof data.field === "string") body.field = data.field;
   if (code === "not_approver") {
     body.approver = data.approver as ErrorResponse["approver"];
     if (typeof data.reason === "string") body.reason = data.reason;

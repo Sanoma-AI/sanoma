@@ -9,7 +9,7 @@ import { anthropic } from "@sanoma-ai/connector-anthropic";
 import { ensureBuilt as ensureAppBuilt, testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
 import { defineConnector, defineDriver, isEnded, SanomaClient, withSetup } from "@sanoma-ai/workflows";
-import { customProvider, getToolName, isToolUIPart, readUIMessageStream } from "ai";
+import { createUIMessageStream, customProvider, getToolName, isToolUIPart, readUIMessageStream } from "ai";
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -20,13 +20,16 @@ import { ACTOR_HEADER } from "../src/api.ts";
 import { type App, startApp } from "../src/index.ts";
 import { takeAppPrompt } from "../src/lib/apps.ts";
 import { type ChatMessage, chatTransport } from "../src/lib/chat.ts";
-import { allowedPath } from "../src/server/agent/checkout.ts";
+import { allowedPath } from "../src/steps/agent/checkout.ts";
+import { ENGINES } from "../src/steps/agent/turn.ts";
+import { appSteps } from "../src/steps/index.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built app. The chat's route, end to end, on our loop: a mock
 // model (a connector's model half, as models.test.ts attaches one) that answers each request by a
 // script, the sanoma package's fixture company as the repository (its own git repository, with an
-// offboarding workflow), and a lookup the policy holds for a lead. No fake stream layer: the route's
-// stream as the browser's transport reads it.
+// offboarding workflow), and a lookup the policy holds for a lead. Each turn is a run the test
+// worker executes with the app's steps; the route streams its reply from the database. No fake
+// stream layer: the route's stream as the browser's transport reads it.
 
 /** This file's run, so its chats and held runs are new on a test database used before. */
 const RUN = randomUUID().slice(0, 8);
@@ -50,6 +53,8 @@ const SCRIPT: Record<string, Step[]> = {
     { text: "Drafted: offboarding now collects the laptop. Merge the branch to apply it." },
   ],
   "Look up Acme": [{ tool: "lookup", input: { op: "crm.customer.find", input: { name: "Acme" } } }, { text: "Acme." }],
+  "Look up Beta": [{ tool: "lookup", input: { op: "crm.customer.find", input: { name: "Beta" } } }, { text: "Beta." }],
+  "Never mind": [{ text: "Fine." }],
   continue: [{ text: "Acme Ltd is a customer since 2019." }],
   [takeAppPrompt("file:///srv/crm")]: [
     { tool: "take_app", input: { url: "file:///srv/crm" } },
@@ -191,6 +196,8 @@ export default defineWorkflow({
   git("init", "--quiet", "--initial-branch=main");
   git("add", "--all");
   git("commit", "--quiet", "-m", "First");
+  // The worker runs the turns, in the repository.
+  await testApp.restart({ source: localGitSource(dir, { databaseUrl: testApp.config.databaseUrl! }), app: appSteps });
   await start();
 }, 600_000);
 
@@ -246,6 +253,9 @@ const post = (body: unknown, headers: Record<string, string> = {}, url = app!.ur
     body: JSON.stringify(body),
   });
 
+/** A message's text. */
+const said = (message: ChatMessage) => message.parts.flatMap((p) => (p.type === "text" ? [p.text] : [])).join("");
+
 const toolParts = (message: ChatMessage | undefined) => (message?.parts ?? []).filter(isToolUIPart);
 
 describe("the chat", () => {
@@ -293,7 +303,7 @@ describe("the chat", () => {
     expect(((await chats.load(id)) as ChatMessage[]).map((m) => m.role)).toEqual(["user", "assistant"]);
   }, 300_000);
 
-  it("shows a held lookup as its approval, and after a restart reloads the chat, settles it and continues", async () => {
+  it("shows a held lookup as its approval, and after the worker's restart settles the turn it cut short and continues", async () => {
     const { chats } = testApp.client;
     const history = (await chats.load(id)) as ChatMessage[];
     // The lookup is held: its part shows the run waiting, and the transcript keeps it as it waits.
@@ -318,15 +328,17 @@ describe("the chat", () => {
     expect(await testApp.client.approvals(runId!)).toEqual([
       expect.objectContaining({ approver: "lead", status: "pending" }),
     ]);
+    const turnId = (await testApp.client.turn(id))!.runId;
 
-    // The server stops mid-turn; the lead approves; the server starts again.
-    await app!.close();
-    app = undefined;
+    // The worker stops mid-turn; the lead approves; another worker takes the runs over: the turn,
+    // begun already, settles what it left and runs nothing again, and the stream ends.
+    await testApp.stop();
+    await testApp.client.decide(runId!, { decision: "approve", by: { id: "lead" } }, undefined, { timeoutSeconds: 1 });
+    await testApp.restart();
     const cut = await turn;
     expect(toolParts(cut)[0]).toMatchObject({ preliminary: true, output: { held: { runId } } });
-    await testApp.client.decide(runId!, { decision: "approve", by: { id: "lead" } });
+    expect(await testApp.client.result(turnId)).toEqual({ interrupted: true });
     await waitFor(async () => isEnded((await testApp.client.run(runId!))?.status ?? "running"), Boolean, 30_000);
-    await start();
 
     // The chat reloads from its transcript, its turn cut short where it was; "continue" settles the
     // lookup from its run and picks up.
@@ -343,6 +355,90 @@ describe("the chat", () => {
     });
     // The model saw the settled lookup's result before it answered.
     expect(JSON.stringify(model.doStreamCalls.at(-1)!.prompt)).toContain("Acme Ltd");
+  }, 300_000);
+
+  it("stops a turn under way for the person's next message, which answers once it has stopped", async () => {
+    const other = `stops-${RUN}`;
+    let held: string | undefined;
+    const first = send(other, [], "Look up Beta", (reply) => {
+      held ??= (toolParts(reply)[0]?.output as { held?: { runId: string } } | undefined)?.held?.runId;
+    });
+    await waitFor(() => held, Boolean, 30_000);
+    const turnId = (await testApp.client.turn(other))!.runId;
+    const stored = (await testApp.client.chats.load(other)) as ChatMessage[];
+    const reply = await send(other, stored, "Never mind");
+    expect(reply!.parts.at(-1)).toMatchObject({ type: "text", text: "Fine." });
+    // The first turn ended for it: its stream too, where it was.
+    expect(toolParts(await first)[0]).toMatchObject({ output: { held: { runId: held } } });
+    expect((await testApp.client.run(turnId))?.status).toBe("finished");
+    const roles = ((await testApp.client.chats.load(other)) as ChatMessage[]).map((m) => m.role);
+    expect(roles).toEqual(["user", "assistant", "user", "assistant"]);
+    // The turns' runs name the chat's messages by id: their text is the chat's person's alone.
+    const next = (await testApp.client.turn(other))!.runId;
+    for (const run of [turnId, next]) {
+      expect(JSON.stringify(await testApp.client.ledger(run)), run).not.toMatch(/Beta|Never mind|Fine\./);
+    }
+  }, 300_000);
+
+  it("keeps the conversation's order for messages sent while a turn is open: each one's history, then its reply", async () => {
+    const other = `order-${RUN}`;
+    const { chats } = testApp.client;
+    // An engine that answers each message by its text, the first once let go (stopped or not),
+    // and keeps the messages each turn was given.
+    const { promise: held, resolve: letGo } = Promise.withResolvers<void>();
+    const given: string[][] = [];
+    vi.spyOn(ENGINES, "loop").mockImplementation(({ messages }) =>
+      createUIMessageStream({
+        execute: async ({ writer }) => {
+          given.push(messages.map(said));
+          if (given.length === 1) await held;
+          const text = `Re: ${said(messages.at(-1)!)}`;
+          writer.write({ type: "start", messageId: randomUUID() });
+          writer.write({ type: "text-start", id: "t" });
+          writer.write({ type: "text-delta", id: "t", delta: text });
+          writer.write({ type: "text-end", id: "t" });
+          writer.write({ type: "finish" });
+        },
+      }),
+    );
+    // Until the chat's latest turn is its `n`th message's, started.
+    const started = (n: number) =>
+      waitFor(
+        async () => {
+          const [stored, turn] = await Promise.all([chats.load(other), testApp.client.turn(other)]);
+          return stored.length === n && turn?.runId === `chat:${other}:${stored[n - 1]!.id}`;
+        },
+        Boolean,
+        30_000,
+      );
+    // Two and Three are sent while One's turn is open, before Two's turn starts.
+    const sent = [send(other, [], "One")];
+    await waitFor(
+      () => given.length,
+      (n) => n === 1,
+      30_000,
+    );
+    sent.push(send(other, [], "Two"));
+    await started(2);
+    sent.push(send(other, [], "Three"));
+    await started(3);
+    letGo();
+    await Promise.all(sent);
+    await waitFor(
+      async () => (await testApp.client.turn(other))?.status,
+      (status) => status === "finished",
+      30_000,
+    );
+
+    expect(given).toEqual([["One"], ["One", "Re: One", "Two"], ["One", "Re: One", "Two", "Re: Two", "Three"]]);
+    expect(((await chats.load(other)) as ChatMessage[]).map(said)).toEqual([
+      "One",
+      "Re: One",
+      "Two",
+      "Re: Two",
+      "Three",
+      "Re: Three",
+    ]);
   }, 300_000);
 
   it("takes an app only from a public repository: the Apps page's prompt and the source's refusal", async () => {
@@ -443,6 +539,22 @@ describe("the composer and a model", () => {
       const column = await chatColumn(bare!.url);
       expect(column).not.toContain("Connect a model");
       expect(column).toMatch(/<button(?![^>]*aria-describedby)[^>]*aria-label="Send"/);
+    });
+
+    it("writes the person's message to the chat before its turn's run starts, so a turn no worker runs keeps it", async () => {
+      // No worker here: the turn's run waits in its queue, and the reply's stream with it, which the browser leaves.
+      const chatId = `kept-${RUN}`;
+      const message = userMessage("Hi");
+      await fetch(new URL("/api/chat", bare!.url), {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: new URL(bare!.url).origin, [ACTOR_HEADER]: "ada" },
+        body: JSON.stringify({ id: chatId, message }),
+        signal: AbortSignal.timeout(2_000),
+      })
+        .then((res) => res.text())
+        .catch(() => undefined);
+      expect(await client!.chats.load(chatId)).toEqual([message]);
+      expect(await client!.turn(chatId)).toMatchObject({ runId: `chat:${chatId}:${message.id}`, status: "queued" });
     });
   });
 });

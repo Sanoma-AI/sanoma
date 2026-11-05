@@ -116,7 +116,7 @@ describe("the server functions a public site's host answers", () => {
     expect([...PUBLIC_FNS]).toEqual(["callFn", "getActor"]);
     expect(call("callFn", "hello")).toBe("answered");
     expect(call("getActor", "hello")).toBe("answered");
-    for (const name of ["getConfig", "startRunFn", "setCredentialFn", "goLiveFn", "getRuns"]) {
+    for (const name of ["getConfig", "startRunFn", "setCredentialFn", "goLiveSignInFn", "getRuns"]) {
       const thrown = (() => {
         try {
           return call(name, "hello");
