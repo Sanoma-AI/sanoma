@@ -64,6 +64,7 @@ describe("a worker's stop", () => {
     let runId = "";
     await stopWith(async () => {
       runId = await app.client.start(waits, {}, { startedBy: alice });
+      await waitFor(async () => (await app.client.run(runId))?.status !== "queued");
     });
     expect(await afterRestart(runId)).toEqual(finishedByTheNextWorker);
   });

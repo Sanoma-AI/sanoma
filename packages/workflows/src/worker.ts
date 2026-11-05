@@ -204,7 +204,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
   };
   // Runs recovered during launch start before it returns, so they must already find this
   // state. If starting fails, a worker still running in the process gets its own back, once
-  // DBOS has stopped: until then a run DBOS dispatches finds this state stopped, and is refused.
+  // DBOS has stopped: until then a run DBOS dispatches finds this state stopped, and is handed back.
   const previous = current;
   let launched = false;
   try {
@@ -421,7 +421,7 @@ async function runWorkflow(name: string, start: RunArgs | Date): Promise<unknown
   if (!state) throw new Error(`Run of "${name}" started with no worker running`);
   // A stop's failure is not the run's outcome, but DBOS would record it as one, for good, while
   // its pool is still open. A run's own cancellation it records nothing for: the next worker recovers it.
-  // A stopped worker's state stays current while DBOS shuts down.
+  // So does a run DBOS dispatches during the stop, as a stopped worker's state stays current until DBOS is down.
   if (state.stopped) throw new DBOSErrors.DBOSWorkflowCancelledError(runId);
   try {
     return await state.deadlines.running(runId, () => runOn(state, name, start));
