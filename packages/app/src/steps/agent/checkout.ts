@@ -140,21 +140,30 @@ export async function tellCommits(client: SanomaClient, id: string, by: Principa
 /** What `changeEvent` fails with for a draft with no change under way. */
 const NO_CHANGE = new Set(["run_not_found", "run_ended"]);
 
+/** A coding agent's turn's commit message: the engine's `title` and the person's message. */
+export const turnMessage = ({ messages }: Pick<EngineTurn, "messages">, title: string) =>
+  `${title}: ${textOf(messages.at(-1)!, " ").trim().slice(0, 72)}`;
+
 /**
  * The end of a coding agent's turn, however it ended (an error too): what it changed committed on
- * the chat's draft as the person, under `title` and their message, its change told (`tellCommits`),
- * then, unless a new message stopped it (the next turn shows the card), the draft's card
- * (`data-draft`) from its checks and its diff.
+ * the chat's draft as the person, under `title` and their message (`turnMessage`), its change told
+ * (`tellCommits`), then, unless a new message stopped it (the next turn shows the card), the
+ * draft's card (`data-draft`) from its checks and its diff. A turn whose box committed for it
+ * (`carryOut`) gives the draft's head `before` it: the card shows when the branch moved since.
  */
 export async function commitTurn(
-  { step, chat, messages }: EngineTurn,
+  turn: EngineTurn,
   draft: Draft,
   title: string,
   writer: UIMessageStreamWriter<ChatMessage>,
+  before?: string,
 ) {
+  const { step, chat } = turn;
   const { by } = step;
-  const message = `${title}: ${textOf(messages.at(-1)!, " ").trim().slice(0, 72)}`;
-  const committed = (await draft.commit({ paths: ["."], message, author: by.id })) !== undefined;
+  const message = turnMessage(turn, title);
+  const committed =
+    (await draft.commit({ paths: ["."], message, author: by.id })) !== undefined ||
+    (before !== undefined && (await drafting(step).head(draft.branch)) !== before);
   if (!committed) return;
   // Told even when the turn was stopped: the commit has landed.
   const told = tellCommits(step.client, chat.id, by);

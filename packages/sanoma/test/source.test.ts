@@ -352,6 +352,70 @@ describe("localGitSource's drafts", () => {
     await expect(source.closeDraft!("../escape")).rejects.toThrow(/A draft's id/);
   });
 
+  it("carries a draft's branch to a clone elsewhere as a bundle, and takes that clone's new commits back as a fast-forward", async () => {
+    const source = localGitSource(dir);
+    const draft = await source.draft!("box");
+    writeFileSync(join(draft.root, "a.ts"), "export const a = 1;\n");
+    await draft.commit({ paths: ["a.ts"], message: "A", author: "agent" });
+    const clone = mkdtempSync(join(tmpdir(), "sanoma-clone-"));
+    const there = (...args: string[]) => execFileSync("git", args, { cwd: clone, encoding: "utf8" }).trim();
+    /** Fetches `bytes` into the clone and checks out the draft's branch at `head`, as a box does. */
+    const fetchInto = (bytes: Uint8Array, head: string) => {
+      writeFileSync(join(clone, "in.bundle"), bytes);
+      there("fetch", "--quiet", "in.bundle", "refs/heads/draft/box");
+      there("checkout", "--quiet", "-f", "-B", "draft/box", head);
+    };
+    try {
+      there("init", "--quiet");
+      // The whole branch the first time, and for a `since` this repository lacks or that is no commit's id.
+      const whole = await source.bundle!("box");
+      expect(whole.head).toBe(await source.head(draft.branch));
+      fetchInto(whole.bytes, whole.head);
+      expect(readFileSync(join(clone, "a.ts"), "utf8")).toBe("export const a = 1;\n");
+      expect(there("log", "--format=%s")).toBe("A\nIgnore\nFirst");
+      // Commits and a branch alone: no remote, no config of this repository's.
+      expect(there("remote")).toBe("");
+      for (const since of ["0".repeat(40), "HEAD", "--all"]) {
+        writeFileSync(join(clone, "again.bundle"), (await source.bundle!("box", { since })).bytes);
+        expect(there("bundle", "verify", "again.bundle")).toMatch(/complete history/);
+      }
+      // Nothing when the clone has every commit.
+      expect(await source.bundle!("box", { since: whole.head })).toEqual({ bytes: new Uint8Array(), head: whole.head });
+
+      // Since what the clone has: the new commit alone, which needs the clone's.
+      writeFileSync(join(draft.root, "b.ts"), "export const b = 1;\n");
+      await draft.commit({ paths: ["b.ts"], message: "B", author: "agent" });
+      const since = await source.bundle!("box", { since: whole.head });
+      expect(since.bytes.length).toBeLessThan(whole.bytes.length);
+      fetchInto(since.bytes, since.head);
+      expect(there("rev-parse", "HEAD")).toBe(since.head);
+
+      // The clone's commit, back: the draft's checkout fast-forwarded to it, the live checkout left alone.
+      writeFileSync(join(clone, "c.ts"), "export const c = 1;\n");
+      there("add", "c.ts");
+      there("commit", "--quiet", "-m", "C");
+      there("bundle", "create", "--quiet", "out.bundle", "draft/box", `^${since.head}`);
+      const back = await source.unbundle!("box", readFileSync(join(clone, "out.bundle")));
+      expect(back.head).toBe(there("rev-parse", "HEAD"));
+      expect(await source.head(draft.branch)).toBe(back.head);
+      expect(readFileSync(join(draft.root, "c.ts"), "utf8")).toBe("export const c = 1;\n");
+      expect(git("-C", draft.root, "status", "--porcelain")).toBe("");
+      expect(git("for-each-ref", "refs/sanoma")).toBe("");
+      expect(status()).toBe("");
+
+      // Refused unless a fast-forward, and for a draft that is not open.
+      writeFileSync(join(draft.root, "d.ts"), "export const d = 1;\n");
+      const d = await draft.commit({ paths: ["d.ts"], message: "D", author: "agent" });
+      await expect(source.unbundle!("box", readFileSync(join(clone, "out.bundle")))).rejects.toThrow(
+        /does not follow the draft's/,
+      );
+      expect(await source.head(draft.branch)).toBe(d!.revision);
+      await expect(source.unbundle!("nope", readFileSync(join(clone, "out.bundle")))).rejects.toThrow(/not open/);
+    } finally {
+      rmSync(clone, { recursive: true, force: true });
+    }
+  });
+
   it("pushes a draft by its branch", async () => {
     const source = localGitSource(dir);
     const draft = await source.draft!("p");

@@ -18,7 +18,7 @@ type At = { path: string; abortSignal?: AbortSignal };
 export interface BoxSessionOptions {
   /** The harness session's id (`createSession({ sessionId })`), whose `.agent-runs` it deletes when destroyed. */
   id: string;
-  /** The draft's checkout (`Draft.root`): where the agent works, and the only files of the repository it may touch. */
+  /** The draft's checkout in the box (`carryIn`'s clone): where the agent works, and the only files of the repository it may touch. */
   root: string;
   /**
    * The box's home (`homeOf`), kept across turns: a bridge installs its agent under it once
@@ -73,9 +73,10 @@ class BoxSession implements HarnessV1NetworkSandboxSession {
   async #path(path: string): Promise<string> {
     const full = resolve(this.defaultWorkingDirectory, path);
     // Its home, by real paths (a link there leads nowhere else), but no other session's run files
-    // (a bridge's start config holds the key), in any case (macOS's file system ignores it).
+    // (a bridge's start config holds the key), in any case (macOS's file system ignores it), and
+    // not the checkout when the home holds it (the box's clone): that is the checkout rule's.
     const home = within(this.#home, full) ? await realWithin(this.#home, full) : undefined;
-    if (home !== undefined) {
+    if (home !== undefined && !(await realWithin(this.defaultWorkingDirectory, home.full))) {
       const inside = home.inside.toLowerCase();
       const runs = relative(this.#home, this.#runs).toLowerCase();
       if (!within(dirname(runs), inside) || within(runs, inside)) return home.full;
