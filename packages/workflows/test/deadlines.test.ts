@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import { randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -566,6 +567,8 @@ describe("the supervisor", () => {
     expect(supervisor.stopped).toBe(false);
     await waitFor(() => stops.length === 1);
     expect(supervisor.stopped).toBe(true);
+    // Woken when the deadline it registered falls, as its wakeup would: woken sooner, it would stop again.
+    await delay(Date.parse(stops[0]!.at!) - Date.now());
     await supervisor.wake();
     expect(supervisor.stopped).toBe(false);
     // A wake while it runs starts nothing more.

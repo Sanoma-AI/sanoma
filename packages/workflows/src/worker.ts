@@ -1,4 +1,4 @@
-import { DBOS, type ScheduledWorkflowFn } from "@dbos-inc/dbos-sdk";
+import { DBOS, Error as DBOSErrors, type ScheduledWorkflowFn } from "@dbos-inc/dbos-sdk";
 import type { WorkerApp } from "./app-steps.ts";
 import { readApps } from "./apps.ts";
 import type { AppSteps } from "./app-workflows.ts";
@@ -275,7 +275,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
   };
   // Runs recovered during launch start before it returns, so they must already find this
   // state. If starting fails, a worker still running in the process gets its own back, once
-  // DBOS has stopped: until then a run DBOS dispatches finds this state stopped, and is refused.
+  // DBOS has stopped: until then a run DBOS dispatches finds this state stopped, and is handed back.
   const previous = current;
   let launched = false;
   try {
@@ -316,7 +316,11 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     }
     // Built-in runs move to the latest version only: a rollback's worker, unless promoted, leaves them be.
     if (isLatest) await carryBuiltInRuns(resolved, () => secrets.db());
-    await DBOS.registerQueue(resolved.queueName);
+    // How often it looks for queued runs: DBOS's default second, unless a test suite asks for less.
+    const pollMs = process.env.SANOMA_QUEUE_POLL_MS;
+    if (pollMs && !(Number(pollMs) > 0))
+      throw new Error(`SANOMA_QUEUE_POLL_MS is milliseconds above zero, not "${pollMs}"`);
+    await DBOS.registerQueue(resolved.queueName, pollMs ? { minPollingIntervalMs: Number(pollMs) } : undefined);
     // The schedules are the latest version's: an older worker leaves them as the newer set them.
     if (isLatest && options.schedules !== false) {
       await applyScheduled(resolved, registered, () => secrets.db());
@@ -534,9 +538,18 @@ function register(name: string): ScheduledWorkflowFn {
  */
 async function runWorkflow(name: string, start: RunArgs | Date): Promise<unknown> {
   const state = current;
-  // A stopped worker's state stays current while DBOS shuts down.
-  if (!state || state.stopped) throw new Error(`Run of "${name}" started with no worker running`);
-  return state.deadlines.running(DBOS.workflowID!, () => runOn(state, name, start));
+  const runId = DBOS.workflowID!;
+  if (!state) throw new Error(`Run of "${name}" started with no worker running`);
+  // A stop's failure is not the run's outcome, but DBOS would record it as one, for good, while
+  // its pool is still open. A run's own cancellation it records nothing for: the next worker recovers it.
+  // So does a run DBOS dispatches during the stop, as a stopped worker's state stays current until DBOS is down.
+  if (state.stopped) throw new DBOSErrors.DBOSWorkflowCancelledError(runId);
+  try {
+    return await state.deadlines.running(runId, () => runOn(state, name, start));
+  } catch (err) {
+    if (state.stopped && isInfrastructureError(err, state)) throw new DBOSErrors.DBOSWorkflowCancelledError(runId);
+    throw err;
+  }
 }
 
 async function runOn(state: WorkerState, name: string, start: RunArgs | Date): Promise<unknown> {

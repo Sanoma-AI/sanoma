@@ -59,7 +59,8 @@ const takenByDbos = (err: unknown) =>
  * cancelled the run or another process took it over, or the run's worker is stopping and the
  * error has none of our codes. `stop()` marks the worker stopped before DBOS shuts down, so from
  * then on whatever fails without a code (DBOS's "system database has been shut down", pg's
- * closed pool) is the shutdown, and the run recovered on the next worker records how it ends.
+ * closed pool) is the shutdown. `runWorkflow` then keeps DBOS from recording it, so the run
+ * recovered on the next worker records how it ends.
  * A coded failure then (a driver's final answer, a denial, a rejection) is still the outcome:
  * DBOS records the run's error and never runs it again, so the ledger records it too. Narrower
  * than `isRunControlError`: DBOS's other errors (a run that is not deterministic) end the run

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { CLIENT_IP_HEADER as RUNTIME_CLIENT_IP_HEADER, WAKE_PATH as RUNTIME_WAKE_PATH } from "@sanoma-ai/workflows";
 import { APP_BUNDLE_PATH as RUNTIME_APP_BUNDLE_PATH } from "@sanoma-ai/workflows/shared";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import {
   APP_BUNDLE_PATH,
   CLIENT_IP_HEADER,
@@ -255,25 +255,16 @@ describe("the Worker's object", () => {
 
   it("destroys a container whose worker has not stopped once the drain's time is up", async () => {
     vi.useFakeTimers();
-    try {
-      const { ctx, calls } = stubCtx({ running: true, labels: { revision: "r1", image: IMAGE }, drains: false });
-      const object = new Instance(ctx, ENV);
-      await object.startNow();
-      const alarm = { rang: false };
-      const ringing = object.alarm().finally(() => (alarm.rang = true));
-      // A second at a time: the start digests its labels before it waits, off the timers.
-      for (let s = 0; !alarm.rang && s < 60; s++) await vi.advanceTimersByTimeAsync(1_000);
-      await ringing;
-      expect(calls).toEqual([
-        `timeout ${INACTIVITY_MS}`,
-        "signal 15",
-        "destroy",
-        "start r2",
-        `timeout ${INACTIVITY_MS}`,
-      ]);
-    } finally {
-      vi.useRealTimers();
-    }
+    onTestFinished(() => void vi.useRealTimers());
+    const { ctx, calls } = stubCtx({ running: true, labels: { revision: "r1", image: IMAGE }, drains: false });
+    const object = new Instance(ctx, ENV);
+    await object.startNow();
+    const alarm = { rang: false };
+    const ringing = object.alarm().finally(() => (alarm.rang = true));
+    // A second at a time, for as long as it takes: the start digests its labels off the timers, in real time.
+    while (!alarm.rang) await vi.advanceTimersByTimeAsync(1_000);
+    await ringing;
+    expect(calls).toEqual([`timeout ${INACTIVITY_MS}`, "signal 15", "destroy", "start r2", `timeout ${INACTIVITY_MS}`]);
   });
 
   it("throws from the alarm without starting a container when the Worker names no image", async () => {
