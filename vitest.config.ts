@@ -8,6 +8,10 @@ export default defineConfig({
   resolve: {
     // Run tests against source, not dist/. Keep in sync with `paths` in tsconfig.json.
     alias: [
+      {
+        find: /^virtual:sanoma\/(locales|icons|content)$/,
+        replacement: src("./packages/app/test/fixtures/virtual-modules.ts"),
+      },
       { find: /^@sanoma-ai\/invoices\/pdf-contract$/, replacement: src("./packages/invoices/src/render-contract.ts") },
       { find: /^@sanoma-ai\/invoices\/pdf$/, replacement: src("./packages/invoices/src/pdf.tsx") },
       { find: /^@sanoma-ai\/invoices\/browser$/, replacement: src("./packages/invoices/src/browser.ts") },
@@ -42,7 +46,7 @@ export default defineConfig({
     ],
   },
   test: {
-    include: ["packages/*/test/**/*.test.ts", "connectors/*/test/**/*.test.ts", "scripts/*.test.ts"],
+    include: ["packages/*/test/**/*.test.{ts,tsx}", "connectors/*/test/**/*.test.ts", "scripts/*.test.ts"],
     testTimeout: 60_000,
     hookTimeout: 60_000,
     // Four files at once peak near 60 connections; docker-compose.yml leaves room for several gates.

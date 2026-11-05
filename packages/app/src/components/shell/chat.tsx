@@ -1,12 +1,14 @@
 import { useChat } from "@ai-sdk/react";
 import { ArrowUpIcon } from "@phosphor-icons/react/dist/csr/ArrowUp";
+import { CaretDownIcon } from "@phosphor-icons/react/dist/csr/CaretDown";
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/csr/ChatCircle";
 import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
 import { SparkleIcon } from "@phosphor-icons/react/dist/csr/Sparkle";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { generateId } from "ai";
+import { type ChatStatus, generateId } from "ai";
 import { type FormEvent, type ReactNode, useId, useMemo, useState } from "react";
+import { Bubble, BubbleContent } from "#/components/ui/bubble.tsx";
 import { Button } from "#/components/ui/button.tsx";
 import {
   DropdownMenu,
@@ -14,12 +16,28 @@ import {
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "#/components/ui/dropdown-menu.tsx";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "#/components/ui/empty.tsx";
-import { NativeSelect, NativeSelectOptGroup, NativeSelectOption } from "#/components/ui/native-select.tsx";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupText,
+  InputGroupTextarea,
+} from "#/components/ui/input-group.tsx";
+import { Message, MessageContent } from "#/components/ui/message.tsx";
+import {
+  MessageScroller,
+  MessageScrollerButton,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+} from "#/components/ui/message-scroller.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
-import { Textarea } from "#/components/ui/textarea.tsx";
 import { cn } from "#/lib/utils.ts";
 import { actorHeaders, useActor } from "../../actor.ts";
 import {
@@ -170,28 +188,13 @@ function Conversation({
   };
   return (
     <>
-      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4" aria-live="polite">
-        {messages.length === 0 && <EmptyChat />}
-        {messages.map((message, i) =>
-          message.role === "user" ? (
-            <div key={message.id} className="ml-8 self-end rounded-xl bg-card px-3 py-2 ring-1 ring-border">
-              <p className="whitespace-pre-wrap">{textOf(message, "\n")}</p>
-            </div>
-          ) : (
-            <Reply key={message.id} message={message} live={busy && i === messages.length - 1} chat={id} />
-          ),
-        )}
-        {status === "submitted" && <Spinner aria-label="Waiting for the agent" />}
-        {error && <TurnError message={error.message} />}
-        {!busy && !error && !noModel && stoppedShort(messages) && (
-          <div className="flex items-center gap-2 text-muted-foreground">
-            <span>The last turn stopped before it finished.</span>
-            <Button variant="secondary" size="sm" onClick={() => send("continue")}>
-              Continue
-            </Button>
-          </div>
-        )}
-      </div>
+      <Thread
+        chat={id}
+        messages={messages}
+        status={status}
+        error={error}
+        onContinue={noModel ? undefined : () => send("continue")}
+      />
       <div className="p-3">
         <Composer
           busy={busy}
@@ -202,6 +205,64 @@ function Conversation({
         />
       </div>
     </>
+  );
+}
+
+/**
+ * The thread (AI Elements' Chat): each turn an item of the scroller, the person's the anchor, so
+ * a new question settles near the top with the reply streaming below it; then what waits on the
+ * turn, its error, and Continue (`onContinue`, when it can be offered) after one that stopped short.
+ */
+export function Thread({
+  chat,
+  messages,
+  status,
+  error,
+  onContinue,
+}: {
+  chat: string;
+  messages: ChatMessage[];
+  status: ChatStatus;
+  error?: Error;
+  onContinue?: () => void;
+}) {
+  const busy = status === "submitted" || status === "streaming";
+  return (
+    <MessageScrollerProvider autoScroll>
+      <MessageScroller className="h-auto min-h-0 flex-1">
+        <MessageScrollerViewport aria-label="Conversation">
+          <MessageScrollerContent className="gap-4 p-4">
+            {messages.length === 0 && <EmptyChat />}
+            {messages.map((message, i) => (
+              <MessageScrollerItem key={message.id} messageId={message.id} scrollAnchor={message.role === "user"}>
+                {message.role === "user" ? (
+                  <Message align="end">
+                    <MessageContent>
+                      <Bubble align="end" variant="outline" className="*:data-[slot=bubble-content]:bg-card">
+                        <BubbleContent className="whitespace-pre-wrap">{textOf(message, "\n")}</BubbleContent>
+                      </Bubble>
+                    </MessageContent>
+                  </Message>
+                ) : (
+                  <Reply message={message} live={busy && i === messages.length - 1} chat={chat} />
+                )}
+              </MessageScrollerItem>
+            ))}
+            {status === "submitted" && <Spinner aria-label="Waiting for the agent" />}
+            {error && <TurnError message={error.message} />}
+            {!busy && !error && onContinue && stoppedShort(messages) && (
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <span>The last turn stopped before it finished.</span>
+                <Button variant="secondary" size="sm" onClick={onContinue}>
+                  Continue
+                </Button>
+              </div>
+            )}
+          </MessageScrollerContent>
+        </MessageScrollerViewport>
+        <MessageScrollerButton />
+      </MessageScroller>
+    </MessageScrollerProvider>
   );
 }
 
@@ -248,9 +309,9 @@ const OWN = NAMES.filter(ownPlan);
 
 /** An engine as the composer's choice. */
 const engineOption = (name: EngineName) => (
-  <NativeSelectOption key={name} value={name}>
+  <DropdownMenuRadioItem key={name} value={name}>
     {ENGINE_NAMES[name]}
-  </NativeSelectOption>
+  </DropdownMenuRadioItem>
 );
 
 /** A link to a connector's page, where its credentials are set. */
@@ -300,7 +361,7 @@ function EmptyChat() {
  * own agents in a group of their own), Send (Enter; Shift+Enter for a new line), and while there
  * is a `note` (where to connect a model), the note, Send off.
  */
-function Composer({
+export function Composer({
   busy,
   onSend,
   draft,
@@ -324,52 +385,65 @@ function Composer({
     setText("");
   };
   return (
-    <form
-      onSubmit={submit}
-      className="flex flex-col gap-2 rounded-xl bg-card p-3 text-card-foreground ring-1 ring-border"
-    >
-      {page && (
-        <span className="inline-flex h-6 w-fit max-w-full items-center rounded-md px-2 text-xs font-medium ring-1 ring-border">
-          <span className="truncate">{page}</span>
-        </span>
-      )}
-      <Textarea
-        rows={2}
-        ref={draft ? focusAtEnd : undefined}
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) submit(e);
-        }}
-        aria-label="Message the agent"
-        placeholder="Ask anything…"
-        className="min-h-0 resize-none rounded-none border-0 bg-transparent p-0 shadow-none focus-visible:ring-0 dark:bg-transparent"
-      />
-      {note && <div id={noteId}>{note}</div>}
-      <div className="flex items-center justify-end gap-2">
-        {engine && (
-          <NativeSelect
-            size="sm"
-            className="mr-auto"
-            aria-label="Engine"
-            value={engine.value}
-            onChange={(e) => engine.set(e.target.value as EngineName)}
-          >
-            {OURS.map(engineOption)}
-            <NativeSelectOptGroup label="Your own plan">{OWN.map(engineOption)}</NativeSelectOptGroup>
-          </NativeSelect>
+    <form onSubmit={submit}>
+      <InputGroup className="h-auto rounded-xl bg-card text-card-foreground has-disabled:bg-card has-disabled:opacity-100 dark:has-disabled:bg-card">
+        {page && (
+          <InputGroupAddon align="block-start" className="pt-3">
+            <InputGroupText className="h-6 max-w-full rounded-md px-2 text-xs text-foreground ring-1 ring-border">
+              <span className="truncate">{page}</span>
+            </InputGroupText>
+          </InputGroupAddon>
         )}
-        <Button
-          type="submit"
-          size="icon-sm"
-          variant="secondary"
-          disabled={busy || !!note || !text.trim()}
-          aria-label="Send"
-          aria-describedby={note ? noteId : undefined}
-        >
-          {busy ? <Spinner /> : <ArrowUpIcon aria-hidden="true" />}
-        </Button>
-      </div>
+        <InputGroupTextarea
+          rows={2}
+          ref={draft ? focusAtEnd : undefined}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) submit(e);
+          }}
+          aria-label="Message the agent"
+          placeholder="Ask anything…"
+          className="min-h-0 px-3"
+        />
+        {note && (
+          <InputGroupAddon id={noteId} align="block-end" className="cursor-auto px-3 font-normal select-text">
+            {note}
+          </InputGroupAddon>
+        )}
+        <InputGroupAddon align="block-end" className="px-3 pb-3">
+          {engine && (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={<InputGroupButton size="sm" aria-label="Engine" className="-ml-2 text-xs" />}
+              >
+                {ENGINE_NAMES[engine.value]}
+                <CaretDownIcon aria-hidden="true" data-icon="inline-end" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="min-w-56">
+                <DropdownMenuRadioGroup value={engine.value} onValueChange={(value: EngineName) => engine.set(value)}>
+                  <DropdownMenuGroup>{OURS.map(engineOption)}</DropdownMenuGroup>
+                  <DropdownMenuGroup>
+                    <DropdownMenuLabel>Your own plan</DropdownMenuLabel>
+                    {OWN.map(engineOption)}
+                  </DropdownMenuGroup>
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+          <InputGroupButton
+            type="submit"
+            size="icon-sm"
+            variant="secondary"
+            className="ml-auto"
+            disabled={busy || !!note || !text.trim()}
+            aria-label="Send"
+            aria-describedby={note ? noteId : undefined}
+          >
+            {busy ? <Spinner /> : <ArrowUpIcon aria-hidden="true" />}
+          </InputGroupButton>
+        </InputGroupAddon>
+      </InputGroup>
     </form>
   );
 }

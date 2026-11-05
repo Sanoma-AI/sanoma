@@ -16,5 +16,5 @@
       "@sanoma-ai/connector-better-auth": ["../../connectors/better-auth/src/index.ts"]
     }
   },
-  "include": ["src", "vite.config.ts"]
+  "include": ["src", "test/*.test.tsx", "vite.config.ts"]
 }
