@@ -10,9 +10,17 @@ setFaker(faker);
 /** Seeds the generator from a name, so one name always makes up the same values. */
 export const seedFrom = (name: string) => seed(createHash("sha256").update(name).digest().readUInt32BE(0));
 
-/** The schema's value with every field `given` does not set made up, parsed by the schema. */
+/**
+ * The schema's value with every required field `given` does not set made up, parsed by the schema.
+ * Optional fields are left out, as a caller may leave them: made up, they could break a rule
+ * between fields (one of two ids, not both).
+ */
 export function fill(schema: z.ZodType, given: Record<string, unknown>): unknown {
-  return schema.parse({ ...(fake(schema) as object), ...given });
+  const made = fake(schema) as Record<string, unknown>;
+  for (const [name, field] of Object.entries(shapeOf(schema))) {
+    if (field.safeParse(undefined).success) delete made[name];
+  }
+  return schema.parse({ ...made, ...given });
 }
 
 /** An object schema's fields by name; none for any other schema. */
