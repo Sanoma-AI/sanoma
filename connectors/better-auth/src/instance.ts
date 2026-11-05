@@ -4,6 +4,7 @@ import {
   databaseOn,
   type Migrations,
   migrationsApplied,
+  pgCode,
   underPreparationLock,
 } from "@sanoma-ai/workflows/db";
 import { type BetterAuthOptions, betterAuth } from "better-auth";
@@ -39,25 +40,16 @@ export type ExtraOptions = Omit<
 export const SCHEMAS = { visitors: visitors.schema.schemaName, staff: staff.schema.schemaName } as const;
 type Schema = (typeof SCHEMAS)[keyof typeof SCHEMAS];
 
-/** A login's tables by Better Auth's model names, as its Drizzle adapter takes them, and their generated migrations. */
+/** A login's tables (its `db/` module: Better Auth's models by name, as its Drizzle adapter reads them) and their generated migrations. */
 interface Login {
-  models: ReturnType<typeof modelsOf>;
+  tables: ReturnType<typeof loginTables>;
   migrations: Migrations;
 }
-
-/** The tables of one of the `db/` modules, without the schema itself. */
-const modelsOf = ({ user, session, account, verification, rateLimit }: ReturnType<typeof loginTables>) => ({
-  user,
-  session,
-  account,
-  verification,
-  rateLimit,
-});
 
 /** Each schema's login: the journal tables are the runtime's neighbours in the schema `drizzle`. */
 const LOGINS = {
   [SCHEMAS.visitors]: {
-    models: modelsOf(visitors),
+    tables: visitors,
     migrations: {
       folder: () => new URL("../drizzle/visitors/", import.meta.url),
       table: "__drizzle_migrations_better_auth",
@@ -65,7 +57,7 @@ const LOGINS = {
     },
   },
   [SCHEMAS.staff]: {
-    models: modelsOf(staff),
+    tables: staff,
     migrations: {
       folder: () => new URL("../drizzle/staff/", import.meta.url),
       table: "__drizzle_migrations_better_auth_staff",
@@ -96,7 +88,7 @@ export interface BetterAuthSetup<O extends ExtraOptions> {
  * so a limit holds across processes and requests). The plugins they run (the email code, magic
  * links) keep no tables of their own.
  */
-const TABLE_OPTIONS = {
+export const TABLE_OPTIONS = {
   user: { additionalFields: { github: { type: "string" as const, required: false, input: false } } },
   rateLimit: { storage: "database" as const },
 };
@@ -144,7 +136,7 @@ export function openBetterAuth<O extends ExtraOptions>({
     ...options,
     user: { ...options.user, ...TABLE_OPTIONS.user },
     // The schema's own tables, so no search_path, which the URL's own `options` could undo.
-    database: drizzleAdapter(databaseOn(pool), { provider: "pg", schema: LOGINS[schema].models, transaction: true }),
+    database: drizzleAdapter(databaseOn(pool), { provider: "pg", schema: LOGINS[schema].tables, transaction: true }),
     // `secrets` over `secret`, else BETTER_AUTH_SECRETS in the environment would win.
     secrets: [{ version: 1, value: key }],
     secret: key,
@@ -213,17 +205,31 @@ function once(memo: Map<string, Promise<void>>, key: string, run: () => Promise<
 /** Each database and schema's migration, once per process however many workers run on it. */
 const migrated = new Map<string, Promise<void>>();
 
+/** Postgres's code for a schema that is already there (`duplicate_schema`). */
+const SCHEMA_EXISTS = "42P06";
+
 /**
  * The preparation of one login's `schema`: the migrations its database has not had, once per
  * process, under the preparation's lock across processes (the runtime's own, which makes the
  * database first when missing): two workers starting at once both succeed, the second finding
- * everything made.
+ * everything made. A schema with no journal is one a release before these migrations made, with
+ * Better Auth's own, of another shape: refused, naming the drop that resets it.
  */
 const preparing =
   (schema: Schema) =>
   (databaseUrl: string): Promise<void> =>
     once(migrated, `${databaseUrl}#${schema}`, () =>
-      underPreparationLock(databaseUrl, (db) => applyMigrations(db, LOGINS[schema].migrations)),
+      underPreparationLock(databaseUrl, (db) => applyMigrations(db, LOGINS[schema].migrations)).catch(
+        (err: unknown) => {
+          const why =
+            pgCode(err) === SCHEMA_EXISTS
+              ? `the schema ${schema} is from a release before this one, and its users sign in again: drop it (DROP SCHEMA ${schema} CASCADE) and start the worker again`
+              : err instanceof Error
+                ? err.message
+                : String(err);
+          throw new Error(`better-auth: could not prepare ${schema}: ${why}`, { cause: err });
+        },
+      ),
     );
 
 /**

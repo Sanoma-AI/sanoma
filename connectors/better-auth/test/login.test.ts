@@ -120,6 +120,19 @@ beforeAll(async () => {
 afterAll(() => pool.end());
 
 describe("login", () => {
+  it("refuses a schema from before the migrations, naming the drop that resets it", async () => {
+    const client = new Client({ connectionString: databaseUrl });
+    await client.connect();
+    try {
+      // As a release on Better Auth's own migrations left it: the schema, no journal.
+      await client.query('CREATE SCHEMA better_auth; CREATE TABLE better_auth."user" (id text PRIMARY KEY)');
+      await expect((await freshPrepare())(databaseUrl)).rejects.toThrow(/DROP SCHEMA better_auth CASCADE/);
+      await client.query("DROP SCHEMA better_auth CASCADE");
+    } finally {
+      await client.end();
+    }
+  });
+
   it("waits, at its first use, until the worker prepared the schema, and never makes it", async () => {
     const verifying = betterAuthLogin(context).verify(request("/"));
     await delay(1500);

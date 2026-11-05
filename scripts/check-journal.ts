@@ -34,13 +34,26 @@ const journalAt = (ref: string, path: string): Journal | undefined =>
     ? JSON.parse(git("show", `${ref}:${path}`))
     : undefined;
 
-const journals = git("ls-files", "--", "*/drizzle/*/meta/_journal.json").trim().split("\n").filter(Boolean);
+/** Where a migrations folder keeps its journal, wherever the folder is. */
+const PATTERN = "*/drizzle/*/meta/_journal.json";
+
+/** The journals `ref` tracks (the working tree's for HEAD), by path. */
+const journalsOf = (ref: string): string[] =>
+  (ref === "HEAD" ? git("ls-files", "--", PATTERN) : git("ls-tree", "-r", "--name-only", ref, "--", PATTERN))
+    .trim()
+    .split("\n")
+    .filter(Boolean);
+
+const journals = journalsOf("HEAD");
 if (journals.length === 0) {
   console.error("no migration journal is tracked: the check would pass nothing");
   process.exit(1);
 }
 
 const problems: string[] = [];
+// A folder renamed or deleted: every database past its migrations would start them over under the new name.
+for (const path of journalsOf(base))
+  if (!journals.includes(path)) problems.push(`${path}: a journal on ${base}, and gone`);
 for (const path of journals) {
   const head: Journal = JSON.parse(readFileSync(join(repo, path), "utf8"));
   const before = journalAt(base, path);
