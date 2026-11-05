@@ -243,7 +243,8 @@ describe("People", () => {
     const ops = (await page("/people?show=groups&person=ops")).html;
     expect(ops).toMatch(/<fieldset disabled=""[^>]*>(?:(?!<\/fieldset>)[\s\S])*Names another declared resource/);
     // A name no row of the tab has opens nothing.
-    expect((await page("/people?person=nobody")).html).not.toMatch(/role="region"(?! aria-label="Conversation")/);
+    const nobody = (await page("/people?person=nobody")).html;
+    expect(nobody.slice(nobody.indexOf('<main data-slot="page"'))).not.toContain('role="region"');
   });
 
   it("is Hosting's Edit on a declaration: the same form above its file", async () => {

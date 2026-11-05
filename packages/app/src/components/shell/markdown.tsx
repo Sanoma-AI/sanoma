@@ -1,15 +1,8 @@
-import { createElement, type ElementType } from "react";
-import { type Components, type ExtraProps, Streamdown } from "streamdown";
-import {
-  CodeBlock,
-  CodeBlockActions,
-  CodeBlockContent,
-  CodeBlockCopyButton,
-  CodeBlockLine,
-} from "#/components/ui/code-block.tsx";
+import { createElement, type ElementType, lazy, Suspense } from "react";
+import { type Components, Streamdown } from "streamdown";
+import { CodeBlock, CodeBlockContent } from "#/components/ui/code-block.tsx";
 import { Separator } from "#/components/ui/separator.tsx";
 import { Table, TableCell, TableHead } from "#/components/ui/table.tsx";
-import { useHighlightedCode } from "#/hooks/use-highlighted-code.ts";
 
 // A reply's text as Markdown, streamed (Streamdown closes what is still open), in the app's own
 // classes: a company's Tailwind does not scan Streamdown's install, so every element it draws with
@@ -24,27 +17,25 @@ const styled =
   <Props extends object>({ node: _node, ...props }: Props & { node?: unknown }) =>
     createElement(tag, { ...props, className });
 
-/** A fenced block: its code and language, as Markdown parsed them, highlighted once that has loaded. */
-function Fence({ node }: ExtraProps) {
-  const code = node?.children[0];
-  const element = code?.type === "element" ? code : undefined;
-  const text = element?.children.map((child) => (child.type === "text" ? child.value : "")).join("") ?? "";
-  const classes = element?.properties.className;
-  const language = (Array.isArray(classes) ? String(classes[0] ?? "") : "").replace("language-", "");
-  const lines = useHighlightedCode(text, language);
+/** Shiki's core with it, so a reply with no code does not load it. */
+const Fence = lazy(() => import("./fence.tsx"));
+
+/** A fenced block's code; `<code>` with markup inside, which only raw HTML writes, stays as it came. */
+const FencedCode: Components["code"] = ({ node: _node, className, children }) => {
+  if (typeof children !== "string") return <code className={className}>{children}</code>;
+  const text = children.replace(/\n$/, "");
   return (
-    <CodeBlock>
-      <CodeBlockActions>
-        <CodeBlockCopyButton value={text.replace(/\n$/, "")} />
-      </CodeBlockActions>
-      <CodeBlockContent>
-        {lines.map((line, i) => (
-          <CodeBlockLine key={i}>{line}</CodeBlockLine>
-        ))}
-      </CodeBlockContent>
-    </CodeBlock>
+    <Suspense
+      fallback={
+        <CodeBlock>
+          <CodeBlockContent>{text}</CodeBlockContent>
+        </CodeBlock>
+      }
+    >
+      <Fence text={text} language={className?.replace("language-", "") ?? ""} />
+    </Suspense>
   );
-}
+};
 
 const HEADING = "mt-1 font-medium first:mt-0";
 const TITLE = styled("h3", `${HEADING} text-base`);
@@ -67,7 +58,7 @@ const ELEMENTS: Components = {
   blockquote: styled("blockquote", "border-l pl-3 text-muted-foreground"),
   hr: () => <Separator />,
   inlineCode: styled("code", "rounded-sm bg-muted px-1 py-0.5 font-mono text-[0.875em]"),
-  pre: Fence,
+  code: FencedCode,
   table: ({ node: _node, ...props }) => <Table {...props} />,
   thead: "thead",
   tbody: "tbody",

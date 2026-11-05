@@ -35,6 +35,7 @@ vi.mock(
 beforeAll(async () => {
   // The reply's lazy renderer, loaded ahead so no test's wait is spent transforming it.
   await import("../src/components/shell/markdown.tsx");
+  await import("../src/components/shell/fence.tsx");
   // What jsdom lacks and the message scroller reads.
   for (const name of ["ResizeObserver", "IntersectionObserver"]) {
     vi.stubGlobal(
@@ -108,13 +109,25 @@ describe("the chat's thread", () => {
 
   it("draws a fenced block as a code block, with its copy", async () => {
     await play(createChat<ChatMessage>().user("Show me").assistant("Here:\n\n```ts\nconst a = 1;\n```"));
+    // Once its chunk has come, in place of the plain block.
     const block = await waitFor(() => {
-      const found = document.querySelector('[data-slot="code-block"]');
-      expect(found).not.toBeNull();
+      const found = document.querySelector<HTMLElement>('[data-slot="code-block"]');
+      expect(found && within(found).queryByRole("button", { name: "Copy" })).not.toBeNull();
       return found as HTMLElement;
     });
     expect(block.textContent).toContain("const a = 1;");
-    expect(within(block).getByRole("button", { name: "Copy" })).toBeTruthy();
+    expect(block.closest("pre")).toBeNull();
+    // Its language reached the highlighter: the tokens carry their colours.
+    await waitFor(() => expect(block.querySelector('[data-slot="code-block-line"] span[style]')).not.toBeNull(), {
+      timeout: 10_000,
+    });
+    expect(screen.getByText("Here:").closest('[data-slot="code-block"]')).toBeNull();
+  });
+
+  it("keeps the text of raw HTML's code", async () => {
+    await play(createChat<ChatMessage>().user("Show me").assistant("<pre><code>before <b>bold</b> after</code></pre>"));
+    await screen.findByText("bold");
+    expect(document.querySelector('[data-slot="code-block"]')).toBeNull();
   });
 
   it("loads no image a reply names, by Markdown or by HTML", async () => {

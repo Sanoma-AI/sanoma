@@ -2,7 +2,6 @@ import { SparkleIcon } from "@phosphor-icons/react/dist/csr/Sparkle";
 import { Link } from "@tanstack/react-router";
 import type { ChatStatus } from "ai";
 import { memo, type ReactNode } from "react";
-import { Alert, AlertDescription } from "#/components/ui/alert.tsx";
 import { Bubble, BubbleContent } from "#/components/ui/bubble.tsx";
 import { Button } from "#/components/ui/button.tsx";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "#/components/ui/empty.tsx";
@@ -17,6 +16,7 @@ import {
   MessageScrollerViewport,
 } from "#/components/ui/message-scroller.tsx";
 import { Trace, TraceLine, TraceTitle } from "#/components/ui/trace.tsx";
+import { Notice } from "../kit.tsx";
 import { type ChatMessage, errorParts, textOf, unfinished } from "../../lib/chat.ts";
 import { Reply } from "./chat-parts.tsx";
 
@@ -129,17 +129,15 @@ function TurnError({ message }: { message: string }) {
   }
   const { text, vendor } = errorParts(said);
   return (
-    <Alert variant="destructive">
-      <AlertDescription>
-        {text}
-        {vendor && (
-          <>
-            {" "}
-            <ConnectorPageLink vendor={vendor}>Set it on its connector page</ConnectorPageLink>.
-          </>
-        )}
-      </AlertDescription>
-    </Alert>
+    <Notice variant="destructive">
+      {text}
+      {vendor && (
+        <>
+          {" "}
+          <ConnectorPageLink vendor={vendor}>Set it on its connector page</ConnectorPageLink>.
+        </>
+      )}
+    </Notice>
   );
 }
 
