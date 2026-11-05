@@ -11,7 +11,7 @@ import { z } from "zod";
 
 /*
  * Neon, serverless Postgres (https://api-docs.neon.tech/reference), through its official SDK,
- * `@neondatabase/api-client`. The schemas are a cut of Neon's own field names, by hand.
+ * `@neon/sdk`. The schemas are a cut of Neon's own field names, by hand.
  */
 
 /** Neon's AWS regions, as a project's `region` takes them (https://neon.com/docs/introduction/regions). */
