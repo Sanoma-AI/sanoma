@@ -1,7 +1,5 @@
 import type { CollectionEntry } from "@sanoma-ai/workflows/describe";
-import { CALL_WORKFLOW, errorMessage, type Saved } from "@sanoma-ai/workflows/shared";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
+import { errorMessage, type Saved } from "@sanoma-ai/workflows/shared";
 import { FloppyDiskIcon } from "@phosphor-icons/react/dist/csr/FloppyDisk";
 import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
 import { useMemo, useState } from "react";
@@ -18,48 +16,15 @@ import {
 } from "#/components/ui/dialog.tsx";
 import { FieldGroup } from "#/components/ui/field.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
-import { errorBodyOf } from "../api.ts";
 import type { UntypedApi } from "../api-client.ts";
 import { buildInput, fieldsOf, initialValues } from "../form/schema.ts";
 import { errorsOf, FieldView, FormFoot, useSchemaForm } from "../form/start-form.tsx";
-import { api, DATA_KEY, runLink } from "../queries.ts";
+import { api, toastIfHeld, useRecordCall } from "../queries.ts";
 import { Notice } from "./common.tsx";
 
 // A collection's record form: one form, drawn from the record's JSON Schema as the start form is
 // from a workflow's input, to add a record or edit one; and Delete. Every call is the collection's
 // operation, `data.<name>.save` or `.delete`, made through `api` as the person.
-
-/** A call the form makes: an operation of the collection and its input. */
-type RecordCall = { op: "save" | "delete"; input: unknown };
-
-/**
- * Calls the collection's `save` or `delete` through `api` (a new id each), as the person asking,
- * and refreshes the collection's records once it is made. A failure is the caller's to show.
- */
-function useRecordCall(name: string) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ op, input }: RecordCall) => (api as UntypedApi).data[name][op](input) as Promise<unknown>,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: [...DATA_KEY, name] }),
-  });
-}
-
-/**
- * When `err` is a call the policy holds for an approval, says so with a toast linking to the run
- * of the built-in `call` workflow that makes it once approved, and answers true.
- */
-function toastIfHeld(err: unknown): boolean {
-  const body = errorBodyOf(err);
-  if (body?.code !== "approval_pending" || !body.runId) return false;
-  toast.info("Held for approval", {
-    description: (
-      <Link {...runLink({ workflow: CALL_WORKFLOW, runId: body.runId })} className="underline underline-offset-4">
-        Open the run
-      </Link>
-    ),
-  });
-  return true;
-}
 
 /** An issue's path in a save's input (`record.<field>`), as the form's. */
 const inRecord = (path: (string | number)[]) => (path[0] === "record" ? path.slice(1) : path);
