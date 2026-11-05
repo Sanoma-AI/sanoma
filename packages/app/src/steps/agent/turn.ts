@@ -28,10 +28,11 @@ export const ENGINES: Readonly<Record<EngineName, Engine>> = {
 
 /**
  * The turn: the transcript, read from the chat's store, with what the turn before left unfinished
- * settled (`settle`), the person's message (`input.message`, by id) after it, and the reply of the
- * chat's engine, written as it streams (`persist`). A turn the worker's restart cut short
- * (`resumed`) settles its own reply instead, which `settle` sees as the last, and runs nothing
- * again: the person sends "continue".
+ * settled (`settle`), the person's message (`input.message`, by id) moved after it, and the reply
+ * of the chat's engine, written as it streams (`persist`). The person's messages stored after this
+ * one were sent while it waited, for turns of their own: they go after it, out of its history. A
+ * turn the worker's restart cut short (`resumed`) settles its own reply instead, which `settle`
+ * sees as the last, and runs nothing again: the person sends "continue".
  */
 export async function chat(step: ChatTurnContext, input: ChatTurnInput): Promise<ChatTurnOutput> {
   const { chats } = step.client;
@@ -40,10 +41,12 @@ export async function chat(step: ChatTurnContext, input: ChatTurnInput): Promise
   const named = found.engine as EngineName;
   if (!Object.hasOwn(ENGINES, named)) throw new Error(`No engine ${named}: the chat opened on one this app lacks`);
   const stored = (await chats.load(found.id)) as ChatMessage[];
-  const message = stored.find((m) => m.id === input.message);
+  const at = stored.findIndex((m) => m.id === input.message);
+  const message = stored[at];
   if (message?.role !== "user") throw new Error(`Chat ${input.chat} has no message ${input.message} of its person's`);
-  // The rest, the new message last: a reply of the turn before may have been written after it.
-  const before = stored.filter((m) => m !== message);
+  // The rest is its history: a reply of the turn before may have been written after it.
+  const next = stored.slice(at + 1).filter((m) => m.role === "user");
+  const before = stored.filter((m) => m !== message && !next.includes(m));
   const history = (await settle(step.client, before)) as ChatMessage[];
   // The messages settle changed.
   await chats.upsert(
@@ -54,6 +57,7 @@ export async function chat(step: ChatTurnContext, input: ChatTurnInput): Promise
     await chats.end(found.id, step.runId);
     return { interrupted: true };
   }
+  await chats.upsert(found.id, [message, ...next], { last: true });
   const reply = await persist(step, found, ENGINES[named]({ chat: found, messages: [...history, message], step }));
   return reply === undefined ? {} : { reply };
 }

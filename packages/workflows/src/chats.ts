@@ -35,10 +35,10 @@ export interface Chats {
   /** Records the draft the chat edits. */
   attach(id: string, draftId: string): Promise<void>;
   /**
-   * Writes these messages of the chat, each by its id: a message already there is replaced in its
-   * place, a new one goes after the rest, in the order given.
+   * Writes these messages of the chat, each by its id: a new one goes after the rest, in the order
+   * given, and one already there is replaced in its place, or, with `last`, moved after the rest too.
    */
-  upsert(id: string, messages: readonly UIMessage[]): Promise<void>;
+  upsert(id: string, messages: readonly UIMessage[], options?: { last?: boolean }): Promise<void>;
   /** The chat's messages in order; none for a chat that has none. */
   load(id: string): Promise<UIMessage[]>;
   /** Whether the chat `id` has a message `message`. */
@@ -85,10 +85,10 @@ export function chatStore(db: () => Promise<Db>): Chats {
     async attach(id, draftId) {
       await (await db()).update(chats).set({ draftId }).where(eq(chats.id, id));
     },
-    async upsert(id, messages) {
+    async upsert(id, messages, options) {
       if (!messages.length) return;
       if (messages.some((m) => !m.id)) throw new SanomaError("invalid_input", "A chat message needs an id");
-      // A new message's place is after the chat's last, in the order given.
+      // A new message's place, or a moved one's, is after the chat's last, in the order given.
       const last = sql`(SELECT coalesce(max(${chatMessages.seq}), 0) FROM ${chatMessages} WHERE ${eq(chatMessages.chatId, id)})`;
       await (
         await db()
@@ -99,7 +99,7 @@ export function chatStore(db: () => Promise<Db>): Chats {
         )
         .onConflictDoUpdate({
           target: [chatMessages.chatId, chatMessages.id],
-          set: { message: sql`excluded.message` },
+          set: { message: sql`excluded.message`, ...(options?.last && { seq: sql`excluded.seq` }) },
         });
     },
     async load(id) {

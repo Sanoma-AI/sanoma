@@ -9,7 +9,7 @@ import { anthropic } from "@sanoma-ai/connector-anthropic";
 import { ensureBuilt as ensureAppBuilt, testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
 import { defineConnector, defineDriver, isEnded, SanomaClient, withSetup } from "@sanoma-ai/workflows";
-import { customProvider, getToolName, isToolUIPart, readUIMessageStream } from "ai";
+import { createUIMessageStream, customProvider, getToolName, isToolUIPart, readUIMessageStream } from "ai";
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -21,6 +21,7 @@ import { type App, startApp } from "../src/index.ts";
 import { takeAppPrompt } from "../src/lib/apps.ts";
 import { type ChatMessage, chatTransport } from "../src/lib/chat.ts";
 import { allowedPath } from "../src/steps/agent/checkout.ts";
+import { ENGINES } from "../src/steps/agent/turn.ts";
 import { appSteps } from "../src/steps/index.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built app. The chat's route, end to end, on our loop: a mock
@@ -252,6 +253,9 @@ const post = (body: unknown, headers: Record<string, string> = {}, url = app!.ur
     body: JSON.stringify(body),
   });
 
+/** A message's text. */
+const said = (message: ChatMessage) => message.parts.flatMap((p) => (p.type === "text" ? [p.text] : [])).join("");
+
 const toolParts = (message: ChatMessage | undefined) => (message?.parts ?? []).filter(isToolUIPart);
 
 describe("the chat", () => {
@@ -374,6 +378,67 @@ describe("the chat", () => {
     for (const run of [turnId, next]) {
       expect(JSON.stringify(await testApp.client.ledger(run)), run).not.toMatch(/Beta|Never mind|Fine\./);
     }
+  }, 300_000);
+
+  it("keeps the conversation's order for messages sent while a turn is open: each one's history, then its reply", async () => {
+    const other = `order-${RUN}`;
+    const { chats } = testApp.client;
+    // An engine that answers each message by its text, the first once let go (stopped or not),
+    // and keeps the messages each turn was given.
+    const { promise: held, resolve: letGo } = Promise.withResolvers<void>();
+    const given: string[][] = [];
+    vi.spyOn(ENGINES, "loop").mockImplementation(({ messages }) =>
+      createUIMessageStream({
+        execute: async ({ writer }) => {
+          given.push(messages.map(said));
+          if (given.length === 1) await held;
+          const text = `Re: ${said(messages.at(-1)!)}`;
+          writer.write({ type: "start", messageId: randomUUID() });
+          writer.write({ type: "text-start", id: "t" });
+          writer.write({ type: "text-delta", id: "t", delta: text });
+          writer.write({ type: "text-end", id: "t" });
+          writer.write({ type: "finish" });
+        },
+      }),
+    );
+    // Until the chat's latest turn is its `n`th message's, started.
+    const started = (n: number) =>
+      waitFor(
+        async () => {
+          const [stored, turn] = await Promise.all([chats.load(other), testApp.client.turn(other)]);
+          return stored.length === n && turn?.runId === `chat:${other}:${stored[n - 1]!.id}`;
+        },
+        Boolean,
+        30_000,
+      );
+    // Two and Three are sent while One's turn is open, before Two's turn starts.
+    const sent = [send(other, [], "One")];
+    await waitFor(
+      () => given.length,
+      (n) => n === 1,
+      30_000,
+    );
+    sent.push(send(other, [], "Two"));
+    await started(2);
+    sent.push(send(other, [], "Three"));
+    await started(3);
+    letGo();
+    await Promise.all(sent);
+    await waitFor(
+      async () => (await testApp.client.turn(other))?.status,
+      (status) => status === "finished",
+      30_000,
+    );
+
+    expect(given).toEqual([["One"], ["One", "Re: One", "Two"], ["One", "Re: One", "Two", "Re: Two", "Three"]]);
+    expect(((await chats.load(other)) as ChatMessage[]).map(said)).toEqual([
+      "One",
+      "Re: One",
+      "Two",
+      "Re: Two",
+      "Three",
+      "Re: Three",
+    ]);
   }, 300_000);
 
   it("takes an app only from a public repository: the Apps page's prompt and the source's refusal", async () => {
