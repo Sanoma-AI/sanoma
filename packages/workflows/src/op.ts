@@ -5,6 +5,7 @@ import type { ConnectionSnapshot } from "./connection.ts";
 import type { ProviderV4 } from "@ai-sdk/provider";
 import type { z } from "zod";
 import type { Fake } from "./fake.ts";
+import type { SandboxBackend, SandboxContext } from "./sandbox-contract.ts";
 import type { Secrets } from "./secret.ts";
 import type { RemoteHalf } from "./source.ts";
 import type { Steps } from "./steps.ts";
@@ -325,8 +326,8 @@ export interface Driver {
  * to call: the config then names the connector alone, and never a driver, a fake, steps or a
  * login. Any may be missing: a workflow using an operation of a connector with no driver is
  * refused, a connector with no fake has none for sandbox runs, one with no login half signs no
- * visitor in, one with no model half gives the app no models, and one with no remote half hosts
- * no repository a change is reviewed on.
+ * visitor in, one with no model half gives the app no models, one with no remote half hosts
+ * no repository a change is reviewed on, and one with no sandbox half opens no box.
  */
 export interface ConnectorSetup {
   /** Auth methods available to named connections; login identity is separate. */
@@ -362,6 +363,12 @@ export interface ConnectorSetup {
    * resolved config (`ResolvedConfig.remotes`). It reads its credentials when called.
    */
   remote?: () => RemoteHalf;
+  /**
+   * Makes the connector's sandbox backend, which opens the boxes of the type that meets the
+   * `Sandbox` contract by name: by the app, when a coding agent's turn needs a box. It reads its
+   * credentials through `context.secrets`.
+   */
+  sandbox?: (context: SandboxContext) => SandboxBackend | Promise<SandboxBackend>;
 }
 
 /** What the app gives a connector's model half (`ConnectorSetup.model`): the secrets, as a login half reads them. */

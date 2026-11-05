@@ -298,10 +298,11 @@ export const VendorEntrySchema = z.strictObject({
 export type VendorEntry = z.infer<typeof VendorEntrySchema>;
 
 /**
- * The contracts a resource type meets, from its spec: `host`, `database` and `wakeup` (`Host`,
- * `Database`, `Wakeup`), and `source` for a type a host's `source` names (the repository it clones).
+ * The contracts a resource type meets, from its spec: `host`, `database`, `wakeup` and `sandbox`
+ * (`Host`, `Database`, `Wakeup`, `Sandbox`), and `source` for a type a host's `source` names (the
+ * repository it clones).
  */
-export const CAPABILITIES = ["host", "database", "wakeup", "source"] as const;
+export const CAPABILITIES = ["host", "database", "wakeup", "sandbox", "source"] as const;
 
 /** A resource type a connector declares with `defineResource`. */
 export const ResourceTypeEntrySchema = z.strictObject({

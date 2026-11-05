@@ -236,3 +236,14 @@ expect(results.every((r) => r.ok)).toBe(true);
 ```
 
 `fakeDatabase(name?)` is a database of the test Postgres (`testdb.database` at `testDatabaseUrl(name)`, made by its `create` and dropped by its `delete`) that pauses: `suspend()` drops every connection to it, as a Neon compute's suspend does, and resolves to how many it dropped; `remove()` drops the database; its `storeUrl` stores the URL as `SANOMA_DATABASE_URL_<EXPORT>`. `connector` is for a config, `driver` for calling its operations directly.
+
+## A sandbox's conformance
+
+`@sanoma-ai/testing/sandbox` decides whether a sandbox backend (a connector's `sandbox` half, see [Sandboxes](../workflows/README.md#sandboxes)) gives the boxes a coding agent needs. `checkSandbox({ backend, capabilities, image, size, name? })` discards the box `name` (default `sanoma-kit`), opens it, and drives it through the contract alone, returning each check as `{ name, ok, error? }`: stdout arrives before a command exits, stdin reaches `cat`, a written file reads back and runs with its mode, a command killed mid-run exits non-zero, and `discard` leaves the next `open` empty; with `capabilities.snapshot`, that file and one a command wrote under `$HOME` survive `stop` and the next `open`; with `capabilities.port`, a `node` server in the box answers at what `expose` returns. Once no box opens, the rest fail at once. It discards the box at its end.
+
+```ts
+const results = await checkSandbox({ backend, capabilities: type.sandbox!.capabilities, image, size: 2 });
+expect(results.every((r) => r.ok)).toBe(true);
+```
+
+`fakeSandbox(root?)` is a backend on this machine (`testsandbox.box`, which snapshots and exposes ports): a box is the directory `<root>/<name>`, its home, its commands `bash -c` children in process groups of their own, its ports loopback's. `connector` is for a config, `backend` and `capabilities` for the kit; `remove()` deletes `root`.
