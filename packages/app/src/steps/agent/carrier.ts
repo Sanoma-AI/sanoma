@@ -58,13 +58,15 @@ function carrying(source: Source | undefined): Carrying {
  * box last had (the whole of it the first time), fetched into the box's clone (made the first
  * time) and checked out there as the instance has it, whatever a turn that died left behind; then
  * `pnpm install --frozen-lockfile` when the lockfile differs from the one last installed, so the
- * install stays in the box. The clone's path, the agent's working directory, and the head given.
+ * install stays in the box. An install that fails is logged and tried again next turn: the turn
+ * goes on, since its agent cannot run one. `signal` stops it. The clone's path, the agent's
+ * working directory, and the head given.
  */
 export async function carryIn(
   box: Box,
   source: Source | undefined,
   id: string,
-  home: string,
+  { home, signal }: { home: string; signal?: AbortSignal },
 ): Promise<{ root: string; head: string }> {
   const known = await box.read(KNOWN);
   const { bytes, head } = await carrying(source).bundle(id, {
@@ -72,17 +74,22 @@ export async function carryIn(
   });
   try {
     if (bytes.length) await box.write(BUNDLE, bytes);
-    await inBox(box, IN, { BRANCH: draftBranch(id), HEAD: head, BUNDLE: bytes.length ? BUNDLE : "" });
+    await inBox(box, IN, { BRANCH: draftBranch(id), HEAD: head, BUNDLE: bytes.length ? BUNDLE : "" }, signal);
   } catch (err) {
     throw new Error(`The draft could not be brought into your box (${errorMessage(err)})`, { cause: err });
+  }
+  try {
+    await inBox(box, INSTALL, {}, signal);
+  } catch (err) {
+    if (!signal?.aborted) console.error(`sanoma app: the install in the box ${box.id} failed:`, errorMessage(err));
   }
   return { root: join(home, CLONE), head };
 }
 
-/** The box's side of `carryIn`, in its home. */
+/** The box's side of `carryIn`, in its home: the clone at the draft's head, clean. */
 const IN = `set -eu
-mkdir -p "${CLONE}"
-cd "${CLONE}"
+mkdir -p ${CLONE}
+cd ${CLONE}
 [ -d .git ] || git init --quiet
 if [ -n "$BUNDLE" ]; then
   git fetch --quiet --no-tags "$HOME/$BUNDLE" "refs/heads/$BRANCH"
@@ -90,21 +97,24 @@ if [ -n "$BUNDLE" ]; then
 fi
 git checkout --quiet --force -B "$BRANCH" "$HEAD"
 git clean --quiet --force -d
-printf %s "$HEAD" > .git/sanoma-head
-if [ -f pnpm-lock.yaml ]; then
-  lock=$(git hash-object pnpm-lock.yaml)
-  if [ "$lock" != "$(cat .git/sanoma-lockfile 2>/dev/null || true)" ]; then
-    pnpm install --frozen-lockfile
-    printf %s "$lock" > .git/sanoma-lockfile
-  fi
-fi`;
+printf %s "$HEAD" > .git/sanoma-head`;
+
+/** The clone's install, when its lockfile is not the one last installed (its hash kept beside the known head). */
+const INSTALL = `set -eu
+cd ${CLONE}
+[ -f pnpm-lock.yaml ] || exit 0
+lock=$(git hash-object pnpm-lock.yaml)
+[ "$lock" = "$(cat .git/sanoma-lockfile 2>/dev/null || true)" ] && exit 0
+pnpm install --frozen-lockfile
+printf %s "$lock" > .git/sanoma-lockfile`;
 
 /**
  * Brings what the turn changed in `box`'s clone back to the draft `id`: committed there as `author`
  * with `message`, bundled since `since` (the head `carryIn` gave), and fetched into the draft's
- * checkout as a fast-forward (`Source.unbundle`). Whether it brought any commit. A box that fails
- * on the way (one that stopped mid-turn) loses the turn's edits, and says so: the next turn starts
- * again from the draft.
+ * checkout as a fast-forward (`Source.unbundle`). Whether it brought any commit. Never stopped by
+ * the turn's signal: a stopped turn's edits are kept too. When it fails (a box that stopped
+ * mid-turn, a draft that moved meanwhile), the turn's edits are lost, and it says so: the next turn
+ * starts again from the draft.
  */
 export async function carryOut(
   box: Box,
@@ -129,16 +139,25 @@ export async function carryOut(
     });
     bytes = await box.read(BUNDLE);
   } catch (err) {
-    throw new Error(
-      `The agent's edits could not be brought back from your box, which may have stopped mid-turn, so they are lost; the next turn starts again from the draft (${errorMessage(err)})`,
-      { cause: err },
-    );
+    throw lost("from your box, which may have stopped mid-turn", err);
   }
   if (!bytes) return false;
-  const { head } = await repository.unbundle(id, bytes);
+  let head: string;
+  try {
+    ({ head } = await repository.unbundle(id, bytes));
+  } catch (err) {
+    throw lost("into the draft", err);
+  }
   await box.write(KNOWN, new TextEncoder().encode(head));
   return true;
 }
+
+/** What a turn whose edits could not be brought back `where` fails with. */
+const lost = (where: string, err: unknown) =>
+  new Error(
+    `The agent's edits could not be brought back ${where}, so they are lost; the next turn starts again from the draft (${errorMessage(err)})`,
+    { cause: err },
+  );
 
 /** The email of a commit made in a box: none of a person's, which the box never holds. */
 const NO_EMAIL = "noreply@sanoma.invalid";
@@ -146,15 +165,15 @@ const NO_EMAIL = "noreply@sanoma.invalid";
 /** The box's side of `carryOut`, in its home: a bundle only when the branch moved. */
 const OUT = `set -eu
 rm -f "$BUNDLE"
-cd "${CLONE}"
+cd ${CLONE}
 git add --all
 git diff --cached --quiet || git commit --quiet --no-verify -m "$MESSAGE"
 [ "$(git rev-parse "refs/heads/$BRANCH")" = "$SINCE" ] && exit 0
 git bundle create --quiet "$HOME/$BUNDLE" "refs/heads/$BRANCH" "^$SINCE"`;
 
-/** Runs `script` in `box` with `env`; an error with its exit code and the end of what it printed, unless it exits 0. */
-async function inBox(box: Box, script: string, env: Record<string, string>): Promise<void> {
-  const ran = await box.run(script, { env });
+/** Runs `script` in `box`'s home with `env`; an error with its exit code and the end of what it printed, unless it exits 0. */
+async function inBox(box: Box, script: string, env: Record<string, string>, signal?: AbortSignal): Promise<void> {
+  const ran = await box.run(script, { cwd: ".", env, ...(signal && { signal }) });
   const [out, err, { exitCode }] = await Promise.all([
     new Response(ran.stdout).text(),
     new Response(ran.stderr).text(),
@@ -162,5 +181,5 @@ async function inBox(box: Box, script: string, env: Record<string, string>): Pro
   ]);
   if (exitCode === 0) return;
   const said = `${out}\n${err}`.trim().split("\n").slice(-5).join("\n");
-  throw new Error(`exit ${exitCode}${said ? `: ${said}` : ""}`);
+  throw new Error(`exit code ${exitCode}${said ? `: ${said}` : ""}`);
 }

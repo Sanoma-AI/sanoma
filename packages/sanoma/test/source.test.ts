@@ -403,7 +403,12 @@ describe("localGitSource's drafts", () => {
       expect(git("for-each-ref", "refs/sanoma")).toBe("");
       expect(status()).toBe("");
 
-      // Refused unless a fast-forward, and for a draft that is not open.
+      // Refused unless a fast-forward of a clean checkout, and for a draft that is not open.
+      writeFileSync(join(draft.root, "README.md"), "# changed here\n");
+      await expect(source.unbundle!("box", readFileSync(join(clone, "out.bundle")))).rejects.toThrow(
+        /uncommitted changes/,
+      );
+      git("-C", draft.root, "checkout", "--", "README.md");
       writeFileSync(join(draft.root, "d.ts"), "export const d = 1;\n");
       const d = await draft.commit({ paths: ["d.ts"], message: "D", author: "agent" });
       await expect(source.unbundle!("box", readFileSync(join(clone, "out.bundle")))).rejects.toThrow(

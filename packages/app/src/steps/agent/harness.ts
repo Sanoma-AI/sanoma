@@ -106,31 +106,49 @@ async function runTurn(name: RuntimeName, turn: EngineTurn, writer: UIMessageStr
   const backend = localBackend(agentHome(step, "boxes"));
   // This machine is the local box's image and size.
   const opened = { name: boxName(step.resolved.appName, step.by.id), image: "", size: 0 };
-  await boxTurn(backend, opened, async (box) => {
-    // Kept across turns: a bridge installs its agent under it once, and the clone stays.
-    const home = await homeOf(box);
-    const { root, head } = await carryIn(box, step.source, chat.id, home);
-    try {
+  /** The draft's head the box was given, once it was. */
+  let given: string | undefined;
+  try {
+    await boxTurn(backend, opened, async (box) => {
+      // Kept across turns: a bridge installs its agent under it once, and the clone stays.
+      const home = await homeOf(box);
+      const { root, head } = await carryIn(box, step.source, chat.id, { home, signal: step.signal });
+      given = head;
       const sandbox = boxSession(box, { id: `${chat.id}-${generateId()}`, root, home, ports: [port] });
       try {
         await converse(name, turn, writer, sandbox, { auth, model, home, box: box.id });
       } finally {
-        await sandbox.destroy();
+        // However the turn ended (an error too), before the box stops: what it changed, committed
+        // in the box and carried back to the draft.
+        const message = turnMessage(turn, title);
+        await carryBack(sandbox, () =>
+          carryOut(box, step.source, chat.id, { since: head, message, author: step.by.id }),
+        );
       }
-    } finally {
-      // However the turn ended (an error too): its error, if any, follows the commit.
-      try {
-        await carryOut(box, step.source, chat.id, {
-          since: head,
-          message: turnMessage(turn, title),
-          author: step.by.id,
-        });
-      } finally {
-        await commitTurn(turn, draft, title, writer, head);
-      }
-    }
-  });
+    });
+  } finally {
+    // Checked once the box is free: its error, if any, follows the card.
+    if (given !== undefined) await commitTurn(turn, draft, title, writer, given);
+  }
   writer.write({ type: "finish" });
+}
+
+/**
+ * `carry`, then `sandbox` destroyed. When carrying fails, so has the box: the lost edits are the
+ * turn's error, not the session's cleanup, which is tried all the same.
+ */
+async function carryBack(sandbox: HarnessV1NetworkSandboxSession, carry: () => Promise<unknown>) {
+  try {
+    await carry();
+  } catch (err) {
+    try {
+      await sandbox.destroy();
+    } catch {
+      // The box failed already.
+    }
+    throw err;
+  }
+  await sandbox.destroy();
 }
 
 /** The turn's harness session in `sandbox`, run to its end, its permission requests answered by the checkout rule. */

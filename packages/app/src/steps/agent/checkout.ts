@@ -149,7 +149,8 @@ export const turnMessage = ({ messages }: Pick<EngineTurn, "messages">, title: s
  * the chat's draft as the person, under `title` and their message (`turnMessage`), its change told
  * (`tellCommits`), then, unless a new message stopped it (the next turn shows the card), the
  * draft's card (`data-draft`) from its checks and its diff. A turn whose box committed for it
- * (`carryOut`) gives the draft's head `before` it: the card shows when the branch moved since.
+ * (`carryOut`) commits nothing here and gives the draft's head `before` it instead: the change is
+ * told and the card shown when the branch moved since.
  */
 export async function commitTurn(
   turn: EngineTurn,
@@ -162,8 +163,9 @@ export async function commitTurn(
   const { by } = step;
   const message = turnMessage(turn, title);
   const committed =
-    (await draft.commit({ paths: ["."], message, author: by.id })) !== undefined ||
-    (before !== undefined && (await drafting(step).head(draft.branch)) !== before);
+    before === undefined
+      ? (await draft.commit({ paths: ["."], message, author: by.id })) !== undefined
+      : (await drafting(step).head(draft.branch)) !== before;
   if (!committed) return;
   // Told even when the turn was stopped: the commit has landed.
   const told = tellCommits(step.client, chat.id, by);

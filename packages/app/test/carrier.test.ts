@@ -70,7 +70,7 @@ describe("the carrier", () => {
     let root = "";
     const moved = await boxTurn(sandbox.backend, opening, async (box) => {
       const home = await homeOf(box);
-      const carried = await carryIn(box, source, "d1", home);
+      const carried = await carryIn(box, source, "d1", { home });
       root = carried.root;
       expect(carried).toEqual({ root: join(home, "repo"), head: before });
       expect(
@@ -107,7 +107,7 @@ describe("the carrier", () => {
     writeFileSync(join(draft.root, "notes.md"), "Laptops go back to IT.\n");
     await draft.commit({ paths: ["notes.md"], message: "Notes", author: "ada" });
     await boxTurn(sandbox.backend, opening, async (box) => {
-      const { head } = await carryIn(box, source, "d1", await homeOf(box));
+      const { head } = await carryIn(box, source, "d1", { home: await homeOf(box) });
       expect(head).toBe(await source.head(draft.branch));
       expect(readFileSync(join(root, "notes.md"), "utf8")).toBe("Laptops go back to IT.\n");
       expect(await carryOut(box, source, "d1", { since: head, ...turn })).toBe(false);
@@ -122,7 +122,7 @@ describe("the carrier", () => {
     // A box that dies mid-turn, its disk with it.
     await expect(
       boxTurn(sandbox.backend, opening, async (box) => {
-        const carried = await carryIn(box, source, "d2", await homeOf(box));
+        const carried = await carryIn(box, source, "d2", { home: await homeOf(box) });
         writeFileSync(join(carried.root, "lost.ts"), "export {};\n");
         await sandbox.backend.discard(opening);
         await carryOut(box, source, "d2", { since: carried.head, ...turn });
@@ -132,12 +132,12 @@ describe("the carrier", () => {
 
     // One that died with its disk kept, an edit left uncommitted: the next turn starts clean from the draft.
     await boxTurn(sandbox.backend, opening, async (box) => {
-      const carried = await carryIn(box, source, "d2", await homeOf(box));
+      const carried = await carryIn(box, source, "d2", { home: await homeOf(box) });
       writeFileSync(join(carried.root, "offboarding.ts"), "broken(\n");
       writeFileSync(join(carried.root, "stray.ts"), "export {};\n");
     });
     await boxTurn(sandbox.backend, opening, async (box) => {
-      const carried = await carryIn(box, source, "d2", await homeOf(box));
+      const carried = await carryIn(box, source, "d2", { home: await homeOf(box) });
       expect(carried.head).toBe(head);
       expect(await inBox(box, "git status --porcelain", carried.root)).toBe("");
       expect(existsSync(join(carried.root, "stray.ts"))).toBe(false);
@@ -174,12 +174,12 @@ describe("the carrier", () => {
   it("refuses to carry a draft for a repository that cannot", async () => {
     const box = await sandbox.backend.open(opening);
     const plain: Source = { root: dir, commit: () => undefined, head: () => "x" };
-    await expect(carryIn(box, plain, "d", "/home")).rejects.toThrow(/cannot carry a draft/);
+    await expect(carryIn(box, plain, "d", { home: "/home" })).rejects.toThrow(/cannot carry a draft/);
   });
 });
 
 describe("the clone's install", () => {
-  it("installs with the lockfile on the first open and again only when the lockfile changed", async () => {
+  it("installs with the lockfile on the first open and again only when the lockfile changed, and goes on when it fails", async () => {
     // A company with nothing to install but its lockfile, on the app's local backend.
     writeFileSync(join(dir, "package.json"), '{ "name": "acme", "private": true }\n');
     const lockfile =
@@ -191,7 +191,7 @@ describe("the clone's install", () => {
     const draft = await source.draft!("d3");
     const boxes = localBackend(join(dir, ".sanoma/agent-home/boxes"));
     const open = () =>
-      boxTurn(boxes, opening, async (box) => (await carryIn(box, source, "d3", await homeOf(box))).root);
+      boxTurn(boxes, opening, async (box) => (await carryIn(box, source, "d3", { home: await homeOf(box) })).root);
     const root = await open();
     const installed = join(root, "node_modules");
     expect(existsSync(installed)).toBe(true);
@@ -204,5 +204,19 @@ describe("the clone's install", () => {
     await draft.commit({ paths: ["pnpm-lock.yaml"], message: "Lockfile again", author: "ada" });
     await open();
     expect(existsSync(installed)).toBe(true);
+    // One that fails is logged, and the turn goes on: its agent cannot run one.
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    writeFileSync(
+      join(draft.root, "package.json"),
+      '{ "name": "acme", "private": true, "dependencies": { "x": "1" } }\n',
+    );
+    // Its lockfile changed too, but lacks the dependency.
+    writeFileSync(join(draft.root, "pnpm-lock.yaml"), `${lockfile}\n\n`);
+    await draft.commit({ paths: ["package.json", "pnpm-lock.yaml"], message: "A dependency", author: "ada" });
+    // Without pnpm's own record of an install it found up to date.
+    rmSync(installed, { recursive: true });
+    expect(await open()).toBe(root);
+    expect(logged).toHaveBeenCalledWith(expect.stringMatching(/the install in the box .* failed/), expect.any(String));
+    logged.mockRestore();
   }, 120_000);
 });

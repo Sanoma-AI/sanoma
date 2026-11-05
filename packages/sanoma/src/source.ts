@@ -422,8 +422,12 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
       return inTemp(async (file) => {
         await writeFile(file, bytes);
         return serial(async () => {
+          if (await gitIn(at, ["status", "--porcelain", "--untracked-files=no"])) {
+            throw new Error(`The draft ${id}'s checkout has uncommitted changes`);
+          }
           const into = `refs/sanoma/fetched/${randomUUID()}`;
-          // Checked as it arrives: it was made where an agent ran.
+          // It was made where an agent ran: fsck'd as it arrives by a git that checks a bundle's
+          // objects (2.39 does not); checkout's own path checks hold either way.
           const fetch = ["-c", "fetch.fsckObjects=true", "fetch", "--quiet", "--no-tags", "--no-write-fetch-head"];
           await gitIn(at, [...fetch, "--", file, `+refs/heads/${branch}:${into}`]);
           try {
