@@ -9,11 +9,19 @@ import type {
   TypeOfAttribute,
 } from "@cedar-policy/cedar-wasm/nodejs";
 import { ChangeFacts } from "./change.ts";
-import { isBatch, recordSchemaOf } from "./collection.ts";
+import { recordSchemaOf } from "./collection.ts";
 import type { ResolvedConfig } from "./config.ts";
 import { jsonSchemaOf } from "./define.ts";
 import { isObject } from "./resource.ts";
-import { CHANGE_MERGE, DATA_VENDOR, EFFECTS, groupNamesOf, type PeopleResource, WORKFLOW_ACTION } from "./shared.ts";
+import {
+  CHANGE_MERGE,
+  DATA_VENDOR,
+  EFFECTS,
+  groupNamesOf,
+  isBatch,
+  type PeopleResource,
+  WORKFLOW_ACTION,
+} from "./shared.ts";
 
 // The Cedar schema a company's policies are validated and decided against: made from the
 // resolved config and the people, in memory for the evaluator, and written as text to

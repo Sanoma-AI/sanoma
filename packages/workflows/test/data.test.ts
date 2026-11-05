@@ -69,9 +69,9 @@ describe("the collections' driver on Postgres", () => {
 
   let n = 0;
   /** Calls the driver as a run does: the input parsed by the operation's schema, the output too. */
-  const call = async (op: Op, input: unknown, by?: string) => {
+  const call = async (op: Op, input: unknown, by?: string, attempt = 1) => {
     const fn = driver.ops[`${op.resource}.${op.name}`]!;
-    const context = { idempotencyKey: `t:${n++}`, runId: "t", opId: op.id, attempt: 1, secrets: memorySecrets() };
+    const context = { idempotencyKey: `t:${n++}`, runId: "t", opId: op.id, attempt, secrets: memorySecrets() };
     return op.output.parse(await fn(op.input.parse(input), by === undefined ? context : { ...context, by }));
   };
   const keys = async (query: unknown) => ((await call(leads.list, query)) as { key: string }[]).map((s) => s.key);
@@ -304,6 +304,12 @@ describe("the collections' driver on Postgres", () => {
       vendorCode: "record_changed",
       current,
     });
+    // A retry finding no record deleted it the first time; one finding another record did not.
+    expect(await call(leads.delete, { key: "Gone", ifRecord: acme }, undefined, 2)).toEqual({
+      key: "Gone",
+      deleted: true,
+    });
+    await expect(call(leads.delete, { key: "Acme", ifRecord: acme }, undefined, 2)).rejects.toMatchObject({ current });
     expect(await call(leads.delete, { key: "Acme", ifRecord: { ...acme, stage: "won" } })).toEqual({
       key: "Acme",
       deleted: true,

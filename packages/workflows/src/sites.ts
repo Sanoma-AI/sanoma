@@ -16,6 +16,8 @@ import {
   BUILT_IN_WORKFLOWS,
   DATA_VENDOR,
   DOMAIN_NAME,
+  entryOpsOf,
+  isBatch,
   LOCALE,
   SITE_NAME,
   siteKey,
@@ -80,7 +82,7 @@ export function readSites(
    */
   const refused = (call: SiteCall, login: string | undefined): string | undefined => {
     const why = `a visitor's call to ${KIND_NAMES[call.kind]} "${call.target}" is refused`;
-    let action: string;
+    let actions: string[];
     let group: string;
     if (call.kind === "workflow") {
       if (BUILT_IN_WORKFLOWS.has(call.target)) return `${why}: a visitor may not start the runtime's own workflows`;
@@ -88,22 +90,24 @@ export function readSites(
       if (call.method !== undefined && call.method !== "start") {
         return `${why}: a visitor reads only the result of a run it started`;
       }
-      [action, group] = [`${WORKFLOW_ACTION}${call.target}`, START];
+      [actions, group] = [[`${WORKFLOW_ACTION}${call.target}`], START];
     } else {
-      action = call.kind === "op" ? call.target : `${DATA_VENDOR}.${call.target}.${call.method}`;
+      const action = call.kind === "op" ? call.target : `${DATA_VENDOR}.${call.target}.${call.method}`;
       const op = ops.get(action);
       if (!op) return undefined;
-      group = `effect:${op.effect}`;
+      // A batch is its entries to the policy: the save and the delete each need a permit.
+      [actions, group] = [isBatch(op) ? entryOpsOf(op) : [action], `effect:${op.effect}`];
     }
     if (!permits) return undefined;
     const [scopes, principal] =
       login === undefined
         ? [[ANONYMOUS], `== Sanoma::Principal::"${ANONYMOUS}"`]
         : [[ANONYMOUS, VISITORS], `in Sanoma::Group::"${VISITORS}"`];
-    if (permits(new Set(scopes), action, group)) return undefined;
+    const missing = actions.filter((action) => !permits(new Set(scopes), action, group));
+    if (!missing.length) return undefined;
     return (
-      `${why}: no permit in policies/ names ${scopes.join(" or ")} for ${action}. ` +
-      `Add: permit (principal ${principal}, action == Sanoma::Action::"${action}", resource);`
+      `${why}: no permit in policies/ names ${scopes.join(" or ")} for ${missing.join(" or ")}. ` +
+      `Add: ${missing.map((a) => `permit (principal ${principal}, action == Sanoma::Action::"${a}", resource);`).join(" ")}`
     );
   };
 

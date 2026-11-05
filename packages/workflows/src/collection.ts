@@ -21,6 +21,7 @@ import {
 import { callerFile } from "./define.ts";
 import { appOfFile } from "./paths.ts";
 import {
+  BATCH,
   BATCH_LIMIT,
   checkCollection,
   DATA_VENDOR,
@@ -110,10 +111,6 @@ export interface Collection<
   >;
   readonly delete: Op<typeof DATA_VENDOR, N, "delete", { key: string; ifRecord?: Record<string, unknown> }, Deleted>;
 }
-
-/** The one operation of a collection that stands for others: `saveMany`, each entry a `save` or `delete`. */
-const BATCH = "saveMany";
-export const isBatch = (op: Pick<Op, "vendor" | "name">): boolean => op.vendor === DATA_VENDOR && op.name === BATCH;
 
 /**
  * Declares a collection of records, in `resources/data.ts`:
@@ -205,7 +202,7 @@ function specsOf(name: string, key: string, fields: Record<string, Field>, recor
   const byKey = z.object({ key: z.string().min(1), ifRecord });
   /** What `save` takes, and a batch for each of its records. */
   const saving = z
-    .strictObject({ record, ifAbsent: z.boolean().optional(), ifRecord })
+    .object({ record, ifAbsent: z.boolean().optional(), ifRecord })
     .refine((input) => !(input.ifAbsent && input.ifRecord !== undefined), {
       message: "Choose ifAbsent or ifRecord, not both",
     });
@@ -434,14 +431,20 @@ export function collectionsDriver(list: readonly Collection[], store: { db(): Pr
       // Gone between the refusal and this read: what refused it was a record, so it has changed since.
       throw current ? recordExists(current) : recordChanged(null);
     };
-    /** One delete on `db`, as `delete` makes it and a batch makes each of its deletes. */
-    const deleteOn = async (db: Db, { key, ifRecord }: DeleteInput): Promise<Deleted> => {
+    /**
+     * One delete on `db`, as `delete` makes it and a batch makes each of its deletes. A retry
+     * (`attempt` past the first) that finds no record under `ifRecord` deleted it the first time,
+     * and its answer was lost: nothing is left to recover a receipt from, so it is deleted.
+     */
+    const deleteOn = async (db: Db, { key, ifRecord }: DeleteInput, retrying: boolean): Promise<Deleted> => {
       const gone = await db
         .delete(data)
         .where(ifRecord === undefined ? here(key) : and(here(key), eq(data.record, ifRecord)))
         .returning({ key: data.key });
-      if (gone.length === 0 && ifRecord !== undefined) throw recordChanged(await getOn(db, key));
-      return { key, deleted: gone.length > 0 };
+      if (gone.length || ifRecord === undefined) return { key, deleted: gone.length > 0 };
+      const current = await getOn(db, key);
+      if (current === null && retrying) return { key, deleted: true };
+      throw recordChanged(current);
     };
     const ops: Record<string, (input: any, call: CallContext) => Promise<unknown>> = {
       get: async ({ key }: { key: string }) => getOn(await store.db(), key),
@@ -481,11 +484,11 @@ export function collectionsDriver(list: readonly Collection[], store: { db(): Pr
             }
           };
           for (const e of records) await made(e.record[c.key] as string, saveOn(tx, e, by));
-          for (const e of deletes) await made(e.key, deleteOn(tx, e));
+          for (const e of deletes) await made(e.key, deleteOn(tx, e, call.attempt > 1));
           if (conflicts.length) throw recordsChanged(conflicts);
           return results;
         }),
-      delete: async (input: DeleteInput) => deleteOn(await store.db(), input),
+      delete: async (input: DeleteInput, call) => deleteOn(await store.db(), input, call.attempt > 1),
     };
     return [c.name, ops];
   });
@@ -626,9 +629,11 @@ export function collectionsFake(list: readonly Collection[]): Fake<CollectionsSt
             records()[key] = next;
             return saved(next);
           };
-          const remove = ({ key, ifRecord }: DeleteInput): Deleted => {
+          const remove = ({ key, ifRecord }: DeleteInput, retrying: boolean): Deleted => {
             const previous = stored(key);
             if (ifRecord !== undefined && !(previous && sameJson(previous.record, ifRecord))) {
+              // As the driver: a retry finding no record deleted it the first time.
+              if (!previous && retrying) return { key, deleted: true };
               throw recordChanged(previous ? saved(previous) : null);
             }
             delete records()[key];
@@ -643,12 +648,18 @@ export function collectionsFake(list: readonly Collection[]): Fake<CollectionsSt
               matching(where).toSorted(byOrder(order, types)).slice(0, limit).map(saved),
             count: async ({ where }: Pick<Listing, "where">) => ({ count: matching(where).length }),
             save: async (input: SaveInput, call) => save(input, updatedBy(call)),
-            // All or none, as the driver's transaction: a conflict puts back every entry made before it.
+            // All or none, as the driver's transaction: a failure puts back every entry made before it.
             [BATCH]: async ({ records: saves, deletes }: Batch, call) => {
               const by = updatedBy(call);
               const results: unknown[] = [];
               const conflicts: Conflict[] = [];
               const before = new Map<string, Stored | undefined>();
+              const restore = () => {
+                for (const [key, previous] of before) {
+                  if (previous) records()[key] = previous;
+                  else delete records()[key];
+                }
+              };
               const made = (key: string, entry: () => unknown) => {
                 before.set(key, stored(key));
                 try {
@@ -657,16 +668,18 @@ export function collectionsFake(list: readonly Collection[]): Fake<CollectionsSt
                   conflicts.push(conflictOf(key, err));
                 }
               };
-              for (const e of saves) made(e.record[c.key] as string, () => save(e, by));
-              for (const e of deletes) made(e.key, () => remove(e));
-              if (!conflicts.length) return results;
-              for (const [key, previous] of before) {
-                if (previous) records()[key] = previous;
-                else delete records()[key];
+              try {
+                for (const e of saves) made(e.record[c.key] as string, () => save(e, by));
+                for (const e of deletes) made(e.key, () => remove(e, call.attempt > 1));
+              } catch (err) {
+                restore();
+                throw err;
               }
+              if (!conflicts.length) return results;
+              restore();
               throw recordsChanged(conflicts);
             },
-            delete: async (input: DeleteInput) => remove(input),
+            delete: async (input: DeleteInput, call) => remove(input, call.attempt > 1),
           };
           return [c.name, ops];
         }),

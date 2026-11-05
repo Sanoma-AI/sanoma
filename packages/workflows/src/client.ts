@@ -41,7 +41,7 @@ import {
 } from "./call.ts";
 import { type Chats, chatStore } from "./chats.ts";
 import { type Tokens, tokenStore } from "./tokens.ts";
-import { collectionsDriver, isBatch } from "./collection.ts";
+import { collectionsDriver } from "./collection.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { configuredSecrets } from "./credentials.ts";
 import {
@@ -109,6 +109,7 @@ import {
   errorMessage,
   FOLLOW_WORKFLOW,
   HOST_CHECK_AGENT,
+  isBatch,
   isEnded,
   isToken,
   isVisitor,
@@ -500,10 +501,15 @@ export class SanomaClient {
     const calls = callsOf(op, parsed, ops);
     const write = op.effect !== "read";
     // Only an id the caller gave can have been used: a write made, or held, with it settles it.
+    // One made and partly recorded is made again, as a retry (the store keeps the records it has).
+    let attempt = 1;
     if (write && options.id !== undefined) {
-      const first =
-        (await this.recordedCall(runId, op, calls, connection)) ?? (await this.heldCall(op.id, heldId, held));
-      if (first) return first.output;
+      const made = await this.recordedCall(runId, op, calls, connection);
+      if (made && "partial" in made) attempt = 2;
+      else {
+        const first = made ?? (await this.heldCall(op.id, heldId, held));
+        if (first) return first.output;
+      }
     }
     const run = { id: runId, workflow: CALL_WORKFLOW, approvals: [] };
     const decisions: RecordedDecision[] = [];
@@ -536,7 +542,7 @@ export class SanomaClient {
       idempotencyKey: runId,
       runId,
       opId: op.id,
-      attempt: 1,
+      attempt,
       secrets: this.storedSecrets,
       by: actor.id,
       principal: actor,
@@ -630,26 +636,27 @@ export class SanomaClient {
     } catch (err) {
       if (!is(err, TransactionRollbackError)) throw err;
       const first = await this.recordedCall(runId, op, calls, context.connection);
-      if (!first) throw err;
+      if (!first || "partial" in first) throw err;
       return first.output;
     }
   }
 
   /**
    * What the direct write recorded as `runId` returned, when one did (a batch's output from its
-   * entries' records): refused (`invalid_input`) when it was of another operation or input, and
-   * its failure again (`driver_failed`) when it failed.
+   * entries' records): refused (`invalid_input`) when it was of another operation or input, its
+   * failure again (`driver_failed`) when it failed, and `partial` when fewer records than its
+   * calls are there (a batch's, appended one by one outside a transaction, cut short).
    */
   private async recordedCall(
     runId: string,
     op: Op,
     calls: readonly Call[],
     connection?: ConnectionSnapshot,
-  ): Promise<{ output: unknown } | undefined> {
+  ): Promise<{ output: unknown } | { partial: true } | undefined> {
     const made = (await this.audit.store.read(runId)).filter((r) => r.type === "op.called");
     if (!made.length) return undefined;
     const same = (what: (record: (typeof made)[number], call: Call) => boolean) =>
-      made.length === calls.length && made.every((r, i) => what(r, calls[i]!));
+      made.length <= calls.length && made.every((r, i) => what(r, calls[i]!));
     const differs = [
       ...(same((r, c) => r.op === c.op.id) ? [] : ["op"]),
       ...(same((r, c) => sameJson(r.input, recorded(c.op, c.input))) ? [] : ["input"]),
@@ -670,6 +677,7 @@ export class SanomaClient {
         { runId, op: op.id, error: failed.error },
       );
     }
+    if (made.length < calls.length) return { partial: true };
     return { output: isBatch(op) ? made.map((r) => r.output) : made[0]!.output };
   }
 

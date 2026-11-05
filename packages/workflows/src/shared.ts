@@ -55,6 +55,14 @@ export const APPLY_WORKFLOW = "apply";
  */
 export const DATA_VENDOR = "data";
 
+/** The one operation of a collection that stands for others: `saveMany`, each entry a `save` or `delete`. */
+export const BATCH = "saveMany";
+export const isBatch = (op: Pick<OpEntry, "vendor" | "name">): boolean =>
+  op.vendor === DATA_VENDOR && op.name === BATCH;
+/** The ids of the operations a batch's entries are: its collection's `save` and `delete`. */
+export const entryOpsOf = (op: Pick<OpEntry, "resource">): string[] =>
+  ["save", "delete"].map((name) => `${DATA_VENDOR}.${op.resource}.${name}`);
+
 /** Every effect an operation may have, each an action group (`effect:<effect>`) of the Cedar schema. */
 export const EFFECTS = ["read", "write", "publish", "send", "money", "access"] as const satisfies readonly Effect[];
 
@@ -68,11 +76,16 @@ export const WORKFLOW_ACTION = "workflow:";
  */
 export function previewRequests(
   workflow: Pick<WorkflowEntry, "name" | "ops">,
-  ops: ReadonlyMap<string, Pick<OpEntry, "effect">>,
+  ops: ReadonlyMap<string, Pick<OpEntry, "effect" | "vendor" | "resource" | "name">>,
 ): Omit<PreviewRequest, "principal">[] {
+  // A batch is asked as its entries, the save and the delete the policy decides: no rule names it.
+  const asked = workflow.ops.flatMap((id) => {
+    const op = ops.get(id);
+    return op && isBatch(op) ? entryOpsOf(op) : [id];
+  });
   return [
     { action: { id: `${WORKFLOW_ACTION}${workflow.name}` } },
-    ...workflow.ops.map((id) => {
+    ...[...new Set(asked)].map((id) => {
       const effect = ops.get(id)?.effect;
       return { action: effect === undefined ? { id } : { id, effect }, inRun: true };
     }),

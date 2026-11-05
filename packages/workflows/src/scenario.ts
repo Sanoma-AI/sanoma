@@ -45,10 +45,12 @@ import {
   DATA_VENDOR,
   declaresPeople,
   DRIFT_WORKFLOW,
+  entryOpsOf,
   errorMessage,
   fitsOp,
   flatten,
   groupNamesOf,
+  isBatch,
   isEnded,
   principalIdsOf,
   problemLine,
@@ -447,6 +449,12 @@ function rulesOf(scope: Scope): { rules: Rule[]; parameterTypes: ParameterTypeSp
     { name: "field", regexp: /\S+/, transformer: (s) => s },
   ];
   const opOf = (id: unknown) => scope.ops.get(id as string)!;
+  /** An operation a `Then` step reads the ledger for: never a batch, which the ledger records as its entries. */
+  const recordedOp = (id: unknown): string => {
+    const op = opOf(id);
+    if (isBatch(op)) throw new Error(`${op.id} is recorded as its entries: name ${entryOpsOf(op).join(" or ")}`);
+    return op.id;
+  };
   const workflowOf = (name: unknown) => scope.workflows.get(name as string)!;
   // The people as the root's data files declare them when a step names one (`readPeople`, read
   // again only once a file changed): while they declare no one, any id and any group go.
@@ -597,33 +605,33 @@ function rulesOf(scope: Scope): { rules: Rule[]; parameterTypes: ParameterTypeSp
       source: "{op} was called with",
       takes: TAKES_OBJECT,
       read: ([op], pickle) =>
-        expecting({ op: op as string, input: fieldsFrom(pickle, opOf(op).input, inputOf(op), true), called: true }),
+        expecting({ op: recordedOp(op), input: fieldsFrom(pickle, opOf(op).input, inputOf(op), true), called: true }),
     },
     ...[true, false].map((called): Rule => ({
       kind: "then",
       source: `{op} was ${called ? "" : "not "}called`,
-      read: ([op]) => expecting({ op: op as string, called }),
+      read: ([op]) => expecting({ op: recordedOp(op), called }),
     })),
     {
       kind: "then",
       source: "{op} was denied",
-      read: ([op]) => expecting({ op: op as string, decision: "denied" }),
+      read: ([op]) => expecting({ op: recordedOp(op), decision: "denied" }),
     },
     {
       kind: "then",
       source: "{op} was denied with {string}",
-      read: ([op, reason]) => expecting({ op: op as string, decision: "denied", reason: reason as string }),
+      read: ([op, reason]) => expecting({ op: recordedOp(op), decision: "denied", reason: reason as string }),
     },
     {
       kind: "then",
       source: "{op} was held for {who}",
-      read: ([op, who]) => expecting({ op: op as string, decision: "held", approver: who as string }),
+      read: ([op, who]) => expecting({ op: recordedOp(op), decision: "held", approver: who as string }),
     },
     {
       kind: "then",
       source: "{op} was held for group {string}",
       read: ([op, group]) =>
-        expecting({ op: op as string, decision: "held", approver: { group: groupNamed(group as string) } }),
+        expecting({ op: recordedOp(op), decision: "held", approver: { group: groupNamed(group as string) } }),
     },
     {
       kind: "then",
