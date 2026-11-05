@@ -213,7 +213,7 @@ const preparing =
         (err: unknown) => {
           const why =
             pgCode(err) === SCHEMA_EXISTS
-              ? `the schema ${schema} is from a release before this one, and its users sign in again: drop it (DROP SCHEMA ${schema} CASCADE) and start the worker again`
+              ? `the schema ${schema} has no journal (drizzle.${LOGINS[schema].migrations.table}): a release before this one made it, or the journal table was lost; drop the schema (DROP SCHEMA ${schema} CASCADE; its users sign in again), or restore the journal, and start the worker again`
               : errorMessage(err);
           throw new Error(`better-auth: could not prepare ${schema}: ${why}`, { cause: err });
         },

@@ -48,15 +48,15 @@
     "generate": "drizzle-kit generate --config drizzle/visitors.config.ts && drizzle-kit generate --config drizzle/staff.config.ts"
   },
   "dependencies": {
-    "better-auth": "~1.7.12",
-    "drizzle-orm": "0.45.4"
+    "better-auth": "1.7.12",
+    "drizzle-orm": "0.45.4",
+    "pg": "^8.23.1"
   },
   "devDependencies": {
     "@sanoma-ai/testing": "workspace:*",
     "@sanoma-ai/workflows": "workspace:*",
     "@types/pg": "^8.23.1",
-    "drizzle-kit": "0.31.11",
-    "pg": "^8.23.1"
+    "drizzle-kit": "0.31.11"
   },
   "peerDependencies": {
     "@sanoma-ai/workflows": "workspace:^"

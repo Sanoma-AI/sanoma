@@ -127,8 +127,8 @@ describe("login", () => {
       // As a release on Better Auth's own migrations left it: the schema, no journal.
       await client.query('CREATE SCHEMA better_auth; CREATE TABLE better_auth."user" (id text PRIMARY KEY)');
       await expect((await freshPrepare())(databaseUrl)).rejects.toThrow(/DROP SCHEMA better_auth CASCADE/);
-      await client.query("DROP SCHEMA better_auth CASCADE");
     } finally {
+      await client.query("DROP SCHEMA better_auth CASCADE");
       await client.end();
     }
   });

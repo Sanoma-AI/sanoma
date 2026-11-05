@@ -27,7 +27,7 @@ try {
 /** Where a migrations folder keeps its journal, wherever the folder is. */
 const JOURNAL = /(^|\/)drizzle\/[^/]+\/meta\/_journal\.json$/;
 
-/** The journals `ref` tracks (the working tree's for HEAD), by path; `ls-tree` takes no glob, so every path is listed and matched. */
+/** The journals `ref` tracks (the index's for HEAD, read from the working tree), by path; `ls-tree` takes no glob, so every path is listed and matched. */
 const journalsOf = (ref: string): string[] =>
   (ref === "HEAD" ? git("ls-files") : git("ls-tree", "-r", "--name-only", ref))
     .split("\n")
