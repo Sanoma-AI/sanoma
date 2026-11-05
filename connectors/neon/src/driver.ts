@@ -15,15 +15,14 @@ export interface NeonDriverOptions {
 /** Neon's error body: `{ code, message }`. */
 const Problem = z.object({ code: z.string().optional(), message: z.string() });
 
-/** The kinds of SDK error that carry Neon's answer: a status and its body. */
-const ANSWERED = new Set<NeonErrorUnion["kind"]>([
-  "api",
-  "not_found",
-  "auth",
-  "rate_limit",
-] satisfies NeonApiErrorKind[]);
+/**
+ * An error carrying Neon's answer, its HTTP status and a body it could read: every kind of
+ * `NeonApiError`, whatever kinds the SDK adds. A body read that failed (a parse error, or the
+ * deadline while reading) leaves an `Error` in `body`: no answer was read.
+ */
 type Answered = Extract<NeonErrorUnion, { kind: NeonApiErrorKind }>;
-const answered = (error: NeonErrorUnion): error is Answered => ANSWERED.has(error.kind);
+const answered = (error: NeonErrorUnion): error is Answered =>
+  typeof (error as { status?: unknown }).status === "number" && !((error as { body?: unknown }).body instanceof Error);
 
 /**
  * The `DriverError` for a request that failed, retryable as `retryable` says. No `cause`: the
@@ -32,7 +31,12 @@ const answered = (error: NeonErrorUnion): error is Answered => ANSWERED.has(erro
 function failure(where: string, error: NeonErrorUnion): DriverError {
   if (error.kind === "network") {
     // No answer: the request may or may not have reached Neon.
-    return new DriverError(`neon: ${where}: the request failed (${error.reason})`, { retryable: true });
+    // Not the SDK's reason: a malformed header's error echoes its value, the key.
+    return new DriverError(`neon: ${where}: the request failed`, { retryable: true });
+  }
+  if ("status" in error && typeof error.status === "number" && !answered(error)) {
+    // Neon answered, but its reply could not be read: as good as no reply.
+    return new DriverError(`neon: ${where}: the reply could not be read`, { retryable: true });
   }
   if (!answered(error)) {
     return new DriverError(`neon: ${where}: ${errorMessage(error)}`, { retryable: false });
@@ -42,7 +46,7 @@ function failure(where: string, error: NeonErrorUnion): DriverError {
   return new DriverError(`neon: ${where}: ${problem?.message ?? `HTTP ${status}`}`, {
     retryable: retryable(status),
     status,
-    ...(error.code && { vendorCode: error.code }),
+    ...(problem?.code && { vendorCode: problem.code }),
   });
 }
 
@@ -57,14 +61,14 @@ function sdkApi(timeoutMs: number, key: string): NeonApi {
   let loaded: Promise<{ raw: Raw; client: Client }> | undefined;
   const connect = () => (loaded ??= loadSdk().then((raw) => ({ raw, client: neonClient(raw, key) })));
   /**
-   * One request under its own deadline. Once the deadline has passed, any failure is the timeout:
-   * the SDK reports one that fires while the body is read as an error of the reply's status.
+   * One request under its own deadline. Once the deadline has passed, a failure with no answer read
+   * is the timeout; an answer Neon gave in time still stands.
    */
   const attempt = async <T>(where: string, request: Request<T>): Promise<RawResult<T>> => {
     const { raw, client } = await connect();
     const signal = AbortSignal.timeout(timeoutMs);
     const result = await request(raw, { client, signal });
-    if (result.error !== undefined && signal.aborted) {
+    if (result.error !== undefined && signal.aborted && !answered(result.error)) {
       throw new DriverError(`neon: ${where}: no reply in ${timeoutMs} ms`, { retryable: true });
     }
     return result;

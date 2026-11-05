@@ -313,6 +313,19 @@ describe.skipIf(live)("neonDriver", () => {
     expect(err.cause).toBeUndefined();
   });
 
+  it("retries a reply it cannot read", async () => {
+    server.use(
+      http.get(
+        `*${PROJECTS}/${P}`,
+        () => new HttpResponse('{"project":', { headers: { "content-type": "application/json" } }),
+      ),
+    );
+    expect(await failure(op("project.read", { id: P }))).toMatchObject({
+      retryable: true,
+      message: `neon: GET /projects/${P}: the reply could not be read`,
+    });
+  });
+
   it("retries no reply and a timeout", async () => {
     server.use(http.all("*", () => HttpResponse.error()));
     expect(await failure(op("project.read", { id: P }))).toMatchObject({ retryable: true });

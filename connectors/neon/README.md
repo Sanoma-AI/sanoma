@@ -81,11 +81,11 @@ Each invocation builds its own SDK client from the verified material. Replacing 
 
 ### Errors and retries
 
-The driver maps failures to `DriverError` internally. The named runtime boundary retains retryability and HTTP status, with a fixed message and no provider cause or error body. A 408, a 423 (the project's earlier operations, such as a new compute's start, still run), a 429, a 5xx, a timeout or no reply is retryable; any other 4xx is not. A 404 with Neon's error body reads a project as gone, and deletes a project or branch as done; one without it fails. An error never carries axios's, whose request headers hold the key. Authentication verification failures stop before invoking the operation.
+The driver maps failures to `DriverError` internally. The named runtime boundary retains retryability and HTTP status, with a fixed message and no provider cause or error body. A 408, a 423 (the project's earlier operations, such as a new compute's start, still run), a 429, a 5xx, a timeout or no reply is retryable; any other 4xx is not. A 404 with Neon's error body reads a project as gone, and deletes a project or branch as done; one without it fails. An error never carries the SDK's, whose request headers hold the key. Authentication verification failures stop before invoking the operation.
 
 ### Testing the driver
 
-`test/driver.test.ts` and the features replay Neon's replies (`test/fixtures`) with [`@sanoma-ai/testing/replay`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/testing/README.md#replaying-a-vendors-api): `pnpm vitest run connectors/neon` needs no account. The features' fixtures are recorded from a real organization (2026-10-27); the driver tests' own are written by hand from Neon's API reference (the OpenAPI spec the SDK bundles, `public-v2-for-users.gen.yaml`) and checked against those recordings. Record the features again with an organization's key, which creates projects there and deletes them after each scenario:
+`test/driver.test.ts` and the features replay Neon's replies (`test/fixtures`) with [`@sanoma-ai/testing/replay`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/testing/README.md#replaying-a-vendors-api): `pnpm vitest run connectors/neon` needs no account. The features' fixtures are recorded from a real organization (2026-10-27); the driver tests' own are written by hand from Neon's API reference (its published OpenAPI spec, [`v2.json`](https://neon.com/api_spec/release/v2.json)) and checked against those recordings. Record the features again with an organization's key, which creates projects there and deletes them after each scenario:
 
 ```sh
 SANOMA_LIVE=1 SANOMA_RECORD=1 NEON_API_KEY=napi_... pnpm vitest run connectors/neon/test/features.test.ts
