@@ -19,27 +19,15 @@ import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { createRequire, registerHooks } from "node:module";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { APP_NAME, problemLine, SITE_NAME, type SitesBundle, siteDir, siteKey } from "@sanoma-ai/workflows/shared";
-import type { ConfigDescription, SiteEntry } from "@sanoma-ai/workflows/describe";
-import type { RootSnapshot } from "@sanoma-ai/workflows";
+import { APP_NAME, problemLine, SITE_NAME, siteKey } from "@sanoma-ai/workflows/shared";
 import type { InlineConfig, Logger, Plugin, PluginOption, ViteDevServer } from "vite";
-import {
-  CONTENT_TYPES,
-  type ContentProblem,
-  contentTypes,
-  PUBLISHED_FILE,
-  publishedOf,
-  readContent,
-  STYLESHEET_FILE,
-} from "./content-files.ts";
+import { CONTENT_TYPES, type ContentProblem, contentTypes, readContent, STYLESHEET_FILE } from "./content-files.ts";
 import type { ServerEntry } from "./context.ts";
-import { PUBLIC_FNS } from "./public-fns.ts";
-import { prerenderedDir, prerenderedFile } from "./worker/prerendered.ts";
 
 export { CONTENT_TYPES, type ContentProblem, contentTypes, readContent } from "./content-files.ts";
 
 /** The app package's directory, by its real path (not the symlink pnpm makes): from `src/` or `dist/`. */
-const pkgDir = realpathSync(fileURLToPath(new URL("..", import.meta.url)));
+export const pkgDir = realpathSync(fileURLToPath(new URL("..", import.meta.url)));
 
 // The runtime and what it loads stay outside the server bundle: the server imports them from the
 // consumer's install, so the app and the worker share one copy. (The app imports no connector; a
@@ -233,7 +221,7 @@ function installed(name: string): string {
   return found;
 }
 
-const defaultRuntimeFrom = join(pkgDir, "package.json");
+export const defaultRuntimeFrom = join(pkgDir, "package.json");
 
 const inside = (file: string, dir: string) => {
   const rel = relative(dir, file);
@@ -241,7 +229,7 @@ const inside = (file: string, dir: string) => {
 };
 
 /** A company's own file (a module id's path): in the repo, not in a dependency. */
-const companyFile = (id: string, repo: string) => {
+export const companyFile = (id: string, repo: string) => {
   const file = id.split("?")[0]!;
   return inside(file, repo) && !file.includes(`${sep}node_modules${sep}`);
 };
@@ -328,36 +316,33 @@ function tailwindFromApp(): void {
   });
 }
 
+/** `file` as an import specifier: an absolute path with forward slashes, as Vite writes one on Windows too. */
+export const specifier = (file: string) => JSON.stringify(file.split(sep).join("/"));
+
 /**
  * A company repo's build: the repo is Vite's root, the app's `src` (real path) Start's source
  * directory, the route tree the app's routes with `sites/` mounted at `/sites`, all of it written
- * under `.sanoma/app`. A site resolves React, TanStack and the app as the app does.
+ * under `.sanoma/app`. A site resolves React, TanStack and the app as the app does. With `bundle`,
+ * the plugins that make it the Worker's app bundle instead (`buildAppBundle`).
  */
-function repoConfig(repo: string, runtimeFrom = defaultRuntimeFrom, worker?: WorkerTarget): InlineConfig {
+export function repoConfig(repo: string, runtimeFrom = defaultRuntimeFrom, bundle?: PluginOption[]): InlineConfig {
   const { src } = appSources();
-  // The Worker's build keeps its own route tree, cache and temporary files.
-  const out = join(repo, ".sanoma", "app", ...(worker ? ["worker"] : []));
-  const routeTree = join(out, "routeTree.gen.ts");
+  // The route tree is the one both builds share; the Worker's keeps its own cache and temporary files.
+  const routeTree = join(repo, ".sanoma", "app", "routeTree.gen.ts");
+  const out = join(repo, ".sanoma", "app", ...(bundle ? ["bundle"] : []));
   const sites = join(repo, "sites");
   // Start joins srcDirectory to the root for its entries, so it must be relative.
   const srcDirectory = relative(repo, src);
   const fromApp = createRequire(join(src, "router.tsx"));
   const tailwind = installed("tailwindcss");
   tailwindFromApp();
-  // The app's routes at the root, and the sites' listing at /sites; on the Worker, only the sites it
-  // serves, each at its own mount, as the listing would mount it.
-  const children = worker
-    ? worker.sites.map((key) => ({
-        type: "physical" as const,
-        directory: join(repo, siteDir(key), "routes"),
-        pathPrefix: `/sites/${key}`,
-      }))
-    : [
-        { type: "physical" as const, directory: ".", pathPrefix: "" },
-        ...(existsSync(join(sites, "__virtual.ts"))
-          ? [{ type: "physical" as const, directory: sites, pathPrefix: "/sites" }]
-          : []),
-      ];
+  // The app's routes at the root, and the sites' listing at /sites.
+  const children = [
+    { type: "physical" as const, directory: ".", pathPrefix: "" },
+    ...(existsSync(join(sites, "__virtual.ts"))
+      ? [{ type: "physical" as const, directory: sites, pathPrefix: "/sites" }]
+      : []),
+  ];
   return {
     configFile: false,
     root: repo,
@@ -375,8 +360,8 @@ function repoConfig(repo: string, runtimeFrom = defaultRuntimeFrom, worker?: Wor
         },
       },
       sharedDeps(repo, src),
-      runtimeExternal(runtimeFrom, worker !== undefined),
-      ...(worker?.plugins ?? []),
+      runtimeExternal(runtimeFrom, bundle !== undefined),
+      ...(bundle ?? []),
       contentPlugin(repo),
       sitesPlugin(repo),
       stylesheetPlugin(),
@@ -851,7 +836,10 @@ export interface BuildAppOptions {
 }
 
 /** Vite's logger at `warn`, each warning and error said through `log`; Vite's own without one. */
-function quietLogger(vite: typeof import("vite"), log: ((line: string) => void) | undefined): Logger | undefined {
+export function quietLogger(
+  vite: typeof import("vite"),
+  log: ((line: string) => void) | undefined,
+): Logger | undefined {
   const logger = vite.createLogger("warn", { allowClearScreen: false });
   return log && { ...logger, warn: (msg) => log(msg), warnOnce: (msg) => log(msg), error: (msg) => log(msg) };
 }
@@ -899,8 +887,6 @@ export async function buildApp(
       );
     }
     copyFileSync(routeTree, join(outDir, "routeTree.gen.ts"));
-    // What its pages show of the content, for the public sites' sitemaps (`startApp`).
-    writeFileSync(join(outDir, PUBLISHED_FILE), JSON.stringify(publishedOf(root)));
     renameSync(outDir, distDir);
   } catch (err) {
     rmSync(outDir, { recursive: true, force: true });
@@ -926,265 +912,4 @@ function conflictOf(root: string, err: unknown): Error | undefined {
     .filter((line) => line !== "" && !line.startsWith("at "))
     .map((file) => relative(root, file));
   return new Error(`More than one page claims ${[...paths].join(", ")}: ${files.join(", ")}`, { cause: err });
-}
-
-/** What `repoConfig` builds for the Worker: the sites it serves, by key, and the plugins that build it. */
-interface WorkerTarget {
-  sites: string[];
-  plugins: PluginOption[];
-}
-
-/** The sites bundle's main module in the app's source, which re-exports Start's handler behind the sites' own routing. */
-const WORKER_ENTRY = join(pkgDir, "src", "worker", "entry.ts");
-
-/** What the Cloudflare host's Worker runs a company's public sites from (`buildWorker`), for the connector to upload. */
-export type WorkerBundle = SitesBundle;
-
-export interface BuildWorkerOptions {
-  /** The company's config file, which the bundle imports for its workflows and connectors. */
-  configFile: string;
-  /** The config's description, each public site's `domain` set from the host's domains. */
-  description: ConfigDescription;
-  /** The root's people, policies and app name, as `readRootSnapshot` reads them. */
-  snapshot: RootSnapshot;
-  /** See `BuildAppOptions.log`. */
-  log?: (line: string) => void;
-}
-
-/** The sites the Worker serves: public, on a domain, with no login (a visitor's sign-in stays on the container). */
-const workerSites = (description: ConfigDescription): SiteEntry[] =>
-  description.sites.filter((site) => site.public && site.domain && !site.login);
-
-/**
- * The pages of `site` the build prerenders: those no call is made from, on the page or a layout
- * above it. A call from a file that is no page (a component's) may be on any of them: none then.
- */
-export function prerenderedPages(site: Pick<SiteEntry, "pages" | "calls">): SiteEntry["pages"] {
-  if (site.calls.some((call) => call.page === undefined)) return [];
-  const pages = site.calls.map((call) => call.page!);
-  return site.pages.filter(({ path }) => !pages.some((page) => path === page || path.startsWith(`${page}/`)));
-}
-
-const WORKER = "virtual:sanoma/worker";
-
-/** `file` as an import specifier: an absolute path with forward slashes, as Vite writes one on Windows too. */
-const specifier = (file: string) => JSON.stringify(file.split(sep).join("/"));
-
-/** A module's line exporting `data` as `name`. */
-const exported = (name: string, data: unknown) => `export const ${name} = ${JSON.stringify(data)};\n`;
-
-/** `virtual:sanoma/worker`, which `worker/entry.ts` imports: the company's config, root, description and content, and Cedar's web build, ready. */
-function workerModule(root: string, served: SiteEntry[], options: BuildWorkerOptions): Plugin {
-  const id = `\0${WORKER}`;
-  // The runtime's Cedar, its web build beside its Node one (`./web` is import-only, so no require resolves it).
-  const fromRuntime = createRequire(createRequire(defaultRuntimeFrom).resolve("@sanoma-ai/workflows"));
-  const cedar = join(dirname(fromRuntime.resolve("@cedar-policy/cedar-wasm/nodejs")), "..", "web");
-  return {
-    name: "sanoma:worker",
-    enforce: "pre",
-    resolveId: (source) => (source === WORKER ? id : undefined),
-    load(loaded) {
-      if (loaded !== id) return;
-      return [
-        `export { default as config } from ${specifier(options.configFile)};\n`,
-        `import * as cedarWeb from ${specifier(join(cedar, "cedar_wasm.js"))};\n`,
-        `import cedarModule from ${specifier(join(cedar, "cedar_wasm_bg.wasm"))};\n`,
-        "cedarWeb.initSync({ module: cedarModule });\n",
-        "export const cedar = cedarWeb;\n",
-        exported("root", root),
-        exported("served", served),
-        exported("snapshot", options.snapshot),
-        exported("description", options.description),
-        exported("published", publishedOf(root)),
-      ].join("");
-    },
-  };
-}
-
-/** The Worker's plugins: Cloudflare's, over the ssr environment, the bundle's module, and DBOS's optional packages stubbed. */
-async function workerPlugins(root: string, served: SiteEntry[], options: BuildWorkerOptions): Promise<PluginOption[]> {
-  const { cloudflare } = await import("@cloudflare/vite-plugin");
-  const { OPTIONAL } = await import("./worker/optional.ts");
-  const missing = join(pkgDir, "src", "worker", "missing.js");
-  return [
-    workerModule(root, served, options),
-    workerTrim(),
-    {
-      // Each company file says it is the one evaluating, for what V8's call sites name in a bundle
-      // no longer (`callerFile` in the runtime): a workflow's file, a collection's app.
-      name: "sanoma:worker-files",
-      applyToEnvironment: (environment) => environment.name === "ssr",
-      transform(code, id) {
-        const file = id.split("?")[0]!;
-        if (!companyFile(id, root) || !/\.[cm]?[jt]sx?$/.test(file)) return;
-        // One line ahead of the code: no mapping moves but by a line, and the bundle's maps are not uploaded.
-        return { code: `globalThis[Symbol.for("sanoma.file")] = ${JSON.stringify(file)};\n${code}`, map: null };
-      },
-    },
-    {
-      name: "sanoma:worker-optional",
-      enforce: "pre",
-      applyToEnvironment: (environment) => environment.name === "ssr",
-      resolveId: (source) => (OPTIONAL.includes(source) ? missing : undefined),
-    },
-    cloudflare({
-      viteEnvironment: { name: "ssr" },
-      persistState: false,
-      inspectorPort: false,
-      config: {
-        name: "sanoma-sites",
-        main: WORKER_ENTRY,
-        compatibility_date: "2026-10-01",
-        compatibility_flags: ["nodejs_compat"],
-        // The build's own preview, for its prerender, and never uploaded (the connector writes the bindings).
-        vars: { SANOMA_PRERENDER: "1" },
-      },
-    }),
-  ];
-}
-
-/**
- * What the Worker's server bundle leaves out of the app's: the app's chrome (a public site's host
- * never draws it), the handlers of every server function but `PUBLIC_FNS` (each still
- * registered, which a public site's host refuses before its handler, as the container's does), and
- * the runtime's read of its version from a package.json beside it (inlined from the build's).
- */
-function workerTrim(): Plugin {
-  const { src } = appSources();
-  const functions = join(src, "functions.ts");
-  const chrome = join(src, "components", "app-chrome.tsx");
-  type Node = { type: string; start: number; end: number; [key: string]: unknown };
-  return {
-    name: "sanoma:worker-trim",
-    enforce: "pre",
-    applyToEnvironment: (environment) => environment.name === "ssr",
-    load: (id) => (id === chrome ? "export default () => null;" : undefined),
-    transform(code, id) {
-      const file = id.split("?")[0]!;
-      if (/[/\\]workflows[/\\](dist[/\\]version\.js|src[/\\]version\.ts)$/.test(file)) {
-        const read = /JSON\.parse\(\s*readFileSync\(new URL\("\.\.\/package\.json", import\.meta\.url\), "utf8"\)\s*\)/;
-        if (!read.test(code)) return this.error(`the Worker's build no longer finds how ${file} reads its version`);
-        const { version } = JSON.parse(readFileSync(join(dirname(file), "..", "package.json"), "utf8")) as {
-          version: string;
-        };
-        return { code: code.replace(read, JSON.stringify({ version })), map: null };
-      }
-      // The module and Start's split of its handlers (`?tss-serverfn-split`) alike.
-      if (file !== functions) return;
-      const edits: { start: number; end: number; text: string }[] = [];
-      for (const statement of this.parse(code, { lang: "ts" }).body as unknown as Node[]) {
-        const declaration = statement.type === "ExportNamedDeclaration" ? (statement.declaration as Node | null) : null;
-        if (declaration?.type !== "VariableDeclaration") continue;
-        for (const declarator of declaration.declarations as Node[]) {
-          const name = (declarator.id as { name: string }).name;
-          let call = declarator.init as Node | null;
-          // Down the builder's chain (`.handler(…)`, `.validator(…)`, …) to `createServerFn(…)`.
-          while (call?.type === "CallExpression" && (call.callee as Node).type === "MemberExpression") {
-            call = (call.callee as Node).object as Node;
-          }
-          if (call?.type !== "CallExpression" || (call.callee as { name?: string }).name !== "createServerFn") continue;
-          if (PUBLIC_FNS.has(name)) continue;
-          const init = declarator.init as Node;
-          const args = (call.arguments as Node[]).map((arg) => code.slice(arg.start, arg.end)).join(", ");
-          const refused = JSON.stringify(`${name} is not served on a public site's host`);
-          edits.push({
-            start: init.start,
-            end: init.end,
-            text: `createServerFn(${args}).handler(() => { throw new Error(${refused}); })`,
-          });
-        }
-      }
-      let trimmed = code;
-      for (const { start, end, text } of edits.toReversed())
-        trimmed = trimmed.slice(0, start) + text + trimmed.slice(end);
-      return { code: trimmed, map: null };
-    },
-  };
-}
-
-/** The file at `path` (with `/`) under `dir`, base64. */
-const base64 = (dir: string, path: string) => readFileSync(join(dir, ...path.split("/"))).toString("base64");
-
-/** Every file under `dir`, by path from it with `/`. */
-const filesUnder = (dir: string): string[] =>
-  readdirSync(dir, { recursive: true, withFileTypes: true })
-    .filter((entry) => entry.isFile())
-    .map((entry) => relative(dir, join(entry.parentPath, entry.name)).split(sep).join("/"))
-    .toSorted();
-
-const MODULE_TYPES: Record<string, WorkerBundle["modules"][number]["type"]> = { js: "esm", mjs: "esm", wasm: "wasm" };
-
-/**
- * Builds the company's public sites for the Cloudflare host's Worker (#428): the sites it serves
- * (`workerSites`) mounted as the app mounts them, under the app's `__root.tsx`, bundled with the
- * runtime and the config for workerd by `@cloudflare/vite-plugin`, and every page no call is made
- * from (`prerenderedPages`) rendered by the build's own preview into the assets. Undefined when
- * no site is served there. Written under `.sanoma/app/worker/` and read back, nothing kept.
- */
-export async function buildWorker(repo: string, options: BuildWorkerOptions): Promise<WorkerBundle | undefined> {
-  const root = realpathSync(repo);
-  const served = workerSites(options.description);
-  if (!served.length) return undefined;
-  const sites = served.map(({ name }) => name);
-  writeSiteFiles(root);
-  const outDir = join(root, ".sanoma", "app", "worker", `build.${process.pid}.tmp`);
-  // Cloudflare's plugin points its preview at the build through `<root>/.wrangler/deploy`.
-  const wrangler = join(root, ".wrangler");
-  const hadWrangler = existsSync(wrangler);
-  rmSync(outDir, { recursive: true, force: true });
-  const vite = await import("vite");
-  const customLogger = quietLogger(vite, options.log);
-  const config: InlineConfig = {
-    ...repoConfig(root, undefined, { sites, plugins: await workerPlugins(root, served, options) }),
-    build: { outDir, emptyOutDir: true },
-    logLevel: "warn",
-    customLogger,
-  };
-  try {
-    await (await vite.createBuilder(config)).buildApp();
-    const client = join(outDir, "client");
-    const server = join(outDir, "server");
-    const { sitemapEntries } = await import("./seo.ts");
-    const pages = served.flatMap((site) =>
-      sitemapEntries({ ...site, pages: prerenderedPages(site) }, `https://${site.domain}`, publishedOf(root)).map(
-        ({ loc }) => ({ site: site.name, path: new URL(loc).pathname }),
-      ),
-    );
-    if (pages.length) {
-      const preview = await vite.preview({ ...config, preview: { port: 0, host: "127.0.0.1", open: false } });
-      try {
-        const base = preview.resolvedUrls?.local[0];
-        if (!base) throw new Error("the Worker's preview has no local URL");
-        for (const { site, path } of pages) {
-          const page = path === "/" ? "" : path;
-          const response = await fetch(new URL(`${prerenderedDir(site)}${page}`, base));
-          const html = await response.text();
-          if (!response.ok)
-            throw new Error(`prerendering ${site}${path} answered ${response.status}: ${html.slice(0, 200)}`);
-          const file = join(client, ...prerenderedFile(site, path)!.split("/"));
-          mkdirSync(dirname(file), { recursive: true });
-          writeFileSync(file, html);
-        }
-      } finally {
-        await preview.close();
-      }
-    }
-    const { main } = JSON.parse(readFileSync(join(server, "wrangler.json"), "utf8")) as { main: string };
-    return {
-      sites,
-      mainModule: main,
-      modules: filesUnder(server)
-        // The modules; not the stylesheets and fonts the server's build emits beside them, which the client's has.
-        .flatMap((name) => {
-          const type = MODULE_TYPES[name.split(".").at(-1)!];
-          return type ? [{ name, type, content: base64(server, name) }] : [];
-        }),
-      assets: filesUnder(client)
-        .filter((path) => path !== "wrangler.json" && path !== ".assetsignore")
-        .map((path) => ({ path: `/${path}`, content: base64(client, path) })),
-    };
-  } finally {
-    rmSync(outDir, { recursive: true, force: true });
-    if (!hadWrangler) rmSync(wrangler, { recursive: true, force: true });
-  }
 }

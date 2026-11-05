@@ -25,6 +25,7 @@ import { ACTOR_COOKIE, ACTOR_KEY } from "../src/api.ts";
 import { type App, startApp } from "../src/index.ts";
 import { spanLines } from "../src/lib/lines.ts";
 import { hostEnforcement, permissions } from "../src/server/core.ts";
+import type { AppSnapshot } from "../src/snapshot.ts";
 
 // The Permissions page: its grid and the policy files through the server core
 // (`getPermissions`), the page as the server renders it, and in Chrome the who-are-you picker,
@@ -105,12 +106,19 @@ const resolved = resolveConfig(config);
 const cedar = resolved.policy;
 const description = describeConfig(config);
 
+/** The snapshot as the grid reads it: the description, and the repository's remote when it has one (`AppSnapshot.repository`). */
+const snapshotOf = (described: typeof description, remoteUrl?: string) =>
+  ({ description: described, ...(remoteUrl && { repository: { remote: remoteUrl, workflows: {} } }) }) as AppSnapshot;
+
 /** A public site, so the grid shows a visitor's columns. */
 const site = { name: "www", public: true as const, pages: [], calls: [], problems: [], warnings: [] };
 
 /** The grid under `policy`, as `getPermissions` answers it, `described` as the description says it, beside a public site. */
 const gridOf = (policy: Policy, described = description.policy) =>
-  permissions({ resolved: { ...resolved, policy }, description: { ...description, policy: described, sites: [site] } });
+  permissions({
+    resolved: { ...resolved, policy },
+    snapshot: snapshotOf({ ...description, policy: described, sites: [site] }),
+  });
 
 describe("the Permissions grid", () => {
   // The grid itself is `permissionsGrid`'s (`packages/workflows/test/grid.test.ts`): here what the app adds.
@@ -128,8 +136,10 @@ describe("the Permissions grid", () => {
     const fixture = resolveConfig(people);
     const described = describeConfig(people);
     const filesOf = (files: { file: string; text: string }[]) =>
-      permissions({ resolved: { ...fixture }, description: { ...described, policy: { ...described.policy, files } } })
-        .files;
+      permissions({
+        resolved: { ...fixture },
+        snapshot: snapshotOf({ ...described, policy: { ...described.policy, files } }),
+      }).files;
     const read = described.policy.files;
     const files = filesOf(read);
     const file = "policies/refunds.cedar";
@@ -152,20 +162,20 @@ describe("the Permissions grid", () => {
   });
 });
 
-describe("what the host enforces", () => {
-  const context = { client: undefined as never, description, resolved, source };
+/** The context with the snapshot as made now, the remote as `origin` says. */
+const context = () => ({ client: undefined as never, resolved, snapshot: snapshotOf(description, origin) });
 
+describe("what the host enforces", () => {
   it("is nothing without a remote, or with no connector for its host", async () => {
-    expect(await hostEnforcement({ ...context, source: undefined })).toBeNull();
     origin = undefined;
-    expect(await hostEnforcement(context)).toBeNull();
+    expect(await hostEnforcement(context())).toBeNull();
     origin = "https://elsewhere.example/acme/company.git";
-    expect(await hostEnforcement(context)).toBeNull();
+    expect(await hostEnforcement(context())).toBeNull();
   });
 
   it("is the host's answer on main, by the connector's name; a host that fails, nothing enforced and why", async () => {
     origin = remote.url;
-    expect(await hostEnforcement(context)).toEqual({
+    expect(await hostEnforcement(context())).toEqual({
       host: "fakegit",
       pullRequest: false,
       check: false,
@@ -174,7 +184,7 @@ describe("what the host enforces", () => {
     remote.host.enforcement = async () => {
       throw new Error("the host is down");
     };
-    expect(await hostEnforcement(context)).toEqual({
+    expect(await hostEnforcement(context())).toEqual({
       host: "fakegit",
       pullRequest: false,
       check: false,
@@ -250,6 +260,9 @@ describe("the Permissions page", () => {
   it("says under the grid whether the host requires a merge, and nothing without a remote", async () => {
     expect(await permissionsPage(app)).not.toContain("the sanoma check on main");
     origin = remote.url;
+    // As `git remote add` writes it: the app reads the remote again once the git config changed.
+    mkdirSync(join(root, ".git"), { recursive: true });
+    writeFileSync(join(root, ".git", "config"), `[remote "origin"]\n\turl = ${origin}\n`);
     expect(await permissionsPage(app)).toContain(
       "fakegit does not require a pull request or the sanoma check on main. a fake host enforces nothing Until then a push around Sanoma lands in the ledger as a gap.",
     );

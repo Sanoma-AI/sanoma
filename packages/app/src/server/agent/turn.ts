@@ -1,8 +1,6 @@
-import type { Chat, Principal } from "@sanoma-ai/workflows";
 import { safeValidateUIMessages } from "ai";
 import { z } from "zod";
 import { ApiError } from "../../api.ts";
-import type { AppContext } from "../../context.ts";
 import { type ChatMessage, type EngineName, noModelText, onModelConnector, textOf } from "../../lib/chat.ts";
 import { type ActorContext, parse, requireActor, toApiError } from "../core.ts";
 import { chatModel } from "../models.ts";
@@ -108,17 +106,3 @@ export async function postChat(request: Request, context: ActorContext & { site?
 }
 
 const invalid = (error: string) => new ApiError(400, { error, code: "invalid_input" });
-
-/** The person's chat `id` with its transcript; null when they have none of that id. */
-export async function chatFor(
-  app: AppContext,
-  principal: Principal,
-  id: string,
-): Promise<{ chat: Chat; messages: ChatMessage[] } | null> {
-  const { client } = app;
-  const chat = await client.chats.get(id);
-  if (chat?.person !== principal.id) return null;
-  // As the next turn will take it: what a restart cut short settled, unless a turn is under way.
-  const stored = await client.chats.load(id);
-  return { chat, messages: (written(id) ? stored : await settle(app, stored)) as ChatMessage[] };
-}

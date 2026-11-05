@@ -1,9 +1,13 @@
+// The Node adapter: serves the app's handler (`appHandler`) over Node's `http`, locally and in
+// `sanoma serve`. It makes what the handler is given from where the files are: the snapshot
+// (`liveSnapshot`, made again once a file changed), the client, the public sites' logins, the
+// built client's files (or Vite's dev server), and the checkout the repository's actions work in.
 import { createReadStream } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { extname, join, relative, resolve, sep } from "node:path";
-import { pipeline } from "node:stream/promises";
+import { Readable } from "node:stream";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   CLIENT_IP_HEADER,
@@ -11,7 +15,6 @@ import {
   isLoopback,
   type LoginHalf,
   problemLine,
-  requestOrigin,
   warningLine,
   type ResolvedConfig,
   resolveConfig,
@@ -20,25 +23,27 @@ import {
   type SocialClients,
   type Source,
 } from "@sanoma-ai/workflows";
-import { type ConfigDescription, liveDescription, readPeople, type SiteEntry } from "@sanoma-ai/workflows/describe";
+import type { SiteEntry } from "@sanoma-ai/workflows/describe";
 import { siteDir } from "@sanoma-ai/workflows/shared";
 import { NodeRequest, sendNodeResponse } from "srvx/node";
-import type { AppContext, LoginProvider, RequestContext, ServerEntry } from "./context.ts";
+import { STYLESHEET_FILE } from "./content-files.ts";
+import type { AdmittingLogin, LoginProvider, ServerEntry } from "./context.ts";
+import { appHandler, type AppHandlerOptions, type IngressRoute, localHost } from "./handler.ts";
 import { admitting } from "./login/admission.ts";
 import { loginKey } from "./login/keys.ts";
 import { publicFront } from "./login/public.ts";
 import { sendLoginCode } from "./login/staff.ts";
-import { hostName, loopbackLogin, placeOf } from "./loopback.ts";
-import { type Published, PUBLISHED_FILE, publishedOf, STYLESHEET_FILE } from "./content-files.ts";
-import { seoFile } from "./seo.ts";
-import { siteHost } from "./site-path.ts";
+import { loopbackLogin } from "./loopback.ts";
 import { secretValues } from "./server/secrets.ts";
-import { remoteWebhook } from "./server/webhooks.ts";
+import { type AppSnapshot, siteFileBroken } from "./snapshot.ts";
+import { liveSnapshot } from "./snapshot-build.ts";
 
 export { ACTOR_HEADER } from "./api.ts";
 export type { LoginProvider, ResolveActor } from "./context.ts";
+export type { IngressRoute } from "./handler.ts";
 export { type MakeStaffLogin, type StaffSocial, staffLogin } from "./login/staff.ts";
 export { loopbackLogin } from "./loopback.ts";
+export type { AppBundle, AppBundleContext, AppBundleEnv, AppBundleModule, AppHost } from "./app-bundle.ts";
 
 export interface AppOptions {
   /** Defaults to 0: any free port, which `App.url` reports. 3000 is the suggested fixed port. */
@@ -94,19 +99,6 @@ export interface AppOptions {
   onWrite?: () => void;
 }
 
-/** One of `AppOptions.ingress`: a machine route, such as the wakeup's `/wake`. */
-export interface IngressRoute {
-  method?: "GET" | "POST" | "PUT" | "DELETE";
-  /** The whole path, from `/`, without a query: matched exactly, unless `prefix`. */
-  path: string;
-  /**
-   * Also every path under `path` (`/wakeup` answers `/wakeup/instances/…`), for a route that
-   * matches what follows itself. A route at the exact path comes first, then the longest prefix.
-   */
-  prefix?: boolean;
-  handle(request: Request): Promise<Response>;
-}
-
 export interface App {
   /** Where the app listens, such as `http://127.0.0.1:3000`. */
   url: string;
@@ -115,19 +107,13 @@ export interface App {
   close(): Promise<void>;
 }
 
-/** Answers a request the login let through, a file's or the server entry's. */
-interface Responder {
-  respond(req: IncomingMessage, res: ServerResponse, request: Request, context: RequestContext): Promise<void>;
-  /** Closes what it opened, logging a failure rather than throwing it, as `closeQuietly`. */
-  close(): Promise<void>;
-}
-
 /**
- * Serves the web UI over a config: its runs, their ledgers and approvals, and a form to start
- * each workflow. Reads the same config the worker runs, through Postgres and the
- * config's ledger store; it runs no workflows itself. Refuses, at once, a config the worker
- * would refuse; missing credentials refuse nothing, and the connector pages show and set them;
- * data files with problems it warns about and leaves out (the Hosting page lists them).
+ * Serves the app over a config on Node: its runs, their ledgers and approvals, and a form to start
+ * each workflow, from the company's files where they are. Reads the same config the worker runs,
+ * through Postgres and the config's ledger store; it runs no workflows itself. Refuses, at once, a
+ * config the worker would refuse; missing credentials refuse nothing, and the connector pages
+ * show and set them; data files with problems it warns about and leaves out (the Hosting page
+ * lists them).
  */
 export async function startApp(config: SanomaConfig, options: AppOptions = {}): Promise<App> {
   const host = options.host ?? "127.0.0.1";
@@ -137,65 +123,14 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
     throw new Error(`The dev server listens on this machine only, not ${host}: serve a build there`);
   }
   const resolved = resolveConfig(config);
-  const login = admitting(given, () => readPeople(resolved.root));
-  // Made again on a request once a file it loaded has changed (a form's Save, say); what is said
-  // here, the public sites' hosts and their logins, stay as the app started.
-  const describe = liveDescription(config);
-  const description = describe();
-  // Problems in the files do not stop the app: a data file's resources are left out (the Hosting
-  // page lists the problems), a workflow the worker will refuse is shown with its outline's error,
-  // and a site's call to what the config lacks fails when it is made.
-  const lines = new Set([
-    // The policies refuse every call and start until these are fixed.
-    ...resolved.policyProblems,
-    ...description.problems.map(problemLine),
-    ...description.workflows.flatMap((wf) => wf.problems.map((p) => problemLine({ file: wf.file, ...p }))),
-    ...description.sites.flatMap((site) => site.problems.map(problemLine)),
-  ]);
-  if (lines.size) {
-    const list = [...lines].map((line) => `  ${line}`).join("\n");
-    console.warn(`sanoma app: the config's files have problems (\`sanoma check\` lists them):\n${list}`);
-  }
-  const warnings = description.sites.flatMap((site) => site.warnings.map((w) => `  ${warningLine(w)}`));
-  if (warnings.length)
-    console.warn(`sanoma app: warnings in the sites (\`sanoma check\` lists them):\n${warnings.join("\n")}`);
-  const hosts = publicHosts(description, options.domains ?? {});
-  // Each public site's domain, as `publicHosts` set it on the description made at boot: set again
-  // on each one made after, which `readSites` makes without it.
-  const domains = new Map(description.sites.flatMap((site) => (site.domain ? [[site.name, site.domain]] : [])));
-  const current = (): ConfigDescription => {
-    const now = describe();
-    for (const site of now.sites) {
-      const domain = domains.get(site.name);
-      if (domain !== undefined) site.domain = domain;
-    }
-    return now;
-  };
-  const ingress = new Map<string, IngressRoute>();
-  // A git host's webhooks, answered once the app is made.
-  const webhooks: IngressRoute[] = [...resolved.remotes]
-    .filter(([, half]) => half.webhook)
-    .map(([vendor]) => ({
-      method: "POST",
-      path: `/webhooks/${vendor}`,
-      handle: (request) => remoteWebhook(app, vendor, request),
-    }));
-  for (const route of [...(options.ingress ?? []), ...webhooks]) {
-    if (!/^\/[^?#]*$/.test(route.path) || route.path === "/healthz")
-      throw new Error(
-        `An ingress route's path starts with /, has no query and is not /healthz, unlike "${route.path}"`,
-      );
-    if (route.prefix && route.path.endsWith("/"))
-      throw new Error(`A prefix ingress route's path does not end with /, unlike "${route.path}"`);
-    if (ingress.has(route.path))
-      throw new Error(`Two ingress routes have the path ${route.path}: give each path one route`);
-    ingress.set(route.path, route);
-  }
-  // Longest first, so the first under which a path falls is the most specific.
-  const prefixed = [...ingress.values()].filter((r) => r.prefix).toSorted((a, b) => b.path.length - a.path.length);
-  const ingressAt = (path: string) => ingress.get(path) ?? prefixed.find((route) => path.startsWith(`${route.path}/`));
+  const live = await liveSnapshot(config, { ...(options.source && { source: options.source }) });
+  const current = await live();
+  warnProblems(resolved, current);
+  // The build first, importing nothing and connecting to nothing: a missing or half build is
+  // refused before anything is opened. The dev server has nothing built to check.
+  const sockets = new WeakMap<Request, { req: IncomingMessage; res: ServerResponse }>();
   const server = createServer((req, res) => {
-    handle(req, res).catch((err: unknown) => {
+    void handle(req, res).catch((err: unknown) => {
       console.error("sanoma app: request failed:", err);
       if (res.headersSent) res.destroy();
       else {
@@ -204,95 +139,10 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
       }
     });
   });
-
-  async function handle(req: IncomingMessage, res: ServerResponse) {
-    const path = req.url?.split("?")[0];
-    // A host's probe, before the login: it says the app answers, and nothing else.
-    if (path === "/healthz" && (req.method === "GET" || req.method === "HEAD")) {
-      res.writeHead(200, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
-      return void res.end(req.method === "HEAD" ? undefined : "ok\n");
-    }
-    // A machine route, before the login too: it checks its own token.
-    const route = path === undefined ? undefined : ingressAt(path);
-    if (route?.method !== undefined && route.method !== req.method) {
-      res.writeHead(405, {
-        allow: route.method,
-        "content-type": "text/plain; charset=utf-8",
-        "cache-control": "no-store",
-      });
-      return void res.end(`${path} answers ${route.method} only\n`);
-    }
-    if (route) return sendNodeResponse(res, await route.handle(new NodeRequest({ req, res })));
-    // A public site's host, ahead of the staff login, which it never reaches: the site's front door.
-    const asked = hostName(req.headers.host ?? "");
-    const entry = hosts.get(asked);
-    if (entry !== undefined) {
-      const site = sites.get(entry.name);
-      if (!site) {
-        res.writeHead(503, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
-        return void res.end(
-          "This site is not served: its site.ts or its login has a problem, which the app's log names.\n",
-        );
-      }
-      // The visitor's address, from the socket alone, for a login's rate limits: never a client's copy.
-      req.headers[CLIENT_IP_HEADER] = req.socket.remoteAddress ?? "";
-      const request = new NodeRequest({ req, res });
-      // Its URLs are at its domain, when it has one; only there may a crawler index it.
-      const origin = entry.domain ? `https://${entry.domain}` : requestOrigin(request);
-      if (asked !== entry.domain) res.setHeader("x-robots-tag", "noindex");
-      const answer = seoFile(request, entry, origin, published) ?? (await site.login.handle?.(request));
-      if (answer) return sendNodeResponse(res, answer);
-      return responder.respond(req, res, request, { app: site, site: entry.name, origin });
-    }
-    const request = new NodeRequest({ req, res });
-    // Then the login sees every request (pages, server functions and static files alike): its
-    // own routes, and any it will not let through.
-    const answer = await login.handle?.(request);
-    if (answer) return sendNodeResponse(res, answer);
-    await responder.respond(req, res, request, { app, origin: requestOrigin(request) });
-  }
-
-  // The build first, importing nothing and connecting to nothing: a missing or half build is
-  // refused before anything is opened. The dev server has nothing built to check.
-  // What the sitemaps list of the content, drafts left out: `content/` as it is now on the dev
-  // server, read at each request; else what the build wrote of it.
-  let load: () => Promise<Responder>;
-  let published: () => Published;
-  let stylesheet: string | undefined;
-  if (options.dev) {
-    const { repo, onFileChange } = options.dev;
-    load = () => devResponder(repo, server, onFileChange);
-    published = () => publishedOf(repo);
-  } else {
-    const distDir = resolve(options.distDir ?? defaultDistDir());
-    const built = await readFile(join(distDir, PUBLISHED_FILE), "utf8").then(
-      (text) => JSON.parse(text) as Published,
-      // The package's own build has no content to list.
-      (err: unknown) => {
-        if (!isMissing(err)) throw err;
-        return {};
-      },
-    );
-    published = () => built;
-    const files = await staticFiles(join(distDir, "client"));
-    // The kit's theme, which the root route imports as `style.css?url`: what the login's own pages
-    // link, as the build named it. A build without the file (an older one) leaves the pages unstyled.
-    stylesheet = await readFile(join(distDir, STYLESHEET_FILE), "utf8").then(
-      (text) => {
-        const path = JSON.parse(text) as unknown;
-        return typeof path === "string" && files.has(path) ? path : undefined;
-      },
-      (err: unknown) => {
-        if (!isMissing(err)) throw err;
-        return undefined;
-      },
-    );
-    const serverEntry = join(distDir, "server", "server.js");
-    await mustBeFile(serverEntry);
-    load = async () => builtResponder(files, await loadServerEntry(serverEntry));
-  }
   const [loaded, connected] = await Promise.allSettled([
-    load(),
+    options.dev
+      ? devResponder(options.dev, server, sockets)
+      : builtResponder(resolve(options.distDir ?? defaultDistDir())),
     SanomaClient.connect(config, { onWrite: options.onWrite, ...(options.source && { source: options.source }) }),
   ]);
   if (loaded.status === "rejected" && connected.status === "rejected") {
@@ -311,38 +161,54 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   }
   const responder = loaded.value;
   const client = connected.value;
-  // What every context shares; each defines its own `description` getter, which a spread would read once.
-  const shared = { resolved, place: placeOf(resolved.databaseUrl), client, source: options.source };
-  const app: AppContext = {
-    ...shared,
-    get description() {
-      return current();
-    },
-    login,
-    ...(stylesheet && { stylesheet }),
-  };
-  // Each public site served, by name, with its own context, whose login is its front door: its
-  // login half, if it has one, made once the app listens (`openLogins`). A public site whose
-  // site.ts has a problem is not served, as its login could be one not read.
+  // The people as the files say now, so a person taken out is refused at their next request.
+  const login = admitting(given, async () => (await live()).people);
+  // Each public site served, by name, with its own front door: its login half, if it has one,
+  // made once the app listens (`openLogins`). A public site whose site.ts has a problem is not
+  // served, as its login could be one not read.
   const halves = new Map<SiteEntry, PromiseWithResolvers<LoginHalf>>();
-  const sites = new Map<string, AppContext>();
-  for (const site of description.sites) {
+  const sites = new Map<string, AdmittingLogin>();
+  for (const site of current.description.sites) {
     if (!site.public) continue;
-    const file = `${siteDir(site.name)}/site.ts`;
-    if (site.problems.some((p) => p.file === file)) {
-      console.warn(`sanoma app: ${file} has a problem: the site is served on no host until it is fixed`);
+    if (siteFileBroken(site)) {
+      console.warn(
+        `sanoma app: ${siteDir(site.name)}/site.ts has a problem: the site is served on no host until it is fixed`,
+      );
       continue;
     }
     const half = site.login === undefined ? undefined : Promise.withResolvers<LoginHalf>();
     if (half) halves.set(site, half);
-    sites.set(site.name, {
-      ...shared,
-      get description() {
-        return current();
-      },
-      site: site.name,
-      login: publicFront(site, half?.promise, (token) => client.tokens.resolve(token)),
-    });
+    sites.set(
+      site.name,
+      publicFront(site, half?.promise, (token) => client.tokens.resolve(token)),
+    );
+  }
+  const app = appHandler(
+    {
+      resolved,
+      snapshot: live,
+      client,
+      login,
+      sites,
+      ...(options.domains && { domains: options.domains }),
+      ...(options.ingress && { ingress: options.ingress }),
+      entry: responder.entry,
+      files: responder.files,
+      ...(responder.stylesheet && { stylesheet: responder.stylesheet }),
+      local: { ...(options.source && { source: options.source }) },
+    },
+    current,
+  );
+
+  async function handle(req: IncomingMessage, res: ServerResponse) {
+    // The visitor's address, from the socket alone, for a login's rate limits: never a client's copy.
+    req.headers[CLIENT_IP_HEADER] = req.socket.remoteAddress ?? "";
+    const request = new NodeRequest({ req, res });
+    sockets.set(request, { req, res });
+    const response = await app.fetch(request);
+    // Vite's dev server answered on the socket itself.
+    if (res.headersSent) return void (await response.body?.cancel());
+    await sendNodeResponse(res, response);
   }
 
   try {
@@ -354,14 +220,14 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
       });
     });
     // The staff login, once there is a client and the files it admits by; a login that cannot start stops the app.
-    await given.open?.(app);
+    await given.open?.(app.context);
   } catch (err) {
     if (server.listening) await new Promise((done) => server.close(done));
     await responder.close();
     await closeQuietly(client);
     throw err;
   }
-  const opened = await openLogins(resolved, client, halves, options.social);
+  const opened = await openLogins(resolved, client, halves, app.domains, options.social);
   for (const { name } of halves.keys()) if (!opened.has(name)) sites.delete(name);
 
   const address = server.address() as AddressInfo;
@@ -402,32 +268,26 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   };
 }
 
-/** A public site's host on this machine. */
-const localHost = (site: string) => `${siteHost(site)}.localhost`;
-
 /**
- * Each public site's hosts, to its entry: `<name>.localhost`, and the domain `domains` gives it
- * (then set on its entry). A domain naming a site that is missing or not public is warned about
- * and served nowhere; so is a host another site has first (one site per host).
+ * Says what is wrong in the files, without stopping the app: a data file's resources are left out
+ * (the Hosting page lists the problems), a workflow the worker will refuse is shown with its
+ * outline's error, and a site's call to what the config lacks fails when it is made.
  */
-function publicHosts(description: ConfigDescription, domains: Record<string, string>): Map<string, SiteEntry> {
-  const hosts = new Map<string, SiteEntry>();
-  const claim = (host: string, site: SiteEntry) => {
-    if (!hosts.has(host)) return void hosts.set(host, site);
-    console.warn(`sanoma app: ${host} is another public site's host: ${siteDir(site.name)} is not served there`);
-  };
-  for (const site of description.sites) if (site.public) claim(localHost(site.name), site);
-  for (const [name, domain] of Object.entries(domains)) {
-    const site = description.sites.find((s) => s.name === name);
-    if (!site?.public) {
-      console.warn(`sanoma app: the domain ${domain} names ${siteDir(name)}, which is not a public site: not served`);
-      continue;
-    }
-    const host = domain.toLowerCase();
-    claim(host, site);
-    if (hosts.get(host) === site) site.domain = host;
+function warnProblems(resolved: ResolvedConfig, { description }: AppSnapshot): void {
+  const lines = new Set([
+    // The policies refuse every call and start until these are fixed.
+    ...resolved.policyProblems,
+    ...description.problems.map(problemLine),
+    ...description.workflows.flatMap((wf) => wf.problems.map((p) => problemLine({ file: wf.file, ...p }))),
+    ...description.sites.flatMap((site) => site.problems.map(problemLine)),
+  ]);
+  if (lines.size) {
+    const list = [...lines].map((line) => `  ${line}`).join("\n");
+    console.warn(`sanoma app: the config's files have problems (\`sanoma check\` lists them):\n${list}`);
   }
-  return hosts;
+  const warnings = description.sites.flatMap((site) => site.warnings.map((w) => `  ${warningLine(w)}`));
+  if (warnings.length)
+    console.warn(`sanoma app: warnings in the sites (\`sanoma check\` lists them):\n${warnings.join("\n")}`);
 }
 
 /**
@@ -440,12 +300,14 @@ async function openLogins(
   resolved: ResolvedConfig,
   client: SanomaClient,
   halves: ReadonlyMap<SiteEntry, PromiseWithResolvers<LoginHalf>>,
+  domains: ReadonlyMap<string, string>,
   social: SocialClients | undefined,
 ): Promise<Map<string, LoginHalf>> {
   const secrets = secretValues(client);
   const opened = new Map<string, LoginHalf>();
   await Promise.all(
-    [...halves].map(async ([{ name, login, domain }, half]) => {
+    [...halves].map(async ([{ name, login }, half]) => {
+      const domain = domains.get(name);
       const origins = [`http://${localHost(name)}:*`, ...(domain ? [`https://${domain}`] : [])];
       half.resolve(
         (async () =>
@@ -504,33 +366,63 @@ async function mustBeFile(path: string) {
   if (!found) throw notBuilt(path);
 }
 
-/** The build's files, then its server entry. */
-const builtResponder = (files: Map<string, StaticFile>, entry: ServerEntry): Responder => ({
-  async respond(req, res, request, context) {
-    const file = staticFile(files, req);
-    if (file) return sendFile(file, req, res);
-    await sendNodeResponse(res, await entry.fetch(request, { context }));
-  },
-  close: async () => {},
-});
+/** What answers what the handler lets through: the host's files, then Start's entry. */
+interface Responder extends Pick<AppHandlerOptions, "entry" | "files" | "stylesheet"> {
+  /** Closes what it opened, logging a failure rather than throwing it, as `closeQuietly`. */
+  close(): Promise<void>;
+}
 
-/** Vite's dev server (`appDevServer`, loaded only here), then Start's entry as it imports it now. */
-async function devResponder(repo: string, server: Server, onFileChange?: (file: string) => void): Promise<Responder> {
+/** The build at `distDir`: its client's files, the kit's stylesheet, and its server entry. */
+async function builtResponder(distDir: string): Promise<Responder> {
+  const files = await staticFiles(join(distDir, "client"));
+  // The kit's theme, which the root route imports as `style.css?url`: what the login's own pages
+  // link, as the build named it. A build without the file (an older one) leaves the pages unstyled.
+  const stylesheet = await readFile(join(distDir, STYLESHEET_FILE), "utf8").then(
+    (text) => {
+      const path = JSON.parse(text) as unknown;
+      return typeof path === "string" && files.has(path) ? path : undefined;
+    },
+    (err: unknown) => {
+      if (!isMissing(err)) throw err;
+      return undefined;
+    },
+  );
+  const serverEntry = join(distDir, "server", "server.js");
+  await mustBeFile(serverEntry);
+  const entry = await loadServerEntry(serverEntry);
+  return {
+    entry,
+    files: async (request) => {
+      const file = staticFile(files, request);
+      if (!file) return undefined;
+      const body = request.method === "HEAD" ? null : (Readable.toWeb(createReadStream(file.path)) as ReadableStream);
+      return new Response(body, { headers: file.headers });
+    },
+    ...(stylesheet && { stylesheet }),
+    close: async () => {},
+  };
+}
+
+/**
+ * Vite's dev server (`appDevServer`, loaded only here), then Start's entry as it imports it now:
+ * Vite's own answers (modules, the HMR client, files) are written to the request's socket.
+ */
+async function devResponder(
+  { repo, onFileChange }: NonNullable<AppOptions["dev"]>,
+  server: ReturnType<typeof createServer>,
+  sockets: WeakMap<Request, { req: IncomingMessage; res: ServerResponse }>,
+): Promise<Responder> {
   const { appDevServer } = await import("./build.ts");
   const dev = await appDevServer(repo, server, onFileChange);
   return {
-    respond: (req, res, request, context) =>
+    files: (request) =>
       new Promise((done, fail) => {
-        // Vite answers what it serves itself without calling next.
-        res.once("close", done);
-        dev.middlewares(req, res, (err) => {
-          if (err) return fail(err);
-          dev
-            .serverEntry()
-            .then(async (entry) => sendNodeResponse(res, await entry.fetch(request, { context })))
-            .then(done, fail);
-        });
+        const { req, res } = sockets.get(request)!;
+        // Vite answers what it serves itself without calling next; the adapter then sends nothing.
+        res.once("close", () => done(new Response(null)));
+        dev.middlewares(req, res, (err) => (err ? fail(err) : done(undefined)));
       }),
+    entry: { fetch: async (request, opts) => (await dev.serverEntry()).fetch(request, opts) },
     close: () =>
       dev.close().catch((err: unknown) => console.error("sanoma app: closing the dev server also failed:", err)),
   };
@@ -559,7 +451,7 @@ const TYPES: Record<string, string> = {
 
 interface StaticFile {
   path: string;
-  headers: Record<string, string | number>;
+  headers: Record<string, string>;
 }
 
 /**
@@ -581,7 +473,7 @@ async function staticFiles(clientDir: string): Promise<Map<string, StaticFile>> 
       path,
       headers: {
         "content-type": TYPES[extname(path)] ?? "application/octet-stream",
-        "content-length": (await stat(path)).size,
+        "content-length": String((await stat(path)).size),
         "cache-control": rel.startsWith("assets/") ? "public, max-age=31536000, immutable" : "no-cache",
         "x-content-type-options": "nosniff",
       },
@@ -593,23 +485,14 @@ async function staticFiles(clientDir: string): Promise<Map<string, StaticFile>> 
 }
 
 /** The built file a request names, if any. Server functions are never files. */
-function staticFile(files: Map<string, StaticFile>, req: IncomingMessage): StaticFile | undefined {
-  const url = req.url ?? "/";
-  if ((req.method !== "GET" && req.method !== "HEAD") || url.startsWith("/_serverFn/")) {
-    return undefined;
-  }
-  const query = url.indexOf("?");
+function staticFile(files: Map<string, StaticFile>, request: Request): StaticFile | undefined {
+  const { pathname } = new URL(request.url);
+  if ((request.method !== "GET" && request.method !== "HEAD") || pathname.startsWith("/_serverFn/")) return undefined;
   try {
-    return files.get(decodeURIComponent(query === -1 ? url : url.slice(0, query)));
+    return files.get(decodeURIComponent(pathname));
   } catch {
     return undefined;
   }
-}
-
-async function sendFile(file: StaticFile, req: IncomingMessage, res: ServerResponse) {
-  res.writeHead(200, file.headers);
-  if (req.method === "HEAD") res.end();
-  else await pipeline(createReadStream(file.path), res);
 }
 
 function urlHost({ address, family }: AddressInfo): string {

@@ -20,7 +20,7 @@ describe("checks", () => {
       head: () => "HEAD",
       check: async (id: string) => (asked.push(id), checked),
     } satisfies Source;
-    expect(await checks({ source }, "chat-1")).toEqual({
+    expect(await checks({ local: { source } }, "chat-1")).toEqual({
       ok: false,
       problems: checked.problems,
       warnings: checked.warnings,
@@ -30,7 +30,7 @@ describe("checks", () => {
 
   it("is one problem when the repository cannot check a draft", async () => {
     const source: Source = { root: "/repo", commit: () => undefined, head: () => "HEAD" };
-    for (const app of [{ source }, {}]) {
+    for (const app of [{ local: { source } }, { local: {} }, {}]) {
       expect(await checks(app, "chat-1")).toEqual({
         ok: false,
         problems: ["sanoma check: this instance's repository cannot check a draft"],

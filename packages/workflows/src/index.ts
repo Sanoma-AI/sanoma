@@ -213,6 +213,8 @@ export {
   deriveHosts,
   type HostFacts,
   hostFacts,
+  type HostRootFacts,
+  hostRootFacts,
   DEPLOY_KEY_TITLE,
   DEPLOY_KEY_TYPE,
   GITHUB_APP,

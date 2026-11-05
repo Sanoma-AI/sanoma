@@ -37,8 +37,10 @@ const LINTED = ["workflows", "resources", "sites", "apps"];
  * the outline cannot draw: what the worker refuses to start with), and each site's call to what
  * the config does not have; with sites, their generated files written first and, beside those
  * three, the app built with them and `tsc -p sites/tsconfig.json` (`checkSites`), and what is
- * wrong under `content/` (as `writeSiteFiles` reads it). Their problems in the order tsc, the sites' tsc, oxlint,
- * the policies, the config, the folders refused as sites, the content's problems, the sites' build. Then, unless the policies do not hold, every scenario against the fakes (`runScenarios`), each step that did not hold a
+ * wrong under `content/` (as `writeSiteFiles` reads it); and the app bundle for the Cloudflare
+ * Worker built (`checkBundle`), so a company file importing what the Worker lacks is named. Their
+ * problems in the order tsc, the sites' tsc, oxlint, the policies, the config, the folders refused
+ * as sites, the content's problems, the sites' build, the app bundle's. Then, unless the policies do not hold, every scenario against the fakes (`runScenarios`), each step that did not hold a
  * problem. `ok` when there are no problems; the warnings beside them (the sites', and an import
  * from one app's folder into another's) never make it not.
  * With them, the repo's Permissions grid (`permissionsGrid`, as the app's Permissions page has
@@ -58,9 +60,15 @@ export async function check(
   const { sites, refused } = build?.sitesOf(root) ?? { sites: [], refused: [] };
   // Before tsc and oxlint read sites/, as `sanoma` writes them: only when there is a site.
   const content = build && sites.length ? build.writeSiteFiles(root).problems.map(problemLine) : [];
-  const [tsc, checked, lints] = await Promise.all([
+  // The app bundle after the sites' build, which writes the route tree both builds read.
+  const sitesThenBundle = async () => {
+    const checked = build && sites.length ? await checkSites(build, sites, root, log) : { typed: [], built: [] };
+    // A sites build that failed fails the bundle's for the same reason: its problems once.
+    return { checked, bundled: checked.built.length ? [] : await checkBundle(config, root, log) };
+  };
+  const [tsc, { checked, bundled }, lints] = await Promise.all([
     typecheck(root, log),
-    build && sites.length ? checkSites(build, sites, root, log) : { typed: [], built: [] },
+    sitesThenBundle(),
     lint(root, log),
   ]);
   const read = configProblems(description, root);
@@ -76,6 +84,7 @@ export async function check(
     ...unmounted,
     ...content,
     ...checked.built,
+    ...bundled,
   ];
 
   if (resolved.scenarios === undefined) {
@@ -114,6 +123,23 @@ async function checkSites(
   );
   if (!existsSync(join(root, ".sanoma", "app", "routeTree.gen.ts"))) return { typed: [], built };
   return { typed: await typecheck(root, log, "sites/tsconfig.json"), built };
+}
+
+/**
+ * The app bundle for the Cloudflare Worker (`buildAppBundle`), built and dropped: a company file
+ * that imports what the Worker does not have is one problem, at the file, naming what it imports
+ * (`NodeOnlyImport`, the first the build met); any other failure as `buildProblems` says it.
+ */
+async function checkBundle(config: Loaded["config"], root: string, log: (line: string) => void): Promise<string[]> {
+  const { buildAppBundle, NodeOnlyImport } = await import("@sanoma-ai/app/bundle");
+  log("build the app bundle");
+  try {
+    await buildAppBundle(root, { config, runtimeFrom: runtimeFrom() });
+    return [];
+  } catch (err) {
+    if (err instanceof NodeOnlyImport) return [err.message];
+    return buildProblems(`the app bundle: ${errorMessage(err)}`, log);
+  }
 }
 
 /**

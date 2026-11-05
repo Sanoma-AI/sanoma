@@ -418,9 +418,28 @@ async function publicOnGithub(repository: string): Promise<boolean | undefined> 
   }
 }
 
+/** What `hostFacts` reads from the company's root: the installed `sanoma`, `origin` and the public sites' domains. */
+export type HostRootFacts = Pick<HostFacts, "version" | "origin" | "domains">;
+
 /**
- * What the declared hosts that derive (`deriveHosts`) are filled from, read now: the installed
- * `sanoma`, `origin`, the public sites' domains, and of `secrets` (none outside a run) which
+ * The root's part of the hosts' facts (`HostRootFacts`), read now: the `sanoma` the repository
+ * installs, `origin` (git, with no credentials) and the public sites' domains. Node only, where
+ * the root is; a bundle carries them as read (the app's snapshot).
+ */
+export async function hostRootFacts(root: string): Promise<HostRootFacts> {
+  const { siteDomains } = await import("./sites.ts");
+  const [version, origin] = await Promise.all([installedSanoma(root), originUrl(root)]);
+  return {
+    ...(version !== undefined && { version }),
+    ...(origin !== undefined && { origin }),
+    domains: siteDomains(root),
+  };
+}
+
+/**
+ * What the declared hosts that derive (`deriveHosts`) are filled from: the root's facts
+ * (`rootFacts`, asked only when a declared host derives: `hostRootFacts`, or a snapshot's), and of
+ * `secrets` (none outside a run) which
  * optional credentials, App keys and source key are stored, and which credentials the drivers
  * read from this machine's environment alone (`unbound`). With `mint` (apply, never drift or a
  * sandbox run), the source key (where the config has the deploy-key type) and, when a wakeup is
@@ -429,7 +448,7 @@ async function publicOnGithub(repository: string): Promise<boolean | undefined> 
  * Undefined when no declared host derives.
  */
 export async function hostFacts(options: {
-  root: string;
+  rootFacts: () => Promise<HostRootFacts>;
   resources: readonly DeclaredResource[];
   types: ReadonlyMap<string, Resource>;
   drivers: ReadonlyMap<string, Driver>;
@@ -441,7 +460,7 @@ export async function hostFacts(options: {
   sender?: string;
   mint: boolean;
 }): Promise<HostFacts | undefined> {
-  const { root, resources, types, drivers, secrets, mint } = options;
+  const { rootFacts, resources, types, drivers, secrets, mint } = options;
   const typeOf = (r: DeclaredResource) => types.get(`${r.vendor}.${r.type}`);
   const deriving = resources.filter((r) => typeOf(r)?.host?.derives);
   if (!deriving.length) return undefined;
@@ -466,10 +485,8 @@ export async function hostFacts(options: {
   const githubApp = [...(await stored(Object.values(GITHUB_APP)))];
   if (mint && secrets && hosts.some((h) => wokenBy(h, resources, types))) await mintWakeupToken(secrets);
   const keyed = types.has(DEPLOY_KEY_TYPE);
-  const { siteDomains } = await import("./sites.ts");
-  const [version, origin, sourceKey] = await Promise.all([
-    installedSanoma(root),
-    originUrl(root),
+  const [{ version, origin, domains }, sourceKey] = await Promise.all([
+    rootFacts(),
     secrets && hosts.length && keyed ? sourceKeyOf(secrets, mint) : undefined,
   ]);
   // What a host may clone: `origin`, else the `source` it declares (with no deploy-key type, no
@@ -489,7 +506,7 @@ export async function hostFacts(options: {
   return {
     ...(version !== undefined && { version }),
     ...(origin !== undefined && { origin }),
-    domains: siteDomains(root),
+    domains,
     builtInStore: options.builtInStore,
     carried,
     ...(unbound.size > 0 && { unbound }),

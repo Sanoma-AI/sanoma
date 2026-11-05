@@ -123,3 +123,17 @@ async function settlePart(
     errorText: `${getToolName(part)} was interrupted: the server restarted before it finished`,
   };
 }
+
+/** The person's chat `id` with its transcript; null when they have none of that id. */
+export async function chatFor(
+  app: AppContext,
+  principal: Principal,
+  id: string,
+): Promise<{ chat: Chat; messages: ChatMessage[] } | null> {
+  const { client } = app;
+  const chat = await client.chats.get(id);
+  if (chat?.person !== principal.id) return null;
+  // As the next turn will take it: what a restart cut short settled, unless a turn is under way.
+  const stored = await client.chats.load(id);
+  return { chat, messages: (written(id) ? stored : await settle(app, stored)) as ChatMessage[] };
+}

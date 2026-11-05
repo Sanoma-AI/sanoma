@@ -652,32 +652,39 @@ describe("a company's app with its sites", () => {
     ]);
     const sitemap = await at("/sitemap.xml", "hello.localhost");
     expect(sitemap.headers["content-type"]).toBe("application/xml; charset=utf-8");
-    // Each page with no parameter, and a post's page per published post: never the draft. (The
-    // config's root is the fixture's, which the pages are read from: this copy's own are not there.)
-    expect([...sitemap.body.matchAll(/<loc>([^<]+)<\/loc>/g)].map(([, loc]) => loc)).toEqual(
-      ["/", "/leads", "/posts", "/posts/hello", "/posts/untranslated", "/run", "/started"].map((path) =>
-        new URL(path, origin).toString(),
-      ),
-    );
-    // A site with languages: each page once per language, the default unprefixed, with its URL in
-    // each it is in; a post in French where it has a translation or a `<slug>.md` (here, both).
-    const intl = `http://intl.localhost:${new URL(app.url).port}`;
-    const urls = [...(await at("/sitemap.xml", "intl.localhost")).body.matchAll(/<url>(.*?)<\/url>/g)].map(
-      ([, url]) => [
+    // The pages and the posts as the app's snapshot reads them, from the config's root: this copy's
+    // for these (the fixture has neither its posts nor its pages).
+    const copy = await startApp(defineConfig({ ...config, root: repo }), { port: 0, distDir: result.distDir });
+    try {
+      const port = new URL(copy.url).port;
+      const of = async (host: string) => (await rawGet(new URL("/sitemap.xml", copy.url).href, `${host}:${port}`)).body;
+      // Each page with no parameter, and a post's page per published post: never the draft.
+      const hello = `http://hello.localhost:${port}`;
+      expect([...(await of("hello.localhost")).matchAll(/<loc>([^<]+)<\/loc>/g)].map(([, loc]) => loc)).toEqual(
+        ["/", "/leads", "/missing", "/posts", "/posts/hello", "/posts/untranslated", "/run", "/started", "/styled"].map(
+          (path) => new URL(path, hello).toString(),
+        ),
+      );
+      // A site with languages: each page once per language, the default unprefixed, with its URL in
+      // each it is in; a post in French where it has a translation or a `<slug>.md` (here, both).
+      const intl = `http://intl.localhost:${port}`;
+      const urls = [...(await of("intl.localhost")).matchAll(/<url>(.*?)<\/url>/g)].map(([, url]) => [
         url!.match(/<loc>([^<]+)<\/loc>/)![1],
         [...url!.matchAll(/hreflang="([^"]+)" href="([^"]+)"/g)].map(([, lang, href]) => `${lang} ${href}`),
-      ],
-    );
-    const languages = (en: string, fr: string) => [`en ${intl}${en}`, `fr ${intl}${fr}`, `x-default ${intl}${en}`];
-    expect(urls).toEqual([
-      [`${intl}/`, languages("/", "/fr")],
-      [`${intl}/fr`, languages("/", "/fr")],
-      [`${intl}/posts/hello`, languages("/posts/hello", "/fr/posts/hello")],
-      [`${intl}/fr/posts/hello`, languages("/posts/hello", "/fr/posts/hello")],
-      [`${intl}/fr/posts/only-fr`, []],
-      [`${intl}/posts/untranslated`, languages("/posts/untranslated", "/fr/posts/untranslated")],
-      [`${intl}/fr/posts/untranslated`, languages("/posts/untranslated", "/fr/posts/untranslated")],
-    ]);
+      ]);
+      const languages = (en: string, fr: string) => [`en ${intl}${en}`, `fr ${intl}${fr}`, `x-default ${intl}${en}`];
+      expect(urls).toEqual([
+        [`${intl}/`, languages("/", "/fr")],
+        [`${intl}/fr`, languages("/", "/fr")],
+        [`${intl}/posts/hello`, languages("/posts/hello", "/fr/posts/hello")],
+        [`${intl}/fr/posts/hello`, languages("/posts/hello", "/fr/posts/hello")],
+        [`${intl}/fr/posts/only-fr`, []],
+        [`${intl}/posts/untranslated`, languages("/posts/untranslated", "/fr/posts/untranslated")],
+        [`${intl}/fr/posts/untranslated`, languages("/posts/untranslated", "/fr/posts/untranslated")],
+      ]);
+    } finally {
+      await copy.close();
+    }
     // Not its domain: no response there is to be indexed, its pages' neither.
     const home = await at("/", "hello.localhost");
     for (const answer of [robots, sitemap, home]) {

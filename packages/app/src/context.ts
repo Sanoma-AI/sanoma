@@ -1,6 +1,6 @@
 import type { LoginIdentity, Principal, ResolvedConfig, SanomaClient, Source } from "@sanoma-ai/workflows";
-import type { ConfigDescription } from "@sanoma-ai/workflows/describe";
 import type { Place } from "./api.ts";
+import type { AppSnapshot } from "./snapshot.ts";
 
 export type { LoginIdentity } from "@sanoma-ai/workflows";
 
@@ -11,8 +11,8 @@ export type { LoginIdentity } from "@sanoma-ai/workflows";
 export type ResolveActor = (request: Request) => LoginIdentity | undefined | Promise<LoginIdentity | undefined>;
 
 /**
- * Who may use the app and how they sign in. `startApp` calls `check` with the host it is to
- * listen on before anything else, `open` once it listens, gives every request to `handle` first,
+ * Who may use the app and how they sign in. The Node adapter (`startApp`) calls `check` with the
+ * host it is to listen on before anything else, `open` once it listens; the app gives every request to `handle` first,
  * and asks `resolveActor` who is making a change; `close` when it stops. The default,
  * `loopbackLogin()`, takes the name the page sends and refuses any host but this machine;
  * `staffLogin` signs people in with a login half (Better Auth's) on a host.
@@ -47,22 +47,26 @@ export interface AdmittingLogin extends Omit<LoginProvider, "resolveActor"> {
   resolveActor(request: Request): Promise<Principal | undefined>;
 }
 
-/** What `startApp` hands every request: built once at boot, shared by all requests; its `description` follows the files. */
+/**
+ * What the app hands each request (`appHandler`): the config resolved, the company as the build
+ * or the Node adapter read it (`snapshot`, taken once per request), and the request's client and
+ * login. Nothing in it reads a file.
+ */
 export interface AppContext {
   resolved: ResolvedConfig;
-  /**
-   * `describeConfig(config)` as the files are now (`liveDescription`: made again once a file it
-   * loaded changed): what the page reads (`getConfig`), less the workflows' sources
-   * (`withoutSources`), which `getSource` serves one at a time. Read it per request, never keep it.
-   */
-  description: ConfigDescription;
+  /** The company as its files were read (`AppSnapshot`): what the pages read of it, never the files themselves. */
+  snapshot: AppSnapshot;
   /** Where this instance is, from `resolved.databaseUrl` (`placeOf`): what the bar's badge says. */
   place: Place;
   client: SanomaClient;
-  /** `AppOptions.login`, or `loopbackLogin()`, admitting only a declared person (`admitting`). */
+  /** The staff login (`AppOptions.login`, or `loopbackLogin()`), admitting only a declared person (`admitting`). */
   login: AdmittingLogin;
-  /** The company's repository, which Adopt commits a data file's change to; without one, it only writes the file. */
-  source?: Source;
+  /**
+   * The company's checkout, on a host that has one (the Node adapter's): what the actions that
+   * write the repository or run a child process work in (`server/local/`). None on the Worker,
+   * where those answer that they are not available on this host.
+   */
+  local?: LocalHost;
   /**
    * The built kit's stylesheet's path (`/assets/style-<hash>.css`), which a login's own pages link
    * to look like the app; none on the dev server, which builds nothing.
@@ -75,8 +79,14 @@ export interface AppContext {
   site?: string;
 }
 
+/** What the Node adapter gives the actions that need the checkout (`AppContext.local`). */
+export interface LocalHost {
+  /** The company's repository, which Adopt commits a data file's change to; without one, it only writes the file. */
+  source?: Source;
+}
+
 /**
- * What `startApp` hands each request: the app, and the public site whose host the request came
+ * What the app hands Start with each request: the app, and the public site whose host the request came
  * to, when it came to one; the router then mounts that site's routes at `/`. `origin` is what a
  * page's absolute URLs start with (`siteOrigin()`): the site's domain when it has one, else the
  * request's own origin.
@@ -87,7 +97,7 @@ export interface RequestContext {
   origin: string;
 }
 
-/** Start's server entry, which `startApp` hands each request with the context: the build's `server.js`, or the dev server's. */
+/** Start's server entry, which the app hands each request with the context: the build's `server.js`, the dev server's, or the Worker bundle's own. */
 export interface ServerEntry {
   fetch(request: Request, opts?: { context?: RequestContext }): Response | Promise<Response>;
 }

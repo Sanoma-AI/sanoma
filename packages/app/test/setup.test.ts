@@ -21,7 +21,6 @@ import {
   sealLoginCode,
   startWorker,
 } from "@sanoma-ai/workflows";
-import { describeConfig } from "@sanoma-ai/workflows/describe";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { credentials, databaseOn } from "@sanoma-ai/workflows/db";
@@ -36,6 +35,7 @@ import { loopbackLogin } from "../src/loopback.ts";
 import { admitting } from "../src/login/admission.ts";
 import { barLink } from "./bar-helpers.ts";
 import { callApi } from "../src/server/core.ts";
+import { appSnapshot } from "../src/snapshot-build.ts";
 import { GITHUB_APP, githubManifest, mintWakeupToken, setSetupToken, setupStatus } from "../src/server/setup.ts";
 
 // Connecting GitHub and the vendors (/hosting/connect): the GitHub App's manifest page, its callback
@@ -127,7 +127,7 @@ beforeAll(async () => {
   client = await SanomaClient.connect(config);
   ctx = {
     resolved: resolveConfig(config),
-    description: describeConfig(config),
+    snapshot: await appSnapshot(config),
     client,
     place: "this-computer",
     login: admitting(loopbackLogin(), () => ({ people: [], problems: [] })),
@@ -182,7 +182,7 @@ describe("creating the GitHub App", () => {
     const { action, manifest } = form(html);
     expect(`${action.origin}${action.pathname}`).toBe("https://github.com/settings/apps/new");
     const state = action.searchParams.get("state")!;
-    expect(manifest).toEqual(githubManifest(app.url, `Sanoma ${ctx.description.appName}`));
+    expect(manifest).toEqual(githubManifest(app.url, `Sanoma ${ctx.snapshot.description.appName}`));
     expect(manifest).toMatchObject({
       redirect_url: `${app.url}/setup/github/callback`,
       callback_urls: [`${app.url}/auth/better-auth/callback/github`],
@@ -280,7 +280,10 @@ describe("sign-in on the host", () => {
       { name: "docs", public: true },
       { name: "ops" },
     ];
-    const withSites = { ...ctx, description: { ...ctx.description, sites } } as unknown as AppContext;
+    const withSites = {
+      ...ctx,
+      snapshot: { ...ctx.snapshot, description: { ...ctx.snapshot.description, sites } },
+    } as unknown as AppContext;
     expect((await setupStatus(withSites)).signIn.sites).toEqual([{ name: "www", login: "better-auth" }]);
   });
 
@@ -696,7 +699,7 @@ describe("a sign-in code's run", () => {
       expect(page).not.toContain(sealed);
       expect(page).not.toContain("246810");
       // A site's api read of the run's ledger is sent no more of the sealed code than the page.
-      const read = { ...ctx, resolved: resolveConfig(sending), description: describeConfig(sending), client: runs };
+      const read = { ...ctx, resolved: resolveConfig(sending), snapshot: await appSnapshot(sending), client: runs };
       const ledger = JSON.stringify(
         await callApi(read, { id: "alice" }, { name: "loginCode.ledger", input: { runId } }),
       );

@@ -15,7 +15,7 @@ import {
   sealLoginCode,
   type SocialClients,
 } from "@sanoma-ai/workflows";
-import { admit, readPeople } from "@sanoma-ai/workflows/describe";
+import { admit } from "@sanoma-ai/workflows/describe";
 import { personsOf } from "@sanoma-ai/workflows/shared";
 import { z } from "zod";
 import type { AppContext, LoginProvider } from "../context.ts";
@@ -56,7 +56,7 @@ const InviteBody = z.union([z.object({ email: z.string().email() }), z.object({ 
 export function staffLogin(make: MakeStaffLogin, social: StaffSocial = {}): LoginProvider {
   let app: AppContext | undefined;
   let half: LoginHalf | undefined;
-  const people = () => readPeople(app!.resolved.root);
+  const people = () => app!.snapshot.people;
   /** How the login's pages look: the kit's stylesheet, and the company they are for. */
   const frame = (): PageFrame =>
     app ? { ...(app.stylesheet && { stylesheet: app.stylesheet }), company: companyOf(app.resolved.appName) } : {};

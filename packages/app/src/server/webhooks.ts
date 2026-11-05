@@ -7,7 +7,8 @@ import { secretValues } from "./secrets.ts";
 // event it says happened handed to `SanomaClient.remoteEvent`: a push to `main` deploys, a push to
 // a draft's branch plans its change again, a closed pull request ends it.
 
-const plain = (status: number, text: string) =>
+/** A plain-text answer, never cached. */
+export const plain = (status: number, text: string): Response =>
   new Response(text, { status, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
 
 /**
