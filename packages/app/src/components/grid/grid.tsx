@@ -55,6 +55,9 @@ const UPDATED = "@updated";
 const BY = "@by";
 const HEADS: Record<string, string> = { [UPDATED]: "Updated", [BY]: "By" };
 
+/** The least a column is shown at, in pixels: narrower, the table scrolls sideways instead. */
+const MIN_WIDTH = 96;
+
 /** A row's height in pixels, which the virtual rows are laid out by. */
 const ROW_PX = 37;
 
@@ -283,6 +286,9 @@ export function DataGrid({
   const [body, setBody] = useState<HTMLTableSectionElement | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const rows = table.getRowModel().rows;
+  /** A column's share of the table's width: its size over all the visible columns' sizes. */
+  const total = table.getTotalSize();
+  const share = (size: number) => `${(size / total) * 100}%`;
   const focused = table.getFocusedCell();
   const focusedField = focused && fields.get(focused.column.id);
   /** The field the focused cell edits: none for the key, Updated and By, or a field the form cannot hold. */
@@ -398,8 +404,9 @@ export function DataGrid({
           aria-colcount={visible.length}
           data-slot="table"
           className="table-fixed border-separate border-spacing-0 text-sm"
-          // The columns fill the page, their sizes as proportions, and scroll only once they cannot.
-          style={{ width: "100%", minWidth: table.getTotalSize() }}
+          // The columns share the page in proportion to their sizes, and scroll only once each
+          // would be narrower than it can be read at.
+          style={{ width: "100%", minWidth: visible.length * MIN_WIDTH }}
           onKeyDown={(event: KeyboardEvent) => {
             // On a cell itself: not its link, nor an editor.
             const typed = editing ? undefined : typedCharacter(event);
@@ -412,7 +419,7 @@ export function DataGrid({
             <TableRow aria-rowindex={1} className="hover:bg-transparent">
               {table.getFlatHeaders().map((header) => {
                 const head = {
-                  style: { width: header.getSize() },
+                  style: { width: share(header.getSize()) },
                   className: "sticky top-0 z-10 border-b bg-background",
                 };
                 const resizer = (
@@ -469,7 +476,7 @@ export function DataGrid({
                         tabIndex={tabIndex}
                         aria-selected={cell.getIsSelected()}
                         aria-invalid={conflict ? true : undefined}
-                        style={{ width: cell.column.getSize() }}
+                        style={{ width: share(cell.column.getSize()) }}
                         className={cn(
                           "h-9 truncate border-b px-2 py-0 outline-none select-none",
                           id === keyField && "font-medium",
