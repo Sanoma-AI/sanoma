@@ -1,4 +1,4 @@
-import { DBOS, type ScheduledWorkflowFn } from "@dbos-inc/dbos-sdk";
+import { DBOS, Error as DBOSErrors, type ScheduledWorkflowFn } from "@dbos-inc/dbos-sdk";
 import { awaitApproval } from "./approvals.ts";
 import { buildCtx, decideStart, isInfrastructureError, startHoldOf } from "./call.ts";
 import { dbosStatusesOf } from "./client.ts";
@@ -497,8 +497,12 @@ async function runOn(state: WorkerState, name: string, start: RunArgs | Date): P
     }
   } catch (err) {
     const record = entry(run, { type: "run.failed", error: errorInfo(err) });
-    if (isInfrastructureError(err, state)) skipped(record, `the run was interrupted (${errorMessage(err)})`);
-    else await writeFailure(run, record, err);
+    if (isInfrastructureError(err, state)) {
+      skipped(record, `the run was interrupted (${errorMessage(err)})`);
+      // A stop's failure is not the run's outcome, but DBOS would record it as one, for good, while
+      // its pool is still open. A run's own cancellation it records nothing for: the next worker recovers it.
+      if (state.stopped) throw new DBOSErrors.DBOSWorkflowCancelledError(run.id);
+    } else await writeFailure(run, record, err);
     throw err;
   }
   await write(run, entry(run, { type: "run.finished", output }));
