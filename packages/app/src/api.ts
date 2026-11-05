@@ -18,7 +18,7 @@ import type {
 } from "@sanoma-ai/workflows";
 import type { ConfigDescription, PermissionsGrid, Span } from "@sanoma-ai/workflows/describe";
 import { ConfigDescriptionSchema } from "@sanoma-ai/workflows/description";
-import type { Check, Scenario } from "@sanoma-ai/workflows/scenario";
+import type { RunCheck, Scenario } from "@sanoma-ai/workflows/scenario";
 import { EFFECTS, RUN_STATUSES } from "@sanoma-ai/workflows/shared";
 import { z } from "zod";
 
@@ -165,8 +165,9 @@ export interface RunDetail {
   ledgerError?: string;
   approvals: ApprovalState[];
   /**
-   * For a sandbox run, each of its scenario's expectations checked against the ledger. Absent
-   * until the run has been seeded, and when `checksError` says why there are none.
+   * For a sandbox run, each of its scenario's expectations checked against the ledger, as the
+   * worker ran them when the run last waited or ended (`SanomaClient.runChecks`). Absent until the
+   * run has been seeded and first waits, and when `checksError` says why there are none.
    */
   checks?: RunCheck[];
   /**
@@ -174,16 +175,6 @@ export interface RunDetail {
    * those that did not load), or the scenarios could not be read at all.
    */
   checksError?: string;
-}
-
-/** One of a sandbox run's checks, and whether its answer is final. */
-export interface RunCheck extends Check {
-  /**
-   * True once the answer cannot change: the run has ended, or the check expects a call that
-   * has been made. Until then a check not met is not failed yet, and one met (a call not made
-   * so far) may still fail.
-   */
-  settled: boolean;
 }
 
 /**
@@ -519,6 +510,7 @@ export const PreviewQuery = z
 export type PreviewQuery = z.infer<typeof PreviewQuery>;
 
 export type { PermissionsRow } from "@sanoma-ai/workflows/describe";
+export type { RunCheck } from "@sanoma-ai/workflows/scenario";
 
 /**
  * The Permissions page's grid (`getPermissions`): the policy, then the grid (`permissionsGrid`:

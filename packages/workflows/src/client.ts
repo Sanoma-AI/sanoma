@@ -30,21 +30,26 @@ import { type Tokens, tokenStore } from "./tokens.ts";
 import { collectionsDriver } from "./collection.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { configuredSecrets } from "./credentials.ts";
-import { dbosClient, lazyPool, type LazyPool, spendInviteRequest } from "./db.ts";
+import {
+  type AppBehind,
+  dbosClient,
+  lazyPool,
+  type LazyPool,
+  readAppBehind,
+  readRunChecks,
+  spendInviteRequest,
+} from "./db.ts";
 import { type CredentialStatus, credentialsOf } from "./env.ts";
 import { type ApprovalState, Principal, type WorkflowDefinition } from "./define.ts";
 import { APPLY_WORKFLOW, type ApplyInput, type ApplyReport } from "./apply.ts";
 import {
   ADMIN,
-  BASE,
   type ChangeEvent,
   ChangeEventSchema,
   ChangeInput,
   type ChangeReport,
   type ChangeState,
-  followBase,
   initialChangeState,
-  repositoryOf,
 } from "./change.ts";
 import { DRIFT_WORKFLOW, type DriftReport } from "./drift.ts";
 import { isDirect } from "./direct.ts";
@@ -57,7 +62,6 @@ import {
   parseOrThrow,
   PolicyDeniedError,
   SanomaError,
-  vendorCodeOf,
 } from "./errors.ts";
 import {
   insertRecord,
@@ -68,7 +72,6 @@ import {
   type OwnedLedger,
   ownedLedger,
 } from "./ledger.ts";
-import { warn } from "./log.ts";
 import type { CallContext, Driver, Op, SignInMethod } from "./op.ts";
 import { allowAll, type RecordedDecision } from "./policy.ts";
 import { admit, readPeople } from "./resources.ts";
@@ -85,6 +88,7 @@ import {
   DATA_VENDOR,
   ENDED_STATUSES,
   errorMessage,
+  FOLLOW_WORKFLOW,
   HOST_CHECK_AGENT,
   isEnded,
   isToken,
@@ -94,14 +98,9 @@ import {
   SCHEDULE_AGENT,
   WORKFLOW_ACTION,
 } from "./shared.ts";
-import { draftOf, type RemoteEvent, type RepoRef, type Source } from "./source.ts";
-
-/** The company's repository on its host, for `remoteEvent`. */
-type Repository = Awaited<ReturnType<typeof repositoryOf>>;
-
-/** Whether two references name one repository: a host's names are compared without case. */
-const sameRepo = (a: RepoRef, b: RepoRef) =>
-  a.owner.toLowerCase() === b.owner.toLowerCase() && a.name.toLowerCase() === b.name.toLowerCase();
+import { RemoteEventSchema } from "./follow-workflow.ts";
+import type { RunChecks } from "./scenario.ts";
+import type { RemoteEvent } from "./source.ts";
 
 /** A principal, or its id alone. */
 const PrincipalOrId = z.union([
@@ -259,11 +258,6 @@ export interface ClientOptions {
    */
   onWrite?: () => void;
   /**
-   * The company's repository, as the worker is given it: what `remoteEvent` acts for (its
-   * `origin`) and fetches a draft's new commits into. Without one, `remoteEvent` does nothing.
-   */
-  source?: Source;
-  /**
    * The version each run it starts is queued for, so only a worker of that code runs it: the app
    * bundle's (its snapshot's), which is live beside a worker of another version while a deploy
    * rolls. Without it a run is queued with none, which DBOS gives the app's latest version.
@@ -365,6 +359,12 @@ export class SanomaClient {
     );
     if (workflow.name === CHANGE_WORKFLOW && !isChangeRunOf((parsed as ChangeInput).id, runId)) {
       throw new SanomaError("invalid_input", "A change is started with openChange, which names its run", { runId });
+    }
+    if (
+      workflow.name === FOLLOW_WORKFLOW &&
+      (runId !== followRunId(parsed as RemoteEvent) || startedBy.id !== HOST_CHECK_AGENT)
+    ) {
+      throw new SanomaError("invalid_input", "A follow is started with follow, which names its run", { runId });
     }
     const hold = await this.startHold(workflow.name, parsed, startedBy, runId);
     const args: RunArgs = { input, startedBy, ...(sandbox === undefined ? {} : { sandbox }), ...(hold && { hold }) };
@@ -1024,106 +1024,28 @@ export class SanomaClient {
   }
 
   /**
-   * Does what a host's webhook says happened (`RemoteEvent`, from a remote half's `webhook`) to the
-   * company's repository, the `origin` of `ClientOptions.source` (`repositoryOf`); an event of
-   * another repository, or with no source, is ignored. A delivery told again does nothing more.
-   *
-   * - `pushed` to `main`: the checkout follows `main`, then apply on the declared hosts
-   *   (`ResolvedConfig.hosts`) as `host-check`, as the run `deploy:<head>`, once per head; nothing
-   *   with no host, nor while a change is merging or deploying, which does both itself.
-   * - `pushed` to a draft's branch (`draftOf`) with its change open: the host's commits fetched into
-   *   the draft (`Source.follow` on its branch), then the change told `commits`, as `by`; nothing
-   *   when the change or the draft is at that head already (the run's own push), or when the draft
-   *   cannot fast-forward to it (warned).
-   * - `closed` for the open change's pull request: the change told `merged` (with its merge commit)
-   *   or `closed`, as `by`. The run checks either on the host before it believes it.
+   * Starts the built-in follow workflow on what a host's webhook says happened (`RemoteEvent`,
+   * from a remote half's `webhook`, verified), as the runtime's agent `host-check`: the worker,
+   * which has the checkout, follows it there (`follow-workflow.ts`). Its run id is
+   * `follow:<sha256 of the event>`, so a delivery told again is the one run. Its id.
    */
-  async remoteEvent(event: RemoteEvent, options: { by: Principal | string }): Promise<void> {
-    const main = event.kind === "pushed" && event.branch === BASE;
-    const id = draftOf(event.branch);
-    if (!main && id === undefined) return;
-    const repository = await this.repository();
-    if (!repository || !sameRepo(repository.repo, event.repo)) return;
-    if (main) return this.deployPush(repository, event.head);
-    const change = await this.change(id!);
-    if (!change || isEnded(change.status)) return;
-    let told: ChangeEvent;
-    let key: string;
-    if (event.kind === "closed") {
-      // A pull request of an earlier change of the draft is not this one's.
-      if (event.number !== change.state.pullRequest?.number) return;
-      told = event.merged && event.sha !== undefined ? { kind: "merged", sha: event.sha } : { kind: "closed" };
-      key = `${event.number}:${event.sha ?? "closed"}`;
-    } else {
-      if (change.state.head === event.head || !(await this.fetched(repository, event.branch, event.head))) return;
-      told = { kind: "commits" };
-      key = event.head;
-    }
-    await this.changeEvent(id!, told, { by: options.by, key: `${event.kind}:${event.branch}:${key}` }).catch(
-      (err: unknown) => {
-        // Ended, or gone, since it was read: nothing to tell.
-        if (!["run_ended", "run_not_found"].includes(errorCode(err) ?? "")) throw err;
-      },
-    );
-  }
-
-  /** After a push of `head` to `main` (`remoteEvent`): the checkout follows it, then apply on the declared hosts. */
-  private async deployPush({ source }: Repository, head: string): Promise<void> {
-    const runId = `deploy:${head}`;
-    const [deployed, phases] = await Promise.all([this.run(runId), this.openChangePhases()]);
-    if (deployed || phases.some((phase) => phase === "merging" || phase === "deploying")) return;
-    // First, as a change's deploy does: the hosts, and what apply reads, are then main's.
-    const moved = await followBase(this.config.remotes, this.storedSecrets, source);
-    if (!("revision" in moved)) {
-      // Not on stale files, and nothing recorded as `deploy:<head>`: a redelivery may deploy it.
-      warn(
-        `${BASE} was not deployed: the checkout did not follow it: ${"skipped" in moved ? moved.skipped : moved.error}`,
-      );
-      return;
-    }
-    const hosts = await this.config.hosts();
-    if (hosts.length) await this.apply({ only: hosts }, { startedBy: HOST_CHECK_AGENT, runId });
-  }
-
-  /** Where each open change is (`ChangeState.phase`), read from what its run last published. */
-  private async openChangePhases(): Promise<(ChangeState["phase"] | undefined)[]> {
-    const rows = await this.dbos.listWorkflows({
-      workflowName: CHANGE_WORKFLOW,
-      applicationName: this.config.appName,
-      status: dbosStatusesOf("queued", "running"),
-      loadInput: false,
-      loadOutput: false,
-    });
-    return Promise.all(
-      rows.map(async (r) => (await this.dbos.getEvent<ChangeState>(r.workflowID, CHANGE_EVENT, 0))?.phase),
-    );
+  async follow(event: RemoteEvent): Promise<string> {
+    const parsed = parseOrThrow(RemoteEventSchema, event, "Not an event of a host's webhook");
+    return this.start(FOLLOW_WORKFLOW, parsed, { startedBy: HOST_CHECK_AGENT, runId: followRunId(parsed) });
   }
 
   /**
-   * Brings `head`, pushed to the draft's `branch` on the host, into the draft: false when it holds
-   * it already, or cannot take it (no `follow`, a commit of its own, or one uncommitted: warned).
+   * How far the app `folder` (taken from a source) is behind its source, or why that cannot be
+   * told, as the worker last checked (at its start and after the checkout follows `main`);
+   * undefined when it has not told it.
    */
-  private async fetched({ source, url, host }: Repository, branch: string, head: string): Promise<boolean> {
-    const local = await Promise.resolve(source.head(branch)).catch(() => undefined);
-    if (local === head) return false;
-    const moved = source.follow
-      ? await source.follow({ url, token: await host.token(), ref: branch })
-      : { skipped: "this repository cannot follow its remote" };
-    if ("skipped" in moved) {
-      warn(`${branch} did not take the host's commits: ${moved.skipped}`);
-      return false;
-    }
-    return true;
+  async appBehind(folder: string): Promise<AppBehind | undefined> {
+    return readAppBehind(await this.db(), folder);
   }
 
-  /** The repository of `ClientOptions.source` on its host (`repositoryOf`); undefined with no source, remote or half for it. */
-  private async repository(): Promise<Repository | undefined> {
-    const { source } = this.options;
-    if (!source) return undefined;
-    return repositoryOf(this.config.remotes, this.storedSecrets, source).catch((err: unknown) => {
-      if (["no_remote", "no_remote_half"].includes(vendorCodeOf(err) ?? "")) return undefined;
-      throw err;
-    });
+  /** A sandbox run's checks against its scenario as the worker last ran them (when the run last waited or ended); undefined for none yet. */
+  async runChecks(runId: string): Promise<RunChecks | undefined> {
+    return readRunChecks(await this.db(), runId);
   }
 
   /** The runs of the draft `id`'s change, newest first: `change:<id>` and `change:<id>~<n>`. */
@@ -1685,6 +1607,13 @@ const alreadyDecided = (runId: string, a: ApprovalState) =>
       ...(a.withdrawnReason === undefined ? {} : { withdrawnReason: a.withdrawnReason }),
     },
   );
+
+/**
+ * A follow's run id (`SanomaClient.follow`): `follow:` and the SHA-256 of the event as its schema
+ * parsed it, its keys then in the schema's order, so one event is one id however its JSON was laid out.
+ */
+const followRunId = (parsed: RemoteEvent) =>
+  `follow:${createHash("sha256").update(JSON.stringify(parsed)).digest("hex")}`;
 
 /** A change's first run's id: `change:<draft id>`. */
 const changeRunId = (id: string) => `change:${id}`;

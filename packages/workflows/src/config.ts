@@ -30,6 +30,8 @@ import { appRunner } from "./app-steps.ts";
 import { appWorkflows } from "./app-workflows.ts";
 import { changeSteps } from "./change-steps.ts";
 import { changeWorkflow } from "./change-workflow.ts";
+import { followSteps } from "./follow-steps.ts";
+import { followWorkflow } from "./follow-workflow.ts";
 import {
   type Collection,
   collectionsConnector,
@@ -71,6 +73,7 @@ import {
   CALL_WORKFLOW,
   CHANGE_WORKFLOW,
   DATA_VENDOR,
+  FOLLOW_WORKFLOW,
   LOGIN_CODE_WORKFLOW,
 } from "./shared.ts";
 import { fakeSourceDriver, type RemoteHalf, SOURCE_RESOLVE, sourceDriver, sourceOps } from "./source.ts";
@@ -444,6 +447,8 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
       .map((r) => r.id);
   };
   names.set(CHANGE_WORKFLOW, changeWorkflow(changeOps, changeSteps({ remotes, hosts })));
+  // Built-in, in every config: what a git host's webhook says happened, which the worker with the checkout follows.
+  names.set(FOLLOW_WORKFLOW, followWorkflow(followSteps({ remotes, hosts })));
   // Built-in, in every config: the app's own actions on the repository, which a worker given the app's steps runs.
   for (const wf of appWorkflows(appRunner)) names.set(wf.name, wf);
   const declaredObjects = () => readDeclaredObjects(root, connectors, declarable);

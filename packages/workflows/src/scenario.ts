@@ -186,6 +186,23 @@ export interface Check {
   detail?: string;
 }
 
+/** One of a sandbox run's checks, and whether its answer is final. */
+export interface RunCheck extends Check {
+  /**
+   * True once the answer cannot change: the run has ended, or the check expects a call that
+   * has been made (or a decision recorded). Until then a check not met is not failed yet, and
+   * one met (a call not made so far) may still fail.
+   */
+  settled: boolean;
+}
+
+/**
+ * A sandbox run's checks, as the worker ran them when the run last waited or ended (`recordChecks`):
+ * each of its scenario's expectations against its ledger, or why there are none (its scenario is
+ * no longer in the feature files, with those that did not load, or they could not be read at all).
+ */
+export type RunChecks = { checks: RunCheck[] } | { error: string };
+
 /**
  * What steps can name: the config's operations, workflows, resource types and collections by id,
  * the steps its connectors (and the company) ship, where the feature files are, and the root

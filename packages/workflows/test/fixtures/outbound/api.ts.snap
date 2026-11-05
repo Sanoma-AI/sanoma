@@ -41,6 +41,8 @@ interface CompanyApi {
     repository?: string;
     project?: string;
   }, unknown>;
+  /** Follow the repository's host: the workflow `follow`, built in. */
+  follow: WorkflowFn<unknown, unknown>;
   /** Go live: the workflow `go-live`, built in. */
   goLive: WorkflowFn<{
     owner: string;

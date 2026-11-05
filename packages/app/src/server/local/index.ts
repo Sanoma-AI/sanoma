@@ -1,45 +1,15 @@
-// The seam for what still needs the company's checkout in the app's own process: what reads it or
-// runs a child process (git, Cucumber, a coding agent), and so only where the company's files are
-// (what writes the repository is the worker's, in the runs of the app's built-ins: `steps/`). The
-// Node adapter's app imports this module; the Worker's bundle replaces it with `none.ts`, so none
-// of it, or what it imports, is in the bundle, and each caller answers "not available on this
-// host" (501, `notHere`) when `local` is undefined.
+// The seam for what still needs the company's checkout in the app's own process: the chat turn,
+// which runs a coding agent as a child process in a draft (what writes the repository, follows a
+// host's webhook, tells how far an app is behind its source or checks a sandbox run is the
+// worker's, in runs and the runtime's tables). The Node adapter's app imports this module; the
+// Worker's bundle replaces it with `none.ts`, so none of it, or what it imports, is in the bundle,
+// and each caller answers "not available on this host" (501, `notHere`) when `local` is undefined.
 // oxlint-disable-next-line import/no-unassigned-import
 import "@tanstack/react-start/server-only";
-import type { LedgerRecord, RunStatus } from "@sanoma-ai/workflows";
-import { isEnded } from "@sanoma-ai/workflows";
-import { check, loadScenarios } from "@sanoma-ai/workflows/scenario";
-import type { RunDetail } from "../../api.ts";
-import type { AppContext } from "../../context.ts";
 import { postSignInCode } from "../agent/acp.ts";
 import { postChat } from "../agent/turn.ts";
-import { notLoaded } from "../core.ts";
-import { appBehind } from "./behind.ts";
 
-/**
- * A sandbox run's checks: Cucumber runs its scenario's Then steps against the ledger, over the
- * feature file as it reads now, which the agent may have changed since.
- */
-async function scenarioChecks(
-  { resolved }: Pick<AppContext, "resolved">,
-  name: string,
-  status: RunStatus,
-  ledger: LedgerRecord[],
-): Promise<Pick<RunDetail, "checks" | "checksError">> {
-  const loaded = await loadScenarios(resolved);
-  const scenario = loaded.scenarios.find((s) => s.name === name);
-  if (!scenario)
-    return { checksError: `The feature files no longer have scenario "${name}"${notLoaded(loaded.errors)}` };
-  const ended = isEnded(status);
-  const checks = (await check(resolved, scenario, ledger)).map((c, i) => {
-    const e = scenario.expect[i]!;
-    // Met once: a call made, or a decision recorded, stays made.
-    return { ...c, settled: ended || (c.ok && (("called" in e && e.called === true) || "decision" in e)) };
-  });
-  return { checks };
-}
-
-const actions = { appBehind, scenarioChecks, postChat, postSignInCode };
+const actions = { postChat, postSignInCode };
 
 /** What needs the checkout, as one object. */
 export type Local = typeof actions;

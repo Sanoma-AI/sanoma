@@ -1,7 +1,6 @@
 import { DBOS } from "@dbos-inc/dbos-sdk";
 import type { AppRunner, AppSteps } from "./app-workflows.ts";
 import type { ResolvedConfig, SanomaConfig } from "./config.ts";
-import type { SanomaClient } from "./client.ts";
 import { currentRun, type Run } from "./run.ts";
 import { APPLY_WORKFLOW } from "./shared.ts";
 
@@ -14,10 +13,6 @@ export interface WorkerApp {
   steps: AppSteps;
   config: SanomaConfig;
   resolved: ResolvedConfig;
-  /** The worker's own client, connected on first use; the worker closes it when it stops. */
-  client(): Promise<SanomaClient>;
-  /** Runs `write` once the one before it has settled: the worker's repository writes, one at a time. */
-  serially<T>(write: () => Promise<T>): Promise<T>;
 }
 
 /** What a worker started without the app's steps answers a run of one of the app's built-ins. */
@@ -30,19 +25,6 @@ const runNow = (): Run => {
   return run;
 };
 
-/**
- * `WorkerApp.serially`, over a chain of its own: each write waits for the one before it to
- * settle, failed or not.
- */
-export function serialWrites(): WorkerApp["serially"] {
-  let tail: Promise<unknown> = Promise.resolve();
-  return (write) => {
-    const done = tail.then(write);
-    tail = done.catch(() => undefined);
-    return done;
-  };
-}
-
 /** The runner the app's built-ins run their work through. */
 export const appRunner: AppRunner = {
   step: ((name: keyof AppSteps, input: never) => {
@@ -51,10 +33,10 @@ export const appRunner: AppRunner = {
     if (!app) throw new Error(NO_APP_STEPS);
     return DBOS.runStep(
       () =>
-        app.serially(async () =>
+        run.state.serially(async () =>
           (app.steps[name] as (step: unknown, input: unknown) => Promise<unknown>)(
             {
-              client: await app.client(),
+              client: await run.state.client(),
               ...(run.state.source && { source: run.state.source }),
               config: app.config,
               resolved: app.resolved,

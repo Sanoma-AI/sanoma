@@ -1,8 +1,8 @@
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { ensureBuilt, testDatabaseUrl } from "@sanoma-ai/testing";
+import { ensureBuilt, testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
-import { memoryLedger, type SanomaConfig, type Source } from "@sanoma-ai/workflows";
+import { memoryLedger, type SanomaConfig } from "@sanoma-ai/workflows";
 import { APPS_LIST, type AvailableApps } from "@sanoma-ai/workflows/shared";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
@@ -17,7 +17,7 @@ import introduce from "../../workflows/test/fixtures/company-apps/workflows/intr
 import { ACTOR_COOKIE, ACTOR_KEY } from "../src/api.ts";
 import { type App, startApp } from "../src/index.ts";
 import { takeAppPrompt, updateAppPrompt } from "../src/lib/apps.ts";
-import { appBehind } from "../src/server/local/behind.ts";
+import { appBehind } from "../src/server/core.ts";
 import { appSnapshot } from "../src/snapshot-build.ts";
 import { barLink } from "./bar-helpers.ts";
 
@@ -162,17 +162,16 @@ describe("the Apps page", () => {
     expect(html).toContain("No app nope.");
   });
 
-  it("tells how far a taken app is behind its source, or why it cannot", async () => {
-    const snapshot = await appSnapshot(testApp.config);
-    // Only `behind` is read.
-    const behind = (folder: string, source?: Pick<Source, "behind">) =>
-      appBehind({ snapshot, local: { ...(source && { source: source as Source }) } }, folder);
-    const fetched = { behind: async (folder: string) => (folder === "crm" ? 3 : 0) };
-    expect(await behind("crm", fetched)).toEqual({ behind: 3 });
-    expect(await behind("shop", fetched)).toEqual({ error: "No app apps/shop/ taken from a source" });
-    expect(await behind("crm")).toEqual({ error: "This instance's repository cannot fetch an app's source" });
-    const offline = { behind: () => Promise.reject(new Error("git fetch from https://github.com/example/crm failed")) };
-    expect(await behind("crm", offline)).toEqual({ error: "git fetch from https://github.com/example/crm failed" });
+  it("tells how far a taken app is behind its source as the worker told it, or why it cannot", async () => {
+    const at = { snapshot: await appSnapshot(testApp.config), client: testApp.client };
+    // This instance's worker has no repository (how far an app is behind, fetched, is the worker's tests'):
+    // told at its start for crm, the one app taken from a source.
+    const told = await waitFor(
+      () => appBehind(at, "crm"),
+      (answer) => !("error" in answer && answer.error.startsWith("Not told yet")),
+    );
+    expect(told).toEqual({ error: "This instance's repository cannot fetch an app's source" });
+    expect(await appBehind(at, "shop")).toEqual({ error: "No app apps/shop/ taken from a source" });
   });
 
   it("reads GitHub's apps through sanoma.apps.list, as the person, under the policy", async () => {
@@ -233,9 +232,9 @@ describe("Workflows and Permissions by app", () => {
   it("groups the workflows by their folder, the root's first, with a tab each beside the filters", async () => {
     const { html } = await page("/workflows");
     const tabs = html.match(/<div[^>]*role="tablist"[^>]*aria-label="App"[\s\S]*?<\/div>/)?.[0];
-    expect(tabs).toMatch(/href="\/workflows"[^>]*>All<span[^>]*>10<\/span>/);
-    // The root holds introduce and the built-ins, the app's actions among them.
-    expect(tabs).toMatch(/href="\/workflows\?app=\."[^>]*>Yours<span[^>]*>8<\/span>/);
+    expect(tabs).toMatch(/href="\/workflows"[^>]*>All<span[^>]*>11<\/span>/);
+    // The root holds introduce and the built-ins, follow and the app's actions among them.
+    expect(tabs).toMatch(/href="\/workflows\?app=\."[^>]*>Yours<span[^>]*>9<\/span>/);
     expect(tabs).toMatch(/href="\/workflows\?app=crm"[^>]*>crm<span[^>]*>1<\/span>/);
     expect(tabs).toMatch(/href="\/workflows\?app=shop"[^>]*>shop<span[^>]*>1<\/span>/);
     expect(html).toMatch(

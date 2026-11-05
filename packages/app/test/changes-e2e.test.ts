@@ -114,7 +114,7 @@ beforeAll(async () => {
   };
   source = localGitSource(dir, { databaseUrl });
   worker = await startTestWorker(config, { databaseUrl, source, app: appSteps });
-  client = await SanomaClient.connect(config, { source });
+  client = await SanomaClient.connect(config);
   app = await startApp(config, { port: 0, source });
 }, 600_000);
 

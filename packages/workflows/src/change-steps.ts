@@ -245,6 +245,8 @@ export function changeSteps({ remotes, hosts }: ChangeStepsOptions): ChangeSteps
       const follow: ChangeDeploy["follow"] = await DBOS.runStep(() => followBase(remotes, run.state.secrets), {
         name: "change:follow",
       });
+      // The apps taken from a source are told again against main as merged (no step: nothing the run reads).
+      if ("revision" in follow) run.state.refreshAppsBehind();
       const declared = run.state.workflows.has(APPLY_WORKFLOW)
         ? await DBOS.runStep(hosts, { name: "change:hosts" })
         : [];

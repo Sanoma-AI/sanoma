@@ -17,6 +17,7 @@ import {
   SetCredentialRequest,
 } from "./api.ts";
 import {
+  appBehind,
   appConfig,
   callApi,
   change,
@@ -35,7 +36,6 @@ import {
   lastRuns,
   listRuns,
   nextFires,
-  notHere,
   openChange,
   permissions,
   preview,
@@ -51,7 +51,6 @@ import { availableConnectors } from "./server/available.ts";
 import { goLiveChoices, goLiveProgress, goLiveSignIn } from "./server/go-live.ts";
 import { hostDerived } from "./server/host-derived.ts";
 import { invitePerson, peopleSignIns } from "./server/people.ts";
-import { local } from "./server/local/index.ts";
 import { setSetupToken, setupStatus } from "./server/setup.ts";
 import { withPrincipal } from "./middleware.ts";
 import { chatFor } from "./server/agent/transcript.ts";
@@ -107,7 +106,7 @@ export const getLastRuns = createServerFn(READ).handler(({ context }) => lastRun
 /** The run, or the router's not-found when there is none. */
 export const getRun = createServerFn(READ)
   .validator(validate(z.object({ id: z.string().min(1) })))
-  .handler(({ data, context }) => runDetail(context.app, data.id, local?.scenarioChecks));
+  .handler(({ data, context }) => runDetail(context.app, data.id));
 
 /** The changes, newest first: the open ones, the done ones, or all (`ChangesQuery`). */
 export const getChanges = createServerFn(READ)
@@ -207,12 +206,10 @@ export const setSetupTokenFn = createServerFn(CHANGE)
 /** The connector packages on npm. */
 export const getAvailableConnectors = createServerFn(READ).handler(() => availableConnectors());
 
-/** How many commits a taken app is behind its source, fetched now; or why that cannot be told. */
+/** How many commits a taken app is behind its source, as the worker last checked; or why that cannot be told. */
 export const getAppBehind = createServerFn(READ)
   .validator(validate(z.object({ folder: z.string().min(1) })))
-  .handler(({ data, context }) =>
-    local ? local.appBehind(context.app, data.folder) : { error: notHere("Fetching an app's source") },
-  );
+  .handler(({ data, context }) => appBehind(context.app, data.folder));
 
 /** What going live can choose from: GitHub accounts, Supabase organizations and regions, the host. */
 export const getGoLiveChoices = createServerFn(READ).handler(async ({ context }) =>

@@ -2,10 +2,12 @@ import { DBOS, DBOSClient } from "@dbos-inc/dbos-sdk";
 import { setTimeout as delay } from "node:timers/promises";
 import { Client, escapeIdentifier, Pool } from "pg";
 import { warn } from "./log.ts";
+import type { RunCheck, RunChecks } from "./scenario.ts";
 import { errorMessage } from "./shared.ts";
 
 // The runtime's own tables live in the config's database, beside DBOS's: the credentials, the
-// ledger, the collections' records, the wakeup's row, the operator agent's chats and the api tokens. What they
+// ledger, the collections' records, the wakeup's row, the operator agent's chats, the api tokens, and
+// what the worker tells the app (how far each app is behind its source, a sandbox run's checks). What they
 // share is here: the one preparation of a database, a pool that opens once it is prepared and
 // survives a dropped connection, and a table creation two processes may race.
 
@@ -32,6 +34,13 @@ export const CHAT_MESSAGES_TABLE = "sanoma_chat_messages";
 export const API_TOKENS_TABLE = "sanoma_api_tokens";
 /** The nonces of sealed invite requests spent (`spendInviteRequest`), each until it expires. */
 export const INVITE_REQUESTS_TABLE = "sanoma_invite_requests";
+/**
+ * How far each app taken from a source is behind it, as the worker last checked (`recordAppsBehind`):
+ * one row per app folder, its count of commits or why it could not be told.
+ */
+export const APP_BEHIND_TABLE = "sanoma_app_behind";
+/** Each sandbox run's checks against its scenario, as the worker last ran them (`recordChecks` in sandbox.ts): one row per run. */
+export const RUN_CHECKS_TABLE = "sanoma_run_checks";
 
 /** The runtime's tables, each with the word the messages name it by. */
 const TABLES: readonly [what: string, ddl: string][] = [
@@ -109,6 +118,16 @@ const TABLES: readonly [what: string, ddl: string][] = [
   [
     "invite requests",
     `CREATE TABLE IF NOT EXISTS ${INVITE_REQUESTS_TABLE} (nonce text PRIMARY KEY, expires_at timestamptz NOT NULL)`,
+  ],
+  [
+    "apps behind",
+    `CREATE TABLE IF NOT EXISTS ${APP_BEHIND_TABLE} (folder text PRIMARY KEY, behind integer, error text, ` +
+      "checked_at timestamptz NOT NULL DEFAULT now(), CHECK ((behind IS NULL) <> (error IS NULL)))",
+  ],
+  [
+    "run checks",
+    `CREATE TABLE IF NOT EXISTS ${RUN_CHECKS_TABLE} (run_id text PRIMARY KEY, checks jsonb, error text, ` +
+      "checked_at timestamptz NOT NULL DEFAULT now(), CHECK ((checks IS NULL) <> (error IS NULL)))",
   ],
 ];
 
@@ -288,7 +307,7 @@ async function prepare(databaseUrl: string): Promise<void> {
 }
 
 /** The last of the runtime's tables a preparation makes (`TABLES`), so its being there says they all are. */
-const LAST_TABLE = INVITE_REQUESTS_TABLE;
+const LAST_TABLE = RUN_CHECKS_TABLE;
 
 /** Refuses when the database at `databaseUrl` lacks DBOS's tables or the runtime's: `by` makes them, not this process. */
 async function checkPrepared(databaseUrl: string, by: string): Promise<void> {
@@ -429,4 +448,50 @@ export async function spendInviteRequest(db: Db, nonce: string, expiresAt: Date)
     [nonce, expiresAt],
   );
   return rowCount === 1;
+}
+
+/** How far an app is behind its source (`Source.behind`), or why that could not be told. */
+export type AppBehind = { behind: number } | { error: string };
+
+/** Sets each app's row to what was told of it now, and drops the rows of apps no longer listed. */
+export async function writeAppsBehind(db: Db, told: ReadonlyMap<string, AppBehind>): Promise<void> {
+  await db.query(`DELETE FROM ${APP_BEHIND_TABLE} WHERE NOT (folder = ANY($1::text[]))`, [[...told.keys()]]);
+  for (const [folder, answer] of told) {
+    await db.query(
+      `INSERT INTO ${APP_BEHIND_TABLE} (folder, behind, error) VALUES ($1, $2, $3) ` +
+        "ON CONFLICT (folder) DO UPDATE SET behind = excluded.behind, error = excluded.error, checked_at = now()",
+      "behind" in answer ? [folder, answer.behind, null] : [folder, null, answer.error],
+    );
+  }
+}
+
+/** The app `folder`'s row: how far it is behind its source, or why not; undefined when the worker has not told it. */
+export async function readAppBehind(db: Db, folder: string): Promise<AppBehind | undefined> {
+  const { rows } = await db.query<{ behind: number | null; error: string | null }>(
+    `SELECT behind, error FROM ${APP_BEHIND_TABLE} WHERE folder = $1`,
+    [folder],
+  );
+  const row = rows[0];
+  if (!row) return undefined;
+  return row.error === null ? { behind: row.behind! } : { error: row.error };
+}
+
+/** Sets the run's checks (`RunChecks`), replacing what was there. */
+export async function writeRunChecks(db: Db, runId: string, checks: RunChecks): Promise<void> {
+  await db.query(
+    `INSERT INTO ${RUN_CHECKS_TABLE} (run_id, checks, error) VALUES ($1, $2, $3) ` +
+      "ON CONFLICT (run_id) DO UPDATE SET checks = excluded.checks, error = excluded.error, checked_at = now()",
+    "checks" in checks ? [runId, JSON.stringify(checks.checks), null] : [runId, null, checks.error],
+  );
+}
+
+/** The run's checks as the worker last ran them; undefined when it has run none. */
+export async function readRunChecks(db: Db, runId: string): Promise<RunChecks | undefined> {
+  const { rows } = await db.query<{ checks: RunCheck[] | null; error: string | null }>(
+    `SELECT checks, error FROM ${RUN_CHECKS_TABLE} WHERE run_id = $1`,
+    [runId],
+  );
+  const row = rows[0];
+  if (!row) return undefined;
+  return row.error === null ? { checks: row.checks! } : { error: row.error };
 }

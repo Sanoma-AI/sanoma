@@ -332,13 +332,20 @@ export const GO_LIVE_WORKFLOW = "go-live";
 export const GO_LIVE_HOST_WORKFLOW = "go-live-host";
 export const CONNECT_EXISTING_WORKFLOW = "connect-existing";
 
-/** The workflows the runtime adds itself, which a config's own may not be named: drift, apply, call, change, login-code and the app's actions. */
+/**
+ * What a git host's webhook says happened to the company's repository, done by the worker
+ * (`follow-workflow.ts`): started by the app as `host-check`, one run per event (`SanomaClient.follow`).
+ */
+export const FOLLOW_WORKFLOW = "follow";
+
+/** The workflows the runtime adds itself, which a config's own may not be named: drift, apply, call, change, login-code, follow and the app's actions. */
 export const BUILT_IN_WORKFLOWS: ReadonlySet<string> = new Set([
   DRIFT_WORKFLOW,
   APPLY_WORKFLOW,
   CALL_WORKFLOW,
   CHANGE_WORKFLOW,
   LOGIN_CODE_WORKFLOW,
+  FOLLOW_WORKFLOW,
   ADOPT_WORKFLOW,
   PATCH_WORKFLOW,
   GO_LIVE_WORKFLOW,
@@ -451,7 +458,7 @@ export const ANONYMOUS_PRINCIPAL: Principal = Object.freeze({ id: ANONYMOUS, gro
 export const WAKEUP_AGENT = "wakeup";
 /** The runtime's agent a scheduled run is started by (`trigger: { schedule }`): the policy decides its starts. */
 export const SCHEDULE_AGENT = "schedule";
-/** The runtime's agent that checks and deploys the hosts: drift's, and apply's after a push to `main` (`SanomaClient.remoteEvent`). */
+/** The runtime's agent that checks and deploys the hosts: drift's, and a host's webhook's (`SanomaClient.follow`), whose apply after a push to `main` is its too. */
 export const HOST_CHECK_AGENT = "host-check";
 /** The runtime's agent that sends a sign-in code (`LOGIN_CODE_WORKFLOW`): a company's policy exempts it from its holds on sending. */
 export const LOGIN_AGENT = "login";

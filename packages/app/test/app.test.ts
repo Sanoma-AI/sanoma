@@ -72,7 +72,6 @@ import {
   startRun,
   validate,
 } from "../src/server/core.ts";
-import { local } from "../src/server/local/index.ts";
 import { appSteps } from "../src/steps/index.ts";
 import { pageApi } from "./page-api.ts";
 import { appSnapshot, scenariosOf } from "../src/snapshot-build.ts";
@@ -343,8 +342,8 @@ const clearAs = change(validate(ClearCredentialRequest), clearCredential);
 const runsOf = (query: Record<string, unknown> = {}) =>
   answer("GET", async () => listRuns(ctx, validate(RunsQuery)(query as RunsQuery)));
 
-/** `getRun`: one run, its ledger, its approvals and a sandbox run's checks. */
-const detail = (id: string, context = ctx) => runDetail(context, id, local!.scenarioChecks);
+/** `getRun`: one run, its ledger, its approvals and a sandbox run's checks, as the worker last ran them. */
+const detail = (id: string, context = ctx) => runDetail(context, id);
 
 /** `startRunFn` with this argument, as tester. */
 const postRun = (data: unknown) => startAs(data, { actor: "tester" });
@@ -720,10 +719,10 @@ describe("scenarios and sandbox runs", () => {
     expect(started.body.workflow).toBe("announce");
     sandboxId = started.body.runId;
 
-    // The app decides nothing: the run waits on its approval as a live run does.
+    // The app decides nothing: the run waits on its approval as a live run does, and the worker checks it as it waits.
     const held = await waitFor(
       () => detail(sandboxId),
-      (d) => d.approvals.some((a) => a.status === "pending"),
+      (d) => d.approvals.some((a) => a.status === "pending") && d.checks !== undefined,
     );
     expect(held.run).toMatchObject({ status: "waiting", sandbox: SCENARIO, startedBy: { id: "tester" } });
     expect(held.ledger.find((r) => r.type === "scenario.seeded")).toMatchObject({
@@ -759,7 +758,7 @@ describe("scenarios and sandbox runs", () => {
     const id = started.body.runId;
     const held = await waitFor(
       () => detail(id),
-      (d) => d.approvals.some((a) => a.status === "pending"),
+      (d) => d.approvals.some((a) => a.status === "pending") && d.checks !== undefined,
     );
     // A call not made so far may still be made: not settled, though met.
     expect(held.checks).toEqual([
@@ -788,20 +787,33 @@ describe("scenarios and sandbox runs", () => {
 
 describe("scenarios that no longer load", () => {
   it("says why a seeded run has no checks, and why a scenario cannot start, when its file breaks", async () => {
-    const before = await detail(sandboxId);
-    expect(before.checks).toBeDefined();
+    // Started, then the file breaks while it waits: the checks the worker runs as it ends say why there are none.
+    const started = await postRun({ scenario: SCENARIO });
+    const id = started.body.runId;
+    const held = await waitFor(
+      () => detail(id),
+      (d) => d.approvals.some((a) => a.status === "pending") && d.checks !== undefined,
+    );
     const text = readFileSync(featureFile, "utf8");
     const was = ctx;
     try {
       writeFileSync(featureFile, "Feature: Broken\n  Scenario: Broken\n    Then nothing\n");
       // The app's own snapshot is made again once the file changed (`liveSnapshot`); this one by hand.
       ctx = { ...ctx, snapshot: await appSnapshot(config) };
-      const broken = await detail(sandboxId);
-      expect(broken.checks).toBeUndefined();
+      // Until it ends, the checks are those it waited with.
+      expect((await detail(id)).checks).toEqual(held.checks);
+      await decideAs(
+        { runId: id, approvalId: held.approvals[0]!.id, decision: "approve" },
+        { actor: "marketing-lead" },
+      );
+      const broken = await waitFor(
+        () => detail(id),
+        (d) => d.run.status === "finished" && d.checks === undefined,
+      );
       expect(broken.checksError).toMatch(
         /^The feature files no longer have scenario "Launch on time"; these files did not load: scenarios\/announce\.feature:3: no step matches "nothing"\nKnown steps:/,
       );
-      const run = await page(`/workflows/announce/runs/${sandboxId}`);
+      const run = await page(`/workflows/announce/runs/${id}`);
       expect(run.html).toMatch(/<h2[^>]*>Checks<\/h2>/);
       expect(run.text).toContain("Could not check the run against its scenario: The feature files no longer have");
       // A workflow with no scenarios has its New run form's Sandbox disabled, and says why.
@@ -826,7 +838,8 @@ describe("scenarios that no longer load", () => {
       writeFileSync(featureFile, text);
       ctx = was;
     }
-    expect((await detail(sandboxId)).checks).toEqual(before.checks);
+    // A run that ended keeps the checks it ended with.
+    expect((await detail(sandboxId)).checks).toHaveLength(5);
   });
 
   it("lists no scenarios, with why, when they cannot be read at all", async () => {
@@ -895,7 +908,7 @@ describe("the page", () => {
     expect(res.headers.get("content-type")).toMatch(/text\/html/);
     const html = await res.text();
     expect(html).toContain('<div id="app">');
-    expect(html).toMatch(/<h1[^>]*>Workflows<span[^>]*>10<\/span><\/h1>/);
+    expect(html).toMatch(/<h1[^>]*>Workflows<span[^>]*>11<\/span><\/h1>/);
     // The bar: Chat, then Inbox and Workflows, no site tiles (the package's own build has no
     // sites), then Setup (with Data and Permissions, as the config has collections and a policy),
     // the current lit.
@@ -1989,10 +2002,10 @@ describe("resources and drift", () => {
   it("tabs the overview by filter, All runs last, and heads it with New workflow, each view its own link", async () => {
     const overview = await page("/workflows");
     expect(tabs(overview.html)).toEqual([
-      { label: "All", href: "/workflows", count: 10, selected: true },
+      { label: "All", href: "/workflows", count: 11, selected: true },
       { label: "Waiting on you", href: "/workflows?filter=waiting", count: 0, selected: false },
       { label: "Failed last run", href: "/workflows?filter=failed", count: 0, selected: false },
-      { label: "Built-in", href: "/workflows?filter=builtin", count: 9, selected: false },
+      { label: "Built-in", href: "/workflows?filter=builtin", count: 10, selected: false },
       { label: "All runs", href: "/workflows?view=runs", count: undefined, selected: false },
     ]);
     expect(overview.html).toMatch(/<button[^>]*aria-haspopup="dialog"[^>]*>(<svg.*?<\/svg>)?New workflow<\/button>/);
@@ -2023,7 +2036,7 @@ describe("resources and drift", () => {
     expect(builtin.html).not.toMatch(/<td[^>]*><div[^>]*><a[^>]*href="\/workflows\/announce"/);
     expect(builtin.html).toMatch(/<td[^>]*><div[^>]*><a[^>]*href="\/workflows\/change"/);
     expect(builtin.html).toMatch(/<td[^>]*><div[^>]*><a[^>]*href="\/workflows\/go-live"/);
-    expect(tabNamed(builtin.html, "Built-in")).toMatchObject({ count: 9, selected: true });
+    expect(tabNamed(builtin.html, "Built-in")).toMatchObject({ count: 10, selected: true });
     expect(builtin.html).not.toMatch(/<a [^>]*role="tab"[^>]*aria-selected="false"[^>]*aria-current="page"/);
   });
 

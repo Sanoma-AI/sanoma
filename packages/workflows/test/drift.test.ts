@@ -29,7 +29,7 @@ import { fakeMail, mailDataFile, recordsFor } from "./fakes/mail.ts";
 import { companyConfig, companyDir, companyFakes, nodeIdOf } from "./fixtures/company/fakes.ts";
 import company from "./fixtures/company/sanoma.config.ts";
 import { CALL_WORKFLOW, visitorPrincipal } from "../src/shared.ts";
-import { APP_ACTIONS, rootWith, useApp, withoutSetup } from "./harness.ts";
+import { AFTER_CHANGE, rootWith, useApp, withoutSetup } from "./harness.ts";
 
 // Needs Postgres: `pnpm db:up`. The company fixture's data files, checked against the GitHub
 // and Stripe fakes, which hold an object for each declared resource as the vendor would.
@@ -371,12 +371,12 @@ describe("the built-in drift workflow in a config", () => {
   const bare = { ...company, connectors: company.connectors.map(withoutSetup) };
 
   it("is added, with apply, when the connectors declare resource types, using each type's import that has a driver", () => {
-    // Beside change, the app's actions and call, built in every config (call for the listing of apps).
+    // Beside change, follow, the app's actions and call, built in every config (call for the listing of apps).
     expect([...resolveConfig(config).workflows.keys()]).toEqual([
       DRIFT_WORKFLOW,
       APPLY_WORKFLOW,
       CHANGE_WORKFLOW,
-      ...APP_ACTIONS,
+      ...AFTER_CHANGE,
       CALL_WORKFLOW,
     ]);
     const entry = describeConfig(config).workflows.find((wf) => wf.name === DRIFT_WORKFLOW);
@@ -432,6 +432,7 @@ describe("the built-in drift workflow in a config", () => {
       { name: "change", builtin: true },
       { name: "connect-existing", builtin: true, ops: [] },
       { name: "drift", builtin: true, ops: [] },
+      { name: "follow", builtin: true, ops: [] },
       { name: "go-live", builtin: true, ops: [] },
       { name: "go-live-host", builtin: true, ops: [] },
       { name: "patch", builtin: true, ops: [] },
@@ -440,8 +441,8 @@ describe("the built-in drift workflow in a config", () => {
 
   it("is not added when no connector declares a resource type, and the config's own workflows are not built-in", () => {
     const marketing = { ...company, connectors: [bluesky] };
-    // Only the change workflow, the app's actions and call (for the listing of apps), which every config has.
-    expect([...resolveConfig(marketing).workflows.keys()]).toEqual([CHANGE_WORKFLOW, ...APP_ACTIONS, CALL_WORKFLOW]);
+    // Only the change workflow, follow, the app's actions and call (for the listing of apps), which every config has.
+    expect([...resolveConfig(marketing).workflows.keys()]).toEqual([CHANGE_WORKFLOW, ...AFTER_CHANGE, CALL_WORKFLOW]);
     const own = defineWorkflow({ name: "own", trigger: "manual", input: z.object({}), uses: [], run: async () => 1 });
     expect(
       describeConfig({ ...company, workflows: [own] }).workflows.find((wf) => wf.name === "own"),

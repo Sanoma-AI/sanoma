@@ -44,8 +44,7 @@ export function useTestApp(config: SanomaConfig, options: TestWorkerOptions): Te
 
   beforeAll(async () => {
     worker = await startTestWorker(shared, options);
-    // Given the worker's repository too, so a host's webhook events reach it (`remoteEvent`).
-    client = await SanomaClient.connect(shared, options.source && { source: options.source });
+    client = await SanomaClient.connect(shared);
     raw = await dbosClient(shared.databaseUrl, appName);
   }, 60_000);
 

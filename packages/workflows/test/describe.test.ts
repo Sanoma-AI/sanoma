@@ -421,6 +421,7 @@ describe("a workflow's name in a site's api", () => {
       ["connect-existing", []],
       ["data", [[1, 1, "A site calls this workflow api.data, which is the collections': rename it"]]],
       ["drift", []],
+      ["follow", []],
       ["ghost", [[1, 1, "A site calls this workflow api.ghost, which is the vendor ghost's operations: rename it"]]],
       ["go-live", []],
       ["go-live-host", []],

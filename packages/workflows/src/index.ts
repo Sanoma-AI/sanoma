@@ -107,6 +107,7 @@ export {
   type Written,
 } from "./app-workflows.ts";
 export { NO_APP_STEPS } from "./app-steps.ts";
+export { type FollowOutput, RemoteEventSchema } from "./follow-workflow.ts";
 export {
   ADMIN,
   type ChangeDecision,
@@ -277,7 +278,7 @@ export {
   type StoredSecret,
 } from "./client.ts";
 // A raw DBOS client on the runtime's database, for tests and tools that read DBOS directly.
-export { dbosClient } from "./db.ts";
+export { type AppBehind, dbosClient } from "./db.ts";
 // The runtime bundled where a company's files are not (the Cloudflare host's Worker): the root's
 // people, policies and app name as data, Cedar's web build, and a database it only checks.
 export { type RootSnapshot, useRootSnapshot } from "./bundled.ts";
@@ -300,6 +301,7 @@ export {
   CHANGE_WORKFLOW,
   CONNECT_EXISTING_WORKFLOW,
   declaresPeople,
+  FOLLOW_WORKFLOW,
   GO_LIVE_HOST_WORKFLOW,
   GO_LIVE_WORKFLOW,
   PATCH_WORKFLOW,

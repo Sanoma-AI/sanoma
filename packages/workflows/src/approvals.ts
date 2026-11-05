@@ -140,6 +140,8 @@ export async function awaitApproval(
       { key: state.id, at: state.requestedAt },
     ),
   );
+  // A sandbox run's checks as it starts to wait, for the app; imported here, so a live run never loads Cucumber.
+  if (run.sandbox !== undefined) await (await import("./sandbox.ts")).recordChecks(run, false);
   for (;;) {
     // A decision comes from a request (`SanomaClient.decide`), which wakes a stopped worker: no deadline.
     const raw = await run.state.deadlines.waiting(run.id, { kind: "approval" }, () =>

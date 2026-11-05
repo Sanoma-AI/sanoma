@@ -1,8 +1,10 @@
 import type { ConnectionRef, ConnectionRegistry, ConnectionSnapshot } from "./connection.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { WorkerApp } from "./app-steps.ts";
+import type { SanomaClient } from "./client.ts";
 import type { Collection } from "./collection.ts";
 import type { DeclaredObjects } from "./config.ts";
+import type { Db } from "./db.ts";
 import type { DeadlineRegistry } from "./deadlines.ts";
 import type { ApprovalState, Approver, Principal, WorkflowDefinition } from "./define.ts";
 import type { Fake } from "./fake.ts";
@@ -54,8 +56,23 @@ export interface WorkerState {
   scenarios?: URL;
   /** The worker's `source`, when it was given one. */
   source?: Source;
-  /** The app's steps (`WorkerOptions.app`), with the worker's own client for them: what the app's built-ins run; none without them. */
+  /** The app's steps (`WorkerOptions.app`): what the app's built-ins run; none without them. */
   appSteps?: WorkerApp;
+  /**
+   * The worker's own client, connected on first use, for its version (what it starts runs on);
+   * closed when the worker stops. What the built-ins' steps tell and read through, never a run's body.
+   */
+  client(): Promise<SanomaClient>;
+  /** Runs `write` once the one before it has settled: the worker's writes to its repository, one at a time. */
+  serially<T>(write: () => Promise<T>): Promise<T>;
+  /**
+   * Checks again, in the background, how far each app taken from a source is behind it
+   * (`Source.behind`), into the runtime's table (`recordAppsBehind`): at the worker's start and
+   * after the checkout follows `main`. Never throws, and is no step: nothing a run reads.
+   */
+  refreshAppsBehind(): void;
+  /** The runtime's tables (`db.ts`): what the worker writes for the app to read, such as a sandbox run's checks. */
+  db(): Promise<Db>;
   types: ReadonlyMap<string, Resource>;
   /** The objects the data files declare, read at each call: a workflow's change operation may not aim at one (`refuseDeclared`). */
   declaredObjects(): Promise<DeclaredObjects>;

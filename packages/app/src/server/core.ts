@@ -184,8 +184,8 @@ function sealedShown(record: LedgerRecord): LedgerRecord {
     : record;
 }
 
-/** The run with its ledger and approvals, and a sandbox run's checks where they can be run, or a 404. */
-export async function runDetail(app: AppContext, runId: string, checks?: ScenarioChecks): Promise<RunDetail> {
+/** The run with its ledger and approvals, and a sandbox run's checks as the worker last ran them, or a 404. */
+export async function runDetail(app: AppContext, runId: string): Promise<RunDetail> {
   const { client } = app;
   const run = await client.run(runId);
   if (!run) throw new ApiError(404, { error: `No run ${runId}`, code: "run_not_found" });
@@ -208,31 +208,34 @@ export async function runDetail(app: AppContext, runId: string, checks?: Scenari
   if (ledger.length === 0 && run.status !== "queued") {
     return { run, ledger, ledgerError: NO_RECORDS, approvals };
   }
-  const seeded = ledger.find((r) => r.type === "scenario.seeded");
-  if (!seeded) return { run, ledger, approvals };
-  // Cucumber runs the scenario's Then steps against the ledger, over the feature file as it reads
-  // now: where the files are.
-  if (!checks) return { run, ledger, approvals, checksError: notHere("Checking a sandbox run") };
-  try {
-    return { run, ledger, approvals, ...(await checks(app, seeded.scenario, run.status, ledger)) };
-  } catch (err) {
-    // The scenarios could not be read at all (an operation's phrase names a field it lacks).
-    const checksError = errorMessage(err);
-    logReadOnce(runId, checksError, "the scenario", err);
-    return { run, ledger, approvals, checksError };
-  }
+  if (!ledger.some((r) => r.type === "scenario.seeded")) return { run, ledger, approvals };
+  // The worker runs a seeded run's checks each time it waits and when it ends; none yet until it first waits.
+  const told = await client.runChecks(runId);
+  if (!told) return { run, ledger, approvals };
+  if ("error" in told) return { run, ledger, approvals, checksError: told.error };
+  // Every answer is final once the run has ended.
+  const ended = isEnded(run.status);
+  return { run, ledger, approvals, checks: told.checks.map((c) => ({ ...c, settled: ended || c.settled })) };
 }
 
 /**
- * A sandbox run's checks against its ledger (`local.scenarioChecks`): Cucumber over the feature
- * files, so only where they are; `runDetail` says why there are none without it.
+ * How many commits the taken app `folder` is behind its source, or why that cannot be told, as
+ * the worker last checked (at its start and after the checkout follows `main`). Only an app the
+ * description lists, taken from a source.
  */
-export type ScenarioChecks = (
-  app: Pick<AppContext, "resolved">,
-  scenario: string,
-  status: RunSummary["status"],
-  ledger: LedgerRecord[],
-) => Promise<Pick<RunDetail, "checks" | "checksError">>;
+export async function appBehind(
+  { client, snapshot }: Pick<AppContext, "client" | "snapshot">,
+  folder: string,
+): Promise<{ behind: number } | { error: string }> {
+  if (!snapshot.description.apps.some((app) => app.name === folder && app.source !== undefined)) {
+    return { error: `No app apps/${folder}/ taken from a source` };
+  }
+  return (
+    (await client.appBehind(folder)) ?? {
+      error: "Not told yet: the worker checks each app's source when it starts and after each push to main",
+    }
+  );
+}
 
 /** What an action that needs the company's checkout says on a host that has none (the Worker). */
 export const notHere = (what: string) =>

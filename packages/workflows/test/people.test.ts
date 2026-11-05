@@ -81,9 +81,10 @@ describe("the people types", () => {
       "sanoma.token.mint",
       "sanoma.token.revoke",
     ]);
-    // No drift or apply: the change workflow, the app's actions, and call for the listing of apps, in every config.
+    // No drift or apply: the change workflow, follow, the app's actions, and call for the listing of apps, in every config.
     expect([...resolved.workflows.keys()]).toEqual([
       "change",
+      "follow",
       "adopt",
       "patch",
       "go-live",
