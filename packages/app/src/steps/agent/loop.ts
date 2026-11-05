@@ -11,10 +11,10 @@ import {
   ToolLoopAgent,
 } from "ai";
 import { noKeyText } from "../../lib/chat.ts";
-import { modelRegistry, modelVendor } from "../models.ts";
+import { modelRegistry, modelVendor } from "../../server/models.ts";
 import { instructions } from "./prompt.ts";
 import { type LoopTools, loopTools } from "./tools.ts";
-import { chatResponse, type EngineTurn } from "./transcript.ts";
+import type { Engine } from "./transcript.ts";
 
 // Our own loop, the chat's first engine: the AI SDK's ToolLoopAgent on the company's model (the
 // first connector with a model half, its default), with our tools on the chat's draft.
@@ -43,10 +43,11 @@ const loopAgent = (model: LanguageModel, system: string, tools: LoopTools) =>
     }),
   });
 
-/** The loop's engine: a turn of `chat` as a UI message stream, its transcript written as it goes. */
-export async function run({ chat, messages, principal, app, signal }: EngineTurn): Promise<Response> {
+/** The loop's engine: a turn of `chat` as a UI message stream. */
+export const run: Engine = ({ chat, messages, step }) => {
   // `postChat` refuses a turn of the loop (`onModelConnector`) while no connector gives a model (`chatModel`).
-  const vendor = modelVendor(app)!;
+  const vendor = modelVendor(step)!;
+  const { by: principal, signal } = step;
   /** What the chat says for a failure: a missing key with its connector's page; the AI SDK's own errors as they are. */
   const onError = (err: unknown): string => {
     if (LoadAPIKeyError.isInstance(err)) return noKeyText(vendor, err.message);
@@ -54,15 +55,14 @@ export async function run({ chat, messages, principal, app, signal }: EngineTurn
     console.error("sanoma app: a chat turn failed:", err);
     return "Something went wrong; the server's log says what";
   };
-  const stream = createUIMessageStream({
+  return createUIMessageStream({
     onError,
     execute: async ({ writer }) => {
-      const [registry, system] = await Promise.all([modelRegistry(app), instructions(app, principal, chat)]);
+      const [registry, system] = await Promise.all([modelRegistry(step), instructions(step, principal, chat)]);
       const model = registry.languageModel(`${vendor}/default`);
       const tools = loopTools({
-        app,
+        step,
         chat,
-        principal,
         showDraft: (data) => writer.write({ type: "data-draft", id: "draft", data }),
       });
       const agent = loopAgent(model, system, tools);
@@ -77,5 +77,4 @@ export async function run({ chat, messages, principal, app, signal }: EngineTurn
       );
     },
   });
-  return chatResponse(app, chat, stream);
-}
+};

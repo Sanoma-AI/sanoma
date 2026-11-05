@@ -1,4 +1,4 @@
-import type { UIMessage } from "ai";
+import type { UIMessage, UIMessageChunk } from "ai";
 import { sql } from "drizzle-orm";
 import {
   bigserial,
@@ -14,6 +14,7 @@ import {
 } from "drizzle-orm/pg-core";
 import type { ConnectionHealth, ConnectionStatus } from "../connection.ts";
 import type { LedgerRecord } from "../ledger.ts";
+import type { RunCheck } from "../scenario.ts";
 import type { SecretLocation } from "../secret-store.ts";
 
 // The runtime's tables in a company's database, beside DBOS's: what `prepareDatabase` makes and
@@ -86,7 +87,7 @@ export const wakeup = pgTable(
   (t) => [check("sanoma_wakeup_one_row", sql`${t.id} = 1`)],
 );
 
-/** The operator agent's chats (`chats.ts`): who each is for, its engine and its draft. */
+/** The operator agent's chats (`chats.ts`): who each is for, its engine, its draft and the turn last begun (its run's id). */
 export const chats = pgTable(
   "sanoma_chats",
   {
@@ -96,6 +97,7 @@ export const chats = pgTable(
     draftId: text(),
     title: text().notNull(),
     createdAt: when().notNull().defaultNow(),
+    turn: text(),
   },
   (t) => [index("sanoma_chats_person").on(t.person, t.createdAt)],
 );
@@ -112,6 +114,24 @@ export const chatMessages = pgTable(
     message: jsonb().$type<UIMessage>().notNull(),
   },
   (t) => [primaryKey({ columns: [t.chatId, t.id] })],
+);
+
+/**
+ * The reply a chat turn streams, as the worker writes it (`Chats.append`): its UI message stream's
+ * chunks in `seq` order, then a row with none, its end. The app streams them to the browser; a
+ * chat's turn's rows go when its next turn begins.
+ */
+export const chatChunks = pgTable(
+  "sanoma_chat_chunks",
+  {
+    chatId: text()
+      .notNull()
+      .references(() => chats.id, { onDelete: "cascade" }),
+    runId: text().notNull(),
+    seq: integer().notNull(),
+    chunk: jsonb().$type<UIMessageChunk>(),
+  },
+  (t) => [primaryKey({ columns: [t.runId, t.seq] }), index("sanoma_chat_chunks_chat").on(t.chatId)],
 );
 
 /** The api tokens (`tokens.ts`): each one's SHA-256, never the token, whom it acts for, its groups, and when it was revoked. */
@@ -170,4 +190,31 @@ export const connectionSetups = pgTable(
     credentialVersion: text().notNull(),
   },
   (t) => [primaryKey({ columns: [t.connectionId, t.revision] })],
+);
+
+/**
+ * How far each app taken from a source is behind it, as the worker last checked (`writeAppsBehind`):
+ * one row per app folder, its count of commits or why it could not be told.
+ */
+export const appBehind = pgTable(
+  "sanoma_app_behind",
+  {
+    folder: text().primaryKey(),
+    behind: integer(),
+    error: text(),
+    checkedAt: when().notNull().defaultNow(),
+  },
+  (t) => [check("sanoma_app_behind_one_answer", sql`(${t.behind} IS NULL) <> (${t.error} IS NULL)`)],
+);
+
+/** Each sandbox run's checks against its scenario, as the worker last ran them (`recordChecks` in sandbox.ts): one row per run. */
+export const runChecks = pgTable(
+  "sanoma_run_checks",
+  {
+    runId: text().primaryKey(),
+    checks: jsonb().$type<RunCheck[]>(),
+    error: text(),
+    checkedAt: when().notNull().defaultNow(),
+  },
+  (t) => [check("sanoma_run_checks_one_answer", sql`(${t.checks} IS NULL) <> (${t.error} IS NULL)`)],
 );

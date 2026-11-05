@@ -2,7 +2,6 @@
 import "@tanstack/react-start/server-only";
 import {
   APPLY_WORKFLOW,
-  databaseUrlSecret,
   errorMessage,
   HOST_SIGNING_KEY,
   isEnded,
@@ -37,10 +36,14 @@ import { WAKEUP_URL } from "./setup.ts";
 // Going live, steps 2 to 6 (step 1 is connect, in setup.ts): choose where the company goes,
 // write `resources/sanoma/infra.ts`, apply the repository, the deploy key the host clones it with
 // and the database, push the local repository to the new one, apply the host, and wait until it
-// answers. Writing the file and pushing are where the checkout is (`local/go-live.ts`). Every change to a vendor is the built-in apply workflow's; what this file calls itself
+// answers. Writing the file and pushing are the worker's, in the runs of the built-ins `go-live`
+// and `go-live-host` (`steps/go-live.ts`). Every change to a vendor is the built-in apply workflow's; what this file calls itself
 // is only reading lists of accounts to choose from, and git. The database, the host and the
 // wakeup are chosen by their contracts (`database`, `host`, `wakeup`) among the config's resource
 // types, never named but to prefer one.
+
+/** What going live reads of the company, in a request (`AppContext`) and in the worker's runs (`AppStepContext`) alike. */
+export type Company = Pick<AppContext, "resolved" | "client">;
 
 /** What `infra.ts` declares, by export, and the deploy key apply declares for its host: the lockfile's keys. */
 export const KEYS = {
@@ -59,7 +62,7 @@ const HOST_LINE = /^export const host = (\w+)\.(\w+)\(/m;
  * earlier file declares; a file written before deploy keys declares none, and its host clones as
  * it did.
  */
-export const beforeHost = ({ resolved }: AppContext, infra: string) => {
+export const beforeHost = ({ resolved }: Company, infra: string) => {
   const [, vendor, type] = HOST_LINE.exec(infra) ?? [];
   if (resolved.types.get(`${vendor}.${type}`)?.host?.derives) return [KEYS.repo, KEYS.sourceKey, KEYS.store];
   return /^export const deployKey\b/m.test(infra) ? [KEYS.repo, KEYS.deployKey, KEYS.store] : [KEYS.repo, KEYS.store];
@@ -77,13 +80,6 @@ const SUPABASE = "supabase.project";
 const CLOUDFLARE = "cloudflare.host";
 export const DOCKER = "docker.container";
 
-/** The runtime image a container on this machine runs: `docker build -t sanoma-runtime packages/sanoma/runtime`. */
-export const RUNTIME_IMAGE = "sanoma-runtime";
-
-/** The secret the database's URL is stored in: its `storeUrl` for the export `store`. */
-export const DATABASE_URL = databaseUrlSecret("store");
-export const SECRETS_KEY = "SANOMA_SECRETS_KEY";
-
 /**
  * What going live fills in a database type beyond its contract's inputs, by type, from the
  * choices: Supabase's organization, and the password apply generates (the one its `storeUrl`
@@ -100,21 +96,16 @@ export const DATABASE_EXTRAS: Record<string, (choices: { organization?: string }
 };
 
 const GITHUB_API = "https://api.github.com";
-/** The wakeup's declaration in `infra.ts`, as `renderInfra` writes it. */
-export const WAKEUP_LINE = /^export const wakeup = /m;
-/** The repository's owner and name in `infra.ts` as `renderInfra` writes them. */
-export const REPO = /export const repo = github\.repository\(\{\s*owner: "([^"]+)",\s*name: "([^"]+)"/;
 const SUPABASE_API = "https://api.supabase.com";
 
 export const idOf = (type: Resource) => `${type.vendor}.${type.type}`;
-export const hasField = (type: Resource, field: string) => field in (type.schema.shape as Record<string, unknown>);
 
 /**
  * The resource types going live may choose from: all but those of a vendor whose host binds its
  * own bootstrap (Sanoma Cloud's), whose database and host go together in a file of their own
  * that going live does not write yet (#514 G1).
  */
-function offered({ resolved }: AppContext): Resource[] {
+function offered({ resolved }: Company): Resource[] {
   const types = [...resolved.types.values()];
   const own = new Set(types.filter((type) => type.host?.bindsBootstrap).map((type) => type.vendor));
   return types.filter((type) => !own.has(type.vendor));
@@ -124,7 +115,7 @@ function offered({ resolved }: AppContext): Resource[] {
  * What going live declares that the config's connectors do not: the repository type and its
  * deploy key's (a GitHub connector of an earlier release has none), a database type, a host type.
  */
-export const missingTypes = (app: AppContext) => {
+export const missingTypes = (app: Company) => {
   const { resolved } = app;
   const types = offered(app);
   return [
@@ -138,7 +129,7 @@ export const missingTypes = (app: AppContext) => {
  * The secrets going live reads: GitHub's and Supabase's tokens (for the lists the page offers),
  * and those that say which vendors are connected (`SETUP_VENDORS`' tokens).
  */
-const connections = async ({ client, resolved }: AppContext, actor?: Principal) => {
+const connections = async ({ client, resolved }: Company, actor?: Principal) => {
   const named = new Map<string, boolean>(
     [...resolved.connections.catalog.methods]
       .filter(([, methods]) => Object.keys(methods).length > 0)
@@ -181,7 +172,7 @@ const isConnected = (stored: Connections, vendor: string, strictly = false) => {
  * Of the config's types that meet a contract, the first of `preferred` whose vendor is
  * connected, else the first connected; when none is, the same over all (the page asks to connect).
  */
-function pick(app: AppContext, stored: Connections, meets: (type: Resource) => unknown, preferred: string[]) {
+function pick(app: Company, stored: Connections, meets: (type: Resource) => unknown, preferred: string[]) {
   const all = offered(app).filter(meets);
   const connected = all.filter((type) => isConnected(stored, type.vendor));
   const among = connected.length ? connected : all;
@@ -204,21 +195,11 @@ export const toConnect = ({ stored, database, host }: Awaited<ReturnType<typeof 
  * What going live chooses now, from what is connected: the database (Neon's first), the host
  * (Cloudflare's first, then Docker's) and its wakeup.
  */
-export async function choose(app: AppContext, actor?: Principal) {
+export async function choose(app: Company, actor?: Principal) {
   const stored = await connections(app, actor);
   const database = pick(app, stored, (type) => type.database, [NEON]);
   const host = pick(app, stored, (type) => type.host, [CLOUDFLARE, DOCKER]);
   return { stored, database, host, wakeup: host ? hostWakeup(app, host, stored) : {} };
-}
-
-/** `into`, with `value` at its dotted `path`, the objects on the way made. */
-export function setPath(into: Record<string, DataValue>, path: string, value: DataValue): Record<string, DataValue> {
-  const keys = path.split(".");
-  const last = keys.pop()!;
-  let at = into;
-  for (const key of keys) at = (at[key] ??= {}) as Record<string, DataValue>;
-  at[last] = value;
-  return into;
 }
 
 /** `url`'s answer as JSON, or an error saying who answered what. */
@@ -240,7 +221,7 @@ const githubHeaders = (token: string) => ({
  * with the stored `GITHUB_TOKEN` (`connections`), so it pushes with that one too, not one this
  * process's environment happens to have.
  */
-export const githubOf = (app: AppContext) => ({
+export const githubOf = (app: Company) => ({
   remote: app.resolved.remotes.get("github"),
   context: { secrets: secretValues(app.client) },
 });
@@ -337,7 +318,7 @@ export async function goLiveChoices(app: AppContext, actor?: Principal): Promise
  * `cannot` says why, and none is declared. With none connected: no wakeup, and nothing to say.
  */
 function hostWakeup(
-  { resolved }: AppContext,
+  { resolved }: Company,
   host: Resource,
   stored: Connections,
 ): { type?: Resource; secrets?: Record<string, DataValue>; cannot?: string } {

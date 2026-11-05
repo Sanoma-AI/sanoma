@@ -5,31 +5,28 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { promisify } from "node:util";
 import {
   type AppMerge,
+  type ChatTurnContext,
   type Chat,
   type CheckResult,
   type Draft,
   errorCode,
   isDirect,
   isEnded,
-  type Principal,
 } from "@sanoma-ai/workflows";
 import { tool } from "ai";
 import { z } from "zod";
-import type { AppContext } from "../../context.ts";
 import type { DraftCard, HeldOutput } from "../../lib/chat.ts";
-import { checks } from "../drafts.ts";
-import { drafting, mustAllow, openDraft, tellCommits } from "./checkout.ts";
+import { checks, drafting, mustAllow, openDraft, tellCommits } from "./checkout.ts";
 
 // Our loop's tools: reading the repository, editing the chat's draft (opened by the first edit,
 // committed at each), taking and updating an app there (a git merge of its source), its checks,
 // and lookups through the policy. No shell: the draft sits in the live checkout until previews
 // exist. Every path goes through the checkout rule (`allowedPath`).
 
-/** What the tools act for: the app, the chat (whose `draftId` the first edit sets) and the person. */
+/** What the tools act for: the turn's step (the worker's client and repository, the person), and the chat (whose `draftId` the first edit sets). */
 export interface ToolsTurn {
-  app: AppContext;
+  step: ChatTurnContext;
   chat: Chat;
-  principal: Principal;
   /** Shows the draft's card in the reply, as it now stands. */
   showDraft(card: DraftCard): void;
 }
@@ -45,15 +42,15 @@ const git = promisify(execFile);
 
 /** The loop's tools for a turn of `turn.chat`. */
 export function loopTools(turn: ToolsTurn) {
-  const { app, chat, principal } = turn;
+  const { step, chat } = turn;
+  const { client, by: principal } = step;
   let opening: Promise<Draft> | undefined;
   /** The checks since the last edit, for the card. */
   let checked: CheckResult | undefined;
 
-  const source = () => drafting(app);
   /** The chat's draft, opened (and attached to the chat) by the first call. */
   const draft = () =>
-    (opening ??= openDraft(app, chat).catch((err: unknown) => {
+    (opening ??= openDraft(step, chat).catch((err: unknown) => {
       opening = undefined;
       throw err;
     }));
@@ -63,16 +60,21 @@ export function loopTools(turn: ToolsTurn) {
     opening
       ? Promise.resolve(true)
       : (drafted ??= chat.draftId
-          ? (source().drafts?.() ?? Promise.resolve([])).then((ids) => ids.includes(chat.id))
+          ? (drafting(step).drafts?.() ?? Promise.resolve([])).then((ids) => ids.includes(chat.id))
           : Promise.resolve(false));
   /**
    * Where reads look: the chat's open draft, else the live checkout (a merged and deleted draft is
    * not opened again by a read), at its commit either way.
    */
-  const readRoot = async () => ((await hasDraft()) ? (await draft()).root : source().root);
+  const readRoot = async () => ((await hasDraft()) ? (await draft()).root : drafting(step).root);
   const showCard = async () => {
     const { branch } = await draft();
-    turn.showDraft({ draft: chat.id, branch, ...(await source().diff(chat.id)), ...(checked && { checks: checked }) });
+    turn.showDraft({
+      draft: chat.id,
+      branch,
+      ...(await drafting(step).diff(chat.id)),
+      ...(checked && { checks: checked }),
+    });
   };
   /**
    * The turn's writes and checks, one at a time: the model may call several tools at once, and a
@@ -94,7 +96,7 @@ export function loopTools(turn: ToolsTurn) {
     const file = await inRepo(root, full);
     const committed = await commit({ paths: [file], message, author: principal.id });
     checked = undefined;
-    await Promise.all([committed && tellCommits(app.client, chat.id, principal), showCard()]);
+    await Promise.all([committed && tellCommits(client, chat.id, principal), showCard()]);
     return { path: file, committed: committed?.revision ?? "nothing changed" };
   };
 
@@ -120,7 +122,7 @@ export function loopTools(turn: ToolsTurn) {
         "Read named account requirements and last-tested status, with links to secure input. Never returns credentials or tests a provider.",
       inputSchema: z.object({}),
       execute: async () =>
-        (await app.client.connections({ actor: principal })).map((card) => ({
+        (await client.connections({ actor: principal })).map((card) => ({
           ...card,
           secureInput: `/connectors/${encodeURIComponent(card.vendor)}`,
         })),
@@ -236,7 +238,7 @@ export function loopTools(turn: ToolsTurn) {
       execute: () =>
         inTurn(async () => {
           if (!(await hasDraft())) throw new Error("Nothing is drafted yet: edit a file first");
-          checked = await checks(app, chat.id);
+          checked = await checks(step, chat.id);
           await showCard();
           return checked;
         }),
@@ -249,23 +251,23 @@ export function loopTools(turn: ToolsTurn) {
         input: z.record(z.string(), z.unknown()).default({}).describe("Its input"),
       }),
       async *execute({ op, input }, { toolCallId, abortSignal }): AsyncGenerator<HeldOutput | { output: unknown }> {
-        const declared = app.resolved.ops.get(op);
-        if (declared?.effect !== "read" || !isDirect(declared, app.resolved.types)) {
+        const declared = step.resolved.ops.get(op);
+        if (declared?.effect !== "read" || !isDirect(declared, step.resolved.types)) {
           throw new Error(`${op} is not a lookup: only a read your instructions list as one is`);
         }
         let output: unknown;
         try {
           // One run per tool call: the chat's and the call's ids, so the run is the chat's alone.
-          output = await app.client.call(op, input, { actor: principal, id: `${chat.id}:${toolCallId}` });
+          output = await client.call(op, input, { actor: principal, id: `${chat.id}:${toolCallId}` });
         } catch (err) {
           const runId = heldRun(err);
           if (runId === undefined) throw err;
           yield { held: { runId } };
-          for (let wait: number = HELD_POLL_MS[0]; !isEnded((await app.client.run(runId))?.status ?? "failed");) {
+          for (let wait: number = HELD_POLL_MS[0]; !isEnded((await client.run(runId))?.status ?? "failed");) {
             await sleep(wait, undefined, { signal: abortSignal });
             wait = Math.min(wait * 2, HELD_POLL_MS[1]);
           }
-          output = await app.client.result(runId);
+          output = await client.result(runId);
         }
         yield { output };
       },

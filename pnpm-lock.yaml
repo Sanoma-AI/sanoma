@@ -330,6 +330,9 @@ importers:
       '@ai-sdk/provider':
         specifier: 4.0.34
         version: 4.0.34
+      '@ai-sdk/provider-utils':
+        specifier: 5.0.68
+        version: 5.0.68(zod@4.6.5)
       '@ai-sdk/react':
         specifier: 4.0.157
         version: 4.0.157(react@19.3.0)(zod@4.6.5)

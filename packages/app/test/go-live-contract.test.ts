@@ -22,7 +22,7 @@ import { secret } from "@sanoma-ai/workflows/resources";
 import { z } from "zod";
 import type { AppContext } from "../src/context.ts";
 import { goLiveChoices } from "../src/server/go-live.ts";
-import { renderInfra } from "../src/server/local/go-live.ts";
+import { renderInfra } from "../src/steps/go-live.ts";
 import type { AppSnapshot } from "../src/snapshot.ts";
 
 // Going live chooses the database, the host and the wakeup by their contracts, among the config's
@@ -186,10 +186,14 @@ const DEPLOY_KEY = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC0deploykey";
 const snapshotOf = (config: SanomaConfig) =>
   ({ description: describeConfig(config), infra: null, bound: [] }) as unknown as AppSnapshot;
 
-/** Going live's context for a config, with `stored` the secrets the client says are stored. */
-function contextOf(connectors: Connector<any, any>[], stored: Record<string, string> = {}): AppContext {
+/** Going live's context for a config, with `stored` the secrets the client says are stored: a request's, and the config a run's step has. */
+function contextOf(
+  connectors: Connector<any, any>[],
+  stored: Record<string, string> = {},
+): AppContext & { config: SanomaConfig } {
   const config: SanomaConfig = { workflows: [], connectors, root };
   return {
+    config,
     resolved: resolveConfig(config),
     snapshot: snapshotOf(config),
     client: {
@@ -197,7 +201,7 @@ function contextOf(connectors: Connector<any, any>[], stored: Record<string, str
         new Map(names.filter((n) => stored[n]).map((n) => [n, { value: stored[n]!, source: "stored" as const }])),
     } as unknown as AppContext["client"],
     place: "this-computer",
-  } as AppContext;
+  } as AppContext & { config: SanomaConfig };
 }
 
 const choices = { owner: "acme", name: "acme-ops", region: "aws-eu-central-1", size: "0.25", port: 8080 };
@@ -369,14 +373,12 @@ describe("going live by contract", () => {
     expect((await goLiveChoices(half)).host?.type).toBe("docker.container");
     const connected = contextOf(ALL, { CLOUDFLARE_API_TOKEN: "cf", CLOUDFLARE_ACCOUNT_ID: "acct" });
     await expect(renderInfra(connected, { ...choices, host: "docker.container" }, DEPLOY_KEY)).rejects.toMatchObject({
-      status: 409,
       message: "Going live now runs the company on cloudflare.host, not docker.container: reload the page",
     });
     const supabaseConnected = contextOf(ALL, { SUPABASE_ACCESS_TOKEN: "sb" });
     await expect(
       renderInfra(supabaseConnected, { ...choices, database: "neon.project" }, DEPLOY_KEY),
     ).rejects.toMatchObject({
-      status: 409,
       message: "Going live now keeps the company's records in supabase.project, not neon.project: reload the page",
     });
   });
@@ -390,13 +392,13 @@ describe("going live by contract", () => {
 
   it("refuses a region the database does not list, and a size it does not take", async () => {
     await expect(renderInfra(contextOf(ALL), { ...choices, region: "mars" }, DEPLOY_KEY)).rejects.toMatchObject({
-      status: 400,
-      body: { issues: [{ path: ["region"] }] },
+      code: "invalid_input",
+      data: { issues: [{ path: ["region"] }] },
     });
     const supabaseOnly = contextOf([github, supabase, docker]);
     await expect(
       renderInfra(supabaseOnly, { ...choices, region: "eu-west-1", organization: "org" }, DEPLOY_KEY),
-    ).rejects.toMatchObject({ status: 400, body: { issues: [{ path: ["size"] }] } });
+    ).rejects.toMatchObject({ code: "invalid_input", data: { issues: [{ path: ["size"] }] } });
   });
 
   it("writes an input at a dotted path as nested fields", async () => {
@@ -440,12 +442,12 @@ describe("going live by contract", () => {
     const earlier = contextOf([github, supabase, docker]);
     (earlier.resolved.types as Map<string, unknown>).delete("github.repository_deploy_key");
     expect((await goLiveChoices(earlier)).missing).toEqual(["github.repository_deploy_key"]);
-    await expect(renderInfra(contextOf([github, docker]), unsized, DEPLOY_KEY)).rejects.toMatchObject({
-      status: 409,
-    });
+    await expect(renderInfra(contextOf([github, docker]), unsized, DEPLOY_KEY)).rejects.toThrow(
+      "The config's connectors declare no a database type: add them to sanoma.config.ts",
+    );
     await expect(
       renderInfra(contextOf([github, supabase, docker]), { ...unsized, region: "eu-west-1" }, DEPLOY_KEY),
-    ).rejects.toMatchObject({ status: 400, body: { issues: [{ path: ["organization"] }] } });
+    ).rejects.toMatchObject({ code: "invalid_input", data: { issues: [{ path: ["organization"] }] } });
   });
 
   it("offers no type of a vendor whose host binds its own bootstrap: its file is not going live's to write yet", async () => {
@@ -474,6 +476,8 @@ describe("going live by contract", () => {
     });
     const app = contextOf([github, neon, defineConnector("cloud", { host: own }, { package: "@acme/cloud" })]);
     expect((await goLiveChoices(app)).missing).toEqual(["a host type"]);
-    await expect(renderInfra(app, choices, DEPLOY_KEY)).rejects.toMatchObject({ status: 409 });
+    await expect(renderInfra(app, choices, DEPLOY_KEY)).rejects.toThrow(
+      "The config's connectors declare no a host type",
+    );
   });
 });

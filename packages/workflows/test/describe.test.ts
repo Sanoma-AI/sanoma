@@ -39,7 +39,7 @@ const base = defineConfig({
 
 describe("describeConfig", () => {
   it("describes each workflow: its input as JSON Schema, the operations it may call, its built-ins and outline", () => {
-    const wf = describeConfig(base).workflows[0]!;
+    const wf = describeConfig(base).workflows.find((entry) => !entry.builtin)!;
     expect(wf.name).toBe("announce");
     expect(wf.title).toBe("Announce a launch");
     expect(wf.input).toMatchObject({
@@ -333,8 +333,9 @@ export default defineWorkflow({
     );
     const { workflows, problems } = describeConfig({ ...base, workflows: [definedIn(file)], root: dir });
     expect(problems).toEqual([]);
-    expect(workflows[0]!.file).toBe(file);
-    expect(workflows[0]!.outline).toEqual({
+    const own = workflows.find((wf) => !wf.builtin)!;
+    expect(own.file).toBe(file);
+    expect(own.outline).toEqual({
       error: expect.stringMatching(/^.*announce\.ts:11:15: ctx is only called/),
     });
     const found = [
@@ -342,7 +343,7 @@ export default defineWorkflow({
       { line: 2, column: 30, message: expect.stringMatching(/^import "node:fs" is not allowed in a workflow/) },
       { line: 11, column: 15, message: expect.stringMatching(/^ctx is only called, directly/) },
     ];
-    expect(workflows[0]!.problems).toEqual(found);
+    expect(own.problems).toEqual(found);
     // A file defining two workflows gives each its problems; one it does not define, the outline's error too.
     const again = { ...definedIn(file), name: "again" } as typeof announce;
     const twice = describeConfig({ ...base, workflows: [definedIn(file), again], root: dir }).workflows;
@@ -356,14 +357,18 @@ export default defineWorkflow({
     dir = mkdtempSync(join(tmpdir(), "sanoma-describe-"));
     const broken = join(dir, "broken.ts");
     writeFileSync(broken, 'export default defineWorkflow({ name: "announce", run: async (ctx) => { ctx. } });\n');
-    const [parsed] = describeConfig({ ...base, workflows: [definedIn(broken)], root: dir }).workflows;
+    const parsed = describeConfig({ ...base, workflows: [definedIn(broken)], root: dir }).workflows.find(
+      (wf) => !wf.builtin,
+    );
     expect(parsed!.outline).toEqual({ error: expect.stringMatching(/broken\.ts could not be parsed/) });
     expect(parsed!.problems).toEqual([
       { line: 1, column: expect.any(Number), message: expect.stringMatching(/^syntax: /) },
     ]);
 
     const gone = join(dir, "gone.ts");
-    const [unread] = describeConfig({ ...base, workflows: [definedIn(gone)], root: dir }).workflows;
+    const unread = describeConfig({ ...base, workflows: [definedIn(gone)], root: dir }).workflows.find(
+      (wf) => !wf.builtin,
+    );
     expect(unread!.outline).toEqual({ error: expect.stringMatching(/could not be read/) });
     expect(unread!.problems).toEqual([
       { line: 1, column: 1, message: expect.stringMatching(/^.*gone\.ts could not be read/) },
@@ -408,13 +413,19 @@ describe("a workflow's name in a site's api", () => {
       wf.problems.filter((p) => p.message.includes("api.")).map((p) => [p.line, p.column, p.message]),
     ]);
     expect(apiProblems).toEqual([
+      ["adopt", []],
       ["announce", []],
       ["apply", []],
       ["call", []],
       ["change", []],
+      ["chat", []],
+      ["connect-existing", []],
       ["data", [[1, 1, "A site calls this workflow api.data, which is the collections': rename it"]]],
       ["drift", []],
+      ["follow", []],
       ["ghost", [[1, 1, "A site calls this workflow api.ghost, which is the vendor ghost's operations: rename it"]]],
+      ["go-live", []],
+      ["go-live-host", []],
       [
         "outbound-next",
         [[1, 1, 'A site calls this workflow api.outboundNext, as workflow "outboundNext" is: rename it']],
@@ -423,6 +434,7 @@ describe("a workflow's name in a site's api", () => {
         "outboundNext",
         [[1, 1, 'A site calls this workflow api.outboundNext, as workflow "outbound-next" is: rename it']],
       ],
+      ["patch", []],
       ["then", [[1, 1, "A site calls this workflow api.then, which a promise would take for its own: rename it"]]],
     ]);
   });

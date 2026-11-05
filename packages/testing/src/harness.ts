@@ -19,8 +19,12 @@ export interface TestApp {
   readonly raw: DBOSClient;
   /** Stops the worker, as a process that stopped would; `restart` starts another. */
   stop(): Promise<void>;
-  /** Stops the worker (unless `stop` did) and starts another on the same config and ledger, as a restarted process would. */
-  restart(): Promise<void>;
+  /**
+   * Stops the worker (unless `stop` did) and starts another on the same config and ledger, as a
+   * restarted process would; with `more`, on these options too, from then on (a repository a
+   * later `beforeAll` made, say).
+   */
+  restart(more?: Omit<TestWorkerOptions, "databaseUrl">): Promise<void>;
 }
 
 const started = <T>(x: T | undefined, what: string): T => {
@@ -35,7 +39,8 @@ const started = <T>(x: T | undefined, what: string): T => {
  * worker's runs and a restarted worker keeps its ledger; the config is resolved once here, for
  * the raw client's app name.
  */
-export function useTestApp(config: SanomaConfig, options: TestWorkerOptions): TestApp {
+export function useTestApp(config: SanomaConfig, given: TestWorkerOptions): TestApp {
+  let options = given;
   const shared = { ...config, ledger: config.ledger ?? memoryLedger(), databaseUrl: options.databaseUrl };
   const { appName } = resolveConfig(shared);
   let worker: Worker | undefined;
@@ -44,8 +49,7 @@ export function useTestApp(config: SanomaConfig, options: TestWorkerOptions): Te
 
   beforeAll(async () => {
     worker = await startTestWorker(shared, options);
-    // Given the worker's repository too, so a host's webhook events reach it (`remoteEvent`).
-    client = await SanomaClient.connect(shared, options.source && { source: options.source });
+    client = await SanomaClient.connect(shared);
     raw = await dbosClient(shared.databaseUrl, appName);
   }, 60_000);
 
@@ -73,7 +77,8 @@ export function useTestApp(config: SanomaConfig, options: TestWorkerOptions): Te
       await started(worker, "worker").stop();
       worker = undefined;
     },
-    async restart() {
+    async restart(more) {
+      if (more) options = { ...options, ...more };
       const old = worker;
       worker = undefined;
       await old?.stop();

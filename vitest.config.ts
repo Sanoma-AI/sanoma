@@ -26,6 +26,7 @@ export default defineConfig({
       },
       { find: /^@sanoma-ai\/bridge\/(connector|fake|tfschema)$/, replacement: src("./packages/bridge/src/$1.ts") },
       { find: /^@sanoma-ai\/app\/build$/, replacement: src("./packages/app/src/build.ts") },
+      { find: /^@sanoma-ai\/app\/steps$/, replacement: src("./packages/app/src/steps/index.ts") },
       { find: /^@sanoma-ai\/(workflows|testing|app|bridge)$/, replacement: src("./packages/$1/src/index.ts") },
       {
         find: /^@sanoma-ai\/connector-([a-z0-9-]+)\/(driver|fake|resources|remote|vault)$/,

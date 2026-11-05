@@ -1,4 +1,4 @@
-import type { ApprovalState, ChangeView, RunStatus, RunSummary } from "@sanoma-ai/workflows";
+import type { AppApi, ApprovalState, ChangeView, RunStatus, RunSummary } from "@sanoma-ai/workflows";
 import type {
   CollectionEntry,
   ConfigDescription,
@@ -74,6 +74,14 @@ import { type Api, createApi, type UntypedApi } from "./api-client.ts";
  * A site's, from `sanoma/site`; the app's own calls through it are untyped.
  */
 export const api: Api = createApi((request) => callFn({ data: request }));
+
+/**
+ * The app's own built-in workflows on the repository (`app-workflows.ts` in the runtime), typed:
+ * each called as a site calls a workflow, through `api` (started, then its `.result` polled until
+ * the run ends), so the worker runs it and the page gets its output, or its failure as an
+ * `ApiError`. Keyed by api name (`apiNameOf`).
+ */
+export const appApi = api as unknown as AppApi;
 
 /** How often the runs and a run's detail refresh while a page shows them. */
 export const POLL_MS = 2_000;

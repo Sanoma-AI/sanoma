@@ -37,12 +37,15 @@ import type { AppContext } from "../src/context.ts";
 import { loopbackLogin } from "../src/loopback.ts";
 import { admitting } from "../src/login/admission.ts";
 import { goLiveChoices, goLiveProgress, goLiveSignIn } from "../src/server/go-live.ts";
-import { goLive, goLiveHost, renderInfra } from "../src/server/local/go-live.ts";
 import { liveSnapshot } from "../src/snapshot-build.ts";
 import { setSetupToken } from "../src/server/setup.ts";
+import { renderInfra } from "../src/steps/go-live.ts";
+import { appSteps } from "../src/steps/index.ts";
+import { pageApi } from "./page-api.ts";
 
-// Going live end to end, on fakes, from a company with nothing but a first commit: the choices
-// (GitHub and Supabase answered by msw), infra.ts written and committed, apply on the repository
+// Going live end to end, on fakes, from a company with nothing but a first commit, its writes the
+// runs of the built-ins `go-live` and `go-live-host` on a worker given the app's steps, called as
+// the page calls them: the choices (GitHub and Supabase answered by msw), infra.ts written and committed, apply on the repository
 // and the database (GitHub's and Supabase's fakes) held for a person, the database URL stored
 // after the project is made, the push to a bare repository standing in for GitHub's, and apply on
 // a host in this process, which ends answering at its URL, with a wakeup service connected (one
@@ -138,7 +141,7 @@ const config: SanomaConfig = {
   root,
 };
 const source = localGitSource(root);
-const app = useTestApp(config, { databaseUrl, source });
+const app = useTestApp(config, { databaseUrl, source, app: appSteps });
 
 const api = setupServer(
   http.get("https://api.github.com/user", () => HttpResponse.json({ login: "acme-dev" })),
@@ -179,7 +182,6 @@ beforeAll(async () => {
     client: app.client,
     place: "this-computer",
     login: admitting(loopbackLogin(), () => ({ people: [], problems: [] })),
-    local: { source },
   };
   now = async () => ({ ...ctx, snapshot: await live() });
   // A free port for the host.
@@ -217,6 +219,9 @@ const settled = () =>
     (p) => p.run !== null && (p.run.pending !== undefined || isEnded(p.run.status)),
     60_000,
   );
+
+/** What `renderInfra` reads, as a run's step has it. */
+const rendering = async () => ({ ...(await now()), config: app.config });
 
 /** A deploy key's public half, as `renderInfra` takes it. */
 const DEPLOY_KEY = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC0deploykey";
@@ -262,7 +267,7 @@ describe("going live", () => {
   });
 
   it("writes infra.ts as a data file the config reads: the repository, the database, and a host running them", async () => {
-    const text = await renderInfra(await now(), choices(), DEPLOY_KEY);
+    const text = await renderInfra(await rendering(), choices(), DEPLOY_KEY);
     expect(text).toBe(
       [
         `import { github } from "@sanoma-ai/connector-github/resources";`,
@@ -328,7 +333,7 @@ describe("going live", () => {
   it("declares sanoma.wakeup after the host once a wakeup service is connected, the host given the instance's token", async () => {
     await setSetupToken(await now(), alice, { name: "SANOMA_WAKEUP_ACCOUNT_TOKEN", value: wakeup.account });
     await setSetupToken(await now(), alice, { name: "SANOMA_WAKEUP_URL", value: wakeup.url });
-    const text = await renderInfra(await now(), choices(), DEPLOY_KEY);
+    const text = await renderInfra(await rendering(), choices(), DEPLOY_KEY);
     expect(text).toContain(`import { sanoma, secret } from "sanoma/resources";`);
     // The worker on the host registers with the instance's token, at the service's URL.
     expect(text).toContain(
@@ -361,7 +366,7 @@ describe("going live", () => {
       login: { sender: resend.emails.send, from: "Acme <login@acme.test>" },
     };
     const client = await SanomaClient.connect({ ...withSender, databaseUrl });
-    const sending = { ...(await now()), resolved: resolveConfig(withSender), client };
+    const sending = { config: withSender, resolved: resolveConfig(withSender), client };
     try {
       const text = await renderInfra(sending, choices(), DEPLOY_KEY);
       expect(text).toContain(`    RESEND_API_KEY: secret("RESEND_API_KEY"),\n`);
@@ -370,16 +375,19 @@ describe("going live", () => {
     } finally {
       await client.close();
     }
-    expect(await renderInfra(await now(), choices(), DEPLOY_KEY)).not.toContain("RESEND_");
+    expect(await renderInfra(await rendering(), choices(), DEPLOY_KEY)).not.toContain("RESEND_");
   });
 
   it("refuses a push before the repository and the database are made", async () => {
-    await expect(goLiveHost(await now(), alice)).rejects.toMatchObject({ status: 409 });
+    await expect(pageApi(await now(), alice).goLiveHost({})).rejects.toMatchObject({
+      status: 422,
+      body: { error: "Apply the repository, its deploy key and the database first" },
+    });
   });
 
   it("goes from the choices to a host answering at its URL", async () => {
     // Steps 3 and 4: infra.ts committed, with the owner, apply on the repository, its deploy key and the database.
-    await goLive(await now(), alice, choices());
+    const first = await pageApi(await now(), alice).goLive(choices());
     const sourceKey = (await app.client.secrets(["SANOMA_SOURCE_KEY"])).get("SANOMA_SOURCE_KEY")!.value;
     expect(sourceKey).toMatch(/^-----BEGIN RSA PRIVATE KEY-----\n/);
     expect(readFileSync(join(root, INFRA), "utf8")).toMatch(/\n {2}key: "ssh-rsa [A-Za-z0-9+/]+=*",\n/);
@@ -387,6 +395,9 @@ describe("going live", () => {
       "alice via Sanoma|Go live: declare the repository, its deploy key, the database and the host",
     );
     let progress = await settled();
+    // The apply the go-live run started, its child, is the run the page follows.
+    expect(first).toEqual({ runId: expect.stringMatching(/:apply$/) });
+    expect(progress.run!.runId).toBe(first.runId);
     expect(progress.infra).toBe(readFileSync(join(root, INFRA), "utf8"));
     expect(progress.run).toMatchObject({ status: "waiting", pending: { plan: { problems: [] } } });
     expect(progress.run!.pending!.plan!.steps.map((s) => [s.id, s.action])).toEqual([
@@ -395,7 +406,10 @@ describe("going live", () => {
       [`${INFRA}#store`, "create"],
     ]);
     // Going live writes the file once.
-    await expect(goLive(await now(), alice, choices())).rejects.toBeTruthy();
+    await expect(pageApi(await now(), alice).goLive(choices())).rejects.toMatchObject({
+      status: 422,
+      body: { error: `${INFRA} is written already: change it in the file, and apply from Hosting` },
+    });
 
     progress = await approveRun(progress);
     expect(progress.run!.results).toMatchObject([
@@ -421,7 +435,7 @@ describe("going live", () => {
     execFileSync("git", ["init", "--quiet", "--bare", "--initial-branch=main", remote]);
 
     // Steps 5 and 6: the push, then apply on the host.
-    await goLiveHost(await now(), alice);
+    await pageApi(await now(), alice).goLiveHost({});
     const head = git("rev-parse", "main");
     expect(execFileSync("git", ["rev-parse", "main"], { cwd: remote, encoding: "utf8" }).trim()).toBe(head);
     progress = await settled();

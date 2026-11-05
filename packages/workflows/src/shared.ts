@@ -308,13 +308,58 @@ export const APPS_LIST = "sanoma.apps.list";
  */
 export const LOGIN_CODE_WORKFLOW = "login-code";
 
-/** The workflows the runtime adds itself, which a config's own may not be named: drift, apply, call, change and login-code. */
+/**
+ * The app's own actions on the company's repository, each a built-in workflow the app starts and
+ * the worker runs with the app's steps (`WorkerOptions.app`, `app-workflows.ts`): Adopt (a drifted
+ * field's value at the vendor into its data file), a form's Save, going live (`infra.ts` written,
+ * then the push and the host's apply) and connecting an existing repository or database.
+ */
+export const ADOPT_WORKFLOW = "adopt";
+export const PATCH_WORKFLOW = "patch";
+export const GO_LIVE_WORKFLOW = "go-live";
+export const GO_LIVE_HOST_WORKFLOW = "go-live-host";
+export const CONNECT_EXISTING_WORKFLOW = "connect-existing";
+
+/**
+ * What a git host's webhook says happened to the company's repository, done by the worker
+ * (`follow-workflow.ts`): started by the app as `host-check`, one run per event (`SanomaClient.follow`).
+ */
+export const FOLLOW_WORKFLOW = "follow";
+
+/**
+ * A turn of a person's chat with the operator agent, run by the worker with the app's steps
+ * (`chat-workflow.ts`): started by the app as the chat's person (`SanomaClient.startTurn`), one run
+ * per message, `chat:<chat>:<message>`.
+ */
+export const CHAT_WORKFLOW = "chat";
+
+/** What the run id of each of the chat `chat`'s turns starts with: exact, as a chat's id has no `:` (`DRAFT_ID`). */
+export const chatRunPrefix = (chat: string) => `chat:${chat}:`;
+
+/** The run id of the chat `chat`'s turn for the message `message`. */
+export const chatRunId = (chat: string, message: string) => `${chatRunPrefix(chat)}${message}`;
+
+/** The feature files that did not load (`loadScenarios`' errors), as a scenario not found names them after its name. */
+export const notLoaded = (errors: readonly { message: string }[]) =>
+  errors.length ? `; these files did not load: ${errors.map((e) => e.message).join("; ")}` : "";
+
+/** The `recv` topic a turn's run is told on (`ChatTell`): a stop, a sign-in code, its own turn's end. */
+export const CHAT_TOPIC = "chat:tell";
+
+/** The workflows the runtime adds itself, which a config's own may not be named: drift, apply, call, change, login-code, follow, chat and the app's actions. */
 export const BUILT_IN_WORKFLOWS: ReadonlySet<string> = new Set([
   DRIFT_WORKFLOW,
   APPLY_WORKFLOW,
   CALL_WORKFLOW,
   CHANGE_WORKFLOW,
   LOGIN_CODE_WORKFLOW,
+  FOLLOW_WORKFLOW,
+  CHAT_WORKFLOW,
+  ADOPT_WORKFLOW,
+  PATCH_WORKFLOW,
+  GO_LIVE_WORKFLOW,
+  GO_LIVE_HOST_WORKFLOW,
+  CONNECT_EXISTING_WORKFLOW,
 ]);
 
 /**
@@ -422,7 +467,7 @@ export const ANONYMOUS_PRINCIPAL: Principal = Object.freeze({ id: ANONYMOUS, gro
 export const WAKEUP_AGENT = "wakeup";
 /** The runtime's agent a scheduled run is started by (`trigger: { schedule }`): the policy decides its starts. */
 export const SCHEDULE_AGENT = "schedule";
-/** The runtime's agent that checks and deploys the hosts: drift's, and apply's after a push to `main` (`SanomaClient.remoteEvent`). */
+/** The runtime's agent that checks and deploys the hosts: drift's, and a host's webhook's (`SanomaClient.follow`), whose apply after a push to `main` is its too. */
 export const HOST_CHECK_AGENT = "host-check";
 /** The runtime's agent that sends a sign-in code (`LOGIN_CODE_WORKFLOW`): a company's policy exempts it from its holds on sending. */
 export const LOGIN_AGENT = "login";

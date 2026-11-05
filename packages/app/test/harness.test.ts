@@ -25,6 +25,7 @@ import { localGitSource } from "../../sanoma/src/source.ts";
 import { ACTOR_HEADER } from "../src/api.ts";
 import { type App, startApp } from "../src/index.ts";
 import { type ChatMessage, chatTransport, type EngineName } from "../src/lib/chat.ts";
+import { appSteps } from "../src/steps/index.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built app. The chat's second engine, end to end: an existing
 // coding agent through HarnessAgent in our local session, on the Anthropic connector's key. No
@@ -215,10 +216,10 @@ export default defineWorkflow({
   git("init", "--quiet", "--initial-branch=main");
   git("add", "--all");
   git("commit", "--quiet", "-m", "First");
-  app = await startApp(testApp.config, {
-    port: 0,
-    source: localGitSource(dir, { databaseUrl: testApp.config.databaseUrl! }),
-  });
+  const source = localGitSource(dir, { databaseUrl: testApp.config.databaseUrl! });
+  // The worker runs the turns: with the checkout and the app's steps.
+  await testApp.restart({ source, app: appSteps });
+  app = await startApp(testApp.config, { port: 0, source });
 }, 600_000);
 
 afterAll(async () => {

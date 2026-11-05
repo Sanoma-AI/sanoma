@@ -2,8 +2,9 @@ import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { deriveSigningKey, signingKeyFor } from "./deployment-key.ts";
 
 // Small values sealed under a key of their own, derived from the deployment's SANOMA_SIGNING_KEY
-// for one purpose (HKDF-SHA256): a sign-in code in a `login-code` run's input, and a request for
-// an invite that a holder of the key sends to the instance (`POST /auth/invite`). AES-256-GCM, the
+// for one purpose (HKDF-SHA256): a sign-in code in a `login-code` run's input, a code a person
+// pastes back to their own agent's sign-in, in the message to their chat turn's run, and a request
+// for an invite that a holder of the key sends to the instance (`POST /auth/invite`). AES-256-GCM, the
 // purpose as its additional data, so a value sealed for one purpose never opens for another.
 
 const IV = 12;
@@ -40,6 +41,7 @@ function unseal(purpose: string, sealed: string): unknown {
 }
 
 const CODE = "login code";
+const CHAT_CODE = "chat code";
 const INVITE = "invite request";
 
 /**
@@ -55,6 +57,18 @@ export function openLoginCode(sealed: string, to: string): string {
     throw new Error(`The sign-in code is not one this deployment sealed for ${to}`);
   }
   return opened.code;
+}
+
+/**
+ * A code a person pastes for their own agent's sign-in, sealed for the chat turn's run `runId`
+ * (`SanomaClient.turnCode`), so the run's messages, which DBOS keeps, never show it.
+ */
+export const sealChatCode = (runId: string, code: string): string => seal(CHAT_CODE, { runId, code });
+
+/** The code `sealChatCode` sealed for `runId`; undefined for anything else, a code sealed for another run among it. */
+export function openChatCode(sealed: string, runId: string): string | undefined {
+  const opened = unseal(CHAT_CODE, sealed) as { runId?: unknown; code?: unknown } | undefined;
+  return typeof opened?.code === "string" && opened.runId === runId ? opened.code : undefined;
 }
 
 /** A request for an invite (`POST /auth/invite { request }`): for whom, until when (ms since the epoch), and a nonce. */

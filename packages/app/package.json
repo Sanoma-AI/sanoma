@@ -1,6 +1,6 @@
 {
   "name": "@sanoma-ai/app",
-  "version": "0.10.12",
+  "version": "0.10.13",
   "description": "A web UI over a Sanoma config: runs, approvals, the ledger and a start form",
   "keywords": [
     "approvals",
@@ -45,6 +45,10 @@
       "types": "./dist/bundle-build.d.ts",
       "default": "./dist/bundle-build.js"
     },
+    "./steps": {
+      "types": "./dist/steps/index.d.ts",
+      "default": "./dist/steps/index.js"
+    },
     "./site": {
       "types": "./src/site.ts",
       "default": "./src/site.ts"
@@ -71,6 +75,7 @@
     "@ai-sdk/harness-claude-code": "1.0.162",
     "@ai-sdk/harness-pi": "1.0.160",
     "@ai-sdk/provider": "4.0.34",
+    "@ai-sdk/provider-utils": "5.0.68",
     "@ai-sdk/react": "4.0.157",
     "@base-ui/react": "^1.9.0",
     "@cloudflare/vite-plugin": "1.66.0",

@@ -8,6 +8,7 @@ import {
 } from "@tanstack/react-query";
 import { CatchBoundary, type ErrorComponentProps, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
+import type { GoLiveInput } from "@sanoma-ai/workflows";
 import { APPLY_WORKFLOW, errorMessage, isEnded, siteDir } from "@sanoma-ai/workflows/shared";
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/csr/ArrowSquareOut";
 import { CheckIcon } from "@phosphor-icons/react/dist/csr/Check";
@@ -24,18 +25,11 @@ import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup } from "#/co
 import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
 import { Skeleton } from "#/components/ui/skeleton.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
-import {
-  errorBodyOf,
-  INFRA,
-  type GoLiveChoices,
-  type GoLiveRequest,
-  type GoLiveRun,
-  SETUP_VENDORS,
-  type SetupStatus,
-} from "../api.ts";
-import { goLiveFn, goLiveHostFn, goLiveSignInFn } from "../functions.ts";
+import { errorBodyOf, INFRA, type GoLiveChoices, type GoLiveRun, SETUP_VENDORS, type SetupStatus } from "../api.ts";
+import { goLiveSignInFn } from "../functions.ts";
 import { RUN_TONE } from "../lib/tone.ts";
 import {
+  appApi,
   configQuery,
   goLiveChoicesQuery,
   goLiveProgressQuery,
@@ -216,7 +210,7 @@ function ChooseForm() {
 function ChooseFields({ choices }: { choices: GoLiveChoices }) {
   const { database, host, organizations } = choices;
   const regions = database?.regions ?? null;
-  const [form, setForm] = useState<GoLiveRequest>({
+  const [form, setForm] = useState<GoLiveInput>({
     owner: choices.owners[0]?.login ?? "",
     name: choices.name,
     ...(organizations?.[0] && { organization: organizations[0].id }),
@@ -225,15 +219,14 @@ function ChooseFields({ choices }: { choices: GoLiveChoices }) {
     ...(host && { host: host.type }),
     port: 8080,
   });
-  const set = (field: keyof GoLiveRequest) => (e: { target: { value: string } }) => {
+  const set = (field: keyof GoLiveInput) => (e: { target: { value: string } }) => {
     const { value } = e.target;
     // An empty size is the vendor's default: left out.
     setForm({ ...form, [field]: field === "port" ? Number(value) : field === "size" && !value ? undefined : value });
   };
   const queryClient = useQueryClient();
-  const goLive = useServerFn(goLiveFn);
   const mutation = useMutation({
-    mutationFn: () => goLive({ data: form }),
+    mutationFn: () => appApi.goLive(form),
     onSuccess: async () => {
       toast.success("Wrote infra.ts and started apply");
       await queryClient.invalidateQueries({ queryKey: RUNS_KEY });
@@ -430,9 +423,8 @@ function ApplyAgain({ only }: { only: string[] }) {
 /** Pushes this repository to the new one, then starts apply on the host. */
 function PushButton() {
   const queryClient = useQueryClient();
-  const push = useServerFn(goLiveHostFn);
   const mutation = useMutation({
-    mutationFn: () => push(),
+    mutationFn: () => appApi.goLiveHost({}),
     onSuccess: async () => {
       toast.success("Pushed, and started apply on the host");
       await queryClient.invalidateQueries({ queryKey: RUNS_KEY });

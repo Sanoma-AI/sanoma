@@ -32,21 +32,26 @@ import { type Tokens, tokenStore } from "./tokens.ts";
 import { collectionsDriver } from "./collection.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { configuredSecrets } from "./credentials.ts";
-import { dbosClient, lazyDb, type LazyDb, spendInviteRequest } from "./db.ts";
+import {
+  type AppBehind,
+  dbosClient,
+  lazyDb,
+  type LazyDb,
+  readAppBehind,
+  readRunChecks,
+  spendInviteRequest,
+} from "./db.ts";
 import { type CredentialStatus, credentialsOf } from "./env.ts";
 import { type ApprovalState, Principal, type WorkflowDefinition } from "./define.ts";
 import { APPLY_WORKFLOW, type ApplyInput, type ApplyReport } from "./apply.ts";
 import {
   ADMIN,
-  BASE,
   type ChangeEvent,
   ChangeEventSchema,
   ChangeInput,
   type ChangeReport,
   type ChangeState,
-  followBase,
   initialChangeState,
-  repositoryOf,
 } from "./change.ts";
 import { DRIFT_WORKFLOW, type DriftReport } from "./drift.ts";
 import { isDirect } from "./direct.ts";
@@ -59,7 +64,6 @@ import {
   parseOrThrow,
   PolicyDeniedError,
   SanomaError,
-  vendorCodeOf,
 } from "./errors.ts";
 import {
   insertRecord,
@@ -70,7 +74,6 @@ import {
   type OwnedLedger,
   ownedLedger,
 } from "./ledger.ts";
-import { warn } from "./log.ts";
 import type { CallContext, Driver, Op, SignInMethod } from "./op.ts";
 import { allowAll, type RecordedDecision } from "./policy.ts";
 import { admit, readPeople } from "./resources.ts";
@@ -83,10 +86,16 @@ import {
   CHANGE_MERGE,
   CHANGE_TOPIC,
   CHANGE_WORKFLOW,
+  CHAT_TOPIC,
+  CHAT_WORKFLOW,
   changeIdOf,
+  chatRunId,
+  chatRunPrefix,
   DATA_VENDOR,
+  DRAFT_ID,
   ENDED_STATUSES,
   errorMessage,
+  FOLLOW_WORKFLOW,
   HOST_CHECK_AGENT,
   isEnded,
   isToken,
@@ -96,14 +105,11 @@ import {
   SCHEDULE_AGENT,
   WORKFLOW_ACTION,
 } from "./shared.ts";
-import { draftOf, type RemoteEvent, type RepoRef, type Source } from "./source.ts";
-
-/** The company's repository on its host, for `remoteEvent`. */
-type Repository = Awaited<ReturnType<typeof repositoryOf>>;
-
-/** Whether two references name one repository: a host's names are compared without case. */
-const sameRepo = (a: RepoRef, b: RepoRef) =>
-  a.owner.toLowerCase() === b.owner.toLowerCase() && a.name.toLowerCase() === b.name.toLowerCase();
+import { RemoteEventSchema } from "./follow-workflow.ts";
+import type { ChatTell, ChatTurnInput } from "./chat-workflow.ts";
+import { sealChatCode } from "./seal.ts";
+import type { RunChecks } from "./scenario.ts";
+import type { RemoteEvent } from "./source.ts";
 
 /** A principal, or its id alone. */
 const PrincipalOrId = z.union([
@@ -261,11 +267,6 @@ export interface ClientOptions {
    */
   onWrite?: () => void;
   /**
-   * The company's repository, as the worker is given it: what `remoteEvent` acts for (its
-   * `origin`) and fetches a draft's new commits into. Without one, `remoteEvent` does nothing.
-   */
-  source?: Source;
-  /**
    * The version each run it starts is queued for, so only a worker of that code runs it: the app
    * bundle's (its snapshot's), which is live beside a worker of another version while a deploy
    * rolls. Without it a run is queued with none, which DBOS gives the app's latest version.
@@ -365,10 +366,12 @@ export class SanomaClient {
       options.sandbox,
       "`sandbox` must be the name of a scenario in the config's `scenarios/`",
     );
-    if (workflow.name === CHANGE_WORKFLOW && !isChangeRunOf((parsed as ChangeInput).id, runId)) {
-      throw new SanomaError("invalid_input", "A change is started with openChange, which names its run", { runId });
-    }
     const hold = await this.startHold(workflow.name, parsed, startedBy, runId);
+    const own = OWN_STARTS[workflow.name];
+    if (own && !(await own.admits(parsed, startedBy, runId, this))) {
+      const refused = `A run of ${workflow.name} is started with ${own.by}, which names its run`;
+      throw new SanomaError("invalid_input", refused, { runId });
+    }
     const args: RunArgs = { input, startedBy, ...(sandbox === undefined ? {} : { sandbox }), ...(hold && { hold }) };
     // Kept on the run's status row too, so a listing tells sandbox runs apart without its input,
     // and says whom an agent's run is for (DBOS keeps the principal's id and groups itself); a
@@ -414,7 +417,9 @@ export class SanomaClient {
    * The policy's answer to starting a run of `workflow` as `startedBy` (`decideStart`), for a
    * workflow of the config's own: a deny throws `policy_denied`; a hold is what the run waits on
    * before its body. A run `runId` names already is returned as it is, whatever the policy says now, but to a visitor.
-   * A visitor (`isVisitor`) starts no built-in but `call`, whose calls the policy decides as direct ones.
+   * A visitor (`isVisitor`, an api token's principal too) starts no built-in but `call`, whose calls
+   * the policy decides as direct ones: the app's own actions on the repository (`app-workflows.ts`)
+   * are staff's, as their server functions were, which no site's host answered.
    */
   private async startHold(
     workflow: string,
@@ -976,6 +981,24 @@ export class SanomaClient {
     return Promise.all(rows.map((row) => this.changeView(row)));
   }
 
+  /**
+   * Whether a change is merging or deploying `main` now (`ChangeState.phase`, as its run last
+   * published it), which follows `main` and applies the hosts itself.
+   */
+  async changeDeploying(): Promise<boolean> {
+    const rows = await this.dbos.listWorkflows({
+      workflowName: CHANGE_WORKFLOW,
+      applicationName: this.config.appName,
+      status: dbosStatusesOf("queued", "running"),
+      loadInput: false,
+      loadOutput: false,
+    });
+    const phases = await Promise.all(
+      rows.map(async (row) => (await this.dbos.getEvent<ChangeState>(row.workflowID, CHANGE_EVENT, 0))?.phase),
+    );
+    return phases.some((phase) => phase === "merging" || phase === "deploying");
+  }
+
   /** The change of the draft `id`: its latest run's (`openChange`), or undefined when it has none. */
   async change(id: string): Promise<ChangeView | undefined> {
     const [row] = await this.changeRuns(id, { load: true });
@@ -1025,105 +1048,86 @@ export class SanomaClient {
   }
 
   /**
-   * Does what a host's webhook says happened (`RemoteEvent`, from a remote half's `webhook`) to the
-   * company's repository, the `origin` of `ClientOptions.source` (`repositoryOf`); an event of
-   * another repository, or with no source, is ignored. A delivery told again does nothing more.
-   *
-   * - `pushed` to `main`: the checkout follows `main`, then apply on the declared hosts
-   *   (`ResolvedConfig.hosts`) as `host-check`, as the run `deploy:<head>`, once per head; nothing
-   *   with no host, nor while a change is merging or deploying, which does both itself.
-   * - `pushed` to a draft's branch (`draftOf`) with its change open: the host's commits fetched into
-   *   the draft (`Source.follow` on its branch), then the change told `commits`, as `by`; nothing
-   *   when the change or the draft is at that head already (the run's own push), or when the draft
-   *   cannot fast-forward to it (warned).
-   * - `closed` for the open change's pull request: the change told `merged` (with its merge commit)
-   *   or `closed`, as `by`. The run checks either on the host before it believes it.
+   * Starts the built-in follow workflow on what a host's webhook says happened (`RemoteEvent`,
+   * from a remote half's `webhook`, verified), as the runtime's agent `host-check`: the worker,
+   * which has the checkout, follows it there (`follow-workflow.ts`). Its run id is
+   * `follow:<sha256 of the event>`, so a delivery told again is the one run. Its id.
    */
-  async remoteEvent(event: RemoteEvent, options: { by: Principal | string }): Promise<void> {
-    const main = event.kind === "pushed" && event.branch === BASE;
-    const id = draftOf(event.branch);
-    if (!main && id === undefined) return;
-    const repository = await this.repository();
-    if (!repository || !sameRepo(repository.repo, event.repo)) return;
-    if (main) return this.deployPush(repository, event.head);
-    const change = await this.change(id!);
-    if (!change || isEnded(change.status)) return;
-    let told: ChangeEvent;
-    let key: string;
-    if (event.kind === "closed") {
-      // A pull request of an earlier change of the draft is not this one's.
-      if (event.number !== change.state.pullRequest?.number) return;
-      told = event.merged && event.sha !== undefined ? { kind: "merged", sha: event.sha } : { kind: "closed" };
-      key = `${event.number}:${event.sha ?? "closed"}`;
-    } else {
-      if (change.state.head === event.head || !(await this.fetched(repository, event.branch, event.head))) return;
-      told = { kind: "commits" };
-      key = event.head;
-    }
-    await this.changeEvent(id!, told, { by: options.by, key: `${event.kind}:${event.branch}:${key}` }).catch(
-      (err: unknown) => {
-        // Ended, or gone, since it was read: nothing to tell.
-        if (!["run_ended", "run_not_found"].includes(errorCode(err) ?? "")) throw err;
-      },
-    );
-  }
-
-  /** After a push of `head` to `main` (`remoteEvent`): the checkout follows it, then apply on the declared hosts. */
-  private async deployPush({ source }: Repository, head: string): Promise<void> {
-    const runId = `deploy:${head}`;
-    const [deployed, phases] = await Promise.all([this.run(runId), this.openChangePhases()]);
-    if (deployed || phases.some((phase) => phase === "merging" || phase === "deploying")) return;
-    // First, as a change's deploy does: the hosts, and what apply reads, are then main's.
-    const moved = await followBase(this.config.remotes, this.storedSecrets, source);
-    if (!("revision" in moved)) {
-      // Not on stale files, and nothing recorded as `deploy:<head>`: a redelivery may deploy it.
-      warn(
-        `${BASE} was not deployed: the checkout did not follow it: ${"skipped" in moved ? moved.skipped : moved.error}`,
-      );
-      return;
-    }
-    const hosts = await this.config.hosts();
-    if (hosts.length) await this.apply({ only: hosts }, { startedBy: HOST_CHECK_AGENT, runId });
-  }
-
-  /** Where each open change is (`ChangeState.phase`), read from what its run last published. */
-  private async openChangePhases(): Promise<(ChangeState["phase"] | undefined)[]> {
-    const rows = await this.dbos.listWorkflows({
-      workflowName: CHANGE_WORKFLOW,
-      applicationName: this.config.appName,
-      status: dbosStatusesOf("queued", "running"),
-      loadInput: false,
-      loadOutput: false,
-    });
-    return Promise.all(
-      rows.map(async (r) => (await this.dbos.getEvent<ChangeState>(r.workflowID, CHANGE_EVENT, 0))?.phase),
-    );
+  async follow(event: RemoteEvent): Promise<string> {
+    const parsed = parseOrThrow(RemoteEventSchema, event, "Not an event of a host's webhook");
+    return this.start(FOLLOW_WORKFLOW, parsed, { startedBy: HOST_CHECK_AGENT, runId: followRunId(parsed) });
   }
 
   /**
-   * Brings `head`, pushed to the draft's `branch` on the host, into the draft: false when it holds
-   * it already, or cannot take it (no `follow`, a commit of its own, or one uncommitted: warned).
+   * Starts a turn of the chat `input.chat` on the person's new message `input.message`, already in
+   * its transcript (`chats.upsert`), as `startedBy`, the chat's person: the built-in chat workflow,
+   * as the run `chat:<chat>:<message>` (`chatRunId`), after the chat's turn before it, which it
+   * waits for; that turn, when it has not ended, is told to stop. The worker runs the turn and
+   * writes its reply (`chats.chunks`, then the transcript). Its run id.
    */
-  private async fetched({ source, url, host }: Repository, branch: string, head: string): Promise<boolean> {
-    const local = await Promise.resolve(source.head(branch)).catch(() => undefined);
-    if (local === head) return false;
-    const moved = source.follow
-      ? await source.follow({ url, token: await host.token(), ref: branch })
-      : { skipped: "this repository cannot follow its remote" };
-    if ("skipped" in moved) {
-      warn(`${branch} did not take the host's commits: ${moved.skipped}`);
-      return false;
+  async startTurn(input: Omit<ChatTurnInput, "after">, options: StartOptions): Promise<string> {
+    const runId = chatRunId(input.chat, input.message);
+    // The latest other than this one, which a start told again finds first.
+    const before = (await this.turns(input.chat, 2)).find((row) => row.workflowID !== runId);
+    await this.start(CHAT_WORKFLOW, { ...input, ...(before && { after: before.workflowID }) } satisfies ChatTurnInput, {
+      ...options,
+      runId,
+    });
+    // Once the new turn stands, which refused anyone but the chat's person.
+    if (before && !isEnded(runStatus(before.status, []))) {
+      await this.dbos.send(before.workflowID, { kind: "stop" } satisfies ChatTell, CHAT_TOPIC);
     }
-    return true;
+    return runId;
   }
 
-  /** The repository of `ClientOptions.source` on its host (`repositoryOf`); undefined with no source, remote or half for it. */
-  private async repository(): Promise<Repository | undefined> {
-    const { source } = this.options;
-    if (!source) return undefined;
-    return repositoryOf(this.config.remotes, this.storedSecrets, source).catch((err: unknown) => {
-      if (["no_remote", "no_remote_half"].includes(vendorCodeOf(err) ?? "")) return undefined;
-      throw err;
+  /** The chat's latest turn (`startTurn`), or undefined when it has had none. */
+  async turn(chat: string): Promise<RunSummary | undefined> {
+    const [row] = await this.turns(chat, 1);
+    return row && this.summarize(row);
+  }
+
+  /**
+   * Hands `code`, which the person pasted on their own agent's sign-in card, to the sign-in waiting
+   * in the turn under way of their chat `chat`, sealed (`sealChatCode`), so the run's messages never
+   * show it. `run_not_found` when the chat has no turn under way of `by`'s.
+   */
+  async turnCode(chat: string, code: string, options: { by: Principal | string }): Promise<void> {
+    const by = await this.admitted(
+      parseOrThrow(PrincipalOrId, options?.by, '`by` must be a principal, such as "alice" or { id: "alice" }'),
+    );
+    const [row] = await this.turns(chat, 1);
+    if (!row || isEnded(runStatus(row.status, [])) || row.authenticatedUser !== by.id) {
+      throw new SanomaError("run_not_found", `No turn of chat ${chat} is under way`, { chat });
+    }
+    const told: ChatTell = { kind: "code", sealed: sealChatCode(row.workflowID, code) };
+    await this.dbos.send(row.workflowID, told, CHAT_TOPIC);
+  }
+
+  /**
+   * How far the app `folder` (taken from a source) is behind its source, or why that cannot be
+   * told, as the worker last checked (at its start and after the checkout follows `main`);
+   * undefined when it has not told it.
+   */
+  async appBehind(folder: string): Promise<AppBehind | undefined> {
+    return readAppBehind(await this.database.db(), folder);
+  }
+
+  /** A sandbox run's checks against its scenario as the worker last ran them (when the run last waited or ended); undefined for none yet. */
+  async runChecks(runId: string): Promise<RunChecks | undefined> {
+    return readRunChecks(await this.database.db(), runId);
+  }
+
+  /** The latest `limit` turns of the chat `chat`, newest first: its runs `chat:<chat>:<message>` (`chatRunPrefix`). */
+  private async turns(chat: string, limit: number) {
+    return this.dbos.listWorkflows({
+      // DBOS matches the prefix with LIKE as given, where a chat id's `_` is any character: escaped.
+      workflow_id_prefix: chatRunPrefix(chat).replaceAll(/[\\%_]/g, "\\$&"),
+      workflowName: CHAT_WORKFLOW,
+      applicationName: this.config.appName,
+      sortDesc: true,
+      limit,
+      loadInput: false,
+      loadOutput: false,
     });
   }
 
@@ -1686,6 +1690,47 @@ const alreadyDecided = (runId: string, a: ApprovalState) =>
       ...(a.withdrawnReason === undefined ? {} : { withdrawnReason: a.withdrawnReason }),
     },
   );
+
+/**
+ * The built-ins only one of the client's methods starts, by name: that method (`by`), and whether
+ * a start is its own (`admits`), which `start` asks once the policy has (a visitor is denied
+ * first), refusing any other: a change under the id `openChange` names; a follow as `host-check`
+ * under its event's id; a chat turn under its chat's and message's id, after a turn of the same
+ * chat, as the chat's person.
+ */
+const OWN_STARTS: Record<
+  string,
+  {
+    by: string;
+    admits(
+      input: any,
+      startedBy: Principal,
+      runId: string | undefined,
+      client: SanomaClient,
+    ): boolean | Promise<boolean>;
+  }
+> = {
+  [CHANGE_WORKFLOW]: { by: "openChange", admits: (input: ChangeInput, _by, runId) => isChangeRunOf(input.id, runId) },
+  [FOLLOW_WORKFLOW]: {
+    by: "follow",
+    admits: (event: RemoteEvent, by, runId) => runId === followRunId(event) && by.id === HOST_CHECK_AGENT,
+  },
+  [CHAT_WORKFLOW]: {
+    by: "startTurn",
+    admits: async ({ chat, message, after }: ChatTurnInput, by, runId, client) =>
+      runId === chatRunId(chat, message) &&
+      (after === undefined ||
+        (after.startsWith(chatRunPrefix(chat)) && DRAFT_ID.test(after.slice(chatRunPrefix(chat).length)))) &&
+      (await client.chats.get(chat))?.person === by.id,
+  },
+};
+
+/**
+ * A follow's run id (`SanomaClient.follow`): `follow:` and the SHA-256 of the event as its schema
+ * parsed it, its keys then in the schema's order, so one event is one id however its JSON was laid out.
+ */
+const followRunId = (parsed: RemoteEvent) =>
+  `follow:${createHash("sha256").update(JSON.stringify(parsed)).digest("hex")}`;
 
 /** A change's first run's id: `change:<draft id>`. */
 const changeRunId = (id: string) => `change:${id}`;
