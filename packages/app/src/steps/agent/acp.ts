@@ -369,14 +369,14 @@ class AcpTurn {
         const full = await this.#allowed(params.path);
         const bytes = await this.box.read(full);
         if (bytes === null) throw acp.RequestError.resourceNotFound(full);
-        const text = new TextDecoder().decode(bytes);
+        const text = utf8.decode(bytes);
         if (params.line == null && params.limit == null) return { content: text };
         const from = Math.max(0, (params.line ?? 1) - 1);
         const lines = text.split("\n");
         return { content: lines.slice(from, params.limit == null ? undefined : from + params.limit).join("\n") };
       })
       .onRequest("fs/write_text_file", async ({ params }) => {
-        await this.box.write(await this.#allowed(params.path), new TextEncoder().encode(params.content));
+        await this.box.write(await this.#allowed(params.path), utf8.encode(params.content));
         return {};
       })
       .onRequest("terminal/create", async ({ params }) => {
@@ -720,19 +720,19 @@ export async function install(box: Box, agent: OwnAgent, dir: string): Promise<v
   const marker = join(dir, "installed.json");
   const wanted = JSON.stringify(agent.packages);
   const found = await box.read(marker);
-  if (found && new TextDecoder().decode(found) === wanted) return;
+  if (found && utf8.decode(found) === wanted) return;
   const key = `${box.id} ${dir}`;
   let running = installs.get(key);
   if (!running) {
     running = (async () => {
-      await box.write(join(dir, "package.json"), new TextEncoder().encode('{ "private": true }\n'));
+      await box.write(join(dir, "package.json"), utf8.encode('{ "private": true }\n'));
       const pnpm = ["add", "--ignore-scripts", "--ignore-workspace", "--loglevel=error", ...agent.packages];
       await ran(box, `rm -rf node_modules && ${commandLine("pnpm", pnpm)}`, dir);
       if (agent.setup) {
         const setup = join(dir, agent.setup);
         await ran(box, commandLine("node", [basename(setup)]), dirname(setup));
       }
-      await box.write(marker, new TextEncoder().encode(wanted));
+      await box.write(marker, utf8.encode(wanted));
     })();
     installs.set(key, running);
     void running.then(
@@ -743,11 +743,17 @@ export async function install(box: Box, agent: OwnAgent, dir: string): Promise<v
   await running;
 }
 
+/** A file's text in the box, as `BoxSession` reads it too, and back. */
+const utf8 = {
+  encode: (text: string) => new TextEncoder().encode(text),
+  decode: (bytes: Uint8Array) => new TextDecoder("utf-8", { ignoreBOM: true }).decode(bytes),
+};
+
 /** Runs `line` in `box`, in `cwd`: an error with the end of what it printed unless it exits 0. */
 const ran = async (box: Box, line: string, cwd: string) => new Started(await box.run(line, { cwd })).done();
 
-/** `promise`, or a failure when the turn stops (or `timeout` passes) first; `promise` goes on. */
-function untilAborted<T>(promise: Promise<T>, signal: AbortSignal, timeout?: { ms: number; text: string }): Promise<T> {
+/** `promise`, or a failure when the turn stops or `timeout` passes first; `promise` goes on. */
+function untilAborted<T>(promise: Promise<T>, signal: AbortSignal, timeout: { ms: number; text: string }): Promise<T> {
   return new Promise<T>((done, fail) => {
     if (signal.aborted) return fail(new Error(STOPPED));
     const end = (settle: () => void) => {
@@ -756,7 +762,7 @@ function untilAborted<T>(promise: Promise<T>, signal: AbortSignal, timeout?: { m
       settle();
     };
     const stop = () => end(() => fail(new Error(STOPPED)));
-    const timer = timeout && setTimeout(() => end(() => fail(new Error(timeout.text))), timeout.ms);
+    const timer = setTimeout(() => end(() => fail(new Error(timeout.text))), timeout.ms);
     signal.addEventListener("abort", stop, { once: true });
     promise.then(
       (value) => end(() => done(value)),
@@ -767,19 +773,18 @@ function untilAborted<T>(promise: Promise<T>, signal: AbortSignal, timeout?: { m
 
 /**
  * The shims' directory (`.acp/shims` under the box's `home`), first on the agent's PATH: each of
- * `SHIMS`, so nothing of the box's signs the agent in. Written each turn, so a box that lost them
- * gets them again, each aside and then moved into place: another turn's agent may be running one now.
+ * `SHIMS`, so nothing of the box's signs the agent in. Written each turn by one command, so a box
+ * that lost them gets them again, each aside and then moved into place: another turn's agent may be
+ * running one now.
  */
 export async function shims(box: Box, home: string): Promise<string> {
   const dir = join(home, OWN_AGENTS_DIR, "shims");
   const aside = `.${generateId()}`;
-  const names = Object.keys(SHIMS);
-  await Promise.all(
-    names.map((name) =>
-      box.write(join(dir, `${name}${aside}`), new TextEncoder().encode(SHIMS[name]!), { mode: 0o755 }),
-    ),
+  const written = Object.entries(SHIMS).map(
+    ([name, script]) =>
+      `cat > ${name}${aside} <<'SANOMA_SHIM'\n${script}SANOMA_SHIM\nchmod 755 ${name}${aside} && mv -f ${name}${aside} ${name}`,
   );
-  await ran(box, names.map((name) => `mv -f ${name}${aside} ${name}`).join(" && "), dir);
+  await ran(box, [`mkdir -p ${quote(dir)} && cd ${quote(dir)}`, ...written].join(" &&\n"), home);
   return dir;
 }
 
@@ -854,7 +859,7 @@ class Started {
   /** Writes `text` to its stdin, when it was given one. */
   write(text: string) {
     this.#writer ??= this.process.stdin.getWriter();
-    void this.#writer.write(new TextEncoder().encode(text)).catch(() => {});
+    void this.#writer.write(utf8.encode(text)).catch(() => {});
   }
 
   /** Resolves when it exits 0; an error with the end of what it printed otherwise. */
