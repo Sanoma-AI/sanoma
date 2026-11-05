@@ -146,9 +146,15 @@ describe("the chat's thread", () => {
     open.mockRestore();
   });
 
-  it("opens an address as a plain link, with no dialog", async () => {
-    await play(createChat<ChatMessage>().user("Who?").assistant("Write to [us](mailto:hello@example.com)."));
+  it("opens an address as a plain link, and asks for any other, however it is written", async () => {
+    await play(
+      createChat<ChatMessage>()
+        .user("Who?")
+        .assistant("Write to [us](mailto:hello@example.com), or see [this](//example.com/x) and [that](/inbox)."),
+    );
     expect((await screen.findByRole("link", { name: "us" })).getAttribute("href")).toBe("mailto:hello@example.com");
+    expect(screen.getByRole("button", { name: "this" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "that" })).toBeTruthy();
   });
 
   it("loads no image a reply names, by Markdown or by HTML", async () => {

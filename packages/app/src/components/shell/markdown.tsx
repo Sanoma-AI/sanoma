@@ -25,7 +25,7 @@ import { Table, TableCell, TableHead } from "#/components/ui/table.tsx";
 // classes: a company's Tailwind does not scan Streamdown's install, so every element it draws with
 // a class of its own is given here, and `space-y-0` takes its root's away. No image is ever loaded:
 // what a reply says can come from what the agent read, and an image's address would carry data out
-// without anyone clicking. Links are Streamdown's hardened ones, asking before they open; a fenced block is the kit's
+// without anyone clicking. Links are Streamdown's hardened ones, asking before they open (bar an address or an anchor); a fenced block is the kit's
 // CodeBlock, its highlighter and each language loaded the first time one is shown.
 
 /** An element as `tag` with `className`, without the `node` Streamdown passes a component. */
@@ -39,7 +39,13 @@ const Fence = lazy(() => import("./fence.tsx"));
 
 /** A fenced block's code. */
 const FencedCode: Components["code"] = ({ node: _node, className, children }) => {
-  if (typeof children !== "string") return <code className={className}>{children}</code>;
+  if (typeof children !== "string") {
+    return (
+      <CodeBlock>
+        <CodeBlockContent>{children}</CodeBlockContent>
+      </CodeBlock>
+    );
+  }
   const text = children.replace(/\n$/, "");
   const plain = (
     <CodeBlock>
@@ -107,10 +113,10 @@ const ELEMENTS: Components = {
   ol: styled("ol", "flex list-decimal flex-col gap-1 pl-5"),
   li: "li",
   strong: styled("strong", "font-medium"),
-  // A web link (or one still streaming) is Streamdown's, so an unfinished one is not followed and a
-  // click asks first (`LINK_SAFETY`); an address, an in-page or an in-app one is a plain link.
+  // Streamdown's, so an unfinished link is not followed and a click asks first (`LINK_SAFETY`); only
+  // an email address and an in-page anchor, which leave nothing, are plain links.
   a: ({ node: _node, href, ...props }) =>
-    !href || !/^(https?|streamdown):/i.test(href) ? (
+    !href || /^(mailto:|#)/i.test(href) ? (
       <a {...props} href={href} className="underline underline-offset-4" />
     ) : (
       <StreamdownLink
