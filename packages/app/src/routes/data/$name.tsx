@@ -1,6 +1,6 @@
 import type { ConfigDescription } from "@sanoma-ai/workflows/describe";
 import { errorMessage, personsOf } from "@sanoma-ai/workflows/shared";
-import { hashKey, keepPreviousData, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { hashKey, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
@@ -86,11 +86,12 @@ function CollectionPage() {
   const records = useQuery({
     ...recordsQuery(name, query),
     enabled: actor !== null,
-    // The rows stay while a filter's are read.
-    placeholderData: keepPreviousData,
+    // The rows stay while a filter's are read: this collection's, never another's, whose grid
+    // would edit them under this one's fields.
+    placeholderData: (previous, previousQuery) => (previousQuery?.queryKey[1] === name ? previous : undefined),
   });
   // The search whose rows are on screen: this one once its records are read, the one before
-  // while they are (`keepPreviousData`). Its collection is what the grid and the form change.
+  // while they are (`placeholderData`). Its collection is what the grid and the form change.
   const [shown, setShown] = useState({ name, query });
   if (!records.isPlaceholderData && hashKey([name, query]) !== hashKey([shown.name, shown.query]))
     setShown({ name, query });
@@ -181,7 +182,7 @@ function CollectionPage() {
                     // browser has read who (none while the server renders).
                     key={search.new ? `new:${actor ?? ""}` : search.record}
                     collection={collection}
-                    records={view.collection}
+                    view={view}
                     saved={saved}
                     actor={actor}
                     onDone={close}

@@ -10,7 +10,7 @@ import { recordsView, savedIn } from "../src/components/grid/collection.ts";
 // and the held call's toast are fakes, as the page hands it its own.
 
 const calls = {
-  save: vi.fn<(input: { record: Record<string, unknown> }) => Promise<unknown>>(),
+  save: vi.fn<(input: { record: Record<string, unknown> }) => Promise<Saved>>(),
   delete: vi.fn<(input: { key: string }) => Promise<unknown>>(),
 };
 const list = vi.fn<() => Promise<Saved[]>>();
@@ -56,6 +56,24 @@ describe("the Data page's records collection", () => {
     expect(recordsView(new QueryClient(), sourceOf(QUERY)).collection).not.toBe(collection);
   });
 
+  it("lets a view go once nothing shows it, query and all, and makes it again for the search", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(["data", "leads", QUERY], [row("Acme", {})]);
+    const view = recordsView(queryClient, sourceOf(QUERY));
+    view.collection.subscribeChanges(() => {}).unsubscribe();
+    // Its 10 s, and the moment the library takes to start counting them.
+    await vi.advanceTimersByTimeAsync(11_000);
+    vi.useRealTimers();
+    expect(view.collection.status).toBe("cleaned-up");
+    expect(queryClient.getQueryData(["data", "leads", QUERY])).toBeUndefined();
+    // Read again, as the page reads a search it has not kept.
+    list.mockResolvedValueOnce([row("Acme", { stage: "new" })]);
+    const again = recordsView(queryClient, sourceOf(QUERY));
+    expect(again.collection).not.toBe(view.collection);
+    await vi.waitFor(() => expect(again.collection.get("Acme")?.record.stage).toBe("new"));
+  });
+
   it("saves an update over the record it found (ifRecord), and keeps what the save answered", async () => {
     const { collection } = viewOf(row("Acme", { stage: "new" }));
     calls.save.mockImplementationOnce(savedBy);
@@ -91,6 +109,52 @@ describe("the Data page's records collection", () => {
       ifRecord: { company: "Acme", stage: "replied" },
     });
     expect(collection.get("Acme")?.record).toEqual({ company: "Acme", stage: "replied", contact: "a@acme.test" });
+  });
+
+  it("saves an edit over the record as stored when the one before it was held, and never waits on another record's", async () => {
+    const { collection, edit } = viewOf(row("Acme", { stage: "new" }), row("Gizmo", { stage: "new" }));
+    let hold!: () => void;
+    calls.save.mockImplementationOnce(
+      () =>
+        new Promise((_, reject) => {
+          hold = () =>
+            reject(new ApiError(409, { error: "Held for approval", code: "approval_pending", runId: "call:ada:1" }));
+        }),
+    );
+    const first = edit({ key: "Acme", record: { company: "Acme", stage: "won" } });
+    const second = edit({ key: "Acme", record: { company: "Acme", stage: "won", contact: "a@acme.test" } });
+    // Gizmo's edit is saved while Acme's first still waits for its answer.
+    calls.save.mockImplementationOnce(savedBy);
+    const other = edit({ key: "Gizmo", record: { company: "Gizmo", stage: "replied" } });
+    await other.when("settled");
+    expect(calls.save.mock.calls.map(([input]) => input.record.company)).toEqual(["Acme", "Gizmo"]);
+    calls.save.mockImplementationOnce(savedBy);
+    hold();
+    await Promise.all([first.when("settled"), second.when("settled")]);
+    // Over the record as stored, not the held change still on screen when it was made.
+    expect(calls.save.mock.calls[2]![0]).toEqual({
+      record: { company: "Acme", stage: "won", contact: "a@acme.test" },
+      ifRecord: { company: "Acme", stage: "new" },
+    });
+    expect(collection.get("Gizmo")?.record.stage).toBe("replied");
+  });
+
+  it("rolls the edits made on a refused one back with it, and saves the next edit after them", async () => {
+    const { collection, edit } = viewOf(row("Acme", { stage: "new" }));
+    const denied = new ApiError(403, { error: "leads are not lost", code: "policy_denied" });
+    calls.save.mockRejectedValueOnce(denied);
+    const first = edit({ key: "Acme", record: { company: "Acme", stage: "lost" } });
+    const second = edit({ key: "Acme", record: { company: "Acme", stage: "lost", contact: "a@acme.test" } });
+    await expect(first.when("settled")).rejects.toBe(denied);
+    await expect(second.when("settled")).rejects.toBeUndefined();
+    expect(collection.get("Acme")?.record).toEqual({ company: "Acme", stage: "new" });
+    calls.save.mockImplementationOnce(savedBy);
+    await edit({ key: "Acme", record: { company: "Acme", stage: "replied" } }).when("settled");
+    expect(calls.save).toHaveBeenCalledTimes(2);
+    expect(calls.save.mock.calls[1]![0]).toEqual({
+      record: { company: "Acme", stage: "replied" },
+      ifRecord: { company: "Acme", stage: "new" },
+    });
   });
 
   it("rolls a denied save back, failing with the policy's error", async () => {

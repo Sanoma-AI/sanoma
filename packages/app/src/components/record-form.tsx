@@ -26,29 +26,30 @@ import { type RecordsView, savedIn } from "./grid/collection.ts";
 
 // A collection's record form: one form, drawn from the record's JSON Schema as the start form is
 // from a workflow's input, to add a record or edit one; and Delete. Each is a change of the page's
-// records collection, the grid's (`grid/collection.ts`), whose handler calls the collection's
-// operation, `data.<name>.save` (`ifAbsent` for a new record, `ifRecord` for an edit) or
-// `.delete`, through `api` as the person; a held call's toast is the collection's.
+// records collection, the grid's (`grid/collection.ts`; an edit in its queue of the record's
+// edits, after the grid's), whose handler calls the collection's operation, `data.<name>.save`
+// (`ifAbsent` for a new record, `ifRecord` for an edit) or `.delete`, through `api` as the
+// person; a held call's toast is the collection's.
 
 /** An issue's path in a save's input (`record.<field>`), as the form's. */
 const inRecord = (path: (string | number)[]) => (path[0] === "record" ? path.slice(1) : path);
 
 /**
  * The record form: a new record's (`saved` none), its people filled in with `actor`, whoever is
- * asking; or `saved`'s, its key read-only, with Delete. `records` is the page's records
+ * asking; or `saved`'s, its key read-only, with Delete. `view` is the page's records
  * collection, which a save or a delete changes. Save answers by `onDone` once saved or held for
  * an approval (said with a toast linking to its run); a denial and what the fields refuse show
  * on the form.
  */
 export function RecordForm({
   collection: { name, key, record },
-  records,
+  view: { collection: records, edit },
   saved,
   actor,
   onDone,
 }: {
   collection: CollectionEntry;
-  records: RecordsView["collection"];
+  view: RecordsView;
   saved?: Saved | undefined;
   actor: string | null | undefined;
   onDone: () => void;
@@ -70,9 +71,7 @@ export function RecordForm({
         return { fields: { [key]: "A record has this key already: open it to change it" } };
       }
       const tx = saved
-        ? records.update(saved.key, (draft) => {
-            draft.record = input;
-          })
+        ? edit({ key: saved.key, record: input })
         : records.insert({ key: typed, record: input, updatedAt: new Date().toISOString(), updatedBy: actor ?? "" });
       await tx.when("settled");
       // None when the call is held for an approval: its toast said so.

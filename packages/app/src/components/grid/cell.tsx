@@ -41,11 +41,18 @@ export function recordWith(
   const { input, errors } = buildInput([field], { [field.key]: draft });
   const error = errors[field.key];
   if (error) return { error };
-  // In the record's own order, so an edit that changes nothing reads as the record it was.
-  const record = { ...base };
-  if (Object.hasOwn(input, field.key)) record[field.key] = input[field.key];
-  else delete record[field.key];
-  return { record };
+  return { record: withValue(base, field.key, input[field.key]) };
+}
+
+/**
+ * `record` with `field` set to `value`, or left out when `value` is undefined: in the record's
+ * own order, so an edit that changes nothing reads as the record it was.
+ */
+export function withValue(record: Record<string, unknown>, field: string, value: unknown): Record<string, unknown> {
+  const next = { ...record };
+  if (value === undefined) delete next[field];
+  else next[field] = value;
+  return next;
 }
 
 /** Focuses an editor once it mounts, its caret after the text. */

@@ -8,20 +8,19 @@ import { hashKey, type QueryClient, type QueryKey } from "@tanstack/react-query"
 // browser as it hydrates) is what the collection starts with. Every write is an optimistic
 // change of the collection whose handler makes the one call that leaves the browser, as the
 // person asking: an insert `data.<name>.save` with `ifAbsent`, an update `save` with `ifRecord`
-// (the record as the change found it), a delete `delete`. Once a call answers, the handler
+// (the record as last read or saved), a delete `delete`. Once a call answers, the handler
 // writes the record it saved into the collection; a refused call rolls the change back.
 // It imports nothing that defines a server function (`queries.ts`, `common.tsx`): the page hands
 // it those, so a test can hand it fakes.
 
-/** Where a transaction's handler leaves, by key, the records as its calls left them, in its metadata. */
-const SAVED = "saved";
+/** By transaction, the records as its calls left them, by key: null once deleted. */
+const savedBy = new WeakMap<object, Map<string, Saved | null>>();
 
 /**
  * The record `key` as a transaction's call left it, null once deleted: undefined while no call
  * answered, or when the call is held for an approval.
  */
-export const savedIn = (tx: Pick<Transaction, "metadata">, key: string): Saved | null | undefined =>
-  (tx.metadata[SAVED] as Record<string, Saved | null> | undefined)?.[key];
+export const savedIn = (tx: object, key: string): Saved | null | undefined => savedBy.get(tx)?.get(key);
 
 /** A grid edit: the record `key` names, as the edit leaves it. */
 export interface RecordEdit {
@@ -41,31 +40,36 @@ export interface RecordsSource {
       record: Record<string, unknown>;
       ifAbsent?: true;
       ifRecord?: Record<string, unknown>;
-    }) => Promise<unknown>;
+    }) => Promise<Saved>;
     delete: (input: { key: string }) => Promise<unknown>;
   };
   held: (err: unknown, queryClient: QueryClient) => boolean;
 }
 
 function createRecordsView(queryClient: QueryClient, { query, calls, held }: RecordsSource) {
+  // The record `key` as the collection last read or saved it (the query's rows, which its writes
+  // keep): what an update is saved over, never an edit before it still on screen, which its
+  // call may have held or saved reshaped.
+  const stored = (key: string) =>
+    queryClient.getQueryData<Saved[]>(query.queryKey)?.find((row) => row.key === key)?.record;
   const persist = async ({ transaction }: { transaction: Transaction<Saved> }) => {
-    const saved: Record<string, Saved | null> = {};
+    const saved = new Map<string, Saved | null>();
     for (const mutation of transaction.mutations) {
       try {
         if (mutation.type === "delete") {
           await calls.delete({ key: mutation.key });
           await collection.utils.writeDelete(mutation.key);
-          saved[mutation.key] = null;
+          saved.set(mutation.key, null);
           continue;
         }
         const { record } = mutation.modified;
-        const answer = (await calls.save(
+        const answer = await calls.save(
           mutation.type === "insert"
             ? { record, ifAbsent: true }
-            : { record, ifRecord: (mutation.original as Saved).record },
-        )) as Saved;
+            : { record, ifRecord: stored(mutation.key) ?? (mutation.original as Saved).record },
+        );
         await collection.utils.writeUpsert(answer);
-        saved[answer.key] = answer;
+        saved.set(answer.key, answer);
       } catch (err) {
         // A call held for an approval is not refused: it waits, as a run of `call`. Nothing is
         // written, so the row shows the record as it is stored, not the change, until that run
@@ -73,11 +77,11 @@ function createRecordsView(queryClient: QueryClient, { query, calls, held }: Rec
         if (!held(err, queryClient)) throw err;
       }
     }
-    transaction.metadata[SAVED] = saved;
+    savedBy.set(transaction, saved);
   };
   const collection = createCollection({
     ...queryCollectionOptions({
-      // `recordsQuery`'s: its options' types are Query's whole range.
+      // `recordsQuery`'s: its options' types are Query's whole range, which this one's do not take.
       queryKey: query.queryKey,
       queryFn: query.queryFn as () => Promise<Saved[]>,
       staleTime: query.staleTime as number,
@@ -89,28 +93,40 @@ function createRecordsView(queryClient: QueryClient, { query, calls, held }: Rec
       onUpdate: persist,
       onDelete: persist,
     }),
-    // A server's render is one request's: what it made is let go soon after (longer than a page
-    // takes to render, never the browser's 5 minutes).
-    ...(!("document" in globalThis) && { gcTime: 10_000 }),
+    // Let go, its query with it, 10 s after nothing shows it: another search's, never read again
+    // as the window takes the focus, or a server's render once sent (none subscribes there).
+    gcTime: 10_000,
   });
-  // The grid's edits, one after another, so each is saved over the record the one before it
-  // saved (`ifRecord`), never raced to the server: a change refused rolls back those made on it.
-  const edit = createPacedMutations<RecordEdit, Saved>({
-    onMutate: ({ key, record }) => {
-      collection.update(key, (draft) => {
-        draft.record = record;
+  // The edits of each record one after another, so each is saved over the record the one before
+  // it saved (`ifRecord`), never raced to the server; another record's do not wait for them. A
+  // change refused rolls back those made on it.
+  const queues = new Map<string, (edit: RecordEdit) => Transaction<Saved>>();
+  const edit = (change: RecordEdit) => {
+    let queue = queues.get(change.key);
+    if (!queue) {
+      queue = createPacedMutations<RecordEdit, Saved>({
+        onMutate: ({ key, record }) => {
+          collection.update(key, (draft) => {
+            draft.record = record;
+          });
+        },
+        mutationFn: persist,
+        strategy: queueStrategy({ wait: 0 }),
       });
-    },
-    mutationFn: persist,
-    strategy: queueStrategy({ wait: 0 }),
-  });
+      queues.set(change.key, queue);
+    }
+    return queue(change);
+  };
   return { collection, edit };
 }
 
-/** A Data page's records (`collection`) and the grid's queue of edits to them (`edit`). */
+/** A Data page's records (`collection`) and each record's queue of edits, the grid's and the form's (`edit`). */
 export type RecordsView = ReturnType<typeof createRecordsView>;
 
-/** By query client, the views made, by their query's key: the one view per search the library expects. */
+/**
+ * By query client, the views made, by their query's key: the one view per search the library
+ * expects, each until its collection is let go.
+ */
 const views = new WeakMap<QueryClient, Map<string, RecordsView>>();
 
 /** The records `source` reads, in `queryClient`: made once for its query's key, then the same. */
@@ -119,6 +135,12 @@ export function recordsView(queryClient: QueryClient, source: RecordsSource): Re
   if (!byKey) views.set(queryClient, (byKey = new Map()));
   const id = hashKey(source.query.queryKey);
   let view = byKey.get(id);
-  if (!view) byKey.set(id, (view = createRecordsView(queryClient, source)));
+  if (!view) {
+    const made = (view = createRecordsView(queryClient, source));
+    byKey.set(id, made);
+    made.collection.on("status:cleaned-up", () => {
+      if (byKey.get(id) === made) byKey.delete(id);
+    });
+  }
   return view;
 }

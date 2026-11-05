@@ -1,10 +1,10 @@
 import type { CellSelectionDirection } from "@tanstack/react-table";
 import { type UseHotkeyDefinition, useHotkeys } from "@tanstack/react-hotkeys";
 
-// The grid's keyboard, scoped to the grid's element: arrows move the selection, Shift and an
-// arrow extend it, Enter starts editing the cell or commits the edit, Esc cancels it, Tab moves
-// right (and out of the grid past the last column), Space expands the record, Cmd/Ctrl+C copies
-// the selection. Typing a character on a cell starts editing it with that character
+// The grid's keyboard, scoped to the grid's body (its cells, not its headings): arrows move the
+// selection, Shift and an arrow extend it, Enter starts editing the cell or commits the edit, Esc
+// cancels it, Tab moves right (and out of the grid past the last column), Space expands the
+// record, Cmd/Ctrl+C copies the selection. Typing a character on a cell starts editing it with that character
 // (`typedCharacter`, which the grid's own key handler reads, as no hotkey names every key).
 
 /** What the keys do: the grid's to say. */
@@ -34,7 +34,7 @@ const tab = (direction: CellSelectionDirection, move: GridKeys["move"]) => (even
   if (move(direction)) event.preventDefault();
 };
 
-/** Registers the grid's keys on `target`, the grid's element (none while it is not mounted). */
+/** Registers the grid's keys on `target`, the grid's body (none while it is not mounted). */
 export function useGridKeys(target: HTMLElement | null, keys: GridKeys) {
   const browsing = { enabled: !keys.editing };
   // An editor is a text field, select or checkbox, whose own keys the hotkeys leave to it unless told.

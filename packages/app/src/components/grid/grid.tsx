@@ -28,7 +28,7 @@ import { fieldsOf, type ScalarField, type ScalarValue } from "../../form/schema.
 import { api, type DataSearch, heldQuery } from "../../queries.ts";
 import { Nothing, StatusDot, When } from "../common.tsx";
 import { FROM, IssuesFlag, SortHead, Value } from "../data-grid.tsx";
-import { CellEditor, draftOf, recordWith } from "./cell.tsx";
+import { CellEditor, draftOf, recordWith, withValue } from "./cell.tsx";
 import { csv, delimited } from "./clipboard.ts";
 import { type RecordsView, savedIn } from "./collection.ts";
 import { type Conflict, conflictId, ConflictRow } from "./conflicts.tsx";
@@ -203,11 +203,11 @@ export function DataGrid({
    * denial says why. A held edit's toast is the collection's.
    */
   function save(key: string, field: string, record: Record<string, unknown>, undoing = false) {
+    // The field as the edit finds it, which Undo puts back.
+    const before = records.get(key)?.record[field];
     const tx = edit({ key, record });
-    const [mutation] = tx.mutations;
     // The record as it was: nothing to save.
-    if (!mutation) return;
-    const before = (mutation.original as Saved).record;
+    if (tx.mutations.length === 0) return;
     tx.when("settled").then(
       () => {
         const saved = savedIn(tx, key);
@@ -217,7 +217,14 @@ export function DataGrid({
         if (undoing) toast.success(`Undid ${field} for ${key}`);
         else
           toast.success(`Saved ${field} for ${key}`, {
-            action: { label: "Undo", onClick: () => save(key, field, before, true) },
+            // The one field back, over the record as it is now: edits since to its other fields stay.
+            action: {
+              label: "Undo",
+              onClick: () => {
+                const now = records.get(key);
+                if (now) save(key, field, withValue(now.record, field, before), true);
+              },
+            },
           });
       },
       (err: unknown) => {
@@ -253,12 +260,7 @@ export function DataGrid({
     }
     // The record as it is now is what the edit is saved over (`ifRecord`).
     await records.utils.writeUpsert(current);
-    const { [conflict.field]: _, ...rest } = current.record;
-    save(
-      conflict.key,
-      conflict.field,
-      conflict.mine === undefined ? rest : { ...rest, [conflict.field]: conflict.mine },
-    );
+    save(conflict.key, conflict.field, withValue(current.record, conflict.field, conflict.mine));
   }
 
   const keepTheirs = (conflict: Conflict) => {
@@ -277,6 +279,8 @@ export function DataGrid({
   // Set while an edit ends from the keyboard: the cell takes the focus back from its editor.
   const refocus = useRef(false);
   const [grid, setGrid] = useState<HTMLTableElement | null>(null);
+  // The keys' element: the cells' body, so a heading's sort link keeps Tab, the arrows and Space.
+  const [body, setBody] = useState<HTMLTableSectionElement | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const rows = table.getRowModel().rows;
   const focused = table.getFocusedCell();
@@ -311,7 +315,7 @@ export function DataGrid({
     save(cell.key, cell.field, next.record);
   };
 
-  useGridKeys(grid, {
+  useGridKeys(body, {
     editing: editing !== null,
     move: (direction) => {
       const before = table.getFocusedCell()?.id;
@@ -364,6 +368,7 @@ export function DataGrid({
   const before = items[0]?.start ?? 0;
   const after = hydrated ? virtualizer.getTotalSize() - (items.at(-1)?.end ?? 0) : 0;
   const visible = table.getVisibleLeafColumns();
+  const conflictsByKey = Map.groupBy(conflicts.values(), (conflict) => conflict.key);
 
   if (listed.length === 0) {
     return (
@@ -432,7 +437,7 @@ export function DataGrid({
               })}
             </TableRow>
           </TableHeader>
-          <TableBody>
+          <TableBody ref={setBody}>
             {before > 0 && (
               <tr aria-hidden>
                 <td colSpan={visible.length} style={{ height: before }} />
@@ -441,7 +446,7 @@ export function DataGrid({
             {items.map(({ index }) => {
               const row = rows[index]!;
               const saved = row.original;
-              const rowConflicts = [...conflicts.values()].filter((c) => c.key === saved.key);
+              const rowConflicts = conflictsByKey.get(saved.key) ?? [];
               return [
                 <TableRow
                   key={row.id}
