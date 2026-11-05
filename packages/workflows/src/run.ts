@@ -1,7 +1,10 @@
 import type { ConnectionRef, ConnectionRegistry, ConnectionSnapshot } from "./connection.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
+import type { WorkerApp } from "./app-steps.ts";
+import type { SanomaClient } from "./client.ts";
 import type { Collection } from "./collection.ts";
 import type { DeclaredObjects } from "./config.ts";
+import type { Db } from "./db.ts";
 import type { DeadlineRegistry } from "./deadlines.ts";
 import type { ApprovalState, Approver, Principal, WorkflowDefinition } from "./define.ts";
 import type { Fake } from "./fake.ts";
@@ -53,6 +56,24 @@ export interface WorkerState {
   scenarios?: URL;
   /** The worker's `source`, when it was given one. */
   source?: Source;
+  /** The app's steps (`WorkerOptions.app`): what the app's built-ins run; none without them. */
+  appSteps?: WorkerApp;
+  /**
+   * The worker's own client, connected on first use, for its version (what it starts runs on);
+   * closed when the worker stops. What the built-ins' steps tell and read through, never a run's body.
+   */
+  client(): Promise<SanomaClient>;
+  /** Runs `write` once the one before it has settled: the worker's writes to its repository, one at a time. */
+  serially<T>(write: () => Promise<T>): Promise<T>;
+  /**
+   * Fast-forwards the checkout to the host's `main` (`followBase`), one of the worker's writes
+   * (`serially`), as a change's deploy and a push to `main` do first; on a new revision, how far
+   * each app taken from a source is behind it is checked again, in the background, into the
+   * runtime's table (`recordAppsBehind` in worker.ts), as at the worker's start.
+   */
+  followMain(): Promise<{ revision: string } | { skipped: string } | { error: string }>;
+  /** The runtime's tables (`db.ts`): what the worker writes for the app to read, such as a sandbox run's checks. */
+  db(): Promise<Db>;
   types: ReadonlyMap<string, Resource>;
   /** The objects the data files declare, read at each call: a workflow's change operation may not aim at one (`refuseDeclared`). */
   declaredObjects(): Promise<DeclaredObjects>;
@@ -88,6 +109,11 @@ export interface WorkerState {
   stopped: boolean;
   /** Which of its runs are executing and which wait, until when: what the worker's `idle` reads. */
   deadlines: DeadlineRegistry;
+  /**
+   * Aborted once the worker has stopped, after DBOS is down: what work of its that outlives a DBOS
+   * call stops on (a chat turn's agent, the check of the apps behind), recorded nowhere.
+   */
+  shutdown: AbortSignal;
 }
 
 /** What a run keeps in memory. Rebuilt the same way when DBOS replays the run. */
@@ -136,3 +162,18 @@ export interface WorkflowOutline {
  * it, whether it is a sandbox run, the worker's source and policy), as no `ctx` member gives them.
  */
 export const currentRun = new AsyncLocalStorage<Run>();
+
+/** The run whose built-in step is running (`currentRun`): `what` names the step for the error when there is none. */
+export function runNow(what: string): Run {
+  const run = currentRun.getStore();
+  if (!run) throw new Error(`${what} ran outside its run`);
+  return run;
+}
+
+/**
+ * A sandbox run's checks recorded for the app (`recordChecks`, which never throws); nothing for a
+ * live run, which never loads `sandbox.ts`, and with it Cucumber.
+ */
+export async function recordSandboxChecks(run: Run): Promise<void> {
+  if (run.sandbox !== undefined) await (await import("./sandbox.ts")).recordChecks(run, run.sandbox);
+}

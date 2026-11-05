@@ -2,14 +2,25 @@ import { cpSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { WAKE_PATH as RUNTIME_WAKE_PATH } from "@sanoma-ai/workflows";
-import { describe, expect, it, vi } from "vitest";
-import { imageLabel, Instance, INACTIVITY_MS, type ObjectState, WAKE_PATH, worker } from "../worker/instance.js";
+import { CLIENT_IP_HEADER as RUNTIME_CLIENT_IP_HEADER, WAKE_PATH as RUNTIME_WAKE_PATH } from "@sanoma-ai/workflows";
+import { APP_BUNDLE_PATH as RUNTIME_APP_BUNDLE_PATH } from "@sanoma-ai/workflows/shared";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
+import {
+  APP_BUNDLE_PATH,
+  CLIENT_IP_HEADER,
+  digestLabel,
+  Instance,
+  INACTIVITY_MS,
+  type ObjectState,
+  serve,
+  WAKE_PATH,
+} from "../worker/instance.js";
 
-// The Worker's own code, `worker/instance.js`, over a stubbed `ctx`: the routes of its object,
-// the start of its container, the proxy and the alarm. The kits run it over the fake's `ctx`
-// (`host.test.ts`, `wakeup.test.ts`); `index.js`, which only extends `DurableObject` with it, runs
-// on Cloudflare (Miniflare would run it here, which this package does not add).
+// The Worker's own code, `worker/instance.js`, over a stubbed `ctx`: the Worker script's fetch
+// (`serve`), the routes of its object, the start, drain and replacement of its container, and the
+// alarm. The kits run it over the fake's `ctx` (`host.test.ts`, `wakeup.test.ts`); `index.js`,
+// which only binds it to `DurableObject` and the uploaded app, runs on Cloudflare (Miniflare would
+// run it here, which this package does not add).
 
 vi.mock("cloudflare:workers", () => ({
   DurableObject: class {
@@ -34,7 +45,7 @@ const ENV = {
 /** The copy the upload names (`containers[].images`), pinned in the account's registry. */
 const PINNED = `registry.cloudflare.com/0123456789abcdef0123456789abcdef/sanoma-ai-runtime@sha256:${"7".repeat(64)}`;
 /** The image's label, as the object starts a container with it. */
-const IMAGE = await imageLabel(PINNED);
+const IMAGE = await digestLabel(PINNED);
 
 /** A `ctx` that records what the object does: its container answers `answer` once started. */
 function stubCtx({
@@ -43,6 +54,7 @@ function stubCtx({
   images = { runtime: PINNED },
   answer = () => new Response("ok"),
   exits,
+  drains = true,
 }: {
   running?: boolean;
   labels?: Record<string, string>;
@@ -50,6 +62,8 @@ function stubCtx({
   answer?: (request: Request) => Response;
   /** A container that ends as soon as it starts: how, as `monitor` rejects. */
   exits?: string;
+  /** Whether its worker stops on SIGTERM. */
+  drains?: boolean;
 } = {}) {
   const storage = new Map<string, unknown>();
   const calls: string[] = [];
@@ -63,6 +77,10 @@ function stubCtx({
       container.running = true;
     }),
     inspect: vi.fn<ObjectState["container"]["inspect"]>(async () => (container.running ? { labels } : null)),
+    signal: vi.fn<ObjectState["container"]["signal"]>((signal) => {
+      calls.push(`signal ${signal}`);
+      if (drains) container.running = false;
+    }),
     destroy: vi.fn<ObjectState["container"]["destroy"]>(async () => {
       calls.push("destroy");
       container.running = false;
@@ -100,7 +118,20 @@ function stubCtx({
 }
 
 /** The labels of a container started at the Worker's revision and image, serving the sites' `domains`. */
-const labelled = async (domains: string) => ({ revision: "r2", image: IMAGE, domains: await imageLabel(domains) });
+const labelled = async (domains: string) => ({ revision: "r2", image: IMAGE, domains: await digestLabel(domains) });
+
+/** A request to the object's route `path`, with the company's token unless `token` says otherwise. */
+const route = (path: string, token: string | null = TOKEN) =>
+  new Request(`https://sanoma-company.acme.workers.dev${path}`, {
+    ...(token !== null && { headers: { authorization: `Bearer ${token}` } }),
+  });
+const START = "/__sanoma/health?start=1";
+
+/** Has the object start its container, as a deploy's restart or a queued run does: the alarm `startNow` sets, rung. */
+const started = async (object: Instance) => {
+  await object.startNow();
+  await object.alarm();
+};
 
 const wake = (method: string, { token = TOKEN, body }: { token?: string; body?: unknown } = {}) =>
   new Request("https://sanoma-company.acme.workers.dev/__sanoma/wake", {
@@ -138,15 +169,31 @@ describe("the Worker's object", () => {
     expect(container.start).not.toHaveBeenCalled();
   });
 
-  it("starts the container at the Worker's revision with its text bindings, once for requests at once, and proxies", async () => {
-    const { ctx, calls, sent } = stubCtx({ answer: (r) => new Response(`${new URL(r.url).pathname} ok`) });
+  it("answers the runtime's own routes and header, which it cannot import", () => {
+    expect(APP_BUNDLE_PATH).toBe(RUNTIME_APP_BUNDLE_PATH);
+    expect(CLIENT_IP_HEADER).toBe(RUNTIME_CLIENT_IP_HEADER);
+  });
+
+  it("answers its three routes alone, a start and the bundle only with the company's token", async () => {
+    const { ctx, container } = stubCtx();
     const object = new Instance(ctx, ENV);
-    const ask = () =>
-      object.fetch(
-        new Request("https://sanoma-company.acme.workers.dev/api/x?y=1", { headers: { host: "elsewhere" } }),
-      );
-    const answers = await Promise.all([ask(), ask()]);
-    expect(await Promise.all(answers.map((a) => a.text()))).toEqual(["/api/x ok", "/api/x ok"]);
+    expect((await object.fetch(route("/"))).status).toBe(404);
+    expect((await object.fetch(route("/api/x"))).status).toBe(404);
+    expect((await object.fetch(route(START, "swi_another"))).status).toBe(401);
+    expect((await object.fetch(route(START, null))).status).toBe(401);
+    expect((await object.fetch(route(`${APP_BUNDLE_PATH}?revision=r3`, "swi_another"))).status).toBe(401);
+    expect(container.start).not.toHaveBeenCalled();
+  });
+
+  it("starts the container from an alarm when asked with the token, at the Worker's revision with its text bindings, once for asks at once", async () => {
+    const { ctx, calls } = stubCtx();
+    const object = new Instance(ctx, ENV);
+    const asks = await Promise.all([object.fetch(route(START)), object.fetch(route(START))]);
+    // The ask returns at once: the start is the alarm's, which outlives it.
+    expect(asks.map((a) => a.status)).toEqual([202, 202]);
+    expect(await asks[0]!.json()).toEqual({ revision: "r2", running: false, ready: false });
+    expect(calls).toEqual([]);
+    await object.alarm();
     expect(calls).toEqual(["start r2", `timeout ${INACTIVITY_MS}`]);
     const [options] = vi.mocked(ctx.container.start).mock.calls[0]!;
     // The image its upload names, at the instance type the object sets: the policy has the object say both.
@@ -163,66 +210,107 @@ describe("the Worker's object", () => {
       enableInternet: true,
       labels: { revision: "r2", image: IMAGE },
     });
-    const proxied = sent.filter((r) => new URL(r.url).pathname === "/api/x");
-    // At the host asked for, so the company serves the site declared on it, and told it was https.
-    expect(proxied.map((r) => r.url)).toEqual([
-      "http://sanoma-company.acme.workers.dev/api/x?y=1",
-      "http://sanoma-company.acme.workers.dev/api/x?y=1",
-    ]);
-    expect(proxied[0]!.headers.get("x-forwarded-proto")).toBe("https");
+    const ready = await object.fetch(route(START));
+    expect(ready.status).toBe(200);
+    expect(await ready.json()).toEqual({ revision: "r2", running: true, ready: true });
     expect(vi.mocked(ctx.container.getTcpPort).mock.calls.every(([port]) => port === 3000)).toBe(true);
+  });
+
+  it("passes an ask for the app bundle on to the worker with the token once it runs, and starts it when it does not", async () => {
+    const { ctx, sent } = stubCtx({
+      answer: (r) =>
+        new URL(r.url).pathname === APP_BUNDLE_PATH
+          ? new Response('{"building":"r3"}', { status: 202 })
+          : new Response("ok"),
+    });
+    const object = new Instance(ctx, ENV);
+    const stopped = await object.fetch(route(`${APP_BUNDLE_PATH}?revision=r3`));
+    expect(stopped.status).toBe(202);
+    expect(await stopped.json()).toEqual({ starting: true });
+    await object.alarm();
+    const building = await object.fetch(route(`${APP_BUNDLE_PATH}?revision=r3`));
+    expect(await building.json()).toEqual({ building: "r3" });
+    const asked = sent.find((r) => new URL(r.url).pathname === APP_BUNDLE_PATH)!;
+    expect(asked.url).toBe("http://container/__sanoma/app-bundle?revision=r3");
+    expect(asked.headers.get("authorization")).toBe(`Bearer ${TOKEN}`);
   });
 
   it.each([
     ["revision", { revision: "r1", image: IMAGE }],
     ["image", { revision: "r2", image: "0123456789abcdef" }],
-  ])("destroys a running container at another %s and starts it at the Worker's: a deploy", async (_, labels) => {
-    const { ctx, calls } = stubCtx({ running: true, labels });
+  ])(
+    "drains a running container at another %s and starts it at the Worker's: a deploy's restart",
+    async (_, labels) => {
+      const { ctx, calls } = stubCtx({ running: true, labels });
+      const object = new Instance(ctx, ENV);
+      // The object restarted with its container running: the timeout is set again.
+      expect(calls).toEqual([`timeout ${INACTIVITY_MS}`]);
+      expect((await object.fetch(route(START))).status).toBe(202);
+      await object.alarm();
+      // SIGTERM, the worker's own stop: it stopped, so nothing was destroyed.
+      expect(calls).toEqual([`timeout ${INACTIVITY_MS}`, "signal 15", "start r2", `timeout ${INACTIVITY_MS}`]);
+      expect(await (await object.fetch(route(START))).json()).toEqual({ revision: "r2", running: true, ready: true });
+    },
+  );
+
+  it("destroys a container whose worker has not stopped once the drain's time is up", async () => {
+    vi.useFakeTimers();
+    onTestFinished(() => void vi.useRealTimers());
+    const { ctx, calls } = stubCtx({ running: true, labels: { revision: "r1", image: IMAGE }, drains: false });
     const object = new Instance(ctx, ENV);
-    // The object restarted with its container running: the timeout is set again.
-    expect(calls).toEqual([`timeout ${INACTIVITY_MS}`]);
-    const health = await object.fetch(new Request("https://sanoma-company.acme.workers.dev/__sanoma/health?start=1"));
-    expect(await health.json()).toEqual({ revision: "r2", running: true, ready: true });
-    expect(calls).toEqual([`timeout ${INACTIVITY_MS}`, "destroy", "start r2", `timeout ${INACTIVITY_MS}`]);
+    await object.startNow();
+    const alarm = { rang: false };
+    const ringing = object.alarm().finally(() => (alarm.rang = true));
+    // A second at a time, for as long as it takes: the start digests its labels off the timers, in real time.
+    while (!alarm.rang) await vi.advanceTimersByTimeAsync(1_000);
+    await ringing;
+    expect(calls).toEqual([`timeout ${INACTIVITY_MS}`, "signal 15", "destroy", "start r2", `timeout ${INACTIVITY_MS}`]);
   });
 
-  it("answers 503 without starting a container when the Worker names no image", async () => {
+  it("throws from the alarm without starting a container when the Worker names no image", async () => {
     const { ctx, container } = stubCtx({ images: {} });
-    const answer = await new Instance(ctx, ENV).fetch(new Request("https://x.workers.dev/api/x"));
-    expect(answer.status).toBe(503);
-    expect(await answer.json()).toEqual({ error: expect.stringContaining('names no "runtime" image') });
+    const object = new Instance(ctx, ENV);
+    await object.startNow();
+    await expect(object.alarm()).rejects.toThrow('names no "runtime" image');
     expect(container.start).not.toHaveBeenCalled();
   });
 
-  it("answers 503 when the container stops under a request, and checks it again on the next", async () => {
-    const { ctx, sent } = stubCtx({
+  it("answers 503 when the container stops under an ask for the bundle, and starts it again on the next", async () => {
+    const { ctx, container } = stubCtx({
       answer: (r) => {
-        if (new URL(r.url).pathname === "/healthz") return new Response("ok");
+        if (new URL(r.url).pathname !== APP_BUNDLE_PATH) return new Response("ok");
         throw new Error("the container is not running");
       },
     });
     const object = new Instance(ctx, ENV);
-    const answer = await object.fetch(new Request("https://x.workers.dev/api/x"));
+    await started(object);
+    const answer = await object.fetch(route(`${APP_BUNDLE_PATH}?revision=r3`));
     expect(answer.status).toBe(503);
     expect(await answer.json()).toEqual({
       error: "the company's container did not answer: the container is not running",
     });
-    await object.fetch(new Request("https://x.workers.dev/api/x"));
-    expect(sent.filter((r) => new URL(r.url).pathname === "/healthz")).toHaveLength(2);
+    expect((await object.fetch(route(`${APP_BUNDLE_PATH}?revision=r3`))).status).toBe(202);
+    await object.alarm();
+    // Running, but not known to answer: checked again rather than started again.
+    expect(container.start).toHaveBeenCalledTimes(1);
   });
 
-  it("gives up a start when the container ends, and says how in the refusal", async () => {
+  it("gives up a start when the container ends, and says how to the next ask, once", async () => {
     const { ctx, container } = stubCtx({ exits: "Container exited with unexpected exit code: 1" });
     const object = new Instance(ctx, ENV);
-    const answer = await object.fetch(new Request("https://x.workers.dev/__sanoma/health?start=1"));
+    expect((await object.fetch(route(START))).status).toBe(202);
+    await expect(object.alarm()).rejects.toThrow(
+      "the container failed: Container exited with unexpected exit code: 1 before answering /healthz on port 3000",
+    );
+    const answer = await object.fetch(route(START));
     expect(answer.status).toBe(503);
     expect(await answer.json()).toEqual({
-      error: expect.stringContaining(
-        "the container failed: Container exited with unexpected exit code: 1 before answering /healthz on port 3000",
-      ),
+      error: expect.stringContaining("Container exited with unexpected exit code: 1"),
       exit: "the container failed: Container exited with unexpected exit code: 1",
     });
     expect(container.start).toHaveBeenCalledTimes(1);
+    // Told once: the next ask starts it again.
+    expect((await object.fetch(route(START))).status).toBe(202);
   });
 
   it("starts again when the platform has not assigned the application to the namespace yet", async () => {
@@ -234,7 +322,8 @@ describe("the Worker's object", () => {
       return Promise.reject(new Error("There is no container application assigned to this Durable Object namespace"));
     };
     const object = new Instance(ctx, ENV);
-    const answer = await object.fetch(new Request("https://x.workers.dev/__sanoma/health?start=1"));
+    await started(object);
+    const answer = await object.fetch(route(START));
     expect(answer.status).toBe(200);
     expect(await answer.json()).toMatchObject({ running: true, ready: true });
     expect(container.start).toHaveBeenCalledTimes(2);
@@ -256,16 +345,15 @@ describe("the Worker's object", () => {
         if (++starts === 1) endFirst = reject;
       });
     const object = new Instance(ctx, ENV);
-    expect((await object.fetch(new Request("https://x.workers.dev/__sanoma/health?start=1"))).status).toBe(200);
-    // It crashed: the next request starts another, and the first container's end arrives at that start.
+    await started(object);
+    // It crashed: the next start makes another, and the first container's end arrives at that start.
     container.running = false;
     vi.mocked(container.start).mockImplementationOnce(() => {
       container.running = true;
       endFirst(new Error("Container exited with unexpected exit code: 137"));
     });
-    const answer = await object.fetch(new Request("https://x.workers.dev/__sanoma/health?start=1"));
-    expect(answer.status).toBe(200);
-    expect(await answer.json()).toMatchObject({ ready: true });
+    await started(object);
+    expect(await (await object.fetch(route(START))).json()).toMatchObject({ ready: true });
     expect(container.start).toHaveBeenCalledTimes(2);
   });
 
@@ -274,41 +362,44 @@ describe("the Worker's object", () => {
     let stop!: () => void;
     container.monitor = () => new Promise<void>((resolve) => (stop = resolve));
     const object = new Instance(ctx, ENV);
-    expect((await object.fetch(new Request("https://x.workers.dev/__sanoma/health?start=1"))).status).toBe(200);
+    await started(object);
     // Cloudflare stopped it after ten quiet minutes.
     container.running = false;
     stop();
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(await (await object.fetch(new Request("https://x.workers.dev/__sanoma/health"))).json()).toEqual({
+    // No `exit`: the next ask starts it again rather than refusing.
+    expect(await (await object.fetch(route("/__sanoma/health", null))).json()).toEqual({
       revision: "r2",
       running: false,
-      ready: true,
+      ready: false,
     });
   });
 
-  it("answers its health without starting the container, unless asked to", async () => {
+  it("answers its health to anyone without starting the container", async () => {
     const { ctx, container } = stubCtx();
-    const health = await new Instance(ctx, ENV).fetch(new Request("https://x.workers.dev/__sanoma/health"));
+    const health = await new Instance(ctx, ENV).fetch(route("/__sanoma/health", null));
+    expect(health.status).toBe(200);
     expect(await health.json()).toEqual({ revision: "r2", running: false, ready: false });
     expect(container.start).not.toHaveBeenCalled();
   });
 
-  it("starts the container again when the sites' domains change, which its environment and its sites bundle name", async () => {
+  it("starts the container again when the sites' domains change, which its environment names", async () => {
     const env = { ...ENV, SANOMA_DOMAINS: "www=new.acme.example" };
     const moved = stubCtx({ running: true, labels: await labelled("www=old.acme.example") });
-    expect((await new Instance(moved.ctx, env).fetch(new Request("https://x.workers.dev/healthz"))).status).toBe(200);
-    expect(moved.calls).toContain("destroy");
+    await started(new Instance(moved.ctx, env));
+    expect(moved.calls).toContain("signal 15");
     expect(moved.container.start).toHaveBeenCalledWith(
       expect.objectContaining({ labels: await labelled("www=new.acme.example") }),
     );
     const kept = stubCtx({ running: true, labels: await labelled("www=new.acme.example") });
-    expect((await new Instance(kept.ctx, env).fetch(new Request("https://x.workers.dev/healthz"))).status).toBe(200);
-    expect(kept.container.destroy).not.toHaveBeenCalled();
+    await started(new Instance(kept.ctx, env));
+    expect(kept.container.signal).not.toHaveBeenCalled();
   });
 
   it("keeps a running container at the Worker's revision and image", async () => {
     const { ctx, container } = stubCtx({ running: true });
-    expect((await new Instance(ctx, ENV).fetch(new Request("https://x.workers.dev/healthz"))).status).toBe(200);
+    await started(new Instance(ctx, ENV));
+    expect(container.signal).not.toHaveBeenCalled();
     expect(container.destroy).not.toHaveBeenCalled();
     expect(container.start).not.toHaveBeenCalled();
   });
@@ -357,7 +448,7 @@ describe("the Worker's object", () => {
   it("sends /wake at startNow to a container that is up, whose worker may have stopped itself", async () => {
     const { ctx, container, sent } = stubCtx({ running: true });
     const object = new Instance(ctx, ENV);
-    expect((await object.fetch(new Request("https://x.workers.dev/healthz"))).status).toBe(200);
+    await started(object);
     sent.length = 0;
     await object.startNow();
     await object.alarm();
@@ -413,60 +504,100 @@ describe("the Worker's object", () => {
     expect(await (await object.fetch(wake("GET"))).json()).toEqual({ at: "2000-01-01T00:00:00.000Z", rang });
   });
 
-  it("answers a site's page from the sites bundle on the Worker, the rest from the object, and has the object start the container", async () => {
-    // The Worker as the upload lays it out: the package's modules, and beside them under `sites/`
-    // a bundle (which the package does not ship) whose site on `www.acme.example` queues a run.
-    const dir = realpathSync(mkdtempSync(join(tmpdir(), "sanoma-sites-router-")));
-    try {
-      cpSync(fileURLToPath(new URL("../worker/", import.meta.url)), dir, { recursive: true });
-      mkdirSync(join(dir, "sites"));
-      writeFileSync(
-        join(dir, "sites", "index.js"),
-        `export default {
-          serves: (request) => new URL(request.url).hostname === "www.acme.example",
-          fetch: async (request, env, ctx, host) => (await host.startNow(), new Response("from the site")),
-        };`,
-      );
-      const router = (await import(pathToFileURL(join(dir, "sites.js")).href)) as {
-        default: { fetch(request: Request, env: unknown, ctx: unknown): Promise<Response> };
-        SanomaInstance: unknown;
-      };
-      const entry = (await import(pathToFileURL(join(dir, "index.js")).href)) as { SanomaInstance: unknown };
-      const startNow = vi.fn<() => Promise<void>>(async () => {});
-      const getByName = vi.fn<(name: string) => object>(() => ({
-        fetch: async () => new Response("from the object"),
-        startNow,
-      }));
-      const env = { SANOMA_INSTANCE: { getByName } };
-      const page = await router.default.fetch(new Request("https://www.acme.example/"), env, {});
-      expect(await page.text()).toBe("from the site");
-      expect(startNow).toHaveBeenCalledOnce();
-      const app = await router.default.fetch(new Request("https://sanoma-company.acme.workers.dev/"), env, {});
-      expect(await app.text()).toBe("from the object");
-      // The object class its upload binds, as `index.js` exports it.
-      expect(router.SanomaInstance).toBe(entry.SanomaInstance);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it("sends every request of the Worker to its one object", async () => {
-    const getByName = vi.fn<(name: string) => { fetch(): Promise<Response> }>(() => ({
-      fetch: async () => new Response("from the object"),
-    }));
-    const answer = await worker.fetch(new Request("https://x.workers.dev/"), { SANOMA_INSTANCE: { getByName } });
-    expect(await answer.text()).toBe("from the object");
-    expect(getByName).toHaveBeenCalledWith("instance");
-  });
-
   it("exports the object class over the platform's DurableObject from its entry module", async () => {
     const entry = (await import(new URL("../worker/index.js", import.meta.url).href)) as {
       SanomaInstance: new (ctx: unknown, env: unknown) => unknown;
-      default: unknown;
     };
     const { ctx } = stubCtx();
     const object = entry.SanomaInstance && new entry.SanomaInstance(ctx, ENV);
     expect(object).toMatchObject({ ctx, env: ENV });
-    expect(entry.default).toBe(worker);
+  });
+});
+
+/** An object whose routes answer `from the object`, its `startNow` recorded. */
+const objectStub = () => {
+  const startNow = vi.fn<() => Promise<void>>(async () => {});
+  const fetch = vi.fn<(request: Request) => Promise<Response>>(async () => new Response("from the object"));
+  const getByName = vi.fn<(name: string) => object>(() => ({ fetch, startNow }));
+  return { env: { SANOMA_INSTANCE: { getByName } }, startNow, fetch, getByName };
+};
+
+describe("the Worker script", () => {
+  const ctx = { waitUntil: () => {} };
+
+  it("hands the object its routes, and answers the Host contract's /wake by having it start the worker", async () => {
+    const { env, fetch, startNow, getByName } = objectStub();
+    const app = vi.fn<() => Promise<Response>>();
+    const load = async () => ({ default: { fetch: app } });
+    for (const path of [WAKE_PATH, "/__sanoma/health", `${APP_BUNDLE_PATH}?revision=r3`]) {
+      expect(await (await serve(route(path), env, ctx, load)).text()).toBe("from the object");
+    }
+    expect(fetch).toHaveBeenCalledTimes(3);
+    const woken = await serve(route("/wake", null), env, ctx, load);
+    expect(woken.status).toBe(204);
+    expect(startNow).toHaveBeenCalledOnce();
+    expect(getByName.mock.calls.every(([name]) => name === "instance")).toBe(true);
+    expect(app).not.toHaveBeenCalled();
+  });
+
+  it("answers everything else with the app bundle, the visitor's address from Cloudflare alone and the object's start as its host", async () => {
+    const { env, startNow } = objectStub();
+    let seen: { request: Request; host: { startNow(): Promise<unknown> } } | undefined;
+    const load = vi.fn<Parameters<typeof serve>[3]>(async () => ({
+      default: {
+        fetch: async (request: Request, _env: unknown, _ctx: unknown, host: { startNow(): Promise<unknown> }) => {
+          seen = { request, host };
+          return new Response("from the app");
+        },
+      },
+    }));
+    const visitor = new Request("https://www.acme.example/pricing?plan=pro", {
+      method: "POST",
+      headers: { "cf-connecting-ip": "203.0.113.7", [CLIENT_IP_HEADER]: "10.0.0.1" },
+      body: "hello",
+    });
+    const answer = await serve(visitor, env, ctx, load);
+    expect(await answer.text()).toBe("from the app");
+    expect(seen!.request.url).toBe("https://www.acme.example/pricing?plan=pro");
+    expect(await seen!.request.text()).toBe("hello");
+    // The client's own copy is overwritten.
+    expect(seen!.request.headers.get(CLIENT_IP_HEADER)).toBe("203.0.113.7");
+    await seen!.host.startNow();
+    expect(startNow).toHaveBeenCalledOnce();
+    // A GET of /wake is the contract's; a page of the app at another method is the app's.
+    await serve(new Request("https://www.acme.example/wake", { method: "POST" }), env, ctx, load);
+    expect(load).toHaveBeenCalledTimes(2);
+    // Without Cloudflare's header, no address: never the client's.
+    const bare = new Request("https://www.acme.example/", { headers: { [CLIENT_IP_HEADER]: "10.0.0.1" } });
+    await serve(bare, env, ctx, load);
+    expect(seen!.request.headers.get(CLIENT_IP_HEADER)).toBe("");
+  });
+
+  it("imports the app the upload puts under app/ from its entry, and the placeholder answers 503 until the first bundle", async () => {
+    // The Worker as the upload lays it out: the package's modules, and `app/index.js` beside them.
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "sanoma-worker-")));
+    try {
+      cpSync(fileURLToPath(new URL("../worker/", import.meta.url)), dir, { recursive: true });
+      mkdirSync(join(dir, "app"));
+      writeFileSync(
+        join(dir, "app", "index.js"),
+        `export default { fetch: async () => new Response("from the app") };`,
+      );
+      const entry = (await import(pathToFileURL(join(dir, "index.js")).href)) as {
+        default: { fetch(request: Request, env: unknown, ctx: unknown): Promise<Response> };
+      };
+      const { env } = objectStub();
+      expect(await (await entry.default.fetch(new Request("https://www.acme.example/"), env, ctx)).text()).toBe(
+        "from the app",
+      );
+      const placeholder = (await import(pathToFileURL(join(dir, "no-app.js")).href)) as {
+        default: { fetch(): Response };
+      };
+      const answer = placeholder.default.fetch();
+      expect(answer.status).toBe(503);
+      expect(answer.headers.get("retry-after")).toBe("30");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

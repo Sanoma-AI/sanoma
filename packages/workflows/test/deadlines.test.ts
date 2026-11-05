@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import { randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -6,7 +7,8 @@ import { startTestWorker, testDatabaseUrl } from "@sanoma-ai/testing";
 import { Pool } from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { dbosClient, prepareDatabase, WAKEUP_TABLE } from "../src/db.ts";
+import { databaseOn, dbosClient, prepareDatabase } from "../src/db.ts";
+import { wakeup } from "../src/db/company.ts";
 import { deadlineRegistry, idle } from "../src/deadlines.ts";
 import {
   type CallContext,
@@ -155,8 +157,8 @@ function useWorker(name: string, files: Record<string, string>) {
       return ctx.worker;
     },
     async row() {
-      const { rows } = await ctx.pool.query(`SELECT * FROM ${WAKEUP_TABLE}`);
-      return rows[0] as { at: Date | null; stopped_at: Date | null; last_error: string | null };
+      const [row] = await databaseOn(ctx.pool).select().from(wakeup);
+      return row!;
     },
     /** Cancels every run left unfinished, so the next test's worker recovers none. */
     async cancelAll() {
@@ -376,8 +378,8 @@ describe("the stop rule", () => {
       },
     ]);
     const row = await app.row();
-    expect(row).toMatchObject({ at: new Date(until!), last_error: null });
-    expect(row.stopped_at).toBeInstanceOf(Date);
+    expect(row).toMatchObject({ at: new Date(until!), lastError: null });
+    expect(row.stoppedAt).toBeInstanceOf(Date);
     expect(await worker.idle()).toBe(false);
     // Nothing recorded the stop as the run's end.
     expect((await app.client.ledger(runId)).map((r) => r.type)).toEqual(["run.started", "sleep.started"]);
@@ -390,15 +392,15 @@ describe("the stop rule", () => {
 
   it("keeps running when the register fails, recording why, and stops once it succeeds", async () => {
     registerFails = new Error("the wakeup service is down");
-    const { stopped_at } = await app.row();
+    const { stoppedAt } = await app.row();
     await app.client.start(nap, { seconds: 30 }, { startedBy: alice });
     const stops: SelfStop[] = [];
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const worker = await app.start({ ...fast, onStopped: (s) => stops.push(s) });
-    await waitFor(async () => (await app.row()).last_error !== null);
+    await waitFor(async () => (await app.row()).lastError !== null);
     const failed = await app.row();
-    expect(failed.last_error).toBe("the wakeup service is down");
-    expect(failed.stopped_at).toEqual(stopped_at);
+    expect(failed.lastError).toBe("the wakeup service is down");
+    expect(failed.stoppedAt).toEqual(stoppedAt);
     expect(stops).toEqual([]);
     expect(await worker.idle()).toBe(true);
     // Tried again at each check, logged once.
@@ -408,7 +410,7 @@ describe("the stop rule", () => {
 
     registerFails = undefined;
     await waitFor(() => stops.length === 1);
-    expect(await app.row()).toMatchObject({ last_error: null, at: new Date(stops[0]!.at!) });
+    expect(await app.row()).toMatchObject({ lastError: null, at: new Date(stops[0]!.at!) });
   });
 
   it("never stops a worker whose caller would not hear it stop", async () => {
@@ -498,7 +500,7 @@ describe("the stop rule with the environment's wakeup", () => {
     expect(wakes).toEqual([{ method: "PUT", url: "/__sanoma/wake", authorization: `Bearer ${TOKEN}`, body: { at } }]);
     // No driver: the connector's register is never called.
     expect(registered).toEqual([]);
-    expect(await app.row()).toMatchObject({ at: new Date(at), last_error: null });
+    expect(await app.row()).toMatchObject({ at: new Date(at), lastError: null });
   });
 
   it("keeps running when the host refuses the registration, recording its status and error", async () => {
@@ -509,8 +511,8 @@ describe("the stop rule with the environment's wakeup", () => {
     const stops: SelfStop[] = [];
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     await app.start({ ...fast, onStopped: (s) => stops.push(s) });
-    await waitFor(async () => (await app.row()).last_error !== null);
-    expect((await app.row()).last_error).toBe(
+    await waitFor(async () => (await app.row()).lastError !== null);
+    expect((await app.row()).lastError).toBe(
       `PUT ${host}/__sanoma/wake answered 401: the token is not this host's SANOMA_WAKEUP_TOKEN`,
     );
     expect(stops).toEqual([]);
@@ -565,6 +567,8 @@ describe("the supervisor", () => {
     expect(supervisor.stopped).toBe(false);
     await waitFor(() => stops.length === 1);
     expect(supervisor.stopped).toBe(true);
+    // Woken when the deadline it registered falls, as its wakeup would: woken sooner, it would stop again.
+    await delay(Date.parse(stops[0]!.at!) - Date.now());
     await supervisor.wake();
     expect(supervisor.stopped).toBe(false);
     // A wake while it runs starts nothing more.

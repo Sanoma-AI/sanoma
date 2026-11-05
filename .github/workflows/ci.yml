@@ -9,9 +9,46 @@ on:
       - "**/README.md"
       - "**/AGENTS.md"
 
+# A new push to a pull request replaces its run. Main's runs finish: the release workflows read them.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  test:
+  checks:
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Node and pnpm from .mise.toml, the one pin; pnpm then switches to `packageManager`.
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        with:
+          cache: true
+      - id: pnpm
+        run: echo "store=$(pnpm store path)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pnpm.outputs.store }}
+          key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm format:check
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - name: Generated bridge client is up to date
+        run: pnpm --filter @sanoma-ai/bridge run generate && git diff --exit-code packages/bridge/src/gen && test -z "$(git status --porcelain packages/bridge/src/gen)"
+      - name: Generated migrations are up to date
+        run: pnpm --filter @sanoma-ai/workflows --filter @sanoma-ai/connector-better-auth run generate && git diff --exit-code packages/workflows/drizzle connectors/better-auth/drizzle && test -z "$(git status --porcelain packages/workflows/drizzle connectors/better-auth/drizzle)"
+      # A migration generated before another merged to main would never reach a database past it.
+      - name: Migrations are newer than main's
+        if: github.event_name == 'pull_request'
+        run: git fetch --depth=1 origin main && node scripts/check-journal.ts origin/main
+
+  shard:
+    runs-on: ubuntu-latest
+    strategy:
+      # One failing shard leaves the others to report theirs, so one run shows every failure.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     services:
       postgres:
         image: postgres:18
@@ -33,9 +70,6 @@ jobs:
           path: ${{ steps.pnpm.outputs.store }}
           key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
       - run: pnpm install --frozen-lockfile
-      - run: pnpm format:check
-      - run: pnpm lint
-      - run: pnpm typecheck
       - run: pnpm build
       # Each @sanoma-ai/postgres-<platform> payload, made by its prepack as release.yml makes it; this runner's is checked.
       - uses: actions/cache@v4
@@ -48,9 +82,15 @@ jobs:
       - if: steps.postgres.outputs.cache-hit != 'true'
         run: pnpm --filter "./packages/postgres-bin/*" run prepack
       - run: pnpm postgres:download --check
-      - run: pnpm test
-      - name: Generated bridge client is up to date
-        run: pnpm --filter @sanoma-ai/bridge run generate && git diff --exit-code packages/bridge/src/gen && test -z "$(git status --porcelain packages/bridge/src/gen)"
+      - run: pnpm test --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+
+  # The one result a pull request reads, whatever the number of shards.
+  test:
+    runs-on: ubuntu-latest
+    needs: [checks, shard]
+    if: always()
+    steps:
+      - run: test "${{ needs.checks.result }}" = success && test "${{ needs.shard.result }}" = success
 
   runtime-image:
     runs-on: ubuntu-latest

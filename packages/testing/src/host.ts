@@ -126,6 +126,11 @@ export interface HostUnderTest {
   commit(): Promise<string>;
   /** A drift check's row for the host's declaration. */
   drift(): Promise<DriftResult>;
+  /**
+   * A page of the app, by path (`/`), for a host that answers visitors apart from the company's
+   * worker: it must answer while the worker is stopped, and throughout a deploy, never with a 503.
+   */
+  page?: string;
   /** How long a check waits for the host. Default 60 s. */
   timeoutMs?: number;
 }
@@ -175,8 +180,9 @@ export async function credentialHeard(
  * change, a sleep survives a restart, a new commit shows as drift that apply clears, and no
  * secret is in the ledger. A host that stops (`stops-when-quiet`) is also checked
  * for what a request to its URL starts again (`suspend`, then a `/wake`): a run queued while it
- * was stopped drains, and a sleep that ended while it was stopped continues. Leaves the host
- * applied, and its check's credential cleared.
+ * was stopped drains, and a sleep that ended while it was stopped continues. With a `page`, the
+ * page answers while the host is stopped, and every ask of it answers 200 throughout a deploy of a
+ * new commit. Leaves the host applied, and its check's credential cleared.
  */
 export async function checkHost(host: HostUnderTest): Promise<HostCheck[]> {
   const { type, client, timeoutMs = 60_000 } = host;
@@ -254,6 +260,43 @@ export async function checkHost(host: HostUnderTest): Promise<HostCheck[]> {
       await delay(Math.max(0, until - Date.now()) + 500);
       await wake();
       await finish(runId);
+    });
+    if (host.page !== undefined) {
+      const page = new URL(host.page, wakeUrlOf(spec.outputs(applied)));
+      await check("a page of the app answers while the container is stopped", async () => {
+        await suspend();
+        const res = await fetch(page);
+        await res.body?.cancel();
+        if (res.status !== 200) throw new Error(`${page} answered ${res.status} while stopped`);
+      });
+    }
+  }
+  if (host.page !== undefined) {
+    await check("a deploy never answers 503 to a visitor", async () => {
+      const page = new URL(host.page!, wakeUrlOf(spec.outputs(applied)));
+      await host.commit();
+      const seen = new Map<number | string, number>();
+      const deploying = new AbortController();
+      const asking = (async () => {
+        while (!deploying.signal.aborted) {
+          const status = await fetch(page).then(async (res) => (await res.body?.cancel(), res.status), errorMessage);
+          seen.set(status, (seen.get(status) ?? 0) + 1);
+          await delay(20);
+        }
+      })();
+      try {
+        await apply();
+      } finally {
+        deploying.abort();
+        await asking;
+      }
+      const other = [...seen].filter(([status]) => status !== 200);
+      if (other.length) {
+        throw new Error(
+          `asked during the deploy, ${page} answered ${other.map(([s, n]) => `${s} (${n}×)`).join(", ")}`,
+        );
+      }
+      if (!seen.size) throw new Error(`${page} was never asked during the deploy`);
     });
   }
   await check("a new commit shows as drift that apply clears", async () => {

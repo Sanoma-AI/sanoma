@@ -1,5 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { connectMaking, createTable, type Db, openPool } from "./db.ts";
+import { and, eq, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
+import { type Db, databaseOn, openPool, underPreparationLock } from "./db.ts";
+import { applyMigrations, WAKEUP_MIGRATIONS } from "./db/migrate.ts";
+import { wakeupAccounts, wakeupInstances } from "./db/wakeup.ts";
 import { info, warn } from "./log.ts";
 import { generateSecret, tokenHash as hashOf } from "./secret.ts";
 import { errorMessage } from "./shared.ts";
@@ -11,38 +14,8 @@ import { errorMessage } from "./shared.ts";
  * before it stops, `PUT`s with that token when it wants waking, replacing what it asked before;
  * the service then calls `GET {url}/wake`, retrying until an answer is a 2xx. It makes its two
  * tables itself, in the database it is given (sanoma-ops's own, when it hosts it): never among
- * `db.ts`'s, which every company's database gets.
+ * `db/company.ts`'s, which every company's database gets.
  */
-
-/** Where the accounts live: one per party that registers instances, its token's hash alone. */
-export const WAKEUP_ACCOUNTS_TABLE = "sanoma_wakeup_accounts";
-/** Where the instances live: each one's URL, its token's hash and its registered wake. */
-export const WAKEUP_INSTANCES_TABLE = "sanoma_wakeup_instances";
-
-const TABLES: readonly [what: string, ddl: string][] = [
-  [
-    "wakeup accounts",
-    `CREATE TABLE IF NOT EXISTS ${WAKEUP_ACCOUNTS_TABLE} (id uuid PRIMARY KEY, token_hash text UNIQUE NOT NULL, ` +
-      "label text NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), revoked_at timestamptz)",
-  ],
-  [
-    "wakeup instances",
-    `CREATE TABLE IF NOT EXISTS ${WAKEUP_INSTANCES_TABLE} (id uuid PRIMARY KEY, ` +
-      `account_id uuid NOT NULL REFERENCES ${WAKEUP_ACCOUNTS_TABLE} (id), url text NOT NULL, ` +
-      "token_hash text UNIQUE NOT NULL, at timestamptz, " +
-      "called_at timestamptz, attempts integer NOT NULL DEFAULT 0, next_attempt_at timestamptz, " +
-      "last_error text, created_at timestamptz NOT NULL DEFAULT now())",
-  ],
-  // Each on its own, so one another process made first does not skip the next.
-  [
-    "wakeup instances",
-    `CREATE INDEX IF NOT EXISTS ${WAKEUP_INSTANCES_TABLE}_at ON ${WAKEUP_INSTANCES_TABLE} (at) WHERE at IS NOT NULL`,
-  ],
-  [
-    "wakeup instances",
-    `CREATE INDEX IF NOT EXISTS ${WAKEUP_INSTANCES_TABLE}_account ON ${WAKEUP_INSTANCES_TABLE} (account_id)`,
-  ],
-];
 
 /** How long a call to an instance's `/wake` may take. */
 const CALL_TIMEOUT_MS = 10_000;
@@ -173,54 +146,45 @@ export function instanceUrl(value: unknown): { url: string } | { error: string }
   return { url: url.href.replace(/\/+$/, "") };
 }
 
-interface InstanceRow {
-  id: string;
-  account_id: string;
-  url: string;
-  at: Date | null;
-  called_at: Date | null;
-  attempts: number;
-  last_error: string | null;
-}
+type InstanceRow = typeof wakeupInstances.$inferSelect;
 
 /** An instance as `GET` shows it to its account. */
 const shownInstance = (row: InstanceRow) => ({
   id: row.id,
   url: row.url,
   at: row.at?.toISOString() ?? null,
-  calledAt: row.called_at?.toISOString() ?? null,
+  calledAt: row.calledAt?.toISOString() ?? null,
   attempts: row.attempts,
-  lastError: row.last_error,
+  lastError: row.lastError,
 });
 
 /** A row waiting for its call: registered, not called since its `at`. */
-const WAITING = "i.at IS NOT NULL AND (i.called_at IS NULL OR i.called_at < i.at)";
-/** Of an account not revoked. */
-const LIVE = `JOIN ${WAKEUP_ACCOUNTS_TABLE} a ON a.id = i.account_id AND a.revoked_at IS NULL`;
+const waiting = and(
+  isNotNull(wakeupInstances.at),
+  or(isNull(wakeupInstances.calledAt), lt(wakeupInstances.calledAt, wakeupInstances.at)),
+);
+/** The join to an account not revoked. */
+const live = and(eq(wakeupAccounts.id, wakeupInstances.accountId), isNull(wakeupAccounts.revokedAt));
 
 /**
- * Runs `use` on a connection to `databaseUrl` once the service's two tables are there: the
- * database and the tables made when missing.
+ * Runs `use` on a connection to `databaseUrl` holding the preparation's lock, the database and the
+ * service's two tables made when missing: the service's own migrations folder, with its own journal
+ * table, since the database may be a company's too.
  */
-async function withTables<T>(databaseUrl: string, use: (db: Db) => Promise<T>): Promise<T> {
-  const conn = await connectMaking(databaseUrl);
-  try {
-    for (const [what, ddl] of TABLES) await createTable(conn, ddl, what);
-    return await use(conn);
-  } finally {
-    await conn.end().catch(() => undefined);
-  }
+function withTables<T>(databaseUrl: string, use: (db: Db) => Promise<T>): Promise<T> {
+  return underPreparationLock(databaseUrl, async (db) => {
+    await applyMigrations(db, WAKEUP_MIGRATIONS).catch((err: unknown) => {
+      throw new Error(`could not prepare the wakeup service tables: ${errorMessage(err)}`, { cause: err });
+    });
+    return use(db);
+  });
 }
 
 async function insertAccount(db: Db, label: string): Promise<{ id: string; token: string }> {
   if (!label.trim()) throw new Error("An account's label must not be empty");
   const id = randomUUID();
   const token = newToken("swa_");
-  await db.query(`INSERT INTO ${WAKEUP_ACCOUNTS_TABLE} (id, token_hash, label) VALUES ($1, $2, $3)`, [
-    id,
-    hashOf(token),
-    label,
-  ]);
+  await db.insert(wakeupAccounts).values({ id, tokenHash: hashOf(token), label });
   return { id, token };
 }
 
@@ -257,26 +221,26 @@ export async function startWakeupService({
 }: WakeupServiceOptions): Promise<WakeupService> {
   await withTables(databaseUrl, async () => {});
   const pool = openPool(databaseUrl, "wakeup service");
-  const loop = startLoop({ pool, now, fetch, log });
+  const db = databaseOn(pool);
+  const loop = startLoop({ db, now, fetch, log });
 
   /** The live account the request's token is, or a 401. */
   async function account(request: Request): Promise<string | Response> {
     const token = bearer(request);
     if (!token?.startsWith("swa_")) return problem(401, "an account's token is needed");
-    const { rows } = await pool.query<{ id: string }>(
-      `SELECT id FROM ${WAKEUP_ACCOUNTS_TABLE} WHERE token_hash = $1 AND revoked_at IS NULL`,
-      [hashOf(token)],
-    );
-    return rows[0]?.id ?? problem(401, "the token is no account's");
+    const [row] = await db
+      .select({ id: wakeupAccounts.id })
+      .from(wakeupAccounts)
+      .where(and(eq(wakeupAccounts.tokenHash, hashOf(token)), isNull(wakeupAccounts.revokedAt)));
+    return row?.id ?? problem(401, "the token is no account's");
   }
 
   /** The account's instance `id`, or a 404, or a 403 when it is another account's. */
   async function owned(accountId: string, id: string): Promise<InstanceRow | Response> {
     if (!UUID.test(id)) return problem(404, "no such instance");
-    const { rows } = await pool.query<InstanceRow>(`SELECT * FROM ${WAKEUP_INSTANCES_TABLE} WHERE id = $1`, [id]);
-    const row = rows[0];
+    const [row] = await db.select().from(wakeupInstances).where(eq(wakeupInstances.id, id));
     if (!row) return problem(404, "no such instance");
-    return row.account_id === accountId ? row : problem(403, "the instance is another account's");
+    return row.accountId === accountId ? row : problem(403, "the instance is another account's");
   }
 
   async function register(request: Request): Promise<Response> {
@@ -291,32 +255,39 @@ export async function startWakeupService({
       return problem(400, "token must be an instance's token: swi_, then 43 or more base64url characters");
     // The token names the instance: a new one is a new row, one of this account's is moved to the
     // URL given, and another account's is refused (no row returned).
-    const { rows } = await pool.query<{ id: string; made: boolean }>(
-      `INSERT INTO ${WAKEUP_INSTANCES_TABLE} AS i (id, account_id, url, token_hash) VALUES ($1, $2, $3, $4) ` +
-        "ON CONFLICT (token_hash) DO UPDATE SET url = EXCLUDED.url, " +
-        "at = CASE WHEN i.url = EXCLUDED.url THEN i.at END, " +
-        "called_at = CASE WHEN i.url = EXCLUDED.url THEN i.called_at END, " +
-        "attempts = CASE WHEN i.url = EXCLUDED.url THEN i.attempts ELSE 0 END, " +
-        "next_attempt_at = CASE WHEN i.url = EXCLUDED.url THEN i.next_attempt_at END, " +
-        "last_error = CASE WHEN i.url = EXCLUDED.url THEN i.last_error END " +
-        "WHERE i.account_id = EXCLUDED.account_id RETURNING i.id, i.id = $1 AS made",
-      [randomUUID(), accountId, checked.url, hashOf(token)],
-    );
-    const row = rows[0];
+    const id = randomUUID();
+    const sameUrl = eq(wakeupInstances.url, checked.url);
+    const [row] = await db
+      .insert(wakeupInstances)
+      .values({ id, accountId, url: checked.url, tokenHash: hashOf(token) })
+      .onConflictDoUpdate({
+        target: wakeupInstances.tokenHash,
+        set: {
+          url: checked.url,
+          at: sql`CASE WHEN ${sameUrl} THEN ${wakeupInstances.at} END`,
+          calledAt: sql`CASE WHEN ${sameUrl} THEN ${wakeupInstances.calledAt} END`,
+          attempts: sql`CASE WHEN ${sameUrl} THEN ${wakeupInstances.attempts} ELSE 0 END`,
+          nextAttemptAt: sql`CASE WHEN ${sameUrl} THEN ${wakeupInstances.nextAttemptAt} END`,
+          lastError: sql`CASE WHEN ${sameUrl} THEN ${wakeupInstances.lastError} END`,
+        },
+        setWhere: eq(wakeupInstances.accountId, accountId),
+      })
+      .returning({ id: wakeupInstances.id });
     if (!row) {
       return problem(409, "the token is another account's instance's");
     }
-    return json(row.made ? 201 : 200, { id: row.id });
+    return json(row.id === id ? 201 : 200, { id: row.id });
   }
 
   async function wake(request: Request): Promise<Response> {
     const token = bearer(request);
     if (!token?.startsWith("swi_")) return problem(401, "an instance's token is needed");
-    const { rows } = await pool.query<{ id: string }>(
-      `SELECT i.id FROM ${WAKEUP_INSTANCES_TABLE} i ${LIVE} WHERE i.token_hash = $1`,
-      [hashOf(token)],
-    );
-    const id = rows[0]?.id;
+    const [found] = await db
+      .select({ id: wakeupInstances.id })
+      .from(wakeupInstances)
+      .innerJoin(wakeupAccounts, live)
+      .where(eq(wakeupInstances.tokenHash, hashOf(token)));
+    const id = found?.id;
     if (!id) return problem(401, "the token is no instance's");
     const given = await jsonBody(request);
     if (given instanceof Response) return given;
@@ -324,11 +295,10 @@ export async function startWakeupService({
     if (typeof at !== "string" || !ISO_DATE_TIME.test(at) || Number.isNaN(Date.parse(at)))
       return problem(400, "at must be an ISO 8601 date-time");
     // Whatever it had is replaced: a wake that arrives for an older one starts a worker with nothing to do.
-    await pool.query(
-      `UPDATE ${WAKEUP_INSTANCES_TABLE} SET at = $2, called_at = NULL, attempts = 0, ` +
-        "next_attempt_at = NULL, last_error = NULL WHERE id = $1",
-      [id, new Date(at)],
-    );
+    await db
+      .update(wakeupInstances)
+      .set({ at: new Date(at), calledAt: null, attempts: 0, nextAttemptAt: null, lastError: null })
+      .where(eq(wakeupInstances.id, id));
     loop.poke();
     return noContent();
   }
@@ -350,19 +320,19 @@ export async function startWakeupService({
     const row = await owned(accountId, id);
     if (row instanceof Response) return row;
     if (method === "GET") return json(200, shownInstance(row));
-    await pool.query(`DELETE FROM ${WAKEUP_INSTANCES_TABLE} WHERE id = $1`, [id]);
+    await db.delete(wakeupInstances).where(eq(wakeupInstances.id, id));
     return noContent();
   }
 
   return {
     routes: [{ path: "/wakeup", prefix: true, handle }],
-    mintAccount: (label) => insertAccount(pool, label),
+    mintAccount: (label) => insertAccount(db, label),
     async revokeAccount(id) {
       if (!UUID.test(id)) return;
-      await pool.query(`UPDATE ${WAKEUP_ACCOUNTS_TABLE} SET revoked_at = $2 WHERE id = $1 AND revoked_at IS NULL`, [
-        id,
-        now(),
-      ]);
+      await db
+        .update(wakeupAccounts)
+        .set({ revokedAt: now() })
+        .where(and(eq(wakeupAccounts.id, id), isNull(wakeupAccounts.revokedAt)));
     },
     async stop() {
       await loop.stop();
@@ -371,11 +341,8 @@ export async function startWakeupService({
   };
 }
 
-interface Due {
-  id: string;
-  url: string;
-  at: Date;
-}
+/** A row due for its call: one waiting, so its `at` is set. */
+type Due = Pick<InstanceRow, "id" | "url"> & { at: Date };
 
 /**
  * The one loop: calls every row that is due, at most `CONCURRENCY` at once, then sleeps until the
@@ -383,12 +350,12 @@ interface Due {
  * `min(2^attempts s, MAX_BACKOFF_S)`, for as long as it takes: no row is ever dropped.
  */
 function startLoop({
-  pool,
+  db,
   now,
   fetch,
   log,
 }: {
-  pool: ReturnType<typeof openPool>;
+  db: Db;
   now: () => Date;
   fetch: typeof globalThis.fetch;
   log: { info(line: string): void; warn(line: string): void };
@@ -414,21 +381,22 @@ function startLoop({
     if (stopping.signal.aborted) return;
     // Recorded only on the registration called: one replaced (another `at`), or moved to another
     // URL, is called again.
-    const same = "WHERE id = $1 AND at = $2 AND url = $3";
+    const same = and(eq(wakeupInstances.id, row.id), eq(wakeupInstances.at, row.at), eq(wakeupInstances.url, row.url));
     if (error === undefined) {
-      await pool.query(
-        `UPDATE ${WAKEUP_INSTANCES_TABLE} SET called_at = $4, attempts = 0, next_attempt_at = NULL, ` +
-          `last_error = NULL ${same}`,
-        [row.id, row.at, row.url, now()],
-      );
+      await db
+        .update(wakeupInstances)
+        .set({ calledAt: now(), attempts: 0, nextAttemptAt: null, lastError: null })
+        .where(same);
       log.info(`wakeup: called ${target}`);
     } else {
-      await pool.query(
-        `UPDATE ${WAKEUP_INSTANCES_TABLE} SET attempts = attempts + 1, last_error = $4, ` +
-          `next_attempt_at = $5::timestamptz + least(power(2, attempts), ${MAX_BACKOFF_S}) * interval '1 second' ` +
-          same,
-        [row.id, row.at, row.url, error, now()],
-      );
+      await db
+        .update(wakeupInstances)
+        .set({
+          attempts: sql`${wakeupInstances.attempts} + 1`,
+          lastError: error,
+          nextAttemptAt: sql`${now().toISOString()}::timestamptz + least(power(2, ${wakeupInstances.attempts}), ${sql.raw(String(MAX_BACKOFF_S))}) * interval '1 second'`,
+        })
+        .where(same);
       log.warn(`wakeup: calling ${target} failed (${error}); it is tried again`);
     }
   }
@@ -436,25 +404,43 @@ function startLoop({
   /** Calls every due row; returns when the next one is due, or undefined with none waiting. */
   async function round(): Promise<Date | undefined> {
     // Taken for `CLAIM_S`, rows another service holds skipped: each due row is called by one service.
-    const { rows } = await pool.query<Due>(
-      `UPDATE ${WAKEUP_INSTANCES_TABLE} SET next_attempt_at = $1::timestamptz + interval '${CLAIM_S} seconds' ` +
-        `WHERE id IN (SELECT i.id FROM ${WAKEUP_INSTANCES_TABLE} i ${LIVE} WHERE ${WAITING} ` +
-        "AND i.at <= $1 AND (i.next_attempt_at IS NULL OR i.next_attempt_at <= $1) " +
-        `ORDER BY i.at LIMIT ${ROUND_ROWS} FOR UPDATE OF i SKIP LOCKED) RETURNING id, url, at`,
-      [now()],
-    );
-    const queue = [...rows];
+    const at = now();
+    const due = db
+      .select({ id: wakeupInstances.id })
+      .from(wakeupInstances)
+      .innerJoin(wakeupAccounts, live)
+      .where(
+        and(
+          waiting,
+          lte(wakeupInstances.at, at),
+          or(isNull(wakeupInstances.nextAttemptAt), lte(wakeupInstances.nextAttemptAt, at)),
+        ),
+      )
+      .orderBy(wakeupInstances.at)
+      .limit(ROUND_ROWS)
+      .for("update", { of: wakeupInstances, skipLocked: true });
+    const rows = await db
+      .update(wakeupInstances)
+      .set({ nextAttemptAt: new Date(at.getTime() + CLAIM_S * 1000) })
+      .where(inArray(wakeupInstances.id, due))
+      .returning({ id: wakeupInstances.id, url: wakeupInstances.url, at: wakeupInstances.at });
+    const queue = rows.flatMap((r): Due[] => (r.at ? [{ ...r, at: r.at }] : []));
     const worker = async () => {
       for (let row = queue.shift(); row && !stopping.signal.aborted; row = queue.shift()) {
         await call(row).catch((err: unknown) => log.warn(`wakeup: could not record a call: ${errorMessage(err)}`));
       }
     };
     await Promise.all(Array.from({ length: Math.min(CONCURRENCY, queue.length) }, worker));
-    const next = await pool.query<{ next: Date | null }>(
-      `SELECT min(greatest(i.at, coalesce(i.next_attempt_at, i.at))) AS next FROM ${WAKEUP_INSTANCES_TABLE} i ` +
-        `${LIVE} WHERE ${WAITING}`,
-    );
-    return next.rows[0]?.next ?? undefined;
+    const [next] = await db
+      .select({
+        next: sql<Date | null>`min(greatest(${wakeupInstances.at}, coalesce(${wakeupInstances.nextAttemptAt}, ${wakeupInstances.at})))`.mapWith(
+          wakeupInstances.at,
+        ),
+      })
+      .from(wakeupInstances)
+      .innerJoin(wakeupAccounts, live)
+      .where(waiting);
+    return next?.next ?? undefined;
   }
 
   const sleep = (ms: number) =>

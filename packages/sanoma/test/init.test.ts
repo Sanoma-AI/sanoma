@@ -293,11 +293,13 @@ describe("the template", () => {
     };
     const checked = await runCli(dir, ["check"], env);
     expect(checked.code, `${checked.stdout}${checked.stderr}`).toBe(0);
-    // The generated SDK, written before tsc, and nothing else: no app built.
+    // The generated SDK, written before tsc, and the app bundle's build cache: no site, so no sites' files.
     const logged = checked.stderr.split("\n");
     expect(logged.indexOf("wrote .sanoma/api.ts")).toBeGreaterThan(-1);
     expect(logged.indexOf("wrote .sanoma/api.ts")).toBeLessThan(logged.indexOf("tsc"));
-    expect(readdirSync(join(dir, ".sanoma"))).toEqual(["api.ts", "schema.cedarschema"]);
+    expect(logged).toContain("build the app bundle");
+    expect(readdirSync(join(dir, ".sanoma"))).toEqual(["api.ts", "app", "schema.cedarschema"]);
+    expect(existsSync(join(dir, "sites"))).toBe(false);
     // The policy holds, so the scenarios ran: each passed under it.
     expect(logged).toContain("passed scenarios/publish-post/publish.feature › The editor approves");
     expect(logged).toContain("passed scenarios/publish-post/publish.feature › An editor publishes without a review");

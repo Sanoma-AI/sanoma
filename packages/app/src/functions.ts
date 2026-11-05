@@ -3,7 +3,6 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import {
   type ActorInfo,
-  AdoptRequest,
   CallRequest,
   ChangesQuery,
   ClearCredentialRequest,
@@ -11,17 +10,13 @@ import {
   ConnectConnectionRequest,
   TestConnectionRequest,
   DisconnectConnectionRequest,
-  ConnectExistingRequest,
   DecideCall,
-  GoLiveRequest,
   InviteRequest,
-  PatchRequest,
   PreviewQuery,
   RunsQuery,
   SetCredentialRequest,
 } from "./api.ts";
 import {
-  adopt,
   appBehind,
   appConfig,
   callApi,
@@ -37,31 +32,28 @@ import {
   decide,
   driftReport,
   fileSource,
-  hasRemote,
   hostEnforcement,
   lastRuns,
   listRuns,
   nextFires,
   openChange,
-  patch,
   permissions,
   preview,
   readStartRun,
   runDetail,
   saysWho,
-  scenarios,
   setCredential,
   signOutUrl,
   startRun,
   validate,
 } from "./server/core.ts";
 import { availableConnectors } from "./server/available.ts";
-import { goLive, goLiveChoices, goLiveHost, goLiveProgress, goLiveSignIn } from "./server/go-live.ts";
+import { goLiveChoices, goLiveProgress, goLiveSignIn } from "./server/go-live.ts";
 import { hostDerived } from "./server/host-derived.ts";
 import { invitePerson, peopleSignIns } from "./server/people.ts";
-import { connectExisting, setSetupToken, setupStatus } from "./server/setup.ts";
+import { setSetupToken, setupStatus } from "./server/setup.ts";
 import { withPrincipal } from "./middleware.ts";
-import { chatFor } from "./server/agent/turn.ts";
+import { chatFor } from "./server/chat.ts";
 import { chatModel } from "./server/models.ts";
 
 // The page's reads and changes, as server functions: the app's only HTTP surface. Each parses its
@@ -80,7 +72,7 @@ export const getConfig = createServerFn(READ).handler(({ context }) => appConfig
 /** A file the config names (a workflow's or a data file), as it is now; `null` for any other. */
 export const getSource = createServerFn(READ)
   .validator(validate(z.object({ file: z.string().min(1) })))
-  .handler(({ data, context }) => fileSource(context.app, data.file));
+  .handler(({ data, context }) => fileSource(context.app.snapshot, data.file));
 
 /**
  * Who the server resolves this request to, and whether the deployment says so itself; nobody for
@@ -98,15 +90,15 @@ export const getActor = createServerFn(READ).handler(async ({ context }): Promis
   }
 });
 
-/** The config's scenarios, read again from their feature files whenever one has changed: the agent may be editing them. */
-export const getScenarios = createServerFn(READ).handler(({ context }) => scenarios(context.app));
+/** The config's scenarios, as the snapshot read them from their feature files: the Node adapter's is read again once one changed. */
+export const getScenarios = createServerFn(READ).handler(({ context }) => context.app.snapshot.scenarios);
 
 export const getRuns = createServerFn(READ)
   .validator(validate(RunsQuery))
   .handler(({ data, context }) => listRuns(context.app, data));
 
 /** When each workflow on a schedule fires next, ISO 8601 by name. */
-export const getNextFires = createServerFn(READ).handler(({ context }) => nextFires(context.app));
+export const getNextFires = createServerFn(READ).handler(({ context }) => nextFires(context.app.snapshot.description));
 
 /** Each workflow's latest run, by name. */
 export const getLastRuns = createServerFn(READ).handler(({ context }) => lastRuns(context.app));
@@ -127,7 +119,9 @@ export const getChange = createServerFn(READ)
   .handler(({ data, context }) => change(context.app, data.id));
 
 /** Whether the repository has a remote, where its changes are reviewed: the bar's Changes. */
-export const getRemote = createServerFn(READ).handler(({ context }) => hasRemote(context.app));
+export const getRemote = createServerFn(READ).handler(
+  ({ context }) => context.app.snapshot.repository?.remote !== undefined,
+);
 
 /** Sends the person's chat's draft for review: its change opened, its run's id. */
 export const openChangeFn = createServerFn(CHANGE)
@@ -164,21 +158,6 @@ export const decideFn = createServerFn(CHANGE)
 export const getDriftReport = createServerFn(READ)
   .validator(validate(z.object({ runId: z.string().min(1) })))
   .handler(({ data, context }) => driftReport(context.app, data.runId));
-
-/** Writes what the vendor holds for drifted fields into their data file, and commits it when the app has a source. */
-export const adoptFn = createServerFn(CHANGE)
-  .middleware([withPrincipal])
-  .validator(validate(AdoptRequest))
-  .handler(({ data, context }) => adopt(context.app, context.principal, data));
-
-/**
- * A form's Save: sets fields of a declaration in its file, landed as a change for review when the
- * repository has a remote, else written and committed (`patch`).
- */
-export const patchFn = createServerFn(CHANGE)
-  .middleware([withPrincipal])
-  .validator(validate(PatchRequest))
-  .handler(({ data, context }) => patch(context.app, context.principal, data, context.origin));
 
 /** Each vendor's credential statuses now: they change as people set them, and with the environment. */
 export const getCredentials = createServerFn(READ).handler(({ context }) => credentials(context.app));
@@ -227,7 +206,7 @@ export const setSetupTokenFn = createServerFn(CHANGE)
 /** The connector packages on npm. */
 export const getAvailableConnectors = createServerFn(READ).handler(() => availableConnectors());
 
-/** How many commits a taken app is behind its source, fetched now; or why that cannot be told. */
+/** How many commits a taken app is behind its source, as the worker last checked; or why that cannot be told. */
 export const getAppBehind = createServerFn(READ)
   .validator(validate(z.object({ folder: z.string().min(1) })))
   .handler(({ data, context }) => appBehind(context.app, data.folder));
@@ -243,16 +222,6 @@ export const getGoLiveProgress = createServerFn(READ).handler(({ context }) => g
 /** What apply gives the declared host that derives: its image, source, branch, domains and keys (never a value). */
 export const getHostDerived = createServerFn(READ).handler(({ context }) => hostDerived(context.app));
 
-/** Writes `infra.ts` for the choices and applies the repository and the database. */
-export const goLiveFn = createServerFn(CHANGE)
-  .middleware([withPrincipal])
-  .validator(validate(GoLiveRequest))
-  .handler(({ data, context }) => goLive(context.app, context.principal, data));
-
-/** Pushes the local repository, then applies the host. */
-export const goLiveHostFn = createServerFn(CHANGE)
-  .middleware([withPrincipal])
-  .handler(({ context }) => goLiveHost(context.app, context.principal));
 /** Signs the person going live in on the host, by a sealed invite request: the link to open. */
 export const goLiveSignInFn = createServerFn(CHANGE)
   .middleware([withPrincipal])
@@ -266,12 +235,6 @@ export const inviteFn = createServerFn(CHANGE)
   .middleware([withPrincipal])
   .validator(validate(InviteRequest))
   .handler(({ data, context }) => invitePerson(context.app, context.principal, data.person, context.origin));
-
-/** Declares an existing repository and/or project in infra.ts, commits it, and starts the apply that binds them. */
-export const connectExistingFn = createServerFn(CHANGE)
-  .middleware([withPrincipal])
-  .validator(validate(ConnectExistingRequest))
-  .handler(({ data, context }) => connectExisting(context.app, context.principal, data));
 
 /** Whether the chat has a model to answer on, its connector's key set: the composer says "Connect a model" until then. */
 export const getChatModel = createServerFn(READ).handler(({ context }) => chatModel(context.app));

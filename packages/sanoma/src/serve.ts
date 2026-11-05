@@ -3,6 +3,7 @@ import { realpathSync } from "node:fs";
 import { dirname, extname, isAbsolute, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type AppOptions, type IngressRoute, staffLogin, startApp } from "@sanoma-ai/app";
+import { appSteps } from "@sanoma-ai/app/steps";
 import { betterAuthStaffLogin, prepareBetterAuthStaff } from "@sanoma-ai/connector-better-auth";
 import {
   deploymentKey,
@@ -42,12 +43,14 @@ const sourceOf = (config: SanomaConfig) => localGitSource(rootOf(config), { data
 
 /**
  * What a worker of the launcher's starts with: promoted, since a local worker is always the
- * version to take queued runs, even one seen before; the checkout as its source; and the staff
+ * version to take queued runs, even one seen before; the checkout as its source; the app's steps,
+ * which the app's built-in workflows run (Adopt, Save, going live, connecting, a chat's turn); and the staff
  * login's tables among what it prepares, since no config names that login (`appOptions` makes it).
  */
 export const workerOptions = (config: SanomaConfig) => ({
   promote: true,
   source: sourceOf(config),
+  app: appSteps,
   prepare: [prepareBetterAuthStaff],
 });
 

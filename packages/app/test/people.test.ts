@@ -4,8 +4,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureBuilt, testDatabaseUrl } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
-import { resolveConfig, type SanomaConfig, type Source } from "@sanoma-ai/workflows";
-import { describeConfig, readPeople } from "@sanoma-ai/workflows/describe";
+import { type Principal, resolveConfig, type SanomaConfig, type Source } from "@sanoma-ai/workflows";
+import { readPeople } from "@sanoma-ai/workflows/describe";
 import { executablePath, launch } from "puppeteer-core";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { ACTOR_COOKIE } from "../src/api.ts";
@@ -13,12 +13,14 @@ import type { AppContext, LoginProvider } from "../src/context.ts";
 import { type App, startApp } from "../src/index.ts";
 import { admitting } from "../src/login/admission.ts";
 import { actorFromCookie, loopbackLogin } from "../src/loopback.ts";
-import { patch } from "../src/server/core.ts";
+import { appSnapshot } from "../src/snapshot-build.ts";
 import { invitePerson, peopleSignIns } from "../src/server/people.ts";
+import { appSteps } from "../src/steps/index.ts";
+import { pageApi } from "./page-api.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built app, as data.test.ts does. People: `/people`, its
-// tabs and table from the people file, a row's declaration form over the list, Save through
-// `patch` into a checkout with no remote (a stub source that commits), and the same form as
+// tabs and table from the people file, a row's declaration form over the list, Save through a
+// `patch` run into a checkout with no remote (a stub source that commits), and the same form as
 // Hosting's Edit; on an app whose login mints invite links (a stub of the host's staff login), each
 // row's Invite link and its card. The tests in a browser need Google Chrome, or `CHROME_PATH`, and
 // skip without either.
@@ -71,7 +73,7 @@ const source: Source = {
 };
 
 const config: SanomaConfig = { workflows: [], connectors: [], root };
-const testApp = useTestApp(config, { databaseUrl: testDatabaseUrl("app_people") });
+const testApp = useTestApp(config, { databaseUrl: testDatabaseUrl("app_people"), source, app: appSteps });
 let app: App;
 /** The same company on a login that says who is asking (the loopback's cookie) and mints invite links, as a host's does. */
 let inviter: App;
@@ -120,16 +122,18 @@ const text = (html: string) =>
 const ADA = { id: "ada", groups: ["admin", "ops"] };
 
 /** The context `startApp` hands a request, for calling the server core as the page's Save does. */
-function context(): AppContext {
+async function context(): Promise<AppContext> {
   return {
     resolved: resolveConfig(testApp.config),
-    description: describeConfig(testApp.config),
+    snapshot: await appSnapshot(testApp.config, { source }),
     client: testApp.client,
     place: "this-computer",
     login: admitting(loopbackLogin(), () => readPeople(root)),
-    source,
   };
 }
+
+/** A form's Save as `actor`'s page calls it: a `patch` run, its `.result` polled. */
+const patch = async (actor: Principal, input: unknown) => pageApi(await context(), actor).patch(input);
 
 describe("People", () => {
   it("lists the people with how they sign in and their groups, the tabs with counts, and the people file's problems", async () => {
@@ -162,7 +166,7 @@ describe("People", () => {
   it("says when each person last signed in and how, and mints an invite link only where the login makes them", async () => {
     await testApp.client.recordSignIn("cy", "github");
     await testApp.client.recordSignIn("cy", "code");
-    const signIns = await peopleSignIns(context());
+    const signIns = await peopleSignIns(await context());
     expect(signIns).toEqual({ invites: false, last: { cy: { at: expect.any(Number), method: "code" } } });
     expect(rows((await page("/people")).html)[2]).toEqual([
       "Cy Chen",
@@ -172,7 +176,7 @@ describe("People", () => {
       expect.stringMatching(/ · email code$/),
     ]);
     // On this machine the picker signs anyone in: no invites.
-    await expect(invitePerson(context(), { id: "ada" }, "ada", "http://localhost")).rejects.toMatchObject({
+    await expect(invitePerson(await context(), { id: "ada" }, "ada", "http://localhost")).rejects.toMatchObject({
       status: 409,
     });
 
@@ -183,7 +187,8 @@ describe("People", () => {
         expiresAt: new Date(0),
       }),
     );
-    const hosted = { ...context(), login: { ...context().login, invite } };
+    const base = await context();
+    const hosted = { ...base, login: { ...base.login, invite } };
     expect((await peopleSignIns(hosted)).invites).toBe(true);
     // Only an admin hands one out: it signs its holder in as that person.
     await expect(
@@ -252,31 +257,29 @@ describe("People", () => {
     expect(open).toMatch(/<input[^>]*id="field-name"[^>]*value="Bo Lin"/);
   });
 
-  it("saves through the function into the checkout and commits it, and refuses a people file to someone not in admin", async () => {
+  it("saves through a patch run into the checkout and commits it, and refuses a people file to someone not in admin", async () => {
     const before = readFileSync(join(root, PEOPLE), "utf8");
     // Not in admin, and no remote to review it on: refused, the file as it was.
     await expect(
-      patch(context(), { id: "bo" }, { at: { file: PEOPLE, export: "bo" }, fields: { name: "Bo L." } }),
+      patch({ id: "bo" }, { at: { file: PEOPLE, export: "bo" }, fields: { name: "Bo L." } }),
     ).rejects.toMatchObject({
       status: 403,
-      body: { error: `A change to ${PEOPLE} waits for an admin, and this company has no remote to review on` },
+      body: {
+        code: "not_approver",
+        error: `A change to ${PEOPLE} waits for an admin, and this company has no remote to review on`,
+      },
     });
     expect(readFileSync(join(root, PEOPLE), "utf8")).toBe(before);
     // A name the file computes is the code's.
-    await expect(
-      patch(context(), { id: "ada", groups: ["admin"] }, { at: { file: PEOPLE, export: "cy" }, fields: { name: "C" } }),
-    ).rejects.toMatchObject({
-      status: 409,
+    await expect(patch(ADA, { at: { file: PEOPLE, export: "cy" }, fields: { name: "C" } })).rejects.toMatchObject({
+      status: 400,
       body: { error: "the value of name is computed in the file", field: "name" },
     });
     // By an admin: written and committed.
-    expect(
-      await patch(
-        context(),
-        { id: "ada", groups: ["admin"] },
-        { at: { file: PEOPLE, export: "bo" }, fields: { name: "Bo L." } },
-      ),
-    ).toEqual({ file: PEOPLE, revision: "abcdef0123456789" });
+    expect(await patch(ADA, { at: { file: PEOPLE, export: "bo" }, fields: { name: "Bo L." } })).toEqual({
+      file: PEOPLE,
+      revision: "abcdef0123456789",
+    });
     expect(readFileSync(join(root, PEOPLE), "utf8")).toBe(before.replace('name: "Bo Lin"', 'name: "Bo L."'));
     expect(commits).toEqual([{ paths: [PEOPLE], message: "Change name of bo", author: "ada" }]);
     // The next page reads the description made again from the file as it now is: no restart.

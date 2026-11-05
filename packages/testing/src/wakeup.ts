@@ -24,24 +24,31 @@ import { type HostCheck, hostCheckWorkflows, type Wake } from "./host.ts";
 // wakeup in this process, for the kit's own tests and for building against the contract before
 // a real wakeup lands.
 
-/** The schedule of `wakeupCheckWorkflows`' `wakeup-check-tick`: every minute, the most often a cron fires. */
-const TICK = "* * * * *";
+/**
+ * The schedule of `wakeupCheckWorkflows`' `wakeup-check-tick`: every ten seconds, so a check waits
+ * seconds for a tick and not a minute. A sixth field `defineWorkflow` refuses of a company, whose
+ * schedules DBOS fires alike.
+ */
+const TICK = "*/10 * * * * *";
 
 /**
  * The workflows the checks start or wait for, which the host's config registers: the host
- * checks' (`hostCheckWorkflows`), and `wakeup-check-tick`, on a schedule of every minute. Give
+ * checks' (`hostCheckWorkflows`), and `wakeup-check-tick`, on a schedule of every ten seconds. Give
  * the host's root a `package.json` naming an app of its own for each run of the checks: DBOS
  * fires every tick an app's schedule missed since it last fired.
  */
 export const wakeupCheckWorkflows = [
   ...hostCheckWorkflows,
-  defineWorkflow({
-    name: "wakeup-check-tick",
+  {
+    ...defineWorkflow({
+      name: "wakeup-check-tick",
+      trigger: "manual",
+      input: z.object({}),
+      uses: [],
+      run: async () => ({ ticked: true }),
+    }),
     trigger: { schedule: TICK },
-    input: z.object({}),
-    uses: [],
-    run: async () => ({ ticked: true }),
-  }),
+  },
 ] as const;
 
 /** A declared wakeup under test, the host it wakes, and how to drive it. */
@@ -60,7 +67,7 @@ export interface WakeupUnderTest {
   client: SanomaClient;
   /** Calls the type's register operation (`wakeup.register`) through its driver. */
   register(registration: WakeupRegistration): Promise<void>;
-  /** How long a check waits for a wake or a run, besides the minute it may wait for a schedule's tick. Default 60 s. */
+  /** How long a check waits for a wake, a run or a schedule's tick. Default 60 s. */
   timeoutMs?: number;
 }
 
@@ -129,20 +136,21 @@ export async function checkWakeup(w: WakeupUnderTest): Promise<WakeupCheck[]> {
     notBefore(await arrived(begun), at, `a wake (the replaced one, at ${replaced.toISOString()}?)`);
   });
   await check("a wake at a schedule's next fire, while the host is stopped, runs that tick", async (begun) => {
-    // The tick's run, as the ledger records the time it was for; any tick's without `at`.
+    // The tick's run, as the ledger records the time it was for; any tick's without `at`. A cold
+    // host's backfill makes six runs for each minute it was stopped, so it reads back a good way.
     const tickRun = async (at?: Date) => {
-      // The newest first: the tick waited for is among the last few.
-      const runs = await client.runs({ workflow: "wakeup-check-tick", limit: at ? 10 : 1 });
+      // The newest first.
+      const runs = await client.runs({ workflow: "wakeup-check-tick", limit: at ? 100 : 1 });
       if (!at) return runs[0];
-      const starts = await Promise.all(runs.map(async (run) => (await client.ledger(run.runId))[0]));
-      return runs.find((_, i) => {
-        const started = starts[i];
-        return started?.type === "run.started" && started.scheduledFor === at.toISOString();
-      });
+      for (const run of runs) {
+        const [started] = await client.ledger(run.runId);
+        if (started?.type === "run.started" && started.scheduledFor === at.toISOString()) return run;
+      }
+      return undefined;
     };
     // DBOS fires a tick missed while the host was stopped from the schedule's last fire, so one
-    // fires first, while the host runs (once a minute).
-    await waitFor(() => tickRun(), Boolean, 60_000 + timeoutMs);
+    // fires first, while the host runs.
+    await waitFor(() => tickRun(), Boolean, timeoutMs);
     await host.stop();
     // At least two seconds on, so the host is stopped before it falls.
     const tick = nextFire(TICK, "UTC", new Date(Date.now() + 2_000));

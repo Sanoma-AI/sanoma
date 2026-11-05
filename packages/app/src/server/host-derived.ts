@@ -1,6 +1,6 @@
 // oxlint-disable-next-line import/no-unassigned-import
 import "@tanstack/react-start/server-only";
-import { defaultBranch, deriveHosts, hostFacts, isSecret, type Secrets, valueAt } from "@sanoma-ai/workflows";
+import { deriveHosts, hostFacts, isSecret, type Secrets, valueAt } from "@sanoma-ai/workflows";
 import type { HostDerived } from "../api.ts";
 import type { AppContext } from "../context.ts";
 
@@ -11,18 +11,20 @@ import type { AppContext } from "../context.ts";
  * clone URL), the declared ref or that repository's default branch, the public sites' domains,
  * and of the keys it is given (`SANOMA_…`) whether each is stored, and since when. Null when no
  * declared host derives. Never a secret's value: the facts read the store only to say what is in it.
+ * What the root's files and git say comes from the snapshot (`AppSnapshot.host`).
  */
-export async function hostDerived({ client, resolved, description }: AppContext): Promise<HostDerived | null> {
-  const { root, types } = resolved;
-  if (root === undefined) return null;
-  const resources = structuredClone(description.resources);
+export async function hostDerived({ client, resolved, snapshot }: AppContext): Promise<HostDerived | null> {
+  const { types } = resolved;
+  const at = snapshot.host;
+  if (!at) return null;
+  const resources = structuredClone(snapshot.description.resources);
   const read: Secrets = {
     get: async (name) => (await client.secrets([name])).get(name)?.value,
     ensure: () => Promise.reject(new Error("Hosting mints nothing")),
     delete: () => Promise.reject(new Error("Hosting deletes nothing")),
   };
   const facts = await hostFacts({
-    root,
+    rootFacts: async () => at,
     resources,
     types,
     drivers: resolved.driversByVendor,
@@ -46,16 +48,8 @@ export async function hostDerived({ client, resolved, description }: AppContext)
   const names = Object.entries((inputs.secrets && valueAt(host.desired, inputs.secrets)) ?? {})
     .filter(([name, value]) => name.startsWith("SANOMA_") && isSecret(value) && name !== "SANOMA_DATABASE_URL")
     .map(([, value]) => (value as { $secret: string }).$secret);
-  const [ref, stored] = await Promise.all([
-    text(inputs.ref) ??
-      (url
-        ? defaultBranch(url).then(
-            (resolvedRef) => resolvedRef.ref,
-            () => undefined,
-          )
-        : undefined),
-    client.secrets(names),
-  ]);
+  const ref = text(inputs.ref) ?? (url ? at.branches[url] : undefined);
+  const stored = await client.secrets(names);
   const domains = inputs.domains ? valueAt(host.desired, inputs.domains) : undefined;
   return {
     id: host.id,

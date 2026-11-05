@@ -16,7 +16,6 @@ import {
   visitorPrincipal,
   withSetup,
 } from "@sanoma-ai/workflows";
-import { describeConfig } from "@sanoma-ai/workflows/describe";
 import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { outbound } from "../../workflows/test/fixtures/outbound/resources/data.ts";
@@ -27,6 +26,7 @@ import type { AppContext } from "../src/context.ts";
 import { loopbackLogin } from "../src/loopback.ts";
 import { admitting } from "../src/login/admission.ts";
 import { actorOf, appConfig, callApi, postCall, requireActor, serverFnFailure, validate } from "../src/server/core.ts";
+import { appSnapshot } from "../src/snapshot-build.ts";
 import companySites from "./fixtures/company-sites/sanoma.config.ts";
 
 // Needs Postgres (`pnpm db:up`). A site's `api`: `callFn` through the server core, as its server
@@ -119,10 +119,11 @@ const lead = (company: string, stage = "researched") => ({
 
 /** The app's context, as startApp builds it, on the test app's client: made at the first call. */
 let context: AppContext | undefined;
-const appContext = () =>
+const snapshot = await appSnapshot(testApp.config);
+const appContext = (): AppContext =>
   (context ??= {
     resolved: resolveConfig(testApp.config),
-    description: describeConfig(testApp.config),
+    snapshot,
     client: testApp.client,
     place: "this-computer",
     login: admitting(loopbackLogin(), () => ({ people: [], problems: [] })),
@@ -352,6 +353,18 @@ describe("callFn for a visitor", () => {
       body: { code: "policy_denied" },
     });
   });
+
+  it("starts none of the app's own actions on the repository, nor does an api token, whatever its groups", async () => {
+    const token: Principal = { id: "token:t1", groups: ["admin"] };
+    for (const principal of [visitor, token]) {
+      for (const name of ["adopt", "patch", "goLive", "goLiveHost", "connectExisting"]) {
+        expect(await visit({ name, input: {} }, principal), `${principal.id} ${name}`).toMatchObject({
+          status: 400,
+          body: { code: "invalid_input", error: expect.stringContaining("is neither an operation nor a workflow") },
+        });
+      }
+    }
+  });
 });
 
 /** An `api` whose transport records each request and answers with the next of `answers` (thrown when an Error). */
@@ -426,14 +439,14 @@ describe("createApi", () => {
 });
 
 describe("getConfig", () => {
-  it("holds to AppConfigSchema, on the outbound copy and the company-sites fixture, with each content kind's front matter keys", () => {
+  it("holds to AppConfigSchema, on the outbound copy and the company-sites fixture, with each content kind's front matter keys", async () => {
     const outboundConfig = appConfig(appContext());
     expect(AppConfigSchema.parse(outboundConfig)).toEqual(outboundConfig);
     expect(outboundConfig.content).toEqual([]);
     const sites = appConfig({
       ...appContext(),
       resolved: resolveConfig(companySites),
-      description: describeConfig(companySites),
+      snapshot: await appSnapshot(companySites),
     });
     expect(AppConfigSchema.parse(sites)).toEqual(sites);
     // Drafts kept, translations laid over their originals: every key a file holds.

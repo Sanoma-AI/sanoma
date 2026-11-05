@@ -1,4 +1,6 @@
 import { readFileSync } from "node:fs";
+import { eq, sql } from "drizzle-orm";
+import { connections, ledger } from "../src/db/company.ts";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -25,7 +27,7 @@ import {
 } from "../src/index.ts";
 import { connectionCatalog, ConnectionRegistry } from "../src/connection.ts";
 import { secret } from "../src/secret.ts";
-import { lazyPool } from "../src/db.ts";
+import { lazyDb } from "../src/db.ts";
 import { visitorPrincipal } from "../src/shared.ts";
 import { tree } from "./tree.ts";
 
@@ -79,11 +81,11 @@ const probe = defineWorkflow({
   run: async (ctx) => ctx.mail.message.read({ id: "one" }, { connection: support }),
 });
 const dbUrl = testDatabaseUrl("connections");
-const pool = lazyPool(dbUrl, "connections-test");
+const pool = lazyDb(dbUrl, "connections-test");
 afterAll(() => pool.close());
 const registry = () => new ConnectionRegistry(connectionCatalog([mail], [support, sales], [customer]), () => pool.db());
 async function clear() {
-  await (await pool.db()).query("DELETE FROM sanoma_connections");
+  await (await pool.db()).delete(connections);
 }
 const config = () => ({
   databaseUrl: dbUrl,
@@ -426,11 +428,15 @@ describe("named connection identity", () => {
         ),
       );
       for (const result of results) expect(result).toEqual(results[0]);
-      expect((await (await pool.db()).query("SELECT id FROM sanoma_connections")).rowCount).toBe(1);
+      expect(await (await pool.db()).select({ id: connections.id }).from(connections)).toHaveLength(1);
       expect(
-        (await (await pool.db()).query("SELECT id FROM sanoma_ledger WHERE run_id=$1", [`direct:alice:${id}`]))
-          .rowCount,
-      ).toBe(1);
+        await (
+          await pool.db()
+        )
+          .select({ id: ledger.id })
+          .from(ledger)
+          .where(eq(ledger.runId, `direct:alice:${id}`)),
+      ).toHaveLength(1);
     } finally {
       await client.close();
     }
@@ -545,7 +551,7 @@ describe("named connection identity", () => {
       });
       const checkpoints = await (
         await pool.db()
-      ).query("SELECT to_jsonb(o) AS record FROM dbos.operation_outputs o WHERE workflow_uuid=$1", [run]);
+      ).execute(sql`SELECT to_jsonb(o) AS record FROM dbos.operation_outputs o WHERE workflow_uuid = ${run}`);
       expect(checkpoints.rowCount).toBeGreaterThan(0);
       expect(JSON.stringify(checkpoints.rows)).not.toContain("private-key");
       expect(JSON.stringify(await client.ledger(run))).not.toContain("private-key");
@@ -637,8 +643,8 @@ describe("resource account selection", () => {
       secrets: { store: memorySecretStore() },
       ledger: memoryLedger(),
     };
-    const resourcePool = lazyPool(cfg.databaseUrl, "resource-connections-test");
-    await (await resourcePool.db()).query("DELETE FROM sanoma_connections");
+    const resourcePool = lazyDb(cfg.databaseUrl, "resource-connections-test");
+    await (await resourcePool.db()).delete(connections);
     await resourcePool.close();
     const client = await SanomaClient.connect(cfg);
     let worker: Awaited<ReturnType<typeof startWorker>> | undefined;

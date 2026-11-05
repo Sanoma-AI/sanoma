@@ -263,7 +263,8 @@ export type FakeRemote = ReturnType<typeof fakeRemote>;
  * its own holding the files `edit` writes, on the branch `draft/<id>`, its head moved by each edit;
  * `diff` names the files edited. `push` puts a branch's head on the host; `check` answers `checks`
  * (ok by default) and counts each; `follow` and `closeDraft` record their calls, and `follow`
- * answers `followed` (the host's branch, by default; a draft's branch moves the draft's head to it).
+ * answers `followed` (the host's branch, by default; a draft's branch moves the draft's head to it);
+ * `behind` answers what `behindBy` holds for an app (0 by default; an error, thrown).
  */
 export function memorySource({ root, remote }: { root: string; remote?: FakeRemote }) {
   const drafts = new Map<string, { root: string; files: Map<string, string>; head: string; edits: number }>();
@@ -273,6 +274,7 @@ export function memorySource({ root, remote }: { root: string; remote?: FakeRemo
   const closed: string[] = [];
   const pushes: { url: string; token: string; ref: string }[] = [];
   let followed: ((ref: string) => { revision: string } | { skipped: string }) | undefined;
+  const behindBy = new Map<string, number | Error>();
   const dir = mkdtempSync(join(tmpdir(), "sanoma-drafts-"));
   const draftAt = (id: string) => {
     const draft = drafts.get(id);
@@ -323,6 +325,11 @@ export function memorySource({ root, remote }: { root: string; remote?: FakeRemo
       if (id !== undefined && pushed !== undefined) draftAt(id).head = pushed;
       return { revision: pushed ?? sha(target.ref) };
     },
+    async behind(folder) {
+      const behind = behindBy.get(folder) ?? 0;
+      if (behind instanceof Error) throw behind;
+      return behind;
+    },
   };
 
   return {
@@ -331,6 +338,7 @@ export function memorySource({ root, remote }: { root: string; remote?: FakeRemo
     follows,
     closed,
     pushes,
+    behindBy,
     /**
      * Writes `files` (a path relative to the root and its text, or null to take back an edit of it)
      * in the draft `id`, made the first time, as one commit: its new head.

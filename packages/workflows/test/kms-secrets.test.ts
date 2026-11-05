@@ -1,7 +1,8 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import type { OAuth2Client } from "google-auth-library";
 import crc32c from "crc-32/crc32c.js";
-import { Client, escapeIdentifier } from "pg";
+import { eq, sql } from "drizzle-orm";
+import { Client, Pool } from "pg";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -15,7 +16,9 @@ import {
   withSetup,
 } from "../src/index.ts";
 import { describeConfig } from "../src/describe.ts";
-import { lazyPool } from "../src/db.ts";
+import { databaseOn, lazyDb } from "../src/db.ts";
+import { credentials } from "../src/db/company.ts";
+import { kmsSecrets } from "../src/db/kms.ts";
 import { checkSecretStore } from "../src/secret-store-check.ts";
 import { KMS_SECRETS_SQL, kmsPostgresStore, managedKmsStore, type GcpKmsClient } from "../src/kms-secrets.ts";
 
@@ -89,7 +92,7 @@ function fakeKms(allowed: string[]) {
   };
   return { client, state, returned };
 }
-const pool = lazyPool(testDatabaseUrl("kms_secrets"), "kms-tests");
+const pool = lazyDb(testDatabaseUrl("kms_secrets"), "kms-tests");
 const kms = fakeKms([KEY, NEXT_KEY]);
 const store = (keyName = KEY, decryptKeyNames: string[] = []) =>
   kmsPostgresStore({ company: "acme", keyName, decryptKeyNames, kms: kms.client, database: () => pool.db() });
@@ -119,7 +122,7 @@ const workflow = defineWorkflow({
   run: async (ctx) => ctx.kmsprobe.credential.check({}),
 });
 beforeAll(async () => {
-  await (await pool.db()).query(KMS_SECRETS_SQL);
+  await (await pool.db()).execute(sql.raw(KMS_SECRETS_SQL));
 });
 afterAll(async () => {
   await pool.close();
@@ -128,8 +131,8 @@ afterAll(async () => {
 describe("KMS encrypted Postgres", () => {
   it("composes managed identity lazily and closes each runtime's SDK without closing another runtime", async () => {
     const databaseUrl = testDatabaseUrl("kms_managed"),
-      admin = lazyPool(databaseUrl, "kms-managed-setup");
-    await (await admin.db()).query(KMS_SECRETS_SQL);
+      admin = lazyDb(databaseUrl, "kms-managed-setup");
+    await (await admin.db()).execute(sql.raw(KMS_SECRETS_SQL));
     const closed: (() => Promise<void>)[] = [];
     const credential = vi.fn<() => Promise<string>>(async () => "a".repeat(43));
     const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
@@ -193,7 +196,7 @@ describe("KMS encrypted Postgres", () => {
       client = undefined;
       expect(closed[0]).toHaveBeenCalledTimes(1);
       // Runtime adapter cleanup never closes the administrator's independently owned connection.
-      expect((await (await admin.db()).query("SELECT 1 AS ready")).rows[0].ready).toBe(1);
+      expect((await (await admin.db()).execute<{ ready: number }>(sql`SELECT 1 AS ready`)).rows[0]!.ready).toBe(1);
     } finally {
       await worker?.stop();
       await client?.close();
@@ -236,8 +239,8 @@ describe("KMS encrypted Postgres", () => {
 
   it("uses the selected KMS store for intake, direct calls, durable calls and restart without a local encryption key", async () => {
     const databaseUrl = testDatabaseUrl("kms_runtime"),
-      admin = lazyPool(databaseUrl, "kms-runtime-setup");
-    await (await admin.db()).query(KMS_SECRETS_SQL);
+      admin = lazyDb(databaseUrl, "kms-runtime-setup");
+    await (await admin.db()).execute(sql.raw(KMS_SECRETS_SQL));
     const transport = fakeKms([KEY]);
     const encrypt = vi.spyOn(transport.client, "encrypt");
     const config = {
@@ -266,14 +269,13 @@ describe("KMS encrypted Postgres", () => {
       expect(await client.result(run, 10_000)).toEqual({ configured: true });
       expect(JSON.stringify(await client.ledger(run))).not.toContain("runtime-private-key");
       const db = await admin.db();
-      const rows = await db.query("SELECT envelope FROM sanoma_kms.secrets WHERE namespace=$1", [
-        config.secrets.namespace,
-      ]);
-      expect(rows.rowCount).toBe(1);
-      expect(JSON.stringify(rows.rows)).not.toContain("runtime-private-key");
-      expect(
-        (await db.query("SELECT name FROM sanoma_credentials WHERE namespace=$1", [config.secrets.namespace])).rowCount,
-      ).toBe(0);
+      const rows = await db
+        .select({ envelope: kmsSecrets.envelope })
+        .from(kmsSecrets)
+        .where(eq(kmsSecrets.namespace, config.secrets.namespace));
+      expect(rows).toHaveLength(1);
+      expect(JSON.stringify(rows)).not.toContain("runtime-private-key");
+      expect(await db.$count(credentials, eq(credentials.namespace, config.secrets.namespace))).toBe(0);
       await worker.stop();
       worker = undefined;
       await client.close();
@@ -292,7 +294,7 @@ describe("KMS encrypted Postgres", () => {
 
   it("binds a reused store definition separately to each runtime database", async () => {
     const urls = [testDatabaseUrl("kms_runtime_a"), testDatabaseUrl("kms_runtime_b")];
-    const admins = urls.map((url) => lazyPool(url, "kms-runtime-isolation"));
+    const admins = urls.map((url) => lazyDb(url, "kms-runtime-isolation"));
     const clients: SanomaClient[] = [];
     const config = {
       connectors: [],
@@ -302,7 +304,7 @@ describe("KMS encrypted Postgres", () => {
       },
     };
     try {
-      for (const admin of admins) await (await admin.db()).query(KMS_SECRETS_SQL);
+      for (const admin of admins) await (await admin.db()).execute(sql.raw(KMS_SECRETS_SQL));
       for (const databaseUrl of urls) clients.push(await SanomaClient.connect({ ...config, databaseUrl }));
       await clients[0]!.setSecret("TOKEN", "database-a", { by: "tester" });
       expect((await clients[1]!.secrets(["TOKEN"])).size).toBe(0);
@@ -329,50 +331,57 @@ describe("KMS encrypted Postgres", () => {
     const saved = await s.write(existing, "existing-credential", { expectedVersion: null, by: "tester" });
     await Promise.all(Array.from({ length: 4 }, () => s.validate(namespace)));
     expect(await s.read(existing)).toEqual(saved);
-    const rows = await (await pool.db()).query("SELECT path FROM sanoma_kms.secrets WHERE namespace=$1", [namespace]);
-    expect(rows.rows).toEqual([{ path: existing.path }]);
+    const rows = await (
+      await pool.db()
+    )
+      .select({ path: kmsSecrets.path })
+      .from(kmsSecrets)
+      .where(eq(kmsSecrets.namespace, namespace));
+    expect(rows).toEqual([{ path: existing.path }]);
   });
   it.each(["SELECT", "INSERT", "UPDATE", "DELETE"])("refuses readiness when Postgres denies %s", async (denied) => {
     const db = await pool.db(),
       namespace = randomUUID();
-    const role = escapeIdentifier(`kms_probe_${randomUUID().replaceAll("-", "")}`);
+    const role = sql.identifier(`kms_probe_${randomUUID().replaceAll("-", "")}`);
     const client = new Client({ connectionString: testDatabaseUrl("kms_secrets") });
     client.on("error", () => {});
-    await db.query(`CREATE ROLE ${role} NOLOGIN`);
+    await db.execute(sql`CREATE ROLE ${role} NOLOGIN`);
     try {
-      await db.query(`GRANT USAGE ON SCHEMA sanoma_kms TO ${role}`);
+      await db.execute(sql`GRANT USAGE ON SCHEMA sanoma_kms TO ${role}`);
       const grants = ["SELECT", "INSERT", "UPDATE", "DELETE"].filter((grant) => grant !== denied).join(",");
-      await db.query(`GRANT ${grants} ON sanoma_kms.secrets TO ${role}`);
+      await db.execute(sql`GRANT ${sql.raw(grants)} ON sanoma_kms.secrets TO ${role}`);
       await client.connect();
-      await client.query(`SET ROLE ${role}`);
+      await databaseOn(client).execute(sql`SET ROLE ${role}`);
       const restricted = kmsPostgresStore({
         company: "acme",
         keyName: KEY,
         kms: kms.client,
-        database: async () => client,
+        database: async () => databaseOn(client),
       });
       await expect(restricted.validate(namespace)).rejects.toMatchObject({
         code: "denied",
         message: "Secret store: denied",
       });
-      const rows = await db.query("SELECT path FROM sanoma_kms.secrets WHERE namespace=$1", [namespace]);
-      expect(rows.rowCount).toBe(denied === "DELETE" ? 1 : 0);
+      expect(await db.$count(kmsSecrets, eq(kmsSecrets.namespace, namespace))).toBe(denied === "DELETE" ? 1 : 0);
     } finally {
       await client.end();
-      await db.query("DELETE FROM sanoma_kms.secrets WHERE namespace=$1", [namespace]);
-      await db.query(`DROP OWNED BY ${role}`);
-      await db.query(`DROP ROLE ${role}`);
+      await db.delete(kmsSecrets).where(eq(kmsSecrets.namespace, namespace));
+      await db.execute(sql`DROP OWNED BY ${role}`);
+      await db.execute(sql`DROP ROLE ${role}`);
     }
   });
   it("cleans up a committed probe when the INSERT response is lost", async () => {
     const namespace = randomUUID(),
       db = await pool.db();
-    const query = db.query,
+    const query = Pool.prototype.query,
       callQuery = query as (...args: unknown[]) => unknown;
     let lost = false;
-    const intercepted = function (this: typeof db, ...args: unknown[]) {
+    const intercepted = function (this: Pool, ...args: unknown[]) {
       const result = callQuery.apply(this, args);
-      if (!lost && String(args[0]).startsWith("INSERT INTO sanoma_kms.secrets")) {
+      if (
+        !lost &&
+        ((args[0] as { text?: string } | undefined)?.text ?? "").startsWith('insert into "sanoma_kms"."secrets"')
+      ) {
         lost = true;
         return Promise.resolve(result).then(() => {
           throw new Error("sensitive lost-response diagnostic");
@@ -380,7 +389,7 @@ describe("KMS encrypted Postgres", () => {
       }
       return result;
     };
-    const spy = vi.spyOn(db, "query").mockImplementation(intercepted as typeof query);
+    const spy = vi.spyOn(Pool.prototype, "query").mockImplementation(intercepted as typeof query);
     try {
       await expect(store().validate(namespace)).rejects.toMatchObject({
         code: "unavailable",
@@ -390,7 +399,7 @@ describe("KMS encrypted Postgres", () => {
       spy.mockRestore();
     }
     expect(lost).toBe(true);
-    expect((await db.query("SELECT path FROM sanoma_kms.secrets WHERE namespace=$1", [namespace])).rowCount).toBe(0);
+    expect(await db.$count(kmsSecrets, eq(kmsSecrets.namespace, namespace))).toBe(0);
   });
   it("surfaces denied access without provider payloads", async () => {
     kms.state.denied = true;
@@ -407,8 +416,8 @@ describe("KMS encrypted Postgres", () => {
     const at = address(),
       s = store();
     await s.write(at, "synthetic-private-token", { expectedVersion: null, by: "alice" });
-    const row = await (await pool.db()).query("SELECT * FROM sanoma_kms.secrets WHERE path=$1", [at.path]);
-    expect(JSON.stringify(row.rows)).not.toContain("synthetic-private-token");
+    const row = await (await pool.db()).select().from(kmsSecrets).where(eq(kmsSecrets.path, at.path));
+    expect(JSON.stringify(row)).not.toContain("synthetic-private-token");
     expect((await store().read(at))?.value).toBe("synthetic-private-token");
     expect(kms.returned.every((key) => key.every((byte) => byte === 0))).toBe(true);
     kms.state.denied = true;
@@ -423,17 +432,18 @@ describe("KMS encrypted Postgres", () => {
     async (field) => {
       const at = address();
       await store().write(at, "value", { expectedVersion: null, by: "alice" });
-      await (
-        await pool.db()
-      ).query("UPDATE sanoma_kms.secrets SET envelope=jsonb_set(envelope,ARRAY[$2],to_jsonb($3::text)) WHERE path=$1", [
-        at.path,
-        field,
+      const tampered =
         field === "format"
           ? "v99"
           : field === "keyVersion"
             ? `${KEY}/cryptoKeyVersions/2`
-            : Buffer.alloc(16, 9).toString("base64"),
-      ]);
+            : Buffer.alloc(16, 9).toString("base64");
+      await (
+        await pool.db()
+      )
+        .update(kmsSecrets)
+        .set({ envelope: sql`jsonb_set(${kmsSecrets.envelope}, ARRAY[${field}::text], to_jsonb(${tampered}::text))` })
+        .where(eq(kmsSecrets.path, at.path));
       await expect(store().read(at)).rejects.toMatchObject({ code: "invalid_value" });
     },
   );
@@ -442,7 +452,12 @@ describe("KMS encrypted Postgres", () => {
       const at = address();
       await store().write(at, "value", { expectedVersion: null, by: "alice" });
       const changed = randomUUID();
-      await (await pool.db()).query(`UPDATE sanoma_kms.secrets SET ${field}=$2 WHERE path=$1`, [at.path, changed]);
+      await (
+        await pool.db()
+      )
+        .update(kmsSecrets)
+        .set({ [field]: changed })
+        .where(eq(kmsSecrets.path, at.path));
       const reading =
         field === "company"
           ? kmsPostgresStore({ company: changed, keyName: KEY, kms: kms.client, database: () => pool.db() })
@@ -524,26 +539,26 @@ describe("KMS encrypted Postgres", () => {
   it("survives primary-version rotation and requires old versions for old rows/backups", async () => {
     const at = address();
     const first = await store().write(at, "before rotation", { expectedVersion: null, by: "alice" });
-    const {
-      rows: [backup],
-    } = await (await pool.db()).query("SELECT * FROM sanoma_kms.secrets WHERE path=$1", [at.path]);
+    const [backup] = await (await pool.db()).select().from(kmsSecrets).where(eq(kmsSecrets.path, at.path));
     kms.state.primary = 2;
     try {
       expect((await store().read(at))?.value).toBe("before rotation");
       await store().write(at, "after rotation", { expectedVersion: first.version, by: "alice" });
-      const {
-        rows: [current],
-      } = await (await pool.db()).query("SELECT envelope FROM sanoma_kms.secrets WHERE path=$1", [at.path]);
-      expect(current.envelope.keyVersion).toBe(`${KEY}/cryptoKeyVersions/2`);
+      const [current] = await (
+        await pool.db()
+      )
+        .select({ envelope: kmsSecrets.envelope })
+        .from(kmsSecrets)
+        .where(eq(kmsSecrets.path, at.path));
+      expect(current!.envelope.keyVersion).toBe(`${KEY}/cryptoKeyVersions/2`);
       kms.state.disabledVersions.add(1);
       expect((await store().read(at))?.value).toBe("after rotation");
       await (
         await pool.db()
-      ).query("UPDATE sanoma_kms.secrets SET envelope=$2,version=$3 WHERE path=$1", [
-        at.path,
-        backup.envelope,
-        backup.version,
-      ]);
+      )
+        .update(kmsSecrets)
+        .set({ envelope: backup!.envelope, version: backup!.version })
+        .where(eq(kmsSecrets.path, at.path));
       await expect(store().read(at)).rejects.toMatchObject({ code: "invalid_configuration" });
       kms.state.disabledVersions.clear();
       expect((await store().read(at))?.value).toBe("before rotation");

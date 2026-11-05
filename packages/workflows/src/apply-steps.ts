@@ -4,7 +4,7 @@ import type { ApplyDeclared, ApplySteps, PlannedCall } from "./apply.ts";
 import { decide } from "./call.ts";
 import type { Approver } from "./define.ts";
 import { type Binding, type Bindings, diffLockfiles, LOCKFILE, readLockfile, writeLockfile } from "./lockfile.ts";
-import { currentRun, type Run } from "./run.ts";
+import { runNow } from "./run.ts";
 import { APPLY_WORKFLOW } from "./shared.ts";
 
 // The apply workflow's steps that call no vendor: reading the data files, asking the policy
@@ -16,12 +16,6 @@ const WRITE_STEP = "apply:lockfile";
 
 /** How many of the latest apply runs are searched for the lockfile one last wrote. */
 const RUNS_SEARCHED = 100;
-
-const runNow = (): Run => {
-  const run = currentRun.getStore();
-  if (!run) throw new Error("An apply step ran outside its run");
-  return run;
-};
 
 /**
  * The bindings the latest apply run that wrote the lockfile wrote last, from its steps; undefined
@@ -68,7 +62,7 @@ export function applySteps(
     holds: (calls: PlannedCall[]) =>
       DBOS.runStep(
         async (): Promise<Approver | undefined> => {
-          const run = runNow();
+          const run = runNow("An apply step");
           for (const { op: id, input, connection } of calls) {
             const op = run.state.ops.get(id)!;
             // Parsed as the call will be, so the policy sees the same input with its defaults.
@@ -87,7 +81,7 @@ export function applySteps(
     // step whose output is what it wrote. A sandbox run keeps its lockfile in memory: the run's
     // report has it.
     write: async (key: string, binding: Binding | undefined, message: string, moved?: string) => {
-      const run = runNow();
+      const run = runNow("An apply step");
       if (run.sandbox !== undefined || root === undefined) return { written: false };
       const { source } = run.state;
       const { revision } = await DBOS.runStep(

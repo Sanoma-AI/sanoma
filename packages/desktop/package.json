@@ -1,6 +1,6 @@
 {
   "name": "@sanoma-ai/desktop",
-  "version": "0.1.0",
+  "version": "0.5.0",
   "private": true,
   "description": "The Sanoma desktop shell: opens a company folder, runs its own sanoma launcher, and shows the app in a window",
   "license": "FSL-1.1-ALv2",

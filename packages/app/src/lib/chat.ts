@@ -1,6 +1,6 @@
 import type { CheckResult } from "@sanoma-ai/workflows";
 import { DefaultChatTransport, type InferUITools, isTextUIPart, isToolUIPart, type UIMessage } from "ai";
-import type { LoopTools } from "../server/agent/tools.ts";
+import type { LoopTools } from "../steps/agent/tools.ts";
 
 // The operator agent's chat as the browser and every engine share it: the message type, the
 // parts an engine writes for the chat to draw as cards, and the browser's transport. No server code.

@@ -21,11 +21,13 @@ import {
   withSetup,
 } from "@sanoma-ai/workflows";
 import { secret } from "../../workflows/src/secret.ts";
-import { lazyPool } from "../../workflows/src/db.ts";
+import { connectionHealth, connections as connectionRows, connectionSetups, ledger } from "@sanoma-ai/workflows/db";
+import { eq, sql } from "drizzle-orm";
+import { lazyDb } from "../../workflows/src/db.ts";
 import { tree } from "../../workflows/test/tree.ts";
-import { describeConfig } from "@sanoma-ai/workflows/describe";
 import { PreviewConnectionRequest, ConnectConnectionRequest } from "../src/api.ts";
 import type { AppContext } from "../src/context.ts";
+import { appSnapshot } from "../src/snapshot-build.ts";
 import { admitting } from "../src/login/admission.ts";
 import { loopbackLogin } from "../src/loopback.ts";
 import { startApp } from "../src/index.ts";
@@ -89,7 +91,7 @@ const computed = defineWorkflow({
   },
 });
 const databaseUrl = testDatabaseUrl("app_connections");
-const pool = lazyPool(databaseUrl, "app-connections-tests");
+const pool = lazyDb(databaseUrl, "app-connections-tests");
 let app: AppContext;
 let store: ReturnType<typeof memorySecretStore>;
 let config: SanomaConfig;
@@ -109,13 +111,11 @@ beforeEach(async () => {
   app = {
     resolved,
     client,
-    description: describeConfig(cfg),
+    snapshot: await appSnapshot(cfg),
     place: "this-computer",
     login: admitting(loopbackLogin(), () => ({ people: [], problems: [] })),
   };
-  await (
-    await pool.db()
-  ).query("TRUNCATE sanoma_connections, sanoma_connection_setups, sanoma_connection_health, sanoma_ledger");
+  await (await pool.db()).execute(sql`TRUNCATE ${connectionRows}, ${connectionSetups}, ${connectionHealth}, ${ledger}`);
 });
 afterEach(async () => {
   await app?.client.close();
@@ -247,8 +247,12 @@ describe("connection server boundary", () => {
       expect(remove).not.toHaveBeenCalled();
       expect(await store.read(address)).toEqual(value);
       expect(
-        (await (await pool.db()).query("SELECT status FROM sanoma_connections WHERE id=$1", [support.$connection]))
-          .rows,
+        await (
+          await pool.db()
+        )
+          .select({ status: connectionRows.status })
+          .from(connectionRows)
+          .where(eq(connectionRows.id, support.$connection)),
       ).toEqual([{ status: "connected" }]);
       expect(await page.content()).not.toContain(credentials.password);
       await page.screenshot({ path: "/tmp/connection-management-external.png", fullPage: true });
@@ -325,8 +329,8 @@ describe("connection server boundary", () => {
     expect((await connections(app, actor)).cards.find((card) => card.id === support.$connection)?.status).toBe(
       "disconnected",
     );
-    const ledger = await (await pool.db()).query("SELECT row_to_json(l) AS data FROM sanoma_ledger l");
-    expect(JSON.stringify(ledger.rows)).not.toContain(credentials.password);
+    const records = await (await pool.db()).select().from(ledger);
+    expect(JSON.stringify(records)).not.toContain(credentials.password);
   });
   it("reports a store bootstrap/access failure without leaking the adapter's error", async () => {
     vi.spyOn(store, "validate").mockRejectedValue(new Error("sensitive-provider-request"));

@@ -3,7 +3,7 @@ import { changeIdOf } from "@sanoma-ai/workflows/shared";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type App, startApp } from "../src/index.ts";
 import type { DraftCard } from "../src/lib/chat.ts";
-import { tellCommits } from "../src/server/agent/checkout.ts";
+import { tellCommits } from "../src/steps/agent/checkout.ts";
 import { openChange } from "../src/server/core.ts";
 import { asChangeRef, groupFiles, phaseLabel } from "../src/lib/changes.ts";
 import { cellWords, diffGrids } from "../src/lib/grid-diff.ts";

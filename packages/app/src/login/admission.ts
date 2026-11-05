@@ -8,6 +8,9 @@ import { escapeHtml, smallPage, wantsJson } from "./page.ts";
 // files declare (`sanoma.person`), matched by what the login vouches for, and acts as declared
 // (`admit`). An agent never signs in. One wrapper for every login, so no provider can forget it.
 
+/** What `admitting` admits by: the declared people, and the problems reading them. */
+type Declared = Pick<DeclaredPeople, "problems"> & { people: readonly PeopleResource[] };
+
 /**
  * The login, admitting only a declared person: `resolveActor` returns the declared principal,
  * and a request from anyone else is refused with a 403 saying why (JSON, `not_admitted`, for a
@@ -15,10 +18,7 @@ import { escapeHtml, smallPage, wantsJson } from "./page.ts";
  * people (`readPeople`). While they declare no person, a login that names an id (the loopback's)
  * is taken as it says; one that does not (GitHub's), nobody.
  */
-export function admitting(
-  login: LoginProvider,
-  people: () => Pick<DeclaredPeople, "problems"> & { people: readonly PeopleResource[] },
-): AdmittingLogin {
+export function admitting(login: LoginProvider, people: () => Declared | Promise<Declared>): AdmittingLogin {
   // Each request's answer, shared by `handle` and the `resolveActor` the server then asks.
   const answers = new WeakMap<Request, Promise<{ admitted?: Principal; why?: string }>>();
   const resolve = (request: Request) => {
@@ -28,7 +28,7 @@ export function admitting(
         const identity = await login.resolveActor(request);
         if (!identity) return {};
         try {
-          return { admitted: admit(identity, people(), true) };
+          return { admitted: admit(identity, await people(), true) };
         } catch (e) {
           if (errorCode(e) === "not_admitted") return { why: (e as Error).message };
           // Who is asking could not be read: refused, saying why, rather than every request failing.

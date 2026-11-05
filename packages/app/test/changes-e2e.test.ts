@@ -8,12 +8,13 @@ import { startTestWorker } from "@sanoma-ai/testing";
 import {
   defineWorkflow,
   memoryLedger,
+  type PatchOutput,
   resolveConfig,
   SanomaClient,
   type SanomaConfig,
   type Worker,
 } from "@sanoma-ai/workflows";
-import { describeConfig } from "@sanoma-ai/workflows/describe";
+import { PATCH_WORKFLOW } from "@sanoma-ai/workflows/shared";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { localGitSource } from "../../sanoma/src/source.ts";
@@ -23,9 +24,10 @@ import { type FakeRemote, fakeRemote } from "../../workflows/test/fakes/remote.t
 import { freshDatabase } from "../../workflows/test/harness.ts";
 import type { AppContext } from "../src/context.ts";
 import { type App, startApp } from "../src/index.ts";
-import { tellCommits } from "../src/server/agent/checkout.ts";
-import { change, hasRemote, openChange, patch } from "../src/server/core.ts";
-import { checks } from "../src/server/drafts.ts";
+import { checks, tellCommits } from "../src/steps/agent/checkout.ts";
+import { change, openChange } from "../src/server/core.ts";
+import { appSnapshot } from "../src/snapshot-build.ts";
+import { appSteps } from "../src/steps/index.ts";
 import { PEOPLE, pageOf, publishedAgain, publishOf, renderDraftCard } from "./fixtures/change.ts";
 
 // The life of a change, end to end, as a person drives it through the app: the sanoma package's
@@ -110,8 +112,8 @@ beforeAll(async () => {
     databaseUrl,
   };
   source = localGitSource(dir, { databaseUrl });
-  worker = await startTestWorker(config, { databaseUrl, source });
-  client = await SanomaClient.connect(config, { source });
+  worker = await startTestWorker(config, { databaseUrl, source, app: appSteps });
+  client = await SanomaClient.connect(config);
   app = await startApp(config, { port: 0, source });
 }, 600_000);
 
@@ -152,9 +154,14 @@ describe("a change, from a chat's draft to main", { timeout: 2 * ROUND_MS }, () 
     expect(card.files).toEqual(["policies/hello.cedar", "resources/people.ts"]);
     expect(card.checks).toMatchObject({ ok: true, problems: [] });
     // The app's own answers, as its root loader and the card's query read them.
-    const context = { client, resolved: resolveConfig(config), source } as unknown as AppContext;
+    const context = {
+      client,
+      resolved: resolveConfig(config),
+      snapshot: await appSnapshot(config, { source }),
+      local: { source },
+    } as unknown as AppContext;
     const html = await renderDraftCard(card, {
-      remote: await hasRemote(context),
+      remote: context.snapshot.repository?.remote !== undefined,
       change: await change(context, "rules"),
     });
     expect(html).toMatch(/<button[^>]*aria-disabled="false"[^>]*>Send for review<\/button>/);
@@ -270,14 +277,11 @@ describe("a change, from a chat's draft to main", { timeout: 2 * ROUND_MS }, () 
 
   it("lands a form's Save as a change: a draft of its own, committed, sent for review and held for admin", async () => {
     const main = git("rev-parse", "main");
-    const context = {
-      client,
-      resolved: resolveConfig(config),
-      source,
-      description: describeConfig(config),
-    } as unknown as AppContext;
     const at = { file: "resources/people.ts", export: "alice" };
-    const landed = await patch(context, { id: "alice" }, { at, fields: { name: "Alice Liddell" } }, app.url);
+    const input = { at, fields: { name: "Alice Liddell" } };
+    const landed = (await client.result(
+      await client.start(PATCH_WORKFLOW, input, { startedBy: "alice" }),
+    )) as PatchOutput;
     expect(landed).toEqual({ change: expect.stringMatching(/^change:ui-[\da-f]{8}$/) });
     const saved = (landed as { change: string }).change;
     const id = saved.slice("change:".length);
@@ -296,8 +300,9 @@ describe("a change, from a chat's draft to main", { timeout: 2 * ROUND_MS }, () 
       sha: pr.head,
       state: "pending",
       description: "A change to the rules waits for admin",
-      targetUrl: new URL(`/changes/${id}`, app.url).href,
     });
+    // Its status links no page: the run's input names none, and the worker knows no origin of the app's.
+    expect(remote.statuses.at(-1)?.targetUrl).toBeUndefined();
     // Closed by admin, so no run waits as the worker stops.
     await client.changeEvent(id, { kind: "close", by: "ada" }, { by: { id: "ada" } });
     expect(await client.result(saved)).toMatchObject({ outcome: "closed" });

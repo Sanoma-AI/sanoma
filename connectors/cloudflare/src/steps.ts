@@ -9,7 +9,8 @@ const IMAGE =
 
 /**
  * Cloudflare's steps for Gherkin tests: a company's container before the run (named `host`, so
- * an operation's own test can use `$host.state.url`), its secrets carrying the wakeup token.
+ * an operation's own test can use `$host.state.url`), its secrets carrying the wakeup token and
+ * its database's URL.
  */
 export const cloudflareSteps = defineSteps("cloudflare", ({ given }) => {
   given("a Cloudflare container for {string} at revision {string}", (name: string, revision: string) => ({
@@ -22,7 +23,11 @@ export const cloudflareSteps = defineSteps("cloudflare", ({ given }) => {
         ref: "main",
         revision,
         port: 3000,
-        secrets: { SANOMA_WAKEUP_TOKEN: { $secret: "SANOMA_WAKEUP_TOKEN", generate: true } },
+        secrets: {
+          SANOMA_WAKEUP_TOKEN: { $secret: "SANOMA_WAKEUP_TOKEN", generate: true },
+          // Made up: Hyperdrive's origin is made of it, and nothing connects to it.
+          SANOMA_DATABASE_URL: "postgresql://sanoma:test@db.acme.example:5432/company",
+        },
       },
     },
     as: "host",

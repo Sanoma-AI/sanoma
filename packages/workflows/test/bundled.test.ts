@@ -33,7 +33,7 @@ describe("useRootSnapshot", () => {
     useRootSnapshot(root, {
       appName: "acme",
       version: "acme@from-the-container",
-      changeCode: "code-from-the-container",
+      builtInCodes: { change: "code-from-the-container" },
       policies: [{ file: "policies/visitors.cedar", text: POLICY }],
       people,
     });
@@ -42,7 +42,7 @@ describe("useRootSnapshot", () => {
       appName: "acme",
       queueName: "sanoma:acme",
       version: "acme@from-the-container",
-      changeCode: "code-from-the-container",
+      builtInCodes: { change: "code-from-the-container" },
     });
     expect(readPolicyFiles(root)).toEqual([{ file: "policies/visitors.cedar", text: POLICY }]);
     expect(readPeople(root)).toBe(people);

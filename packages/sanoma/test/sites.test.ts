@@ -194,10 +194,31 @@ export const host = docker.container({
     expect(found.stdout.trimEnd().split("\n")).toEqual([
       "sites/Bad_Name: a site's folder name is a URL segment (lowercase letters, digits and dashes)",
     ]);
-    expect(found.stderr).not.toMatch(/^build /m);
+    // No sites build: the app bundle's alone.
+    expect(found.stderr).not.toMatch(/^build (?!the app bundle$)/m);
     expect(existsSync(join(dir, "sites/__virtual.ts"))).toBe(false);
-    expect(readdirSync(join(dir, ".sanoma"))).toEqual(["api.ts", "schema.cedarschema"]);
+    // And the app bundle's build cache (`sanoma check` builds it for the Worker), under .sanoma/app.
+    expect(readdirSync(join(dir, ".sanoma"))).toEqual(["api.ts", "app", "schema.cedarschema"]);
   }, 180_000);
+
+  it("names a site's file that imports what the Cloudflare Worker does not have, building the app bundle", async () => {
+    dir = copyFixture(fixture);
+    writeFileSync(
+      join(dir, "sites/hello/routes/spawn.tsx"),
+      `import { createFileRoute } from "@tanstack/react-router";
+import { createServerFn } from "@tanstack/react-start";
+import { execFile } from "node:child_process";
+
+const ran = createServerFn().handler(() => new Promise<string>((done) => execFile("true", () => done("ran"))));
+export const Route = createFileRoute("/sites/hello/spawn")({ loader: () => ran(), component: () => null });
+`,
+    );
+    const found = await runCli(dir, ["check"], env);
+    expect(found.code, found.stderr).toBe(1);
+    expect(found.stdout).toContain(
+      "sites/hello/routes/spawn.tsx imports execFile from node:child_process, which the Cloudflare Worker does not have",
+    );
+  }, 300_000);
 
   it("reports two pages claiming one path", async () => {
     dir = copyFixture(fixture);
@@ -283,13 +304,18 @@ describe("sanoma with sites: the dev server", () => {
     const types = join(repo, ".sanoma/content.ts");
     expect(readFileSync(types, "utf8")).toContain("posts: ContentKind<{ title: string }>;");
     const post = join(repo, "content/posts/hello.md");
-    writeFileSync(
-      post,
-      readFileSync(post, "utf8")
-        .replace("title: The first post", "title: The first post\nsummary: Edited")
-        .replace("Read from", "Edited in"),
+    const edited = readFileSync(post, "utf8")
+      .replace("title: The first post", "title: The first post\nsummary: Edited")
+      .replace("Read from", "Edited in");
+    // Written at each look: a watcher still scanning takes one write for how the file always was.
+    await waitFor(
+      () => {
+        writeFileSync(post, edited);
+        return page();
+      },
+      (html) => html.includes("Edited in <strong>"),
+      20_000,
     );
-    await waitFor(page, (html) => html.includes("Edited in <strong>"), 20_000);
     expect(readFileSync(types, "utf8")).toContain("posts: ContentKind<{ title: string; summary: string }>;");
   }, 60_000);
 

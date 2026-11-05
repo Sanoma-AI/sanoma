@@ -14,12 +14,9 @@ export const CONTENT_TYPES = join(".sanoma", "content.ts");
 
 /**
  * Each kind's published entries (drafts left out), what a sitemap lists: each `<slug>.md` by its
- * slug, each translation by its slug and `locale`. `published.json` in a build.
+ * slug, each translation by its slug and `locale`: the snapshot's `published`.
  */
 export type Published = Record<string, { slug: string; locale?: string }[]>;
-
-/** The file a build writes its `Published` content to, beside `client/` and `server/`. */
-export const PUBLISHED_FILE = "published.json";
 
 /**
  * The file a build writes the kit's stylesheet's path to (`/assets/style-<hash>.css`), beside

@@ -1,9 +1,11 @@
 import { fileURLToPath } from "node:url";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
+import { eq, getTableName, inArray } from "drizzle-orm";
 import { Pool } from "pg";
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { collection, collectionsDriver } from "../src/collection.ts";
-import { DATA_TABLE, lazyPool } from "../src/db.ts";
+import { databaseOn, lazyDb } from "../src/db.ts";
+import { data } from "../src/db/company.ts";
 import { type LedgerRecord, memorySecrets, type Op } from "../src/index.ts";
 import { check, drive, loadScenarios } from "../src/scenario.ts";
 import { outbound } from "./fixtures/outbound/resources/data.ts";
@@ -17,7 +19,7 @@ const lead = { company: "Acme", contact: "ada@acme.test", stage: "researched", o
 const regclass = async (url: string) => {
   const pool = new Pool({ connectionString: url });
   try {
-    return (await pool.query(`SELECT to_regclass('${DATA_TABLE}')::text AS t`)).rows[0].t as string | null;
+    return (await pool.query(`SELECT to_regclass('${getTableName(data)}')::text AS t`)).rows[0].t as string | null;
   } finally {
     await pool.end();
   }
@@ -40,7 +42,7 @@ describe("sanoma_data", () => {
     vi.resetModules();
     const two = await import("../src/db.ts");
     await Promise.all([one.prepareDatabase(url), two.prepareDatabase(url)]);
-    expect(await regclass(url)).toBe(DATA_TABLE);
+    expect(await regclass(url)).toBe(getTableName(data));
   });
 });
 
@@ -56,11 +58,12 @@ describe("the collections' driver on Postgres", () => {
     },
   });
   const accounts = collection({ name: "accounts", key: "id", fields: { id: "text" } });
-  const pool = lazyPool(testDatabaseUrl("data"), "data test");
+  const url = testDatabaseUrl("data");
+  const pool = lazyDb(url, "data test");
   const driver = collectionsDriver([leads, accounts], pool);
   afterAll(() => pool.close());
   beforeEach(async () => {
-    await (await pool.db()).query(`DELETE FROM ${DATA_TABLE} WHERE collection IN ('leads', 'accounts')`);
+    await (await pool.db()).delete(data).where(inArray(data.collection, ["leads", "accounts"]));
   });
 
   let n = 0;
@@ -149,21 +152,20 @@ describe("the collections' driver on Postgres", () => {
     const before = { company: "Acme", stage: "new" };
     const record = { ...before, seats: 1 };
     await call(leads.save, { record: before }, "owner");
-    const db = await pool.db();
+    const raw = new Pool({ connectionString: url, max: 1 });
+    const query = raw.query.bind(raw) as (...a: unknown[]) => Promise<unknown>;
     let loseResponse = true;
-    const uncertain = collectionsDriver([leads], {
-      db: async () =>
-        ({
-          query: async (...args: Parameters<typeof db.query>) => {
-            const result = await db.query(...args);
-            if (loseResponse) {
-              loseResponse = false;
-              throw new Error("Response lost after commit");
-            }
-            return result;
-          },
-        }) as typeof db,
-    });
+    // The statement commits, then its response is lost.
+    raw.query = (async (...args: unknown[]) => {
+      const result = await query(...args);
+      if (loseResponse) {
+        loseResponse = false;
+        throw new Error("Response lost after commit");
+      }
+      return result;
+    }) as Pool["query"];
+    onTestFinished(() => raw.end());
+    const uncertain = collectionsDriver([leads], { db: async () => databaseOn(raw) });
     const context = {
       idempotencyKey: "lost-transition",
       runId: "transition",
@@ -207,11 +209,12 @@ describe("the collections' driver on Postgres", () => {
 
   it("orders text by its bytes whatever the database's collation, and a value of another type as missing", async () => {
     for (const company of ["apple", "Banana"]) await call(leads.save, { record: { company, stage: "new", seats: 2 } });
-    await (
-      await pool.db()
-    ).query(`INSERT INTO ${DATA_TABLE} (collection, key, record, updated_by) VALUES ('leads', 'Acme', $1, 'leon')`, [
-      JSON.stringify({ company: "Acme", stage: "new", seats: "many" }),
-    ]);
+    await (await pool.db()).insert(data).values({
+      collection: "leads",
+      key: "Acme",
+      record: { company: "Acme", stage: "new", seats: "many" },
+      updatedBy: "leon",
+    });
     expect(await keys({})).toEqual(["Acme", "Banana", "apple"]);
     expect(await keys({ where: { company: { gte: "B" } } })).toEqual(["Banana", "apple"]);
     expect(await keys({ where: { company: { gte: "a" } } })).toEqual(["apple"]);
@@ -227,11 +230,12 @@ describe("the collections' driver on Postgres", () => {
   });
 
   it("gives back a record saved under an older declaration as it is stored, with its issues", async () => {
-    await (
-      await pool.db()
-    ).query(`INSERT INTO ${DATA_TABLE} (collection, key, record, updated_by) VALUES ('leads', 'Acme', $1, 'leon')`, [
-      JSON.stringify({ company: "Acme", stage: "lost", owner: "leon" }),
-    ]);
+    await (await pool.db()).insert(data).values({
+      collection: "leads",
+      key: "Acme",
+      record: { company: "Acme", stage: "lost", owner: "leon" },
+      updatedBy: "leon",
+    });
     const issues = [
       { path: ["stage"], message: expect.any(String) },
       { path: [], message: expect.stringContaining("owner") },
@@ -262,12 +266,10 @@ unless { context has before };
 
   it("calls get and save as nodes under the policy, the save with the record it replaces, and the record says the run saved it", async () => {
     const pool = db();
+    const store = databaseOn(pool);
     try {
-      await pool.query(`DELETE FROM ${DATA_TABLE} WHERE collection = 'outbound'`);
-      await pool.query(
-        `INSERT INTO ${DATA_TABLE} (collection, key, record, updated_by) VALUES ('outbound', 'Acme', $1, 'leon')`,
-        [JSON.stringify(lead)],
-      );
+      await store.delete(data).where(eq(data.collection, "outbound"));
+      await store.insert(data).values({ collection: "outbound", key: "Acme", record: lead, updatedBy: "leon" });
       const runId = await app.client.start("outbound-next", { company: "Acme" }, { startedBy: { id: "leon" } });
       expect(await app.client.result(runId)).toBe(`run:${runId}`);
       const calls = (await app.client.ledger(runId)).filter(
@@ -285,8 +287,11 @@ unless { context has before };
       expect(calls[1]!.output).toMatchObject({ key: "Acme", updatedBy: `run:${runId}` });
       // A save sees the record it replaces: the policy let it through.
       expect(calls.map(({ decision }) => decision.kind)).toEqual(["allow", "allow"]);
-      const { rows } = await pool.query(`SELECT record, updated_by FROM ${DATA_TABLE} WHERE collection = 'outbound'`);
-      expect(rows).toEqual([{ record: { ...lead, stage: "contacted" }, updated_by: `run:${runId}` }]);
+      const rows = await store
+        .select({ record: data.record, updatedBy: data.updatedBy })
+        .from(data)
+        .where(eq(data.collection, "outbound"));
+      expect(rows).toEqual([{ record: { ...lead, stage: "contacted" }, updatedBy: `run:${runId}` }]);
     } finally {
       await pool.end();
     }
@@ -325,8 +330,16 @@ unless { context has before };
     });
     const pool = db();
     try {
-      const saved = `SELECT key FROM ${DATA_TABLE} WHERE updated_by = ANY($1)`;
-      expect((await pool.query(saved, [runIds.map((id) => `run:${id}`)])).rows).toEqual([]);
+      const saved = await databaseOn(pool)
+        .select({ key: data.key })
+        .from(data)
+        .where(
+          inArray(
+            data.updatedBy,
+            runIds.map((id) => `run:${id}`),
+          ),
+        );
+      expect(saved).toEqual([]);
     } finally {
       await pool.end();
     }

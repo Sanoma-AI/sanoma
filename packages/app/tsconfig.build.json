@@ -1,5 +1,6 @@
 {
-  // The Node entries only: startApp and its types, and the build (`./build`). `vite build` builds
+  // The Node entries only: startApp and its types, the build (`./build`), the Worker's (`./bundle`) and the worker's
+  // steps (`./steps`). `vite build` builds
   // the app itself into dist/client and dist/server.
   "extends": "../../tsconfig.json",
   "compilerOptions": {
@@ -12,5 +13,5 @@
     "paths": {}
   },
   "include": [],
-  "files": ["src/index.ts", "src/build.ts"]
+  "files": ["src/index.ts", "src/build.ts", "src/bundle-build.ts", "src/steps/index.ts"]
 }

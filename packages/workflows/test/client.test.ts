@@ -105,9 +105,28 @@ describe("SanomaClient", () => {
     expect(errorCode(err)).toBe("invalid_input");
     expect(err).toMatchObject({
       // With drift and apply for the resource type a connector declares (`resend.domain`), the
-      // built-in change, and call for the listing of apps a page may call.
-      message: 'No workflow named "nope"; the config has announce, clock, double, drift, apply, change, call',
-      data: { workflow: "nope", workflows: ["announce", "clock", "double", "drift", "apply", "change", "call"] },
+      // built-in change, the app's actions, and call for the listing of apps a page may call.
+      message:
+        'No workflow named "nope"; the config has announce, clock, double, drift, apply, change, follow, adopt, patch, go-live, go-live-host, connect-existing, chat, call',
+      data: {
+        workflow: "nope",
+        workflows: [
+          "announce",
+          "clock",
+          "double",
+          "drift",
+          "apply",
+          "change",
+          "follow",
+          "adopt",
+          "patch",
+          "go-live",
+          "go-live-host",
+          "connect-existing",
+          "chat",
+          "call",
+        ],
+      },
     });
   });
 

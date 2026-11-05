@@ -17,9 +17,9 @@ import type {
   RunSummary,
 } from "@sanoma-ai/workflows";
 import type { ConfigDescription, PermissionsGrid, Span } from "@sanoma-ai/workflows/describe";
-import { AtSchema, ConfigDescriptionSchema } from "@sanoma-ai/workflows/description";
-import type { Check, Scenario } from "@sanoma-ai/workflows/scenario";
-import { EFFECTS, RUN_STATUSES } from "@sanoma-ai/workflows/shared";
+import { ConfigDescriptionSchema } from "@sanoma-ai/workflows/description";
+import type { RunCheck, Scenario } from "@sanoma-ai/workflows/scenario";
+import { EFFECTS, RUN_STATUSES, type Saved } from "@sanoma-ai/workflows/shared";
 import { z } from "zod";
 
 /**
@@ -165,8 +165,10 @@ export interface RunDetail {
   ledgerError?: string;
   approvals: ApprovalState[];
   /**
-   * For a sandbox run, each of its scenario's expectations checked against the ledger. Absent
-   * until the run has been seeded, and when `checksError` says why there are none.
+   * For a sandbox run, each of its scenario's expectations checked against the ledger, as the
+   * worker ran them when the run last waited or ended (`SanomaClient.runChecks`); until it first
+   * has, each of its scenario's Then steps, not settled. Absent until the run has been seeded, and
+   * when `checksError` says why there are none.
    */
   checks?: RunCheck[];
   /**
@@ -174,16 +176,6 @@ export interface RunDetail {
    * those that did not load), or the scenarios could not be read at all.
    */
   checksError?: string;
-}
-
-/** One of a sandbox run's checks, and whether its answer is final. */
-export interface RunCheck extends Check {
-  /**
-   * True once the answer cannot change: the run has ended, or the check expects a call that
-   * has been made. Until then a check not met is not failed yet, and one met (a call not made
-   * so far) may still fail.
-   */
-  settled: boolean;
 }
 
 /**
@@ -392,27 +384,6 @@ export const INFRA = "resources/sanoma/infra.ts";
 export const noWakeup = (hostType: string, wakes?: string) =>
   `No connected wakeup wakes a ${hostType}${wakes ? ` (${wakes})` : ""}: going live declares none, and the host stays up`;
 
-/**
- * What going live chooses (`goLiveFn`): who holds the repository, the database's region (and
- * size, when it takes one), Supabase's organization for a Supabase project, the host's port.
- */
-export const GoLiveRequest = z.object({
-  owner: z.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/, "Choose a GitHub account or organization"),
-  /** The repository's name, and the database's and the host's. */
-  name: z
-    .string()
-    .regex(/^[a-z0-9][a-z0-9-]{0,62}$/, "Lower case letters, digits and hyphens, starting with a letter or digit"),
-  organization: z.string().min(1, "Choose a Supabase organization").optional(),
-  region: z.string().min(1, "Choose a region"),
-  size: z.string().min(1).optional(),
-  /** The database type the page showed (`GoLiveChoices.database`): refused when going live would now choose another. */
-  database: z.string().min(1).optional(),
-  /** The host type the page showed (`GoLiveChoices.host`): refused when going live would now choose another. */
-  host: z.string().min(1).optional(),
-  port: z.number().int().min(1024, "A port from 1024").max(65535, "A port up to 65535"),
-});
-export type GoLiveRequest = z.infer<typeof GoLiveRequest>;
-
 /** A connector package on npm (`getAvailableConnectors`). */
 export interface AvailableConnector {
   /** The npm package name, what `pnpm add` takes. */
@@ -500,40 +471,6 @@ export interface GoLiveProgress {
   /** Where the host answers, from the last apply that made or changed it, and whether `/healthz` answers. */
   host: { url: string; healthy: boolean } | null;
 }
-/**
- * What `connectExistingFn` takes: a GitHub repository (`owner/name`: the owner is always written)
- * and a Supabase project's ref, either or both.
- */
-export const ConnectExistingRequest = z
-  .object({
-    repository: z
-      .string()
-      .trim()
-      .regex(/^[\w-]+\/(?!\.\.?$)[\w.-]+$/, "Enter a repository as owner/name")
-      .optional(),
-    project: z
-      .string()
-      .trim()
-      .regex(/^[a-z0-9]+$/, "Enter a project's ref: lowercase letters and digits")
-      .optional(),
-  })
-  .refine((r) => r.repository || r.project, { message: "Enter a repository, a project's ref, or both" });
-export type ConnectExistingRequest = z.infer<typeof ConnectExistingRequest>;
-
-/**
- * What `connectExistingFn` answers: the data file it wrote, relative to the root, and its text;
- * its commit, on `branch` (with its `diff`) when the repository has a remote and the change waits
- * for a person to merge it; and the apply run that binds what it declares.
- */
-export interface ConnectExistingResponse {
-  file: string;
-  text: string;
-  revision?: string;
-  branch?: string;
-  diff?: string;
-  runId: string;
-}
-
 /** Said at the top of `infra.ts` when it declares an existing database, and on the page. */
 export const PASSWORD_NOTE = [
   "The database password is declared as a generated secret, since Supabase never reads it back.",
@@ -543,40 +480,6 @@ export const PASSWORD_NOTE = [
 /** What `clearCredentialFn` takes: a declared variable, whose stored value it deletes. */
 export const ClearCredentialRequest = z.object({ name: z.string().min(1, "Name a variable") });
 export type ClearCredentialRequest = z.infer<typeof ClearCredentialRequest>;
-
-/**
- * What `adoptFn` takes: a drift run, a resource it found drifted, and the fields whose value at
- * the vendor to write into the resource's data file.
- */
-export const AdoptRequest = z.object({
-  runId: z.string().min(1),
-  id: z.string().min(1),
-  paths: z.array(z.string().min(1)).min(1),
-});
-export type AdoptRequest = z.infer<typeof AdoptRequest>;
-
-/** What `adoptFn` answers: the data file it wrote, relative to the root, and the commit, when the app has a source. */
-export interface AdoptResponse {
-  file: string;
-  revision?: string;
-}
-
-/**
- * What `patchFn` takes: a declaration the description names (a resource, a collection, a site or
- * an app, by its `at`), and the fields to set in it, by dotted path as `setFields` takes them, each
- * to a JSON value.
- */
-export const PatchRequest = z.object({
-  at: AtSchema,
-  fields: z.record(z.string().min(1), z.json()).refine((fields) => Object.keys(fields).length > 0, "Set a field"),
-});
-export type PatchRequest = z.infer<typeof PatchRequest>;
-
-/**
- * What `patchFn` answers: the change it opened for review (its run id), when the repository has a
- * remote; otherwise the file it wrote, relative to the root, and the commit, when the app has a source.
- */
-export type PatchResponse = { change: string } | { file: string; revision?: string };
 
 /**
  * What `callFn` takes, as a site's `api` sends it: an operation's id (`data.outbound.list`), a
@@ -608,6 +511,7 @@ export const PreviewQuery = z
 export type PreviewQuery = z.infer<typeof PreviewQuery>;
 
 export type { PermissionsRow } from "@sanoma-ai/workflows/describe";
+export type { RunCheck } from "@sanoma-ai/workflows/scenario";
 
 /**
  * The Permissions page's grid (`getPermissions`): the policy, then the grid (`permissionsGrid`:
@@ -634,8 +538,11 @@ export type EnforcementResponse = (HostEnforcement & { host: string }) | null;
 /** The `body` of the error a server function fails with. */
 export interface ErrorResponse {
   error: string;
-  /** The runtime's code, when the error has one. Branch on this, never on `error`. */
-  code?: ErrorCode;
+  /**
+   * The runtime's code, when the error has one, or `record_changed`: a collection's `save` with
+   * `ifRecord` finding the record changed since, or gone. Branch on this, never on `error`.
+   */
+  code?: ErrorCode | "record_changed";
   /** For `invalid_input`: what is wrong with the request or the input. */
   issues?: InputIssue[];
   /** For `not_approver`: who may decide. */
@@ -644,9 +551,14 @@ export interface ErrorResponse {
   reason?: string;
   /** For `approval_pending`: the run of the built-in `call` workflow the call waits in; for `run_running`, the run. */
   runId?: string;
-  /** For a form's Save refused with a 409 (`patchFn`): the field its file computes, by dotted path, which only the code changes. */
+  /** For a form's Save refused (`invalid_input` from a `patch` run): the field its file computes, by dotted path, which only the code changes. */
   field?: string;
+  /** For `record_changed`, when the runtime says: the record as it stands now, or null once it is gone. */
+  current?: Saved<Record<string, Json>> | null;
 }
+
+/** A JSON value, as a record's fields hold them. */
+export type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
 
 /**
  * An error with the HTTP status and body a server function answers with. Every server function

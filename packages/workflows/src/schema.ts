@@ -22,20 +22,23 @@ import { CHANGE_MERGE, DATA_VENDOR, EFFECTS, groupNamesOf, type PeopleResource, 
 /** Cedar's bindings: its builds (`/nodejs`, `/web`) export the same functions. */
 export type CedarWasm = typeof import("@cedar-policy/cedar-wasm/nodejs");
 let wasm: CedarWasm | undefined;
+/** How Cedar is loaded on first use: its Node build, unless `useCedarWasm` gave another. */
+let load = () => createRequire(import.meta.url)("@cedar-policy/cedar-wasm/nodejs") as CedarWasm;
 
 /**
- * `@cedar-policy/cedar-wasm`'s Node build, loaded (synchronously, once) on first use, so a process
- * that never decides with Cedar never loads it; or the build `useCedarWasm` gave.
+ * Cedar's bindings, loaded (synchronously, once) on first use, so a process that never decides
+ * with Cedar never loads it: `@cedar-policy/cedar-wasm`'s Node build, or what `useCedarWasm`'s loader gives.
  */
-export const cedarWasm = (): CedarWasm =>
-  (wasm ??= createRequire(import.meta.url)("@cedar-policy/cedar-wasm/nodejs") as CedarWasm);
+export const cedarWasm = (): CedarWasm => (wasm ??= load());
 
 /**
- * From now on, Cedar is `bindings`: its web build, initialised, where the Node build cannot load
- * (the Cloudflare host's Worker, which bundles the runtime).
+ * From now on, Cedar is what `loader` gives on first use: its web build, initialised, where the
+ * Node build cannot load (workerd, which bundles the runtime), and instantiated only once a
+ * request decides with it.
  */
-export function useCedarWasm(bindings: CedarWasm): void {
-  wasm = bindings;
+export function useCedarWasm(loader: () => CedarWasm): void {
+  wasm = undefined;
+  load = loader;
 }
 
 /** The schema as Cedar's JSON format has it. */

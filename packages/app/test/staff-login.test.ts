@@ -75,7 +75,10 @@ describe("staffLogin", () => {
       return true;
     }),
     secrets: async () => new Map(),
+    pool: vi.fn<() => Promise<unknown>>(async () => pool),
   };
+  /** What stands for the client's pool: the half is given it, and nothing here reads it. */
+  const pool = { the: "pool" };
   let context: LoginContext;
   let login: LoginProvider;
 
@@ -94,11 +97,11 @@ describe("staffLogin", () => {
     await provider.open!({
       resolved: {
         appName: "acme-plumbing",
-        databaseUrl: "postgresql://x/y",
         root,
         ...(sender && { login: { sender: {}, from: "Acme <login@acme.test>" } }),
       },
       client,
+      snapshot: { people: readPeople(root) },
       ...(stylesheet && { stylesheet }),
     } as unknown as AppContext);
     return provider;
@@ -121,6 +124,7 @@ describe("staffLogin", () => {
     expect(context.staff!.social).toEqual({ github: { clientId: "id", clientSecret: "secret" } });
     expect(context.origins).toEqual([]);
     expect(context.key).toMatch(/^[0-9a-f]{64}$/);
+    expect(await context.database()).toBe(pool);
     expect(login.signOut).toBe("/auth/better-auth/sign-out");
 
     await context.sendCode!("ada@acme.test", "123456");
@@ -321,8 +325,9 @@ describe("staffLogin", () => {
     try {
       const provider = staffLogin(async () => fakeHalf(["code", "invite"]));
       await provider.open!({
-        resolved: { appName: "acme-plumbing", databaseUrl: "postgresql://x/y", root: broken },
+        resolved: { appName: "acme-plumbing", root: broken },
         client,
+        snapshot: { people: readPeople(broken) },
       } as unknown as AppContext);
       const page = (await provider.handle!(request("/auth/invite/tok-dee@acme.test")))!;
       expect(page.status).toBe(200);

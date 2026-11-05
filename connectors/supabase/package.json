@@ -1,6 +1,6 @@
 {
   "name": "@sanoma-ai/connector-supabase",
-  "version": "0.4.11",
+  "version": "0.4.12",
   "description": "Supabase projects for Sanoma, through the OpenTofu provider and the Management API",
   "keywords": [
     "connector",
@@ -65,6 +65,7 @@
     "watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput"
   },
   "dependencies": {
+    "drizzle-orm": "0.45.4",
     "pg": "^8.23.1"
   },
   "devDependencies": {

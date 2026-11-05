@@ -6,7 +6,6 @@ import { ensureBuilt, testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
 import { memoryLedger, resolveConfig, SanomaClient, type SanomaConfig } from "@sanoma-ai/workflows";
 import { collection } from "@sanoma-ai/workflows/data";
-import { describeConfig } from "@sanoma-ai/workflows/describe";
 import { executablePath, launch } from "puppeteer-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { outbound } from "../../workflows/test/fixtures/outbound/resources/data.ts";
@@ -16,11 +15,13 @@ import { type App, startApp } from "../src/index.ts";
 import { loopbackLogin } from "../src/loopback.ts";
 import { admitting } from "../src/login/admission.ts";
 import { callApi, serverFnFailure, validate } from "../src/server/core.ts";
+import { appSnapshot } from "../src/snapshot-build.ts";
 
 // Needs Postgres (`pnpm db:up`) and the built app: the tests build it when dist/server/server.js
-// is missing or older than a file under src/. The Data section: `/data`, a collection's grid and
-// record form, its calls as the person (`callFn`), and Used by. The one test in a browser needs
-// Google Chrome, or `CHROME_PATH` naming a Chrome or Chromium binary, and skips without either.
+// is missing or older than a file under src/. The Data section: `/data`, a collection's grid,
+// edited in place, and record form, its calls as the person (`callFn`), and Used by. The tests in
+// a browser need Google Chrome, or `CHROME_PATH` naming a Chrome or Chromium binary, and skip
+// without either.
 // It reads the grid through its pages, not `queries.ts`: a test importing a module that defines
 // server functions makes TypeScript read Start's `Register` in another order, and lose its types.
 
@@ -61,7 +62,7 @@ const config: SanomaConfig = {
   collections: [outbound],
   root,
 };
-const testApp = useTestApp(config, { databaseUrl: testDatabaseUrl("data") });
+const testApp = useTestApp(config, { databaseUrl: testDatabaseUrl("app_data") });
 let app: App;
 
 beforeAll(async () => {
@@ -116,7 +117,7 @@ const searchOf = (search: Record<string, unknown>) =>
 async function callAs(actor: string, data: CallRequest) {
   const context = {
     resolved: resolveConfig(testApp.config),
-    description: describeConfig(testApp.config),
+    snapshot: await appSnapshot(testApp.config),
     client: testApp.client,
     place: "this-computer" as const,
     login: admitting(loopbackLogin(), () => ({ people: [], problems: [] })),
@@ -301,6 +302,27 @@ describe("the Data section", () => {
     });
     // The toast's link: the call's run, under the built-in call workflow.
     expect((await page(`/workflows/call/runs/call:cy:${id}`)).status).toBe(200);
+    // A save over the record as it was read (`ifRecord`, as the grid saves a cell) once someone
+    // changed it since: a 409 the grid resolves, never a 500, and nothing written.
+    const read = (saved.body as { record: Record<string, unknown> }).record;
+    await callAs("bo", {
+      name: "data.outbound.save",
+      input: { record: { ...read, stage: "replied" } },
+      id: crypto.randomUUID(),
+    });
+    const changed = await callAs("cy", {
+      name: "data.outbound.save",
+      input: { record: { ...read, stage: "meeting" }, ifRecord: read },
+      id: crypto.randomUUID(),
+    });
+    expect(changed).toMatchObject({ status: 409, body: { code: "record_changed", error: expect.any(String) } });
+    // `current`, the record as it stands, once the runtime's error carries it (`recordChanged(current)`);
+    // none until then.
+    const theirs = { key: "Hooli", updatedBy: "bo" };
+    expect(changed.body.current ?? theirs).toMatchObject(theirs);
+    expect(
+      await callAs("cy", { name: "data.outbound.get", input: { key: "Hooli" }, id: crypto.randomUUID() }),
+    ).toMatchObject({ body: { record: { stage: "replied" }, updatedBy: "bo" } });
     expect(
       await callAs("cy", { name: "data.outbound.delete", input: { key: "Hooli" }, id: crypto.randomUUID() }),
     ).toEqual({ body: { deleted: true } });
@@ -338,7 +360,9 @@ describe("the Data section", () => {
       await tab.type("#field-contact", "pat@puppet.test");
       await tab.select("#field-stage", "0");
       await tab.click('main button[type="submit"]');
+      // The row shows at once, the record once its save answers.
       await tab.waitForSelector('a[href="/data/outbound?record=Puppet"]');
+      await tab.waitForSelector("[data-sonner-toast]::-p-text(Saved Puppet)");
       expect(await puppet()).toMatchObject({
         record: { company: "Puppet", contact: "pat@puppet.test", stage: "researched", owner: "ada" },
         updatedBy: "ada",
@@ -382,6 +406,83 @@ describe("the Data section", () => {
       await (await tab.waitForSelector('[role="dialog"] button::-p-text(Delete)'))!.click();
       await waitFor(puppet, (found) => found === null);
       await tab.waitForFunction(`!document.querySelector('a[href="/data/outbound?record=Puppet"]')`);
+    } finally {
+      await browser.close();
+    }
+  }, 60_000);
+
+  it("edits a cell in place in Chrome: Enter saves it, Undo puts it back, a change meanwhile is a conflict", async (ctx) => {
+    const chrome = process.env.CHROME_PATH ?? (await executablePath("chrome").catch(() => ""));
+    if (!existsSync(chrome)) ctx.skip("no Chrome: install Google Chrome or set CHROME_PATH");
+    // A key of its own each run: the held save below waits in the database after it.
+    const key = `Cell ${crypto.randomUUID().slice(0, 8)}`;
+    await seed(lead(key));
+    const original = lead(key).contact;
+    const record = async () =>
+      (await testApp.client.call("data.outbound.get", { key }, { actor: { id: "ada" } })) as {
+        record: Record<string, unknown>;
+        updatedBy: string;
+      };
+    const browser = await launch({ executablePath: chrome, headless: true });
+    try {
+      const tab = await browser.newPage();
+      await tab.setViewport({ width: 1440, height: 900 });
+      await tab.evaluateOnNewDocument(() => localStorage.setItem("sanoma.actor", "ada"));
+      await tab.goto(new URL(`/data/outbound${searchOf({ key })}`, app.url).href, { waitUntil: "networkidle0" });
+      const contact = `td[data-cell="${key}_contact"]`;
+      // Typing on a cell starts editing it with what is typed; Enter saves the one cell.
+      await tab.click(contact);
+      await tab.keyboard.type("new@cell.test");
+      await tab.keyboard.press("Enter");
+      await tab.waitForSelector(`[data-sonner-toast]::-p-text(Saved contact for ${key})`);
+      expect(await record()).toMatchObject({
+        record: { contact: "new@cell.test", stage: "researched" },
+        updatedBy: "ada",
+      });
+      await tab.waitForSelector(`${contact}::-p-text(new@cell.test)`);
+      // Undo saves the record as it was.
+      await (await tab.waitForSelector("[data-sonner-toast] button::-p-text(Undo)"))!.click();
+      await waitFor(
+        async () => (await record()).record.contact,
+        (value) => value === original,
+      );
+      await tab.waitForSelector(`${contact}::-p-text(${original})`);
+
+      // Someone else saves it meanwhile: the grid's save is a conflict, and Use mine saves over theirs.
+      await callAs("bo", {
+        name: "data.outbound.save",
+        input: { record: { ...lead(key), contact: "bo@cell.test" } },
+        id: crypto.randomUUID(),
+      });
+      await tab.click(contact);
+      await tab.keyboard.type("mine@cell.test");
+      await tab.keyboard.press("Enter");
+      await tab.waitForSelector('[role="alert"]::-p-text(changed since you read it)');
+      expect(await tab.$eval(contact, (td) => td.getAttribute("aria-invalid"))).toBe("true");
+      expect((await record()).record.contact).toBe("bo@cell.test");
+      await (await tab.waitForSelector('[role="alert"] button::-p-text(Use mine)'))!.click();
+      await waitFor(
+        async () => (await record()).record.contact,
+        (value) => value === "mine@cell.test",
+      );
+      await tab.waitForFunction(`!document.querySelector('[role="alert"]')`);
+
+      // A choice the policy denies says why, and the cell shows the record as it is.
+      const stage = `td[data-cell="${key}_stage"]`;
+      await tab.click(stage);
+      await tab.keyboard.press("Enter");
+      await tab.select(`select[aria-label="stage of ${key}"]`, "5");
+      await tab.keyboard.press("Enter");
+      await tab.waitForSelector("[data-sonner-toast]::-p-text(leads are not lost)");
+      await tab.waitForSelector(`${stage}::-p-text(researched)`);
+      // One it holds for an approval marks the record until the call's run ends.
+      await tab.click(stage);
+      await tab.keyboard.press("Enter");
+      await tab.select(`select[aria-label="stage of ${key}"]`, "4");
+      await tab.keyboard.press("Enter");
+      await tab.waitForSelector("[data-sonner-toast]::-p-text(Held for approval)");
+      await tab.waitForSelector(`td[data-cell="${key}_company"]::-p-text(waits for approval)`);
+      expect((await record()).record.stage).toBe("researched");
     } finally {
       await browser.close();
     }

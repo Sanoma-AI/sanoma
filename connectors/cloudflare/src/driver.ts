@@ -3,8 +3,8 @@ import type { Cloudflare } from "cloudflare";
 import { z } from "zod";
 import { cloudflareOps, host } from "./connector.ts";
 import { refused } from "./errors.ts";
+import type { WorkerModule } from "./deploy.ts";
 import { alarmOps, type CloudflareApi, containerOps, type ReadBinding, type ZoneRecord } from "./ops.ts";
-import type { WorkerModule } from "./worker.ts";
 import { recordsOps } from "./records.ts";
 import { CLOUDFLARE_REGISTRY, copyImage } from "./registry.ts";
 
@@ -17,7 +17,11 @@ import { CLOUDFLARE_REGISTRY, copyImage } from "./registry.ts";
 export interface CloudflareDriverOptions {
   /** How long one request may take, in milliseconds. Default 30 000. */
   timeoutMs?: number;
-  /** How long a create or update waits for the Worker to answer at its new revision. Default 10 minutes: a cold start clones and installs. */
+  /**
+   * How long a deploy waits for the app bundle at its revision, and then again for the container
+   * restarted at it. Default 10 minutes each: a cold start clones and installs, and a bundle is a
+   * build of the app.
+   */
   startTimeoutMs?: number;
   /** How long between two tries of the Worker while it starts. Default 2 000. */
   pollMs?: number;
@@ -28,7 +32,7 @@ const env = z.object({
   CLOUDFLARE_API_TOKEN: z
     .string()
     .describe(
-      "an API token with Workers Scripts Edit and Workers Containers Edit, and Zone Read and Zone → DNS → Edit on the zones of custom domains and DNS records",
+      "an API token with Workers Scripts Edit, Workers Containers Edit and Hyperdrive Edit, and Zone Read and Zone → DNS → Edit on the zones of custom domains and DNS records",
     ),
   CLOUDFLARE_ACCOUNT_ID: z
     .string()
@@ -76,8 +80,9 @@ const MODULE_TYPES: Record<NonNullable<WorkerModule["type"]>, string> = {
 const isStatus = (error: unknown, status: number) => error instanceof DriverError && error.status === status;
 
 /** A request to a Worker, with a timeout: a redirect is no answer of the Worker's, and would carry the token elsewhere. */
+/** `fetch` within `timeoutMs`, unless the caller gives its own signal (a large body's). */
 const sender = (timeoutMs: number) => (url: string, init: RequestInit) =>
-  fetch(url, { ...init, redirect: "manual", signal: AbortSignal.timeout(timeoutMs) });
+  fetch(url, { ...init, redirect: "manual", signal: init.signal ?? AbortSignal.timeout(timeoutMs) });
 
 /**
  * The account at `CLOUDFLARE_ACCOUNT_ID` with `CLOUDFLARE_API_TOKEN`, read when an operation is
@@ -174,6 +179,27 @@ function accountApi(timeoutMs: number, subdomains: Map<string, Promise<string>>)
       await calling(`POST workers/scripts/${script}/subdomain`, (cf) =>
         cf.workers.scripts.subdomain.create(script, { account_id, enabled: true }),
       );
+    },
+    hyperdrive: (name) =>
+      calling("GET hyperdrive/configs", async (cf) => {
+        // One page: an account holds 25 configs at most.
+        const page = await cf.hyperdrive.configs.list({ account_id, per_page: 50 });
+        const config = page.result.find((c) => c.name === name);
+        return config && { id: config.id };
+      }),
+    createHyperdrive: (name, origin) =>
+      calling("POST hyperdrive/configs", async (cf) => {
+        // Query caching off: the app reads what it just wrote.
+        const { id } = await cf.hyperdrive.configs.create({ account_id, name, origin, caching: { disabled: true } });
+        return { id };
+      }),
+    async updateHyperdrive(id, name, origin) {
+      await calling(`PUT hyperdrive/configs/${id}`, (cf) =>
+        cf.hyperdrive.configs.update(id, { account_id, name, origin, caching: { disabled: true } }),
+      );
+    },
+    async deleteHyperdrive(id) {
+      await found(`DELETE hyperdrive/configs/${id}`, (cf) => cf.hyperdrive.configs.delete(id, { account_id }));
     },
     async deleteScript(script) {
       await found(`DELETE workers/scripts/${script}`, (cf) =>
@@ -303,7 +329,8 @@ const zoneRecord = (record: {
 
 /**
  * The real Cloudflare account at `CLOUDFLARE_ACCOUNT_ID`, with `CLOUDFLARE_API_TOKEN`: the
- * company's Worker and its container application (`cloudflare.container`), its object's alarm
+ * company's Worker, its container application and its database's Hyperdrive config
+ * (`cloudflare.host`, and `cloudflare.container`, its alias), its object's alarm
  * over the Worker's wake route with the company's `SANOMA_WAKEUP_TOKEN` (`cloudflare.alarm`), and
  * sets of DNS records in the account's zones (`cloudflare.records`). See the README.
  */

@@ -59,7 +59,7 @@ describe("cloudflare.alarm meets the Wakeup contract on the fake", () => {
     start: ({ revision, env }) => inProcessHost(config, databaseUrl)({ port: 0, revision, secrets: env }),
   });
   // As /setup mints it: the host's secrets name it, and the alarm's operations send it.
-  const call = callWith(memorySecrets({ SANOMA_WAKEUP_TOKEN: mintInstanceToken() }));
+  const call = callWith(memorySecrets({ SANOMA_WAKEUP_TOKEN: mintInstanceToken(), DB_URL: databaseUrl }));
   const op = (name: string) => (input: object) => fake.driver.ops[name]!(input, call(`cloudflare.${name}`));
   let client: SanomaClient;
   let url: string;
@@ -72,7 +72,7 @@ describe("cloudflare.alarm meets the Wakeup contract on the fake", () => {
       ref: "main",
       port: 3000,
       revision: "r1",
-      secrets: { SANOMA_WAKEUP_TOKEN: secret("SANOMA_WAKEUP_TOKEN") },
+      secrets: { SANOMA_WAKEUP_TOKEN: secret("SANOMA_WAKEUP_TOKEN"), SANOMA_DATABASE_URL: secret("DB_URL") },
     };
     url = ((await op("container.create")({ desired })) as { state: { url: string } }).state.url;
     client = await SanomaClient.connect(config);

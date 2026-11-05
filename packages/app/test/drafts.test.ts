@@ -1,6 +1,6 @@
 import type { CheckResult, Source } from "@sanoma-ai/workflows";
 import { describe, expect, it } from "vitest";
-import { checks } from "../src/server/drafts.ts";
+import { checks } from "../src/steps/agent/checkout.ts";
 
 // `checks`, a draft's card's: the source's check of the draft (`localGitSource`'s, run for real in
 // `packages/sanoma/test/source.test.ts`), without the grid.
@@ -30,8 +30,8 @@ describe("checks", () => {
 
   it("is one problem when the repository cannot check a draft", async () => {
     const source: Source = { root: "/repo", commit: () => undefined, head: () => "HEAD" };
-    for (const app of [{ source }, {}]) {
-      expect(await checks(app, "chat-1")).toEqual({
+    for (const step of [{ source }, {}]) {
+      expect(await checks(step, "chat-1")).toEqual({
         ok: false,
         problems: ["sanoma check: this instance's repository cannot check a draft"],
         warnings: [],

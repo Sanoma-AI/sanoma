@@ -16,7 +16,9 @@ import { type Connector, setupOf, VENDOR, defineConnector, defineDriver, type Ca
 import { isSecret, type Secret } from "./secret.ts";
 import { SanomaError } from "./errors.ts";
 import { SecretStoreError, type SecretAccess, type SecretLocation } from "./secret-store.ts";
+import { and, eq, getTableColumns, isNull, or, sql } from "drizzle-orm";
 import type { Db } from "./db.ts";
+import { connectionHealth, connections, connectionSetups } from "./db/company.ts";
 
 /** Serializable account reference; vendor literal prevents cross-connector selection in typed calls. */
 export interface ConnectionRef<V extends string = string> {
@@ -255,25 +257,10 @@ export function connectionCatalog(
   return { definitions: defined, rules: dynamic, methods };
 }
 
-type ConnectionRow = {
-  id: string;
-  vendor: string;
-  method: string;
-  owner: string | null;
-  rule: string | null;
-  account: string;
-  scopes: string[];
-  revision: string;
-  definition: string;
-  credential: string | null;
-  location?: SecretLocation | null;
-  status: "connected" | "disconnected" | "pending" | "uncertain";
-  updated_by?: string;
-  updated_at?: Date;
-  health?: ConnectionHealth["state"];
-  checked_at?: Date;
-  externally_renewed?: boolean;
-};
+/** What a connection's row says of it, as `db/company.ts` declares it. */
+export type ConnectionStatus = "connected" | "disconnected" | "pending" | "uncertain";
+/** A connection's metadata, what `save` writes: its row less what the save sets. */
+type ConnectionRow = Omit<typeof connections.$inferSelect, "location" | "updatedBy" | "updatedAt">;
 const snapshot = (r: ConnectionRow): ConnectionSnapshot => ({
   id: r.id,
   vendor: r.vendor,
@@ -312,14 +299,21 @@ export class ConnectionRegistry {
 
   /** Safe card data only. Listing does not read credential values or contact a vendor. */
   async cards(actor: string): Promise<ConnectionCard[]> {
-    const rows = (
-      await (
-        await this.db()
-      ).query<ConnectionRow>(
-        "SELECT c.*, h.health, h.checked_at, h.externally_renewed FROM sanoma_connections c LEFT JOIN sanoma_connection_health h ON c.id=h.connection_id AND c.revision=h.revision WHERE c.owner IS NULL OR c.owner=$1",
-        [actor],
+    const rows = await (
+      await this.db()
+    )
+      .select({
+        ...getTableColumns(connections),
+        health: connectionHealth.health,
+        checkedAt: connectionHealth.checkedAt,
+        externallyRenewed: connectionHealth.externallyRenewed,
+      })
+      .from(connections)
+      .leftJoin(
+        connectionHealth,
+        and(eq(connections.id, connectionHealth.connectionId), eq(connections.revision, connectionHealth.revision)),
       )
-    ).rows;
+      .where(or(isNull(connections.owner), eq(connections.owner, actor)));
     const found = new Map(rows.map((r) => [r.id, r]));
     const ids = new Set([...this.catalog.definitions.keys(), ...rows.filter((r) => r.rule).map((r) => r.id)]);
     const cards: ConnectionCard[] = [];
@@ -352,14 +346,14 @@ export class ConnectionRegistry {
             : row.status,
         ...(credential && this.secrets && { location: this.secrets.location(credential) }),
         ...(row?.location && { boundLocation: row.location }),
-        ...(row?.updated_by && { updatedBy: row.updated_by }),
-        ...(row?.updated_at && { updatedAt: row.updated_at.toISOString() }),
+        ...(row?.updatedBy && { updatedBy: row.updatedBy }),
+        ...(row?.updatedAt && { updatedAt: row.updatedAt.toISOString() }),
         ...(row?.health &&
-          row.checked_at && {
+          row.checkedAt && {
             health: {
               state: row.health,
-              checkedAt: row.checked_at.toISOString(),
-              externallyRenewed: row.externally_renewed ?? false,
+              checkedAt: row.checkedAt.toISOString(),
+              externallyRenewed: row.externallyRenewed ?? false,
             },
           }),
       });
@@ -371,7 +365,7 @@ export class ConnectionRegistry {
    * stable across preview, approval and retry; account allocation is scoped to its principal. */
   async setup(target: ConnectionTarget, actor: Principal, requestId: string): Promise<ConnectionSetup> {
     let declaration: ConnectionDefinition | ConnectionRule | undefined;
-    let row: ConnectionRow | undefined;
+    let row: typeof connections.$inferSelect | undefined;
     let id: string;
     let credential: string | undefined;
     if ("rule" in target) {
@@ -453,30 +447,39 @@ export class ConnectionRegistry {
   async uncertain(ref: ConnectionRef, revision: string, actor: string): Promise<void> {
     await (
       await this.db()
-    ).query(
-      "UPDATE sanoma_connections SET status='uncertain',updated_by=$3,updated_at=now() WHERE id=$1 AND revision=$2 AND status='pending'",
-      [ref.$connection, revision, actor],
-    );
+    )
+      .update(connections)
+      .set({ status: "uncertain", updatedBy: actor })
+      .where(
+        and(eq(connections.id, ref.$connection), eq(connections.revision, revision), eq(connections.status, "pending")),
+      );
   }
 
   async storedVersion(id: string, revision: string): Promise<string | undefined> {
-    return (
-      await (
-        await this.db()
-      ).query<{ credential_version: string }>(
-        "SELECT credential_version FROM sanoma_connection_setups WHERE connection_id=$1 AND revision=$2",
-        [id, revision],
-      )
-    ).rows[0]?.credential_version;
+    const [row] = await (
+      await this.db()
+    )
+      .select({ credentialVersion: connectionSetups.credentialVersion })
+      .from(connectionSetups)
+      .where(and(eq(connectionSetups.connectionId, id), eq(connectionSetups.revision, revision)));
+    return row?.credentialVersion;
   }
 
   async recordStoredVersion(id: string, revision: string, version: string): Promise<void> {
-    await (
-      await this.db()
-    ).query(
-      "INSERT INTO sanoma_connection_setups (connection_id,revision,credential_version) SELECT id,revision,$3 FROM sanoma_connections WHERE id=$1 AND revision=$2 AND status='pending' ON CONFLICT DO NOTHING",
-      [id, revision, version],
-    );
+    const db = await this.db();
+    await db
+      .insert(connectionSetups)
+      .select(
+        db
+          .select({
+            connectionId: connections.id,
+            revision: connections.revision,
+            credentialVersion: sql<string>`${version}`.as("credential_version"),
+          })
+          .from(connections)
+          .where(and(eq(connections.id, id), eq(connections.revision, revision), eq(connections.status, "pending"))),
+      )
+      .onConflictDoNothing();
     if ((await this.storedVersion(id, revision)) !== version) throw new SecretStoreError("conflict");
   }
 
@@ -487,28 +490,45 @@ export class ConnectionRegistry {
     version?: string,
     external = false,
   ): Promise<ConnectionHealth> {
-    const previous = (
-      await (
-        await this.db()
-      ).query<{ credential_version: string | null }>(
-        "SELECT credential_version FROM sanoma_connection_health WHERE connection_id=$1 AND revision=$2",
-        [id, revision],
-      )
-    ).rows[0];
+    const db = await this.db();
+    const [previous] = await db
+      .select({ credentialVersion: connectionHealth.credentialVersion })
+      .from(connectionHealth)
+      .where(and(eq(connectionHealth.connectionId, id), eq(connectionHealth.revision, revision)));
     const renewed =
       external &&
-      previous?.credential_version != null &&
+      previous?.credentialVersion != null &&
       version !== undefined &&
-      previous.credential_version !== version;
-    const result = await (
-      await this.db()
-    ).query<{ checked_at: Date }>(
-      "INSERT INTO sanoma_connection_health (connection_id,revision,health,credential_version,externally_renewed) SELECT id,revision,$3,$4,$5 FROM sanoma_connections WHERE id=$1 AND revision=$2 ON CONFLICT(connection_id) DO UPDATE SET revision=excluded.revision,health=excluded.health,credential_version=excluded.credential_version,externally_renewed=excluded.externally_renewed,checked_at=now() RETURNING checked_at",
-      [id, revision, state, version ?? previous?.credential_version ?? null, renewed],
-    );
-    const checked = result.rows[0];
+      previous.credentialVersion !== version;
+    const credentialVersion = version ?? previous?.credentialVersion ?? null;
+    const [checked] = await db
+      .insert(connectionHealth)
+      .select(
+        db
+          .select({
+            connectionId: connections.id,
+            revision: connections.revision,
+            health: sql<string>`${state}`.as("health"),
+            credentialVersion: sql<string | null>`${credentialVersion}`.as("credential_version"),
+            externallyRenewed: sql<boolean>`${renewed}`.as("externally_renewed"),
+            checkedAt: sql<Date>`now()`.as("checked_at"),
+          })
+          .from(connections)
+          .where(and(eq(connections.id, id), eq(connections.revision, revision))),
+      )
+      .onConflictDoUpdate({
+        target: connectionHealth.connectionId,
+        set: {
+          revision,
+          health: state,
+          credentialVersion,
+          externallyRenewed: renewed,
+          checkedAt: sql`now()`,
+        },
+      })
+      .returning({ checkedAt: connectionHealth.checkedAt });
     if (!checked) refuse("The connection changed during the test; reload before testing it again");
-    return { state, checkedAt: checked.checked_at.toISOString(), externallyRenewed: renewed };
+    return { state, checkedAt: checked.checkedAt.toISOString(), externallyRenewed: renewed };
   }
 
   async test(ref: ConnectionRef, actor: Principal): Promise<ConnectionHealth> {
@@ -578,13 +598,14 @@ export class ConnectionRegistry {
     if (JSON.stringify(identity.scopes) !== JSON.stringify([...new Set(row.scopes)].toSorted()))
       throw new AuthenticationError("scope_changed");
     const next = randomUUID();
-    const result = await (
+    const [activated] = await (
       await this.db()
-    ).query(
-      "UPDATE sanoma_connections SET status='connected',revision=$3,updated_by=$4,updated_at=now() WHERE id=$1 AND revision=$2 RETURNING id",
-      [row.id, revision, next, actor.id],
-    );
-    if (!result.rowCount) refuse("The connection changed; review it again before activating");
+    )
+      .update(connections)
+      .set({ status: "connected", revision: next, updatedBy: actor.id })
+      .where(and(eq(connections.id, row.id), eq(connections.revision, revision)))
+      .returning({ id: connections.id });
+    if (!activated) refuse("The connection changed; review it again before activating");
     await this.health(row.id, next, "connected", bundle?.version);
     return snapshot({ ...row, revision: next, status: "connected" });
   }
@@ -617,8 +638,9 @@ export class ConnectionRegistry {
     checkAuthenticationStore(method, caps, location.management);
   }
 
-  private async row(id: string): Promise<ConnectionRow | undefined> {
-    return (await (await this.db()).query<ConnectionRow>("SELECT * FROM sanoma_connections WHERE id=$1", [id])).rows[0];
+  private async row(id: string) {
+    const [row] = await (await this.db()).select().from(connections).where(eq(connections.id, id));
+    return row;
   }
 
   async select(vendor: string, ref: ConnectionRef | undefined, actor: string): Promise<ConnectionSnapshot | undefined> {
@@ -772,38 +794,46 @@ export class ConnectionRegistry {
     if (row.rule && row.owner !== actor)
       throw new SanomaError("policy_denied", "The connection belongs to another principal");
     const revision = randomUUID();
-    const changed = await (
+    const [changed] = await (
       await this.db()
-    ).query(
-      "UPDATE sanoma_connections SET status='disconnected',revision=$2,updated_by=$3,updated_at=now() WHERE id=$1 AND revision=$4 RETURNING id",
-      [row.id, revision, actor, expectedRevision],
-    );
-    if (!changed.rowCount) refuse("The connection changed; reload before disconnecting it");
+    )
+      .update(connections)
+      .set({ status: "disconnected", revision, updatedBy: actor })
+      .where(and(eq(connections.id, row.id), eq(connections.revision, expectedRevision)))
+      .returning({ id: connections.id });
+    if (!changed) refuse("The connection changed; reload before disconnecting it");
     return { id: row.id, revision, status: "disconnected" };
   }
 
   private async save(row: ConnectionRow, expected: string | null, actor: string): Promise<void> {
-    const values = [
-      row.id,
-      row.vendor,
-      row.method,
-      row.owner,
-      row.rule,
-      row.account,
-      JSON.stringify(row.scopes),
-      row.revision,
-      row.definition,
-      row.credential,
-      actor,
-      row.status,
-      row.credential && this.secrets ? JSON.stringify(this.secrets.location(row.credential)) : null,
-    ];
-    const query =
+    const db = await this.db();
+    const values = {
+      vendor: row.vendor,
+      method: row.method,
+      owner: row.owner,
+      rule: row.rule,
+      account: row.account,
+      scopes: row.scopes,
+      revision: row.revision,
+      definition: row.definition,
+      credential: row.credential,
+      updatedBy: actor,
+      status: row.status,
+      location: row.credential && this.secrets ? this.secrets.location(row.credential) : null,
+    };
+    const [saved] =
       expected === null
-        ? "INSERT INTO sanoma_connections (id,vendor,method,owner,rule,account,scopes,revision,definition,credential,updated_by,status,location) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT(id) DO NOTHING RETURNING id"
-        : "UPDATE sanoma_connections SET vendor=$2,method=$3,owner=$4,rule=$5,account=$6,scopes=$7,revision=$8,definition=$9,credential=$10,updated_by=$11,updated_at=now(),status=$12,location=$13 WHERE id=$1 AND revision=$14 RETURNING id";
-    const result = await (await this.db()).query(query, [...values, ...(expected === null ? [] : [expected])]);
-    if (!result.rowCount) refuse("The connection changed; reload before binding it");
+        ? await db
+            .insert(connections)
+            .values({ id: row.id, ...values })
+            .onConflictDoNothing()
+            .returning({ id: connections.id })
+        : await db
+            .update(connections)
+            .set(values)
+            .where(and(eq(connections.id, row.id), eq(connections.revision, expected)))
+            .returning({ id: connections.id });
+    if (!saved) refuse("The connection changed; reload before binding it");
   }
 }
 

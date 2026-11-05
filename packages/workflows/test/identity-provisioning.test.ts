@@ -2,7 +2,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
-import { lazyPool } from "../src/db.ts";
+import { databaseOn, lazyDb } from "../src/db.ts";
+import { identityCredentials, identityDeployments } from "../src/db/identity.ts";
 import { CLOUD_IDENTITY_SQL, createDeploymentCredential, postgresIdentityEnrollments } from "../src/cloud-identity.ts";
 import {
   postgresIdentityProvisioning,
@@ -11,7 +12,8 @@ import {
 } from "../src/identity-provisioning.ts";
 import { defineWorkflow, memorySecretStore, sanoma } from "../src/index.ts";
 import { z } from "zod";
-import { Pool, escapeIdentifier, escapeLiteral } from "pg";
+import { eq, sql } from "drizzle-orm";
+import { Pool, escapeLiteral } from "pg";
 import { describeConfig } from "../src/describe.ts";
 import { runtimeDriver } from "../src/runtime-ops.ts";
 import { memoryTokens } from "../src/tokens.ts";
@@ -19,12 +21,13 @@ import { memorySecrets } from "../src/secret.ts";
 import { rootWith } from "./harness.ts";
 
 const databaseUrl = testDatabaseUrl("identity_provisioning");
-const pool = lazyPool(databaseUrl, "identity-provisioning-test");
+const pool = lazyDb(databaseUrl, "identity-provisioning-test");
 const provision = postgresIdentityProvisioning(() => pool.db(), { maxValidityMs: 86_400_000 });
 const reader = postgresIdentityEnrollments(() => pool.db());
-const writerRole = `identity_writer_${randomUUID().replaceAll("-", "")}`;
+const writerName = `identity_writer_${randomUUID().replaceAll("-", "")}`;
+const writerRole = sql.identifier(writerName);
 const writerUrl = new URL(databaseUrl);
-writerUrl.username = writerRole;
+writerUrl.username = writerName;
 writerUrl.password = randomUUID();
 const identity = () => ({
   deployment: randomUUID(),
@@ -40,23 +43,21 @@ const enrollment = () => ({
 });
 beforeAll(async () => {
   const db = await pool.db();
-  await db.query("DROP SCHEMA IF EXISTS sanoma_identity CASCADE");
-  await db.query(CLOUD_IDENTITY_SQL);
-  await db.query(
-    `CREATE ROLE ${escapeIdentifier(writerRole)} LOGIN PASSWORD ${escapeLiteral(writerUrl.password)} NOINHERIT`,
+  await db.execute(sql`DROP SCHEMA IF EXISTS sanoma_identity CASCADE`);
+  await db.execute(sql.raw(CLOUD_IDENTITY_SQL));
+  await db.execute(
+    sql`CREATE ROLE ${writerRole} LOGIN PASSWORD ${sql.raw(escapeLiteral(writerUrl.password))} NOINHERIT`,
   );
-  await db.query(
-    `GRANT CONNECT ON DATABASE ${escapeIdentifier(writerUrl.pathname.slice(1))} TO ${escapeIdentifier(writerRole)}`,
-  );
-  await db.query(`GRANT USAGE ON SCHEMA sanoma_identity TO ${escapeIdentifier(writerRole)}`);
-  await db.query(
-    `GRANT SELECT, INSERT, UPDATE ON sanoma_identity.deployments, sanoma_identity.credentials TO ${escapeIdentifier(writerRole)}`,
+  await db.execute(sql`GRANT CONNECT ON DATABASE ${sql.identifier(writerUrl.pathname.slice(1))} TO ${writerRole}`);
+  await db.execute(sql`GRANT USAGE ON SCHEMA sanoma_identity TO ${writerRole}`);
+  await db.execute(
+    sql`GRANT SELECT, INSERT, UPDATE ON sanoma_identity.deployments, sanoma_identity.credentials TO ${writerRole}`,
   );
 });
 afterAll(async () => {
   const db = await pool.db();
-  await db.query(`DROP OWNED BY ${escapeIdentifier(writerRole)}`);
-  await db.query(`DROP ROLE ${escapeIdentifier(writerRole)}`);
+  await db.execute(sql`DROP OWNED BY ${writerRole}`);
+  await db.execute(sql`DROP ROLE ${writerRole}`);
   await pool.close();
 });
 
@@ -85,11 +86,11 @@ describe("declarative enrollment writer", () => {
       await configured.store!.enroll(input);
       expect(await reader.active(input.hash)).toBeDefined();
       const db = await pool.db();
-      await db.query(`REVOKE UPDATE ON sanoma_identity.credentials FROM ${escapeIdentifier(writerRole)}`);
+      await db.execute(sql`REVOKE UPDATE ON sanoma_identity.credentials FROM ${writerRole}`);
       try {
         await expect(configured.store!.enroll(enrollment())).rejects.toMatchObject({ code: "invalid" });
       } finally {
-        await db.query(`GRANT UPDATE ON sanoma_identity.credentials TO ${escapeIdentifier(writerRole)}`);
+        await db.execute(sql`GRANT UPDATE ON sanoma_identity.credentials TO ${writerRole}`);
       }
       await configured.store!.revoke(input);
       expect(await reader.active(input.hash)).toBeUndefined();
@@ -131,9 +132,7 @@ describe("transactional enrollment authority", () => {
     await expect(provision.enroll(other)).rejects.toMatchObject({ code: "conflict" });
     const db = await pool.db();
     // Failed enrollment rolled back its new mapping as well as its credential.
-    expect(
-      (await db.query("SELECT id FROM sanoma_identity.deployments WHERE id=$1", [other.deployment])).rowCount,
-    ).toBe(0);
+    expect(await db.select().from(identityDeployments).where(eq(identityDeployments.id, other.deployment))).toEqual([]);
   });
 
   it("rotates, bounds overlap, and never restores retired access on retry", async () => {
@@ -147,11 +146,11 @@ describe("transactional enrollment authority", () => {
     await provision.retire({ ...old, validUntil: overlap });
     await provision.retire(old); // Later deadline cannot extend access.
     const db = await pool.db();
-    expect(
-      (
-        await db.query("SELECT valid_until FROM sanoma_identity.credentials WHERE hash=$1", [old.hash])
-      ).rows[0].valid_until.toISOString(),
-    ).toBe(overlap);
+    const [retired] = await db
+      .select({ validUntil: identityCredentials.validUntil })
+      .from(identityCredentials)
+      .where(eq(identityCredentials.hash, old.hash));
+    expect(retired!.validUntil.toISOString()).toBe(overlap);
     await expect(provision.enroll(old)).rejects.toMatchObject({ code: "conflict" });
     await provision.retire({ ...old, validUntil: new Date(0).toISOString() });
     expect(await reader.active(old.hash)).toBeUndefined();
@@ -204,14 +203,15 @@ describe("transactional enrollment authority", () => {
     const input = enrollment();
     await provision.enroll(input);
     const db = await pool.db();
-    const role = `identity_reader_${randomUUID().replaceAll("-", "")}`;
-    const restricted = new Pool({ connectionString: databaseUrl, options: `-c role=${role}` });
+    const roleName = `identity_reader_${randomUUID().replaceAll("-", "")}`;
+    const role = sql.identifier(roleName);
+    const restricted = new Pool({ connectionString: databaseUrl, options: `-c role=${roleName}` });
     try {
-      await db.query(`CREATE ROLE ${role} NOLOGIN`);
-      await db.query(`GRANT USAGE ON SCHEMA sanoma_identity TO ${role}`);
-      await db.query(`GRANT SELECT ON ALL TABLES IN SCHEMA sanoma_identity TO ${role}`);
-      const readOnly = postgresIdentityEnrollments(async () => restricted);
-      const forbidden = postgresIdentityProvisioning(async () => restricted, { maxValidityMs: 86_400_000 });
+      await db.execute(sql`CREATE ROLE ${role} NOLOGIN`);
+      await db.execute(sql`GRANT USAGE ON SCHEMA sanoma_identity TO ${role}`);
+      await db.execute(sql`GRANT SELECT ON ALL TABLES IN SCHEMA sanoma_identity TO ${role}`);
+      const readOnly = postgresIdentityEnrollments(async () => databaseOn(restricted));
+      const forbidden = postgresIdentityProvisioning(async () => databaseOn(restricted), { maxValidityMs: 86_400_000 });
       expect(await readOnly.active(input.hash)).toMatchObject({ deployment: input.deployment });
       for (const write of [
         () => forbidden.enroll({ ...input, generation: 2, hash: createDeploymentCredential().hash }),
@@ -223,8 +223,8 @@ describe("transactional enrollment authority", () => {
       }
     } finally {
       await restricted.end();
-      await db.query(`DROP OWNED BY ${role}`);
-      await db.query(`DROP ROLE ${role}`);
+      await db.execute(sql`DROP OWNED BY ${role}`);
+      await db.execute(sql`DROP ROLE ${role}`);
     }
   });
 
@@ -271,7 +271,10 @@ describe("transactional enrollment authority", () => {
     expect(await secrets.get(input.store)).toBe(bearer);
     const db = await pool.db();
     expect(
-      (await db.query("SELECT hash FROM sanoma_identity.credentials WHERE deployment=$1", [input.deployment])).rows,
+      await db
+        .select({ hash: identityCredentials.hash })
+        .from(identityCredentials)
+        .where(eq(identityCredentials.deployment, input.deployment)),
     ).toEqual([{ hash }]);
   });
 
@@ -389,7 +392,7 @@ when { context.input.company == "company-b" };
     expect(ledger).not.toContain(hash);
     const db = await pool.db();
     for (const table of ["dbos.operation_outputs", "dbos.workflow_status"]) {
-      const history = JSON.stringify((await db.query(`SELECT row_to_json(t) FROM ${table} t`)).rows);
+      const history = JSON.stringify((await db.execute(sql`SELECT row_to_json(t) FROM ${sql.raw(table)} t`)).rows);
       expect(history).not.toContain(value);
       expect(history).not.toContain(hash);
       expect(history).not.toContain("sensitive-enrollment:");
@@ -454,8 +457,10 @@ describe("runtime-owned enrollment connection", () => {
         async () => {
           const { rows } = await (
             await pool.db()
-          ).query("SELECT count(*)::int AS count FROM pg_stat_activity WHERE usename=$1", [writerRole]);
-          return rows[0].count;
+          ).execute<{ count: number }>(
+            sql`SELECT count(*)::int AS count FROM pg_stat_activity WHERE usename=${writerName}`,
+          );
+          return rows[0]!.count;
         },
         { timeout: 5_000, interval: 50 },
       )

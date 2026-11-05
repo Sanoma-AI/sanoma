@@ -47,8 +47,8 @@ export interface TestWorkerOptions extends WorkerOptions {
  * carries: a test that spreads the project's config must not reach its real database. Tests are
  * kept apart by database, not by app name, so the app keeps its name (its root's
  * `package.json`'s). `ledger` defaults to a fresh in-memory ledger. Everything else in `config`,
- * and the other options (`promote`, `logLevel`), go to `startWorker` as given. Stop the worker
- * in `afterAll`.
+ * and the other options (`promote`, `logLevel`, `source`, the app's steps as `app`), go to
+ * `startWorker` as given. Stop the worker in `afterAll`.
  */
 export function startTestWorker(config: SanomaConfig, { databaseUrl, ...options }: TestWorkerOptions): Promise<Worker> {
   return startWorker(testWorkerConfig(config, databaseUrl), options);

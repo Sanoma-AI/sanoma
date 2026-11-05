@@ -1,6 +1,6 @@
 {
   "name": "@sanoma-ai/workflows",
-  "version": "0.11.13",
+  "version": "0.11.16",
   "description": "Business processes as TypeScript functions, run durably on DBOS",
   "keywords": [
     "approvals",
@@ -22,6 +22,8 @@
     "dist",
     "src",
     "!src/AGENTS.md",
+    "drizzle",
+    "!drizzle/*.config.ts",
     "oxlint.json",
     "README.md",
     "LICENSE",
@@ -86,6 +88,10 @@
       "types": "./dist/kms-secrets.d.ts",
       "default": "./dist/kms-secrets.js"
     },
+    "./db": {
+      "types": "./dist/db/index.d.ts",
+      "default": "./dist/db/index.js"
+    },
     "./identity-service": {
       "types": "./dist/identity-service.d.ts",
       "default": "./dist/identity-service.js"
@@ -98,7 +104,8 @@
     "build": "tsc -p tsconfig.build.json",
     "clean": "rm -rf dist",
     "prepack": "pnpm run clean && pnpm run build",
-    "watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput"
+    "watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
+    "generate": "drizzle-kit generate --config drizzle/company.config.ts && drizzle-kit generate --config drizzle/wakeup.config.ts"
   },
   "dependencies": {
     "@ai-sdk/provider": "4.0.34",
@@ -112,6 +119,7 @@
     "@google-cloud/kms": "^6.3.0",
     "ai": "7.0.153",
     "crc-32": "^1.2.2",
+    "drizzle-orm": "0.45.4",
     "google-auth-library": "^11.3.2",
     "oxc-parser": "^0.153.0",
     "oxfmt": "^0.72.0",
@@ -121,6 +129,7 @@
   },
   "devDependencies": {
     "@types/pg": "^8.23.1",
+    "drizzle-kit": "0.31.11",
     "msw": "^3.0.3",
     "srvx": "^0.11.22",
     "zod": "^4.6.5"

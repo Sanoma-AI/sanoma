@@ -1,116 +1,66 @@
 import { DBOS, DBOSClient } from "@dbos-inc/dbos-sdk";
 import { setTimeout as delay } from "node:timers/promises";
-import { Client, escapeIdentifier, Pool } from "pg";
+import { and, eq, inArray, lte, ne, notInArray, sql } from "drizzle-orm";
+import { DrizzleQueryError } from "drizzle-orm/errors";
+import { drizzle, type NodePgClient, type NodePgQueryResultHKT } from "drizzle-orm/node-postgres";
+import { type PgDatabase, PgPreparedQuery } from "drizzle-orm/pg-core";
+import { Client, Pool } from "pg";
+import { appBehind, inviteRequests, runChecks } from "./db/company.ts";
+import { workflowStatus } from "./db/dbos.ts";
+import { applyMigrations, COMPANY_MIGRATIONS, migrationsApplied } from "./db/migrate.ts";
 import { warn } from "./log.ts";
+import type { RunChecks } from "./scenario.ts";
 import { errorMessage } from "./shared.ts";
 
-// The runtime's own tables live in the config's database, beside DBOS's: the credentials, the
-// ledger, the collections' records, the wakeup's row, the operator agent's chats and the api tokens. What they
-// share is here: the one preparation of a database, a pool that opens once it is prepared and
-// survives a dropped connection, and a table creation two processes may race.
+// The runtime's own tables live in the config's database, beside DBOS's (`db/company.ts`), among
+// them what the worker tells the app (how far each app is behind its source, a sandbox run's
+// checks). What
+// the stores share is here: Drizzle over a `pg` pool or connection (`databaseOn`), the one
+// preparation of a database, which applies the generated migrations under a lock, and a pool that
+// opens once it is prepared and survives a dropped connection.
 
-/** A connection or a pool: what the queries take. */
-export type Db = Pick<Pool | Client, "query">;
-
-/** Where the credentials set from the app live. */
-export const CREDENTIALS_TABLE = "sanoma_credentials";
-/** Where the Postgres ledger keeps its records. */
-export const LEDGER_TABLE = "sanoma_ledger";
-/** Where the collections keep their records (`collection.ts`): one row per collection and key, the record as JSON. */
-export const DATA_TABLE = "sanoma_data";
 /**
- * The instance's side of its wakeup: one row, made with the table. `at` is the deadline last
- * registered, `stopped_at` when the worker last stopped itself (the schedules backfill from it),
- * `last_error` why the last registration failed.
+ * A database, or a transaction on one (`db.transaction`): what every store takes, so a store runs
+ * inside a caller's transaction as it runs on its own. Made by `databaseOn`.
  */
-export const WAKEUP_TABLE = "sanoma_wakeup";
-/** The operator agent's chats (`chats.ts`): who each is for, its engine and its draft. */
-export const CHATS_TABLE = "sanoma_chats";
-/** Each chat's messages, the AI SDK's UI messages as JSON, in `seq` order. */
-export const CHAT_MESSAGES_TABLE = "sanoma_chat_messages";
-/** The api tokens (`tokens.ts`): each one's SHA-256, never the token, whom it acts for, its groups, and when it was revoked. */
-export const API_TOKENS_TABLE = "sanoma_api_tokens";
-/** The nonces of sealed invite requests spent (`spendInviteRequest`), each until it expires. */
-export const INVITE_REQUESTS_TABLE = "sanoma_invite_requests";
+export type Db = PgDatabase<NodePgQueryResultHKT>;
 
-/** The runtime's tables, each with the word the messages name it by. */
-const TABLES: readonly [what: string, ddl: string][] = [
-  [
-    "connection health",
-    `CREATE TABLE IF NOT EXISTS sanoma_connection_health (
-      connection_id text PRIMARY KEY, revision text NOT NULL, health text NOT NULL,
-      credential_version text, externally_renewed boolean NOT NULL, checked_at timestamptz NOT NULL DEFAULT now())`,
-  ],
-  [
-    "connection setup receipts",
-    `CREATE TABLE IF NOT EXISTS sanoma_connection_setups (
-      connection_id text NOT NULL, revision text NOT NULL, credential_version text NOT NULL,
-      PRIMARY KEY(connection_id, revision))`,
-  ],
-  [
-    "connections",
-    `CREATE TABLE IF NOT EXISTS sanoma_connections (
-    id text PRIMARY KEY, vendor text NOT NULL, method text NOT NULL, owner text, rule text,
-    account text NOT NULL, scopes jsonb NOT NULL, revision text NOT NULL, definition text NOT NULL,
-    credential text, location jsonb, status text NOT NULL DEFAULT 'connected', updated_by text NOT NULL,
-    updated_at timestamptz NOT NULL DEFAULT now());
-    ALTER TABLE sanoma_connections ADD COLUMN IF NOT EXISTS location jsonb`,
-  ],
-  [
-    "credentials",
-    // A table from before 0.10.0 (one row per name, each value sealed to its name alone) holds
-    // nothing 0.10.0 can read: it goes, and its credentials are set again.
-    // One table for the look and the drop: the one the name resolves to.
-    `DO $$ BEGIN
-      IF to_regclass('${CREDENTIALS_TABLE}') IS NOT NULL AND NOT EXISTS (
-        SELECT FROM pg_attribute
-        WHERE attrelid = to_regclass('${CREDENTIALS_TABLE}') AND attname = 'namespace' AND NOT attisdropped
-      ) THEN
-        DROP TABLE ${CREDENTIALS_TABLE};
-      END IF;
-    END $$; ` +
-      `CREATE TABLE IF NOT EXISTS ${CREDENTIALS_TABLE} (namespace text NOT NULL, name text NOT NULL, value text NOT NULL, ` +
-      "version text NOT NULL, set_by text NOT NULL, set_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(namespace, name))",
-  ],
-  [
-    "ledger",
-    // `n` is the write order, `id` the record's, which the first write of takes, and `seq` the
-    // record's place in its run: a run reads in `seq` order, then write order.
-    `CREATE TABLE IF NOT EXISTS ${LEDGER_TABLE} (n bigserial PRIMARY KEY, id text NOT NULL UNIQUE, ` +
-      `run_id text NOT NULL, seq integer NOT NULL, record jsonb NOT NULL); ` +
-      `CREATE INDEX IF NOT EXISTS ${LEDGER_TABLE}_run_seq ON ${LEDGER_TABLE} (run_id, seq, n)`,
-  ],
-  [
-    "data",
-    `CREATE TABLE IF NOT EXISTS ${DATA_TABLE} (collection text NOT NULL, key text NOT NULL, record jsonb NOT NULL, ` +
-      "updated_at timestamptz NOT NULL DEFAULT now(), updated_by text NOT NULL, PRIMARY KEY (collection, key))",
-  ],
-  [
-    "wakeup",
-    `CREATE TABLE IF NOT EXISTS ${WAKEUP_TABLE} (id integer PRIMARY KEY CHECK (id = 1), at timestamptz, ` +
-      `stopped_at timestamptz, last_error text); INSERT INTO ${WAKEUP_TABLE} (id) VALUES (1) ON CONFLICT (id) DO NOTHING`,
-  ],
-  [
-    "chats",
-    `CREATE TABLE IF NOT EXISTS ${CHATS_TABLE} (id text PRIMARY KEY, person text NOT NULL, engine text NOT NULL, ` +
-      "draft_id text, title text NOT NULL, created_at timestamptz NOT NULL DEFAULT now()); " +
-      `CREATE INDEX IF NOT EXISTS ${CHATS_TABLE}_person ON ${CHATS_TABLE} (person, created_at)`,
-  ],
-  [
-    "chat messages",
-    `CREATE TABLE IF NOT EXISTS ${CHAT_MESSAGES_TABLE} (chat_id text NOT NULL REFERENCES ${CHATS_TABLE} (id) ` +
-      "ON DELETE CASCADE, id text NOT NULL, seq integer NOT NULL, message jsonb NOT NULL, PRIMARY KEY (chat_id, id))",
-  ],
-  [
-    "api tokens",
-    `CREATE TABLE IF NOT EXISTS ${API_TOKENS_TABLE} (id text PRIMARY KEY, hash text NOT NULL UNIQUE, ` +
-      "subject text NOT NULL, groups jsonb NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), revoked_at timestamptz)",
-  ],
-  [
-    "invite requests",
-    `CREATE TABLE IF NOT EXISTS ${INVITE_REQUESTS_TABLE} (nonce text PRIMARY KEY, expires_at timestamptz NOT NULL)`,
-  ],
-];
+/**
+ * Drizzle over `client`, a `pg` pool or connection the caller owns and ends (`db.$client`). Column
+ * names are the schema's properties in snake_case (`casing`), as the generated migrations write them.
+ *
+ * A statement that fails throws the `pg` error itself, as `client.query` would, not Drizzle's
+ * `DrizzleQueryError`, whose message carries the statement and its parameters (a credential's
+ * sealed value, a person's email, a record): `pgCode` reads the code, and no message or log
+ * repeats what was sent. `db.test.ts` holds Drizzle to this with a sentinel parameter.
+ */
+export function databaseOn<C extends NodePgClient>(client: C) {
+  rethrowCause();
+  return drizzle(client, { casing: "snake_case" });
+}
+
+let rethrowing = false;
+
+/**
+ * Makes every prepared query of this copy of Drizzle throw the driver's error in place of
+ * `DrizzleQueryError` (drizzle-orm 0.45.4 wraps in `PgPreparedQuery.queryWithCache`, the one
+ * place every query passes). Once per copy of the module.
+ */
+function rethrowCause(): void {
+  if (rethrowing) return;
+  rethrowing = true;
+  const prototype = PgPreparedQuery.prototype as unknown as {
+    queryWithCache(this: unknown, ...args: unknown[]): Promise<unknown>;
+  };
+  const wrapped = prototype.queryWithCache;
+  prototype.queryWithCache = async function (...args) {
+    try {
+      return await wrapped.apply(this, args);
+    } catch (err) {
+      throw err instanceof DrizzleQueryError && err.cause !== undefined ? err.cause : err;
+    }
+  };
+}
 
 /** The Postgres error code of `err`, or an empty string when it has none. */
 export const pgCode = (err: unknown): string => (err as { code?: unknown } | null)?.code?.toString() ?? "";
@@ -151,22 +101,27 @@ export const DBOS_DATABASE_OPTIONS = { systemDatabaseIdleTransactionTimeoutMs: 0
  * `version`, so DBOS gives them to a worker of that version: those it stamped, each with its status
  * (a PENDING one is the caller's to queue again). DBOS has no call for it (a run's version is set at
  * its start, `forkWorkflow` makes a new id, `rewindWorkflow` takes only an ended run), so this is the
- * runtime's one write to DBOS's own tables, in its schema `dbos` (dbos-sdk 5.2.11). One statement:
- * of two workers stamping a run, one does.
+ * runtime's one write to DBOS's own tables (`db/dbos.ts`, dbos-sdk 5.2.11). One statement: of two
+ * workers stamping a run, one does.
  */
 export async function stampVersion(
   db: Db,
   ids: readonly string[],
   version: string,
 ): Promise<{ id: string; pending: boolean }[]> {
-  const { rows } = await db.query<{ workflow_uuid: string; status: string }>(
-    `UPDATE dbos.workflow_status SET application_version = $1
-     WHERE workflow_uuid = ANY($2) AND name = 'change' AND status IN ('PENDING', 'ENQUEUED')
-       AND application_version <> $1
-     RETURNING workflow_uuid, status`,
-    [version, ids],
-  );
-  return rows.map((r) => ({ id: r.workflow_uuid, pending: r.status === "PENDING" }));
+  const stamped = await db
+    .update(workflowStatus)
+    .set({ applicationVersion: version })
+    .where(
+      and(
+        inArray(workflowStatus.workflowUuid, [...ids]),
+        eq(workflowStatus.name, "change"),
+        inArray(workflowStatus.status, ["PENDING", "ENQUEUED"]),
+        ne(workflowStatus.applicationVersion, version),
+      ),
+    )
+    .returning({ id: workflowStatus.workflowUuid, status: workflowStatus.status });
+  return stamped.map((r) => ({ id: r.id, pending: r.status === "PENDING" }));
 }
 
 /**
@@ -193,37 +148,45 @@ const INSUFFICIENT_PRIVILEGE = "42501";
 /** Postgres's code for a database that is not there (`invalid_catalog_name`). */
 const NO_DATABASE = "3D000";
 
-/** A pool opened on first use, once its database is prepared, and ended by `close`. */
-export interface LazyPool {
-  db(): Promise<Pool>;
+/** A database opened on first use, once prepared, and ended by `close`. */
+export interface LazyDb {
+  db(): Promise<Db>;
+  /** The pool `db()` runs on, once the database is prepared. */
+  pool(): Promise<Pool>;
   close(): Promise<void>;
 }
 
 /**
- * A pool for `what` on the database at `databaseUrl`, opened on the first `db()` once the
- * database is prepared (`prepareDatabase`). A preparation that fails lets the pool go, so the
- * next `db()` tries again. `close` ends the pool, for good: a `db()` after it is refused.
+ * A database for `what` on a pool at `databaseUrl`, opened on the first `db()` (or `pool()`) once
+ * the database is prepared (`prepareDatabase`). A preparation that fails lets the pool go, so the
+ * next call tries again. `close` ends the pool, for good: a call after it is refused.
  */
-export function lazyPool(databaseUrl: string, what: string): LazyPool {
+export function lazyDb(databaseUrl: string, what: string): LazyDb {
   let pool: Pool | undefined;
+  let db: Db | undefined;
   let closed = false;
+  async function opened(): Promise<Pool> {
+    if (closed) throw new Error(`the ${what} store is closed`);
+    const current = (pool ??= openPool(databaseUrl, what));
+    try {
+      await prepareDatabase(databaseUrl);
+    } catch (err) {
+      if (pool === current) pool = db = undefined;
+      await current.end().catch(() => undefined);
+      throw err;
+    }
+    return current;
+  }
   return {
     async db() {
-      if (closed) throw new Error(`the ${what} store is closed`);
-      const current = (pool ??= openPool(databaseUrl, what));
-      try {
-        await prepareDatabase(databaseUrl);
-      } catch (err) {
-        if (pool === current) pool = undefined;
-        await current.end().catch(() => undefined);
-        throw err;
-      }
-      return current;
+      const current = await opened();
+      return (db ??= databaseOn(current));
     },
+    pool: opened,
     async close() {
       closed = true;
       const current = pool;
-      pool = undefined;
+      pool = db = undefined;
       await current?.end();
     },
   };
@@ -249,9 +212,10 @@ export function checkPreparedOnly(by: string): void {
  * Makes the database at `databaseUrl` ready for the runtime, once per process and URL: the
  * database itself and DBOS's tables when they are not there yet (as a worker's launch makes
  * them; credentials may be set, and a ledger read, before any worker has run), then the
- * credentials, ledger, data, wakeup and chat tables, and its idle-transaction timeout (`guardIdleTransactions`).
- * Two processes preparing one database both succeed: the second waits for the first
- * (`lockPreparation`). A preparation that fails is forgotten, so the next call tries again.
+ * runtime's tables, by the migrations the database has not had (`COMPANY_MIGRATIONS`), and its
+ * idle-transaction timeout (`guardIdleTransactions`). Two processes preparing one database both
+ * succeed: the second waits for the first (`lockPreparation`). A preparation that fails is
+ * forgotten, so the next call tries again.
  */
 export function prepareDatabase(databaseUrl: string): Promise<void> {
   let preparing = prepared.get(databaseUrl);
@@ -271,33 +235,48 @@ const unprepared = (err: unknown): Error =>
   new Error(`could not prepare the database: ${errorMessage(err)}`, { cause: err });
 
 async function prepare(databaseUrl: string): Promise<void> {
-  const conn = await lockPreparation(databaseUrl).catch((err: unknown) => {
-    throw unprepared(err);
-  });
-  try {
+  await underPreparationLock(databaseUrl, async (db) => {
     await DBOS.migrate(databaseUrl).catch((err: unknown) => {
       // A DBOS table made meanwhile by a release from before the lock, mid-upgrade: it is there.
       if (!madeAlready(err)) throw unprepared(err);
     });
-    for (const [what, ddl] of TABLES) await createTable(conn, ddl, what);
-    await guardIdleTransactions(conn);
+    await applyMigrations(db, COMPANY_MIGRATIONS).catch((err: unknown) => {
+      throw unprepared(err);
+    });
+    await guardIdleTransactions(db);
+  });
+}
+
+/**
+ * Runs `make` on a connection holding the preparation's session lock of the database at
+ * `databaseUrl` (made first when missing), so a second process waits, then finds everything made.
+ * For what makes a database's tables: `prepareDatabase`, and the wakeup service's own.
+ */
+export async function underPreparationLock<T>(databaseUrl: string, make: (db: Db) => Promise<T>): Promise<T> {
+  const db = await lockPreparation(databaseUrl).catch((err: unknown) => {
+    throw unprepared(err);
+  });
+  try {
+    return await make(db);
   } finally {
     // Ending the session releases the lock; a failure to end it must not hide the preparation's.
-    await conn.end().catch(() => undefined);
+    await db.$client.end().catch(() => undefined);
   }
 }
 
-/** The last of the runtime's tables a preparation makes (`TABLES`), so its being there says they all are. */
-const LAST_TABLE = INVITE_REQUESTS_TABLE;
-
-/** Refuses when the database at `databaseUrl` lacks DBOS's tables or the runtime's: `by` makes them, not this process. */
+/**
+ * Refuses when the database at `databaseUrl` lacks DBOS's tables or the runtime's (every
+ * migration of `COMPANY_MIGRATIONS`, by its journal): `by` makes them, not this process.
+ */
 async function checkPrepared(databaseUrl: string, by: string): Promise<void> {
   const conn = await connect(databaseUrl);
   try {
-    const { rows } = await conn.query<{ dbos: boolean; ours: boolean }>(
-      `SELECT to_regclass('dbos.workflow_status') IS NOT NULL AS dbos, to_regclass('${LAST_TABLE}') IS NOT NULL AS ours`,
+    const db = databaseOn(conn);
+    const { rows } = await db.execute<{ dbos: boolean }>(
+      sql`SELECT to_regclass('dbos.workflow_status') IS NOT NULL AS dbos`,
     );
-    const { dbos, ours } = rows[0]!;
+    const dbos = rows[0]?.dbos === true;
+    const ours = await migrationsApplied(db, COMPANY_MIGRATIONS);
     if (!dbos || !ours) {
       const missing = [...(dbos ? [] : ["DBOS's"]), ...(ours ? [] : ["Sanoma's"])].join(" and ");
       throw new Error(`the database has no ${missing} tables yet: ${by} makes them, and this process never does`);
@@ -310,19 +289,20 @@ async function checkPrepared(databaseUrl: string, by: string): Promise<void> {
 /**
  * A connection to the database at `databaseUrl` (made first when missing) holding the
  * preparation's session lock until it ends, so a second process waits, then finds everything
- * made. Racing `DBOS.migrate`s lose to each other in many ways (40P01, XX000), so the race is
- * prevented rather than each loss forgiven. The lock is polled, never waited for by a blocked
- * statement: `CREATE INDEX CONCURRENTLY` waits on that statement's snapshot, a deadlock Postgres
- * cannot see (the lock's holder is this connection, not the migration's).
+ * made. Racing `DBOS.migrate`s lose to each other in many ways (40P01, XX000), and Drizzle's
+ * migrator takes no lock of its own, so the race is prevented rather than each loss forgiven.
+ * The lock is polled, never waited for by a blocked statement: `CREATE INDEX CONCURRENTLY` waits
+ * on that statement's snapshot, a deadlock Postgres cannot see (the lock's holder is this
+ * connection, not the migration's).
  */
-async function lockPreparation(databaseUrl: string): Promise<Client> {
-  const conn = await connectMaking(databaseUrl);
+async function lockPreparation(databaseUrl: string) {
+  const db = databaseOn(await connectMaking(databaseUrl));
   try {
-    const ask = "SELECT pg_try_advisory_lock(hashtext('sanoma.prepareDatabase')) AS locked";
-    while (!(await conn.query<{ locked: boolean }>(ask)).rows[0]!.locked) await delay(50);
-    return conn;
+    const ask = sql`SELECT pg_try_advisory_lock(hashtext('sanoma.prepareDatabase')) AS locked`;
+    while ((await db.execute<{ locked: boolean }>(ask)).rows[0]?.locked !== true) await delay(50);
+    return db;
   } catch (err) {
-    await conn.end().catch(() => undefined);
+    await db.$client.end().catch(() => undefined);
     throw err;
   }
 }
@@ -354,7 +334,7 @@ async function createDatabase(databaseUrl: string): Promise<void> {
   url.pathname = "/postgres";
   const admin = await connect(url.toString());
   try {
-    await admin.query(`CREATE DATABASE ${escapeIdentifier(name)}`);
+    await databaseOn(admin).execute(sql`CREATE DATABASE ${sql.identifier(name)}`);
   } catch (err) {
     if (!madeAlready(err)) throw err;
   } finally {
@@ -370,49 +350,18 @@ async function createDatabase(databaseUrl: string): Promise<void> {
  */
 async function guardIdleTransactions(db: Db): Promise<void> {
   try {
-    await db.query(`DO $$ BEGIN
+    await db.execute(sql`DO $$ BEGIN
       IF current_setting('idle_in_transaction_session_timeout') = '0' AND NOT EXISTS (
         SELECT FROM pg_db_role_setting s JOIN pg_database d ON d.oid = s.setdatabase, unnest(s.setconfig) c
         WHERE d.datname = current_database() AND s.setrole = 0 AND c LIKE 'idle_in_transaction_session_timeout=%'
       ) THEN
         EXECUTE format('ALTER DATABASE %I SET idle_in_transaction_session_timeout = %L', current_database(),
-          '${IDLE_IN_TRANSACTION_TIMEOUT}');
+          ${sql.raw(`'${IDLE_IN_TRANSACTION_TIMEOUT}'`)});
       END IF;
     END $$`);
   } catch (err) {
     if (pgCode(err) !== INSUFFICIENT_PRIVILEGE) throw unprepared(err);
   }
-}
-
-/**
- * Runs `ddl` (`CREATE TABLE IF NOT EXISTS`, and the like) on `db`. Two processes racing to create
- * the same table both succeed; any other failure names the `what` table, with its cause.
- */
-export async function createTable(db: Db, ddl: string, what: string): Promise<void> {
-  try {
-    await db.query(ddl);
-  } catch (err) {
-    if (madeAlready(err)) return;
-    throw new Error(`could not prepare the ${what} table: ${errorMessage(err)}`, { cause: err });
-  }
-}
-
-// The wakeup row's writes: one worker registers per instance (the supervisor runs one at a time,
-// and a deploy stops the old container before the new one starts), so none names a worker.
-
-/** Records that the wakeup took `at`. */
-export async function recordWakeupRegistration(db: Db, at: string): Promise<void> {
-  await db.query(`UPDATE ${WAKEUP_TABLE} SET at = $1, last_error = NULL WHERE id = 1`, [at]);
-}
-
-/** Records why the last registration failed. */
-export async function recordWakeupError(db: Db, error: string): Promise<void> {
-  await db.query(`UPDATE ${WAKEUP_TABLE} SET last_error = $1 WHERE id = 1`, [error]);
-}
-
-/** Records that the worker stops itself now. */
-export async function recordWakeupStop(db: Db): Promise<void> {
-  await db.query(`UPDATE ${WAKEUP_TABLE} SET stopped_at = now() WHERE id = 1`);
 }
 
 /**
@@ -423,10 +372,56 @@ export async function recordWakeupStop(db: Db): Promise<void> {
 export async function spendInviteRequest(db: Db, nonce: string, expiresAt: Date): Promise<boolean> {
   // Rows go an hour after they expire, not at it: the app's clock decides when a request is
   // past, and a database clock ahead of it must not forget a nonce the app still accepts.
-  await db.query(`DELETE FROM ${INVITE_REQUESTS_TABLE} WHERE expires_at <= now() - interval '1 hour'`);
-  const { rowCount } = await db.query(
-    `INSERT INTO ${INVITE_REQUESTS_TABLE} (nonce, expires_at) VALUES ($1, $2) ON CONFLICT (nonce) DO NOTHING`,
-    [nonce, expiresAt],
-  );
-  return rowCount === 1;
+  await db.delete(inviteRequests).where(lte(inviteRequests.expiresAt, sql`now() - interval '1 hour'`));
+  const spent = await db
+    .insert(inviteRequests)
+    .values({ nonce, expiresAt })
+    .onConflictDoNothing({ target: inviteRequests.nonce })
+    .returning({ nonce: inviteRequests.nonce });
+  return spent.length === 1;
+}
+
+/** How far an app is behind its source (`Source.behind`), or why that could not be told. */
+export type AppBehind = { behind: number } | { error: string };
+
+/** Sets each app's row to what was told of it now, and drops the rows of apps no longer listed. */
+export async function writeAppsBehind(db: Db, told: ReadonlyMap<string, AppBehind>): Promise<void> {
+  const folders = [...told.keys()];
+  await db.delete(appBehind).where(folders.length ? notInArray(appBehind.folder, folders) : undefined);
+  for (const [folder, answer] of told) {
+    const row = "behind" in answer ? { behind: answer.behind, error: null } : { behind: null, error: answer.error };
+    await db
+      .insert(appBehind)
+      .values({ folder, ...row })
+      .onConflictDoUpdate({ target: appBehind.folder, set: { ...row, checkedAt: sql`now()` } });
+  }
+}
+
+/** The app `folder`'s row: how far it is behind its source, or why not; undefined when the worker has not told it. */
+export async function readAppBehind(db: Db, folder: string): Promise<AppBehind | undefined> {
+  const [row] = await db
+    .select({ behind: appBehind.behind, error: appBehind.error })
+    .from(appBehind)
+    .where(eq(appBehind.folder, folder));
+  if (!row) return undefined;
+  return row.error === null ? { behind: row.behind! } : { error: row.error };
+}
+
+/** Sets the run's checks (`RunChecks`), replacing what was there. */
+export async function writeRunChecks(db: Db, runId: string, checks: RunChecks): Promise<void> {
+  const row = "checks" in checks ? { checks: checks.checks, error: null } : { checks: null, error: checks.error };
+  await db
+    .insert(runChecks)
+    .values({ runId, ...row })
+    .onConflictDoUpdate({ target: runChecks.runId, set: { ...row, checkedAt: sql`now()` } });
+}
+
+/** The run's checks as the worker last ran them; undefined when it has run none. */
+export async function readRunChecks(db: Db, runId: string): Promise<RunChecks | undefined> {
+  const [row] = await db
+    .select({ checks: runChecks.checks, error: runChecks.error })
+    .from(runChecks)
+    .where(eq(runChecks.runId, runId));
+  if (!row) return undefined;
+  return row.error === null ? { checks: row.checks! } : { error: row.error };
 }

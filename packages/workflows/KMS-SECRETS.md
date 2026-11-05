@@ -48,8 +48,10 @@ For standalone use or an explicitly supplied KMS client, use the lower-level `km
 
 ```ts
 import { KeyManagementServiceClient } from "@google-cloud/kms";
+import { databaseOn } from "@sanoma-ai/workflows/db";
 import { kmsPostgresStore } from "@sanoma-ai/workflows/kms-secrets";
 
+const companyDatabase = databaseOn(companyPool);
 const kms = new KeyManagementServiceClient({ authClient: companyAuthClient });
 const store = kmsPostgresStore({
   company: companyIdFromTrustedBootstrap,
@@ -60,7 +62,7 @@ const store = kmsPostgresStore({
 await store.validate("production");
 ```
 
-An explicit `database` returns a `SecretStore`; omitting it returns a factory that uses the runtime's database. In both forms of `kmsPostgresStore`, the caller owns the supplied KMS client, including `kms.close()`. An explicit database connection is also caller-owned. `managedKmsStore` supplies both the runtime binding and SDK lifecycle instead.
+An explicit `database` returns a `SecretStore`; omitting it returns a factory that uses the runtime's database. In both forms of `kmsPostgresStore`, the caller owns the supplied KMS client, including `kms.close()`. An explicit database (`databaseOn` over the caller's `pg` pool) is also caller-owned, its pool included. `managedKmsStore` supplies both the runtime binding and SDK lifecycle instead.
 
 `SANOMA_SIGNING_KEY` stays independent. This store does not use `SANOMA_SECRETS_KEY`. Workflow code cannot import either backend entry. Secret intake must remain outside durable workflow inputs/outputs. Runtime binding does not establish deployed Cloud readiness; provisioning, bootstrap delivery and live company isolation remain #532 verification work.
 

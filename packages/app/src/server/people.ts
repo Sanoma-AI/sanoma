@@ -1,7 +1,6 @@
 // oxlint-disable-next-line import/no-unassigned-import
 import "@tanstack/react-start/server-only";
 import { ADMIN, type Principal } from "@sanoma-ai/workflows";
-import { readPeople } from "@sanoma-ai/workflows/describe";
 import { personsOf } from "@sanoma-ai/workflows/shared";
 import { ApiError, type InviteLink, type PeopleSignIns } from "../api.ts";
 import type { AppContext } from "../context.ts";
@@ -10,10 +9,10 @@ import type { AppContext } from "../context.ts";
 // `signin.recorded`), and an invite link for one, minted by the app's staff login.
 
 /** The declared people, by id, with their email when declared. */
-const declared = ({ resolved }: Pick<AppContext, "resolved">) => personsOf(readPeople(resolved.root).people);
+const declared = ({ snapshot }: Pick<AppContext, "snapshot">) => personsOf(snapshot.people.people);
 
 /** The email the people files declare for `id`, if any: what a sign-in code goes to and an invite is for. */
-export const declaredEmail = (app: Pick<AppContext, "resolved">, id: string): string | undefined =>
+export const declaredEmail = (app: Pick<AppContext, "snapshot">, id: string): string | undefined =>
   declared(app).find((p) => p.id === id)?.email;
 
 /** When each declared person last signed in and how, and whether this app mints invites (a host's staff login does). */

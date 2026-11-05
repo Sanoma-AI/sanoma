@@ -11,7 +11,9 @@
       "@sanoma-ai/workflows/resources": ["../workflows/src/constructors.ts"],
       "@sanoma-ai/workflows/scenario": ["../workflows/src/scenario.ts"],
       "@sanoma-ai/workflows/shared": ["../workflows/src/shared.ts"],
-      "@sanoma-ai/workflows/wakeup-service": ["../workflows/src/wakeup-service.ts"]
+      "@sanoma-ai/workflows/wakeup-service": ["../workflows/src/wakeup-service.ts"],
+      "@sanoma-ai/workflows/db": ["../workflows/src/db/index.ts"],
+      "@sanoma-ai/connector-better-auth": ["../../connectors/better-auth/src/index.ts"]
     }
   },
   "include": ["src", "vite.config.ts"]

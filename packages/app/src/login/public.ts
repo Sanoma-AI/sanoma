@@ -1,6 +1,18 @@
-import type { LoginHalf, Principal, Tokens } from "@sanoma-ai/workflows";
-import { ANONYMOUS_PRINCIPAL, visitorPrincipal } from "@sanoma-ai/workflows/shared";
+import {
+  errorMessage,
+  type LoginHalf,
+  type Principal,
+  type ResolvedConfig,
+  type SanomaClient,
+  type SocialClients,
+  type Tokens,
+} from "@sanoma-ai/workflows";
+import type { SiteEntry } from "@sanoma-ai/workflows/describe";
+import { ANONYMOUS_PRINCIPAL, siteDir, visitorPrincipal } from "@sanoma-ai/workflows/shared";
 import type { AdmittingLogin } from "../context.ts";
+import { secretValues } from "../server/secrets.ts";
+import { loginKey } from "./keys.ts";
+import { sendLoginCode } from "./staff.ts";
 
 // A public site's front door: on the site's own host it stands where the staff login stands on
 // the app's, and never reads the staff login's cookie or header.
@@ -16,6 +28,47 @@ const notFound = () =>
     status: 404,
     headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" },
   });
+
+/**
+ * A public site's login half (`ConnectorSetup.login` of the connector `site.login` names), given
+ * what the app has: the client's pool, the key derived for that login, the stored secrets, the
+ * site's `origins`, the sender when the config names one, and the company's own OAuth clients. It
+ * opens nothing; what fails here is the key or the config, and the site is then served on no host.
+ */
+export async function siteLogin(
+  resolved: ResolvedConfig,
+  client: SanomaClient,
+  { login }: Pick<SiteEntry, "login">,
+  origins: readonly string[],
+  social: SocialClients | undefined,
+): Promise<LoginHalf> {
+  return resolved.logins.get(login!)!({
+    database: () => client.pool(),
+    key: loginKey(login!),
+    secrets: secretValues(client),
+    origins,
+    ...(resolved.login && { sendCode: (email, code) => sendLoginCode(client, email, code) }),
+    social,
+  });
+}
+
+/**
+ * Settles once `site`'s login `half` is made: one that fails (its key, its config) is logged, with
+ * the adapter's `prefix`, and its site taken off `sites`, so it is served on no host (503).
+ */
+export async function servedOnceMade(
+  sites: Map<string, AdmittingLogin>,
+  site: Pick<SiteEntry, "name" | "login">,
+  half: Promise<LoginHalf>,
+  prefix: string,
+): Promise<void> {
+  await half.catch((err: unknown) => {
+    sites.delete(site.name);
+    console.error(
+      `${prefix}: ${siteDir(site.name)}'s login (${site.login}) could not start, so the site is not served: ${errorMessage(err)}`,
+    );
+  });
+}
 
 /** An api token, `Authorization: Bearer sca_…`: the request's, or undefined. */
 export const bearerOf = (request: Request) =>
