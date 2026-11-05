@@ -1,19 +1,31 @@
 import type { ConfigDescription } from "@sanoma-ai/workflows/describe";
-import { errorMessage } from "@sanoma-ai/workflows/shared";
-import { keepPreviousData, useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { errorMessage, personsOf } from "@sanoma-ai/workflows/shared";
+import { hashKey, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Card, CardAction, CardContent, CardHeader } from "#/components/ui/card.tsx";
 import { Skeleton } from "#/components/ui/skeleton.tsx";
 import { cn } from "#/lib/utils.ts";
 import { useActor } from "../../actor.ts";
-import { ButtonLink, CardHeading, CrumbHeader, Notice, pageTitle, UsedBy } from "../../components/common.tsx";
-import { DataGrid, GridFilters } from "../../components/data-grid.tsx";
+import type { UntypedApi } from "../../api-client.ts";
+import {
+  ButtonLink,
+  CardHeading,
+  CrumbHeader,
+  Notice,
+  pageTitle,
+  toastIfHeld,
+  UsedBy,
+} from "../../components/common.tsx";
+import { GridFilters } from "../../components/data-grid.tsx";
+import { recordsView } from "../../components/grid/collection.ts";
+import { DataGrid } from "../../components/grid/grid.tsx";
 import { RecordForm } from "../../components/record-form.tsx";
 import {
+  api,
   closeRecord,
   collectionNamed,
   configQuery,
@@ -48,18 +60,23 @@ export const Route = createFileRoute("/data/$name")({
 });
 
 /**
- * A collection: where it is declared, its records in a grid with Add record, the record form
- * beside it while a record is open (`?record=`, or `?new`), and the workflows that use it.
+ * A collection: where it is declared, its records in a grid you edit in place, with Add record,
+ * the record form beside it while a record is open (`?record=`, or `?new`; Space on a cell opens
+ * its record), and the workflows that use it.
  */
 function CollectionPage() {
   const { name } = Route.useParams();
   const search = Route.useSearch();
   const select = useMemo(
-    () => (config: ConfigDescription) => ({ collection: collectionNamed(name)(config), ...usedBy(name)(config) }),
+    () => (config: ConfigDescription) => ({
+      collection: collectionNamed(name)(config),
+      people: personsOf(config.resources).map((person) => person.id),
+      ...usedBy(name)(config),
+    }),
     [name],
   );
   const {
-    data: { collection, workflows, sites },
+    data: { collection, people, workflows, sites },
   } = useSuspenseQuery({ ...configQuery(), select });
   // The loader found it; a config that no longer has it reads as not found.
   if (!collection) throw notFound();
@@ -69,13 +86,29 @@ function CollectionPage() {
   const records = useQuery({
     ...recordsQuery(name, query),
     enabled: actor !== null,
-    // The rows stay while a filter's are read.
-    placeholderData: keepPreviousData,
+    // The rows stay while a filter's are read: this collection's, never another's, whose grid
+    // would edit them under this one's fields.
+    placeholderData: (previous, previousQuery) => (previousQuery?.queryKey[1] === name ? previous : undefined),
   });
+  // The search whose rows are on screen: this one once its records are read, the one before
+  // while they are (`placeholderData`). Its collection is what the grid and the form change.
+  const [lastRead, setLastRead] = useState(query);
+  const shown = records.isPlaceholderData ? lastRead : query;
+  if (hashKey([shown]) !== hashKey([lastRead])) setLastRead(shown);
+  const queryClient = useQueryClient();
+  const view = records.data
+    ? recordsView(queryClient, {
+        query: recordsQuery(name, shown),
+        calls: (api as UntypedApi).data[name],
+        held: toastIfHeld,
+      })
+    : undefined;
   const navigate = Route.useNavigate();
   const close = () => void navigate({ search: closeRecord, resetScroll: false });
   const formOpen = search.new === true || search.record !== undefined;
-  const saved = search.record === undefined ? undefined : records.data?.find((r) => r.key === search.record);
+  // The record as the collection has it, an edit of it still saving included: the form must not
+  // build its values from the rows as stored and save over that edit.
+  const saved = search.record === undefined ? undefined : view?.collection.get(search.record);
 
   return (
     <>
@@ -110,14 +143,18 @@ function CollectionPage() {
         {/* The form beside the grid on a wide screen, under it on a narrow one; the grid scrolls sideways in its column. */}
         <div className={cn("grid items-start gap-4", formOpen && "lg:grid-cols-[minmax(0,1fr)_24rem]")}>
           <div className="min-w-0">
-            {records.data ? (
+            {view ? (
               <DataGrid
+                // One grid per collection: its widths, edit and conflicts are that collection's.
+                key={name}
                 collection={collection}
-                records={records.data}
-                order={query.order}
+                view={view}
+                order={shown.order}
                 open={search.record}
-                filtered={query.where !== undefined}
-                limit={query.limit}
+                filtered={shown.where !== undefined}
+                limit={shown.limit}
+                hide={search.hide}
+                people={people}
               />
             ) : actor === null ? (
               <Notice>Say who you are to see the records: the policy decides each read for the person asking.</Notice>
@@ -141,12 +178,13 @@ function CollectionPage() {
                 </CardAction>
               </CardHeader>
               <CardContent>
-                {search.new || saved ? (
+                {view && (search.new || saved) ? (
                   <RecordForm
                     // A new record's people start as whoever is asking: drawn again once the
                     // browser has read who (none while the server renders).
                     key={search.new ? `new:${actor ?? ""}` : search.record}
                     collection={collection}
+                    view={view}
                     saved={saved}
                     actor={actor}
                     onDone={close}
@@ -155,6 +193,8 @@ function CollectionPage() {
                   <Notice>
                     No record <code>{search.record}</code> among those listed: it may be filtered out, or gone.
                   </Notice>
+                ) : actor === null ? (
+                  <Notice>Say who you are to add or change a record.</Notice>
                 ) : (
                   <Skeleton className="h-40 w-full" />
                 )}

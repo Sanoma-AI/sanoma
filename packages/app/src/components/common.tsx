@@ -1,7 +1,7 @@
 import type { ApprovalState, Builtin, Effect, LedgerRecord, RecordedDecision, RunSummary } from "@sanoma-ai/workflows";
 import type { ResourceProblem } from "@sanoma-ai/workflows/describe";
 import { problemAt } from "@sanoma-ai/workflows/shared";
-import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { type QueryClient, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { Link, useMatches, useRouter } from "@tanstack/react-router";
 import { ArrowSquareOutIcon } from "@phosphor-icons/react/dist/csr/ArrowSquareOut";
 import { CaretRightIcon } from "@phosphor-icons/react/dist/csr/CaretRight";
@@ -42,8 +42,10 @@ import { utcText } from "#/lib/time.ts";
 import { cn, plural } from "#/lib/utils.ts";
 import { APPROVAL_TONE, DECISION_TONE, RUN_TONE, type Tone } from "#/lib/tone.ts";
 import type { OpEntry, SiteEntry } from "@sanoma-ai/workflows/describe";
-import { approverLabel, type Tier } from "@sanoma-ai/workflows/shared";
-import { appBehindQuery, configQuery, type SiteCaller } from "../queries.ts";
+import { approverLabel, CALL_WORKFLOW, type Tier } from "@sanoma-ai/workflows/shared";
+import { toast } from "sonner";
+import { errorBodyOf } from "../api.ts";
+import { appBehindQuery, configQuery, runLink, RUNS_KEY, type SiteCaller } from "../queries.ts";
 import type { CodeProps } from "./code.tsx";
 import type { GraphProps } from "./graph.tsx";
 import { ButtonLink, effectBadge, Notice, PageHeader, type PageHeaderProps, Region, Tip, ToneBadge } from "./kit.tsx";
@@ -845,6 +847,25 @@ export function DecisionNote({ note }: { note: string }) {
 }
 
 export { plural };
+
+/**
+ * When `err` is a call the policy holds for an approval, says so with a toast linking to the run
+ * of the built-in `call` workflow that makes it once approved, reads the runs again (where the
+ * grid sees what waits), and answers true.
+ */
+export function toastIfHeld(err: unknown, queryClient: QueryClient): boolean {
+  const body = errorBodyOf(err);
+  if (body?.code !== "approval_pending" || !body.runId) return false;
+  void queryClient.invalidateQueries({ queryKey: RUNS_KEY });
+  toast.info("Held for approval", {
+    description: (
+      <Link {...runLink({ workflow: CALL_WORKFLOW, runId: body.runId })} className="underline underline-offset-4">
+        Open the run
+      </Link>
+    ),
+  });
+  return true;
+}
 
 /** What is wrong in the data files: their resources are left out until it is fixed. */
 export function Problems({ problems }: { problems: ResourceProblem[] }) {

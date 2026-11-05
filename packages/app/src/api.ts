@@ -19,7 +19,7 @@ import type {
 import type { ConfigDescription, PermissionsGrid, Span } from "@sanoma-ai/workflows/describe";
 import { AtSchema, ConfigDescriptionSchema } from "@sanoma-ai/workflows/description";
 import type { Check, Scenario } from "@sanoma-ai/workflows/scenario";
-import { EFFECTS, RUN_STATUSES } from "@sanoma-ai/workflows/shared";
+import { EFFECTS, RUN_STATUSES, type Saved } from "@sanoma-ai/workflows/shared";
 import { z } from "zod";
 
 /**
@@ -634,8 +634,11 @@ export type EnforcementResponse = (HostEnforcement & { host: string }) | null;
 /** The `body` of the error a server function fails with. */
 export interface ErrorResponse {
   error: string;
-  /** The runtime's code, when the error has one. Branch on this, never on `error`. */
-  code?: ErrorCode;
+  /**
+   * The runtime's code, when the error has one, or `record_changed`: a collection's `save` with
+   * `ifRecord` finding the record changed since, or gone. Branch on this, never on `error`.
+   */
+  code?: ErrorCode | "record_changed";
   /** For `invalid_input`: what is wrong with the request or the input. */
   issues?: InputIssue[];
   /** For `not_approver`: who may decide. */
@@ -646,7 +649,12 @@ export interface ErrorResponse {
   runId?: string;
   /** For a form's Save refused with a 409 (`patchFn`): the field its file computes, by dotted path, which only the code changes. */
   field?: string;
+  /** For `record_changed`, when the runtime says: the record as it stands now, or null once it is gone. */
+  current?: Saved<Record<string, Json>> | null;
 }
+
+/** A JSON value, as a record's fields hold them. */
+export type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
 
 /**
  * An error with the HTTP status and body a server function answers with. Every server function
