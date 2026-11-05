@@ -113,18 +113,22 @@ async function runTurn(name: RuntimeName, turn: EngineTurn, writer: UIMessageStr
       const home = await homeOf(box);
       const { root, head } = await carryIn(box, step.source, chat.id, { home, signal: step.signal });
       const sandbox = boxSession(box, { id: `${chat.id}-${generateId()}`, root, home, ports: [port] });
-      // However the turn ended (an error too), before the box stops: what it changed, committed in
-      // the box and carried back to the draft. When that fails, so has the box: the lost edits are
-      // the turn's error, not the session's cleanup, which is tried all the same.
+      // However the turn ended (an error too): the session destroyed, so nothing in the box writes
+      // again, then what it changed committed in the box and carried back to the draft. A failed
+      // carry is the turn's error (its edits are lost); a failed destroy, otherwise.
       await converse(name, turn, writer, sandbox, { auth, model, home, box: box.id }).finally(async () => {
-        const message = turnMessage(turn, ENGINE_NAMES[name]);
+        const destroyed = await Promise.resolve(sandbox.destroy()).then(
+          () => undefined,
+          (err: unknown) => err,
+        );
         try {
+          const message = turnMessage(turn, ENGINE_NAMES[name]);
           carried = await carryOut(box, step.source, chat.id, { since: head, message, author: step.by.id });
         } catch (err) {
-          await Promise.resolve(sandbox.destroy()).catch(() => undefined);
+          if (destroyed) console.error(`sanoma app: destroying the session in the box ${box.id} failed:`, destroyed);
           throw err;
         }
-        await sandbox.destroy();
+        if (destroyed) throw destroyed;
       });
     });
   } finally {

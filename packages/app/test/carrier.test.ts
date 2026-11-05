@@ -80,7 +80,11 @@ describe("the carrier", () => {
       // The agent's edit, in the box.
       writeFileSync(join(root, "offboarding.ts"), "export const steps = ['accounts', 'laptop'];\n");
       writeFileSync(join(root, "laptop.ts"), "export const laptop = true;\n");
+      // Git settings the agent wrote in the box's home run nothing when the box commits.
+      writeFileSync(join(home, "fsmonitor"), `#!/bin/sh\ntouch "${join(home, "ran")}"\n`, { mode: 0o755 });
+      writeFileSync(join(home, ".gitconfig"), `[core]\n\tfsmonitor = ${join(home, "fsmonitor")}\n`);
       expect(await carryOut(box, source, "d1", { since: carried.head, ...turn })).toBe(true);
+      expect(existsSync(join(home, "ran"))).toBe(false);
       // The box's whole environment, as a command there sees it.
       const env = await inBox(box, "env");
       expect(env).not.toContain(TOKEN);

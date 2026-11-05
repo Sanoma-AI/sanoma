@@ -51,7 +51,7 @@ export interface Source {
   /**
    * Takes a bundle of the draft `id`'s branch made elsewhere (an agent box's new commits on it):
    * its commits fetched, then the draft's checkout fast-forwarded to them. Refused unless that is
-   * a fast-forward of a checkout with no uncommitted change to a tracked file. The branch's head after.
+   * a fast-forward that leaves what the checkout holds uncommitted in place. The branch's head after.
    */
   unbundle?(id: string, bytes: Uint8Array): Promise<{ head: string }>;
   /**

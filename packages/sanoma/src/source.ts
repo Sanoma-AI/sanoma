@@ -423,16 +423,13 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
       return inTemp(async (file) => {
         await writeFile(file, bytes);
         return serial(async () => {
-          if (await gitIn(at, ["status", "--porcelain", "--untracked-files=no"])) {
-            throw new Error(`The draft ${id}'s checkout has uncommitted changes`);
-          }
           // It was made where an agent ran: fsck'd as it arrives by a git that checks a bundle's
           // objects (2.39 does not); checkout's own path checks hold either way.
           const pull = ["-c", "fetch.fsckObjects=true", "pull", "--quiet", "--ff-only", "--no-rebase", "--no-tags"];
           await gitIn(at, [...pull, "--", file, `refs/heads/${branch}`]).catch(
             (err: { stderr?: string; message: string }) => {
               throw new Error(
-                `The bundle's ${branch} is no fast-forward of the draft's: ${err.stderr?.trim() || err.message}`,
+                `The draft ${id} could not take the bundle's ${branch} as a fast-forward: ${err.stderr?.trim() || err.message}`,
               );
             },
           );

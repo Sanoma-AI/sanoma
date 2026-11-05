@@ -81,14 +81,19 @@ export async function carryIn(
     throw new Error(`The draft could not be brought into your box (${errorMessage(err)})`, { cause: err });
   }
   try {
-    await inBox(box, INSTALL, {}, signal);
+    // Never longer than this, whatever the registry does.
+    const stop = AbortSignal.timeout(INSTALL_TIMEOUT_MS);
+    await inBox(box, INSTALL, {}, signal ? AbortSignal.any([signal, stop]) : stop);
   } catch (err) {
     if (!signal?.aborted) console.error(`sanoma app: the install in the box ${box.id} failed:`, errorMessage(err));
   }
   return { root: join(home, CLONE), head };
 }
 
-/** The box's side of `carryIn`, in its home: the clone at the draft's head, clean. */
+/** How long the clone's install may take. */
+const INSTALL_TIMEOUT_MS = 10 * 60_000;
+
+/** The box's side of `carryIn`, in its home: the clone at the draft's head, clean (a lock a turn that died left, too). */
 const IN = `set -eu
 mkdir -p ${CLONE}
 cd ${CLONE}
@@ -97,17 +102,18 @@ if [ -n "$BUNDLE" ]; then
   git fetch --quiet --no-tags "$HOME/$BUNDLE" "refs/heads/$BRANCH"
   rm -f "$HOME/$BUNDLE"
 fi
+rm -f .git/index.lock
 git checkout --quiet --force -B "$BRANCH" "$HEAD"
 git clean --quiet --force -d
 printf %s "$HEAD" > ${HEAD_FILE}`;
 
-/** The clone's install, when its lockfile is not the one last installed. */
+/** The clone's install, when its lockfile is not the one last installed: no script of the repository's runs (the agent wrote them, and may run none). */
 const INSTALL = `set -eu
 cd ${CLONE}
 [ -f pnpm-lock.yaml ] || exit 0
 lock=$(git hash-object pnpm-lock.yaml)
 [ "$lock" = "$(cat ${LOCK_FILE} 2>/dev/null || true)" ] && exit 0
-pnpm install --frozen-lockfile
+pnpm install --frozen-lockfile --ignore-scripts
 printf %s "$lock" > ${LOCK_FILE}`;
 
 /**
@@ -138,7 +144,7 @@ export async function carryOut(
       GIT_AUTHOR_EMAIL: NO_EMAIL,
       GIT_COMMITTER_EMAIL: NO_EMAIL,
     });
-    if (said !== "bundled") return false;
+    if (said.split("\n").at(-1) !== "bundled") return false;
     bytes = await box.read(BUNDLE);
     if (!bytes) throw new Error(`${BUNDLE} is gone`);
   } catch (err) {
@@ -178,9 +184,15 @@ git bundle create --quiet "$HOME/${BUNDLE}" "refs/heads/$BRANCH" "^$SINCE"
 printf %s "$head" > ${HEAD_FILE}
 echo bundled`;
 
+/**
+ * Git's settings in a box: none of its home's, where the agent may write (a hook, an fsmonitor or a
+ * filter there would run its commands), nor the system's.
+ */
+const GIT_ENV = { GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
+
 /** Runs `script` in `box`'s home with `env`: what it printed, trimmed; an error with its exit code and the end of its output, unless it exits 0. */
 async function inBox(box: Box, script: string, env: Record<string, string>, signal?: AbortSignal): Promise<string> {
-  const ran = await box.run(script, { cwd: ".", env, ...(signal && { signal }) });
+  const ran = await box.run(script, { cwd: ".", env: { ...GIT_ENV, ...env }, ...(signal && { signal }) });
   const [out, err, { exitCode }] = await Promise.all([
     new Response(ran.stdout).text(),
     new Response(ran.stderr).text(),
