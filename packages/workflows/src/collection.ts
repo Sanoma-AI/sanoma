@@ -103,7 +103,7 @@ export interface Collection<
     N,
     "saveMany",
     {
-      records?: { record: RecordOf<F>; ifRecord?: Record<string, unknown> }[];
+      records?: { record: RecordOf<F>; ifAbsent?: boolean; ifRecord?: Record<string, unknown> }[];
       deletes?: { key: string; ifRecord?: Record<string, unknown> }[];
     },
     (Saved<RecordOf<F>> | Deleted)[]
@@ -203,6 +203,12 @@ function specsOf(name: string, key: string, fields: Record<string, Field>, recor
   const whole = `${DATA_VENDOR}:${name}`;
   const ifRecord = z.record(z.string(), z.unknown()).optional();
   const byKey = z.object({ key: z.string().min(1), ifRecord });
+  /** What `save` takes, and a batch for each of its records. */
+  const saving = z
+    .strictObject({ record, ifAbsent: z.boolean().optional(), ifRecord })
+    .refine((input) => !(input.ifAbsent && input.ifRecord !== undefined), {
+      message: "Choose ifAbsent or ifRecord, not both",
+    });
   const names = Object.keys(fields);
   const where = z.strictObject(
     Object.fromEntries(
@@ -246,11 +252,7 @@ function specsOf(name: string, key: string, fields: Record<string, Field>, recor
       effect: "write",
       idempotent: true,
       description: `Save a record of ${name}: added, or replacing the one with its ${key}; ifAbsent refuses a different existing record`,
-      input: z
-        .object({ record, ifAbsent: z.boolean().optional(), ifRecord })
-        .refine((input) => !(input.ifAbsent && input.ifRecord !== undefined), {
-          message: "Choose ifAbsent or ifRecord, not both",
-        }),
+      input: saving,
       output: SAVED,
       target: ({ record: r }: { record: Record<string, string> }) => at(r[key]!),
     },
@@ -260,7 +262,7 @@ function specsOf(name: string, key: string, fields: Record<string, Field>, recor
       description: `Save and delete records of ${name} together, all or none, each entry decided and recorded as its own save or delete`,
       input: z
         .object({
-          records: z.array(z.strictObject({ record, ifRecord })).default([]),
+          records: z.array(saving).default([]),
           deletes: z.array(byKey).default([]),
         })
         .superRefine((batch, ctx) => {
@@ -329,8 +331,12 @@ export function collectionsConnector(list: readonly Collection[]): Connector<typ
 }
 
 const COLUMNS = { key: data.key, record: data.record, updatedAt: data.updatedAt, updatedBy: data.updatedBy };
-const recordExists = () =>
-  new DriverError("Collection record already exists", { retryable: false, status: 409, vendorCode: "record_exists" });
+/** The refusal of an `ifAbsent` save, carrying the record that is there (`current`). */
+const recordExists = (current: Saved) =>
+  Object.assign(
+    new DriverError("Collection record already exists", { retryable: false, status: 409, vendorCode: "record_exists" }),
+    { current },
+  );
 /** The refusal of an `ifRecord` save or delete, carrying the record as it stands (`current`), or `null` when it is gone. */
 const recordChanged = (current: Saved | null) =>
   Object.assign(
@@ -353,9 +359,10 @@ const recordsChanged = (conflicts: Conflict[]) =>
     }),
     { conflicts },
   );
-/** The refusal of one entry, as a batch collects it; any other failure is the batch's. */
+/** The refusal of one entry (its `ifRecord` or `ifAbsent`), as a batch collects it; any other failure is the batch's. */
 const conflictOf = (key: string, err: unknown): Conflict => {
-  if (vendorCodeOf(err) !== "record_changed") throw err;
+  const code = vendorCodeOf(err);
+  if (code !== "record_changed" && code !== "record_exists") throw err;
   return { key, current: (err as { current: Saved | null }).current };
 };
 const sameJson = (a: Record<string, unknown>, b: Record<string, unknown>) =>
@@ -393,10 +400,16 @@ export function collectionsDriver(list: readonly Collection[], store: { db(): Pr
         updatedBy: row.updatedBy,
       });
     const here = (key: string) => and(eq(data.collection, c.name), eq(data.key, key));
-    /** The record as it stands, for a refused `ifRecord`. */
-    const changed = async (db: Db, key: string) => {
-      const [current] = await db.select(COLUMNS).from(data).where(here(key));
-      return recordChanged(current ? saved(current) : null);
+    /** The record as it stands, for a refused `ifRecord` (`changed`) or `ifAbsent` (`exists`). */
+    const current = async (db: Db, key: string) => {
+      const [row] = await db.select(COLUMNS).from(data).where(here(key));
+      return row ? saved(row) : null;
+    };
+    const changed = async (db: Db, key: string) => recordChanged(await current(db, key));
+    const exists = async (db: Db, key: string) => {
+      const row = await current(db, key);
+      // Gone between the refusal and this read: what refused it was a record, so it has changed since.
+      return row ? recordExists(row) : recordChanged(null);
     };
     /** One save on `db`, as `save` makes it and a batch makes each of its records. */
     const saveOn = async (db: Db, { record, ifAbsent, ifRecord }: SaveInput, by: string) => {
@@ -423,7 +436,7 @@ export function collectionsDriver(list: readonly Collection[], store: { db(): Pr
         .values({ collection: c.name, key, record, updatedBy: by })
         .onConflictDoUpdate({ target: [data.collection, data.key], ...conflict })
         .returning(COLUMNS);
-      if (!row) throw recordExists();
+      if (!row) throw await exists(db, key);
       return saved(row);
     };
     /** One delete on `db`, as `delete` makes it and a batch makes each of its deletes. */
@@ -614,7 +627,7 @@ export function collectionsFake(list: readonly Collection[]): Fake<CollectionsSt
             }
             if (ifAbsent && previous) {
               // Postgres jsonb ignores property order and omitted undefined fields.
-              if (previous.updatedBy !== by || !sameJson(previous.record, record)) throw recordExists();
+              if (previous.updatedBy !== by || !sameJson(previous.record, record)) throw recordExists(saved(previous));
               return saved(previous);
             }
             const next = { key, record: structuredClone(record), updatedAt: new Date().toISOString(), updatedBy: by };

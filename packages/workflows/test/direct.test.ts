@@ -232,7 +232,7 @@ describe("a direct call", () => {
       { key: "Zed", deleted: false },
     ]);
     expect((await rows()).map((r) => r.key)).toEqual(["Acme", "Globex"]);
-    const made = await records();
+    const made = (await records()).filter((r) => r.type === "op.called");
     expect(
       made.map(({ id, seq, op, target, input, decision, output }) => ({
         id,
@@ -301,9 +301,9 @@ describe("a direct call", () => {
       { key: "Globex", record: lead("Globex", "contacted"), updatedBy: "ada" },
     ]);
     expect(
-      (await records())
-        .filter((r) => r.runId === "direct:ada:b2")
-        .map((r) => [r.target, r.type === "op.called" && r.error?.vendorCode]),
+      (await records()).flatMap((r) =>
+        r.runId === "direct:ada:b2" && r.type === "op.called" ? [[r.target, r.error?.vendorCode]] : [],
+      ),
     ).toEqual([
       ["data:outbound/Acme", "record_changed"],
       ["data:outbound/Wayne", "record_changed"],
