@@ -32,7 +32,7 @@ export interface BoxSessionOptions {
   ports: readonly number[];
 }
 
-/** The directory under a box's home that holds a person's own agents' installs and shims (`acp.ts`). */
+/** The directory under a box's home that is a person's own agents' HOME (`acp.ts`): their installs, shims and sign-ins. */
 export const OWN_AGENTS_DIR = ".acp";
 
 /**
@@ -91,7 +91,7 @@ class BoxSession implements HarnessV1NetworkSandboxSession {
     const full = resolve(this.defaultWorkingDirectory, path);
     // Its home, by real paths (a link there leads nowhere else), but no other session's run files
     // (a bridge's start config holds the key) and nothing of the person's own agents (`OWN_AGENTS_DIR`:
-    // the shims first on their PATH), in any case (macOS's file system ignores it).
+    // their sign-ins, and what they run), in any case (macOS's file system ignores it).
     const home = within(this.#home, full) ? await realWithin(this.#home, full) : undefined;
     if (home !== undefined) {
       const inside = home.inside.toLowerCase();

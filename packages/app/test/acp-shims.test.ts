@@ -20,19 +20,22 @@ import { localBackend } from "../src/steps/agent/local-box.ts";
 // What a person's own agent finds in their box (a local backend's): the shims first on its PATH
 // (`shims` in acp.ts), run as the agent runs them: `gh`, `open` and `xdg-open` refuse; `security`
 // is a Keychain that is there, empty, and takes nothing, so Claude Code keeps its sign-in in its
-// own file under the box's home; and its install (`install`), under that home. With SANOMA_LIVE=1
+// own file under its HOME, `.acp` in the box; and its install (`install`), there. With SANOMA_LIVE=1
 // on macOS, Claude Code itself, installed, stores a secret through the shims.
 
 const scratch = realpathSync(mkdtempSync(join(tmpdir(), "sanoma-shims-")));
 let box: Box;
 let home = "";
+/** The person's own agents' HOME in the box. */
+let agents = "";
 let dir = "";
 mkdirSync(join(scratch, "draft"));
 
 beforeAll(async () => {
   box = await localBackend(join(scratch, "boxes")).open({ name: "sanoma-acme-ada", image: "", size: 0 });
   home = await homeOf(box);
-  dir = await shims(box, home);
+  agents = join(home, ".acp");
+  dir = await shims(box, agents);
 });
 
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -44,7 +47,7 @@ const run = (name: string, args: string[], input?: string) => {
 };
 
 describe("a person's own agent's shims", () => {
-  it("are .acp/shims under the box's home, and refuse gh, open and xdg-open", () => {
+  it("are .acp/shims in the box, and refuse gh, open and xdg-open", () => {
     expect(dir).toBe(join(scratch, "boxes/sanoma-acme-ada/.acp/shims"));
     expect(readdirSync(dir).toSorted()).toEqual(["gh", "open", "security", "xdg-open"]);
     for (const [name, args] of [
@@ -64,6 +67,10 @@ describe("a person's own agent's shims", () => {
     const session = boxSession(box, { id: "s1", root: join(scratch, "draft"), home, ports: [] });
     await expect(session.readTextFile({ path: join(dir, "security") })).rejects.toThrow(/outside the checkout/);
     await expect(session.writeTextFile({ path: join(dir, "gh"), content: "exit 0\n" })).rejects.toThrow(
+      /outside the checkout/,
+    );
+    // Nor the agents' sign-ins, beside them in their HOME.
+    await expect(session.readTextFile({ path: join(agents, ".claude/.credentials.json") })).rejects.toThrow(
       /outside the checkout/,
     );
     // The rest of the box's home is the session's.
@@ -105,7 +112,7 @@ describe("a person's own agent's shims", () => {
 });
 
 describe("a person's own agent's install", () => {
-  it("lands under the box's home, installed by pnpm run in the box, its bin run with the box's home as HOME", async () => {
+  it("lands in the agents' HOME in the box, installed by pnpm run there with that HOME", async () => {
     // A package of this machine's, so no registry: its bin says its HOME.
     const pkg = join(scratch, "fake-agent");
     mkdirSync(pkg);
@@ -114,18 +121,20 @@ describe("a person's own agent's install", () => {
       JSON.stringify({ name: "fake-agent", version: "1.0.0", bin: { "fake-agent": "bin.js" } }),
     );
     writeFileSync(join(pkg, "bin.js"), '#!/usr/bin/env node\nprocess.stdout.write(process.env.HOME ?? "");\n');
-    const at = join(home, ".acp/fake");
+    const at = join(agents, "fake");
     const agent = { title: "Fake", packages: [`file:${pkg}`], bin: "fake-agent", args: [], signIn: { run: [] } };
     await install(box, agent, at);
     expect(readFileSync(join(at, "installed.json"), "utf8")).toBe(JSON.stringify(agent.packages));
-    // Its bin, and pnpm's store, as the box sees them: its home's, never this machine user's.
+    // Its bin, and pnpm's store, as the box sees them with the agents' HOME: theirs, never this
+    // machine user's, the store written by the install.
     const said = async (command: string) => {
-      const ran = await box.run(command, { cwd: at });
+      const ran = await box.run(command, { cwd: at, env: { HOME: agents } });
       const [out, { exitCode }] = await Promise.all([new Response(ran.stdout).text(), ran.wait()]);
       return { out: out.trim(), exitCode };
     };
-    expect(await said("node_modules/.bin/fake-agent")).toEqual({ out: home, exitCode: 0 });
-    expect((await said("pnpm store path")).out.startsWith(`${home}/`)).toBe(true);
+    expect(await said("node_modules/.bin/fake-agent")).toEqual({ out: agents, exitCode: 0 });
+    const store = (await said("pnpm store path")).out;
+    expect(store.startsWith(`${agents}/`) && existsSync(store)).toBe(true);
     // Installed: the next turn finds it so.
     rmSync(join(at, "node_modules"), { recursive: true });
     await install(box, agent, at);

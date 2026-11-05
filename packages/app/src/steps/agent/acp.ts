@@ -12,10 +12,11 @@ import type { Engine, EngineTurn } from "./transcript.ts";
 
 // The chat's third engine: a person's own coding agent, driven over the Agent Client Protocol by
 // this client of ours, in the chat's draft, on that person's own subscription. The agent runs in
-// the person's box (`openBox`, the harness engine's too), installed on first use under the box's
-// home (`.acp/<agent>`), which is its HOME, so a sign-in lives in the box and nowhere else, and
-// nothing of ours reads it (on the local backend a box is a directory of this machine and every
-// person's agent runs as its user: what an agent runs itself can reach other people's). One
+// the person's box (`openBox`, the harness engine's too) with `.acp` under the box's home as its
+// HOME (`OWN_AGENTS_DIR`, out of a company-key session's reach), installed on first use there
+// (`.acp/<agent>`), so a sign-in lives in the box and nowhere else, and nothing of ours reads it
+// (on the local backend a box is a directory of this machine and every person's agent runs as
+// its user: what an agent runs itself can reach other people's). One
 // process per turn: the box opened, the agent started, told the chat's earlier messages as text,
 // prompted, killed, the box stopped. Its permission requests, file reads and writes are answered
 // by the checkout rule; the commands it runs through our terminal are its own, in the box. A
@@ -187,12 +188,14 @@ async function runTurn(name: OwnAgentName, engineTurn: EngineTurn, writer: UIMes
     let turn: AcpTurn | undefined;
     try {
       box = await openBox(step);
-      // Kept across turns, the box's: the installs, and the person's sign-ins.
-      const home = await homeOf(box);
-      const dir = join(home, OWN_AGENTS_DIR, name);
-      // A first install under way is waited for even by a new message: the box's stop would end it,
-      // and another turn may be waiting on it too.
-      const [, shimmed] = await Promise.all([install(box, agent, dir), shims(box, home)]);
+      // The person's own agents' HOME, kept across turns in the box: their installs and sign-ins.
+      const home = join(await homeOf(box), OWN_AGENTS_DIR);
+      const dir = join(home, name);
+      // A first install under way is waited for even by a new message (it has a time limit of its
+      // own): the box's stop would end it, and another turn may be waiting on it too.
+      const [installed, shimmed] = await Promise.allSettled([install(box, agent, dir), shims(box, home)]);
+      if (installed.status === "rejected") throw installed.reason;
+      if (shimmed.status === "rejected") throw shimmed.reason;
       turn = new AcpTurn(agent, relay, signal, {
         box,
         chatId: chat.id,
@@ -200,7 +203,7 @@ async function runTurn(name: OwnAgentName, engineTurn: EngineTurn, writer: UIMes
         // S3: the draft's clone in the box; until then the box is this machine and its worktree is the draft's.
         root: draft.root,
         home,
-        shimsDir: shimmed,
+        shimsDir: shimmed.value,
         bins: join(dir, "node_modules", ".bin"),
       });
       const instructions = harnessInstructions(step, principal, chat, messages.slice(0, -1));
@@ -230,7 +233,7 @@ class AcpTurn {
   readonly onCode: (listener: (code: string) => void) => () => void;
   /** The draft's checkout in the box: where the agent works. */
   readonly root: string;
-  /** The box's home, the agent's HOME. */
+  /** The agent's HOME: `.acp` under the box's home. */
   readonly home: string;
   /** The shims' directory and the install's bins: first on the `PATH` of everything the turn runs. */
   readonly shimsDir: string;
@@ -345,7 +348,7 @@ class AcpTurn {
     const path = `${quote(this.shimsDir)}:${quote(this.bins)}:"$PATH"`;
     const process = await this.box.run(`export PATH=${path}\n${line}`, {
       cwd,
-      ...(env && { env }),
+      env: { HOME: this.home, ...env },
       stdin: stdin || protocol,
     });
     const started = new Started(process, { protocol, limit });
@@ -709,9 +712,10 @@ const exitText = (exitCode: number) => `exit code ${exitCode}`;
 
 /**
  * Installs `agent` into `dir` in `box`, once: its packages at their versions by the `pnpm` on the
- * box's `PATH`, as the HarnessAgent bridges run it (the desktop shell ships no npm), with the box's
- * home as its `HOME`, so pnpm's store and cache stay in the box, outside the company's workspace
- * and with no install script run but the vendor's own `setup`, as `installed.json` records. The
+ * box's `PATH`, as the HarnessAgent bridges run it (the desktop shell ships no npm), with the
+ * agents' HOME (`dir`'s parent) as its `HOME`, so pnpm's store and config are theirs, in the box,
+ * outside the company's workspace, and with no install script run but the vendor's own `setup`, as
+ * `installed.json` records; stopped after `INSTALL_WAIT`. The
  * last install's `node_modules` goes first: pnpm refuses one made from another store (the repo
  * moved) or by another major version. Another turn waits for an install under way; a failed one is
  * tried again by the next.
@@ -727,10 +731,12 @@ export async function install(box: Box, agent: OwnAgent, dir: string): Promise<v
     running = (async () => {
       await box.write(join(dir, "package.json"), utf8.encode('{ "private": true }\n'));
       const pnpm = ["add", "--ignore-scripts", "--ignore-workspace", "--loglevel=error", ...agent.packages];
-      await ran(box, `rm -rf node_modules && ${commandLine("pnpm", pnpm)}`, dir);
+      // As its agent's HOME, so pnpm's store and config are theirs; stopped if it hangs.
+      const options = { env: { HOME: dirname(dir) }, signal: AbortSignal.timeout(INSTALL_WAIT) };
+      await ran(box, `rm -rf node_modules && ${commandLine("pnpm", pnpm)}`, { cwd: dir, ...options });
       if (agent.setup) {
         const setup = join(dir, agent.setup);
-        await ran(box, commandLine("node", [basename(setup)]), dirname(setup));
+        await ran(box, commandLine("node", [basename(setup)]), { cwd: dirname(setup), ...options });
       }
       await box.write(marker, utf8.encode(wanted));
     })();
@@ -749,8 +755,9 @@ const utf8 = {
   decode: (bytes: Uint8Array) => new TextDecoder("utf-8", { ignoreBOM: true }).decode(bytes),
 };
 
-/** Runs `line` in `box`, in `cwd`: an error with the end of what it printed unless it exits 0. */
-const ran = async (box: Box, line: string, cwd: string) => new Started(await box.run(line, { cwd })).done();
+/** Runs `line` in `box` with `options`: an error with the end of what it printed unless it exits 0. */
+const ran = async (box: Box, line: string, options: Parameters<Box["run"]>[1]) =>
+  new Started(await box.run(line, options)).done();
 
 /** `promise`, or a failure when the turn stops or `timeout` passes first; `promise` goes on. */
 function untilAborted<T>(promise: Promise<T>, signal: AbortSignal, timeout: { ms: number; text: string }): Promise<T> {
@@ -772,21 +779,24 @@ function untilAborted<T>(promise: Promise<T>, signal: AbortSignal, timeout: { ms
 }
 
 /**
- * The shims' directory (`.acp/shims` under the box's `home`), first on the agent's PATH: each of
+ * The shims' directory (`shims` under the agents' `home`), first on the agent's PATH: each of
  * `SHIMS`, so nothing of the box's signs the agent in. Written each turn by one command, so a box
  * that lost them gets them again, each aside and then moved into place: another turn's agent may be
  * running one now.
  */
 export async function shims(box: Box, home: string): Promise<string> {
-  const dir = join(home, OWN_AGENTS_DIR, "shims");
+  const dir = join(home, "shims");
   const aside = `.${generateId()}`;
   const written = Object.entries(SHIMS).map(
     ([name, script]) =>
       `cat > ${name}${aside} <<'SANOMA_SHIM'\n${script}SANOMA_SHIM\nchmod 755 ${name}${aside} && mv -f ${name}${aside} ${name}`,
   );
-  await ran(box, [`mkdir -p ${quote(dir)} && cd ${quote(dir)}`, ...written].join(" &&\n"), home);
+  await ran(box, [`mkdir -p ${quote(dir)} && cd ${quote(dir)}`, ...written].join(" &&\n"), {});
   return dir;
 }
+
+/** How long an agent's install may take before it is stopped, in ms. */
+const INSTALL_WAIT = 10 * 60_000;
 
 /** The most of a process's output kept when it is given no limit, in bytes. */
 const OUTPUT_KEPT = 1 << 20;

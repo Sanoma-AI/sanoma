@@ -67,9 +67,9 @@ const testApp = useTestApp({ workflows: [], connectors: [], root }, { databaseUr
 let dir = "";
 const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim();
 let app: App | undefined;
-/** The person's box's home: the local backend's, for the app the root's package.json names. */
-const boxHome = (person: string) => join(dir, ".sanoma/agent-home/boxes", boxName("acp-test", person));
-const install = (agent: OwnAgentName) => join(boxHome("ada"), ".acp", agent);
+/** A person's own agents' HOME, `.acp` in their box (the local backend's, for the app the root's package.json names). */
+const agentsHome = (person: string) => join(dir, ".sanoma/agent-home/boxes", boxName("acp-test", person), ".acp");
+const install = (agent: OwnAgentName) => join(agentsHome("ada"), agent);
 const logOf = (agent: OwnAgentName) => join(install(agent), "fake.log");
 
 /** Plants the fake as `agent`'s install, as installed: its marker, its bin, and its config. */
@@ -86,7 +86,7 @@ function plant(agent: OwnAgentName, config: FakeConfig) {
 const configure = (agent: OwnAgentName, config: FakeConfig) =>
   writeFileSync(
     join(install(agent), "fake.json"),
-    JSON.stringify({ ...config, code: CODE, log: logOf(agent), other: join(boxHome("lead"), ".credentials.json") }),
+    JSON.stringify({ ...config, code: CODE, log: logOf(agent), other: join(agentsHome("lead"), ".credentials.json") }),
   );
 
 /** What the fake `agent` logged, entry by entry. */
@@ -138,8 +138,8 @@ export default defineWorkflow({
   git("add", "--all");
   git("commit", "--quiet", "-m", "First");
   // Another person's sign-in, in their box, which nothing of ours reads for ada's agent.
-  mkdirSync(boxHome("lead"), { recursive: true });
-  writeFileSync(join(boxHome("lead"), ".credentials.json"), `lead's token ${RUN}`);
+  mkdirSync(agentsHome("lead"), { recursive: true });
+  writeFileSync(join(agentsHome("lead"), ".credentials.json"), `lead's token ${RUN}`);
   plant("opencode", { signIn: "none", mode: "work" });
   plant("copilot", { signIn: "terminal", mode: "hello" });
   plant("pi", { signIn: "once", mode: "hello" });
@@ -240,7 +240,7 @@ describe("the chat on a person's own agent", () => {
     // The agent ran in the person's box, in the draft, with the box's home as its own, signs in and
     // reads files as the client says it can, and none of this process's credentials reached it or
     // its terminal.
-    const personal = boxHome("ada");
+    const personal = agentsHome("ada");
     const start = log.find((entry) => "start" in entry)!;
     expect(start).toMatchObject({ start: ["acp"], home: personal });
     // The planted bin is a shell script, which adds its own (and macOS's).
@@ -253,7 +253,7 @@ describe("the chat on a person's own agent", () => {
       "PATH",
     ]);
     expect(String(start.path).split(":").slice(0, 2)).toEqual([
-      join(personal, ".acp/shims"),
+      join(personal, "shims"),
       join(install("opencode"), "node_modules/.bin"),
     ]);
     expect(log.find((entry) => "initialize" in entry)!.initialize).toEqual({
@@ -351,7 +351,7 @@ describe("the chat on a person's own agent", () => {
     expect(await pasted).toEqual([404, 400, 204]);
     // The sign-in ran in the box: Copilot's device flow, with the box's home as its HOME.
     expect(logged("copilot").find((entry) => "login" in entry)).toEqual({ login: ["login", "--device-code"] });
-    expect(existsSync(join(boxHome("ada"), ".signed-in-copilot"))).toBe(true);
+    expect(existsSync(join(agentsHome("ada"), ".signed-in-copilot"))).toBe(true);
     // The card says it is done, and keeps neither the link nor the code.
     expect(cardOf(reply)).toEqual({ agent: "Copilot", state: "done" });
     await waitFor(async () => (await testApp.client.chats.load(id)).length === 2);
@@ -367,7 +367,7 @@ describe("the chat on a person's own agent", () => {
     expect(cardOf(reply)).toEqual({
       agent: "Pi",
       state: "once",
-      command: `HOME=${boxHome("ada")} ${join(install("pi"), "node_modules/.bin/pi")}`,
+      command: `HOME=${agentsHome("ada")} ${join(install("pi"), "node_modules/.bin/pi")}`,
       after: "/login",
     });
     expect(textOfReply(reply)).toBe("");
