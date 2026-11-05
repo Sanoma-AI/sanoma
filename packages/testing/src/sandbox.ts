@@ -115,6 +115,7 @@ export async function checkSandbox(s: SandboxUnderTest): Promise<SandboxCheck[]>
       await check("a file and the home directory survive a stop and the next open", async (at) => {
         await ran(at, `echo ${token} > "$HOME/${HOMED}"`);
         await at.stop();
+        opened = undefined;
         const again = (opened = await open());
         if (!same(await again.read(WRITTEN), script)) throw new Error(`${WRITTEN} is gone`);
         if ((await ran(again, `cat "$HOME/${HOMED}"`)) !== `${token}\n`) throw new Error(`$HOME/${HOMED} is gone`);
@@ -148,6 +149,7 @@ export async function checkSandbox(s: SandboxUnderTest): Promise<SandboxCheck[]>
     await check("discard leaves the next open empty", async (at) => {
       await at.stop();
       await backend.discard({ name });
+      opened = undefined;
       const again = (opened = await open());
       if ((await again.read(WRITTEN)) !== null) throw new Error(`${WRITTEN} is still there`);
       if ((await ran(again, `test -e "$HOME/${HOMED}" && echo kept || true`)) !== "") {
@@ -263,13 +265,16 @@ function localBox(id: string, home: string): Box {
       if (!stdin) child.stdin.end();
       const exited = new Promise<{ exitCode: number }>((done) => {
         child.on("error", () => done({ exitCode: 127 }));
-        child.on("close", (code) => done({ exitCode: code ?? 1 }));
+        child.on("close", (code) => {
+          // Kept while any of its group is left, so `stop` kills what it left running.
+          if (group !== undefined && !groupAlive(group)) groups.delete(group);
+          done({ exitCode: code ?? 1 });
+        });
       });
       const kill = (sig: NodeJS.Signals = "SIGKILL") => {
         if (group !== undefined) killGroup(group, sig);
       };
       signal?.addEventListener("abort", () => kill(), { once: true });
-      void exited.then(() => group !== undefined && groups.delete(group));
       return {
         stdin: Writable.toWeb(child.stdin) as WritableStream<Uint8Array>,
         stdout: Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
@@ -294,6 +299,15 @@ function localBox(id: string, home: string): Box {
       groups.clear();
     },
   };
+}
+
+function groupAlive(group: number): boolean {
+  try {
+    process.kill(-group, 0);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function killGroup(group: number, signal: NodeJS.Signals) {

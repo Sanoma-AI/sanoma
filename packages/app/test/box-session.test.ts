@@ -64,6 +64,7 @@ describe("the local backend", () => {
 
   it("names a box by the company and the person, escaped as a directory, and keeps it under its own directory", async () => {
     expect(boxName("@acme", "Ada.Lovelace")).toBe("sanoma-%40acme-%41da%2E%4Covelace");
+    expect(boxName("acme-ada", "x")).not.toBe(boxName("acme", "ada-x"));
     expect(await homeOf(box)).toBe(home);
     for (const bad of ["../out", ".hidden", ""]) {
       await expect(boxes.open({ name: bad, image: "", size: 0 }), bad).rejects.toThrow(/no box's name/);

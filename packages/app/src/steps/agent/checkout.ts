@@ -105,8 +105,12 @@ export const agentHome = (step: Pick<AppStepContext, "source">, kind: "boxes" | 
 export const personDir = (id: string) =>
   encodeURIComponent(id).replaceAll(/[.A-Z]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
 
-/** The box a person's coding agents work in for the company `company` (its app's name): one per person per company. */
-export const boxName = (company: string, person: string) => `sanoma-${personDir(company)}-${personDir(person)}`;
+/**
+ * The box a person's coding agents work in for the company `company` (its app's name): one per
+ * person per company, each part `personDir`'s with its dashes escaped too, so no two pairs share one.
+ */
+export const boxName = (company: string, person: string) =>
+  `sanoma-${[company, person].map((id) => personDir(id).replaceAll("-", "%2D")).join("-")}`;
 
 /** The chat's draft, opened (or found open), and attached to the chat's row the first time. */
 export async function openDraft(step: Pick<AppStepContext, "source" | "client">, chat: Chat): Promise<Draft> {

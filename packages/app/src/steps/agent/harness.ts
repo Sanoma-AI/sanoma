@@ -87,19 +87,16 @@ async function runTurn(name: RuntimeName, turn: EngineTurn, writer: UIMessageStr
   const { step, chat } = turn;
   // The key first: a turn without it opens no draft.
   const auth = await authFor(step);
-  // The agent works in the chat's draft from its first turn, in the person's box.
-  const [draft, model, port, box] = await Promise.all([
-    openDraft(step, chat),
-    modelFor(step, RUNTIMES[name]),
-    freePort(),
-    // S5: the declared sandbox's backend (`resolved.sandboxes()`, its connector's `sandbox`), when there is one.
-    localBackend(agentHome(step, "boxes")).open({
-      name: boxName(step.resolved.appName, step.by.id),
-      // This machine is the local box's image and size.
-      image: "",
-      size: 0,
-    }),
-  ]);
+  // The agent works in the chat's draft from its first turn, in the person's box, opened last
+  // so that nothing that fails before leaves it running.
+  const [draft, model, port] = await Promise.all([openDraft(step, chat), modelFor(step, RUNTIMES[name]), freePort()]);
+  // S5: the declared sandbox's backend (`resolved.sandboxes()`, its connector's `sandbox`), when there is one.
+  const box = await localBackend(agentHome(step, "boxes")).open({
+    name: boxName(step.resolved.appName, step.by.id),
+    // This machine is the local box's image and size.
+    image: "",
+    size: 0,
+  });
   let failed: { err: unknown } | undefined;
   try {
     // Kept across turns: a bridge installs its agent under it once.

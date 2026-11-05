@@ -42,8 +42,8 @@ export async function homeOf(box: Box): Promise<string> {
 /**
  * The session over `box`, `HarnessV1NetworkSandboxSession`. A path is the checkout's as the
  * checkout rule allows it (`allowedPath`), or under the box's home, or refused. `stop` stops the
- * box; `destroy` stops it and deletes the session's `.agent-runs`, which a bridge writes the
- * model's key into; `HarnessAgentSession.destroy()` leaves a session it was given running.
+ * box; `destroy` deletes the session's `.agent-runs`, which a bridge writes the model's key into,
+ * and stops it; `HarnessAgentSession.destroy()` leaves a session it was given running.
  */
 export const boxSession = (box: Box, options: BoxSessionOptions): HarnessV1NetworkSandboxSession =>
   new BoxSession(box, options);
@@ -148,11 +148,12 @@ class BoxSession implements HarnessV1NetworkSandboxSession {
   /** Stops the box: every command, and what a bridge started too. */
   stop = () => this.#box.stop();
 
-  /** Stops it and deletes its `.agent-runs` (the bridge's start files, the model's key in them). */
+  /** Deletes its `.agent-runs` (the bridge's start files, the model's key in them), then stops the box. */
   destroy = async () => {
-    await this.stop();
     const removed = await this.#box.run('rm -rf -- "$RUNS"', { env: { RUNS: this.#runs } });
-    await removed.wait();
+    const { exitCode } = await removed.wait();
+    await this.stop();
+    if (exitCode !== 0) throw new Error(`The session's run files were not deleted (exit ${exitCode})`);
   };
 
   restricted = () => this;

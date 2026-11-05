@@ -301,11 +301,11 @@ describe.each(engines)("the chat on %s", (engine, name, enabled) => {
       // The chat keeps its engine, its draft and its transcript; the session's run files are gone.
       expect(await testApp.client.chats.get(id)).toMatchObject({ engine, draftId: id });
       await waitFor(async () => (await testApp.client.chats.load(id)).length === 2);
-      const runs = join(dir, ".sanoma/agent-home/boxes/sanoma-harness-test-ada/.ai-sdk-harness/.agent-runs");
+      const runs = join(dir, ".sanoma/agent-home/boxes/sanoma-harness%2Dtest-ada/.ai-sdk-harness/.agent-runs");
       expect(existsSync(runs) ? readdirSync(runs) : []).toEqual([]);
       // The session's state is all in the person's box, beside people's own agents'.
       expect(readdirSync(join(dir, ".sanoma/agent-home")).toSorted()).toEqual(["boxes", "people"]);
-      expect(readdirSync(join(dir, ".sanoma/agent-home/boxes"))).toEqual(["sanoma-harness-test-ada"]);
+      expect(readdirSync(join(dir, ".sanoma/agent-home/boxes"))).toEqual(["sanoma-harness%2Dtest-ada"]);
       expect(existsSync(join(dir, ".sanoma/agent-home/people/ada/.credentials.json"))).toBe(true);
     },
     engine === "pi" ? 300_000 : 900_000,
