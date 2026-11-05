@@ -201,7 +201,7 @@ describe("the Data page's records collection", () => {
     expect(calls.save).toHaveBeenCalledWith({ record: { company: "Hooli", stage: "new" }, ifAbsent: true });
     expect(savedIn(added, "Hooli")).toMatchObject({ key: "Hooli", updatedBy: "ada" });
 
-    calls.delete.mockResolvedValueOnce({ deleted: true });
+    calls.delete.mockResolvedValueOnce({ key: "Acme", deleted: true });
     const deleted = collection.delete("Acme");
     await deleted.when("settled");
     expect(calls.delete).toHaveBeenCalledWith({ key: "Acme" });
