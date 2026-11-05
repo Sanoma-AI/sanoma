@@ -1,29 +1,28 @@
 import { authenticationCredentials, defineDriver, DriverError, errorMessage } from "@sanoma-ai/workflows";
-import type { NeonErrorUnion } from "@neon/sdk";
+import type { NeonApiErrorKind, NeonErrorUnion } from "@neon/sdk";
 import type { Client, RawResult } from "@neon/sdk/raw";
 import { z } from "zod";
 import { neonOps } from "./connector.ts";
 import { type NeonApi, neonOperations, retryable } from "./operations.ts";
-import { neonApiKey, neonClient } from "./authentication.ts";
+import { neonApiKey } from "./authentication.ts";
+import { loadSdk, neonClient, type Raw } from "./sdk.ts";
 
 export interface NeonDriverOptions {
   /** How long one request to Neon may take, in milliseconds. Default 30 000. */
   timeoutMs?: number;
 }
 
-/**
- * `@neon/sdk`'s raw layer, loaded at the first call: a worker that never calls Neon (or the app
- * listing the connector) need not load it. The raw functions are Neon's endpoints one to one,
- * with none of the ergonomic client's retries or readiness waits: retrying is the runtime's.
- */
-const sdk = () => import("@neon/sdk/raw");
-
 /** Neon's error body: `{ code, message }`. */
 const Problem = z.object({ code: z.string().optional(), message: z.string() });
 
 /** The kinds of SDK error that carry Neon's answer: a status and its body. */
-const ANSWERED = new Set(["api", "not_found", "auth", "rate_limit"]);
-type Answered = Extract<NeonErrorUnion, { kind: "api" | "not_found" | "auth" | "rate_limit" }>;
+const ANSWERED = new Set<NeonErrorUnion["kind"]>([
+  "api",
+  "not_found",
+  "auth",
+  "rate_limit",
+] satisfies NeonApiErrorKind[]);
+type Answered = Extract<NeonErrorUnion, { kind: NeonApiErrorKind }>;
 const answered = (error: NeonErrorUnion): error is Answered => ANSWERED.has(error.kind);
 
 /**
@@ -33,7 +32,7 @@ const answered = (error: NeonErrorUnion): error is Answered => ANSWERED.has(erro
 function failure(where: string, error: NeonErrorUnion): DriverError {
   if (error.kind === "network") {
     // No answer: the request may or may not have reached Neon.
-    return new DriverError(`neon: ${where}: the request failed`, { retryable: true });
+    return new DriverError(`neon: ${where}: the request failed (${error.reason})`, { retryable: true });
   }
   if (!answered(error)) {
     return new DriverError(`neon: ${where}: ${errorMessage(error)}`, { retryable: false });
@@ -43,25 +42,20 @@ function failure(where: string, error: NeonErrorUnion): DriverError {
   return new DriverError(`neon: ${where}: ${problem?.message ?? `HTTP ${status}`}`, {
     retryable: retryable(status),
     status,
-    ...(problem?.code && { vendorCode: problem.code }),
+    ...(error.code && { vendorCode: error.code }),
   });
 }
 
 /** A 404 with Neon's own error body: no such object, rather than another server's page. */
 const isAbsent = (error: NeonErrorUnion) => error.kind === "not_found" && Problem.safeParse(error.body).success;
 
-type Raw = typeof import("@neon/sdk/raw");
 /** One raw call, given the module, the invocation's client and its deadline. */
 type Request<T> = (raw: Raw, options: { client: Client; signal: AbortSignal }) => Promise<RawResult<T>>;
 
 /** One invocation's SDK client: no key, client or session is shared with another call. */
 function sdkApi(timeoutMs: number, key: string): NeonApi {
   let loaded: Promise<{ raw: Raw; client: Client }> | undefined;
-  const connect = () =>
-    (loaded ??= sdk().then((raw) => ({
-      raw,
-      client: neonClient(raw, key),
-    })));
+  const connect = () => (loaded ??= loadSdk().then((raw) => ({ raw, client: neonClient(raw, key) })));
   /**
    * One request under its own deadline. Once the deadline has passed, any failure is the timeout:
    * the SDK reports one that fires while the body is read as an error of the reply's status.
