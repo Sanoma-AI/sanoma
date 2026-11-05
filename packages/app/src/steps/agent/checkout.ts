@@ -146,29 +146,31 @@ export const turnMessage = ({ messages }: Pick<EngineTurn, "messages">, title: s
 
 /**
  * The end of a coding agent's turn, however it ended (an error too): what it changed committed on
- * the chat's draft as the person, under `title` and their message (`turnMessage`), its change told
- * (`tellCommits`), then, unless a new message stopped it (the next turn shows the card), the
- * draft's card (`data-draft`) from its checks and its diff. A turn whose box committed for it
- * (`carryOut`) commits nothing here and gives the draft's head `before` it instead: the change is
- * told and the card shown when the branch moved since.
+ * the chat's draft as the person, under `title` and their message (`turnMessage`), then shown
+ * (`showCommits`).
  */
 export async function commitTurn(
   turn: EngineTurn,
   draft: Draft,
   title: string,
   writer: UIMessageStreamWriter<ChatMessage>,
-  before?: string,
 ) {
-  const { step, chat } = turn;
-  const { by } = step;
-  const message = turnMessage(turn, title);
-  const committed =
-    before === undefined
-      ? (await draft.commit({ paths: ["."], message, author: by.id })) !== undefined
-      : (await drafting(step).head(draft.branch)) !== before;
-  if (!committed) return;
+  const committed = await draft.commit({ paths: ["."], message: turnMessage(turn, title), author: turn.step.by.id });
+  if (committed) await showCommits(turn, draft, writer);
+}
+
+/**
+ * A turn's new commits on the chat's draft (`commitTurn`'s, or those a box made, `carryOut`), its
+ * change told (`tellCommits`), then, unless a new message stopped the turn (the next turn shows
+ * the card), the draft's card (`data-draft`) from its checks and its diff.
+ */
+export async function showCommits(
+  { step, chat }: EngineTurn,
+  draft: Draft,
+  writer: UIMessageStreamWriter<ChatMessage>,
+) {
   // Told even when the turn was stopped: the commit has landed.
-  const told = tellCommits(step.client, chat.id, by);
+  const told = tellCommits(step.client, chat.id, step.by);
   if (step.signal.aborted) return told;
   const [checked, diff] = await Promise.all([checks(step, chat.id), drafting(step).diff(chat.id), told]);
   writer.write({

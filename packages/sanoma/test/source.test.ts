@@ -411,8 +411,15 @@ describe("localGitSource's drafts", () => {
       git("-C", draft.root, "checkout", "--", "README.md");
       writeFileSync(join(draft.root, "d.ts"), "export const d = 1;\n");
       const d = await draft.commit({ paths: ["d.ts"], message: "D", author: "agent" });
+      // The clone's commit the draft has already: nothing to take.
+      expect(await source.unbundle!("box", readFileSync(join(clone, "out.bundle")))).toEqual({ head: d!.revision });
+      // One the draft lacks, beside the draft's own.
+      writeFileSync(join(clone, "e.ts"), "export const e = 1;\n");
+      there("add", "e.ts");
+      there("commit", "--quiet", "-m", "E");
+      there("bundle", "create", "--quiet", "out.bundle", "draft/box", `^${back.head}`);
       await expect(source.unbundle!("box", readFileSync(join(clone, "out.bundle")))).rejects.toThrow(
-        /does not follow the draft's/,
+        /no fast-forward of the draft's/,
       );
       expect(await source.head(draft.branch)).toBe(d!.revision);
       await expect(source.unbundle!("nope", readFileSync(join(clone, "out.bundle")))).rejects.toThrow(/not open/);

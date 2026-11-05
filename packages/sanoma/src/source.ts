@@ -397,14 +397,15 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
     },
     async bundle(id, { since } = {}) {
       const ref = `refs/heads/${branchOf(id)}`;
-      const tip = await head(ref);
       // A commit the clone says it has, by its id alone, that this repository has too; else the whole branch.
-      const base =
-        since !== undefined &&
-        COMMIT_ID.test(since) &&
-        (await holds(root, ["rev-parse", "--verify", "--quiet", `${since}^{commit}`]))
-          ? since
-          : undefined;
+      const [tip, base] = await Promise.all([
+        head(ref),
+        since !== undefined && COMMIT_ID.test(since)
+          ? holds(root, ["rev-parse", "--verify", "--quiet", `${since}^{commit}`]).then((has) =>
+              has ? since : undefined,
+            )
+          : undefined,
+      ]);
       // Git refuses an empty bundle: the clone has every commit.
       if (base !== undefined && (await holds(root, ["merge-base", "--is-ancestor", tip, base]))) {
         return { bytes: new Uint8Array(), head: tip };
@@ -425,21 +426,17 @@ export function localGitSource(root: string, { databaseUrl }: { databaseUrl?: st
           if (await gitIn(at, ["status", "--porcelain", "--untracked-files=no"])) {
             throw new Error(`The draft ${id}'s checkout has uncommitted changes`);
           }
-          const into = `refs/sanoma/fetched/${randomUUID()}`;
           // It was made where an agent ran: fsck'd as it arrives by a git that checks a bundle's
           // objects (2.39 does not); checkout's own path checks hold either way.
-          const fetch = ["-c", "fetch.fsckObjects=true", "fetch", "--quiet", "--no-tags", "--no-write-fetch-head"];
-          await gitIn(at, [...fetch, "--", file, `+refs/heads/${branch}:${into}`]);
-          try {
-            const fetched = await head(into, at);
-            if (!(await holds(at, ["merge-base", "--is-ancestor", "HEAD", fetched]))) {
-              throw new Error(`The bundle's ${branch} does not follow the draft's: it moved meanwhile`);
-            }
-            await gitIn(at, ["merge", "--quiet", "--ff-only", fetched]);
-            return { head: fetched };
-          } finally {
-            await gitIn(at, ["update-ref", "-d", into]);
-          }
+          const pull = ["-c", "fetch.fsckObjects=true", "pull", "--quiet", "--ff-only", "--no-rebase", "--no-tags"];
+          await gitIn(at, [...pull, "--", file, `refs/heads/${branch}`]).catch(
+            (err: { stderr?: string; message: string }) => {
+              throw new Error(
+                `The bundle's ${branch} is no fast-forward of the draft's: ${err.stderr?.trim() || err.message}`,
+              );
+            },
+          );
+          return { head: await head("HEAD", at) };
         });
       });
     },

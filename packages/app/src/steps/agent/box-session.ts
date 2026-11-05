@@ -74,8 +74,12 @@ class BoxSession implements HarnessV1NetworkSandboxSession {
     const full = resolve(this.defaultWorkingDirectory, path);
     // Its home, by real paths (a link there leads nowhere else), but no other session's run files
     // (a bridge's start config holds the key), in any case (macOS's file system ignores it), and
-    // not the checkout when the home holds it (the box's clone): that is the checkout rule's.
-    const home = within(this.#home, full) ? await realWithin(this.#home, full) : undefined;
+    // not the checkout when the home holds it (the box's clone), nor a link there into it: those
+    // are the checkout rule's.
+    const home =
+      within(this.#home, full) && !within(this.defaultWorkingDirectory, full)
+        ? await realWithin(this.#home, full)
+        : undefined;
     if (home !== undefined && !(await realWithin(this.defaultWorkingDirectory, home.full))) {
       const inside = home.inside.toLowerCase();
       const runs = relative(this.#home, this.#runs).toLowerCase();

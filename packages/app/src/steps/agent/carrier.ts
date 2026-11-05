@@ -13,8 +13,9 @@ import { errorMessage } from "@sanoma-ai/workflows/shared";
 export const CLONE = "repo";
 /** Where a bundle waits in a box, relative to its home, on its way in or out. */
 const BUNDLE = ".sanoma-draft.bundle";
-/** The head the box and the instance both have, beside the clone's git files (gone with the clone, out of an agent's reach). */
-const KNOWN = `${CLONE}/.git/sanoma-head`;
+/** Beside the clone's git files (gone with the clone, out of an agent's reach), relative to the clone: the box's head the instance last knew of, and the lockfile last installed. */
+const HEAD_FILE = ".git/sanoma-head";
+const LOCK_FILE = ".git/sanoma-lockfile";
 
 /** What a turn refused while another runs in the same box is told. */
 export const BOX_BUSY = "A turn is already running in your box: wait for it to end, then send this again";
@@ -23,25 +24,25 @@ export const BOX_BUSY = "A turn is already running in your box: wait for it to e
 const busy = new Set<string>();
 
 /**
- * Runs `use` in the box `box.name` of `backend`, opened for it and stopped at its end however it
+ * Runs `use` in the box `spec.name` of `backend`, opened for it and stopped at its end however it
  * ends, alone: a second turn in the same box while one runs is refused (`BOX_BUSY`).
  */
 export async function boxTurn<T>(
   backend: SandboxBackend,
-  box: Parameters<SandboxBackend["open"]>[0],
+  spec: Parameters<SandboxBackend["open"]>[0],
   use: (box: Box) => Promise<T>,
 ): Promise<T> {
-  if (busy.has(box.name)) throw new Error(BOX_BUSY);
-  busy.add(box.name);
+  if (busy.has(spec.name)) throw new Error(BOX_BUSY);
+  busy.add(spec.name);
   try {
-    const opened = await backend.open(box);
+    const box = await backend.open(spec);
     try {
-      return await use(opened);
+      return await use(box);
     } finally {
-      await opened.stop();
+      await box.stop();
     }
   } finally {
-    busy.delete(box.name);
+    busy.delete(spec.name);
   }
 }
 
@@ -68,13 +69,14 @@ export async function carryIn(
   id: string,
   { home, signal }: { home: string; signal?: AbortSignal },
 ): Promise<{ root: string; head: string }> {
-  const known = await box.read(KNOWN);
+  const known = await box.read(`${CLONE}/${HEAD_FILE}`);
   const { bytes, head } = await carrying(source).bundle(id, {
     ...(known && { since: new TextDecoder().decode(known).trim() }),
   });
+  const bundle = bytes.length ? BUNDLE : "";
   try {
-    if (bytes.length) await box.write(BUNDLE, bytes);
-    await inBox(box, IN, { BRANCH: draftBranch(id), HEAD: head, BUNDLE: bytes.length ? BUNDLE : "" }, signal);
+    if (bundle) await box.write(bundle, bytes);
+    await inBox(box, IN, { BRANCH: draftBranch(id), HEAD: head, BUNDLE: bundle }, signal);
   } catch (err) {
     throw new Error(`The draft could not be brought into your box (${errorMessage(err)})`, { cause: err });
   }
@@ -97,16 +99,16 @@ if [ -n "$BUNDLE" ]; then
 fi
 git checkout --quiet --force -B "$BRANCH" "$HEAD"
 git clean --quiet --force -d
-printf %s "$HEAD" > .git/sanoma-head`;
+printf %s "$HEAD" > ${HEAD_FILE}`;
 
-/** The clone's install, when its lockfile is not the one last installed (its hash kept beside the known head). */
+/** The clone's install, when its lockfile is not the one last installed. */
 const INSTALL = `set -eu
 cd ${CLONE}
 [ -f pnpm-lock.yaml ] || exit 0
 lock=$(git hash-object pnpm-lock.yaml)
-[ "$lock" = "$(cat .git/sanoma-lockfile 2>/dev/null || true)" ] && exit 0
+[ "$lock" = "$(cat ${LOCK_FILE} 2>/dev/null || true)" ] && exit 0
 pnpm install --frozen-lockfile
-printf %s "$lock" > .git/sanoma-lockfile`;
+printf %s "$lock" > ${LOCK_FILE}`;
 
 /**
  * Brings what the turn changed in `box`'s clone back to the draft `id`: committed there as `author`
@@ -127,28 +129,26 @@ export async function carryOut(
   try {
     // Committed as the person, through Sanoma; the box has no git identity of its own.
     const as = `${author} via Sanoma`;
-    await inBox(box, OUT, {
+    const said = await inBox(box, OUT, {
       BRANCH: draftBranch(id),
       SINCE: since,
-      BUNDLE,
       MESSAGE: message,
       GIT_AUTHOR_NAME: as,
       GIT_COMMITTER_NAME: as,
       GIT_AUTHOR_EMAIL: NO_EMAIL,
       GIT_COMMITTER_EMAIL: NO_EMAIL,
     });
+    if (said !== "bundled") return false;
     bytes = await box.read(BUNDLE);
+    if (!bytes) throw new Error(`${BUNDLE} is gone`);
   } catch (err) {
     throw lost("from your box, which may have stopped mid-turn", err);
   }
-  if (!bytes) return false;
-  let head: string;
   try {
-    ({ head } = await repository.unbundle(id, bytes));
+    await repository.unbundle(id, bytes);
   } catch (err) {
     throw lost("into the draft", err);
   }
-  await box.write(KNOWN, new TextEncoder().encode(head));
   return true;
 }
 
@@ -162,24 +162,31 @@ const lost = (where: string, err: unknown) =>
 /** The email of a commit made in a box: none of a person's, which the box never holds. */
 const NO_EMAIL = "noreply@sanoma.invalid";
 
-/** The box's side of `carryOut`, in its home: a bundle only when the branch moved. */
+/**
+ * The box's side of `carryOut`, in its home: a bundle only when the branch moved, said so, and its
+ * new head kept as the one the instance knows of (were the instance to lack it, its next bundle is
+ * the whole branch).
+ */
 const OUT = `set -eu
-rm -f "$BUNDLE"
+rm -f ${BUNDLE}
 cd ${CLONE}
 git add --all
 git diff --cached --quiet || git commit --quiet --no-verify -m "$MESSAGE"
-[ "$(git rev-parse "refs/heads/$BRANCH")" = "$SINCE" ] && exit 0
-git bundle create --quiet "$HOME/$BUNDLE" "refs/heads/$BRANCH" "^$SINCE"`;
+head=$(git rev-parse "refs/heads/$BRANCH")
+[ "$head" = "$SINCE" ] && exit 0
+git bundle create --quiet "$HOME/${BUNDLE}" "refs/heads/$BRANCH" "^$SINCE"
+printf %s "$head" > ${HEAD_FILE}
+echo bundled`;
 
-/** Runs `script` in `box`'s home with `env`; an error with its exit code and the end of what it printed, unless it exits 0. */
-async function inBox(box: Box, script: string, env: Record<string, string>, signal?: AbortSignal): Promise<void> {
+/** Runs `script` in `box`'s home with `env`: what it printed, trimmed; an error with its exit code and the end of its output, unless it exits 0. */
+async function inBox(box: Box, script: string, env: Record<string, string>, signal?: AbortSignal): Promise<string> {
   const ran = await box.run(script, { cwd: ".", env, ...(signal && { signal }) });
   const [out, err, { exitCode }] = await Promise.all([
     new Response(ran.stdout).text(),
     new Response(ran.stderr).text(),
     ran.wait(),
   ]);
-  if (exitCode === 0) return;
+  if (exitCode === 0) return out.trim();
   const said = `${out}\n${err}`.trim().split("\n").slice(-5).join("\n");
   throw new Error(`exit code ${exitCode}${said ? `: ${said}` : ""}`);
 }
