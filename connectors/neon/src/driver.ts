@@ -4,7 +4,7 @@ import type { Client, RawResult } from "@neon/sdk/raw";
 import { z } from "zod";
 import { neonOps } from "./connector.ts";
 import { type NeonApi, neonOperations, retryable } from "./operations.ts";
-import { neonApiKey } from "./authentication.ts";
+import { neonApiKey, neonClient } from "./authentication.ts";
 
 export interface NeonDriverOptions {
   /** How long one request to Neon may take, in milliseconds. Default 30 000. */
@@ -30,12 +30,9 @@ const answered = (error: NeonErrorUnion): error is Answered => ANSWERED.has(erro
  * The `DriverError` for a request that failed, retryable as `retryable` says. No `cause`: the
  * SDK's error keeps its request and response, the key among the request's headers.
  */
-function failure(where: string, error: NeonErrorUnion, timeoutMs: number): DriverError {
-  if (error.kind === "aborted") {
-    // The request's own deadline ran out: it may or may not have reached Neon.
-    return new DriverError(`neon: ${where}: no reply in ${timeoutMs} ms`, { retryable: true });
-  }
+function failure(where: string, error: NeonErrorUnion): DriverError {
   if (error.kind === "network") {
+    // No answer: the request may or may not have reached Neon.
     return new DriverError(`neon: ${where}: the request failed`, { retryable: true });
   }
   if (!answered(error)) {
@@ -63,29 +60,45 @@ function sdkApi(timeoutMs: number, key: string): NeonApi {
   const connect = () =>
     (loaded ??= sdk().then((raw) => ({
       raw,
-      client: raw.createClient(raw.createConfig({ auth: () => key, baseUrl: "https://console.neon.tech/api/v2" })),
+      client: neonClient(raw, key),
     })));
-  /** One request: its reply's `data`, or `undefined` for an absent object when `absent` allows it. */
-  const call = async <T>(where: string, request: Request<T>, absent = false): Promise<T | undefined> => {
+  /**
+   * One request under its own deadline. Once the deadline has passed, any failure is the timeout:
+   * the SDK reports one that fires while the body is read as an error of the reply's status.
+   */
+  const attempt = async <T>(where: string, request: Request<T>): Promise<RawResult<T>> => {
     const { raw, client } = await connect();
-    const { data, error } = await request(raw, { client, signal: AbortSignal.timeout(timeoutMs) });
-    if (error === undefined) return data;
-    if (absent && isAbsent(error)) return undefined;
-    throw failure(where, error, timeoutMs);
+    const signal = AbortSignal.timeout(timeoutMs);
+    const result = await request(raw, { client, signal });
+    if (result.error !== undefined && signal.aborted) {
+      throw new DriverError(`neon: ${where}: no reply in ${timeoutMs} ms`, { retryable: true });
+    }
+    return result;
   };
-  /** One request whose reply has a body. */
-  const send = async <T>(where: string, request: Request<T>): Promise<T> => (await call(where, request)) as T;
+  /** One request: its reply's `data`, every failure a `DriverError`. */
+  const send = async <T>(where: string, request: Request<T>): Promise<T> => {
+    const result = await attempt(where, request);
+    if (result.error !== undefined) throw failure(where, result.error);
+    return result.data;
+  };
+  /** One request whose 404 means no such object: `undefined` then. */
+  const sendOrAbsent = async <T>(where: string, request: Request<T>): Promise<T | undefined> => {
+    const result = await attempt(where, request);
+    if (result.error === undefined) return result.data;
+    if (isAbsent(result.error)) return undefined;
+    throw failure(where, result.error);
+  };
   return {
     listProjects: (query) => send("GET /projects", (raw, o) => raw.listProjects({ ...o, query })),
     createProject: (body) => send("POST /projects", (raw, o) => raw.createProject({ ...o, body })),
     getProject: async (id) =>
-      (await call(`GET /projects/${id}`, (raw, o) => raw.getProject({ ...o, path: { project_id: id } }), true))
+      (await sendOrAbsent(`GET /projects/${id}`, (raw, o) => raw.getProject({ ...o, path: { project_id: id } })))
         ?.project,
     async updateProject(id, body) {
       await send(`PATCH /projects/${id}`, (raw, o) => raw.updateProject({ ...o, path: { project_id: id }, body }));
     },
     async deleteProject(id) {
-      await call(`DELETE /projects/${id}`, (raw, o) => raw.deleteProject({ ...o, path: { project_id: id } }), true);
+      await sendOrAbsent(`DELETE /projects/${id}`, (raw, o) => raw.deleteProject({ ...o, path: { project_id: id } }));
     },
     branches: async (projectId) =>
       (
@@ -116,10 +129,8 @@ function sdkApi(timeoutMs: number, key: string): NeonApi {
         raw.createProjectBranch({ ...o, path: { project_id: projectId }, body }),
       ),
     async deleteBranch(projectId, branchId) {
-      await call(
-        `DELETE /projects/${projectId}/branches/${branchId}`,
-        (raw, o) => raw.deleteProjectBranch({ ...o, path: { project_id: projectId, branch_id: branchId } }),
-        true,
+      await sendOrAbsent(`DELETE /projects/${projectId}/branches/${branchId}`, (raw, o) =>
+        raw.deleteProjectBranch({ ...o, path: { project_id: projectId, branch_id: branchId } }),
       );
     },
     suspendEndpoint: async (projectId, endpointId) =>

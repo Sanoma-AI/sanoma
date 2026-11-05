@@ -82,6 +82,8 @@ describe.skipIf(live)("neonDriver", () => {
     });
     expect(sent).toHaveLength(2);
     expect(sent.every((r) => r.headers.get("authorization") === `Bearer ${TEST_KEY}`)).toBe(true);
+    // The key travels as the Bearer token only, never in a cookie.
+    expect(sent.some((r) => r.headers.has("cookie"))).toBe(false);
   });
 
   it("defaults the list page size and preserves continuation on an empty page", async () => {

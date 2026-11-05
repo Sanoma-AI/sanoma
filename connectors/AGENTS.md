@@ -29,7 +29,7 @@ Local computation connectors may use the same operation contract without represe
 Where a connector's calls come from, in order; the schemas are hand-written Zod in every case, whatever carries the calls:
 
 1. **Resources** (things a company creates and keeps in sync): the vendor's OpenTofu/Terraform provider through the bridge, as a `tfConnector` record (Docker, GCP, GitHub, Stripe, Supabase).
-2. **Operations**: the vendor's officially supported TypeScript SDK as the transport, when one exists and is maintained (Bluesky's `@atproto/api`, Exa's `exa-js`, Cloudflare's `cloudflare`, which carries its container, alarm and DNS records resources too: the Worker they run is the package's own code, uploaded with them, and Neon's `@neondatabase/api-client`, which carries its project resource).
+2. **Operations**: the vendor's officially supported TypeScript SDK as the transport, when one exists and is maintained (Bluesky's `@atproto/api`, Exa's `exa-js`, Cloudflare's `cloudflare`, which carries its container, alarm and DNS records resources too: the Worker they run is the package's own code, uploaded with them, and Neon's `@neon/sdk`, which carries its project resource).
 3. No official SDK: a client generated from the vendor's published OpenAPI spec with Hey API, pinned to a commit and cut to the operations called, in `src/generated/`, never edited by hand (Resend, kept on its generated client although the official `resend` SDK exists; its domain resource uses that client too).
 4. Neither: a driver hand-written on `fetch`, the last resort (Ghost, and Sanoma Cloud, whose API is sanoma-ops's workflows over the app's `POST /api/call`).
 
