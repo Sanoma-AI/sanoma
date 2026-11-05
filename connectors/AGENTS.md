@@ -6,7 +6,7 @@ One workspace package per vendor, each built on `@sanoma-ai/workflows`. A connec
 
 | Path                                      | What it is                                                                                                                                     |
 | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`agent37/`](agent37/AGENTS.md)           | `@sanoma-ai/connector-agent37`: Agent37 instances, the boxes coding agents work in (the `Sandbox` contract), driven over SSH                   |
+| [`agent37/`](agent37/AGENTS.md)           | `@sanoma-ai/connector-agent37`: Agent37 instances, the boxes coding agents work in (the `Sandbox` contract), driven through the runner         |
 | [`anthropic/`](anthropic/AGENTS.md)       | `@sanoma-ai/connector-anthropic`: Anthropic's Claude models (a model half) on the company's key                                                |
 | [`better-auth/`](better-auth/AGENTS.md)   | `@sanoma-ai/connector-better-auth`: Better Auth, the visitor login for public sites and the staff sign-in on a host, on the company's database |
 | [`bluesky/`](bluesky/AGENTS.md)           | `@sanoma-ai/connector-bluesky`: Bluesky (AT Protocol) post operations and an in-memory fake                                                    |

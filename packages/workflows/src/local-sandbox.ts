@@ -40,9 +40,10 @@ function boxDir(dir: string, name: string): string {
 /**
  * The box at `home`, over `node:child_process` and `node:fs`: a command is `bash -c` in a process
  * group of its own (killed whole by `kill`, and by `stop`), with `base` under the caller's `env`;
- * a relative path or `cwd` is under `home`, any other this machine's.
+ * a relative path or `cwd` is under `home`, any other this machine's. The runner in a remote box
+ * (`sandbox-runner.ts`) serves its own machine's.
  */
-function localBox(id: string, home: string, base: Record<string, string>): Box {
+export function localBox(id: string, home: string, base: Record<string, string>): Box {
   /** The process groups its commands lead, killed by `stop` whether or not their leader has exited. */
   const groups = new Set<number>();
   const at = (path: string) => resolve(home, path);

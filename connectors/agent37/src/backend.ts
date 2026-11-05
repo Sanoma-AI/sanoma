@@ -1,13 +1,23 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
-import type { Box, SandboxBackend, SandboxContext } from "@sanoma-ai/workflows";
+import { gzipSync } from "node:zlib";
+import {
+  type Box,
+  RUNNER_PORT,
+  runnerBox,
+  runnerScript,
+  type SandboxBackend,
+  type SandboxContext,
+} from "@sanoma-ai/workflows";
 import { agent37Api, type Agent37Api, type Instance, isCode } from "./api.ts";
 import { wanted } from "./connector.ts";
-import { connect, RefusedError, sshBox, sshKey } from "./ssh.ts";
 
 // The `Sandbox` backend on Agent37: a box is an instance, found by the name in its metadata,
-// made when there is none, woken or started when it sleeps or is stopped; its commands and files
-// go over SSH (`ssh.ts`), its ports through Agent37's edge, and `stop` puts it to sleep.
+// made when there is none, woken or started when it sleeps or is stopped. Its commands and files
+// go through Sanoma's runner in it (`runnerBox`, at its port 7700 behind Agent37's edge), which
+// `open` starts there when it does not answer: Agent37's own exec is buffered and has no stdin,
+// which an agent's process needs. Its ports are reached through the edge, and `stop` puts it to
+// sleep, which keeps the runner running for the next `open`.
 
 export const KEY = "AGENT37_API_KEY";
 
@@ -41,8 +51,6 @@ export function agent37Backend(
   { secrets, declared }: SandboxContext,
   { edge = (id, port) => `https://${id}-${port}.agent37.app`, budgetMs = BUDGET_MS }: Agent37BackendOptions = {},
 ): SandboxBackend {
-  /** Each key's SSH key, registered with its workspace once. */
-  const registered = new Map<string, { ssh: ReturnType<typeof sshKey>; registering: Promise<void> }>();
   const keyOf = async () => {
     const key = (await secrets([KEY])).get(KEY);
     if (!key) throw new Error(`agent37 is not configured: ${KEY} is not set; set it on the connector page`);
@@ -71,21 +79,6 @@ export function agent37Backend(
     const key = await keyOf();
     const api = agent37Api(key);
     const deadline = Date.now() + budgetMs;
-    // The SSH key is registered while the instance is found or made; only the connect needs it.
-    let known = registered.get(key);
-    if (!known) {
-      const ssh = sshKey(key);
-      known = {
-        ssh,
-        registering: api.registerKey(
-          ssh.publicKey,
-          `sanoma-${createHash("sha256").update(ssh.publicKey).digest("hex").slice(0, 8)}`,
-        ),
-      };
-      registered.set(key, known);
-      known.registering.catch(() => registered.delete(key));
-    }
-    const { ssh, registering } = known;
     const [found] = await holding(api, name);
     const made =
       found ??
@@ -103,27 +96,69 @@ export function agent37Backend(
         Math.max(1, deadline - Date.now()),
       ));
     await running(api, made, deadline);
-    await registering;
     const headers = { "X-Agent37-Key": key };
-    const client = await untilDeadline(
-      deadline,
-      () => connect(edge(made.id, 22022), headers, ssh.privateKey, Math.max(1, deadline - Date.now())),
-      (error) => !(error instanceof RefusedError),
-    ).catch((error: unknown) => {
-      // The key may have been removed from the workspace: the next open registers it again.
-      if (error instanceof RefusedError) registered.delete(key);
-      throw error;
-    });
-    const { end, ...commands } = sshBox(client);
+    const url = edge(made.id, RUNNER_PORT);
+    await runnerUp(api, made.id, url, headers, deadline);
+    const { stop, ...box } = runnerBox({ url, headers, id: made.id });
     return {
-      id: made.id,
-      ...commands,
+      ...box,
       expose: async (port) => ({ url: edge(made.id, port), headers }),
       async stop() {
-        await end();
+        // What runs in it is killed first, which a sleep would keep; a runner that cannot be
+        // reached kills nothing, and the sleep goes ahead.
+        await stop().catch(() => undefined);
         await asleep(api, made.id, Date.now() + budgetMs);
       },
     };
+  }
+}
+
+/** Where the runner is kept in a box, under the home of the image's user, and where it logs. */
+const RUNNER = ".sanoma/runner.cjs";
+const LOG = ".sanoma/runner.log";
+/** The most of the packed runner one exec carries: its body takes 128 KB. */
+const CHUNK = 96_000;
+
+/**
+ * Starts the runner in the instance `id` unless it answers at `url`: writes it in with exec (gzip
+ * in base64, in chunks), starts it detached, and waits until it answers, up to `deadline`. A box
+ * that slept kept it running; one that was stopped booted fresh without it.
+ */
+async function runnerUp(
+  api: Agent37Api,
+  id: string,
+  url: string,
+  headers: Record<string, string>,
+  deadline: number,
+): Promise<void> {
+  const answers = () =>
+    fetch(`${url}/health`, { headers, signal: AbortSignal.timeout(5_000) }).then(
+      (res) => res.ok,
+      () => false,
+    );
+  if (await answers()) return;
+  const sh = async (command: string) => {
+    const { exit_code, stderr } = await api.exec(id, `cd && ${command}`);
+    if (exit_code !== 0) {
+      throw new Error(`agent37: starting the runner in ${id} failed (exit ${exit_code}): ${stderr.trim()}`);
+    }
+  };
+  const packed = gzipSync(await runnerScript()).toString("base64");
+  // A file of its own, so two opens at once write theirs apart.
+  const part = `.sanoma/runner-${randomBytes(4).toString("hex")}`;
+  for (let at = 0; at < packed.length; at += CHUNK) {
+    // Base64 is safe unquoted.
+    await sh(`mkdir -p .sanoma && printf %s ${packed.slice(at, at + CHUNK)} >${at ? ">" : ""} ${part}.b64`);
+  }
+  // Detached, its output to a file: exec answers once nothing holds its own.
+  await sh(
+    `base64 -d <${part}.b64 | gunzip >${part}.cjs && rm ${part}.b64 && mv ${part}.cjs ${RUNNER} && ` +
+      `{ nohup node ${RUNNER} >${LOG} 2>&1 </dev/null & }`,
+  );
+  // Node starts it in a fraction of a second.
+  while (!(await answers())) {
+    if (Date.now() > deadline) throw new Error(`agent37: the runner in ${id} does not answer; its log is ~/${LOG}`);
+    await delay(200);
   }
 }
 

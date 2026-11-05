@@ -7,7 +7,7 @@ import { fakeAgent37 } from "./fake.ts";
 /**
  * Agent37 Cloud: the resource type `agent37.instance`, which meets the `Sandbox` contract, and
  * its backend (`agent37Backend`), which opens a box as one Agent37 instance each, made, woken or
- * started as it needs, with commands and files over SSH. It carries its driver (`agent37Driver`),
+ * started as it needs, with commands and files through Sanoma's runner in it. It carries its driver (`agent37Driver`),
  * which reads its key when called, and its fake (`fakeAgent37`).
  */
 export const agent37 = withSetup(agent37Ops, {

@@ -1,6 +1,6 @@
 # @sanoma-ai/connector-agent37
 
-[Agent37 Cloud](https://www.agent37.com) for [`@sanoma-ai/workflows`](https://www.npmjs.com/package/@sanoma-ai/workflows): the boxes a coding agent works in, one persistent Linux computer (an Agent37 instance) per box, which sleeps with its memory kept between turns. Agent37 has no SDK, so the connector calls its API with `fetch`, and drives a box over SSH from this process.
+[Agent37 Cloud](https://www.agent37.com) for [`@sanoma-ai/workflows`](https://www.npmjs.com/package/@sanoma-ai/workflows): the boxes a coding agent works in, one persistent Linux computer (an Agent37 instance) per box, which sleeps with its memory kept between turns. Agent37 has no SDK, so the connector calls its API with `fetch`, and drives a box through Sanoma's runner, which it starts in the box.
 
 ## Usage
 
@@ -41,13 +41,13 @@ The logo the app shows beside these operations is the mark from Agent37's site (
 
 The connector's sandbox half (`withSetup(…, { sandbox })`, `agent37Backend`) opens a box by name:
 
-- `open({ name, image, size })` finds the instance whose metadata holds `sanoma_box: <name>`, or makes one (its label the name, cut to Agent37's 60 characters with a hash), with auto-sleep after 15 idle minutes; starts it when stopped, wakes it when asleep (retrying `409 try_again` while a checkpoint is still being written), waits until it runs, and connects over SSH. All of it within 3 minutes.
-- `run(command, { cwd, env, stdin, signal })` is `bash -c` on an exec channel of the box's one SSH connection, in `cwd` under the home (`/home/node`, the instance's disk) with `env` exported, in a process group of its own, so `kill` (and an abort) signals the command and what it started. Its stdin, stdout and stderr are the channel's, as they come.
-- `read(path)` and `write(path, bytes, { mode })` are a `cat` each on the same connection; a relative path is under the home.
+- `open({ name, image, size })` finds the instance whose metadata holds `sanoma_box: <name>`, or makes one (its label the name, cut to Agent37's 60 characters with a hash), with auto-sleep after 15 idle minutes; starts it when stopped, wakes it when asleep (retrying `409 try_again` while a checkpoint is still being written), waits until it runs, and starts the runner in it unless it answers. All of it within 3 minutes.
+- `run(command, { cwd, env, stdin, signal })` is `bash -c` started by the runner, in `cwd` under the home (`/home/node` on Agent37's templates, the instance's disk) with `env` over the runner's, in a process group of its own, so `kill` (and an abort) signals the command and what it started. Its stdin, stdout and stderr stream as they come.
+- `read(path)` and `write(path, bytes, { mode })` go through the runner too; a relative path is under the home.
 - `expose(port)` is `https://<id>-<port>.agent37.app`, with the key as the `X-Agent37-Key` header, which Agent37's edge asks for.
-- `stop()` closes the connection and puts the instance to sleep, its memory checkpointed, or stops it (its disk kept) when the sleep is refused. `discard({ name })` deletes it.
+- `stop()` kills the commands still running, closes the connection and puts the instance to sleep, the runner kept running in it, its memory checkpointed, or stops it (its disk kept) when the sleep is refused. `discard({ name })` deletes it.
 
-SSH reaches a box as Agent37's own CLI does: a WebSocket to `https://<id>-22022.agent37.app` with the key in `X-Agent37-Key`, carrying the SSH stream, which [`ssh2`](https://www.npmjs.com/package/ssh2) speaks over [`ws`](https://www.npmjs.com/package/ws) in this process, as the user `node`. The SSH key is an ed25519 key derived from the API key, registered once with the workspace (`POST /v1/ssh-keys`, named `sanoma-` and its fingerprint), so nothing is stored; it guards nothing the API key does not, as that key runs any command in a box as root. The host key is not checked: an instance makes a new one when Agent37 moves it, and the tunnel is TLS to Agent37's edge, which checked the key. A custom template needs a `node` user, as Agent37's templates have.
+The runner is [`@sanoma-ai/workflows`'s](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#sandboxes), one file, which `open` writes into a box with Agent37's exec when it does not answer (`~/.sanoma/runner.cjs`, gzipped through exec's body of 128 KB) and starts with the box's `node` (22 or later), as the image's user. It listens on port 7700, which `open` reaches over one WebSocket at `https://<id>-7700.agent37.app` with the key in `X-Agent37-Key`: Agent37's edge checks the key on every request to the port, the upgrade too, and the port is never made public, so the runner asks no credential of its own. Agent37's own exec is buffered and takes no stdin, which an agent's process needs; the runner streams both ways. A box that slept keeps the runner running; one that was stopped boots without it, and the next `open` starts it again (its log is `~/.sanoma/runner.log`). A custom template needs `node`, `bash`, `base64` and `gunzip`, as Agent37's templates have.
 
 ### What it costs
 
@@ -80,7 +80,7 @@ A failure is a `DriverError` with Agent37's status and its error's `code` as `ve
 
 `test/driver.test.ts` replays Agent37's replies (`test/fixtures`) with [`@sanoma-ai/testing/replay`](https://github.com/Sanoma-AI/sanoma/blob/main/packages/testing/README.md#replaying-a-vendors-api). The fixtures were written from Agent37's documentation, not recorded; `SANOMA_LIVE=1 SANOMA_RECORD=1 AGENT37_API_KEY=... pnpm vitest run connectors/agent37/test/driver.test.ts` records them.
 
-`test/backend.test.ts` runs the [sandbox conformance kit](https://github.com/Sanoma-AI/sanoma/blob/main/packages/testing/README.md#a-sandboxs-conformance) and the backend's own cases against Agent37 on this machine (`test/vendor.ts`): its API from memory, and an SSH server (`ssh2`'s) behind a local WebSocket whose commands run here, so the tunnel, the SSH session and the commands are the real ones.
+`test/backend.test.ts` runs the [sandbox conformance kit](https://github.com/Sanoma-AI/sanoma/blob/main/packages/testing/README.md#a-sandboxs-conformance) and the backend's own cases against Agent37 on this machine (`test/vendor.ts`): its API from memory and its exec run here, so the runner the backend writes in and starts, its connection and the commands are the real ones.
 
 ### Running it live
 

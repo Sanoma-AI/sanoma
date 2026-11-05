@@ -90,9 +90,12 @@ export function agent37Api(key: string, timeoutMs = 30_000) {
     sleep: (id: string) => send<Instance>("POST", `/instances/${id}/sleep`),
     stop: (id: string) => send<Instance>("POST", `/instances/${id}/stop`),
     remove: (id: string) => send("DELETE", `/instances/${id}`).then(() => undefined, unless("not_found")),
-    /** Registers an SSH public key with the workspace; one registered already is done. */
-    registerKey: (publicKey: string, name: string) =>
-      send("POST", "/ssh-keys", { public_key: publicKey, name }).then(() => undefined, unless("ssh_key_exists")),
+    /**
+     * Runs `command` with `sh -c` as the image's user, buffered: no stdin, its output back once it
+     * has exited (each stream up to 512 KB), its body up to 128 KB.
+     */
+    exec: (id: string, command: string) =>
+      send<{ exit_code: number; stdout: string; stderr: string }>("POST", `/instances/${id}/exec`, { command }),
   };
 }
 

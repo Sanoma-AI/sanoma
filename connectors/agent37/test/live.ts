@@ -50,7 +50,7 @@ async function sh(box: Box, command: string) {
 
 let failed = false;
 try {
-  const box = await timed("create to ready (made, running, SSH answering)", () =>
+  const box = await timed("create to ready (made, running, the runner started)", () =>
     backend.open({ name: NAME, image: DEFAULTS.image, size: DEFAULTS.size }),
   );
 
@@ -83,7 +83,7 @@ try {
   }
   console.log(`checkpoint written (sleep to a start it takes): ${seconds(waking - asleep)}`);
   const woken = await backend.open({ name: NAME, image: DEFAULTS.image, size: DEFAULTS.size });
-  console.log(`wake from sleep (start to SSH answering): ${seconds(Date.now() - waking)}`);
+  console.log(`wake from sleep (start to the runner answering): ${seconds(Date.now() - waking)}`);
   if (!(await sh(woken, "test -d repo/node_modules && echo kept")).includes("kept")) {
     throw new Error("node_modules did not survive the sleep");
   }
