@@ -12,8 +12,8 @@ export interface RootSnapshot {
   appName: string;
   /** `ResolvedConfig.version`: a hash of the workflows' source, which a bundle's code is not, so a run it queues is its worker's. */
   version: string;
-  /** `ResolvedConfig.changeCode`, for the same reason. */
-  changeCode: string;
+  /** `ResolvedConfig.builtInCodes`, for the same reason. */
+  builtInCodes: Readonly<Record<string, string>>;
   /** `readPolicyFiles`: each `.cedar` file under `policies/` (and an app's), by path from the root. */
   policies: { file: string; text: string }[];
   /** `readPeople`: the people, agents and groups the data files declare, with their problems. */

@@ -58,7 +58,11 @@ export interface AppHost {
   startNow(): Promise<unknown>;
 }
 
-/** The main module's default export: the app's fetch handler. Without a `host`, a queued run waits for whatever starts the worker. */
+/**
+ * The main module's default export: the app's fetch handler. Without a `host`, a queued run waits
+ * for whatever starts the worker. The host sets the visitor's address in `x-sanoma-client-ip`
+ * (`CLIENT_IP_HEADER`), over any copy of the client's: the bundle trusts it as given.
+ */
 export interface AppBundleModule {
   fetch(request: Request, env: AppBundleEnv, ctx: AppBundleContext, host?: AppHost): Promise<Response>;
 }

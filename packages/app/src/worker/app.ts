@@ -6,7 +6,6 @@
 // bundle (`server/local/none.ts`).
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
-  CLIENT_IP_HEADER,
   checkPreparedOnly,
   errorMessage,
   GITHUB_APP,
@@ -175,10 +174,6 @@ export async function serve(
   if (env.SANOMA_HOSTNAME && hostname !== env.SANOMA_HOSTNAME.toLowerCase() && !app.hosts.has(hostname)) {
     return plain(404, "Not found\n");
   }
-  // The visitor's address, from Cloudflare's header alone, for a login's rate limits: never a client's copy.
-  const headers = new Headers(request.headers);
-  headers.set(CLIENT_IP_HEADER, request.headers.get("cf-connecting-ip") ?? "");
-  const asked = new Request(request, { headers });
   let client: Promise<SanomaClient> | undefined;
   // Once per request, however many writes it makes: the worker starts once.
   let starting: Promise<unknown> | undefined;
@@ -203,7 +198,7 @@ export async function serve(
       .catch((err: unknown) => console.error("sanoma: closing the request's client failed:", err));
   };
   try {
-    return closingAfter(await requests.run(connect, () => app.fetch(asked)), close, ctx);
+    return closingAfter(await requests.run(connect, () => app.fetch(request)), close, ctx);
   } catch (err) {
     ctx.waitUntil(close());
     throw err;

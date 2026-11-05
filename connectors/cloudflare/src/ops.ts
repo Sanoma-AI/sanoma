@@ -17,24 +17,26 @@ import { instanceUrl, mintInstanceToken, WAKEUP_TOKEN } from "@sanoma-ai/workflo
 import { alarm, container, type host } from "./connector.ts";
 import { refused } from "./errors.ts";
 import { accountPinned } from "./registry.ts";
-import { serveSites, SITES_PENDING } from "./sites.ts";
 import {
-  HEALTH_PATH,
-  IMAGE,
+  appBundle,
+  appModules,
+  ASSETS_CONFIG,
   MAIN_MODULE,
-  NAMESPACE,
   OBJECT_CLASS,
+  uploadAssets,
+  waitFor,
   type WorkerModule,
   workerModules,
-} from "./worker.ts";
+} from "./deploy.ts";
+import { HEALTH_PATH, IMAGE, NAMESPACE } from "../worker/instance.js";
 
-// Cloudflare as the operations use it (`CloudflareApi`), and the container's and the alarm's
+// Cloudflare as the operations use it (`CloudflareApi`), and the host's and the alarm's
 // operations over it: the driver's calls its API with the SDK and the Worker over HTTP, the
 // fake's answers from its state and its Worker in this process. Both go through `containerOps`
 // and `alarmOps` (and `recordsOps`, in `records.ts`), so they upload, plan and refuse alike.
 
-/** The Workers runtime the Worker is written for. */
-export const COMPATIBILITY_DATE = "2026-10-01";
+/** The Workers runtime of a create's uploads before its first bundle; the bundle's own after. */
+const COMPATIBILITY_DATE = "2026-10-01";
 /** The migration that makes the Worker's object class, on its first upload only. */
 export const MIGRATION = { new_tag: "v1", new_sqlite_classes: [OBJECT_CLASS] };
 /** How long the account may take to prepare an image to run, as Wrangler waits for it. */
@@ -52,16 +54,19 @@ const TEXT = {
   /** The app's own custom domain, when declared: the state's `url` is then `https://<hostname>`. */
   hostname: "SANOMA_HOSTNAME",
   url: HOST_URL,
-  /** Set while the public sites' upload is still to be made (`sites.ts`). */
-  sitesPending: SITES_PENDING,
 } as const;
+/** The app's database, a Hyperdrive config over the host's `SANOMA_DATABASE_URL` (`AppBundleEnv.DATABASE`). */
+const DATABASE = "DATABASE";
+/** The app bundle's static assets (`AppBundleEnv.ASSETS`). */
+const ASSETS = "ASSETS";
 /** Names a secret may not take: the Worker's own bindings. */
-const RESERVED = new Set<string>([NAMESPACE, ...Object.values(TEXT)]);
+const RESERVED = new Set<string>([NAMESPACE, DATABASE, ASSETS, ...Object.values(TEXT)]);
 
 /** A binding as the upload sends it. */
 export type Binding =
   | { type: "durable_object_namespace"; name: string; class_name: string }
   | { type: "plain_text" | "secret_text"; name: string; text: string }
+  | { type: "hyperdrive"; name: string; id: string }
   | { type: "assets"; name: string };
 
 /** A binding as a read shows it: a secret's name, never its text. */
@@ -71,16 +76,21 @@ export interface ReadBinding {
   text?: string;
   /** A Durable Object namespace's id, which the container application is made for. */
   namespace_id?: string;
+  /** A Hyperdrive config's id. */
+  id?: string;
 }
 
 /** Whether a Worker's bindings are Sanoma's: its own object's namespace among them. */
 const isOurs = (bindings: ReadBinding[]) =>
   bindings.some((b) => b.type === "durable_object_namespace" && b.name === NAMESPACE);
+/** Whether a Worker serves the app: only the upload of a bundle binds its database. */
+const servesApp = (bindings: ReadBinding[]) => bindings.some((b) => b.type === "hyperdrive" && b.name === DATABASE);
 
 /** The upload's metadata and modules (`PUT …/workers/scripts/{name}`). */
 export interface Upload {
   main_module: string;
   compatibility_date: string;
+  compatibility_flags: string[];
   bindings: Binding[];
   /**
    * The object classes that run a container (the namespace is container-enabled), each with its
@@ -91,7 +101,7 @@ export interface Upload {
   migrations?: typeof MIGRATION;
   /** The Worker's own logs (what its object saw of a start), kept by Cloudflare for seven days. */
   observability: { enabled: boolean };
-  /** The assets an upload session put in (its completion `jwt`), and how the Worker serves them (`sites.ts`). */
+  /** The assets an upload session put in (its completion `jwt`), and how the Worker serves them (`ASSETS_CONFIG`). */
   assets?: { jwt: string; config: Record<string, unknown> };
   modules: WorkerModule[];
 }
@@ -106,6 +116,16 @@ export interface Preparation {
   status: "pending" | "ready" | "error";
   /** Why it is still pending, or failed. */
   reason?: string;
+}
+
+/** The database a Hyperdrive config reaches, as its `origin` takes it: from the host's `SANOMA_DATABASE_URL`. */
+export interface HyperdriveOrigin {
+  scheme: "postgres" | "postgresql";
+  host: string;
+  port: number;
+  database: string;
+  user: string;
+  password: string;
 }
 
 /** A custom domain attached to a Worker, as the fields read here. */
@@ -172,6 +192,14 @@ export interface CloudflareApi {
   copyImage(image: string): Promise<string>;
   /** Asks the account to prepare a pinned image to run, once more (idempotent): where it is. */
   prepareImage(image: string): Promise<Preparation>;
+  /** The Hyperdrive config of that name, if any (`GET …/hyperdrive/configs`). */
+  hyperdrive(name: string): Promise<{ id: string } | undefined>;
+  /** Makes a Hyperdrive config over `origin`, its query caching off (`POST …/hyperdrive/configs`). */
+  createHyperdrive(name: string, origin: HyperdriveOrigin): Promise<{ id: string }>;
+  /** Sets a config's origin again, its caching off (`PUT …/hyperdrive/configs/{id}`): a password is never read back to compare. */
+  updateHyperdrive(id: string, name: string, origin: HyperdriveOrigin): Promise<void>;
+  /** Deletes a config; nothing when there is none. */
+  deleteHyperdrive(id: string): Promise<void>;
   /** Deletes the Worker, its object's storage with it; nothing when there is none. */
   deleteScript(script: string): Promise<void>;
   /** The container application of that name, if any (`GET …/containers/applications?name=`). */
@@ -324,31 +352,40 @@ const same = (field: (typeof COMPARED)[number], a: unknown, b: unknown) =>
     : (a ?? null) === (b ?? null);
 
 /**
- * `{ revision }` when the Worker answers, else why not; with `start`, once its container answers
- * too, which starts it. A read asks without: a stopped host is healthy, and stays stopped. A
- * container that ended is `exit`: the Worker would start it again on the next ask, so a deploy
+ * `{ revision }` when the Worker's object answers its health, else why not. A read asks without
+ * `start`: a stopped host is healthy, and stays stopped. With `start` and the instance token, only
+ * once its container runs at what the Worker names and answered, which the ask starts (202
+ * meanwhile). A container that ended is `exit`: asking again would only start it again, so a deploy
  * stops asking.
  */
 const health = async (
   cf: CloudflareApi,
   url: string,
-  start: boolean,
+  token?: string,
 ): Promise<{ revision: string; configurationRevision?: string } | { error: string; exit: boolean }> => {
   let res: Response;
   try {
-    res = await cf.send(`${url}${HEALTH_PATH}${start ? "?start=1" : ""}`, { method: "GET" });
+    res = await cf.send(`${url}${HEALTH_PATH}${token === undefined ? "" : "?start=1"}`, {
+      method: "GET",
+      ...(token !== undefined && { headers: { authorization: `Bearer ${token}` } }),
+    });
   } catch (error) {
     return { error: errorMessage(error), exit: false };
   }
   const body = (await res.json().catch(() => undefined)) as
-    | { revision?: unknown; configurationRevision?: unknown; error?: unknown; exit?: unknown }
+    | { revision?: unknown; configurationRevision?: unknown; error?: unknown; exit?: unknown; last?: unknown }
     | undefined;
-  if (res.ok && typeof body?.revision === "string")
+  if (res.status === 200 && typeof body?.revision === "string")
     return {
       revision: body.revision,
       ...(typeof body.configurationRevision === "string" && { configurationRevision: body.configurationRevision }),
     };
-  const error = typeof body?.error === "string" ? body.error : `${HEALTH_PATH} answered ${res.status}`;
+  const error =
+    typeof body?.error === "string"
+      ? body.error
+      : res.status === 202
+        ? `its container is starting${typeof body?.last === "string" ? ` (${body.last})` : ""}`
+        : `${HEALTH_PATH} answered ${res.status}`;
   return { error, exit: typeof body?.exit === "string" };
 };
 
@@ -376,23 +413,75 @@ const zonesOf = async (cf: CloudflareApi, name: string, hostnames: string[]) => 
   return new Map(hostnames.map((hostname) => [hostname, ids.get(apexOf(hostname))!]));
 };
 
+/** The Hyperdrive config's origin from the host's database URL; a refusal that never shows the URL, which holds the password. */
+export function originOf(name: string, databaseUrl: string): HyperdriveOrigin {
+  let url: URL | undefined;
+  try {
+    url = new URL(databaseUrl);
+  } catch {
+    // Said below, without the URL.
+  }
+  const scheme = url?.protocol.slice(0, -1);
+  let decoded: { database: string; user: string; password: string } | undefined;
+  try {
+    if (url) {
+      decoded = {
+        database: decodeURIComponent(url.pathname.slice(1)),
+        user: decodeURIComponent(url.username),
+        password: decodeURIComponent(url.password),
+      };
+    }
+  } catch {
+    // A malformed escape: said below, without the URL.
+  }
+  if (
+    !url ||
+    !decoded ||
+    (scheme !== "postgres" && scheme !== "postgresql") ||
+    !url.hostname ||
+    !decoded.user ||
+    !decoded.database
+  ) {
+    throw refused(
+      `container ${name}: SANOMA_DATABASE_URL is not a postgres:// URL with a user, a host and a database, which Hyperdrive needs`,
+      "invalid",
+    );
+  }
+  return { scheme, host: url.hostname, port: Number(url.port || 5432), ...decoded };
+}
+
 export interface ContainerOptions {
-  /** How long a create or update waits for the Worker to answer at its new revision. */
+  /** How long a deploy waits for each of its two waits: the app bundle at the new revision, then the container restarted at it. */
   startTimeoutMs: number;
   /** How long between two tries. */
   pollMs: number;
 }
 
 /**
- * `cloudflare.host`'s and `cloudflare.container`'s operations over `api()`, made on each call: the
- * one Worker either declares, `type` the one whose fields a call is parsed by (the container's by
- * default). A host is given by apply what its data file leaves out; its port is the image's. A create and an update
- * are one upsert, in Wrangler's order: the image copied and pinned, then prepared, the Worker
- * uploaded with the declared bindings and that image (the migration on its first upload), its
- * workers.dev URL turned on, the application made when there is none, and then a wait until the
- * Worker answers at the new revision, which starts the container. A new image is a new upload:
- * the object destroys a container started at another and starts it again. With domains and the
- * instance token, the public sites the container built go on the Worker last (`serveSites`).
+ * `cloudflare.host`'s operations over `api()`, made on each call (`cloudflare.container`'s are
+ * the same, `type` the one whose fields a call is parsed by). A host is given by apply what its
+ * data file leaves out; its port is the image's. A create and an update are one upsert, a deploy
+ * at revision R in three steps, each with its own wait, so a visitor is answered throughout:
+ *
+ * 1. Build first: the app bundle at R, asked of the Worker's object, which starts its container
+ *    when it is stopped and passes the ask on to the worker running there (`appBundle`): a
+ *    create's container, and an update's still at R-1, builds it in a checkout of R.
+ * 2. One upload: the Worker at R, the bundle's modules under `app/`, its assets through an upload
+ *    session, and every binding (the text that says what it runs, the secrets, the database as a
+ *    Hyperdrive config, the assets, the object's namespace and its container's image). The
+ *    visitors' next request runs it.
+ * 3. Restart last: the object, asked for its health with `start`, drains the worker at R-1 and
+ *    starts the container at R (`instance.js`), and the wait ends once it answers there. An update
+ *    whose plan is none (the upload made, the restart not seen: a deploy that died in its wait, or
+ *    the restart of the worker that ran it) makes this step alone.
+ *
+ * Before them, as Wrangler orders it: the image copied and pinned, then prepared, the Hyperdrive
+ * config made or set again, and on a create the Worker uploaded without an app (`no-app.js`, the
+ * migration on its first upload), its workers.dev URL turned on and its application made, then
+ * uploaded once more so its object learns the application. A domain declared before and no longer
+ * is detached before the upload, and a missing one attached after it. The instance token
+ * (`SANOMA_WAKEUP_TOKEN`), which the bundle and the restart are asked with, is the declared one,
+ * else the stored one, minted when none is, and always bound.
  */
 export function containerOps(
   api: () => CloudflareApi,
@@ -432,12 +521,10 @@ export function containerOps(
       // Where the app answers now: at its hostname once attached; its health is asked on workers.dev.
       url: servedAt(hostname, url),
       worker_url: url,
-      healthy: checkHealth && app !== undefined && "revision" in (await health(cf, url, false)),
+      healthy: checkHealth && app !== undefined && "revision" in (await health(cf, url)),
     };
     const secrets = bindings.filter((b) => b.type === "secret_text").map((b) => b.name);
-    // The deploy uploaded the Worker, and its sites upload did not follow (`serveSites`).
-    const sitesPending = text.has(TEXT.sitesPending);
-    return { state, secrets, sitesPending };
+    return { state, secrets, serves: servesApp(bindings) };
   };
 
   const read = async ({ id }: { id: string }) => {
@@ -445,84 +532,80 @@ export function containerOps(
     return found ? { id, gone: false, state: found.state } : { id, gone: true };
   };
 
-  /** The plan, and whether all it changes is the public sites' upload a deploy did not finish. */
-  const diff = async ({
-    id,
-    desired,
-  }: {
-    id?: string;
-    desired?: Record<string, unknown>;
-  }): Promise<{ planned: Planned; sitesOnly: boolean }> => {
+  const plan = async ({ id, desired }: { id?: string; desired?: Record<string, unknown> }): Promise<Planned> => {
     if (desired) checkHostname(desired.name, desired.hostname, desired.domains);
     const found = id === undefined ? undefined : await inspect(id, false);
-    if (!desired) return { planned: { action: found ? "delete" : "none", ...NONE }, sitesOnly: false };
+    if (!desired) return { action: found ? "delete" : "none", ...NONE };
     const { secrets, ...declared } = desired;
     const unknown = [...type.fields.vendorOwned];
     // A create plans without the account: it needs no credentials yet.
-    if (!found) return { planned: { action: "create", planned: declared, unknown, replace: [] }, sitesOnly: false };
+    if (!found) return { action: "create", planned: declared, unknown, replace: [] };
     const planned: Record<string, unknown> = declared;
     const { state } = found;
-    if (planned.name !== state.name) {
-      return { planned: { action: "replace", planned, unknown, replace: ["name"] }, sitesOnly: false };
-    }
+    if (planned.name !== state.name) return { action: "replace", planned, unknown, replace: ["name"] };
     const changed =
       // `domains` and `hostname` left out are compared too: removing one is a change.
       COMPARED.some(
         (field) => (field in planned || OPTIONAL.has(field)) && !same(field, planned[field], state[field]),
-      ) || sorted(Object.keys(secrets ?? {})) !== sorted(found.secrets);
-    if (!changed && !found.sitesPending)
-      return { planned: { action: "none", planned: state, ...NONE }, sitesOnly: false };
+      ) ||
+      // The instance token is bound whether declared or not.
+      sorted(new Set([...Object.keys(secrets ?? {}), WAKEUP_TOKEN])) !== sorted(found.secrets) ||
+      // A create that ended before its upload of the app.
+      !found.serves;
+    if (!changed) return { action: "none", planned: state, ...NONE };
     // What the Worker will serve: the declared domains and hostname, none of the found ones left
     // out; the app at the declared hostname, or on workers.dev without one.
     const { domains: _domains, hostname: _hostname, ...was } = state;
     const url = servedAt(planned.hostname as string | null | undefined, state.worker_url);
     return {
+      action: "update",
       planned: {
-        action: "update",
-        planned: {
-          ...was,
-          ...planned,
-          ...(state.configurationRevision !== undefined &&
-            planned.configurationRevision == null && { configurationRevision: null }),
-          url,
-        },
-        ...NONE,
+        ...was,
+        ...planned,
+        ...(state.configurationRevision !== undefined &&
+          planned.configurationRevision == null && { configurationRevision: null }),
+        url,
       },
-      // The Worker otherwise runs what is declared, its application made.
-      sitesOnly: !changed && state.id !== null,
+      ...NONE,
     };
   };
 
-  const plan = async (input: { id?: string; desired?: Record<string, unknown> }) => (await diff(input)).planned;
+  /** `desired` parsed, its secrets resolved, and the instance token: the declared one, else the stored one, minted when none is. */
+  const resolved = async (desired: Record<string, unknown>, store: CallContext["secrets"]) => {
+    const declared = type.schema.parse(await resolveSecrets(desired, store));
+    const token = declared.secrets?.[WAKEUP_TOKEN] ?? (await store.ensure(WAKEUP_TOKEN, mintInstanceToken));
+    return { declared, token };
+  };
 
-  /** Waits until the Worker at `url` answers at `revision`, which starts its container. */
-  const started = async (
+  /**
+   * Step 3: has the object restart the container at `revision` (its health with `start`, the worker
+   * at another drained first) and waits until it answers there. Asking again is harmless: a
+   * container that runs at it is kept.
+   */
+  const restarted = async (
     cf: CloudflareApi,
-    script: string,
-    url: string,
+    { script, url, token }: { script: string; url: string; token: string },
     revision: string,
     configurationRevision?: string | null,
   ) => {
-    const until = Date.now() + startTimeoutMs;
-    for (;;) {
-      const seen = await health(cf, url, true);
+    // Retryable once its time is up: the upload is made, so the next apply plans none, and waits for this step alone.
+    await waitFor(`${script}: still starting at ${revision}`, { startTimeoutMs, pollMs }, async () => {
+      const seen = await health(cf, url, token);
       if (
         "revision" in seen &&
         seen.revision === revision &&
         (seen.configurationRevision ?? "") === (configurationRevision ?? "")
       )
-        return;
+        return { value: undefined };
       // Not a wait: the container started and ended, and asking again would only start it again.
       if ("exit" in seen && seen.exit) throw refused(`${script} did not start at ${revision}: ${seen.error}`);
-      if (Date.now() >= until) {
-        const why =
+      return {
+        last:
           "revision" in seen
             ? `it runs ${seen.revision} with configuration ${seen.configurationRevision ?? "unset"}`
-            : seen.error;
-        throw refused(`${script} did not answer at ${revision} in ${Math.round(startTimeoutMs / 1000)} s: ${why}`);
-      }
-      await delay(pollMs);
-    }
+            : seen.error,
+      };
+    });
   };
 
   /** Waits until the account prepared `image` to run, as Wrangler does before an upload. */
@@ -551,18 +634,14 @@ export function containerOps(
     }
   };
 
-  /**
-   * Makes the Worker and its application match `desired`, and waits for it: a create and an
-   * update alike. With `sitesOnly` (the Worker runs `desired` already, but its sites upload did
-   * not follow), the public sites' upload alone.
-   */
-  const put = async (desired: Record<string, unknown>, { secrets: store }: CallContext, sitesOnly = false) => {
-    const declared = type.schema.parse(await resolveSecrets(desired, store));
+  /** Makes the Worker and its application match `desired` at its revision, in the three steps of `containerOps`: a create and an update alike. */
+  const put = async (desired: Record<string, unknown>, { secrets: store }: CallContext) => {
+    const { declared, token } = await resolved(desired, store);
     const { name, image, source, ref, revision, configurationRevision, domains } = declared;
     const port = declared.port ?? RUNTIME_PORT;
     const hostname = declared.hostname ?? undefined;
     checkHostname(name, hostname, domains);
-    const secrets = declared.secrets ?? {};
+    const secrets: Record<string, string> = { ...declared.secrets, [WAKEUP_TOKEN]: token };
     if (!name || !image || !source || !ref) {
       const missing = !name ? "name" : !image ? "image" : !source ? "source" : "ref";
       throw refused(`container ${name ?? ""}: no ${missing}: apply gives a host one`);
@@ -575,6 +654,12 @@ export function containerOps(
     const taken = Object.keys(secrets).filter((key) => RESERVED.has(key));
     if (taken.length)
       throw refused(`container ${name}: ${taken.join(", ")} is the Worker's own; name the secret otherwise`);
+    if (!secrets.SANOMA_DATABASE_URL) {
+      throw refused(
+        `container ${name}: no SANOMA_DATABASE_URL among its secrets: the app on the Worker reaches the database through Hyperdrive over it`,
+      );
+    }
+    const origin = originOf(name, secrets.SANOMA_DATABASE_URL);
     const cf = api();
     const script = scriptOf(name);
     const url = await cf.workerUrl(script);
@@ -602,8 +687,11 @@ export function containerOps(
     );
     const runs = accountPinned(image, cf.account) ? image : await cf.copyImage(image);
     await prepared(cf, runs);
+    // The Hyperdrive config the Worker binds as its database, named after it: made, or set to the URL again.
+    const config = await cf.hyperdrive(script);
+    if (config) await cf.updateHyperdrive(config.id, script, origin);
+    const database = config?.id ?? (await cf.createHyperdrive(script, origin)).id;
     const served = domains ? domainsText(domains) : undefined;
-    const token = secrets[WAKEUP_TOKEN];
     const text = {
       [TEXT.source]: source,
       [TEXT.ref]: ref,
@@ -615,57 +703,76 @@ export function containerOps(
       [TEXT.url]: url,
       ...(served && { [TEXT.domains]: served }),
       ...(hostname && { [TEXT.hostname]: hostname }),
-      // Until `serveSites` uploads the Worker again, without it.
-      ...(domains && token && { [TEXT.sitesPending]: "1" }),
     };
     const bindings: Binding[] = [
       { type: "durable_object_namespace", name: NAMESPACE, class_name: OBJECT_CLASS },
       ...Object.entries(text).map(([key, value]) => ({ type: "plain_text" as const, name: key, text: value })),
-      ...Object.entries(secrets).map(([key, value]) => ({
-        type: "secret_text" as const,
-        name: key,
-        text: value,
-      })),
+      ...Object.entries(secrets).map(([key, value]) => ({ type: "secret_text" as const, name: key, text: value })),
     ];
-    const metadata = {
+    const { entry, noApp } = await workerModules();
+    const worker = {
       main_module: MAIN_MODULE,
-      compatibility_date: COMPATIBILITY_DATE,
-      bindings,
       containers: [{ name: script, class_name: OBJECT_CLASS, images: { [IMAGE]: runs } }],
       observability: { enabled: true },
-      modules: await workerModules(),
     };
-    let app = sitesOnly ? await cf.application(script) : undefined;
-    if (sitesOnly) {
-      if (!app) throw refused(`${script}: its container application is gone`);
-    } else {
-      // A domain declared before and no longer is detached while the bindings still record it, and
-      // a missing one attached once the upload records it: whatever fails in between, none is left
-      // attached and unrecorded, and the next apply attaches what is still missing. A site's domain
-      // so never reaches a Worker that would serve the app there (README, Custom domains).
-      for (const domain of attached) {
-        if (before.has(domain.hostname) && !hostnames.has(domain.hostname)) await cf.detachDomain(domain.id);
-      }
-      await cf.upload(script, { ...metadata, ...(current === undefined && { migrations: MIGRATION }) });
-      await cf.enableSubdomain(script);
-      app = await cf.application(script);
-      if (!app) {
-        // The application is made for the object's namespace, which the first upload made.
-        const namespace = (await cf.bindings(script))?.find((b) => b.name === NAMESPACE)?.namespace_id;
-        if (!namespace) throw refused(`${script}: Cloudflare names no namespace for its ${NAMESPACE} binding`);
-        app = await cf.createApplication(script, namespace);
-        // The object learns which application backs its namespace from a deployment made after
-        // the application exists: without this second upload every start answers "There is no
-        // container application assigned to this Durable Object namespace", for good (found live
-        // 2026-10-29; a Worker deployed again after the application started at once).
-        await cf.upload(script, metadata);
-      }
-      for (const [domain, zone] of missing) await cf.attachDomain(script, domain, zone);
-      await started(cf, script, url, revision, configurationRevision);
+    /** The Worker without an app: what a create runs until its first bundle is built. */
+    const bare = {
+      ...worker,
+      bindings,
+      compatibility_date: COMPATIBILITY_DATE,
+      compatibility_flags: [],
+      modules: [...entry, noApp],
+    };
+    if (!current) await cf.upload(script, { ...bare, migrations: MIGRATION });
+    await cf.enableSubdomain(script);
+    let app = await cf.application(script);
+    /** Whether the Worker runs at R already, without its app: uploaded so in this put. */
+    let bareAtRevision = !current;
+    if (!app) {
+      // The application is made for the object's namespace, which the first upload made.
+      const namespace = (await cf.bindings(script))?.find((b) => b.name === NAMESPACE)?.namespace_id;
+      if (!namespace) throw refused(`${script}: Cloudflare names no namespace for its ${NAMESPACE} binding`);
+      app = await cf.createApplication(script, namespace);
+      // The object learns which application backs its namespace from a deployment made after
+      // the application exists: without this upload every start answers "There is no container
+      // application assigned to this Durable Object namespace", for good (found live 2026-10-29;
+      // a Worker deployed again after the application started at once).
+      await cf.upload(script, bare);
+      bareAtRevision = true;
     }
-    // The public sites on the Worker, once the container that builds them runs (`sites.ts`): the
-    // same bindings, so every domain attached is one they record.
-    if (domains && token) await serveSites(cf, { script, url, token, metadata, startTimeoutMs, pollMs });
+    const at = { script, url, token };
+    // 1. Build first.
+    let bundle = await appBundle(cf, { ...at, revision, earlier: !bareAtRevision }, { startTimeoutMs, pollMs });
+    if ("stale" in bundle && !bareAtRevision) {
+      // The deployment cannot build it (another token, a runtime without the route, a revision
+      // whose worker ends): the Worker at R without its app starts R's container, which can; its
+      // pages say the app is being set up until step 2.
+      await cf.upload(script, bare);
+      bundle = await appBundle(cf, { ...at, revision, earlier: false }, { startTimeoutMs, pollMs });
+    }
+    if ("stale" in bundle) throw refused(`${script}: no app bundle at ${revision}: ${bundle.stale}`);
+    const jwt = bundle.assets.length ? await uploadAssets(cf, script, bundle.assets) : undefined;
+    // 2. One upload. A domain declared before and no longer is detached while the bindings still
+    // record it, and a missing one attached once the upload records it: whatever fails in between,
+    // none is left attached and unrecorded, and the next apply attaches what is still missing.
+    for (const domain of attached) {
+      if (before.has(domain.hostname) && !hostnames.has(domain.hostname)) await cf.detachDomain(domain.id);
+    }
+    await cf.upload(script, {
+      ...worker,
+      bindings: [
+        ...bindings,
+        { type: "hyperdrive", name: DATABASE, id: database },
+        ...(jwt ? [{ type: "assets" as const, name: ASSETS }] : []),
+      ],
+      compatibility_date: bundle.compatibilityDate,
+      compatibility_flags: bundle.compatibilityFlags,
+      ...(jwt && { assets: { jwt, config: ASSETS_CONFIG } }),
+      modules: [...entry, ...appModules(script, bundle)],
+    });
+    for (const [domain, zone] of missing) await cf.attachDomain(script, domain, zone);
+    // 3. Restart last.
+    await restarted(cf, at, revision, configurationRevision);
     const state: ContainerState = {
       id: app.id,
       name,
@@ -697,22 +804,24 @@ export function containerOps(
       }: { id: string; desired: Record<string, unknown>; expect?: { action: PlanAction; replace: string[] } },
       call: CallContext,
     ) => {
-      const { planned: fresh, sitesOnly } = await diff({ id, desired });
-      replanned(`${type.type}.update`, fresh, expect);
-      if (fresh.action === "none") {
-        const found = await read({ id });
-        if (found.state) {
-          // Matching bindings also describe a rollout whose startup failed. An explicit update
-          // confirms readiness even when there is nothing to upload; read/plan remain passive.
-          const { revision, configurationRevision } = container.schema
-            .pick({ revision: true, configurationRevision: true })
-            .parse(desired);
-          if (!revision) throw refused(`container ${id}: no revision to confirm`);
-          await started(api(), scriptOf(id), found.state.worker_url, revision, configurationRevision);
-          return { id, state: { ...found.state, healthy: true } };
-        }
+      const fresh = await plan({ id, desired });
+      if (fresh.action !== "none") {
+        replanned(`${type.type}.update`, fresh, expect);
+        return put(desired, call);
       }
-      return put(desired, call, sitesOnly);
+      // The Worker runs what is declared: the restart alone, which confirms it (matching bindings
+      // also describe a deploy whose restart did not finish). Read and plan remain passive.
+      // The token resolved alone: a restart reads no other secret, and uploads none.
+      const state = fresh.planned as ContainerState;
+      if (!state.revision) throw refused(`container ${id}: no revision to confirm`);
+      const declaredToken = (desired.secrets as Record<string, unknown> | null | undefined)?.[WAKEUP_TOKEN];
+      const token =
+        declaredToken === undefined
+          ? await call.secrets.ensure(WAKEUP_TOKEN, mintInstanceToken)
+          : String(await resolveSecrets(declaredToken, call.secrets));
+      const at = { script: scriptOf(id), url: state.worker_url, token };
+      await restarted(api(), at, state.revision, state.configurationRevision);
+      return { id, state: { ...state, healthy: true } };
     },
     delete: async ({ id }: { id: string }) => {
       const cf = api();
@@ -729,6 +838,9 @@ export function containerOps(
       const app = await cf.application(script);
       if (app) await cf.deleteApplication(app.id);
       await cf.deleteScript(script);
+      // After the Worker, which binds it.
+      const database = await cf.hyperdrive(script);
+      if (database) await cf.deleteHyperdrive(database.id);
       return { id, gone: true as const };
     },
   };

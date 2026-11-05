@@ -28,7 +28,8 @@ it("rolls out a rotated bootstrap at the same source and image, then converges",
     opId: "cloudflare.container.update",
     attempt: 1,
     idempotencyKey: `rollout-${++calls}`,
-    secrets: memorySecrets({ BOOTSTRAP: value }),
+    // The instance token as a store keeps it: the running container takes the bundle's ask only with its own.
+    secrets: memorySecrets({ BOOTSTRAP: value, SANOMA_WAKEUP_TOKEN: "rollout-instance-token" }),
   });
   const desired = {
     name: "rollout",
@@ -38,7 +39,11 @@ it("rolls out a rotated bootstrap at the same source and image, then converges",
     image: "ghcr.io/sanoma-ai/runtime:0.10.12",
     port: 3000,
     configurationRevision: "d1-g1",
-    secrets: { SANOMA_MANAGED_IDENTITY_CREDENTIAL: { $secret: "BOOTSTRAP" } },
+    secrets: {
+      SANOMA_MANAGED_IDENTITY_CREDENTIAL: { $secret: "BOOTSTRAP" },
+      // Made up: Hyperdrive's origin is made of it, and nothing connects to it.
+      SANOMA_DATABASE_URL: "postgresql://sanoma:test@db.acme.example:5432/company",
+    },
   };
   const run = (name: string, input: object, value = "synthetic-first-bootstrap") =>
     fake.driver.ops[`container.${name}`]!(input, context(value));
@@ -89,7 +94,10 @@ function pendingRollout(type: typeof container | typeof host, start: () => Promi
     image: "ghcr.io/sanoma-ai/runtime:0.11.6",
     configurationRevision: "d1-g2",
     port: 3000,
-    secrets: { SANOMA_MANAGED_IDENTITY_CREDENTIAL: { $secret: "BOOTSTRAP" } },
+    secrets: {
+      SANOMA_MANAGED_IDENTITY_CREDENTIAL: { $secret: "BOOTSTRAP" },
+      SANOMA_DATABASE_URL: { $secret: "DATABASE_URL" },
+    },
   };
   const text = {
     SANOMA_SOURCE: desired.source,
@@ -116,6 +124,10 @@ function pendingRollout(type: typeof container | typeof host, start: () => Promi
     bindings: async () => [
       { type: "durable_object_namespace", name: "SANOMA_INSTANCE" },
       { type: "secret_text", name: "SANOMA_MANAGED_IDENTITY_CREDENTIAL" },
+      { type: "secret_text", name: "SANOMA_DATABASE_URL" },
+      { type: "secret_text", name: "SANOMA_WAKEUP_TOKEN" },
+      // The app's upload made: the database bound.
+      { type: "hyperdrive", name: "DATABASE", id: "retry-database" },
       ...Object.entries(text).map(([name, value]) => ({ type: "plain_text", name, text: value })),
     ],
     send,

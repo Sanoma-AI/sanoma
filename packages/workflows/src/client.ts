@@ -372,11 +372,11 @@ export class SanomaClient {
     const args: RunArgs = { input, startedBy, ...(sandbox === undefined ? {} : { sandbox }), ...(hold && { hold }) };
     // Kept on the run's status row too, so a listing tells sandbox runs apart without its input,
     // and says whom an agent's run is for (DBOS keeps the principal's id and groups itself); a
-    // change run's code, so a worker on another version with the same takes it over.
+    // built-in run's code, so a worker on another version with the same takes it over.
     const attributes = {
       sandbox,
       onBehalfOf: startedBy.onBehalfOf,
-      changeCode: workflow.name === CHANGE_WORKFLOW ? this.config.changeCode : undefined,
+      builtInCode: this.config.builtInCodes[workflow.name],
     };
     this.options.onWrite?.();
     // An id DBOS has already returns that run, unless it is another workflow's, which DBOS refuses.

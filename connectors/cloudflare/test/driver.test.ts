@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { isDeepStrictEqual } from "node:util";
 import { type Exchange, live, replay } from "@sanoma-ai/testing/replay";
 import { type CallContext, memorySecrets } from "@sanoma-ai/workflows";
 import { delay, http, HttpResponse } from "msw";
@@ -37,7 +36,9 @@ let driver: ReturnType<typeof cloudflareDriver>;
 beforeEach(() => {
   driver = cloudflareDriver({ timeoutMs: 200, startTimeoutMs: 1_000, pollMs: 1 });
 });
-const op = (name: string, input: object, call = callWith({ SANOMA_WAKEUP_TOKEN: TOKEN })) =>
+/** The host's database, as its secret holds it: Hyperdrive's origin is made of it. */
+const DATABASE_URL = "postgresql://sanoma:p%40ss@db.acme.example:5432/company";
+const op = (name: string, input: object, call = callWith({ SANOMA_WAKEUP_TOKEN: TOKEN, DB_URL: DATABASE_URL })) =>
   driver.ops[name]!(input, call);
 
 const desired = {
@@ -47,7 +48,10 @@ const desired = {
   ref: "main",
   revision: "abc123",
   port: 3000,
-  secrets: { SANOMA_WAKEUP_TOKEN: { $secret: "SANOMA_WAKEUP_TOKEN" } },
+  secrets: {
+    SANOMA_WAKEUP_TOKEN: { $secret: "SANOMA_WAKEUP_TOKEN" },
+    SANOMA_DATABASE_URL: { $secret: "DB_URL" },
+  },
 };
 const state = {
   id: "00000000-0000-4000-8000-000000000001",
@@ -65,14 +69,17 @@ const state = {
 /** The exchanges of `name` that match `keep`. */
 const only = (name: string, keep: (e: Exchange, i: number) => boolean) => fixture(name).filter(keep);
 const apiPath = (path: string) => `${API}${path}`;
-/** The create of the `sites` fixture up to its wait for the container, then `bundle`'s answers. */
-const sitesWith = (...bundle: Exchange[]) => [
-  ...only("sites", (e) => e.path !== "/__sanoma/sites-bundle").slice(0, 12),
-  ...bundle,
+const BUNDLE = "/__sanoma/app-bundle?revision=abc123";
+/** The create of the `create` fixture up to its first ask for the app bundle, then `asks`. */
+const createWith = (...asks: Exchange[]) => [
+  ...fixture("create").slice(
+    0,
+    fixture("create").findIndex((e) => e.path === BUNDLE),
+  ),
+  ...asks,
 ];
-/** The header the container's bundle route marks its answers with. */
-const ROUTE = { "x-sanoma-sites-bundle": "1" };
-const withSites = { ...desired, domains: { www: "www.acme.example" } };
+/** The header the worker's bundle route marks its answers with. */
+const ROUTE = { "x-sanoma-app-bundle": "1" };
 const reply = (path: string, status: number, body: unknown, method = "GET"): Exchange => ({
   method,
   path,
@@ -100,16 +107,15 @@ async function formOf(request: (typeof sent)[number]) {
     headers: { "content-type": request.headers.get("content-type")! },
   }).formData();
 }
-/** Cloudflare's reply to an upload of the Worker. */
-const workerUploaded = () =>
-  fixture("sites").find((e) => e.method === "PUT" && e.path.endsWith("/scripts/sanoma-company"))!;
 /** An upload form's `metadata` part, the JSON. */
 async function metadataOf(form: FormData) {
   return JSON.parse(await (form.get("metadata") as File).text());
 }
-/** The metadata of the upload among the requests sent. */
+/** The metadata of the Worker's last upload among the requests sent. */
 async function uploaded() {
-  return metadataOf(await formOf(sent.find((r) => r.method === "PUT" && r.path.startsWith(API))!));
+  return metadataOf(
+    await formOf(sent.findLast((r) => r.method === "PUT" && r.path === `${API}/workers/scripts/sanoma-company`)!),
+  );
 }
 
 /** `e`, a Worker's settings, with one more plain-text binding. */
@@ -157,7 +163,10 @@ const registryCredentials = reply(
   "POST",
 );
 
-/** A rename's requests up to its upload, from the Worker serving `old.acme.example`: its plan, its reads, the detach of the old name. */
+/**
+ * A rename's requests up to its upload, from the Worker serving `old.acme.example`: its plan, its
+ * reads, the image's preparation, the database's config, the bundle, then the detach of the old name.
+ */
 const renameUntilUpload = (updated: Exchange[]) => {
   const attached = attachedDomains("old.acme.example");
   return [
@@ -168,7 +177,7 @@ const renameUntilUpload = (updated: Exchange[]) => {
     withText(updated[3]!, "SANOMA_HOSTNAME", "old.acme.example"),
     attached,
     zoneLookup(),
-    updated[4]!,
+    ...updated.slice(4, 12),
     detached("d1"),
   ];
 };
@@ -196,6 +205,10 @@ describe.skipIf(live)("cloudflareDriver", () => {
         // Pending, then ready: polled before anything changes.
         `POST ${PREPARATIONS}`,
         `POST ${PREPARATIONS}`,
+        // The database's config, made before the Worker that binds it.
+        "GET /hyperdrive/configs?per_page=50",
+        "POST /hyperdrive/configs",
+        // Without an app until its first bundle.
         "PUT /workers/scripts/sanoma-company",
         "POST /workers/scripts/sanoma-company/subdomain",
         "GET /containers/applications?name=sanoma-company",
@@ -203,15 +216,39 @@ describe.skipIf(live)("cloudflareDriver", () => {
         "POST /containers/applications",
         // Again, once the application exists: the object's namespace learns it from this deployment.
         "PUT /workers/scripts/sanoma-company",
+        // 1. The bundle: the object starts the container, then the worker builds it.
+        `GET ${BUNDLE}`,
+        `GET ${BUNDLE}`,
+        `GET ${BUNDLE}`,
+        "POST /workers/scripts/sanoma-company/assets-upload-session",
+        "POST /workers/assets/upload?base64=true",
+        // 2. One upload.
+        "PUT /workers/scripts/sanoma-company",
+        // 3. The restart.
         "GET /__sanoma/health?start=1",
       ]);
       // Compared, not printed: a failure must not show a live token.
-      expect(sent.slice(0, 10).every((r) => r.headers.get("authorization") === "Bearer test-token")).toBe(true);
-      const again = await metadataOf(await formOf(sent[9]!));
+      expect(sent.slice(0, 12).every((r) => r.headers.get("authorization") === "Bearer test-token")).toBe(true);
+      expect(sent.slice(12, 15).every((r) => r.headers.get("authorization") === `Bearer ${TOKEN}`)).toBe(true);
+      expect(sent.at(-1)!.headers.get("authorization") === `Bearer ${TOKEN}`).toBe(true);
+      const again = await metadataOf(await formOf(sent[11]!));
       expect(again.migrations).toBeUndefined();
       expect(sent[2]!.body).toEqual({ image: PINNED });
+      // Query caching off, over the declared URL, its password decoded.
+      expect(sent[5]!.body).toEqual({
+        name: "sanoma-company",
+        origin: {
+          scheme: "postgresql",
+          host: "db.acme.example",
+          port: 5432,
+          database: "company",
+          user: "sanoma",
+          password: "p@ss",
+        },
+        caching: { disabled: true },
+      });
 
-      const upload = sent[4]!;
+      const upload = sent[6]!;
       expect(upload.headers.get("content-type")).toMatch(/^multipart\/form-data; boundary=/);
       const form = await formOf(upload);
       // One `metadata` part, the JSON, as Cloudflare reads it; the modules as parts named after them.
@@ -232,20 +269,27 @@ describe.skipIf(live)("cloudflareDriver", () => {
         "PORT",
         "SANOMA_HOST_URL",
         "SANOMA_WAKEUP_TOKEN",
+        "SANOMA_DATABASE_URL",
       ]);
       expect(metadata.bindings.map((b: { text?: string }) => b.text)).toContain(URL_OF);
-      // The secret goes as a secret binding, resolved at the call.
-      expect(metadata.bindings.at(-1)).toMatchObject({ type: "secret_text", text: TOKEN });
-      const files = ["index.js", "instance.js"].map((name) => form.get(name) as File);
+      // The secrets go as secret bindings, resolved at the call.
+      expect(metadata.bindings.slice(-2)).toMatchObject([
+        { type: "secret_text", text: TOKEN },
+        { type: "secret_text", text: DATABASE_URL },
+      ]);
+      const files = ["index.js", "instance.js", "app/index.js"].map((name) => form.get(name) as File);
       expect(files.map((f) => [f.name, f.type])).toEqual([
         ["index.js", "application/javascript+module"],
         ["instance.js", "application/javascript+module"],
+        ["app/index.js", "application/javascript+module"],
       ]);
       expect(await files[0]!.text()).toContain('from "cloudflare:workers"');
+      // No app yet: the placeholder.
+      expect(await files[2]!.text()).toContain("being set up");
 
-      expect(sent[5]!.body).toEqual({ enabled: true });
+      expect(sent[7]!.body).toEqual({ enabled: true });
       // The policy's whole body: the image and the instance type are the object's.
-      expect(sent[8]!.body).toEqual({
+      expect(sent[10]!.body).toEqual({
         name: "sanoma-company",
         scheduling_policy: "durable_object",
         // The namespace the upload made, as the Worker's settings name it.
@@ -477,10 +521,10 @@ describe.skipIf(live)("cloudflareDriver", () => {
       expect(await op("container.read", { id: "company" })).toEqual({ id: "company", gone: true });
     });
 
-    it("deletes the application, then the Worker with its object's storage", async () => {
+    it("deletes the application, then the Worker with its object's storage, then its database's config", async () => {
       play(
         "delete-only",
-        only("delete", (_, i) => i >= 10 && i < 14),
+        only("delete", (_, i) => i >= 18 && i < 24),
       );
       expect(await op("container.delete", { id: "company" })).toEqual({ id: "company", gone: true });
       expect(sent.map((r) => `${r.method} ${r.path.replace(API, "")}`)).toEqual([
@@ -488,6 +532,9 @@ describe.skipIf(live)("cloudflareDriver", () => {
         "GET /containers/applications?name=sanoma-company",
         "DELETE /containers/applications/00000000-0000-4000-8000-000000000001",
         "DELETE /workers/scripts/sanoma-company?force=true",
+        // After the Worker that binds it.
+        "GET /hyperdrive/configs?per_page=50",
+        "DELETE /hyperdrive/configs/1e2d3c4b5a69788796a5b4c3d2e1f001",
       ]);
     });
 
@@ -529,63 +576,34 @@ describe.skipIf(live)("cloudflareDriver", () => {
       ]);
     });
 
-    it("serves the public sites from the Worker once its container built them: the bundle, an assets session, and the Worker uploaded again", async () => {
-      const domains = { www: "www.acme.example" };
-      play("sites");
-      expect(await op("container.create", { desired: { ...desired, domains } })).toEqual({
-        id: "company",
-        state: { ...state, domains },
-      });
-      const steps = sent.map((r) => `${r.method} ${r.path.replace(API, "")}`);
-      expect(steps.slice(steps.indexOf("GET /__sanoma/health?start=1"))).toEqual([
-        "GET /__sanoma/health?start=1",
-        // Building, then built: asked again until it is.
-        "GET /__sanoma/sites-bundle",
-        "GET /__sanoma/sites-bundle",
-        "POST /workers/scripts/sanoma-company/assets-upload-session",
-        "POST /workers/assets/upload?base64=true",
-        "PUT /workers/scripts/sanoma-company",
-      ]);
-      const [asked, , session, assets, upload] = sent.slice(-5);
-      // The container's route takes the instance token; the assets upload, the session's jwt.
-      expect(asked!.headers.get("authorization") === `Bearer ${TOKEN}`).toBe(true);
-      expect(assets!.headers.get("authorization")).toBe("Bearer eyJhbGciOiJIUzI1NiJ9.session.signature");
-      const bundle = only("sites", (e) => e.path === "/__sanoma/sites-bundle" && e.status === 200)[0]!.body as {
-        assets: { path: string; content: string }[];
+    it("builds the app bundle first, then uploads the Worker once with it, its assets and its database, and restarts the container last", async () => {
+      play("create");
+      await op("container.create", { desired });
+      const bundle = only("create", (e) => e.path === BUNDLE && e.status === 200)[0]!.body as {
+        assets: { path: string; content: string; hash: string; size: number }[];
       };
-      const [script, page] = bundle.assets;
-      expect(session!.body).toEqual({
-        manifest: {
-          [script!.path]: { hash: hashOf(script!.content, "js"), size: Buffer.from(script!.content, "base64").length },
-          [page!.path]: { hash: hashOf(page!.content, "html"), size: Buffer.from(page!.content, "base64").length },
-        },
-      });
-      // One part per asset the bucket names, by its hash: its base64, and the type it is served with.
-      const files = await formOf(assets!);
-      const parts = [hashOf(script!.content, "js"), hashOf(page!.content, "html")].map(
-        (hash) => files.get(hash) as File,
-      );
-      expect(await Promise.all(parts.map(async (f) => [f.type, await f.text()]))).toEqual([
-        ["text/javascript", script!.content],
-        ["text/html", page!.content],
-      ]);
-      // The Worker as the deploy uploaded it, with the sites router its entry, the bundle under
-      // `sites/`, and the assets the session put in bound.
-      const form = await formOf(upload!);
-      const metadata = await metadataOf(form);
-      const deployed = await metadataOf(
-        await formOf(
-          sent.findLast((r) => r !== upload && r.method === "PUT" && r.path.endsWith("/scripts/sanoma-company"))!,
-        ),
-      );
-      // The deploy's upload says the sites' is still to be made; the sites' takes that off.
-      const pending = { type: "plain_text", name: "SANOMA_SITES_PENDING", text: "1" };
-      expect(deployed.bindings).toContainEqual(pending);
-      expect(metadata).toEqual({
-        ...deployed,
-        main_module: "sites.js",
+      const [asset] = bundle.assets;
+      const session = sent.find((r) => r.path.endsWith("/assets-upload-session"))!;
+      expect(session.body).toEqual({ manifest: { [asset!.path]: { hash: asset!.hash, size: asset!.size } } });
+      expect(asset!.hash).toBe(hashOf(asset!.content, "js"));
+      // One part per asset the bucket names, by its hash: its base64, and the type it is served with,
+      // the session's jwt, not the account's token.
+      const assets = sent.find((r) => r.path.endsWith("/workers/assets/upload?base64=true"))!;
+      expect(assets.headers.get("authorization")).toBe("Bearer eyJhbGciOiJIUzI1NiJ9.session.signature");
+      const part = (await formOf(assets)).get(asset!.hash) as File;
+      expect([part.type, await part.text()]).toEqual(["text/javascript", asset!.content]);
+
+      const puts = sent.filter((r) => r.method === "PUT" && r.path.endsWith("/scripts/sanoma-company"));
+      const [bare, full] = await Promise.all([puts[1]!, puts[2]!].map(async (r) => metadataOf(await formOf(r))));
+      const form = await formOf(puts[2]!);
+      // The bundle's runtime, its modules under `app/` beside the package's, the assets and the database bound.
+      expect(full).toEqual({
+        ...bare,
+        compatibility_date: "2026-10-01",
+        compatibility_flags: ["nodejs_compat"],
         bindings: [
-          ...deployed.bindings.filter((b: object) => !isDeepStrictEqual(b, pending)),
+          ...bare.bindings,
+          { type: "hyperdrive", name: "DATABASE", id: "1e2d3c4b5a69788796a5b4c3d2e1f001" },
           { type: "assets", name: "ASSETS" },
         ],
         assets: {
@@ -593,127 +611,148 @@ describe.skipIf(live)("cloudflareDriver", () => {
           config: { html_handling: "none", not_found_handling: "none", run_worker_first: ["/*", "!/assets/*"] },
         },
       });
-      const modules = ["index.js", "instance.js", "sites.js", "sites/index.js", "sites/chunk.js", "sites/cedar.wasm"];
+      expect(bare.compatibility_flags).toEqual([]);
+      const modules = ["index.js", "instance.js", "app/index.js", "app/chunk.js", "app/cedar.wasm"];
       expect(modules.map((name) => [name, (form.get(name) as File | null)?.type])).toEqual([
         ["index.js", "application/javascript+module"],
         ["instance.js", "application/javascript+module"],
-        ["sites.js", "application/javascript+module"],
-        ["sites/index.js", "application/javascript+module"],
-        ["sites/chunk.js", "application/javascript+module"],
-        ["sites/cedar.wasm", "application/wasm"],
+        ["app/index.js", "application/javascript+module"],
+        ["app/chunk.js", "application/javascript+module"],
+        ["app/cedar.wasm", "application/wasm"],
       ]);
-      expect(await (form.get("sites.js") as File).text()).toContain('from "./sites/index.js"');
-      // Deleted as any: its assets go with it.
-      expect(await op("container.delete", { id: "company" })).toEqual({ id: "company", gone: true });
-      expect(await op("container.read", { id: "company" })).toEqual({ id: "company", gone: true });
+      expect(await (form.get("app/index.js") as File).text()).toContain('import "./chunk.js"');
     });
 
-    it("refuses when the container could not build the sites bundle, saying why", async () => {
+    it("updates in the same three steps, setting the database's config again and uploading no asset Cloudflare has", async () => {
+      play("update-to-a-new-image");
+      await update({ desired: { ...desired, image: PINNED_NEXT, revision: "def456" } });
+      expect(requests().filter((r) => !r.startsWith("GET /workers") && !r.includes(PREPARATIONS))).toEqual([
+        "GET /containers/applications?name=sanoma-company",
+        "GET /hyperdrive/configs?per_page=50",
+        "PUT /hyperdrive/configs/1e2d3c4b5a69788796a5b4c3d2e1f001",
+        "POST /workers/scripts/sanoma-company/subdomain",
+        "GET /containers/applications?name=sanoma-company",
+        // The worker at abc123 builds def456 in a checkout of it.
+        "GET /__sanoma/app-bundle?revision=def456",
+        "GET /__sanoma/app-bundle?revision=def456",
+        "POST /workers/scripts/sanoma-company/assets-upload-session",
+        "PUT /workers/scripts/sanoma-company",
+        // At abc123 still, then at def456: the object drained it and started the new one.
+        "GET /__sanoma/health?start=1",
+        "GET /__sanoma/health?start=1",
+      ]);
+      const upload = await uploaded();
+      expect(upload.assets.jwt).toBe("eyJhbGciOiJIUzI1NiJ9.completion.signature");
+    });
+
+    it("refuses when the worker could not build the bundle, saying why", async () => {
       const error = "sites/www/routes/index.tsx: Unexpected token";
-      play("sites-failed", sitesWith({ ...reply("/__sanoma/sites-bundle", 500, { error }), headers: ROUTE }));
-      await expect(op("container.create", { desired: withSites })).rejects.toThrow(
-        `cloudflare: sanoma-company: its container did not give the sites bundle (its sites are served from the container meanwhile): ${error}`,
-      );
-    });
-
-    it("asks again while the container starts again, and uploads the Worker as deployed for a runtime without the route", async () => {
-      // The object's 503 while the container restarts; then an image from before the route, whose
-      // staff login refuses the path with its sign-in page.
-      const restarting = reply("/__sanoma/sites-bundle", 503, { error: "the company's container did not answer" });
-      const signIn = reply("/__sanoma/sites-bundle", 401, "<!doctype html><title>Sign in</title>");
-      play("sites-old-runtime", sitesWith(restarting, signIn, workerUploaded()));
-      expect(await op("container.create", { desired: withSites })).toMatchObject({ id: "company" });
-      const puts = sent.filter((r) => r.method === "PUT" && r.path.endsWith("/scripts/sanoma-company"));
-      expect(puts).toHaveLength(3);
-      // The last, the deploy's upload again without the mark of a sites upload still to be made.
-      const [deployed, last] = await Promise.all([puts[1]!, puts[2]!].map(async (r) => metadataOf(await formOf(r))));
-      expect(last).toEqual({
-        ...deployed,
-        bindings: deployed.bindings.filter((b: { name: string }) => b.name !== "SANOMA_SITES_PENDING"),
+      play("bundle-failed", createWith({ ...reply(BUNDLE, 500, { error }), headers: ROUTE }));
+      await expect(op("container.create", { desired })).rejects.toMatchObject({
+        retryable: false,
+        message: `cloudflare: sanoma-company: no app bundle at abc123: ${error}`,
       });
-      expect(last.bindings).not.toContainEqual(expect.objectContaining({ type: "assets" }));
     });
 
     it.each([
-      ["an error of Cloudflare's", reply("/__sanoma/sites-bundle", 502, "bad gateway"), "answered 502"],
+      ["another token", reply("/__sanoma/app-bundle?revision=def456", 401, { error: "the token is not this host's" })],
+      ["a runtime without the route", reply("/__sanoma/app-bundle?revision=def456", 404, "<!doctype html>Not found")],
+      ["a worker that ends", reply("/__sanoma/app-bundle?revision=def456", 503, { error: "it ended", exit: "exit 1" })],
+    ])(
+      "recovers a deployment that cannot build the bundle (%s) by running the Worker at the revision without its app first",
+      async (_, stale) => {
+        const updated = fixture("update-to-a-new-image");
+        const placeholder = updated[12]!;
+        play("bundle-stale", [...updated.slice(0, 9), stale, placeholder, ...updated.slice(9)]);
+        await update({ desired: { ...desired, image: PINNED_NEXT, revision: "def456" } });
+        const puts = sent.filter((r) => r.method === "PUT" && r.path.endsWith("/scripts/sanoma-company"));
+        expect(puts).toHaveLength(2);
+        const first = await formOf(puts[0]!);
+        expect(await (first.get("app/index.js") as File).text()).toContain("being set up");
+        expect((await metadataOf(first)).bindings).toContainEqual({
+          type: "plain_text",
+          name: "SANOMA_REVISION",
+          text: "def456",
+        });
+        expect(requests().filter((r) => r.includes("app-bundle"))).toHaveLength(3);
+      },
+    );
+
+    it("stops asking for the bundle when the object says the container ended", async () => {
+      const ended = reply(BUNDLE, 503, {
+        error: "the company's container did not start: the container exited",
+        exit: "the container exited",
+      });
+      play("bundle-exit", createWith(ended));
+      await expect(op("container.create", { desired })).rejects.toThrow("no app bundle at abc123");
+    });
+
+    it.each([
+      ["an error of Cloudflare's", reply(BUNDLE, 502, "bad gateway"), "answered 502"],
       [
-        "the app's 500 without the mark",
-        reply("/__sanoma/sites-bundle", 500, { error: "Internal error" }),
-        "Internal error",
+        "the object's 503 while the container restarts",
+        reply(BUNDLE, 503, { error: "did not answer" }),
+        "did not answer",
       ],
-      ["a timeout of Cloudflare's", reply("/__sanoma/sites-bundle", 504, ""), "answered 504"],
-      [
-        "a bundle cut off",
-        { ...reply("/__sanoma/sites-bundle", 200, '{"sites":["www"],"mainMod'), headers: ROUTE },
-        "cut off",
-      ],
-    ])("asks again on %s, and fails retryably once the start's time is up", async (_, answer, said) => {
+      ["a bundle cut off", { ...reply(BUNDLE, 200, '{"version":"abc123","mainMod'), headers: ROUTE }, "answered 200"],
+    ])("asks again on %s, and fails retryably once the bundle's own time is up", async (_, answer, said) => {
       const slow = cloudflareDriver({ timeoutMs: 200, startTimeoutMs: 30, pollMs: 5 });
-      play("sites-unanswered", sitesWith());
+      play("bundle-unanswered", createWith());
       let asked = 0;
       const body = typeof answer.body === "string" ? answer.body : JSON.stringify(answer.body);
       server.use(
-        http.get("*/__sanoma/sites-bundle", () => {
+        http.get("*/__sanoma/app-bundle", () => {
           asked++;
           return new HttpResponse(body, { status: answer.status, headers: answer.headers });
         }),
       );
       await expect(
-        slow.ops["container.create"]!({ desired: withSites }, callWith({ SANOMA_WAKEUP_TOKEN: TOKEN })),
+        slow.ops["container.create"]!({ desired }, callWith({ SANOMA_WAKEUP_TOKEN: TOKEN, DB_URL: DATABASE_URL })),
       ).rejects.toMatchObject({
         name: "DriverError",
         retryable: true,
-        message: expect.stringMatching(new RegExp(`no sites bundle from its container in 0 s.*${said}`)),
+        message: expect.stringMatching(new RegExp(`still building the app bundle at abc123 after 0 s: .*${said}`)),
       });
       expect(asked).toBeGreaterThan(1);
     });
 
-    it("reads a Worker whose sites upload did not follow as drift, and the update makes that upload alone", async () => {
-      // The Worker as the deploy uploaded it, still marked: its sites upload failed.
-      const [settings, app, subdomain] = only("update-to-a-new-image", (_, i) => i < 3);
-      const deployed = withText(
-        withText(settings!, "SANOMA_DOMAINS", "www=www.acme.example"),
-        "SANOMA_SITES_PENDING",
-        "1",
+    it("confirms an update whose upload is made by the restart alone, though the update approved was a deploy", async () => {
+      // The Worker runs def456 already: a deploy that died in its restart, or the worker that ran it restarted.
+      const [settings, app, subdomain] = only("update-to-a-new-image", (_, i) => i < 3).map((e) =>
+        JSON.parse(JSON.stringify(e).replaceAll('"text":"abc123"', '"text":"def456"')),
       );
-      const domains = attachedDomains("www.acme.example");
-      const preparation = only("update-to-a-new-image", (e) => e.path.endsWith(PREPARATIONS))[0]!;
-      const [bundle, ...upload] = only("sites", (_, i) => i >= 13 && i <= 16);
-      play("sites-pending", [
-        // The plan.
-        deployed,
+      play("restart-alone", [
+        settings!,
         app!,
         subdomain!,
-        domains,
-        // The update: its plan again, its reads, the image's preparation, then the sites' upload.
-        deployed,
-        app!,
-        domains,
-        deployed,
-        domains,
-        preparation,
-        app!,
-        bundle!,
-        ...upload,
+        // The plan's read is the restart's: no second read.
+        reply("/__sanoma/health?start=1", 202, { revision: "def456", running: true, ready: false }),
+        reply("/__sanoma/health?start=1", 200, { revision: "def456", running: true, ready: true }),
       ]);
-      const planned = await op("container.plan", { id: "company", desired: withSites });
-      expect(planned).toMatchObject({ action: "update", planned: { domains: withSites.domains } });
-      expect(await update({ desired: withSites })).toEqual({
+      expect(await update({ desired: { ...desired, revision: "def456" } })).toEqual({
         id: "company",
-        state: { ...state, domains: withSites.domains },
+        state: { ...state, revision: "def456" },
       });
-      // No upload of the Worker as deployed, no domain attached, no wait for its revision: the sites' alone.
-      const changes = sent.filter((r) => r.method !== "GET" && !r.path.endsWith(PREPARATIONS));
-      expect(changes.map((r) => `${r.method} ${r.path.replace(API, "")}`)).toEqual([
-        "POST /workers/scripts/sanoma-company/assets-upload-session",
-        "POST /workers/assets/upload?base64=true",
-        "PUT /workers/scripts/sanoma-company",
-      ]);
-      expect(sent.some((r) => r.path.startsWith("/__sanoma/health"))).toBe(false);
-      const { main_module, bindings } = await metadataOf(await formOf(changes.at(-1)!));
-      expect(main_module).toBe("sites.js");
-      expect(bindings).toContainEqual({ type: "assets", name: "ASSETS" });
-      expect(bindings).not.toContainEqual(expect.objectContaining({ name: "SANOMA_SITES_PENDING" }));
+      expect(sent.some((r) => r.method === "PUT" || r.path.includes("app-bundle"))).toBe(false);
+    });
+
+    it("refuses a host without its database's URL, or with one Hyperdrive cannot take, before any request", async () => {
+      const { SANOMA_DATABASE_URL: _url, ...secrets } = desired.secrets;
+      await expect(op("container.create", { desired: { ...desired, secrets } })).rejects.toThrow(
+        "no SANOMA_DATABASE_URL among its secrets",
+      );
+      await expect(
+        op("container.create", { desired }, callWith({ SANOMA_WAKEUP_TOKEN: TOKEN, DB_URL: "mysql://db/company" })),
+      ).rejects.toMatchObject({ vendorCode: "invalid", message: expect.not.stringContaining("mysql://") });
+      // A password with a malformed escape.
+      await expect(
+        op(
+          "container.create",
+          { desired },
+          callWith({ SANOMA_WAKEUP_TOKEN: TOKEN, DB_URL: "postgres://u:50%zz@db/x" }),
+        ),
+      ).rejects.toMatchObject({ vendorCode: "invalid", message: expect.not.stringContaining("50%zz") });
+      expect(sent).toEqual([]);
     });
 
     it("plans an update when a domain the Worker serves is not attached, so the next apply attaches it", async () => {
@@ -807,12 +846,7 @@ describe.skipIf(live)("cloudflareDriver", () => {
 
     it("detaches a renamed hostname before the upload and attaches the new one after it, the app at the new one", async () => {
       const updated = fixture("update-to-a-new-image");
-      play("hostname-rename", [
-        ...renameUntilUpload(updated),
-        ...updated.slice(5, 8),
-        attachedNew,
-        ...updated.slice(8),
-      ]);
+      play("hostname-rename", [...renameUntilUpload(updated), updated[12]!, attachedNew, ...updated.slice(13)]);
       expect(await update({ desired: renamed })).toEqual({ id: "company", state: renamedState });
       // Detached while the bindings still name it; attached once they name the new one.
       expect(requests().filter((r) => /^(PUT|DELETE) \/workers\/(domains|scripts\/sanoma-company)/.test(r))).toEqual([
@@ -848,10 +882,9 @@ describe.skipIf(live)("cloudflareDriver", () => {
         withText(updated[3]!, "SANOMA_HOSTNAME", "old.acme.example"),
         attachedDomains(),
         zoneLookup(),
-        updated[4]!,
-        ...updated.slice(5, 8),
+        ...updated.slice(4, 13),
         attachedNew,
-        updated[9]!,
+        updated[14]!,
       ]);
       await expect(update({ desired: renamed })).rejects.toMatchObject({ name: "DriverError", status: 400 });
       // Nothing attached that the bindings do not name: the old hostname is gone, the new one not attached yet.
@@ -872,14 +905,14 @@ describe.skipIf(live)("cloudflareDriver", () => {
         ...updated.slice(0, 4),
         attachedDomains(),
         zoneLookup(),
-        ...updated.slice(4, 8),
+        ...updated.slice(4, 13),
         attachRefused,
       ]);
       const withSite = { ...desired, revision: "def456", domains: { www: "www.acme.example" } };
       await expect(
         op("container.update", { id: "company", desired: withSite, expect: { action: "update", replace: [] } }),
       ).rejects.toMatchObject({ name: "DriverError", status: 409 });
-      const puts = sent.filter((r) => r.method === "PUT").map((r) => r.path);
+      const puts = sent.filter((r) => r.method === "PUT" && !r.path.includes("/hyperdrive/")).map((r) => r.path);
       expect(puts).toEqual([apiPath("/workers/scripts/sanoma-company"), apiPath("/workers/domains")]);
     });
 
@@ -925,7 +958,7 @@ describe.skipIf(live)("cloudflareDriver", () => {
       expect(sent).toEqual([]);
     });
 
-    it("fails when the Worker does not answer at the revision in time, saying what it answered", async () => {
+    it("fails retryably when the container is not restarted at the revision in its own time, saying what it runs", async () => {
       const slow = cloudflareDriver({ timeoutMs: 200, startTimeoutMs: 30, pollMs: 5 });
       play(
         "stale",
@@ -933,11 +966,12 @@ describe.skipIf(live)("cloudflareDriver", () => {
       );
       server.use(http.get("*/__sanoma/health", () => HttpResponse.json({ revision: "older" })));
       await expect(
-        slow.ops["container.create"]!({ desired }, callWith({ SANOMA_WAKEUP_TOKEN: TOKEN })),
+        slow.ops["container.create"]!({ desired }, callWith({ SANOMA_WAKEUP_TOKEN: TOKEN, DB_URL: DATABASE_URL })),
       ).rejects.toMatchObject({
         name: "DriverError",
-        retryable: false,
-        message: expect.stringContaining("did not answer at abc123 in 0 s: it runs older"),
+        // The upload is made: the next apply plans none, and waits for the restart alone.
+        retryable: true,
+        message: expect.stringContaining("still starting at abc123 after 0 s: it runs older"),
       });
     });
 
@@ -960,7 +994,7 @@ describe.skipIf(live)("cloudflareDriver", () => {
       );
       const t0 = Date.now();
       await expect(
-        patient.ops["container.create"]!({ desired }, callWith({ SANOMA_WAKEUP_TOKEN: TOKEN })),
+        patient.ops["container.create"]!({ desired }, callWith({ SANOMA_WAKEUP_TOKEN: TOKEN, DB_URL: DATABASE_URL })),
       ).rejects.toMatchObject({
         name: "DriverError",
         retryable: false,
