@@ -60,7 +60,7 @@
     "watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput"
   },
   "dependencies": {
-    "@neondatabase/api-client": "2.7.3"
+    "@neon/sdk": "7.8.0"
   },
   "devDependencies": {
     "@sanoma-ai/testing": "workspace:*",

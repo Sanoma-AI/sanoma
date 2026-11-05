@@ -10,15 +10,15 @@ export const neonApiKey = defineAuthentication({
   async verify({ apiKey }) {
     // Organization- and project-scoped keys return only the organization that owns the key.
     // https://api-docs.neon.tech/reference/getcurrentuserorganizations
-    const { createApiClient } = await import("@neondatabase/api-client");
-    const client = createApiClient({ apiKey, timeout: 10_000 });
-    try {
-      const { data } = await client.getCurrentUserOrganizations();
-      if (data.organizations.length !== 1 || !data.organizations[0]?.id) throw new SecretStoreError("denied");
-      // This endpoint does not attest individual API scopes or key expiry. Do not invent grants.
-      return { account: data.organizations[0].id, scopes: [] };
-    } catch {
+    const raw = await import("@neon/sdk/raw");
+    const client = raw.createClient(
+      raw.createConfig({ auth: () => apiKey, baseUrl: "https://console.neon.tech/api/v2" }),
+    );
+    const { data, error } = await raw.getCurrentUserOrganizations({ client, signal: AbortSignal.timeout(10_000) });
+    if (error !== undefined || data.organizations.length !== 1 || !data.organizations[0]?.id) {
       throw new SecretStoreError("denied");
     }
+    // This endpoint does not attest individual API scopes or key expiry. Do not invent grants.
+    return { account: data.organizations[0].id, scopes: [] };
   },
 });

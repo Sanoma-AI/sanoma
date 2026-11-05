@@ -1,6 +1,6 @@
 # @sanoma-ai/connector-neon
 
-[Neon](https://neon.com) serverless Postgres for [`@sanoma-ai/workflows`](https://www.npmjs.com/package/@sanoma-ai/workflows): a project as the company's database, which pauses when idle and branches for previews, through Neon's own SDK, [`@neondatabase/api-client`](https://www.npmjs.com/package/@neondatabase/api-client).
+[Neon](https://neon.com) serverless Postgres for [`@sanoma-ai/workflows`](https://www.npmjs.com/package/@sanoma-ai/workflows): a project as the company's database, which pauses when idle and branches for previews, through Neon's own SDK, [`@neon/sdk`](https://www.npmjs.com/package/@neon/sdk).
 
 ## Usage
 
@@ -69,7 +69,7 @@ const infrastructure = defineConnection(neon, {
 export default defineConfig({ workflows, connectors: [neon], connections: [infrastructure] });
 ```
 
-`./driver` (`neonDriver`; `neonDriver({ timeoutMs })`, 30 s by default) and `./fake` (`fakeNeon`) are internal entries, for tests. The SDK (and axios with it) loads at the first call, so a worker that never calls Neon does not load it.
+`./driver` (`neonDriver`; `neonDriver({ timeoutMs })`, 30 s by default) and `./fake` (`fakeNeon`) are internal entries, for tests. The SDK loads at the first call, so a worker that never calls Neon does not load it.
 
 ### Authentication
 
