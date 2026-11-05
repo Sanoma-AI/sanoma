@@ -9,6 +9,7 @@ import type {
 import {
   apiNameOf,
   type AvailableApps,
+  CALL_WORKFLOW,
   errorMessage,
   isEnded,
   LIST_LIMIT,
@@ -651,7 +652,7 @@ export const remoteQuery = () =>
   queryOptions({ queryKey: ["remote"], queryFn: () => getRemote(), staleTime: Number.POSITIVE_INFINITY });
 
 /** Every collection's records are under this key, each collection's under its name after it. */
-export const DATA_KEY = ["data"] as const;
+const DATA_KEY = ["data"] as const;
 
 /**
  * A collection's records, as `data.<name>.list` answers this query: called through `api` (the
@@ -662,8 +663,28 @@ export const recordsQuery = (name: string, query: ListQuery<Record<string, unkno
     queryKey: [...DATA_KEY, name, query],
     queryFn: () => (api as UntypedApi).data[name].list(query) as Promise<Saved[]>,
     // Read while the server rendered the page, not again as it hydrates; a save or a delete
-    // refreshes them at once.
+    // writes what it saved into the grid's collection of them (`components/grid/collection.ts`).
     staleTime: 5_000,
+  });
+
+/**
+ * The keys of a collection's records whose save or delete waits for an approval: the pending
+ * policy holds of `data.<name>.save` and `.delete` among the runs waiting (`waitingRunsQuery`,
+ * the Inbox's), so a decision, or the run ending, takes the key off.
+ */
+export const heldQuery = ({ name, key }: Pick<CollectionEntry, "name" | "key">) =>
+  queryOptions({
+    ...waitingRunsQuery(),
+    select: (runs: RunSummary[]) =>
+      runs
+        .filter((run) => run.workflow === CALL_WORKFLOW)
+        .flatMap(pendingApprovals)
+        .flatMap(({ op, input }) => {
+          const held = input as { key?: unknown; record?: Record<string, unknown> } | undefined;
+          const at =
+            op === `data.${name}.save` ? held?.record?.[key] : op === `data.${name}.delete` ? held?.key : undefined;
+          return typeof at === "string" ? [at] : [];
+        }),
   });
 
 /** The choices of the grid's limit, up to `list`'s most; it lists `LIST_LIMIT.default` at first. */
@@ -671,8 +692,9 @@ export const LIMIT_CHOICES = [25, LIST_LIMIT.default, 250, LIST_LIMIT.max] as co
 
 /**
  * The grid's search (`/data/<name>`): `?order=` (a field, or `-field` for descending), `?limit=`,
- * `?key=` (the keys that start with it), `?where=` (an enum field's value, by field), and the
- * record open in the form, `?record=<key>`, or `?new` for a new one. Anything else reads as none.
+ * `?key=` (the keys that start with it), `?where=` (an enum field's value, by field), `?hide=`
+ * (the fields the grid leaves out), and the record open in the form, `?record=<key>`, or `?new`
+ * for a new one. Anything else reads as none.
  */
 export const DataSearch = z.object({
   order: z.string().min(1).optional().catch(undefined),
@@ -681,6 +703,7 @@ export const DataSearch = z.object({
   where: z.record(z.string(), z.string()).optional().catch(undefined),
   record: z.string().min(1).optional().catch(undefined),
   new: WorkflowSearch.shape.new,
+  hide: z.array(z.string().min(1)).min(1).optional().catch(undefined),
 });
 export type DataSearch = z.infer<typeof DataSearch>;
 
