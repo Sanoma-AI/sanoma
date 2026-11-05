@@ -21,7 +21,7 @@ import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.
 import { TableHead } from "#/components/ui/table.tsx";
 import { issueText } from "../form/schema.ts";
 import { type DataSearch, enumFields, LIMIT_CHOICES } from "../queries.ts";
-import { Tip, ToneBadge } from "./common.tsx";
+import { plural, Tip, ToneBadge } from "./common.tsx";
 
 // A collection's grid's pieces around the cells (`grid/` draws the grid): its filters, sorted by
 // any field, filtered by key and by each enum field, at most `limit` of them, some fields hidden;
@@ -157,7 +157,7 @@ function HiddenFields({
       </DropdownMenu>
       {hidden.length > 0 && (
         <Button variant="secondary" size="sm" onClick={() => set({ hide: undefined })}>
-          {hidden.length === 1 ? "1 field hidden" : `${hidden.length} fields hidden`}
+          {plural(hidden.length, "field")} hidden
           <XIcon aria-hidden="true" data-icon="inline-end" />
           <span className="sr-only">: show them all</span>
         </Button>

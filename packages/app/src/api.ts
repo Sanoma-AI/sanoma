@@ -636,7 +636,7 @@ export interface ErrorResponse {
   error: string;
   /**
    * The runtime's code, when the error has one, or `record_changed`: a collection's `save` with
-   * `ifRecord` (or `delete`) finding the record changed since, or gone. Branch on this, never on `error`.
+   * `ifRecord` finding the record changed since, or gone. Branch on this, never on `error`.
    */
   code?: ErrorCode | "record_changed";
   /** For `invalid_input`: what is wrong with the request or the input. */

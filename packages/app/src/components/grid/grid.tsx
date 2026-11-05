@@ -85,12 +85,16 @@ function writeWidths(name: string, widths: ColumnSizingState) {
   }
 }
 
-/** The cell being edited, and what its editor holds. */
+/** The cell being edited, what its editor holds, and what it started with but a typed character. */
 interface Editing {
   key: string;
   field: string;
   draft: ScalarValue;
+  start: ScalarValue;
 }
+
+/** A cell a spreadsheet would read as a formula: written as text in a download. */
+const FORMULA = /^[=+\-@\t\r]/;
 
 /**
  * The grid: `records` as `list` read them for the page's search, `order` its sort, `open` the
@@ -200,15 +204,22 @@ export function DataGrid({
       return next;
     });
   const [savedAt, setSavedAt] = useState<number>();
+  // By key, the record as its last save in flight leaves it (undefined once it fails): an edit
+  // made meanwhile saves over that, not over the rows read before it, so it is never a conflict
+  // with your own edit.
+  const lastSave = useRef(new Map<string, Promise<Record<string, unknown> | undefined>>());
 
-  /** Saves `record` over `ifRecord`, the one cell `field` of `key` edited; Undo saves `ifRecord` back. */
+  /**
+   * Saves `record` over `ifRecord`, the one cell `field` of `key` edited; Undo saves `ifRecord`
+   * back. Answers the record as saved, or undefined when it was not.
+   */
   async function save(
     key: string,
     field: string,
     record: Record<string, unknown>,
     ifRecord: Record<string, unknown>,
     undoing = false,
-  ) {
+  ): Promise<Record<string, unknown> | undefined> {
     try {
       const saved = (await call.mutateAsync({ op: "save", input: { record, ifRecord } })) as Saved;
       setSavedAt(Date.parse(saved.updatedAt));
@@ -217,24 +228,33 @@ export function DataGrid({
         toast.success(`Saved ${field} for ${key}`, {
           action: { label: "Undo", onClick: () => void save(key, field, ifRecord, saved.record, true) },
         });
+      return saved.record;
     } catch (err) {
-      if (toastIfHeld(err)) return;
+      if (toastIfHeld(err)) return undefined;
       const body = errorBodyOf(err);
       if (body?.code === "record_changed") {
         const conflict = { key, field, mine: record[field], current: body.current };
         setConflicts((all) => new Map(all).set(conflictId(conflict), conflict));
-        return;
+        return undefined;
       }
       // A denial says the policy's reason; the cell shows the record as it is again.
       toast.error(`Could not save ${field} for ${key}`, { description: errorMessage(err) });
+      return undefined;
     }
   }
 
   /** Use mine: what you typed over the record as it is now, read again when the conflict did not say. */
   async function takeMine(conflict: Conflict) {
+    let current = conflict.current;
+    if (current === undefined) {
+      try {
+        current = (await (api as UntypedApi).data[name].get({ key: conflict.key })) as Saved | null;
+      } catch (err) {
+        // The conflict stays, and what you typed with it.
+        return void toast.error(`Could not read ${conflict.key}`, { description: errorMessage(err) });
+      }
+    }
     dropConflict(conflict);
-    const current =
-      conflict.current ?? ((await (api as UntypedApi).data[name].get({ key: conflict.key })) as Saved | null);
     if (!current) {
       toast.error(`${conflict.key} is gone`, { description: "Someone else deleted the record." });
       return void queryClient.invalidateQueries({ queryKey: [...DATA_KEY, name] });
@@ -270,9 +290,11 @@ export function DataGrid({
   const startEditing = (typed?: string) => {
     if (!focused || !editable) return;
     const saved = focused.row.original;
-    const draft = draftOf(editable, (savingRecords.get(saved.key) ?? saved.record)[editable.key], typed, people);
+    const value = (savingRecords.get(saved.key) ?? saved.record)[editable.key];
+    const start = draftOf(editable, value, undefined, people);
+    const draft = typed === undefined ? start : draftOf(editable, value, typed, people);
     // At once, so the editor has the focus before the next key arrives.
-    flushSync(() => setEditing({ key: saved.key, field: editable.key, draft }));
+    flushSync(() => setEditing({ key: saved.key, field: editable.key, draft, start }));
   };
 
   const commit = (then?: CellSelectionDirection, fromKeyboard = true) => {
@@ -283,12 +305,22 @@ export function DataGrid({
     refocus.current = fromKeyboard;
     setEditing(null);
     if (then) table.moveCellSelection(then);
-    if (!row) return;
-    const base = row.original.record;
-    const next = recordWith(field, base, edit.draft);
-    if ("error" in next) return void toast.error(`${edit.field}: ${next.error}`);
-    if (JSON.stringify(next.record) === JSON.stringify(base)) return;
-    void save(edit.key, edit.field, next.record, base);
+    // Left as it opened: never a save, even of a value the editor cannot hold (an enum's value
+    // its options no longer have), which it would drop.
+    if (!row || edit.draft === edit.start) return;
+    const checked = recordWith(field, row.original.record, edit.draft);
+    if ("error" in checked) return void toast.error(`${edit.field}: ${checked.error}`);
+    const prior = lastSave.current.get(edit.key);
+    const queued = (async () => {
+      const base = (await prior) ?? row.original.record;
+      const next = recordWith(field, base, edit.draft);
+      if ("error" in next || JSON.stringify(next.record) === JSON.stringify(base)) return base;
+      return save(edit.key, edit.field, next.record, base);
+    })();
+    lastSave.current.set(edit.key, queued);
+    void queued.finally(() => {
+      if (lastSave.current.get(edit.key) === queued) lastSave.current.delete(edit.key);
+    });
   };
 
   useGridKeys(grid, {
@@ -311,7 +343,12 @@ export function DataGrid({
     },
     copy: () => {
       const [range] = table.getSelectedCellRangesData();
-      if (range) void navigator.clipboard.writeText(delimited(range, "\t"));
+      if (!range) return;
+      const text = delimited(range, "\t");
+      // No clipboard on a page served over plain HTTP, or one the browser refuses: say so.
+      void Promise.resolve()
+        .then(() => navigator.clipboard.writeText(text))
+        .catch(() => toast.error("Could not copy the cells"));
     },
   });
 
@@ -348,7 +385,12 @@ export function DataGrid({
 
   const exportCsv = () => {
     const heads = visible.map((c) => HEADS[c.id] ?? c.id);
-    const values = rows.map((row) => row.getVisibleCells().map((cell) => cell.getValue()));
+    const values = rows.map((row) =>
+      row.getVisibleCells().map((cell) => {
+        const value = cell.getValue();
+        return typeof value === "string" && FORMULA.test(value) ? `'${value}` : value;
+      }),
+    );
     const url = URL.createObjectURL(new Blob([delimited([heads, ...values], ",")], { type: "text/csv" }));
     const link = Object.assign(document.createElement("a"), { href: url, download: `${name}.csv` });
     link.click();
@@ -394,7 +436,7 @@ export function DataGrid({
                   ),
                 };
                 return HEADS[header.id] ? (
-                  <TableHead key={header.id} {...head} className={cn(head.className, "relative")}>
+                  <TableHead key={header.id} {...head}>
                     {HEADS[header.id]}
                     {head.children}
                   </TableHead>

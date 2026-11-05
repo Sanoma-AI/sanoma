@@ -118,6 +118,8 @@ function CollectionPage() {
           <div className="min-w-0">
             {records.data ? (
               <DataGrid
+                // One grid per collection: its widths, edit and conflicts are that collection's.
+                key={name}
                 collection={collection}
                 records={records.data}
                 order={query.order}
