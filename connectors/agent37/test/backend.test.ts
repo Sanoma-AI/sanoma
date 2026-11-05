@@ -133,6 +133,16 @@ describe("agent37Backend", () => {
     await backend.discard({ name: "sanoma-stop" });
   });
 
+  it("leaves a box asleep when it slept on its own before the stop", async () => {
+    const backend = backendOf();
+    const box = await backend.open({ name: "sanoma-slept", image: DEFAULTS.image, size: 2 });
+    vendor.instances.get(box.id)!.status = "sleeping";
+    vendor.answer("POST", `/instances/${box.id}/sleep`, 400, { error: { code: "invalid_request" } });
+    await box.stop();
+    expect(vendor.instances.get(box.id)?.status).toBe("sleeping");
+    await backend.discard({ name: "sanoma-slept" });
+  });
+
   it("kills the commands still running when it stops, and fails at once on an SSH key the box refuses", async () => {
     const backend = backendOf();
     const box = await backend.open({ name: "sanoma-end", image: DEFAULTS.image, size: 2 });
