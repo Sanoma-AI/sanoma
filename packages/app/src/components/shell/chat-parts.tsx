@@ -2,14 +2,11 @@ import { CheckIcon } from "@phosphor-icons/react/dist/csr/Check";
 import { CopyIcon } from "@phosphor-icons/react/dist/csr/Copy";
 import { SparkleIcon } from "@phosphor-icons/react/dist/csr/Sparkle";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
-import { approverLabel } from "@sanoma-ai/workflows/shared";
-import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
 import { getToolName, isToolUIPart } from "ai";
-import { type FormEvent, lazy, memo, Suspense, useState } from "react";
+import { type FormEvent, lazy, Suspense, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "#/components/ui/button.tsx";
-import { Card, CardContent, CardFooter, CardHeader } from "#/components/ui/card.tsx";
+import { Card, CardContent, CardHeader } from "#/components/ui/card.tsx";
 import { Input } from "#/components/ui/input.tsx";
 import { Message, MessageContent, MessageFooter } from "#/components/ui/message.tsx";
 import { Spinner } from "#/components/ui/spinner.tsx";
@@ -22,13 +19,9 @@ import {
   TraceLine,
   TraceTitle,
 } from "#/components/ui/trace.tsx";
-import { actorHeaders, useActor } from "../../actor.ts";
-import { pendingApprovals } from "../../api.ts";
+import { actorHeaders } from "../../actor.ts";
 import { type ChatMessage, type DraftCard, heldRunOf, pathOf, type SignInCard, textOf } from "../../lib/chat.ts";
-import { decidableBy } from "../../lib/decidable.ts";
-import { approvalKey, configQuery, runQuery } from "../../queries.ts";
-import { ApprovalDecision, ApprovalDetails } from "../approval.tsx";
-import { CardHeading, TipButton } from "../common.tsx";
+import { CardHeading, TipButton } from "../kit.tsx";
 import { DraftCardView } from "./draft-card.tsx";
 
 // What the chat draws of the agent's reply, per app.md's Chat: Markdown at the reply size, its
@@ -38,6 +31,7 @@ import { DraftCardView } from "./draft-card.tsx";
 
 /** Off the chrome's chunk, which every page loads: until it comes, a reply's text as it is. */
 const Markdown = lazy(() => import("./markdown.tsx"));
+const HeldCard = lazy(() => import("./held-card.tsx"));
 
 type Part = ChatMessage["parts"][number];
 type ToolPart = Extract<Part, { toolCallId: string }>;
@@ -46,18 +40,9 @@ type TracePart = ToolPart | ReasoningPart;
 
 /**
  * The agent's reply in the chat `chat`: its parts in order (thinking and steps side by side
- * grouped into one trace), a sign-in's card, its draft's card last, and Copy. Memoized: a streamed
- * chunk redraws only the reply it belongs to.
+ * grouped into one trace), a sign-in's card, its draft's card last, and Copy.
  */
-export const Reply = memo(function Reply({
-  message,
-  live,
-  chat,
-}: {
-  message: ChatMessage;
-  live: boolean;
-  chat: string;
-}) {
+export function Reply({ message, live, chat }: { message: ChatMessage; live: boolean; chat: string }) {
   const blocks: ({ trace: TracePart[] } | { part: Part })[] = [];
   let draft: DraftCard | undefined;
   let signIn: SignInCard | undefined;
@@ -103,7 +88,7 @@ export const Reply = memo(function Reply({
       </MessageContent>
     </Message>
   );
-});
+}
 
 function ReplyPart({ part, live }: { part: Part; live: boolean }) {
   if (part.type === "text") {
@@ -167,9 +152,8 @@ function Reasoning({ part, live }: { part: ReasoningPart; live: boolean }) {
 
 /** A step: done, under way or stopped as a line, and failed or refused with why, open beneath it. */
 function Step({ step, live }: { step: ToolPart; live: boolean }) {
-  const why = step.state === "output-error" ? step.errorText : refused(step) ? step.approval?.reason : undefined;
   const label = stepLabel(step);
-  const { word, status, icon } = stepState(step, live);
+  const { word, status, icon, why } = stepState(step, live);
   const line = (
     <TraceLine status={status} className="text-xs">
       <TraceIcon>{icon}</TraceIcon>
@@ -188,11 +172,17 @@ function Step({ step, live }: { step: ToolPart; live: boolean }) {
   );
 }
 
-/** A step's state: in a word for a screen reader (the trace's icons are hidden from one), its line's status, its icon. */
+/**
+ * A step's state: in a word for a screen reader (the trace's icons are hidden from one), its line's
+ * status, its icon, and why when it failed or was refused (a coding agent's step its checkout rule
+ * answered no, `HarnessAgent`'s built-in tool).
+ */
 function stepState(step: ToolPart, live: boolean) {
   const stopped = <XIcon aria-hidden="true" />;
-  if (step.state === "output-error") return { word: "Failed", status: "error" as const, icon: stopped };
-  if (refused(step)) return { word: "Refused", icon: stopped };
+  if (step.state === "output-error") {
+    return { word: "Failed", status: "error" as const, icon: stopped, why: step.errorText };
+  }
+  if (step.approval?.approved === false) return { word: "Refused", icon: stopped, why: step.approval.reason };
   if (step.state === "output-available" && !step.preliminary) {
     return { word: "Done", icon: <CheckIcon aria-hidden="true" /> };
   }
@@ -200,9 +190,6 @@ function stepState(step: ToolPart, live: boolean) {
   if (!live) return { word: "Stopped", icon: stopped };
   return { word: "Under way", status: "running" as const, icon: <Spinner aria-hidden="true" /> };
 }
-
-/** A coding agent's step its checkout rule refused (`HarnessAgent`'s built-in tool, answered no). */
-const refused = (step: ToolPart) => step.approval?.approved === false;
 
 /** A step in words: what the tool did, from its input; a coding agent's by its tool's name and the file it names. */
 function stepLabel(step: ToolPart): string {
@@ -351,53 +338,6 @@ function SignInCardView({ card, chat, live }: { card: SignInCard; chat: string; 
           </p>
         )}
       </CardContent>
-    </Card>
-  );
-}
-
-/**
- * A held lookup: the Inbox's approval card while you may decide it, else who it waits for with a
- * link to the Inbox; once decided, its status.
- */
-function HeldCard({ runId }: { runId: string }) {
-  const { actor, groups } = useActor();
-  const { data: people } = useSuspenseQuery({ ...configQuery(), select: (config) => config.resources });
-  const { data } = useQuery(runQuery(runId));
-  if (!data) {
-    return (
-      <p className="flex items-center gap-2 text-muted-foreground">
-        <Spinner /> Asking for an approval…
-      </p>
-    );
-  }
-  const { run } = data;
-  const approval = pendingApprovals(data)[0] ?? data.approvals.at(-1);
-  if (!approval) return null;
-  const entry = { run, approval };
-  if (approval.status === "pending" && decidableBy(actor, groups, people)([entry]).length === 0) {
-    return (
-      <p className="text-muted-foreground">
-        Waiting for {approverLabel(approval.approver)}:{" "}
-        <Link to="/inbox" search={{ approval: approvalKey(entry) }} className="underline underline-offset-4">
-          in the Inbox
-        </Link>
-        .
-      </p>
-    );
-  }
-  return (
-    <Card size="sm" role="region" aria-label={approval.title}>
-      <CardHeader>
-        <CardHeading>{approval.title}</CardHeading>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
-        <ApprovalDetails run={run} approval={approval} showRun />
-      </CardContent>
-      {approval.status === "pending" && (
-        <CardFooter className="flex-wrap gap-2">
-          <ApprovalDecision run={run} approval={approval} />
-        </CardFooter>
-      )}
     </Card>
   );
 }

