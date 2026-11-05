@@ -48,7 +48,6 @@ export function loopTools(turn: ToolsTurn) {
   /** The checks since the last edit, for the card. */
   let checked: CheckResult | undefined;
 
-  const source = () => drafting(step);
   /** The chat's draft, opened (and attached to the chat) by the first call. */
   const draft = () =>
     (opening ??= openDraft(step, chat).catch((err: unknown) => {
@@ -61,16 +60,21 @@ export function loopTools(turn: ToolsTurn) {
     opening
       ? Promise.resolve(true)
       : (drafted ??= chat.draftId
-          ? (source().drafts?.() ?? Promise.resolve([])).then((ids) => ids.includes(chat.id))
+          ? (drafting(step).drafts?.() ?? Promise.resolve([])).then((ids) => ids.includes(chat.id))
           : Promise.resolve(false));
   /**
    * Where reads look: the chat's open draft, else the live checkout (a merged and deleted draft is
    * not opened again by a read), at its commit either way.
    */
-  const readRoot = async () => ((await hasDraft()) ? (await draft()).root : source().root);
+  const readRoot = async () => ((await hasDraft()) ? (await draft()).root : drafting(step).root);
   const showCard = async () => {
     const { branch } = await draft();
-    turn.showDraft({ draft: chat.id, branch, ...(await source().diff(chat.id)), ...(checked && { checks: checked }) });
+    turn.showDraft({
+      draft: chat.id,
+      branch,
+      ...(await drafting(step).diff(chat.id)),
+      ...(checked && { checks: checked }),
+    });
   };
   /**
    * The turn's writes and checks, one at a time: the model may call several tools at once, and a

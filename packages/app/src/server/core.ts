@@ -184,7 +184,7 @@ function sealedShown(record: LedgerRecord): LedgerRecord {
 
 /** The run with its ledger and approvals, and a sandbox run's checks as the worker last ran them, or a 404. */
 export async function runDetail(app: AppContext, runId: string): Promise<RunDetail> {
-  const { client } = app;
+  const { client, snapshot } = app;
   const run = await client.run(runId);
   if (!run) throw new ApiError(404, { error: `No run ${runId}`, code: "run_not_found" });
   const { approvals } = run;
@@ -194,7 +194,11 @@ export async function runDetail(app: AppContext, runId: string): Promise<RunDeta
       (err: unknown) => ({ err }),
     ),
     // Beside the ledger: the worker writes them for a seeded run only, each time it waits and when it ends.
-    client.runChecks(runId),
+    client.runChecks(runId).catch((err: unknown) => {
+      const error = errorMessage(err);
+      logReadOnce(runId, error, "the checks", err);
+      return { error };
+    }),
   ]);
   if ("err" in read) {
     // A store reads a run nothing has recorded as no records, so this is a real failure (a
@@ -211,8 +215,20 @@ export async function runDetail(app: AppContext, runId: string): Promise<RunDeta
   if (ledger.length === 0 && run.status !== "queued") {
     return { run, ledger, ledgerError: NO_RECORDS, approvals };
   }
-  // None yet until a seeded run first waits.
-  if (!told || !ledger.some((r) => r.type === "scenario.seeded")) return { run, ledger, approvals };
+  const seeded = ledger.find((r) => r.type === "scenario.seeded");
+  if (!seeded) return { run, ledger, approvals };
+  if (!told) {
+    // Not checked yet (the worker checks a seeded run when it first waits): its scenario's Then
+    // steps, each not answered yet.
+    const scenario = snapshot.scenarios.scenarios.find((s) => s.name === seeded.scenario);
+    const pending = scenario?.steps.filter((step) => step.kind === "then");
+    return {
+      run,
+      ledger,
+      approvals,
+      ...(pending && { checks: pending.map(({ text }) => ({ step: text, ok: false, settled: false })) }),
+    };
+  }
   if ("error" in told) return { run, ledger, approvals, checksError: told.error };
   // Every answer is final once the run has ended.
   const ended = isEnded(run.status);

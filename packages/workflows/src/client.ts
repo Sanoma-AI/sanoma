@@ -417,7 +417,9 @@ export class SanomaClient {
    * The policy's answer to starting a run of `workflow` as `startedBy` (`decideStart`), for a
    * workflow of the config's own: a deny throws `policy_denied`; a hold is what the run waits on
    * before its body. A run `runId` names already is returned as it is, whatever the policy says now, but to a visitor.
-   * A visitor (`isVisitor`) starts no built-in but `call`, whose calls the policy decides as direct ones.
+   * A visitor (`isVisitor`, an api token's principal too) starts no built-in but `call`, whose calls
+   * the policy decides as direct ones: the app's own actions on the repository (`app-workflows.ts`)
+   * are staff's, as their server functions were, which no site's host answered.
    */
   private async startHold(
     workflow: string,
@@ -991,11 +993,10 @@ export class SanomaClient {
       loadInput: false,
       loadOutput: false,
     });
-    for (const row of rows) {
-      const phase = (await this.dbos.getEvent<ChangeState>(row.workflowID, CHANGE_EVENT, 0))?.phase;
-      if (phase === "merging" || phase === "deploying") return true;
-    }
-    return false;
+    const phases = await Promise.all(
+      rows.map(async (row) => (await this.dbos.getEvent<ChangeState>(row.workflowID, CHANGE_EVENT, 0))?.phase),
+    );
+    return phases.some((phase) => phase === "merging" || phase === "deploying");
   }
 
   /** The change of the draft `id`: its latest run's (`openChange`), or undefined when it has none. */
@@ -1058,13 +1059,14 @@ export class SanomaClient {
   }
 
   /**
-   * Starts a turn of the chat `input.chat` on the person's new message, as `startedBy`, the chat's
-   * person: the built-in chat workflow, as the run `chat:<chat>:<message>` (`chatRunId`), after the
-   * chat's turn before it, which it waits for; that turn, when it has not ended, is told to stop. The
-   * worker runs the turn and writes its reply (`chats.chunks`, then the transcript). Its run id.
+   * Starts a turn of the chat `input.chat` on the person's new message `input.message`, already in
+   * its transcript (`chats.upsert`), as `startedBy`, the chat's person: the built-in chat workflow,
+   * as the run `chat:<chat>:<message>` (`chatRunId`), after the chat's turn before it, which it
+   * waits for; that turn, when it has not ended, is told to stop. The worker runs the turn and
+   * writes its reply (`chats.chunks`, then the transcript). Its run id.
    */
   async startTurn(input: Omit<ChatTurnInput, "after">, options: StartOptions): Promise<string> {
-    const runId = chatRunId(input.chat, input.message.id);
+    const runId = chatRunId(input.chat, input.message);
     // The latest other than this one, which a start told again finds first.
     const before = (await this.turns(input.chat, 2)).find((row) => row.workflowID !== runId);
     await this.start(CHAT_WORKFLOW, { ...input, ...(before && { after: before.workflowID }) } satisfies ChatTurnInput, {
@@ -1118,7 +1120,8 @@ export class SanomaClient {
   /** The latest `limit` turns of the chat `chat`, newest first: its runs `chat:<chat>:<message>` (`chatRunPrefix`). */
   private async turns(chat: string, limit: number) {
     return this.dbos.listWorkflows({
-      workflow_id_prefix: chatRunPrefix(chat),
+      // DBOS matches the prefix with LIKE as given, where a chat id's `_` is any character: escaped.
+      workflow_id_prefix: chatRunPrefix(chat).replaceAll(/[\\%_]/g, "\\$&"),
       workflowName: CHAT_WORKFLOW,
       applicationName: this.config.appName,
       sortDesc: true,
@@ -1715,7 +1718,7 @@ const OWN_STARTS: Record<
   [CHAT_WORKFLOW]: {
     by: "startTurn",
     admits: async ({ chat, message, after }: ChatTurnInput, by, runId, client) =>
-      runId === chatRunId(chat, message.id) &&
+      runId === chatRunId(chat, message) &&
       (after === undefined ||
         (after.startsWith(chatRunPrefix(chat)) && DRAFT_ID.test(after.slice(chatRunPrefix(chat).length)))) &&
       (await client.chats.get(chat))?.person === by.id,

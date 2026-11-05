@@ -6,7 +6,7 @@ import { isRunControlError } from "./errors.ts";
 import { warn } from "./log.ts";
 import { runNow } from "./run.ts";
 import { openChatCode } from "./seal.ts";
-import { CHAT_TOPIC } from "./shared.ts";
+import { CHAT_TOPIC, errorMessage } from "./shared.ts";
 
 // The chat workflow's steps (`chat-workflow.ts` is held to the workflow lint and imports no DBOS):
 // the wait for the turn before, the turn itself in a step of its own (the app's `AppSteps.chat`,
@@ -18,8 +18,12 @@ import { CHAT_TOPIC } from "./shared.ts";
 export const NO_CHAT_STEPS =
   "No agent runs on this instance's worker: chat from the Mac app, or where `sanoma dev` or `sanoma serve` runs the company's checkout";
 
-/** How long one `recv` waits before it asks again; a turn waits for its person's sign-in as long as it lets them. */
-const RECV_SECONDS = 24 * 60 * 60;
+/**
+ * How long one `recv` waits before it asks again: the turn's own end ends the loop once its step
+ * has settled, should its `ended` not have reached the run. A turn waits for its person's sign-in
+ * as long as it lets them.
+ */
+const RECV_SECONDS = 10 * 60;
 
 /** A chat turn under way: how to stop it, and who takes a code pasted for its sign-in. */
 interface LiveTurn {
@@ -70,8 +74,11 @@ export function chatSteps(): ChatSteps {
               input,
             );
           } finally {
-            // From the step: DBOS keeps no record of it, and a step done again tells it again.
-            await DBOS.send(run.id, { kind: "ended" } satisfies ChatTell, CHAT_TOPIC);
+            // From the step: DBOS keeps no record of it, and a step done again tells it again. A
+            // send that fails leaves the step's own answer or error standing: `tell` sees it settled.
+            await DBOS.send(run.id, { kind: "ended" } satisfies ChatTell, CHAT_TOPIC).catch((err: unknown) =>
+              warn(`run ${run.id}: could not tell the run its turn ended: ${errorMessage(err)}`),
+            );
           }
         },
         { name: "chat:turn" },
@@ -86,9 +93,11 @@ export function chatSteps(): ChatSteps {
 
     async tell() {
       const run = runNow("A chat step");
+      // Its turn's step has settled (it is no longer under way here): nothing more to hand it.
+      if (!turns.has(run.id)) return false;
       // No deadline: the turn's step is executing all the while, so the run is busy, not waiting.
       const raw = await DBOS.recv<unknown>(CHAT_TOPIC, { timeoutSeconds: RECV_SECONDS });
-      if (raw === null || raw === undefined) return true;
+      if (raw === null || raw === undefined) return turns.has(run.id);
       const told = ChatTell.safeParse(raw);
       if (!told.success) {
         warn(`run ${run.id}: a message on ${CHAT_TOPIC} is none a chat turn takes, so it is ignored`);

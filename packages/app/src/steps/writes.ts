@@ -17,7 +17,6 @@ import {
   type Written,
 } from "@sanoma-ai/workflows";
 import { type DataValue, describeConfig, formatOptions, NotLiteral, setFields } from "@sanoma-ai/workflows/describe";
-import { changePage } from "../server/core.ts";
 
 // A data file's change from the app's own pages, in the worker (the built-ins `adopt` and
 // `patch`): Adopt (a drifted field's value at the vendor) and a form's Save, each written into the
@@ -94,7 +93,7 @@ async function written(step: AppStepContext, file: string, text: string, message
  * does not name, and, with the writer's reason and the `field`, for a field the file computes or a
  * declaration that is no object literal.
  */
-export async function patch(step: AppStepContext, { at, fields, origin }: PatchInput): Promise<PatchOutput> {
+export async function patch(step: AppStepContext, { at, fields }: PatchInput): Promise<PatchOutput> {
   const root = rootOf(step);
   const { client, source, by } = step;
   const description = describeConfig(step.config);
@@ -129,8 +128,9 @@ export async function patch(step: AppStepContext, { at, fields, origin }: PatchI
         await writeFile(join(inDraft, at.file), text);
         await draft.commit({ paths: [relative(draft.root, join(inDraft, at.file))], message, author: by.id });
       });
-      const page = origin && changePage(id, origin);
-      return { change: await client.openChange({ id, title: message, ...(page && { page }) }, { startedBy: by }) };
+      // No page for its pull request's status to link: the app's origin is no fact the worker has,
+      // and a run's input is its starter's to choose.
+      return { change: await client.openChange({ id, title: message }, { startedBy: by }) };
     } catch (err) {
       // No change opened on it (a policy refusing the change, say): the draft would be left behind with nothing to close it.
       await step.serially(async () => source.closeDraft?.(id));

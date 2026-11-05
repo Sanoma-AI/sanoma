@@ -369,6 +369,11 @@ describe("the chat", () => {
     expect((await testApp.client.run(turnId))?.status).toBe("finished");
     const roles = ((await testApp.client.chats.load(other)) as ChatMessage[]).map((m) => m.role);
     expect(roles).toEqual(["user", "assistant", "user", "assistant"]);
+    // The turns' runs name the chat's messages by id: their text is the chat's person's alone.
+    const next = (await testApp.client.turn(other))!.runId;
+    for (const run of [turnId, next]) {
+      expect(JSON.stringify(await testApp.client.ledger(run)), run).not.toMatch(/Beta|Never mind|Fine\./);
+    }
   }, 300_000);
 
   it("takes an app only from a public repository: the Apps page's prompt and the source's refusal", async () => {
@@ -469,6 +474,22 @@ describe("the composer and a model", () => {
       const column = await chatColumn(bare!.url);
       expect(column).not.toContain("Connect a model");
       expect(column).toMatch(/<button(?![^>]*aria-describedby)[^>]*aria-label="Send"/);
+    });
+
+    it("writes the person's message to the chat before its turn's run starts, so a turn no worker runs keeps it", async () => {
+      // No worker here: the turn's run waits in its queue, and the reply's stream with it, which the browser leaves.
+      const chatId = `kept-${RUN}`;
+      const message = userMessage("Hi");
+      await fetch(new URL("/api/chat", bare!.url), {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: new URL(bare!.url).origin, [ACTOR_HEADER]: "ada" },
+        body: JSON.stringify({ id: chatId, message }),
+        signal: AbortSignal.timeout(2_000),
+      })
+        .then((res) => res.text())
+        .catch(() => undefined);
+      expect(await client!.chats.load(chatId)).toEqual([message]);
+      expect(await client!.turn(chatId)).toMatchObject({ runId: `chat:${chatId}:${message.id}`, status: "queued" });
     });
   });
 });

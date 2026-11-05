@@ -278,7 +278,7 @@ describe("a change, from a chat's draft to main", { timeout: 2 * ROUND_MS }, () 
   it("lands a form's Save as a change: a draft of its own, committed, sent for review and held for admin", async () => {
     const main = git("rev-parse", "main");
     const at = { file: "resources/people.ts", export: "alice" };
-    const input = { at, fields: { name: "Alice Liddell" }, origin: app.url };
+    const input = { at, fields: { name: "Alice Liddell" } };
     const landed = (await client.result(
       await client.start(PATCH_WORKFLOW, input, { startedBy: "alice" }),
     )) as PatchOutput;
@@ -300,8 +300,9 @@ describe("a change, from a chat's draft to main", { timeout: 2 * ROUND_MS }, () 
       sha: pr.head,
       state: "pending",
       description: "A change to the rules waits for admin",
-      targetUrl: new URL(`/changes/${id}`, app.url).href,
     });
+    // Its status links no page: the run's input names none, and the worker knows no origin of the app's.
+    expect(remote.statuses.at(-1)?.targetUrl).toBeUndefined();
     // Closed by admin, so no run waits as the worker stops.
     await client.changeEvent(id, { kind: "close", by: "ada" }, { by: { id: "ada" } });
     expect(await client.result(saved)).toMatchObject({ outcome: "closed" });

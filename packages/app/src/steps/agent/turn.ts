@@ -7,8 +7,9 @@ import { run as loop } from "./loop.ts";
 import { type Engine, persist } from "./transcript.ts";
 
 // A chat turn, in the worker (`AppSteps.chat`), whatever engine runs it: the chat's transcript, the
-// person's new message, and the engines by name. The app checked the message and opened the chat
-// before it started the turn's run (`server/chat.ts`); the run waited for the turn before it.
+// person's new message in it, and the engines by name. The app checked the message, opened the
+// chat and wrote the message before it started the turn's run on its id (`server/chat.ts`); the
+// run waited for the turn before it.
 
 /**
  * The engines, by the name a chat's row keeps (`ENGINE_NAMES`): our loop, the coding agents through
@@ -26,10 +27,11 @@ export const ENGINES: Readonly<Record<EngineName, Engine>> = {
 };
 
 /**
- * The turn: the transcript with what the turn before left unfinished settled (`settle`), the
- * person's message written after it, and the reply of the chat's engine, written as it streams
- * (`persist`). A turn the worker's restart cut short (`resumed`) settles its own reply instead,
- * which `settle` sees as the last, and runs nothing again: the person sends "continue".
+ * The turn: the transcript, read from the chat's store, with what the turn before left unfinished
+ * settled (`settle`), the person's message (`input.message`, by id) after it, and the reply of the
+ * chat's engine, written as it streams (`persist`). A turn the worker's restart cut short
+ * (`resumed`) settles its own reply instead, which `settle` sees as the last, and runs nothing
+ * again: the person sends "continue".
  */
 export async function chat(step: ChatTurnContext, input: ChatTurnInput): Promise<ChatTurnOutput> {
   const { chats } = step.client;
@@ -37,11 +39,17 @@ export async function chat(step: ChatTurnContext, input: ChatTurnInput): Promise
   if (!found) throw new Error(`No chat ${input.chat}`);
   const named = found.engine as EngineName;
   if (!Object.hasOwn(ENGINES, named)) throw new Error(`No engine ${named}: the chat opened on one this app lacks`);
-  const message: ChatMessage = input.message;
   const stored = (await chats.load(found.id)) as ChatMessage[];
-  const history = (await settle(step.client, stored)) as ChatMessage[];
-  // The messages settle changed, and the new one (in its place, for a turn begun before).
-  await chats.upsert(found.id, [...history.filter((m, i) => m !== stored[i]), message]);
+  const message = stored.find((m) => m.id === input.message);
+  if (message?.role !== "user") throw new Error(`Chat ${input.chat} has no message ${input.message} of its person's`);
+  // The rest, the new message last: a reply of the turn before may have been written after it.
+  const before = stored.filter((m) => m !== message);
+  const history = (await settle(step.client, before)) as ChatMessage[];
+  // The messages settle changed.
+  await chats.upsert(
+    found.id,
+    history.filter((m, i) => m !== before[i]),
+  );
   if (step.resumed) {
     await chats.end(found.id, step.runId);
     return { interrupted: true };

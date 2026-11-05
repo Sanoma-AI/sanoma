@@ -32,14 +32,12 @@ export type AdoptInput = z.infer<typeof AdoptInput>;
 
 /**
  * A form's Save: a declaration the description names (a resource, a collection, a site or an
- * app, by its `at`), the fields to set in it, by dotted path as `setFields` takes them, each to a
- * JSON value, and the app's `origin`, where the change's page is, which its pull request's status
- * links.
+ * app, by its `at`), and the fields to set in it, by dotted path as `setFields` takes them, each
+ * to a JSON value.
  */
 export const PatchInput = z.object({
   at: AtSchema,
   fields: z.record(z.string().min(1), z.json()).refine((fields) => Object.keys(fields).length > 0, "Set a field"),
-  origin: z.url({ protocol: /^https?$/ }).optional(),
 });
 export type PatchInput = z.infer<typeof PatchInput>;
 

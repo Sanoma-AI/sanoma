@@ -25,9 +25,17 @@ import { chatModel } from "./models.ts";
 
 // The operator agent's chat, as the app answers it: a turn is a run of the built-in `chat`, which
 // the worker runs (`@sanoma-ai/app/steps`' `chat`, with the engines), writing the reply's chunks
-// and the transcript to the database. The app checks the message, opens the chat, starts the turn
-// (`SanomaClient.startTurn`, which tells a turn under way to stop) and streams the chunks back as
-// the worker writes them; a code pasted on a sign-in card goes to the run as a message.
+// and the transcript to the database. The app checks the message, opens the chat, writes the
+// message to its transcript, starts the turn (`SanomaClient.startTurn`, which tells a turn under
+// way to stop) and streams the chunks back as the worker writes them; a code pasted on a sign-in
+// card goes to the run as a message.
+
+/** A person's message, as a chat takes it: its id (the browser's, which names the turn's run) and its text. */
+const PersonMessage = z.object({
+  id: ChatTurnInput.shape.message,
+  role: z.literal("user"),
+  parts: z.array(z.object({ type: z.literal("text"), text: z.string() })).min(1),
+});
 
 /** What the browser sends: the chat's id (its own, for a new chat) and the person's new message. */
 const ChatRequest = z.object({
@@ -50,7 +58,8 @@ const STATUS_MS = 2_000;
 /**
  * `POST /api/chat`: a turn of the person's chat. Validates the new message (`safeValidateUIMessages`,
  * a 400 for one it refuses, or one the chat has already), opens the chat on its first message
- * (the engine the request names, titled by the message), starts the turn's run and answers with
+ * (the engine the request names, titled by the message), writes the message to its transcript
+ * (so a turn that fails keeps it), starts the turn's run on its id and answers with
  * the reply's stream, read from the database as the worker writes it (`replyStream`). A chat of
  * someone else is a 404; a turn of the loop while it has no model (`chatModel`), a 409 before
  * the chat opens.
@@ -71,8 +80,8 @@ export async function postChat(request: Request, context: ActorContext & { site?
     // A new one, by the person. The transcript, written by the worker, is not validated again.
     const checked = await safeValidateUIMessages<ChatMessage>({ messages: [body.message] });
     if (!checked.success) throw invalid(`Not a chat message: ${checked.error.message}`);
-    // As a turn takes it: the person's text, under an id of letters, digits, _ and -.
-    const turn = ChatTurnInput.shape.message.safeParse(checked.data[0]);
+    // As a chat takes it: the person's text, under an id of letters, digits, _ and -.
+    const turn = PersonMessage.safeParse(checked.data[0]);
     if (!turn.success) {
       throw invalid(`A chat takes the person's messages, as text: ${turn.error.issues[0]?.message ?? "not one"}`);
     }
@@ -88,7 +97,10 @@ export async function postChat(request: Request, context: ActorContext & { site?
       const title = textOf(message, " ").trim().slice(0, 80) || "A chat";
       await chats.open({ id: body.id, person: principal.id, engine: body.engine, title });
     }
-    const runId = await app.client.startTurn({ chat: body.id, message }, { startedBy: principal });
+    // In the transcript before the turn starts, so a turn that fails at once keeps it; the run is
+    // given its id only, since a run's input is in the ledger the company's staff read.
+    await chats.upsert(body.id, [message]);
+    const runId = await app.client.startTurn({ chat: body.id, message: message.id }, { startedBy: principal });
     return createUIMessageStreamResponse({ stream: replyStream(app.client, runId) });
   } catch (err) {
     const { status, body } = toApiError(err, "a chat turn");

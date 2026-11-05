@@ -173,10 +173,13 @@ describe("on a worker given the app's steps", () => {
     }
   });
 
-  it("is no visitor's to start", async () => {
-    for (const name of APP_WORKFLOWS) {
-      const err = await failure(app.client.start(name, INPUTS[name], { startedBy: visitorPrincipal("auth0", "u1") }));
-      expect(errorCode(err), name).toBe("policy_denied");
+  it("is no visitor's to start, nor an api token's, whatever its groups: staff's, as the app's own host admits them", async () => {
+    const { id } = await app.client.tokens.mint({ subject: "visitor:better-auth:u1", groups: ["admin"] });
+    for (const startedBy of [visitorPrincipal("auth0", "u1"), { id: `token:${id}`, groups: ["admin"] }]) {
+      for (const name of APP_WORKFLOWS) {
+        const err = await failure(app.client.start(name, INPUTS[name], { startedBy }));
+        expect(errorCode(err), `${startedBy.id} ${name}`).toBe("policy_denied");
+      }
     }
   });
 });

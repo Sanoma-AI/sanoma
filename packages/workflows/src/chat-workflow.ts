@@ -9,22 +9,20 @@ import { type CHAT_WORKFLOW, DRAFT_ID } from "./shared.ts";
 // (`ChatTell`). What the turn does is the app's (`AppSteps.chat`), in a step of `chat-steps.ts`; a
 // workflow like any other, held to the same lint.
 
-/** A person's message, as a turn takes it: its id (the browser's) and its text. */
-const ChatTurnMessage = z.object({
-  id: z.string().regex(DRAFT_ID, "a message id is letters, digits, _ and -"),
-  role: z.literal("user"),
-  parts: z.array(z.object({ type: z.literal("text"), text: z.string() })).min(1),
-});
-
-/** A turn's input: the chat, the person's new message, and the chat's turn before it, which this one waits for. */
+/**
+ * A turn's input: the chat, the id of the person's new message, which the app wrote to the chat's
+ * transcript before it started the turn, and the chat's turn before it, which this one waits for.
+ * Ids only: a run's input and output are in its ledger, which the company's staff read, and a
+ * chat's text is its person's (`Chats`).
+ */
 export const ChatTurnInput = z.object({
   chat: z.string().regex(DRAFT_ID, "a chat id is letters, digits, _ and -"),
-  message: ChatTurnMessage,
+  message: z.string().regex(DRAFT_ID, "a message id is letters, digits, _ and -"),
   after: z.string().min(1).optional(),
 });
 export type ChatTurnInput = z.infer<typeof ChatTurnInput>;
 
-/** What a turn answers: the reply's message id, once it wrote one; `interrupted` for a turn the worker's restart cut short. */
+/** What a turn answers: the reply's message id (never its text), once it wrote one; `interrupted` for a turn the worker's restart cut short. */
 export interface ChatTurnOutput {
   reply?: string;
   interrupted?: true;

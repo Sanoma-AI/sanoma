@@ -103,11 +103,7 @@ function SchemaDeclarationForm({
     if (!Object.keys(changed).length) return { form: "Nothing has changed.", fields: {} };
     try {
       // What `buildInput` reads from the form is JSON.
-      const answer = await appApi.patch({
-        at,
-        fields: changed as PatchInput["fields"],
-        origin: window.location.origin,
-      });
+      const answer = await appApi.patch({ at, fields: changed as PatchInput["fields"] });
       setDeclared((prev) => ({ ...prev, ...changed }));
       setSaved(answer);
       if ("file" in answer) await refreshWritten(queryClient, file);

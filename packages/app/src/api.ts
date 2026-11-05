@@ -166,8 +166,9 @@ export interface RunDetail {
   approvals: ApprovalState[];
   /**
    * For a sandbox run, each of its scenario's expectations checked against the ledger, as the
-   * worker ran them when the run last waited or ended (`SanomaClient.runChecks`). Absent until the
-   * run has been seeded and first waits, and when `checksError` says why there are none.
+   * worker ran them when the run last waited or ended (`SanomaClient.runChecks`); until it first
+   * has, each of its scenario's Then steps, not settled. Absent until the run has been seeded, and
+   * when `checksError` says why there are none.
    */
   checks?: RunCheck[];
   /**
