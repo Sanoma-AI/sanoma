@@ -19,6 +19,10 @@ allowBuilds:
   # binaries come as platform packages, so the checks their scripts make are not needed.
   esbuild: false
   workerd: false
+  # The Agent37 connector's SSH client (connectors/agent37): its optional native crypto binding
+  # and CPU probe; ssh2 falls back to Node's own crypto without them.
+  cpu-features: false
+  ssh2: false
 overrides:
   # One AI SDK: @ai-sdk/harness 1.0.158 pins ai 7.0.147. Its later releases' Claude Code and Codex
   # adapters ship without their bridges' lockfiles (vercel/ai#23829); drop this once one does.

@@ -6,6 +6,7 @@ One workspace package per vendor, each built on `@sanoma-ai/workflows`. A connec
 
 | Path                                      | What it is                                                                                                                                     |
 | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`agent37/`](agent37/AGENTS.md)           | `@sanoma-ai/connector-agent37`: Agent37 instances, the boxes coding agents work in (the `Sandbox` contract), driven over SSH                   |
 | [`anthropic/`](anthropic/AGENTS.md)       | `@sanoma-ai/connector-anthropic`: Anthropic's Claude models (a model half) on the company's key                                                |
 | [`better-auth/`](better-auth/AGENTS.md)   | `@sanoma-ai/connector-better-auth`: Better Auth, the visitor login for public sites and the staff sign-in on a host, on the company's database |
 | [`bluesky/`](bluesky/AGENTS.md)           | `@sanoma-ai/connector-bluesky`: Bluesky (AT Protocol) post operations and an in-memory fake                                                    |
@@ -31,7 +32,7 @@ Where a connector's calls come from, in order; the schemas are hand-written Zod 
 1. **Resources** (things a company creates and keeps in sync): the vendor's OpenTofu/Terraform provider through the bridge, as a `tfConnector` record (Docker, GCP, GitHub, Stripe, Supabase).
 2. **Operations**: the vendor's officially supported TypeScript SDK as the transport, when one exists and is maintained (Bluesky's `@atproto/api`, Exa's `exa-js`, Cloudflare's `cloudflare`, which carries its container, alarm and DNS records resources too: the Worker they run is the package's own code, uploaded with them, and Neon's `@neon/sdk`, which carries its project resource).
 3. No official SDK: a client generated from the vendor's published OpenAPI spec with Hey API, pinned to a commit and cut to the operations called, in `src/generated/`, never edited by hand (Resend, kept on its generated client although the official `resend` SDK exists; its domain resource uses that client too).
-4. Neither: a driver hand-written on `fetch`, the last resort (Ghost, and Sanoma Cloud, whose API is sanoma-ops's workflows over the app's `POST /api/call`).
+4. Neither: a driver hand-written on `fetch`, the last resort (Ghost, Agent37, and Sanoma Cloud, whose API is sanoma-ops's workflows over the app's `POST /api/call`).
 
 [build-connector](../.agents/skills/build-connector/SKILL.md) walks through making one.
 
