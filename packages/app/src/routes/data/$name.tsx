@@ -1,5 +1,5 @@
 import type { ConfigDescription } from "@sanoma-ai/workflows/describe";
-import { errorMessage } from "@sanoma-ai/workflows/shared";
+import { errorMessage, personsOf } from "@sanoma-ai/workflows/shared";
 import { keepPreviousData, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
@@ -11,7 +11,8 @@ import { Skeleton } from "#/components/ui/skeleton.tsx";
 import { cn } from "#/lib/utils.ts";
 import { useActor } from "../../actor.ts";
 import { ButtonLink, CardHeading, CrumbHeader, Notice, pageTitle, UsedBy } from "../../components/common.tsx";
-import { DataGrid, GridFilters } from "../../components/data-grid.tsx";
+import { GridFilters } from "../../components/data-grid.tsx";
+import { DataGrid } from "../../components/grid/grid.tsx";
 import { RecordForm } from "../../components/record-form.tsx";
 import {
   closeRecord,
@@ -48,18 +49,23 @@ export const Route = createFileRoute("/data/$name")({
 });
 
 /**
- * A collection: where it is declared, its records in a grid with Add record, the record form
- * beside it while a record is open (`?record=`, or `?new`), and the workflows that use it.
+ * A collection: where it is declared, its records in a grid you edit in place, with Add record,
+ * the record form beside it while a record is open (`?record=`, or `?new`; Space on a cell opens
+ * its record), and the workflows that use it.
  */
 function CollectionPage() {
   const { name } = Route.useParams();
   const search = Route.useSearch();
   const select = useMemo(
-    () => (config: ConfigDescription) => ({ collection: collectionNamed(name)(config), ...usedBy(name)(config) }),
+    () => (config: ConfigDescription) => ({
+      collection: collectionNamed(name)(config),
+      people: personsOf(config.resources).map((person) => person.id),
+      ...usedBy(name)(config),
+    }),
     [name],
   );
   const {
-    data: { collection, workflows, sites },
+    data: { collection, people, workflows, sites },
   } = useSuspenseQuery({ ...configQuery(), select });
   // The loader found it; a config that no longer has it reads as not found.
   if (!collection) throw notFound();
@@ -118,6 +124,8 @@ function CollectionPage() {
                 open={search.record}
                 filtered={query.where !== undefined}
                 limit={query.limit}
+                hide={search.hide}
+                people={people}
               />
             ) : actor === null ? (
               <Notice>Say who you are to see the records: the policy decides each read for the person asking.</Notice>

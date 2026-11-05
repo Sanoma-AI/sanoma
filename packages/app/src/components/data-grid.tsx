@@ -4,23 +4,32 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { ArrowDownIcon } from "@phosphor-icons/react/dist/csr/ArrowDown";
 import { ArrowsDownUpIcon } from "@phosphor-icons/react/dist/csr/ArrowsDownUp";
 import { ArrowUpIcon } from "@phosphor-icons/react/dist/csr/ArrowUp";
+import { EyeSlashIcon } from "@phosphor-icons/react/dist/csr/EyeSlash";
 import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
-import { memo, useEffect, useRef, useState } from "react";
+import { XIcon } from "@phosphor-icons/react/dist/csr/X";
+import { type ComponentProps, useEffect, useRef, useState } from "react";
+import { Button } from "#/components/ui/button.tsx";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "#/components/ui/dropdown-menu.tsx";
 import { Field, FieldLabel } from "#/components/ui/field.tsx";
 import { Input } from "#/components/ui/input.tsx";
 import { NativeSelect, NativeSelectOption } from "#/components/ui/native-select.tsx";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "#/components/ui/table.tsx";
+import { TableHead } from "#/components/ui/table.tsx";
 import { issueText } from "../form/schema.ts";
 import { type DataSearch, enumFields, LIMIT_CHOICES } from "../queries.ts";
-import { Nothing, Tip, ToneBadge, When } from "./common.tsx";
-import { LinkRow } from "./runs-table.tsx";
+import { Tip, ToneBadge } from "./common.tsx";
 
-// A collection's grid: its records as a table, a column per field and then who saved each and
-// when, sorted by any field, filtered by key and by each enum field, at most `limit` of them.
-// What it shows is the page's search (`DataSearch`), which the page reads `list` with.
+// A collection's grid's pieces around the cells (`grid/` draws the grid): its filters, sorted by
+// any field, filtered by key and by each enum field, at most `limit` of them, some fields hidden;
+// a field's heading; a value as text; a record its fields refuse. What the grid shows is the
+// page's search (`DataSearch`), which the page reads `list` with.
 
 /** The grid's route, whose search each control writes. */
-const FROM = "/data/$name";
+export const FROM = "/data/$name";
 
 /** How long the key's filter waits after a keystroke before it reads the records again. */
 const TYPING_MS = 250;
@@ -102,122 +111,76 @@ export function GridFilters({ collection, search }: { collection: CollectionEntr
             ))}
         </NativeSelect>
       </Field>
+      <HiddenFields collection={collection} hide={search.hide} set={set} />
     </div>
   );
 }
 
 /**
- * The records as a table: a column per field, in the collection's order, each sortable, then
- * when each was saved and by whom. A record saved under fields that have changed since is
- * flagged, its issues in the flag's tooltip. A row opens its record in the form (`?record=`),
- * which marks it.
+ * Which fields the grid shows (`?hide=`): a menu of the fields but the key, which names each
+ * row, and, while some are hidden, a chip saying how many that shows them all again.
  */
-export function DataGrid({
+function HiddenFields({
   collection,
-  records,
-  order,
-  open,
-  filtered,
-  limit,
+  hide = [],
+  set,
 }: {
   collection: CollectionEntry;
-  records: Saved[];
-  order: string | undefined;
-  /** The key of the record open in the form. */
-  open: string | undefined;
-  filtered: boolean;
-  limit: number;
+  hide: string[] | undefined;
+  set: (next: Partial<DataSearch>) => void;
 }) {
-  const fields = Object.keys(collection.fields);
-  if (records.length === 0) {
-    return (
-      <Nothing title={filtered ? "No record matches" : "No records yet"}>
-        {filtered ? "Change the filters to see others." : "Add one, or save one from a workflow."}
-      </Nothing>
-    );
-  }
+  const fields = Object.keys(collection.fields).filter((field) => field !== collection.key);
+  const hidden = fields.filter((field) => hide.includes(field));
+  const toggle = (field: string, shown: boolean) => {
+    const next = shown ? hidden.filter((f) => f !== field) : [...hidden, field];
+    set({ hide: next.length ? next : undefined });
+  };
+  if (fields.length === 0) return null;
   return (
-    <div className="flex flex-col gap-2">
-      <div className="rounded-lg border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              {fields.map((field) => (
-                <SortHead key={field} field={field} order={order} />
-              ))}
-              <TableHead>Updated</TableHead>
-              <TableHead>By</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {records.map((saved) => (
-              <GridRow key={saved.key} collection={collection} saved={saved} selected={saved.key === open} />
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-      {records.length >= limit && (
-        <p className="text-sm text-muted-foreground">
-          The first {limit} records: filter them, or show more, to see the rest.
-        </p>
+    <div className="flex items-center gap-2">
+      <DropdownMenu>
+        <DropdownMenuTrigger render={<Button variant="outline" />}>
+          <EyeSlashIcon aria-hidden="true" data-icon="inline-start" />
+          Fields
+        </DropdownMenuTrigger>
+        <DropdownMenuContent className="min-w-44">
+          {fields.map((field) => (
+            <DropdownMenuCheckboxItem
+              key={field}
+              checked={!hidden.includes(field)}
+              onCheckedChange={(shown) => toggle(field, shown)}
+            >
+              {field}
+            </DropdownMenuCheckboxItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {hidden.length > 0 && (
+        <Button variant="secondary" size="sm" onClick={() => set({ hide: undefined })}>
+          {hidden.length === 1 ? "1 field hidden" : `${hidden.length} fields hidden`}
+          <XIcon aria-hidden="true" data-icon="inline-end" />
+          <span className="sr-only">: show them all</span>
+        </Button>
       )}
     </div>
   );
 }
 
 /**
- * A record's row, opening it in the form: drawn again only when the record or whether it is
- * open changes, not for every change to the page's search. Its key's link is the row's own.
- */
-const GridRow = memo(function GridRow({
-  collection: { name, key: keyField, fields },
-  saved,
-  selected,
-}: {
-  collection: CollectionEntry;
-  saved: Saved;
-  selected: boolean;
-}) {
-  const open = {
-    to: FROM,
-    params: { name },
-    search: (prev: DataSearch) => ({ ...prev, record: saved.key, new: undefined }),
-    resetScroll: false,
-  } as const;
-  return (
-    <LinkRow link={open} selected={selected}>
-      {Object.keys(fields).map((field) => (
-        <TableCell key={field} className={field === keyField ? "font-medium" : undefined}>
-          {field === keyField ? (
-            <span className="flex items-center gap-2">
-              <Link {...open} preload={false} onClick={(e) => e.stopPropagation()}>
-                {saved.key}
-              </Link>
-              {saved.issues && <IssuesFlag issues={saved.issues} />}
-            </span>
-          ) : (
-            <Value value={saved.record[field]} />
-          )}
-        </TableCell>
-      ))}
-      <TableCell className="text-muted-foreground">
-        <When at={Date.parse(saved.updatedAt)} />
-      </TableCell>
-      <TableCell className="text-muted-foreground">{saved.updatedBy}</TableCell>
-    </LinkRow>
-  );
-});
-
-/**
  * A field's heading, sorting by it: ascending, then descending, then by key again. Not preloaded:
  * hovering a heading would read the records in its order.
  */
-function SortHead({ field, order }: { field: string; order: string | undefined }) {
+export function SortHead({
+  field,
+  order,
+  children,
+  ...props
+}: { field: string; order: string | undefined } & ComponentProps<typeof TableHead>) {
   const sort = order === field ? "ascending" : order === `-${field}` ? "descending" : undefined;
   const next = sort === undefined ? field : sort === "ascending" ? `-${field}` : undefined;
   const Icon = sort === "ascending" ? ArrowUpIcon : sort === "descending" ? ArrowDownIcon : ArrowsDownUpIcon;
   return (
-    <TableHead aria-sort={sort}>
+    <TableHead aria-sort={sort} {...props}>
       <Link
         from={FROM}
         search={(prev) => ({ ...prev, order: next })}
@@ -229,12 +192,13 @@ function SortHead({ field, order }: { field: string; order: string | undefined }
         {field}
         <Icon aria-hidden className={sort ? "size-3.5" : "size-3.5 text-muted-foreground"} />
       </Link>
+      {children}
     </TableHead>
   );
 }
 
 /** A field's value as text: yes or no, a list or an object as JSON, a dash for none. */
-function Value({ value }: { value: unknown }) {
+export function Value({ value }: { value: unknown }) {
   if (value === undefined || value === null) return <span className="text-muted-foreground">-</span>;
   if (typeof value === "boolean") return value ? "yes" : "no";
   if (typeof value === "object") return <code className="text-xs">{JSON.stringify(value)}</code>;
@@ -242,7 +206,7 @@ function Value({ value }: { value: unknown }) {
 }
 
 /** A record the fields no longer accept: a badge, and where they refuse it in its tooltip. */
-function IssuesFlag({ issues }: { issues: NonNullable<Saved["issues"]> }) {
+export function IssuesFlag({ issues }: { issues: NonNullable<Saved["issues"]> }) {
   const text = issues.map(issueText).join("; ");
   return (
     <Tip tip={`Saved before its fields changed: ${text}`}>
