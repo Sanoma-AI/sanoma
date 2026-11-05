@@ -105,13 +105,18 @@ export interface Conflicted {
 /**
  * What a Save came to: how many records it saved; held for an approval in a run of `call` (none
  * saved until it is approved); refused by the policy, the keys it denied dropped from the change
- * and the rest still staged; or conflicts to settle first, nothing saved and all still staged.
+ * and the rest still staged; or conflicts to settle first, nothing saved and all still staged
+ * (none listed when only new records' keys were taken: their key cells say so).
  */
 export type SaveOutcome =
   | { saved: number }
   | { held: number; runId: string | undefined }
   | { denied: string[]; error: unknown }
   | { conflicts: Conflicted[] };
+
+/** Whether `m` changes its record: an update that ends where it began does not. */
+const isChange = (m: Transaction<Saved>["mutations"][number]) =>
+  m.type !== "update" || JSON.stringify(m.modified.record) !== JSON.stringify((m.original as Saved).record);
 
 /** The keys `steps` change. */
 const keysOf = (steps: readonly Step[]) =>
@@ -131,10 +136,12 @@ const without = (steps: readonly Step[], drop: (key: string, field?: string) => 
 
 /**
  * What a page's records are made from: `query`, `recordsQuery(name, search)` (what the loader
- * prefetched); `calls`, the collection's operations as `api.data.<name>` makes them; and `held`,
- * which says a call is held for an approval (`toastIfHeld`) and answers whether it was.
+ * prefetched); `key`, the collection's key field, which names a staged new record to the server;
+ * `calls`, the collection's operations as `api.data.<name>` makes them; and `held`, which says a
+ * call is held for an approval (`toastIfHeld`) and answers whether it was.
  */
 export interface RecordsSource {
+  key: string;
   query: { queryKey: QueryKey; queryFn?: unknown; staleTime?: unknown };
   calls: {
     save: (input: {
@@ -144,14 +151,14 @@ export interface RecordsSource {
     }) => Promise<Saved>;
     delete: (input: { key: string }) => Promise<unknown>;
     saveMany: (input: {
-      records: { record: Record<string, unknown>; ifRecord?: Record<string, unknown> }[];
+      records: { record: Record<string, unknown>; ifAbsent?: true; ifRecord?: Record<string, unknown> }[];
       deletes?: { key: string; ifRecord?: Record<string, unknown> }[];
     }) => Promise<ManyAnswer[]>;
   };
   held: (err: unknown, queryClient: QueryClient) => boolean;
 }
 
-function createRecordsView(queryClient: QueryClient, { query, calls, held }: RecordsSource) {
+function createRecordsView(queryClient: QueryClient, { query, key: keyField, calls, held }: RecordsSource) {
   // The records as the collection last read or saved them (the query's rows, which its writes
   // keep), by key: what an update is saved over, never an edit before it still on screen, which
   // its call may have held or saved reshaped. Not the collection's `base`, which holds a save's
@@ -237,6 +244,21 @@ function createRecordsView(queryClient: QueryClient, { query, calls, held }: Rec
   const base = new Map<string, Saved>();
   // The records a Save sends: all the change's, or those `save` was told.
   let sending: ReadonlySet<string> | undefined;
+  // While a Save commits: its own refusal is its to handle, not `opened`'s.
+  let committing = false;
+
+  /**
+   * A new transaction for the change. A refusal of another transaction over the same records (a
+   * single edit's, saved as the grid's queue saves it) rolls it back with its own, as the library
+   * does: the change is then made again from its steps, never lost.
+   */
+  const opened = () => {
+    const tx = createTransaction<Saved>({ autoCommit: false, mutationFn: send });
+    tx.when("settled").catch(() => {
+      if (!committing && staged?.tx === tx) reopen(staged.steps);
+    });
+    return tx;
+  };
 
   /** `step`'s changes, in `tx`: a new record, its cells and the others', a delete (not shown until saved, so the row stays to be struck). */
   const apply = (tx: Transaction<Saved>, step: Step) => {
@@ -252,18 +274,23 @@ function createRecordsView(queryClient: QueryClient, { query, calls, held }: Rec
     for (const key of step.deletes ?? []) if (collection.has(key)) collection.delete(key, { optimistic: false });
   };
 
-  /** The one `saveMany` of the records the change sends: each update over the record it was staged over. */
+  /**
+   * The one `saveMany` of the records the change sends: a new one only where none is (`ifAbsent`:
+   * the page may not show a record that has its key), each update over the record it was staged
+   * over, and none that ends as it began.
+   */
   const send = async ({ transaction }: { transaction: Transaction<Saved> }) => {
-    const entries = transaction.mutations.filter((m) => !sending || sending.has(m.key));
+    const entries = transaction.mutations.filter((m) => (!sending || sending.has(m.key)) && isChange(m));
     const over = (m: (typeof entries)[number]) => (base.get(m.key) ?? (m.original as Saved)).record;
-    const records = entries.flatMap((m) =>
+    const records = entries.flatMap((m): Parameters<RecordsSource["calls"]["saveMany"]>[0]["records"] =>
       m.type === "insert"
-        ? [{ record: m.modified.record }]
+        ? [{ record: m.modified.record, ifAbsent: true }]
         : m.type === "update"
           ? [{ record: m.modified.record, ifRecord: over(m) }]
           : [],
     );
     const deletes = entries.flatMap((m) => (m.type === "delete" ? [{ key: m.key, ifRecord: over(m) }] : []));
+    if (records.length === 0 && deletes.length === 0) return;
     try {
       const answers = await calls.saveMany({ records, ...(deletes.length > 0 && { deletes }) });
       // What the server saved, in the collection before the change's own rows let go of it.
@@ -282,7 +309,7 @@ function createRecordsView(queryClient: QueryClient, { query, calls, held }: Rec
     const keys = keysOf(steps);
     for (const key of base.keys()) if (!keys.has(key)) base.delete(key);
     if (steps.length === 0) return show(undefined);
-    const tx = createTransaction<Saved>({ autoCommit: false, mutationFn: send });
+    const tx = opened();
     tx.mutate(() => {
       for (const step of steps) apply(tx, step);
     });
@@ -299,7 +326,7 @@ function createRecordsView(queryClient: QueryClient, { query, calls, held }: Rec
     },
     /** Stages `step`, opening a change when none is: shown at once, saved by nothing until `save`. */
     add(step: Step) {
-      const tx = staged?.tx ?? createTransaction<Saved>({ autoCommit: false, mutationFn: send });
+      const tx = staged?.tx ?? opened();
       const rows = storedRows();
       for (const key of keysOf([step])) {
         const row = rows.get(key);
@@ -315,32 +342,43 @@ function createRecordsView(queryClient: QueryClient, { query, calls, held }: Rec
     /** Keep theirs: drops the change to `key`'s `field`, or to the whole record. */
     drop: (key: string, field?: string) =>
       staged && reopen(without(staged.steps, (k, f) => k === key && (field === undefined || f === field))),
-    /** The record `key` as it stands, `current`, is what its change is saved over now; gone, the change is dropped. */
+    /**
+     * The record `key` as it stands, `current` (as Save's read or its refusal wrote it), is what
+     * its change is saved over now: the steps made again over it, so their other fields are
+     * theirs, never the record as staged over; gone, the change is dropped.
+     */
     rebase(key: string, current: Saved | null) {
-      if (!current) stage.drop(key);
-      else if (staged && keysOf(staged.steps).has(key)) base.set(key, current);
+      if (!current) return stage.drop(key);
+      if (!staged || !keysOf(staged.steps).has(key)) return;
+      base.set(key, current);
+      reopen(staged.steps);
     },
     /**
      * Saves the change, or the records `only` names (the rest stay staged), as one `saveMany`.
-     * First the records are read again: one changed since it was staged over is a conflict, and
-     * nothing is sent. A refusal for a conflict keeps every step; one for the policy drops the
-     * records it denied; anything else rolls the change back, nothing changed, and throws.
+     * First the records are read again: one there and changed since it was staged over is a
+     * conflict, and nothing is sent (one the read no longer finds is the server's to answer); a
+     * read that fails throws, the change still staged. A refusal for a conflict keeps every step;
+     * one for the policy drops the records it denied, a new one by the key typed into it; anything
+     * else rolls the change back, nothing changed, and throws.
      */
     async save(only?: ReadonlySet<string>): Promise<SaveOutcome> {
       const open = staged;
       if (!open) return { saved: 0 };
       const sent = (key: string) => !only || only.has(key);
-      await collection.utils.refetch();
+      await collection.utils.refetch({ throwOnError: true });
       const rows = storedRows();
       const conflicts = open.tx.mutations.flatMap((m) => {
         const was = base.get(m.key);
         const now = rows.get(m.key);
-        return was && sent(m.key) && now?.updatedAt !== was.updatedAt ? [{ key: m.key, current: now ?? null }] : [];
+        return was && now && sent(m.key) && isChange(m) && now.updatedAt !== was.updatedAt
+          ? [{ key: m.key, current: now }]
+          : [];
       });
       if (conflicts.length) return { conflicts };
-      const count = open.tx.mutations.filter((m) => sent(m.key)).length;
+      const count = open.tx.mutations.filter((m) => sent(m.key) && isChange(m)).length;
       if (count > SAVE_MANY_MAX) throw new Error(`One change saves at most ${SAVE_MANY_MAX} records: save some first`);
       sending = only;
+      committing = true;
       try {
         await open.tx.commit();
       } catch (err) {
@@ -350,17 +388,29 @@ function createRecordsView(queryClient: QueryClient, { query, calls, held }: Rec
           await collection.utils.writeUpsert(body.conflicts.flatMap(({ current }) => (current ? [current] : [])));
           await collection.utils.writeDelete(gone);
           reopen(open.steps);
-          return { conflicts: body.conflicts };
+          // A new record's is its key taken (by a record the page did not show, written in now,
+          // so the key cell says so): its key to change, not a conflict to settle.
+          const typed = new Set(
+            open.tx.mutations.flatMap((m) => (m.type === "insert" ? [String(m.modified.record[keyField])] : [])),
+          );
+          return { conflicts: body.conflicts.filter(({ key }) => !typed.has(key)) };
         }
         if (body?.code === "policy_denied") {
-          const denied = new Set(body.keys);
-          reopen(without(open.steps, (key) => denied.has(key)));
+          // The server names a new record by the key typed into it, the change by its `newKey`.
+          const denied = new Set(body.denied);
+          const dropped = new Set(
+            open.tx.mutations.flatMap((m) =>
+              denied.has(m.type === "insert" ? String(m.modified.record[keyField]) : m.key) ? [m.key] : [],
+            ),
+          );
+          reopen(without(open.steps, (key) => dropped.has(key)));
           return { denied: [...denied], error: err };
         }
         reopen([]);
         throw err;
       } finally {
         sending = undefined;
+        committing = false;
       }
       reopen(without(open.steps, sent));
       return "held" in open.tx.metadata

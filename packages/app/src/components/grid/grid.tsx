@@ -233,9 +233,10 @@ export function DataGrid({
     changes.flatMap(({ key, fields: changed }) => changed.map(({ field }) => conflictId({ key, field }))),
   );
   const required = useMemo(() => [...fields.values()].filter((f) => f.required).map((f) => f.key), [fields]);
+  // Again as the rows change too (`listed`): a record read or saved since may hold a new one's key.
   const issues = useMemo(
     () => issuesOf(staged, keyField, required, (key) => records.has(key)),
-    [staged, keyField, required, records],
+    [staged, keyField, required, records, listed],
   );
   const issueAt = new Map(issues.map((issue) => [conflictId(issue), issue]));
   // A staged change's conflicts while its record is still in it.
@@ -278,9 +279,14 @@ export function DataGrid({
           }
           return next;
         });
-        toast.warning(`${plural(outcome.conflicts.length, "record")} changed since you staged them`, {
-          description: "Nothing was saved: settle each one, then save again.",
-        });
+        if (outcome.conflicts.length)
+          toast.warning(`${plural(outcome.conflicts.length, "record")} changed since you staged them`, {
+            description: "Nothing was saved: settle each one, then save again.",
+          });
+        else
+          toast.warning("A record has a new record's key already", {
+            description: "Nothing was saved: change its key, then save again.",
+          });
       } else if ("denied" in outcome) {
         setDenied(new Set(outcome.denied));
         toast.error(
@@ -304,6 +310,8 @@ export function DataGrid({
 
   /** A staged conflict settled: Keep theirs drops your change to the cell; the last settled, the change is saved over theirs. */
   const settle = (conflict: Conflict, keep: "theirs" | "mine") => {
+    // Settling makes the change again: never under a Save of the rest, whose transaction it would roll back.
+    if (saving) return void toast.info("Saving the change: try again once it is saved");
     dropConflict(conflict);
     if (keep === "theirs")
       stage.drop(conflict.key, changeOfKey.get(conflict.key)?.type === "delete" ? undefined : conflict.field);
@@ -329,12 +337,15 @@ export function DataGrid({
         if (!saved) return;
         setSavedAt(Date.parse(saved.updatedAt));
         if (undoing) toast.success(`Undid ${field} for ${key}`);
+        // A change staged since: an edit is one of its steps now, so no Undo saves on its own.
+        else if (stage.current()) toast.success(`Saved ${field} for ${key}`);
         else
           toast.success(`Saved ${field} for ${key}`, {
             // The one field back, over the record as it is now: edits since to its other fields stay.
             action: {
               label: "Undo",
               onClick: () => {
+                if (stage.current()) return void toast.info("Save or discard the staged changes first");
                 const now = records.get(key);
                 if (now) save(key, field, withValue(now.record, field, before), true);
               },
@@ -599,7 +610,8 @@ export function DataGrid({
       setEditing(null);
     },
     expand: () => {
-      if (focused)
+      // A staged new record has no record to open until it is saved.
+      if (focused && !isNew(focused.row.id))
         void navigate({ search: (prev) => ({ ...prev, record: focused.row.id, new: undefined }), resetScroll: false });
     },
     copy: () => {

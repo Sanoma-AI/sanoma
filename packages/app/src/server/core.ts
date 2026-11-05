@@ -754,7 +754,8 @@ export function asApiError(err: unknown): ApiError {
   // Read by property, not instanceof: DBOS hands a run's errors back as copies.
   const data: Record<string, unknown> = (err as Partial<SanomaError>).data ?? {};
   if (Array.isArray(data.issues)) body.issues = data.issues as InputIssue[];
-  if (code === "policy_denied" && Array.isArray(data.keys)) body.keys = data.keys.map(String);
+  // A batch's refusal names every entry the policy denied, saves and deletes alike.
+  if (code === "policy_denied" && Array.isArray(data.denied)) body.denied = data.denied.map(String);
   if (typeof data.field === "string") body.field = data.field;
   if (code === "not_approver") {
     body.approver = data.approver as ErrorResponse["approver"];

@@ -570,8 +570,8 @@ export interface ErrorResponse {
   current?: Saved<Record<string, Json>> | null;
   /** For a `saveMany`'s `record_changed`: every record it found changed, or gone, as it stands now. */
   conflicts?: { key: string; current: Saved<Record<string, Json>> | null }[];
-  /** For a `saveMany`'s `policy_denied`: the keys of the records the policy denied. */
-  keys?: string[];
+  /** For a `saveMany`'s `policy_denied`: the keys of every entry the policy denied, saves and deletes alike. */
+  denied?: string[];
 }
 
 /** A JSON value, as a record's fields hold them. */

@@ -2,7 +2,7 @@ import type { Saved } from "@sanoma-ai/workflows/shared";
 import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
 import { ApiError, errorBodyOf } from "../src/api.ts";
-import { type ManyAnswer, newKey, recordsView, savedIn, type Step } from "../src/components/grid/collection.ts";
+import { isNew, type ManyAnswer, newKey, recordsView, savedIn, type Step } from "../src/components/grid/collection.ts";
 
 // The Data page's records collection (`components/grid/collection.ts`) over a fake `api`: each
 // change's handler makes the one call, with `ifRecord` the record as the change found it, and
@@ -34,6 +34,7 @@ const row = (key: string, record: Record<string, unknown>, updatedBy = "bo"): Sa
 /** What the page hands the collection for `query`: `recordsQuery`'s key and function, and the calls. */
 const sourceOf = (query: object) => ({
   query: { queryKey: ["data", "leads", query], queryFn: list, staleTime: 5_000 },
+  key: "company",
   calls,
   held,
 });
@@ -271,7 +272,7 @@ describe("a staged change of the Data page's records", () => {
       records: [
         { record: { company: "Acme", stage: "replied" }, ifRecord: ACME.record },
         { record: { company: "Globex", stage: "won" }, ifRecord: GLOBEX.record },
-        { record: { company: "Hooli" } },
+        { record: { company: "Hooli" }, ifAbsent: true },
       ],
       deletes: [{ key: "Gizmo", ifRecord: GIZMO.record }],
     });
@@ -306,14 +307,17 @@ describe("a staged change of the Data page's records", () => {
     expect(collection.get("Globex")?.record).toEqual(GLOBEX.record);
   });
 
-  it("drops the records the policy denied and keeps the rest staged", async () => {
+  it("drops the records the policy denied, a new one by the key typed into it, and keeps the rest staged", async () => {
     const { collection, stage } = staged();
+    const added = newKey();
     stage.add(paste);
+    stage.add({ what: "new record", said: "Added a record", adds: [added], cells: [cell(added, "company", "Hooli")] });
     calls.saveMany.mockRejectedValueOnce(
-      new ApiError(403, { error: "leads are not won", code: "policy_denied", keys: ["Globex"] }),
+      new ApiError(403, { error: "leads are not won", code: "policy_denied", denied: ["Globex", "Hooli"] }),
     );
     const outcome = await stage.save();
-    expect(outcome).toMatchObject({ denied: ["Globex"] });
+    expect(outcome).toMatchObject({ denied: ["Globex", "Hooli"] });
+    expect(collection.has(added)).toBe(false);
     expect(collection.get("Globex")?.record).toEqual(GLOBEX.record);
     expect(collection.get("Acme")?.record.stage).toBe("replied");
     expect(stage.current()?.tx.mutations.map((m) => m.key)).toEqual(["Acme"]);
@@ -349,14 +353,44 @@ describe("a staged change of the Data page's records", () => {
 
   it("finds a record changed since it was staged a conflict before it sends anything", async () => {
     const changed = { ...row("Globex", { stage: "lost" }, "bo"), updatedAt: "2026-11-04T12:00:00.000Z" };
-    const { stage } = staged(ACME, changed, GIZMO);
+    const { collection, stage } = staged(ACME, changed, GIZMO);
     stage.add(paste);
     await expect(stage.save()).resolves.toEqual({ conflicts: [{ key: "Globex", current: changed }] });
     expect(calls.saveMany).not.toHaveBeenCalled();
     expect(stage.current()?.steps).toEqual([paste]);
+    // The read does not undo what is staged: the cells still show your change.
+    expect(collection.get("Globex")?.record.stage).toBe("won");
     // Keep theirs: the cell's change dropped, the rest still staged.
     stage.drop("Globex", "stage");
     expect(stage.current()?.tx.mutations.map((m) => m.key)).toEqual(["Acme"]);
+  });
+
+  it("saves a conflict's record, once you keep yours, over theirs: their other fields stay theirs", async () => {
+    const theirs = {
+      ...row("Globex", { stage: "contacted", contact: "g@globex.test" }, "bo"),
+      updatedAt: "2026-11-04T12:00:00.000Z",
+    };
+    const { collection, stage } = staged(ACME, theirs, GIZMO);
+    stage.add(paste);
+    await expect(stage.save()).resolves.toEqual({ conflicts: [{ key: "Globex", current: theirs }] });
+    // Use mine: the steps made again over theirs.
+    stage.rebase("Globex", theirs);
+    expect(collection.get("Globex")?.record).toEqual({ company: "Globex", stage: "won", contact: "g@globex.test" });
+    calls.saveMany.mockImplementationOnce(savedManyBy);
+    await expect(stage.save()).resolves.toEqual({ saved: 2 });
+    expect(calls.saveMany.mock.calls[0]![0].records[1]).toEqual({
+      record: { company: "Globex", stage: "won", contact: "g@globex.test" },
+      ifRecord: theirs.record,
+    });
+  });
+
+  it("sends no record whose staged change ends where it began", async () => {
+    const { stage } = staged();
+    stage.add(paste);
+    stage.add({ what: "edit", said: "Changed stage of Globex", cells: [cell("Globex", "stage", "contacted")] });
+    calls.saveMany.mockImplementationOnce(savedManyBy);
+    await expect(stage.save()).resolves.toEqual({ saved: 1 });
+    expect(calls.saveMany.mock.calls[0]![0].records.map((r) => r.record.company)).toEqual(["Acme"]);
   });
 
   it("saves only the records it is told, leaving the rest staged", async () => {
@@ -368,6 +402,86 @@ describe("a staged change of the Data page's records", () => {
     expect(stage.current()?.tx.mutations.map((m) => m.key)).toEqual(["Globex"]);
     expect(collection.get("Globex")?.record.stage).toBe("won");
     expect(collection.get("Acme")).toMatchObject({ record: { stage: "replied" }, updatedBy: "ada" });
+  });
+
+  it("keeps a new record whose key a record off the page has, that record written in, and lists no conflict", async () => {
+    const { collection, stage } = staged();
+    const added = newKey();
+    const step = {
+      what: "new record",
+      said: "Added a record",
+      adds: [added],
+      cells: [cell(added, "company", "Hooli")],
+    };
+    stage.add(step);
+    const theirs = { ...row("Hooli", {}, "cy"), record: { company: "Hooli", stage: "won" } };
+    calls.saveMany.mockRejectedValueOnce(
+      new ApiError(409, { error: "Exists", code: "record_changed", conflicts: [{ key: "Hooli", current: theirs }] }),
+    );
+    await expect(stage.save()).resolves.toEqual({ conflicts: [] });
+    expect(collection.get("Hooli")).toMatchObject(theirs);
+    expect(stage.current()?.steps).toEqual([step]);
+    expect(collection.get(added)?.record).toEqual({ company: "Hooli" });
+  });
+
+  it("keeps the change when its read before Save fails, and sends nothing", async () => {
+    const { collection, stage } = staged();
+    stage.add(paste);
+    const refused = new ApiError(403, { error: "reading leads is denied", code: "policy_denied" });
+    list.mockRejectedValueOnce(refused);
+    await expect(stage.save()).rejects.toBe(refused);
+    expect(calls.saveMany).not.toHaveBeenCalled();
+    expect(stage.current()?.steps).toEqual([paste]);
+    expect(stage.current()?.tx.state).toBe("pending");
+    expect(collection.get("Acme")?.record.stage).toBe("replied");
+  });
+
+  it("makes the change again from its steps in order, each once, over the record each was first staged over", async () => {
+    const { collection, stage } = staged();
+    const added = newKey();
+    stage.add(paste);
+    stage.add({ what: "new record", said: "Added a record", adds: [added], cells: [cell(added, "company", "Hooli")] });
+    stage.add({ what: "edit", said: "Changed stage of Acme", cells: [cell("Acme", "stage", "won")] });
+    stage.add({ what: "edit", said: "Changed contact of Gizmo", cells: [cell("Gizmo", "contact", "g@gizmo.test")] });
+    // Someone else's save of Acme reaches the collection while it is staged.
+    const theirs = { ...row("Acme", { stage: "meeting" }, "cy"), updatedAt: "2026-11-04T11:00:00.000Z" };
+    await collection.utils.writeUpsert(theirs);
+
+    stage.undo();
+    // The later step over the earlier, the new record once, the step taken back gone.
+    expect(collection.get("Acme")?.record.stage).toBe("won");
+    expect(collection.toArray.filter((r) => isNew(r.key)).map((r) => r.record)).toEqual([{ company: "Hooli" }]);
+    expect(collection.get("Gizmo")?.record).toEqual(GIZMO.record);
+    expect(stage.current()?.tx.mutations.map((m) => [m.key, m.type])).toEqual([
+      ["Acme", "update"],
+      ["Globex", "update"],
+      [added, "insert"],
+    ]);
+
+    // Acme is still saved over the record it was first staged over: theirs is a conflict.
+    list.mockResolvedValue([theirs, GLOBEX, GIZMO]);
+    await expect(stage.save()).resolves.toEqual({ conflicts: [{ key: "Acme", current: theirs }] });
+    stage.rebase("Acme", theirs);
+    calls.saveMany.mockImplementationOnce(savedManyBy);
+    await expect(stage.save()).resolves.toEqual({ saved: 3 });
+    expect(calls.saveMany.mock.calls[0]![0].records).toEqual([
+      { record: { company: "Acme", stage: "won" }, ifRecord: theirs.record },
+      { record: { company: "Globex", stage: "won" }, ifRecord: GLOBEX.record },
+      { record: { company: "Hooli" }, ifAbsent: true },
+    ]);
+  });
+
+  it("keeps the change when a single edit of one of its records is refused, which the library rolls back with it", async () => {
+    const view = staged();
+    const { collection, stage } = view;
+    calls.save.mockRejectedValueOnce(new ApiError(403, { error: "leads are not lost", code: "policy_denied" }));
+    const single = view.edit({ key: "Acme", record: { company: "Acme", stage: "lost" } });
+    stage.add(paste);
+    await single.when("settled").catch(() => {});
+    await vi.waitFor(() => expect(stage.current()?.tx.state).toBe("pending"));
+    expect(stage.current()?.steps).toEqual([paste]);
+    expect(collection.get("Acme")?.record.stage).toBe("replied");
+    expect(collection.get("Globex")?.record.stage).toBe("won");
   });
 
   it("resolves a batch held for an approval as sent, the records as stored until its run ends", async () => {

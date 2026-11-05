@@ -16,6 +16,7 @@ import {
   resolveConfig,
   SanomaClient,
   type SanomaConfig,
+  SanomaError,
   type Source,
   startWorker,
   type Worker,
@@ -866,6 +867,31 @@ describe("errors the app answers with", () => {
     const api = asApiError(new Error("connect ECONNREFUSED db.internal:5432"));
     expect(api.status).toBe(500);
     expect(api.body).toEqual({ error: "Something went wrong" });
+  });
+
+  it("answers a batch's refusals with what each entry needs: the keys denied, the records changed as they stand", () => {
+    const denied = asApiError(
+      new SanomaError("policy_denied", "data.leads.saveMany was denied by policy: Globex: lost", {
+        op: "data.leads.saveMany",
+        reason: "Globex: lost",
+        denied: ["Globex", "Gizmo"],
+      }),
+    );
+    expect(denied.status).toBe(403);
+    expect(denied.body).toMatchObject({ code: "policy_denied", denied: ["Globex", "Gizmo"] });
+    const conflicts = [{ key: "Acme", current: null }];
+    const changed = asApiError(
+      Object.assign(
+        new DriverError("1 of the batch's records changed or are missing", {
+          retryable: false,
+          status: 409,
+          vendorCode: "record_changed",
+        }),
+        { conflicts },
+      ),
+    );
+    expect(changed.status).toBe(409);
+    expect(changed.body).toEqual({ error: expect.any(String), code: "record_changed", conflicts });
   });
 
   it("answers an argument a schema refuses, a server function's included, with 400 and the issues", () => {

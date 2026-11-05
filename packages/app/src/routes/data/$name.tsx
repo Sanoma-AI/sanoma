@@ -99,6 +99,7 @@ function CollectionPage() {
   const view = records.data
     ? recordsView(queryClient, {
         query: recordsQuery(name, shown),
+        key: collection.key,
         calls: (api as UntypedApi).data[name],
         held: toastIfHeld,
       })
