@@ -2,7 +2,7 @@ import type { Exchange, ReplayOptions } from "@sanoma-ai/testing/replay";
 
 // How Neon's replies are replayed (and recorded): the driver's tests and the features share it.
 // The features' fixtures are recorded; the driver tests' own are written by hand from Neon's API
-// reference (the SDK's bundled OpenAPI spec). The README says how to record.
+// reference (its published OpenAPI spec, https://neon.com/api_spec/release/v2.json). The README says how to record.
 
 /** A made-up key: the replies need none. */
 export const TEST_KEY = "napi_test_key";

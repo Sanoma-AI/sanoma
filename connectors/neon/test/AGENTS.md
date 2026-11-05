@@ -6,7 +6,7 @@ Tests for the Neon connector: replies written from Neon's API reference, the fea
 
 | Path                                         | What it is                                                                                                                                                                                     |
 | -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`fixtures/`](fixtures/)                     | Neon's exchanges: one per feature scenario, recorded (2026-10-27); the driver tests' own, written by hand from the SDK's bundled OpenAPI spec                                                  |
+| [`fixtures/`](fixtures/)                     | Neon's exchanges: one per feature scenario, recorded (2026-10-27); the driver tests' own, written by hand from Neon's published OpenAPI spec                                                   |
 | [`driver.test.ts`](driver.test.ts)           | `neonDriver`: the requests it sends, paginated metadata listing and incomplete-page refusal, plans, the replace refused, health, the URL stored and refused, branches, computes, error mapping |
 | [`connections.test.ts`](connections.test.ts) | The runtime boundary with protocol doubles: separate organizations, concurrent calls, in-flight rotation, wrong-account refusal and scoped URL storage                                         |
 | [`list.test.ts`](list.test.ts)               | Fake search and pagination, duplicate names and metadata-only output                                                                                                                           |

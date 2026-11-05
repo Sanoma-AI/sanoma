@@ -10,6 +10,7 @@ import { stripe } from "@sanoma-ai/connector-stripe";
 import { supabase } from "@sanoma-ai/connector-supabase";
 import { withFake } from "@sanoma-ai/testing";
 import { fakeHost } from "@sanoma-ai/testing/host";
+import { fakeSandbox } from "@sanoma-ai/testing/sandbox";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { defineConfig, defineConnector, defineWorkflow, memoryLedger, vendorInfo } from "../src/index.ts";
@@ -511,12 +512,18 @@ describe("ConfigDescriptionSchema", () => {
     expect(ConfigDescriptionSchema.safeParse(rest).success).toBe(false);
   });
 
-  it("says which contracts each resource type meets: a host, a database, and the repository a host's source names", () => {
-    const { resourceTypes } = describeConfig({ ...base, workflows: [], connectors: [github, docker, supabase] });
+  it("says which contracts each resource type meets: a host, a database, a sandbox, and the repository a host's source names", () => {
+    const sandbox = fakeSandbox().connector;
+    const { resourceTypes } = describeConfig({
+      ...base,
+      workflows: [],
+      connectors: [github, docker, supabase, sandbox],
+    });
     const capabilities = Object.fromEntries(resourceTypes.map((t) => [t.id, t.capabilities]));
     expect(capabilities).toMatchObject({
       "docker.container": ["host"],
       "supabase.project": ["database"],
+      "testsandbox.box": ["sandbox"],
       "github.repository": ["source"],
     });
     expect(capabilities["github.team"]).toBeUndefined();

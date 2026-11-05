@@ -1,6 +1,5 @@
-import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import type { HarnessV1 } from "@ai-sdk/harness";
+import type { HarnessV1, HarnessV1NetworkSandboxSession } from "@ai-sdk/harness";
 import { HarnessAgent } from "@ai-sdk/harness/agent";
 import type { AppStepContext } from "@sanoma-ai/workflows";
 import { errorMessage } from "@sanoma-ai/workflows/shared";
@@ -14,16 +13,18 @@ import {
 import { type ChatMessage, ENGINE_NAMES, noKeyText, pathOf, textOf } from "../../lib/chat.ts";
 import { modelRegistry } from "../../server/models.ts";
 import { secretValues } from "../../server/secrets.ts";
-import { agentHome, allowedPath, commitTurn, NO_SHELL, openDraft, outsideCheckout } from "./checkout.ts";
-import { freePort, LocalSession } from "./local-session.ts";
+import { boxSession, homeOf, openBox } from "./box-session.ts";
+import { allowedPath, commitTurn, NO_SHELL, openDraft, outsideCheckout } from "./checkout.ts";
+import { freePort } from "./local-box.ts";
 import { harnessInstructions } from "./prompt.ts";
 import type { Engine, EngineTurn } from "./transcript.ts";
 
 // The chat's second engine: an existing coding agent driven by the AI SDK's `HarnessAgent` in a
-// local session of ours (`LocalSession`), in the chat's draft, on the company's model key. Pi runs
-// in this process; Claude Code through its adapter's bridge, a child of the session.
-// A turn is one harness session: made, run to its end (its permission requests answered by the
-// checkout rule), destroyed. Then what the agent changed is committed on the draft and checked.
+// session of ours over the person's box (`boxSession`), in the chat's draft, on the company's
+// model key. Pi runs in this process; Claude Code through its adapter's bridge, in the box.
+// A turn opens the box and is one harness session: made, run to its end (its permission requests
+// answered by the checkout rule), destroyed; the box is stopped. Then what the agent changed is
+// committed on the draft and checked.
 
 /** The connector whose model (`<vendor>/default`) and key the coding agents use, with its key's variable and its base URL's. */
 const VENDOR = "anthropic";
@@ -34,7 +35,7 @@ const BASE_URL = "ANTHROPIC_BASE_URL";
 interface Runtime {
   /** Pi takes `<provider>/<model-id>`; a bridge, the bare id. */
   qualified: boolean;
-  /** A bridge, a child of the session: its first start installs it under the home the sessions share. */
+  /** A bridge, a child of the session: its first start in a box installs it under the box's home. */
   bridge: boolean;
   /** Its adapter, loaded when first used, on the key as an explicit `auth` record (never this process's environment or keychain). */
   harness(auth: Record<string, string>, home: string): Promise<HarnessV1>;
@@ -64,8 +65,8 @@ const RUNTIMES: Readonly<Record<RuntimeName, Runtime>> = {
   // `allow-all`, which the checkout rule could not answer for. Then a vendor per runtime.
 };
 
-/** A bridge's first session, by its runtime: it installs the bridge under the shared home, so the next ones wait for it. */
-const installing = new Map<RuntimeName, Promise<unknown>>();
+/** A bridge's first session in a box, by its runtime and the box's id: it installs the bridge there, so the next ones wait for it. */
+const installing = new Map<string, Promise<unknown>>();
 
 /** The engine for `name`: a turn of a chat through that runtime. */
 export const harnessEngine =
@@ -83,23 +84,43 @@ export const harnessEngine =
     });
 
 async function runTurn(name: RuntimeName, turn: EngineTurn, writer: UIMessageStreamWriter<ChatMessage>) {
-  const { step, chat, messages } = turn;
-  const { by: principal, signal } = step;
-  const runtime: Runtime = RUNTIMES[name];
-  // Kept across restarts: a bridge installs its agent under it once. Its own, beside the own
-  // agents' installs and people's sign-ins, which its files never reach.
-  const home = agentHome(step, "harness");
+  const { step, chat } = turn;
   // The key first: a turn without it opens no draft.
   const auth = await authFor(step);
-  // The agent works in the chat's draft from its first turn.
-  const [draft, model, port] = await Promise.all([
-    openDraft(step, chat),
-    modelFor(step, runtime),
-    freePort(),
-    mkdir(home, { recursive: true }),
-  ]);
-  const sessionId = `${chat.id}-${generateId()}`;
-  const local = new LocalSession({ id: sessionId, root: draft.root, home, port });
+  // The agent works in the chat's draft from its first turn, in the person's box, opened last
+  // so that nothing that fails before leaves it running.
+  const [draft, model, port] = await Promise.all([openDraft(step, chat), modelFor(step, RUNTIMES[name]), freePort()]);
+  const box = await openBox(step);
+  try {
+    // Kept across turns: a bridge installs its agent under it once.
+    const home = await homeOf(box);
+    const sandbox = boxSession(box, { id: `${chat.id}-${generateId()}`, root: draft.root, home, ports: [port] });
+    try {
+      await converse(name, turn, writer, sandbox, { auth, model, home, box: box.id });
+    } finally {
+      await sandbox.destroy();
+    }
+  } finally {
+    // However the turn ended (an error too): its error, if any, follows the commit.
+    try {
+      await commitTurn(turn, draft, ENGINE_NAMES[name], writer);
+    } finally {
+      await box.stop();
+    }
+  }
+  writer.write({ type: "finish" });
+}
+
+/** The turn's harness session in `sandbox`, run to its end, its permission requests answered by the checkout rule. */
+async function converse(
+  name: RuntimeName,
+  { step, chat, messages }: EngineTurn,
+  writer: UIMessageStreamWriter<ChatMessage>,
+  sandbox: HarnessV1NetworkSandboxSession,
+  { auth, model, home, box }: { auth: Record<string, string>; model: string | undefined; home: string; box: string },
+) {
+  const { by: principal, signal } = step;
+  const runtime: Runtime = RUNTIMES[name];
   const harness = await runtime.harness(auth, home);
   const agent = new HarnessAgent({
     harness,
@@ -111,55 +132,52 @@ async function runTurn(name: RuntimeName, turn: EngineTurn, writer: UIMessageStr
     sandboxConfig: { workDir: "." },
   });
   const said = messages.at(-1)!;
-  let failed: { err: unknown } | undefined;
+  const create = () => agent.createSession({ sessionId: sandbox.id, sandboxSession: sandbox, abortSignal: signal });
+  const key = `${name} ${box}`;
+  const installed = installing.get(key);
+  const started = installed ? installed.then(create) : create();
+  // Kept as whether it started (not the session); a failed first start is tried again by the next.
+  if (runtime.bridge && !installed) {
+    installing.set(
+      key,
+      started.then(
+        () => undefined,
+        () => void installing.delete(key),
+      ),
+    );
+  }
+  const session = await started;
   try {
-    const create = () => agent.createSession({ sessionId, sandboxSession: local, abortSignal: signal });
-    const installed = installing.get(name);
-    const started = installed ? installed.then(create) : create();
-    // Kept as whether it started (not the session); a failed first start is tried again by the next.
-    if (runtime.bridge && !installed) {
-      installing.set(
-        name,
-        started.then(
-          () => undefined,
-          () => void installing.delete(name),
+    let result = await agent.stream({ session, prompt: textOf(said), abortSignal: signal });
+    for (let first = true; ; first = false) {
+      for await (const chunk of result.toUIMessageStream({
+        sendStart: first,
+        sendFinish: false,
+        generateMessageId: generateId,
+      })) {
+        // As the chat's chunk: a company's install has the harness's own copy of the AI SDK (its
+        // exact pin), whose chunk types are not this one's, though the chunks are.
+        writer.write(chunk as InferUIMessageChunk<ChatMessage>);
+      }
+      const asked = (await result.content).filter((part) => part.type === "tool-approval-request");
+      if (!asked.length || signal.aborted) break;
+      const kinds = harness.builtinTools as Record<string, { toolUseKind?: string } | undefined>;
+      const answers = await Promise.all(
+        asked.map(({ approvalId, toolCall }) =>
+          answer(
+            sandbox.defaultWorkingDirectory,
+            approvalId,
+            toolCall.toolName,
+            kinds[toolCall.toolName]?.toolUseKind,
+            toolCall.input,
+          ),
         ),
       );
+      result = await agent.continueStream({ session, toolApprovalContinuations: answers, abortSignal: signal });
     }
-    const session = await started;
-    try {
-      let result = await agent.stream({ session, prompt: textOf(said), abortSignal: signal });
-      for (let first = true; ; first = false) {
-        for await (const chunk of result.toUIMessageStream({
-          sendStart: first,
-          sendFinish: false,
-          generateMessageId: generateId,
-        })) {
-          // As the chat's chunk: a company's install has the harness's own copy of the AI SDK (its
-          // exact pin), whose chunk types are not this one's, though the chunks are.
-          writer.write(chunk as InferUIMessageChunk<ChatMessage>);
-        }
-        const asked = (await result.content).filter((part) => part.type === "tool-approval-request");
-        if (!asked.length || signal.aborted) break;
-        const kinds = harness.builtinTools as Record<string, { toolUseKind?: string } | undefined>;
-        const answers = await Promise.all(
-          asked.map(({ approvalId, toolCall }) =>
-            answer(draft.root, approvalId, toolCall.toolName, kinds[toolCall.toolName]?.toolUseKind, toolCall.input),
-          ),
-        );
-        result = await agent.continueStream({ session, toolApprovalContinuations: answers, abortSignal: signal });
-      }
-    } finally {
-      await session.destroy();
-    }
-  } catch (err) {
-    failed = { err };
   } finally {
-    await local.destroy();
+    await session.destroy();
   }
-  await commitTurn(turn, draft, ENGINE_NAMES[name], writer);
-  if (failed) throw failed.err;
-  writer.write({ type: "finish" });
 }
 
 /**

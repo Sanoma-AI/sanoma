@@ -55,6 +55,10 @@
       "types": "./dist/scenarios.d.ts",
       "default": "./dist/scenarios.js"
     },
+    "./sandbox": {
+      "types": "./dist/sandbox.d.ts",
+      "default": "./dist/sandbox.js"
+    },
     "./wakeup": {
       "types": "./dist/wakeup.d.ts",
       "default": "./dist/wakeup.js"

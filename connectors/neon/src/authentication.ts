@@ -1,5 +1,6 @@
 import { defineAuthentication, SecretStoreError } from "@sanoma-ai/workflows";
 import { z } from "zod";
+import { loadSdk, neonClient } from "./sdk.ts";
 
 /** An organization key: Neon verifies which organization owns it before every invocation. */
 export const neonApiKey = defineAuthentication({
@@ -10,15 +11,19 @@ export const neonApiKey = defineAuthentication({
   async verify({ apiKey }) {
     // Organization- and project-scoped keys return only the organization that owns the key.
     // https://api-docs.neon.tech/reference/getcurrentuserorganizations
-    const { createApiClient } = await import("@neondatabase/api-client");
-    const client = createApiClient({ apiKey, timeout: 10_000 });
+    const raw = await loadSdk();
+    let id: string | undefined;
     try {
-      const { data } = await client.getCurrentUserOrganizations();
-      if (data.organizations.length !== 1 || !data.organizations[0]?.id) throw new SecretStoreError("denied");
-      // This endpoint does not attest individual API scopes or key expiry. Do not invent grants.
-      return { account: data.organizations[0].id, scopes: [] };
+      const { data, error } = await raw.getCurrentUserOrganizations({
+        client: neonClient(raw, apiKey),
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (error === undefined && data.organizations?.length === 1) id = data.organizations[0]?.id;
     } catch {
-      throw new SecretStoreError("denied");
+      // A request that failed is a key not verified.
     }
+    if (!id) throw new SecretStoreError("denied");
+    // This endpoint does not attest individual API scopes or key expiry. Do not invent grants.
+    return { account: id, scopes: [] };
   },
 });

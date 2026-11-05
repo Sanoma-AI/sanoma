@@ -7,7 +7,7 @@ import { neonDriver } from "../src/driver.ts";
 import { replayOptions, TEST_KEY } from "./replay.ts";
 
 // Replays its own fixtures in test/fixtures (`create.json`, `read.json`, ...), written by hand
-// from Neon's API reference (the SDK's bundled OpenAPI spec) and checked against the features'
+// from Neon's API reference (its published OpenAPI spec) and checked against the features'
 // recordings; the error cases only replay.
 
 const { server, play, fixture, sent } = replay(replayOptions);
@@ -82,6 +82,8 @@ describe.skipIf(live)("neonDriver", () => {
     });
     expect(sent).toHaveLength(2);
     expect(sent.every((r) => r.headers.get("authorization") === `Bearer ${TEST_KEY}`)).toBe(true);
+    // The key travels as the Bearer token only, never in a cookie.
+    expect(sent.some((r) => r.headers.has("cookie"))).toBe(false);
   });
 
   it("defaults the list page size and preserves continuation on an empty page", async () => {
@@ -307,8 +309,21 @@ describe.skipIf(live)("neonDriver", () => {
       vendorCode: "SOME_CODE",
       message: `neon: GET /projects/${P}: said Neon`,
     });
-    // An axios error carries the request's headers, the key among them: it is not kept.
+    // The SDK's error carries its request, whose headers hold the key: it is not kept.
     expect(err.cause).toBeUndefined();
+  });
+
+  it("retries a reply it cannot read", async () => {
+    server.use(
+      http.get(
+        `*${PROJECTS}/${P}`,
+        () => new HttpResponse('{"project":', { headers: { "content-type": "application/json" } }),
+      ),
+    );
+    expect(await failure(op("project.read", { id: P }))).toMatchObject({
+      retryable: true,
+      message: `neon: GET /projects/${P}: the reply could not be read`,
+    });
   });
 
   it("retries no reply and a timeout", async () => {

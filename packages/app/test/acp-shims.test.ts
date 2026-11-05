@@ -1,20 +1,41 @@
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { Box } from "@sanoma-ai/workflows";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { OWN_AGENTS, shims } from "../src/steps/agent/acp.ts";
+import { install, OWN_AGENTS, shims } from "../src/steps/agent/acp.ts";
+import { boxSession, homeOf } from "../src/steps/agent/box-session.ts";
+import { localBackend } from "../src/steps/agent/local-box.ts";
 
-// The shims first on a person's own agent's PATH (`shims` in acp.ts), run as the agent runs them:
-// `gh`, `open` and `xdg-open` refuse; `security` is a Keychain that is there, empty, and takes
-// nothing, so Claude Code keeps its sign-in in its own file under the person's home. With
-// SANOMA_LIVE=1 on macOS, Claude Code itself, installed, stores a secret through them.
+// What a person's own agent finds in their box (a local backend's): the shims first on its PATH
+// (`shims` in acp.ts), run as the agent runs them: `gh`, `open` and `xdg-open` refuse; `security`
+// is a Keychain that is there, empty, and takes nothing, so Claude Code keeps its sign-in in its
+// own file under its HOME, `.acp` in the box; and its install (`install`), there. With SANOMA_LIVE=1
+// on macOS, Claude Code itself, installed, stores a secret through the shims.
 
-const scratch = mkdtempSync(join(tmpdir(), "sanoma-shims-"));
+const scratch = realpathSync(mkdtempSync(join(tmpdir(), "sanoma-shims-")));
+let box: Box;
+let home = "";
+/** The person's own agents' HOME in the box. */
+let agents = "";
 let dir = "";
+mkdirSync(join(scratch, "draft"));
 
 beforeAll(async () => {
-  dir = await shims(join(scratch, "acp"));
+  box = await localBackend(join(scratch, "boxes")).open({ name: "sanoma-acme-ada", image: "", size: 0 });
+  home = await homeOf(box);
+  agents = join(home, ".acp");
+  dir = await shims(box, agents);
 });
 
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -26,8 +47,8 @@ const run = (name: string, args: string[], input?: string) => {
 };
 
 describe("a person's own agent's shims", () => {
-  it("are acp/shims, and refuse gh, open and xdg-open", () => {
-    expect(dir).toBe(join(scratch, "acp/shims"));
+  it("are .acp/shims in the box, and refuse gh, open and xdg-open", () => {
+    expect(dir).toBe(join(scratch, "boxes/sanoma-acme-ada/.acp/shims"));
     expect(readdirSync(dir).toSorted()).toEqual(["gh", "open", "security", "xdg-open"]);
     for (const [name, args] of [
       ["gh", ["auth", "token"]],
@@ -40,6 +61,20 @@ describe("a person's own agent's shims", () => {
         stderr: `${name} is not available to a person's own agent in Sanoma\n`,
       });
     }
+  });
+
+  it("are out of a company-key session's reach in the same box", async () => {
+    const session = boxSession(box, { id: "s1", root: join(scratch, "draft"), home, ports: [] });
+    await expect(session.readTextFile({ path: join(dir, "security") })).rejects.toThrow(/outside the checkout/);
+    await expect(session.writeTextFile({ path: join(dir, "gh"), content: "exit 0\n" })).rejects.toThrow(
+      /outside the checkout/,
+    );
+    // Nor the agents' sign-ins, beside them in their HOME.
+    await expect(session.readTextFile({ path: join(agents, ".claude/.credentials.json") })).rejects.toThrow(
+      /outside the checkout/,
+    );
+    // The rest of the box's home is the session's.
+    await session.writeTextFile({ path: join(home, ".pi/agent/settings.json"), content: "{}" });
   });
 
   it("answer security as an empty Keychain that takes nothing", async () => {
@@ -76,17 +111,48 @@ describe("a person's own agent's shims", () => {
   });
 });
 
+describe("a person's own agent's install", () => {
+  it("lands in the agents' HOME in the box, installed by pnpm run there with that HOME", async () => {
+    // A package of this machine's, so no registry: its bin says its HOME.
+    const pkg = join(scratch, "fake-agent");
+    mkdirSync(pkg);
+    writeFileSync(
+      join(pkg, "package.json"),
+      JSON.stringify({ name: "fake-agent", version: "1.0.0", bin: { "fake-agent": "bin.js" } }),
+    );
+    writeFileSync(join(pkg, "bin.js"), '#!/usr/bin/env node\nprocess.stdout.write(process.env.HOME ?? "");\n');
+    const at = join(agents, "fake");
+    const agent = { title: "Fake", packages: [`file:${pkg}`], bin: "fake-agent", args: [], signIn: { run: [] } };
+    await install(box, agent, at);
+    expect(readFileSync(join(at, "installed.json"), "utf8")).toBe(JSON.stringify(agent.packages));
+    // Its bin, and pnpm's store, as the box sees them with the agents' HOME: theirs, never this
+    // machine user's, the store written by the install.
+    const said = async (command: string) => {
+      const ran = await box.run(command, { cwd: at, env: { HOME: agents } });
+      const [out, { exitCode }] = await Promise.all([new Response(ran.stdout).text(), ran.wait()]);
+      return { out: out.trim(), exitCode };
+    };
+    expect(await said("node_modules/.bin/fake-agent")).toEqual({ out: agents, exitCode: 0 });
+    const store = (await said("pnpm store path")).out;
+    expect(store.startsWith(`${agents}/`) && existsSync(store)).toBe(true);
+    // Installed: the next turn finds it so.
+    rmSync(join(at, "node_modules"), { recursive: true });
+    await install(box, agent, at);
+    expect(existsSync(join(at, "node_modules"))).toBe(false);
+  }, 120_000);
+});
+
 describe.runIf(process.env.SANOMA_LIVE === "1" && process.platform === "darwin")("Claude Code on macOS", () => {
   it("keeps what it stores in its own file under the person's home, through the shims", () => {
-    const install = join(scratch, "claude-code");
-    const home = join(scratch, "people/ada");
-    mkdirSync(install, { recursive: true });
-    mkdirSync(home, { recursive: true });
+    const installed = join(scratch, "claude-code");
+    const personal = join(scratch, "people/ada");
+    mkdirSync(installed, { recursive: true });
+    mkdirSync(personal, { recursive: true });
     execFileSync("pnpm", ["add", "--ignore-scripts", "--ignore-workspace", ...OWN_AGENTS["claude-code"].packages], {
-      cwd: install,
+      cwd: installed,
       stdio: "ignore",
     });
-    const pnpm = join(install, "node_modules/.pnpm");
+    const pnpm = join(installed, "node_modules/.pnpm");
     const platform = `claude-agent-sdk-darwin-${process.arch}`;
     const sdk = readdirSync(pnpm).find((name) => name.startsWith(`@anthropic-ai+${platform}@`));
     if (!sdk) throw new Error(`no @anthropic-ai/${platform} under ${pnpm}: the adapter's dependency moved`);
@@ -107,10 +173,10 @@ describe.runIf(process.env.SANOMA_LIVE === "1" && process.platform === "darwin")
         "http://127.0.0.1:9/mcp",
       ],
       {
-        cwd: home,
+        cwd: personal,
         encoding: "utf8",
         env: {
-          HOME: home,
+          HOME: personal,
           PATH: `${dir}:/usr/bin:/bin`,
           MCP_CLIENT_SECRET: "made-up",
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
@@ -118,7 +184,7 @@ describe.runIf(process.env.SANOMA_LIVE === "1" && process.platform === "darwin")
       },
     );
     expect(said).not.toContain("could not be stored");
-    const stored = JSON.parse(readFileSync(join(home, ".claude/.credentials.json"), "utf8"));
+    const stored = JSON.parse(readFileSync(join(personal, ".claude/.credentials.json"), "utf8"));
     expect(Object.keys(stored)).toEqual(["mcpOAuthClientConfig"]);
   }, 600_000);
 });
