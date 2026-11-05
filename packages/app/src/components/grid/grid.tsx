@@ -511,18 +511,19 @@ export function DataGrid({
                               resetScroll={false}
                               preload={false}
                               tabIndex={-1}
-                              className="truncate underline-offset-4 hover:underline"
+                              className="shrink-0 underline-offset-4 hover:underline"
                             >
                               {saved.key}
                             </Link>
                             {saved.issues && <IssuesFlag issues={saved.issues} />}
                             {held?.includes(saved.key) && (
-                              <span className="flex shrink-0 items-center gap-1.5 text-xs font-normal text-muted-foreground">
+                              // The key names the row, so it keeps its width: the note is what a narrow column cuts.
+                              <span className="flex min-w-0 items-center gap-1.5 text-xs font-normal text-muted-foreground">
                                 <span
                                   aria-hidden
-                                  className="size-2.5 rounded-full border-2 border-tone-waiting-foreground"
+                                  className="size-2.5 shrink-0 rounded-full border-2 border-tone-waiting-foreground"
                                 />
-                                waits for approval
+                                <span className="truncate">waits for approval</span>
                               </span>
                             )}
                           </span>
