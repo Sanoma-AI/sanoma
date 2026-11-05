@@ -1,6 +1,9 @@
-import { CALL_WORKFLOW, type Saved } from "@sanoma-ai/workflows/shared";
+import { CALL_WORKFLOW, errorMessage, type Saved } from "@sanoma-ai/workflows/shared";
+import { deepEquals } from "@tanstack/react-db";
 import { Link } from "@tanstack/react-router";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
+import { useMemo, useState, useSyncExternalStore } from "react";
+import { toast } from "sonner";
 import { Button } from "#/components/ui/button.tsx";
 import { CardContent, CardHeader } from "#/components/ui/card.tsx";
 import { GRID_CHANGE_TONE } from "#/lib/tone.ts";
@@ -8,12 +11,17 @@ import { cn, plural } from "#/lib/utils.ts";
 import { runLink } from "../../queries.ts";
 import { CardHeading, FLOAT, FloatingCard, StatusDot, Tip, TipButton, ToneBadge } from "../common.tsx";
 import { cellText } from "./clipboard.ts";
-import type { CellChange, Staged } from "./collection.ts";
+import type { CellChange, RecordsView, Staged, Step } from "./collection.ts";
+import { type Conflict, conflictId } from "./conflicts.tsx";
 
 // The change a paste, a fill, an edit of a selection, Delete or a new record stages, as the grid
-// shows it: from the staged transaction's mutations, each record's fields as they were and as
-// staged (`changesOf`), and from its steps, the cells to fix first (`issuesOf`); the bar above
-// the grid's footer, which counts them and saves or discards them; and the review card.
+// shows it (`useStagedChange`): from the staged transaction's mutations, each record's fields as
+// they were and as staged (`changesOf`), and from its steps, the cells to fix first
+// (`issuesOf`); the bar above the grid's footer, which counts them and saves or discards them;
+// and the review card.
+
+/** What a control that would lose the staged change says while it is disabled, and a gesture it refuses. */
+export const STAGED_FIRST = "Save or discard the staged changes first";
 
 /** A record the change saves: what it is called, how it changes, and each field it changes, as it was and as staged. */
 export interface RecordChange {
@@ -24,8 +32,6 @@ export interface RecordChange {
   fields: { field: string; before: unknown; after: unknown }[];
 }
 
-const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
-
 /** The records `staged` changes, from its transaction's mutations; an update that ends where it began is none. */
 export function changesOf(staged: Staged | undefined, keyField: string): RecordChange[] {
   return (staged?.tx.mutations ?? []).flatMap((m) => {
@@ -35,7 +41,7 @@ export function changesOf(staged: Staged | undefined, keyField: string): RecordC
       m.type === "delete"
         ? []
         : [...new Set([...Object.keys(before), ...Object.keys(after)])]
-            .filter((field) => !same(before[field], after[field]))
+            .filter((field) => !deepEquals(before[field], after[field]))
             .map((field) => ({ field, before: before[field], after: after[field] }));
     if (m.type === "update" && fields.length === 0) return [];
     return [{ key: m.key, name: cellText(m.type === "insert" ? after[keyField] : m.key), type: m.type, fields }];
@@ -68,23 +74,20 @@ export function issuesOf(
   const issues = [...last.values()].flatMap(({ key, field, error }) =>
     error && live.has(key) ? [{ key, field, error }] : [],
   );
+  const flagged = new Set(issues.map(conflictId));
   const inserts = staged.tx.mutations.filter((m) => m.type === "insert");
-  const keys = inserts.map((m) => cellText(m.modified.record[keyField]));
-  inserts.forEach((m, i) => {
-    if (issues.some((issue) => issue.key === m.key && issue.field === keyField)) return;
-    const typed = keys[i]!;
-    if (typed === "") issues.push({ key: m.key, field: keyField, error: "Needs a key" });
-    else if (taken(typed) || keys.indexOf(typed) !== i || keys.lastIndexOf(typed) !== i)
-      issues.push({ key: m.key, field: keyField, error: "A record has this key already" });
-  });
+  const typedKeys = Map.groupBy(inserts, (m) => cellText(m.modified.record[keyField]));
+  const flag = (key: string, field: string, error: string) => {
+    if (!flagged.has(conflictId({ key, field }))) issues.push({ key, field, error });
+  };
+  for (const m of inserts) {
+    const typed = cellText(m.modified.record[keyField]);
+    if (typed === "") flag(m.key, keyField, "Needs a key");
+    else if (taken(typed) || typedKeys.get(typed)!.length > 1) flag(m.key, keyField, "A record has this key already");
+  }
   for (const m of inserts)
     for (const field of required)
-      if (
-        field !== keyField &&
-        m.modified.record[field] === undefined &&
-        !issues.some((i) => i.key === m.key && i.field === field)
-      )
-        issues.push({ key: m.key, field, error: "Needs a value" });
+      if (field !== keyField && m.modified.record[field] === undefined) flag(m.key, field, "Needs a value");
   return issues;
 }
 
@@ -303,4 +306,137 @@ export function StagedNote({ staged, changes }: { staged: Staged; changes: numbe
       </span>
     </>
   );
+}
+
+/**
+ * The change staged over `view`'s records, as the grid shows it and saves it: each record's
+ * change, the cells to fix, the conflicts a Save found, what the last Save said, and `stage`,
+ * `save` and `settle`. `listed` is the rows shown: a record read or saved since may hold a new
+ * one's key. `onSaved` is told when a Save saved.
+ */
+export function useStagedChange({
+  view: { collection: records, stage },
+  keyField,
+  required,
+  listed,
+  onSaved,
+}: {
+  view: RecordsView;
+  keyField: string;
+  /** The fields a new record needs. */
+  required: readonly string[];
+  listed: readonly Saved[];
+  onSaved: () => void;
+}) {
+  const staged = useSyncExternalStore(stage.subscribe, stage.current, stage.current);
+  const saving = staged?.saving === true;
+  const changes = useMemo(() => changesOf(staged, keyField), [staged, keyField]);
+  const counts = useMemo(() => countsOf(changes), [changes]);
+  const changeOfKey = useMemo(() => new Map(changes.map((change) => [change.key, change])), [changes]);
+  const changedCells = useMemo(
+    () => new Set(changes.flatMap(({ key, fields }) => fields.map(({ field }) => conflictId({ key, field })))),
+    [changes],
+  );
+  const issues = useMemo(
+    () => issuesOf(staged, keyField, required, (key) => records.has(key)),
+    [staged, keyField, required, records, listed],
+  );
+  const issueAt = useMemo(() => new Map(issues.map((issue) => [conflictId(issue), issue])), [issues]);
+  // The conflicts a Save found, while their record is still in the change.
+  const [found, setFound] = useState<ReadonlyMap<string, Conflict>>(new Map());
+  const conflicts = [...found.values()].filter((c) => changeOfKey.has(c.key));
+  const blocked = new Set([...issues, ...conflicts].map((c) => c.key));
+  const [reviewing, setReviewing] = useState(false);
+  // Nothing staged, nothing to review: the next change opens without the card.
+  if (reviewing && !staged) setReviewing(false);
+  // A change held for an approval: how many records, and its run of `call`.
+  const [held, setHeld] = useState<{ held: number; runId: string | undefined }>();
+  // The records the policy refused in the last Save, dropped from the change.
+  const [denied, setDenied] = useState<ReadonlySet<string>>(new Set());
+  /** Whether a Save is under way, said: the change being saved takes nothing else until it answers. */
+  const busy = () => saving && (toast.info("Saving the change: try again once it is saved"), true);
+
+  return {
+    staged,
+    saving,
+    changes,
+    counts,
+    changeOfKey,
+    changedCells,
+    issues,
+    issueAt,
+    conflicts,
+    blocked,
+    reviewing,
+    setReviewing,
+    held,
+    closeHeld: () => setHeld(undefined),
+    denied,
+    /** Stages `step`: what the last Save said gives way to it. */
+    add(step: Step) {
+      if (busy()) return;
+      setHeld(undefined);
+      setDenied(new Set());
+      stage.add(step);
+    },
+    /** Saves the change, or the records `only` names, as one `saveMany`, and says what came of it. */
+    async save(only?: ReadonlySet<string>) {
+      try {
+        const outcome = await stage.save(only);
+        if ("conflicts" in outcome) {
+          // Each changed field of each record found changed since is a conflict to settle, a delete's on its key.
+          const now = new Map(changesOf(stage.current(), keyField).map((change) => [change.key, change]));
+          setFound((all) => {
+            const next = new Map(all);
+            for (const { key, current } of outcome.conflicts) {
+              const change = now.get(key);
+              const cells = change?.fields.length ? change.fields : [{ field: keyField, after: undefined }];
+              for (const { field, after } of cells) {
+                const conflict = { key, field, mine: after, current, staged: true as const };
+                next.set(conflictId(conflict), conflict);
+              }
+            }
+            return next;
+          });
+          if (outcome.conflicts.length)
+            toast.warning(`${plural(outcome.conflicts.length, "record")} changed since you staged them`, {
+              description: "Nothing was saved: settle each one, then save again.",
+            });
+          else
+            toast.warning("A record has a new record's key already", {
+              description: "Nothing was saved: change its key, then save again.",
+            });
+        } else if ("denied" in outcome) {
+          setDenied(new Set(outcome.denied));
+          toast.error(
+            outcome.denied.length ? `Could not save ${outcome.denied.join(", ")}` : "Could not save the change",
+            { description: errorMessage(outcome.error) },
+          );
+        } else if ("held" in outcome) {
+          setReviewing(false);
+          setHeld(outcome);
+        } else {
+          setReviewing(false);
+          onSaved();
+          toast.success(`Saved ${plural(outcome.saved, "record")}`);
+        }
+      } catch (err) {
+        toast.error("Could not save: nothing changed", { description: errorMessage(err) });
+      }
+    },
+    /** A conflict a Save found, settled: Keep theirs drops your change to the cell; the last settled, the change is saved over theirs. */
+    settle(conflict: Conflict, keep: "theirs" | "mine") {
+      // Settling makes the change again: never under a Save of the rest, whose transaction it would roll back.
+      if (busy()) return;
+      setFound((all) => {
+        const next = new Map(all);
+        next.delete(conflictId(conflict));
+        return next;
+      });
+      if (keep === "theirs")
+        stage.drop(conflict.key, changeOfKey.get(conflict.key)?.type === "delete" ? undefined : conflict.field);
+      const others = conflicts.some((c) => c.key === conflict.key && conflictId(c) !== conflictId(conflict));
+      if (!others) stage.rebase(conflict.key, conflict.current ?? null);
+    },
+  };
 }

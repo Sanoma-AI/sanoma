@@ -3,7 +3,7 @@ import { errorMessage, type Saved } from "@sanoma-ai/workflows/shared";
 import { useMutation } from "@tanstack/react-query";
 import { FloppyDiskIcon } from "@phosphor-icons/react/dist/csr/FloppyDisk";
 import { TrashIcon } from "@phosphor-icons/react/dist/csr/Trash";
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "#/components/ui/button.tsx";
 import {
@@ -23,6 +23,7 @@ import { errorsOf, FieldView, FormFoot, useSchemaForm } from "../form/start-form
 import { api } from "../queries.ts";
 import { Notice } from "./common.tsx";
 import { type RecordsView, savedIn } from "./grid/collection.ts";
+import { STAGED_FIRST } from "./grid/staged.tsx";
 
 // A collection's record form: one form, drawn from the record's JSON Schema as the start form is
 // from a workflow's input, to add a record or edit one; and Delete. Each is a change of the page's
@@ -44,20 +45,21 @@ const inRecord = (path: (string | number)[]) => (path[0] === "record" ? path.sli
  */
 export function RecordForm({
   collection: { name, key, record },
-  view: { collection: records, edit, stage },
+  view: { collection: records, edit },
   saved,
+  staged,
   actor,
   onDone,
 }: {
   collection: CollectionEntry;
   view: RecordsView;
   saved?: Saved | undefined;
+  /** While the grid has a change staged, its bar is the one way to save: the form waits for it. */
+  staged: boolean;
   actor: string | null | undefined;
   onDone: () => void;
 }) {
   const fields = useMemo(() => fieldsOf(record) ?? [], [record]);
-  // While the grid has a change staged, its bar is the one way to save: the form waits for it.
-  const staged = useSyncExternalStore(stage.subscribe, stage.current, stage.current) !== undefined;
   const defaultValues = useMemo(() => {
     if (saved) return initialValues(fields, saved.record);
     const people = actor ? fields.filter((f) => f.kind === "person").map((f) => [f.key, actor]) : [];
@@ -109,7 +111,7 @@ export function RecordForm({
             <FieldView key={field.key} form={form} field={field} path={[field.key]} />
           ),
         )}
-        {staged && <Notice>The grid has a change staged: save it or discard it there first.</Notice>}
+        {staged && <Notice>{STAGED_FIRST}, in the grid's bar.</Notice>}
         <FormFoot form={form}>
           {(submitting) => (
             <>

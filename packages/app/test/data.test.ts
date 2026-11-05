@@ -533,11 +533,18 @@ describe("the Data section", () => {
       await tab.waitForSelector(`td[data-cell="${keys[1]}_stage"]::-p-text(replied)`);
       // Nothing is saved until Save.
       expect(await stored()).toEqual(before);
+      // Another search's records would lose it: its controls wait for the change.
+      const locked = `({
+        sort: document.querySelector('th a')?.getAttribute("aria-disabled"),
+        key: document.querySelector("#grid-key").matches(":disabled"),
+      })`;
+      expect(await tab.evaluate(locked)).toEqual({ sort: "true", key: true });
 
       await (await tab.waitForSelector(`${bar} button::-p-text(Discard)`))!.click();
       await tab.waitForFunction(`!document.querySelector('${bar}') && !document.querySelector("td[data-changed]")`);
       await tab.waitForSelector(`td[data-cell="${keys[1]}_stage"]::-p-text(researched)`);
       expect(await stored()).toEqual(before);
+      expect(await tab.evaluate(locked)).toEqual({ sort: null, key: false });
     } finally {
       await browser.close();
     }
