@@ -79,6 +79,7 @@ export async function checkSandbox(s: SandboxUnderTest): Promise<SandboxCheck[]>
   try {
     await backend.discard({ name });
     opened = await open();
+    results.push({ name: "a box opens", ok: true });
   } catch (err) {
     results.push({ name: "a box opens", ok: false, error: errorMessage(err) });
   }
@@ -87,8 +88,13 @@ export async function checkSandbox(s: SandboxUnderTest): Promise<SandboxCheck[]>
       const started = await at.run("echo ready; sleep 30");
       try {
         const reader = started.stdout.getReader();
-        const first = await timed(reader.read(), timeoutMs, "the first output");
-        if (!new TextDecoder().decode(first.value).startsWith("ready")) throw new Error("it printed something else");
+        const decoder = new TextDecoder();
+        let said = "";
+        while (!said.includes("ready\n")) {
+          const { value, done } = await timed(reader.read(), timeoutMs, "the first output");
+          if (done) throw new Error(`it printed ${JSON.stringify(said)} and ended`);
+          said += decoder.decode(value, { stream: true });
+        }
         const exited = await Promise.race([started.wait().then(() => true), delay(200).then(() => false)]);
         if (exited) throw new Error("it had exited before its output arrived");
         reader.releaseLock();

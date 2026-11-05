@@ -107,9 +107,12 @@ async function runTurn(name: RuntimeName, turn: EngineTurn, writer: UIMessageStr
       await sandbox.destroy();
     }
   } finally {
-    await box.stop();
     // However the turn ended (an error too): its error, if any, follows the commit.
-    await commitTurn(turn, draft, ENGINE_NAMES[name], writer);
+    try {
+      await commitTurn(turn, draft, ENGINE_NAMES[name], writer);
+    } finally {
+      await box.stop();
+    }
   }
   writer.write({ type: "finish" });
 }

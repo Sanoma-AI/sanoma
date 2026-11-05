@@ -60,16 +60,19 @@ function localBox(id: string, home: string, base: Record<string, string>): Box {
       if (group !== undefined) groups.add(group);
       child.stdin.on("error", () => {});
       if (!stdin) child.stdin.end();
+      let ended = false;
       const exited = new Promise<{ exitCode: number }>((done) => {
         child.on("error", () => done({ exitCode: 127 }));
         child.on("close", (code) => {
+          ended = true;
           // Forgotten once none of its group is left, so `stop` kills no group its pid leads later.
           if (group !== undefined && !groupAlive(group)) groups.delete(group);
           done({ exitCode: code ?? 1 });
         });
       });
       const kill = (sig: NodeJS.Signals = "SIGKILL") => {
-        if (group !== undefined) killGroup(group, sig);
+        // Once it has ended, only while its group is left, so a reused pid is never hit.
+        if (group !== undefined && (!ended || groupAlive(group))) killGroup(group, sig);
       };
       const onAbort = () => kill();
       if (signal?.aborted) onAbort();

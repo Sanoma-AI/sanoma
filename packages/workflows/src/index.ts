@@ -254,7 +254,6 @@ export {
 } from "./database.ts";
 export {
   type Box,
-  checkSandbox,
   type Process,
   type SandboxBackend,
   type SandboxCapabilities,

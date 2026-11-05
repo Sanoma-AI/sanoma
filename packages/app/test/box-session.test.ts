@@ -52,6 +52,7 @@ describe("the local backend", () => {
   it("passes the sandbox conformance kit", async () => {
     const results = await checkSandbox({ backend: boxes, capabilities: LOCAL_SANDBOX, image: "", size: 0 });
     expect(results).toEqual([
+      { name: "a box opens", ok: true },
       { name: "stdout arrives before the command exits", ok: true },
       { name: "stdin reaches cat", ok: true },
       { name: "a written file reads back, and runs with its mode", ok: true },

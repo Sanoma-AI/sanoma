@@ -14,6 +14,7 @@ describe("the sandbox conformance kit", () => {
   it("passes every check against a backend that snapshots and exposes ports", async () => {
     const results = await checkSandbox({ ...sandbox, image: "local", size: 1, timeoutMs: 10_000 });
     expect(results).toEqual([
+      { name: "a box opens", ok: true },
       { name: "stdout arrives before the command exits", ok: true },
       { name: "stdin reaches cat", ok: true },
       { name: "a written file reads back, and runs with its mode", ok: true },
