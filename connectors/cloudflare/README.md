@@ -212,7 +212,7 @@ The kits have not run on a real account yet: the connector's first real run was 
 It needs:
 
 - a published runtime image, `ghcr.io/sanoma-ai/runtime:<version>` (the `sanoma` package's version), which apply copies into the account's registry; `CLOUDFLARE_TEST_IMAGE` names another;
-- `CLOUDFLARE_TEST_CHECKOUT`: a clone of a company repository whose `origin` Cloudflare can clone and this machine can push to (each deploy check pushes an empty commit), holding the kits' company: [`connectors/docker/test/fixtures/company`](../docker/test/fixtures/company) with `sanoma` from npm, its config registering `wakeupCheckWorkflows` (the host checks' workflows and a tick every minute);
+- `CLOUDFLARE_TEST_CHECKOUT`: a clone of a company repository whose `origin` Cloudflare can clone and this machine can push to (each deploy check pushes an empty commit), holding the kits' company: [`connectors/docker/test/fixtures/company`](../docker/test/fixtures/company) with `sanoma` from npm, its config registering `wakeupCheckWorkflows` (the host checks' workflows and a tick every ten seconds);
 - `CLOUDFLARE_TEST_SOURCE_KEY_FILE`, for a private repository: the private half of a read-only deploy key on it, passed as the host's `SANOMA_SOURCE_KEY` secret as go-live does (the private `Sanoma-AI/host-check-company` is that company, with such a key);
 - `CLOUDFLARE_TEST_DATABASE_URL`: a Postgres both the container and this machine reach, empty, the company's;
 - Postgres here for the operator that applies the host (`pnpm db:up`).
