@@ -40,6 +40,9 @@ export interface AppBundleEnv {
   SANOMA_SIGNING_KEY?: string;
   /** The key the stored secrets are sealed under, when the config stores them itself. */
   SANOMA_SECRETS_KEY?: string;
+  /** The company's GitHub App's OAuth client, both or neither: GitHub as a way to sign in, for the staff and the sites' visitors. */
+  SANOMA_GITHUB_CLIENT_ID?: string;
+  SANOMA_GITHUB_CLIENT_SECRET?: string;
   /** The Worker's static assets: `AppBundle.assets`. */
   ASSETS: { fetch(request: Request): Promise<Response> };
 }

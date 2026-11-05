@@ -1,17 +1,23 @@
 // The app on the Worker (`worker/main.ts` imports it on the first request): the app's handler
 // (`appHandler`) over the snapshot and config the bundle was built with, a client of each
-// request's own on the company's database, and the Worker's assets for the client build and the
-// prerendered pages. What needs the checkout is not in the bundle (`server/local/none.ts`).
+// request's own on the company's database, the staff's and the sites' sign-ins (Better Auth,
+// composed as the `sanoma` bin composes them on Node) on that client's pool, and the Worker's
+// assets for the client build and the prerendered pages. What needs the checkout is not in the
+// bundle (`server/local/none.ts`).
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
   CLIENT_IP_HEADER,
   checkPreparedOnly,
+  errorMessage,
+  GITHUB_APP,
   resolveConfig,
   SanomaClient,
+  type SocialClients,
   useCedarWasm,
   useRootSnapshot,
 } from "@sanoma-ai/workflows";
 import { domainsOf } from "@sanoma-ai/workflows/shared";
+import { betterAuthStaffLogin } from "@sanoma-ai/connector-better-auth";
 import start from "@tanstack/react-start/server-entry";
 import { cedar, config, root, snapshot } from "virtual:sanoma/app-bundle";
 import {
@@ -23,7 +29,9 @@ import {
 } from "../app-bundle.ts";
 import type { AdmittingLogin } from "../context.ts";
 import { type AppHandler, appHandler } from "../handler.ts";
-import { publicFront } from "../login/public.ts";
+import { admitting } from "../login/admission.ts";
+import { publicFront, servedOnceMade, siteLogin } from "../login/public.ts";
+import { staffLogin } from "../login/staff.ts";
 import { plain } from "../server/webhooks.ts";
 import { servedOnWorker } from "../snapshot.ts";
 
@@ -49,44 +57,58 @@ const member = (path: string[]): unknown =>
     },
   });
 
-/**
- * The staff's login on the Worker: none yet (the staff's sign-in on the Worker is #609), so the
- * app's own pages and server functions answer 503 there. A public site's host never reaches it.
- */
-const noStaffLogin: AdmittingLogin = {
-  name: "worker",
-  check() {},
-  resolveActor: async () => undefined,
-  handle: () =>
-    plain(503, "Signing in to the app is not available on this host yet: use the app where the company runs.\n"),
-};
+/** The company's GitHub App's OAuth client from the Worker's secrets, both or neither (one alone is warned about and no GitHub). */
+function socialOf(env: AppBundleEnv): SocialClients | undefined {
+  const { [GITHUB_APP.client_id]: clientId, [GITHUB_APP.client_secret]: clientSecret } = env;
+  if (clientId && clientSecret) return { github: { clientId, clientSecret } };
+  if (clientId || clientSecret) {
+    console.warn(
+      `sanoma: GitHub sign-in needs both ${GITHUB_APP.client_id} and ${GITHUB_APP.client_secret}: it is off`,
+    );
+  }
+  return undefined;
+}
 
 /** The handler, made on the first request from the Worker's bindings, which do not change in an isolate. */
-let made: AppHandler | undefined;
+let made: Promise<AppHandler> | undefined;
 
-function handlerOf(env: AppBundleEnv) {
-  if (made) return made;
+/**
+ * The app's handler: the staff login (Better Auth's, admitting the snapshot's people) and each
+ * served site with its login half, both on the request's client. A site whose login fails to be
+ * made (its key, its config) is logged and served on no host (503), as on Node; so are the app's
+ * own pages when the staff sign-in fails to start.
+ */
+async function handlerOf(env: AppBundleEnv): Promise<AppHandler> {
   const databaseUrl = env.DATABASE?.connectionString;
   if (!databaseUrl) throw new Error("the Worker has no DATABASE binding with a connection string");
   const resolved = resolveConfig({ ...config, root, databaseUrl });
-  // Each call made on the request's own client (`requests`), `tokens.resolve` too.
+  // Each call made on the request's own client (`requests`), `tokens.resolve` and the logins' pool too.
   const client = member([]) as SanomaClient;
-  // Each site the Worker serves; another public site answers 503 on its hosts here.
+  const social = socialOf(env);
+  const staff = staffLogin(betterAuthStaffLogin, social);
+  const domains = env.SANOMA_DOMAINS ? domainsOf(env.SANOMA_DOMAINS) : {};
+  // Each site the Worker serves, with its login half when it has one; another public site answers 503 on its hosts here.
   const sites = new Map<string, AdmittingLogin>();
+  const halves: Promise<unknown>[] = [];
   for (const site of snapshot.description.sites) {
     if (!servedOnWorker(site)) continue;
+    const domain = domains[site.name];
+    const half =
+      site.login === undefined
+        ? undefined
+        : siteLogin(resolved, client, site, domain ? [`https://${domain}`] : [], social);
     sites.set(
       site.name,
-      publicFront(site, undefined, (token) => client.tokens.resolve(token)),
+      publicFront(site, half, (token) => client.tokens.resolve(token)),
     );
+    if (half) halves.push(servedOnceMade(sites, site, half, "sanoma"));
   }
-  const domains = env.SANOMA_DOMAINS ? domainsOf(env.SANOMA_DOMAINS) : {};
   const app = appHandler(
     {
       resolved,
       snapshot: () => snapshot,
       client,
-      login: noStaffLogin,
+      login: admitting(staff, () => snapshot.people),
       sites,
       domains,
       entry: start,
@@ -94,7 +116,13 @@ function handlerOf(env: AppBundleEnv) {
     },
     snapshot,
   );
-  return (made = app);
+  // The staff sign-in that cannot start (its key, SANOMA_SIGNING_KEY, unset) is logged, and the
+  // app's own pages answer 503 while the sites are served, as a site whose half failed.
+  const opened = staff.open?.(app.context).catch((err: unknown) => {
+    console.error(`sanoma: the staff sign-in could not start, so the app's pages are not served: ${errorMessage(err)}`);
+  });
+  await Promise.all([opened, ...halves]);
+  return app;
 }
 
 /**
@@ -139,7 +167,10 @@ export async function serve(
   ctx: AppBundleContext,
   host: AppHost | undefined,
 ): Promise<Response> {
-  const app = handlerOf(env);
+  const app = await (made ??= handlerOf(env).catch((err: unknown) => {
+    made = undefined;
+    throw err;
+  }));
   const { hostname } = new URL(request.url);
   if (env.SANOMA_HOSTNAME && hostname !== env.SANOMA_HOSTNAME.toLowerCase() && !app.hosts.has(hostname)) {
     return plain(404, "Not found\n");

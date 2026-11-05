@@ -3,7 +3,7 @@
 // build (`buildApp`). The bundle carries the company's config, the snapshot of its files and the
 // runtime; what needs the checkout (`server/local/`) is left out, and the pages no call is made
 // from are prerendered into its assets. `@sanoma-ai/app/bundle`.
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -260,7 +260,8 @@ const MODULE_TYPES: Record<string, AppBundle["modules"][number]["type"]> = { js:
 function pagesToPrerender(snapshot: AppSnapshot, domains: Readonly<Record<string, string>>) {
   return snapshot.description.sites.flatMap((site) => {
     const domain = domains[site.name]?.toLowerCase();
-    if (!servedOnWorker(site) || !domain) return [];
+    // A site with a login shows each visitor their own pages: nothing of it is prerendered.
+    if (!servedOnWorker(site) || site.login !== undefined || !domain) return [];
     return { site, domain, pages: prerenderedPages(site) };
   });
 }
@@ -306,6 +307,8 @@ async function prerender(
         vars: {
           SANOMA_DOMAINS: domainsText(Object.fromEntries(targets.map(({ site, domain }) => [site.name, domain]))),
           DATABASE: { connectionString: "postgresql://prerender.invalid/none" },
+          // The logins are made with the handler, their keys derived from this; none signs anything a prerendered page holds.
+          SANOMA_SIGNING_KEY: randomBytes(32).toString("base64"),
         },
       }),
     );

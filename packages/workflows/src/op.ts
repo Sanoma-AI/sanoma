@@ -1,3 +1,4 @@
+import type { Pool } from "pg";
 import type { Principal } from "./define.ts";
 import type { Authentication, CallAuthentication } from "./authentication.ts";
 import type { ConnectionSnapshot } from "./connection.ts";
@@ -400,8 +401,14 @@ export interface SocialClients {
  * public site, once per site; for the staff login, once, with `staff`.
  */
 export interface LoginContext {
-  /** The company's database (`resolved.databaseUrl`), where a login like Better Auth keeps its users. */
-  databaseUrl: string;
+  /**
+   * The company's database, as the app's client reaches it (`SanomaClient.pool`): the pool a login
+   * like Better Auth keeps its users on, once the database is prepared. On Node it is the app's
+   * one pool for as long as the app runs; on a Worker it is the request's own, ended with the
+   * response. A login keeps one instance per pool and nothing else across requests, since the
+   * next request may bring another pool.
+   */
+  database(): Promise<Pool>;
   /**
    * A 32-byte key derived from the deployment's `SANOMA_SIGNING_KEY` for this login (HKDF-SHA256,
    * purpose `login <connector>`), hex; a login signs its cookies with it and never asks a person for a secret.
@@ -468,8 +475,9 @@ export function sameOrigin(request: Request): boolean {
 /**
  * A connector's login half: how a public site tells who a visitor is, and, made with
  * `LoginContext.staff`, how the app's staff sign in. The app makes one with `login(context)` once
- * per public site (and once for staff), when it starts; a login that keeps tables in the database
- * has its connector's `prepare` make them, which the worker runs, and only checks for them. It
+ * per public site (and once for staff), when it starts, which opens nothing: a login reaches the
+ * database through `context.database` as requests come, and a login that keeps tables there has
+ * its connector's `prepare` make them, which the worker runs, and only checks for them. It
  * answers the provider's subject and
  * what it verified; the app makes the principal from it (`visitor:<connector>:<subject>`, in
  * `visitors`, or the declared person the identity matches), so a connector never sets groups. A
@@ -499,7 +507,6 @@ export interface LoginHalf {
    * signs them in with it, using it up.
    */
   invitation?(token: string): Promise<{ email: string; path: string } | undefined>;
-  close?(): Promise<void>;
 }
 
 /** How long an invite lasts: 24 hours. */

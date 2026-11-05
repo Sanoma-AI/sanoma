@@ -41,24 +41,18 @@ interface HookContext {
  * (`context.social.github`), a visitor also signs up and in with GitHub (`/sign-in/social`, which
  * joins the account of GitHub's verified email), or links it once signed in (`/link-social`), and
  * is then said to be that GitHub login (`verify`'s `github`). Its tables are in schema
- * `better_auth` on the company's database, which the worker makes (`prepareBetterAuth`), its
- * cookies signed with the app's key for it (`context.key`). The site's origins are its allowed
- * hosts (a request for another host is refused) and set the cookie's `Secure` flag: an `https`
- * origin's is.
+ * `better_auth` on the company's database, which the worker makes (`prepareBetterAuth`), reached
+ * through the pool the app gives each request (`context.database`), its cookies signed with the
+ * app's key for it (`context.key`). The site's origins are its allowed hosts (a request for
+ * another host is refused) and set the cookie's `Secure` flag: an `https` origin's is.
  */
-export async function betterAuthLogin({
-  databaseUrl,
-  key,
-  origins,
-  sendCode,
-  social,
-}: LoginContext): Promise<LoginHalf> {
+export function betterAuthLogin({ database, key, origins, sendCode, social }: LoginContext): LoginHalf {
   const github = social?.github;
   const sites = sitesOf(origins);
   const hosts = new Map<Protocol, string[]>();
   for (const { protocol, host } of sites) hosts.set(protocol, [...(hosts.get(protocol) ?? []), host]);
-  const { auths, close } = await openBetterAuth({
-    databaseUrl,
+  const auth = openBetterAuth({
+    database,
     key,
     schema: SCHEMA,
     basePath: BASE_PATH,
@@ -86,7 +80,7 @@ export async function betterAuthLogin({
   const authFor = (request: Request) => {
     const host = getHostFromSource(request, false) ?? "";
     const site = sites.find((s) => matchesHostPattern(host, s.host));
-    return site && auths.get(site.protocol);
+    return site && auth(site.protocol);
   };
   const methods: LoginMethod[] = [
     "password",
@@ -95,26 +89,25 @@ export async function betterAuthLogin({
   ];
   return {
     async verify(request) {
-      const auth = authFor(request);
-      if (!auth) throw new Error(`better-auth: ${request.headers.get("host")} is not one of the site's hosts`);
+      const own = authFor(request);
+      if (!own) throw new Error(`better-auth: ${request.headers.get("host")} is not one of the site's hosts`);
       // Null for a missing, bad or signed-out cookie.
-      const session = await auth.api.getSession({ headers: request.headers });
+      const session = await (await own).api.getSession({ headers: request.headers });
       if (!session) return null;
       return { subject: session.user.id, ...identityOf(session.user as User) };
     },
     async handle(request) {
       const { pathname } = new URL(request.url);
       if (pathname !== BASE_PATH && !pathname.startsWith(`${BASE_PATH}/`)) return undefined;
-      // Better Auth throws for a host it does not allow, which would be a 500.
-      const auth = authFor(request);
-      if (!auth) return new Response("Misdirected Request", { status: 421 });
       // Better Auth checks a redirect in a body against the site's hosts; one in the query must be a path here.
       if (!localRedirects(new URL(request.url))) return new Response("Bad Request", { status: 400 });
-      return auth.handler(withSignOutBody(request, SIGN_OUT));
+      // Better Auth throws for a host it does not allow, which would be a 500.
+      const own = authFor(request);
+      if (!own) return new Response("Misdirected Request", { status: 421 });
+      return (await own).handler(withSignOutBody(request, SIGN_OUT));
     },
     signOut: SIGN_OUT,
     methods,
-    close,
   };
 }
 

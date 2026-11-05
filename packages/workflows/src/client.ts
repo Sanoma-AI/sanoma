@@ -1,3 +1,4 @@
+import type { Pool } from "pg";
 import {
   connectionDriver,
   connectionTargetSchema,
@@ -1520,6 +1521,11 @@ export class SanomaClient {
       ...(named && { name }),
       issues: [{ path: ["name"], message, code: "custom" }],
     });
+  }
+
+  /** The pool the client reads and writes with, once the database is prepared: what a login runs on (`LoginContext.database`). */
+  pool(): Promise<Pool> {
+    return this.database.pool();
   }
 
   /**

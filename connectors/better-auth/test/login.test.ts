@@ -2,7 +2,7 @@ import { hkdfSync, randomBytes, randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { CLIENT_IP_HEADER, type LoginContext, type LoginHalf } from "@sanoma-ai/workflows";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
-import { Client } from "pg";
+import { Client, Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { prepareBetterAuth } from "../src/instance.ts";
 import { betterAuthLogin } from "../src/login.ts";
@@ -12,8 +12,10 @@ const databaseUrl = testDatabaseUrl("better_auth");
 const keyFor = (purpose: string) =>
   Buffer.from(hkdfSync("sha256", process.env.SANOMA_SECRETS_KEY!, "", purpose, 32)).toString("hex");
 const SITE = "http://account.localhost:5173";
+/** The app's pool, as its client holds it: what every half here runs on. */
+const pool = new Pool({ connectionString: databaseUrl });
 const context: LoginContext = {
-  databaseUrl,
+  database: async () => pool,
   key: keyFor("login better-auth"),
   secrets: async () => new Map(),
   // Locally and hosted at once: one Better Auth for each scheme.
@@ -110,15 +112,17 @@ beforeAll(async () => {
   await client.end();
 });
 
+afterAll(() => pool.end());
+
 describe("login", () => {
-  it("waits to open until the worker prepared the schema, and never makes it", async () => {
-    const opening = betterAuthLogin(context);
+  it("waits, at its first use, until the worker prepared the schema, and never makes it", async () => {
+    const verifying = betterAuthLogin(context).verify(request("/"));
     await delay(1500);
     expect(await tables()).toEqual([]);
     await (
       await freshPrepare()
     )(databaseUrl);
-    await (await opening).close?.();
+    expect(await verifying).toBeNull();
     expect(await tables()).toEqual(["account", "rateLimit", "session", "user", "verification"]);
   });
 
@@ -130,18 +134,30 @@ describe("login", () => {
     expect(await tables()).toEqual(["account", "rateLimit", "session", "user", "verification"]);
   });
 
-  it("is prepared again on the migrated schema, the same tables, and then opens", async () => {
+  it("is prepared again on the migrated schema, the same tables", async () => {
     await (
       await freshPrepare()
     )(databaseUrl);
     expect(await tables()).toEqual(["account", "rateLimit", "session", "user", "verification"]);
-    const half = await betterAuthLogin(context);
-    await half.close?.();
   });
 
-  it("refuses a context without the app's key, and an origin that is more than a scheme and a host", async () => {
-    await expect(betterAuthLogin({ ...context, key: undefined as unknown as string })).rejects.toThrow(/no key/);
-    await expect(betterAuthLogin({ ...context, origins: ["https://account.example/sign-in"] })).rejects.toThrow(
+  it("runs on whichever pool the app gives, an instance per pool, on the one set of tables", async () => {
+    // As a Worker gives it: a pool per request, each ended after.
+    const pools = [new Pool({ connectionString: databaseUrl }), new Pool({ connectionString: databaseUrl })];
+    const given: Pool[] = [];
+    const half = betterAuthLogin({ ...context, database: async () => given[given.push(pools.shift() ?? pool) - 1]! });
+    const { cookie } = await signUp(half);
+    expect(given).toHaveLength(1);
+    const seen = await half.verify(request("/", { cookie }));
+    expect(seen?.subject).toBeDefined();
+    expect(given).toHaveLength(2);
+    expect(pools).toEqual([]);
+    await Promise.all(given.map((p) => p.end()));
+  });
+
+  it("refuses a context without the app's key, and an origin that is more than a scheme and a host", () => {
+    expect(() => betterAuthLogin({ ...context, key: undefined as unknown as string })).toThrow(/no key/);
+    expect(() => betterAuthLogin({ ...context, origins: ["https://account.example/sign-in"] })).toThrow(
       /a scheme and a host alone/,
     );
   });
@@ -150,9 +166,8 @@ describe("login", () => {
 describe("the login half", () => {
   let half: LoginHalf;
   beforeAll(async () => {
-    half = await betterAuthLogin(context);
+    half = betterAuthLogin(context);
   });
-  afterAll(() => half.close?.());
 
   it("answers its own routes only, and a host outside the site's with 421", async () => {
     expect(await half.handle(request("/sites/account"))).toBeUndefined();
@@ -208,12 +223,8 @@ describe("the login half", () => {
 
   it("takes a session as its own only under the key it signed it with", async () => {
     const { cookie } = await signUp(half);
-    const other = await betterAuthLogin({ ...context, key: keyFor("login another") });
-    try {
-      expect(await other.verify(request("/", { cookie }))).toBeNull();
-    } finally {
-      await other.close?.();
-    }
+    const other = betterAuthLogin({ ...context, key: keyFor("login another") });
+    expect(await other.verify(request("/", { cookie }))).toBeNull();
     expect(await half.verify(request("/", { cookie }))).not.toBeNull();
   });
 
@@ -232,13 +243,9 @@ describe("the login half", () => {
     }
     expect(statuses).toEqual([401, 401, 401]);
     // The fourth try from the same address is refused by another instance, which only the table tells about the first three.
-    const other = await betterAuthLogin(context);
-    try {
-      const fourth = await other.handle(request("/auth/better-auth/sign-in/email", { body, ip: "10.9.9.9" }));
-      expect(fourth?.status).toBe(429);
-    } finally {
-      await other.close?.();
-    }
+    const other = betterAuthLogin(context);
+    const fourth = await other.handle(request("/auth/better-auth/sign-in/email", { body, ip: "10.9.9.9" }));
+    expect(fourth?.status).toBe(429);
     const another = await half.handle(request("/auth/better-auth/sign-in/email", { body, ip: "10.9.9.10" }));
     expect(another?.status).toBe(401);
     expect(await rateLimits()).toContain("10.9.9.9");
@@ -249,9 +256,8 @@ describe("the login half with a sender", () => {
   const codes = new Map<string, string>();
   let half: LoginHalf;
   beforeAll(async () => {
-    half = await betterAuthLogin({ ...context, sendCode: async (email, code) => void codes.set(email, code) });
+    half = betterAuthLogin({ ...context, sendCode: async (email, code) => void codes.set(email, code) });
   });
-  afterAll(() => half.close?.());
 
   it("offers the code beside the password", () => {
     expect(half.methods).toEqual(["password", "code"]);
@@ -276,18 +282,14 @@ describe("the login half with a sender", () => {
   });
 
   it("has no code routes without a sender", async () => {
-    const plain = await betterAuthLogin(context);
-    try {
-      expect(plain.methods).toEqual(["password"]);
-      const sent = await plain.handle(
-        request("/auth/better-auth/email-otp/send-verification-otp", {
-          body: { email: "a@example.com", type: "sign-in" },
-        }),
-      );
-      expect(sent?.status).toBe(404);
-    } finally {
-      await plain.close?.();
-    }
+    const plain = betterAuthLogin(context);
+    expect(plain.methods).toEqual(["password"]);
+    const sent = await plain.handle(
+      request("/auth/better-auth/email-otp/send-verification-otp", {
+        body: { email: "a@example.com", type: "sign-in" },
+      }),
+    );
+    expect(sent?.status).toBe(404);
   });
 });
 
@@ -332,16 +334,13 @@ describe("the login half with the company's GitHub client", () => {
           : answer({}, 401);
       return fetch(input, init);
     });
-    half = await betterAuthLogin({
+    half = betterAuthLogin({
       ...context,
       sendCode: async (email, code) => void codes.set(email, code),
       social: { github: { clientId: "client-id", clientSecret: "client-secret" } },
     });
   });
-  afterAll(async () => {
-    await half.close?.();
-    vi.unstubAllGlobals();
-  });
+  afterAll(() => vi.unstubAllGlobals());
 
   /** A visitor signed in by an email code (to `email`, a new one by default): their email and session cookie. */
   async function signedIn(email = `${randomUUID()}@example.com`) {
@@ -526,16 +525,12 @@ describe("the login half with the company's GitHub client", () => {
   });
 
   it("has no GitHub without the company's client", async () => {
-    const plain = await betterAuthLogin(context);
-    try {
-      expect(plain.methods).toEqual(["password"]);
-      const { cookie } = await signUp(plain);
-      const started = await plain.handle(
-        request("/auth/better-auth/link-social", { cookie, body: { provider: "github", callbackURL: "/" } }),
-      );
-      expect(started?.status).toBe(404);
-    } finally {
-      await plain.close?.();
-    }
+    const plain = betterAuthLogin(context);
+    expect(plain.methods).toEqual(["password"]);
+    const { cookie } = await signUp(plain);
+    const started = await plain.handle(
+      request("/auth/better-auth/link-social", { cookie, body: { provider: "github", callbackURL: "/" } }),
+    );
+    expect(started?.status).toBe(404);
   });
 });

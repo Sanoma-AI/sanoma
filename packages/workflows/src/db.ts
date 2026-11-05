@@ -148,31 +148,38 @@ const NO_DATABASE = "3D000";
 /** A database opened on first use, once prepared, and ended by `close`. */
 export interface LazyDb {
   db(): Promise<Db>;
+  /** The pool `db()` runs on, once the database is prepared. */
+  pool(): Promise<Pool>;
   close(): Promise<void>;
 }
 
 /**
- * A database for `what` on a pool at `databaseUrl`, opened on the first `db()` once the database
- * is prepared (`prepareDatabase`). A preparation that fails lets the pool go, so the next `db()`
- * tries again. `close` ends the pool, for good: a `db()` after it is refused.
+ * A database for `what` on a pool at `databaseUrl`, opened on the first `db()` (or `pool()`) once
+ * the database is prepared (`prepareDatabase`). A preparation that fails lets the pool go, so the
+ * next call tries again. `close` ends the pool, for good: a call after it is refused.
  */
 export function lazyDb(databaseUrl: string, what: string): LazyDb {
   let pool: Pool | undefined;
   let db: Db | undefined;
   let closed = false;
+  async function opened(): Promise<Pool> {
+    if (closed) throw new Error(`the ${what} store is closed`);
+    const current = (pool ??= openPool(databaseUrl, what));
+    try {
+      await prepareDatabase(databaseUrl);
+    } catch (err) {
+      if (pool === current) pool = db = undefined;
+      await current.end().catch(() => undefined);
+      throw err;
+    }
+    return current;
+  }
   return {
     async db() {
-      if (closed) throw new Error(`the ${what} store is closed`);
-      const current = (pool ??= openPool(databaseUrl, what));
-      try {
-        await prepareDatabase(databaseUrl);
-      } catch (err) {
-        if (pool === current) pool = db = undefined;
-        await current.end().catch(() => undefined);
-        throw err;
-      }
+      const current = await opened();
       return (db ??= databaseOn(current));
     },
+    pool: opened,
     async close() {
       closed = true;
       const current = pool;
