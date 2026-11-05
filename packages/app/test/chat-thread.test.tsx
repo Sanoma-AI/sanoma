@@ -146,6 +146,11 @@ describe("the chat's thread", () => {
     open.mockRestore();
   });
 
+  it("opens an address as a plain link, with no dialog", async () => {
+    await play(createChat<ChatMessage>().user("Who?").assistant("Write to [us](mailto:hello@example.com)."));
+    expect((await screen.findByRole("link", { name: "us" })).getAttribute("href")).toBe("mailto:hello@example.com");
+  });
+
   it("loads no image a reply names, by Markdown or by HTML", async () => {
     await play(
       createChat<ChatMessage>()

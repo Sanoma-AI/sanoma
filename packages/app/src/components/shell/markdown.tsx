@@ -1,3 +1,4 @@
+import { CatchBoundary } from "@tanstack/react-router";
 import { createElement, type ElementType, lazy, Suspense } from "react";
 import {
   type Components,
@@ -38,17 +39,20 @@ const Fence = lazy(() => import("./fence.tsx"));
 
 /** A fenced block's code. */
 const FencedCode: Components["code"] = ({ node: _node, className, children }) => {
-  const text = String(children).replace(/\n$/, "");
+  if (typeof children !== "string") return <code className={className}>{children}</code>;
+  const text = children.replace(/\n$/, "");
+  const plain = (
+    <CodeBlock>
+      <CodeBlockContent>{text}</CodeBlockContent>
+    </CodeBlock>
+  );
+  // A chunk that does not come leaves the block plain, the rest of the reply as it is.
   return (
-    <Suspense
-      fallback={
-        <CodeBlock>
-          <CodeBlockContent>{text}</CodeBlockContent>
-        </CodeBlock>
-      }
-    >
-      <Fence text={text} language={className?.replace("language-", "") ?? ""} />
-    </Suspense>
+    <CatchBoundary getResetKey={() => "fence"} errorComponent={() => plain}>
+      <Suspense fallback={plain}>
+        <Fence text={text} language={className?.replace("language-", "") ?? ""} />
+      </Suspense>
+    </CatchBoundary>
   );
 };
 
@@ -84,7 +88,9 @@ const LINK_SAFETY = { enabled: true, renderModal: (props: LinkSafetyModalProps) 
 
 // Raw HTML is left out (its tags show as the text they are, as `Array<string>` must), so the
 // sanitizer and Streamdown's hardening are the rest of its defaults.
-const PLUGINS = [defaultRehypePlugins.sanitize, defaultRehypePlugins.harden].filter((plugin) => plugin !== undefined);
+const { sanitize, harden } = defaultRehypePlugins;
+if (!sanitize || !harden) throw new Error("Streamdown no longer names its sanitize and harden plugins");
+const PLUGINS = [sanitize, harden];
 
 const HEADING = "mt-1 font-medium first:mt-0";
 const TITLE = styled("h3", `${HEADING} text-base`);
@@ -101,9 +107,10 @@ const ELEMENTS: Components = {
   ol: styled("ol", "flex list-decimal flex-col gap-1 pl-5"),
   li: "li",
   strong: styled("strong", "font-medium"),
-  // Streamdown's link, so an unfinished one is not followed and a click asks first (`LINK_SAFETY`).
+  // A web link (or one still streaming) is Streamdown's, so an unfinished one is not followed and a
+  // click asks first (`LINK_SAFETY`); an address, an in-page or an in-app one is a plain link.
   a: ({ node: _node, href, ...props }) =>
-    href?.startsWith("#") ? (
+    !href || !/^(https?|streamdown):/i.test(href) ? (
       <a {...props} href={href} className="underline underline-offset-4" />
     ) : (
       <StreamdownLink
