@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
-import { collection, collectionsFake, recordIssues } from "../src/collection.ts";
+import { collection, collectionsFake, isBatch, recordIssues } from "../src/collection.ts";
 import { describeConfig } from "../src/describe.ts";
 import { defineConnector, memorySecrets, type Op, resolveConfig } from "../src/index.ts";
 import { loadScenarios } from "../src/scenario.ts";
@@ -20,6 +20,9 @@ const declared = (declaration: unknown) => () => collection(declaration as never
 const lead = { company: "Acme", contact: "ada@acme.test", stage: "researched", owner: "leon" };
 const accepts = (record: unknown) => outbound.save.input.safeParse({ record }).success;
 const list = (query: unknown) => outbound.list.input.safeParse(query);
+const batch = (input: unknown) => outbound.saveMany.input.safeParse(input);
+/** A batch of `n` deletes. */
+const many = (n: number) => ({ deletes: Array.from({ length: n }, (_, i) => ({ key: `k${i}` })) });
 
 describe("collection()", () => {
   it("refuses a name that is not a lowercase letter, then letters and digits", () => {
@@ -62,22 +65,48 @@ describe("collection()", () => {
     expect(declared({ name: "leads", key: "id", fields: {} })).toThrow(`collection("leads"): it needs fields`);
   });
 
-  it("makes four operations of the vendor data, each with its effect and target", () => {
-    const ops: Op[] = [outbound.get, outbound.list, outbound.save, outbound.delete];
+  it("makes six operations of the vendor data, each with its effect and target", () => {
+    const ops: Op[] = [outbound.get, outbound.list, outbound.count, outbound.save, outbound.saveMany, outbound.delete];
     expect(
       ops.map(({ id, vendor, resource, effect, idempotent }) => ({ id, vendor, resource, effect, idempotent })),
     ).toEqual([
       { id: "data.outbound.get", vendor: "data", resource: "outbound", effect: "read", idempotent: true },
       { id: "data.outbound.list", vendor: "data", resource: "outbound", effect: "read", idempotent: true },
+      { id: "data.outbound.count", vendor: "data", resource: "outbound", effect: "read", idempotent: true },
       { id: "data.outbound.save", vendor: "data", resource: "outbound", effect: "write", idempotent: true },
+      { id: "data.outbound.saveMany", vendor: "data", resource: "outbound", effect: "write", idempotent: true },
       { id: "data.outbound.delete", vendor: "data", resource: "outbound", effect: "write", idempotent: true },
     ]);
     expect(outbound.get.target!({ key: "Acme" })).toBe("data:outbound/Acme");
     expect(outbound.list.target!({ limit: 100 })).toBe("data:outbound");
+    expect(outbound.count.target!({})).toBe("data:outbound");
     expect(outbound.save.target!({ record: lead })).toBe("data:outbound/Acme");
+    expect(outbound.saveMany.target!({ records: [{ record: lead }], deletes: [] })).toBe("data:outbound");
     expect(outbound.delete.target!({ key: "Acme" })).toBe("data:outbound/Acme");
     expect(outbound).toMatchObject({ kind: "collection", name: "outbound", key: "company", title: "Outbound" });
     expect(Object.isFrozen(outbound)).toBe(true);
+    expect([isBatch(outbound.saveMany), isBatch(outbound.save)]).toEqual([true, false]);
+  });
+
+  it("takes a batch of 1 to 1000 entries, each key once, and a delete guarded by ifRecord", () => {
+    expect(batch({ records: [{ record: lead }] }).data).toEqual({ records: [{ record: lead }], deletes: [] });
+    expect(batch({ deletes: [{ key: "Acme" }, { key: "Globex", ifRecord: lead }] }).success).toBe(true);
+    expect(batch({ records: [{ record: lead, ifRecord: lead }], deletes: [{ key: "Globex" }] }).success).toBe(true);
+    expect(batch(many(1000)).success).toBe(true);
+    for (const input of [
+      {},
+      many(1001),
+      { records: [{ record: lead }], deletes: [{ key: "Acme" }] },
+      { records: [{ record: lead }, { record: { ...lead, stage: "won" } }] },
+      { records: [{ record: lead, ifAbsent: true }] },
+      { records: [{ record: { ...lead, stage: "maybe" } }] },
+      { deletes: [{ key: "" }] },
+    ]) {
+      expect(batch(input).success, JSON.stringify(input)).toBe(false);
+    }
+    expect(outbound.delete.input.safeParse({ key: "Acme", ifRecord: lead }).success).toBe(true);
+    expect(outbound.count.input.safeParse({ where: { stage: "won", seats: { gte: 5 } } }).success).toBe(true);
+    expect(outbound.count.input.safeParse({ where: { nickname: "Ac" } }).success).toBe(false);
   });
 
   it("saves a record its fields accept, and refuses one they do not", () => {
@@ -204,8 +233,8 @@ describe("the collections' fake", () => {
     expect(await keys({ where: { seats: { gte: 3, lte: 8 } } })).toEqual(["Globex", "Initech"]);
     expect(await keys({ order: "seats" })).toEqual(["Globex", "Initech", "Acme", "Umbrella"]);
     expect(await keys({ order: "-seats", limit: 2 })).toEqual(["Initech", "Globex"]);
-    expect(await call(outbound.delete, { key: "Globex" })).toEqual({ deleted: true });
-    expect(await call(outbound.delete, { key: "Globex" })).toEqual({ deleted: false });
+    expect(await call(outbound.delete, { key: "Globex" })).toEqual({ key: "Globex", deleted: true });
+    expect(await call(outbound.delete, { key: "Globex" })).toEqual({ key: "Globex", deleted: false });
     expect(await call(outbound.get, { key: "constructor" })).toBeNull();
   });
 
@@ -215,7 +244,7 @@ describe("the collections' fake", () => {
     expect(await keys({})).toEqual(["Banana", "__proto__", "apple"]);
     expect(await keys({ where: { company: { gte: "_" } } })).toEqual(["__proto__", "apple"]);
     expect(await call(outbound.get, { key: "__proto__" })).toMatchObject({ key: "__proto__" });
-    expect(await call(outbound.delete, { key: "__proto__" })).toEqual({ deleted: true });
+    expect(await call(outbound.delete, { key: "__proto__" })).toEqual({ key: "__proto__", deleted: true });
   });
 
   it("takes a value of another type than its field's as missing: it matches no filter and sorts last", async () => {
@@ -231,6 +260,70 @@ describe("the collections' fake", () => {
     });
     expect(await keys({ where: { seats: { gte: 0 } } })).toEqual(["Globex"]);
     expect(await keys({ order: "-seats" })).toEqual(["Globex", "Acme"]);
+  });
+
+  it("saves and deletes a batch all or none, answering in order, and counts, as the driver on Postgres does", async () => {
+    fake.reset();
+    const globex = { ...lead, company: "Globex", seats: 3 };
+    const initech = { ...lead, company: "Initech", stage: "won" };
+    for (const record of [lead, globex, initech]) await call(outbound.save, { record }, "leon");
+    expect(await call(outbound.count, {})).toEqual({ count: 3 });
+    expect(await call(outbound.count, { where: { stage: "researched", seats: { gte: 3 } } })).toEqual({ count: 1 });
+    const results = (await call(
+      outbound.saveMany,
+      {
+        records: [
+          { record: { ...lead, stage: "contacted" }, ifRecord: lead },
+          { record: { ...lead, company: "Umbrella" } },
+        ],
+        deletes: [{ key: "Globex", ifRecord: globex }, { key: "Nobody" }],
+      },
+      "ada",
+    )) as Record<string, unknown>[];
+    expect(results).toEqual([
+      { key: "Acme", record: { ...lead, stage: "contacted" }, updatedAt: expect.any(String), updatedBy: "ada" },
+      { key: "Umbrella", record: { ...lead, company: "Umbrella" }, updatedAt: expect.any(String), updatedBy: "ada" },
+      { key: "Globex", deleted: true },
+      { key: "Nobody", deleted: false },
+    ]);
+    expect(await keys({})).toEqual(["Acme", "Initech", "Umbrella"]);
+    // One conflict refuses the whole batch, every conflict listed with the record as it stands, and nothing changes.
+    const current = await call(outbound.get, { key: "Acme" });
+    await expect(
+      call(
+        outbound.saveMany,
+        {
+          records: [{ record: { ...lead, company: "Wayne" } }, { record: { ...lead, stage: "won" }, ifRecord: lead }],
+          deletes: [
+            { key: "Initech", ifRecord: lead },
+            { key: "Gone", ifRecord: lead },
+          ],
+        },
+        "ada",
+      ),
+    ).rejects.toMatchObject({
+      status: 409,
+      retryable: false,
+      vendorCode: "record_changed",
+      conflicts: [
+        { key: "Acme", current },
+        { key: "Initech", current: await call(outbound.get, { key: "Initech" }) },
+        { key: "Gone", current: null },
+      ],
+    });
+    expect(await keys({})).toEqual(["Acme", "Initech", "Umbrella"]);
+    expect(await call(outbound.get, { key: "Acme" })).toEqual(current);
+    // A delete guarded by ifRecord refuses a changed or missing record as a save does.
+    await expect(call(outbound.delete, { key: "Acme", ifRecord: lead })).rejects.toMatchObject({
+      vendorCode: "record_changed",
+      current,
+    });
+    await expect(call(outbound.delete, { key: "Gone", ifRecord: lead })).rejects.toMatchObject({ current: null });
+    expect(await call(outbound.delete, { key: "Acme", ifRecord: { ...lead, stage: "contacted" } })).toEqual({
+      key: "Acme",
+      deleted: true,
+    });
+    expect(await call(outbound.count, {})).toEqual({ count: 2 });
   });
 
   it("gives back a record that no longer fits as it is, with its issues", async () => {
@@ -286,7 +379,9 @@ describe("a config's collections", () => {
       "sanoma.token.revoke",
       "data.outbound.get",
       "data.outbound.list",
+      "data.outbound.count",
       "data.outbound.save",
+      "data.outbound.saveMany",
       "data.outbound.delete",
     ]);
     expect([...resolved.fakes.keys()]).toEqual(["data"]);
@@ -351,7 +446,14 @@ describe("a config's collections", () => {
           required: ["company", "contact", "stage", "owner"],
           additionalProperties: false,
         }),
-        ops: ["data.outbound.get", "data.outbound.list", "data.outbound.save", "data.outbound.delete"],
+        ops: [
+          "data.outbound.get",
+          "data.outbound.list",
+          "data.outbound.count",
+          "data.outbound.save",
+          "data.outbound.saveMany",
+          "data.outbound.delete",
+        ],
         declared: {
           id: "resources/data.ts#outbound",
           file: "resources/data.ts",
@@ -367,10 +469,12 @@ describe("a config's collections", () => {
       owner: { type: "string", minLength: 1, format: "person" },
     });
     expect(ops.filter((op) => op.vendor === "data").map((op) => [op.id, op.effect])).toEqual([
+      ["data.outbound.count", "read"],
       ["data.outbound.delete", "write"],
       ["data.outbound.get", "read"],
       ["data.outbound.list", "read"],
       ["data.outbound.save", "write"],
+      ["data.outbound.saveMany", "write"],
     ]);
   });
 

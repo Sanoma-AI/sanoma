@@ -203,6 +203,12 @@ type Range<V> = { gt?: V; gte?: V; lt?: V; lte?: V };
 /** How many records a collection's `list` answers: `default` when the query names no `limit`, `max` at most. */
 export const LIST_LIMIT = { default: 100, max: 1000 } as const;
 
+/** How many entries (records and deletes together) a collection's `saveMany` takes at most. */
+export const BATCH_LIMIT = 1000;
+
+/** What a collection's `delete` answers, and `saveMany` for each of its deletes: whether there was a record. */
+export type Deleted = { key: string; deleted: boolean };
+
 /** The kinds of value a field holds: text, a number, true or false, a date (ISO 8601) or a person's id. */
 export const FIELD_TYPES = ["text", "number", "boolean", "date", "person"] as const;
 
@@ -673,10 +679,27 @@ export interface WorkflowFn<I, O> {
 /** An operation a site may call directly (a read, or a collection's write), as the person on the page. */
 export type OpFn<I, O> = (input: I) => Promise<O>;
 
-/** A collection as a site's `api.data.<name>` has it: its four operations (`Saved`, `ListQuery`). */
+/** A collection as a site's `api.data.<name>` has it: its six operations (`Saved`, `ListQuery`, `Deleted`). */
 export interface CollectionApi<R> {
   get: OpFn<{ key: string }, Saved<R> | null>;
   list(query?: ListQuery<R>): Promise<Saved<R>[]>;
+  /** How many records there are, or match `where` (as `list` takes it). */
+  count(query?: Pick<ListQuery<R>, "where">): Promise<{ count: number }>;
   save: OpFn<{ record: R; ifAbsent?: boolean; ifRecord?: Record<string, unknown> }, Saved<R>>;
-  delete: OpFn<{ key: string }, { deleted: boolean }>;
+  /**
+   * Saves and deletes together, all or none, at most `BATCH_LIMIT` entries, each key once: the
+   * records' receipts then the deletes' answers, in the order sent. The policy decides each entry
+   * as its own `save` or `delete`; a deny refuses the batch (`policy_denied`, with the `denied`
+   * keys), a hold holds it whole, and a changed or missing record under an `ifRecord` refuses it
+   * (status 409, `record_changed`) with every such entry in `conflicts: { key, current }[]`.
+   */
+  saveMany: OpFn<
+    {
+      records?: { record: R; ifRecord?: Record<string, unknown> }[];
+      deletes?: { key: string; ifRecord?: Record<string, unknown> }[];
+    },
+    (Saved<R> | Deleted)[]
+  >;
+  /** Deletes the record, or with `ifRecord` only while it still matches (status 409, `record_changed`, otherwise). */
+  delete: OpFn<{ key: string; ifRecord?: Record<string, unknown> }, Deleted>;
 }

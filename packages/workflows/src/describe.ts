@@ -205,7 +205,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
       key: c.key,
       fields: c.fields,
       record: { $id: `sanoma:collection/${c.name}`, ...toJsonSchema(recordSchemaOf(c), `${c.name} record`, "input") },
-      ops: [c.get, c.list, c.save, c.delete].map((op) => op.id),
+      ops: [c.get, c.list, c.count, c.save, c.saveMany, c.delete].map((op) => op.id),
       ...(declared.has(c.name) && { declared: declared.get(c.name) }),
     }))
     .toSorted((a, b) => a.name.localeCompare(b.name));
