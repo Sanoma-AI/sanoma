@@ -7,9 +7,10 @@ import wakeupJournal from "../../drizzle/wakeup/meta/_journal.json" with { type:
 
 // The generated migrations (`pnpm --filter @sanoma-ai/workflows generate`), one folder per
 // database the runtime makes tables in, each with its own journal table in the schema `drizzle`,
-// since the wakeup service's database may be a company's own. The Worker, which never migrates,
-// checks a database against the journal shipped with the package (`migrationsApplied`), with no
-// file read: the journal is imported.
+// since the wakeup service's database may be a company's own. A connector's tables have folders
+// of their own, shaped the same (`@sanoma-ai/connector-better-auth`). The Worker, which never
+// migrates, checks a database against the journal shipped with the package
+// (`migrationsApplied`), with no file read: the journal is imported.
 
 /** Drizzle's journal, `meta/_journal.json` of a migrations folder. */
 export interface MigrationsJournal {
@@ -18,26 +19,26 @@ export interface MigrationsJournal {
 
 /** A migrations folder with the journal table recording what of it a database has. */
 export interface Migrations {
-  /** The folder's name under the package's `drizzle/`. */
-  name: string;
+  /**
+   * The folder, beside the module declaring it (`new URL("../drizzle/<name>/", import.meta.url)`,
+   * from `src/` and from `dist/` alike), asked for only when migrating, never in the Worker.
+   */
+  folder(): URL;
   /** Its journal table in the schema `drizzle`. */
   table: string;
   journal: MigrationsJournal;
 }
 
-/** The folder of `of`, from `src/` and from `dist/` alike; read only when migrating, never in the Worker. */
-const folderOf = (of: Migrations): string => fileURLToPath(new URL(`../../drizzle/${of.name}/`, import.meta.url));
-
 /** The tables every company database gets (`db/company.ts`). */
 export const COMPANY_MIGRATIONS = {
-  name: "company",
+  folder: () => new URL("../../drizzle/company/", import.meta.url),
   table: "__drizzle_migrations",
   journal: companyJournal,
 } satisfies Migrations;
 
 /** The wakeup service's tables (`db/wakeup.ts`). */
 export const WAKEUP_MIGRATIONS = {
-  name: "wakeup",
+  folder: () => new URL("../../drizzle/wakeup/", import.meta.url),
   table: "__drizzle_migrations_wakeup",
   journal: wakeupJournal,
 } satisfies Migrations;
@@ -45,12 +46,12 @@ export const WAKEUP_MIGRATIONS = {
 /**
  * Applies to `db` the migrations of `of` its database has not had, in one transaction, recording
  * each in the journal table. Drizzle's migrator compares only the newest timestamp, so a migration
- * older than the newest applied is skipped: `scripts/check-journal.ts` keeps a branch from adding
- * one. Two processes migrating one database at once race (the migrator takes no lock): callers
+ * older than the newest applied is skipped: the repository's `scripts/check-journal.ts` keeps a
+ * branch from adding one. Two processes migrating one database at once race (the migrator takes no lock): callers
  * hold `underPreparationLock`.
  */
 export const applyMigrations = (db: Db, of: Migrations): Promise<void> =>
-  migrate(db, { migrationsFolder: folderOf(of), migrationsTable: of.table });
+  migrate(db, { migrationsFolder: fileURLToPath(of.folder()), migrationsTable: of.table });
 
 /**
  * Whether the database `db` is on has had every migration of `of`: each journal entry's `when`

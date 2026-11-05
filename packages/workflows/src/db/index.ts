@@ -1,10 +1,12 @@
 // `@sanoma-ai/workflows/db`, server-only: the runtime's tables and the database they are read
-// with, for the packages that share them (the connectors' stores, the app's tests). Never a
-// workflow's import: the shipped `oxlint.json` refuses it, as it does `/wakeup-service`.
+// with, for the packages that share them (the connectors' stores, the app's tests), and the
+// migrator a connector applies its own generated folder with, under the preparation's lock. Never
+// a workflow's import: the shipped `oxlint.json` refuses it, as it does `/wakeup-service`.
 
-export { type Db, databaseOn, pgCode } from "../db.ts";
+export { type Db, databaseOn, pgCode, underPreparationLock } from "../db.ts";
 export * from "./company.ts";
 export * from "./dbos.ts";
 export * from "./identity.ts";
 export * from "./kms.ts";
+export * from "./migrate.ts";
 export * from "./wakeup.ts";
