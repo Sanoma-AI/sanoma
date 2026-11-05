@@ -18,7 +18,7 @@ export interface Instance {
 }
 
 /** What `POST /v1/instances` takes, cut to what the backend sends. */
-export interface InstanceCreate {
+interface InstanceCreate {
   template: string;
   resources: { cpu: number; memory: number; disk: number };
   type: string;
@@ -50,6 +50,11 @@ function failure(where: string, status: number, body: unknown): DriverError {
 /** Whether `error` is Agent37's answer `code`. */
 export const isCode = (error: unknown, code: string) => error instanceof DriverError && error.vendorCode === code;
 
+/** A rejection handler that takes Agent37's answer `code` as done, and fails on any other error. */
+const unless = (code: string) => (error: unknown) => {
+  if (!isCode(error, code)) throw error;
+};
+
 /** The Sandbox API with the key `key`; each request fails as a `DriverError` past `timeoutMs`. */
 export function agent37Api(key: string, timeoutMs = 30_000) {
   async function send<T>(method: string, path: string, body?: object, ms = timeoutMs): Promise<T> {
@@ -70,13 +75,7 @@ export function agent37Api(key: string, timeoutMs = 30_000) {
         retryable: true,
       });
     }
-    const text = await res.text().catch(() => "");
-    let parsed: unknown;
-    try {
-      parsed = text ? JSON.parse(text) : undefined;
-    } catch {
-      parsed = undefined;
-    }
+    const parsed: unknown = await res.json().catch(() => undefined);
     if (!res.ok) throw failure(where, res.status, parsed);
     return parsed as T;
   }
@@ -90,21 +89,10 @@ export function agent37Api(key: string, timeoutMs = 30_000) {
     /** Checkpoints its memory and processes; it wakes at the next `start`. */
     sleep: (id: string) => send<Instance>("POST", `/instances/${id}/sleep`),
     stop: (id: string) => send<Instance>("POST", `/instances/${id}/stop`),
-    async remove(id: string) {
-      try {
-        await send("DELETE", `/instances/${id}`);
-      } catch (error) {
-        if (!isCode(error, "not_found")) throw error;
-      }
-    },
+    remove: (id: string) => send("DELETE", `/instances/${id}`).then(() => undefined, unless("not_found")),
     /** Registers an SSH public key with the workspace; one registered already is done. */
-    async registerKey(publicKey: string, name: string) {
-      try {
-        await send("POST", "/ssh-keys", { public_key: publicKey, name });
-      } catch (error) {
-        if (!isCode(error, "ssh_key_exists")) throw error;
-      }
-    },
+    registerKey: (publicKey: string, name: string) =>
+      send("POST", "/ssh-keys", { public_key: publicKey, name }).then(() => undefined, unless("ssh_key_exists")),
   };
 }
 

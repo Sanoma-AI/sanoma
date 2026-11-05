@@ -6,7 +6,7 @@ import { wanted } from "./connector.ts";
 // says whether it works; the fake's answer at once. Both go through `instanceOperations`.
 
 /** What a declaration is bound by: there is no object at Agent37 to name it. */
-export const BINDING = "agent37";
+const BINDING = "agent37";
 
 /** A declaration's state: its binding, and that the key lists the workspace's instances. */
 const stateOf = (id: string) => ({ id, healthy: true });
@@ -17,33 +17,36 @@ export function instanceOperations(list: () => Promise<unknown>) {
     await list();
     return { id, gone: false, state: stateOf(id) };
   };
+  /** Binds a declaration: a new one by `BINDING`, a bound one by its id. */
+  const bind = async ({ id = BINDING, desired }: { id?: string; desired: Record<string, unknown> }) => {
+    wanted(desired);
+    await list();
+    return { id, state: stateOf(id) };
+  };
   return {
     instance: {
       read,
       import: read,
-      plan: async ({ id, desired }: { id?: string; desired?: Record<string, unknown> }) => {
-        const none = { unknown: [], replace: [] };
-        if (!desired) return { action: (id === undefined ? "none" : "delete") as PlanAction, ...none };
+      plan: async ({
+        id,
+        desired,
+      }: {
+        id?: string;
+        desired?: Record<string, unknown>;
+      }): Promise<{ action: PlanAction; planned?: Record<string, unknown>; unknown: string[]; replace: string[] }> => {
+        if (!desired) return { action: id === undefined ? "none" : "delete", unknown: [], replace: [] };
         wanted(desired);
-        if (id !== undefined) return { action: "none" as PlanAction, planned: { ...desired, ...stateOf(id) }, ...none };
-        const unknown = ["id", "healthy"];
+        if (id !== undefined)
+          return { action: "none", planned: { ...desired, ...stateOf(id) }, unknown: [], replace: [] };
         return {
-          action: "create" as PlanAction,
+          action: "create",
           planned: { ...desired, id: null, healthy: null },
-          unknown,
+          unknown: ["id", "healthy"],
           replace: [],
         };
       },
-      create: async ({ desired }: { desired: Record<string, unknown> }) => {
-        wanted(desired);
-        await list();
-        return { id: BINDING, state: stateOf(BINDING) };
-      },
-      update: async ({ id, desired }: { id: string; desired: Record<string, unknown> }) => {
-        wanted(desired);
-        await list();
-        return { id, state: stateOf(id) };
-      },
+      create: bind,
+      update: bind,
       // The boxes stay: each is discarded on its own (`SandboxBackend.discard`).
       delete: async ({ id }: { id: string }) => ({ id, gone: true as const }),
     },

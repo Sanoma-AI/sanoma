@@ -41,8 +41,8 @@ export function agent37Backend(
   { secrets, declared }: SandboxContext,
   { edge = (id, port) => `https://${id}-${port}.agent37.app`, budgetMs = BUDGET_MS }: Agent37BackendOptions = {},
 ): SandboxBackend {
-  /** The keys registered with their workspaces, once each. */
-  const registered = new Map<string, Promise<void>>();
+  /** Each key's SSH key, registered with its workspace once. */
+  const registered = new Map<string, { ssh: ReturnType<typeof sshKey>; registering: Promise<void> }>();
   const keyOf = async () => {
     const key = (await secrets([KEY])).get(KEY);
     if (!key) throw new Error(`agent37 is not configured: ${KEY} is not set; set it on the connector page`);
@@ -60,7 +60,7 @@ export function agent37Backend(
     },
     async discard({ name }) {
       const api = agent37Api(await keyOf());
-      for (const { id } of await holding(api, name)) await api.remove(id);
+      await Promise.all((await holding(api, name)).map(({ id }) => api.remove(id)));
     },
   };
 
@@ -69,14 +69,15 @@ export function agent37Backend(
     const key = await keyOf();
     const api = agent37Api(key);
     const deadline = Date.now() + budgetMs;
-    const ssh = sshKey(key);
-    let registering = registered.get(key);
-    if (!registering) {
-      registering = api.registerKey(ssh.publicKey, "sanoma");
-      registered.set(key, registering);
-      registering.catch(() => registered.delete(key));
+    // The SSH key is registered while the instance is found or made; only the connect needs it.
+    let known = registered.get(key);
+    if (!known) {
+      const ssh = sshKey(key);
+      known = { ssh, registering: api.registerKey(ssh.publicKey, "sanoma") };
+      registered.set(key, known);
+      known.registering.catch(() => registered.delete(key));
     }
-    await registering;
+    const { ssh, registering } = known;
     const [found] = await holding(api, name);
     const made =
       found ??
@@ -94,6 +95,7 @@ export function agent37Backend(
         Math.max(1, deadline - Date.now()),
       ));
     await running(api, made, deadline);
+    await registering;
     const headers = { "X-Agent37-Key": key };
     const client = await untilDeadline(
       deadline,
@@ -124,7 +126,7 @@ const holding = async (api: Agent37Api, name: string) =>
 async function untilDeadline<T>(
   deadline: number,
   attempt: () => Promise<T>,
-  retry: (error: unknown) => boolean = () => true,
+  retry: (error: unknown) => boolean,
 ): Promise<T> {
   for (let wait = 1_000; ; wait = Math.min(wait * 2, 10_000)) {
     try {
@@ -142,7 +144,8 @@ const retrying = <T>(deadline: number, call: () => Promise<T>) =>
 
 /** Waits until the instance is running: starts it when it is stopped, wakes it when it sleeps. */
 async function running(api: Agent37Api, instance: Instance, deadline: number): Promise<void> {
-  for (let { status } = instance; ; { status } = instance = await api.get(instance.id)) {
+  for (;;) {
+    let { status } = instance;
     if (["failed", "deleting", "deleted"].includes(status)) {
       const reason = instance.status_reason?.message ? `: ${instance.status_reason.message}` : "";
       throw new Error(`agent37: the instance ${instance.id} is ${status}${reason}; discard the box to make it again`);
@@ -152,6 +155,7 @@ async function running(api: Agent37Api, instance: Instance, deadline: number): P
     if (status === "running") return;
     if (Date.now() > deadline) throw new Error(`agent37: the instance ${instance.id} is still ${status}`);
     await delay(2_000);
+    instance = await api.get(instance.id);
   }
 }
 

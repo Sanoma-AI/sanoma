@@ -11,7 +11,7 @@ import { createWebSocketStream, WebSocket } from "ws";
 // connection per open box, one exec channel per command.
 
 /** Who a box's commands run as: the image's user on Agent37's templates, whose home is the instance's disk. */
-export const USER = "node";
+const USER = "node";
 
 /**
  * The SSH key the connector logs in to boxes with: an ed25519 key derived from the API key, so
@@ -114,7 +114,7 @@ export function connect(
 }
 
 /** `s` as one word of a POSIX shell's command line. */
-export const quote = (s: string) => `'${s.replaceAll("'", `'\\''`)}'`;
+const quote = (s: string) => `'${s.replaceAll("'", `'\\''`)}'`;
 
 const NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
@@ -124,7 +124,7 @@ const NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
  * `kill` can signal the whole group, and whose exit status is the line's. The job's stdin is the
  * channel's; the shell's notice of a job killed is not printed.
  */
-export function commandLine(
+function commandLine(
   command: string,
   { cwd, env = {}, pidfile }: { cwd?: string; env?: Record<string, string>; pidfile: string },
 ): string {
@@ -141,7 +141,7 @@ export function commandLine(
 }
 
 /** The command line that sends `signal` to the group whose leader's pid is in `pidfile`, once it is there (up to 5 s). */
-export const killLine = (pidfile: string, signal: string) =>
+const killLine = (pidfile: string, signal: string) =>
   `f=${quote(pidfile)}; i=0; while [ ! -s "$f" ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done; ` +
   `kill -s ${signal.replace(/^SIG/, "")} -- -"$(cat "$f" 2>/dev/null)" 2>/dev/null; true`;
 
