@@ -632,6 +632,8 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed, ref?:
     );
   let decisions = await decideStep();
   let decision = decisionOf(op, calls, decisions, run.state.collections);
+  // The records keep the first decisions: a hold stays a hold once its approval let the call through.
+  const decided = decisions;
   const logged = recorded(op, parsed, run.workflow);
   /** The call's records, one per call it made, numbered from `seq`, each with its decision and what `outcome` says of it. */
   const records = (outcome: (i: number) => Partial<LedgerBody>, at?: number) =>
@@ -645,7 +647,7 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed, ref?:
           ...targetOf(c.op, c.input),
           effect: c.op.effect,
           input: recorded(c.op, c.input, run.workflow),
-          decision: decisions[i]!,
+          decision: decided[i]!,
           ...(connection && { connection }),
           ...outcome(i),
         } as LedgerBody,

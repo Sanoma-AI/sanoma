@@ -83,11 +83,16 @@ describe("the collections' driver on Postgres", () => {
     ]);
     expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
     const failed = results.find((r) => r.status === "rejected");
+    const winner = results.find((r) => r.status === "fulfilled");
     expect(failed).toMatchObject({
       status: "rejected",
-      reason: { retryable: false, vendorCode: "record_exists", status: 409 },
+      reason: {
+        retryable: false,
+        vendorCode: "record_exists",
+        status: 409,
+        current: winner?.status === "fulfilled" ? winner.value : undefined,
+      },
     });
-    const winner = results.find((r) => r.status === "fulfilled");
     expect(await call(leads.get, { key: "Acme" })).toEqual(winner?.status === "fulfilled" ? winner.value : undefined);
   });
 
@@ -270,7 +275,11 @@ describe("the collections' driver on Postgres", () => {
       call(
         leads.saveMany,
         {
-          records: [{ record: { company: "Wayne", stage: "new" } }, { record: { ...acme, seats: 9 }, ifRecord: acme }],
+          records: [
+            { record: { company: "Wayne", stage: "new" } },
+            { record: { ...acme, seats: 9 }, ifRecord: acme },
+            { record: { company: "Umbrella", stage: "won" }, ifAbsent: true },
+          ],
           deletes: [
             { key: "Initech", ifRecord: acme },
             { key: "Gone", ifRecord: acme },
@@ -284,6 +293,7 @@ describe("the collections' driver on Postgres", () => {
       vendorCode: "record_changed",
       conflicts: [
         { key: "Acme", current },
+        { key: "Umbrella", current: await call(leads.get, { key: "Umbrella" }) },
         { key: "Initech", current: await call(leads.get, { key: "Initech" }) },
         { key: "Gone", current: null },
       ],

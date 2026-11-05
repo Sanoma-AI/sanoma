@@ -690,12 +690,12 @@ export interface CollectionApi<R> {
    * Saves and deletes together, all or none, at most `BATCH_LIMIT` entries, each key once: the
    * records' receipts then the deletes' answers, in the order sent. The policy decides each entry
    * as its own `save` or `delete`; a deny refuses the batch (`policy_denied`, with the `denied`
-   * keys), a hold holds it whole, and a changed or missing record under an `ifRecord` refuses it
-   * (status 409, `record_changed`) with every such entry in `conflicts: { key, current }[]`.
+   * keys), a hold holds it whole, and a record an entry's `ifRecord` or `ifAbsent` refuses refuses
+   * it (status 409, `record_changed`) with every such entry in `conflicts: { key, current }[]`.
    */
   saveMany: OpFn<
     {
-      records?: { record: R; ifRecord?: Record<string, unknown> }[];
+      records?: { record: R; ifAbsent?: boolean; ifRecord?: Record<string, unknown> }[];
       deletes?: { key: string; ifRecord?: Record<string, unknown> }[];
     },
     (Saved<R> | Deleted)[]

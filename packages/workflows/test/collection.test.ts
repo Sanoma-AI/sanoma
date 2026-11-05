@@ -92,13 +92,14 @@ describe("collection()", () => {
     expect(batch({ records: [{ record: lead }] }).data).toEqual({ records: [{ record: lead }], deletes: [] });
     expect(batch({ deletes: [{ key: "Acme" }, { key: "Globex", ifRecord: lead }] }).success).toBe(true);
     expect(batch({ records: [{ record: lead, ifRecord: lead }], deletes: [{ key: "Globex" }] }).success).toBe(true);
+    expect(batch({ records: [{ record: lead, ifAbsent: true }] }).success).toBe(true);
     expect(batch(many(1000)).success).toBe(true);
     for (const input of [
       {},
       many(1001),
       { records: [{ record: lead }], deletes: [{ key: "Acme" }] },
       { records: [{ record: lead }, { record: { ...lead, stage: "won" } }] },
-      { records: [{ record: lead, ifAbsent: true }] },
+      { records: [{ record: lead, ifAbsent: true, ifRecord: lead }] },
       { records: [{ record: { ...lead, stage: "maybe" } }] },
       { deletes: [{ key: "" }] },
     ]) {
@@ -173,6 +174,7 @@ describe("the collections' fake", () => {
       retryable: false,
       status: 409,
       vendorCode: "record_exists",
+      current: first,
     });
     const advanced = await call(outbound.save, { record: { ...lead, stage: "won" } }, "ada");
     await expect(call(outbound.save, { record: lead, ifAbsent: true }, "ada")).rejects.toMatchObject({
@@ -293,7 +295,11 @@ describe("the collections' fake", () => {
       call(
         outbound.saveMany,
         {
-          records: [{ record: { ...lead, company: "Wayne" } }, { record: { ...lead, stage: "won" }, ifRecord: lead }],
+          records: [
+            { record: { ...lead, company: "Wayne" } },
+            { record: { ...lead, stage: "won" }, ifRecord: lead },
+            { record: { ...lead, company: "Umbrella", stage: "won" }, ifAbsent: true },
+          ],
           deletes: [
             { key: "Initech", ifRecord: lead },
             { key: "Gone", ifRecord: lead },
@@ -307,6 +313,7 @@ describe("the collections' fake", () => {
       vendorCode: "record_changed",
       conflicts: [
         { key: "Acme", current },
+        { key: "Umbrella", current: await call(outbound.get, { key: "Umbrella" }) },
         { key: "Initech", current: await call(outbound.get, { key: "Initech" }) },
         { key: "Gone", current: null },
       ],
