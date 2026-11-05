@@ -26,7 +26,7 @@ import {
   PolicyDeniedError,
   SanomaError,
 } from "./errors.ts";
-import { type Collection, isBatch } from "./collection.ts";
+import type { Collection } from "./collection.ts";
 import { currentGroup, entry, type LedgerBody, skipped, write, writeFailure } from "./ledger.ts";
 import { shown } from "./log.ts";
 import { type CallContext, isOp, type Op } from "./op.ts";
@@ -42,8 +42,10 @@ import {
   CALL_WORKFLOW,
   CHANGE_MERGE,
   DATA_VENDOR,
+  entryOpsOf,
   errorMessage,
   fitsOp,
+  isBatch,
   LOGIN_CODE_WORKFLOW,
   problemLine,
   type Saved,
@@ -317,9 +319,8 @@ export interface Call {
 export function callsOf(op: Op, input: unknown, ops: ReadonlyMap<string, Op>): Call[] {
   if (!isBatch(op)) return [{ op, input }];
   const { records, deletes } = input as { records: unknown[]; deletes: unknown[] };
-  const save = ops.get(`${DATA_VENDOR}.${op.resource}.save`)!;
-  const remove = ops.get(`${DATA_VENDOR}.${op.resource}.delete`)!;
-  return [...records.map((e) => ({ op: save, input: e })), ...deletes.map((e) => ({ op: remove, input: e }))];
+  const [save, remove] = entryOpsOf(op).map((id) => ops.get(id)!);
+  return [...records.map((e) => ({ op: save!, input: e })), ...deletes.map((e) => ({ op: remove!, input: e }))];
 }
 
 /** The outputs of the calls a call made, from its output: a batch's, one per entry, in order. */
@@ -677,14 +678,16 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed, ref?:
         decision.reason,
         deniedKeys(op, calls, decisions, run.state.collections),
       );
-      await writeFailures(() => ({ error: errorInfo(err), durationMs: 0 }), err);
+      // A deny after an approval is recorded as the deny, with its reason, not as the hold.
+      await writeFailures((i) => ({ decision: decisions[i]!, error: errorInfo(err), durationMs: 0 }), err);
       throw err;
     }
     if (decision.kind !== "approve") break;
     const title = decision.title ?? `${op.id} needs ${approverLabel(decision.approver)}`;
     try {
-      // A hold covers the call it held, and the calls a batch makes, each decided again once it is approved.
-      const covers = [...new Set([op.id, ...calls.map((c) => c.op.id)])];
+      // A hold covers the call it held and the calls of a batch it held, each decided again once it is approved.
+      const held = calls.filter((_, i) => decisions[i]!.kind === "approve").map((c) => c.op.id);
+      const covers = [...new Set([op.id, ...held])];
       await awaitApproval(run, title, { approver: decision.approver, covers }, place, {
         op: op.id,
         seq,

@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
-import { collection, collectionsFake, isBatch, recordIssues } from "../src/collection.ts";
+import { collection, collectionsFake, recordIssues } from "../src/collection.ts";
+import { isBatch, previewRequests } from "../src/shared.ts";
 import { describeConfig } from "../src/describe.ts";
 import { defineConnector, memorySecrets, type Op, resolveConfig } from "../src/index.ts";
 import { loadScenarios } from "../src/scenario.ts";
@@ -86,6 +87,18 @@ describe("collection()", () => {
     expect(outbound).toMatchObject({ kind: "collection", name: "outbound", key: "company", title: "Outbound" });
     expect(Object.isFrozen(outbound)).toBe(true);
     expect([isBatch(outbound.saveMany), isBatch(outbound.save)]).toEqual([true, false]);
+    // The policy is asked about a batch as its entries, once each.
+    const byId = new Map([outbound.saveMany, outbound.save, outbound.get].map((op) => [op.id, op]));
+    const asked = previewRequests(
+      { name: "sync", ops: [outbound.saveMany.id, outbound.save.id, outbound.get.id] },
+      byId,
+    );
+    expect(asked.map((r) => r.action.id)).toEqual([
+      "workflow:sync",
+      "data.outbound.save",
+      "data.outbound.delete",
+      "data.outbound.get",
+    ]);
   });
 
   it("takes a batch of 1 to 1000 entries, each key once, and a delete guarded by ifRecord", () => {
@@ -159,9 +172,9 @@ describe("collection()", () => {
 describe("the collections' fake", () => {
   const fake = collectionsFake([outbound]);
   let n = 0;
-  const call = async (op: Op, input: unknown, by?: string) => {
+  const call = async (op: Op, input: unknown, by?: string, attempt = 1) => {
     const fn = fake.driver.ops[`${op.resource}.${op.name}`]!;
-    const context = { idempotencyKey: `t:${n++}`, runId: "t", opId: op.id, attempt: 1, secrets: memorySecrets() };
+    const context = { idempotencyKey: `t:${n++}`, runId: "t", opId: op.id, attempt, secrets: memorySecrets() };
     return op.output.parse(await fn(op.input.parse(input), by === undefined ? context : { ...context, by }));
   };
   const keys = async (query: unknown) => ((await call(outbound.list, query)) as { key: string }[]).map((s) => s.key);
@@ -326,6 +339,14 @@ describe("the collections' fake", () => {
       current,
     });
     await expect(call(outbound.delete, { key: "Gone", ifRecord: lead })).rejects.toMatchObject({ current: null });
+    // A retry finding no record deleted it the first time; one finding another record did not.
+    expect(await call(outbound.delete, { key: "Gone", ifRecord: lead }, undefined, 2)).toEqual({
+      key: "Gone",
+      deleted: true,
+    });
+    await expect(call(outbound.delete, { key: "Acme", ifRecord: lead }, undefined, 2)).rejects.toMatchObject({
+      current,
+    });
     expect(await call(outbound.delete, { key: "Acme", ifRecord: { ...lead, stage: "contacted" } })).toEqual({
       key: "Acme",
       deleted: true,
