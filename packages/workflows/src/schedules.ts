@@ -145,13 +145,18 @@ export type TimeMatcherClass = new (pattern: string, timezone?: string) => TimeM
 let matcherClass: TimeMatcherClass | undefined;
 
 /**
- * DBOS's `TimeMatcher`, from `dist/src/scheduler/crontab.js` beside its main module: the package's
- * exports leave it out (dbos-sdk 5.2.11), so it is loaded by path, and a test holds it there.
+ * The file DBOS's `TimeMatcher` is in, `dist/src/scheduler/crontab.js` beside its main module, as
+ * `require` resolves the package: its exports leave it out (dbos-sdk 5.2.11), so it is loaded by
+ * path, and a test holds it there.
  */
+export const timeMatcherFile = (require: NodeJS.Require): string =>
+  join(dirname(require.resolve("@dbos-inc/dbos-sdk")), "scheduler", "crontab.js");
+
+/** DBOS's `TimeMatcher`, required from its file (`timeMatcherFile`), or the one `useTimeMatcher` gave. */
 export function timeMatcher(): TimeMatcherClass {
   if (matcherClass) return matcherClass;
   const require = createRequire(import.meta.url);
-  const file = join(dirname(require.resolve("@dbos-inc/dbos-sdk")), "scheduler", "crontab.js");
+  const file = timeMatcherFile(require);
   const loaded = (require(file) as { TimeMatcher?: unknown }).TimeMatcher;
   if (typeof loaded !== "function") throw new Error(`DBOS's cron parser is not in ${file} any more`);
   return (matcherClass = loaded as TimeMatcherClass);
@@ -162,6 +167,8 @@ export function timeMatcher(): TimeMatcherClass {
  * which bundles the runtime, and imports it by its file.
  */
 export function useTimeMatcher(matcher: TimeMatcherClass): void {
+  if (typeof matcher !== "function")
+    throw new Error("DBOS's cron parser (TimeMatcher) is not in its scheduler's crontab.js any more");
   matcherClass = matcher;
 }
 

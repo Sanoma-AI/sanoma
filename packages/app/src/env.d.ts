@@ -28,16 +28,16 @@ declare module "virtual:sanoma/icons" {
 }
 
 /**
- * The app bundle's company, as the Worker's build makes it (`bundleModule` in `bundle-build.ts`):
- * its config and root, the snapshot of its files, and Cedar's web build, initialised on first use.
+ * The app bundle's company root and the snapshot of its files, registered (`useRootSnapshot`) as
+ * the module is evaluated, ahead of any company file, with Cedar's web build and DBOS's cron
+ * parser (`bundleModule` in `bundle-build.ts`).
  */
-declare module "virtual:sanoma/app-root" {
+declare module "virtual:sanoma/app-runtime" {
   export const root: string;
   export const snapshot: import("./snapshot.ts").AppSnapshot;
 }
 
+/** The app bundle's config as `sanoma` loads it (`bundleModule` in `bundle-build.ts`). */
 declare module "virtual:sanoma/app-bundle" {
   export const config: import("@sanoma-ai/workflows").SanomaConfig;
-  export const cedar: () => import("@sanoma-ai/workflows").CedarWasm;
-  export const TimeMatcher: import("@sanoma-ai/workflows").TimeMatcherClass;
 }

@@ -69,6 +69,7 @@ export {
   declaredWakeup,
   defineConfig,
   envWakeup,
+  joinDeclarations,
   type Login,
   readRootSnapshot,
   resolveConfig,
@@ -193,7 +194,7 @@ export type { RunArgs } from "./run.ts";
 export { startWorker, type Worker, type WorkerOptions } from "./worker.ts";
 export { superviseWorker, type Supervisor, type SupervisorOptions } from "./supervisor.ts";
 export type { DeadlineSource, Deadlines, SelfStop, Wait } from "./deadlines.ts";
-export { nextFire, nextScheduledFire, type TimeMatcherClass, useTimeMatcher } from "./schedules.ts";
+export { nextFire, nextScheduledFire, timeMatcherFile, type TimeMatcherClass, useTimeMatcher } from "./schedules.ts";
 // `secret` itself is at `@sanoma-ai/workflows/resources`, for data files; this is the drivers' side.
 export {
   generateSecret,

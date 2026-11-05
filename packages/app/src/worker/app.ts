@@ -4,8 +4,9 @@
 // composed as the `sanoma` bin composes them on Node) on that client's pool, and the Worker's
 // assets for the client build and the prerendered pages. What needs the checkout is the worker's
 // (`steps/`), not in the bundle.
-// First: the root and its snapshot, registered before any company file evaluates, through the routes too.
-import { root, snapshot } from "virtual:sanoma/app-root";
+// First: the runtime's registrations (the root and its snapshot, Cedar, DBOS's cron parser), made
+// before any company file evaluates, through the routes too.
+import { root, snapshot } from "virtual:sanoma/app-runtime";
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
   checkPreparedOnly,
@@ -14,13 +15,11 @@ import {
   resolveConfig,
   SanomaClient,
   type SocialClients,
-  useCedarWasm,
-  useTimeMatcher,
 } from "@sanoma-ai/workflows";
 import { domainsOf } from "@sanoma-ai/workflows/shared";
 import { betterAuthStaffLogin } from "@sanoma-ai/connector-better-auth";
 import start from "@tanstack/react-start/server-entry";
-import { cedar, config, TimeMatcher } from "virtual:sanoma/app-bundle";
+import { config } from "virtual:sanoma/app-bundle";
 import {
   type AppBundleContext,
   type AppBundleEnv,
@@ -36,11 +35,8 @@ import { staffLogin } from "../login/staff.ts";
 import { plain } from "../server/webhooks.ts";
 import { servedOnWorker } from "../snapshot.ts";
 
-// The runtime, bundled: the root's people, policies, app name and version as data (registered by
-// the bundle's module, ahead of the company's files), Cedar's web build on first use, DBOS's cron
-// parser by its file, and a database the worker prepares, never this Worker.
-useCedarWasm(cedar);
-useTimeMatcher(TimeMatcher);
+// The runtime, bundled (its registrations made by `virtual:sanoma/app-runtime`), on a database the
+// worker prepares, never this Worker.
 checkPreparedOnly("the company's worker, at its start,");
 
 /** What each request's client is made from: its own connection (a Worker's sockets are its request's), on its first call. */

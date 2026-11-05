@@ -9,9 +9,10 @@ import { createRequire, SourceMap, type SourceMapPayload } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { declarationFiles, filesUnder, type SanomaConfig, vendorInfo } from "@sanoma-ai/workflows";
+import { declarationFiles, filesUnder, type SanomaConfig, timeMatcherFile, vendorInfo } from "@sanoma-ai/workflows";
 import { domainsText } from "@sanoma-ai/workflows/shared";
 import type { SiteEntry } from "@sanoma-ai/workflows/describe";
+import MagicString from "magic-string";
 import type { InlineConfig, Plugin, PluginOption } from "vite";
 import { type AppBundle, prerenderedAsset } from "./app-bundle.ts";
 import {
@@ -120,58 +121,57 @@ export function prerenderedPages(site: Pick<SiteEntry, "pages" | "calls">): Site
 }
 
 const BUNDLE = "virtual:sanoma/app-bundle";
-/** The root and its snapshot, registered (`useRootSnapshot`) before any company file is evaluated: `appOfFile` finds a file's app by it. */
-const ROOT = "virtual:sanoma/app-root";
+
+/** `[[path, <name><i>], …]`, each path beside the module imported from it as `<name><i>`. */
+const entries = (paths: string[], name: string) =>
+  `[${paths.map((path, i) => `[${JSON.stringify(path)}, ${name}${i}]`).join(", ")}]`;
 
 /**
- * `virtual:sanoma/app-bundle`, which `worker/app.ts` imports after `virtual:sanoma/app-root` (the
- * company's root and snapshot, registered before any company file evaluates): its config as
- * `sanoma` loads it (its file's, with each workflow file's default export and each data file's
- * exports joined to what it lists, once each), Cedar's web build on first use, and DBOS's cron parser.
+ * The runtime's registrations, made before any company file is evaluated: the root and its
+ * snapshot (`useRootSnapshot`: `appOfFile` finds a file's app by it), Cedar's web build
+ * (`useCedarWasm`, initialised on first use) and DBOS's cron parser by its file (`useTimeMatcher`).
+ */
+const RUNTIME = "virtual:sanoma/app-runtime";
+
+/**
+ * `virtual:sanoma/app-runtime`, which `worker/app.ts` imports first, and `virtual:sanoma/app-bundle`,
+ * the config as `sanoma` loads it (its file's, with the declaration files joined, `joinDeclarations`).
  */
 function bundleModule(root: string, configFile: string, snapshot: AppSnapshot): Plugin {
   const id = `\0${BUNDLE}`;
-  const rootId = `\0${ROOT}`;
+  const runtimeId = `\0${RUNTIME}`;
   // The runtime's Cedar, its web build beside its Node one (`./web` is import-only, so no require resolves it).
   const fromRuntime = createRequire(createRequire(defaultRuntimeFrom).resolve("@sanoma-ai/workflows"));
   const cedar = join(dirname(fromRuntime.resolve("@cedar-policy/cedar-wasm/nodejs")), "..", "web");
-  // DBOS's cron parser, which its exports leave out, by its file (as `timeMatcher` requires it on Node).
-  const crontab = join(dirname(fromRuntime.resolve("@dbos-inc/dbos-sdk")), "scheduler", "crontab.js");
   return {
     name: "sanoma:app-bundle",
     enforce: "pre",
-    resolveId: (source) => (source === BUNDLE ? id : source === ROOT ? rootId : undefined),
-    async load(loaded) {
-      if (loaded === rootId) {
+    resolveId: (source) => (source === BUNDLE ? id : source === RUNTIME ? runtimeId : undefined),
+    load(loaded) {
+      if (loaded === runtimeId) {
         return [
-          'import { useRootSnapshot } from "@sanoma-ai/workflows";\n',
+          'import { useCedarWasm, useRootSnapshot, useTimeMatcher } from "@sanoma-ai/workflows";\n',
+          `import * as cedarWeb from ${specifier(join(cedar, "cedar_wasm.js"))};\n`,
+          `import cedarModule from ${specifier(join(cedar, "cedar_wasm_bg.wasm"))};\n`,
+          `import { TimeMatcher } from ${specifier(timeMatcherFile(fromRuntime))};\n`,
           `export const root = ${JSON.stringify(root)};\n`,
           `export const snapshot = JSON.parse(${JSON.stringify(JSON.stringify(snapshot))});\n`,
           "useRootSnapshot(root, snapshot);\n",
+          "useCedarWasm(() => (cedarWeb.initSync({ module: cedarModule }), cedarWeb));\n",
+          "useTimeMatcher(TimeMatcher);\n",
         ].join("");
       }
       if (loaded !== id) return;
       const files = declarationFiles(root);
-      // The workflow files with a default export, as `sanoma` imported them (the rest are helpers).
-      const modules = (await Promise.all(files.workflows.map((file) => import(pathToFileURL(file).href)))) as {
-        default?: unknown;
-      }[];
-      const workflowFiles = files.workflows.filter((_, i) => modules[i]!.default !== undefined);
       return [
-        // First, so the root is registered before the config's files are evaluated.
-        `import ${JSON.stringify(ROOT)};\n`,
+        // First, so the runtime's registrations are made before the config's files are evaluated.
+        `import ${JSON.stringify(RUNTIME)};\n`,
+        'import { joinDeclarations } from "@sanoma-ai/workflows";\n',
         `import config from ${specifier(configFile)};\n`,
-        ...workflowFiles.map((file, i) => `import workflow${i} from ${specifier(file)};\n`),
-        ...files.data.map((file, i) => `import * as data${i} from ${specifier(file)};\n`),
-        `const workflows = new Set([...(config.workflows ?? []), ${workflowFiles.map((_, i) => `workflow${i}`).join(", ")}]);\n`,
-        `const collections = new Set([...(config.collections ?? []), ${files.data.map((_, i) => `...Object.values(data${i})`).join(", ")}]);\n`,
-        "if (workflows.size) config.workflows = [...workflows];\n",
-        "if (collections.size) config.collections = [...collections];\n",
+        ...files.workflows.map((path, i) => `import * as workflow${i} from ${specifier(path)};\n`),
+        ...files.data.map((path, i) => `import * as data${i} from ${specifier(path)};\n`),
+        `joinDeclarations(config, { workflows: ${entries(files.workflows, "workflow")}, data: ${entries(files.data, "data")} });\n`,
         "export { config };\n",
-        `import * as cedarWeb from ${specifier(join(cedar, "cedar_wasm.js"))};\n`,
-        `import cedarModule from ${specifier(join(cedar, "cedar_wasm_bg.wasm"))};\n`,
-        "export const cedar = () => (cedarWeb.initSync({ module: cedarModule }), cedarWeb);\n",
-        `export { TimeMatcher } from ${specifier(crontab)};\n`,
       ].join("");
     },
   };
@@ -206,27 +206,25 @@ async function bundlePlugins(root: string, configFile: string, snapshot: AppSnap
       // does not have) is read here. A connector's module calls it as it is evaluated.
       name: "sanoma:import-meta-url",
       applyToEnvironment: ssr,
-      transform(code, id) {
-        const file = id.split("?")[0]!;
-        if (!code.includes("import.meta.url") || !/\.[cm]?[jt]sx?$/.test(file)) return;
-        const url = pathToFileURL(file).href;
-        const edits: { start: number; end: number; text: string }[] = [];
-        for (const node of nodesOf(this.parse(code, { lang: langOf(file) }))) {
-          if (node.type === "CallExpression" && isVendorInfo(node)) {
-            // In parentheses, an expression wherever the call was; its lines kept, so the lines after it keep theirs.
-            const lines = "\n".repeat(code.slice(node.start, node.end).split("\n").length - 1);
-            edits.push({ start: node.start, end: node.end, text: `(${JSON.stringify(vendorInfo(url))}${lines})` });
-          } else if (isImportMetaUrl(node) && !edits.some((edit) => edit.start <= node.start && node.end <= edit.end)) {
-            edits.push({ start: node.start, end: node.end, text: JSON.stringify(url) });
+      transform: {
+        filter: { id: /\.[cm]?[jt]sx?(\?|$)/, code: "import.meta.url" },
+        handler(code, id) {
+          const file = id.split("?")[0]!;
+          const url = pathToFileURL(file).href;
+          const out = new MagicString(code);
+          // The call last replaced: its own `import.meta.url`, visited right after it, goes with it.
+          let replaced = { start: -1, end: -1 };
+          for (const node of nodesOf(this.parse(code, { lang: langOf(file) }))) {
+            if (replaced.start <= node.start && node.end <= replaced.end) continue;
+            if (node.type === "CallExpression" && isVendorInfo(node)) {
+              out.overwrite(node.start, node.end, `(${JSON.stringify(vendorInfo(url))})`);
+              replaced = node;
+            } else if (isImportMetaUrl(node)) {
+              out.overwrite(node.start, node.end, JSON.stringify(url));
+            }
           }
-        }
-        if (!edits.length) return;
-        let out = code;
-        for (const { start, end, text } of edits.toSorted((a, b) => b.start - a.start)) {
-          out = out.slice(0, start) + text + out.slice(end);
-        }
-        // No edit adds or removes a line: no mapping moves to another line.
-        return { code: out, map: null };
+          return { code: out.toString(), map: out.generateMap({ hires: true }) };
+        },
       },
     },
     {
@@ -237,9 +235,8 @@ async function bundlePlugins(root: string, configFile: string, snapshot: AppSnap
       transform(code, id) {
         const file = id.split("?")[0]!;
         if (!companyFile(id, root) || !/\.[cm]?[jt]sx?$/.test(file)) return;
-        // On the code's first line: no mapping moves to another line, so the source map still names
-        // a line of the file (`runOnWorkerd`).
-        return { code: `globalThis[Symbol.for("sanoma.file")] = ${JSON.stringify(file)};${code}`, map: null };
+        const out = new MagicString(code).prepend(`globalThis[Symbol.for("sanoma.file")] = ${JSON.stringify(file)};\n`);
+        return { code: out.toString(), map: out.generateMap({ hires: true }) };
       },
     },
     {
@@ -423,14 +420,15 @@ function framesOf(stack: string, server: string, root: string): { at: string; to
 }
 
 /**
- * What a request the probe answered with a throw says: the module whose evaluation threw (when
- * the outermost frame is a module's body), else where it threw, then the error's first line,
- * then each frame of the build's own modules by its source.
+ * What a request the probe answered with a throw says: the module whose evaluation threw (on
+ * `loading`, the request that loads the app, when the outermost frame is a module's body), else
+ * where it threw, then the error's first line, then each frame of the build's own modules by its source.
  */
-function thrownOn(stack: string, server: string, root: string): Error {
+function thrownOn(stack: string, server: string, root: string, loading: boolean): Error {
   const frames = framesOf(stack, server, root);
-  // A module's evaluation is the outermost frame of a throw as it is evaluated; a request's handler is outside any it throws in.
-  const evaluating = frames.at(-1)?.top ? frames.at(-1) : undefined;
+  // A module's evaluation is the outermost frame of a throw as it is evaluated. V8 names no
+  // function there, nor in an anonymous one: only the request that loads the app is read so.
+  const evaluating = loading && frames.at(-1)?.top ? frames.at(-1) : undefined;
   const where = evaluating
     ? `${evaluating.at} throws as the Cloudflare Worker evaluates it`
     : `the app throws on the Cloudflare Worker${frames[0] ? ` at ${frames[0].at}` : ""}`;
@@ -464,8 +462,8 @@ async function runOnWorkerd(
   const { unstable_startWorker } = await import("wrangler");
   const dir = mkdtempSync(join(tmpdir(), "sanoma-prerender-"));
   const probe = join(server, PROBE);
-  writeFileSync(probe, probeModule(main));
   try {
+    writeFileSync(probe, probeModule(main));
     const config = join(dir, "wrangler.json");
     writeFileSync(
       config,
@@ -501,14 +499,14 @@ async function runOnWorkerd(
     });
     try {
       await worker.ready;
-      const answer = async (url: string) => {
+      const answer = async (url: string, loading = false) => {
         const response = (await worker.fetch(url)) as unknown as Response;
         const text = await response.text();
-        if (response.headers.has(THROWN)) throw thrownOn(text, server, root);
+        if (response.headers.has(THROWN)) throw thrownOn(text, server, root, loading);
         return { response, text };
       };
       // Any host but a site's is the app's.
-      const health = await answer("https://app.invalid/healthz");
+      const health = await answer("https://app.invalid/healthz", true);
       if (!health.response.ok) {
         throw new Error(
           `the app on the Cloudflare Worker answered /healthz ${health.response.status}: ${health.text.slice(0, 200)}`,
