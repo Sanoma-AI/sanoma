@@ -81,10 +81,10 @@ describe("agent37Backend", () => {
       expect(exitCode).toBe(0);
       expect(out).toBe(`${vendor.home(box.id)}/work/it's here\nhi it's 'quoted'\n`);
       // A child of the command dies with it.
-      const tree = await box.run("sleep 30 & sleep 30; wait");
+      const tree = await box.run("sleep 4241 & sleep 4241; wait");
       tree.kill("SIGTERM");
       expect((await tree.wait()).exitCode).toBe(143);
-      const left = await box.run("pgrep -f 'sleep 30' || true");
+      const left = await box.run("pgrep -fx 'sleep 4241' || true");
       expect(await new Response(left.stdout).text()).toBe("");
       // An abort kills it too.
       const aborting = new AbortController();
@@ -131,6 +131,27 @@ describe("agent37Backend", () => {
       status: 402,
     });
     await backend.discard({ name: "sanoma-stop" });
+  });
+
+  it("kills the commands still running when it stops, and fails at once on an SSH key the box refuses", async () => {
+    const backend = backendOf();
+    const box = await backend.open({ name: "sanoma-end", image: DEFAULTS.image, size: 2 });
+    const left = await box.run("sleep 4243");
+    await box.stop();
+    expect((await left.wait()).exitCode).not.toBe(0);
+    const again = await backend.open({ name: "sanoma-end", image: DEFAULTS.image, size: 2 });
+    const found = await again.run("pgrep -fx 'sleep 4243' || true");
+    expect(await new Response(found.stdout).text()).toBe("");
+    await again.stop();
+    // The workspace lost the key the backend registered: no wait brings it back.
+    const kept = vendor.keys.splice(0);
+    const begun = Date.now();
+    await expect(backend.open({ name: "sanoma-end", image: DEFAULTS.image, size: 2 })).rejects.toThrow(
+      "the SSH tunnel",
+    );
+    expect(Date.now() - begun).toBeLessThan(5_000);
+    vendor.keys.push(...kept);
+    await backend.discard({ name: "sanoma-end" });
   });
 
   it("refuses a shape Agent37 has not, and opens nothing without its key", async () => {
