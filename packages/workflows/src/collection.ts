@@ -112,7 +112,7 @@ export interface Collection<
 }
 
 /** The one operation of a collection that stands for others: `saveMany`, each entry a `save` or `delete`. */
-export const BATCH = "saveMany";
+const BATCH = "saveMany";
 export const isBatch = (op: Pick<Op, "vendor" | "name">): boolean => op.vendor === DATA_VENDOR && op.name === BATCH;
 
 /**
@@ -371,7 +371,6 @@ type SaveInput = { record: Record<string, unknown>; ifAbsent?: boolean; ifRecord
 type DeleteInput = { key: string; ifRecord?: Record<string, unknown> };
 /** A `saveMany` input as its schema parses it. */
 type Batch = { records: SaveInput[]; deletes: DeleteInput[] };
-type Counting = { where?: Record<string, unknown> };
 // By namespace: the fake names a range's bounds `gt`, `gte`, `lt` and `lte`.
 const RANGE = { gt: drizzle.gt, gte: drizzle.gte, lt: drizzle.lt, lte: drizzle.lte };
 
@@ -400,16 +399,10 @@ export function collectionsDriver(list: readonly Collection[], store: { db(): Pr
         updatedBy: row.updatedBy,
       });
     const here = (key: string) => and(eq(data.collection, c.name), eq(data.key, key));
-    /** The record as it stands, for a refused `ifRecord` (`changed`) or `ifAbsent` (`exists`). */
-    const current = async (db: Db, key: string) => {
+    /** The record on `db`, as `get` answers it and a refused save or delete carries it (`current`). */
+    const getOn = async (db: Db, key: string) => {
       const [row] = await db.select(COLUMNS).from(data).where(here(key));
       return row ? saved(row) : null;
-    };
-    const changed = async (db: Db, key: string) => recordChanged(await current(db, key));
-    const exists = async (db: Db, key: string) => {
-      const row = await current(db, key);
-      // Gone between the refusal and this read: what refused it was a record, so it has changed since.
-      return row ? recordExists(row) : recordChanged(null);
     };
     /** One save on `db`, as `save` makes it and a batch makes each of its records. */
     const saveOn = async (db: Db, { record, ifAbsent, ifRecord }: SaveInput, by: string) => {
@@ -424,7 +417,7 @@ export function collectionsDriver(list: readonly Collection[], store: { db(): Pr
           .where(and(here(key), or(eq(data.record, ifRecord), retry)))
           .returning(COLUMNS);
         if (row) return saved(row);
-        throw await changed(db, key);
+        throw recordChanged(await getOn(db, key));
       }
       // The conflict row is locked by Postgres: never implement an insert-only claim as get + save.
       // An identical retry by the same actor keeps the first receipt and never overwrites later progress.
@@ -436,8 +429,10 @@ export function collectionsDriver(list: readonly Collection[], store: { db(): Pr
         .values({ collection: c.name, key, record, updatedBy: by })
         .onConflictDoUpdate({ target: [data.collection, data.key], ...conflict })
         .returning(COLUMNS);
-      if (!row) throw await exists(db, key);
-      return saved(row);
+      if (row) return saved(row);
+      const current = await getOn(db, key);
+      // Gone between the refusal and this read: what refused it was a record, so it has changed since.
+      throw current ? recordExists(current) : recordChanged(null);
     };
     /** One delete on `db`, as `delete` makes it and a batch makes each of its deletes. */
     const deleteOn = async (db: Db, { key, ifRecord }: DeleteInput): Promise<Deleted> => {
@@ -445,14 +440,11 @@ export function collectionsDriver(list: readonly Collection[], store: { db(): Pr
         .delete(data)
         .where(ifRecord === undefined ? here(key) : and(here(key), eq(data.record, ifRecord)))
         .returning({ key: data.key });
-      if (gone.length === 0 && ifRecord !== undefined) throw await changed(db, key);
+      if (gone.length === 0 && ifRecord !== undefined) throw recordChanged(await getOn(db, key));
       return { key, deleted: gone.length > 0 };
     };
     const ops: Record<string, (input: any, call: CallContext) => Promise<unknown>> = {
-      get: async ({ key }: { key: string }) => {
-        const [row] = await (await store.db()).select(COLUMNS).from(data).where(here(key));
-        return row ? saved(row) : null;
-      },
+      get: async ({ key }: { key: string }) => getOn(await store.db(), key),
       list: async (listing: Listing) => {
         const { where, order } = listClauses(c, listing);
         const rows = await (
@@ -465,7 +457,7 @@ export function collectionsDriver(list: readonly Collection[], store: { db(): Pr
           .limit(listing.limit);
         return rows.map(saved);
       },
-      count: async (counting: Counting) => {
+      count: async (counting: Pick<Listing, "where">) => {
         const [row] = await (
           await store.db()
         )
@@ -649,7 +641,7 @@ export function collectionsFake(list: readonly Collection[]): Fake<CollectionsSt
             },
             list: async ({ where, order, limit }: Listing) =>
               matching(where).toSorted(byOrder(order, types)).slice(0, limit).map(saved),
-            count: async ({ where }: Counting) => ({ count: matching(where).length }),
+            count: async ({ where }: Pick<Listing, "where">) => ({ count: matching(where).length }),
             save: async (input: SaveInput, call) => save(input, updatedBy(call)),
             // All or none, as the driver's transaction: a conflict puts back every entry made before it.
             [BATCH]: async ({ records: saves, deletes }: Batch, call) => {

@@ -465,8 +465,9 @@ export class SanomaClient {
    * it as the person, in a run `direct:<actor>:<id>` of the workflow `call` with no approvals. A
    * deny throws `policy_denied` and writes nothing. An allowed call runs the driver once, without
    * DBOS and without a retry (a driver's failure is `driver_failed`). A read returns its output
-   * and records nothing. A write is recorded as one `op.called` (seq 0) in that run, and with the
-   * default ledger in one transaction with the record it saves, so both are written or neither;
+   * and records nothing. A write is recorded as one `op.called` per call it makes (`callsOf`, seq
+   * from 0) in that run, and with the default ledger in one transaction with what it saves, so
+   * both are written or neither;
    * a write with the same id and input returns the output recorded. When the policy asks for an
    * approval, the call becomes run `call:<actor>:<id>` of the built-in `call` workflow, started
    * as the person, which makes it once approved, and this throws `approval_pending` with its id.

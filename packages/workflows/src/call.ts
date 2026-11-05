@@ -317,11 +317,9 @@ export interface Call {
 export function callsOf(op: Op, input: unknown, ops: ReadonlyMap<string, Op>): Call[] {
   if (!isBatch(op)) return [{ op, input }];
   const { records, deletes } = input as { records: unknown[]; deletes: unknown[] };
-  const of = (name: string) => ops.get(`${DATA_VENDOR}.${op.resource}.${name}`)!;
-  return [
-    ...records.map((e) => ({ op: of("save"), input: e })),
-    ...deletes.map((e) => ({ op: of("delete"), input: e })),
-  ];
+  const save = ops.get(`${DATA_VENDOR}.${op.resource}.save`)!;
+  const remove = ops.get(`${DATA_VENDOR}.${op.resource}.delete`)!;
+  return [...records.map((e) => ({ op: save, input: e })), ...deletes.map((e) => ({ op: remove, input: e }))];
 }
 
 /** The outputs of the calls a call made, from its output: a batch's, one per entry, in order. */
@@ -332,6 +330,20 @@ const keyOf = (op: Op, input: unknown, collection: Collection): string =>
   op.name === "save"
     ? ((input as { record: Record<string, unknown> }).record[collection.key] as string)
     : (input as { key: string }).key;
+
+/** A batch's denied entries: each one's key, with its decision. */
+function denialsOf(
+  op: Op,
+  calls: readonly Call[],
+  decisions: readonly RecordedDecision[],
+  collections: ReadonlyMap<string, Collection>,
+): { key: string; decision: Extract<RecordedDecision, { kind: "deny" }> }[] {
+  const collection = collections.get(op.resource)!;
+  return calls.flatMap((c, i) => {
+    const decision = decisions[i]!;
+    return decision.kind === "deny" ? [{ key: keyOf(c.op, c.input, collection), decision }] : [];
+  });
+}
 
 /**
  * The decision for a call from those of the calls it makes: a batch is denied when any entry is
@@ -346,12 +358,11 @@ export function decisionOf(
 ): RecordedDecision {
   if (!isBatch(op)) return decisions[0]!;
   const version = decisions[0]?.policyVersion === undefined ? {} : { policyVersion: decisions[0].policyVersion };
-  const denied = decisions.flatMap((d, i) =>
-    d.kind === "deny" ? [`${keyOf(calls[i]!.op, calls[i]!.input, collections.get(op.resource)!)}: ${d.reason}`] : [],
-  );
+  const denied = denialsOf(op, calls, decisions, collections);
   if (denied.length) {
-    const reasons = [...new Set(decisions.flatMap((d) => (d.kind === "deny" ? (d.reasons ?? []) : [])))];
-    return { kind: "deny", reason: denied.join("; "), ...(reasons.length && { reasons }), ...version };
+    const reasons = [...new Set(denied.flatMap(({ decision }) => decision.reasons ?? []))];
+    const reason = denied.map(({ key, decision }) => `${key}: ${decision.reason}`).join("; ");
+    return { kind: "deny", reason, ...(reasons.length && { reasons }), ...version };
   }
   return decisions.find((d) => d.kind === "approve") ?? { kind: "allow", ...version };
 }
@@ -364,16 +375,10 @@ export function deniedKeys(
   collections: ReadonlyMap<string, Collection>,
 ): { denied?: string[] } {
   if (!isBatch(op)) return {};
-  const collection = collections.get(op.resource)!;
-  return { denied: calls.flatMap((c, i) => (decisions[i]!.kind === "deny" ? [keyOf(c.op, c.input, collection)] : [])) };
+  return { denied: denialsOf(op, calls, decisions, collections).map(({ key }) => key) };
 }
 
-/**
- * Asks the policy about one call, with the record a collection's `save` or
- * `delete` replaces as `before` (`beforeOf`). The runtime's own rule first (`runtimeHold`, over
- * the running instance's people): while it holds or denies, the company's policy is not asked.
- * Runs inside a step, so it must have no side effects of its own.
- */
+/** `decideEach` for one call. */
 export async function decide(
   run: Run,
   op: Op,
@@ -384,7 +389,13 @@ export async function decide(
   return decision!;
 }
 
-/** `decide` for each of the calls a call makes (`callsOf`), in order, each read of a `before` keyed by its place. */
+/**
+ * Asks the policy about each of the calls a call makes (`callsOf`), in order, with the record a
+ * collection's `save` or `delete` replaces as `before` (`beforeOf`, each read keyed by its place).
+ * The runtime's own rule first (`runtimeHold`, over the running instance's people): while it
+ * holds or denies a call, the company's policy is not asked about it. Runs inside a step, so it
+ * must have no side effects of its own.
+ */
 export async function decideEach(
   run: Run,
   calls: readonly Call[],
@@ -654,8 +665,8 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed, ref?:
         { seq: seq + i, ...(at !== undefined && { at }) },
       ),
     );
-  const writeFailures = async (outcome: (i: number) => Partial<LedgerBody>, err: unknown) => {
-    for (const record of records(outcome)) await writeFailure(run, record, err);
+  const writeFailures = async (outcome: (i: number) => Partial<LedgerBody>, err: unknown, at?: number) => {
+    for (const record of records(outcome, at)) await writeFailure(run, record, err);
   };
 
   // Each hold is lifted in turn: once one is approved, the policy is asked again, with it.
@@ -735,7 +746,7 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed, ref?:
     const failed = () => ({ error: errorInfo(err), durationMs: Date.now() - started, ...(attempt ? { attempt } : {}) });
     if (isInfrastructureError(err, run.state)) {
       for (const record of records(failed, started)) skipped(record, `the call was interrupted (${errorMessage(err)})`);
-    } else await writeFailures(failed, err);
+    } else await writeFailures(failed, err, started);
     throw err;
   }
   const { output, at, durationMs } = result;
