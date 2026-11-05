@@ -8,6 +8,7 @@ import {
   FILE,
   frame,
   RUNNER_PORT,
+  RUNNER_PROTOCOL,
   type RunnerAnswer,
   type RunnerRequest,
   STDERR,
@@ -31,15 +32,31 @@ import type { Process } from "./sandbox-contract.ts";
 const port = Number(process.env.SANOMA_RUNNER_PORT ?? RUNNER_PORT);
 const host = process.env.SANOMA_RUNNER_HOST ?? "0.0.0.0";
 
-/** How long an exited command's last output may take to be sent before its exit, in ms. */
-const LAST_OUTPUT = 200;
+/**
+ * How long an exited command's output still queued here may take to be sent before its exit, in
+ * ms: `localBox` has waited for its pipes already, unless what it left running holds them.
+ */
+const LAST_OUTPUT = 50;
+/** How much a connection may hold unsent before a command's output waits for it, in bytes. */
+const UNSENT = 1 << 20;
 /** How often a connection is pinged: Agent37's edge closes one silent for 15 minutes. */
 const BEAT = 30_000;
 
 const box = localBox("runner", homedir(), process.env as Record<string, string>);
 
-const server = createServer((req, res) => void res.writeHead(req.url === "/health" ? 200 : 404).end());
-new WebSocketServer({ server }).on("connection", serve);
+const server = createServer((req, res) => {
+  if (req.url !== "/health") return void res.writeHead(404).end();
+  res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ protocol: RUNNER_PROTOCOL }));
+});
+new WebSocketServer({ server })
+  .on("connection", serve)
+  .on("error", (error) => console.error(`the runner's WebSocket server: ${error.message}`));
+let tries = 0;
+server.on("error", (error: NodeJS.ErrnoException) => {
+  // The runner it replaces may not have let go of the port yet.
+  if (error.code !== "EADDRINUSE" || ++tries > 25) throw error;
+  setTimeout(() => server.listen(port, host), 200);
+});
 server.listen(port, host, () => {
   const { address, port: bound } = server.address() as AddressInfo;
   console.log(`sanoma runner listening on ${address}:${bound}`);
@@ -57,6 +74,8 @@ function serve(ws: WebSocket) {
   const send = (data: Uint8Array | string) => ws.readyState === ws.OPEN && ws.send(data);
   const say = (answer: RunnerAnswer) => send(JSON.stringify(answer));
   const beat = setInterval(() => ws.ping(), BEAT);
+  // A frame ws refuses (one too large, one malformed) closes this connection, not the runner.
+  ws.on("error", (error) => console.error(`a connection: ${error.message}`));
   ws.on("close", () => {
     clearInterval(beat);
     // A dropped connection kills nothing: its commands go on, their stdin ended, their output dropped.
@@ -137,7 +156,11 @@ function serve(ws: WebSocket) {
   /** Sends what `from` prints, until it ends or fails. */
   async function pump(id: number, stream: number, from: ReadableStream<Uint8Array>) {
     try {
-      for await (const chunk of from) send(frame(id, stream, chunk));
+      for await (const chunk of from) {
+        // Its output waits for a slow connection, and so the command does, its pipe full.
+        while (ws.readyState === ws.OPEN && ws.bufferedAmount > UNSENT) await delay(10);
+        send(frame(id, stream, chunk));
+      }
     } catch {
       // A pipe that failed has nothing more to say.
     }

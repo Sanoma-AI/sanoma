@@ -7,6 +7,7 @@ import { createInterface } from "node:readline";
 import { checkSandbox } from "@sanoma-ai/testing/sandbox";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runnerBox, runnerScript } from "../src/runner-box.ts";
+import { RUNNER_PROTOCOL } from "../src/runner-protocol.ts";
 import type { Box, SandboxBackend } from "../src/sandbox-contract.ts";
 
 // The runner as a backend ships it (`runnerScript()`, the built `dist/sandbox-runner.cjs`), written
@@ -58,7 +59,7 @@ const text = (stream: ReadableStream<Uint8Array>) => new Response(stream).text()
 
 describe("the sandbox runner", () => {
   it("answers its health check", async () => {
-    expect((await fetch(`${url}/health`)).status).toBe(200);
+    expect(await (await fetch(`${url}/health`)).json()).toEqual({ protocol: RUNNER_PROTOCOL });
     expect((await fetch(`${url}/other`)).status).toBe(404);
   });
 

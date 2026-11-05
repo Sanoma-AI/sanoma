@@ -53,6 +53,10 @@ const instanceSchema = z
   .refine((box) => (box.disk ?? DEFAULTS.disk) <= (shapeOf(box)?.disk ?? Infinity), {
     message: "the disk is larger than the shape takes (12 GB with 2 vCPUs; 20, 40 or 80 GB with 4)",
     path: ["disk"],
+  })
+  .refine((box) => (box.region ?? DEFAULTS.region) === "us" || (box.type ?? DEFAULTS.type) !== "default", {
+    message: "only `us` runs the `default` type: `eu` and `ap-south` run `vm` and `performance`",
+    path: ["type"],
   });
 
 /** What a declaration asks of a box, its defaults filled. */

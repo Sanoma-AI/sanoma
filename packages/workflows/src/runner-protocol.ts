@@ -5,6 +5,12 @@
 /** The port the runner listens on in a box. */
 export const RUNNER_PORT = 7700;
 
+/**
+ * The protocol's version, which the runner's `GET /health` answers (`{ protocol }`): a backend
+ * restarts a runner that answers another, one an earlier release started in a box that slept.
+ */
+export const RUNNER_PROTOCOL = 1;
+
 /** What a binary frame's bytes are: a process's stdin, stdout or stderr, or a file read or written. */
 export const STDIN = 0;
 export const STDOUT = 1;

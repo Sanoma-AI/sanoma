@@ -4,6 +4,7 @@ import { gzipSync } from "node:zlib";
 import {
   type Box,
   RUNNER_PORT,
+  RUNNER_PROTOCOL,
   runnerBox,
   runnerScript,
   type SandboxBackend,
@@ -105,24 +106,29 @@ export function agent37Backend(
       expose: async (port) => ({ url: edge(made.id, port), headers }),
       async stop() {
         // What runs in it is killed first, which a sleep would keep; a runner that cannot be
-        // reached kills nothing, and the sleep goes ahead.
-        await stop().catch(() => undefined);
+        // reached, or does not answer in time, kills nothing, and the sleep goes ahead.
+        await Promise.race([stop().catch(() => undefined), delay(STOP_MS)]);
         await asleep(api, made.id, Date.now() + budgetMs);
       },
     };
   }
 }
 
-/** Where the runner is kept in a box, under the home of the image's user, and where it logs. */
+/** How long `stop` waits for the runner to kill what runs in the box, in ms. */
+const STOP_MS = 30_000;
+
+/** Where the runner is kept in a box, under the home of the image's user, its pid and its log. */
 const RUNNER = ".sanoma/runner.cjs";
+const PID = ".sanoma/runner.pid";
 const LOG = ".sanoma/runner.log";
 /** The most of the packed runner one exec carries: its body takes 128 KB. */
 const CHUNK = 96_000;
 
 /**
- * Starts the runner in the instance `id` unless it answers at `url`: writes it in with exec (gzip
- * in base64, in chunks), starts it detached, and waits until it answers, up to `deadline`. A box
- * that slept kept it running; one that was stopped booted fresh without it.
+ * Starts the runner in the instance `id` unless it answers at `url` with this release's protocol:
+ * writes it in with exec (gzip in base64, in chunks), ends the one it replaces, starts it
+ * detached, and waits until it answers, up to `deadline`. A box that slept kept it running; one
+ * that was stopped booted fresh without it.
  */
 async function runnerUp(
   api: Agent37Api,
@@ -132,10 +138,9 @@ async function runnerUp(
   deadline: number,
 ): Promise<void> {
   const answers = () =>
-    fetch(`${url}/health`, { headers, signal: AbortSignal.timeout(5_000) }).then(
-      (res) => res.ok,
-      () => false,
-    );
+    fetch(`${url}/health`, { headers, signal: AbortSignal.timeout(5_000) })
+      .then(async (res) => res.ok && ((await res.json()) as { protocol?: unknown }).protocol === RUNNER_PROTOCOL)
+      .catch(() => false);
   if (await answers()) return;
   const sh = async (command: string) => {
     const { exit_code, stderr } = await api.exec(id, `cd && ${command}`);
@@ -150,10 +155,11 @@ async function runnerUp(
     // Base64 is safe unquoted.
     await sh(`mkdir -p .sanoma && printf %s ${packed.slice(at, at + CHUNK)} >${at ? ">" : ""} ${part}.b64`);
   }
-  // Detached, its output to a file: exec answers once nothing holds its own.
+  // Detached, its output to a file: exec answers once nothing holds its own. The runner it
+  // replaces (another release's) ends, and with it what it started; the new one waits for its port.
   await sh(
     `base64 -d <${part}.b64 | gunzip >${part}.cjs && rm ${part}.b64 && mv ${part}.cjs ${RUNNER} && ` +
-      `{ nohup node ${RUNNER} >${LOG} 2>&1 </dev/null & }`,
+      `{ kill "$(cat ${PID} 2>/dev/null)" 2>/dev/null; nohup node ${RUNNER} >${LOG} 2>&1 </dev/null & echo $! >${PID}; }`,
   );
   // Node starts it in a fraction of a second.
   while (!(await answers())) {

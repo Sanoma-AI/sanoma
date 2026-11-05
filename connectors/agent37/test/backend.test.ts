@@ -152,9 +152,42 @@ describe("agent37Backend", () => {
     await backend.discard({ name: "sanoma-broken" });
   });
 
+  it("replaces a runner of another release that a box kept asleep", async () => {
+    const backend = backendOf();
+    const box = await backend.open({ name: "sanoma-old", image: DEFAULTS.image, size: 2 });
+    await box.stop();
+    // Another release's runner, in its place: it answers another protocol.
+    await vendor.fetch(`https://api.agent37.com/v1/instances/${box.id}/stop`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${KEY}` },
+    });
+    await vendor.fetch(`https://api.agent37.com/v1/instances/${box.id}/start`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${KEY}` },
+    });
+    const old = `require("node:http").createServer((q, s) => s.end('{"protocol":0}')).listen(process.env.SANOMA_RUNNER_PORT, "127.0.0.1")`;
+    await vendor.fetch(`https://api.agent37.com/v1/instances/${box.id}/exec`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${KEY}` },
+      body: JSON.stringify({
+        command: `cd && { nohup node -e '${old}' >/dev/null 2>&1 </dev/null & echo $! >.sanoma/runner.pid; }`,
+      }),
+    });
+    vendor.sent.length = 0;
+    const again = await backend.open({ name: "sanoma-old", image: DEFAULTS.image, size: 2 });
+    expect(execs(box.id)).toBeGreaterThan(0);
+    const ran = await again.run("echo new");
+    expect(await new Response(ran.stdout).text()).toBe("new\n");
+    await again.stop();
+    await backend.discard({ name: "sanoma-old" });
+  });
+
   it("refuses a shape Agent37 has not, and opens nothing without its key", async () => {
     await expect(backendOf({ size: 2, memory: 8 }).open({ name: "x", image: "", size: 2 })).rejects.toThrow(
       "Agent37's shapes",
+    );
+    await expect(backendOf({ region: "eu" }).open({ name: "x", image: "", size: 2 })).rejects.toThrow(
+      "only `us` runs the `default` type",
     );
     const keyless = agent37Backend({ secrets: async () => new Map(), declared: {} });
     await expect(keyless.open({ name: "x", image: "", size: 2 })).rejects.toThrow("AGENT37_API_KEY is not set");

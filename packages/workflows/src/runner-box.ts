@@ -32,11 +32,20 @@ interface Waiter {
   lost(): void;
 }
 
+/** An open connection to the runner, and what its ids wait for. */
+interface Connection {
+  ws: WebSocket;
+  waiting: Map<number, Waiter>;
+}
+
+/** How long the runner's WebSocket may take to open, in ms. */
+const OPEN_MS = 30_000;
+
 /**
  * The box `id` whose runner is at `url` (`http(s)://`, the WebSocket's upgrade sent with
  * `headers`): its commands, files and `stop` (which kills every command in it and closes the
- * connection). Connects at the first call, and again at the next call after a drop. How its ports
- * are reached is the vendor's, so the backend adds `expose`.
+ * connection). Connects at the first call, and again at the next call after a drop or a `stop`.
+ * How its ports are reached is the vendor's, so the backend adds `expose`.
  */
 export function runnerBox({
   url,
@@ -48,30 +57,39 @@ export function runnerBox({
   id: string;
 }): Omit<Box, "expose"> {
   const where = `the runner at ${new URL(url).host}`;
-  let socket: Promise<WebSocket> | undefined;
+  let current: Promise<Connection> | undefined;
   let last = 0;
-  const waiting = new Map<number, Waiter>();
 
-  const connect = () => (socket ??= open());
-  function open(): Promise<WebSocket> {
-    const opening = new Promise<WebSocket>((resolve, reject) => {
+  const connect = () => (current ??= open());
+  function open(): Promise<Connection> {
+    const opening = new Promise<Connection>((resolve, reject) => {
       // Node's WebSocket (undici) takes `headers` beside the standard's protocols.
       const ws = new WebSocket(url.replace(/^http/, "ws"), { headers } as unknown as string[]);
       ws.binaryType = "arraybuffer";
-      ws.addEventListener("open", () => resolve(ws));
+      const connection: Connection = { ws, waiting: new Map() };
+      const late = setTimeout(() => ws.close(), OPEN_MS);
+      ws.addEventListener("open", () => {
+        clearTimeout(late);
+        resolve(connection);
+      });
       ws.addEventListener("message", ({ data }: { data: string | ArrayBuffer }) => {
-        if (typeof data !== "string") {
-          const { id: of, stream, bytes } = unframe(new Uint8Array(data));
-          return waiting.get(of)?.bytes(stream, bytes);
+        try {
+          if (typeof data !== "string") {
+            const { id: of, stream, bytes } = unframe(new Uint8Array(data));
+            return connection.waiting.get(of)?.bytes(stream, bytes);
+          }
+          const answer = JSON.parse(data) as RunnerAnswer;
+          if (answer.id !== undefined) connection.waiting.get(answer.id)?.answer(answer);
+        } catch {
+          // A frame that is not the protocol's (another runner's) is dropped.
         }
-        const answer = JSON.parse(data) as RunnerAnswer;
-        if (answer.id !== undefined) waiting.get(answer.id)?.answer(answer);
       });
       ws.addEventListener("close", ({ code, reason }) => {
-        if (socket === opening) socket = undefined;
+        clearTimeout(late);
+        if (current === opening) current = undefined;
         reject(new Error(`${where} closed the connection (${reason || code})`));
-        for (const waiter of waiting.values()) waiter.lost();
-        waiting.clear();
+        for (const waiter of connection.waiting.values()) waiter.lost();
+        connection.waiting.clear();
       });
     });
     return opening;
@@ -82,7 +100,7 @@ export function runnerBox({
     request: { op: "read"; path: string } | { op: "write"; path: string; mode?: number } | { op: "stop" },
     bytes?: Uint8Array,
   ): Promise<Uint8Array | null | undefined> {
-    const ws = await connect();
+    const { ws, waiting } = await connect();
     const n = ++last;
     return new Promise((resolve, reject) => {
       const settle = (done: () => void) => {
@@ -107,7 +125,7 @@ export function runnerBox({
   return {
     id,
     async run(command, { cwd, env, stdin = false, signal } = {}): Promise<Process> {
-      const ws = await connect();
+      const { ws, waiting } = await connect();
       const n = ++last;
       const stdout = new TransformStream<Uint8Array, Uint8Array>();
       const stderr = new TransformStream<Uint8Array, Uint8Array>();
@@ -163,7 +181,10 @@ export function runnerBox({
     },
     async stop() {
       await ask({ op: "stop" });
-      (await socket)?.close();
+      // The next call opens a new connection, not this closing one.
+      const closing = current;
+      current = undefined;
+      (await closing)?.ws.close();
     },
   };
 }
