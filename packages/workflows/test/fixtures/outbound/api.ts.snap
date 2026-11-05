@@ -39,14 +39,7 @@ interface CompanyApi {
   /** A chat turn: the workflow `chat`, built in. */
   chat: WorkflowFn<{
     chat: string;
-    message: {
-      id: string;
-      role: "user";
-      parts: {
-        type: "text";
-        text: string;
-      }[];
-    };
+    message: string;
     after?: string;
   }, unknown>;
   /** Connect an existing repository or database: the workflow `connect-existing`, built in. */
@@ -80,7 +73,6 @@ interface CompanyApi {
       export: string;
     };
     fields: Record<string, unknown>;
-    origin?: string;
   }, unknown>;
   /** Plan a launch: the workflow `plan-launch`. */
   planLaunch: WorkflowFn<{
