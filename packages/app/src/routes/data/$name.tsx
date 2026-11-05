@@ -106,7 +106,9 @@ function CollectionPage() {
   const navigate = Route.useNavigate();
   const close = () => void navigate({ search: closeRecord, resetScroll: false });
   const formOpen = search.new === true || search.record !== undefined;
-  const saved = search.record === undefined ? undefined : records.data?.find((r) => r.key === search.record);
+  // The record as the collection has it, an edit of it still saving included: the form must not
+  // build its values from the rows as stored and save over that edit.
+  const saved = search.record === undefined ? undefined : view?.collection.get(search.record);
 
   return (
     <>
