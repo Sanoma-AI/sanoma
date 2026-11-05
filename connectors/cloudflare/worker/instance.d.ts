@@ -1,18 +1,23 @@
 // The types of `instance.js`, for the package's TypeScript: the fake runs it, and `src/` names its routes.
+import type { AppBundleModule } from "@sanoma-ai/app";
 
-/** The object's own route: the wake it holds. */
+/** The object's route that holds the company's wake, with the instance token. */
 export declare const WAKE_PATH: "/__sanoma/wake";
-/** The object's route that answers `{ revision, running }`; with `?start=1`, once the container answers `/healthz`. */
+/** The object's route that answers what the Worker runs; with `?start=1` and the instance token, it starts the container at it. */
 export declare const HEALTH_PATH: "/__sanoma/health";
-/** How long the container keeps running after the last request: Cloudflare stops it then. */
+/** The worker port's route of the app bundle at `?revision=`, which the object passes on with the instance token. */
+export declare const APP_BUNDLE_PATH: "/__sanoma/app-bundle";
+/** The header the app reads the visitor's address from. */
+export declare const CLIENT_IP_HEADER: "x-sanoma-client-ip";
+/** How long the container keeps running after the object's last request: Cloudflare stops it then. */
 export declare const INACTIVITY_MS: number;
 /** The binding that names the object, in the Worker's env. */
 export declare const NAMESPACE: "SANOMA_INSTANCE";
 /** The name the upload gives the runtime image (`containers[].images`), which the object starts. */
 export declare const IMAGE: "runtime";
 
-/** The label naming an image: a digest of it. */
-export declare function imageLabel(image: string): Promise<string>;
+/** A label of a value too long for one: a digest of it. */
+export declare function digestLabel(value: string): Promise<string>;
 
 /** What the object's code needs of a Durable Object's `ctx`: its container and its storage. */
 export interface ObjectState {
@@ -28,6 +33,8 @@ export interface ObjectState {
       labels: Record<string, string>;
     }): void;
     inspect(): Promise<{ image?: string; labels: Record<string, string> } | null>;
+    /** Sends the container's process a POSIX signal: 15, SIGTERM, drains the worker. */
+    signal(signal: number): void;
     destroy(reason?: string): Promise<void>;
     getTcpPort(port: number): { fetch(input: string | Request, init?: RequestInit): Promise<Response> };
     setInactivityTimeout(ms: number): Promise<void>;
@@ -48,18 +55,23 @@ export interface ObjectState {
 /** One object of the Worker. */
 export declare class Instance {
   constructor(ctx: ObjectState, env: Record<string, unknown>);
+  /** Its routes: the wake, the health (with `?start=1`, a start), the app bundle. */
   fetch(request: Request): Promise<Response>;
   /** `info` as Cloudflare gives it: how many times this alarm was retried. */
   alarm(info?: { retryCount: number; isRetry: boolean }): Promise<void>;
-  /** Starts the container from an alarm now, without waiting for it: a run was queued for it. */
+  /** Starts the container from an alarm now, without waiting for it. */
   startNow(): Promise<void>;
 }
 
-/** The Worker's one object, which every request and the sites router's `startNow` go to. */
-export declare function instanceOf(env: Record<string, unknown>): {
-  fetch(request: Request): Promise<Response>;
-  startNow(): Promise<void>;
-};
+/** What the Worker's request gives its handlers to keep working after the response. */
+export interface WorkerContext {
+  waitUntil(promise: Promise<unknown>): void;
+}
 
-/** The Worker's default export: every request goes to the one object. */
-export declare const worker: { fetch(request: Request, env: Record<string, unknown>): Promise<Response> };
+/** The Worker script's fetch: the object's routes, the Host contract's `/wake`, and the app bundle (`loadApp`) for the rest. */
+export declare function serve(
+  request: Request,
+  env: Record<string, unknown>,
+  ctx: WorkerContext,
+  loadApp: () => Promise<{ default: AppBundleModule }>,
+): Promise<Response>;

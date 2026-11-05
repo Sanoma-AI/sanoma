@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1793827390392,
+      "tag": "0000_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1793827495694,
+      "tag": "0001_wakeup_row",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793857547422,
+      "tag": "0002_runs_tell_the_app",
+      "breakpoints": true
+    }
+  ]
+}

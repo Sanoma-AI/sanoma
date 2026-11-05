@@ -23,6 +23,8 @@ import {
 } from "@sanoma-ai/workflows";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
+import { credentials, databaseOn } from "@sanoma-ai/workflows/db";
+import { eq, inArray } from "drizzle-orm";
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -135,7 +137,9 @@ beforeAll(async () => {
   await client.secrets(NAMES).catch(() => undefined);
   const db = new Client({ connectionString: config.databaseUrl });
   await db.connect();
-  await db.query("DELETE FROM sanoma_credentials WHERE name = ANY($1)", [NAMES]);
+  await databaseOn(db)
+    .delete(credentials)
+    .where(inArray(credentials.name, [...NAMES]));
   await db.end();
 });
 
@@ -387,7 +391,7 @@ describe("Connect a wakeup service", () => {
       expect(await instanceToken()).not.toBe(minted);
     } finally {
       await db.connect();
-      await db.query("DELETE FROM sanoma_credentials WHERE name = 'SANOMA_WAKEUP_TOKEN'");
+      await databaseOn(db).delete(credentials).where(eq(credentials.name, "SANOMA_WAKEUP_TOKEN"));
       await db.end();
     }
   });
@@ -521,7 +525,9 @@ describe("Hosting", () => {
     // No App to begin with (an earlier test may have stored one).
     const db = new Client({ connectionString: config.databaseUrl });
     await db.connect();
-    await db.query("DELETE FROM sanoma_credentials WHERE name = ANY($1)", [Object.values(GITHUB_APP)]);
+    await databaseOn(db)
+      .delete(credentials)
+      .where(inArray(credentials.name, Object.values(GITHUB_APP)));
     await db.end();
     // No sender and no App: the email code warns, not blocking, with both ways to fix it.
     const bare = await signInItem();

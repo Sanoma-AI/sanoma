@@ -1,15 +1,24 @@
 import { createHash } from "node:crypto";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
+import type { AppBundle, AppBundleModule } from "@sanoma-ai/app";
 import { DriverError, errorMessage, retryableStatus } from "@sanoma-ai/workflows";
 import { defineFake, type FakeOptions } from "@sanoma-ai/workflows/fake";
+import { APP_BUNDLE_HEADER, APP_BUNDLE_PATH } from "@sanoma-ai/workflows/shared";
 import { NodeRequest, sendNodeResponse } from "srvx/node";
+import { Instance, type ObjectState, serve } from "../worker/instance.js";
 import { caaContent, cloudflareOps, host } from "./connector.ts";
+import { OBJECT_CLASS } from "./deploy.ts";
 import {
   alarmOps,
   type Application,
   type CloudflareApi,
   containerOps,
+  type HyperdriveOrigin,
   inZone,
   type ReadBinding,
   type RecordWrite,
@@ -18,7 +27,6 @@ import {
 } from "./ops.ts";
 import { recordsOps } from "./records.ts";
 import { accountImage, accountPinned, pinImage } from "./registry.ts";
-import { Instance, OBJECT_CLASS, type ObjectState, worker } from "./worker.ts";
 
 /** A `GET /wake` a container answered: when. */
 export interface FakeWake {
@@ -43,6 +51,12 @@ export type StartContainer = (input: {
 export interface FakeCloudflareOptions extends FakeOptions {
   /** What a container runs. Default: a stub that answers `/healthz` 200 and `/wake` 204. */
   start?: StartContainer;
+  /**
+   * The app bundle a container's worker builds at a revision, which its port's
+   * `/__sanoma/app-bundle` answers (202 on the first ask, as the runtime's route does). Default:
+   * `stubAppBundle`.
+   */
+  bundle?: (revision: string) => AppBundle;
   /** The zones the account holds, by name. Default: every one asked for, as a sandbox's account holds its domains. */
   zones?: readonly string[];
 }
@@ -62,9 +76,12 @@ export interface FakeCloudflareState extends Record<string, unknown> {
       images: Record<string, string>;
       main_module?: string;
       modules?: string[];
+      compatibility_flags?: string[];
       assets?: Record<string, string>;
     }
   >;
+  /** The account's Hyperdrive configs, by id: each one's name and its origin, its password left out. */
+  hyperdrives: Record<string, { name: string; origin: Omit<HyperdriveOrigin, "password"> }>;
   /** The account's assets, by hash: the type each was uploaded with (the content is not kept). */
   assets: Record<string, string>;
   /** The container applications, by id. */
@@ -112,6 +129,10 @@ function dnsRecordOf(zone: string, { type, name, ttl, comment, proxied, content,
   };
 }
 
+/** A Hyperdrive config's origin as a database URL: what the fake's `DATABASE` binding gives. */
+const connectionString = ({ scheme, user, password, host: at, port, database }: HyperdriveOrigin) =>
+  `${scheme}://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${at}:${port}/${encodeURIComponent(database)}`;
+
 /** workers.dev's answer for a name with no Worker behind it. */
 const nothingHere = () =>
   new Response("<!doctype html><title>There is nothing here yet</title>", {
@@ -138,6 +159,61 @@ const stubContainer: StartContainer = async () => {
   };
 };
 
+const b64 = (text: string) => Buffer.from(text).toString("base64");
+
+/**
+ * The app bundle the fake's containers build unless it is given `bundle`: one main module and one
+ * asset. Its fetch answers `/healthz`, an asset from `ASSETS`, a POST by having the host start the
+ * worker (as a page that queues a run does), and any other page with the revision it was built at
+ * (`x-sanoma-revision`) and the visitor's address it was given (`x-sanoma-client-ip`); a 500
+ * without its `DATABASE` binding. Not the app's own bundle: that one is a build for `workerd`
+ * (`nodejs_compat`, its wasm modules), which Node cannot import.
+ */
+export function stubAppBundle(revision: string): AppBundle {
+  const main = `const REVISION = ${JSON.stringify(revision)};
+export default {
+  async fetch(request, env, ctx, host) {
+    if (typeof env.DATABASE?.connectionString !== "string") return new Response("no DATABASE binding\\n", { status: 500 });
+    const url = new URL(request.url);
+    if (url.pathname === "/healthz") return new Response("ok\\n");
+    if (url.pathname.startsWith("/assets/")) return env.ASSETS.fetch(request);
+    if (request.method === "POST") {
+      ctx.waitUntil(host.startNow());
+      return new Response(null, { status: 202 });
+    }
+    return new Response(\`<!doctype html><title>\${REVISION}</title>\\n\`, {
+      headers: {
+        "content-type": "text/html",
+        "x-sanoma-revision": REVISION,
+        "x-sanoma-client-ip": request.headers.get("x-sanoma-client-ip") ?? "",
+      },
+    });
+  },
+};
+`;
+  const asset = b64("console.log('sanoma');\n");
+  return {
+    version: revision,
+    mainModule: "index.js",
+    modules: [{ name: "index.js", type: "esm", content: b64(main) }],
+    assets: [
+      {
+        path: "/assets/app.js",
+        content: asset,
+        hash: createHash("sha256").update(`${asset}js`).digest("hex").slice(0, 32),
+        size: Buffer.byteLength(asset, "base64"),
+      },
+    ],
+    compatibilityDate: "2026-10-01",
+    compatibilityFlags: ["nodejs_compat"],
+    prerendered: [],
+  };
+}
+
+/** An answer of the runtime's app-bundle route, marked as the route's. */
+const bundleAnswer = (status: number, body: unknown) =>
+  Response.json(body, { status, headers: { [APP_BUNDLE_HEADER]: "1" } });
+
 /**
  * One Durable Object of a Worker, in this process: the `ctx` `worker/instance.js` runs over
  * (`ctx.container` running `start`'s runtime, `ctx.storage` in memory, one alarm on a timer),
@@ -147,13 +223,22 @@ const stubContainer: StartContainer = async () => {
  */
 function fakeObject(
   start: StartContainer,
+  bundle: (revision: string) => AppBundle,
   images: () => Record<string, string>,
   source: (image: string) => string | undefined,
   started: FakeContainer[],
 ) {
   const storage = new Map<string, unknown>();
   let running:
-    | { runtime: Promise<FakeContainer>; image: string; labels: Record<string, string>; port: number }
+    | {
+        runtime: Promise<FakeContainer>;
+        image: string;
+        labels: Record<string, string>;
+        port: number;
+        token?: string;
+        /** The revisions its worker was asked the app bundle of: the first ask builds it. */
+        built: Set<string>;
+      }
     | undefined;
   let alarm: { at: number; timer?: NodeJS.Timeout } | undefined;
   let ringing: Promise<void> | undefined;
@@ -170,6 +255,20 @@ function fakeObject(
       (runtime) => runtime.stop(),
       () => undefined,
     );
+  };
+  /** The runtime's own `/__sanoma/app-bundle`, as the worker port answers it (`appBundleRoute`). */
+  const bundleRoute = (request: Request, mine: NonNullable<typeof running>) => {
+    const token = mine.token;
+    if (!token || request.headers.get("authorization") !== `Bearer ${token}`) {
+      return bundleAnswer(401, { error: "the token is not this instance's SANOMA_WAKEUP_TOKEN" });
+    }
+    const revision = new URL(request.url).searchParams.get("revision") ?? "";
+    if (!revision) return bundleAnswer(400, { error: "revision must be a commit id (?revision=<sha>)" });
+    if (!mine.built.has(revision)) {
+      mine.built.add(revision);
+      return bundleAnswer(202, { building: revision });
+    }
+    return bundleAnswer(200, bundle(revision));
   };
   /** Runs `work` as a request to the object: the container's inactivity counts from the last one's end. */
   const active = async <T>(work: () => Promise<T>): Promise<T> => {
@@ -237,7 +336,14 @@ function fakeObject(
           started.push(made);
           return made;
         });
-        const mine = { runtime, image, labels: { ...labels }, port: Number(env.PORT) };
+        const mine = {
+          runtime,
+          image,
+          labels: { ...labels },
+          port: Number(env.PORT),
+          ...(env.SANOMA_WAKEUP_TOKEN && { token: env.SANOMA_WAKEUP_TOKEN }),
+          built: new Set<string>(),
+        };
         running = mine;
         // A runtime that does not start leaves no container, as a failed start does.
         runtime.catch(() => {
@@ -247,14 +353,28 @@ function fakeObject(
       inspect: async () => (running ? { image: running.image, labels: { ...running.labels } } : null),
       // A runtime that does not start is a container that ended; one that runs never does here.
       monitor: () => (running ? running.runtime.then(() => new Promise<void>(() => {})) : Promise.resolve()),
+      // The worker's own stop: it drains and exits, and the container with it.
+      signal(signal) {
+        if (signal !== 15) throw new TypeError(`the fake sends SIGTERM (15) alone, not ${signal}`);
+        const was = running;
+        if (!was) return;
+        void was.runtime
+          .then((runtime) => runtime.stop())
+          .catch(() => undefined)
+          .finally(() => {
+            if (running === was) running = undefined;
+          });
+      },
       destroy,
       getTcpPort: (port) => ({
         async fetch(input, init) {
           if (!running) throw new Error("the container is not running");
           if (port !== running.port) throw new Error(`nothing listens on port ${port} in the container`);
-          const runtime = await running.runtime;
+          const mine = running;
+          const runtime = await mine.runtime;
           const request = new Request(input, init);
           const { pathname, search } = new URL(request.url);
+          if (pathname === APP_BUNDLE_PATH) return bundleRoute(request, mine);
           const headers = new Headers(request.headers);
           for (const name of HOP) headers.delete(name);
           const answer = await fetch(new URL(pathname + search, runtime.url), {
@@ -320,52 +440,118 @@ type FakeObject = ReturnType<typeof fakeObject>;
 
 /**
  * An in-memory Cloudflare account for tests, as the API answers: Workers in `state.scripts`,
- * container applications in `state.applications`, the images copied into its registry in
- * `state.images` (nothing is pulled), their custom domains in `state.domains` (every zone held
- * unless `zones` names them), each zone's DNS records in `state.dns`, by the zone's name (a batch
- * is all or nothing: an identical record or one beside a CNAME fails it whole), and the account's
- * workers.dev URLs served in
- * this process, one server on a port of this machine per Worker name (a name with no Worker
- * answers workers.dev's 404). Each Worker runs the package's own object code
- * (`worker/instance.js`) over a `ctx` in this process: its container runs `start`'s runtime
- * (the image and the revision label it was started at, the Worker's text bindings as its
- * environment), its storage is in memory, and its alarm rings on a timer, again after a throw.
- * An upload restarts the object over the new bindings and images, its container, storage and
- * alarm kept: a new image starts the container again at the next request, as the object finds its
- * label changed. `copyImage` pins its copy by a made-up digest, and `prepareImage` answers ready
- * for an image pinned in the account's registry. An assets upload session asks for the hashes
- * `state.assets` lacks, in one bucket, and an upload that redeems its completion jwt keeps each
- * path's hash on the Worker (`state.scripts[…].assets`); the Worker's requests still go to its
- * object, as the fake runs no sites bundle. `stop(name)` stops a company's
- * container as ten quiet minutes would, `fire()` rings every alarm now, `wakes()` lists the
- * `/wake`s the containers answered, `close()` (and `reset()`) stops everything.
+ * container applications in `state.applications`, Hyperdrive configs in `state.hyperdrives`
+ * (their passwords left out), the images copied into its registry in `state.images` (nothing is
+ * pulled), their custom domains in `state.domains` (every zone held unless `zones` names them),
+ * each zone's DNS records in `state.dns`, by the zone's name (a batch is all or nothing: an
+ * identical record or one beside a CNAME fails it whole), and the account's workers.dev URLs
+ * served in this process, one server on a port of this machine per Worker name (a name with no
+ * Worker answers workers.dev's 404).
+ *
+ * Each Worker runs the package's own code (`worker/instance.js`): its fetch (`serve`) over the
+ * upload's `app/index.js`, written to a folder and imported (the placeholder of a create's first
+ * uploads, then the bundle's main module, `stubAppBundle` unless `bundle` says), its `DATABASE`
+ * the config's direct URL, its `ASSETS` the uploaded contents; and its object over a `ctx` in this
+ * process: its container runs `start`'s runtime (the image and the revision label it was started
+ * at, the Worker's text bindings as its environment), its port's `/__sanoma/app-bundle` answers
+ * `bundle`'s as the runtime's route does, SIGTERM stops the runtime, its storage is in memory, and
+ * its alarm rings on a timer, again after a throw. An upload restarts the object over the new
+ * bindings and images, its container, storage and alarm kept: the object finds the labels changed
+ * at the next start, and drains and replaces it. `copyImage` pins its copy by a made-up digest,
+ * and `prepareImage` answers ready for an image pinned in the account's registry. An assets upload
+ * session asks for the hashes `state.assets` lacks, in one bucket, and an upload that redeems its
+ * completion jwt keeps each path's hash on the Worker (`state.scripts[…].assets`). `stop(name)`
+ * stops a company's container as ten quiet minutes would, `fire()` rings every alarm now,
+ * `wakes()` lists the `/wake`s the containers answered, `close()` (and `reset()`) stops everything.
  */
 export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
   const start = options.start ?? stubContainer;
+  const bundle = options.bundle ?? stubAppBundle;
   const servers = new Map<string, { server: Server; url: string }>();
   const objects = new Map<string, FakeObject>();
-  /** Each Worker's env: its bindings' text, the secrets' with it, which the state does not keep. */
-  const envs = new Map<string, Record<string, unknown>>();
+  /**
+   * Each Worker as its last upload runs it: its env (its bindings' text, the secrets' with it,
+   * which the state does not keep, its database, assets and object), and its app, the upload's
+   * `app/index.js` imported from a folder of its own on the first request.
+   */
+  const workers = new Map<
+    string,
+    { env: Record<string, unknown>; loadApp: () => Promise<{ default: AppBundleModule }> }
+  >();
+  /** Where each upload's modules are written, to be imported as files. */
+  let uploads: string | undefined;
+  /** Each Hyperdrive config's database URL, which the state does not keep: its password is in it. */
+  const databases = new Map<string, string>();
+  /** The assets' contents, by hash, which the state does not keep. */
+  const contents = new Map<string, { content: Buffer; contentType: string }>();
   const started: FakeContainer[] = [];
   /** The open assets upload sessions, by jwt: the Worker's name, its manifest and the hashes still to upload. */
   const sessions = new Map<string, { script: string; manifest: Record<string, string>; missing: Set<string> }>();
   /** The completion jwts an upload may redeem: the Worker's name and its manifest, each path's hash. */
   const completed = new Map<string, { script: string; manifest: Record<string, string> }>();
 
-  /** The request to the Worker named `script`, as workers.dev passes it on. */
-  const dispatch = async (state: FakeCloudflareState, script: string, request: Request): Promise<Response> => {
-    const env = envs.get(script);
-    if (!env || !state.scripts[script]?.subdomain) return nothingHere();
-    return worker.fetch(request, env);
+  /** The asset of the Worker named `script` at the request's path, if its last upload has one. */
+  const assetOf = (state: FakeCloudflareState, script: string, request: Request) => {
+    const hash = state.scripts[script]?.assets?.[new URL(request.url).pathname];
+    const found = hash === undefined ? undefined : contents.get(hash);
+    return found && new Response(found.content, { headers: { "content-type": found.contentType } });
+  };
+  /**
+   * The request to the Worker named `script`, as workers.dev passes it on: a path under
+   * `/assets/` its assets have straight from them (`run_worker_first`), anything else to the
+   * Worker script's fetch (`serve`, the package's own) over its last upload, with Cloudflare's
+   * `cf-connecting-ip` set from the visitor's address.
+   */
+  const dispatch = async (
+    state: FakeCloudflareState,
+    script: string,
+    request: Request,
+    visitor = "127.0.0.1",
+  ): Promise<Response> => {
+    const worker = workers.get(script);
+    if (!worker || !state.scripts[script]?.subdomain) return nothingHere();
+    if (new URL(request.url).pathname.startsWith("/assets/")) {
+      const asset = assetOf(state, script, request);
+      if (asset) return asset;
+    }
+    const headers = new Headers(request.headers);
+    headers.set("cf-connecting-ip", visitor);
+    const ctx = {
+      waitUntil: (promise: Promise<unknown>) =>
+        void promise.catch((err: unknown) => console.warn(`cloudflare fake: a waitUntil threw: ${errorMessage(err)}`)),
+    };
+    return serve(new Request(request, { headers }), worker.env, ctx, worker.loadApp);
+  };
+  /** Writes an upload's modules to a folder of their own: the app is imported from there. */
+  const written = (modules: { name: string; content: string | Uint8Array }[]) => {
+    uploads ??= mkdtempSync(join(tmpdir(), "sanoma-cloudflare-fake-"));
+    const dir = mkdtempSync(join(uploads, "upload-"));
+    for (const { name, content } of modules.filter((m) => m.name.startsWith("app/"))) {
+      const file = join(dir, name);
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, content);
+    }
+    let app: Promise<{ default: AppBundleModule }> | undefined;
+    return () =>
+      (app ??= import(pathToFileURL(join(dir, "app", "index.js")).href) as Promise<{ default: AppBundleModule }>);
+  };
+  /** A Hyperdrive config written: its origin in the state without the password, its URL beside it. */
+  const keep = (state: FakeCloudflareState, id: string, name: string, origin: HyperdriveOrigin) => {
+    const { password: _password, ...shown } = origin;
+    (state.hyperdrives ??= {})[id] = { name, origin: shown };
+    databases.set(id, connectionString(origin));
   };
   const scriptAt = (url: string) => [...servers].find(([, s]) => s.url === new URL(url).origin)?.[0];
 
   /** The Worker name's URL: a server of its own, made at the first ask, which outlives the Worker as workers.dev's name does. */
-  const serve = async (state: FakeCloudflareState, script: string) => {
+  const listenAt = async (state: FakeCloudflareState, script: string) => {
     const found = servers.get(script);
     if (found) return found.url;
     const server = createServer((req, res) => {
-      void dispatch(state, script, new NodeRequest({ req, res })).then(
+      // Made from its parts: undici's Request cannot copy the server's own request.
+      const { method, url, headers, body } = new NodeRequest({ req, res });
+      const request = new Request(url, { method, headers, body, duplex: "half" } as RequestInit);
+      void dispatch(state, script, request, req.socket.remoteAddress).then(
         (answer) => sendNodeResponse(res, answer),
         (err: unknown) => {
           if (res.headersSent) return void res.destroy();
@@ -399,12 +585,13 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
     };
     const recordsOf = (zoneId: string) => state.dns[zoneNamed(zoneId)] ?? [];
     return {
-      workerUrl: (script) => serve(state, script),
+      workerUrl: (script) => listenAt(state, script),
       async bindings(script) {
         return structuredClone(state.scripts[script]?.bindings);
       },
-      async upload(script, { modules, main_module, bindings, containers, migrations, assets }) {
+      async upload(script, { modules, main_module, bindings, containers, migrations, assets, compatibility_flags }) {
         if (!modules.some((m) => m.name === main_module)) throw fail(400, 10021, `no module named ${main_module}`);
+        if (!modules.some((m) => m.name === "app/index.js")) throw fail(400, 10021, "no module named app/index.js");
         const redeemed = assets && completed.get(assets.jwt);
         if (assets && redeemed?.script !== script) {
           throw fail(400, 10203, "the assets' completion jwt is not one this Worker's upload session gave");
@@ -431,9 +618,18 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
                 startNow: () => objects.get(script)!.startNow(),
               }),
             };
-          } else if (binding.type !== "assets") env[binding.name] = binding.text;
+          } else if (binding.type === "hyperdrive") {
+            const url = databases.get(binding.id);
+            if (url === undefined) throw fail(400, 10021, `no Hyperdrive config ${binding.id}`);
+            // The direct URL: Hyperdrive's pooled one is Cloudflare's own.
+            env[binding.name] = { connectionString: url };
+          } else if (binding.type === "assets") {
+            env[binding.name] = {
+              fetch: async (request: Request) => assetOf(state, script, request) ?? new Response(null, { status: 404 }),
+            };
+          } else env[binding.name] = binding.text;
         }
-        envs.set(script, env);
+        workers.set(script, { env, loadApp: written(modules) });
         // The namespace the first upload made, kept across uploads as Cloudflare keeps it.
         const namespace_id = state.scripts[script]?.bindings.find((b) => b.namespace_id)?.namespace_id ?? nextId();
         state.scripts[script] = {
@@ -442,12 +638,13 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
               ? { type, name }
               : type === "durable_object_namespace"
                 ? { type, name, namespace_id }
-                : { type, name, ...("text" in rest && { text: rest.text }) },
+                : { type, name, ...("text" in rest && { text: rest.text }), ...("id" in rest && { id: rest.id }) },
           ),
           subdomain: state.scripts[script]?.subdomain ?? false,
           images: { ...runs.images },
           main_module,
           modules: modules.map((m) => m.name),
+          ...(compatibility_flags.length > 0 && { compatibility_flags: [...compatibility_flags] }),
           ...(redeemed && { assets: { ...redeemed.manifest } }),
         };
         if (assets) completed.delete(assets.jwt);
@@ -455,6 +652,7 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
           objects.get(script) ??
           fakeObject(
             start,
+            bundle,
             () => state.scripts[script]?.images ?? {},
             (image) => appOf(script) && (state.images[image] ?? image),
             started,
@@ -467,9 +665,29 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
         if (!found) throw fail(404, 10007, `workers/scripts/${script}: This Worker does not exist on your account.`);
         found.subdomain = true;
       },
+      async hyperdrive(name) {
+        const id = Object.entries(state.hyperdrives ?? {}).find(([, config]) => config.name === name)?.[0];
+        return id === undefined ? undefined : { id };
+      },
+      async createHyperdrive(name, origin) {
+        if (Object.values((state.hyperdrives ??= {})).some((config) => config.name === name)) {
+          throw fail(409, 2017, `hyperdrive/configs: a configuration named ${name} exists`);
+        }
+        const id = nextId();
+        keep(state, id, name, origin);
+        return { id };
+      },
+      async updateHyperdrive(id, name, origin) {
+        if (!state.hyperdrives?.[id]) throw fail(404, 2005, `hyperdrive/configs/${id}: not found`);
+        keep(state, id, name, origin);
+      },
+      async deleteHyperdrive(id) {
+        delete state.hyperdrives?.[id];
+        databases.delete(id);
+      },
       async deleteScript(script) {
         delete state.scripts[script];
-        envs.delete(script);
+        workers.delete(script);
         await objects.get(script)?.remove();
         objects.delete(script);
       },
@@ -585,9 +803,10 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
       async uploadAssets(jwt, files) {
         const session = sessions.get(jwt);
         if (!session) throw fail(401, 10000, "workers/assets/upload: the jwt is no open upload session's");
-        for (const { hash, contentType } of files) {
+        for (const { hash, base64, contentType } of files) {
           if (!session.missing.delete(hash)) throw fail(400, 10203, `workers/assets/upload: ${hash} is not asked for`);
           (state.assets ??= {})[hash] = contentType;
+          contents.set(hash, { content: Buffer.from(base64, "base64"), contentType });
         }
         if (session.missing.size) return undefined;
         sessions.delete(jwt);
@@ -610,6 +829,7 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
         seq: 0,
         scripts: {},
         assets: {},
+        hyperdrives: {},
         applications: {},
         images: {},
         zones: {},
@@ -630,7 +850,11 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
   const close = async () => {
     for (const object of objects.values()) await object.remove();
     objects.clear();
-    envs.clear();
+    workers.clear();
+    databases.clear();
+    contents.clear();
+    if (uploads) rmSync(uploads, { recursive: true, force: true });
+    uploads = undefined;
     sessions.clear();
     completed.clear();
     for (const { server } of servers.values()) {

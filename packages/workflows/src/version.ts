@@ -69,14 +69,14 @@ export function computeVersion({
 }
 
 /**
- * A hash of the built-in `change` workflow's own code, which each change run carries (its
- * `changeCode` attribute) so a worker on another version of the app may take it over
- * (`carryChangeRuns` in worker.ts): what `computeVersion` hashes of that one workflow, with
+ * A hash of a built-in workflow's own code (`apply`'s, `change`'s, …), which each of its runs
+ * carries (its `builtInCode` attribute) so a worker on another version of the app may take it
+ * over (`carryBuiltInRuns` in worker.ts): what `computeVersion` hashes of that one workflow, with
  * `RUNTIME_VERSION`, `STEP_LAYOUT` and the installed DBOS version. Never the company's workflows
  * nor `DBOS__APPVERSION`, so a merge that changes only the company's code leaves it as it is.
  */
-export function changeCodeOf(change: WorkflowDefinition<any, any>): string {
-  return sha256([RUNTIME_VERSION, STEP_LAYOUT, installedDbosVersion(), codeOf(change)]);
+export function builtInCodeOf(builtIn: WorkflowDefinition<any, any>): string {
+  return sha256([RUNTIME_VERSION, STEP_LAYOUT, installedDbosVersion(), codeOf(builtIn)]);
 }
 
 const sha256 = (parts: unknown[]) => createHash("sha256").update(JSON.stringify(parts)).digest("hex");

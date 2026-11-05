@@ -7,7 +7,7 @@ import {
   type SignInMethod,
 } from "@sanoma-ai/workflows";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
-import { Client } from "pg";
+import { Client, Pool } from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { prepareBetterAuthStaff } from "../src/instance.ts";
 import { betterAuthStaffLogin } from "../src/staff.ts";
@@ -22,8 +22,10 @@ const DECLARED = "alice@example.com";
 
 const codes = new Map<string, string>();
 const signIns: [SignInMethod, LoginIdentity][] = [];
+/** The app's pool, as its client holds it: what every half here runs on. */
+const pool = new Pool({ connectionString: databaseUrl });
 const context: LoginContext = {
-  databaseUrl,
+  database: async () => pool,
   key,
   secrets: async () => new Map(),
   origins: [],
@@ -68,18 +70,19 @@ async function tokensOf(id: number): Promise<{ access_token: string | null }[]> 
   const client = new Client({ connectionString: databaseUrl });
   await client.connect();
   try {
-    const sql = `SELECT "accessToken" AS access_token FROM better_auth_staff.account WHERE "providerId" = 'github' AND "accountId" = $1`;
+    const sql = `SELECT access_token FROM better_auth_staff.account WHERE provider_id = 'github' AND account_id = $1`;
     return (await client.query(sql, [String(id)])).rows as { access_token: string | null }[];
   } finally {
     await client.end();
   }
 }
 
-async function rows(table: string): Promise<number> {
+async function rows(table: string, email?: string): Promise<number> {
   const client = new Client({ connectionString: databaseUrl });
   await client.connect();
   try {
-    return (await client.query(`SELECT 1 FROM better_auth_staff."${table}"`)).rowCount ?? 0;
+    const where = email === undefined ? "" : ` WHERE value LIKE ${client.escapeLiteral(`%"email":"${email}"%`)}`;
+    return (await client.query(`SELECT 1 FROM better_auth_staff."${table}"${where}`)).rowCount ?? 0;
   } finally {
     await client.end();
   }
@@ -96,18 +99,21 @@ beforeAll(async () => {
   await admin.end();
   const client = new Client({ connectionString: databaseUrl });
   await client.connect();
+  // The schema and its journal: a database as the worker first finds it.
   await client.query("DROP SCHEMA IF EXISTS better_auth_staff CASCADE");
+  await client.query("DROP TABLE IF EXISTS drizzle.__drizzle_migrations_better_auth_staff");
   await client.end();
   // The worker's part: the login only opens on a prepared schema.
   await prepareBetterAuthStaff(databaseUrl);
 });
 
+afterAll(() => pool.end());
+
 describe("the staff login", () => {
   let half: LoginHalf;
   beforeAll(async () => {
-    half = await betterAuthStaffLogin(context);
+    half = betterAuthStaffLogin(context);
   });
-  afterAll(() => half.close?.());
   beforeEach(() => {
     codes.clear();
     signIns.length = 0;
@@ -115,20 +121,16 @@ describe("the staff login", () => {
 
   it("offers a code and invites, and GitHub only with the company's client", async () => {
     expect(half.methods).toEqual(["code", "invite"]);
-    const github = await betterAuthStaffLogin({
+    const github = betterAuthStaffLogin({
       ...context,
       sendCode: undefined,
       staff: { ...context.staff!, social: { github: { clientId: "id", clientSecret: "secret" } } },
     });
-    try {
-      expect(github.methods).toEqual(["github", "invite"]);
-      const sent = await github.handle(
-        request("/auth/better-auth/email-otp/send-verification-otp", { body: { email: DECLARED, type: "sign-in" } }),
-      );
-      expect(sent?.status).toBe(404);
-    } finally {
-      await github.close?.();
-    }
+    expect(github.methods).toEqual(["github", "invite"]);
+    const sent = await github.handle(
+      request("/auth/better-auth/email-otp/send-verification-otp", { body: { email: DECLARED, type: "sign-in" } }),
+    );
+    expect(sent?.status).toBe(404);
   });
 
   it("sends a code to a declared email only, answering an undeclared one the same and storing nothing", async () => {
@@ -184,6 +186,20 @@ describe("the staff login", () => {
     }
   });
 
+  it("mints one invite at a time per email, whichever process asks: two at once leave one", async () => {
+    // Two processes: two halves on pools of their own.
+    const otherPool = new Pool({ connectionString: databaseUrl });
+    try {
+      const other = betterAuthStaffLogin({ ...context, database: async () => otherPool });
+      const tokens = await Promise.all([half.invite!(DECLARED, request("/")), other.invite!(DECLARED, request("/"))]);
+      const live = await Promise.all(tokens.map((token) => half.invitation!(token)));
+      expect(live.filter(Boolean)).toHaveLength(1);
+      expect(await rows("verification", DECLARED)).toBe(1);
+    } finally {
+      await otherPool.end();
+    }
+  });
+
   it("makes no user for anyone the files do not declare, whatever the route", async () => {
     const users = await rows("user");
     const token = await half.invite!(`${randomUUID()}@example.com`, request("/"));
@@ -231,7 +247,7 @@ describe("the staff login with GitHub", () => {
         return holder ? answer([{ email: holder.email, primary: true, verified: true }]) : answer({}, 401);
       return fetch(input, init);
     });
-    half = await betterAuthStaffLogin({
+    half = betterAuthStaffLogin({
       ...context,
       staff: {
         ...context.staff!,
@@ -241,10 +257,7 @@ describe("the staff login with GitHub", () => {
       },
     });
   });
-  afterAll(async () => {
-    await half.close?.();
-    vi.unstubAllGlobals();
-  });
+  afterAll(() => vi.unstubAllGlobals());
   beforeEach(() => {
     codes.clear();
     signIns.length = 0;

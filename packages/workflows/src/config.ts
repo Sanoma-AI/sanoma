@@ -41,7 +41,7 @@ import {
   collectionsFake,
   isCollection,
 } from "./collection.ts";
-import { lazyPool, type LazyPool } from "./db.ts";
+import { lazyDb, type LazyDb } from "./db.ts";
 import { isDirectory, kindDirs, SCENARIOS_DIR } from "./paths.ts";
 import { callerFile, type Use, type WorkflowDefinition } from "./define.ts";
 import { DRIFT_WORKFLOW, driftWorkflow } from "./drift.ts";
@@ -85,7 +85,7 @@ import { runtimeDriver, sandboxRuntimeDriver, sanoma } from "./runtime-ops.ts";
 import { tokenStore } from "./tokens.ts";
 import type { Steps } from "./steps.ts";
 import { checkSchedule } from "./schedules.ts";
-import { changeCodeOf, computeVersion } from "./version.ts";
+import { builtInCodeOf, computeVersion } from "./version.ts";
 import { type DeclaredResource, readPeople, type ResourceProblem } from "./resources.ts";
 import { checkWakeupOps, type DeclaredWakeup, type EnvWakeup, HOST_URL } from "./wakeup.ts";
 import { instanceUrl, WAKEUP_TOKEN } from "./wakeup-service.ts";
@@ -182,7 +182,7 @@ export interface Login {
 export interface ResolvedConfig {
   secrets: SecretConfiguration;
   connections: ConnectionRegistry;
-  connectionPool: LazyPool;
+  connectionStore: LazyDb;
   identityProvisioning: ReturnType<typeof configuredIdentityProvisioning>;
   /**
    * Scopes workflows, queues and versions in the system database: the `name` of
@@ -192,8 +192,11 @@ export interface ResolvedConfig {
   databaseUrl: string;
   /** The DBOS application version: `<appName>@<DBOS__APPVERSION, or a hash of the workflows>`. */
   version: string;
-  /** The hash of the built-in change workflow's own code (`changeCodeOf`), which each change run carries. */
-  changeCode: string;
+  /**
+   * Each built-in workflow's code hash (`builtInCodeOf`), by its name, which each of its runs carries:
+   * a worker on another version of the app takes over a run whose code is its own (`carryBuiltInRuns`).
+   */
+  builtInCodes: Readonly<Record<string, string>>;
   /** The DBOS queue runs are started on: `sanoma:<appName>`. */
   queueName: string;
   /** The config's `login`, checked (`checkLogin`); the built-in `login-code` workflow sends through its `sender`, from its `from`. */
@@ -245,11 +248,11 @@ export interface ResolvedConfig {
   /** The config's collections, by name: their operations are in `ops` and `drivers`, their fake in `fakes`, under `DATA_VENDOR`. */
   collections: ReadonlyMap<string, Collection>;
   /**
-   * The pool the collections' driver keeps their records through, when there are any: opened on
+   * The database the collections' driver keeps their records in, when there are any: opened on
    * its first call, and closed by whoever calls the driver (the worker, and the client, which
    * calls it directly, when each stops).
    */
-  dataStore?: LazyPool;
+  dataStore?: LazyDb;
   /**
    * By name; each checked against `ops` and `drivers`. The config's, the built-ins `drift`
    * (`DRIFT_WORKFLOW`) and `apply` (`APPLY_WORKFLOW`) when its connectors declare resource types,
@@ -357,15 +360,15 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   const hostTyped = [...types.values()].some((type) => type.host);
   // Built-in: the collections' operations, `data.<name>.<op>`, on the config's database.
   const databaseUrl = resolveDatabaseUrl(config);
-  const connectionPool = lazyPool(databaseUrl, "connections");
+  const connectionStore = lazyDb(databaseUrl, "connections");
   const identityProvisioning = configuredIdentityProvisioning(config.identityProvisioning);
   const connections = new ConnectionRegistry(
     connectionCatalog(config.connectors, config.connections, config.connectionRules),
-    () => connectionPool.db(),
-    configuredSecrets(config.secrets ?? {}, () => connectionPool.db()),
+    () => connectionStore.db(),
+    configuredSecrets(config.secrets ?? {}, () => connectionStore.db()),
   );
   const declared = [...collections.values()];
-  const dataStore = declared.length ? lazyPool(databaseUrl, "data") : undefined;
+  const dataStore = declared.length ? lazyDb(databaseUrl, "data") : undefined;
   // Built-in, in every config: a change's operations, which the template's policy names
   // (`sanoma.change.merge`), the listing of apps a page may call (`sanoma.apps.list`), and what a
   // workflow asks the runtime to do for it (`sanoma`, runtime-ops.ts).
@@ -390,9 +393,9 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
       connectionDriver(connections),
       appsListDriver,
       runtimeDriver({
-        tokens: tokenStore(() => connectionPool.db()),
+        tokens: tokenStore(() => connectionStore.db()),
         identities: identityProvisioning.store,
-        inspect: inspectRun(() => connectionPool.db(), appName),
+        inspect: inspectRun(() => connectionStore.db(), appName),
       }),
       ...(hostTyped ? [sourceDriver] : []),
       ...(dataStore ? [collectionsDriver(declared, dataStore)] : []),
@@ -468,14 +471,18 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   return {
     secrets: config.secrets ?? {},
     connections,
-    connectionPool,
+    connectionStore,
     identityProvisioning,
     appName,
     databaseUrl,
     // The built-in's code and operations are part of the app's version, like the config's own. A
     // bundle's code is not the source's: it carries the hashes of the root it was read from.
     version: bundled?.version ?? computeVersion({ appName, workflows: [...names.values()] }),
-    changeCode: bundled?.changeCode ?? changeCodeOf(names.get(CHANGE_WORKFLOW)!),
+    builtInCodes:
+      bundled?.builtInCodes ??
+      Object.fromEntries(
+        [...names.values()].filter((wf) => BUILT_IN_WORKFLOWS.has(wf.name)).map((wf) => [wf.name, builtInCodeOf(wf)]),
+      ),
     queueName: `sanoma:${appName}`,
     ...(login && { login }),
     ops,
@@ -643,8 +650,8 @@ function makersOf<K extends keyof ConnectorSetup>(
 export function readRootSnapshot(config: SanomaConfig, resolved: ResolvedConfig = resolveConfig(config)): RootSnapshot {
   const root = rootOf(config);
   if (root === undefined) throw new Error("A config with no root has no files to carry");
-  const { appName, version, changeCode } = resolved;
-  return { appName, version, changeCode, policies: readPolicyFiles(root), people: readPeople(root) };
+  const { appName, version, builtInCodes } = resolved;
+  return { appName, version, builtInCodes, policies: readPolicyFiles(root), people: readPeople(root) };
 }
 
 /**

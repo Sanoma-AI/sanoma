@@ -4,8 +4,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AppBundle } from "@sanoma-ai/app";
 import { buildAppBundle, NodeOnlyImport, prerenderedPages } from "@sanoma-ai/app/bundle";
+import { prepareBetterAuth, prepareBetterAuthStaff } from "@sanoma-ai/connector-better-auth";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
-import { defineConfig, SanomaClient } from "@sanoma-ai/workflows";
+import { defineConfig, SanomaClient, sealInvite } from "@sanoma-ai/workflows";
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { unstable_startWorker } from "wrangler";
@@ -13,8 +14,9 @@ import fixture from "./fixtures/company-sites/sanoma.config.ts";
 
 // The app bundle (`buildAppBundle`) of the fixture company, built and run on workerd (Miniflare)
 // over Postgres, behind a router standing in for the Cloudflare connector's: it hands the bundle
-// a host that counts the worker's starts. Needs Postgres (`pnpm db:up`) and the built packages,
-// as sites-build.test.ts.
+// a host that counts the worker's starts. The staff sign-in (Better Auth's, by invite) and the
+// members site's login run on the Worker too. Needs Postgres (`pnpm db:up`) and the built
+// packages, as sites-build.test.ts.
 const appDir = fileURLToPath(new URL("..", import.meta.url));
 const fixtureDir = fileURLToPath(new URL("./fixtures/company-sites/", import.meta.url));
 const databaseUrl = testDatabaseUrl("app_bundle");
@@ -40,11 +42,18 @@ function write(file: string, content: string | Buffer): void {
   writeFileSync(file, content);
 }
 
-/** A copy of the fixture company, with the app installed as a company installs it. */
+/** The one declared person: whom the staff login admits, by invite here. */
+const PEOPLE = `import { sanoma } from "sanoma/resources";
+
+export const ada = sanoma.person({ id: "ada", email: "ada@acme.test" });
+`;
+
+/** A copy of the fixture company, with the app installed as a company installs it, and one person declared. */
 function company(): { repo: string; config: ReturnType<typeof defineConfig> } {
   const repo = mkdtempSync(join(tmpdir(), "sanoma-bundle-"));
   temporary.push(repo);
   cpSync(fixtureDir, repo, { recursive: true });
+  write(join(repo, "resources", "people.ts"), PEOPLE);
   mkdirSync(join(repo, "node_modules"));
   symlinkSync(join(appDir, "..", "sanoma"), join(repo, "node_modules", "sanoma"));
   return { repo, config: defineConfig({ ...fixture, root: repo, file: join(repo, "sanoma.config.ts"), databaseUrl }) };
@@ -55,14 +64,18 @@ let bundle: AppBundle;
 let worker: Awaited<ReturnType<typeof unstable_startWorker>>;
 
 const get = (url: string, init?: RequestInit) => worker.fetch(url, init as never) as unknown as Promise<Response>;
+/** A request as TLS in front of a Worker hands it on (the dev server is plain http): an invite's URL and a cookie are then https's. */
+const secure = (url: string, init: RequestInit = {}) =>
+  get(url, { ...init, headers: { ...(init.headers as Record<string, string>), "x-forwarded-proto": "https" } });
 
 beforeAll(async () => {
   const { repo, config } = company();
   bundle = await buildAppBundle(repo, { config, domains: DOMAINS });
-  // What the worker does at its start: the database prepared (the Worker never prepares it).
+  // What the worker does at its start: the database and the logins' tables prepared (the Worker never prepares them).
   const client = await SanomaClient.connect(config);
   await client.secrets(["SANOMA_NOTHING"]);
   await client.close();
+  await Promise.all([prepareBetterAuth(databaseUrl), prepareBetterAuthStaff(databaseUrl)]);
   const dir = mkdtempSync(join(tmpdir(), "sanoma-bundle-upload-"));
   temporary.push(dir);
   for (const { name, content } of bundle.modules) write(join(dir, "script", name), Buffer.from(content, "base64"));
@@ -95,8 +108,10 @@ beforeAll(async () => {
         SANOMA_DOMAINS: Object.entries(DOMAINS)
           .map(([site, domain]) => `${site}=${domain}`)
           .join(","),
-        // The worker's secrets, which the Worker's bindings carry: the client checks the stored secrets' key.
+        // The worker's secrets, which the Worker's bindings carry: the client checks the stored
+        // secrets' key, and the logins' cookies and the invite requests are signed under the signing key.
         SANOMA_SECRETS_KEY: process.env.SANOMA_SECRETS_KEY,
+        SANOMA_SIGNING_KEY: process.env.SANOMA_SIGNING_KEY,
       },
     }),
   );
@@ -236,10 +251,44 @@ describe("buildAppBundle", () => {
     expect(Number(await (await get("https://hello.example/__test/started")).text())).toBe(before + 1);
   });
 
-  it("answers 503 for the staff's pages and a site with a login, whose sign-in is not on the Worker yet", async () => {
-    for (const url of [`https://${HOSTNAME}/`, `https://${HOSTNAME}/_serverFn/x`, "https://members.example/"]) {
-      expect((await get(url)).status, url).toBe(503);
-    }
+  it("signs a declared person in on the Worker: an invite minted by a sealed request, landed, then the app", async () => {
+    const app = `https://${HOSTNAME}`;
+    // Nobody signed in: the sign-in page, which offers an invite link since the fixture names no sender.
+    const signedOut = await secure(`${app}/`);
+    expect(signedOut.status).toBe(401);
+    expect(await signedOut.text()).toContain("invite link");
+    expect((await secure(`${app}/auth/better-auth/get-session`)).status).toBe(200);
+    expect((await secure(`${app}/auth/invite/nothing`)).status).toBe(410);
+    // What going live does: an invite for the person, from a request sealed under the signing key.
+    const minted = await secure(`${app}/auth/invite`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ request: sealInvite({ email: "ada@acme.test" }) }),
+    });
+    expect(minted.status).toBe(200);
+    const { url } = (await minted.json()) as { url: string };
+    expect(url).toMatch(new RegExp(`^${app}/auth/invite/`));
+    const landing = await secure(url);
+    expect(landing.status).toBe(200);
+    const html = await landing.text();
+    expect(html).toContain("Continue as ada@acme.test");
+    const verify = /href="([^"]*magic-link\/verify[^"]*)"/.exec(html)?.[1]?.replaceAll(/&(?:amp|#38);/g, "&");
+    expect(verify).toBeDefined();
+    const landed = await secure(`${app}${verify}`, { redirect: "manual" });
+    expect(landed.status).toBe(302);
+    expect(landed.headers.get("location")).toBe(`${app}/`);
+    const cookie = landed.headers.get("set-cookie")?.split(";")[0];
+    expect(cookie).toMatch(/session_token=/);
+    const home = await secure(`${app}/`, { headers: { cookie: cookie! } });
+    expect(home.status).toBe(200);
+  });
+
+  it("serves a site with a login on the Worker, its half made on the request's client", async () => {
+    expect((await get("https://members.example/")).status).toBe(200);
+    // The half's own route, on its site's host alone: the fixture login's sign-out clears its cookie.
+    const signOut = await get("https://members.example/auth/fixture-login/sign-out", { method: "POST" });
+    expect([signOut.status, signOut.headers.get("set-cookie")]).toEqual([204, "x-fixture-visitor=; Max-Age=0; Path=/"]);
+    expect((await get("https://hello.example/auth/fixture-login/sign-out", { method: "POST" })).status).toBe(404);
   });
 
   it("answers 404 for a host that is neither the app's nor a site's domain", async () => {

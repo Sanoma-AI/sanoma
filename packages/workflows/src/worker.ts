@@ -11,7 +11,7 @@ import {
   type AppBehind,
   type Db,
   DBOS_DATABASE_OPTIONS,
-  lazyPool,
+  lazyDb,
   prepareDatabase,
   stampVersion,
   writeAppsBehind,
@@ -37,7 +37,7 @@ import { currentRun, type Run, type RunArgs, type WorkerState, type WorkflowOutl
 import type { DatabasePreparation } from "./op.ts";
 import { applyScheduled, nextScheduledFire, type ScheduledStarter, scheduledStarter } from "./schedules.ts";
 import type { Source } from "./source.ts";
-import { approverLabel, CHANGE_WORKFLOW, errorMessage, WORKFLOW_ACTION } from "./shared.ts";
+import { approverLabel, errorMessage, WORKFLOW_ACTION } from "./shared.ts";
 
 export interface Worker {
   /**
@@ -153,7 +153,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
   }
   // The config's own, or a Postgres store made for this worker, which `stop` then closes.
   const ledger = ownedLedger(resolved);
-  const secrets = lazyPool(resolved.databaseUrl, "secrets");
+  const secrets = lazyDb(resolved.databaseUrl, "secrets");
   const storedSecrets = configuredSecrets(resolved.secrets, () => secrets.db());
   let stopRule: { close(): void } | undefined;
   let stopping: Promise<void> | undefined;
@@ -232,7 +232,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
           () => resolved.connections.close(),
           () => resolved.identityProvisioning.close(),
           () => secrets.close(),
-          () => resolved.connectionPool.close(),
+          () => resolved.connectionStore.close(),
           () => ledger.close(),
           async () => resolved.dataStore?.close(),
         ]) {
@@ -286,8 +286,8 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
         );
       }
     }
-    // Change runs move to the latest version only: a rollback's worker, unless promoted, leaves them be.
-    if (isLatest) await carryChangeRuns(resolved, () => secrets.db());
+    // Built-in runs move to the latest version only: a rollback's worker, unless promoted, leaves them be.
+    if (isLatest) await carryBuiltInRuns(resolved, () => secrets.db());
     await DBOS.registerQueue(resolved.queueName);
     // The schedules are the latest version's: an older worker leaves them as the newer set them.
     if (isLatest && options.schedules !== false) {
@@ -337,7 +337,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
         secrets.close(),
         ledger.close(),
         resolved.dataStore?.close(),
-        resolved.connectionPool.close(),
+        resolved.connectionStore.close(),
       ]);
     }
     current = previous;
@@ -409,37 +409,44 @@ async function recordAppsBehind(root: string | undefined, source: Source | undef
 }
 
 /**
- * Takes over the unfinished change runs of other versions whose change code is this worker's,
- * keeping each run's id, history and unread messages: a change's own deploy restarts the worker on
- * the merged code, a new version, which DBOS would never give the run to. Each is stamped with this
- * version (`stampVersion`), and a PENDING one queued again on the app's queue (`resumeWorkflows`);
- * one stopped between the two is PENDING on this version, which DBOS's recovery takes. Not
- * `rewindWorkflow`, which takes only a cancelled run and deletes its unread messages. It assumes one
- * live worker per database, as a deploy does: an older one still running such a run runs it on
- * until it stops. A failure is warned about, and the worker starts.
+ * Takes over the unfinished runs of the built-in workflows (apply, change, …) started on other
+ * versions whose code is this worker's (`builtInCodes`), keeping each run's id, history and unread
+ * messages: a deploy restarts the worker on the merged code, a new version, which DBOS would never
+ * give the run to, and the apply or change run that made the deploy is one of them. Each is stamped
+ * with this version (`stampVersion`), and a PENDING one queued again on the app's queue
+ * (`resumeWorkflows`); one stopped between the two is PENDING on this version, which DBOS's
+ * recovery takes. Not `rewindWorkflow`, which takes only a cancelled run and deletes its unread
+ * messages. It assumes one live worker per database, as a deploy does: an older one still running
+ * such a run runs it on until it stops. A failure is warned about, and the worker starts.
  */
-async function carryChangeRuns({ appName, version, changeCode, queueName }: ResolvedConfig, db: () => Promise<Db>) {
+async function carryBuiltInRuns({ appName, version, builtInCodes, queueName }: ResolvedConfig, db: () => Promise<Db>) {
   try {
     const runs = await DBOS.listWorkflows({
-      workflowName: CHANGE_WORKFLOW,
+      workflowName: Object.keys(builtInCodes),
       status: ["PENDING", "ENQUEUED"],
       applicationName: appName,
-      attributes: { changeCode },
       loadInput: false,
       loadOutput: false,
     });
     const theirs = runs
-      .filter((r) => r.applicationVersion && r.applicationVersion !== version)
+      .filter(
+        (r) =>
+          r.applicationVersion &&
+          r.applicationVersion !== version &&
+          r.attributes?.builtInCode === builtInCodes[r.workflowName],
+      )
       .map((r) => r.workflowID);
     if (!theirs.length) return;
     const carried = await stampVersion(await db(), theirs, version);
     const pending = carried.filter((r) => r.pending).map((r) => r.id);
     if (pending.length) await DBOS.resumeWorkflows(pending, { queueName });
     if (carried.length) {
-      info(`carried ${carried.length} change run(s) onto version ${version}: ${carried.map((r) => r.id).join(", ")}`);
+      info(`carried ${carried.length} built-in run(s) onto version ${version}: ${carried.map((r) => r.id).join(", ")}`);
     }
   } catch (err) {
-    warn(`carrying the change runs of other versions onto ${version} failed, so they stay there: ${errorMessage(err)}`);
+    warn(
+      `carrying the built-in runs of other versions onto ${version} failed, so they stay there: ${errorMessage(err)}`,
+    );
   }
 }
 

@@ -21,6 +21,9 @@ import {
   withSignOutBody,
 } from "./instance.ts";
 
+/** Says nothing: a listener for a checked-out client's `error`, whose query fails on its own. */
+const quiet = () => undefined;
+
 // The staff login: Better Auth again, as a second instance in a schema of its own, signing in only
 // the people the files declare. An email code to a declared email, GitHub through the company's
 // own client, and invites (one-use magic links the app mints for a declared email); no password.
@@ -88,9 +91,10 @@ const METHOD_OF: Record<string, SignInMethod> = {
  * cookie, `sanoma.session_token`, for the host, seven days. A code is sent, and a user made, only
  * for a person `staff.admits`: an undeclared email gets the same answer and leaves nothing.
  * Each sign-in is told to `staff.record`. It answers on any host the app does, so a change
- * (any POST) to its routes must come from the page's own origin.
+ * (any POST) to its routes must come from the page's own origin. It runs on the pool the app
+ * gives each request (`database`), and keeps nothing between requests.
  */
-export async function betterAuthStaffLogin({ databaseUrl, key, sendCode, staff }: LoginContext): Promise<LoginHalf> {
+export function betterAuthStaffLogin({ database, key, sendCode, staff }: LoginContext): LoginHalf {
   if (!staff) throw new Error("better-auth: the staff login needs the app's staff context");
   const github = staff.social.github;
   /** Each invite's token as Better Auth hands it over, by email, until `invite` takes it. */
@@ -102,8 +106,8 @@ export async function betterAuthStaffLogin({ databaseUrl, key, sendCode, staff }
     const login = account?.providerId === "github" && ctx ? logins.get(ctx) : undefined;
     if (login) await ctx!.context.internalAdapter.updateUser(account!.userId, { github: login });
   };
-  const { auths, close } = await openBetterAuth({
-    databaseUrl,
+  const auth = openBetterAuth({
+    database,
     key,
     schema: SCHEMA,
     basePath: BASE_PATH,
@@ -189,35 +193,64 @@ export async function betterAuthStaffLogin({ databaseUrl, key, sendCode, staff }
       },
     },
   });
-  const authFor = (request: Request) => auths.get(protocolOf(request))!;
+  const authFor = (request: Request) => auth(protocolOf(request));
   const methods: LoginMethod[] = [
     ...(sendCode ? (["code"] as const) : []),
     ...(github ? (["github"] as const) : []),
     "invite",
   ];
 
-  /** Mints `email`'s invite, server-side, its token from `minted`; a new one replaces the last. */
-  async function mint(email: string, request: Request): Promise<string> {
-    const auth = authFor(request);
+  /** The mints of this process, one after another. */
+  let mints: Promise<unknown> = Promise.resolve();
+
+  /**
+   * Mints `email`'s invite, server-side, its token from `minted`; a new one replaces the last. One
+   * at a time per email, whichever process asks: a transaction of its own holds Postgres's lock
+   * for the email while the old row goes and the new one is written on the pool's other
+   * connections (a transaction's lock is one connection's for the transaction, safe through a
+   * pooler), so two mints at once leave one invite, and `minted` hands over the right token. One
+   * at a time in the process as well (`mints`): the lock's connection is one of the pool's, and
+   * many held at once, each waiting for another of the pool's, would leave none for Better Auth.
+   */
+  function mint(email: string, request: Request): Promise<string> {
+    const minting = mints.then(() => mintNow(email, request));
+    mints = minting.catch(() => undefined);
+    return minting;
+  }
+
+  async function mintNow(email: string, request: Request): Promise<string> {
+    const own = await authFor(request);
     const normalized = email.toLowerCase();
-    // A new invite replaces the last: the old one's row goes.
-    const { adapter } = await auth.$context;
-    await adapter.deleteMany({
-      model: "verification",
-      where: [{ field: "value", value: JSON.stringify({ type: "magic-link", email: normalized }) }],
-    });
-    await auth.api.signInMagicLink({ body: { email: normalized, callbackURL: "/" }, headers: request.headers });
+    const lock = await (await database()).connect();
+    // A checked-out client with no listener would throw its connection's error as uncaught; the query fails instead.
+    lock.on("error", quiet);
+    try {
+      await lock.query("BEGIN");
+      await lock.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`sanoma.login.invite.${normalized}`]);
+      // A new invite replaces the last: the old one's row goes.
+      const { adapter } = await own.$context;
+      await adapter.deleteMany({
+        model: "verification",
+        where: [{ field: "value", value: JSON.stringify({ type: "magic-link", email: normalized }) }],
+      });
+      await own.api.signInMagicLink({ body: { email: normalized, callbackURL: "/" }, headers: request.headers });
+      await lock.query("COMMIT");
+    } catch (err) {
+      await lock.query("ROLLBACK").catch(() => undefined);
+      throw err;
+    } finally {
+      lock.off("error", quiet);
+      lock.release();
+    }
     const token = minted.get(normalized);
     minted.delete(normalized);
     if (!token) throw new Error("better-auth: the invite was not minted");
     return token;
   }
-  /** The invite being minted, which the next waits for. */
-  let invites: Promise<unknown> = Promise.resolve();
 
   return {
     async verify(request) {
-      const session = await authFor(request).api.getSession({ headers: request.headers });
+      const session = await (await authFor(request)).api.getSession({ headers: request.headers });
       return session ? { subject: session.user.id, ...identityOf(session.user) } : null;
     },
     async handle(request) {
@@ -229,20 +262,14 @@ export async function betterAuthStaffLogin({ databaseUrl, key, sendCode, staff }
       if (request.method !== "GET" && !sameOrigin(request)) return new Response("Forbidden", { status: 403 });
       // Any host is allowed, so Better Auth trusts any redirect: only a path on this host is taken.
       if (!localRedirects(new URL(request.url))) return new Response("Bad Request", { status: 400 });
-      return authFor(request).handler(withSignOutBody(request, SIGN_OUT));
+      return (await authFor(request)).handler(withSignOutBody(request, SIGN_OUT));
     },
     signOut: SIGN_OUT,
     methods,
-    invite(email, request) {
-      // One at a time: each takes its token from `minted` and replaces the last invite's row.
-      const next = invites.then(() => mint(email, request));
-      invites = next.catch(() => undefined);
-      return next;
-    },
+    invite: mint,
     async invitation(token) {
-      // The first of the instances: they share the tables.
-      const auth = auths.values().next().value!;
-      const { internalAdapter } = await auth.$context;
+      // Either protocol's instance: they share the tables.
+      const { internalAdapter } = await (await auth("https")).$context;
       const found = await internalAdapter.findVerificationValue(`magic-link:${hashed(token)}`);
       if (!found || found.expiresAt < new Date()) return undefined;
       const { email } = JSON.parse(found.value) as { email?: string };
@@ -250,7 +277,6 @@ export async function betterAuthStaffLogin({ databaseUrl, key, sendCode, staff }
       const query = new URLSearchParams({ token, callbackURL: "/" });
       return { email, path: `${BASE_PATH}/magic-link/verify?${query}` };
     },
-    close,
   };
 }
 

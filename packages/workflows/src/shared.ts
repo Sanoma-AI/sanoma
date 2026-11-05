@@ -150,18 +150,6 @@ export const APP_BUNDLE_PATH = "/__sanoma/app-bundle";
 /** The header every answer of that route carries, so a host tells them from its own errors. */
 export const APP_BUNDLE_HEADER = "x-sanoma-app-bundle";
 
-// removed by #610
-export const SITES_BUNDLE_PATH = "/__sanoma/sites-bundle";
-// removed by #610
-export const SITES_BUNDLE_HEADER = "x-sanoma-sites-bundle";
-// removed by #610
-export interface SitesBundle {
-  sites: string[];
-  mainModule: string;
-  modules: { name: string; type: "esm" | "wasm" | "text" | "data"; content: string }[];
-  assets: { path: string; content: string }[];
-}
-
 /** Where a host with a `hostname` serves the app (`HostSpec`'s `hostname`): `https://<hostname>`. */
 export const hostnameUrl = (hostname: string): string => `https://${hostname}`;
 

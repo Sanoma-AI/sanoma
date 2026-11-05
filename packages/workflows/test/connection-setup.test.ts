@@ -1,4 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { sql } from "drizzle-orm";
+import { connectionHealth, connections, connectionSetups, ledger } from "../src/db/company.ts";
+import { workflowStatus } from "../src/db/dbos.ts";
 import { z } from "zod";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
@@ -18,7 +21,7 @@ import {
   type AuthenticationContext,
 } from "../src/index.ts";
 import { secret } from "../src/secret.ts";
-import { lazyPool } from "../src/db.ts";
+import { lazyDb } from "../src/db.ts";
 import { tree } from "./tree.ts";
 
 const verify = vi.fn<(credentials: { token: string }) => Promise<{ account: string; scopes: string[] }>>(
@@ -62,13 +65,11 @@ const rule = defineConnectionRule(inbox, {
   scopes: ["read"],
 });
 const dbUrl = testDatabaseUrl("connection_setup");
-const pool = lazyPool(dbUrl, "connection-setup-tests");
+const pool = lazyDb(dbUrl, "connection-setup-tests");
 afterAll(() => pool.close());
 beforeEach(async () => {
-  await (
-    await pool.db()
-  ).query("TRUNCATE sanoma_connections, sanoma_connection_setups, sanoma_connection_health, sanoma_ledger");
-  await (await pool.db()).query("TRUNCATE dbos.workflow_status CASCADE");
+  await (await pool.db()).execute(sql`TRUNCATE ${connections}, ${connectionSetups}, ${connectionHealth}, ${ledger}`);
+  await (await pool.db()).execute(sql`TRUNCATE ${workflowStatus} CASCADE`);
   verify.mockClear();
 });
 const config = () => ({
@@ -113,21 +114,19 @@ describe("secure connection setup", () => {
           { authentication: ["identity"] },
         ),
     });
-    const connections = ["production", "development"].map((name) =>
-      defineConnection(workload, { name, method: "identity" }),
-    );
+    const named = ["production", "development"].map((name) => defineConnection(workload, { name, method: "identity" }));
     const store = memorySecretStore();
     const read = vi.spyOn(store, "read");
     const write = vi.spyOn(store, "write");
     const client = await SanomaClient.connect({
       ...config(),
       connectors: [workload],
-      connections,
+      connections: named,
       connectionRules: [],
       secrets: { store },
     });
     try {
-      for (const connection of connections) {
+      for (const connection of named) {
         const preview = await client.previewConnection({ connection }, undefined, { actor: "alice", id: randomUUID() });
         expect(preview.account).toBe(`verified:${connection.$connection}`);
         await client.connectConnection(preview, undefined, { actor: "alice" });
@@ -444,9 +443,9 @@ describe("secure connection setup", () => {
         { id: "inbox/support", account: "support", status: "connected", updatedBy: "alice" },
         { id: "inbox/sales", account: "sales", status: "connected", updatedBy: "alice" },
       ]);
-      const records = await (await pool.db()).query("SELECT to_jsonb(t) FROM sanoma_ledger t");
-      expect(records.rowCount).toBeGreaterThan(0);
-      expect(JSON.stringify(records.rows)).not.toContain("never-record");
+      const records = await (await pool.db()).select().from(ledger);
+      expect(records.length).toBeGreaterThan(0);
+      expect(JSON.stringify(records)).not.toContain("never-record");
       const read = vi.spyOn(cfg.secrets.store, "read");
       await client.connections({ actor: "alice" });
       expect(read).not.toHaveBeenCalled();
@@ -590,7 +589,7 @@ describe("secure connection setup", () => {
         expect(write).toHaveBeenCalledTimes(1);
         const history = await (
           await pool.db()
-        ).query("SELECT to_jsonb(o) FROM dbos.operation_outputs o WHERE workflow_uuid=$1", [failure.data.runId]);
+        ).execute(sql`SELECT to_jsonb(o) FROM dbos.operation_outputs o WHERE workflow_uuid = ${failure.data.runId}`);
         expect(history.rowCount).toBeGreaterThan(0);
         expect(JSON.stringify(history.rows)).not.toContain("never-record");
         expect(JSON.stringify(await client.ledger(failure.data.runId))).not.toContain("never-record");

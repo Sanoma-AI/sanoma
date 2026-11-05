@@ -1,6 +1,4 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:http";
-import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
@@ -18,23 +16,30 @@ import { writeLockfile } from "@sanoma-ai/workflows/describe";
 import { secret } from "@sanoma-ai/workflows/resources";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { cloudflareOps, container } from "../src/connector.ts";
-import { fakeCloudflare } from "../src/fake.ts";
+import { fakeCloudflare, stubAppBundle } from "../src/fake.ts";
 
 // Needs Postgres: `pnpm db:up`. The Host contract's conformance kit against `cloudflare.container`
-// on the fake: its Worker served in this process, the package's own object code running the
+// on the fake: its Worker script served in this process (the package's own `serve` over the app
+// bundle the container's worker built, `stubAppBundle`), the package's own object code running the
 // company in this process as its container, which the fake stops as Cloudflare does when it is
 // quiet. Drift is the built-in workflow over a data file that declares the host, bound in the
 // lockfile.
 
 const key = "kit-secret-value-that-never-leaks";
+const DATABASE_URL = "postgresql://sanoma:p%40ss@db.acme.example:5432/company";
 let n = 0;
-const call = (opId: string): CallContext => ({
-  idempotencyKey: `${opId}:${++n}`,
-  runId: "kit",
-  opId,
-  attempt: 1,
-  secrets: memorySecrets({ HOST_KEY: key }),
-});
+/** A call's context over `secrets`, kept across calls as a company's store is: the instance token minted once. */
+const caller =
+  (secrets = memorySecrets({ HOST_KEY: key, DB_URL: DATABASE_URL })) =>
+  (opId: string): CallContext => ({
+    idempotencyKey: `${opId}:${++n}`,
+    runId: "kit",
+    opId,
+    attempt: 1,
+    secrets,
+  });
+/** The secrets a host is given: its database's URL, which Hyperdrive goes over. */
+const HOST_SECRETS = { SANOMA_DATABASE_URL: secret("DB_URL") };
 
 describe("cloudflare.container meets the Host contract on the fake", () => {
   const databaseUrl = testDatabaseUrl("cloudflare_host");
@@ -58,6 +63,7 @@ describe("cloudflare.container meets the Host contract on the fake", () => {
     start: ({ revision, env }) => inProcessHost(config, databaseUrl)({ port: 0, revision, secrets: env }),
   });
   config.connectors.push(withSetup(cloudflareOps, { driver: () => fake.driver }));
+  const call = caller(memorySecrets({ HOST_KEY: key, DB_URL: databaseUrl }));
   const op = (name: string) => (input: object) =>
     fake.driver.ops[`container.${name}`]!(input, call(`cloudflare.container.${name}`));
   let client: SanomaClient;
@@ -83,7 +89,11 @@ describe("cloudflare.container meets the Host contract on the fake", () => {
 
   /** Apply, as it runs for a host: the revision from the ref, then a plan, then the change it names. */
   async function apply() {
-    const desired = { ...declared, secrets: { SANOMA_SECRETS_KEY: secret("HOST_KEY") }, revision: "" };
+    const desired = {
+      ...declared,
+      secrets: { SANOMA_SECRETS_KEY: secret("HOST_KEY"), SANOMA_DATABASE_URL: secret("DB_URL") },
+      revision: "",
+    };
     desired.revision = await resolveRevision(repo.url, declared.ref);
     const plan = (await op("plan")({ id: declared.name, desired })) as { action: string };
     if (plan.action === "none")
@@ -92,37 +102,44 @@ describe("cloudflare.container meets the Host contract on the fake", () => {
     return (done as { state: Record<string, unknown> }).state;
   }
 
-  it("passes every check, the two of a host that stops among them", { timeout: 300_000 }, async () => {
-    const results = await checkHost({
-      type: container,
-      apply,
-      stop: async () => void (await op("delete")({ id: declared.name })),
-      suspend: () => fake.stop(declared.name),
-      client,
-      secrets: [key],
-      commit: repo.commit,
-      async drift() {
-        const report = await client.driftReport(await client.drift({ startedBy: { id: "kit" } }));
-        return report.resources.find((r) => r.id === "resources/hosts.ts#host")!;
-      },
-      timeoutMs: 30_000,
-    });
-    expect(results).toEqual([
-      { name: "the app answers on its port", ok: true },
-      { name: "a queued run drains", ok: true },
-      { name: "the next store read sees a credential change", ok: true },
-      { name: "a sleep survives a restart", ok: true },
-      { name: "a queued run drains after a stop and a wake", ok: true },
-      { name: "a sleep that ends while stopped continues after a wake", ok: true },
-      { name: "a new commit shows as drift that apply clears", ok: true },
-      { name: "no secret is in the ledger", ok: true },
-    ]);
-    // A deploy started the container again at the new revision, behind the same URL.
-    expect(Object.keys(fake.state.scripts)).toEqual(["sanoma-company"]);
-    // The ghcr.io image was copied into the account's registry once, and the Worker names the copy, pinned.
-    expect(Object.values(fake.state.images)).toEqual([declared.image]);
-    expect(Object.values(fake.state.scripts["sanoma-company"]!.images)).toEqual(Object.keys(fake.state.images));
-  });
+  it(
+    "passes every check, the ones of a host that stops and of its pages among them",
+    { timeout: 300_000 },
+    async () => {
+      const results = await checkHost({
+        type: container,
+        apply,
+        stop: async () => void (await op("delete")({ id: declared.name })),
+        suspend: () => fake.stop(declared.name),
+        client,
+        secrets: [key],
+        commit: repo.commit,
+        async drift() {
+          const report = await client.driftReport(await client.drift({ startedBy: { id: "kit" } }));
+          return report.resources.find((r) => r.id === "resources/hosts.ts#host")!;
+        },
+        page: "/",
+        timeoutMs: 30_000,
+      });
+      expect(results).toEqual([
+        { name: "the app answers on its port", ok: true },
+        { name: "a queued run drains", ok: true },
+        { name: "the next store read sees a credential change", ok: true },
+        { name: "a sleep survives a restart", ok: true },
+        { name: "a queued run drains after a stop and a wake", ok: true },
+        { name: "a sleep that ends while stopped continues after a wake", ok: true },
+        { name: "a page of the app answers while the container is stopped", ok: true },
+        { name: "a deploy never answers 503 to a visitor", ok: true },
+        { name: "a new commit shows as drift that apply clears", ok: true },
+        { name: "no secret is in the ledger", ok: true },
+      ]);
+      // A deploy started the container again at the new revision, behind the same URL.
+      expect(Object.keys(fake.state.scripts)).toEqual(["sanoma-company"]);
+      // The ghcr.io image was copied into the account's registry once, and the Worker names the copy, pinned.
+      expect(Object.values(fake.state.images)).toEqual([declared.image]);
+      expect(Object.values(fake.state.scripts["sanoma-company"]!.images)).toEqual(Object.keys(fake.state.images));
+    },
+  );
 });
 
 describe("cloudflare.container's custom domains on the fake", () => {
@@ -134,8 +151,10 @@ describe("cloudflare.container's custom domains on the fake", () => {
     revision: "abc123",
     port: 3000,
     domains: { www: "www.acme.example" },
+    secrets: HOST_SECRETS,
   };
   const fake = fakeCloudflare({ zones: ["acme.example"] });
+  const call = caller();
   const op = (name: string, input: object) =>
     fake.driver.ops[`container.${name}`]!(input, call(`cloudflare.container.${name}`));
   afterAll(() => fake.close());
@@ -201,65 +220,73 @@ describe("cloudflare.container's custom domains on the fake", () => {
   });
 });
 
-const b64 = (text: string) => Buffer.from(text).toString("base64");
-
-describe("cloudflare.container's public sites on the fake", () => {
-  /** What the container's bundle route answers: one site, its entry and one asset. */
-  const bundle = {
-    sites: ["www"],
-    mainModule: "index.js",
-    modules: [{ name: "index.js", type: "esm", content: b64("export default {};\n") }],
-    assets: [{ path: "/assets/main-3f2a.js", content: b64("console.log(1);\n") }],
+describe("cloudflare.host's deploy on the fake", () => {
+  const desired = {
+    name: "company",
+    image: "ghcr.io/sanoma-ai/runtime:0.7.0",
+    source: "https://github.com/acme/company.git",
+    ref: "main",
+    revision: "abc123",
+    port: 3000,
+    secrets: HOST_SECRETS,
   };
-  const asked: string[] = [];
-  // A container that builds the bundle on the first ask, as the runtime's route does.
-  const fake = fakeCloudflare({
-    zones: ["acme.example"],
-    async start() {
-      let built = false;
-      const server = createServer((req, res) => {
-        if (req.url === "/healthz") return void res.writeHead(200).end("ok\n");
-        if (req.url !== "/__sanoma/sites-bundle") return void res.writeHead(404).end();
-        asked.push(req.headers.authorization ?? "");
-        // Marked as the route's, as the runtime marks each answer.
-        const marked = { "x-sanoma-sites-bundle": "1", "content-type": "application/json" };
-        if (!built) return void ((built = true), res.writeHead(202, marked).end("{}"));
-        res.writeHead(200, marked).end(JSON.stringify(bundle));
-      });
-      await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
-      return {
-        url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
-        stop: () => new Promise<void>((done) => server.close(() => done())),
-      };
-    },
-  });
-  const op = (name: string, input: object) =>
-    fake.driver.ops[`container.${name}`]!(input, call(`cloudflare.container.${name}`));
+  const built: string[] = [];
+  const fake = fakeCloudflare({ bundle: (revision) => (built.push(revision), stubAppBundle(revision)) });
+  const call = caller();
+  const op = (name: string, input: object) => fake.driver.ops[`host.${name}`]!(input, call(`cloudflare.host.${name}`));
   afterAll(() => fake.close());
 
-  it("uploads the bundle the container built beside the Worker, its assets once, with the instance token", async () => {
-    const desired = {
-      name: "company",
-      image: "ghcr.io/sanoma-ai/runtime:0.7.0",
-      source: "https://github.com/acme/company.git",
-      ref: "main",
-      revision: "abc123",
-      port: 3000,
-      domains: { www: "www.acme.example" },
-      secrets: { SANOMA_WAKEUP_TOKEN: secret("HOST_KEY") },
-    };
-    await op("create", { desired });
-    expect(asked).toEqual([`Bearer ${key}`, `Bearer ${key}`]);
+  it("builds the bundle first, uploads the Worker with it once, and restarts the container at the revision last", async () => {
+    const made = (await op("create", { desired })) as { state: Record<string, unknown> };
+    expect(built).toEqual(["abc123"]);
     const worker = fake.state.scripts["sanoma-company"]!;
-    expect(worker.main_module).toBe("sites.js");
-    expect(worker.modules).toEqual(["index.js", "instance.js", "sites.js", "sites/index.js"]);
+    expect(worker.modules).toEqual(["index.js", "instance.js", "app/index.js"]);
+    expect(worker.compatibility_flags).toEqual(["nodejs_compat"]);
+    expect(Object.keys(worker.assets!)).toEqual(["/assets/app.js"]);
+    // The database through Hyperdrive, over the declared URL; the password never in the state.
+    const [id, config] = Object.entries(fake.state.hyperdrives)[0]!;
+    expect(config).toEqual({
+      name: "sanoma-company",
+      origin: { scheme: "postgresql", host: "db.acme.example", port: 5432, database: "company", user: "sanoma" },
+    });
+    expect(worker.bindings).toContainEqual({ type: "hyperdrive", name: "DATABASE", id });
     expect(worker.bindings).toContainEqual({ type: "assets", name: "ASSETS" });
-    const [hash] = Object.values(worker.assets!);
-    expect(Object.keys(worker.assets!)).toEqual(["/assets/main-3f2a.js"]);
-    expect(fake.state.assets).toEqual({ [hash!]: "text/javascript" });
-    // A new revision: the container builds again, and the session needs none of the assets it has.
+    // The instance token, minted and bound though not declared.
+    expect(worker.bindings).toContainEqual({ type: "secret_text", name: "SANOMA_WAKEUP_TOKEN" });
+    expect(await op("plan", { id: "company", desired })).toMatchObject({ action: "none" });
+
+    // A page is the app's, on the Worker, with the visitor's address Cloudflare gave.
+    const page = await fetch(String(made.state.worker_url), { headers: { "x-sanoma-client-ip": "10.0.0.1" } });
+    expect(page.status).toBe(200);
+    expect(page.headers.get("x-sanoma-revision")).toBe("abc123");
+    expect(page.headers.get("x-sanoma-client-ip")).toBe("127.0.0.1");
+    // The client build straight from the assets.
+    expect(await (await fetch(`${made.state.worker_url}/assets/app.js`)).text()).toBe("console.log('sanoma');\n");
+
     await op("update", { id: "company", desired: { ...desired, revision: "def456" } });
-    expect(fake.state.scripts["sanoma-company"]!.assets).toEqual(worker.assets);
-    expect(Object.keys(fake.state.assets)).toEqual([hash]);
+    expect(built).toEqual(["abc123", "def456"]);
+    expect((await fetch(String(made.state.worker_url))).headers.get("x-sanoma-revision")).toBe("def456");
+    // The session needs none of the assets the account has.
+    expect(Object.keys(fake.state.assets)).toHaveLength(1);
+    await op("delete", { id: "company" });
+    expect(fake.state.hyperdrives).toEqual({});
+  });
+
+  it("refuses a host without its database's URL before anything changes", async () => {
+    await expect(op("create", { desired: { ...desired, name: "other", secrets: {} } })).rejects.toThrow(
+      "no SANOMA_DATABASE_URL among its secrets",
+    );
+    expect(fake.state.scripts).toEqual({});
+  });
+
+  it("confirms a deploy whose upload is made by its restart alone", async () => {
+    await op("create", { desired });
+    // The plan is none, the approved one an update: the restart, the last step, alone.
+    await expect(
+      op("update", { id: "company", desired, expect: { action: "update", replace: [] } }),
+    ).resolves.toMatchObject({ state: { revision: "abc123", healthy: true } });
+    expect(built.filter((r) => r === "abc123")).toHaveLength(2);
+    expect(fake.state.scripts["sanoma-company"]!.modules).toContain("app/index.js");
+    await op("delete", { id: "company" });
   });
 });

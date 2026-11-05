@@ -2,7 +2,9 @@ import { DBOS, type ScheduledWorkflowFn, type WorkflowSchedule } from "@dbos-inc
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import type { ResolvedConfig } from "./config.ts";
-import { type Db, WAKEUP_TABLE } from "./db.ts";
+import { eq } from "drizzle-orm";
+import type { Db } from "./db.ts";
+import { wakeup } from "./db/company.ts";
 import type { Principal, WorkflowDefinition } from "./define.ts";
 import { readPeople, admit } from "./resources.ts";
 import type { WorkerState } from "./run.ts";
@@ -77,7 +79,9 @@ export async function applyScheduled(
   await Promise.all([...before.keys()].filter((name) => !names.has(name)).map((name) => DBOS.deleteSchedule(name)));
   const unfired = declared.filter((d) => before.get(d.schedule.scheduleName)?.lastFiredAt === null);
   if (!unfired.length) return;
-  const stoppedAt = await lastStopped(await db());
+  // When the instance's worker last stopped itself, from the wakeup row; never, and nothing was missed.
+  const [row] = await (await db()).select({ stoppedAt: wakeup.stoppedAt }).from(wakeup).where(eq(wakeup.id, 1));
+  const stoppedAt = row?.stoppedAt;
   if (!stoppedAt) return;
   for (const { schedule, since } of unfired) {
     const from = stoppedAt > since ? stoppedAt : since;
@@ -102,12 +106,6 @@ function sinceOf(schedule: WorkflowSchedule | undefined): Date | undefined {
   const since = (schedule?.context as Partial<ScheduleContext> | null | undefined)?.since;
   const at = typeof since === "string" ? new Date(since) : undefined;
   return at && !Number.isNaN(at.getTime()) ? at : undefined;
-}
-
-/** When the instance's worker last stopped, from the wakeup's row; undefined while it never has. */
-async function lastStopped(db: Db): Promise<Date | undefined> {
-  const { rows } = await db.query<{ stopped_at: Date | null }>(`SELECT stopped_at FROM ${WAKEUP_TABLE} WHERE id = 1`);
-  return rows[0]?.stopped_at ?? undefined;
 }
 
 /** Who starts a scheduled run, as `scheduledStarter` admitted them, or why they were not. */

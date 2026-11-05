@@ -109,7 +109,20 @@ const aim = defineWorkflow({
   input: z.object({ op: z.enum(["create", "update", "delete"]), name: z.string(), id: z.string().optional() }),
   uses: [cloudflare.container.create, cloudflare.container.update, cloudflare.container.delete],
   run: async (ctx, { op, name, id: at = name }) => {
-    const desired = { name, image: IMAGE, source: SOURCE, ref: "main", revision: "r1", port: 3000 };
+    const desired = {
+      name,
+      image: IMAGE,
+      source: SOURCE,
+      ref: "main",
+      revision: "r1",
+      port: 3000,
+      // Made up: Hyperdrive's origin is made of it, and nothing connects to it.
+      secrets: {
+        SANOMA_DATABASE_URL: "postgresql://sanoma:test@db.acme.example:5432/company",
+        // Its own, so no token is minted under the instance's name in the company's store.
+        SANOMA_WAKEUP_TOKEN: "aim-instance-token",
+      },
+    };
     let id: string;
     if (op === "create") id = (await ctx.cloudflare.container.create({ desired })).id;
     else if (op === "update") id = (await ctx.cloudflare.container.update({ id: at, desired })).id;

@@ -4,15 +4,20 @@ import { afterAll, beforeAll, expect, it } from "vitest";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { testDatabaseUrl } from "@sanoma-ai/testing";
-import { lazyPool } from "../src/db.ts";
+import { eq, sql } from "drizzle-orm";
+import { escapeLiteral } from "pg";
+import { lazyDb } from "../src/db.ts";
+import { identityAuditEvents, identityCredentials, identityDeployments } from "../src/db/identity.ts";
 import { CLOUD_IDENTITY_SQL, createDeploymentCredential, type ProvisioningIdentity } from "../src/cloud-identity.ts";
 import { CLOUD_IDENTITY_AUDIT_SQL, startIdentityService } from "../src/identity-service.ts";
 
 const url = testDatabaseUrl("identity_service");
-const admin = lazyPool(url, "identity-service-test");
+const admin = lazyDb(url, "identity-service-test");
 const suffix = randomUUID().replaceAll("-", "");
-const readRole = `identity_r_${suffix}`,
-  auditRole = `identity_a_${suffix}`;
+const readName = `identity_r_${suffix}`,
+  auditName = `identity_a_${suffix}`;
+const readRole = sql.identifier(readName),
+  auditRole = sql.identifier(auditName);
 const password = randomUUID();
 const roleUrl = (role: string) => {
   const value = new URL(url);
@@ -21,8 +26,8 @@ const roleUrl = (role: string) => {
   return value.toString();
 };
 const options = {
-  enrollmentDatabaseUrl: roleUrl(readRole),
-  auditDatabaseUrl: roleUrl(auditRole),
+  enrollmentDatabaseUrl: roleUrl(readName),
+  auditDatabaseUrl: roleUrl(auditName),
   mode: { type: "runtime" as const },
   host: "127.0.0.1",
   port: 0,
@@ -70,26 +75,35 @@ const transport = setupServer(
 );
 beforeAll(async () => {
   const db = await admin.db();
-  await db.query("DROP SCHEMA IF EXISTS sanoma_identity CASCADE");
-  await db.query(CLOUD_IDENTITY_SQL + CLOUD_IDENTITY_AUDIT_SQL);
-  for (const role of [readRole, auditRole]) await db.query(`CREATE ROLE ${role} LOGIN PASSWORD '${password}'`);
-  await db.query(`GRANT USAGE ON SCHEMA sanoma_identity TO ${readRole}, ${auditRole};
-    GRANT SELECT ON sanoma_identity.deployments, sanoma_identity.credentials TO ${readRole};
-    GRANT INSERT ON sanoma_identity.audit_events TO ${auditRole}`);
-  await db.query(
-    "INSERT INTO sanoma_identity.deployments (id,company,environment,service_account) VALUES ('control','sanoma','production',$1)",
-    [identity.serviceAccount],
-  );
-  await db.query(
-    "INSERT INTO sanoma_identity.credentials (hash,deployment,generation,valid_from,valid_until) VALUES ($1,'control',1,now(),now()+interval '1 hour')",
-    [credential.hash],
-  );
+  await db.execute(sql`DROP SCHEMA IF EXISTS sanoma_identity CASCADE`);
+  await db.execute(sql.raw(CLOUD_IDENTITY_SQL + CLOUD_IDENTITY_AUDIT_SQL));
+  for (const role of [readRole, auditRole])
+    await db.execute(sql`CREATE ROLE ${role} LOGIN PASSWORD ${sql.raw(escapeLiteral(password))}`);
+  await db.execute(sql`GRANT USAGE ON SCHEMA sanoma_identity TO ${readRole}, ${auditRole}`);
+  await db.execute(sql`GRANT SELECT ON sanoma_identity.deployments, sanoma_identity.credentials TO ${readRole}`);
+  await db.execute(sql`GRANT INSERT ON sanoma_identity.audit_events TO ${auditRole}`);
+  await db.insert(identityDeployments).values({
+    id: "control",
+    company: "sanoma",
+    environment: "production",
+    serviceAccount: identity.serviceAccount,
+  });
+  await db.insert(identityCredentials).values({
+    hash: credential.hash,
+    deployment: "control",
+    generation: 1,
+    validFrom: sql`now()`,
+    validUntil: sql`now() + interval '1 hour'`,
+  });
   transport.listen({ onUnhandledFrame: "bypass" });
 });
 afterAll(async () => {
   transport.close();
   const db = await admin.db();
-  for (const role of [readRole, auditRole]) await db.query(`DROP OWNED BY ${role}; DROP ROLE ${role}`);
+  for (const role of [readRole, auditRole]) {
+    await db.execute(sql`DROP OWNED BY ${role}`);
+    await db.execute(sql`DROP ROLE ${role}`);
+  }
   await admin.close();
 });
 
@@ -105,8 +119,7 @@ it("serves the runtime route with read-only enrollment and append-only audit rol
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ accessToken: "synthetic-issued-token" });
     expect((await fetch(service.url + "/identity")).status).toBe(404);
-    const events = (await (await admin.db()).query("SELECT * FROM sanoma_identity.audit_events ORDER BY recorded_at"))
-      .rows;
+    const events = await (await admin.db()).select().from(identityAuditEvents).orderBy(identityAuditEvents.recordedAt);
     expect(events.map((e) => e.result)).toEqual(["denied", "issued"]);
     const text = JSON.stringify(events);
     for (const secret of [
@@ -131,11 +144,11 @@ it("refuses writer/admin enrollment and audit roles with read or mutation privil
     "Identity service unavailable",
   );
   const db = await admin.db();
-  await db.query(`GRANT SELECT ON sanoma_identity.audit_events TO ${auditRole}`);
+  await db.execute(sql`GRANT SELECT ON sanoma_identity.audit_events TO ${auditRole}`);
   try {
     await expect(startIdentityService(options)).rejects.toThrow("Identity service unavailable");
   } finally {
-    await db.query(`REVOKE SELECT ON sanoma_identity.audit_events FROM ${auditRole}`);
+    await db.execute(sql`REVOKE SELECT ON sanoma_identity.audit_events FROM ${auditRole}`);
   }
 });
 
@@ -145,14 +158,14 @@ it("fails closed during audit outage and recovers without a fallback identity", 
   const call = () =>
     fetch(service.url + "/token", { method: "POST", headers: { Authorization: `Bearer ${credential.credential}` } });
   try {
-    await db.query(`REVOKE INSERT ON sanoma_identity.audit_events FROM ${auditRole}`);
+    await db.execute(sql`REVOKE INSERT ON sanoma_identity.audit_events FROM ${auditRole}`);
     const denied = await call();
     expect(denied.status).toBe(503);
     expect(await denied.text()).toBe('{"error":"unavailable"}');
-    await db.query(`GRANT INSERT ON sanoma_identity.audit_events TO ${auditRole}`);
+    await db.execute(sql`GRANT INSERT ON sanoma_identity.audit_events TO ${auditRole}`);
     expect((await call()).status).toBe(200);
   } finally {
-    await db.query(`GRANT INSERT ON sanoma_identity.audit_events TO ${auditRole}`);
+    await db.execute(sql`GRANT INSERT ON sanoma_identity.audit_events TO ${auditRole}`);
     await service.stop();
   }
 });
@@ -217,7 +230,12 @@ it("serves only the fixed provisioning route and rejects GET bodies at the HTTP 
     });
     expect(status).toBe(400);
     expect(issued).toBe(count);
-    await (await admin.db()).query("UPDATE sanoma_identity.deployments SET enabled=false WHERE id='control'");
+    await (
+      await admin.db()
+    )
+      .update(identityDeployments)
+      .set({ enabled: false })
+      .where(eq(identityDeployments.id, "control"));
     expect((await fetch(service.url + "/identity", { headers })).status).toBe(401);
     expect(issued).toBe(count);
   } finally {

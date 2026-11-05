@@ -40,6 +40,9 @@ export interface AppBundleEnv {
   SANOMA_SIGNING_KEY?: string;
   /** The key the stored secrets are sealed under, when the config stores them itself. */
   SANOMA_SECRETS_KEY?: string;
+  /** The company's GitHub App's OAuth client, both or neither: GitHub as a way to sign in, for the staff and the sites' visitors. */
+  SANOMA_GITHUB_CLIENT_ID?: string;
+  SANOMA_GITHUB_CLIENT_SECRET?: string;
   /** The Worker's static assets: `AppBundle.assets`. */
   ASSETS: { fetch(request: Request): Promise<Response> };
 }
@@ -55,7 +58,11 @@ export interface AppHost {
   startNow(): Promise<unknown>;
 }
 
-/** The main module's default export: the app's fetch handler. Without a `host`, a queued run waits for whatever starts the worker. */
+/**
+ * The main module's default export: the app's fetch handler. Without a `host`, a queued run waits
+ * for whatever starts the worker. The host sets the visitor's address in `x-sanoma-client-ip`
+ * (`CLIENT_IP_HEADER`), over any copy of the client's: the bundle trusts it as given.
+ */
 export interface AppBundleModule {
   fetch(request: Request, env: AppBundleEnv, ctx: AppBundleContext, host?: AppHost): Promise<Response>;
 }

@@ -30,11 +30,8 @@ import { STYLESHEET_FILE } from "./content-files.ts";
 import type { AdmittingLogin, LoginProvider, ServerEntry } from "./context.ts";
 import { appHandler, type AppHandlerOptions, type IngressRoute, localHost } from "./handler.ts";
 import { admitting } from "./login/admission.ts";
-import { loginKey } from "./login/keys.ts";
-import { publicFront } from "./login/public.ts";
-import { sendLoginCode } from "./login/staff.ts";
+import { publicFront, servedOnceMade, siteLogin } from "./login/public.ts";
 import { loopbackLogin } from "./loopback.ts";
-import { secretValues } from "./server/secrets.ts";
 import { type AppSnapshot, siteFileBroken } from "./snapshot.ts";
 import { liveSnapshot } from "./snapshot-build.ts";
 
@@ -164,7 +161,7 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
   // The people as the files say now, so a person taken out is refused at their next request.
   const login = admitting(given, async () => (await live()).people);
   // Each public site served, by name, with its own front door: its login half, if it has one,
-  // made once the app listens (`openLogins`). A public site whose site.ts has a problem is not
+  // made once the app listens (`halves`). A public site whose site.ts has a problem is not
   // served, as its login could be one not read.
   const halves = new Map<SiteEntry, PromiseWithResolvers<LoginHalf>>();
   const sites = new Map<string, AdmittingLogin>();
@@ -226,8 +223,17 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
     await closeQuietly(client);
     throw err;
   }
-  const opened = await openLogins(resolved, client, halves, app.domains, options.social);
-  for (const { name } of halves.keys()) if (!opened.has(name)) sites.delete(name);
+  // The sites' logins, with the client and the files: one that fails (its key, its config) is
+  // logged, and its site is served on no host (503), so the app starts and the environment
+  // (`SANOMA_SIGNING_KEY`, which each login's key is derived from) can give what it lacks.
+  await Promise.all(
+    [...halves].map(async ([site, half]) => {
+      const domain = app.domains.get(site.name);
+      const origins = [`http://${localHost(site.name)}:*`, ...(domain ? [`https://${domain}`] : [])];
+      half.resolve(siteLogin(resolved, client, site, origins, options.social));
+      await servedOnceMade(sites, site, half.promise, "sanoma app");
+    }),
+  );
 
   const address = server.address() as AddressInfo;
   let closing: Promise<void> | undefined;
@@ -250,15 +256,6 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
           await given
             .close?.()
             .catch((err: unknown) => console.error("sanoma app: closing the login also failed:", err));
-          await Promise.all(
-            [...opened].map(([name, half]) =>
-              half
-                .close?.()
-                .catch((err: unknown) =>
-                  console.error(`sanoma app: closing ${siteDir(name)}'s login also failed:`, err),
-                ),
-            ),
-          );
           await closeQuietly(client);
         }
       })();
@@ -287,48 +284,6 @@ function warnProblems(resolved: ResolvedConfig, { description }: AppSnapshot): v
   const warnings = description.sites.flatMap((site) => site.warnings.map((w) => `  ${warningLine(w)}`));
   if (warnings.length)
     console.warn(`sanoma app: warnings in the sites (\`sanoma check\` lists them):\n${warnings.join("\n")}`);
-}
-
-/**
- * Makes each public site's login half (`ConnectorSetup.login`), all at once, settling the promise
- * its front door waits on: the ones made, by site name. One that fails is logged, and its site is
- * then served on no host (503): the app starts, so the connector's page, or the environment
- * (`SANOMA_SIGNING_KEY`, which each login's key is derived from), can give what it lacks.
- */
-async function openLogins(
-  resolved: ResolvedConfig,
-  client: SanomaClient,
-  halves: ReadonlyMap<SiteEntry, PromiseWithResolvers<LoginHalf>>,
-  domains: ReadonlyMap<string, string>,
-  social: SocialClients | undefined,
-): Promise<Map<string, LoginHalf>> {
-  const secrets = secretValues(client);
-  const opened = new Map<string, LoginHalf>();
-  await Promise.all(
-    [...halves].map(async ([{ name, login }, half]) => {
-      const domain = domains.get(name);
-      const origins = [`http://${localHost(name)}:*`, ...(domain ? [`https://${domain}`] : [])];
-      half.resolve(
-        (async () =>
-          resolved.logins.get(login!)!({
-            databaseUrl: resolved.databaseUrl,
-            key: loginKey(login!),
-            secrets,
-            origins,
-            ...(resolved.login && { sendCode: (email, code) => sendLoginCode(client, email, code) }),
-            social,
-          }))(),
-      );
-      try {
-        opened.set(name, await half.promise);
-      } catch (err) {
-        console.error(
-          `sanoma app: ${siteDir(name)}'s login (${login}) could not start, so the site is not served: ${errorMessage(err)}`,
-        );
-      }
-    }),
-  );
-  return opened;
 }
 
 /**

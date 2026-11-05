@@ -1,6 +1,7 @@
 import type { UIMessage, UIMessageChunk } from "ai";
-import type { Pool } from "pg";
-import { CHAT_CHUNKS_TABLE as CHUNKS, CHAT_MESSAGES_TABLE as MESSAGES, CHATS_TABLE as CHATS } from "./db.ts";
+import { and, asc, desc, eq, gt, ne, sql } from "drizzle-orm";
+import type { Db } from "./db.ts";
+import { chatChunks, chatMessages, chats } from "./db/company.ts";
 import { SanomaError } from "./errors.ts";
 
 // The operator agent's chats, in the config's database beside the runtime's other tables: one row
@@ -57,72 +58,71 @@ export interface Chats {
   chunks(turn: string, after: number): Promise<{ chunks: UIMessageChunk[]; last: number; ended: boolean }>;
 }
 
-/** A row of the chats' table. */
-interface ChatRow {
-  id: string;
-  person: string;
-  engine: string;
-  draft_id: string | null;
-  title: string;
-  created_at: Date;
-}
-
-const COLUMNS = "id, person, engine, draft_id, title, created_at";
-
-const chatOf = ({ draft_id, created_at, ...row }: ChatRow): Chat => ({
-  ...row,
-  ...(draft_id === null ? {} : { draftId: draft_id }),
-  createdAt: created_at.getTime(),
+const chatOf = ({ id, person, engine, title, draftId, createdAt }: typeof chats.$inferSelect): Chat => ({
+  id,
+  person,
+  engine,
+  title,
+  ...(draftId === null ? {} : { draftId }),
+  createdAt: createdAt.getTime(),
 });
 
-/** The chats' store on the pool `db` gives, the config's database once it is prepared. */
-export function chatStore(db: () => Promise<Pool>): Chats {
+/** The chats' store on the database `db` gives, the config's database once it is prepared. */
+export function chatStore(db: () => Promise<Db>): Chats {
   return {
     async open({ id, person, engine, title }) {
-      const { rows } = await (
+      const opened = await (
         await db()
-      ).query(
-        `INSERT INTO ${CHATS} (id, person, engine, title) VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO NOTHING RETURNING id`,
-        [id, person, engine, title],
-      );
-      if (!rows.length) throw new SanomaError("invalid_input", `Chat ${id} exists already; open it with another id`);
+      )
+        .insert(chats)
+        .values({ id, person, engine, title })
+        .onConflictDoNothing()
+        .returning({ id: chats.id });
+      if (!opened.length) throw new SanomaError("invalid_input", `Chat ${id} exists already; open it with another id`);
     },
     async attach(id, draftId) {
-      await (await db()).query(`UPDATE ${CHATS} SET draft_id = $2 WHERE id = $1`, [id, draftId]);
+      await (await db()).update(chats).set({ draftId }).where(eq(chats.id, id));
     },
     async upsert(id, messages) {
       if (!messages.length) return;
       if (messages.some((m) => !m.id)) throw new SanomaError("invalid_input", "A chat message needs an id");
       // A new message's place is after the chat's last, in the order given.
+      const last = sql`(SELECT coalesce(max(${chatMessages.seq}), 0) FROM ${chatMessages} WHERE ${eq(chatMessages.chatId, id)})`;
       await (
         await db()
-      ).query(
-        `INSERT INTO ${MESSAGES} (chat_id, id, seq, message) ` +
-          `SELECT $1, m.value->>'id', last.seq + m.n, m.value ` +
-          `FROM jsonb_array_elements($2::jsonb) WITH ORDINALITY AS m (value, n), ` +
-          `(SELECT coalesce(max(seq), 0) AS seq FROM ${MESSAGES} WHERE chat_id = $1) AS last ` +
-          "ON CONFLICT (chat_id, id) DO UPDATE SET message = EXCLUDED.message",
-        [id, JSON.stringify(messages)],
-      );
+      )
+        .insert(chatMessages)
+        .values(
+          messages.map((message, n) => ({ chatId: id, id: message.id, seq: sql<number>`${last} + ${n + 1}`, message })),
+        )
+        .onConflictDoUpdate({
+          target: [chatMessages.chatId, chatMessages.id],
+          set: { message: sql`excluded.message` },
+        });
     },
     async load(id) {
-      const { rows } = await (
+      const rows = await (
         await db()
-      ).query<{ message: UIMessage }>(`SELECT message FROM ${MESSAGES} WHERE chat_id = $1 ORDER BY seq, id`, [id]);
+      )
+        .select({ message: chatMessages.message })
+        .from(chatMessages)
+        .where(eq(chatMessages.chatId, id))
+        .orderBy(asc(chatMessages.seq), asc(chatMessages.id));
       return rows.map((row) => row.message);
     },
     async get(id) {
-      const { rows } = await (await db()).query<ChatRow>(`SELECT ${COLUMNS} FROM ${CHATS} WHERE id = $1`, [id]);
-      return rows[0] && chatOf(rows[0]);
+      const [row] = await (await db()).select().from(chats).where(eq(chats.id, id));
+      return row && chatOf(row);
     },
     async begin(id, turn) {
-      const pool = await db();
-      const { rows } = await pool.query(
-        `UPDATE ${CHATS} SET turn = $2 WHERE id = $1 AND turn IS DISTINCT FROM $2 RETURNING id`,
-        [id, turn],
-      );
-      await pool.query(`DELETE FROM ${CHUNKS} WHERE chat_id = $1 AND run_id <> $2`, [id, turn]);
-      return rows.length > 0;
+      const database = await db();
+      const begun = await database
+        .update(chats)
+        .set({ turn })
+        .where(and(eq(chats.id, id), sql`${chats.turn} IS DISTINCT FROM ${turn}`))
+        .returning({ id: chats.id });
+      await database.delete(chatChunks).where(and(eq(chatChunks.chatId, id), ne(chatChunks.runId, turn)));
+      return begun.length > 0;
     },
     async append(id, turn, chunks) {
       if (chunks.length) await appendChunks(await db(), id, turn, chunks);
@@ -131,37 +131,38 @@ export function chatStore(db: () => Promise<Pool>): Chats {
       await appendChunks(await db(), id, turn, [null]);
     },
     async chunks(turn, after) {
-      const { rows } = await (
+      const rows = await (
         await db()
-      ).query<{ seq: number; chunk: UIMessageChunk | null }>(
-        `SELECT seq, chunk FROM ${CHUNKS} WHERE run_id = $1 AND seq > $2 ORDER BY seq`,
-        [turn, after],
-      );
-      const ended = rows.at(-1)?.chunk === null;
+      )
+        .select({ seq: chatChunks.seq, chunk: chatChunks.chunk })
+        .from(chatChunks)
+        .where(and(eq(chatChunks.runId, turn), gt(chatChunks.seq, after)))
+        .orderBy(asc(chatChunks.seq));
       return {
         chunks: rows.flatMap((row) => (row.chunk === null ? [] : [row.chunk])),
         last: rows.at(-1)?.seq ?? after,
-        ended,
+        ended: rows.at(-1)?.chunk === null,
       };
     },
     async list(person) {
-      const { rows } = await (
+      const rows = await (
         await db()
-      ).query<ChatRow>(`SELECT ${COLUMNS} FROM ${CHATS} WHERE person = $1 ORDER BY created_at DESC, id LIMIT 50`, [
-        person,
-      ]);
+      )
+        .select()
+        .from(chats)
+        .where(eq(chats.person, person))
+        .orderBy(desc(chats.createdAt), asc(chats.id))
+        .limit(50);
       return rows.map(chatOf);
     },
   };
 }
 
 /** Writes `chunks` (null, the end) after the turn's last, in the order given. */
-async function appendChunks(pool: Pool, id: string, turn: string, chunks: readonly (UIMessageChunk | null)[]) {
-  await pool.query(
-    `INSERT INTO ${CHUNKS} (chat_id, run_id, seq, chunk) ` +
-      "SELECT $1, $2, last.seq + c.n, nullif(c.value, 'null') " +
-      "FROM jsonb_array_elements($3::jsonb) WITH ORDINALITY AS c (value, n), " +
-      `(SELECT coalesce(max(seq), 0) AS seq FROM ${CHUNKS} WHERE run_id = $2) AS last`,
-    [id, turn, JSON.stringify(chunks)],
-  );
+async function appendChunks(db: Db, id: string, turn: string, chunks: readonly (UIMessageChunk | null)[]) {
+  // A chunk's place is after the turn's last, in the order given.
+  const last = sql`(SELECT coalesce(max(${chatChunks.seq}), 0) FROM ${chatChunks} WHERE ${eq(chatChunks.runId, turn)})`;
+  await db
+    .insert(chatChunks)
+    .values(chunks.map((chunk, n) => ({ chatId: id, runId: turn, seq: sql<number>`${last} + ${n + 1}`, chunk })));
 }

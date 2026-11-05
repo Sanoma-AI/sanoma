@@ -26,6 +26,8 @@ import { loadDataFiles, readLockfile, readResources } from "@sanoma-ai/workflows
 import { startWakeupService, type WakeupService } from "@sanoma-ai/workflows/wakeup-service";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
+import { credentials, databaseOn } from "@sanoma-ai/workflows/db";
+import { eq } from "drizzle-orm";
 import { Client } from "pg";
 import { NodeRequest, sendNodeResponse } from "srvx/node";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -539,7 +541,7 @@ describe("going live", () => {
     // No token of the person's own: the fakes' drivers declare no variables to clear it by.
     const db = new Client({ connectionString: databaseUrl });
     await db.connect();
-    await db.query("DELETE FROM sanoma_credentials WHERE name = 'GITHUB_TOKEN'");
+    await databaseOn(db).delete(credentials).where(eq(credentials.name, "GITHUB_TOKEN"));
     await db.end();
     const { owners, organizations, errors } = await goLiveChoices(await now());
     expect(owners).toEqual([{ login: "acme-labs", kind: "organization", via: "app" }]);

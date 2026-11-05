@@ -10,6 +10,8 @@
     ".agents/skills",
     "skills-lock.json",
     "packages/bridge/src/gen",
-    "packages/bridge/testdata"
+    "packages/bridge/testdata",
+    "packages/workflows/drizzle/*/meta",
+    "connectors/better-auth/drizzle/*/meta"
   ]
 }

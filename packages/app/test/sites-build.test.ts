@@ -797,10 +797,12 @@ describe("a company's app with its sites", () => {
     expect((await at("/auth/fixture-login/sign-out", "hello.localhost", { method: "POST" })).status).toBe(404);
     expect(loginContexts[0]).toMatchObject({
       origins: ["http://members.localhost:*"],
-      databaseUrl: config.databaseUrl,
       // Its own key, from SANOMA_SECRETS_KEY for "login fixture-login".
       key: expect.stringMatching(/^[0-9a-f]{64}$/),
     });
+    // The client's own pool, which the half runs on: one connection answers.
+    const { rows } = await (await loginContexts[0]!.database()).query<{ one: number }>("SELECT 1 AS one");
+    expect(rows).toEqual([{ one: 1 }]);
   });
 
   it("serves a public site at its domain too and links to it from the Sites page, but no domain of a site that is not public", async () => {
