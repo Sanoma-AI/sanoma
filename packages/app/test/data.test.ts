@@ -360,7 +360,9 @@ describe("the Data section", () => {
       await tab.type("#field-contact", "pat@puppet.test");
       await tab.select("#field-stage", "0");
       await tab.click('main button[type="submit"]');
+      // The row shows at once, the record once its save answers.
       await tab.waitForSelector('a[href="/data/outbound?record=Puppet"]');
+      await tab.waitForSelector("[data-sonner-toast]::-p-text(Saved Puppet)");
       expect(await puppet()).toMatchObject({
         record: { company: "Puppet", contact: "pat@puppet.test", stage: "researched", owner: "ada" },
         updatedBy: "ada",

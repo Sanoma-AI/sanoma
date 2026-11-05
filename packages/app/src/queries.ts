@@ -644,7 +644,7 @@ export const remoteQuery = () =>
   queryOptions({ queryKey: ["remote"], queryFn: () => getRemote(), staleTime: Number.POSITIVE_INFINITY });
 
 /** Every collection's records are under this key, each collection's under its name after it. */
-export const DATA_KEY = ["data"] as const;
+const DATA_KEY = ["data"] as const;
 
 /**
  * A collection's records, as `data.<name>.list` answers this query: called through `api` (the
@@ -655,33 +655,9 @@ export const recordsQuery = (name: string, query: ListQuery<Record<string, unkno
     queryKey: [...DATA_KEY, name, query],
     queryFn: () => (api as UntypedApi).data[name].list(query) as Promise<Saved[]>,
     // Read while the server rendered the page, not again as it hydrates; a save or a delete
-    // refreshes them at once.
+    // writes what it saved into the grid's collection of them (`components/grid/collection.ts`).
     staleTime: 5_000,
   });
-
-/** A call the record form or the grid makes: an operation of the collection and its input. */
-export type RecordCall = { op: "save" | "delete"; input: unknown };
-
-/** The key of a collection's calls in the mutation cache: what the grid shows as saving. */
-export const recordCallKey = (name: string) => [...DATA_KEY, name, "call"] as const;
-
-/**
- * Calls the collection's `save` or `delete` through `api` (a new id each), as the person asking,
- * and refreshes the collection's records once it is made: the call settles once they are read
- * again. A failure is the caller's to show.
- */
-export function useRecordCall(name: string) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationKey: recordCallKey(name),
-    mutationFn: ({ op, input }: RecordCall) => (api as UntypedApi).data[name][op](input) as Promise<unknown>,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: [...DATA_KEY, name] }),
-    // A held call is a run waiting: the grid marks its record from the runs.
-    onError: (err) => {
-      if (errorBodyOf(err)?.code === "approval_pending") void queryClient.invalidateQueries({ queryKey: RUNS_KEY });
-    },
-  });
-}
 
 /**
  * The keys of a collection's records whose save or delete waits for an approval: the pending

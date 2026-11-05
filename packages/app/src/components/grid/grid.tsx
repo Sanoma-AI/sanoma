@@ -1,6 +1,7 @@
 import type { CollectionEntry } from "@sanoma-ai/workflows/describe";
 import { errorMessage, type Saved } from "@sanoma-ai/workflows/shared";
-import { useMutationState, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useLiveQuery } from "@tanstack/react-db";
+import { useQuery } from "@tanstack/react-query";
 import { Link, useHydrated, useNavigate } from "@tanstack/react-router";
 import {
   type CellSelectionDirection,
@@ -24,28 +25,22 @@ import { cn } from "#/lib/utils.ts";
 import { errorBodyOf } from "../../api.ts";
 import type { UntypedApi } from "../../api-client.ts";
 import { fieldsOf, type ScalarField, type ScalarValue } from "../../form/schema.ts";
-import {
-  api,
-  DATA_KEY,
-  type DataSearch,
-  heldQuery,
-  type RecordCall,
-  recordCallKey,
-  useRecordCall,
-} from "../../queries.ts";
-import { Nothing, StatusDot, toastIfHeld, When } from "../common.tsx";
+import { api, type DataSearch, heldQuery } from "../../queries.ts";
+import { Nothing, StatusDot, When } from "../common.tsx";
 import { FROM, IssuesFlag, SortHead, Value } from "../data-grid.tsx";
 import { CellEditor, draftOf, recordWith } from "./cell.tsx";
 import { csv, delimited } from "./clipboard.ts";
+import { type RecordsView, savedIn } from "./collection.ts";
 import { type Conflict, conflictId, ConflictRow } from "./conflicts.tsx";
 import { typedCharacter, useGridKeys } from "./keys.ts";
 
 // A collection's records as a spreadsheet: a column per field, in the collection's order, then
 // when each record was saved and by whom. Click or arrow to a cell, type or press Enter to edit
-// it, Enter to save it: one edit is one `save` of the record with `ifRecord`, the record as the
-// grid read it, so a record someone changed since comes back as a conflict, never overwritten.
-// The first page renders on the server as rows; the selection, the editors and the virtual rows
-// mount in the browser. Sorting, filtering and hiding are the page's search (`DataSearch`).
+// it, Enter to save it: one edit is an optimistic update of the page's records collection
+// (`collection.ts`), saved with `ifRecord`, the record as the edit found it, so a record someone
+// changed since comes back as a conflict, never overwritten. The first page renders on the
+// server as rows; the selection, the editors and the virtual rows mount in the browser.
+// Sorting, filtering and hiding are the page's search (`DataSearch`).
 
 const features = tableFeatures({
   cellSelectionFeature,
@@ -93,13 +88,13 @@ interface Editing {
 }
 
 /**
- * The grid: `records` as `list` read them for the page's search, `order` its sort, `open` the
+ * The grid: `view` the records `list` read for the page's search, `order` its sort, `open` the
  * record in the side panel, `hide` the fields left out, `people` the declared people's ids (what
  * a person field chooses from). Says how many match, or that there may be more than `limit`.
  */
 export function DataGrid({
   collection,
-  records,
+  view: { collection: records, edit },
   order,
   open,
   filtered,
@@ -108,7 +103,7 @@ export function DataGrid({
   people,
 }: {
   collection: CollectionEntry;
-  records: Saved[];
+  view: RecordsView;
   order: string | undefined;
   /** The key of the record open in the side panel. */
   open: string | undefined;
@@ -118,7 +113,22 @@ export function DataGrid({
   people: readonly string[];
 }) {
   const { name, key: keyField } = collection;
-  const queryClient = useQueryClient();
+  // In the order `list` read them: by the sorted field, records without it last, then by key,
+  // text as Postgres orders it under `COLLATE "C"`.
+  const sortField = order?.replace(/^-/, "");
+  const listed = useLiveQuery({
+    query: (q) => {
+      const from = q.from({ saved: records });
+      const sorted = sortField
+        ? from.orderBy(({ saved }) => saved.record[sortField], {
+            direction: order?.startsWith("-") ? "desc" : "asc",
+            nulls: "last",
+            stringSort: "lexical",
+          })
+        : from;
+      return sorted.orderBy(({ saved }) => saved.key, { direction: "asc", stringSort: "lexical" });
+    },
+  }).data;
   const navigate = useNavigate({ from: FROM });
   const hydrated = useHydrated();
   const fields = useMemo(
@@ -156,13 +166,13 @@ export function DataGrid({
   const table = useTable({
     features,
     columns,
-    data: records,
+    data: listed,
     getRowId: (saved) => saved.key,
     state: { columnVisibility, columnSizing: widths },
     onColumnSizingChange: setWidths,
     columnResizeMode: "onChange",
     defaultColumn: { minSize: 60, maxSize: 800 },
-    // A save reads the records again: the selection stays where it was.
+    // An edit changes the rows: the selection stays where it was.
     autoResetCellSelection: false,
   });
   const resizing = table.state.columnResizing.isResizingColumn !== false;
@@ -170,27 +180,12 @@ export function DataGrid({
     if (!resizing && Object.keys(widths).length) writeWidths(name, widths);
   }, [name, widths, resizing]);
 
-  const call = useRecordCall(name);
-  // What is being saved, by key: shown in its cells until the save settles (then the records
-  // read again show it), so a denied or held save reverts to the record as it is.
-  const saving = useMutationState({
-    filters: { mutationKey: recordCallKey(name), status: "pending" },
-    select: (mutation) => mutation.state.variables as RecordCall | undefined,
-  });
-  const savingRecords = new Map(
-    saving.flatMap((variables) => {
-      const record =
-        variables?.op === "save" ? (variables.input as { record: Record<string, unknown> }).record : undefined;
-      return record ? [[String(record[keyField]), record] as const] : [];
-    }),
-  );
-  const reread = () => void queryClient.invalidateQueries({ queryKey: [...DATA_KEY, name] });
   // Built once per collection: a new `select` would run again over the waiting runs every render.
   const held = useQuery(useMemo(() => heldQuery({ name, key: keyField }), [name, keyField])).data;
-  // Once a held save's run ends (approved, or not), its record is read again.
+  // Once a held save's run ends (approved, or not), the records are read again.
   const wasHeld = useRef<string[]>(undefined);
   useEffect(() => {
-    if (wasHeld.current?.some((k) => !held?.includes(k))) reread();
+    if (wasHeld.current?.some((k) => !held?.includes(k))) void records.utils.refetch();
     wasHeld.current = held;
   });
   const [conflicts, setConflicts] = useState<ReadonlyMap<string, Conflict>>(new Map());
@@ -201,43 +196,43 @@ export function DataGrid({
       return next;
     });
   const [savedAt, setSavedAt] = useState<number>();
-  // By key, the record as its last save in flight leaves it (undefined once it fails): an edit
-  // made meanwhile saves over that, not over the rows read before it, so it is never a conflict
-  // with your own edit.
-  const lastSave = useRef(new Map<string, Promise<Record<string, unknown> | undefined>>());
 
   /**
-   * Saves `record` over `ifRecord`, the one cell `field` of `key` edited; Undo saves `ifRecord`
-   * back. Answers the record as saved, or undefined when it was not.
+   * Edits `key`'s record to `record`, the one cell `field` changed, after the grid's edits before
+   * it; Undo edits it back. A refusal rolls the cell back: a conflict shows under the row, a
+   * denial says why. A held edit's toast is the collection's.
    */
-  async function save(
-    key: string,
-    field: string,
-    record: Record<string, unknown>,
-    ifRecord: Record<string, unknown>,
-    undoing = false,
-  ): Promise<Record<string, unknown> | undefined> {
-    try {
-      const saved = (await call.mutateAsync({ op: "save", input: { record, ifRecord } })) as Saved;
-      setSavedAt(Date.parse(saved.updatedAt));
-      if (undoing) toast.success(`Undid ${field} for ${key}`);
-      else
-        toast.success(`Saved ${field} for ${key}`, {
-          action: { label: "Undo", onClick: () => void save(key, field, ifRecord, saved.record, true) },
+  function save(key: string, field: string, record: Record<string, unknown>, undoing = false) {
+    const tx = edit({ key, record });
+    const [mutation] = tx.mutations;
+    // The record as it was: nothing to save.
+    if (!mutation) return;
+    const before = (mutation.original as Saved).record;
+    tx.when("settled").then(
+      () => {
+        const saved = savedIn(tx, key);
+        // Held for an approval: its toast said so.
+        if (!saved) return;
+        setSavedAt(Date.parse(saved.updatedAt));
+        if (undoing) toast.success(`Undid ${field} for ${key}`);
+        else
+          toast.success(`Saved ${field} for ${key}`, {
+            action: { label: "Undo", onClick: () => save(key, field, before, true) },
+          });
+      },
+      (err: unknown) => {
+        const body = errorBodyOf(err);
+        if (body?.code === "record_changed") {
+          const conflict = { key, field, mine: record[field], current: body.current };
+          setConflicts((all) => new Map(all).set(conflictId(conflict), conflict));
+          return;
+        }
+        // A denial says the policy's reason; an edit made on one refused is rolled back with it.
+        toast.error(`Could not save ${field} for ${key}`, {
+          description: err === undefined ? "A change before it was not saved." : errorMessage(err),
         });
-      return saved.record;
-    } catch (err) {
-      if (toastIfHeld(err)) return undefined;
-      const body = errorBodyOf(err);
-      if (body?.code === "record_changed") {
-        const conflict = { key, field, mine: record[field], current: body.current };
-        setConflicts((all) => new Map(all).set(conflictId(conflict), conflict));
-        return undefined;
-      }
-      // A denial says the policy's reason; the cell shows the record as it is again.
-      toast.error(`Could not save ${field} for ${key}`, { description: errorMessage(err) });
-      return undefined;
-    }
+      },
+    );
   }
 
   /** Use mine: what you typed over the record as it is now, read again when the conflict did not say. */
@@ -254,16 +249,21 @@ export function DataGrid({
     dropConflict(conflict);
     if (!current) {
       toast.error(`${conflict.key} is gone`, { description: "Someone else deleted the record." });
-      return reread();
+      return void records.utils.refetch();
     }
+    // The record as it is now is what the edit is saved over (`ifRecord`).
+    await records.utils.writeUpsert(current);
     const { [conflict.field]: _, ...rest } = current.record;
-    const record = conflict.mine === undefined ? rest : { ...rest, [conflict.field]: conflict.mine };
-    await save(conflict.key, conflict.field, record, current.record);
+    save(
+      conflict.key,
+      conflict.field,
+      conflict.mine === undefined ? rest : { ...rest, [conflict.field]: conflict.mine },
+    );
   }
 
   const keepTheirs = (conflict: Conflict) => {
     dropConflict(conflict);
-    reread();
+    void records.utils.refetch();
   };
 
   const [editing, setEditingState] = useState<Editing | null>(null);
@@ -287,7 +287,7 @@ export function DataGrid({
   const startEditing = (typed?: string) => {
     if (!focused || !editable) return;
     const saved = focused.row.original;
-    const value = (savingRecords.get(saved.key) ?? saved.record)[editable.key];
+    const value = saved.record[editable.key];
     const start = draftOf(editable, value, undefined, people);
     const draft = draftOf(editable, value, typed, people);
     // At once, so the editor has the focus before the next key arrives.
@@ -295,29 +295,20 @@ export function DataGrid({
   };
 
   const commit = (then?: CellSelectionDirection, fromKeyboard = true) => {
-    const edit = editingNow.current;
-    if (!edit) return;
-    const field = fields.get(edit.field) as ScalarField;
-    const row = rows.find((r) => r.id === edit.key);
+    const cell = editingNow.current;
+    if (!cell) return;
+    const field = fields.get(cell.field) as ScalarField;
+    const row = rows.find((r) => r.id === cell.key);
     refocus.current = fromKeyboard;
     setEditing(null);
     if (then) table.moveCellSelection(then);
     // Left as it opened: never a save, even of a value the editor cannot hold (an enum's value
     // its options no longer have), which it would drop.
-    if (!row || edit.draft === edit.start) return;
-    const checked = recordWith(field, row.original.record, edit.draft);
-    if ("error" in checked) return void toast.error(`${edit.field}: ${checked.error}`);
-    const prior = lastSave.current.get(edit.key);
-    const queued = (async () => {
-      const base = (await prior) ?? row.original.record;
-      const next = recordWith(field, base, edit.draft);
-      if ("error" in next || JSON.stringify(next.record) === JSON.stringify(base)) return base;
-      return save(edit.key, edit.field, next.record, base);
-    })();
-    lastSave.current.set(edit.key, queued);
-    void queued.finally(() => {
-      if (lastSave.current.get(edit.key) === queued) lastSave.current.delete(edit.key);
-    });
+    if (!row || cell.draft === cell.start) return;
+    // Over the row as it shows, the edits before it still saving included.
+    const next = recordWith(field, row.original.record, cell.draft);
+    if ("error" in next) return void toast.error(`${cell.field}: ${next.error}`);
+    save(cell.key, cell.field, next.record);
   };
 
   useGridKeys(grid, {
@@ -374,7 +365,7 @@ export function DataGrid({
   const after = hydrated ? virtualizer.getTotalSize() - (items.at(-1)?.end ?? 0) : 0;
   const visible = table.getVisibleLeafColumns();
 
-  if (records.length === 0) {
+  if (listed.length === 0) {
     return (
       <Nothing title={filtered ? "No record matches" : "No records yet"}>
         {filtered ? "Change the filters to see others." : "Add one, or save one from a workflow."}
@@ -450,7 +441,6 @@ export function DataGrid({
             {items.map(({ index }) => {
               const row = rows[index]!;
               const saved = row.original;
-              const shown = savingRecords.get(saved.key) ?? saved.record;
               const rowConflicts = [...conflicts.values()].filter((c) => c.key === saved.key);
               return [
                 <TableRow
@@ -528,7 +518,7 @@ export function DataGrid({
                         ) : id === BY ? (
                           saved.updatedBy
                         ) : (
-                          <Value value={conflict ? conflict.mine : shown[id]} />
+                          <Value value={conflict ? conflict.mine : saved.record[id]} />
                         )}
                       </TableCell>
                     );
@@ -555,11 +545,11 @@ export function DataGrid({
       </div>
       <footer className="flex flex-wrap items-center gap-x-2 gap-y-1 border-t px-3 py-2 text-xs text-muted-foreground">
         <span>
-          {records.length >= limit
+          {listed.length >= limit
             ? `The first ${limit} records: filter them, or show more, to see the rest`
-            : records.length === 1
+            : listed.length === 1
               ? "1 record matches"
-              : `${records.length} records match`}
+              : `${listed.length} records match`}
         </span>
         {savedAt !== undefined && (
           <>
