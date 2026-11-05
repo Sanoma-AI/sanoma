@@ -5,7 +5,7 @@ import type { Box, Principal, Process } from "@sanoma-ai/workflows";
 import { AGENTS as AGENTS_GROUP, errorMessage, isVisitor } from "@sanoma-ai/workflows/shared";
 import { createUIMessageStream, generateId, type UIMessageStreamWriter } from "ai";
 import { type ChatMessage, pathOf, type SignInCard, textOf } from "../../lib/chat.ts";
-import { homeOf, openBox } from "./box-session.ts";
+import { homeOf, openBox, OWN_AGENTS_DIR } from "./box-session.ts";
 import { allowedPath, commitTurn, mustAllow, NO_SHELL, openDraft, outsideCheckout } from "./checkout.ts";
 import { harnessInstructions } from "./prompt.ts";
 import type { Engine, EngineTurn } from "./transcript.ts";
@@ -116,9 +116,6 @@ const CARD_EVERY = 250;
 /** Why a turn or its sign-in ended early: the person sent another message. */
 const STOPPED = "a new message stopped it";
 
-/** The directory under a box's home that holds the agents' installs (`<agent>`) and the shims. */
-const ACP = ".acp";
-
 /** A shim's refusal: what it says, and its exit. */
 const refusal = (name: string) => `echo "${name} is not available to a person's own agent in Sanoma" >&2\nexit 1\n`;
 
@@ -185,15 +182,17 @@ async function runTurn(name: OwnAgentName, engineTurn: EngineTurn, writer: UIMes
   writer.write({ type: "start", messageId: generateId() });
   const relay = new Relay(writer);
   // Opened last, so that nothing that fails before leaves it running; stopped however the turn ends.
-  const box = await openBox(step);
+  let box: Box | undefined;
   try {
     let turn: AcpTurn | undefined;
     try {
+      box = await openBox(step);
       // Kept across turns, the box's: the installs, and the person's sign-ins.
       const home = await homeOf(box);
-      const dir = join(home, ACP, name);
-      // A new message does not wait for a first install: the box's stop ends it, and the next turn installs again.
-      const [, shimmed] = await Promise.all([untilAborted(install(box, agent, dir), signal), shims(box, home)]);
+      const dir = join(home, OWN_AGENTS_DIR, name);
+      // A first install under way is waited for even by a new message: the box's stop would end it,
+      // and another turn may be waiting on it too.
+      const [, shimmed] = await Promise.all([install(box, agent, dir), shims(box, home)]);
       turn = new AcpTurn(agent, relay, signal, {
         box,
         chatId: chat.id,
@@ -215,7 +214,7 @@ async function runTurn(name: OwnAgentName, engineTurn: EngineTurn, writer: UIMes
     relay.finish();
     await commitTurn(engineTurn, draft, agent.title, writer);
   } finally {
-    await box.stop();
+    await box?.stop();
   }
   writer.write({ type: "finish" });
 }
@@ -238,6 +237,8 @@ class AcpTurn {
   readonly bins: string;
   /** Every process the turn started (the agent, its terminals, a sign-in), killed when it ends. */
   readonly #started = new Set<Started>();
+  /** Whether `stop` was called: a process started after it is killed at once. */
+  #stopped = false;
   readonly #terminals = new Map<string, Started>();
 
   constructor(
@@ -278,6 +279,8 @@ class AcpTurn {
   async run(text: string) {
     if (this.signal.aborted) return;
     const child = await this.#start(commandLine(join(this.bins, this.agent.bin), this.agent.args), { protocol: true });
+    // Stopped while it started: `stop` kills it.
+    if (this.signal.aborted) return;
     // Its stdout's end waits for its exit, so the connection sees how it ended first.
     const stdout = child.process.stdout.pipeThrough(new TransformStream({ flush: () => child.exited.then(() => {}) }));
     const connection = this.#client().connect(acp.ndJsonStream(child.process.stdin, stdout));
@@ -318,6 +321,7 @@ class AcpTurn {
 
   /** Kills every process the turn started, and waits for them to go, so nothing writes after the commit. */
   async stop() {
+    this.#stopped = true;
     const started = [...this.#started];
     this.#started.clear();
     for (const process of started) process.process.kill();
@@ -345,6 +349,12 @@ class AcpTurn {
       stdin: stdin || protocol,
     });
     const started = new Started(process, { protocol, limit });
+    if (this.#stopped) {
+      // The turn ended while it was starting: nothing may write after the commit.
+      process.kill();
+      await started.exited;
+      throw new Error("The turn has ended");
+    }
     this.#started.add(started);
     return started;
   }
@@ -755,37 +765,29 @@ function untilAborted<T>(promise: Promise<T>, signal: AbortSignal, timeout?: { m
   });
 }
 
-/** The shims written by this process, by their box and directory. */
-const shimmed = new Map<string, Promise<string>>();
-
 /**
  * The shims' directory (`.acp/shims` under the box's `home`), first on the agent's PATH: each of
- * `SHIMS`, so nothing of the box's signs the agent in. Written once per process and box, each
- * aside and then moved into place: an earlier process's agent may be running one now.
+ * `SHIMS`, so nothing of the box's signs the agent in. Written each turn, so a box that lost them
+ * gets them again, each aside and then moved into place: another turn's agent may be running one now.
  */
-export function shims(box: Box, home: string): Promise<string> {
-  const dir = join(home, ACP, "shims");
-  const key = `${box.id} ${dir}`;
-  let writing = shimmed.get(key);
-  if (!writing) {
-    writing = (async () => {
-      const names = Object.keys(SHIMS);
-      await Promise.all(
-        names.map((name) =>
-          box.write(join(dir, `.${name}.new`), new TextEncoder().encode(SHIMS[name]!), { mode: 0o755 }),
-        ),
-      );
-      await ran(box, names.map((name) => `mv -f .${name}.new ${name}`).join(" && "), dir);
-      return dir;
-    })();
-    shimmed.set(key, writing);
-    writing.catch(() => shimmed.delete(key));
-  }
-  return writing;
+export async function shims(box: Box, home: string): Promise<string> {
+  const dir = join(home, OWN_AGENTS_DIR, "shims");
+  const aside = `.${generateId()}`;
+  const names = Object.keys(SHIMS);
+  await Promise.all(
+    names.map((name) =>
+      box.write(join(dir, `${name}${aside}`), new TextEncoder().encode(SHIMS[name]!), { mode: 0o755 }),
+    ),
+  );
+  await ran(box, names.map((name) => `mv -f ${name}${aside} ${name}`).join(" && "), dir);
+  return dir;
 }
 
 /** The most of a process's output kept when it is given no limit, in bytes. */
 const OUTPUT_KEPT = 1 << 20;
+
+/** How long a process's last output may take to be kept after it exits, in ms. */
+const PIPES_WAIT = 200;
 
 /**
  * A process started in the box (`Box.run`), what it prints kept (the last `limit` bytes, from a
@@ -811,11 +813,15 @@ class Started {
   constructor(process: Process, { protocol, limit }: { protocol?: boolean; limit?: number } = {}) {
     this.process = process;
     this.limit = limit ?? OUTPUT_KEPT;
-    this.exited = process.wait().then(({ exitCode }) => (this.exitCode = exitCode));
     const keep = (stream: ReadableStream<Uint8Array>) =>
-      void stream.pipeTo(new WritableStream({ write: (chunk) => this.#print(chunk) })).catch(() => {});
-    keep(process.stderr);
-    if (!protocol) keep(process.stdout);
+      stream.pipeTo(new WritableStream({ write: (chunk) => this.#print(chunk) })).catch(() => {});
+    const kept = Promise.all([keep(process.stderr), protocol || keep(process.stdout)]);
+    // Exited once what it printed last has been kept too, or a moment after its exit when what it
+    // left running holds its output open.
+    this.exited = process.wait().then(async ({ exitCode }) => {
+      await Promise.race([kept, new Promise((done) => setTimeout(done, PIPES_WAIT).unref())]);
+      return (this.exitCode = exitCode);
+    });
   }
 
   #print(chunk: Uint8Array) {

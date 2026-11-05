@@ -14,7 +14,7 @@ import { join } from "node:path";
 import type { Box } from "@sanoma-ai/workflows";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { install, OWN_AGENTS, shims } from "../src/steps/agent/acp.ts";
-import { homeOf } from "../src/steps/agent/box-session.ts";
+import { boxSession, homeOf } from "../src/steps/agent/box-session.ts";
 import { localBackend } from "../src/steps/agent/local-box.ts";
 
 // What a person's own agent finds in their box (a local backend's): the shims first on its PATH
@@ -27,6 +27,7 @@ const scratch = realpathSync(mkdtempSync(join(tmpdir(), "sanoma-shims-")));
 let box: Box;
 let home = "";
 let dir = "";
+mkdirSync(join(scratch, "draft"));
 
 beforeAll(async () => {
   box = await localBackend(join(scratch, "boxes")).open({ name: "sanoma-acme-ada", image: "", size: 0 });
@@ -57,6 +58,16 @@ describe("a person's own agent's shims", () => {
         stderr: `${name} is not available to a person's own agent in Sanoma\n`,
       });
     }
+  });
+
+  it("are out of a company-key session's reach in the same box", async () => {
+    const session = boxSession(box, { id: "s1", root: join(scratch, "draft"), home, ports: [] });
+    await expect(session.readTextFile({ path: join(dir, "security") })).rejects.toThrow(/outside the checkout/);
+    await expect(session.writeTextFile({ path: join(dir, "gh"), content: "exit 0\n" })).rejects.toThrow(
+      /outside the checkout/,
+    );
+    // The rest of the box's home is the session's.
+    await session.writeTextFile({ path: join(home, ".pi/agent/settings.json"), content: "{}" });
   });
 
   it("answer security as an empty Keychain that takes nothing", async () => {

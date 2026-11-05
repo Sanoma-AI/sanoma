@@ -32,6 +32,9 @@ export interface BoxSessionOptions {
   ports: readonly number[];
 }
 
+/** The directory under a box's home that holds a person's own agents' installs and shims (`acp.ts`). */
+export const OWN_AGENTS_DIR = ".acp";
+
 /**
  * The box of the person `step` is run by, for the company (`boxName`), opened: where every coding
  * agent of theirs works, a turn's engine stopping it when the turn ends.
@@ -87,12 +90,14 @@ class BoxSession implements HarnessV1NetworkSandboxSession {
   async #path(path: string): Promise<string> {
     const full = resolve(this.defaultWorkingDirectory, path);
     // Its home, by real paths (a link there leads nowhere else), but no other session's run files
-    // (a bridge's start config holds the key), in any case (macOS's file system ignores it).
+    // (a bridge's start config holds the key) and nothing of the person's own agents (`OWN_AGENTS_DIR`:
+    // the shims first on their PATH), in any case (macOS's file system ignores it).
     const home = within(this.#home, full) ? await realWithin(this.#home, full) : undefined;
     if (home !== undefined) {
       const inside = home.inside.toLowerCase();
       const runs = relative(this.#home, this.#runs).toLowerCase();
-      if (!within(dirname(runs), inside) || within(runs, inside)) return home.full;
+      const own = within(OWN_AGENTS_DIR, inside);
+      if (!own && (!within(dirname(runs), inside) || within(runs, inside))) return home.full;
     }
     const allowed = await allowedPath(this.defaultWorkingDirectory, full);
     if (allowed === undefined) throw new Error(`${path} is outside the checkout, or under .git or node_modules`);
