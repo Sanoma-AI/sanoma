@@ -1,10 +1,11 @@
 import { getAuthTables } from "better-auth/db";
 import { emailOTP } from "better-auth/plugins/email-otp";
 import { magicLink } from "better-auth/plugins/magic-link";
-import { getTableColumns, getTableName, is } from "drizzle-orm";
+import { getTableColumns, is } from "drizzle-orm";
 import { PgTable } from "drizzle-orm/pg-core";
 import { describe, expect, it } from "vitest";
-import { loginTables } from "../src/db/tables.ts";
+import * as staff from "../src/db/staff.ts";
+import * as visitors from "../src/db/visitors.ts";
 import { TABLE_OPTIONS } from "../src/instance.ts";
 
 // Better Auth's own migrations are never run (the tables are declared, and the adapter reads
@@ -17,42 +18,34 @@ const models = getAuthTables({
   plugins: [emailOTP({ async sendVerificationOTP() {} }), magicLink({ async sendMagicLink() {} })],
 });
 
-const declared: Record<string, unknown> = loginTables("better_auth");
+/** The modules drizzle-kit reads, by their top-level exports: a table either leaves out has no migration. */
+const logins: Record<string, Record<string, unknown>> = { visitors, staff };
 
 describe("the tables", () => {
   it("declare every model Better Auth has, with its id, and every field, required and unique where it is", () => {
     expect(Object.keys(models).toSorted()).toEqual(["account", "rateLimit", "session", "user", "verification"]);
-    for (const [model, { fields }] of Object.entries(models)) {
-      const table = declared[model];
-      expect(is(table, PgTable), model).toBe(true);
-      const columns = getTableColumns(table as PgTable);
-      expect(columns.id?.primary, `${model}.id`).toBe(true);
-      for (const [field, { required, unique }] of Object.entries(fields)) {
-        const column = columns[field];
-        expect(column, `${model}.${field}`).toBeDefined();
-        expect(column!.notNull, `${model}.${field} required`).toBe(required === true);
-        expect(column!.isUnique, `${model}.${field} unique`).toBe(unique === true);
+    for (const [login, declared] of Object.entries(logins))
+      for (const [model, { fields }] of Object.entries(models)) {
+        const table = declared[model];
+        expect(is(table, PgTable), `${login}.${model}`).toBe(true);
+        const columns = getTableColumns(table as PgTable);
+        expect(columns.id?.primary, `${login}.${model}.id`).toBe(true);
+        for (const [field, { required, unique }] of Object.entries(fields)) {
+          const column = columns[field];
+          expect(column, `${login}.${model}.${field}`).toBeDefined();
+          expect(column!.notNull, `${login}.${model}.${field} required`).toBe(required === true);
+          expect(column!.isUnique, `${login}.${model}.${field} unique`).toBe(unique === true);
+        }
       }
-    }
   });
 
   it("declare no column Better Auth does not read", () => {
-    for (const [model, { fields }] of Object.entries(models)) {
-      const extra = Object.keys(getTableColumns(declared[model] as PgTable)).filter(
-        (c) => c !== "id" && !(c in fields),
-      );
-      expect(extra, model).toEqual([]);
-    }
-  });
-
-  it("are the same set in either schema, each in its own", () => {
-    const visitors = loginTables("better_auth");
-    const staff = loginTables("better_auth_staff");
-    expect(staff.schema.schemaName).toBe("better_auth_staff");
-    for (const model of Object.keys(models) as (keyof typeof visitors)[]) {
-      if (model === "schema") continue;
-      expect(getTableName(staff[model])).toBe(getTableName(visitors[model]));
-      expect(Object.keys(getTableColumns(staff[model]))).toEqual(Object.keys(getTableColumns(visitors[model])));
-    }
+    for (const [login, declared] of Object.entries(logins))
+      for (const [model, { fields }] of Object.entries(models)) {
+        const extra = Object.keys(getTableColumns(declared[model] as PgTable)).filter(
+          (c) => c !== "id" && !(c in fields),
+        );
+        expect(extra, `${login}.${model}`).toEqual([]);
+      }
   });
 });

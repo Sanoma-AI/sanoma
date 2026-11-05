@@ -1,19 +1,11 @@
-import { CLIENT_IP_HEADER, requestOrigin } from "@sanoma-ai/workflows";
-import {
-  applyMigrations,
-  databaseOn,
-  type Migrations,
-  migrationsApplied,
-  pgCode,
-  underPreparationLock,
-} from "@sanoma-ai/workflows/db";
+import { CLIENT_IP_HEADER, errorMessage, requestOrigin } from "@sanoma-ai/workflows";
+import { applyMigrations, databaseOn, migrationsApplied, pgCode, underPreparationLock } from "@sanoma-ai/workflows/db";
 import { type BetterAuthOptions, betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { emailOTP } from "better-auth/plugins/email-otp";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Pool } from "pg";
 import * as staff from "./db/staff.ts";
-import type { loginTables } from "./db/tables.ts";
 import * as visitors from "./db/visitors.ts";
 import staffJournal from "../drizzle/staff/meta/_journal.json" with { type: "json" };
 import visitorsJournal from "../drizzle/visitors/meta/_journal.json" with { type: "json" };
@@ -40,13 +32,11 @@ export type ExtraOptions = Omit<
 export const SCHEMAS = { visitors: visitors.schema.schemaName, staff: staff.schema.schemaName } as const;
 type Schema = (typeof SCHEMAS)[keyof typeof SCHEMAS];
 
-/** A login's tables (its `db/` module: Better Auth's models by name, as its Drizzle adapter reads them) and their generated migrations. */
-interface Login {
-  tables: ReturnType<typeof loginTables>;
-  migrations: Migrations;
-}
-
-/** Each schema's login: the journal tables are the runtime's neighbours in the schema `drizzle`. */
+/**
+ * Each schema's login: its tables (its `db/` module, Better Auth's models by name, as its Drizzle
+ * adapter reads them) and their generated migrations, whose journal tables are the runtime's
+ * neighbours in the schema `drizzle`.
+ */
 const LOGINS = {
   [SCHEMAS.visitors]: {
     tables: visitors,
@@ -64,7 +54,7 @@ const LOGINS = {
       journal: staffJournal,
     },
   },
-} satisfies Record<Schema, Login>;
+};
 
 export interface BetterAuthSetup<O extends ExtraOptions> {
   /** The pool the app's client runs on (`LoginContext.database`): one instance per pool it gives. */
@@ -224,9 +214,7 @@ const preparing =
           const why =
             pgCode(err) === SCHEMA_EXISTS
               ? `the schema ${schema} is from a release before this one, and its users sign in again: drop it (DROP SCHEMA ${schema} CASCADE) and start the worker again`
-              : err instanceof Error
-                ? err.message
-                : String(err);
+              : errorMessage(err);
           throw new Error(`better-auth: could not prepare ${schema}: ${why}`, { cause: err });
         },
       ),

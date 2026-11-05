@@ -2,17 +2,13 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { MigrationsJournal } from "../packages/workflows/src/db/migrate.ts";
 
 // Drizzle's migrator applies a migration only when it is newer than the newest one a database has
 // had, so a migration generated on a branch before another merged to `main` is skipped, silently,
 // on every database already past it. CI runs this on a pull request against `origin/main`, over
 // every migrations folder in the repository (`drizzle/<folder>/meta/_journal.json`, wherever git
 // tracks one): every entry a journal gains must be newer than the base's newest, with the next index.
-
-/** Drizzle's journal, `meta/_journal.json` of a migrations folder. */
-interface Journal {
-  entries: { idx: number; when: number; tag: string }[];
-}
 
 const repo = fileURLToPath(new URL("..", import.meta.url));
 const base = process.argv[2] ?? "origin/main";
@@ -28,21 +24,14 @@ try {
   process.exit(1);
 }
 
-/** The journal at `ref`, or undefined while the folder is not there. */
-const journalAt = (ref: string, path: string): Journal | undefined =>
-  git("ls-tree", "--full-tree", "--name-only", ref, "--", path).trim()
-    ? JSON.parse(git("show", `${ref}:${path}`))
-    : undefined;
-
 /** Where a migrations folder keeps its journal, wherever the folder is. */
-const PATTERN = "*/drizzle/*/meta/_journal.json";
+const JOURNAL = /(^|\/)drizzle\/[^/]+\/meta\/_journal\.json$/;
 
-/** The journals `ref` tracks (the working tree's for HEAD), by path. */
+/** The journals `ref` tracks (the working tree's for HEAD), by path; `ls-tree` takes no glob, so every path is listed and matched. */
 const journalsOf = (ref: string): string[] =>
-  (ref === "HEAD" ? git("ls-files", "--", PATTERN) : git("ls-tree", "-r", "--name-only", ref, "--", PATTERN))
-    .trim()
+  (ref === "HEAD" ? git("ls-files") : git("ls-tree", "-r", "--name-only", ref))
     .split("\n")
-    .filter(Boolean);
+    .filter((path) => JOURNAL.test(path));
 
 const journals = journalsOf("HEAD");
 if (journals.length === 0) {
@@ -51,13 +40,13 @@ if (journals.length === 0) {
 }
 
 const problems: string[] = [];
+const atBase = new Set(journalsOf(base));
 // A folder renamed or deleted: every database past its migrations would start them over under the new name.
-for (const path of journalsOf(base))
-  if (!journals.includes(path)) problems.push(`${path}: a journal on ${base}, and gone`);
+for (const path of atBase) if (!journals.includes(path)) problems.push(`${path}: a journal on ${base}, and gone`);
 for (const path of journals) {
-  const head: Journal = JSON.parse(readFileSync(join(repo, path), "utf8"));
-  const before = journalAt(base, path);
-  if (!before) continue;
+  if (!atBase.has(path)) continue;
+  const head: MigrationsJournal = JSON.parse(readFileSync(join(repo, path), "utf8"));
+  const before: MigrationsJournal = JSON.parse(git("show", `${base}:${path}`));
   const known = new Set(before.entries.map((e) => e.tag));
   const newest = Math.max(0, ...before.entries.map((e) => e.when));
   let idx = before.entries.length;
