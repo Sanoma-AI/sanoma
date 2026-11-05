@@ -65,10 +65,14 @@ const str = (s: Buffer | string) => {
   return Buffer.concat([uint32(b.length), b]);
 };
 
+/** A tunnel or a login that a wait does not change: the edge refused the key, or the server the SSH key. */
+export class RefusedError extends Error {}
+
 /**
  * An SSH connection as `USER` to the server behind the WebSocket at `url` (`https://`, sent with
  * `headers`), within `timeoutMs`. The host key is not checked: the instance makes a new one when
- * Agent37 moves it, and the tunnel is TLS to Agent37's edge, which checked the API key.
+ * Agent37 moves it, and the tunnel is TLS to Agent37's edge, which checked the API key. Fails
+ * with a `RefusedError` when the edge refuses the key (401, 403, 404) or the server the SSH key.
  */
 export function connect(
   url: string,
@@ -77,12 +81,16 @@ export function connect(
   timeoutMs: number,
 ): Promise<Client> {
   return new Promise((resolve, reject) => {
-    const client = new Client();
+    // A dropped connection, or one torn down here, ends the commands on it: each one's `wait` says so.
+    const client = new Client().on("error", () => {});
     const ws = new WebSocket(url, { headers, handshakeTimeout: timeoutMs });
-    const fail = (error: Error) => {
+    const fail = (error: Error & { level?: string }) => {
       client.end();
       ws.terminate();
-      reject(new Error(`the SSH tunnel to ${new URL(url).host} failed: ${error.message}`));
+      const refused =
+        error.level === "client-authentication" || /Unexpected server response: 40[134]\b/.test(error.message);
+      const message = `the SSH tunnel to ${new URL(url).host} failed: ${error.message}`;
+      reject(refused ? new RefusedError(message) : new Error(message));
     };
     ws.once("error", fail);
     ws.once("open", () => {
@@ -90,8 +98,6 @@ export function connect(
       client.once("error", fail);
       client.once("ready", () => {
         client.off("error", fail);
-        // A dropped connection ends the commands on it: each one's `wait` says so.
-        client.on("error", () => {});
         resolve(client);
       });
       client.connect({
@@ -166,13 +172,22 @@ const ABSENT = 44;
 
 /**
  * A box's commands and files over `client`: `run` an exec channel per command (`commandLine`),
- * `read` and `write` a `cat` each. A relative path or `cwd` is under the home.
+ * `read` and `write` a `cat` each, and `end`, which kills the process groups of the commands
+ * still running and closes the connection. A relative path or `cwd` is under the home.
  */
-export function sshBox(client: Client): Pick<Box, "run" | "read" | "write"> {
+export function sshBox(client: Client): Pick<Box, "run" | "read" | "write"> & { end(): Promise<void> } {
+  /** The pidfiles of the commands still running. */
+  const running = new Set<string>();
   return {
+    async end() {
+      const groups = [...running].map((f) => `kill -s KILL -- -"$(cat ${quote(f)} 2>/dev/null)" 2>/dev/null`);
+      if (groups.length) await once(client, `${groups.join("; ")}; true`).catch(() => undefined);
+      client.end();
+    },
     async run(command, { cwd, env, stdin, signal } = {}): Promise<Process> {
       const pidfile = `/tmp/sanoma-run-${randomBytes(8).toString("hex")}`;
       const channel = await exec(client, commandLine(command, { cwd, env, pidfile }));
+      running.add(pidfile);
       let status: number | undefined;
       let closed = false;
       channel.on("exit", (code: number | null, name?: string) => {
@@ -181,6 +196,7 @@ export function sshBox(client: Client): Pick<Box, "run" | "read" | "write"> {
       const exited = new Promise<{ exitCode: number }>((done) =>
         channel.on("close", () => {
           closed = true;
+          running.delete(pidfile);
           // No status: the connection dropped, and the command with it.
           done({ exitCode: status ?? 255 });
         }),

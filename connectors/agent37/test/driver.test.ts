@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { agent37 } from "../src/index.ts";
 import { agent37Driver } from "../src/driver.ts";
 import { fakeAgent37 } from "../src/fake.ts";
+import { wanted } from "../src/connector.ts";
 import { agent37 as declare } from "../src/resources.ts";
 import { replayOptions } from "./replay.ts";
 
@@ -27,6 +28,9 @@ describe("agent37.instance", () => {
     expect(() => declare.instance({ size: 2, memory: 8 })).toThrow("Agent37's shapes");
     expect(() => declare.instance({ disk: 13 })).toThrow("the disk is larger than the shape takes");
     expect(() => declare.instance({ id: "x" })).toThrow("leave out id");
+    // A size `open` is given over the declared one takes its own memory.
+    expect(wanted({ size: 4, memory: 16, disk: 12 }, { size: 2 })).toMatchObject({ size: 2, memory: 4, disk: 12 });
+    expect(wanted({ size: 4, memory: 16 }, { size: 4, image: "mine" })).toMatchObject({ memory: 16, image: "mine" });
     expect(() => resolveConfig({ workflows: [], connectors: [agent37] })).not.toThrow();
     expect(declare.instance.sandbox?.outputs({ id: "agent37", healthy: true })).toEqual({
       id: "agent37",
