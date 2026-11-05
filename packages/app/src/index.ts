@@ -30,7 +30,7 @@ import { STYLESHEET_FILE } from "./content-files.ts";
 import type { AdmittingLogin, LoginProvider, ServerEntry } from "./context.ts";
 import { appHandler, type AppHandlerOptions, type IngressRoute, localHost } from "./handler.ts";
 import { admitting } from "./login/admission.ts";
-import { publicFront, siteLogin } from "./login/public.ts";
+import { publicFront, servedOnceMade, siteLogin } from "./login/public.ts";
 import { loopbackLogin } from "./loopback.ts";
 import { type AppSnapshot, siteFileBroken } from "./snapshot.ts";
 import { liveSnapshot } from "./snapshot-build.ts";
@@ -232,12 +232,7 @@ export async function startApp(config: SanomaConfig, options: AppOptions = {}): 
       const domain = app.domains.get(site.name);
       const origins = [`http://${localHost(site.name)}:*`, ...(domain ? [`https://${domain}`] : [])];
       half.resolve(siteLogin(resolved, client, site, origins, options.social));
-      await half.promise.catch((err: unknown) => {
-        sites.delete(site.name);
-        console.error(
-          `sanoma app: ${siteDir(site.name)}'s login (${site.login}) could not start, so the site is not served: ${errorMessage(err)}`,
-        );
-      });
+      await servedOnceMade(sites, site, half.promise, "sanoma app");
     }),
   );
 

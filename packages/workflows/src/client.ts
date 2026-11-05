@@ -32,7 +32,7 @@ import { type Tokens, tokenStore } from "./tokens.ts";
 import { collectionsDriver } from "./collection.ts";
 import { type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { configuredSecrets } from "./credentials.ts";
-import { type Db, dbosClient, lazyDb, type LazyDb, spendInviteRequest } from "./db.ts";
+import { dbosClient, lazyDb, type LazyDb, spendInviteRequest } from "./db.ts";
 import { type CredentialStatus, credentialsOf } from "./env.ts";
 import { type ApprovalState, Principal, type WorkflowDefinition } from "./define.ts";
 import { APPLY_WORKFLOW, type ApplyInput, type ApplyReport } from "./apply.ts";
@@ -1524,8 +1524,8 @@ export class SanomaClient {
   }
 
   /** The pool the client reads and writes with, once the database is prepared: what a login runs on (`LoginContext.database`). */
-  async pool(): Promise<Pool> {
-    return ((await this.database.db()) as Db & { $client: Pool }).$client;
+  pool(): Promise<Pool> {
+    return this.database.pool();
   }
 
   /**

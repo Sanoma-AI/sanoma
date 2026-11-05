@@ -9,13 +9,14 @@ import {
   CLIENT_IP_HEADER,
   checkPreparedOnly,
   errorMessage,
+  GITHUB_APP,
   resolveConfig,
   SanomaClient,
   type SocialClients,
   useCedarWasm,
   useRootSnapshot,
 } from "@sanoma-ai/workflows";
-import { domainsOf, siteDir } from "@sanoma-ai/workflows/shared";
+import { domainsOf } from "@sanoma-ai/workflows/shared";
 import { betterAuthStaffLogin } from "@sanoma-ai/connector-better-auth";
 import start from "@tanstack/react-start/server-entry";
 import { cedar, config, root, snapshot } from "virtual:sanoma/app-bundle";
@@ -29,7 +30,7 @@ import {
 import type { AdmittingLogin } from "../context.ts";
 import { type AppHandler, appHandler } from "../handler.ts";
 import { admitting } from "../login/admission.ts";
-import { publicFront, siteLogin } from "../login/public.ts";
+import { publicFront, servedOnceMade, siteLogin } from "../login/public.ts";
 import { staffLogin } from "../login/staff.ts";
 import { plain } from "../server/webhooks.ts";
 import { servedOnWorker } from "../snapshot.ts";
@@ -58,11 +59,11 @@ const member = (path: string[]): unknown =>
 
 /** The company's GitHub App's OAuth client from the Worker's secrets, both or neither (one alone is warned about and no GitHub). */
 function socialOf(env: AppBundleEnv): SocialClients | undefined {
-  const { SANOMA_GITHUB_CLIENT_ID: clientId, SANOMA_GITHUB_CLIENT_SECRET: clientSecret } = env;
+  const { [GITHUB_APP.client_id]: clientId, [GITHUB_APP.client_secret]: clientSecret } = env;
   if (clientId && clientSecret) return { github: { clientId, clientSecret } };
   if (clientId || clientSecret) {
     console.warn(
-      "sanoma: GitHub sign-in needs both SANOMA_GITHUB_CLIENT_ID and SANOMA_GITHUB_CLIENT_SECRET: it is off",
+      `sanoma: GitHub sign-in needs both ${GITHUB_APP.client_id} and ${GITHUB_APP.client_secret}: it is off`,
     );
   }
   return undefined;
@@ -100,16 +101,7 @@ async function handlerOf(env: AppBundleEnv): Promise<AppHandler> {
       site.name,
       publicFront(site, half, (token) => client.tokens.resolve(token)),
     );
-    if (half) {
-      halves.push(
-        half.catch((err: unknown) => {
-          sites.delete(site.name);
-          console.error(
-            `sanoma: ${siteDir(site.name)}'s login (${site.login}) could not start, so the site is not served: ${errorMessage(err)}`,
-          );
-        }),
-      );
-    }
+    if (half) halves.push(servedOnceMade(sites, site, half, "sanoma"));
   }
   const app = appHandler(
     {

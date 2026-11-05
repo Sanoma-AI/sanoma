@@ -1,6 +1,14 @@
-import type { LoginHalf, Principal, ResolvedConfig, SanomaClient, SocialClients, Tokens } from "@sanoma-ai/workflows";
+import {
+  errorMessage,
+  type LoginHalf,
+  type Principal,
+  type ResolvedConfig,
+  type SanomaClient,
+  type SocialClients,
+  type Tokens,
+} from "@sanoma-ai/workflows";
 import type { SiteEntry } from "@sanoma-ai/workflows/describe";
-import { ANONYMOUS_PRINCIPAL, visitorPrincipal } from "@sanoma-ai/workflows/shared";
+import { ANONYMOUS_PRINCIPAL, siteDir, visitorPrincipal } from "@sanoma-ai/workflows/shared";
 import type { AdmittingLogin } from "../context.ts";
 import { secretValues } from "../server/secrets.ts";
 import { loginKey } from "./keys.ts";
@@ -41,6 +49,24 @@ export async function siteLogin(
     origins,
     ...(resolved.login && { sendCode: (email, code) => sendLoginCode(client, email, code) }),
     social,
+  });
+}
+
+/**
+ * Settles once `site`'s login `half` is made: one that fails (its key, its config) is logged, with
+ * the adapter's `prefix`, and its site taken off `sites`, so it is served on no host (503).
+ */
+export async function servedOnceMade(
+  sites: Map<string, AdmittingLogin>,
+  site: Pick<SiteEntry, "name" | "login">,
+  half: Promise<LoginHalf>,
+  prefix: string,
+): Promise<void> {
+  await half.catch((err: unknown) => {
+    sites.delete(site.name);
+    console.error(
+      `${prefix}: ${siteDir(site.name)}'s login (${site.login}) could not start, so the site is not served: ${errorMessage(err)}`,
+    );
   });
 }
 
