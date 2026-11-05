@@ -719,10 +719,11 @@ describe("scenarios and sandbox runs", () => {
     expect(started.body.workflow).toBe("announce");
     sandboxId = started.body.runId;
 
-    // The app decides nothing: the run waits on its approval as a live run does, and the worker checks it as it waits.
+    // The app decides nothing: the run waits on its approval as a live run does, and the worker
+    // checks it as it waits. Until it has, the app shows the Then steps unanswered (none `ok`).
     const held = await waitFor(
       () => detail(sandboxId),
-      (d) => d.approvals.some((a) => a.status === "pending") && d.checks !== undefined,
+      (d) => d.approvals.some((a) => a.status === "pending") && (d.checks?.some((c) => c.ok) ?? false),
     );
     expect(held.run).toMatchObject({ status: "waiting", sandbox: SCENARIO, startedBy: { id: "tester" } });
     expect(held.ledger.find((r) => r.type === "scenario.seeded")).toMatchObject({
@@ -758,7 +759,7 @@ describe("scenarios and sandbox runs", () => {
     const id = started.body.runId;
     const held = await waitFor(
       () => detail(id),
-      (d) => d.approvals.some((a) => a.status === "pending") && d.checks !== undefined,
+      (d) => d.approvals.some((a) => a.status === "pending") && (d.checks?.some((c) => c.ok) ?? false),
     );
     // A call not made so far may still be made: not settled, though met.
     expect(held.checks).toEqual([
@@ -790,9 +791,10 @@ describe("scenarios that no longer load", () => {
     // Started, then the file breaks while it waits: the checks the worker runs as it ends say why there are none.
     const started = await postRun({ scenario: SCENARIO });
     const id = started.body.runId;
+    // The worker's checks, not the app's unanswered placeholder (which the broken file takes away).
     const held = await waitFor(
       () => detail(id),
-      (d) => d.approvals.some((a) => a.status === "pending") && d.checks !== undefined,
+      (d) => d.approvals.some((a) => a.status === "pending") && (d.checks?.some((c) => c.ok) ?? false),
     );
     const text = readFileSync(featureFile, "utf8");
     const was = ctx;
