@@ -1,7 +1,7 @@
 import { DBOS } from "@dbos-inc/dbos-sdk";
-import type { AppRunner, AppSteps } from "./app-workflows.ts";
+import type { AppAction, AppRunner, AppStepContext, AppSteps } from "./app-workflows.ts";
 import type { ResolvedConfig, SanomaConfig } from "./config.ts";
-import { currentRun, type Run } from "./run.ts";
+import { type Run, runNow } from "./run.ts";
 import { APPLY_WORKFLOW } from "./shared.ts";
 
 // The app's built-ins' steps (`app-workflows.ts` is held to the workflow lint and imports no
@@ -19,41 +19,49 @@ export interface WorkerApp {
 export const NO_APP_STEPS =
   "This worker runs none of the app's actions: start it with the app's steps (`WorkerOptions.app`), as `sanoma serve` and `sanoma worker` do";
 
-const runNow = (): Run => {
-  const run = currentRun.getStore();
-  if (!run) throw new Error("An app step ran outside its run");
-  return run;
-};
+/** The app's steps the run's worker was given; thrown, saying `missing`, when it was given none. */
+export function appStepsOf(run: Run, missing: string): WorkerApp {
+  const app = run.state.appSteps;
+  if (!app) throw new Error(missing);
+  return app;
+}
+
+/** What the run's app step is given (`AppStepContext`): the worker's own client, connected on first use, and what the worker has. */
+export async function stepContext(run: Run, { config, resolved }: WorkerApp): Promise<AppStepContext> {
+  const { state } = run;
+  return {
+    client: await state.client(),
+    ...(state.source && { source: state.source }),
+    serially: state.serially,
+    config,
+    resolved,
+    by: run.actor,
+    runId: run.id,
+  };
+}
+
+/** The app's step `name` with `input`, in a DBOS step of the run's (`app:<name>`). */
+function step(run: Run, name: AppAction, input: unknown): Promise<any> {
+  const app = appStepsOf(run, NO_APP_STEPS);
+  return DBOS.runStep(
+    async () =>
+      (app.steps[name] as (step: AppStepContext, input: unknown) => Promise<unknown>)(
+        await stepContext(run, app),
+        input,
+      ),
+    { name: `app:${name}` },
+  );
+}
 
 /** The runner the app's built-ins run their work through. */
 export const appRunner: AppRunner = {
-  step: ((name: keyof AppSteps, input: never) => {
-    const run = runNow();
-    const app = run.state.appSteps;
-    if (!app) throw new Error(NO_APP_STEPS);
-    return DBOS.runStep(
-      () =>
-        run.state.serially(async () =>
-          (app.steps[name] as (step: unknown, input: unknown) => Promise<unknown>)(
-            {
-              client: await run.state.client(),
-              ...(run.state.source && { source: run.state.source }),
-              config: app.config,
-              resolved: app.resolved,
-              by: run.actor,
-              runId: run.id,
-            },
-            input,
-          ),
-        ),
-      { name: `app:${name}` },
-    );
-  }) as AppRunner["step"],
-
-  async apply(input) {
-    const run = runNow();
+  step: (name, input) => step(runNow("An app step"), name, input) as ReturnType<AppSteps[typeof name]>,
+  async stepThenApply(name, input) {
+    const run = runNow("An app step");
+    const { apply, ...rest } = await step(run, name, input);
+    // Its child, as its own actor, not waited for: an apply may wait for its plan's approval.
     const runId = `${run.id}:apply`;
-    await run.state.startRun(APPLY_WORKFLOW, runId, { input, startedBy: run.actor });
-    return runId;
+    await run.state.startRun(APPLY_WORKFLOW, runId, { input: apply, startedBy: run.actor });
+    return { ...rest, runId };
   },
 };

@@ -12,7 +12,6 @@ import {
   type ChangeFacts,
   type ChangeState,
   type ChangeVerified,
-  followBase,
   repositoryOf,
   isRules,
   mayDeclarePeople,
@@ -25,7 +24,7 @@ import { isRunControlError } from "./errors.ts";
 import { warn } from "./log.ts";
 import { inside } from "./paths.ts";
 import { peopleSources } from "./resources.ts";
-import { currentRun, type Run } from "./run.ts";
+import { runNow, type Run } from "./run.ts";
 import {
   AGENTS,
   APPLY_WORKFLOW,
@@ -42,12 +41,6 @@ import type { CheckResult, RemoteHalf } from "./source.ts";
 // deploying and verifying after the merge, and publishing where the change is. Here, not in
 // change-workflow.ts, which is held to the workflow lint and imports no DBOS; each reads its run
 // from `currentRun`.
-
-const runNow = (): Run => {
-  const run = currentRun.getStore();
-  if (!run) throw new Error("A change step ran outside its run");
-  return run;
-};
 
 /** True when the file at `path` is a people file (`mayDeclarePeople`), one `readPeople` would load; false when there is none. */
 const fileDeclaresPeople = async (path: string) => mayDeclarePeople(await readFile(path, "utf8").catch(() => ""));
@@ -135,7 +128,7 @@ export function changeSteps({ remotes, hosts }: ChangeStepsOptions): ChangeSteps
   const settled = (number: number) =>
     DBOS.runStep(
       async (): Promise<ChangeEvent> => {
-        const { host } = await repositoryOf(remotes, runNow().state.secrets);
+        const { host } = await repositoryOf(remotes, runNow("A change step").state.secrets);
         const pr = await host.pullRequest(number);
         if (pr.state === "merged") return { kind: "merged", sha: pr.mergeSha ?? pr.head };
         return pr.state === "closed" ? { kind: "closed" } : { kind: "commits" };
@@ -157,7 +150,7 @@ export function changeSteps({ remotes, hosts }: ChangeStepsOptions): ChangeSteps
     plan: (id, check) =>
       DBOS.runStep(
         async (): Promise<ChangeFacts> => {
-          const run = runNow();
+          const run = runNow("A change step");
           const source = sourceOfRun();
           if (!source.diff || !source.draft) throw new Error("This repository keeps no drafts (`Source.diff`)");
           const [{ files }, draft] = await Promise.all([source.diff(id), source.draft(id)]);
@@ -205,7 +198,7 @@ export function changeSteps({ remotes, hosts }: ChangeStepsOptions): ChangeSteps
     ahead: (merge) =>
       DBOS.runStep(
         async (): Promise<ChangeDecision> => {
-          const run = runNow();
+          const run = runNow("A change step");
           const op = run.state.ops.get(CHANGE_MERGE)!;
           const decision = await decide(run, op, op.input.parse(merge));
           if (decision.kind === "deny") return { answer: "deny", reason: decision.reason };
@@ -226,7 +219,7 @@ export function changeSteps({ remotes, hosts }: ChangeStepsOptions): ChangeSteps
       ),
 
     async next(number) {
-      const run = runNow();
+      const run = runNow("A change step");
       for (;;) {
         // An event comes from a request (`SanomaClient.changeEvent`), which wakes a stopped worker: no deadline.
         const event = await received(run, RECV_SECONDS);
@@ -234,19 +227,17 @@ export function changeSteps({ remotes, hosts }: ChangeStepsOptions): ChangeSteps
       }
     },
 
-    queued: (number) => drain(runNow(), () => settled(number)),
+    queued: (number) => drain(runNow("A change step"), () => settled(number)),
 
-    retire: (reason) => withdrawApprovals(runNow(), CHANGE_MERGE, reason),
+    retire: (reason) => withdrawApprovals(runNow("A change step"), CHANGE_MERGE, reason),
 
     async deploy() {
-      const run = runNow();
+      const run = runNow("A change step");
       // The checkout moves to the merge first, so the hosts and what apply reads are the merged ones.
       // Merged already: a deploy that fails is the change's to report, not a failed run.
-      const follow: ChangeDeploy["follow"] = await DBOS.runStep(() => followBase(remotes, run.state.secrets), {
+      const follow: ChangeDeploy["follow"] = await DBOS.runStep(() => run.state.followMain(), {
         name: "change:follow",
       });
-      // The apps taken from a source are told again against main as merged (no step: nothing the run reads).
-      if ("revision" in follow) run.state.refreshAppsBehind();
       const declared = run.state.workflows.has(APPLY_WORKFLOW)
         ? await DBOS.runStep(hosts, { name: "change:hosts" })
         : [];
@@ -256,7 +247,7 @@ export function changeSteps({ remotes, hosts }: ChangeStepsOptions): ChangeSteps
     },
 
     async verify({ apply }) {
-      const run = runNow();
+      const run = runNow("A change step");
       if (apply === undefined || !run.state.workflows.has(DRIFT_WORKFLOW)) return undefined;
       const { runId, output, error } = await child(run, DRIFT_WORKFLOW, "verify", {});
       const applied = new Set(apply.hosts);

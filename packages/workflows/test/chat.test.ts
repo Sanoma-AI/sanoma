@@ -2,16 +2,14 @@ import { useTestApp } from "@sanoma-ai/testing/harness";
 import { describe, expect, it } from "vitest";
 import {
   type AppSteps,
-  CHAT_WORKFLOW,
   type ChatTurnContext,
   type ChatTurnInput,
-  chatRunId,
   errorCode,
   memoryLedger,
-  NO_CHAT_STEPS,
   type Source,
 } from "../src/index.ts";
-import { visitorPrincipal } from "../src/shared.ts";
+import { NO_CHAT_STEPS } from "../src/chat-steps.ts";
+import { CHAT_WORKFLOW, chatRunId, visitorPrincipal } from "../src/shared.ts";
 import { ALICE, failure, freshDatabase, rootWith, waitFor } from "./harness.ts";
 
 // Needs Postgres: `pnpm db:up`. The built-in `chat`: a turn of a person's chat, started with

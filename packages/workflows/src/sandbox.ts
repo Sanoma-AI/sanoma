@@ -12,16 +12,12 @@ import { memorySecrets } from "./secret.ts";
 import { writeRunChecks } from "./db.ts";
 import { warn } from "./log.ts";
 import { check, type Given, loadScenarios, type RunChecks, type Scenario } from "./scenario.ts";
-import { errorMessage } from "./shared.ts";
+import { errorMessage, notLoaded } from "./shared.ts";
 
 /*
  * What a worker does for a sandbox run, imported only when it starts one: kept apart from
  * `scenario.ts`, which the app reads too, because it needs DBOS and the ledger.
  */
-
-/** The feature files that did not load, as a scenario not found names them. */
-const notLoaded = (errors: readonly { message: string }[]) =>
-  errors.length ? `; these files did not load: ${errors.map((e) => e.message).join("; ")}` : "";
 
 /** True for a fake that holds resources (`ResourceFake`, as `@sanoma-ai/bridge`'s `tfFake` is). */
 const holdsResources = (fake: Fake<unknown>): fake is Fake<unknown> & ResourceFake =>
@@ -225,23 +221,24 @@ export async function seedSandbox(run: Run, name: string, input: unknown): Promi
 /**
  * A seeded sandbox run's checks against its ledger so far, written for the app (`writeRunChecks`):
  * Cucumber runs its scenario's Then steps over the feature file as it reads now, which the agent
- * may have changed since. Called when the run waits and when it ends (`ended`, which settles every
- * check); a check met is settled before that when what it expects stays so (a call made, a
- * decision recorded). No step and no ledger record, so a replay neither depends on it nor differs
- * by it: a failure is warned about, and the run goes on.
+ * may have changed since. Called when the run waits and when it ends (`recordSandboxChecks`); a
+ * check met is settled when what it expects stays so (a call made, a decision recorded), and every
+ * one once the run has ended, which the app reads from the run's status. No step and no ledger
+ * record, so a replay neither depends on it nor differs by it: a failure is warned about, and the
+ * run goes on.
  */
-export async function recordChecks(run: Run, ended: boolean): Promise<void> {
-  if (run.sandbox === undefined || !run.fakeDrivers) return;
-  const { state, sandbox: name } = run;
+export async function recordChecks(run: Run, name: string): Promise<void> {
+  if (!run.fakeDrivers) return;
+  const { state } = run;
   try {
-    const checks = await checksOf(run, name, ended).catch((err: unknown): RunChecks => ({ error: errorMessage(err) }));
+    const checks = await checksOf(run, name).catch((err: unknown): RunChecks => ({ error: errorMessage(err) }));
     await writeRunChecks(await state.db(), run.id, checks);
   } catch (err) {
     warn(`run ${run.id}: could not record its checks against scenario "${name}": ${errorMessage(err)}`);
   }
 }
 
-async function checksOf({ id, state }: Run, name: string, ended: boolean): Promise<RunChecks> {
+async function checksOf({ id, state }: Run, name: string): Promise<RunChecks> {
   const loaded = await loadScenarios(state);
   const scenario = loaded.scenarios.find((s) => s.name === name);
   if (!scenario) return { error: `The feature files no longer have scenario "${name}"${notLoaded(loaded.errors)}` };
@@ -249,8 +246,8 @@ async function checksOf({ id, state }: Run, name: string, ended: boolean): Promi
   return {
     checks: checks.map((c, i) => {
       const e = scenario.expect[i]!;
-      // Met once: a call made, or a decision recorded, stays made.
-      return { ...c, settled: ended || (c.ok && (("called" in e && e.called === true) || "decision" in e)) };
+      // Met once: a call made, or a decision recorded, stays made. Every one is, once the run has ended (`runDetail`).
+      return { ...c, settled: c.ok && (("called" in e && e.called === true) || "decision" in e) };
     }),
   };
 }

@@ -3,24 +3,27 @@ import { useTestApp } from "@sanoma-ai/testing/harness";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
-  ADOPT_WORKFLOW,
   type AppStepContext,
   type AppSteps,
   APPLY_WORKFLOW,
-  CONNECT_EXISTING_WORKFLOW,
   defineWorkflow,
   errorCode,
-  GO_LIVE_HOST_WORKFLOW,
-  GO_LIVE_WORKFLOW,
   memoryLedger,
-  NO_APP_STEPS,
-  PATCH_WORKFLOW,
   resolveConfig,
   SanomaError,
   type Source,
 } from "../src/index.ts";
+import { NO_APP_STEPS } from "../src/app-steps.ts";
 import { describeConfig } from "../src/describe.ts";
-import { BUILT_IN_WORKFLOWS, visitorPrincipal } from "../src/shared.ts";
+import {
+  ADOPT_WORKFLOW,
+  BUILT_IN_WORKFLOWS,
+  CONNECT_EXISTING_WORKFLOW,
+  GO_LIVE_HOST_WORKFLOW,
+  GO_LIVE_WORKFLOW,
+  PATCH_WORKFLOW,
+  visitorPrincipal,
+} from "../src/shared.ts";
 import { companyFakes } from "./fixtures/company/fakes.ts";
 import { ALICE, failure, rootWith } from "./harness.ts";
 

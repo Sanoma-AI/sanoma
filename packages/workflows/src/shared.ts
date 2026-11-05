@@ -333,12 +333,15 @@ export const FOLLOW_WORKFLOW = "follow";
  */
 export const CHAT_WORKFLOW = "chat";
 
-/** The run id of the chat `chat`'s turn for the message `message`. */
-export const chatRunId = (chat: string, message: string) => `chat:${chat}:${message}`;
+/** What the run id of each of the chat `chat`'s turns starts with: exact, as a chat's id has no `:` (`DRAFT_ID`). */
+export const chatRunPrefix = (chat: string) => `chat:${chat}:`;
 
-/** The chat a turn's run is of (`chatRunId`); undefined for any other run id. */
-export const chatOfRun = (runId: string): string | undefined => CHAT_RUN.exec(runId)?.[1];
-const CHAT_RUN = new RegExp(`^chat:(${DRAFT_ID.source.slice(1, -1)}):${DRAFT_ID.source.slice(1, -1)}$`);
+/** The run id of the chat `chat`'s turn for the message `message`. */
+export const chatRunId = (chat: string, message: string) => `${chatRunPrefix(chat)}${message}`;
+
+/** The feature files that did not load (`loadScenarios`' errors), as a scenario not found names them after its name. */
+export const notLoaded = (errors: readonly { message: string }[]) =>
+  errors.length ? `; these files did not load: ${errors.map((e) => e.message).join("; ")}` : "";
 
 /** The `recv` topic a turn's run is told on (`ChatTell`): a stop, a sign-in code, its own turn's end. */
 export const CHAT_TOPIC = "chat:tell";

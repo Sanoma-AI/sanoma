@@ -2,6 +2,7 @@
 import "@tanstack/react-start/server-only";
 import { setTimeout as sleep } from "node:timers/promises";
 import {
+  type AppBehind,
   type ApprovalState,
   type DriftReport,
   deploymentKey,
@@ -20,7 +21,7 @@ import {
   type RunSummary,
   SanomaError,
 } from "@sanoma-ai/workflows";
-import { apiNameOf, isVisitor, flatten, LOGIN_CODE_WORKFLOW } from "@sanoma-ai/workflows/shared";
+import { apiNameOf, isVisitor, flatten, LOGIN_CODE_WORKFLOW, notLoaded } from "@sanoma-ai/workflows/shared";
 import { type ConfigDescription, permissionsGrid } from "@sanoma-ai/workflows/describe";
 import { isNotFound, isRedirect, notFound } from "@tanstack/react-router";
 import { z } from "zod";
@@ -172,10 +173,6 @@ function logReadOnce(runId: string, message: string, what: string, err: unknown)
   console.error(`sanoma app: could not read ${what} of run ${runId}:`, err);
 }
 
-/** The feature files that did not load, as `seedSandbox` names them: appended to a scenario not found. */
-export const notLoaded = (errors: readonly { message: string }[]) =>
-  errors.length ? `; these files did not load: ${errors.map((e) => e.message).join("; ")}` : "";
-
 /** A `login-code` run's start with its sealed code cut to what the page shows (`SEALED_SHOWN`), which is all a reader is sent. */
 function sealedShown(record: LedgerRecord): LedgerRecord {
   if (record.type !== "run.started" || typeof record.input !== "object" || record.input === null) return record;
@@ -191,28 +188,31 @@ export async function runDetail(app: AppContext, runId: string): Promise<RunDeta
   const run = await client.run(runId);
   if (!run) throw new ApiError(404, { error: `No run ${runId}`, code: "run_not_found" });
   const { approvals } = run;
-  let ledger: LedgerRecord[];
-  try {
-    ledger = await client.ledger(runId);
-    if (run.workflow === LOGIN_CODE_WORKFLOW) ledger = ledger.map(sealedShown);
-  } catch (err) {
+  const [read, told] = await Promise.all([
+    client.ledger(runId).then(
+      (records) => ({ records }),
+      (err: unknown) => ({ err }),
+    ),
+    // Beside the ledger: the worker writes them for a seeded run only, each time it waits and when it ends.
+    client.runChecks(runId),
+  ]);
+  if ("err" in read) {
     // A store reads a run nothing has recorded as no records, so this is a real failure (a
     // corrupt file, a permission): logged for the operator once, and the page shows the run and
     // why its ledger is missing.
-    const ledgerError = errorMessage(err);
-    logReadOnce(runId, ledgerError, "the ledger", err);
+    const ledgerError = errorMessage(read.err);
+    logReadOnce(runId, ledgerError, "the ledger", read.err);
     return { run, ledger: [], ledgerError, approvals };
   }
+  const ledger = run.workflow === LOGIN_CODE_WORKFLOW ? read.records.map(sealedShown) : read.records;
   // A run that has started records run.started first. Seeing none, the likeliest cause is an
   // app on another ledger than the worker's (another database, or a jsonl directory relative to
   // another cwd).
   if (ledger.length === 0 && run.status !== "queued") {
     return { run, ledger, ledgerError: NO_RECORDS, approvals };
   }
-  if (!ledger.some((r) => r.type === "scenario.seeded")) return { run, ledger, approvals };
-  // The worker runs a seeded run's checks each time it waits and when it ends; none yet until it first waits.
-  const told = await client.runChecks(runId);
-  if (!told) return { run, ledger, approvals };
+  // None yet until a seeded run first waits.
+  if (!told || !ledger.some((r) => r.type === "scenario.seeded")) return { run, ledger, approvals };
   if ("error" in told) return { run, ledger, approvals, checksError: told.error };
   // Every answer is final once the run has ended.
   const ended = isEnded(run.status);
@@ -227,7 +227,7 @@ export async function runDetail(app: AppContext, runId: string): Promise<RunDeta
 export async function appBehind(
   { client, snapshot }: Pick<AppContext, "client" | "snapshot">,
   folder: string,
-): Promise<{ behind: number } | { error: string }> {
+): Promise<AppBehind> {
   if (!snapshot.description.apps.some((app) => app.name === folder && app.source !== undefined)) {
     return { error: `No app apps/${folder}/ taken from a source` };
   }

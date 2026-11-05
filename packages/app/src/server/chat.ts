@@ -1,5 +1,5 @@
-import type { Chat, Principal, SanomaClient } from "@sanoma-ai/workflows";
-import { DRAFT_ID, isEnded } from "@sanoma-ai/workflows/shared";
+import { type Chat, ChatTurnInput, type Principal, type SanomaClient } from "@sanoma-ai/workflows";
+import { isEnded } from "@sanoma-ai/workflows/shared";
 import {
   createUIMessageStreamResponse,
   getToolName,
@@ -31,16 +31,21 @@ import { chatModel } from "./models.ts";
 
 /** What the browser sends: the chat's id (its own, for a new chat) and the person's new message. */
 const ChatRequest = z.object({
-  id: z.string().regex(DRAFT_ID, "a chat id is letters, digits, _ and -"),
+  id: ChatTurnInput.shape.chat,
   message: z.unknown(),
   /** The engine a new chat opens on; a chat keeps the one it opened on. */
   engine: z.string().default("loop"),
 });
 
-/** How often the reply's stream looks for the chunks the worker wrote, in ms. */
+/**
+ * How soon the reply's stream looks again for the chunks the worker writes, in ms: `POLL_MS` while
+ * they come, twice as long after each look that found none, up to `QUIET_MS` (a turn may wait a
+ * day for its person's sign-in).
+ */
 const POLL_MS = 100;
-/** How many looks without a chunk go by before it asks whether the turn's run has ended. */
-const STATUS_EVERY = 10;
+const QUIET_MS = 2_000;
+/** How often, while no chunk comes, it asks whether the turn's run has ended, in ms. */
+const STATUS_MS = 2_000;
 
 /**
  * `POST /api/chat`: a turn of the person's chat. Validates the new message (`safeValidateUIMessages`,
@@ -66,30 +71,24 @@ export async function postChat(request: Request, context: ActorContext & { site?
     // A new one, by the person. The transcript, written by the worker, is not validated again.
     const checked = await safeValidateUIMessages<ChatMessage>({ messages: [body.message] });
     if (!checked.success) throw invalid(`Not a chat message: ${checked.error.message}`);
-    const message = checked.data[0]!;
-    if (message.role !== "user" || !message.parts.every((part) => part.type === "text")) {
-      throw invalid("A chat takes the person's messages, as text");
+    // As a turn takes it: the person's text, under an id of letters, digits, _ and -.
+    const turn = ChatTurnInput.shape.message.safeParse(checked.data[0]);
+    if (!turn.success) {
+      throw invalid(`A chat takes the person's messages, as text: ${turn.error.issues[0]?.message ?? "not one"}`);
     }
-    if (!DRAFT_ID.test(message.id)) throw invalid("A chat message's id is letters, digits, _ and -");
-    if (chat && (await chats.load(chat.id)).some((m) => m.id === message.id)) {
-      throw invalid(`The chat has a message ${message.id} already`);
-    }
+    const message = turn.data;
+    const [had, model] = await Promise.all([
+      chat ? chats.has(chat.id, message.id) : false,
+      onModelConnector(named) ? chatModel(app) : undefined,
+    ]);
+    if (had) throw invalid(`The chat has a message ${message.id} already`);
     // A valid message the loop cannot answer yet: refused before the chat opens, as the composer says.
-    if (onModelConnector(named)) {
-      const model = await chatModel(app);
-      if (!model.ready) throw new ApiError(409, { error: noModelText(model.vendor) });
-    }
+    if (model && !model.ready) throw new ApiError(409, { error: noModelText(model.vendor) });
     if (!chat) {
       const title = textOf(message, " ").trim().slice(0, 80) || "A chat";
       await chats.open({ id: body.id, person: principal.id, engine: body.engine, title });
     }
-    const parts = message.parts.flatMap((part) =>
-      part.type === "text" ? [{ type: "text" as const, text: part.text }] : [],
-    );
-    const runId = await app.client.startTurn(
-      { chat: body.id, message: { id: message.id, role: "user", parts } },
-      { startedBy: principal },
-    );
+    const runId = await app.client.startTurn({ chat: body.id, message }, { startedBy: principal });
     return createUIMessageStreamResponse({ stream: replyStream(app.client, runId) });
   } catch (err) {
     const { status, body } = toApiError(err, "a chat turn");
@@ -99,13 +98,16 @@ export async function postChat(request: Request, context: ActorContext & { site?
 
 /**
  * The reply of the turn `runId` as a UI message stream: the chunks the worker writes
- * (`Chats.chunks`), looked for every `POLL_MS`, until the turn's stream ends. A run that ended
- * without ending it (it failed at once, on a worker with no agent; or its worker went away) ends
- * the stream with its error. The browser going away stops the reading, not the turn.
+ * (`Chats.chunks`), looked for less often while none come (`POLL_MS`), until the turn's stream
+ * ends. A run that ended without ending it (it failed at once, on a worker with no agent; or its
+ * worker went away) ends the stream with its error. The browser going away stops the reading, not
+ * the turn.
  */
 function replyStream(client: SanomaClient, runId: string): ReadableStream<UIMessageChunk> {
   let last = 0;
-  let quiet = 0;
+  let wait = POLL_MS;
+  // When it last asked after the run: never, so the first quiet look asks.
+  let asked = 0;
   const reading = new AbortController();
   return new ReadableStream<UIMessageChunk>({
     async pull(controller) {
@@ -115,10 +117,11 @@ function replyStream(client: SanomaClient, runId: string): ReadableStream<UIMess
         for (const chunk of read.chunks) controller.enqueue(chunk);
         if (read.ended) return controller.close();
         if (read.chunks.length) {
-          quiet = 0;
+          wait = POLL_MS;
           return;
         }
-        if (++quiet % STATUS_EVERY === 0) {
+        if (Date.now() - asked >= STATUS_MS) {
+          asked = Date.now();
           const run = await client.run(runId);
           if (run && isEnded(run.status)) {
             // What it wrote before it ended, then why.
@@ -130,7 +133,8 @@ function replyStream(client: SanomaClient, runId: string): ReadableStream<UIMess
             return controller.close();
           }
         }
-        await new Promise((done) => setTimeout(done, POLL_MS));
+        await new Promise((done) => setTimeout(done, wait));
+        wait = Math.min(wait * 2, QUIET_MS);
       }
     },
     cancel() {

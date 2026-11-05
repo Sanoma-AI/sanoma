@@ -11,6 +11,7 @@ import type {
   GO_LIVE_HOST_WORKFLOW,
   GO_LIVE_WORKFLOW,
   PATCH_WORKFLOW,
+  WorkflowFn,
 } from "./shared.ts";
 import type { Source } from "./source.ts";
 
@@ -18,7 +19,7 @@ import type { Source } from "./source.ts";
 // (its pages through `api.<name>`, polling `.result`) and the worker runs it, since only the
 // worker has the checkout. What each does is the app's, given to the worker as `AppSteps`
 // (`WorkerOptions.app`, `@sanoma-ai/app/steps`), and each is called in a step of its own run
-// (`app-steps.ts`), one repository write at a time per worker. Workflows like any other, held to
+// (`app-steps.ts`), its writes to the checkout one at a time per worker. Workflows like any other, held to
 // the same lint: no DBOS here, and no operation, so nothing goes through `ctx`.
 
 /** Adopt's input: a drift run, a resource it found drifted, and the fields whose value at the vendor to write into the resource's data file. */
@@ -112,12 +113,18 @@ export interface ConnectExistingOutput extends Written {
 
 /**
  * What an app step is given: the worker's own client (connected on first use, closed when the
- * worker stops), its repository (`WorkerOptions.source`), the config and its resolution, who
- * started the run (`by`, as `SanomaClient.start` admitted them) and the run's id.
+ * worker stops), its repository (`WorkerOptions.source`) and the lock its writes there take, the
+ * config and its resolution, who started the run (`by`, as `SanomaClient.start` admitted them)
+ * and the run's id.
  */
 export interface AppStepContext {
   client: SanomaClient;
   source?: Source;
+  /**
+   * Runs `write` once the worker's write before it has settled (`WorkerState.serially`): what a step
+   * holds around reading and writing the checkout and committing, so two never write one file.
+   */
+  serially<T>(write: () => Promise<T>): Promise<T>;
   config: SanomaConfig;
   resolved: ResolvedConfig;
   by: Principal;
@@ -139,8 +146,8 @@ export interface ChatTurnContext extends AppStepContext {
 
 /**
  * The app's own actions, which a worker runs (`WorkerOptions.app`): one method per built-in
- * workflow of the app's, each called in a DBOS step of its run, one at a time on the worker, since
- * each writes the repository (but a chat turn, `chat`). A step refuses by throwing: a `SanomaError` with the code the page
+ * workflow of the app's, each called in a DBOS step of its run, its writes to the checkout under
+ * `AppStepContext.serially`. A step refuses by throwing: a `SanomaError` with the code the page
  * branches on (`invalid_input` with its `issues`, or a `field`; `not_approver`), else an error
  * whose message the page shows. What a step returns is checkpointed, so it is JSON. One that
  * applies after its write returns what apply plans (`apply`), which its run starts as a child.
@@ -161,18 +168,41 @@ export interface AppSteps {
   ): Promise<Omit<ConnectExistingOutput, "runId"> & { apply: ApplyInput }>;
   /**
    * A chat turn: the reply to the person's message, by the chat's engine, written to the chat's
-   * transcript and, as it streams, to its chunks (`Chats.append`, then `Chats.end`). Not one at a
-   * time: a turn writes its own draft, not the checkout.
+   * transcript and, as it streams, to its chunks (`Chats.append`, then `Chats.end`). It writes its
+   * own draft, not the checkout.
    */
   chat(step: ChatTurnContext, input: ChatTurnInput): Promise<ChatTurnOutput>;
 }
 
+/** The app's steps an action's run calls (`AppRunner`): all but the chat's turn, which its own workflow runs. */
+export type AppAction = Exclude<keyof AppSteps, "chat">;
+
+/** The actions whose step answers what to apply after its write. */
+type Applying = {
+  [K in AppAction]: Awaited<ReturnType<AppSteps[K]>> extends { apply: ApplyInput } ? K : never;
+}[AppAction];
+
 /** What a built-in of the app's runs its work through (`appRunner`, in `app-steps.ts`). */
 export interface AppRunner {
-  /** The app's step `name` with `input`, in a DBOS step of this run, one at a time on the worker; refused when the worker runs no app steps. */
-  step<K extends keyof AppSteps>(name: K, input: Parameters<AppSteps[K]>[1]): ReturnType<AppSteps[K]>;
-  /** Starts apply with `input` as a child run of this one (`<run>:apply`), as its own actor, without waiting for it: its run id. */
-  apply(input: ApplyInput): Promise<string>;
+  /** The app's step `name` with `input`, in a DBOS step of this run; refused when the worker runs no app steps. */
+  step<K extends AppAction>(name: K, input: Parameters<AppSteps[K]>[1]): ReturnType<AppSteps[K]>;
+  /**
+   * The step, then the apply it answers started as a child run of this one (`<run>:apply`), as its
+   * own actor, without waiting for it: what the step answered besides, with that run's id.
+   */
+  stepThenApply<K extends Applying>(
+    name: K,
+    input: Parameters<AppSteps[K]>[1],
+  ): Promise<Omit<Awaited<ReturnType<AppSteps[K]>>, "apply"> & { runId: string }>;
+}
+
+/** The app's built-ins as its pages call them, by api name (`apiNameOf`): started, then their `.result` polled. */
+export interface AppApi {
+  adopt: WorkflowFn<AdoptInput, Written>;
+  patch: WorkflowFn<PatchInput, PatchOutput>;
+  goLive: WorkflowFn<GoLiveInput, GoLiveOutput>;
+  goLiveHost: WorkflowFn<GoLiveHostInput, GoLiveOutput>;
+  connectExisting: WorkflowFn<ConnectExistingInput, ConnectExistingOutput>;
 }
 
 /** The built-in workflows of the app's actions, over `runner`: `resolveConfig` adds them to every config. */
@@ -201,10 +231,7 @@ export function appWorkflows(runner: AppRunner): WorkflowDefinition<any, any>[] 
       trigger: "manual",
       input: GoLiveInput,
       uses: [],
-      run: async (_ctx, input): Promise<GoLiveOutput> => {
-        const { apply } = await runner.step("goLive", input);
-        return { runId: await runner.apply(apply) };
-      },
+      run: async (_ctx, input): Promise<GoLiveOutput> => runner.stepThenApply("goLive", input),
     }),
     defineWorkflow({
       name: "go-live-host" satisfies typeof GO_LIVE_HOST_WORKFLOW,
@@ -212,10 +239,7 @@ export function appWorkflows(runner: AppRunner): WorkflowDefinition<any, any>[] 
       trigger: "manual",
       input: GoLiveHostInput,
       uses: [],
-      run: async (_ctx, input): Promise<GoLiveOutput> => {
-        const { apply } = await runner.step("goLiveHost", input);
-        return { runId: await runner.apply(apply) };
-      },
+      run: async (_ctx, input): Promise<GoLiveOutput> => runner.stepThenApply("goLiveHost", input),
     }),
     defineWorkflow({
       name: "connect-existing" satisfies typeof CONNECT_EXISTING_WORKFLOW,
@@ -223,10 +247,7 @@ export function appWorkflows(runner: AppRunner): WorkflowDefinition<any, any>[] 
       trigger: "manual",
       input: ConnectExistingInput,
       uses: [],
-      run: async (_ctx, input): Promise<ConnectExistingOutput> => {
-        const { apply, ...connected } = await runner.step("connectExisting", input);
-        return { ...connected, runId: await runner.apply(apply) };
-      },
+      run: async (_ctx, input): Promise<ConnectExistingOutput> => runner.stepThenApply("connectExisting", input),
     }),
   ];
 }

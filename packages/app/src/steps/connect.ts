@@ -14,12 +14,13 @@ import {
 import { type DataValue, formatOptions, renderDataFile } from "@sanoma-ai/workflows/describe";
 import { secret as secretOf } from "@sanoma-ai/workflows/resources";
 import { INFRA, PASSWORD_NOTE } from "../api.ts";
+import { rootOf } from "./writes.ts";
 
 // Connecting an existing repository or database, in the worker (the built-in `connect-existing`):
 // each is imported by its name or ref, declared in `resources/sanoma/infra.ts` from what was read,
 // and bound to that file's declaration by an apply run that only binds, which the run starts. In a
 // repository with a remote, the file goes on a branch of its own for a person to merge; without
-// one (local), it is committed where the checkout is.
+// one, it is committed where the checkout is.
 
 /** The branch the change waits on, in a repository with a remote. */
 export const CONNECT_BRANCH = "setup/connect-existing";
@@ -62,8 +63,7 @@ const EXISTING = {
  */
 export async function connectExisting(step: AppStepContext, request: ConnectExistingInput) {
   const { resolved, source, by } = step;
-  const { root } = resolved;
-  if (root === undefined) throw new Error("The config has no root, so its data files cannot be written");
+  const root = rootOf(step);
   const path = join(root, INFRA);
   if (existsSync(path)) throw new Error(`${INFRA} is there already: declare what to connect in it instead`);
   const wanted = (["repository", "project"] as const).flatMap((what) => {
@@ -86,36 +86,36 @@ export async function connectExisting(step: AppStepContext, request: ConnectExis
   const rendered = await renderDataFile({ imports, exports }, formatOptions(root));
   const text = request.project ? `${PASSWORD_NOTE.map((line) => `// ${line}\n`).join("")}${rendered}` : rendered;
 
-  const git = source && (await gitAt(source.root));
-  const branch = git && (await git("remote")) ? CONNECT_BRANCH : undefined;
-  if (branch) {
-    try {
-      await git!("switch", "--quiet", "-c", branch);
-    } catch (err) {
-      throw new Error(`Could not start the branch ${branch}: ${errorMessage(err)}`, { cause: err });
-    }
-  }
   const names = wanted.map((w) => `${w.vendor} ${w.given}`).join(" and ");
-  let commit: { revision: string } | undefined;
-  try {
-    await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, text);
-    commit = await source?.commit({ paths: [relative(source.root, path)], message: `Connect ${names}`, author: by.id });
-  } catch (err) {
-    // Left as it was: no file, and back on the branch it started from, so connecting again works.
-    await rm(path, { force: true });
-    if (branch) await git!("switch", "--quiet", "-").then(() => git!("branch", "-D", branch));
-    throw new Error(`Could not commit ${INFRA}: ${errorMessage(err)}`, { cause: err });
-  }
-  const diff = branch && commit ? await git!("show", "--format=", commit.revision) : undefined;
-  return {
-    file: INFRA,
-    text,
-    ...commit,
-    ...(branch && { branch }),
-    ...(diff && { diff }),
-    apply: { only: Object.keys(bind), bind },
-  };
+  const landed = await step.serially(async () => {
+    const git = source && (await gitAt(source.root));
+    const branch = git && (await git("remote")) ? CONNECT_BRANCH : undefined;
+    if (branch) {
+      try {
+        await git!("switch", "--quiet", "-c", branch);
+      } catch (err) {
+        throw new Error(`Could not start the branch ${branch}: ${errorMessage(err)}`, { cause: err });
+      }
+    }
+    let commit: { revision: string } | undefined;
+    try {
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, text);
+      commit = await source?.commit({
+        paths: [relative(source.root, path)],
+        message: `Connect ${names}`,
+        author: by.id,
+      });
+    } catch (err) {
+      // Left as it was: no file, and back on the branch it started from, so connecting again works.
+      await rm(path, { force: true });
+      if (branch) await git!("switch", "--quiet", "-").then(() => git!("branch", "-D", branch));
+      throw new Error(`Could not commit ${INFRA}: ${errorMessage(err)}`, { cause: err });
+    }
+    const diff = branch && commit ? await git!("show", "--format=", commit.revision) : undefined;
+    return { ...commit, ...(branch && { branch }), ...(diff && { diff }) };
+  });
+  return { file: INFRA, text, ...landed, apply: { only: Object.keys(bind), bind } };
 }
 
 /**

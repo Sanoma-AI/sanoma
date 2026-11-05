@@ -1,9 +1,9 @@
 import { DBOS } from "@dbos-inc/dbos-sdk";
-import { BASE, type ChangeEvent, followBase, repositoryOf } from "./change.ts";
+import { BASE, type ChangeEvent, repositoryOf } from "./change.ts";
 import { errorCode, vendorCodeOf } from "./errors.ts";
 import type { FollowOutput, FollowSteps, FollowTarget } from "./follow-workflow.ts";
 import { warn } from "./log.ts";
-import { currentRun, type Run } from "./run.ts";
+import { runNow, type Run } from "./run.ts";
 import { APPLY_WORKFLOW, HOST_CHECK_AGENT, isEnded } from "./shared.ts";
 import { draftOf, type RemoteHalf, type RepoRef } from "./source.ts";
 
@@ -12,12 +12,6 @@ import { draftOf, type RemoteHalf, type RepoRef } from "./source.ts";
 // its host says. Each reads its run from `currentRun`; the worker's own client tells and reads
 // the changes, as `host-check`, and every write to the checkout is one of the worker's, one at a
 // time (`WorkerState.serially`).
-
-const runNow = (): Run => {
-  const run = currentRun.getStore();
-  if (!run) throw new Error("A follow step ran outside its run");
-  return run;
-};
 
 /** Whether two references name one repository: a host's names are compared without case. */
 const sameRepo = (a: RepoRef, b: RepoRef) =>
@@ -47,7 +41,7 @@ export function followSteps({ remotes, hosts }: FollowStepsOptions): FollowSteps
           const main = event.kind === "pushed" && event.branch === BASE;
           const id = draftOf(event.branch);
           if (!main && id === undefined) return { ignored: `${event.branch} is neither ${BASE} nor a draft's branch` };
-          const run = runNow();
+          const run = runNow("A follow step");
           if (!run.state.source) return { ignored: "This worker has no repository" };
           const found = await repository(run);
           if (!found) return { ignored: "This worker's repository has no remote on a host a connector reads" };
@@ -60,27 +54,21 @@ export function followSteps({ remotes, hosts }: FollowStepsOptions): FollowSteps
       ),
 
     async main(head) {
-      const run = runNow();
+      const run = runNow("A follow step");
       const deploy = `deploy:${head}`;
       const declared = await DBOS.runStep(
         async () => {
           const client = await run.state.client();
-          const [deployed, open] = await Promise.all([
-            client.run(deploy),
-            client.changes({ open: true, limit: Number.POSITIVE_INFINITY }),
-          ]);
-          if (deployed || open.some((c) => c.state.phase === "merging" || c.state.phase === "deploying")) {
-            return undefined;
-          }
+          const [deployed, deploying] = await Promise.all([client.run(deploy), client.changeDeploying()]);
+          if (deployed || deploying) return undefined;
           // First, as a change's deploy does: the hosts, and what apply reads, are then main's.
-          const moved = await run.state.serially(() => followBase(remotes, run.state.secrets, run.state.source));
+          const moved = await run.state.followMain();
           if (!("revision" in moved)) {
             // Nothing recorded as `deploy:<head>`: a later push deploys it.
             throw new Error(
               `${BASE} was not deployed: the checkout did not follow it: ${"skipped" in moved ? moved.skipped : moved.error}`,
             );
           }
-          run.state.refreshAppsBehind();
           return run.state.workflows.has(APPLY_WORKFLOW) ? await hosts() : [];
         },
         { name: "follow:main" },
@@ -95,7 +83,7 @@ export function followSteps({ remotes, hosts }: FollowStepsOptions): FollowSteps
     draft: (event, id) =>
       DBOS.runStep(
         async (): Promise<{ told: ChangeEvent; key: string } | { ignored: string }> => {
-          const run = runNow();
+          const run = runNow("A follow step");
           const change = await (await run.state.client()).change(id);
           if (!change || isEnded(change.status)) return { ignored: `The draft ${id} has no open change` };
           const key = `${event.kind}:${event.branch}:`;
@@ -129,7 +117,7 @@ export function followSteps({ remotes, hosts }: FollowStepsOptions): FollowSteps
     tell: (id, told, key) =>
       DBOS.runStep(
         async () => {
-          const client = await runNow().state.client();
+          const client = await runNow("A follow step").state.client();
           await client.changeEvent(id, told, { by: HOST_CHECK_AGENT, key }).catch((err: unknown) => {
             // Ended, or gone, since it was read: nothing to tell.
             if (!["run_ended", "run_not_found"].includes(errorCode(err) ?? "")) throw err;

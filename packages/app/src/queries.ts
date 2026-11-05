@@ -1,18 +1,4 @@
-import type {
-  AdoptInput,
-  ApprovalState,
-  ChangeView,
-  ConnectExistingInput,
-  ConnectExistingOutput,
-  GoLiveHostInput,
-  GoLiveInput,
-  GoLiveOutput,
-  PatchInput,
-  PatchOutput,
-  RunStatus,
-  RunSummary,
-  Written,
-} from "@sanoma-ai/workflows";
+import type { AppApi, ApprovalState, ChangeView, RunStatus, RunSummary } from "@sanoma-ai/workflows";
 import type {
   CollectionEntry,
   ConfigDescription,
@@ -28,7 +14,6 @@ import {
   LIST_LIMIT,
   type ListQuery,
   type Saved,
-  type WorkflowFn,
 } from "@sanoma-ai/workflows/shared";
 import { type QueryClient, queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { linkOptions, useNavigate } from "@tanstack/react-router";
@@ -95,13 +80,7 @@ export const api: Api = createApi((request) => callFn({ data: request }));
  * the run ends), so the worker runs it and the page gets its output, or its failure as an
  * `ApiError`. Keyed by api name (`apiNameOf`).
  */
-export const appApi = api as unknown as {
-  adopt: WorkflowFn<AdoptInput, Written>;
-  patch: WorkflowFn<PatchInput, PatchOutput>;
-  goLive: WorkflowFn<GoLiveInput, GoLiveOutput>;
-  goLiveHost: WorkflowFn<GoLiveHostInput, GoLiveOutput>;
-  connectExisting: WorkflowFn<ConnectExistingInput, ConnectExistingOutput>;
-};
+export const appApi = api as unknown as AppApi;
 
 /** How often the runs and a run's detail refresh while a page shows them. */
 export const POLL_MS = 2_000;

@@ -44,7 +44,7 @@ const sourceOf = (config: SanomaConfig) => localGitSource(rootOf(config), { data
 /**
  * What a worker of the launcher's starts with: promoted, since a local worker is always the
  * version to take queued runs, even one seen before; the checkout as its source; the app's steps,
- * which the app's built-in workflows run (Adopt, Save, going live, connecting); and the staff
+ * which the app's built-in workflows run (Adopt, Save, going live, connecting, a chat's turn); and the staff
  * login's tables among what it prepares, since no config names that login (`appOptions` makes it).
  */
 export const workerOptions = (config: SanomaConfig) => ({

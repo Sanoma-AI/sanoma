@@ -11,7 +11,6 @@ import {
   type PatchInput,
   type PatchOutput,
   peopleSources,
-  type Principal,
   remoteFor,
   SanomaError,
   type Source,
@@ -22,11 +21,12 @@ import { changePage } from "../server/core.ts";
 
 // A data file's change from the app's own pages, in the worker (the built-ins `adopt` and
 // `patch`): Adopt (a drifted field's value at the vendor) and a form's Save, each written into the
-// checkout (or a draft of it) and committed through the worker's repository. The worker runs one
-// at a time, so two never read the same file and both write it.
+// checkout (or a draft of it) and committed through the worker's repository, each read, write
+// and commit one of the worker's writes (`AppStepContext.serially`), so two never read the same
+// file and both write it.
 
 /** The config's root, where its data files are: a config without one has none to write. */
-function rootOf({ resolved }: AppStepContext): string {
+export function rootOf({ resolved }: Pick<AppStepContext, "resolved">): string {
   if (resolved.root === undefined) throw new Error("The config has no root, so its data files cannot be written");
   return resolved.root;
 }
@@ -53,19 +53,21 @@ export async function adopt(step: AppStepContext, { runId, id, paths }: AdoptInp
   // The id is `<file>#<export>`, the file relative to the root: the drift run read it there.
   const at = id.lastIndexOf("#");
   const file = id.slice(0, at);
-  let text: string;
-  try {
-    text = await setFields(await readFile(join(root, file), "utf8"), id.slice(at + 1), fields, formatOptions(root));
-  } catch (err) {
-    throw new Error(`Could not adopt into ${file}: ${errorMessage(err)}`, { cause: err });
-  }
-  return written(step, file, text, `Adopt ${paths.join(", ")} of ${result.name} from ${result.vendor}`);
+  return step.serially(async () => {
+    let text: string;
+    try {
+      text = await setFields(await readFile(join(root, file), "utf8"), id.slice(at + 1), fields, formatOptions(root));
+    } catch (err) {
+      throw new Error(`Could not adopt into ${file}: ${errorMessage(err)}`, { cause: err });
+    }
+    return written(step, file, text, `Adopt ${paths.join(", ")} of ${result.name} from ${result.vendor}`);
+  });
 }
 
 /**
  * Writes `text` into the checkout's `file` (relative to the root), then commits it through the
  * worker's repository, when it has one, as the run's actor: what Adopt and a patch without a
- * remote land as.
+ * remote land as. Under `serially`, with the read it writes after.
  */
 async function written(step: AppStepContext, file: string, text: string, message: string): Promise<Written> {
   const path = join(rootOf(step), file);
@@ -119,32 +121,35 @@ export async function patch(step: AppStepContext, { at, fields, origin }: PatchI
   if (source?.draft && (await reviewsChanges(step, source))) {
     // The file as the draft has it: main's, which the change is reviewed against.
     const id = `ui-${randomUUID().slice(0, 8)}`;
-    const draft = await source.draft(id);
-    const inDraft = join(draft.root, relative(source.root, root));
     try {
-      const { text } = await edited(inDraft);
-      await writeFile(join(inDraft, at.file), text);
-      await draft.commit({ paths: [relative(draft.root, join(inDraft, at.file))], message, author: by.id });
+      await step.serially(async () => {
+        const draft = await source.draft!(id);
+        const inDraft = join(draft.root, relative(source.root, root));
+        const { text } = await edited(inDraft);
+        await writeFile(join(inDraft, at.file), text);
+        await draft.commit({ paths: [relative(draft.root, join(inDraft, at.file))], message, author: by.id });
+      });
       const page = origin && changePage(id, origin);
       return { change: await client.openChange({ id, title: message, ...(page && { page }) }, { startedBy: by }) };
     } catch (err) {
       // No change opened on it (a policy refusing the change, say): the draft would be left behind with nothing to close it.
-      await source.closeDraft?.(id);
+      await step.serially(async () => source.closeDraft?.(id));
       throw err;
     }
   }
-  const { before, text } = await edited(root);
-  if ((isRules(at.file) || mayDeclarePeople(before) || peopleSources(root).has(at.file)) && !isAdmin(by)) {
-    throw new SanomaError(
-      "not_approver",
-      `A change to ${at.file} waits for an admin, and this company has no remote to review on`,
-      { approver: { group: ADMIN } },
-    );
-  }
-  return written(step, at.file, text, message);
+  return step.serially(async () => {
+    const { before, text } = await edited(root);
+    const rules = isRules(at.file) || mayDeclarePeople(before) || peopleSources(root).has(at.file);
+    if (rules && by.groups?.includes(ADMIN) !== true) {
+      throw new SanomaError(
+        "not_approver",
+        `A change to ${at.file} waits for an admin, and this company has no remote to review on`,
+        { approver: { group: ADMIN } },
+      );
+    }
+    return written(step, at.file, text, message);
+  });
 }
-
-const isAdmin = (actor: Principal) => actor.groups?.includes(ADMIN) === true;
 
 /**
  * Whether a change can be reviewed: the repository drafts and has a remote that a connector's

@@ -41,6 +41,8 @@ export interface Chats {
   upsert(id: string, messages: readonly UIMessage[]): Promise<void>;
   /** The chat's messages in order; none for a chat that has none. */
   load(id: string): Promise<UIMessage[]>;
+  /** Whether the chat `id` has a message `message`. */
+  has(id: string, message: string): Promise<boolean>;
   /** The chat `id`, or undefined when there is none. */
   get(id: string): Promise<Chat | undefined>;
   /** The person's chats, the newest first: the latest 50. */
@@ -109,6 +111,15 @@ export function chatStore(db: () => Promise<Db>): Chats {
         .where(eq(chatMessages.chatId, id))
         .orderBy(asc(chatMessages.seq), asc(chatMessages.id));
       return rows.map((row) => row.message);
+    },
+    async has(id, message) {
+      const [row] = await (
+        await db()
+      )
+        .select({ id: chatMessages.id })
+        .from(chatMessages)
+        .where(and(eq(chatMessages.chatId, id), eq(chatMessages.id, message)));
+      return row !== undefined;
     },
     async get(id) {
       const [row] = await (await db()).select().from(chats).where(eq(chats.id, id));

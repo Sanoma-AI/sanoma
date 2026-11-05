@@ -5,9 +5,9 @@ import { RejectedError, WithdrawnError } from "./errors.ts";
 import { entry, write } from "./ledger.ts";
 import { warn } from "./log.ts";
 import type { Placed } from "./call.ts";
-import type { Run } from "./run.ts";
+import { recordSandboxChecks, type Run } from "./run.ts";
 import { readPeople } from "./resources.ts";
-import { approverLabel, isVisitor, OWN_CHANGE, refusalOf } from "./shared.ts";
+import { approverLabel, errorMessage, isVisitor, OWN_CHANGE, refusalOf } from "./shared.ts";
 
 // The wire contract between a run waiting on approvals and whoever decides them. The client
 // imports this file and never the worker's.
@@ -140,8 +140,10 @@ export async function awaitApproval(
       { key: state.id, at: state.requestedAt },
     ),
   );
-  // A sandbox run's checks as it starts to wait, for the app; imported here, so a live run never loads Cucumber.
-  if (run.sandbox !== undefined) await (await import("./sandbox.ts")).recordChecks(run, false);
+  // A sandbox run's checks as it starts to wait, for the app, in the background: the wait is not held for them.
+  void recordSandboxChecks(run).catch((err: unknown) =>
+    warn(`run ${run.id}: its checks were not recorded: ${errorMessage(err)}`),
+  );
   for (;;) {
     // A decision comes from a request (`SanomaClient.decide`), which wakes a stopped worker: no deadline.
     const raw = await run.state.deadlines.waiting(run.id, { kind: "approval" }, () =>

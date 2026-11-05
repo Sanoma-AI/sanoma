@@ -2,7 +2,6 @@
 import "@tanstack/react-start/server-only";
 import {
   APPLY_WORKFLOW,
-  databaseUrlSecret,
   errorMessage,
   HOST_SIGNING_KEY,
   isEnded,
@@ -81,13 +80,6 @@ const SUPABASE = "supabase.project";
 const CLOUDFLARE = "cloudflare.host";
 export const DOCKER = "docker.container";
 
-/** The runtime image a container on this machine runs: `docker build -t sanoma-runtime packages/sanoma/runtime`. */
-export const RUNTIME_IMAGE = "sanoma-runtime";
-
-/** The secret the database's URL is stored in: its `storeUrl` for the export `store`. */
-export const DATABASE_URL = databaseUrlSecret("store");
-export const SECRETS_KEY = "SANOMA_SECRETS_KEY";
-
 /**
  * What going live fills in a database type beyond its contract's inputs, by type, from the
  * choices: Supabase's organization, and the password apply generates (the one its `storeUrl`
@@ -104,14 +96,9 @@ export const DATABASE_EXTRAS: Record<string, (choices: { organization?: string }
 };
 
 const GITHUB_API = "https://api.github.com";
-/** The wakeup's declaration in `infra.ts`, as `renderInfra` writes it. */
-export const WAKEUP_LINE = /^export const wakeup = /m;
-/** The repository's owner and name in `infra.ts` as `renderInfra` writes them. */
-export const REPO = /export const repo = github\.repository\(\{\s*owner: "([^"]+)",\s*name: "([^"]+)"/;
 const SUPABASE_API = "https://api.supabase.com";
 
 export const idOf = (type: Resource) => `${type.vendor}.${type.type}`;
-export const hasField = (type: Resource, field: string) => field in (type.schema.shape as Record<string, unknown>);
 
 /**
  * The resource types going live may choose from: all but those of a vendor whose host binds its
@@ -213,16 +200,6 @@ export async function choose(app: Company, actor?: Principal) {
   const database = pick(app, stored, (type) => type.database, [NEON]);
   const host = pick(app, stored, (type) => type.host, [CLOUDFLARE, DOCKER]);
   return { stored, database, host, wakeup: host ? hostWakeup(app, host, stored) : {} };
-}
-
-/** `into`, with `value` at its dotted `path`, the objects on the way made. */
-export function setPath(into: Record<string, DataValue>, path: string, value: DataValue): Record<string, DataValue> {
-  const keys = path.split(".");
-  const last = keys.pop()!;
-  let at = into;
-  for (const key of keys) at = (at[key] ??= {}) as Record<string, DataValue>;
-  at[last] = value;
-  return into;
 }
 
 /** `url`'s answer as JSON, or an error saying who answered what. */

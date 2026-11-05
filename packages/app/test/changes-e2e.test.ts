@@ -8,13 +8,13 @@ import { startTestWorker } from "@sanoma-ai/testing";
 import {
   defineWorkflow,
   memoryLedger,
-  PATCH_WORKFLOW,
   type PatchOutput,
   resolveConfig,
   SanomaClient,
   type SanomaConfig,
   type Worker,
 } from "@sanoma-ai/workflows";
+import { PATCH_WORKFLOW } from "@sanoma-ai/workflows/shared";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { localGitSource } from "../../sanoma/src/source.ts";

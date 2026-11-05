@@ -300,14 +300,14 @@ const runOn = (ledger: LedgerStore): Run => ({
     secrets: memorySecrets(),
     client: () => Promise.reject(new Error("no client here")),
     serially: (next) => next(),
-    refreshAppsBehind: () => {},
+    followMain: () => Promise.reject(new Error("no checkout here")),
     db: () => Promise.reject(new Error("no database here")),
     workflows: new Map(),
     outlines: new Map(),
     startRun: () => Promise.reject(new Error("no runs here")),
     stopped: false,
     deadlines: deadlineRegistry(),
-    turns: new Map(),
+    shutdown: new AbortController().signal,
   },
 });
 

@@ -3,6 +3,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
   type AppStepContext,
+  databaseUrlSecret,
   deploymentKey,
   errorMessage,
   DEPLOY_KEY_TITLE,
@@ -14,16 +15,10 @@ import {
   sourceKeyPair,
   type RepoRef,
   type Resource,
+  VENDOR,
   vendorCodeOf,
 } from "@sanoma-ai/workflows";
-import {
-  type DataValue,
-  describeConfig,
-  formatOptions,
-  readLockfile,
-  Reference,
-  renderDataFile,
-} from "@sanoma-ai/workflows/describe";
+import { type DataValue, formatOptions, readLockfile, Reference, renderDataFile } from "@sanoma-ai/workflows/describe";
 import { secret } from "@sanoma-ai/workflows/resources";
 import { INFRA } from "../api.ts";
 import { invalid } from "../server/core.ts";
@@ -31,21 +26,15 @@ import {
   beforeHost,
   choose,
   DATABASE_EXTRAS,
-  DATABASE_URL,
   DOCKER,
   githubOf,
-  hasField,
   idOf,
   KEYS,
   missingTypes,
-  REPO,
-  RUNTIME_IMAGE,
-  SECRETS_KEY,
-  setPath,
   toConnect,
-  WAKEUP_LINE,
 } from "../server/go-live.ts";
 import { mintWakeupToken } from "../server/setup.ts";
+import { rootOf } from "./writes.ts";
 
 // Going live's writes, in the worker (the built-ins `go-live` and `go-live-host`): `infra.ts`
 // rendered from the choices and written, committed, and the repository pushed to the one apply
@@ -54,10 +43,28 @@ import { mintWakeupToken } from "../server/setup.ts";
 /** What rendering `infra.ts` reads: the config, its resolution, and the client the connections are read through. */
 export type Rendering = Pick<AppStepContext, "config" | "resolved" | "client">;
 
-/** The config's root, where `infra.ts` goes. */
-function rootOf({ resolved }: Pick<AppStepContext, "resolved">): string {
-  if (resolved.root === undefined) throw new Error("The config has no root, so its data files cannot be written");
-  return resolved.root;
+/** The runtime image a container on this machine runs: `docker build -t sanoma-runtime packages/sanoma/runtime`. */
+const RUNTIME_IMAGE = "sanoma-runtime";
+
+/** The secret the database's URL is stored in: its `storeUrl` for the export `store`. */
+const DATABASE_URL = databaseUrlSecret("store");
+const SECRETS_KEY = "SANOMA_SECRETS_KEY";
+
+/** The wakeup's declaration in `infra.ts`, as `renderInfra` writes it. */
+const WAKEUP_LINE = /^export const wakeup = /m;
+/** The repository's owner and name in `infra.ts` as `renderInfra` writes them. */
+const REPO = /export const repo = github\.repository\(\{\s*owner: "([^"]+)",\s*name: "([^"]+)"/;
+
+const hasField = (type: Resource, field: string) => field in (type.schema.shape as Record<string, unknown>);
+
+/** `into`, with `value` at its dotted `path`, the objects on the way made. */
+function setPath(into: Record<string, DataValue>, path: string, value: DataValue): Record<string, DataValue> {
+  const keys = path.split(".");
+  const last = keys.pop()!;
+  let at = into;
+  for (const key of keys) at = (at[key] ??= {}) as Record<string, DataValue>;
+  at[last] = value;
+  return into;
 }
 
 /** The version of `sanoma` the company's repository installs (`installedSanoma`), which the host's runtime image is tagged with. */
@@ -98,10 +105,12 @@ export async function renderInfra(
       `Going live now keeps the company's records in ${idOf(database)}, not ${shownDatabase}: reload the page`,
     );
   }
-  const { vendors } = describeConfig(step.config);
   const constructors = (vendor: string) => {
-    // The runtime's own (`sanoma.wakeup`) is in no connector of the config's.
-    const pkg = vendor === "sanoma" ? "sanoma" : vendors[vendor]?.package;
+    // The runtime's own (`sanoma.wakeup`) is in no connector of the config's; else the first connector of the vendor's names it.
+    const pkg =
+      vendor === "sanoma"
+        ? "sanoma"
+        : step.config.connectors.find((c) => c[VENDOR].id === vendor)?.[VENDOR].info?.package;
     if (!pkg) throw new Error(`The ${vendor} connector names no package to import from`);
     return { source: `${pkg}/resources`, imported: vendor, local: vendor };
   };
@@ -233,23 +242,25 @@ export async function goLive(step: AppStepContext, choices: GoLiveInput) {
   // time, since GitHub takes a key for one repository only, and none declares this one yet.
   const key = chosen.host?.host?.derives ? undefined : await sourceKeyPair();
   const text = await renderInfra(step, choices, key?.publicKey, chosen);
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, text, { flag: "wx" }).catch((err: NodeJS.ErrnoException) => {
-    throw err.code === "EEXIST" ? writtenAlready() : err;
-  });
-  try {
-    if (key) await client.setSecret(SOURCE_KEY, key.privateKey, { by: by.id });
-    // Once the request is good: a wakeup's token may be the environment's or its connector page's, which mint nothing.
-    if (chosen.wakeup.type) await mintWakeupToken(client, by);
-  } catch (err) {
-    // Unwritten again, so going live can be tried again.
-    await rm(path, { force: true });
-    throw err;
-  }
-  await source?.commit({
-    paths: [INFRA],
-    message: "Go live: declare the repository, its deploy key, the database and the host",
-    author: by.id,
+  await step.serially(async () => {
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, text, { flag: "wx" }).catch((err: NodeJS.ErrnoException) => {
+      throw err.code === "EEXIST" ? writtenAlready() : err;
+    });
+    try {
+      if (key) await client.setSecret(SOURCE_KEY, key.privateKey, { by: by.id });
+      // Once the request is good: a wakeup's token may be the environment's or its connector page's, which mint nothing.
+      if (chosen.wakeup.type) await mintWakeupToken(client, by);
+    } catch (err) {
+      // Unwritten again, so going live can be tried again.
+      await rm(path, { force: true });
+      throw err;
+    }
+    await source?.commit({
+      paths: [INFRA],
+      message: "Go live: declare the repository, its deploy key, the database and the host",
+      author: by.id,
+    });
   });
   return { apply: { only: beforeHost(step, text) } };
 }
@@ -293,17 +304,19 @@ export async function goLiveHost(step: AppStepContext, _input: GoLiveHostInput) 
   if (!(await client.secrets([DATABASE_URL])).has(DATABASE_URL)) {
     throw new Error(`${DATABASE_URL} is not stored: the database's URL was not stored after its create`);
   }
-  // What is pushed is `main`, where going live committed: refused on another branch.
-  if ((await source.head()) !== (await Promise.resolve(source.head("main")).catch(() => undefined))) {
-    throw new Error("Check out main, where infra.ts and the lockfile are committed, then push");
-  }
-  // The repository's owner and name as going live wrote them, first in the file.
-  const [, owner, name] = REPO.exec(infra) ?? [];
-  if (!owner || !name) throw new Error(`Cannot tell the repository from ${INFRA}`);
-  await source.push({
-    url: `https://github.com/${owner}/${name}.git`,
-    token: await pushToken(step, { owner, name }),
-    ref: "main",
+  await step.serially(async () => {
+    // What is pushed is `main`, where going live committed: refused on another branch.
+    if ((await source.head()) !== (await Promise.resolve(source.head("main")).catch(() => undefined))) {
+      throw new Error("Check out main, where infra.ts and the lockfile are committed, then push");
+    }
+    // The repository's owner and name as going live wrote them, first in the file.
+    const [, owner, name] = REPO.exec(infra) ?? [];
+    if (!owner || !name) throw new Error(`Cannot tell the repository from ${INFRA}`);
+    await source.push!({
+      url: `https://github.com/${owner}/${name}.git`,
+      token: await pushToken(step, { owner, name }),
+      ref: "main",
+    });
   });
   // The wakeup, when declared, after the host it names: one apply, in dependency order.
   return { apply: { only: WAKEUP_LINE.test(infra) ? [KEYS.host, KEYS.wakeup] : [KEYS.host] } };

@@ -4,6 +4,7 @@ import { readApps } from "./apps.ts";
 import type { AppSteps } from "./app-workflows.ts";
 import { awaitApproval } from "./approvals.ts";
 import { buildCtx, decideStart, isInfrastructureError, startHoldOf } from "./call.ts";
+import { followBase } from "./change.ts";
 import { dbosStatusesOf, SanomaClient } from "./client.ts";
 import { declaredWakeup, envWakeup, type ResolvedConfig, resolveConfig, type SanomaConfig } from "./config.ts";
 import { configuredSecrets } from "./credentials.ts";
@@ -33,7 +34,14 @@ import { entry, ownedLedger, skipped, write, writeFailure } from "./ledger.ts";
 import { dbosLogger, info, quietIfSandbox, setLogLevel, warn } from "./log.ts";
 import { lineStartsOf, readSource } from "./ast.ts";
 import { callsOf, outlineWithSource } from "./outline.ts";
-import { currentRun, type Run, type RunArgs, type WorkerState, type WorkflowOutline } from "./run.ts";
+import {
+  currentRun,
+  recordSandboxChecks,
+  type Run,
+  type RunArgs,
+  type WorkerState,
+  type WorkflowOutline,
+} from "./run.ts";
 import type { DatabasePreparation } from "./op.ts";
 import { applyScheduled, nextScheduledFire, type ScheduledStarter, scheduledStarter } from "./schedules.ts";
 import type { Source } from "./source.ts";
@@ -97,8 +105,9 @@ export interface WorkerOptions {
   source?: Source;
   /**
    * The app's own actions (`@sanoma-ai/app/steps`), which its built-in workflows run (Adopt, a
-   * form's Save, going live, connecting an existing repository): the launcher passes them. Without
-   * them, a run of one fails, saying this worker runs none of them (`NO_APP_STEPS`).
+   * form's Save, going live, connecting an existing repository, a chat's turn): the launcher passes
+   * them. Without them, a run of one fails, saying this worker runs none of them (`NO_APP_STEPS`,
+   * or for a chat `NO_CHAT_STEPS`).
    */
   app?: AppSteps;
   /**
@@ -161,8 +170,26 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
   // The worker's own client, connected by the first step that needs it, for the worker's version: what it starts runs on.
   let client: Promise<SanomaClient> | undefined;
   const appSteps: WorkerApp | undefined = options.app && { steps: options.app, config, resolved };
-  // Each check of the apps' sources waits for the one before it: the latest is what the table says.
-  let behind: Promise<void> = Promise.resolve();
+  const shutdown = new AbortController();
+  // One check of the apps' sources at a time; one asked for meanwhile runs once it ends, so the
+  // table says what the latest `main` is behind.
+  let behind: Promise<void> | undefined;
+  let again = false;
+  const refreshAppsBehind = () => {
+    if (behind) {
+      again = true;
+      return;
+    }
+    behind = (async () => {
+      do {
+        again = false;
+        await recordAppsBehind(resolved.root, options.source, state.db, shutdown.signal);
+      } while (again && !shutdown.signal.aborted);
+      // In the same turn as the last look at `again`, so no ask falls between (it never throws).
+      behind = undefined;
+    })();
+  };
+  const serially = serialWrites();
   const state: WorkerState = {
     app: resolved.appName,
     connections: resolved.connections,
@@ -178,10 +205,13 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
         client = undefined;
         throw err;
       })),
-    serially: serialWrites(),
-    refreshAppsBehind: () => {
-      behind = behind.then(() => recordAppsBehind(resolved.root, options.source, () => secrets.db()));
-    },
+    serially,
+    followMain: () =>
+      serially(async () => {
+        const moved = await followBase(resolved.remotes, storedSecrets, options.source);
+        if ("revision" in moved) refreshAppsBehind();
+        return moved;
+      }),
     // The runtime's tables, on the secrets' pool: the same database.
     db: () => secrets.db(),
     types: resolved.types,
@@ -202,7 +232,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     },
     stopped: false,
     deadlines: deadlineRegistry(),
-    turns: new Map(),
+    shutdown: shutdown.signal,
   };
   const worker: Worker = {
     unconfigured: [...credentialsOf(resolved.driversByVendor, (name) => process.env[name])]
@@ -222,12 +252,10 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
         for (const close of [
           () => DBOS.shutdown(),
           // Once DBOS is down, so a turn's step cut short is recorded nowhere: the next worker settles it.
-          async () => {
-            for (const turn of state.turns.values()) turn.stop.abort();
-          },
+          async () => shutdown.abort(),
           async () => (await client?.catch(() => undefined))?.close(),
-          // Before the pool it writes to closes.
-          () => behind,
+          // Before the pool it writes to closes: the app it checks now, then none.
+          async () => behind,
           () => storedSecrets.close(),
           () => resolved.connections.close(),
           () => resolved.identityProvisioning.close(),
@@ -297,7 +325,7 @@ export async function startWorker(config: SanomaConfig, options: WorkerOptions =
     }
     await warnAboutStrandedRuns(resolved);
     // How far each app taken from a source is behind it, fetched in the background: the app reads the table.
-    state.refreshAppsBehind();
+    refreshAppsBehind();
     const summary = unconfiguredSummary(worker.unconfigured, resolved.driversByVendor.size);
     if (summary && !options.quiet) warn(summary);
     if (resolved.policyProblems.length && !options.quiet) {
@@ -384,12 +412,19 @@ function serialWrites(): WorkerState["serially"] {
  * Tells how far each app under `root` taken from a source (its `app.ts` names one) is behind it,
  * fetched now (`Source.behind`), or why that cannot be told: offline, no shared history, a
  * repository that cannot fetch. Written to the runtime's table for the app (`writeAppsBehind`),
- * which then lists no other app. Never throws: a failure is warned about.
+ * which then lists no other app. Never throws: a failure is warned about. One at a time, since each
+ * fetches into the one checkout; nothing more once `stopped` is aborted, nor written.
  */
-async function recordAppsBehind(root: string | undefined, source: Source | undefined, db: () => Promise<Db>) {
+async function recordAppsBehind(
+  root: string | undefined,
+  source: Source | undefined,
+  db: () => Promise<Db>,
+  stopped: AbortSignal,
+) {
   try {
     const told = new Map<string, AppBehind>();
     for (const app of readApps(root).filter((a) => a.source !== undefined)) {
+      if (stopped.aborted) return;
       if (!source?.behind) {
         told.set(app.name, { error: "This instance's repository cannot fetch an app's source" });
         continue;
@@ -402,7 +437,7 @@ async function recordAppsBehind(root: string | undefined, source: Source | undef
         ),
       );
     }
-    await writeAppsBehind(await db(), told);
+    if (!stopped.aborted) await writeAppsBehind(await db(), told);
   } catch (err) {
     warn(`could not tell how far the apps are behind their sources: ${errorMessage(err)}`);
   }
@@ -582,19 +617,12 @@ async function runOn(state: WorkerState, name: string, start: RunArgs | Date): P
     if (isInfrastructureError(err, state)) skipped(record, `the run was interrupted (${errorMessage(err)})`);
     else {
       await writeFailure(run, record, err);
-      await endChecks(run);
+      await recordSandboxChecks(run);
     }
     throw err;
   }
   await write(run, entry(run, { type: "run.finished", output }));
-  await endChecks(run);
+  // Once its outcome is recorded, before DBOS records it, so a page that reads the run ended reads its last checks.
+  await recordSandboxChecks(run);
   return output;
-}
-
-/**
- * A sandbox run's checks once its outcome is recorded, before DBOS records it, so a page that
- * reads the run ended reads them settled: no step, so a replay that writes them again changes nothing.
- */
-async function endChecks(run: Run): Promise<void> {
-  if (run.sandbox !== undefined) await (await import("./sandbox.ts")).recordChecks(run, true);
 }

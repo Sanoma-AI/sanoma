@@ -89,9 +89,10 @@ import {
   CHAT_TOPIC,
   CHAT_WORKFLOW,
   changeIdOf,
-  chatOfRun,
   chatRunId,
+  chatRunPrefix,
   DATA_VENDOR,
+  DRAFT_ID,
   ENDED_STATUSES,
   errorMessage,
   FOLLOW_WORKFLOW,
@@ -365,17 +366,12 @@ export class SanomaClient {
       options.sandbox,
       "`sandbox` must be the name of a scenario in the config's `scenarios/`",
     );
-    if (workflow.name === CHANGE_WORKFLOW && !isChangeRunOf((parsed as ChangeInput).id, runId)) {
-      throw new SanomaError("invalid_input", "A change is started with openChange, which names its run", { runId });
-    }
-    if (
-      workflow.name === FOLLOW_WORKFLOW &&
-      (runId !== followRunId(parsed as RemoteEvent) || startedBy.id !== HOST_CHECK_AGENT)
-    ) {
-      throw new SanomaError("invalid_input", "A follow is started with follow, which names its run", { runId });
-    }
     const hold = await this.startHold(workflow.name, parsed, startedBy, runId);
-    if (workflow.name === CHAT_WORKFLOW) await this.mayStartTurn(parsed as ChatTurnInput, startedBy, runId);
+    const own = OWN_STARTS[workflow.name];
+    if (own && !(await own.admits(parsed, startedBy, runId, this))) {
+      const refused = `A run of ${workflow.name} is started with ${own.by}, which names its run`;
+      throw new SanomaError("invalid_input", refused, { runId });
+    }
     const args: RunArgs = { input, startedBy, ...(sandbox === undefined ? {} : { sandbox }), ...(hold && { hold }) };
     // Kept on the run's status row too, so a listing tells sandbox runs apart without its input,
     // and says whom an agent's run is for (DBOS keeps the principal's id and groups itself); a
@@ -983,6 +979,25 @@ export class SanomaClient {
     return Promise.all(rows.map((row) => this.changeView(row)));
   }
 
+  /**
+   * Whether a change is merging or deploying `main` now (`ChangeState.phase`, as its run last
+   * published it), which follows `main` and applies the hosts itself.
+   */
+  async changeDeploying(): Promise<boolean> {
+    const rows = await this.dbos.listWorkflows({
+      workflowName: CHANGE_WORKFLOW,
+      applicationName: this.config.appName,
+      status: dbosStatusesOf("queued", "running"),
+      loadInput: false,
+      loadOutput: false,
+    });
+    for (const row of rows) {
+      const phase = (await this.dbos.getEvent<ChangeState>(row.workflowID, CHANGE_EVENT, 0))?.phase;
+      if (phase === "merging" || phase === "deploying") return true;
+    }
+    return false;
+  }
+
   /** The change of the draft `id`: its latest run's (`openChange`), or undefined when it has none. */
   async change(id: string): Promise<ChangeView | undefined> {
     const [row] = await this.changeRuns(id, { load: true });
@@ -1050,7 +1065,8 @@ export class SanomaClient {
    */
   async startTurn(input: Omit<ChatTurnInput, "after">, options: StartOptions): Promise<string> {
     const runId = chatRunId(input.chat, input.message.id);
-    const before = (await this.turns(input.chat)).find((row) => row.workflowID !== runId);
+    // The latest other than this one, which a start told again finds first.
+    const before = (await this.turns(input.chat, 2)).find((row) => row.workflowID !== runId);
     await this.start(CHAT_WORKFLOW, { ...input, ...(before && { after: before.workflowID }) } satisfies ChatTurnInput, {
       ...options,
       runId,
@@ -1064,7 +1080,7 @@ export class SanomaClient {
 
   /** The chat's latest turn (`startTurn`), or undefined when it has had none. */
   async turn(chat: string): Promise<RunSummary | undefined> {
-    const [row] = await this.turns(chat);
+    const [row] = await this.turns(chat, 1);
     return row && this.summarize(row);
   }
 
@@ -1077,7 +1093,7 @@ export class SanomaClient {
     const by = await this.admitted(
       parseOrThrow(PrincipalOrId, options?.by, '`by` must be a principal, such as "alice" or { id: "alice" }'),
     );
-    const [row] = await this.turns(chat);
+    const [row] = await this.turns(chat, 1);
     if (!row || isEnded(runStatus(row.status, [])) || row.authenticatedUser !== by.id) {
       throw new SanomaError("run_not_found", `No turn of chat ${chat} is under way`, { chat });
     }
@@ -1099,33 +1115,17 @@ export class SanomaClient {
     return readRunChecks(await this.database.db(), runId);
   }
 
-  /**
-   * Refuses a chat turn's start but `startTurn`'s: its run id is `chatRunId`'s, the turn it waits
-   * for is the same chat's, and the chat is `startedBy`'s.
-   */
-  private async mayStartTurn(input: ChatTurnInput, startedBy: Principal, runId: string | undefined) {
-    if (
-      runId !== chatRunId(input.chat, input.message.id) ||
-      (input.after !== undefined && chatOfRun(input.after) !== input.chat)
-    ) {
-      throw new SanomaError("invalid_input", "A chat turn is started with startTurn, which names its run", { runId });
-    }
-    if ((await this.chats.get(input.chat))?.person !== startedBy.id) {
-      throw new SanomaError("invalid_input", `${startedBy.id} has no chat ${input.chat}`, { chat: input.chat });
-    }
-  }
-
-  /** The turns of the chat `chat`, newest first: its runs `chat:<chat>:<message>`. */
-  private async turns(chat: string) {
-    const rows = await this.dbos.listWorkflows({
-      workflow_id_prefix: `chat:${chat}:`,
+  /** The latest `limit` turns of the chat `chat`, newest first: its runs `chat:<chat>:<message>` (`chatRunPrefix`). */
+  private async turns(chat: string, limit: number) {
+    return this.dbos.listWorkflows({
+      workflow_id_prefix: chatRunPrefix(chat),
       workflowName: CHAT_WORKFLOW,
       applicationName: this.config.appName,
       sortDesc: true,
+      limit,
       loadInput: false,
       loadOutput: false,
     });
-    return rows.filter((row) => chatOfRun(row.workflowID) === chat);
   }
 
   /** The runs of the draft `id`'s change, newest first: `change:<id>` and `change:<id>~<n>`. */
@@ -1687,6 +1687,40 @@ const alreadyDecided = (runId: string, a: ApprovalState) =>
       ...(a.withdrawnReason === undefined ? {} : { withdrawnReason: a.withdrawnReason }),
     },
   );
+
+/**
+ * The built-ins only one of the client's methods starts, by name: that method (`by`), and whether
+ * a start is its own (`admits`), which `start` asks once the policy has (a visitor is denied
+ * first), refusing any other: a change under the id `openChange` names; a follow as `host-check`
+ * under its event's id; a chat turn under its chat's and message's id, after a turn of the same
+ * chat, as the chat's person.
+ */
+const OWN_STARTS: Record<
+  string,
+  {
+    by: string;
+    admits(
+      input: any,
+      startedBy: Principal,
+      runId: string | undefined,
+      client: SanomaClient,
+    ): boolean | Promise<boolean>;
+  }
+> = {
+  [CHANGE_WORKFLOW]: { by: "openChange", admits: (input: ChangeInput, _by, runId) => isChangeRunOf(input.id, runId) },
+  [FOLLOW_WORKFLOW]: {
+    by: "follow",
+    admits: (event: RemoteEvent, by, runId) => runId === followRunId(event) && by.id === HOST_CHECK_AGENT,
+  },
+  [CHAT_WORKFLOW]: {
+    by: "startTurn",
+    admits: async ({ chat, message, after }: ChatTurnInput, by, runId, client) =>
+      runId === chatRunId(chat, message.id) &&
+      (after === undefined ||
+        (after.startsWith(chatRunPrefix(chat)) && DRAFT_ID.test(after.slice(chatRunPrefix(chat).length)))) &&
+      (await client.chats.get(chat))?.person === by.id,
+  },
+};
 
 /**
  * A follow's run id (`SanomaClient.follow`): `follow:` and the SHA-256 of the event as its schema

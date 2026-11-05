@@ -9,13 +9,9 @@ import { supabase } from "@sanoma-ai/connector-supabase";
 import { fakeSupabase } from "@sanoma-ai/connector-supabase/fake";
 import { ensureBuilt, testDatabaseUrl } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
-import {
-  CONNECT_EXISTING_WORKFLOW,
-  type ConnectExistingInput,
-  type ConnectExistingOutput,
-  withSetup,
-} from "@sanoma-ai/workflows";
+import { type ConnectExistingInput, type ConnectExistingOutput, withSetup } from "@sanoma-ai/workflows";
 import { LOCKFILE, readLockfile } from "@sanoma-ai/workflows/describe";
+import { CONNECT_EXISTING_WORKFLOW } from "@sanoma-ai/workflows/shared";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { localGitSource } from "../../sanoma/src/source.ts";
 import { INFRA } from "../src/api.ts";

@@ -66,11 +66,12 @@ export interface WorkerState {
   /** Runs `write` once the one before it has settled: the worker's writes to its repository, one at a time. */
   serially<T>(write: () => Promise<T>): Promise<T>;
   /**
-   * Checks again, in the background, how far each app taken from a source is behind it
-   * (`Source.behind`), into the runtime's table (`recordAppsBehind`): at the worker's start and
-   * after the checkout follows `main`. Never throws, and is no step: nothing a run reads.
+   * Fast-forwards the checkout to the host's `main` (`followBase`), one of the worker's writes
+   * (`serially`), as a change's deploy and a push to `main` do first; on a new revision, how far
+   * each app taken from a source is behind it is checked again, in the background, into the
+   * runtime's table (`recordAppsBehind` in worker.ts), as at the worker's start.
    */
-  refreshAppsBehind(): void;
+  followMain(): Promise<{ revision: string } | { skipped: string } | { error: string }>;
   /** The runtime's tables (`db.ts`): what the worker writes for the app to read, such as a sandbox run's checks. */
   db(): Promise<Db>;
   types: ReadonlyMap<string, Resource>;
@@ -109,17 +110,10 @@ export interface WorkerState {
   /** Which of its runs are executing and which wait, until when: what the worker's `idle` reads. */
   deadlines: DeadlineRegistry;
   /**
-   * Each chat turn under way on this worker, by its run's id: what a message to the run is handed
-   * to (`chat-steps.ts`), its stop and its sign-in's listener for a pasted code. Each is stopped
-   * once the worker has stopped, so no agent goes on without it.
+   * Aborted once the worker has stopped, after DBOS is down: what work of its that outlives a DBOS
+   * call stops on (a chat turn's agent, the check of the apps behind), recorded nowhere.
    */
-  turns: Map<string, LiveTurn>;
-}
-
-/** A chat turn under way (`WorkerState.turns`): how to stop it, and who takes a code pasted for its sign-in. */
-export interface LiveTurn {
-  stop: AbortController;
-  code?: (code: string) => void;
+  shutdown: AbortSignal;
 }
 
 /** What a run keeps in memory. Rebuilt the same way when DBOS replays the run. */
@@ -168,3 +162,30 @@ export interface WorkflowOutline {
  * it, whether it is a sandbox run, the worker's source and policy), as no `ctx` member gives them.
  */
 export const currentRun = new AsyncLocalStorage<Run>();
+
+/** The run whose built-in step is running (`currentRun`): `what` names the step for the error when there is none. */
+export function runNow(what: string): Run {
+  const run = currentRun.getStore();
+  if (!run) throw new Error(`${what} ran outside its run`);
+  return run;
+}
+
+/** Each sandbox run's latest record of its checks, which the next waits for, so the last written is the latest. */
+const recording = new WeakMap<Run, Promise<void>>();
+
+/**
+ * A sandbox run's checks recorded for the app (`recordChecks`, which never throws), after the
+ * record before it; nothing for a live run, which never loads `sandbox.ts`, and with it Cucumber.
+ */
+export function recordSandboxChecks(run: Run): Promise<void> {
+  const name = run.sandbox;
+  if (name === undefined) return Promise.resolve();
+  const next = (recording.get(run) ?? Promise.resolve()).then(async () =>
+    (await import("./sandbox.ts")).recordChecks(run, name),
+  );
+  recording.set(
+    run,
+    next.catch(() => undefined),
+  );
+  return next;
+}
