@@ -278,16 +278,19 @@ unless { context has before };
       const calls = (await app.client.ledger(runId)).filter(
         (r): r is Extract<LedgerRecord, { type: "op.called" }> => r.type === "op.called",
       );
-      expect(calls.map(({ op, effect, node, input }) => ({ op, effect, node, input }))).toEqual([
-        { op: "data.outbound.get", effect: "read", node: "0", input: { key: "Acme" } },
+      expect(calls.map(({ op, effect, node, target, input }) => ({ op, effect, node, target, input }))).toEqual([
+        { op: "data.outbound.get", effect: "read", node: "0", target: "data:outbound/Acme", input: { key: "Acme" } },
         {
           op: "data.outbound.save",
           effect: "write",
           node: "1.0.0",
+          target: "data:outbound/Acme",
           input: { record: { ...lead, stage: "contacted" }, ifRecord: lead },
         },
       ]);
       expect(calls[1]!.output).toMatchObject({ key: "Acme", updatedBy: `run:${runId}` });
+      // The record's history, from the app's ledger (on disk): the run's calls on it, newest first.
+      expect((await app.client.history("data:outbound/Acme")).map((r) => r.id)).toEqual([calls[1]!.id, calls[0]!.id]);
       // A save sees the record it replaces: the policy let it through.
       expect(calls.map(({ decision }) => decision.kind)).toEqual(["allow", "allow"]);
       const rows = await store
