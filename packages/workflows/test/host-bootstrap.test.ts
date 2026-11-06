@@ -111,6 +111,8 @@ describe("bootstrap a Cloudflare host delivers to its container", () => {
       vi.unstubAllEnvs();
       for (const name of [
         "SANOMA_SIGNING_KEY",
+        "SANOMA_SIGNING_KEY_FILE",
+        "SANOMA_SECRETS_KEY",
         "SANOMA_SECRETS_KEY_FILE",
         "SANOMA_PROVISIONING_CREDENTIAL",
         "NEVER_DELIVERED",

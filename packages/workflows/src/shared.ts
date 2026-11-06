@@ -736,3 +736,10 @@ export const STORAGE_PROBLEMS: Readonly<Record<AuthenticationStoreProblem, strin
   unsupported: "replaces its credentials with a conditional write, which this store does not offer",
   too_large: "may keep credentials larger than this store holds",
 };
+
+/** What to do instead, for each `STORAGE_PROBLEMS` entry: on the connector page and in `sanoma check`. */
+export const STORAGE_ADVICE: Readonly<Record<AuthenticationStoreProblem, string>> = {
+  read_only: "bind them to a path Sanoma manages in a writable store, such as the built-in one",
+  unsupported: "choose the built-in store or another that offers conditional writes",
+  too_large: "choose a store with a larger limit",
+};

@@ -992,8 +992,8 @@ const NO_TOKEN = `add ${WAKEUP_TOKEN} to the host's secrets (secret("${WAKEUP_TO
  * `cloudflare.alarm`'s operations and `alarm.register` over `api().send`: the host's own Worker's
  * wake route (`/__sanoma/wake`), each request with the company's `SANOMA_WAKEUP_TOKEN`, read from
  * the secret the alarm's `token` names (`tokenName`; `register` reads the default). `create`
- * mints and stores the token when none is, and the host's URL as `SANOMA_HOST_URL` (replacing an
- * earlier host's). `register` sends to the stored URL, on the host and off it: a connector reads
+ * mints and stores the token when none is, and, for the default token's alarm, the host's URL as
+ * `SANOMA_HOST_URL` (replacing an earlier host's). `register` sends to the stored URL, on the host and off it: a connector reads
  * no fact from the process environment.
  */
 export function alarmOps(api: () => Pick<CloudflareApi, "send">) {
@@ -1077,10 +1077,14 @@ export function alarmOps(api: () => Pick<CloudflareApi, "send">) {
         throw refused(`alarm.create: the host's ${WAKEUP_TOKEN} is not the stored ${name}: ${advice}`, "token");
       }
       // Where `register` reaches the host, beside the token in the same store: this alarm's host, never an earlier one's.
-      const stored = await secrets.get(HOST_URL);
-      if (stored !== host) {
-        if (stored !== undefined) await secrets.delete(HOST_URL);
-        await secrets.ensure(HOST_URL, () => host);
+      // Only for the default token, which `register` sends: a workflow's alarm for another host, under a token of
+      // its own, must not move the company's registrations there.
+      if (name === WAKEUP_TOKEN) {
+        const stored = await secrets.get(HOST_URL);
+        if (stored !== host) {
+          if (stored !== undefined) await secrets.delete(HOST_URL);
+          await secrets.ensure(HOST_URL, () => host);
+        }
       }
       return { id: host, state };
     },

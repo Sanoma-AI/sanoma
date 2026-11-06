@@ -1230,6 +1230,14 @@ describe.skipIf(live)("cloudflareDriver", () => {
       expect(await call.secrets.get("SANOMA_HOST_URL")).toBe(URL_OF);
     });
 
+    it("keeps the company's host's URL when it creates another host's alarm, under a token of its own", async () => {
+      const company = "https://company.example.workers.dev";
+      const call = callWith({ SANOMA_HOST_URL: company, CLOUD_ACME_WAKEUP_TOKEN: TOKEN });
+      play("alarm-own-token", [wake(200, { at: null })]);
+      await op("alarm.create", { desired: { host: URL_OF, token: { $secret: "CLOUD_ACME_WAKEUP_TOKEN" } } }, call);
+      expect(await call.secrets.get("SANOMA_HOST_URL")).toBe(company);
+    });
+
     it("fails a register the Worker could not take as retryable", async () => {
       play("register-failed", [wake(503, { error: "storage is not available" }, "PUT")]);
       const call = callWith({ SANOMA_WAKEUP_TOKEN: TOKEN, SANOMA_HOST_URL: URL_OF });

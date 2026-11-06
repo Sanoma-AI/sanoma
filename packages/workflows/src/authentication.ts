@@ -157,7 +157,7 @@ export function authenticationCredentials<S extends z.ZodType>(
   }
 }
 
-/** Why a store cannot keep a method's credentials: `checkAuthenticationStore`'s refusal, as `StorageProblem` in `shared.ts`. */
+/** Why a store cannot keep a method's credentials: `checkAuthenticationStore`'s refusal (`STORAGE_PROBLEMS` in `shared.ts` says each). */
 export type AuthenticationStoreProblem = "too_large" | "read_only" | "unsupported";
 
 /** Compatibility before consent, including externally renewed (read-only) OAuth bundles: the refusal, none when they fit. */

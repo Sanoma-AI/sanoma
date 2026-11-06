@@ -18,7 +18,6 @@ import {
 } from "./description.ts";
 import { isDirect } from "./direct.ts";
 import { type CredentialStatus, credentialsOf } from "./env.ts";
-import type { AuthenticationStoreProblem } from "./authentication.ts";
 import { codeMail } from "./login-code.ts";
 import { lintWorkflow } from "./lint.ts";
 import { fresh, stampOf, stampsOf } from "./load.ts";
@@ -41,6 +40,7 @@ import {
   principalOf,
   problemLine,
   siteAtHostname,
+  STORAGE_ADVICE,
   STORAGE_PROBLEMS,
 } from "./shared.ts";
 import { readSites, type SiteEntry, siteDomains } from "./sites.ts";
@@ -344,13 +344,6 @@ function loginProblems(resolved: ResolvedConfig, people: readonly PeopleResource
   ];
 }
 
-/** What to do instead, for each kind of `ConnectionStorageProblem` (`STORAGE_PROBLEMS` says what it is). */
-const STORAGE_ADVICE: Readonly<Record<AuthenticationStoreProblem, string>> = {
-  read_only: "bind them to a path Sanoma manages in a writable store, such as the built-in one",
-  unsupported: "choose the built-in store or another that offers conditional writes",
-  too_large: "choose a store with a larger limit",
-};
-
 /**
  * Each declared connection and creation rule whose method's storage needs its binding cannot meet
  * (`ConnectionRegistry.storageProblems`): refused before consent, never kept elsewhere instead.
@@ -359,7 +352,7 @@ function connectionStorageProblems(resolved: ResolvedConfig): ResourceProblem[] 
   return resolved.connections.storageProblems().map(({ id, method, problem, location }) => ({
     file: "sanoma.config.ts",
     message:
-      `connection ${id}: its ${method} method ${STORAGE_PROBLEMS[problem]}: ${STORAGE_ADVICE[problem]}` +
+      `${location ? "connection" : "connection rule"} ${id}: its ${method} method ${STORAGE_PROBLEMS[problem]}: ${STORAGE_ADVICE[problem]}` +
       (location
         ? ` (now ${location.store}${location.namespace ? ` ${location.namespace}` : ""} ${location.path})`
         : ""),

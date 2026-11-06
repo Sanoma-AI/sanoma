@@ -358,7 +358,8 @@ export class ConnectionRegistry {
           : "default" in declaration
             ? declaration.credentials?.$secret
             : row?.credential;
-      const storageProblem = this.storeProblem(method, credential);
+      const location = credential && this.secrets ? this.secrets.location(credential) : undefined;
+      const storageProblem = this.storeProblem(method, location);
       cards.push({
         id,
         vendor: declaration.vendor,
@@ -374,7 +375,7 @@ export class ConnectionRegistry {
           : row.definition !== this.bindingFingerprint(declaration, method, credential)
             ? "configuration_changed"
             : row.status,
-        ...(credential && this.secrets && { location: this.secrets.location(credential) }),
+        ...(location && { location }),
         ...(row?.location && { boundLocation: row.location }),
         ...(row?.updatedBy && { updatedBy: row.updatedBy }),
         ...(row?.updatedAt && { updatedAt: row.updatedAt.toISOString() }),
@@ -653,10 +654,9 @@ export class ConnectionRegistry {
       .digest("hex");
   }
 
-  /** Why `method` cannot keep its credentials under `credential` (`authenticationStoreProblem`); none without a store or a credential. */
-  private storeProblem(method: Authentication, credential?: string | null): AuthenticationStoreProblem | undefined {
-    if (!this.secrets || !credential) return undefined;
-    const location = this.secrets.location(credential);
+  /** Why `method` cannot keep its credentials at `location` (`authenticationStoreProblem`); none without a store or a location. */
+  private storeProblem(method: Authentication, location?: SecretLocation): AuthenticationStoreProblem | undefined {
+    if (!this.secrets || !location) return undefined;
     return authenticationStoreProblem(
       method,
       location.namespace === "" ? BOUND : this.secrets.store.capabilities,
@@ -665,7 +665,7 @@ export class ConnectionRegistry {
   }
 
   private checkStore(method: Authentication, credential?: string | null): void {
-    const problem = this.storeProblem(method, credential);
+    const problem = this.secrets && credential && this.storeProblem(method, this.secrets.location(credential));
     if (problem) throw new SecretStoreError(problem);
   }
 
@@ -681,9 +681,9 @@ export class ConnectionRegistry {
     for (const d of this.catalog.definitions.values()) {
       const method = this.catalog.methods.get(d.vendor)![d.method]!;
       const credential = method.kind === "workload-identity" ? undefined : d.credentials?.$secret;
-      const problem = this.storeProblem(method, credential);
-      if (problem)
-        problems.push({ id: d.$connection, method: d.method, problem, location: secrets.location(credential!) });
+      const location = credential ? secrets.location(credential) : undefined;
+      const problem = this.storeProblem(method, location);
+      if (problem) problems.push({ id: d.$connection, method: d.method, problem, location });
     }
     for (const [id, rule] of this.catalog.rules) {
       const method = this.catalog.methods.get(rule.vendor)![rule.method]!;

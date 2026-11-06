@@ -1,5 +1,5 @@
 import type { ConnectionCard, ConnectionReview, ConnectionTarget, SecretLocation } from "@sanoma-ai/workflows";
-import { CALL_WORKFLOW, STORAGE_PROBLEMS } from "@sanoma-ai/workflows/shared";
+import { CALL_WORKFLOW, STORAGE_ADVICE, STORAGE_PROBLEMS } from "@sanoma-ai/workflows/shared";
 import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
@@ -224,8 +224,8 @@ function ConnectionRow({ card, data }: { card: ConnectionsResponse["cards"][numb
         )}
         {card.storageProblem && (
           <ItemDescription className="line-clamp-none">
-            This method {STORAGE_PROBLEMS[card.storageProblem]}. Change the binding in your company’s code before
-            connecting.
+            This method {STORAGE_PROBLEMS[card.storageProblem]}. Before connecting, change your company’s code:{" "}
+            {STORAGE_ADVICE[card.storageProblem]}.
           </ItemDescription>
         )}
         {unsupportedWrite && !card.storageProblem && (
