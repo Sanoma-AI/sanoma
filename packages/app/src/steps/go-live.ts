@@ -77,8 +77,9 @@ async function sanomaVersion(root: string): Promise<string> {
 
 /**
  * `infra.ts`'s text for the choices: the repository, with the owner chosen, the database, the
- * host that runs the company from them and, once a wakeup for the host is connected, the wakeup
- * that starts the host again. A host that derives (`cloudflare.host`) is declared by its
+ * host that runs the company from them, once a wakeup for the host is connected, the wakeup
+ * that starts the host again, and once a sandbox's vendor is (Agent37's key), the box its coding
+ * agents work in (`box`), with its type's defaults. A host that derives (`cloudflare.host`) is declared by its
  * decisions alone, its name and its database: apply gives it the rest, the read-only deploy key
  * it clones with among them (`deriveHosts`). Any other host (`docker.container`) names its image,
  * source, ref, port and secrets, and its deploy key is declared beside it (`deployKey`, the public
@@ -91,7 +92,7 @@ export async function renderInfra(
   chosen?: Awaited<ReturnType<typeof choose>>,
 ) {
   const root = rootOf(step);
-  const { database, host, wakeup } = chosen ?? (await choose(step));
+  const { database, host, wakeup, sandbox } = chosen ?? (await choose(step));
   const missing = missingTypes(step);
   if (missing.length || !host || !database) {
     throw new Error(`The config's connectors declare no ${missing.join(", ")}: add them to sanoma.config.ts`);
@@ -135,9 +136,15 @@ export async function renderInfra(
   const woken = wakeup.type;
   return renderDataFile(
     {
-      imports: [...new Set(["github", database.vendor, host.vendor, ...(woken ? [woken.vendor] : [])])].map(
-        constructors,
-      ),
+      imports: [
+        ...new Set([
+          "github",
+          database.vendor,
+          host.vendor,
+          ...(woken ? [woken.vendor] : []),
+          ...(sandbox ? [sandbox.vendor] : []),
+        ]),
+      ].map(constructors),
       exports: [
         { name: "repo", vendor: "github", type: "repository", desired: { owner, name, visibility: "private" } },
         ...(derives
@@ -167,6 +174,8 @@ export async function renderInfra(
               },
             ]
           : []),
+        // The coding agents' box, with its type's defaults.
+        ...(sandbox ? [{ name: "box", vendor: sandbox.vendor, type: sandbox.type, desired: {} }] : []),
       ],
     },
     formatOptions(root),

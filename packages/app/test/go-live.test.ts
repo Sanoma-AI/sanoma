@@ -6,6 +6,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { agent37 } from "@sanoma-ai/connector-agent37";
 import { fakeGithub } from "@sanoma-ai/connector-github/fake";
 import { github } from "@sanoma-ai/connector-github";
 import { resend } from "@sanoma-ai/connector-resend";
@@ -161,6 +162,7 @@ const NAMES = [
   "SANOMA_WAKEUP_ACCOUNT_TOKEN",
   "SANOMA_WAKEUP_TOKEN",
   "SANOMA_SOURCE_KEY",
+  "AGENT37_API_KEY",
 ];
 const alice = { id: "alice" };
 let ctx: AppContext;
@@ -376,6 +378,31 @@ describe("going live", () => {
       await client.close();
     }
     expect(await renderInfra(await rendering(), choices(), DEPLOY_KEY)).not.toContain("RESEND_");
+  });
+
+  it("declares the coding agents' box, with its type's defaults, once Agent37's key is connected", async () => {
+    const boxed: SanomaConfig = { ...config, connectors: [...config.connectors, agent37] };
+    const client = await SanomaClient.connect({ ...boxed, databaseUrl });
+    const boxing = { config: boxed, resolved: resolveConfig(boxed), client };
+    try {
+      expect(await renderInfra(boxing, choices(), DEPLOY_KEY)).not.toContain("agent37");
+      await client.setSecret("AGENT37_API_KEY", "sk_live_test", { by: "alice" });
+      const text = await renderInfra(boxing, choices(), DEPLOY_KEY);
+      expect(text).toContain(`import { agent37 } from "@sanoma-ai/connector-agent37/resources";\n`);
+      expect(text).toContain(`export const box = agent37.instance({});\n`);
+      expect(text).toMatch(/export default \[repo, deployKey, store, host(, wakeup)?, box\];/);
+      const other = mkdtempSync(join(tmpdir(), "sanoma-go-live-read-"));
+      try {
+        mkdirSync(join(other, "resources", "sanoma"), { recursive: true });
+        writeFileSync(join(other, INFRA), text);
+        const read = readResources({ ...boxed, root: other });
+        expect(read.map((r) => [r.id, `${r.vendor}.${r.type}`]).at(-1)).toEqual([`${INFRA}#box`, "agent37.instance"]);
+      } finally {
+        rmSync(other, { recursive: true, force: true });
+      }
+    } finally {
+      await client.close();
+    }
   });
 
   it("refuses a push before the repository and the database are made", async () => {

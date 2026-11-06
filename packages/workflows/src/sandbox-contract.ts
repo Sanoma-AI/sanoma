@@ -80,7 +80,10 @@ export interface Box {
  * vendor keeps its state, so no snapshot handle crosses the contract.
  */
 export interface SandboxBackend {
-  /** The box `name`, made from `image` with `size` vCPUs when there is none, woken or started when stopped. */
+  /**
+   * The box `name`, made from `image` with `size` vCPUs when there is none (an empty `image` and a
+   * `size` of 0 are the backend's own), woken or started when stopped.
+   */
   open(opts: { name: string; image: string; size: number }): Promise<Box>;
   /** Deletes the box `name` and whatever the vendor kept of it: the next `open` finds it empty. */
   discard(opts: { name: string }): Promise<void>;

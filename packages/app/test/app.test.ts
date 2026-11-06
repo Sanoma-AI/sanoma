@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { ensureBuilt, testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
+import { fakeSandbox } from "@sanoma-ai/testing/sandbox";
 import {
   defineConfig,
   defineConnector,
@@ -2208,6 +2209,27 @@ describe("an app configured otherwise", () => {
       expect(warn.mock.calls.flat().join("\n")).toMatch(/files have problems.*\n {2}policies\/bad\.cedar:1:\d+: /s);
     } finally {
       warn.mockRestore();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("shows a declared sandbox on Hosting as the coding agents' box, beside the other slots", async () => {
+    const root = mkdtempSync(join(tmpdir(), "sanoma-app-box-"));
+    const fake = fakeSandbox(join(root, "boxes"));
+    mkdirSync(join(root, "resources"));
+    writeFileSync(
+      join(root, "resources/infra.ts"),
+      'import { testsandbox } from "@sanoma-ai/testing-sandbox/resources";\nexport const box = testsandbox.box({ name: "boxes", image: "local", size: 1 });\n',
+    );
+    try {
+      const boxed = await startApp({ ...config, connectors: [...config.connectors, fake.connector], root });
+      const hosting = await page("/hosting", boxed.url).finally(() => boxed.close());
+      expect(hosting.status).toBe(200);
+      expect(hosting.text).toMatch(
+        /data-slot="card-title"[^>]*><h2>Agent box<\/h2>.*?href="\/hosting\?resource=resources%2Finfra\.ts%23box"[^>]*>boxes<.*?<code[^>]*>testsandbox\.box<\/code>/s,
+      );
+      expect(hosting.text).not.toContain("Coding agents work in a box of their own on a live instance");
+    } finally {
       rmSync(root, { recursive: true, force: true });
     }
   });

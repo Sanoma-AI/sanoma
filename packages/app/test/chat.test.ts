@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,7 +8,7 @@ import type { LanguageModelV4CallOptions, LanguageModelV4StreamPart } from "@ai-
 import { anthropic } from "@sanoma-ai/connector-anthropic";
 import { ensureBuilt as ensureAppBuilt, testDatabaseUrl, waitFor } from "@sanoma-ai/testing";
 import { useTestApp } from "@sanoma-ai/testing/harness";
-import { defineConnector, defineDriver, isEnded, SanomaClient, withSetup } from "@sanoma-ai/workflows";
+import { defineConnector, defineDriver, isEnded, localBackend, SanomaClient, withSetup } from "@sanoma-ai/workflows";
 import { createUIMessageStream, customProvider, getToolName, isToolUIPart, readUIMessageStream } from "ai";
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -20,7 +20,7 @@ import { ACTOR_HEADER } from "../src/api.ts";
 import { type App, startApp } from "../src/index.ts";
 import { takeAppPrompt } from "../src/lib/apps.ts";
 import { type ChatMessage, chatTransport } from "../src/lib/chat.ts";
-import { allowedPath } from "../src/steps/agent/checkout.ts";
+import { allowedPath, here, realIn } from "../src/steps/agent/checkout.ts";
 import { ENGINES } from "../src/steps/agent/turn.ts";
 import { appSteps } from "../src/steps/index.ts";
 
@@ -560,30 +560,36 @@ describe("the composer and a model", () => {
 });
 
 describe("allowedPath", () => {
-  it("allows a path inside the worktree, and refuses one outside it, under .git or node_modules, or through a symlink out", async () => {
-    const tree = mkdtempSync(join(tmpdir(), "sanoma-allowed-"));
+  it("allows a path inside the worktree, and refuses one outside it, under .git or node_modules, or through a symlink out, on this machine and in a box", async () => {
+    const boxes = mkdtempSync(join(tmpdir(), "sanoma-allowed-"));
+    // The worktree is a box's home: the box checks the same paths on its own files.
+    const box = await localBackend(boxes).open({ name: "tree", image: "", size: 0 });
+    const tree = join(boxes, "tree");
     try {
       mkdirSync(join(tree, "workflows"));
       execFileSync("ln", ["-s", tmpdir(), join(tree, "out")]);
       execFileSync("ln", ["-s", "workflows", join(tree, "in")]);
-      const real = (await allowedPath(tree, "."))!;
-      expect(await allowedPath(tree, "workflows/new.ts")).toBe(join(real, "workflows/new.ts"));
-      expect(await allowedPath(tree, "new/deep/file.ts")).toBe(join(real, "new/deep/file.ts"));
-      expect(await allowedPath(tree, "in/x.ts")).toBe(join(real, "workflows/x.ts"));
-      for (const path of [
-        "../x",
-        "/etc/passwd",
-        "out/x",
-        ".git/config",
-        ".GIT/config",
-        "Node_Modules/x/index.js",
-        "node_modules/x/index.js",
-        "workflows/../../x",
-      ]) {
-        expect(await allowedPath(tree, path), path).toBeUndefined();
+      for (const real of [here, realIn(box)]) {
+        const at = (await allowedPath(tree, ".", real))!;
+        expect(at).toBe(realpathSync(tree));
+        expect(await allowedPath(tree, "workflows/new.ts", real)).toBe(join(at, "workflows/new.ts"));
+        expect(await allowedPath(tree, "new/deep/file.ts", real)).toBe(join(at, "new/deep/file.ts"));
+        expect(await allowedPath(tree, "in/x.ts", real)).toBe(join(at, "workflows/x.ts"));
+        for (const path of [
+          "../x",
+          "/etc/passwd",
+          "out/x",
+          ".git/config",
+          ".GIT/config",
+          "Node_Modules/x/index.js",
+          "node_modules/x/index.js",
+          "workflows/../../x",
+        ]) {
+          expect(await allowedPath(tree, path, real), path).toBeUndefined();
+        }
       }
     } finally {
-      rmSync(tree, { recursive: true, force: true });
+      rmSync(boxes, { recursive: true, force: true });
     }
   });
 });

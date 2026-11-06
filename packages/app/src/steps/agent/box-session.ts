@@ -5,7 +5,11 @@ import {
   type HarnessV1NetworkSandboxSession,
 } from "@ai-sdk/harness";
 import type { AppStepContext, Box, Process } from "@sanoma-ai/workflows";
-import { agentHome, allowedPath, boxName, realWithin, within } from "./checkout.ts";
+import { DECLARE_BOX } from "../../api.ts";
+import { noKeyText } from "../../lib/chat.ts";
+import { placeOf } from "../../loopback.ts";
+import { secretValues } from "../../server/secrets.ts";
+import { agentHome, boxName, inCheckout, type RealPaths, realIn, within } from "./checkout.ts";
 import { localBackend } from "./local-box.ts";
 
 // The sandbox session `HarnessAgent` runs a coding agent in, over a box of the `Sandbox` contract:
@@ -36,17 +40,51 @@ export interface BoxSessionOptions {
 export const OWN_AGENTS_DIR = ".acp";
 
 /**
- * The box of the person `step` is run by, for the company (`boxName`), opened: where every coding
- * agent of theirs works, a turn's engine stopping it when the turn ends.
+ * What a coding agent's turn is told on a live instance that declares no sandbox: what to declare,
+ * and Agent37's connector page for its key (`noKeyText`).
  */
-export const openBox = (step: Pick<AppStepContext, "source" | "resolved" | "by">): Promise<Box> =>
-  // S5: the declared sandbox's backend (`resolved.sandboxes()`, its connector's `sandbox`), when there is one.
-  localBackend(agentHome(step, "boxes")).open({
-    name: boxName(step.resolved.appName, step.by.id),
-    // This machine is the local box's image and size.
-    image: "",
-    size: 0,
-  });
+export const NO_BOX = noKeyText(
+  "agent37",
+  `Coding agents work in a box of their own on a live instance, and this company declares none: ${DECLARE_BOX}`,
+);
+
+/**
+ * The box of the person `step` is run by, for the company (`boxName`), chosen: where every coding
+ * agent of theirs works, `open` opening it for a turn, whose engine stops it when the turn ends.
+ * The declared sandbox's (`sandboxes()`), through its connector's backend given its fields, with
+ * the image and size it declares; else, on this computer (`placeOf`), the local backend's; on a
+ * live instance, none: refused with `NO_BOX`, so that no agent runs inside the live instance.
+ */
+export async function personBox(
+  step: Pick<AppStepContext, "source" | "resolved" | "by" | "client">,
+): Promise<{ name: string; open: () => Promise<Box> }> {
+  const { resolved, client } = step;
+  const name = boxName(resolved.appName, step.by.id);
+  const [declared] = await resolved.sandboxes();
+  if (declared) {
+    const make = resolved.sandboxBackends.get(declared.vendor);
+    const { inputs } = resolved.types.get(`${declared.vendor}.${declared.type}`)!.sandbox!;
+    if (!make) throw new Error(`${declared.id}: the ${declared.vendor} connector attaches no sandbox backend`);
+    const field = (path: string) =>
+      path
+        .split(".")
+        .reduce<unknown>((at, key) => (at as Record<string, unknown> | undefined)?.[key], declared.desired);
+    const [image, size] = [field(inputs.image), field(inputs.size)];
+    return {
+      name,
+      open: async () =>
+        (await make({ secrets: secretValues(client), declared: declared.desired })).open({
+          name,
+          // What it leaves out is the backend's own.
+          image: typeof image === "string" ? image : "",
+          size: typeof size === "number" ? size : 0,
+        }),
+    };
+  }
+  if (placeOf(resolved.databaseUrl) === "live") throw new Error(NO_BOX);
+  // This machine is the local box's image and size.
+  return { name, open: () => localBackend(agentHome(step, "boxes")).open({ name, image: "", size: 0 }) };
+}
 
 /** The box's home, `$HOME` as its commands see it. */
 export async function homeOf(box: Box): Promise<string> {
@@ -58,7 +96,7 @@ export async function homeOf(box: Box): Promise<string> {
 
 /**
  * The session over `box`, `HarnessV1NetworkSandboxSession`. A path is the checkout's as the
- * checkout rule allows it (`allowedPath`), or under the box's home, or refused. `stop` stops the
+ * checkout rule allows it (`allowedPath`, on the box's files), or under the box's home, or refused. `stop` stops the
  * box; `destroy` kills what the session started (so the box stays up for the turn's carry back,
  * and its opener stops it) and deletes the session's `.agent-runs`, which a bridge writes the
  * model's key into; `HarnessAgentSession.destroy()` leaves a session it was given running.
@@ -78,9 +116,12 @@ class BoxSession implements HarnessV1NetworkSandboxSession {
   readonly #runs: string;
   /** What it started, killed when it is destroyed. */
   readonly #started = new Set<Process>();
+  /** Real paths in the box, where its files are. */
+  readonly #real: RealPaths;
 
   constructor(box: Box, { id, root, home, ports }: BoxSessionOptions) {
     this.#box = box;
+    this.#real = realIn(box);
     this.id = id;
     this.defaultWorkingDirectory = resolve(root);
     this.#home = resolve(home);
@@ -89,25 +130,26 @@ class BoxSession implements HarnessV1NetworkSandboxSession {
     this.ports = [...ports];
   }
 
-  /** `path` as the session may use it: the checkout's by the checkout rule, else under its home; refused otherwise. */
+  /**
+   * `path` as the session may use it, by its real path in the box: the checkout's by the checkout
+   * rule, else under its home; refused otherwise.
+   */
   async #path(path: string): Promise<string> {
     const full = resolve(this.defaultWorkingDirectory, path);
+    const [home, root, real] = await this.#real([this.#home, this.defaultWorkingDirectory, full]);
     // Its home, by real paths (a link there leads nowhere else), but no other session's run files
     // (a bridge's start config holds the key) and nothing of the person's own agents (`OWN_AGENTS_DIR`:
     // their sign-ins, and what they run), in any case (macOS's file system ignores it), and not the
     // checkout when the home holds it (the box's clone), nor a link there into it: those are the
     // checkout rule's.
-    const home =
-      within(this.#home, full) && !within(this.defaultWorkingDirectory, full)
-        ? await realWithin(this.#home, full)
-        : undefined;
-    if (home !== undefined && !(await realWithin(this.defaultWorkingDirectory, home.full))) {
-      const inside = home.inside.toLowerCase();
+    const homeOnly = within(this.#home, full) && !within(this.defaultWorkingDirectory, full);
+    if (homeOnly && home !== null && real !== null && within(home, real) && !(root !== null && within(root, real))) {
+      const inside = relative(home, real).toLowerCase();
       const runs = relative(this.#home, this.#runs).toLowerCase();
       const own = within(OWN_AGENTS_DIR, inside);
-      if (!own && (!within(dirname(runs), inside) || within(runs, inside))) return home.full;
+      if (!own && (!within(dirname(runs), inside) || within(runs, inside))) return real;
     }
-    const allowed = await allowedPath(this.defaultWorkingDirectory, full);
+    const allowed = inCheckout(root, real);
     if (allowed === undefined) throw new Error(`${path} is outside the checkout, or under .git or node_modules`);
     return allowed;
   }

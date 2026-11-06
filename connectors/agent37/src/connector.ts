@@ -69,16 +69,16 @@ function shapeOf({ size = DEFAULTS.size, memory }: { size?: number; memory?: num
 
 /**
  * A declaration's fields with the defaults it leaves out, `image` and `size` given (as `open`
- * takes them) over the declared ones, the memory and disk following a size given that differs
- * from the declared one; throws what Agent37 would refuse.
+ * takes them; empty and 0 give none) over the declared ones, the memory and disk following a size
+ * given that differs from the declared one; throws what Agent37 would refuse.
  */
 export function wanted(declared: Record<string, unknown>, given: { image?: string; size?: number } = {}): Wanted {
-  const resized = given.size !== undefined && given.size !== (declared.size ?? DEFAULTS.size);
+  const resized = !!given.size && given.size !== (declared.size ?? DEFAULTS.size);
   const { memory: _, disk: __, ...rest } = declared;
   const box = instance.schema.parse({
     ...(resized ? rest : declared),
     ...(given.image && { image: given.image }),
-    ...(given.size !== undefined && { size: given.size }),
+    ...(given.size && { size: given.size }),
   });
   const size = box.size ?? DEFAULTS.size;
   return { ...DEFAULTS, ...box, size, memory: box.memory ?? shapeOf({ size })!.memory };

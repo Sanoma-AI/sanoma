@@ -31,7 +31,8 @@ export const WAKEUP_URL = "SANOMA_WAKEUP_URL";
  * The tokens the page takes, pasted: the connectors' own variables, so their pages show the same
  * rows. One of a vendor's (`SETUP_VENDORS`) is asked for only when the config declares a type of
  * that vendor. Cloudflare's are optional: going live runs the company there once both are
- * stored, and on Docker without them.
+ * stored, and on Docker without them. Agent37's is too: going live declares the coding agents'
+ * box there once it is stored.
  */
 export const SETUP_TOKENS: Record<string, { description: string; optional?: true }> = {
   GITHUB_TOKEN: {
@@ -51,6 +52,11 @@ export const SETUP_TOKENS: Record<string, { description: string; optional?: true
   },
   CLOUDFLARE_ACCOUNT_ID: {
     description: "The account id, from the Workers & Pages overview.",
+    optional: true,
+  },
+  AGENT37_API_KEY: {
+    description:
+      "Optional: an Agent37 API key (sk_live_…), from agent37.com's Cloud API keys page, so that coding agents work in a box of their own.",
     optional: true,
   },
   [WAKEUP_URL]: {
