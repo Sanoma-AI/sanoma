@@ -1212,20 +1212,22 @@ describe.skipIf(live)("cloudflareDriver", () => {
       expect(sent[0]!.headers.get("authorization") === `Bearer ${TOKEN}`).toBe(true);
     });
 
-    it("registers at the host's URL from the environment first, as the Worker sets it on the host", async () => {
+    it("refuses to register with no stored host's URL, whatever the environment holds, without a request", async () => {
       vi.stubEnv("SANOMA_HOST_URL", URL_OF);
-      play("register-from-env", [wake(204, null, "PUT")]);
-      const call = callWith({ SANOMA_WAKEUP_TOKEN: TOKEN, SANOMA_HOST_URL: "https://elsewhere.example.workers.dev" });
-      expect(await op("alarm.register", { at: "2099-01-01T00:00:00Z" }, call)).toEqual({});
-      expect(sent[0]!.headers.get("authorization") === `Bearer ${TOKEN}`).toBe(true);
-    });
-
-    it("refuses to register with no host's URL in the environment or the store, naming both, without a request", async () => {
-      await expect(op("alarm.register", { at: "2099-01-01T00:00:00Z" })).rejects.toMatchObject({
+      await expect(
+        op("alarm.register", { at: "2099-01-01T00:00:00Z" }, callWith({ SANOMA_WAKEUP_TOKEN: TOKEN })),
+      ).rejects.toMatchObject({
         retryable: false,
-        message: expect.stringContaining("SANOMA_HOST_URL is set neither in the environment"),
+        message: expect.stringContaining("SANOMA_HOST_URL is not stored"),
       });
       expect(sent).toEqual([]);
+    });
+
+    it("stores a new host's URL over an earlier host's", async () => {
+      const call = callWith({ SANOMA_HOST_URL: "https://elsewhere.example.workers.dev" });
+      play("alarm-new-host", [wake(200, { at: null })]);
+      await op("alarm.create", { desired: { host: URL_OF } }, call);
+      expect(await call.secrets.get("SANOMA_HOST_URL")).toBe(URL_OF);
     });
 
     it("fails a register the Worker could not take as retryable", async () => {

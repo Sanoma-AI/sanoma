@@ -29,6 +29,7 @@ import { connectionCatalog, ConnectionRegistry } from "../src/connection.ts";
 import { secret } from "../src/secret.ts";
 import { lazyDb } from "../src/db.ts";
 import { visitorPrincipal } from "../src/shared.ts";
+import { describeConfig } from "../src/describe.ts";
 import { tree } from "./tree.ts";
 
 const auth = defineAuthentication({
@@ -688,5 +689,97 @@ describe("resource account selection", () => {
       await worker?.stop();
       await client.close();
     }
+  });
+});
+
+/** Secrets with one name bound to the environment, read-only. */
+const secrets = (store = memorySecretStore()) =>
+  new SecretAccess({ store, bindings: { CAL_BOUND: { env: "CALENDAR_BOUND" } } }, store);
+
+describe("storage a method needs, before consent", () => {
+  // A method that refreshes its credentials (as OAuth does): it writes them, conditionally.
+  const refreshing = defineAuthentication({
+    kind: "oauth2",
+    version: 1,
+    schema: z.object({ refreshToken: z.string() }),
+    storage: { writable: true, maxBytes: 1024, conditionalWrites: true },
+    verify: async () => ({ account: "a", scopes: [] }),
+  });
+  const calendarOps = defineConnector("calendar", {
+    event: { read: { effect: "read", input: z.object({}), output: z.object({}) } },
+  });
+  const calendar = withSetup(calendarOps, {
+    authentication: { oauth: refreshing },
+    driver: () => defineDriver(calendarOps, { event: { read: async () => ({}) } }, { authentication: ["oauth"] }),
+  });
+  const bound = defineConnection(calendar, {
+    name: "bound",
+    method: "oauth",
+    credentials: secret("CAL_BOUND"),
+    scopes: [],
+  });
+  const managed = defineConnection(calendar, {
+    name: "managed",
+    method: "oauth",
+    credentials: secret("CAL"),
+    scopes: [],
+  });
+  const visitors = defineConnectionRule(calendar, {
+    name: "visitors",
+    method: "oauth",
+    createBy: ["alice"],
+    scopes: [],
+  });
+  const catalog = connectionCatalog([calendar], [bound, managed], [visitors]);
+  // A startup binding (a host's environment) and a store without conditional writes (an account-wide provider store).
+  const noConditional = { ...memorySecretStore(), id: "account-store" };
+  Object.defineProperty(noConditional, "capabilities", {
+    value: { ...memorySecretStore().capabilities, conditionalWrites: "none" },
+  });
+
+  it("names a refreshing method bound read-only, and every one on a store without conditional writes", () => {
+    expect(new ConnectionRegistry(catalog, () => pool.db(), secrets()).storageProblems()).toEqual([
+      {
+        id: bound.$connection,
+        method: "oauth",
+        problem: "read_only",
+        location: { store: "environment", namespace: "", path: "CALENDAR_BOUND", management: "external" },
+      },
+    ]);
+    const problems = new ConnectionRegistry(catalog, () => pool.db(), secrets(noConditional)).storageProblems();
+    expect(problems.map(({ id, problem }) => [id, problem])).toEqual([
+      [bound.$connection, "read_only"],
+      [managed.$connection, "unsupported"],
+      ["calendar/visitors", "unsupported"],
+    ]);
+  });
+
+  it("puts the problem on the card and refuses the preview, with no store or vendor contacted", async () => {
+    await clear();
+    const checked = new ConnectionRegistry(catalog, () => pool.db(), secrets());
+    const cards = await checked.cards("alice");
+    expect(cards.find((c) => c.id === bound.$connection)?.storageProblem).toBe("read_only");
+    expect(cards.find((c) => c.id === managed.$connection)?.storageProblem).toBeUndefined();
+    await expect(checked.setup({ connection: bound }, { id: "alice" }, randomUUID())).rejects.toMatchObject({
+      code: "read_only",
+    });
+  });
+
+  it("is a problem `sanoma check` reports", () => {
+    const { problems } = describeConfig({
+      databaseUrl: dbUrl,
+      connectors: [calendar],
+      connections: [bound, managed],
+      secrets: { bindings: { CAL_BOUND: { env: "CALENDAR_BOUND" } } },
+      ledger: memoryLedger(),
+    });
+    expect(problems.filter((p) => p.file === "sanoma.config.ts")).toEqual([
+      {
+        file: "sanoma.config.ts",
+        message: expect.stringMatching(
+          /^connection calendar\/bound: its oauth method writes its credentials .* \(now environment CALENDAR_BOUND\)$/,
+        ),
+      },
+    ]);
   });
 });

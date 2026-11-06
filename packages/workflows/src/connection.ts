@@ -15,7 +15,13 @@ import {
 import { type Connector, setupOf, VENDOR, defineConnector, defineDriver, type CallContext } from "./op.ts";
 import { isSecret, type Secret } from "./secret.ts";
 import { SanomaError } from "./errors.ts";
-import { SecretStoreError, type SecretAccess, type SecretLocation } from "./secret-store.ts";
+import {
+  SecretStoreError,
+  type SecretAccess,
+  type SecretLocation,
+  type SecretStoreCapabilities,
+  type SecretStoreErrorCode,
+} from "./secret-store.ts";
 import { and, eq, getTableColumns, isNull, or, sql } from "drizzle-orm";
 import type { Db } from "./db.ts";
 import { connectionHealth, connections, connectionSetups } from "./db/company.ts";
@@ -70,6 +76,20 @@ export interface ConnectionCard {
   updatedBy?: string;
   updatedAt?: string;
   health?: ConnectionHealth;
+  /**
+   * Why its credentials cannot be kept where they are bound (`checkAuthenticationStore`), found
+   * before anyone consents: `read_only` (the method writes them, a refresh, and the binding or
+   * store is read-only), `unsupported` (it needs conditional writes the store lacks), `too_large`.
+   */
+  storageProblem?: SecretStoreErrorCode;
+}
+/** A declared account or creation rule whose method's storage needs its binding cannot meet (`storageProblems`). */
+export interface ConnectionStorageProblem {
+  id: string;
+  method: string;
+  problem: SecretStoreErrorCode;
+  /** Where its credentials are bound; none for a rule's, which are Sanoma's in the store. */
+  location?: SecretLocation;
 }
 export interface ConnectionHealth {
   state:
@@ -98,6 +118,24 @@ export interface ConnectionSetup {
   previousLocation?: SecretLocation;
 }
 const idPart = /^[a-z][a-z0-9-]{0,63}$/;
+/** A value bound to the environment or bootstrap: read-only to Sanoma, whatever the store. */
+const BOUND: SecretStoreCapabilities = {
+  writable: false,
+  maxBytes: Number.MAX_SAFE_INTEGER,
+  conditionalWrites: "none",
+  deletion: "unsupported",
+  changeDetection: "read",
+};
+/** The store's refusal `check` throws, as a code; undefined when it throws none. */
+function refusal(check: () => void): SecretStoreErrorCode | undefined {
+  try {
+    check();
+    return undefined;
+  } catch (error) {
+    if (error instanceof SecretStoreError) return error.code;
+    throw error;
+  }
+}
 function refuse(message: string): never {
   throw new SanomaError("invalid_input", message);
 }
@@ -329,6 +367,7 @@ export class ConnectionRegistry {
           : "default" in declaration
             ? declaration.credentials?.$secret
             : row?.credential;
+      const storageProblem = refusal(() => this.checkStore(method, credential));
       cards.push({
         id,
         vendor: declaration.vendor,
@@ -348,6 +387,7 @@ export class ConnectionRegistry {
         ...(row?.location && { boundLocation: row.location }),
         ...(row?.updatedBy && { updatedBy: row.updatedBy }),
         ...(row?.updatedAt && { updatedAt: row.updatedAt.toISOString() }),
+        ...(storageProblem && { storageProblem }),
         ...(row?.health &&
           row.checkedAt && {
             health: {
@@ -625,17 +665,42 @@ export class ConnectionRegistry {
   private checkStore(method: Authentication, credential?: string | null): void {
     if (!this.secrets || !credential) return;
     const location = this.secrets.location(credential);
-    const caps =
-      location.namespace === ""
-        ? {
-            writable: false,
-            maxBytes: Number.MAX_SAFE_INTEGER,
-            conditionalWrites: "none" as const,
-            deletion: "unsupported" as const,
-            changeDetection: "read" as const,
-          }
-        : this.secrets.store.capabilities;
-    checkAuthenticationStore(method, caps, location.management);
+    checkAuthenticationStore(
+      method,
+      location.namespace === "" ? BOUND : this.secrets.store.capabilities,
+      location.management,
+    );
+  }
+
+  /**
+   * Each declared account and creation rule whose method cannot keep its credentials where they
+   * are bound, as preview would refuse it: `sanoma check` reports them, before anyone consents.
+   * No store or vendor is contacted.
+   */
+  storageProblems(): ConnectionStorageProblem[] {
+    const secrets = this.secrets;
+    if (!secrets) return [];
+    const problems: ConnectionStorageProblem[] = [];
+    for (const d of this.catalog.definitions.values()) {
+      const method = this.catalog.methods.get(d.vendor)![d.method]!;
+      const credential = method.kind === "workload-identity" ? undefined : d.credentials?.$secret;
+      const problem = refusal(() => this.checkStore(method, credential));
+      if (problem)
+        problems.push({
+          id: d.$connection,
+          method: d.method,
+          problem,
+          ...(credential !== undefined &&
+            problem !== "invalid_configuration" && { location: secrets.location(credential) }),
+        });
+    }
+    for (const [id, rule] of this.catalog.rules) {
+      const method = this.catalog.methods.get(rule.vendor)![rule.method]!;
+      // A rule's accounts are each kept under a name of their own, which no binding names: Sanoma's, in the store.
+      const problem = refusal(() => checkAuthenticationStore(method, secrets.store.capabilities, "sanoma"));
+      if (problem) problems.push({ id, method: rule.method, problem });
+    }
+    return problems;
   }
 
   private async row(id: string) {

@@ -119,6 +119,97 @@ No step answers a visitor 503 or an error: the app deployed answers until the up
 
 Every host needs `SANOMA_DATABASE_URL` among its secrets: a create or an update without it, or with a URL that is not `postgres://` or `postgresql://`, is refused before anything changes, and the error never shows the URL. The container keeps the direct URL in its environment. The app on the Worker reaches the database through a [Hyperdrive](https://developers.cloudflare.com/hyperdrive/) config of the Worker's name, one per host, made or updated at every deploy from the URL (`{ scheme, host, port, database, user, password }`, port 5432 unless the URL names one, user and password decoded) with query caching off, `caching: { disabled: true }`: the app's reads must see its own writes. The upload binds it as `DATABASE`, whose `connectionString` the app connects with. Hyperdrive must reach the database from Cloudflare's network: a host on `localhost` or a private address is refused by Cloudflare at the config's write. The token needs Hyperdrive Edit.
 
+## Secrets
+
+A host's secrets are read-only startup values. Apply resolves them on the machine that applies it, the Worker holds them, and the container receives them when it starts. Nothing on the host writes them back, and they are not a secret store.
+
+**What the host is given.** A `cloudflare.host` is given its `secrets` by apply ([Hosts](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#hosts)), as markers, never values:
+
+| Under                                      | From                                                                                                                                                                                                                                        |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SANOMA_DATABASE_URL`                      | The declared `database`'s URL                                                                                                                                                                                                               |
+| `SANOMA_SIGNING_KEY`                       | The config's `SANOMA_SIGNING_KEY` binding (`{ bootstrap }` or `{ env }`), else a key of the host's own, generated at its create                                                                                                             |
+| `SANOMA_SECRETS_KEY`                       | The config's binding of it, only with the built-in store                                                                                                                                                                                    |
+| `SANOMA_WAKEUP_TOKEN`, `SANOMA_SOURCE_KEY` | The wakeup's token, and the deploy key it clones a private repository with                                                                                                                                                                  |
+| Its vendors' credentials                   | Those stored on the connector pages of its data file's vendors, its repository's and the sign-in sender's, so it can deploy itself (`CLOUDFLARE_API_TOKEN` among them when it is stored), and the company's GitHub App keys that are stored |
+| Each `{ env, host: true }` binding         | That binding's value, under its variable's name: `PROVISIONING: { env: "SANOMA_PROVISIONING_CREDENTIAL", host: true }` is given as `SANOMA_PROVISIONING_CREDENTIAL`                                                                         |
+
+A `host: true` binding whose variable has no value is refused before the deploy. A variable the driver reads from this machine's environment with no binding is a problem the plan names, since the host would not be given it. A `{ path }` binding is never delivered: it is read from the store.
+
+**How they reach the Worker.** The driver resolves each marker through the applying runtime's own bindings, so a `SANOMA_SECRETS_KEY_FILE` there is read on that machine and the host receives the key's value, never the path. The [one upload](#the-deploy) binds each as `secret_text`, beside the non-secret `plain_text` bindings (`SANOMA_REVISION`, `SANOMA_CONFIG_REVISION`, `SANOMA_HOST_URL`, `SANOMA_DOMAINS` and the rest). Cloudflare keeps them encrypted and shows their names, never their values, so a plan compares names only. The app on the Worker reads them as its environment (`nodejs_compat` fills `process.env` from the text bindings), and its database through the `DATABASE` binding, not the URL.
+
+**How they reach the container.** The object starts the container with the Worker's text bindings, plain and secret, as its environment, and `sanoma worker` there resolves the company's bindings from it: an `{ env }` binding reads that variable, a `{ bootstrap }` binding the key. The process keeps its startup environment: a changed value reaches it only at its next start. To roll out a changed value, advance `configurationRevision` and apply the host: the upload carries the new values and the restart starts a container with them. A value changed alone plans no update.
+
+**Mounted files.** `SANOMA_SIGNING_KEY_FILE` and `SANOMA_SECRETS_KEY_FILE` name a file on the machine reading them. Neither is delivered: Cloudflare mounts no files into the container, and the app on the Worker refuses a `_FILE` input, as `workerd` has no file system. Use them on the applying machine or a host of your own.
+
+**Read-only.** On the host, a value from the environment or a bootstrap binding cannot be replaced or deleted through Sanoma: a write, a delete or an `ensure` of one fails `read_only`. A binding whose variable the host was not given reads as missing; it never falls back to the store's value of that name.
+
+**In the environment is delivery, not encryption at rest.** Cloudflare encrypts Worker secrets at rest. In the running Worker and container they are plain values in the environment, readable by all code there: the app, the company's workflows, its sites' server code and the connectors' drivers. Deliver only what the host's runtime needs.
+
+**Limits.** A Worker holds 128 variables on the Paid plan (64 on Free), secrets and plain text together, each at most 5 KB ([Workers limits](https://developers.cloudflare.com/workers/platform/limits/), page updated 2026-10-29).
+
+### The token: deploying and running
+
+`CLOUDFLARE_API_TOKEN` is management authority. A host's runtime needs none of it to read its own secrets, which arrive in its environment.
+
+| Who                                    | Needs                                                                                                                                                                                                           |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Apply of a host (here, or on the host) | Workers Scripts Edit, Workers Containers Edit, Hyperdrive Edit; Zone Read for `domains` and `hostname`; Zone → DNS → Edit on the zones of [DNS records](#dns-records)                                           |
+| The runtime on the host                | None for its secrets, its wakeup's register or its wake route, which use `SANOMA_WAKEUP_TOKEN`. A host is given the API token only when it is stored for its vendor, so the host can deploy itself after a push |
+| Anything here                          | Never Secrets Store Write or Secrets Store Read: Sanoma does not use the account's Secrets Store ([below](#the-account-secrets-store))                                                                          |
+
+A host given the token holds it in its environment with everything else, so code on the host can deploy Workers with it. Give such a host a token scoped to the permissions above and this account. Without the token stored for `cloudflare`, the host is not given it, and deploys are applied from elsewhere.
+
+### The account Secrets Store
+
+Cloudflare's account-wide [Secrets Store](https://developers.cloudflare.com/secrets-store/) is not one of Sanoma's secret stores: there is no adapter for it. Cloudflare documents (pages read 2026-11-06):
+
+- It is in open beta: one store per account, up to 100 production secrets per account, each value at most 65,536 bytes ([manage account secrets](https://developers.cloudflare.com/secrets-store/manage-secrets/), updated 2026-10-22).
+- Once stored, a value cannot be read through the API or the dashboard; only a bound service reads it. Locally created secrets are kept unencrypted in `.wrangler/state` (same page).
+- A Worker reads one through a `secrets_store_secret` binding (`store_id`, `secret_name`) with `await env.BINDING.get()`. The binding reads only; it has no write or delete ([Workers integration](https://developers.cloudflare.com/secrets-store/integrations/workers/), updated 2026-10-12; [script upload](https://developers.cloudflare.com/api/resources/workers/subresources/scripts/methods/update/) for the binding's type).
+- Writing is management: `PATCH …/secrets_store/stores/{store_id}/secrets/{secret_id}` with `value`, `scopes` and `comment`, under the Secrets Store Write permission. Its result carries `created`, `modified` and `status`, and no version; the API documents no ETag or conditional write ([edit a secret](https://developers.cloudflare.com/api/resources/secrets_store/subresources/stores/subresources/secrets/methods/edit/)). Creating secrets needs the Super Administrator or Secrets Store Admin role, binding them Super Administrator or Secrets Store Deployer.
+- A container receives a Secrets Store value only as the Worker passes it at the container's start, and keeps it until its next start ([containers' environment](https://developers.cloudflare.com/containers/examples/env-vars-and-secrets/), updated 2026-10-12).
+
+Against the `SecretStore` contract this is a store that only a Worker's binding reads, that the container where workflows run cannot read, that cannot report a version for a read, and whose only write is an unconditional replace by a management token: `writable: false` at runtime, `conditionalWrites: "none"`, `changeDetection: "read"`. Such a store cannot keep credentials Sanoma writes (an OAuth refresh, a generated secret), which is what a store adapter is for, and a value it holds reaches the runtime only as a startup value, as a host's secrets already do. A method that writes its credentials is refused against a read-only binding or a store without conditional writes before anyone consents, on the connector page and by `sanoma check` ([Credentials](https://github.com/Sanoma-AI/sanoma/blob/main/packages/workflows/README.md#credentials)), never kept somewhere else instead. The store's list (`GET …/secrets_store/stores`) answered on Sanoma's account on 2026-11-06 with no store; nothing was made there.
+
+### Setups
+
+**Supabase and Cloudflare, with the built-in store.** The company's database is Supabase Postgres; the built-in store encrypts credentials in it. Bind both keys as bootstrap and give the host the database:
+
+```ts
+// sanoma.config.ts
+secrets: {
+  bindings: {
+    SANOMA_SIGNING_KEY: { bootstrap: "SANOMA_SIGNING_KEY" },
+    SANOMA_SECRETS_KEY: { bootstrap: "SANOMA_SECRETS_KEY" },
+  },
+},
+```
+
+```ts
+// resources/infra.ts: `store` a declared `supabase.project`
+export const host = cloudflare.host({ database: store });
+```
+
+Apply gives the Worker `SANOMA_DATABASE_URL`, `SANOMA_SIGNING_KEY` and `SANOMA_SECRETS_KEY` as secrets, and the container receives them at its start. Back up the encryption key apart from the database: a database backup alone cannot decrypt the credentials.
+
+**Supabase and Cloudflare, with Supabase Vault.** The [Vault adapter](../supabase/README.md#supabase-vault-as-the-secret-store) keeps and encrypts the credentials, so there is no `SANOMA_SECRETS_KEY`. Bind `SANOMA_SIGNING_KEY` as above, and deliver the adapter's scoped login to the host:
+
+```ts
+// sanoma.config.ts
+secrets: {
+  store: supabaseVault(),
+  bindings: {
+    SANOMA_SIGNING_KEY: { bootstrap: "SANOMA_SIGNING_KEY" },
+    VAULT_LOGIN: { env: "SUPABASE_VAULT_DATABASE_URL", host: true },
+  },
+},
+```
+
+The login authenticates to the store, so it is a host secret, never a value in the store it unlocks.
+
+**The account Secrets Store.** Not a setup Sanoma supports, for the reasons above. Keep the company's credentials in the built-in store or Supabase Vault, and what the host's runtime needs at its start as host secrets. Sanoma reads nothing from the account store and copies nothing into it.
+
 ## The image
 
 A container of the `durable_object` policy runs an image of its own account's registry pinned by digest, `registry.cloudflare.com/<account id>/<repository>@sha256:<digest>`, never a tag, which Cloudflare stores and pulls without a limit (Docker Hub's pulls are not cached and are limited per address). So a create or an update first copies the declared image there and pins the copy by its manifest's digest, and the object starts that: `ghcr.io/sanoma-ai/runtime:0.8.1` becomes `registry.cloudflare.com/<account id>/sanoma-ai-runtime@sha256:…` (the path with `-` for `/`, copied as `:0.8.1`). An image in the account's registry by a tag is not copied: its manifest's digest is asked for (`docker-content-digest`); one there pinned by digest runs as it is, with no registry request. The copy is registry to registry in Node, no Docker: the source pulled anonymously (a public image; the token its registry's challenge names), the target pushed to with temporary credentials from `containers.registries.credentials.generate` (push and pull, an hour, never stored or logged). Each blob the account lacks is streamed across in one request of its known length, then the manifest, unchanged; when the account's manifest for that tag already has the source's digest, nothing is copied, and a digest-pinned source must answer that digest. Docker Hub is not copied from: declare `ghcr.io/sanoma-ai/runtime`. The source must be one image manifest (OCI or Docker v2), not an index: the release pushes one (`provenance: false`). Then the account prepares the pinned image to run (`POST …/containers/image-preparations { image }`, `containers.images.prepare`), asked again every two seconds until it is `ready`, as Wrangler does: an `error` fails the apply with Cloudflare's `reason`, not retryable, and fifteen minutes without `ready` fails it as retryable. Both come before the upload, so a copy or a preparation that fails leaves the Worker as it was.
@@ -185,7 +276,7 @@ It reads these on every call, never when the config loads:
 | `CLOUDFLARE_API_TOKEN`  | An API token with Workers Scripts Edit and Workers Containers Edit (Write, in the API's terms), Zone Read for `domains` (custom domains are attached and detached with Workers Scripts Edit) and DNS records, and Zone → DNS → Edit on the zones of [DNS records](#dns-records) |
 | `CLOUDFLARE_ACCOUNT_ID` | The account's id, 32 hexadecimal digits, on its dashboard's overview                                                                                                                                                                                                            |
 
-When either is unset, a call fails, not retryable, naming it. The driver declares both in its `env` ([Credentials](https://www.npmjs.com/package/@sanoma-ai/workflows#credentials)): the worker starts without them, and the app's connector page shows their status and lets you set them. The alarm's operations need neither: they call the Worker with `SANOMA_WAKEUP_TOKEN` (`alarm.create` mints it when none is stored), and `alarm.create` stores `SANOMA_HOST_URL` once the host answered, for a register made off the host; it keeps the first one stored, which the Worker's own binding overrides on the host. A read without the token reads the alarm as unhealthy, so a plan to delete it still goes on.
+When either is unset, a call fails, not retryable, naming it. The driver declares both in its `env` ([Credentials](https://www.npmjs.com/package/@sanoma-ai/workflows#credentials)): the worker starts without them, and the app's connector page shows their status and lets you set them. The alarm's operations need neither: they call the Worker with `SANOMA_WAKEUP_TOKEN` (`alarm.create` mints it when none is stored), and `alarm.create` stores `SANOMA_HOST_URL` once the host answered, replacing an earlier host's. `register` sends to the stored URL, beside the stored token, on the host as off it: it reads nothing from the process environment. A read without the token reads the alarm as unhealthy, so a plan to delete it still goes on.
 
 ### Errors and retries
 

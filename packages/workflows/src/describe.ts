@@ -305,6 +305,7 @@ export function describeConfig(config: SanomaConfig): ConfigDescription {
         resolved.root === undefined ? {} : siteDomains(resolved.root),
       ),
       ...loginProblems(resolved, dataFiles.resources),
+      ...connectionStorageProblems(resolved),
     ],
     apps,
     policy: {
@@ -339,6 +340,31 @@ function loginProblems(resolved: ResolvedConfig, people: readonly PeopleResource
         `agent, \`unless { principal == Sanoma::Principal::"${LOGIN_AGENT}" }\``,
     },
   ];
+}
+
+/** Why each kind of `ConnectionStorageProblem` refuses the account, and what to do instead. */
+const STORAGE_ADVICE: Partial<Record<string, string>> = {
+  read_only:
+    "writes its credentials (a refresh replaces them), and they are bound read-only: bind them to a path Sanoma manages in a writable store, such as the built-in one",
+  unsupported:
+    "replaces its credentials with a conditional write, which this store does not offer: choose the built-in store or another that offers conditional writes",
+  too_large: "may keep credentials larger than this store holds: choose a store with a larger limit",
+};
+
+/**
+ * Each declared connection and creation rule whose method's storage needs its binding cannot meet
+ * (`ConnectionRegistry.storageProblems`): refused before consent, never kept elsewhere instead.
+ */
+function connectionStorageProblems(resolved: ResolvedConfig): ResourceProblem[] {
+  return resolved.connections.storageProblems().map(({ id, method, problem, location }) => ({
+    file: "sanoma.config.ts",
+    message:
+      `connection ${id}: its ${method} method ` +
+      (STORAGE_ADVICE[problem] ?? `cannot keep its credentials where they are bound (${problem})`) +
+      (location
+        ? ` (now ${location.store}${location.namespace ? ` ${location.namespace}` : ""} ${location.path})`
+        : ""),
+  }));
 }
 
 /** That the root's `kind` `name`, in `file`, is named as an app is. */
