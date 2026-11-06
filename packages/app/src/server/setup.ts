@@ -177,6 +177,7 @@ const cookie = (request: Request, name: string, value: string, path: string, max
 /** What the page shows: the App's slug, each token's status and how people will sign in on the host (`signIn`); never a value. */
 export async function setupStatus(app: AppContext, actor?: Principal): Promise<SetupStatus> {
   const names = setupTokens(app);
+  const writer = app.resolved.identityProvisioning.secret;
   const secrets = app.client.secrets([GITHUB_APP.slug, GITHUB_APP.client_id, GITHUB_APP.client_secret, ...names]);
   const [found, signIn, missing] = await Promise.all([
     secrets,
@@ -188,13 +189,12 @@ export async function setupStatus(app: AppContext, actor?: Principal): Promise<S
   ]);
   const slug = found.get(GITHUB_APP.slug);
   const tokens = names.map((name): CredentialStatus => {
-    const { description, optional = false } = SETUP_TOKENS[name] ?? ENROLLMENT_WRITER;
+    const { description, optional = false } = name === writer ? ENROLLMENT_WRITER : SETUP_TOKENS[name]!;
     const secret = found.get(name);
     if (!secret) return { name, description, optional, status: "missing" };
     const { source, setBy, setAt } = secret;
     return { name, description, optional, status: "set", source, ...(setBy && { setBy, setAt }) };
   });
-  const writer = app.resolved.identityProvisioning.secret;
   return {
     githubApp: slug ? { slug: slug.value, setBy: slug.setBy, setAt: slug.setAt, missing } : null,
     tokens,

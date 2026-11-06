@@ -56,7 +56,7 @@ function writerUrl(databaseUrl: string): string {
  */
 export function configuredIdentityProvisioning(
   config: IdentityProvisioning | IdentityProvisioningDatabase | undefined,
-  secrets?: Pick<SecretAccess, "get">,
+  secrets: Pick<SecretAccess, "get">,
 ): { store?: IdentityProvisioning; close(): Promise<void>; secret?: string } {
   if (!config) return { close: async () => {} };
   if (!("databaseUrl" in config)) return { store: config, close: async () => {} };
@@ -70,7 +70,7 @@ export function configuredIdentityProvisioning(
     if (secret === undefined) return declared!;
     let value: string | undefined;
     try {
-      value = await secrets?.get(secret);
+      value = await secrets.get(secret);
     } catch {
       throw new IdentityProvisioningError("unavailable");
     }

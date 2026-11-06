@@ -69,11 +69,11 @@ describe("declarative enrollment writer", () => {
       expect(JSON.stringify(describeConfig({ connectors: [], identityProvisioning: config }))).not.toContain(
         writerUrl.href,
       );
-      await configuredIdentityProvisioning(config).close();
+      await configuredIdentityProvisioning(config, memorySecrets()).close();
       expect(connect).not.toHaveBeenCalled();
-      expect(() => configuredIdentityProvisioning({ ...config, databaseUrl: "sensitive-invalid-value" })).toThrow(
-        "Identity provisioning: invalid",
-      );
+      expect(() =>
+        configuredIdentityProvisioning({ ...config, databaseUrl: "sensitive-invalid-value" }, memorySecrets()),
+      ).toThrow("Identity provisioning: invalid");
     } finally {
       connect.mockRestore();
     }
@@ -104,7 +104,10 @@ describe("declarative enrollment writer", () => {
   });
 
   it("uses a restricted writer, denies privilege drift and closes its own pool", async () => {
-    const configured = configuredIdentityProvisioning({ databaseUrl: writerUrl.href, maxValidityMs: 86_400_000 });
+    const configured = configuredIdentityProvisioning(
+      { databaseUrl: writerUrl.href, maxValidityMs: 86_400_000 },
+      memorySecrets(),
+    );
     const input = enrollment();
     try {
       await configured.store!.enroll(input);
@@ -126,7 +129,7 @@ describe("declarative enrollment writer", () => {
   });
 
   it("rejects an administrator writer and leaves caller-supplied adapters owned by the caller", async () => {
-    const admin = configuredIdentityProvisioning({ databaseUrl, maxValidityMs: 86_400_000 });
+    const admin = configuredIdentityProvisioning({ databaseUrl, maxValidityMs: 86_400_000 }, memorySecrets());
     try {
       await expect(admin.store!.enroll(enrollment())).rejects.toMatchObject({ code: "invalid" });
     } finally {
@@ -134,7 +137,7 @@ describe("declarative enrollment writer", () => {
     }
     const adapter = memoryIdentityProvisioning(),
       close = vi.fn<() => Promise<void>>();
-    await configuredIdentityProvisioning({ ...adapter, close } as typeof adapter).close();
+    await configuredIdentityProvisioning({ ...adapter, close } as typeof adapter, memorySecrets()).close();
     expect(close).not.toHaveBeenCalled();
   });
 });

@@ -7,11 +7,8 @@ import {
   type Driver,
 } from "@sanoma-ai/workflows";
 import { accountOf, federationCredentials, type gcpAuthentication, type GcpIdentity } from "./authentication.ts";
-import { gcpTf } from "./connector.ts";
+import { gcpTf, references } from "./connector.ts";
 import { constrain, retainKeys } from "./constraints.ts";
-
-/** Fields that name a parent resource: always inside the connection's project. */
-const PARENTS = ["id", "key_ring", "crypto_key_id", "service_account_id"];
 
 export function gcpDriver(
   identity: GcpIdentity | undefined,
@@ -36,21 +33,25 @@ export function gcpDriver(
           const checked = constrain(operation, input);
           const desired = checked.desired;
           const projects = [identity.project, identity.projectNumber];
-          // Resource names (`projects/<p>/...`) and the project-level forms IAM audit configs use
-          // (`<p> <service>` to import, `<p>/audit_config/<service>` as state).
-          const inProject = (value: string) =>
-            projects.some((p) => [`projects/${p}/`, `${p}/`, `${p} `].some((prefix) => value.startsWith(prefix)));
-          if (input.id && !inProject(input.id)) throw new AuthenticationError("wrong_account");
+          const type = operation.slice(0, operation.indexOf("."));
+          // The fields naming a parent resource (its full name) are inside the project too.
+          const parents = Object.keys(references[type as keyof typeof references] ?? {});
+          const inProject = (value: string) => projects.some((p) => value.startsWith(`projects/${p}/`));
+          // Every ID is a resource name, or starts with one (IAM members), but an audit config's:
+          // `<project> <service>` to import, `<project>/audit_config/<service>` as state.
+          const idInProject =
+            type === "auditConfig"
+              ? (id: string) => projects.some((p) => id.startsWith(`${p} `) || id.startsWith(`${p}/audit_config/`))
+              : inProject;
+          if (input.id && !idInProject(input.id)) throw new AuthenticationError("wrong_account");
           for (const state of [input.state, desired]) {
             if (!state) continue;
             if (state.project != null && !projects.includes(String(state.project)))
               throw new AuthenticationError("wrong_account");
-            for (const field of PARENTS)
+            if (typeof state.id === "string" && !idInProject(state.id)) throw new AuthenticationError("wrong_account");
+            for (const field of parents)
               if (typeof state[field] === "string" && !inProject(state[field]))
                 throw new AuthenticationError("wrong_account");
-            // A Cloud Run service's IAM `name` is its full resource name; a short name is the service's own.
-            if (typeof state.name === "string" && state.name.startsWith("projects/") && !inProject(state.name))
-              throw new AuthenticationError("wrong_account");
           }
           const credentials = federationCredentials(identity, bearer);
           const driver = gcpTf.driver(
