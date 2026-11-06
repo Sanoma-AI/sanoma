@@ -52,6 +52,8 @@ const SECRETS_KEY = "SANOMA_SECRETS_KEY";
 
 /** The wakeup's declaration in `infra.ts`, as `renderInfra` writes it. */
 const WAKEUP_LINE = /^export const wakeup = /m;
+/** The coding agents' box's declaration in `infra.ts`, as `renderInfra` writes it. */
+const BOX_LINE = /^export const box = /m;
 /** The repository's owner and name in `infra.ts` as `renderInfra` writes them. */
 const REPO = /export const repo = github\.repository\(\{\s*owner: "([^"]+)",\s*name: "([^"]+)"/;
 
@@ -92,7 +94,9 @@ export async function renderInfra(
   chosen?: Awaited<ReturnType<typeof choose>>,
 ) {
   const root = rootOf(step);
-  const { database, host, wakeup, sandbox } = chosen ?? (await choose(step));
+  const { database, host, wakeup, sandbox: connected } = chosen ?? (await choose(step));
+  // The box, unless another data file declares one already: a second would leave both out.
+  const sandbox = (await step.resolved.sandboxes()).length ? undefined : connected;
   const missing = missingTypes(step);
   if (missing.length || !host || !database) {
     throw new Error(`The config's connectors declare no ${missing.join(", ")}: add them to sanoma.config.ts`);
@@ -131,7 +135,12 @@ export async function renderInfra(
     // The installed sanoma is what the host's image is tagged with: refused here when there is none.
     await sanomaVersion(root);
   }
-  const declared = derives ? hosted : await declaredHost(step, host, hosted, port, wakeup.secrets);
+  const declared = derives
+    ? hosted
+    : await declaredHost(step, host, hosted, port, {
+        ...wakeup.secrets,
+        ...(await vendorSecrets(step, sandbox?.vendor)),
+      });
   if (!derives && !deployKey) throw new Error("A host that does not derive is declared with its deploy key");
   const woken = wakeup.type;
   return renderDataFile(
@@ -185,14 +194,15 @@ export async function renderInfra(
 /**
  * A host that does not derive, as `infra.ts` declares it: its image (this machine's for Docker's,
  * else the published one of the installed sanoma), its source and ref, its secrets (each a
- * `secret(...)`, never a value) and its port.
+ * `secret(...)`, never a value: the runtime's, `extra` and the sign-in sender's) and its port.
  */
 async function declaredHost(
   step: Rendering,
   host: Resource,
   hosted: Record<string, DataValue>,
   port: number | undefined,
-  wakeupSecrets: Record<string, DataValue> | undefined,
+  /** The wakeup's and the sandbox's secrets it is given besides the runtime's. */
+  extra: Record<string, DataValue>,
 ): Promise<Record<string, DataValue>> {
   const { inputs } = host.host!;
   if (hasField(host, "image")) {
@@ -207,8 +217,8 @@ async function declaredHost(
     SANOMA_SIGNING_KEY: secret("SANOMA_SIGNING_KEY"),
     ...(!step.resolved.secrets.store && { SANOMA_SECRETS_KEY: secret(SECRETS_KEY) }),
     [SOURCE_KEY]: secret(SOURCE_KEY),
-    ...wakeupSecrets,
-    ...(await senderSecrets(step)),
+    ...extra,
+    ...(await vendorSecrets(step, step.resolved.login?.sender?.vendor)),
   });
   if (inputs.port && port !== undefined) setPath(hosted, inputs.port, port);
   return hosted;
@@ -327,19 +337,24 @@ export async function goLiveHost(step: AppStepContext, _input: GoLiveHostInput) 
       ref: "main",
     });
   });
-  // The wakeup, when declared, after the host it names: one apply, in dependency order.
-  return { apply: { only: WAKEUP_LINE.test(infra) ? [KEYS.host, KEYS.wakeup] : [KEYS.host] } };
+  // The wakeup, when declared, after the host it names, and the box: one apply, in dependency order.
+  const only = [
+    KEYS.host,
+    ...(WAKEUP_LINE.test(infra) ? [KEYS.wakeup] : []),
+    ...(BOX_LINE.test(infra) ? [KEYS.box] : []),
+  ];
+  return { apply: { only } };
 }
 
 /**
- * The variables the config's sign-in sender (`login.sender`) reads, as the host's secrets: each
- * its driver declares (Resend's `RESEND_API_KEY`), one the driver marks optional only once stored,
- * so the host sends sign-in codes as this app does. None without a sender.
+ * The variables `vendor`'s driver reads, as the host's secrets: each it declares (Resend's
+ * `RESEND_API_KEY`), one the driver marks optional only once stored, so the host calls the vendor
+ * as this app does: the sign-in sender's (`login.sender`), so it sends sign-in codes, and the
+ * sandbox's, so its coding agents open their boxes. None without a vendor.
  */
-async function senderSecrets({ client, resolved }: Rendering): Promise<Record<string, DataValue>> {
-  const sender = resolved.login?.sender;
-  if (!sender) return {};
-  const statuses = (await client.credentials()).get(sender.vendor) ?? [];
+async function vendorSecrets({ client }: Rendering, vendor: string | undefined): Promise<Record<string, DataValue>> {
+  if (!vendor) return {};
+  const statuses = (await client.credentials()).get(vendor) ?? [];
   return Object.fromEntries(
     statuses.filter((c) => c.status === "set" || !c.optional).map((c) => [c.name, secret(c.name)]),
   );

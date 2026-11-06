@@ -53,6 +53,7 @@ export const KEYS = {
   host: `${INFRA}#host`,
   sourceKey: sourceKeyId(`${INFRA}#host`),
   wakeup: `${INFRA}#wakeup`,
+  box: `${INFRA}#box`,
 } as const;
 /** The host's type in `infra.ts`, as `renderInfra` writes it. */
 const HOST_LINE = /^export const host = (\w+)\.(\w+)\(/m;

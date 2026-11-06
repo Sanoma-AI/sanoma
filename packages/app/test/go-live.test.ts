@@ -390,6 +390,8 @@ describe("going live", () => {
       const text = await renderInfra(boxing, choices(), DEPLOY_KEY);
       expect(text).toContain(`import { agent37 } from "@sanoma-ai/connector-agent37/resources";\n`);
       expect(text).toContain(`export const box = agent37.instance({});\n`);
+      // The host is given the key its boxes are opened with.
+      expect(text).toContain(`    AGENT37_API_KEY: secret("AGENT37_API_KEY"),\n`);
       expect(text).toMatch(/export default \[repo, deployKey, store, host(, wakeup)?, box\];/);
       const other = mkdtempSync(join(tmpdir(), "sanoma-go-live-read-"));
       try {

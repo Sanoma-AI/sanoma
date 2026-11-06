@@ -13,6 +13,7 @@ import {
 } from "@sanoma-ai/workflows";
 import type { UIMessageStreamWriter } from "ai";
 import { type ChatMessage, textOf } from "../../lib/chat.ts";
+import { inBox } from "./carrier.ts";
 import type { EngineTurn } from "./transcript.ts";
 
 /** Where an agent may never write in a checkout: git's own files, and the install (`node_modules`, a link to the live one in a draft). */
@@ -56,19 +57,23 @@ function realPaths(fs: typeof import("node:fs"), path: typeof import("node:path"
 /** `RealPaths` on this machine's files: the live instance's, where our loop drafts. */
 export const here: RealPaths = async (paths) => realPaths(nodeFs, nodePath, paths) as never;
 
+/** How long a box may take to check paths: a box that hangs fails the check, never the turn's end. */
+const CHECK_TIMEOUT_MS = 30_000;
+
 /** `RealPaths` on `box`'s files, by its Node: a coding agent's paths are checked where its files are. */
 export const realIn =
   (box: Box): RealPaths =>
   async (paths) => {
     const script = `process.stdout.write(JSON.stringify((${realPaths.toString()})(require("node:fs"), require("node:path"), JSON.parse(process.env.PATHS))))`;
-    const ran = await box.run('exec node -e "$SCRIPT"', { env: { SCRIPT: script, PATHS: JSON.stringify(paths) } });
-    const [out, err, { exitCode }] = await Promise.all([
-      new Response(ran.stdout).text(),
-      new Response(ran.stderr).text(),
-      ran.wait(),
-    ]);
-    if (exitCode !== 0) throw new Error(`The box ${box.id} could not check a path (exit ${exitCode}): ${err.trim()}`);
-    return JSON.parse(out) as never;
+    const said = await inBox(
+      box,
+      'exec node -e "$SCRIPT"',
+      { SCRIPT: script, PATHS: JSON.stringify(paths) },
+      {
+        limit: CHECK_TIMEOUT_MS,
+      },
+    );
+    return JSON.parse(said) as never;
   };
 
 /**

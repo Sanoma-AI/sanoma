@@ -219,7 +219,7 @@ const CARRY_TIMEOUT_MS = 5 * 60_000;
  * Runs `script` in `box`'s home with `env`, stopped by `signal` or after `limit` ms: what it
  * printed, trimmed; an error with its exit code and the end of its output, unless it exits 0.
  */
-async function inBox(
+export async function inBox(
   box: Box,
   script: string,
   env: Record<string, string>,
