@@ -21,7 +21,7 @@ import { checks, drafting, mustAllow, openDraft, tellCommits } from "./checkout.
 // Our loop's tools: reading the repository, editing the chat's draft (opened by the first edit,
 // committed at each), taking and updating an app there (a git merge of its source), its checks,
 // and lookups through the policy. No shell: the draft sits in the live checkout until previews
-// exist. Every path goes through the checkout rule (`allowedPath`).
+// exist. Every path goes through the checkout rule (`allowedPaths`).
 
 /** What the tools act for: the turn's step (the worker's client and repository, the person), and the chat (whose `draftId` the first edit sets). */
 export interface ToolsTurn {

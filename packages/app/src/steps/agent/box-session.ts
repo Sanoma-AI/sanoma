@@ -4,12 +4,12 @@ import {
   harnessStateDirectoryPath,
   type HarnessV1NetworkSandboxSession,
 } from "@ai-sdk/harness";
-import type { AppStepContext, Box, Process } from "@sanoma-ai/workflows";
+import { type AppStepContext, type Box, type Process, valueAt } from "@sanoma-ai/workflows";
 import { DECLARE_BOX } from "../../api.ts";
 import { noKeyText } from "../../lib/chat.ts";
 import { placeOf } from "../../loopback.ts";
 import { secretValues } from "../../server/secrets.ts";
-import { agentHome, boxName, inCheckout, type RealPaths, realIn, within } from "./checkout.ts";
+import { agentHome, boxName, inCheckout, type RealPaths, realIn, under, within } from "./checkout.ts";
 import { localBackend } from "./local-box.ts";
 
 // The sandbox session `HarnessAgent` runs a coding agent in, over a box of the `Sandbox` contract:
@@ -43,10 +43,7 @@ export const OWN_AGENTS_DIR = ".acp";
  * What a coding agent's turn is told on a live instance that declares no sandbox: what to declare,
  * and Agent37's connector page for its key (`noKeyText`).
  */
-export const NO_BOX = noKeyText(
-  "agent37",
-  `Coding agents work in a box of their own on a live instance, and this company declares none: ${DECLARE_BOX}`,
-);
+export const NO_BOX = noKeyText("agent37", DECLARE_BOX);
 
 /**
  * The box of the person `step` is run by, for the company (`boxName`), chosen: where every coding
@@ -65,25 +62,21 @@ export async function personBox(
     const make = resolved.sandboxBackends.get(declared.vendor);
     const { inputs } = resolved.types.get(`${declared.vendor}.${declared.type}`)!.sandbox!;
     if (!make) throw new Error(`${declared.id}: the ${declared.vendor} connector attaches no sandbox backend`);
-    const field = (path: string) =>
-      path
-        .split(".")
-        .reduce<unknown>((at, key) => (at as Record<string, unknown> | undefined)?.[key], declared.desired);
-    const [image, size] = [field(inputs.image), field(inputs.size)];
+    const [image, size] = [valueAt(declared.desired, inputs.image), valueAt(declared.desired, inputs.size)];
     return {
       name,
       open: async () =>
         (await make({ secrets: secretValues(client), declared: declared.desired })).open({
           name,
           // What it leaves out is the backend's own.
-          image: typeof image === "string" ? image : "",
-          size: typeof size === "number" ? size : 0,
+          ...(typeof image === "string" && { image }),
+          ...(typeof size === "number" && { size }),
         }),
     };
   }
   if (placeOf(resolved.databaseUrl) === "live") throw new Error(NO_BOX);
   // This machine is the local box's image and size.
-  return { name, open: () => localBackend(agentHome(step, "boxes")).open({ name, image: "", size: 0 }) };
+  return { name, open: () => localBackend(agentHome(step, "boxes")).open({ name }) };
 }
 
 /** The box's home, `$HOME` as its commands see it. */
@@ -96,7 +89,7 @@ export async function homeOf(box: Box): Promise<string> {
 
 /**
  * The session over `box`, `HarnessV1NetworkSandboxSession`. A path is the checkout's as the
- * checkout rule allows it (`allowedPath`, on the box's files), or under the box's home, or refused. `stop` stops the
+ * checkout rule allows it (`allowedPaths`, on the box's files), or under the box's home, or refused. `stop` stops the
  * box; `destroy` kills what the session started (so the box stays up for the turn's carry back,
  * and its opener stops it) and deletes the session's `.agent-runs`, which a bridge writes the
  * model's key into; `HarnessAgentSession.destroy()` leaves a session it was given running.
@@ -143,7 +136,7 @@ class BoxSession implements HarnessV1NetworkSandboxSession {
     // checkout when the home holds it (the box's clone), nor a link there into it: those are the
     // checkout rule's.
     const homeOnly = within(this.#home, full) && !within(this.defaultWorkingDirectory, full);
-    if (homeOnly && home !== null && real !== null && within(home, real) && !(root !== null && within(root, real))) {
+    if (homeOnly && real && home && under(home, real) && !under(root, real)) {
       const inside = relative(home, real).toLowerCase();
       const runs = relative(this.#home, this.#runs).toLowerCase();
       const own = within(OWN_AGENTS_DIR, inside);

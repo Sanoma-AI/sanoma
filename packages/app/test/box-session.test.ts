@@ -42,7 +42,7 @@ execFileSync("ln", ["-s", tmpdir(), join(root, "out")]);
 
 let box: Box;
 beforeAll(async () => {
-  box = await boxes.open({ name, image: "", size: 0 });
+  box = await boxes.open({ name });
 });
 afterAll(() => rmSync(base, { recursive: true, force: true }));
 
@@ -78,7 +78,7 @@ describe("the local backend", () => {
     expect(boxName("acme-ada", "x")).not.toBe(boxName("acme", "ada-x"));
     expect(await homeOf(box)).toBe(home);
     for (const bad of ["../out", ".hidden", ""]) {
-      await expect(boxes.open({ name: bad, image: "", size: 0 }), bad).rejects.toThrow(/no box's name/);
+      await expect(boxes.open({ name: bad }), bad).rejects.toThrow(/no box's name/);
     }
   });
 });

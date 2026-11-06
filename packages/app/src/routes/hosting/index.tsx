@@ -7,6 +7,7 @@ import type {
 } from "@sanoma-ai/workflows/describe";
 import {
   APPLY_WORKFLOW,
+  credentialReady,
   DRIFT_WORKFLOW,
   exportSpan,
   hostnameUrl,
@@ -262,9 +263,7 @@ function Hosting({
       {children}
       {slots.goingLive && <GoLive />}
       {config.place === "live" && !slots.filled.some((slot) => slot.capability === "sandbox") && (
-        <Notice>
-          Coding agents work in a box of their own on a live instance, and none is declared: {DECLARE_BOX}.
-        </Notice>
+        <Notice>{DECLARE_BOX}.</Notice>
       )}
       {slots.filled.length > 0 && (
         <div className="grid gap-(--gap-region) md:grid-cols-2 2xl:grid-cols-4">
@@ -450,7 +449,7 @@ function VendorKeys({ vendor }: { vendor: string }) {
   const { data: keys = [] } = useQuery({ ...credentialsQuery(), select: credentialsFor(vendor) });
   return keys.map((key) => (
     <Fact key={key.name} label={key.name}>
-      {key.status === "set" ? "set" : <span className="text-muted-foreground">not set</span>}
+      <span className={credentialReady(key) ? undefined : "text-destructive"}>{key.status}</span>
       {" on its "}
       <Link to="/connectors/$vendor" params={{ vendor }} className="underline underline-offset-4">
         connector page

@@ -15,7 +15,16 @@ import { modelRegistry } from "../../server/models.ts";
 import { secretValues } from "../../server/secrets.ts";
 import { boxSession, homeOf, personBox } from "./box-session.ts";
 import { boxTurn, carryIn, carryOut } from "./carrier.ts";
-import { allowedPath, NO_SHELL, openDraft, outsideCheckout, realIn, showCommits, turnMessage } from "./checkout.ts";
+import {
+  allowedPaths,
+  NO_SHELL,
+  openDraft,
+  outsideCheckout,
+  type RealPaths,
+  realIn,
+  showCommits,
+  turnMessage,
+} from "./checkout.ts";
 import { freePort } from "./local-box.ts";
 import { harnessInstructions } from "./prompt.ts";
 import type { Engine, EngineTurn } from "./transcript.ts";
@@ -141,6 +150,7 @@ async function converse(
   { auth, model, home, box }: { auth: Record<string, string>; model: string | undefined; home: string; box: Box },
 ) {
   const { by: principal, signal } = step;
+  const real = realIn(box);
   const runtime: Runtime = RUNTIMES[name];
   const harness = await runtime.harness(auth, home);
   const agent = new HarnessAgent({
@@ -186,7 +196,7 @@ async function converse(
       const answers = await Promise.all(
         asked.map(({ approvalId, toolCall }) =>
           answer(
-            box,
+            real,
             sandbox.defaultWorkingDirectory,
             approvalId,
             toolCall.toolName,
@@ -230,11 +240,11 @@ async function modelFor(step: AppStepContext, { qualified }: Runtime): Promise<s
 
 /**
  * The checkout rule's answer to a built-in call: an edit of a file the rule allows in the draft's
- * clone in `box` (`allowedPath`, on the box's files) is approved; a command, an edit outside it or under `.git` or `node_modules`, and
+ * clone (`allowedPaths`, on the box's files, `real`) is approved; a command, an edit outside it or under `.git` or `node_modules`, and
  * any other call that asks, are denied with the reason, which the agent reads. Never a policy call.
  */
 async function answer(
-  box: Box,
+  real: RealPaths,
   root: string,
   approvalId: string,
   toolName: string,
@@ -247,7 +257,8 @@ async function answer(
   if (kind !== "edit" || path === undefined) {
     return deny(`${toolName} is not available in this chat: edit the files in your checkout`);
   }
-  if ((await allowedPath(root, path, realIn(box))) === undefined) {
+  const [allowed] = await allowedPaths(root, [path], real);
+  if (allowed === undefined) {
     return deny(outsideCheckout(path));
   }
   return { type: "tool-approval-response" as const, approvalId, approved: true };

@@ -1,4 +1,4 @@
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import * as acp from "@agentclientprotocol/sdk";
 import type { Box, Principal, Process } from "@sanoma-ai/workflows";
@@ -8,7 +8,7 @@ import { type ChatMessage, pathOf, type SignInCard, textOf } from "../../lib/cha
 import { homeOf, OWN_AGENTS_DIR, personBox } from "./box-session.ts";
 import { boxTurn, carryIn, carryOut } from "./carrier.ts";
 import {
-  inCheckout,
+  allowedPaths,
   mustAllow,
   NO_SHELL,
   openDraft,
@@ -489,8 +489,8 @@ class AcpTurn {
     const named = [...new Set(paths.filter((path): path is string => typeof path === "string"))];
     if (!named.length) return refuse("A read or an edit names its file: say which file in your checkout");
     // Checked in one go, in the box.
-    const [root, ...reals] = await this.real([resolve(this.root), ...named.map((path) => resolve(this.root, path))]);
-    const outside = named.find((_, i) => inCheckout(root, reals[i]!) === undefined);
+    const allowed = await allowedPaths(this.root, named, this.real);
+    const outside = named.find((_, i) => allowed[i] === undefined);
     if (outside !== undefined) return refuse(outsideCheckout(outside));
     const allow = offered("allow_once");
     return allow

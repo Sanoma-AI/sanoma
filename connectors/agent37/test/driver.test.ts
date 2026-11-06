@@ -31,12 +31,6 @@ describe("agent37.instance", () => {
     // A size `open` is given over the declared one takes its own memory.
     expect(wanted({ size: 4, memory: 16, disk: 30 }, { size: 2 })).toMatchObject({ size: 2, memory: 4, disk: 10 });
     expect(wanted({ size: 4, memory: 16 }, { size: 4, image: "mine" })).toMatchObject({ memory: 16, image: "mine" });
-    // An empty image and a size of 0 are the declaration's (the app's choice of none).
-    expect(wanted({ size: 4, memory: 16 }, { size: 0, image: "" })).toMatchObject({
-      size: 4,
-      memory: 16,
-      image: "agent37-base",
-    });
     expect(() => resolveConfig({ workflows: [], connectors: [agent37] })).not.toThrow();
     expect(declare.instance.sandbox?.outputs({ id: "agent37", healthy: true })).toEqual({
       id: "agent37",

@@ -20,7 +20,7 @@ import { ACTOR_HEADER } from "../src/api.ts";
 import { type App, startApp } from "../src/index.ts";
 import { takeAppPrompt } from "../src/lib/apps.ts";
 import { type ChatMessage, chatTransport } from "../src/lib/chat.ts";
-import { allowedPath, here, realIn } from "../src/steps/agent/checkout.ts";
+import { allowedPaths, here, realIn } from "../src/steps/agent/checkout.ts";
 import { ENGINES } from "../src/steps/agent/turn.ts";
 import { appSteps } from "../src/steps/index.ts";
 
@@ -559,34 +559,37 @@ describe("the composer and a model", () => {
   });
 });
 
-describe("allowedPath", () => {
+describe("allowedPaths", () => {
   it("allows a path inside the worktree, and refuses one outside it, under .git or node_modules, or through a symlink out, on this machine and in a box", async () => {
     const boxes = mkdtempSync(join(tmpdir(), "sanoma-allowed-"));
     // The worktree is a box's home: the box checks the same paths on its own files.
-    const box = await localBackend(boxes).open({ name: "tree", image: "", size: 0 });
+    const box = await localBackend(boxes).open({ name: "tree" });
     const tree = join(boxes, "tree");
     try {
       mkdirSync(join(tree, "workflows"));
       execFileSync("ln", ["-s", tmpdir(), join(tree, "out")]);
       execFileSync("ln", ["-s", "workflows", join(tree, "in")]);
+      const at = realpathSync(tree);
+      const refused = [
+        "../x",
+        "/etc/passwd",
+        "out/x",
+        ".git/config",
+        ".GIT/config",
+        "Node_Modules/x/index.js",
+        "node_modules/x/index.js",
+        "workflows/../../x",
+      ];
       for (const real of [here, realIn(box)]) {
-        const at = (await allowedPath(tree, ".", real))!;
-        expect(at).toBe(realpathSync(tree));
-        expect(await allowedPath(tree, "workflows/new.ts", real)).toBe(join(at, "workflows/new.ts"));
-        expect(await allowedPath(tree, "new/deep/file.ts", real)).toBe(join(at, "new/deep/file.ts"));
-        expect(await allowedPath(tree, "in/x.ts", real)).toBe(join(at, "workflows/x.ts"));
-        for (const path of [
-          "../x",
-          "/etc/passwd",
-          "out/x",
-          ".git/config",
-          ".GIT/config",
-          "Node_Modules/x/index.js",
-          "node_modules/x/index.js",
-          "workflows/../../x",
-        ]) {
-          expect(await allowedPath(tree, path, real), path).toBeUndefined();
-        }
+        expect(
+          await allowedPaths(tree, [".", "workflows/new.ts", "new/deep/file.ts", "in/x.ts", ...refused], real),
+        ).toEqual([
+          at,
+          join(at, "workflows/new.ts"),
+          join(at, "new/deep/file.ts"),
+          join(at, "workflows/x.ts"),
+          ...refused.map(() => undefined),
+        ]);
       }
     } finally {
       rmSync(boxes, { recursive: true, force: true });

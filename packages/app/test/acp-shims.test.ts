@@ -32,7 +32,7 @@ let dir = "";
 mkdirSync(join(scratch, "draft"));
 
 beforeAll(async () => {
-  box = await localBackend(join(scratch, "boxes")).open({ name: "sanoma-acme-ada", image: "", size: 0 });
+  box = await localBackend(join(scratch, "boxes")).open({ name: "sanoma-acme-ada" });
   home = await homeOf(box);
   agents = join(home, ".acp");
   dir = await shims(box, agents);

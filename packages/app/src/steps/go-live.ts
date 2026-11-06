@@ -50,10 +50,8 @@ const RUNTIME_IMAGE = "sanoma-runtime";
 const DATABASE_URL = databaseUrlSecret("store");
 const SECRETS_KEY = "SANOMA_SECRETS_KEY";
 
-/** The wakeup's declaration in `infra.ts`, as `renderInfra` writes it. */
-const WAKEUP_LINE = /^export const wakeup = /m;
-/** The coding agents' box's declaration in `infra.ts`, as `renderInfra` writes it. */
-const BOX_LINE = /^export const box = /m;
+/** Whether `infra` declares the export `name`, as `renderInfra` writes it. */
+const declares = (infra: string, name: string) => new RegExp(`^export const ${name} = `, "m").test(infra);
 /** The repository's owner and name in `infra.ts` as `renderInfra` writes them. */
 const REPO = /export const repo = github\.repository\(\{\s*owner: "([^"]+)",\s*name: "([^"]+)"/;
 
@@ -146,13 +144,11 @@ export async function renderInfra(
   return renderDataFile(
     {
       imports: [
-        ...new Set([
-          "github",
-          database.vendor,
-          host.vendor,
-          ...(woken ? [woken.vendor] : []),
-          ...(sandbox ? [sandbox.vendor] : []),
-        ]),
+        ...new Set(
+          ["github", database.vendor, host.vendor, woken?.vendor, sandbox?.vendor].filter(
+            (vendor) => vendor !== undefined,
+          ),
+        ),
       ].map(constructors),
       exports: [
         { name: "repo", vendor: "github", type: "repository", desired: { owner, name, visibility: "private" } },
@@ -340,8 +336,7 @@ export async function goLiveHost(step: AppStepContext, _input: GoLiveHostInput) 
   // The wakeup, when declared, after the host it names, and the box: one apply, in dependency order.
   const only = [
     KEYS.host,
-    ...(WAKEUP_LINE.test(infra) ? [KEYS.wakeup] : []),
-    ...(BOX_LINE.test(infra) ? [KEYS.box] : []),
+    ...(["wakeup", "box"] as const).filter((name) => declares(infra, name)).map((name) => KEYS[name]),
   ];
   return { apply: { only } };
 }
