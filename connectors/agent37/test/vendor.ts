@@ -97,7 +97,6 @@ export async function fakeAgent37Vendor() {
             exit_code: code ?? 1,
             stdout: Buffer.concat(out).toString(),
             stderr: Buffer.concat(err).toString(),
-            truncated: false,
           }),
         ),
       ),
@@ -113,18 +112,7 @@ export async function fakeAgent37Vendor() {
     if (method === "GET" && path === "/instances") return json(200, { data: [...instances.values()].toReversed() });
     if (method === "POST" && path === "/instances") {
       const id = `fake${String(++seq).padStart(6, "0")}`;
-      const made: FakeInstance = {
-        id,
-        status: "running",
-        name: body!.name,
-        metadata: body!.metadata ?? null,
-        template: body!.template,
-        resources: body!.resources,
-        type: body!.type,
-        region: body!.region,
-        auto_sleep: body!.auto_sleep,
-        idle_timeout_seconds: body!.idle_timeout_seconds,
-      };
+      const made: FakeInstance = { ...body!, id, status: "running", metadata: body!.metadata ?? null } as FakeInstance;
       instances.set(id, made);
       runners.set(id, { port: await freePort(), groups: [] });
       mkdirSync(home(id), { recursive: true });
@@ -147,13 +135,13 @@ export async function fakeAgent37Vendor() {
       if (found.status !== "running") return problem(400, "invalid_request");
       return exec(found.id, body!.command);
     }
-    const to = { start: "running", sleep: "sleeping", stop: "stopped" }[action as string];
-    if (method === "POST" && to) {
-      const from = {
-        start: ["stopped", "sleeping", "running"],
-        sleep: ["running", "sleeping"],
-        stop: ["running", "sleeping", "stopped"],
-      }[action!]!;
+    const move = {
+      start: { to: "running", from: ["stopped", "sleeping", "running"] },
+      sleep: { to: "sleeping", from: ["running", "sleeping"] },
+      stop: { to: "stopped", from: ["running", "sleeping", "stopped"] },
+    }[action as string];
+    if (method === "POST" && move) {
+      const { to, from } = move;
       if (!from.includes(found.status)) return problem(400, "invalid_request");
       // A stopped instance boots fresh: its disk is kept, its processes are not.
       if (action === "stop") await boot(found.id);

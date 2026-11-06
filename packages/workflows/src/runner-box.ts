@@ -1,6 +1,15 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { FILE, frame, type RunnerAnswer, type RunnerRequest, STDERR, STDIN, unframe } from "./runner-protocol.ts";
+import {
+  FILE,
+  frame,
+  RUNNER_PROTOCOL,
+  type RunnerAnswer,
+  type RunnerRequest,
+  STDERR,
+  STDIN,
+  unframe,
+} from "./runner-protocol.ts";
 import type { Box, Process } from "./sandbox-contract.ts";
 
 // A box whose commands and files go through the runner (`sandbox-runner.ts`), a small server of
@@ -20,6 +29,17 @@ export async function runnerScript(): Promise<Uint8Array> {
     throw new Error(`${fileURLToPath(at)} is missing: build @sanoma-ai/workflows`);
   });
 }
+
+/**
+ * Whether the runner at `url` (asked with `headers`) answers, and speaks this release's protocol:
+ * a backend starts one when it does not, and replaces one that speaks another.
+ */
+export const runnerAnswers = (url: string, headers?: Record<string, string>): Promise<boolean> =>
+  fetch(`${url}/health`, { headers, signal: AbortSignal.timeout(5_000) })
+    .then(async (res) => res.ok && ((await res.json()) as { protocol?: unknown }).protocol === RUNNER_PROTOCOL)
+    .catch(() => false);
+
+const encoder = new TextEncoder();
 
 /** Drops a write or close the reader no longer wants (it cancelled). */
 const ignore = () => {};
@@ -131,10 +151,8 @@ export function runnerBox({
       const stderr = new TransformStream<Uint8Array, Uint8Array>();
       const out = stdout.writable.getWriter();
       const err = stderr.writable.getWriter();
-      let ended = false;
       const exited = new Promise<{ exitCode: number }>((done) => {
         const end = (exitCode: number) => {
-          ended = true;
           waiting.delete(n);
           out.close().catch(ignore);
           err.close().catch(ignore);
@@ -145,7 +163,7 @@ export function runnerBox({
           answer(answer) {
             if (answer.op === "exit") return end(answer.code);
             if (answer.op !== "error") return;
-            err.write(new TextEncoder().encode(`${where}: ${answer.message}\n`)).catch(ignore);
+            err.write(encoder.encode(`${where}: ${answer.message}\n`)).catch(ignore);
             end(127);
           },
           lost: () => end(255),
@@ -153,7 +171,7 @@ export function runnerBox({
       });
       ws.send(JSON.stringify({ op: "run", id: n, command, cwd, env, stdin } satisfies RunnerRequest));
       const kill = (sig: NodeJS.Signals = "SIGKILL") => {
-        if (!ended) ws.send(JSON.stringify({ op: "kill", id: n, signal: sig } satisfies RunnerRequest));
+        if (waiting.has(n)) ws.send(JSON.stringify({ op: "kill", id: n, signal: sig } satisfies RunnerRequest));
       };
       const onAbort = () => kill();
       if (signal?.aborted) onAbort();

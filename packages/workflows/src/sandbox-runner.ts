@@ -17,6 +17,7 @@ import {
   unframe,
 } from "./runner-protocol.ts";
 import type { Process } from "./sandbox-contract.ts";
+import { errorMessage } from "./shared.ts";
 
 // The runner: the server of ours a backend starts inside a remote box, which `runnerBox` talks to
 // over a WebSocket (the protocol is in `runner-protocol.ts`). It serves this machine as the local
@@ -42,7 +43,9 @@ const UNSENT = 1 << 20;
 /** How often a connection is pinged: Agent37's edge closes one silent for 15 minutes. */
 const BEAT = 30_000;
 
-const box = localBox("runner", homedir(), process.env as Record<string, string>);
+// Its commands' environment is its own, but for where it listens.
+const { SANOMA_RUNNER_PORT: _, SANOMA_RUNNER_HOST: __, ...own } = process.env;
+const box = localBox("runner", homedir(), own as Record<string, string>);
 
 const server = createServer((req, res) => {
   if (req.url !== "/health") return void res.writeHead(404).end();
@@ -51,12 +54,6 @@ const server = createServer((req, res) => {
 new WebSocketServer({ server })
   .on("connection", serve)
   .on("error", (error) => console.error(`the runner's WebSocket server: ${error.message}`));
-let tries = 0;
-server.on("error", (error: NodeJS.ErrnoException) => {
-  // The runner it replaces may not have let go of the port yet.
-  if (error.code !== "EADDRINUSE" || ++tries > 25) throw error;
-  setTimeout(() => server.listen(port, host), 200);
-});
 server.listen(port, host, () => {
   const { address, port: bound } = server.address() as AddressInfo;
   console.log(`sanoma runner listening on ${address}:${bound}`);
@@ -79,7 +76,7 @@ function serve(ws: WebSocket) {
   ws.on("close", () => {
     clearInterval(beat);
     // A dropped connection kills nothing: its commands go on, their stdin ended, their output dropped.
-    for (const input of inputs.values()) input.then((writer) => writer.close()).catch(() => {});
+    for (const id of inputs.keys()) endInput(id);
   });
   ws.on("message", (data: Buffer, binary) => {
     if (binary) return received(unframe(data));
@@ -89,9 +86,7 @@ function serve(ws: WebSocket) {
     } catch {
       return say({ op: "error", message: "a text frame is JSON" });
     }
-    handle(request).catch((error: unknown) =>
-      say({ op: "error", id: request.id, message: error instanceof Error ? error.message : String(error) }),
-    );
+    handle(request).catch((error: unknown) => say({ op: "error", id: request.id, message: errorMessage(error) }));
   });
 
   async function handle(request: RunnerRequest): Promise<unknown> {
@@ -117,11 +112,8 @@ function serve(ws: WebSocket) {
           inputs.delete(id);
         }
       }
-      case "stdin-end": {
-        const input = inputs.get(request.id);
-        inputs.delete(request.id);
-        return input?.then((writer) => writer.close()).catch(() => {});
-      }
+      case "stdin-end":
+        return endInput(request.id);
       case "kill":
         return processes.get(request.id)?.then((started) => started.kill(request.signal));
       case "read": {
@@ -149,8 +141,15 @@ function serve(ws: WebSocket) {
     writes.delete(id);
     box.write(write.path, bytes, { mode: write.mode }).then(
       () => say({ op: "ok", id }),
-      (error: unknown) => say({ op: "error", id, message: error instanceof Error ? error.message : String(error) }),
+      (error: unknown) => say({ op: "error", id, message: errorMessage(error) }),
     );
+  }
+
+  /** Ends the stdin of the command `id`, once it has started. */
+  function endInput(id: number) {
+    const input = inputs.get(id);
+    inputs.delete(id);
+    return input?.then((writer) => writer.close()).catch(() => {});
   }
 
   /** Sends what `from` prints, until it ends or fails. */

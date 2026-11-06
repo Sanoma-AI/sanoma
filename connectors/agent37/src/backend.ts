@@ -4,7 +4,7 @@ import { gzipSync } from "node:zlib";
 import {
   type Box,
   RUNNER_PORT,
-  RUNNER_PROTOCOL,
+  runnerAnswers,
   runnerBox,
   runnerScript,
   type SandboxBackend,
@@ -123,6 +123,8 @@ const PID = ".sanoma/runner.pid";
 const LOG = ".sanoma/runner.log";
 /** The most of the packed runner one exec carries: its body takes 128 KB. */
 const CHUNK = 96_000;
+/** The runner, gzipped in base64, as exec writes it in: packed once. */
+let packing: Promise<string> | undefined;
 
 /**
  * Starts the runner in the instance `id` unless it answers at `url` with this release's protocol:
@@ -137,32 +139,30 @@ async function runnerUp(
   headers: Record<string, string>,
   deadline: number,
 ): Promise<void> {
-  const answers = () =>
-    fetch(`${url}/health`, { headers, signal: AbortSignal.timeout(5_000) })
-      .then(async (res) => res.ok && ((await res.json()) as { protocol?: unknown }).protocol === RUNNER_PROTOCOL)
-      .catch(() => false);
-  if (await answers()) return;
+  if (await runnerAnswers(url, headers)) return;
   const sh = async (command: string) => {
     const { exit_code, stderr } = await api.exec(id, `cd && ${command}`);
     if (exit_code !== 0) {
       throw new Error(`agent37: starting the runner in ${id} failed (exit ${exit_code}): ${stderr.trim()}`);
     }
   };
-  const packed = gzipSync(await runnerScript()).toString("base64");
+  const packed = await (packing ??= runnerScript().then((script) => gzipSync(script).toString("base64")));
   // A file of its own, so two opens at once write theirs apart.
   const part = `.sanoma/runner-${randomBytes(4).toString("hex")}`;
+  const writes: string[] = [];
   for (let at = 0; at < packed.length; at += CHUNK) {
     // Base64 is safe unquoted.
-    await sh(`mkdir -p .sanoma && printf %s ${packed.slice(at, at + CHUNK)} >${at ? ">" : ""} ${part}.b64`);
+    writes.push(`mkdir -p .sanoma && printf %s ${packed.slice(at, at + CHUNK)} >${at ? ">" : ""} ${part}.b64`);
   }
-  // Detached, its output to a file: exec answers once nothing holds its own. The runner it
-  // replaces (another release's) ends, and with it what it started; the new one waits for its port.
-  await sh(
-    `base64 -d <${part}.b64 | gunzip >${part}.cjs && rm ${part}.b64 && mv ${part}.cjs ${RUNNER} && ` +
-      `{ kill "$(cat ${PID} 2>/dev/null)" 2>/dev/null; nohup node ${RUNNER} >${LOG} 2>&1 </dev/null & echo $! >${PID}; }`,
-  );
+  // The last write starts it, detached, its output to a file: exec answers once nothing holds its
+  // own. The runner it replaces (another release's) ends first, and with it what it started.
+  writes[writes.length - 1] +=
+    ` && base64 -d <${part}.b64 | gunzip >${part}.cjs && rm ${part}.b64 && mv ${part}.cjs ${RUNNER} && ` +
+    `{ old=$(cat ${PID} 2>/dev/null); [ -n "$old" ] && kill $old 2>/dev/null && while kill -0 $old 2>/dev/null; do sleep 0.1; done; ` +
+    `nohup node ${RUNNER} >${LOG} 2>&1 </dev/null & echo $! >${PID}; }`;
+  for (const write of writes) await sh(write);
   // Node starts it in a fraction of a second.
-  while (!(await answers())) {
+  while (!(await runnerAnswers(url, headers))) {
     if (Date.now() > deadline) throw new Error(`agent37: the runner in ${id} does not answer; its log is ~/${LOG}`);
     await delay(200);
   }
@@ -173,27 +173,19 @@ const holding = async (api: Agent37Api, name: string) =>
   (await api.list()).filter((i) => i.metadata?.[BOX] === name && !["deleting", "deleted"].includes(i.status));
 
 /**
- * Calls `attempt` until it succeeds, waiting longer each time, while `retry` says its error is
- * worth a wait and `deadline` has not passed; then fails with its last error.
+ * `call` again while Agent37 answers `try_again` (a sleep's checkpoint is being written), waiting
+ * longer each time, until `deadline`; then fails with its last error.
  */
-async function untilDeadline<T>(
-  deadline: number,
-  attempt: () => Promise<T>,
-  retry: (error: unknown) => boolean,
-): Promise<T> {
+async function retrying<T>(deadline: number, call: () => Promise<T>): Promise<T> {
   for (let wait = 1_000; ; wait = Math.min(wait * 2, 10_000)) {
     try {
-      return await attempt();
+      return await call();
     } catch (error) {
-      if (!retry(error) || Date.now() + wait > deadline) throw error;
+      if (!isCode(error, "try_again") || Date.now() + wait > deadline) throw error;
       await delay(wait);
     }
   }
 }
-
-/** `call` again while Agent37 answers `try_again` (a sleep's checkpoint is being written), until `deadline`. */
-const retrying = <T>(deadline: number, call: () => Promise<T>) =>
-  untilDeadline(deadline, call, (error) => isCode(error, "try_again"));
 
 /** Waits until the instance is running: starts it when it is stopped, wakes it when it sleeps. */
 async function running(api: Agent37Api, instance: Instance, deadline: number): Promise<void> {

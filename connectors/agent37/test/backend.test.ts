@@ -1,5 +1,6 @@
 import { checkSandbox } from "@sanoma-ai/testing/sandbox";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { agent37Api } from "../src/api.ts";
 import { agent37Backend, BOX, labelOf } from "../src/backend.ts";
 import { DEFAULTS, instance } from "../src/connector.ts";
 import { fakeAgent37Vendor, KEY } from "./vendor.ts";
@@ -21,7 +22,12 @@ beforeEach(() => {
 const secrets = async (names: readonly string[]) => new Map(names.map((name) => [name, KEY]));
 const backendOf = (declared: Record<string, unknown> = {}) =>
   agent37Backend({ secrets, declared }, { edge: vendor.edge, budgetMs: 20_000 });
+/** Opens the box `name` of the default shape. */
+const open = (backend: ReturnType<typeof backendOf>, name: string) =>
+  backend.open({ name, image: DEFAULTS.image, size: 2 });
 const text = (bytes: Uint8Array | null) => (bytes === null ? null : Buffer.from(bytes).toString());
+/** Agent37's API, for what a test does behind the backend's back. */
+const api = agent37Api(KEY);
 const execs = (id: string) => vendor.sent.filter((s) => s.path === `/instances/${id}/exec`).length;
 
 describe("agent37Backend", () => {
@@ -72,14 +78,14 @@ describe("agent37Backend", () => {
 
   it("wakes a sleeping box, waiting out a checkpoint still being written, its runner still running", async () => {
     const backend = backendOf();
-    const box = await backend.open({ name: "sanoma-wake", image: DEFAULTS.image, size: 2 });
+    const box = await open(backend, "sanoma-wake");
     await box.write("kept", new TextEncoder().encode("yes"));
     await box.stop();
     vendor.answer("POST", `/instances/${box.id}/start`, 409, {
       error: { code: "try_again", message: "checkpointing" },
     });
     vendor.sent.length = 0;
-    const again = await backend.open({ name: "sanoma-wake", image: DEFAULTS.image, size: 2 });
+    const again = await open(backend, "sanoma-wake");
     expect(again.id).toBe(box.id);
     expect(text(await again.read("kept"))).toBe("yes");
     expect(vendor.sent.filter((s) => s.path === `/instances/${box.id}/start`)).toHaveLength(2);
@@ -91,19 +97,19 @@ describe("agent37Backend", () => {
 
   it("stops a box whose sleep is refused, starts its runner again after the fresh boot, and fails at once on a refusal a wait does not change", async () => {
     const backend = backendOf();
-    const box = await backend.open({ name: "sanoma-stop", image: DEFAULTS.image, size: 2 });
+    const box = await open(backend, "sanoma-stop");
     vendor.answer("POST", `/instances/${box.id}/sleep`, 502, { error: { code: "provisioning_failed" } });
     await box.stop();
     expect(vendor.instances.get(box.id)?.status).toBe("stopped");
     vendor.sent.length = 0;
-    const again = await backend.open({ name: "sanoma-stop", image: DEFAULTS.image, size: 2 });
+    const again = await open(backend, "sanoma-stop");
     expect(execs(box.id)).toBeGreaterThan(0);
     const ran = await again.run("echo back");
     expect(await new Response(ran.stdout).text()).toBe("back\n");
     await again.stop();
     vendor.instances.get(box.id)!.status = "stopped";
     vendor.answer("POST", `/instances/${box.id}/start`, 402, { error: { code: "insufficient_balance" } });
-    await expect(backend.open({ name: "sanoma-stop", image: DEFAULTS.image, size: 2 })).rejects.toMatchObject({
+    await expect(open(backend, "sanoma-stop")).rejects.toMatchObject({
       vendorCode: "insufficient_balance",
       status: 402,
     });
@@ -112,7 +118,7 @@ describe("agent37Backend", () => {
 
   it("leaves a box asleep when it slept on its own before the stop", async () => {
     const backend = backendOf();
-    const box = await backend.open({ name: "sanoma-slept", image: DEFAULTS.image, size: 2 });
+    const box = await open(backend, "sanoma-slept");
     vendor.instances.get(box.id)!.status = "sleeping";
     vendor.answer("POST", `/instances/${box.id}/sleep`, 400, { error: { code: "invalid_request" } });
     await box.stop();
@@ -122,11 +128,11 @@ describe("agent37Backend", () => {
 
   it("kills the commands still running when it stops", async () => {
     const backend = backendOf();
-    const box = await backend.open({ name: "sanoma-end", image: DEFAULTS.image, size: 2 });
+    const box = await open(backend, "sanoma-end");
     const left = await box.run("sleep 4243");
     await box.stop();
     expect((await left.wait()).exitCode).not.toBe(0);
-    const again = await backend.open({ name: "sanoma-end", image: DEFAULTS.image, size: 2 });
+    const again = await open(backend, "sanoma-end");
     const found = await again.run("pgrep -fx 'sleep 4243' || true");
     expect(await new Response(found.stdout).text()).toBe("");
     await again.stop();
@@ -135,18 +141,15 @@ describe("agent37Backend", () => {
 
   it("fails an open whose runner does not start, with what exec said", async () => {
     const backend = backendOf();
-    const box = await backend.open({ name: "sanoma-broken", image: DEFAULTS.image, size: 2 });
+    const box = await open(backend, "sanoma-broken");
     await box.stop();
-    await vendor.fetch(`https://api.agent37.com/v1/instances/${box.id}/stop`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${KEY}` },
-    });
+    await api.stop(box.id);
     vendor.answer("POST", `/instances/${box.id}/exec`, 200, {
       exit_code: 127,
       stdout: "",
       stderr: "node: not found\n",
     });
-    await expect(backend.open({ name: "sanoma-broken", image: DEFAULTS.image, size: 2 })).rejects.toThrow(
+    await expect(open(backend, "sanoma-broken")).rejects.toThrow(
       `agent37: starting the runner in ${box.id} failed (exit 127): node: not found`,
     );
     await backend.discard({ name: "sanoma-broken" });
@@ -154,27 +157,18 @@ describe("agent37Backend", () => {
 
   it("replaces a runner of another release that a box kept asleep", async () => {
     const backend = backendOf();
-    const box = await backend.open({ name: "sanoma-old", image: DEFAULTS.image, size: 2 });
+    const box = await open(backend, "sanoma-old");
     await box.stop();
     // Another release's runner, in its place: it answers another protocol.
-    await vendor.fetch(`https://api.agent37.com/v1/instances/${box.id}/stop`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${KEY}` },
-    });
-    await vendor.fetch(`https://api.agent37.com/v1/instances/${box.id}/start`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${KEY}` },
-    });
+    await api.stop(box.id);
+    await api.start(box.id);
     const old = `require("node:http").createServer((q, s) => s.end('{"protocol":0}')).listen(process.env.SANOMA_RUNNER_PORT, "127.0.0.1")`;
-    await vendor.fetch(`https://api.agent37.com/v1/instances/${box.id}/exec`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${KEY}` },
-      body: JSON.stringify({
-        command: `cd && { nohup node -e '${old}' >/dev/null 2>&1 </dev/null & echo $! >.sanoma/runner.pid; }`,
-      }),
-    });
+    await api.exec(
+      box.id,
+      `cd && { nohup node -e '${old}' >/dev/null 2>&1 </dev/null & echo $! >.sanoma/runner.pid; }`,
+    );
     vendor.sent.length = 0;
-    const again = await backend.open({ name: "sanoma-old", image: DEFAULTS.image, size: 2 });
+    const again = await open(backend, "sanoma-old");
     expect(execs(box.id)).toBeGreaterThan(0);
     const ran = await again.run("echo new");
     expect(await new Response(ran.stdout).text()).toBe("new\n");
