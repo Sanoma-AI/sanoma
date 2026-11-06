@@ -17,7 +17,7 @@ import { Pool, escapeLiteral } from "pg";
 import { describeConfig } from "../src/describe.ts";
 import { runtimeDriver } from "../src/runtime-ops.ts";
 import { memoryTokens } from "../src/tokens.ts";
-import { memorySecrets } from "../src/secret.ts";
+import { memorySecrets, secret } from "../src/secret.ts";
 import { rootWith } from "./harness.ts";
 
 const databaseUrl = testDatabaseUrl("identity_provisioning");
@@ -76,6 +76,30 @@ describe("declarative enrollment writer", () => {
       );
     } finally {
       connect.mockRestore();
+    }
+  });
+
+  it("reads a secret() writer URL when the writer is first used, never at config load", async () => {
+    const values = new Map<string, string>();
+    const get = vi.fn<(name: string) => Promise<string | undefined>>(async (name) => values.get(name));
+    const config = { databaseUrl: secret("IDENTITY_WRITER_URL"), maxValidityMs: 86_400_000 };
+    expect(() => describeConfig({ connectors: [], identityProvisioning: config })).not.toThrow();
+    const configured = configuredIdentityProvisioning(config, { get });
+    expect(configured.secret).toBe("IDENTITY_WRITER_URL");
+    expect(get).not.toHaveBeenCalled();
+    try {
+      await expect(configured.store!.enroll(enrollment())).rejects.toMatchObject({ code: "unset", retryable: false });
+      values.set("IDENTITY_WRITER_URL", "sensitive-invalid-value");
+      const invalid = await configured.store!.enroll(enrollment()).catch((e: unknown) => e);
+      expect(invalid).toMatchObject({ code: "invalid" });
+      expect(String(invalid)).not.toContain("sensitive-invalid-value");
+      values.set("IDENTITY_WRITER_URL", writerUrl.href);
+      const input = enrollment();
+      await configured.store!.enroll(input);
+      expect(await reader.active(input.hash)).toBeDefined();
+      expect(get).toHaveBeenCalledTimes(3);
+    } finally {
+      await configured.close();
     }
   });
 
@@ -465,5 +489,40 @@ describe("runtime-owned enrollment connection", () => {
         { timeout: 5_000, interval: 50 },
       )
       .toBe(0);
+  });
+});
+
+const writerInput = () => ({
+  deployment: randomUUID(),
+  company: "company-a",
+  store: `SECRET_WRITER_BOOTSTRAP_${randomUUID().replaceAll("-", "").toUpperCase()}`,
+  generation: 1,
+  validUntil: new Date(Date.now() + 3_600_000).toISOString(),
+});
+
+describe("an enrollment writer entered as a secret", () => {
+  const store = memorySecretStore();
+  const app = useTestApp(
+    {
+      connectors: [],
+      workflows: [enroll],
+      secrets: { store },
+      identityProvisioning: { databaseUrl: secret("IDENTITY_WRITER_URL"), maxValidityMs: 86_400_000 },
+    },
+    { databaseUrl: testDatabaseUrl("identity_config_secret") },
+  );
+  it("says the writer is not set until its URL is stored, then enrolls through it", async () => {
+    const early = await app.client.start(enroll, writerInput(), { startedBy: "ada" });
+    await expect(app.client.result(early)).rejects.toThrow(/enrollment writer is not set/);
+    await store.write({ namespace: "default", path: "IDENTITY_WRITER_URL" }, writerUrl.href, {
+      expectedVersion: null,
+      by: "ada",
+    });
+    const next = writerInput();
+    await app.client.result(await app.client.start(enroll, next, { startedBy: "ada" }));
+    const bearer = (await store.read({ namespace: "default", path: next.store }))!.value;
+    expect(await reader.active(createHash("sha256").update(bearer).digest("hex"))).toMatchObject({
+      deployment: next.deployment,
+    });
   });
 });

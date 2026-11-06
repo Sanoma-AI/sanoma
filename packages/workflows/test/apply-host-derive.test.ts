@@ -269,7 +269,7 @@ describe("explicit host environment delivery through apply", () => {
       secrets: {
         store: memorySecretStore(),
         bindings: {
-          PROVISIONING_BOOTSTRAP: { env: "TEST_HOST_BOOTSTRAP", host: true },
+          RELAY_TOKEN: { env: "TEST_HOST_BOOTSTRAP", host: true },
           LOCAL_ONLY: { env: "TEST_LOCAL_ONLY" },
           NOT_DELIVERED: { env: "TEST_NOT_DELIVERED", host: false },
         },
@@ -296,7 +296,7 @@ describe("explicit host environment delivery through apply", () => {
     expect(delivered).not.toHaveProperty("TEST_LOCAL_ONLY");
     expect(delivered).not.toHaveProperty("TEST_NOT_DELIVERED");
     const ledger = JSON.stringify(await harness.client.ledger(run));
-    expect(ledger).toContain('"$secret":"PROVISIONING_BOOTSTRAP"');
+    expect(ledger).toContain('"$secret":"RELAY_TOKEN"');
     for (const history of [ledger, JSON.stringify(report), JSON.stringify(await harness.raw.listWorkflowSteps(run))])
       expect(history).not.toContain(value);
   });
@@ -306,7 +306,7 @@ describe("explicit host environment delivery through apply", () => {
     const problem = expect.objectContaining({
       file: "resources/sanoma/infra.ts",
       message: expect.stringMatching(
-        /^host: PROVISIONING_BOOTSTRAP \(`host: true`\) has no value where apply runs, .*: set TEST_HOST_BOOTSTRAP, /,
+        /^host: RELAY_TOKEN \(`host: true`\) has no value where apply runs, .*: set TEST_HOST_BOOTSTRAP, /,
       ),
     });
     const run = await harness.client.apply({}, { startedBy: { id: "alice" } });

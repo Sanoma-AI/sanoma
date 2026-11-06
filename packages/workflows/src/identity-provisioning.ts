@@ -3,6 +3,8 @@ import { Pool } from "pg";
 import type { IdentityEnrollment } from "./cloud-identity.ts";
 import { type Db, databaseOn, pgCode } from "./db.ts";
 import { identityCredentials, identityDeployments } from "./db/identity.ts";
+import { isSecret, type Secret } from "./secret.ts";
+import type { SecretAccess } from "./secret-store.ts";
 
 export type DeploymentIdentity = Omit<IdentityEnrollment, "generation">;
 export interface EnrollIdentity extends IdentityEnrollment {
@@ -17,21 +19,19 @@ export interface IdentityProvisioning {
   revoke(input: DeploymentIdentity): Promise<void>;
 }
 
-/** Trusted control-plane configuration; the runtime owns this separate writer connection. */
+/**
+ * Trusted control-plane configuration; the runtime owns this separate writer connection. The URL
+ * is a `secret()` reference to a value entered on the app's Hosting page, or a string.
+ */
 export interface IdentityProvisioningDatabase {
-  databaseUrl: string;
+  databaseUrl: string | Secret;
   maxValidityMs: number;
 }
 
-/** Resolve without I/O. Explicit adapters remain caller-owned; database configuration is runtime-owned. */
-export function configuredIdentityProvisioning(
-  config: IdentityProvisioning | IdentityProvisioningDatabase | undefined,
-): { store?: IdentityProvisioning; close(): Promise<void> } {
-  if (!config) return { close: async () => {} };
-  if (!("databaseUrl" in config)) return { store: config, close: async () => {} };
-  let url: URL;
+/** A restricted writer's connection string, TLS verified beyond this machine; refused sanitized. */
+function writerUrl(databaseUrl: string): string {
   try {
-    url = new URL(config.databaseUrl);
+    const url = new URL(databaseUrl);
     if (
       !["postgres:", "postgresql:"].includes(url.protocol) ||
       !url.hostname ||
@@ -43,20 +43,52 @@ export function configuredIdentityProvisioning(
     )
       fail("invalid");
     if (!["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) url.searchParams.set("sslmode", "verify-full");
+    return url.href;
   } catch {
     throw new IdentityProvisioningError("invalid");
   }
-  const connectionString = url.href;
-  let db: (Db & { $client: Pool }) | undefined;
+}
+
+/**
+ * Resolve without I/O. Explicit adapters remain caller-owned; database configuration is
+ * runtime-owned. A `secret()` URL is read through `secrets` when the writer is used, inside the
+ * enrollment operation, so it is never read at config load and a replaced value takes the next use.
+ */
+export function configuredIdentityProvisioning(
+  config: IdentityProvisioning | IdentityProvisioningDatabase | undefined,
+  secrets?: Pick<SecretAccess, "get">,
+): { store?: IdentityProvisioning; close(): Promise<void>; secret?: string } {
+  if (!config) return { close: async () => {} };
+  if (!("databaseUrl" in config)) return { store: config, close: async () => {} };
+  const { databaseUrl } = config;
+  const secret = isSecret(databaseUrl) ? databaseUrl.$secret : undefined;
+  const declared = isSecret(databaseUrl) ? undefined : writerUrl(databaseUrl);
+  let current: { url: string; db: Db & { $client: Pool } } | undefined;
   let closed = false;
   let closing: Promise<void> | undefined;
+  async function connectionString(): Promise<string> {
+    if (secret === undefined) return declared!;
+    let value: string | undefined;
+    try {
+      value = await secrets?.get(secret);
+    } catch {
+      throw new IdentityProvisioningError("unavailable");
+    }
+    if (!value) throw new IdentityProvisioningError("unset");
+    return writerUrl(value);
+  }
   const store = postgresIdentityProvisioning(async () => {
     if (closed) throw new IdentityProvisioningError("unavailable");
-    if (!db) {
-      const pool = new Pool({ connectionString, max: 5, connectionTimeoutMillis: 10_000, query_timeout: 15_000 });
+    const url = await connectionString();
+    if (closed) throw new IdentityProvisioningError("unavailable");
+    if (current?.url !== url) {
+      // A replaced value: its old pool ends once its own queries are done.
+      void current?.db.$client.end().catch(() => {});
+      const pool = new Pool({ connectionString: url, max: 5, connectionTimeoutMillis: 10_000, query_timeout: 15_000 });
       pool.on("error", () => {});
-      db = databaseOn(pool);
+      current = { url, db: databaseOn(pool) };
     }
+    const { db } = current;
     // The control plane needs enrollment writes, never schema or database administration.
     const { rows } = await db.execute<{ allowed: boolean }>(sql`SELECT
       NOT EXISTS (SELECT FROM pg_roles WHERE rolname=current_user AND (rolsuper OR rolcreatedb OR rolcreaterole OR rolbypassrls))
@@ -76,15 +108,17 @@ export function configuredIdentityProvisioning(
     store,
     close() {
       closed = true;
-      return (closing ??= db?.$client.end() ?? Promise.resolve());
+      return (closing ??= current?.db.$client.end() ?? Promise.resolve());
     },
+    ...(secret && { secret }),
   };
 }
 
 export class IdentityProvisioningError extends Error {
   readonly retryable: boolean;
-  readonly code: "invalid" | "conflict" | "unavailable";
-  constructor(code: "invalid" | "conflict" | "unavailable") {
+  /** `unset`: the writer's `secret()` URL has no stored value yet. */
+  readonly code: "invalid" | "conflict" | "unavailable" | "unset";
+  constructor(code: "invalid" | "conflict" | "unavailable" | "unset") {
     super(`Identity provisioning: ${code}`);
     this.name = "IdentityProvisioningError";
     this.code = code;
@@ -103,6 +137,8 @@ export function identityProvisioningCode(error: unknown): IdentityProvisioningEr
       return "conflict";
     case "unavailable":
       return "unavailable";
+    case "unset":
+      return "unset";
   }
 }
 

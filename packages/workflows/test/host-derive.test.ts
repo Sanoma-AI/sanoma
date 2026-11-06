@@ -302,11 +302,11 @@ describe("what a host that derives is given, or refused", () => {
   it("delivers explicitly selected environment names using logical secret references", () => {
     const { secrets, problems } = derived(
       { "resources/sanoma/infra.ts": INFRA },
-      { hostEnvironment: { SANOMA_PROVISIONING_CREDENTIAL: "PROVISIONING_BOOTSTRAP" } },
+      { hostEnvironment: { ACME_RELAY_TOKEN: "RELAY_TOKEN" } },
     );
     expect(problems).toEqual([]);
-    expect(secrets.SANOMA_PROVISIONING_CREDENTIAL).toEqual({ $secret: "PROVISIONING_BOOTSTRAP" });
-    expect(secrets).not.toHaveProperty("PROVISIONING_BOOTSTRAP");
+    expect(secrets.ACME_RELAY_TOKEN).toEqual({ $secret: "RELAY_TOKEN" });
+    expect(secrets).not.toHaveProperty("RELAY_TOKEN");
   });
 
   it("refuses a binding given to the host with no value, naming it and where it is read, and leaves the host out", () => {
@@ -314,21 +314,21 @@ describe("what a host that derives is given, or refused", () => {
       { "resources/sanoma/infra.ts": INFRA },
       {
         hostEnvironment: {
-          SANOMA_PROVISIONING_CREDENTIAL: "PROVISIONING_BOOTSTRAP",
+          ACME_RELAY_TOKEN: "RELAY_TOKEN",
           SANOMA_IDENTITY_WRITE_DATABASE_URL: "IDENTITY_WRITER",
         },
-        hostEnvironmentUnset: ["PROVISIONING_BOOTSTRAP"],
+        hostEnvironmentUnset: ["RELAY_TOKEN"],
       },
     );
     expect(problems).toEqual([
       expect.objectContaining({
         file: "resources/sanoma/infra.ts",
         message:
-          "host: PROVISIONING_BOOTSTRAP (`host: true`) has no value where apply runs, so the host cannot be given it: set SANOMA_PROVISIONING_CREDENTIAL, which its binding in sanoma.config.ts reads, or take `host: true` off that binding",
+          "host: RELAY_TOKEN (`host: true`) has no value where apply runs, so the host cannot be given it: set ACME_RELAY_TOKEN, which its binding in sanoma.config.ts reads, or take `host: true` off that binding",
       }),
     ]);
     expect(out.leftOut.has("resources/sanoma/infra.ts#host")).toBe(true);
-    expect(secrets).not.toHaveProperty("SANOMA_PROVISIONING_CREDENTIAL");
+    expect(secrets).not.toHaveProperty("ACME_RELAY_TOKEN");
     expect(secrets.SANOMA_IDENTITY_WRITE_DATABASE_URL).toEqual({ $secret: "IDENTITY_WRITER" });
   });
 
@@ -359,7 +359,7 @@ describe("what a host that derives is given, or refused", () => {
         secrets: memorySecrets({ IDENTITY_WRITER: "set" }),
         builtInStore: true,
         bindings: {
-          PROVISIONING_BOOTSTRAP: { env: "SANOMA_PROVISIONING_CREDENTIAL", host: true },
+          RELAY_TOKEN: { env: "ACME_RELAY_TOKEN", host: true },
           IDENTITY_WRITER: { env: "SANOMA_IDENTITY_WRITE_DATABASE_URL", host: true },
           LOCAL_ONLY: { env: "LOCAL_ONLY" },
         },
@@ -368,10 +368,10 @@ describe("what a host that derives is given, or refused", () => {
       });
     expect(await told(false)).toMatchObject({
       hostEnvironment: {
-        SANOMA_PROVISIONING_CREDENTIAL: "PROVISIONING_BOOTSTRAP",
+        ACME_RELAY_TOKEN: "RELAY_TOKEN",
         SANOMA_IDENTITY_WRITE_DATABASE_URL: "IDENTITY_WRITER",
       },
-      hostEnvironmentUnset: ["PROVISIONING_BOOTSTRAP"],
+      hostEnvironmentUnset: ["RELAY_TOKEN"],
     });
     expect(await told(true)).not.toHaveProperty("hostEnvironmentUnset");
   });
@@ -432,7 +432,7 @@ describe("what a host that derives is given, or refused", () => {
     );
     const { secrets } = derived(
       { "resources/sanoma/infra.ts": INFRA },
-      { hostEnvironment: { SANOMA_PROVISIONING_CREDENTIAL: "PROVISIONING_BOOTSTRAP" } },
+      { hostEnvironment: { ACME_RELAY_TOKEN: "RELAY_TOKEN" } },
       ownTypes,
     );
     expect(secrets).toBeUndefined();

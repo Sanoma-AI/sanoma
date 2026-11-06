@@ -10,8 +10,13 @@ export default {
     "google_service_account_iam_member",
     "google_iam_workload_identity_pool",
     "google_iam_workload_identity_pool_provider",
+    "google_project_iam_custom_role",
+    "google_project_iam_audit_config",
+    "google_cloud_run_v2_service",
+    "google_cloud_run_v2_service_iam_member",
   ],
-  // ForceNew fields in Google's v8.7.0 google/services/kms resource definitions.
+  // ForceNew fields in Google's v8.7.0 resource definitions (google/services/kms, resourcemanager,
+  // cloudrunv2 and tpgiamresource).
   immutable: {
     google_kms_key_ring: ["location", "name", "project"],
     google_kms_crypto_key: [
@@ -23,5 +28,9 @@ export default {
       "purpose",
       "version_template.protection_level",
     ],
+    google_project_iam_custom_role: ["project", "role_id"],
+    google_project_iam_audit_config: ["project"],
+    google_cloud_run_v2_service: ["location", "name", "project"],
+    google_cloud_run_v2_service_iam_member: ["location", "member", "name", "project", "role"],
   },
 } satisfies ResourcesConfig;

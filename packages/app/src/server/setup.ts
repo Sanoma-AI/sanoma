@@ -74,18 +74,31 @@ export const SETUP_TOKENS: Record<string, { description: string; optional?: true
 /** The vendor a setup token is for, when it is a vendor's (`SETUP_VENDORS`). */
 const vendorOf = (name: string) => SETUP_VENDORS.find((v) => v.tokens.includes(name))?.vendor;
 
-/** The setup tokens this config asks for. */
+/**
+ * The identity enrollment writer's URL, when the config names it with `secret()`
+ * (`identityProvisioning.databaseUrl`): asked for here, under that name, until it is stored.
+ */
+const ENROLLMENT_WRITER: (typeof SETUP_TOKENS)[string] = {
+  description:
+    "The enrollment writer's connection string (postgres://…): a restricted login on the identity enrollment database, through which Sanoma Cloud's sign-up enrolls each company's deployment credential. Until it is stored, enrollment says the writer is not set.",
+};
+
+/** The setup tokens this config asks for, the enrollment writer's last. */
 const setupTokens = ({ resolved }: AppContext) => {
   const vendors = new Set([...resolved.types.values()].map((type) => type.vendor));
-  return Object.keys(SETUP_TOKENS).filter((name) => {
-    const vendor = vendorOf(name);
-    // A connector with authentication methods is configured through named account intake.
-    // Never offer its former global token field as a second way to connect it.
-    return (
-      vendor === undefined ||
-      (vendors.has(vendor) && !Object.keys(resolved.connections.catalog.methods.get(vendor) ?? {}).length)
-    );
-  });
+  const writer = resolved.identityProvisioning.secret;
+  return [
+    ...Object.keys(SETUP_TOKENS).filter((name) => {
+      const vendor = vendorOf(name);
+      // A connector with authentication methods is configured through named account intake.
+      // Never offer its former global token field as a second way to connect it.
+      return (
+        vendor === undefined ||
+        (vendors.has(vendor) && !Object.keys(resolved.connections.catalog.methods.get(vendor) ?? {}).length)
+      );
+    }),
+    ...(writer ? [writer] : []),
+  ];
 };
 
 const CALLBACK = "/setup/github/callback";
@@ -175,15 +188,17 @@ export async function setupStatus(app: AppContext, actor?: Principal): Promise<S
   ]);
   const slug = found.get(GITHUB_APP.slug);
   const tokens = names.map((name): CredentialStatus => {
-    const { description, optional = false } = SETUP_TOKENS[name]!;
+    const { description, optional = false } = SETUP_TOKENS[name] ?? ENROLLMENT_WRITER;
     const secret = found.get(name);
     if (!secret) return { name, description, optional, status: "missing" };
     const { source, setBy, setAt } = secret;
     return { name, description, optional, status: "set", source, ...(setBy && { setBy, setAt }) };
   });
+  const writer = app.resolved.identityProvisioning.secret;
   return {
     githubApp: slug ? { slug: slug.value, setBy: slug.setBy, setAt: slug.setAt, missing } : null,
     tokens,
+    ...(writer && { enrollmentWriter: writer }),
     signIn: { ...signIn, github: found.has(GITHUB_APP.client_id) && found.has(GITHUB_APP.client_secret) },
   };
 }

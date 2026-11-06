@@ -1700,6 +1700,1799 @@
         }
       },
       "schemaVersion": 0
+    },
+    "google_project_iam_custom_role": {
+      "block": {
+        "attributes": {
+          "deleted": {
+            "computed": true,
+            "description": "The current deleted state of the role.",
+            "descriptionKind": "plain",
+            "type": "bool"
+          },
+          "deletion_policy": {
+            "computed": true,
+            "description": "Whether Terraform will be prevented from destroying the instance. Defaults to \"DELETE\".\nWhen a 'terraform destroy' or 'terraform apply' would delete the instance,\nthe command will fail if this field is set to \"PREVENT\" in Terraform state.\nWhen set to \"ABANDON\", the command will remove the resource from Terraform\nmanagement without updating or deleting the resource in the API.\nWhen set to \"DELETE\", deleting the resource is allowed.\n",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": "string"
+          },
+          "description": {
+            "description": "A human-readable description for the role.",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": "string"
+          },
+          "id": {
+            "computed": true,
+            "optional": true,
+            "type": "string"
+          },
+          "name": {
+            "computed": true,
+            "description": "The name of the role in the format projects/{{project}}/roles/{{role_id}}. Like id, this field can be used as a reference in other resources such as IAM role bindings.",
+            "descriptionKind": "plain",
+            "type": "string"
+          },
+          "permissions": {
+            "description": "The names of the permissions this role grants when bound in an IAM policy. At least one permission must be specified.",
+            "descriptionKind": "plain",
+            "required": true,
+            "type": [
+              "set",
+              "string"
+            ]
+          },
+          "project": {
+            "computed": true,
+            "description": "The project that the service account will be created in. Defaults to the provider project configuration.",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": "string"
+          },
+          "role_id": {
+            "description": "The camel case role id to use for this role. Cannot contain - characters.",
+            "descriptionKind": "plain",
+            "required": true,
+            "type": "string"
+          },
+          "stage": {
+            "description": "The current launch stage of the role. Defaults to GA.",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": "string"
+          },
+          "title": {
+            "description": "A human-readable title for the role.",
+            "descriptionKind": "plain",
+            "required": true,
+            "type": "string"
+          }
+        },
+        "blocks": {}
+      },
+      "schemaVersion": 0
+    },
+    "google_project_iam_audit_config": {
+      "block": {
+        "attributes": {
+          "etag": {
+            "computed": true,
+            "description": "The etag of iam policy",
+            "descriptionKind": "plain",
+            "type": "string"
+          },
+          "id": {
+            "computed": true,
+            "optional": true,
+            "type": "string"
+          },
+          "project": {
+            "required": true,
+            "type": "string"
+          },
+          "service": {
+            "description": "Service which will be enabled for audit logging. The special value allServices covers all services.",
+            "descriptionKind": "plain",
+            "required": true,
+            "type": "string"
+          }
+        },
+        "blocks": {
+          "audit_log_config": {
+            "block": {
+              "attributes": {
+                "exempted_members": {
+                  "description": "Identities that do not cause logging for this type of permission. Each entry can have one of the following values:user:{emailid}: An email address that represents a specific Google account. For example, alice@gmail.com or joe@example.com. serviceAccount:{emailid}: An email address that represents a service account. For example, my-other-app@appspot.gserviceaccount.com. group:{emailid}: An email address that represents a Google group. For example, admins@example.com. domain:{domain}: A G Suite domain (primary, instead of alias) name that represents all the users of that domain. For example, google.com or example.com.",
+                  "descriptionKind": "plain",
+                  "optional": true,
+                  "type": [
+                    "set",
+                    "string"
+                  ]
+                },
+                "log_type": {
+                  "description": "Permission type for which logging is to be configured. Must be one of DATA_READ, DATA_WRITE, or ADMIN_READ.",
+                  "descriptionKind": "plain",
+                  "required": true,
+                  "type": "string"
+                }
+              },
+              "blocks": {},
+              "description": "The configuration for logging of each type of permission. This can be specified multiple times.",
+              "descriptionKind": "plain"
+            },
+            "minItems": 1,
+            "nesting": "set"
+          }
+        }
+      },
+      "schemaVersion": 0
+    },
+    "google_cloud_run_v2_service": {
+      "block": {
+        "attributes": {
+          "annotations": {
+            "description": "Unstructured key value map that may be set by external tools to store and arbitrary metadata. They are not queryable and should be preserved when modifying objects.\n\nCloud Run API v2 does not support annotations with 'run.googleapis.com', 'cloud.googleapis.com', 'serving.knative.dev', or 'autoscaling.knative.dev' namespaces, and they will be rejected in new resources.\nAll system annotations in v1 now have a corresponding field in v2 Service.\n\nThis field follows Kubernetes annotations' namespacing, limits, and rules.\n\n**Note**: This field is non-authoritative, and will only manage the annotations present in your configuration.\nPlease refer to the field 'effective_annotations' for all of the annotations present on the resource.",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": [
+              "map",
+              "string"
+            ]
+          },
+          "client": {
+            "description": "Arbitrary identifier for the API client.",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": "string"
+          },
+          "client_version": {
+            "description": "Arbitrary version identifier for the API client.",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": "string"
+          },
+          "conditions": {
+            "computed": true,
+            "description": "The Conditions of all other associated sub-resources. They contain additional diagnostics information in case the Service does not reach its Serving state. See comments in reconciling for additional information on reconciliation process in Cloud Run.",
+            "descriptionKind": "plain",
+            "type": [
+              "list",
+              [
+                "object",
+                {
+                  "execution_reason": "string",
+                  "last_transition_time": "string",
+                  "message": "string",
+                  "reason": "string",
+                  "revision_reason": "string",
+                  "severity": "string",
+                  "state": "string",
+                  "type": "string"
+                }
+              ]
+            ]
+          },
+          "create_time": {
+            "computed": true,
+            "description": "The creation time.",
+            "descriptionKind": "plain",
+            "type": "string"
+          },
+          "creator": {
+            "computed": true,
+            "description": "Email address of the authenticated creator.",
+            "descriptionKind": "plain",
+            "type": "string"
+          },
+          "custom_audiences": {
+            "description": "One or more custom audiences that you want this service to support. Specify each custom audience as the full URL in a string. The custom audiences are encoded in the token and used to authenticate requests.\nFor more information, see https://cloud.google.com/run/docs/configuring/custom-audiences.",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": [
+              "list",
+              "string"
+            ]
+          },
+          "default_uri_disabled": {
+            "description": "Disables public resolution of the default URI of this service.",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": "bool"
+          },
+          "delete_time": {
+            "computed": true,
+            "description": "The deletion time.",
+            "descriptionKind": "plain",
+            "type": "string"
+          },
+          "deletion_policy": {
+            "computed": true,
+            "description": "Whether Terraform will be prevented from destroying the instance. Defaults to \"DELETE\".\nWhen a 'terraform destroy' or 'terraform apply' would delete the instance,\nthe command will fail if this field is set to \"PREVENT\" in Terraform state.\nWhen set to \"ABANDON\", the command will remove the resource from Terraform\nmanagement without updating or deleting the resource in the API.\nWhen set to \"DELETE\", deleting the resource is allowed.\n",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": "string"
+          },
+          "deletion_protection": {
+            "description": "Whether Terraform will be prevented from destroying the service. Defaults to true.\nWhen a'terraform destroy' or 'terraform apply' would delete the service,\nthe command will fail if this field is not set to false in Terraform state.\nWhen the field is set to true or unset in Terraform state, a 'terraform apply'\nor 'terraform destroy' that would delete the service will fail.\nWhen the field is set to false, deleting the service is allowed.",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": "bool"
+          },
+          "description": {
+            "description": "User-provided description of the Service. This field currently has a 512-character limit.",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": "string"
+          },
+          "effective_annotations": {
+            "computed": true,
+            "description": "All of annotations (key/value pairs) present on the resource in GCP, including the annotations configured through Terraform, other clients and services.",
+            "descriptionKind": "plain",
+            "type": [
+              "map",
+              "string"
+            ]
+          },
+          "effective_labels": {
+            "computed": true,
+            "description": "All of labels (key/value pairs) present on the resource in GCP, including the labels configured through Terraform, other clients and services.",
+            "descriptionKind": "plain",
+            "type": [
+              "map",
+              "string"
+            ]
+          },
+          "etag": {
+            "computed": true,
+            "description": "A system-generated fingerprint for this version of the resource. May be used to detect modification conflict during updates.",
+            "descriptionKind": "plain",
+            "type": "string"
+          },
+          "expire_time": {
+            "computed": true,
+            "description": "For a deleted resource, the time after which it will be permanently deleted.",
+            "descriptionKind": "plain",
+            "type": "string"
+          },
+          "generation": {
+            "computed": true,
+            "description": "A number that monotonically increases every time the user modifies the desired state. Please note that unlike v1, this is an int64 value. As with most Google APIs, its JSON representation will be a string instead of an integer.",
+            "descriptionKind": "plain",
+            "type": "string"
+          },
+          "iap_enabled": {
+            "description": "Used to enable/disable IAP for the cloud-run service.",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": "bool"
+          },
+          "id": {
+            "computed": true,
+            "optional": true,
+            "type": "string"
+          },
+          "ingress": {
+            "computed": true,
+            "description": "Provides the ingress settings for this Service. On output, returns the currently observed ingress settings, or INGRESS_TRAFFIC_UNSPECIFIED if no revision is active. Possible values: [\"INGRESS_TRAFFIC_ALL\", \"INGRESS_TRAFFIC_INTERNAL_ONLY\", \"INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER\"]",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": "string"
+          },
+          "invoker_iam_disabled": {
+            "description": "Disables IAM permission check for run.routes.invoke for callers of this service. For more information, visit https://cloud.google.com/run/docs/securing/managing-access#invoker_check.",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": "bool"
+          },
+          "labels": {
+            "description": "Unstructured key value map that can be used to organize and categorize objects. User-provided labels are shared with Google's billing system, so they can be used to filter, or break down billing charges by team, component,\nenvironment, state, etc. For more information, visit https://docs.cloud.google.com/resource-manager/docs/creating-managing-labels or https://cloud.google.com/run/docs/configuring/labels.\n\nCloud Run API v2 does not support labels with  'run.googleapis.com', 'cloud.googleapis.com', 'serving.knative.dev', or 'autoscaling.knative.dev' namespaces, and they will be rejected.\nAll system labels in v1 now have a corresponding field in v2 Service.\n\n**Note**: This field is non-authoritative, and will only manage the labels present in your configuration.\nPlease refer to the field 'effective_labels' for all of the labels present on the resource.",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": [
+              "map",
+              "string"
+            ]
+          },
+          "last_modifier": {
+            "computed": true,
+            "description": "Email address of the last authenticated modifier.",
+            "descriptionKind": "plain",
+            "type": "string"
+          },
+          "latest_created_revision": {
+            "computed": true,
+            "description": "Name of the last created revision. See comments in reconciling for additional information on reconciliation process in Cloud Run.",
+            "descriptionKind": "plain",
+            "type": "string"
+          },
+          "latest_ready_revision": {
+            "computed": true,
+            "description": "Name of the latest revision that is serving traffic. See comments in reconciling for additional information on reconciliation process in Cloud Run.",
+            "descriptionKind": "plain",
+            "type": "string"
+          },
+          "launch_stage": {
+            "computed": true,
+            "description": "The launch stage as defined by [Google Cloud Platform Launch Stages](https://cloud.google.com/products#product-launch-stages). Cloud Run supports ALPHA, BETA, and GA.\nIf no value is specified, GA is assumed. Set the launch stage to a preview stage on input to allow use of preview features in that stage. On read (or output), describes whether the resource uses preview features.\n\nFor example, if ALPHA is provided as input, but only BETA and GA-level features are used, this field will be BETA on output. Possible values: [\"UNIMPLEMENTED\", \"PRELAUNCH\", \"EARLY_ACCESS\", \"ALPHA\", \"BETA\", \"GA\", \"DEPRECATED\"]",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": "string"
+          },
+          "location": {
+            "description": "The location of the cloud run service",
+            "descriptionKind": "plain",
+            "required": true,
+            "type": "string"
+          },
+          "name": {
+            "description": "Name of the Service.",
+            "descriptionKind": "plain",
+            "required": true,
+            "type": "string"
+          },
+          "observed_generation": {
+            "computed": true,
+            "description": "The generation of this Service currently serving traffic. See comments in reconciling for additional information on reconciliation process in Cloud Run. Please note that unlike v1, this is an int64 value. As with most Google APIs, its JSON representation will be a string instead of an integer.",
+            "descriptionKind": "plain",
+            "type": "string"
+          },
+          "project": {
+            "computed": true,
+            "optional": true,
+            "type": "string"
+          },
+          "reconciling": {
+            "computed": true,
+            "description": "Returns true if the Service is currently being acted upon by the system to bring it into the desired state.\n\nWhen a new Service is created, or an existing one is updated, Cloud Run will asynchronously perform all necessary steps to bring the Service to the desired serving state. This process is called reconciliation. While reconciliation is in process, observedGeneration, latest_ready_revison, trafficStatuses, and uri will have transient values that might mismatch the intended state: Once reconciliation is over (and this field is false), there are two possible outcomes: reconciliation succeeded and the serving state matches the Service, or there was an error, and reconciliation failed. This state can be found in terminalCondition.state.\n\nIf reconciliation succeeded, the following fields will match: traffic and trafficStatuses, observedGeneration and generation, latestReadyRevision and latestCreatedRevision.\n\nIf reconciliation failed, trafficStatuses, observedGeneration, and latestReadyRevision will have the state of the last serving revision, or empty for newly created Services. Additional information on the failure can be found in terminalCondition and conditions.",
+            "descriptionKind": "plain",
+            "type": "bool"
+          },
+          "ssh_enabled": {
+            "description": "Enables SSH access to the Service.",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": "bool"
+          },
+          "tags": {
+            "description": "A map of resource manager tags.\nResource manager tag keys and values have the same definition as resource manager tags.\nKeys must be in the format tagKeys/{tag_key_id}, and values are in the format tagValues/{tag_value_id}.",
+            "descriptionKind": "plain",
+            "optional": true,
+            "type": [
+              "map",
+              "string"
+            ]
+          },
+          "terminal_condition": {
+            "computed": true,
+            "description": "The Condition of this Service, containing its readiness status, and detailed error information in case it did not reach a serving state. See comments in reconciling for additional information on reconciliation process in Cloud Run.",
+            "descriptionKind": "plain",
+            "type": [
+              "list",
+              [
+                "object",
+                {
+                  "execution_reason": "string",
+                  "last_transition_time": "string",
+                  "message": "string",
+                  "reason": "string",
+                  "revision_reason": "string",
+                  "severity": "string",
+                  "state": "string",
+                  "type": "string"
+                }
+              ]
+            ]
+          },
+          "terraform_labels": {
+            "computed": true,
+            "description": "The combination of labels configured directly on the resource\n and default labels configured on the provider.",
+            "descriptionKind": "plain",
+            "type": [
+              "map",
+              "string"
+            ]
+          },
+          "traffic_statuses": {
+            "computed": true,
+            "description": "Detailed status information for corresponding traffic targets. See comments in reconciling for additional information on reconciliation process in Cloud Run.",
+            "descriptionKind": "plain",
+            "type": [
+              "list",
+              [
+                "object",
+                {
+                  "percent": "number",
+                  "revision": "string",
+                  "tag": "string",
+                  "type": "string",
+                  "uri": "string"
+                }
+              ]
+            ]
+          },
+          "uid": {
+            "computed": true,
+            "description": "Server assigned unique identifier for the trigger. The value is a UUID4 string and guaranteed to remain unchanged until the resource is deleted.",
+            "descriptionKind": "plain",
+            "type": "string"
+          },
+          "update_time": {
+            "computed": true,
+            "description": "The last-modified time.",
+            "descriptionKind": "plain",
+            "type": "string"
+          },
+          "uri": {
+            "computed": true,
+            "description": "The main URI in which this Service is serving traffic.",
+            "descriptionKind": "plain",
+            "type": "string"
+          },
+          "urls": {
+            "computed": true,
+            "description": "All URLs serving traffic for this Service.",
+            "descriptionKind": "plain",
+            "type": [
+              "list",
+              "string"
+            ]
+          }
+        },
+        "blocks": {
+          "binary_authorization": {
+            "block": {
+              "attributes": {
+                "breakglass_justification": {
+                  "description": "If present, indicates to use Breakglass using this justification. If useDefault is False, then it must be empty. For more information on breakglass, see https://cloud.google.com/binary-authorization/docs/using-breakglass",
+                  "descriptionKind": "plain",
+                  "optional": true,
+                  "type": "string"
+                },
+                "policy": {
+                  "description": "The path to a binary authorization policy. Format: projects/{project}/platforms/cloudRun/{policy-name}",
+                  "descriptionKind": "plain",
+                  "optional": true,
+                  "type": "string"
+                },
+                "use_default": {
+                  "description": "If True, indicates to use the default project's binary authorization policy. If False, binary authorization will be disabled.",
+                  "descriptionKind": "plain",
+                  "optional": true,
+                  "type": "bool"
+                }
+              },
+              "blocks": {},
+              "description": "Settings for the Binary Authorization feature.",
+              "descriptionKind": "plain"
+            },
+            "maxItems": 1,
+            "nesting": "list"
+          },
+          "build_config": {
+            "block": {
+              "attributes": {
+                "base_image": {
+                  "description": "The base image used to build the function.",
+                  "descriptionKind": "plain",
+                  "optional": true,
+                  "type": "string"
+                },
+                "enable_automatic_updates": {
+                  "description": "Sets whether the function will receive automatic base image updates.",
+                  "descriptionKind": "plain",
+                  "optional": true,
+                  "type": "bool"
+                },
+                "environment_variables": {
+                  "description": "User-provided build-time environment variables for the function.",
+                  "descriptionKind": "plain",
+                  "optional": true,
+                  "type": [
+                    "map",
+                    "string"
+                  ]
+                },
+                "function_target": {
+                  "description": "The name of the function (as defined in source code) that will be executed. Defaults to the resource name suffix, if not specified. For backward compatibility, if function with given name is not found, then the system will try to use function named \"function\".",
+                  "descriptionKind": "plain",
+                  "optional": true,
+                  "type": "string"
+                },
+                "image_uri": {
+                  "description": "Artifact Registry URI to store the built image.",
+                  "descriptionKind": "plain",
+                  "optional": true,
+                  "type": "string"
+                },
+                "name": {
+                  "computed": true,
+                  "description": "The Cloud Build name of the latest successful deployment of the function.",
+                  "descriptionKind": "plain",
+                  "type": "string"
+                },
+                "service_account": {
+                  "description": "Service account to be used for building the container. The format of this field is 'projects/{projectId}/serviceAccounts/{serviceAccountEmail}'.",
+                  "descriptionKind": "plain",
+                  "optional": true,
+                  "type": "string"
+                },
+                "source_location": {
+                  "description": "The Cloud Storage bucket URI where the function source code is located.",
+                  "descriptionKind": "plain",
+                  "optional": true,
+                  "type": "string"
+                },
+                "worker_pool": {
+                  "description": "Name of the Cloud Build Custom Worker Pool that should be used to build the Cloud Run function. The format of this field is 'projects/{project}/locations/{region}/workerPools/{workerPool}' where {project} and {region} are the project id and region respectively where the worker pool is defined and {workerPool} is the short name of the worker pool.",
+                  "descriptionKind": "plain",
+                  "optional": true,
+                  "type": "string"
+                }
+              },
+              "blocks": {},
+              "description": "Configuration for building a Cloud Run function.",
+              "descriptionKind": "plain"
+            },
+            "maxItems": 1,
+            "nesting": "list"
+          },
+          "multi_region_settings": {
+            "block": {
+              "attributes": {
+                "multi_region_id": {
+                  "computed": true,
+                  "description": "System-generated unique id for the multi-region Service.",
+                  "descriptionKind": "plain",
+                  "type": "string"
+                },
+                "regions": {
+                  "description": "The list of regions to deploy the multi-region Service.",
+                  "descriptionKind": "plain",
+                  "optional": true,
+                  "type": [
+                    "list",
+                    "string"
+                  ]
+                }
+              },
+              "blocks": {},
+              "description": "Settings for creating a Multi-Region Service. Make sure to use region = 'global' when using them. For more information, visit https://cloud.google.com/run/docs/multiple-regions#deploy",
+              "descriptionKind": "plain"
+            },
+            "maxItems": 1,
+            "nesting": "list"
+          },
+          "scaling": {
+            "block": {
+              "attributes": {
+                "manual_instance_count": {
+                  "computed": true,
+                  "description": "Total instance count for the service in manual scaling mode. This number of instances is divided among all revisions with specified traffic based on the percent of traffic they are receiving.",
+                  "descriptionKind": "plain",
+                  "optional": true,
+                  "type": "number"
+                },
+                "max_instance_count": {
+                  "computed": true,
+                  "description": "Combined maximum number of instances for all revisions receiving traffic.",
+                  "descriptionKind": "plain",
+                  "optional": true,
+                  "type": "number"
+                },
+                "min_instance_count": {
+                  "computed": true,
+                  "description": "Minimum number of instances for the service, to be divided among all revisions receiving traffic.",
+                  "descriptionKind": "plain",
+                  "optional": true,
+                  "type": "number"
+                },
+                "scaling_mode": {
+                  "description": "The [scaling mode](https://cloud.google.com/run/docs/reference/rest/v2/projects.locations.services#scalingmode) for the service. Possible values: [\"AUTOMATIC\", \"MANUAL\"]",
+                  "descriptionKind": "plain",
+                  "optional": true,
+                  "type": "string"
+                }
+              },
+              "blocks": {},
+              "description": "Scaling settings that apply to the whole service",
+              "descriptionKind": "plain"
+            },
+            "maxItems": 1,
+            "nesting": "list"
+          },
+          "template": {
+            "block": {
+              "attributes": {
+                "annotations": {
+                  "description": "Unstructured key value map that may be set by external tools to store and arbitrary metadata. They are not queryable and should be preserved when modifying objects.\n\nCloud Run API v2 does not support annotations with 'run.googleapis.com', 'cloud.googleapis.com', 'serving.knative.dev', or 'autoscaling.knative.dev' namespaces, and they will be rejected.\nAll system annotations in v1 now have a corresponding field in v2 RevisionTemplate.\n\nThis field follows Kubernetes annotations' namespacing, limits, and rules.",
+                  "descriptionKind": "plain",
+                  "optional": true,
+                  "type": [
+                    "map",
+                    "string"
+                  ]
+                },
+                "encryption_key": {
+                  "description": "A reference to a customer managed encryption key (CMEK) to use to encrypt this container image. For more information, go to https://cloud.google.com/run/docs/securing/using-cmek",
+                  "descriptionKind": "plain",
+                  "optional": true,
+                  "type": "string"
+                },
+                "execution_environment": {
+                  "description": "The sandbox environment to host this Revision. Possible values: [\"EXECUTION_ENVIRONMENT_GEN1\", \"EXECUTION_ENVIRONMENT_GEN2\"]",
+                  "descriptionKind": "plain",
+                  "optional": true,
+                  "type": "string"
+                },
+                "gpu_zonal_redundancy_disabled": {
+                  "description": "True if GPU zonal redundancy is disabled on this revision.",
+                  "descriptionKind": "plain",
+                  "optional": true,
+                  "type": "bool"
+                },
+                "health_check_disabled": {
+                  "description": "Disables health checking containers during deployment.",
+                  "descriptionKind": "plain",
+                  "optional": true,
+                  "type": "bool"
+                },
+                "labels": {
+                  "description": "Unstructured key value map that can be used to organize and categorize objects. User-provided labels are shared with Google's billing system, so they can be used to filter, or break down billing charges by team, component, environment, state, etc.\nFor more information, visit https://docs.cloud.google.com/resource-manager/docs/creating-managing-labels or https://cloud.google.com/run/docs/configuring/labels.\n\nCloud Run API v2 does not support labels with 'run.googleapis.com', 'cloud.googleapis.com', 'serving.knative.dev', or 'autoscaling.knative.dev' namespaces, and they will be rejected.\nAll system labels in v1 now have a corresponding field in v2 RevisionTemplate.",
+                  "descriptionKind": "plain",
+                  "optional": true,
+                  "type": [
+                    "map",
+                    "string"
+                  ]
+                },
+                "max_instance_request_concurrency": {
+                  "computed": true,
+                  "description": "Sets the maximum number of requests that each serving instance can receive.\nIf not specified or 0, defaults to 80 when requested CPU >= 1 and defaults to 1 when requested CPU < 1.",
+                  "descriptionKind": "plain",
+                  "optional": true,
+                  "type": "number"
+                },
+                "revision": {
+                  "description": "The unique name for the revision. If this field is omitted, it will be automatically generated based on the Service name.",
+                  "descriptionKind": "plain",
+                  "optional": true,
+                  "type": "string"
+                },
+                "service_account": {
+                  "computed": true,
+                  "description": "Email address of the IAM service account associated with the revision of the service. The service account represents the identity of the running revision, and determines what permissions the revision has. If not provided, the revision will use the project's default service account.",
+                  "descriptionKind": "plain",
+                  "optional": true,
+                  "type": "string"
+                },
+                "session_affinity": {
+                  "description": "Enables session affinity. For more information, go to https://cloud.google.com/run/docs/configuring/session-affinity",
+                  "descriptionKind": "plain",
+                  "optional": true,
+                  "type": "bool"
+                },
+                "timeout": {
+                  "computed": true,
+                  "description": "Max allowed time for an instance to respond to a request.\n\nA duration in seconds with up to nine fractional digits, ending with 's'. Example: \"3.5s\".",
+                  "descriptionKind": "plain",
+                  "optional": true,
+                  "type": "string"
+                }
+              },
+              "blocks": {
+                "containers": {
+                  "block": {
+                    "attributes": {
+                      "args": {
+                        "description": "Arguments to the entrypoint. The docker image's CMD is used if this is not provided. Variable references are not supported in Cloud Run.",
+                        "descriptionKind": "plain",
+                        "optional": true,
+                        "type": [
+                          "list",
+                          "string"
+                        ]
+                      },
+                      "base_image_uri": {
+                        "description": "Base image for this container. If set, it indicates that the service is enrolled into automatic base image update.",
+                        "descriptionKind": "plain",
+                        "optional": true,
+                        "type": "string"
+                      },
+                      "build_info": {
+                        "computed": true,
+                        "description": "The build info of the container image.",
+                        "descriptionKind": "plain",
+                        "type": [
+                          "list",
+                          [
+                            "object",
+                            {
+                              "function_target": "string",
+                              "source_location": "string"
+                            }
+                          ]
+                        ]
+                      },
+                      "command": {
+                        "description": "Entrypoint array. Not executed within a shell. The docker image's ENTRYPOINT is used if this is not provided. Variable references $(VAR_NAME) are expanded using the container's environment. If a variable cannot be resolved, the reference in the input string will be unchanged. The $(VAR_NAME) syntax can be escaped with a double $$, ie: $$(VAR_NAME). Escaped references will never be expanded, regardless of whether the variable exists or not. More info: https://kubernetes.io/docs/tasks/inject-data-application/define-command-argument-container/#running-a-command-in-a-shell",
+                        "descriptionKind": "plain",
+                        "optional": true,
+                        "type": [
+                          "list",
+                          "string"
+                        ]
+                      },
+                      "depends_on": {
+                        "description": "Containers which should be started before this container. If specified the container will wait to start until all containers with the listed names are healthy.",
+                        "descriptionKind": "plain",
+                        "optional": true,
+                        "type": [
+                          "list",
+                          "string"
+                        ]
+                      },
+                      "image": {
+                        "description": "URL of the Container image in Google Container Registry or Google Artifact Registry. More info: https://kubernetes.io/docs/concepts/containers/images",
+                        "descriptionKind": "plain",
+                        "required": true,
+                        "type": "string"
+                      },
+                      "name": {
+                        "description": "Name of the container specified as a DNS_LABEL.",
+                        "descriptionKind": "plain",
+                        "optional": true,
+                        "type": "string"
+                      },
+                      "sandbox_launcher": {
+                        "description": "Indicates that this container can act as a sandbox supervisor and launch sandboxes.",
+                        "descriptionKind": "plain",
+                        "optional": true,
+                        "type": "bool"
+                      },
+                      "working_dir": {
+                        "description": "Container's working directory. If not specified, the container runtime's default will be used, which might be configured in the container image.",
+                        "descriptionKind": "plain",
+                        "optional": true,
+                        "type": "string"
+                      }
+                    },
+                    "blocks": {
+                      "env": {
+                        "block": {
+                          "attributes": {
+                            "name": {
+                              "description": "Name of the environment variable. Must be a C_IDENTIFIER, and may not exceed 32768 characters.",
+                              "descriptionKind": "plain",
+                              "required": true,
+                              "type": "string"
+                            },
+                            "value": {
+                              "description": "Literal value of the environment variable. Defaults to \"\" and the maximum allowed length is 32768 characters. Variable references are not supported in Cloud Run.",
+                              "descriptionKind": "plain",
+                              "optional": true,
+                              "type": "string"
+                            }
+                          },
+                          "blocks": {
+                            "value_source": {
+                              "block": {
+                                "attributes": {},
+                                "blocks": {
+                                  "secret_key_ref": {
+                                    "block": {
+                                      "attributes": {
+                                        "secret": {
+                                          "description": "The name of the secret in Cloud Secret Manager. Format: {secretName} if the secret is in the same project. projects/{project}/secrets/{secretName} if the secret is in a different project.",
+                                          "descriptionKind": "plain",
+                                          "required": true,
+                                          "type": "string"
+                                        },
+                                        "version": {
+                                          "description": "The Cloud Secret Manager secret version. Can be 'latest' for the latest value or an integer for a specific version.",
+                                          "descriptionKind": "plain",
+                                          "optional": true,
+                                          "type": "string"
+                                        }
+                                      },
+                                      "blocks": {},
+                                      "description": "Selects a secret and a specific version from Cloud Secret Manager.",
+                                      "descriptionKind": "plain"
+                                    },
+                                    "maxItems": 1,
+                                    "nesting": "list"
+                                  }
+                                },
+                                "description": "Source for the environment variable's value.",
+                                "descriptionKind": "plain"
+                              },
+                              "maxItems": 1,
+                              "nesting": "list"
+                            }
+                          },
+                          "description": "List of environment variables to set in the container.",
+                          "descriptionKind": "plain"
+                        },
+                        "nesting": "set"
+                      },
+                      "liveness_probe": {
+                        "block": {
+                          "attributes": {
+                            "failure_threshold": {
+                              "description": "Minimum consecutive failures for the probe to be considered failed after having succeeded. Defaults to 3. Minimum value is 1.",
+                              "descriptionKind": "plain",
+                              "optional": true,
+                              "type": "number"
+                            },
+                            "initial_delay_seconds": {
+                              "description": "Number of seconds after the container has started before the probe is initiated. Defaults to 0 seconds. Minimum value is 0. Maximum value for liveness probe is 3600. Maximum value for startup probe is 240. More info: https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle#container-probes",
+                              "descriptionKind": "plain",
+                              "optional": true,
+                              "type": "number"
+                            },
+                            "period_seconds": {
+                              "description": "How often (in seconds) to perform the probe. Default to 10 seconds. Minimum value is 1. Maximum value for liveness probe is 3600. Maximum value for startup probe is 240. Must be greater or equal than timeoutSeconds",
+                              "descriptionKind": "plain",
+                              "optional": true,
+                              "type": "number"
+                            },
+                            "timeout_seconds": {
+                              "description": "Number of seconds after which the probe times out. Defaults to 1 second. Minimum value is 1. Maximum value is 3600. Must be smaller than periodSeconds. More info: https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle#container-probes",
+                              "descriptionKind": "plain",
+                              "optional": true,
+                              "type": "number"
+                            }
+                          },
+                          "blocks": {
+                            "grpc": {
+                              "block": {
+                                "attributes": {
+                                  "port": {
+                                    "computed": true,
+                                    "description": "Port number to access on the container. Number must be in the range 1 to 65535.\nIf not specified, defaults to the same value as container.ports[0].containerPort.",
+                                    "descriptionKind": "plain",
+                                    "optional": true,
+                                    "type": "number"
+                                  },
+                                  "service": {
+                                    "description": "The name of the service to place in the gRPC HealthCheckRequest\n(see https://github.com/grpc/grpc/blob/master/doc/health-checking.md).\nIf this is not specified, the default behavior is defined by gRPC.",
+                                    "descriptionKind": "plain",
+                                    "optional": true,
+                                    "type": "string"
+                                  }
+                                },
+                                "blocks": {},
+                                "description": "GRPC specifies an action involving a GRPC port.",
+                                "descriptionKind": "plain"
+                              },
+                              "maxItems": 1,
+                              "nesting": "list"
+                            },
+                            "http_get": {
+                              "block": {
+                                "attributes": {
+                                  "path": {
+                                    "description": "Path to access on the HTTP server. Defaults to '/'.",
+                                    "descriptionKind": "plain",
+                                    "optional": true,
+                                    "type": "string"
+                                  },
+                                  "port": {
+                                    "computed": true,
+                                    "description": "Port number to access on the container. Number must be in the range 1 to 65535.\nIf not specified, defaults to the same value as container.ports[0].containerPort.",
+                                    "descriptionKind": "plain",
+                                    "optional": true,
+                                    "type": "number"
+                                  }
+                                },
+                                "blocks": {
+                                  "http_headers": {
+                                    "block": {
+                                      "attributes": {
+                                        "name": {
+                                          "description": "The header field name",
+                                          "descriptionKind": "plain",
+                                          "required": true,
+                                          "type": "string"
+                                        },
+                                        "value": {
+                                          "description": "The header field value",
+                                          "descriptionKind": "plain",
+                                          "optional": true,
+                                          "type": "string"
+                                        }
+                                      },
+                                      "blocks": {},
+                                      "description": "Custom headers to set in the request. HTTP allows repeated headers.",
+                                      "descriptionKind": "plain"
+                                    },
+                                    "nesting": "list"
+                                  }
+                                },
+                                "description": "HTTPGet specifies the http request to perform.",
+                                "descriptionKind": "plain"
+                              },
+                              "maxItems": 1,
+                              "nesting": "list"
+                            },
+                            "tcp_socket": {
+                              "block": {
+                                "attributes": {
+                                  "port": {
+                                    "description": "Port number to access on the container. Must be in the range 1 to 65535.\nIf not specified, defaults to the exposed port of the container, which\nis the value of container.ports[0].containerPort.",
+                                    "descriptionKind": "plain",
+                                    "required": true,
+                                    "type": "number"
+                                  }
+                                },
+                                "blocks": {},
+                                "description": "TCPSocketAction describes an action based on opening a socket",
+                                "descriptionKind": "plain"
+                              },
+                              "maxItems": 1,
+                              "nesting": "list"
+                            }
+                          },
+                          "description": "Periodic probe of container liveness. Container will be restarted if the probe fails. More info: https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle#container-probes",
+                          "descriptionKind": "plain"
+                        },
+                        "maxItems": 1,
+                        "nesting": "list"
+                      },
+                      "ports": {
+                        "block": {
+                          "attributes": {
+                            "container_port": {
+                              "description": "Port number the container listens on. This must be a valid TCP port number, 0 < containerPort < 65536.",
+                              "descriptionKind": "plain",
+                              "optional": true,
+                              "type": "number"
+                            },
+                            "name": {
+                              "computed": true,
+                              "description": "If specified, used to specify which protocol to use. Allowed values are \"http1\" and \"h2c\".",
+                              "descriptionKind": "plain",
+                              "optional": true,
+                              "type": "string"
+                            }
+                          },
+                          "blocks": {},
+                          "description": "List of ports to expose from the container. Only a single port can be specified. The specified ports must be listening on all interfaces (0.0.0.0) within the container to be accessible.\n\nIf omitted, a port number will be chosen and passed to the container through the PORT environment variable for the container to listen on",
+                          "descriptionKind": "plain"
+                        },
+                        "maxItems": 1,
+                        "nesting": "list"
+                      },
+                      "readiness_probe": {
+                        "block": {
+                          "attributes": {
+                            "failure_threshold": {
+                              "computed": true,
+                              "description": "Minimum consecutive failures for the probe to be considered failed after\nhaving succeeded. Defaults to 3.",
+                              "descriptionKind": "plain",
+                              "optional": true,
+                              "type": "number"
+                            },
+                            "period_seconds": {
+                              "computed": true,
+                              "description": "How often (in seconds) to perform the probe.\nDefault to 10 seconds.",
+                              "descriptionKind": "plain",
+                              "optional": true,
+                              "type": "number"
+                            },
+                            "success_threshold": {
+                              "computed": true,
+                              "description": "Minimum consecutive successes for the probe to be considered successful after having failed.\nDefaults to 2.",
+                              "descriptionKind": "plain",
+                              "optional": true,
+                              "type": "number"
+                            },
+                            "timeout_seconds": {
+                              "computed": true,
+                              "description": "Number of seconds after which the probe times out.\nDefaults to 1 second. Must be smaller than period_seconds.",
+                              "descriptionKind": "plain",
+                              "optional": true,
+                              "type": "number"
+                            }
+                          },
+                          "blocks": {
+                            "grpc": {
+                              "block": {
+                                "attributes": {
+                                  "port": {
+                                    "computed": true,
+                                    "description": "Port number to access on the container. Number must be in the range 1 to 65535.\nIf not specified, defaults to the same value as container.ports[0].containerPort.",
+                                    "descriptionKind": "plain",
+                                    "optional": true,
+                                    "type": "number"
+                                  },
+                                  "service": {
+                                    "description": "The name of the service to place in the gRPC HealthCheckRequest\n(see https://github.com/grpc/grpc/blob/master/doc/health-checking.md).\nIf this is not specified, the default behavior is defined by gRPC.",
+                                    "descriptionKind": "plain",
+                                    "optional": true,
+                                    "type": "string"
+                                  }
+                                },
+                                "blocks": {},
+                                "description": "GRPC specifies an action involving a GRPC port.",
+                                "descriptionKind": "plain"
+                              },
+                              "maxItems": 1,
+                              "nesting": "list"
+                            },
+                            "http_get": {
+                              "block": {
+                                "attributes": {
+                                  "path": {
+                                    "computed": true,
+                                    "description": "Path to access on the HTTP server. If set, it should not be empty string.",
+                                    "descriptionKind": "plain",
+                                    "optional": true,
+                                    "type": "string"
+                                  },
+                                  "port": {
+                                    "computed": true,
+                                    "description": "Port number to access on the container. Number must be in the range 1 to 65535.\nIf not specified, defaults to the same value as container.ports[0].containerPort.",
+                                    "descriptionKind": "plain",
+                                    "optional": true,
+                                    "type": "number"
+                                  }
+                                },
+                                "blocks": {},
+                                "description": "HttpGet specifies the http request to perform.",
+                                "descriptionKind": "plain"
+                              },
+                              "maxItems": 1,
+                              "nesting": "list"
+                            }
+                          },
+                          "description": "Periodic probe of container readiness.",
+                          "descriptionKind": "plain"
+                        },
+                        "maxItems": 1,
+                        "nesting": "list"
+                      },
+                      "resources": {
+                        "block": {
+                          "attributes": {
+                            "cpu_idle": {
+                              "description": "Determines whether CPU is only allocated during requests. True by default if the parent 'resources' field is not set. However, if\n'resources' is set, this field must be explicitly set to true to preserve the default behavior.",
+                              "descriptionKind": "plain",
+                              "optional": true,
+                              "type": "bool"
+                            },
+                            "limits": {
+                              "computed": true,
+                              "description": "Only memory, CPU, and nvidia.com/gpu are supported. Use key 'cpu' for CPU limit, 'memory' for memory limit, 'nvidia.com/gpu' for gpu limit. Note: The only supported values for CPU are '1', '2', '4', '6' and '8'. Setting 4 CPU requires at least 2Gi of memory, setting 6 or more CPU requires at least 4Gi of memory. The values of the map is string form of the 'quantity' k8s type: https://github.com/kubernetes/kubernetes/blob/master/staging/src/k8s.io/apimachinery/pkg/api/resource/quantity.go",
+                              "descriptionKind": "plain",
+                              "optional": true,
+                              "type": [
+                                "map",
+                                "string"
+                              ]
+                            },
+                            "startup_cpu_boost": {
+                              "description": "Determines whether CPU should be boosted on startup of a new container instance above the requested CPU threshold, this can help reduce cold-start latency.",
+                              "descriptionKind": "plain",
+                              "optional": true,
+                              "type": "bool"
+                            }
+                          },
+                          "blocks": {},
+                          "description": "Compute Resource requirements by this container. More info: https://kubernetes.io/docs/concepts/storage/persistent-volumes#resources",
+                          "descriptionKind": "plain"
+                        },
+                        "maxItems": 1,
+                        "nesting": "list"
+                      },
+                      "startup_probe": {
+                        "block": {
+                          "attributes": {
+                            "failure_threshold": {
+                              "description": "Minimum consecutive failures for the probe to be considered failed after having succeeded. Defaults to 3. Minimum value is 1.",
+                              "descriptionKind": "plain",
+                              "optional": true,
+                              "type": "number"
+                            },
+                            "initial_delay_seconds": {
+                              "description": "Number of seconds after the container has started before the probe is initiated. Defaults to 0 seconds. Minimum value is 0. Maximum value for liveness probe is 3600. Maximum value for startup probe is 240. More info: https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle#container-probes",
+                              "descriptionKind": "plain",
+                              "optional": true,
+                              "type": "number"
+                            },
+                            "period_seconds": {
+                              "description": "How often (in seconds) to perform the probe. Default to 10 seconds. Minimum value is 1. Maximum value for liveness probe is 3600. Maximum value for startup probe is 240. Must be greater or equal than timeoutSeconds",
+                              "descriptionKind": "plain",
+                              "optional": true,
+                              "type": "number"
+                            },
+                            "timeout_seconds": {
+                              "description": "Number of seconds after which the probe times out. Defaults to 1 second. Minimum value is 1. Maximum value is 3600. Must be smaller than periodSeconds. More info: https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle#container-probes",
+                              "descriptionKind": "plain",
+                              "optional": true,
+                              "type": "number"
+                            }
+                          },
+                          "blocks": {
+                            "grpc": {
+                              "block": {
+                                "attributes": {
+                                  "port": {
+                                    "computed": true,
+                                    "description": "Port number to access on the container. Number must be in the range 1 to 65535.\nIf not specified, defaults to the same value as container.ports[0].containerPort.",
+                                    "descriptionKind": "plain",
+                                    "optional": true,
+                                    "type": "number"
+                                  },
+                                  "service": {
+                                    "description": "The name of the service to place in the gRPC HealthCheckRequest\n(see https://github.com/grpc/grpc/blob/master/doc/health-checking.md).\nIf this is not specified, the default behavior is defined by gRPC.",
+                                    "descriptionKind": "plain",
+                                    "optional": true,
+                                    "type": "string"
+                                  }
+                                },
+                                "blocks": {},
+                                "description": "GRPC specifies an action involving a GRPC port.",
+                                "descriptionKind": "plain"
+                              },
+                              "maxItems": 1,
+                              "nesting": "list"
+                            },
+                            "http_get": {
+                              "block": {
+                                "attributes": {
+                                  "path": {
+                                    "description": "Path to access on the HTTP server. Defaults to '/'.",
+                                    "descriptionKind": "plain",
+                                    "optional": true,
+                                    "type": "string"
+                                  },
+                                  "port": {
+                                    "computed": true,
+                                    "description": "Port number to access on the container. Must be in the range 1 to 65535.\nIf not specified, defaults to the same value as container.ports[0].containerPort.",
+                                    "descriptionKind": "plain",
+                                    "optional": true,
+                                    "type": "number"
+                                  }
+                                },
+                                "blocks": {
+                                  "http_headers": {
+                                    "block": {
+                                      "attributes": {
+                                        "name": {
+                                          "description": "The header field name",
+                                          "descriptionKind": "plain",
+                                          "required": true,
+                                          "type": "string"
+                                        },
+                                        "value": {
+                                          "description": "The header field value",
+                                          "descriptionKind": "plain",
+                                          "optional": true,
+                                          "type": "string"
+                                        }
+                                      },
+                                      "blocks": {},
+                                      "description": "Custom headers to set in the request. HTTP allows repeated headers.",
+                                      "descriptionKind": "plain"
+                                    },
+                                    "nesting": "list"
+                                  }
+                                },
+                                "description": "HTTPGet specifies the http request to perform. Exactly one of HTTPGet or TCPSocket must be specified.",
+                                "descriptionKind": "plain"
+                              },
+                              "maxItems": 1,
+                              "nesting": "list"
+                            },
+                            "tcp_socket": {
+                              "block": {
+                                "attributes": {
+                                  "port": {
+                                    "computed": true,
+                                    "description": "Port number to access on the container. Must be in the range 1 to 65535.\nIf not specified, defaults to the same value as container.ports[0].containerPort.",
+                                    "descriptionKind": "plain",
+                                    "optional": true,
+                                    "type": "number"
+                                  }
+                                },
+                                "blocks": {},
+                                "description": "TCPSocket specifies an action involving a TCP port. Exactly one of HTTPGet or TCPSocket must be specified.",
+                                "descriptionKind": "plain"
+                              },
+                              "maxItems": 1,
+                              "nesting": "list"
+                            }
+                          },
+                          "description": "Startup probe of application within the container. All other probes are disabled if a startup probe is provided, until it succeeds. Container will not be added to service endpoints if the probe fails. More info: https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle#container-probes",
+                          "descriptionKind": "plain"
+                        },
+                        "maxItems": 1,
+                        "nesting": "list"
+                      },
+                      "volume_mounts": {
+                        "block": {
+                          "attributes": {
+                            "mount_path": {
+                              "description": "Path within the container at which the volume should be mounted. Must not contain ':'. For Cloud SQL volumes, it can be left empty, or must otherwise be /cloudsql. All instances defined in the Volume will be available as /cloudsql/[instance]. For more information on Cloud SQL volumes, visit https://cloud.google.com/sql/docs/mysql/connect-run",
+                              "descriptionKind": "plain",
+                              "required": true,
+                              "type": "string"
+                            },
+                            "name": {
+                              "description": "This must match the Name of a Volume.",
+                              "descriptionKind": "plain",
+                              "required": true,
+                              "type": "string"
+                            },
+                            "sub_path": {
+                              "description": "Path within the volume from which the container's volume should be mounted.",
+                              "descriptionKind": "plain",
+                              "optional": true,
+                              "type": "string"
+                            }
+                          },
+                          "blocks": {},
+                          "description": "Volume to mount into the container's filesystem.",
+                          "descriptionKind": "plain"
+                        },
+                        "nesting": "list"
+                      }
+                    },
+                    "description": "Holds the containers that define the unit of execution for this Service.",
+                    "descriptionKind": "plain"
+                  },
+                  "nesting": "list"
+                },
+                "node_selector": {
+                  "block": {
+                    "attributes": {
+                      "accelerator": {
+                        "description": "The GPU to attach to an instance. See https://cloud.google.com/run/docs/configuring/services/gpu for configuring GPU.",
+                        "descriptionKind": "plain",
+                        "required": true,
+                        "type": "string"
+                      }
+                    },
+                    "blocks": {},
+                    "description": "Node Selector describes the hardware requirements of the resources.",
+                    "descriptionKind": "plain"
+                  },
+                  "maxItems": 1,
+                  "nesting": "list"
+                },
+                "sandboxes": {
+                  "block": {
+                    "attributes": {},
+                    "blocks": {
+                      "templates": {
+                        "block": {
+                          "attributes": {
+                            "args": {
+                              "description": "Arguments to the entrypoint. The docker image's CMD is used if this is not provided.",
+                              "descriptionKind": "plain",
+                              "optional": true,
+                              "type": [
+                                "list",
+                                "string"
+                              ]
+                            },
+                            "command": {
+                              "description": "Entrypoint array. Not executed within a shell. The docker image's ENTRYPOINT is used if this is not provided.",
+                              "descriptionKind": "plain",
+                              "optional": true,
+                              "type": [
+                                "list",
+                                "string"
+                              ]
+                            },
+                            "image": {
+                              "description": "Name of the container image in Dockerhub or Artifact Registry. If the host is not provided, Dockerhub is assumed.",
+                              "descriptionKind": "plain",
+                              "required": true,
+                              "type": "string"
+                            },
+                            "name": {
+                              "description": "Name of the sandbox specified as a DNS_LABEL (RFC 1123).",
+                              "descriptionKind": "plain",
+                              "required": true,
+                              "type": "string"
+                            },
+                            "working_dir": {
+                              "description": "Container's working directory. If not specified, the container runtime's default will be used, which might be configured in the container image.",
+                              "descriptionKind": "plain",
+                              "optional": true,
+                              "type": "string"
+                            }
+                          },
+                          "blocks": {
+                            "env": {
+                              "block": {
+                                "attributes": {
+                                  "name": {
+                                    "description": "Name of the environment variable. Must be a C_IDENTIFIER, and may not exceed 32768 characters.",
+                                    "descriptionKind": "plain",
+                                    "required": true,
+                                    "type": "string"
+                                  },
+                                  "value": {
+                                    "description": "Literal value of the environment variable. Defaults to \"\" and the maximum allowed length is 32768 characters. Variable references are not supported in Cloud Run.",
+                                    "descriptionKind": "plain",
+                                    "optional": true,
+                                    "type": "string"
+                                  }
+                                },
+                                "blocks": {},
+                                "description": "List of environment variables to set in the sandbox.",
+                                "descriptionKind": "plain"
+                              },
+                              "nesting": "set"
+                            },
+                            "volume_mounts": {
+                              "block": {
+                                "attributes": {
+                                  "mount_path": {
+                                    "description": "Path within the container at which the volume should be mounted. Must not contain ':'. For Cloud SQL volumes, it can be left empty, or must otherwise be /cloudsql. All instances defined in the Volume will be available as /cloudsql/[instance]. For more information on Cloud SQL volumes, visit https://cloud.google.com/sql/docs/mysql/connect-run",
+                                    "descriptionKind": "plain",
+                                    "required": true,
+                                    "type": "string"
+                                  },
+                                  "name": {
+                                    "description": "This must match the Name of a Volume.",
+                                    "descriptionKind": "plain",
+                                    "required": true,
+                                    "type": "string"
+                                  },
+                                  "sub_path": {
+                                    "description": "Path within the volume from which the container's volume should be mounted.",
+                                    "descriptionKind": "plain",
+                                    "optional": true,
+                                    "type": "string"
+                                  }
+                                },
+                                "blocks": {},
+                                "description": "Volume to mount into the container's filesystem.",
+                                "descriptionKind": "plain"
+                              },
+                              "nesting": "list"
+                            }
+                          },
+                          "description": "Sandbox templates that can be launched through the 'sandbox' CLI.",
+                          "descriptionKind": "plain"
+                        },
+                        "nesting": "list"
+                      }
+                    },
+                    "description": "Configuration for sandboxes.",
+                    "descriptionKind": "plain"
+                  },
+                  "maxItems": 1,
+                  "nesting": "list"
+                },
+                "scaling": {
+                  "block": {
+                    "attributes": {
+                      "concurrency_utilization": {
+                        "description": "Determines a threshold for concurrency utilization before scaling begins. Accepted values are between 0.1 and 0.95 (inclusive) or 0.0 to disable concurrency utilization as threshold for scaling. CPU and concurrency scaling cannot both be disabled.",
+                        "descriptionKind": "plain",
+                        "optional": true,
+                        "type": "number"
+                      },
+                      "cpu_utilization": {
+                        "description": "Determines a threshold for CPU utilization before scaling begins. Accepted values are between 0.1 and 0.95 (inclusive) or 0.0 to disable CPU utilization as threshold for scaling. CPU and concurrency scaling cannot both be disabled.",
+                        "descriptionKind": "plain",
+                        "optional": true,
+                        "type": "number"
+                      },
+                      "max_instance_count": {
+                        "computed": true,
+                        "description": "Maximum number of serving instances that this resource should have. Must not be less than minimum instance count. If absent, Cloud Run will calculate\na default value based on the project's available container instances quota in the region and specified instance size.",
+                        "descriptionKind": "plain",
+                        "optional": true,
+                        "type": "number"
+                      },
+                      "min_instance_count": {
+                        "description": "Minimum number of serving instances that this resource should have. Defaults to 0. Must not be greater than maximum instance count.",
+                        "descriptionKind": "plain",
+                        "optional": true,
+                        "type": "number"
+                      }
+                    },
+                    "blocks": {},
+                    "description": "Scaling settings for this Revision.",
+                    "descriptionKind": "plain"
+                  },
+                  "maxItems": 1,
+                  "nesting": "list"
+                },
+                "volumes": {
+                  "block": {
+                    "attributes": {
+                      "name": {
+                        "description": "Volume's name.",
+                        "descriptionKind": "plain",
+                        "required": true,
+                        "type": "string"
+                      }
+                    },
+                    "blocks": {
+                      "cloud_sql_instance": {
+                        "block": {
+                          "attributes": {
+                            "instances": {
+                              "description": "The Cloud SQL instance connection names, as can be found in https://console.cloud.google.com/sql/instances. Visit https://cloud.google.com/sql/docs/mysql/connect-run for more information on how to connect Cloud SQL and Cloud Run. Format: {project}:{location}:{instance}",
+                              "descriptionKind": "plain",
+                              "optional": true,
+                              "type": [
+                                "set",
+                                "string"
+                              ]
+                            }
+                          },
+                          "blocks": {},
+                          "description": "For Cloud SQL volumes, contains the specific instances that should be mounted. Visit https://cloud.google.com/sql/docs/mysql/connect-run for more information on how to connect Cloud SQL and Cloud Run.",
+                          "descriptionKind": "plain"
+                        },
+                        "maxItems": 1,
+                        "nesting": "list"
+                      },
+                      "empty_dir": {
+                        "block": {
+                          "attributes": {
+                            "medium": {
+                              "description": "The different types of medium supported for EmptyDir. Default value: \"MEMORY\" Possible values: [\"MEMORY\", \"DISK\"]",
+                              "descriptionKind": "plain",
+                              "optional": true,
+                              "type": "string"
+                            },
+                            "size_limit": {
+                              "description": "Limit on the storage usable by this EmptyDir volume. The size limit is also applicable for memory medium. The maximum usage on memory medium EmptyDir would be the minimum value between the SizeLimit specified here and the sum of memory limits of all containers in a pod. This field's values are of the 'Quantity' k8s type: https://kubernetes.io/docs/reference/kubernetes-api/common-definitions/quantity/. The default is nil which means that the limit is undefined. More info: https://kubernetes.io/docs/concepts/storage/volumes/#emptydir.",
+                              "descriptionKind": "plain",
+                              "optional": true,
+                              "type": "string"
+                            }
+                          },
+                          "blocks": {},
+                          "description": "Ephemeral storage used as a shared volume.",
+                          "descriptionKind": "plain"
+                        },
+                        "maxItems": 1,
+                        "nesting": "list"
+                      },
+                      "gcs": {
+                        "block": {
+                          "attributes": {
+                            "bucket": {
+                              "description": "GCS Bucket name",
+                              "descriptionKind": "plain",
+                              "required": true,
+                              "type": "string"
+                            },
+                            "mount_options": {
+                              "description": "A list of flags to pass to the gcsfuse command for configuring this volume.\nFlags should be passed without leading dashes.",
+                              "descriptionKind": "plain",
+                              "optional": true,
+                              "type": [
+                                "list",
+                                "string"
+                              ]
+                            },
+                            "read_only": {
+                              "description": "If true, mount the GCS bucket as read-only",
+                              "descriptionKind": "plain",
+                              "optional": true,
+                              "type": "bool"
+                            }
+                          },
+                          "blocks": {},
+                          "description": "Cloud Storage bucket mounted as a volume using GCSFuse. This feature is only supported in the gen2 execution environment.",
+                          "descriptionKind": "plain"
+                        },
+                        "maxItems": 1,
+                        "nesting": "list"
+                      },
+                      "nfs": {
+                        "block": {
+                          "attributes": {
+                            "path": {
+                              "description": "Path that is exported by the NFS server.",
+                              "descriptionKind": "plain",
+                              "required": true,
+                              "type": "string"
+                            },
+                            "read_only": {
+                              "description": "If true, mount the NFS volume as read only",
+                              "descriptionKind": "plain",
+                              "optional": true,
+                              "type": "bool"
+                            },
+                            "server": {
+                              "description": "Hostname or IP address of the NFS server",
+                              "descriptionKind": "plain",
+                              "required": true,
+                              "type": "string"
+                            }
+                          },
+                          "blocks": {},
+                          "description": "Represents an NFS mount.",
+                          "descriptionKind": "plain"
+                        },
+                        "maxItems": 1,
+                        "nesting": "list"
+                      },
+                      "secret": {
+                        "block": {
+                          "attributes": {
+                            "default_mode": {
+                              "description": "Integer representation of mode bits to use on created files by default. Must be a value between 0000 and 0777 (octal), defaulting to 0444. Directories within the path are not affected by this setting.",
+                              "descriptionKind": "plain",
+                              "optional": true,
+                              "type": "number"
+                            },
+                            "secret": {
+                              "description": "The name of the secret in Cloud Secret Manager. Format: {secret} if the secret is in the same project. projects/{project}/secrets/{secret} if the secret is in a different project.",
+                              "descriptionKind": "plain",
+                              "required": true,
+                              "type": "string"
+                            }
+                          },
+                          "blocks": {
+                            "items": {
+                              "block": {
+                                "attributes": {
+                                  "mode": {
+                                    "description": "Integer octal mode bits to use on this file, must be a value between 01 and 0777 (octal). If 0 or not set, the Volume's default mode will be used.",
+                                    "descriptionKind": "plain",
+                                    "optional": true,
+                                    "type": "number"
+                                  },
+                                  "path": {
+                                    "description": "The relative path of the secret in the container.",
+                                    "descriptionKind": "plain",
+                                    "required": true,
+                                    "type": "string"
+                                  },
+                                  "version": {
+                                    "description": "The Cloud Secret Manager secret version. Can be 'latest' for the latest value or an integer for a specific version",
+                                    "descriptionKind": "plain",
+                                    "optional": true,
+                                    "type": "string"
+                                  }
+                                },
+                                "blocks": {},
+                                "description": "If unspecified, the volume will expose a file whose name is the secret, relative to VolumeMount.mount_path. If specified, the key will be used as the version to fetch from Cloud Secret Manager and the path will be the name of the file exposed in the volume. When items are defined, they must specify a path and a version.",
+                                "descriptionKind": "plain"
+                              },
+                              "nesting": "list"
+                            }
+                          },
+                          "description": "Secret represents a secret that should populate this volume. More info: https://kubernetes.io/docs/concepts/storage/volumes#secret",
+                          "descriptionKind": "plain"
+                        },
+                        "maxItems": 1,
+                        "nesting": "list"
+                      }
+                    },
+                    "description": "A list of Volumes to make available to containers.",
+                    "descriptionKind": "plain"
+                  },
+                  "nesting": "list"
+                },
+                "vpc_access": {
+                  "block": {
+                    "attributes": {
+                      "connector": {
+                        "description": "VPC Access connector name. Format: projects/{project}/locations/{location}/connectors/{connector}, where {project} can be project id or number.",
+                        "descriptionKind": "plain",
+                        "optional": true,
+                        "type": "string"
+                      },
+                      "egress": {
+                        "computed": true,
+                        "description": "Traffic VPC egress settings. Possible values: [\"ALL_TRAFFIC\", \"PRIVATE_RANGES_ONLY\"]",
+                        "descriptionKind": "plain",
+                        "optional": true,
+                        "type": "string"
+                      }
+                    },
+                    "blocks": {
+                      "network_interfaces": {
+                        "block": {
+                          "attributes": {
+                            "network": {
+                              "computed": true,
+                              "description": "The VPC network that the Cloud Run resource will be able to send traffic to. At least one of network or subnetwork must be specified. If both\nnetwork and subnetwork are specified, the given VPC subnetwork must belong to the given VPC network. If network is not specified, it will be\nlooked up from the subnetwork.",
+                              "descriptionKind": "plain",
+                              "optional": true,
+                              "type": "string"
+                            },
+                            "subnetwork": {
+                              "computed": true,
+                              "description": "The VPC subnetwork that the Cloud Run resource will get IPs from. At least one of network or subnetwork must be specified. If both\nnetwork and subnetwork are specified, the given VPC subnetwork must belong to the given VPC network. If subnetwork is not specified, the\nsubnetwork with the same name with the network will be used.",
+                              "descriptionKind": "plain",
+                              "optional": true,
+                              "type": "string"
+                            },
+                            "tags": {
+                              "description": "Network tags applied to this Cloud Run service.",
+                              "descriptionKind": "plain",
+                              "optional": true,
+                              "type": [
+                                "list",
+                                "string"
+                              ]
+                            }
+                          },
+                          "blocks": {},
+                          "description": "Direct VPC egress settings. Currently only single network interface is supported.",
+                          "descriptionKind": "plain"
+                        },
+                        "nesting": "list"
+                      }
+                    },
+                    "description": "VPC Access configuration to use for this Task. For more information, visit https://cloud.google.com/run/docs/configuring/connecting-vpc.",
+                    "descriptionKind": "plain"
+                  },
+                  "maxItems": 1,
+                  "nesting": "list"
+                },
+                "workload_identity_config": {
+                  "block": {
+                    "attributes": {
+                      "identity": {
+                        "description": "The Revision's SPIFFE workload identity. Enables provisioning of SPIFFE workload certificates.",
+                        "descriptionKind": "plain",
+                        "optional": true,
+                        "type": "string"
+                      },
+                      "identity_certificate_enabled": {
+                        "description": "Controls whether an instance receives a managed workload identity (MWLID) certificate.\nDefaults to true when 'identity_type' is 'IDENTITY_TYPE_AGENT_IDENTITY'.",
+                        "descriptionKind": "plain",
+                        "optional": true,
+                        "type": "bool"
+                      },
+                      "identity_type": {
+                        "description": "The type of identity to use. 'IDENTITY_TYPE_AGENT_IDENTITY' assigns a system-managed agent identity and\nis required when the Service's 'functional_type' is 'FUNCTIONAL_TYPE_AGENT'. Once set, this field\ncannot be changed or unset. Possible values: [\"IDENTITY_TYPE_SERVICE_ACCOUNT\", \"IDENTITY_TYPE_WORKLOAD_IDENTITY\", \"IDENTITY_TYPE_AGENT_IDENTITY\"]",
+                        "descriptionKind": "plain",
+                        "optional": true,
+                        "type": "string"
+                      }
+                    },
+                    "blocks": {},
+                    "description": "The Revision's workload identity settings. Used to assign an\n[Agent Platform](https://cloud.google.com/run/docs/ai/agent-platform-features) identity to the workload.",
+                    "descriptionKind": "plain"
+                  },
+                  "maxItems": 1,
+                  "nesting": "list"
+                }
+              },
+              "description": "The template used to create revisions for this Service.",
+              "descriptionKind": "plain"
+            },
+            "maxItems": 1,
+            "minItems": 1,
+            "nesting": "list"
+          },
+          "timeouts": {
+            "block": {
+              "attributes": {
+                "create": {
+                  "optional": true,
+                  "type": "string"
+                },
+                "delete": {
+                  "optional": true,
+                  "type": "string"
+                },
+                "update": {
+                  "optional": true,
+                  "type": "string"
+                }
+              },
+              "blocks": {}
+            },
+            "nesting": "single"
+          },
+          "traffic": {
+            "block": {
+              "attributes": {
+                "percent": {
+                  "computed": true,
+                  "description": "Specifies percent of the traffic to this Revision. This defaults to zero if unspecified.",
+                  "descriptionKind": "plain",
+                  "optional": true,
+                  "type": "number"
+                },
+                "revision": {
+                  "description": "Revision to which to send this portion of traffic, if traffic allocation is by revision.",
+                  "descriptionKind": "plain",
+                  "optional": true,
+                  "type": "string"
+                },
+                "tag": {
+                  "description": "Indicates a string to be part of the URI to exclusively reference this target.",
+                  "descriptionKind": "plain",
+                  "optional": true,
+                  "type": "string"
+                },
+                "type": {
+                  "description": "The allocation type for this traffic target. Possible values: [\"TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST\", \"TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION\"]",
+                  "descriptionKind": "plain",
+                  "optional": true,
+                  "type": "string"
+                }
+              },
+              "blocks": {},
+              "description": "Specifies how to distribute traffic over a collection of Revisions belonging to the Service. If traffic is empty or not provided, defaults to 100% traffic to the latest Ready Revision.",
+              "descriptionKind": "plain"
+            },
+            "nesting": "list"
+          }
+        }
+      },
+      "schemaVersion": 0
+    },
+    "google_cloud_run_v2_service_iam_member": {
+      "block": {
+        "attributes": {
+          "etag": {
+            "computed": true,
+            "type": "string"
+          },
+          "id": {
+            "computed": true,
+            "optional": true,
+            "type": "string"
+          },
+          "location": {
+            "computed": true,
+            "optional": true,
+            "type": "string"
+          },
+          "member": {
+            "required": true,
+            "type": "string"
+          },
+          "name": {
+            "required": true,
+            "type": "string"
+          },
+          "project": {
+            "computed": true,
+            "optional": true,
+            "type": "string"
+          },
+          "role": {
+            "required": true,
+            "type": "string"
+          }
+        },
+        "blocks": {
+          "condition": {
+            "block": {
+              "attributes": {
+                "description": {
+                  "optional": true,
+                  "type": "string"
+                },
+                "expression": {
+                  "required": true,
+                  "type": "string"
+                },
+                "title": {
+                  "required": true,
+                  "type": "string"
+                }
+              },
+              "blocks": {}
+            },
+            "maxItems": 1,
+            "nesting": "list"
+          }
+        }
+      },
+      "schemaVersion": 0
     }
   },
   "source": "hashicorp/google",

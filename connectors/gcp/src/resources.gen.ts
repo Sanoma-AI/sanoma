@@ -11,6 +11,1511 @@ export const provider: TfProvider = {
   sha256: "6cdda89470cd3dbcb6d60ec54134ae608d3775fd47bd80d7762ce5428da56a3d",
 };
 
+export const google_cloud_run_v2_service = {
+  typeName: "google_cloud_run_v2_service",
+  schemaVersion: 0,
+  schema: z.object({
+    annotations: z
+      .record(z.string(), z.string())
+      .nullish()
+      .describe(
+        "Unstructured key value map that may be set by external tools to store and arbitrary metadata. They are not queryable and should be preserved when modifying objects.\n\nCloud Run API v2 does not support annotations with 'run.googleapis.com', 'cloud.googleapis.com', 'serving.knative.dev', or 'autoscaling.knative.dev' namespaces, and they will be rejected in new resources.\nAll system annotations in v1 now have a corresponding field in v2 Service.\n\nThis field follows Kubernetes annotations' namespacing, limits, and rules.\n\n**Note**: This field is non-authoritative, and will only manage the annotations present in your configuration.\nPlease refer to the field 'effective_annotations' for all of the annotations present on the resource.",
+      ),
+    client: z.string().nullish().describe("Arbitrary identifier for the API client."),
+    client_version: z.string().nullish().describe("Arbitrary version identifier for the API client."),
+    conditions: z
+      .array(
+        z.object({
+          execution_reason: z.string().nullish(),
+          last_transition_time: z.string().nullish(),
+          message: z.string().nullish(),
+          reason: z.string().nullish(),
+          revision_reason: z.string().nullish(),
+          severity: z.string().nullish(),
+          state: z.string().nullish(),
+          type: z.string().nullish(),
+        }),
+      )
+      .nullish()
+      .describe(
+        "The Conditions of all other associated sub-resources. They contain additional diagnostics information in case the Service does not reach its Serving state. See comments in reconciling for additional information on reconciliation process in Cloud Run.",
+      ),
+    create_time: z.string().nullish().describe("The creation time."),
+    creator: z.string().nullish().describe("Email address of the authenticated creator."),
+    custom_audiences: z
+      .array(z.string())
+      .nullish()
+      .describe(
+        "One or more custom audiences that you want this service to support. Specify each custom audience as the full URL in a string. The custom audiences are encoded in the token and used to authenticate requests.\nFor more information, see https://cloud.google.com/run/docs/configuring/custom-audiences.",
+      ),
+    default_uri_disabled: z
+      .boolean()
+      .nullish()
+      .describe("Disables public resolution of the default URI of this service."),
+    delete_time: z.string().nullish().describe("The deletion time."),
+    deletion_policy: z
+      .string()
+      .nullish()
+      .describe(
+        'Whether Terraform will be prevented from destroying the instance. Defaults to "DELETE".\nWhen a \'terraform destroy\' or \'terraform apply\' would delete the instance,\nthe command will fail if this field is set to "PREVENT" in Terraform state.\nWhen set to "ABANDON", the command will remove the resource from Terraform\nmanagement without updating or deleting the resource in the API.\nWhen set to "DELETE", deleting the resource is allowed.',
+      ),
+    deletion_protection: z
+      .boolean()
+      .nullish()
+      .describe(
+        "Whether Terraform will be prevented from destroying the service. Defaults to true.\nWhen a'terraform destroy' or 'terraform apply' would delete the service,\nthe command will fail if this field is not set to false in Terraform state.\nWhen the field is set to true or unset in Terraform state, a 'terraform apply'\nor 'terraform destroy' that would delete the service will fail.\nWhen the field is set to false, deleting the service is allowed.",
+      ),
+    description: z
+      .string()
+      .nullish()
+      .describe("User-provided description of the Service. This field currently has a 512-character limit."),
+    effective_annotations: z
+      .record(z.string(), z.string())
+      .nullish()
+      .describe(
+        "All of annotations (key/value pairs) present on the resource in GCP, including the annotations configured through Terraform, other clients and services.",
+      ),
+    effective_labels: z
+      .record(z.string(), z.string())
+      .nullish()
+      .describe(
+        "All of labels (key/value pairs) present on the resource in GCP, including the labels configured through Terraform, other clients and services.",
+      ),
+    etag: z
+      .string()
+      .nullish()
+      .describe(
+        "A system-generated fingerprint for this version of the resource. May be used to detect modification conflict during updates.",
+      ),
+    expire_time: z
+      .string()
+      .nullish()
+      .describe("For a deleted resource, the time after which it will be permanently deleted."),
+    generation: z
+      .string()
+      .nullish()
+      .describe(
+        "A number that monotonically increases every time the user modifies the desired state. Please note that unlike v1, this is an int64 value. As with most Google APIs, its JSON representation will be a string instead of an integer.",
+      ),
+    iap_enabled: z.boolean().nullish().describe("Used to enable/disable IAP for the cloud-run service."),
+    id: z.string().nullish(),
+    ingress: z
+      .string()
+      .nullish()
+      .describe(
+        'Provides the ingress settings for this Service. On output, returns the currently observed ingress settings, or INGRESS_TRAFFIC_UNSPECIFIED if no revision is active. Possible values: ["INGRESS_TRAFFIC_ALL", "INGRESS_TRAFFIC_INTERNAL_ONLY", "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"]',
+      ),
+    invoker_iam_disabled: z
+      .boolean()
+      .nullish()
+      .describe(
+        "Disables IAM permission check for run.routes.invoke for callers of this service. For more information, visit https://cloud.google.com/run/docs/securing/managing-access#invoker_check.",
+      ),
+    labels: z
+      .record(z.string(), z.string())
+      .nullish()
+      .describe(
+        "Unstructured key value map that can be used to organize and categorize objects. User-provided labels are shared with Google's billing system, so they can be used to filter, or break down billing charges by team, component,\nenvironment, state, etc. For more information, visit https://docs.cloud.google.com/resource-manager/docs/creating-managing-labels or https://cloud.google.com/run/docs/configuring/labels.\n\nCloud Run API v2 does not support labels with  'run.googleapis.com', 'cloud.googleapis.com', 'serving.knative.dev', or 'autoscaling.knative.dev' namespaces, and they will be rejected.\nAll system labels in v1 now have a corresponding field in v2 Service.\n\n**Note**: This field is non-authoritative, and will only manage the labels present in your configuration.\nPlease refer to the field 'effective_labels' for all of the labels present on the resource.",
+      ),
+    last_modifier: z.string().nullish().describe("Email address of the last authenticated modifier."),
+    latest_created_revision: z
+      .string()
+      .nullish()
+      .describe(
+        "Name of the last created revision. See comments in reconciling for additional information on reconciliation process in Cloud Run.",
+      ),
+    latest_ready_revision: z
+      .string()
+      .nullish()
+      .describe(
+        "Name of the latest revision that is serving traffic. See comments in reconciling for additional information on reconciliation process in Cloud Run.",
+      ),
+    launch_stage: z
+      .string()
+      .nullish()
+      .describe(
+        'The launch stage as defined by [Google Cloud Platform Launch Stages](https://cloud.google.com/products#product-launch-stages). Cloud Run supports ALPHA, BETA, and GA.\nIf no value is specified, GA is assumed. Set the launch stage to a preview stage on input to allow use of preview features in that stage. On read (or output), describes whether the resource uses preview features.\n\nFor example, if ALPHA is provided as input, but only BETA and GA-level features are used, this field will be BETA on output. Possible values: ["UNIMPLEMENTED", "PRELAUNCH", "EARLY_ACCESS", "ALPHA", "BETA", "GA", "DEPRECATED"]',
+      ),
+    location: z.string().describe("The location of the cloud run service"),
+    name: z.string().describe("Name of the Service."),
+    observed_generation: z
+      .string()
+      .nullish()
+      .describe(
+        "The generation of this Service currently serving traffic. See comments in reconciling for additional information on reconciliation process in Cloud Run. Please note that unlike v1, this is an int64 value. As with most Google APIs, its JSON representation will be a string instead of an integer.",
+      ),
+    project: z.string().nullish(),
+    reconciling: z
+      .boolean()
+      .nullish()
+      .describe(
+        "Returns true if the Service is currently being acted upon by the system to bring it into the desired state.\n\nWhen a new Service is created, or an existing one is updated, Cloud Run will asynchronously perform all necessary steps to bring the Service to the desired serving state. This process is called reconciliation. While reconciliation is in process, observedGeneration, latest_ready_revison, trafficStatuses, and uri will have transient values that might mismatch the intended state: Once reconciliation is over (and this field is false), there are two possible outcomes: reconciliation succeeded and the serving state matches the Service, or there was an error, and reconciliation failed. This state can be found in terminalCondition.state.\n\nIf reconciliation succeeded, the following fields will match: traffic and trafficStatuses, observedGeneration and generation, latestReadyRevision and latestCreatedRevision.\n\nIf reconciliation failed, trafficStatuses, observedGeneration, and latestReadyRevision will have the state of the last serving revision, or empty for newly created Services. Additional information on the failure can be found in terminalCondition and conditions.",
+      ),
+    ssh_enabled: z.boolean().nullish().describe("Enables SSH access to the Service."),
+    tags: z
+      .record(z.string(), z.string())
+      .nullish()
+      .describe(
+        "A map of resource manager tags.\nResource manager tag keys and values have the same definition as resource manager tags.\nKeys must be in the format tagKeys/{tag_key_id}, and values are in the format tagValues/{tag_value_id}.",
+      ),
+    terminal_condition: z
+      .array(
+        z.object({
+          execution_reason: z.string().nullish(),
+          last_transition_time: z.string().nullish(),
+          message: z.string().nullish(),
+          reason: z.string().nullish(),
+          revision_reason: z.string().nullish(),
+          severity: z.string().nullish(),
+          state: z.string().nullish(),
+          type: z.string().nullish(),
+        }),
+      )
+      .nullish()
+      .describe(
+        "The Condition of this Service, containing its readiness status, and detailed error information in case it did not reach a serving state. See comments in reconciling for additional information on reconciliation process in Cloud Run.",
+      ),
+    terraform_labels: z
+      .record(z.string(), z.string())
+      .nullish()
+      .describe(
+        "The combination of labels configured directly on the resource\n and default labels configured on the provider.",
+      ),
+    traffic_statuses: z
+      .array(
+        z.object({
+          percent: z.number().nullish(),
+          revision: z.string().nullish(),
+          tag: z.string().nullish(),
+          type: z.string().nullish(),
+          uri: z.string().nullish(),
+        }),
+      )
+      .nullish()
+      .describe(
+        "Detailed status information for corresponding traffic targets. See comments in reconciling for additional information on reconciliation process in Cloud Run.",
+      ),
+    uid: z
+      .string()
+      .nullish()
+      .describe(
+        "Server assigned unique identifier for the trigger. The value is a UUID4 string and guaranteed to remain unchanged until the resource is deleted.",
+      ),
+    update_time: z.string().nullish().describe("The last-modified time."),
+    uri: z.string().nullish().describe("The main URI in which this Service is serving traffic."),
+    urls: z.array(z.string()).nullish().describe("All URLs serving traffic for this Service."),
+    binary_authorization: z
+      .object({
+        breakglass_justification: z
+          .string()
+          .nullish()
+          .describe(
+            "If present, indicates to use Breakglass using this justification. If useDefault is False, then it must be empty. For more information on breakglass, see https://cloud.google.com/binary-authorization/docs/using-breakglass",
+          ),
+        policy: z
+          .string()
+          .nullish()
+          .describe(
+            "The path to a binary authorization policy. Format: projects/{project}/platforms/cloudRun/{policy-name}",
+          ),
+        use_default: z
+          .boolean()
+          .nullish()
+          .describe(
+            "If True, indicates to use the default project's binary authorization policy. If False, binary authorization will be disabled.",
+          ),
+      })
+      .nullish()
+      .describe("Settings for the Binary Authorization feature."),
+    build_config: z
+      .object({
+        base_image: z.string().nullish().describe("The base image used to build the function."),
+        enable_automatic_updates: z
+          .boolean()
+          .nullish()
+          .describe("Sets whether the function will receive automatic base image updates."),
+        environment_variables: z
+          .record(z.string(), z.string())
+          .nullish()
+          .describe("User-provided build-time environment variables for the function."),
+        function_target: z
+          .string()
+          .nullish()
+          .describe(
+            'The name of the function (as defined in source code) that will be executed. Defaults to the resource name suffix, if not specified. For backward compatibility, if function with given name is not found, then the system will try to use function named "function".',
+          ),
+        image_uri: z.string().nullish().describe("Artifact Registry URI to store the built image."),
+        name: z
+          .string()
+          .nullish()
+          .describe("The Cloud Build name of the latest successful deployment of the function."),
+        service_account: z
+          .string()
+          .nullish()
+          .describe(
+            "Service account to be used for building the container. The format of this field is 'projects/{projectId}/serviceAccounts/{serviceAccountEmail}'.",
+          ),
+        source_location: z
+          .string()
+          .nullish()
+          .describe("The Cloud Storage bucket URI where the function source code is located."),
+        worker_pool: z
+          .string()
+          .nullish()
+          .describe(
+            "Name of the Cloud Build Custom Worker Pool that should be used to build the Cloud Run function. The format of this field is 'projects/{project}/locations/{region}/workerPools/{workerPool}' where {project} and {region} are the project id and region respectively where the worker pool is defined and {workerPool} is the short name of the worker pool.",
+          ),
+      })
+      .nullish()
+      .describe("Configuration for building a Cloud Run function."),
+    multi_region_settings: z
+      .object({
+        multi_region_id: z.string().nullish().describe("System-generated unique id for the multi-region Service."),
+        regions: z.array(z.string()).nullish().describe("The list of regions to deploy the multi-region Service."),
+      })
+      .nullish()
+      .describe(
+        "Settings for creating a Multi-Region Service. Make sure to use region = 'global' when using them. For more information, visit https://cloud.google.com/run/docs/multiple-regions#deploy",
+      ),
+    scaling: z
+      .object({
+        manual_instance_count: z
+          .number()
+          .nullish()
+          .describe(
+            "Total instance count for the service in manual scaling mode. This number of instances is divided among all revisions with specified traffic based on the percent of traffic they are receiving.",
+          ),
+        max_instance_count: z
+          .number()
+          .nullish()
+          .describe("Combined maximum number of instances for all revisions receiving traffic."),
+        min_instance_count: z
+          .number()
+          .nullish()
+          .describe(
+            "Minimum number of instances for the service, to be divided among all revisions receiving traffic.",
+          ),
+        scaling_mode: z
+          .string()
+          .nullish()
+          .describe(
+            'The [scaling mode](https://cloud.google.com/run/docs/reference/rest/v2/projects.locations.services#scalingmode) for the service. Possible values: ["AUTOMATIC", "MANUAL"]',
+          ),
+      })
+      .nullish()
+      .describe("Scaling settings that apply to the whole service"),
+    template: z
+      .object({
+        annotations: z
+          .record(z.string(), z.string())
+          .nullish()
+          .describe(
+            "Unstructured key value map that may be set by external tools to store and arbitrary metadata. They are not queryable and should be preserved when modifying objects.\n\nCloud Run API v2 does not support annotations with 'run.googleapis.com', 'cloud.googleapis.com', 'serving.knative.dev', or 'autoscaling.knative.dev' namespaces, and they will be rejected.\nAll system annotations in v1 now have a corresponding field in v2 RevisionTemplate.\n\nThis field follows Kubernetes annotations' namespacing, limits, and rules.",
+          ),
+        encryption_key: z
+          .string()
+          .nullish()
+          .describe(
+            "A reference to a customer managed encryption key (CMEK) to use to encrypt this container image. For more information, go to https://cloud.google.com/run/docs/securing/using-cmek",
+          ),
+        execution_environment: z
+          .string()
+          .nullish()
+          .describe(
+            'The sandbox environment to host this Revision. Possible values: ["EXECUTION_ENVIRONMENT_GEN1", "EXECUTION_ENVIRONMENT_GEN2"]',
+          ),
+        gpu_zonal_redundancy_disabled: z
+          .boolean()
+          .nullish()
+          .describe("True if GPU zonal redundancy is disabled on this revision."),
+        health_check_disabled: z.boolean().nullish().describe("Disables health checking containers during deployment."),
+        labels: z
+          .record(z.string(), z.string())
+          .nullish()
+          .describe(
+            "Unstructured key value map that can be used to organize and categorize objects. User-provided labels are shared with Google's billing system, so they can be used to filter, or break down billing charges by team, component, environment, state, etc.\nFor more information, visit https://docs.cloud.google.com/resource-manager/docs/creating-managing-labels or https://cloud.google.com/run/docs/configuring/labels.\n\nCloud Run API v2 does not support labels with 'run.googleapis.com', 'cloud.googleapis.com', 'serving.knative.dev', or 'autoscaling.knative.dev' namespaces, and they will be rejected.\nAll system labels in v1 now have a corresponding field in v2 RevisionTemplate.",
+          ),
+        max_instance_request_concurrency: z
+          .number()
+          .nullish()
+          .describe(
+            "Sets the maximum number of requests that each serving instance can receive.\nIf not specified or 0, defaults to 80 when requested CPU >= 1 and defaults to 1 when requested CPU < 1.",
+          ),
+        revision: z
+          .string()
+          .nullish()
+          .describe(
+            "The unique name for the revision. If this field is omitted, it will be automatically generated based on the Service name.",
+          ),
+        service_account: z
+          .string()
+          .nullish()
+          .describe(
+            "Email address of the IAM service account associated with the revision of the service. The service account represents the identity of the running revision, and determines what permissions the revision has. If not provided, the revision will use the project's default service account.",
+          ),
+        session_affinity: z
+          .boolean()
+          .nullish()
+          .describe(
+            "Enables session affinity. For more information, go to https://cloud.google.com/run/docs/configuring/session-affinity",
+          ),
+        timeout: z
+          .string()
+          .nullish()
+          .describe(
+            "Max allowed time for an instance to respond to a request.\n\nA duration in seconds with up to nine fractional digits, ending with 's'. Example: \"3.5s\".",
+          ),
+        containers: z
+          .array(
+            z.object({
+              args: z
+                .array(z.string())
+                .nullish()
+                .describe(
+                  "Arguments to the entrypoint. The docker image's CMD is used if this is not provided. Variable references are not supported in Cloud Run.",
+                ),
+              base_image_uri: z
+                .string()
+                .nullish()
+                .describe(
+                  "Base image for this container. If set, it indicates that the service is enrolled into automatic base image update.",
+                ),
+              build_info: z
+                .array(z.object({ function_target: z.string().nullish(), source_location: z.string().nullish() }))
+                .nullish()
+                .describe("The build info of the container image."),
+              command: z
+                .array(z.string())
+                .nullish()
+                .describe(
+                  "Entrypoint array. Not executed within a shell. The docker image's ENTRYPOINT is used if this is not provided. Variable references $(VAR_NAME) are expanded using the container's environment. If a variable cannot be resolved, the reference in the input string will be unchanged. The $(VAR_NAME) syntax can be escaped with a double $$, ie: $$(VAR_NAME). Escaped references will never be expanded, regardless of whether the variable exists or not. More info: https://kubernetes.io/docs/tasks/inject-data-application/define-command-argument-container/#running-a-command-in-a-shell",
+                ),
+              depends_on: z
+                .array(z.string())
+                .nullish()
+                .describe(
+                  "Containers which should be started before this container. If specified the container will wait to start until all containers with the listed names are healthy.",
+                ),
+              image: z
+                .string()
+                .describe(
+                  "URL of the Container image in Google Container Registry or Google Artifact Registry. More info: https://kubernetes.io/docs/concepts/containers/images",
+                ),
+              name: z.string().nullish().describe("Name of the container specified as a DNS_LABEL."),
+              sandbox_launcher: z
+                .boolean()
+                .nullish()
+                .describe("Indicates that this container can act as a sandbox supervisor and launch sandboxes."),
+              working_dir: z
+                .string()
+                .nullish()
+                .describe(
+                  "Container's working directory. If not specified, the container runtime's default will be used, which might be configured in the container image.",
+                ),
+              env: z
+                .array(
+                  z.object({
+                    name: z
+                      .string()
+                      .describe(
+                        "Name of the environment variable. Must be a C_IDENTIFIER, and may not exceed 32768 characters.",
+                      ),
+                    value: z
+                      .string()
+                      .nullish()
+                      .describe(
+                        'Literal value of the environment variable. Defaults to "" and the maximum allowed length is 32768 characters. Variable references are not supported in Cloud Run.',
+                      ),
+                    value_source: z
+                      .object({
+                        secret_key_ref: z
+                          .object({
+                            secret: z
+                              .string()
+                              .describe(
+                                "The name of the secret in Cloud Secret Manager. Format: {secretName} if the secret is in the same project. projects/{project}/secrets/{secretName} if the secret is in a different project.",
+                              ),
+                            version: z
+                              .string()
+                              .nullish()
+                              .describe(
+                                "The Cloud Secret Manager secret version. Can be 'latest' for the latest value or an integer for a specific version.",
+                              ),
+                          })
+                          .nullish()
+                          .describe("Selects a secret and a specific version from Cloud Secret Manager."),
+                      })
+                      .nullish()
+                      .describe("Source for the environment variable's value."),
+                  }),
+                )
+                .nullish()
+                .describe("List of environment variables to set in the container."),
+              liveness_probe: z
+                .object({
+                  failure_threshold: z
+                    .number()
+                    .nullish()
+                    .describe(
+                      "Minimum consecutive failures for the probe to be considered failed after having succeeded. Defaults to 3. Minimum value is 1.",
+                    ),
+                  initial_delay_seconds: z
+                    .number()
+                    .nullish()
+                    .describe(
+                      "Number of seconds after the container has started before the probe is initiated. Defaults to 0 seconds. Minimum value is 0. Maximum value for liveness probe is 3600. Maximum value for startup probe is 240. More info: https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle#container-probes",
+                    ),
+                  period_seconds: z
+                    .number()
+                    .nullish()
+                    .describe(
+                      "How often (in seconds) to perform the probe. Default to 10 seconds. Minimum value is 1. Maximum value for liveness probe is 3600. Maximum value for startup probe is 240. Must be greater or equal than timeoutSeconds",
+                    ),
+                  timeout_seconds: z
+                    .number()
+                    .nullish()
+                    .describe(
+                      "Number of seconds after which the probe times out. Defaults to 1 second. Minimum value is 1. Maximum value is 3600. Must be smaller than periodSeconds. More info: https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle#container-probes",
+                    ),
+                  grpc: z
+                    .object({
+                      port: z
+                        .number()
+                        .nullish()
+                        .describe(
+                          "Port number to access on the container. Number must be in the range 1 to 65535.\nIf not specified, defaults to the same value as container.ports[0].containerPort.",
+                        ),
+                      service: z
+                        .string()
+                        .nullish()
+                        .describe(
+                          "The name of the service to place in the gRPC HealthCheckRequest\n(see https://github.com/grpc/grpc/blob/master/doc/health-checking.md).\nIf this is not specified, the default behavior is defined by gRPC.",
+                        ),
+                    })
+                    .nullish()
+                    .describe("GRPC specifies an action involving a GRPC port."),
+                  http_get: z
+                    .object({
+                      path: z.string().nullish().describe("Path to access on the HTTP server. Defaults to '/'."),
+                      port: z
+                        .number()
+                        .nullish()
+                        .describe(
+                          "Port number to access on the container. Number must be in the range 1 to 65535.\nIf not specified, defaults to the same value as container.ports[0].containerPort.",
+                        ),
+                      http_headers: z
+                        .array(
+                          z.object({
+                            name: z.string().describe("The header field name"),
+                            value: z.string().nullish().describe("The header field value"),
+                          }),
+                        )
+                        .nullish()
+                        .describe("Custom headers to set in the request. HTTP allows repeated headers."),
+                    })
+                    .nullish()
+                    .describe("HTTPGet specifies the http request to perform."),
+                  tcp_socket: z
+                    .object({
+                      port: z
+                        .number()
+                        .describe(
+                          "Port number to access on the container. Must be in the range 1 to 65535.\nIf not specified, defaults to the exposed port of the container, which\nis the value of container.ports[0].containerPort.",
+                        ),
+                    })
+                    .nullish()
+                    .describe("TCPSocketAction describes an action based on opening a socket"),
+                })
+                .nullish()
+                .describe(
+                  "Periodic probe of container liveness. Container will be restarted if the probe fails. More info: https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle#container-probes",
+                ),
+              ports: z
+                .object({
+                  container_port: z
+                    .number()
+                    .nullish()
+                    .describe(
+                      "Port number the container listens on. This must be a valid TCP port number, 0 < containerPort < 65536.",
+                    ),
+                  name: z
+                    .string()
+                    .nullish()
+                    .describe(
+                      'If specified, used to specify which protocol to use. Allowed values are "http1" and "h2c".',
+                    ),
+                })
+                .nullish()
+                .describe(
+                  "List of ports to expose from the container. Only a single port can be specified. The specified ports must be listening on all interfaces (0.0.0.0) within the container to be accessible.\n\nIf omitted, a port number will be chosen and passed to the container through the PORT environment variable for the container to listen on",
+                ),
+              readiness_probe: z
+                .object({
+                  failure_threshold: z
+                    .number()
+                    .nullish()
+                    .describe(
+                      "Minimum consecutive failures for the probe to be considered failed after\nhaving succeeded. Defaults to 3.",
+                    ),
+                  period_seconds: z
+                    .number()
+                    .nullish()
+                    .describe("How often (in seconds) to perform the probe.\nDefault to 10 seconds."),
+                  success_threshold: z
+                    .number()
+                    .nullish()
+                    .describe(
+                      "Minimum consecutive successes for the probe to be considered successful after having failed.\nDefaults to 2.",
+                    ),
+                  timeout_seconds: z
+                    .number()
+                    .nullish()
+                    .describe(
+                      "Number of seconds after which the probe times out.\nDefaults to 1 second. Must be smaller than period_seconds.",
+                    ),
+                  grpc: z
+                    .object({
+                      port: z
+                        .number()
+                        .nullish()
+                        .describe(
+                          "Port number to access on the container. Number must be in the range 1 to 65535.\nIf not specified, defaults to the same value as container.ports[0].containerPort.",
+                        ),
+                      service: z
+                        .string()
+                        .nullish()
+                        .describe(
+                          "The name of the service to place in the gRPC HealthCheckRequest\n(see https://github.com/grpc/grpc/blob/master/doc/health-checking.md).\nIf this is not specified, the default behavior is defined by gRPC.",
+                        ),
+                    })
+                    .nullish()
+                    .describe("GRPC specifies an action involving a GRPC port."),
+                  http_get: z
+                    .object({
+                      path: z
+                        .string()
+                        .nullish()
+                        .describe("Path to access on the HTTP server. If set, it should not be empty string."),
+                      port: z
+                        .number()
+                        .nullish()
+                        .describe(
+                          "Port number to access on the container. Number must be in the range 1 to 65535.\nIf not specified, defaults to the same value as container.ports[0].containerPort.",
+                        ),
+                    })
+                    .nullish()
+                    .describe("HttpGet specifies the http request to perform."),
+                })
+                .nullish()
+                .describe("Periodic probe of container readiness."),
+              resources: z
+                .object({
+                  cpu_idle: z
+                    .boolean()
+                    .nullish()
+                    .describe(
+                      "Determines whether CPU is only allocated during requests. True by default if the parent 'resources' field is not set. However, if\n'resources' is set, this field must be explicitly set to true to preserve the default behavior.",
+                    ),
+                  limits: z
+                    .record(z.string(), z.string())
+                    .nullish()
+                    .describe(
+                      "Only memory, CPU, and nvidia.com/gpu are supported. Use key 'cpu' for CPU limit, 'memory' for memory limit, 'nvidia.com/gpu' for gpu limit. Note: The only supported values for CPU are '1', '2', '4', '6' and '8'. Setting 4 CPU requires at least 2Gi of memory, setting 6 or more CPU requires at least 4Gi of memory. The values of the map is string form of the 'quantity' k8s type: https://github.com/kubernetes/kubernetes/blob/master/staging/src/k8s.io/apimachinery/pkg/api/resource/quantity.go",
+                    ),
+                  startup_cpu_boost: z
+                    .boolean()
+                    .nullish()
+                    .describe(
+                      "Determines whether CPU should be boosted on startup of a new container instance above the requested CPU threshold, this can help reduce cold-start latency.",
+                    ),
+                })
+                .nullish()
+                .describe(
+                  "Compute Resource requirements by this container. More info: https://kubernetes.io/docs/concepts/storage/persistent-volumes#resources",
+                ),
+              startup_probe: z
+                .object({
+                  failure_threshold: z
+                    .number()
+                    .nullish()
+                    .describe(
+                      "Minimum consecutive failures for the probe to be considered failed after having succeeded. Defaults to 3. Minimum value is 1.",
+                    ),
+                  initial_delay_seconds: z
+                    .number()
+                    .nullish()
+                    .describe(
+                      "Number of seconds after the container has started before the probe is initiated. Defaults to 0 seconds. Minimum value is 0. Maximum value for liveness probe is 3600. Maximum value for startup probe is 240. More info: https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle#container-probes",
+                    ),
+                  period_seconds: z
+                    .number()
+                    .nullish()
+                    .describe(
+                      "How often (in seconds) to perform the probe. Default to 10 seconds. Minimum value is 1. Maximum value for liveness probe is 3600. Maximum value for startup probe is 240. Must be greater or equal than timeoutSeconds",
+                    ),
+                  timeout_seconds: z
+                    .number()
+                    .nullish()
+                    .describe(
+                      "Number of seconds after which the probe times out. Defaults to 1 second. Minimum value is 1. Maximum value is 3600. Must be smaller than periodSeconds. More info: https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle#container-probes",
+                    ),
+                  grpc: z
+                    .object({
+                      port: z
+                        .number()
+                        .nullish()
+                        .describe(
+                          "Port number to access on the container. Number must be in the range 1 to 65535.\nIf not specified, defaults to the same value as container.ports[0].containerPort.",
+                        ),
+                      service: z
+                        .string()
+                        .nullish()
+                        .describe(
+                          "The name of the service to place in the gRPC HealthCheckRequest\n(see https://github.com/grpc/grpc/blob/master/doc/health-checking.md).\nIf this is not specified, the default behavior is defined by gRPC.",
+                        ),
+                    })
+                    .nullish()
+                    .describe("GRPC specifies an action involving a GRPC port."),
+                  http_get: z
+                    .object({
+                      path: z.string().nullish().describe("Path to access on the HTTP server. Defaults to '/'."),
+                      port: z
+                        .number()
+                        .nullish()
+                        .describe(
+                          "Port number to access on the container. Must be in the range 1 to 65535.\nIf not specified, defaults to the same value as container.ports[0].containerPort.",
+                        ),
+                      http_headers: z
+                        .array(
+                          z.object({
+                            name: z.string().describe("The header field name"),
+                            value: z.string().nullish().describe("The header field value"),
+                          }),
+                        )
+                        .nullish()
+                        .describe("Custom headers to set in the request. HTTP allows repeated headers."),
+                    })
+                    .nullish()
+                    .describe(
+                      "HTTPGet specifies the http request to perform. Exactly one of HTTPGet or TCPSocket must be specified.",
+                    ),
+                  tcp_socket: z
+                    .object({
+                      port: z
+                        .number()
+                        .nullish()
+                        .describe(
+                          "Port number to access on the container. Must be in the range 1 to 65535.\nIf not specified, defaults to the same value as container.ports[0].containerPort.",
+                        ),
+                    })
+                    .nullish()
+                    .describe(
+                      "TCPSocket specifies an action involving a TCP port. Exactly one of HTTPGet or TCPSocket must be specified.",
+                    ),
+                })
+                .nullish()
+                .describe(
+                  "Startup probe of application within the container. All other probes are disabled if a startup probe is provided, until it succeeds. Container will not be added to service endpoints if the probe fails. More info: https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle#container-probes",
+                ),
+              volume_mounts: z
+                .array(
+                  z.object({
+                    mount_path: z
+                      .string()
+                      .describe(
+                        "Path within the container at which the volume should be mounted. Must not contain ':'. For Cloud SQL volumes, it can be left empty, or must otherwise be /cloudsql. All instances defined in the Volume will be available as /cloudsql/[instance]. For more information on Cloud SQL volumes, visit https://cloud.google.com/sql/docs/mysql/connect-run",
+                      ),
+                    name: z.string().describe("This must match the Name of a Volume."),
+                    sub_path: z
+                      .string()
+                      .nullish()
+                      .describe("Path within the volume from which the container's volume should be mounted."),
+                  }),
+                )
+                .nullish()
+                .describe("Volume to mount into the container's filesystem."),
+            }),
+          )
+          .nullish()
+          .describe("Holds the containers that define the unit of execution for this Service."),
+        node_selector: z
+          .object({
+            accelerator: z
+              .string()
+              .describe(
+                "The GPU to attach to an instance. See https://cloud.google.com/run/docs/configuring/services/gpu for configuring GPU.",
+              ),
+          })
+          .nullish()
+          .describe("Node Selector describes the hardware requirements of the resources."),
+        sandboxes: z
+          .object({
+            templates: z
+              .array(
+                z.object({
+                  args: z
+                    .array(z.string())
+                    .nullish()
+                    .describe("Arguments to the entrypoint. The docker image's CMD is used if this is not provided."),
+                  command: z
+                    .array(z.string())
+                    .nullish()
+                    .describe(
+                      "Entrypoint array. Not executed within a shell. The docker image's ENTRYPOINT is used if this is not provided.",
+                    ),
+                  image: z
+                    .string()
+                    .describe(
+                      "Name of the container image in Dockerhub or Artifact Registry. If the host is not provided, Dockerhub is assumed.",
+                    ),
+                  name: z.string().describe("Name of the sandbox specified as a DNS_LABEL (RFC 1123)."),
+                  working_dir: z
+                    .string()
+                    .nullish()
+                    .describe(
+                      "Container's working directory. If not specified, the container runtime's default will be used, which might be configured in the container image.",
+                    ),
+                  env: z
+                    .array(
+                      z.object({
+                        name: z
+                          .string()
+                          .describe(
+                            "Name of the environment variable. Must be a C_IDENTIFIER, and may not exceed 32768 characters.",
+                          ),
+                        value: z
+                          .string()
+                          .nullish()
+                          .describe(
+                            'Literal value of the environment variable. Defaults to "" and the maximum allowed length is 32768 characters. Variable references are not supported in Cloud Run.',
+                          ),
+                      }),
+                    )
+                    .nullish()
+                    .describe("List of environment variables to set in the sandbox."),
+                  volume_mounts: z
+                    .array(
+                      z.object({
+                        mount_path: z
+                          .string()
+                          .describe(
+                            "Path within the container at which the volume should be mounted. Must not contain ':'. For Cloud SQL volumes, it can be left empty, or must otherwise be /cloudsql. All instances defined in the Volume will be available as /cloudsql/[instance]. For more information on Cloud SQL volumes, visit https://cloud.google.com/sql/docs/mysql/connect-run",
+                          ),
+                        name: z.string().describe("This must match the Name of a Volume."),
+                        sub_path: z
+                          .string()
+                          .nullish()
+                          .describe("Path within the volume from which the container's volume should be mounted."),
+                      }),
+                    )
+                    .nullish()
+                    .describe("Volume to mount into the container's filesystem."),
+                }),
+              )
+              .nullish()
+              .describe("Sandbox templates that can be launched through the 'sandbox' CLI."),
+          })
+          .nullish()
+          .describe("Configuration for sandboxes."),
+        scaling: z
+          .object({
+            concurrency_utilization: z
+              .number()
+              .nullish()
+              .describe(
+                "Determines a threshold for concurrency utilization before scaling begins. Accepted values are between 0.1 and 0.95 (inclusive) or 0.0 to disable concurrency utilization as threshold for scaling. CPU and concurrency scaling cannot both be disabled.",
+              ),
+            cpu_utilization: z
+              .number()
+              .nullish()
+              .describe(
+                "Determines a threshold for CPU utilization before scaling begins. Accepted values are between 0.1 and 0.95 (inclusive) or 0.0 to disable CPU utilization as threshold for scaling. CPU and concurrency scaling cannot both be disabled.",
+              ),
+            max_instance_count: z
+              .number()
+              .nullish()
+              .describe(
+                "Maximum number of serving instances that this resource should have. Must not be less than minimum instance count. If absent, Cloud Run will calculate\na default value based on the project's available container instances quota in the region and specified instance size.",
+              ),
+            min_instance_count: z
+              .number()
+              .nullish()
+              .describe(
+                "Minimum number of serving instances that this resource should have. Defaults to 0. Must not be greater than maximum instance count.",
+              ),
+          })
+          .nullish()
+          .describe("Scaling settings for this Revision."),
+        volumes: z
+          .array(
+            z.object({
+              name: z.string().describe("Volume's name."),
+              cloud_sql_instance: z
+                .object({
+                  instances: z
+                    .array(z.string())
+                    .nullish()
+                    .describe(
+                      "The Cloud SQL instance connection names, as can be found in https://console.cloud.google.com/sql/instances. Visit https://cloud.google.com/sql/docs/mysql/connect-run for more information on how to connect Cloud SQL and Cloud Run. Format: {project}:{location}:{instance}",
+                    ),
+                })
+                .nullish()
+                .describe(
+                  "For Cloud SQL volumes, contains the specific instances that should be mounted. Visit https://cloud.google.com/sql/docs/mysql/connect-run for more information on how to connect Cloud SQL and Cloud Run.",
+                ),
+              empty_dir: z
+                .object({
+                  medium: z
+                    .string()
+                    .nullish()
+                    .describe(
+                      'The different types of medium supported for EmptyDir. Default value: "MEMORY" Possible values: ["MEMORY", "DISK"]',
+                    ),
+                  size_limit: z
+                    .string()
+                    .nullish()
+                    .describe(
+                      "Limit on the storage usable by this EmptyDir volume. The size limit is also applicable for memory medium. The maximum usage on memory medium EmptyDir would be the minimum value between the SizeLimit specified here and the sum of memory limits of all containers in a pod. This field's values are of the 'Quantity' k8s type: https://kubernetes.io/docs/reference/kubernetes-api/common-definitions/quantity/. The default is nil which means that the limit is undefined. More info: https://kubernetes.io/docs/concepts/storage/volumes/#emptydir.",
+                    ),
+                })
+                .nullish()
+                .describe("Ephemeral storage used as a shared volume."),
+              gcs: z
+                .object({
+                  bucket: z.string().describe("GCS Bucket name"),
+                  mount_options: z
+                    .array(z.string())
+                    .nullish()
+                    .describe(
+                      "A list of flags to pass to the gcsfuse command for configuring this volume.\nFlags should be passed without leading dashes.",
+                    ),
+                  read_only: z.boolean().nullish().describe("If true, mount the GCS bucket as read-only"),
+                })
+                .nullish()
+                .describe(
+                  "Cloud Storage bucket mounted as a volume using GCSFuse. This feature is only supported in the gen2 execution environment.",
+                ),
+              nfs: z
+                .object({
+                  path: z.string().describe("Path that is exported by the NFS server."),
+                  read_only: z.boolean().nullish().describe("If true, mount the NFS volume as read only"),
+                  server: z.string().describe("Hostname or IP address of the NFS server"),
+                })
+                .nullish()
+                .describe("Represents an NFS mount."),
+              secret: z
+                .object({
+                  default_mode: z
+                    .number()
+                    .nullish()
+                    .describe(
+                      "Integer representation of mode bits to use on created files by default. Must be a value between 0000 and 0777 (octal), defaulting to 0444. Directories within the path are not affected by this setting.",
+                    ),
+                  secret: z
+                    .string()
+                    .describe(
+                      "The name of the secret in Cloud Secret Manager. Format: {secret} if the secret is in the same project. projects/{project}/secrets/{secret} if the secret is in a different project.",
+                    ),
+                  items: z
+                    .array(
+                      z.object({
+                        mode: z
+                          .number()
+                          .nullish()
+                          .describe(
+                            "Integer octal mode bits to use on this file, must be a value between 01 and 0777 (octal). If 0 or not set, the Volume's default mode will be used.",
+                          ),
+                        path: z.string().describe("The relative path of the secret in the container."),
+                        version: z
+                          .string()
+                          .nullish()
+                          .describe(
+                            "The Cloud Secret Manager secret version. Can be 'latest' for the latest value or an integer for a specific version",
+                          ),
+                      }),
+                    )
+                    .nullish()
+                    .describe(
+                      "If unspecified, the volume will expose a file whose name is the secret, relative to VolumeMount.mount_path. If specified, the key will be used as the version to fetch from Cloud Secret Manager and the path will be the name of the file exposed in the volume. When items are defined, they must specify a path and a version.",
+                    ),
+                })
+                .nullish()
+                .describe(
+                  "Secret represents a secret that should populate this volume. More info: https://kubernetes.io/docs/concepts/storage/volumes#secret",
+                ),
+            }),
+          )
+          .nullish()
+          .describe("A list of Volumes to make available to containers."),
+        vpc_access: z
+          .object({
+            connector: z
+              .string()
+              .nullish()
+              .describe(
+                "VPC Access connector name. Format: projects/{project}/locations/{location}/connectors/{connector}, where {project} can be project id or number.",
+              ),
+            egress: z
+              .string()
+              .nullish()
+              .describe('Traffic VPC egress settings. Possible values: ["ALL_TRAFFIC", "PRIVATE_RANGES_ONLY"]'),
+            network_interfaces: z
+              .array(
+                z.object({
+                  network: z
+                    .string()
+                    .nullish()
+                    .describe(
+                      "The VPC network that the Cloud Run resource will be able to send traffic to. At least one of network or subnetwork must be specified. If both\nnetwork and subnetwork are specified, the given VPC subnetwork must belong to the given VPC network. If network is not specified, it will be\nlooked up from the subnetwork.",
+                    ),
+                  subnetwork: z
+                    .string()
+                    .nullish()
+                    .describe(
+                      "The VPC subnetwork that the Cloud Run resource will get IPs from. At least one of network or subnetwork must be specified. If both\nnetwork and subnetwork are specified, the given VPC subnetwork must belong to the given VPC network. If subnetwork is not specified, the\nsubnetwork with the same name with the network will be used.",
+                    ),
+                  tags: z.array(z.string()).nullish().describe("Network tags applied to this Cloud Run service."),
+                }),
+              )
+              .nullish()
+              .describe("Direct VPC egress settings. Currently only single network interface is supported."),
+          })
+          .nullish()
+          .describe(
+            "VPC Access configuration to use for this Task. For more information, visit https://cloud.google.com/run/docs/configuring/connecting-vpc.",
+          ),
+        workload_identity_config: z
+          .object({
+            identity: z
+              .string()
+              .nullish()
+              .describe(
+                "The Revision's SPIFFE workload identity. Enables provisioning of SPIFFE workload certificates.",
+              ),
+            identity_certificate_enabled: z
+              .boolean()
+              .nullish()
+              .describe(
+                "Controls whether an instance receives a managed workload identity (MWLID) certificate.\nDefaults to true when 'identity_type' is 'IDENTITY_TYPE_AGENT_IDENTITY'.",
+              ),
+            identity_type: z
+              .string()
+              .nullish()
+              .describe(
+                "The type of identity to use. 'IDENTITY_TYPE_AGENT_IDENTITY' assigns a system-managed agent identity and\nis required when the Service's 'functional_type' is 'FUNCTIONAL_TYPE_AGENT'. Once set, this field\ncannot be changed or unset. Possible values: [\"IDENTITY_TYPE_SERVICE_ACCOUNT\", \"IDENTITY_TYPE_WORKLOAD_IDENTITY\", \"IDENTITY_TYPE_AGENT_IDENTITY\"]",
+              ),
+          })
+          .nullish()
+          .describe(
+            "The Revision's workload identity settings. Used to assign an\n[Agent Platform](https://cloud.google.com/run/docs/ai/agent-platform-features) identity to the workload.",
+          ),
+      })
+      .describe("The template used to create revisions for this Service."),
+    timeouts: z
+      .object({
+        create: z.string().nullish(),
+        delete: z.string().nullish(),
+        update: z.string().nullish(),
+      })
+      .nullish(),
+    traffic: z
+      .array(
+        z.object({
+          percent: z
+            .number()
+            .nullish()
+            .describe("Specifies percent of the traffic to this Revision. This defaults to zero if unspecified."),
+          revision: z
+            .string()
+            .nullish()
+            .describe("Revision to which to send this portion of traffic, if traffic allocation is by revision."),
+          tag: z
+            .string()
+            .nullish()
+            .describe("Indicates a string to be part of the URI to exclusively reference this target."),
+          type: z
+            .string()
+            .nullish()
+            .describe(
+              'The allocation type for this traffic target. Possible values: ["TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST", "TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION"]',
+            ),
+        }),
+      )
+      .nullish()
+      .describe(
+        "Specifies how to distribute traffic over a collection of Revisions belonging to the Service. If traffic is empty or not provided, defaults to 100% traffic to the latest Ready Revision.",
+      ),
+  }),
+  fields: {
+    immutable: ["location", "name", "project"],
+    vendorOwned: [
+      "conditions",
+      "create_time",
+      "creator",
+      "delete_time",
+      "effective_annotations",
+      "effective_labels",
+      "etag",
+      "expire_time",
+      "generation",
+      "last_modifier",
+      "latest_created_revision",
+      "latest_ready_revision",
+      "observed_generation",
+      "reconciling",
+      "terminal_condition",
+      "terraform_labels",
+      "traffic_statuses",
+      "uid",
+      "update_time",
+      "uri",
+      "urls",
+      "build_config.name",
+      "multi_region_settings.multi_region_id",
+      "template.containers.build_info",
+    ],
+    writeOnly: [],
+    unordered: [
+      "template.containers.env",
+      "template.sandboxes.templates.env",
+      "template.volumes.cloud_sql_instance.instances",
+    ],
+  },
+  shape: {
+    attributes: [
+      "annotations",
+      "client",
+      "client_version",
+      "conditions",
+      "create_time",
+      "creator",
+      "custom_audiences",
+      "default_uri_disabled",
+      "delete_time",
+      "deletion_policy",
+      "deletion_protection",
+      "description",
+      "effective_annotations",
+      "effective_labels",
+      "etag",
+      "expire_time",
+      "generation",
+      "iap_enabled",
+      "id",
+      "ingress",
+      "invoker_iam_disabled",
+      "labels",
+      "last_modifier",
+      "latest_created_revision",
+      "latest_ready_revision",
+      "launch_stage",
+      "location",
+      "name",
+      "observed_generation",
+      "project",
+      "reconciling",
+      "ssh_enabled",
+      "tags",
+      "terminal_condition",
+      "terraform_labels",
+      "traffic_statuses",
+      "uid",
+      "update_time",
+      "uri",
+      "urls",
+    ],
+    blocks: {
+      binary_authorization: {
+        nesting: "list",
+        one: true,
+        shape: {
+          attributes: ["breakglass_justification", "policy", "use_default"],
+        },
+      },
+      build_config: {
+        nesting: "list",
+        one: true,
+        shape: {
+          attributes: [
+            "base_image",
+            "enable_automatic_updates",
+            "environment_variables",
+            "function_target",
+            "image_uri",
+            "name",
+            "service_account",
+            "source_location",
+            "worker_pool",
+          ],
+        },
+      },
+      multi_region_settings: {
+        nesting: "list",
+        one: true,
+        shape: {
+          attributes: ["multi_region_id", "regions"],
+        },
+      },
+      scaling: {
+        nesting: "list",
+        one: true,
+        shape: {
+          attributes: ["manual_instance_count", "max_instance_count", "min_instance_count", "scaling_mode"],
+        },
+      },
+      template: {
+        nesting: "list",
+        one: true,
+        shape: {
+          attributes: [
+            "annotations",
+            "encryption_key",
+            "execution_environment",
+            "gpu_zonal_redundancy_disabled",
+            "health_check_disabled",
+            "labels",
+            "max_instance_request_concurrency",
+            "revision",
+            "service_account",
+            "session_affinity",
+            "timeout",
+          ],
+          blocks: {
+            containers: {
+              nesting: "list",
+              shape: {
+                attributes: [
+                  "args",
+                  "base_image_uri",
+                  "build_info",
+                  "command",
+                  "depends_on",
+                  "image",
+                  "name",
+                  "sandbox_launcher",
+                  "working_dir",
+                ],
+                blocks: {
+                  env: {
+                    nesting: "set",
+                    shape: {
+                      attributes: ["name", "value"],
+                      blocks: {
+                        value_source: {
+                          nesting: "list",
+                          one: true,
+                          shape: {
+                            attributes: [],
+                            blocks: {
+                              secret_key_ref: {
+                                nesting: "list",
+                                one: true,
+                                shape: {
+                                  attributes: ["secret", "version"],
+                                },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                  liveness_probe: {
+                    nesting: "list",
+                    one: true,
+                    shape: {
+                      attributes: ["failure_threshold", "initial_delay_seconds", "period_seconds", "timeout_seconds"],
+                      blocks: {
+                        grpc: {
+                          nesting: "list",
+                          one: true,
+                          shape: {
+                            attributes: ["port", "service"],
+                          },
+                        },
+                        http_get: {
+                          nesting: "list",
+                          one: true,
+                          shape: {
+                            attributes: ["path", "port"],
+                            blocks: {
+                              http_headers: {
+                                nesting: "list",
+                                shape: {
+                                  attributes: ["name", "value"],
+                                },
+                              },
+                            },
+                          },
+                        },
+                        tcp_socket: {
+                          nesting: "list",
+                          one: true,
+                          shape: {
+                            attributes: ["port"],
+                          },
+                        },
+                      },
+                    },
+                  },
+                  ports: {
+                    nesting: "list",
+                    one: true,
+                    shape: {
+                      attributes: ["container_port", "name"],
+                    },
+                  },
+                  readiness_probe: {
+                    nesting: "list",
+                    one: true,
+                    shape: {
+                      attributes: ["failure_threshold", "period_seconds", "success_threshold", "timeout_seconds"],
+                      blocks: {
+                        grpc: {
+                          nesting: "list",
+                          one: true,
+                          shape: {
+                            attributes: ["port", "service"],
+                          },
+                        },
+                        http_get: {
+                          nesting: "list",
+                          one: true,
+                          shape: {
+                            attributes: ["path", "port"],
+                          },
+                        },
+                      },
+                    },
+                  },
+                  resources: {
+                    nesting: "list",
+                    one: true,
+                    shape: {
+                      attributes: ["cpu_idle", "limits", "startup_cpu_boost"],
+                    },
+                  },
+                  startup_probe: {
+                    nesting: "list",
+                    one: true,
+                    shape: {
+                      attributes: ["failure_threshold", "initial_delay_seconds", "period_seconds", "timeout_seconds"],
+                      blocks: {
+                        grpc: {
+                          nesting: "list",
+                          one: true,
+                          shape: {
+                            attributes: ["port", "service"],
+                          },
+                        },
+                        http_get: {
+                          nesting: "list",
+                          one: true,
+                          shape: {
+                            attributes: ["path", "port"],
+                            blocks: {
+                              http_headers: {
+                                nesting: "list",
+                                shape: {
+                                  attributes: ["name", "value"],
+                                },
+                              },
+                            },
+                          },
+                        },
+                        tcp_socket: {
+                          nesting: "list",
+                          one: true,
+                          shape: {
+                            attributes: ["port"],
+                          },
+                        },
+                      },
+                    },
+                  },
+                  volume_mounts: {
+                    nesting: "list",
+                    shape: {
+                      attributes: ["mount_path", "name", "sub_path"],
+                    },
+                  },
+                },
+              },
+            },
+            node_selector: {
+              nesting: "list",
+              one: true,
+              shape: {
+                attributes: ["accelerator"],
+              },
+            },
+            sandboxes: {
+              nesting: "list",
+              one: true,
+              shape: {
+                attributes: [],
+                blocks: {
+                  templates: {
+                    nesting: "list",
+                    shape: {
+                      attributes: ["args", "command", "image", "name", "working_dir"],
+                      blocks: {
+                        env: {
+                          nesting: "set",
+                          shape: {
+                            attributes: ["name", "value"],
+                          },
+                        },
+                        volume_mounts: {
+                          nesting: "list",
+                          shape: {
+                            attributes: ["mount_path", "name", "sub_path"],
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            scaling: {
+              nesting: "list",
+              one: true,
+              shape: {
+                attributes: ["concurrency_utilization", "cpu_utilization", "max_instance_count", "min_instance_count"],
+              },
+            },
+            volumes: {
+              nesting: "list",
+              shape: {
+                attributes: ["name"],
+                blocks: {
+                  cloud_sql_instance: {
+                    nesting: "list",
+                    one: true,
+                    shape: {
+                      attributes: ["instances"],
+                    },
+                  },
+                  empty_dir: {
+                    nesting: "list",
+                    one: true,
+                    shape: {
+                      attributes: ["medium", "size_limit"],
+                    },
+                  },
+                  gcs: {
+                    nesting: "list",
+                    one: true,
+                    shape: {
+                      attributes: ["bucket", "mount_options", "read_only"],
+                    },
+                  },
+                  nfs: {
+                    nesting: "list",
+                    one: true,
+                    shape: {
+                      attributes: ["path", "read_only", "server"],
+                    },
+                  },
+                  secret: {
+                    nesting: "list",
+                    one: true,
+                    shape: {
+                      attributes: ["default_mode", "secret"],
+                      blocks: {
+                        items: {
+                          nesting: "list",
+                          shape: {
+                            attributes: ["mode", "path", "version"],
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            vpc_access: {
+              nesting: "list",
+              one: true,
+              shape: {
+                attributes: ["connector", "egress"],
+                blocks: {
+                  network_interfaces: {
+                    nesting: "list",
+                    shape: {
+                      attributes: ["network", "subnetwork", "tags"],
+                    },
+                  },
+                },
+              },
+            },
+            workload_identity_config: {
+              nesting: "list",
+              one: true,
+              shape: {
+                attributes: ["identity", "identity_certificate_enabled", "identity_type"],
+              },
+            },
+          },
+        },
+      },
+      timeouts: {
+        nesting: "single",
+        shape: {
+          attributes: ["create", "delete", "update"],
+        },
+      },
+      traffic: {
+        nesting: "list",
+        shape: {
+          attributes: ["percent", "revision", "tag", "type"],
+        },
+      },
+    },
+  },
+} satisfies TfResourceType;
+
+export const google_cloud_run_v2_service_iam_member = {
+  typeName: "google_cloud_run_v2_service_iam_member",
+  schemaVersion: 0,
+  schema: z.object({
+    etag: z.string().nullish(),
+    id: z.string().nullish(),
+    location: z.string().nullish(),
+    member: z.string(),
+    name: z.string(),
+    project: z.string().nullish(),
+    role: z.string(),
+    condition: z
+      .object({
+        description: z.string().nullish(),
+        expression: z.string(),
+        title: z.string(),
+      })
+      .nullish(),
+  }),
+  fields: {
+    immutable: ["location", "member", "name", "project", "role"],
+    vendorOwned: ["etag"],
+    writeOnly: [],
+    unordered: [],
+  },
+  shape: {
+    attributes: ["etag", "id", "location", "member", "name", "project", "role"],
+    blocks: {
+      condition: {
+        nesting: "list",
+        one: true,
+        shape: {
+          attributes: ["description", "expression", "title"],
+        },
+      },
+    },
+  },
+} satisfies TfResourceType;
+
 export const google_iam_workload_identity_pool = {
   typeName: "google_iam_workload_identity_pool",
   schemaVersion: 0,
@@ -651,6 +2156,110 @@ export const google_kms_key_ring = {
         },
       },
     },
+  },
+} satisfies TfResourceType;
+
+export const google_project_iam_audit_config = {
+  typeName: "google_project_iam_audit_config",
+  schemaVersion: 0,
+  schema: z.object({
+    etag: z.string().nullish().describe("The etag of iam policy"),
+    id: z.string().nullish(),
+    project: z.string(),
+    service: z
+      .string()
+      .describe("Service which will be enabled for audit logging. The special value allServices covers all services."),
+    audit_log_config: z
+      .array(
+        z.object({
+          exempted_members: z
+            .array(z.string())
+            .nullish()
+            .describe(
+              "Identities that do not cause logging for this type of permission. Each entry can have one of the following values:user:{emailid}: An email address that represents a specific Google account. For example, alice@gmail.com or joe@example.com. serviceAccount:{emailid}: An email address that represents a service account. For example, my-other-app@appspot.gserviceaccount.com. group:{emailid}: An email address that represents a Google group. For example, admins@example.com. domain:{domain}: A G Suite domain (primary, instead of alias) name that represents all the users of that domain. For example, google.com or example.com.",
+            ),
+          log_type: z
+            .string()
+            .describe(
+              "Permission type for which logging is to be configured. Must be one of DATA_READ, DATA_WRITE, or ADMIN_READ.",
+            ),
+        }),
+      )
+      .min(1)
+      .describe("The configuration for logging of each type of permission. This can be specified multiple times."),
+  }),
+  fields: {
+    immutable: ["project"],
+    vendorOwned: ["etag"],
+    writeOnly: [],
+    unordered: ["audit_log_config", "audit_log_config.exempted_members"],
+  },
+  shape: {
+    attributes: ["etag", "id", "project", "service"],
+    blocks: {
+      audit_log_config: {
+        nesting: "set",
+        shape: {
+          attributes: ["exempted_members", "log_type"],
+        },
+      },
+    },
+  },
+} satisfies TfResourceType;
+
+export const google_project_iam_custom_role = {
+  typeName: "google_project_iam_custom_role",
+  schemaVersion: 0,
+  schema: z.object({
+    deleted: z.boolean().nullish().describe("The current deleted state of the role."),
+    deletion_policy: z
+      .string()
+      .nullish()
+      .describe(
+        'Whether Terraform will be prevented from destroying the instance. Defaults to "DELETE".\nWhen a \'terraform destroy\' or \'terraform apply\' would delete the instance,\nthe command will fail if this field is set to "PREVENT" in Terraform state.\nWhen set to "ABANDON", the command will remove the resource from Terraform\nmanagement without updating or deleting the resource in the API.\nWhen set to "DELETE", deleting the resource is allowed.',
+      ),
+    description: z.string().nullish().describe("A human-readable description for the role."),
+    id: z.string().nullish(),
+    name: z
+      .string()
+      .nullish()
+      .describe(
+        "The name of the role in the format projects/{{project}}/roles/{{role_id}}. Like id, this field can be used as a reference in other resources such as IAM role bindings.",
+      ),
+    permissions: z
+      .array(z.string())
+      .describe(
+        "The names of the permissions this role grants when bound in an IAM policy. At least one permission must be specified.",
+      ),
+    project: z
+      .string()
+      .nullish()
+      .describe(
+        "The project that the service account will be created in. Defaults to the provider project configuration.",
+      ),
+    role_id: z.string().describe("The camel case role id to use for this role. Cannot contain - characters."),
+    stage: z.string().nullish().describe("The current launch stage of the role. Defaults to GA."),
+    title: z.string().describe("A human-readable title for the role."),
+  }),
+  fields: {
+    immutable: ["project", "role_id"],
+    vendorOwned: ["deleted", "name"],
+    writeOnly: [],
+    unordered: ["permissions"],
+  },
+  shape: {
+    attributes: [
+      "deleted",
+      "deletion_policy",
+      "description",
+      "id",
+      "name",
+      "permissions",
+      "project",
+      "role_id",
+      "stage",
+      "title",
+    ],
   },
 } satisfies TfResourceType;
 

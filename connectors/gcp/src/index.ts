@@ -1,23 +1,26 @@
 import { withSetup } from "@sanoma-ai/workflows";
 import { gcpTf } from "./connector.ts";
-import { gcpAuthentication, type GcpIdentities } from "./authentication.ts";
+import { checkIdentity, gcpAuthentication, type GcpIdentity } from "./authentication.ts";
 import { gcpDriver } from "./driver.ts";
 import { fakeGcp } from "./fake.ts";
 
-export { gcpProvisioningIdentity } from "./provisioning-identity.ts";
-export type { GcpIdentities, GcpIdentity } from "./authentication.ts";
+export type { GcpIdentity } from "./authentication.ts";
 
-/** Bind named connections to trusted deployment WIF sources; configuration contains no secret values. */
-export function gcpWithIdentities(identities: GcpIdentities) {
-  const configured = Object.freeze(
-    Object.fromEntries(Object.entries(identities).map(([id, identity]) => [id, Object.freeze({ ...identity })])),
-  );
+/**
+ * Google Cloud as one provisioning identity, its facts declared here (project, project number,
+ * service account, WIF audience, issuer): a connection on its `workloadIdentity` method stores
+ * only the provisioning bearer, entered on the connector page. Without an identity, as `gcp`,
+ * every live verification and call is refused.
+ */
+export function gcpWithIdentity(identity?: GcpIdentity) {
+  const checked = identity && checkIdentity(identity);
+  const method = gcpAuthentication(checked);
   return withSetup(gcpTf.connector, {
-    authentication: { workloadIdentity: gcpAuthentication(configured) },
-    driver: () => gcpDriver(configured),
+    authentication: { workloadIdentity: method },
+    driver: () => gcpDriver(checked, method),
     fake: fakeGcp,
   });
 }
 
-/** Operations/resources for authoring. Live use requires gcpWithIdentities in deployment config. */
-export const gcp = gcpWithIdentities({});
+/** Operations and resources for authoring and sandbox runs; a live call needs `gcpWithIdentity`. */
+export const gcp = gcpWithIdentity();
