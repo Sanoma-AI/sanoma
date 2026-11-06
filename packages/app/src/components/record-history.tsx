@@ -58,7 +58,7 @@ function HistoryLine({ entry, you }: { entry: HistoryEntry; you: string | null |
       · <Change change={entry.change} />
       {!entry.runId.startsWith("direct:") && (
         <>
-          {" "}
+          {" · "}
           <Link {...runLink(entry)} className="text-muted-foreground underline-offset-4 hover:underline">
             run
           </Link>
