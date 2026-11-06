@@ -648,14 +648,19 @@ export async function recordHistory(app: AppContext, actor: Principal, { name, k
   // The ledger keeps every record a write saved, and `history` answers whoever asks: so only
   // someone the policy lets read the record reads its history, asked as `callFn` asks the read
   // (its refusal, a 403, is the answer). A direct read is not recorded, so asking adds no line.
+  // One id per record, so a read the policy holds is one run for the person however often the
+  // panel asks again, not an approval each time.
   const get = `data.${name}.get`;
-  await callApi(app, actor, { name: get, input: { key } });
+  await callApi(app, actor, { name: get, input: { key }, id: `history:${name}/${key}` });
   // The read answered, so the collection is there, and its target is the one its calls are recorded on.
   const target = app.resolved.ops.get(get)!.target!({ key });
   // Its fields in the order declared, then any a record holds that it no longer declares.
   const declared = Object.keys(app.resolved.collections.get(name)!.fields);
   const deleteOp = `data.${name}.delete`;
-  const writes = (await app.client.history(target, HISTORY_CALLS)).filter(
+  const calls = await app.client.history(target, HISTORY_CALLS);
+  // Cut at the limit, the oldest write read may not be the record's first: it is only what the next changed.
+  const cut = calls.length === HISTORY_CALLS;
+  const writes = calls.filter(
     (r): r is Extract<LedgerRecord, { type: "op.called" }> =>
       r.type === "op.called" &&
       r.effect === "write" &&
@@ -669,21 +674,22 @@ export async function recordHistory(app: AppContext, actor: Principal, { name, k
     (await Promise.all(runs.map((id) => app.client.run(id)))).flatMap((run) => (run?.sandbox ? [run.runId] : [])),
   );
   let before: Record<string, unknown> | undefined;
-  const entries = writes
-    .filter((r) => !sandbox.has(r.runId))
+  const entries: HistoryEntry[] = [];
+  for (const [i, r] of writes
+    .filter((w) => !sandbox.has(w.runId))
     .toReversed()
-    .map((r) => {
-      const after = r.op === deleteOp ? undefined : (r.output as Saved).record;
-      const entry: HistoryEntry = {
+    .entries()) {
+    const after = r.op === deleteOp ? undefined : (r.output as Saved).record;
+    if (!cut || i > 0)
+      entries.push({
         at: r.at,
         by: r.actor.id,
         workflow: r.workflow,
         runId: r.runId,
         change: !after ? "deleted" : before ? fieldChanges(declared, before, after) : "created",
-      };
-      before = after;
-      return entry;
-    });
+      });
+    before = after;
+  }
   return entries.toReversed();
 }
 
