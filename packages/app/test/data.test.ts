@@ -329,6 +329,119 @@ describe("the Data section", () => {
     expect(rowKeys((await page(`/data/outbound${searchOf({ key: "Hoo" })}`)).html)).toEqual([]);
   });
 
+  it("saves a batch as one change, all or nothing: a denied entry, a stale ifRecord, a taken key or a hold leave every row as it was", async () => {
+    // Keys of their own each run: the held batch's run outlives it in the database.
+    const prefix = `Batch ${crypto.randomUUID().slice(0, 8)}`;
+    const [one, two, three] = ["A", "B", "C"].map((letter) => `${prefix} ${letter}`) as [string, string, string];
+    type Stored = { key: string; record: Record<string, unknown>; updatedBy: string } | null;
+    const read = async (key: string) =>
+      (await callAs("cy", { name: "data.outbound.get", input: { key }, id: crypto.randomUUID() })).body as Stored;
+    const rows = async () => [await read(one), await read(two), await read(three)];
+    const saveMany = (input: unknown, id = crypto.randomUUID()) =>
+      callAs("cy", { name: "data.outbound.saveMany", input, id });
+    await seed(lead(one));
+    await seed(lead(two));
+    const [first, second] = (await rows()) as [NonNullable<Stored>, NonNullable<Stored>];
+
+    // A denied entry: 403 naming its key, and the other entry not saved either.
+    expect(
+      await saveMany({ records: [{ record: lead(one, "contacted") }, { record: lead(two, "lost") }] }),
+    ).toMatchObject({
+      status: 403,
+      body: { code: "policy_denied", denied: [two], error: expect.stringMatching(/leads are not lost/) },
+    });
+    expect(await rows()).toEqual([first, second, null]);
+
+    // A stale ifRecord: 409 with the record as it stands, nothing saved.
+    await seed(lead(two, "replied"), "bo");
+    const theirs = (await read(two))!;
+    expect(
+      await saveMany({
+        records: [
+          { record: lead(one, "contacted"), ifRecord: first.record },
+          { record: lead(two, "meeting"), ifRecord: second.record },
+        ],
+      }),
+    ).toMatchObject({
+      status: 409,
+      body: { code: "record_changed", conflicts: [{ key: two, current: { record: theirs.record, updatedBy: "bo" } }] },
+    });
+    expect(await rows()).toEqual([first, theirs, null]);
+
+    // An ifAbsent entry on a taken key is in the same 409, beside the stale one.
+    expect(
+      await saveMany({
+        records: [
+          { record: lead(three), ifAbsent: true },
+          { record: lead(one, "meeting"), ifAbsent: true },
+          { record: lead(two, "meeting"), ifRecord: second.record },
+        ],
+      }),
+    ).toMatchObject({
+      status: 409,
+      body: {
+        code: "record_changed",
+        conflicts: [
+          { key: one, current: { record: first.record } },
+          { key: two, current: { record: theirs.record } },
+        ],
+      },
+    });
+    expect(await rows()).toEqual([first, theirs, null]);
+
+    // A held entry holds the batch whole, as one run of call; nothing saved until it is approved.
+    const id = crypto.randomUUID();
+    const runId = `call:cy:${id}`;
+    expect(
+      await saveMany(
+        {
+          records: [
+            { record: lead(one, "won"), ifRecord: first.record },
+            { record: lead(two, "meeting"), ifRecord: theirs.record },
+          ],
+        },
+        id,
+      ),
+    ).toEqual({ status: 409, body: { error: expect.any(String), code: "approval_pending", runId } });
+    expect(await rows()).toEqual([first, theirs, null]);
+    // The run asks for its approval once the worker has it.
+    await waitFor(async () => (await testApp.client.approvals(runId)).some((a) => a.status === "pending"));
+    await testApp.client.decide(runId, { decision: "approve", by: { id: "lead" } });
+    await waitFor(
+      async () => (await read(one))?.record.stage,
+      (stage) => stage === "won",
+    );
+    expect((await read(two))?.record).toMatchObject({ stage: "meeting" });
+
+    // A new record, an edit over the record as read and a delete: saved together, answered in order.
+    const [won, meeting] = (await rows()) as [NonNullable<Stored>, NonNullable<Stored>];
+    const mixed = await saveMany({
+      records: [
+        { record: lead(three), ifAbsent: true },
+        { record: { ...won.record, stage: "replied" }, ifRecord: won.record },
+      ],
+      deletes: [{ key: two, ifRecord: meeting.record }],
+    });
+    expect(mixed.body).toEqual([
+      expect.objectContaining({ key: three, record: lead(three), updatedBy: "cy" }),
+      expect.objectContaining({ key: one, record: { ...won.record, stage: "replied" }, updatedBy: "cy" }),
+      { key: two, deleted: true },
+    ]);
+    expect(await rows()).toEqual([
+      expect.objectContaining({ record: expect.objectContaining({ stage: "replied" }) }),
+      null,
+      expect.objectContaining({ record: lead(three) }),
+    ]);
+    // How many the grid's key filter matches, as its footer counts them past the limit.
+    expect(
+      await callAs("cy", {
+        name: "data.outbound.count",
+        input: { where: { company: { gte: prefix, lt: `${prefix}\uffff` } } },
+        id: crypto.randomUUID(),
+      }),
+    ).toEqual({ body: { count: 2 } });
+  });
+
   it("lists the workflows that use the collection, never the built-in call, and keeps data off Connectors", async () => {
     const { html } = await page("/data/outbound");
     expect(html).toContain(">Used by</h2>");
@@ -483,6 +596,133 @@ describe("the Data section", () => {
       await tab.waitForSelector("[data-sonner-toast]::-p-text(Held for approval)");
       await tab.waitForSelector(`td[data-cell="${key}_company"]::-p-text(waits for approval)`);
       expect((await record()).record.stage).toBe("researched");
+    } finally {
+      await browser.close();
+    }
+  }, 60_000);
+
+  it("stages a pasted range in Chrome: the bar counts it, its cells tinted, and Discard takes it back", async (ctx) => {
+    const chrome = process.env.CHROME_PATH ?? (await executablePath("chrome").catch(() => ""));
+    if (!existsSync(chrome)) ctx.skip("no Chrome: install Google Chrome or set CHROME_PATH");
+    // Keys of their own each run, which the grid's key filter shows alone.
+    const prefix = `Paste ${crypto.randomUUID().slice(0, 8)}`;
+    const keys = ["A", "B", "C"].map((letter) => `${prefix} ${letter}`);
+    for (const key of keys) await seed(lead(key));
+    const stored = async () =>
+      Promise.all(
+        keys.map(
+          async (key) =>
+            (
+              (await testApp.client.call("data.outbound.get", { key }, { actor: { id: "ada" } })) as {
+                record: Record<string, unknown>;
+              }
+            ).record,
+        ),
+      );
+    const before = await stored();
+    const browser = await launch({ executablePath: chrome, headless: true });
+    try {
+      const tab = await browser.newPage();
+      await tab.setViewport({ width: 1440, height: 900 });
+      await tab.evaluateOnNewDocument(() => localStorage.setItem("sanoma.actor", "ada"));
+      await tab.goto(new URL(`/data/outbound${searchOf({ key: prefix })}`, app.url).href, {
+        waitUntil: "networkidle0",
+      });
+      await tab.click(`td[data-cell="${keys[0]}_contact"]`);
+      // Three rows of two cells, as a spreadsheet copies them, pasted from the contact cell.
+      const text = "a@paste.test\tcontacted\r\nb@paste.test\treplied\r\nc@paste.test\tmeeting\r\n";
+      await tab.evaluate(`{
+        const data = new DataTransfer();
+        data.setData("text/plain", ${JSON.stringify(text)});
+        document.activeElement.dispatchEvent(
+          new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }),
+        );
+      }`);
+      const bar = '[role="region"][aria-label="Staged changes"]';
+      await tab.waitForSelector(`${bar}::-p-text(6 changes in 3 records)`);
+      expect(await tab.evaluate(`document.querySelector('${bar}').textContent`)).toContain("from your paste");
+      const tinted = await tab.$$eval("td[data-changed]", (cells) => cells.map((td) => td.getAttribute("data-cell")));
+      expect(tinted).toEqual(keys.flatMap((key) => [`${key}_contact`, `${key}_stage`]));
+      await tab.waitForSelector(`td[data-cell="${keys[1]}_stage"]::-p-text(replied)`);
+      // Nothing is saved until Save.
+      expect(await stored()).toEqual(before);
+      // Another search's records would lose it: its controls wait for the change.
+      const locked = `({
+        sort: document.querySelector('th a')?.getAttribute("aria-disabled"),
+        key: document.querySelector("#grid-key").matches(":disabled"),
+      })`;
+      expect(await tab.evaluate(locked)).toEqual({ sort: "true", key: true });
+
+      await (await tab.waitForSelector(`${bar} button::-p-text(Discard)`))!.click();
+      await tab.waitForFunction(`!document.querySelector('${bar}') && !document.querySelector("td[data-changed]")`);
+      await tab.waitForSelector(`td[data-cell="${keys[1]}_stage"]::-p-text(researched)`);
+      expect(await stored()).toEqual(before);
+      expect(await tab.evaluate(locked)).toEqual({ sort: null, key: false });
+    } finally {
+      await browser.close();
+    }
+  }, 60_000);
+
+  it("saves a pasted range as one change in Chrome, and keeps staged what the policy did not deny", async (ctx) => {
+    const chrome = process.env.CHROME_PATH ?? (await executablePath("chrome").catch(() => ""));
+    if (!existsSync(chrome)) ctx.skip("no Chrome: install Google Chrome or set CHROME_PATH");
+    const prefix = `Save ${crypto.randomUUID().slice(0, 8)}`;
+    const keys = ["A", "B"].map((letter) => `${prefix} ${letter}`) as [string, string];
+    for (const key of keys) await seed(lead(key));
+    const stored = async () =>
+      Promise.all(
+        keys.map(
+          async (key) =>
+            (
+              (await testApp.client.call("data.outbound.get", { key }, { actor: { id: "ada" } })) as {
+                record: Record<string, unknown>;
+              }
+            ).record,
+        ),
+      );
+    const browser = await launch({ executablePath: chrome, headless: true });
+    try {
+      const tab = await browser.newPage();
+      await tab.setViewport({ width: 1440, height: 900 });
+      await tab.evaluateOnNewDocument(() => localStorage.setItem("sanoma.actor", "ada"));
+      await tab.goto(new URL(`/data/outbound${searchOf({ key: prefix })}`, app.url).href, {
+        waitUntil: "networkidle0",
+      });
+      const bar = '[role="region"][aria-label="Staged changes"]';
+      const paste = async (text: string) => {
+        await tab.click(`td[data-cell="${keys[0]}_contact"]`);
+        await tab.evaluate(`{
+          const data = new DataTransfer();
+          data.setData("text/plain", ${JSON.stringify(text)});
+          document.activeElement.dispatchEvent(
+            new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }),
+          );
+        }`);
+      };
+
+      // 2×2 over both records, saved as one change.
+      await paste("a@save.test\tcontacted\r\nb@save.test\treplied\r\n");
+      await tab.waitForSelector(`${bar}::-p-text(4 changes in 2 records)`);
+      await (await tab.waitForSelector(`${bar} button::-p-text(Save as one change)`))!.click();
+      await tab.waitForSelector("[data-sonner-toast]::-p-text(Saved 2 records)");
+      await tab.waitForFunction(`!document.querySelector('${bar}') && !document.querySelector("td[data-changed]")`);
+      await tab.waitForSelector(`td[data-cell="${keys[1]}_stage"]::-p-text(replied)`);
+      expect(await stored()).toEqual([
+        { ...lead(keys[0]), contact: "a@save.test", stage: "contacted" },
+        { ...lead(keys[1]), contact: "b@save.test", stage: "replied" },
+      ]);
+
+      // A range with a lost lead: the policy denies that record, nothing is saved, and the other stays staged.
+      const before = await stored();
+      await paste("c@save.test\tmeeting\r\nd@save.test\tlost\r\n");
+      await tab.waitForSelector(`${bar}::-p-text(4 changes in 2 records)`);
+      await (await tab.waitForSelector(`${bar} button::-p-text(Save as one change)`))!.click();
+      await tab.waitForSelector(`[data-sonner-toast]::-p-text(Could not save ${keys[1]})`);
+      await tab.waitForSelector(`td[data-cell="${keys[1]}_company"]::-p-text(refused)`);
+      await tab.waitForSelector(`${bar}::-p-text(2 changes in 1 record)`);
+      const tinted = await tab.$$eval("td[data-changed]", (cells) => cells.map((td) => td.getAttribute("data-cell")));
+      expect(tinted).toEqual([`${keys[0]}_contact`, `${keys[0]}_stage`]);
+      expect(await stored()).toEqual(before);
     } finally {
       await browser.close();
     }

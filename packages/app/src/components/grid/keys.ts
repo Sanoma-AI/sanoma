@@ -2,7 +2,7 @@ import type { CellSelectionDirection } from "@tanstack/react-table";
 import { type UseHotkeyDefinition, useHotkeys } from "@tanstack/react-hotkeys";
 
 // The grid's keyboard, scoped to the grid's body, so a heading's sort link keeps Tab, the arrows
-// and Space. Typing a character on a cell starts editing it with that character: the grid's own
+// and Space. Cmd/Ctrl+V is the browser's: the grid reads its `paste` event. Typing a character on a cell starts editing it with that character: the grid's own
 // key handler reads it (`typedCharacter`), as no hotkey names every key.
 
 /** What the keys do: the grid's to say. */
@@ -18,6 +18,12 @@ interface GridKeys {
   cancel: () => void;
   expand: () => void;
   copy: () => void;
+  /** Clears the selected cells, staged (`collection.ts`'s `stage`). */
+  clear: () => void;
+  /** Takes back the last staged step. */
+  undo: () => void;
+  /** Stages a new record below the rows. */
+  add: () => void;
 }
 
 const ARROWS = [
@@ -46,6 +52,10 @@ export function useGridKeys(target: HTMLElement | null, keys: GridKeys) {
     { hotkey: "F2", callback: keys.edit, options: browsing },
     { hotkey: "Space", callback: keys.expand, options: browsing },
     { hotkey: "Mod+C", callback: keys.copy, options: browsing },
+    { hotkey: "Delete", callback: keys.clear, options: browsing },
+    { hotkey: "Backspace", callback: keys.clear, options: browsing },
+    { hotkey: "Mod+Z", callback: keys.undo, options: browsing },
+    { hotkey: "Shift+Enter", callback: keys.add, options: browsing },
     { hotkey: "Enter", callback: () => keys.commit(), options: editing },
     { hotkey: "Escape", callback: keys.cancel, options: editing },
     ...TABS.flatMap(([key, direction]) => [

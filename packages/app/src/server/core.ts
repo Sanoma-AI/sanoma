@@ -736,14 +736,17 @@ export function asApiError(err: unknown): ApiError {
     const reason = codes.includes(failure.code ?? "") ? failure.code! : "unavailable";
     return new ApiError(reason === "conflict" ? 409 : 400, { error: `Secret store: ${reason.replaceAll("_", " ")}` });
   }
-  // A collection's record changed since the caller read it (`ifRecord`): the caller's to resolve,
-  // with the record as it stands when the error carries it.
-  if (vendorCodeOf(err) === "record_changed") {
-    const { current } = err as { current?: ErrorResponse["current"] };
+  // A collection's record changed since the caller read it (`ifRecord`), or there already
+  // (`ifAbsent`): the caller's to resolve, with the record as it stands when the error carries it,
+  // or, for a batch, each entry's.
+  const vendorCode = vendorCodeOf(err);
+  if (vendorCode === "record_changed" || vendorCode === "record_exists") {
+    const { current, conflicts } = err as Pick<ErrorResponse, "current" | "conflicts">;
     return new ApiError(409, {
       error: errorMessage(err),
-      code: "record_changed",
+      code: vendorCode,
       ...(current !== undefined && { current }),
+      ...(Array.isArray(conflicts) && { conflicts }),
     });
   }
   const code = errorCode(err);
@@ -753,6 +756,8 @@ export function asApiError(err: unknown): ApiError {
   // Read by property, not instanceof: DBOS hands a run's errors back as copies.
   const data: Record<string, unknown> = (err as Partial<SanomaError>).data ?? {};
   if (Array.isArray(data.issues)) body.issues = data.issues as InputIssue[];
+  // A batch's refusal names every entry the policy denied, saves and deletes alike.
+  if (code === "policy_denied" && Array.isArray(data.denied)) body.denied = data.denied.map(String);
   if (typeof data.field === "string") body.field = data.field;
   if (code === "not_approver") {
     body.approver = data.approver as ErrorResponse["approver"];

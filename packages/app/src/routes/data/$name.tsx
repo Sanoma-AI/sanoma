@@ -1,10 +1,11 @@
 import type { ConfigDescription } from "@sanoma-ai/workflows/describe";
 import { errorMessage, personsOf } from "@sanoma-ai/workflows/shared";
 import { hashKey, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute, Link, notFound } from "@tanstack/react-router";
+import { createFileRoute, Link, notFound, type ShouldBlockFn, useBlocker } from "@tanstack/react-router";
 import { PlusIcon } from "@phosphor-icons/react/dist/csr/Plus";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
+import { toast } from "sonner";
 import { Badge } from "#/components/ui/badge.tsx";
 import { Card, CardAction, CardContent, CardHeader } from "#/components/ui/card.tsx";
 import { Skeleton } from "#/components/ui/skeleton.tsx";
@@ -23,17 +24,22 @@ import {
 import { GridFilters } from "../../components/data-grid.tsx";
 import { recordsView } from "../../components/grid/collection.ts";
 import { DataGrid } from "../../components/grid/grid.tsx";
+import { STAGED_FIRST } from "../../components/grid/staged.tsx";
 import { RecordForm } from "../../components/record-form.tsx";
 import {
   api,
   closeRecord,
   collectionNamed,
   configQuery,
+  countQuery,
   DataSearch,
   listQueryOf,
   recordsQuery,
   usedBy,
 } from "../../queries.ts";
+
+/** No records view yet: nothing staged to be told of. */
+const unstaged = () => () => {};
 
 export const Route = createFileRoute("/data/$name")({
   validateSearch: DataSearch,
@@ -99,10 +105,33 @@ function CollectionPage() {
   const view = records.data
     ? recordsView(queryClient, {
         query: recordsQuery(name, shown),
+        key: collection.key,
         calls: (api as UntypedApi).data[name],
         held: toastIfHeld,
       })
     : undefined;
+  // A change is staged over the view of one search: a search that reads other records, or
+  // another page, would lose it. While one is, the controls that change the search are
+  // disabled, anything else that would leave it (Back, a link) says why it does not, and
+  // closing the tab asks first.
+  const staged = useSyncExternalStore(
+    view?.stage.subscribe ?? unstaged,
+    () => view?.stage.current() !== undefined,
+    () => false,
+  );
+  // Once per collection: a new function each render would register the blocker again each render.
+  const shouldBlockFn = useCallback<ShouldBlockFn>(
+    ({ current, next }) => {
+      // What a location's search reads, which a staged change is over.
+      const reads = (location: { search: unknown }) =>
+        hashKey([listQueryOf(collection, location.search as DataSearch)]);
+      const leaves = next.pathname !== current.pathname || reads(next) !== reads(current);
+      if (leaves) toast.info(STAGED_FIRST);
+      return leaves;
+    },
+    [collection],
+  );
+  useBlocker({ disabled: !staged, shouldBlockFn });
   const navigate = Route.useNavigate();
   const close = () => void navigate({ search: closeRecord, resetScroll: false });
   const formOpen = search.new === true || search.record !== undefined;
@@ -139,7 +168,7 @@ function CollectionPage() {
       </CrumbHeader>
       <section aria-label="Records" className="flex flex-col gap-(--gap-section)">
         {/* Its own per collection: a filter typed on one never lands on another. */}
-        <GridFilters key={name} collection={collection} search={search} />
+        <GridFilters key={name} collection={collection} search={search} staged={staged} />
         {/* The form beside the grid on a wide screen, under it on a narrow one; the grid scrolls sideways in its column. */}
         <div className={cn("grid items-start gap-4", formOpen && "lg:grid-cols-[minmax(0,1fr)_24rem]")}>
           <div className="min-w-0">
@@ -151,8 +180,9 @@ function CollectionPage() {
                 view={view}
                 order={shown.order}
                 open={search.record}
-                filtered={shown.where !== undefined}
+                where={shown.where}
                 limit={shown.limit}
+                reading={records.isPlaceholderData}
                 hide={search.hide}
                 people={people}
               />
@@ -186,8 +216,13 @@ function CollectionPage() {
                     collection={collection}
                     view={view}
                     saved={saved}
+                    staged={staged}
                     actor={actor}
-                    onDone={close}
+                    onDone={() => {
+                      close();
+                      // An add or a delete changes how many match.
+                      void queryClient.invalidateQueries({ queryKey: countQuery(name, shown.where).queryKey });
+                    }}
                   />
                 ) : records.data ? (
                   <Notice>
