@@ -25,8 +25,8 @@ import type { Engine, EngineTurn } from "./transcript.ts";
 // the company's model key. Pi runs in this process; Claude Code through its adapter's bridge, in
 // the box. A turn opens the box (one turn in it at a time), carries the draft into it (`carryIn`)
 // and is one harness session: made, run to its end (its permission requests answered by the
-// checkout rule), destroyed. Then what the agent changed is committed in the box, carried back to
-// the draft (`carryOut`) and checked there, and the box is stopped.
+// checkout rule), destroyed (what it started killed). Then what the agent changed is committed in
+// the box and carried back to the draft (`carryOut`), the box is stopped, and the draft checked.
 
 /** The connector whose model (`<vendor>/default`) and key the coding agents use, with its key's variable and its base URL's. */
 const VENDOR = "anthropic";
@@ -101,7 +101,13 @@ async function runTurn(name: RuntimeName, turn: EngineTurn, writer: UIMessageStr
       async (box) => {
         // Kept across turns: a bridge installs its agent under it once, and the clone stays.
         const home = await homeOf(box);
-        const { root, head } = await carryIn(box, step.source, chat.id, { home, signal: step.signal });
+        const cloned = await carryIn(box, step.source, chat.id, { home, signal: step.signal }).catch((err: unknown) => {
+          // A stopped turn says nothing.
+          if (step.signal.aborted) return undefined;
+          throw err;
+        });
+        if (!cloned) return;
+        const { root, head } = cloned;
         const sandbox = boxSession(box, { id: `${chat.id}-${generateId()}`, root, home, ports: [port] });
         // However the turn ended (an error too): the session destroyed, so nothing in the box writes
         // again, then what it changed committed in the box and carried back to the draft. A failed

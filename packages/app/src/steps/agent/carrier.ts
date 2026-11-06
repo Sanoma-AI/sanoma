@@ -65,14 +65,23 @@ export async function carryIn(
   id: string,
   { home, signal }: { home: string; signal?: AbortSignal },
 ): Promise<{ root: string; head: string }> {
+  const repository = carrying(source);
   const known = await box.read(`${CLONE}/${HEAD_FILE}`);
-  const { bytes, head } = await carrying(source).bundle(id, {
-    ...(known && { since: new TextDecoder().decode(known).trim() }),
-  });
-  const bundle = bytes.length ? BUNDLE : "";
-  try {
+  const bring = async (since?: string) => {
+    const { bytes, head } = await repository.bundle(id, since === undefined ? {} : { since });
+    const bundle = bytes.length ? BUNDLE : "";
     if (bundle) await box.write(bundle, bytes);
     await inBox(box, IN, { BRANCH: draftBranch(id), HEAD: head, BUNDLE: bundle }, signal);
+    return head;
+  };
+  const since = known ? new TextDecoder().decode(known).trim() : undefined;
+  let head: string;
+  try {
+    // A clone that lacks the head it says it has (the agent's own git ran there) takes the whole branch.
+    head = await bring(since).catch((err: unknown) => {
+      if (since === undefined || signal?.aborted) throw err;
+      return bring();
+    });
   } catch (err) {
     throw new Error(`The draft could not be brought into your box (${errorMessage(err)})`, { cause: err });
   }
@@ -144,7 +153,7 @@ export async function carryOut(
     bytes = await box.read(BUNDLE);
     if (!bytes) throw new Error(`${BUNDLE} is gone`);
   } catch (err) {
-    throw lost("from your box, which may have stopped mid-turn", err);
+    throw lost("from your box", err);
   }
   try {
     await repository.unbundle(id, bytes);
@@ -167,24 +176,36 @@ const NO_EMAIL = "noreply@sanoma.invalid";
 /**
  * The box's side of `carryOut`, in its home: a bundle only when the branch moved, said so, and its
  * new head kept as the one the instance knows of (were the instance to lack it, its next bundle is
- * the whole branch).
+ * the whole branch). Edits off the draft's branch, or a branch whose history was rewritten, are
+ * refused rather than dropped unsaid.
  */
 const OUT = `set -eu
 rm -f ${BUNDLE}
 cd ${CLONE}
+[ "$(git symbolic-ref -q HEAD || true)" = "refs/heads/$BRANCH" ] || { echo "the agent left the branch $BRANCH" >&2; exit 3; }
 git add --all
 git diff --cached --quiet || git commit --quiet --no-verify -m "$MESSAGE"
 head=$(git rev-parse "refs/heads/$BRANCH")
 [ "$head" = "$SINCE" ] && exit 0
+git merge-base --is-ancestor "$SINCE" "$head" || { echo "the agent rewrote the branch's history" >&2; exit 3; }
 git bundle create --quiet "$HOME/${BUNDLE}" "refs/heads/$BRANCH" "^$SINCE"
 printf %s "$head" > ${HEAD_FILE}
 echo bundled`;
 
 /**
  * Git's settings in a box: none of its home's, where the agent may write (a hook, an fsmonitor or a
- * filter there would run its commands), nor the system's.
+ * filter there would run its commands), nor the system's, and no hook or fsmonitor of the clone's
+ * own (an agent with a terminal can write its `.git`).
  */
-const GIT_ENV = { GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
+const GIT_ENV = {
+  GIT_CONFIG_GLOBAL: "/dev/null",
+  GIT_CONFIG_NOSYSTEM: "1",
+  GIT_CONFIG_COUNT: "2",
+  GIT_CONFIG_KEY_0: "core.hooksPath",
+  GIT_CONFIG_VALUE_0: "/dev/null",
+  GIT_CONFIG_KEY_1: "core.fsmonitor",
+  GIT_CONFIG_VALUE_1: "false",
+};
 
 /** Runs `script` in `box`'s home with `env`: what it printed, trimmed; an error with its exit code and the end of its output, unless it exits 0. */
 async function inBox(box: Box, script: string, env: Record<string, string>, signal?: AbortSignal): Promise<string> {

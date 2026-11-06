@@ -194,7 +194,8 @@ async function runTurn(name: OwnAgentName, engineTurn: EngineTurn, writer: UIMes
   const draft = await openDraft(step, chat);
   writer.write({ type: "start", messageId: generateId() });
   const relay = new Relay(writer);
-  /** Whether the box's commits reached the draft. */
+  /** Whether the box was opened, and whether its commits reached the draft. */
+  let opened = false;
   let carried = false;
   try {
     // Opened last, so that nothing that fails before leaves it running; stopped however the turn ends.
@@ -202,6 +203,7 @@ async function runTurn(name: OwnAgentName, engineTurn: EngineTurn, writer: UIMes
       boxName(step.resolved.appName, principal.id),
       () => openBox(step),
       async (box) => {
+        opened = true;
         let turn: AcpTurn | undefined;
         /** The draft's head the box's clone was given, once it was. */
         let since: string | undefined;
@@ -247,6 +249,11 @@ async function runTurn(name: OwnAgentName, engineTurn: EngineTurn, writer: UIMes
         }
       },
     );
+  } catch (err) {
+    if (opened) throw err;
+    // A box that would not open, or that runs another turn: said in the reply, as a dead agent is.
+    if (!signal.aborted) relay.say(`${agent.title} could not answer: ${errorMessage(err)}`);
+    relay.finish();
   } finally {
     // Checked once the box is free: the turn's error, if any, follows the card.
     if (carried) await showCommits(engineTurn, draft, writer);

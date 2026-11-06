@@ -143,7 +143,7 @@ describe("the carrier", () => {
           await carryOut(box, source, "d2", { since: carried.head, ...turn });
         },
       ),
-    ).rejects.toThrow(/could not be brought back from your box, which may have stopped mid-turn, so they are lost/);
+    ).rejects.toThrow(/could not be brought back from your box, so they are lost/);
     expect(await source.head(draft.branch)).toBe(head);
 
     // One that died with its disk kept, an edit left uncommitted: the next turn starts clean from the draft.
@@ -167,6 +167,50 @@ describe("the carrier", () => {
         expect(existsSync(join(carried.root, "lost.ts"))).toBe(false);
       },
     );
+  });
+
+  it("takes the whole branch when the clone lacks the head it says it has, runs none of the clone's own hooks, and refuses edits off the draft's branch", async () => {
+    const source = localGitSource(dir);
+    const draft = await source.draft!("d3");
+    let root = "";
+    await boxTurn(
+      opening.name,
+      () => sandbox.backend.open(opening),
+      async (box) => {
+        ({ root } = await carryIn(box, source, "d3", { home: await homeOf(box) }));
+      },
+    );
+    // What an agent with a terminal can do to the clone's git: a hook, and a known head it lacks.
+    writeFileSync(
+      join(root, ".git/hooks/post-checkout"),
+      `#!/bin/sh
+touch "${join(root, "..", "ran")}"
+`,
+      {
+        mode: 0o755,
+      },
+    );
+    writeFileSync(join(draft.root, "notes.md"), "Laptops go back to IT.\n");
+    await draft.commit({ paths: ["notes.md"], message: "Notes", author: "ada" });
+    const notes = await source.head(draft.branch);
+    writeFileSync(join(root, ".git/sanoma-head"), notes);
+    await boxTurn(
+      opening.name,
+      () => sandbox.backend.open(opening),
+      async (box) => {
+        const carried = await carryIn(box, source, "d3", { home: await homeOf(box) });
+        expect(carried.head).toBe(notes);
+        expect(readFileSync(join(root, "notes.md"), "utf8")).toBe("Laptops go back to IT.\n");
+        expect(existsSync(join(root, "..", "ran"))).toBe(false);
+        // Edits on a detached head are refused, never dropped unsaid.
+        await inBox(box, "git checkout --quiet --detach", root);
+        writeFileSync(join(root, "offboarding.ts"), "export const steps = [];\n");
+        await expect(carryOut(box, source, "d3", { since: carried.head, ...turn })).rejects.toThrow(
+          /could not be brought back from your box, so they are lost.*the agent left the branch draft\/d3/s,
+        );
+      },
+    );
+    expect(await source.head(draft.branch)).toBe(notes);
   });
 
   it("refuses a second turn in a box while one runs there, and stops the box at each turn's end however it ends", async () => {

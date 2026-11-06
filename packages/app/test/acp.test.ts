@@ -240,9 +240,9 @@ describe("the chat on a person's own agent", () => {
     expect(existsSync(join(clone, "node_modules/evil.js"))).toBe(false);
     expect(existsSync(join(draftRoot, "node_modules/evil.js"))).toBe(false);
 
-    // The agent ran in the person's box, in its clone of the draft, with the box's home as its own, signs in and
-    // reads files as the client says it can, and none of this process's credentials reached it or
-    // its terminal.
+    // The agent ran in the person's box, in its clone of the draft, with the box's home as its
+    // own, signs in and reads files as the client says it can, and none of this process's
+    // credentials reached it or its terminal.
     const personal = agentsHome("ada");
     const start = log.find((entry) => "start" in entry)!;
     expect(start).toMatchObject({ start: ["acp"], home: personal });
@@ -276,7 +276,8 @@ describe("the chat on a person's own agent", () => {
       /^You are the operator agent[\s\S]*You act for ada\.[\s\S]*\n\nada: Add a laptop step to offboarding$/,
     );
 
-    // The edit is the draft's commit, carried back from the box and checked; the live checkout is as it was.
+    // The edit is the draft's commit, carried back from the box and checked; the live checkout is
+    // as it was.
     expect(reply!.parts.filter((part) => part.type === "data-draft").map((part) => part.data)).toEqual([
       {
         draft: id,
@@ -361,8 +362,8 @@ describe("the chat on a person's own agent", () => {
     expect(JSON.stringify(await testApp.client.chats.load(id))).not.toContain("FAKE-0001");
     // Signed in: the next message is answered.
     expect(textOfReply(await send(id, "acp-copilot", "Hi again"))).toBe("Hello.");
-    // A code with no sign-in waiting is refused, once the turn's run has ended after its reply.
-    await waitFor(async () => (await paste(id, CODE)).status === 404);
+    // A code with no sign-in waiting is refused.
+    expect((await paste(id, CODE)).status).toBe(404);
   }, 120_000);
 
   it("shows the command to run once on this computer for a vendor whose sign-in needs a terminal", async () => {
