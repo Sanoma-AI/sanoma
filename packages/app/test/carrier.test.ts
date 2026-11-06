@@ -309,7 +309,7 @@ touch "${join(root, "..", "ran")}"
 });
 
 describe("the clone's install", () => {
-  it("installs with the lockfile on the first open and again only when the lockfile changed, and goes on when it fails", async () => {
+  it("installs with the lockfile on the first open and again only when the lockfile changed or the install is gone, and goes on when it fails", async () => {
     // A company with nothing to install but its lockfile, on the app's local backend.
     writeFileSync(join(dir, "package.json"), '{ "name": "acme", "private": true }\n');
     const lockfile =
@@ -329,10 +329,15 @@ describe("the clone's install", () => {
     const root = await open();
     const installed = join(root, "node_modules");
     expect(existsSync(installed)).toBe(true);
-    // The same lockfile: no install.
+    // The same lockfile: no install (pnpm would write its state again).
+    const state = join(installed, ".pnpm-workspace-state-v1.json");
+    rmSync(state);
+    await open();
+    expect(existsSync(state)).toBe(false);
+    // An install that is gone is made again.
     rmSync(installed, { recursive: true });
     await open();
-    expect(existsSync(installed)).toBe(false);
+    expect(existsSync(state)).toBe(true);
     // A changed lockfile installs again.
     writeFileSync(join(draft.root, "pnpm-lock.yaml"), `${lockfile}\n`);
     await draft.commit({ paths: ["pnpm-lock.yaml"], message: "Lockfile again", author: "ada" });

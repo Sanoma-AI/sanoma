@@ -66,22 +66,14 @@ export async function carryIn(
   { home, signal }: { home: string; signal?: AbortSignal },
 ): Promise<{ root: string; head: string }> {
   const repository = carrying(source);
-  const known = await box.read(`${CLONE}/${HEAD_FILE}`);
-  const bring = async (since?: string) => {
-    const { bytes, head } = await repository.bundle(id, since === undefined ? {} : { since });
-    const bundle = bytes.length ? BUNDLE : "";
-    if (bundle) await box.write(bundle, bytes);
-    await inBox(box, IN, { BRANCH: draftBranch(id), HEAD: head, BUNDLE: bundle }, { signal });
-    return head;
-  };
-  const since = known ? new TextDecoder().decode(known).trim() : undefined;
   let head: string;
   try {
-    // A clone that lacks the head it says it has (the agent's own git ran there) takes the whole branch.
-    head = await bring(since).catch((err: unknown) => {
-      if (since === undefined || signal?.aborted) throw err;
-      return bring();
-    });
+    const since = await inBox(box, KNOWN, {}, { signal });
+    const bundled = await repository.bundle(id, since ? { since } : {});
+    head = bundled.head;
+    const bundle = bundled.bytes.length ? BUNDLE : "";
+    if (bundle) await box.write(bundle, bundled.bytes);
+    await inBox(box, IN, { BRANCH: draftBranch(id), HEAD: head, BUNDLE: bundle }, { signal });
   } catch (err) {
     throw new Error(`The draft could not be brought into your box (${errorMessage(err)})`, { cause: err });
   }
@@ -93,6 +85,10 @@ export async function carryIn(
   }
   return { root: join(home, CLONE), head };
 }
+
+/** The head the clone was last given, when it still holds that commit (the agent's own git may have run there): none, and the whole branch is sent. */
+const KNOWN = `h=$(cat ${CLONE}/${HEAD_FILE} 2>/dev/null) || exit 0
+git -C ${CLONE} cat-file -e "$h^{commit}" 2>/dev/null && printf %s "$h" || true`;
 
 /** How long the clone's install may take. */
 const INSTALL_TIMEOUT_MS = 10 * 60_000;
@@ -115,12 +111,12 @@ git checkout --quiet --force -B "$BRANCH" "$HEAD"
 if [ "$was" = "refs/heads/$BRANCH" ]; then git clean --quiet --force -d; else git clean --quiet --force -d -x -e node_modules; fi
 printf %s "$HEAD" > ${HEAD_FILE}`;
 
-/** The clone's install, when its lockfile is not the one last installed: no script or `.pnpmfile.cjs` of the repository's runs (the agent wrote them, and may run none). */
+/** The clone's install, when its lockfile is not the one last installed (or the install is gone): no script or `.pnpmfile.cjs` of the repository's runs (the agent wrote them, and may run none). */
 const INSTALL = `set -eu
 cd ${CLONE}
 [ -f pnpm-lock.yaml ] || exit 0
 lock=$(git hash-object pnpm-lock.yaml)
-[ "$lock" = "$(cat ${LOCK_FILE} 2>/dev/null || true)" ] && exit 0
+[ -d node_modules ] && [ "$lock" = "$(cat ${LOCK_FILE} 2>/dev/null || true)" ] && exit 0
 pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile
 printf %s "$lock" > ${LOCK_FILE}`;
 
@@ -184,6 +180,7 @@ const NO_EMAIL = "noreply@sanoma.invalid";
 const OUT = `set -eu
 rm -f ${BUNDLE}
 cd ${CLONE}
+rm -f .git/index.lock
 [ "$(git symbolic-ref -q HEAD || true)" = "refs/heads/$BRANCH" ] || git checkout --quiet -B "$BRANCH"
 git add --all
 git diff --cached --quiet || git commit --quiet --no-verify -m "$MESSAGE"
