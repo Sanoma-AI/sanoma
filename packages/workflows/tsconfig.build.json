@@ -9,5 +9,6 @@
     "rewriteRelativeImportExtensions": true,
     "paths": {}
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/sandbox-runner.ts"]
 }

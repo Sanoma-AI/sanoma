@@ -86,8 +86,12 @@ export interface SandboxBackend {
   discard(opts: { name: string }): Promise<void>;
 }
 
-/** What the app gives a connector's sandbox half (`ConnectorSetup.sandbox`): the secrets, as a model half reads them. */
-export type SandboxContext = Pick<LoginContext, "secrets">;
+/**
+ * What the app gives a connector's sandbox half (`ConnectorSetup.sandbox`): the secrets, as a model
+ * half reads them, and the declared fields of the resource whose boxes it opens, which hold the
+ * vendor's facts (its region, its type of machine) beside the image and size `open` takes.
+ */
+export type SandboxContext = Pick<LoginContext, "secrets"> & { declared: Record<string, unknown> };
 
 /**
  * Throws what is wrong with a resource type's `sandbox`: a type apply cannot change (not

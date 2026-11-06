@@ -48,6 +48,21 @@ importers:
         specifier: ^5.0.3
         version: 5.0.3(@opentelemetry/api@1.10.0)(@types/node@26.6.4)(msw@3.0.3(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.4)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)))(vite@8.3.5(@types/node@26.6.4)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
+  connectors/agent37:
+    devDependencies:
+      '@sanoma-ai/testing':
+        specifier: workspace:*
+        version: link:../../packages/testing
+      '@sanoma-ai/workflows':
+        specifier: workspace:*
+        version: link:../../packages/workflows
+      msw:
+        specifier: ^3.0.3
+        version: 3.0.3(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.4)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+
   connectors/anthropic:
     dependencies:
       '@ai-sdk/anthropic':
@@ -829,15 +844,24 @@ importers:
       '@types/pg':
         specifier: ^8.23.1
         version: 8.23.1
+      '@types/ws':
+        specifier: 8.18.2
+        version: 8.18.2
       drizzle-kit:
         specifier: 0.31.11
         version: 0.31.11
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
       msw:
         specifier: ^3.0.3
         version: 3.0.3(@types/node@26.6.4)(supports-color@11.0.0)(typescript@7.0.2)(vite@8.3.5(@types/node@26.6.4)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
       srvx:
         specifier: ^0.11.22
         version: 0.11.22
+      ws:
+        specifier: 8.22.0
+        version: 8.22.0
       zod:
         specifier: ^4.6.5
         version: 4.6.5
@@ -3634,6 +3658,9 @@ packages:
 
   '@types/validate-npm-package-name@4.0.2':
     resolution: {integrity: sha512-lrpDziQipxCEeK5kWxvljWYhUvOiB2A9izZd9B2AFarYAkqZshb4lPbRs7zKEic6eGtH8V/2qJW+dPp9OtF6bw==}
+
+  '@types/ws@8.18.2':
+    resolution: {integrity: sha512-67MQl+fpWKVTT1NYdnmo3U4sc/xPo/zQBncVnI74qmQa0z/b+1g6iYqNmGCPbxO+zz2aklb08a0oHfegiVd0/w==}
 
   '@typescript/typescript-aix-ppc64@7.0.2':
     resolution: {integrity: sha512-MTKKkWB7p/0E9xi1d1tHtZ5PiLkGEMIq88pK2CubZjOsLtYTLqhgIgi6zepFa+9GHZ6h05NMCkQxGKiPXMxXtQ==}
@@ -10192,6 +10219,10 @@ snapshots:
       '@types/node': 26.6.4
 
   '@types/validate-npm-package-name@4.0.2': {}
+
+  '@types/ws@8.18.2':
+    dependencies:
+      '@types/node': 26.6.4
 
   '@typescript/typescript-aix-ppc64@7.0.2':
     optional: true

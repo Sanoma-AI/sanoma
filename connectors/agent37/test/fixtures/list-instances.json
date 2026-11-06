@@ -1,0 +1,35 @@
+[
+  {
+    "method": "GET",
+    "path": "/v1/instances",
+    "status": 200,
+    "body": {
+      "data": [
+        {
+          "id": "ab12cd34ef",
+          "status": "sleeping",
+          "status_reason": null,
+          "template": "agent37-base",
+          "template_revision": null,
+          "image_ref": null,
+          "image_digest": null,
+          "type": "default",
+          "region": "us",
+          "mount_path": "/home/node",
+          "resources": { "cpu": 2, "memory": 4, "disk": 10 },
+          "url": "https://ab12cd34ef.agent37.app",
+          "domain_urls": [],
+          "public_ports": [],
+          "name": null,
+          "metadata": null,
+          "auto_sleep": true,
+          "idle_timeout_seconds": 900,
+          "network": "allow-all",
+          "slept_at": 1781222400,
+          "past_due": false,
+          "created": 1781222400
+        }
+      ]
+    }
+  }
+]

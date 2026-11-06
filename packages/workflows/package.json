@@ -101,7 +101,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && esbuild src/sandbox-runner.ts --bundle --platform=node --target=node22 --format=cjs --minify --external:bufferutil --external:utf-8-validate --outfile=dist/sandbox-runner.cjs --log-level=warning",
     "clean": "rm -rf dist",
     "prepack": "pnpm run clean && pnpm run build",
     "watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
@@ -129,9 +129,12 @@
   },
   "devDependencies": {
     "@types/pg": "^8.23.1",
+    "@types/ws": "8.18.2",
     "drizzle-kit": "0.31.11",
+    "esbuild": "0.28.2",
     "msw": "^3.0.3",
     "srvx": "^0.11.22",
+    "ws": "8.22.0",
     "zod": "^4.6.5"
   },
   "peerDependencies": {
