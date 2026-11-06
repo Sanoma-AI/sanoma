@@ -23,6 +23,7 @@ import { errorsOf, FieldView, FormFoot, useSchemaForm } from "../form/start-form
 import { api } from "../queries.ts";
 import { Notice } from "./common.tsx";
 import { type RecordsView, savedIn } from "./grid/collection.ts";
+import { HistoryLink } from "./record-history.tsx";
 
 // A collection's record form: one form, drawn from the record's JSON Schema as the start form is
 // from a workflow's input, to add a record or edit one; and Delete. Each is a change of the page's
@@ -75,7 +76,12 @@ export function RecordForm({
         : records.insert({ key: typed, record: input, updatedAt: new Date().toISOString(), updatedBy: actor ?? "" });
       await tx.when("settled");
       // None when the call is held for an approval: its toast said so.
-      if (savedIn(tx, typed)) toast.success(`Saved ${typed}`);
+      if (savedIn(tx, typed))
+        toast.success(
+          <>
+            Saved <HistoryLink name={name} recordKey={typed} />
+          </>,
+        );
     } catch (err) {
       return errorsOf(err, fields, {
         at: inRecord,

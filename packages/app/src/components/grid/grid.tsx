@@ -28,6 +28,7 @@ import { fieldsOf, type ScalarField, type ScalarValue } from "../../form/schema.
 import { api, type DataSearch, heldQuery } from "../../queries.ts";
 import { Nothing, StatusDot, When } from "../common.tsx";
 import { FROM, IssuesFlag, SortHead, Value } from "../data-grid.tsx";
+import { HistoryLink } from "../record-history.tsx";
 import { CellEditor, draftOf, recordWith, withValue } from "./cell.tsx";
 import { csv, delimited } from "./clipboard.ts";
 import { type RecordsView, savedIn } from "./collection.ts";
@@ -219,16 +220,21 @@ export function DataGrid({
         setSavedAt(Date.parse(saved.updatedAt));
         if (undoing) toast.success(`Undid ${field} for ${key}`);
         else
-          toast.success(`Saved ${field} for ${key}`, {
-            // The one field back, over the record as it is now: edits since to its other fields stay.
-            action: {
-              label: "Undo",
-              onClick: () => {
-                const now = records.get(key);
-                if (now) save(key, field, withValue(now.record, field, before), true);
+          toast.success(
+            <>
+              Saved {field} for <HistoryLink name={name} recordKey={key} />
+            </>,
+            {
+              // The one field back, over the record as it is now: edits since to its other fields stay.
+              action: {
+                label: "Undo",
+                onClick: () => {
+                  const now = records.get(key);
+                  if (now) save(key, field, withValue(now.record, field, before), true);
+                },
               },
             },
-          });
+          );
       },
       (err: unknown) => {
         const body = errorBodyOf(err);

@@ -28,8 +28,9 @@ export interface RecordEdit {
 
 /**
  * What a page's records are made from: `query`, `recordsQuery(name, search)` (what the loader
- * prefetched); `calls`, the collection's operations as `api.data.<name>` makes them; and `held`,
- * which says a call is held for an approval (`toastIfHeld`) and answers whether it was.
+ * prefetched); `calls`, the collection's operations as `api.data.<name>` makes them; `held`,
+ * which says a call is held for an approval (`toastIfHeld`) and answers whether it was; and
+ * `history`, the key of a record's history (`historyQuery`), read again once a call on it answers.
  */
 export interface RecordsSource {
   query: { queryKey: QueryKey; queryFn?: unknown; staleTime?: unknown };
@@ -42,9 +43,10 @@ export interface RecordsSource {
     delete: (input: { key: string }) => Promise<unknown>;
   };
   held: (err: unknown, queryClient: QueryClient) => boolean;
+  history: (key: string) => QueryKey;
 }
 
-function createRecordsView(queryClient: QueryClient, { query, calls, held }: RecordsSource) {
+function createRecordsView(queryClient: QueryClient, { query, calls, held, history }: RecordsSource) {
   // The record `key` as the collection last read or saved it (the query's rows, which its writes
   // keep): what an update is saved over, never an edit before it still on screen, which its
   // call may have held or saved reshaped. Not the collection's `base`, which holds a save's
@@ -58,6 +60,7 @@ function createRecordsView(queryClient: QueryClient, { query, calls, held }: Rec
           await calls.delete({ key: mutation.key });
           await collection.utils.writeDelete(mutation.key);
           transaction.metadata[mutation.key] = null;
+          void queryClient.invalidateQueries({ queryKey: history(mutation.key) });
           continue;
         }
         const { record } = mutation.modified;
@@ -68,6 +71,7 @@ function createRecordsView(queryClient: QueryClient, { query, calls, held }: Rec
         );
         await collection.utils.writeUpsert(answer);
         transaction.metadata[answer.key] = answer;
+        void queryClient.invalidateQueries({ queryKey: history(answer.key) });
       } catch (err) {
         // A call held for an approval is not refused: it waits, as a run of `call`. Nothing is
         // written, so the row shows the record as it is stored, not the change, until that run

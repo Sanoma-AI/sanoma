@@ -50,6 +50,7 @@ import {
   getGoLiveChoices,
   getGoLiveProgress,
   getHostDerived,
+  getHistory,
   getHostEnforcement,
   getLastRuns,
   getNextFires,
@@ -664,6 +665,18 @@ export const recordsQuery = (name: string, query: ListQuery<Record<string, unkno
     queryFn: () => (api as UntypedApi).data[name].list(query) as Promise<Saved[]>,
     // Read while the server rendered the page, not again as it hydrates; a save or a delete
     // writes what it saved into the grid's collection of them (`components/grid/collection.ts`).
+    staleTime: 5_000,
+  });
+
+/**
+ * The record `key`'s writes, newest first (`getHistory`), for the record's side panel: read only
+ * by someone the policy lets read the record. The records collection reads it again once a
+ * save or a delete of the record answers (`RecordsSource.history`).
+ */
+export const historyQuery = (name: string, key: string) =>
+  queryOptions({
+    queryKey: [...DATA_KEY, name, "history", key],
+    queryFn: () => getHistory({ data: { name, key } }),
     staleTime: 5_000,
   });
 
