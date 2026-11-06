@@ -62,6 +62,16 @@ interface CompanyApi {
   }, unknown>;
   /** Push and run the host: the workflow `go-live-host`, built in. */
   goLiveHost: WorkflowFn<{}, unknown>;
+  /** Import a spreadsheet: the workflow `import`, built in. */
+  import: WorkflowFn<{
+    collection: string;
+    mapping: ({
+      field: string;
+      values?: Record<string, unknown>;
+    } | null)[];
+    rows: string[][];
+    people?: string[];
+  }, unknown>;
   /** Move a lead on: the workflow `outbound-next`. */
   outboundNext: WorkflowFn<{
     company: string;

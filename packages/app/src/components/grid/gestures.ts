@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import type { ScalarField } from "../../form/schema.ts";
 import { plural } from "../../lib/utils.ts";
 import { valueOf } from "./cell.tsx";
-import { cellText, pastedCells } from "./clipboard.ts";
+import { cellsOf, cellText } from "./clipboard.ts";
 import { type CellChange, isNew, newKey, type Step } from "./collection.ts";
 import type { GridTable } from "./grid.tsx";
 import type { RecordChange } from "./staged.tsx";
@@ -68,7 +68,7 @@ export function useGestures({
    * rows there, and as new records past the last; one value into a selection fills it.
    */
   const paste = (text: string) => {
-    const pasted = pastedCells(text);
+    const pasted = cellsOf(text, "\t");
     if (!focused || pasted.length === 0) return;
     const [only] = pasted.length === 1 && pasted[0]!.length === 1 ? pasted[0]! : [];
     if (only !== undefined && table.getSelectedCellCount() > 1) {

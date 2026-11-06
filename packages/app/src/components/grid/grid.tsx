@@ -762,7 +762,7 @@ export function DataGrid({
 function KeyLink({ name, recordKey, staged }: { name: string; recordKey: string; staged: boolean }) {
   return (
     <Link
-      to={FROM}
+      to="/data/$name"
       params={{ name }}
       search={openRecord(recordKey)}
       disabled={staged}

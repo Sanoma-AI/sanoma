@@ -31,6 +31,8 @@ export type { AvailableApp, AvailableApps } from "./apps-list.ts";
 
 // Sanoma's claims, data (`sanoma/claims` re-exports them).
 export * from "./claims.ts";
+// A sheet read into a collection's records, as the built-in `import` and the app's pages read it.
+export * from "./import.ts";
 // A site's `site.ts` declares itself with it (`sanoma/site` calls it, typing its icon).
 export { defineSite, type SiteDefinition } from "./definitions.ts";
 
@@ -362,10 +364,16 @@ export const chatRunId = (chat: string, message: string) => `${chatRunPrefix(cha
 export const notLoaded = (errors: readonly { message: string }[]) =>
   errors.length ? `; these files did not load: ${errors.map((e) => e.message).join("; ")}` : "";
 
+/**
+ * A sheet's rows into a collection, as a run of the person who started it (`import-workflow.ts`):
+ * the app's Import pages start it, when the config has a collection.
+ */
+export const IMPORT_WORKFLOW = "import";
+
 /** The `recv` topic a turn's run is told on (`ChatTell`): a stop, a sign-in code, its own turn's end. */
 export const CHAT_TOPIC = "chat:tell";
 
-/** The workflows the runtime adds itself, which a config's own may not be named: drift, apply, call, change, login-code, follow, chat and the app's actions. */
+/** The workflows the runtime adds itself, which a config's own may not be named: drift, apply, call, change, login-code, follow, chat, import and the app's actions. */
 export const BUILT_IN_WORKFLOWS: ReadonlySet<string> = new Set([
   DRIFT_WORKFLOW,
   APPLY_WORKFLOW,
@@ -374,6 +382,7 @@ export const BUILT_IN_WORKFLOWS: ReadonlySet<string> = new Set([
   LOGIN_CODE_WORKFLOW,
   FOLLOW_WORKFLOW,
   CHAT_WORKFLOW,
+  IMPORT_WORKFLOW,
   ADOPT_WORKFLOW,
   PATCH_WORKFLOW,
   GO_LIVE_WORKFLOW,

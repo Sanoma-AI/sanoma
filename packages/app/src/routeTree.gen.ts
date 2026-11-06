@@ -31,7 +31,7 @@ import { Route as ChangesIdRouteImport } from './routes/changes/$id'
 import { Route as ConnectorsIndexRouteImport } from './routes/connectors/index'
 import { Route as ConnectorsVendorRouteImport } from './routes/connectors/$vendor'
 import { Route as DataIndexRouteImport } from './routes/data/index'
-import { Route as DataNameRouteImport } from './routes/data/$name'
+import { Route as DataNameRouteRouteImport } from './routes/data/$name/route'
 import { Route as HostingIndexRouteImport } from './routes/hosting/index'
 import { Route as HostingConnectRouteImport } from './routes/hosting/connect'
 import { Route as HostingExistingRouteImport } from './routes/hosting/existing'
@@ -43,6 +43,8 @@ import { Route as SetupExistingRouteImport } from './routes/setup/existing'
 import { Route as SitesIndexRouteImport } from './routes/sites.index'
 import { Route as WorkflowsIndexRouteImport } from './routes/workflows/index'
 import { Route as WorkflowsNameRouteRouteImport } from './routes/workflows/$name/route'
+import { Route as DataNameIndexRouteImport } from './routes/data/$name/index'
+import { Route as DataNameImportRouteImport } from './routes/data/$name/import'
 import { Route as SetupGithubCallbackRouteImport } from './routes/setup/github/callback'
 import { Route as SetupGithubManifestRouteImport } from './routes/setup/github/manifest'
 import { Route as WorkflowsNameIndexRouteImport } from './routes/workflows/$name/index'
@@ -159,7 +161,7 @@ const DataIndexRoute = DataIndexRouteImport.update({
   path: '/',
   getParentRoute: () => DataRouteRoute,
 } as any)
-const DataNameRoute = DataNameRouteImport.update({
+const DataNameRouteRoute = DataNameRouteRouteImport.update({
   id: '/$name',
   path: '/$name',
   getParentRoute: () => DataRouteRoute,
@@ -219,6 +221,16 @@ const WorkflowsNameRouteRoute = WorkflowsNameRouteRouteImport.update({
   path: '/$name',
   getParentRoute: () => WorkflowsRouteRoute,
 } as any)
+const DataNameIndexRoute = DataNameIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => DataNameRouteRoute,
+} as any)
+const DataNameImportRoute = DataNameImportRouteImport.update({
+  id: '/import',
+  path: '/import',
+  getParentRoute: () => DataNameRouteRoute,
+} as any)
 const SetupGithubCallbackRoute = SetupGithubCallbackRouteImport.update({
   id: '/setup/github/callback',
   path: '/setup/github/callback',
@@ -258,6 +270,7 @@ export interface FileRoutesByFullPath {
   '/permissions': typeof PermissionsRoute
   '/resources': typeof ResourcesRoute
   '/start': typeof StartRoute
+  '/data/$name': typeof DataNameRouteRouteWithChildren
   '/workflows/$name': typeof WorkflowsNameRouteRouteWithChildren
   '/api/call': typeof ApiCallRoute
   '/api/chat': typeof ApiChatRoute
@@ -265,7 +278,6 @@ export interface FileRoutesByFullPath {
   '/apps/$name': typeof AppsNameRoute
   '/changes/$id': typeof ChangesIdRoute
   '/connectors/$vendor': typeof ConnectorsVendorRoute
-  '/data/$name': typeof DataNameRoute
   '/hosting/connect': typeof HostingConnectRoute
   '/hosting/existing': typeof HostingExistingRoute
   '/runs/$id': typeof RunsIdRoute
@@ -280,9 +292,11 @@ export interface FileRoutesByFullPath {
   '/setup/': typeof SetupIndexRoute
   '/sites/': typeof SitesIndexRoute
   '/workflows/': typeof WorkflowsIndexRoute
+  '/data/$name/import': typeof DataNameImportRoute
   '/setup/github/callback': typeof SetupGithubCallbackRoute
   '/setup/github/manifest': typeof SetupGithubManifestRoute
   '/workflows/$name/new': typeof WorkflowsNameNewRoute
+  '/data/$name/': typeof DataNameIndexRoute
   '/workflows/$name/': typeof WorkflowsNameIndexRoute
   '/workflows/$name/runs/$id': typeof WorkflowsNameRunsIdRoute
 }
@@ -299,7 +313,6 @@ export interface FileRoutesByTo {
   '/apps/$name': typeof AppsNameRoute
   '/changes/$id': typeof ChangesIdRoute
   '/connectors/$vendor': typeof ConnectorsVendorRoute
-  '/data/$name': typeof DataNameRoute
   '/hosting/connect': typeof HostingConnectRoute
   '/hosting/existing': typeof HostingExistingRoute
   '/runs/$id': typeof RunsIdRoute
@@ -314,9 +327,11 @@ export interface FileRoutesByTo {
   '/setup': typeof SetupIndexRoute
   '/sites': typeof SitesIndexRoute
   '/workflows': typeof WorkflowsIndexRoute
+  '/data/$name/import': typeof DataNameImportRoute
   '/setup/github/callback': typeof SetupGithubCallbackRoute
   '/setup/github/manifest': typeof SetupGithubManifestRoute
   '/workflows/$name/new': typeof WorkflowsNameNewRoute
+  '/data/$name': typeof DataNameIndexRoute
   '/workflows/$name': typeof WorkflowsNameIndexRoute
   '/workflows/$name/runs/$id': typeof WorkflowsNameRunsIdRoute
 }
@@ -334,6 +349,7 @@ export interface FileRoutesById {
   '/permissions': typeof PermissionsRoute
   '/resources': typeof ResourcesRoute
   '/start': typeof StartRoute
+  '/data/$name': typeof DataNameRouteRouteWithChildren
   '/workflows/$name': typeof WorkflowsNameRouteRouteWithChildren
   '/api/call': typeof ApiCallRoute
   '/api/chat': typeof ApiChatRoute
@@ -341,7 +357,6 @@ export interface FileRoutesById {
   '/apps/$name': typeof AppsNameRoute
   '/changes/$id': typeof ChangesIdRoute
   '/connectors/$vendor': typeof ConnectorsVendorRoute
-  '/data/$name': typeof DataNameRoute
   '/hosting/connect': typeof HostingConnectRoute
   '/hosting/existing': typeof HostingExistingRoute
   '/runs/$id': typeof RunsIdRoute
@@ -356,9 +371,11 @@ export interface FileRoutesById {
   '/setup/': typeof SetupIndexRoute
   '/sites/': typeof SitesIndexRoute
   '/workflows/': typeof WorkflowsIndexRoute
+  '/data/$name/import': typeof DataNameImportRoute
   '/setup/github/callback': typeof SetupGithubCallbackRoute
   '/setup/github/manifest': typeof SetupGithubManifestRoute
   '/workflows/$name/new': typeof WorkflowsNameNewRoute
+  '/data/$name/': typeof DataNameIndexRoute
   '/workflows/$name/': typeof WorkflowsNameIndexRoute
   '/workflows/$name/runs/$id': typeof WorkflowsNameRunsIdRoute
 }
@@ -377,6 +394,7 @@ export interface FileRouteTypes {
     | '/permissions'
     | '/resources'
     | '/start'
+    | '/data/$name'
     | '/workflows/$name'
     | '/api/call'
     | '/api/chat'
@@ -384,7 +402,6 @@ export interface FileRouteTypes {
     | '/apps/$name'
     | '/changes/$id'
     | '/connectors/$vendor'
-    | '/data/$name'
     | '/hosting/connect'
     | '/hosting/existing'
     | '/runs/$id'
@@ -399,9 +416,11 @@ export interface FileRouteTypes {
     | '/setup/'
     | '/sites/'
     | '/workflows/'
+    | '/data/$name/import'
     | '/setup/github/callback'
     | '/setup/github/manifest'
     | '/workflows/$name/new'
+    | '/data/$name/'
     | '/workflows/$name/'
     | '/workflows/$name/runs/$id'
   fileRoutesByTo: FileRoutesByTo
@@ -418,7 +437,6 @@ export interface FileRouteTypes {
     | '/apps/$name'
     | '/changes/$id'
     | '/connectors/$vendor'
-    | '/data/$name'
     | '/hosting/connect'
     | '/hosting/existing'
     | '/runs/$id'
@@ -433,9 +451,11 @@ export interface FileRouteTypes {
     | '/setup'
     | '/sites'
     | '/workflows'
+    | '/data/$name/import'
     | '/setup/github/callback'
     | '/setup/github/manifest'
     | '/workflows/$name/new'
+    | '/data/$name'
     | '/workflows/$name'
     | '/workflows/$name/runs/$id'
   id:
@@ -452,6 +472,7 @@ export interface FileRouteTypes {
     | '/permissions'
     | '/resources'
     | '/start'
+    | '/data/$name'
     | '/workflows/$name'
     | '/api/call'
     | '/api/chat'
@@ -459,7 +480,6 @@ export interface FileRouteTypes {
     | '/apps/$name'
     | '/changes/$id'
     | '/connectors/$vendor'
-    | '/data/$name'
     | '/hosting/connect'
     | '/hosting/existing'
     | '/runs/$id'
@@ -474,9 +494,11 @@ export interface FileRouteTypes {
     | '/setup/'
     | '/sites/'
     | '/workflows/'
+    | '/data/$name/import'
     | '/setup/github/callback'
     | '/setup/github/manifest'
     | '/workflows/$name/new'
+    | '/data/$name/'
     | '/workflows/$name/'
     | '/workflows/$name/runs/$id'
   fileRoutesById: FileRoutesById
@@ -667,7 +689,7 @@ declare module '@tanstack/react-router' {
       id: '/data/$name'
       path: '/$name'
       fullPath: '/data/$name'
-      preLoaderRoute: typeof DataNameRouteImport
+      preLoaderRoute: typeof DataNameRouteRouteImport
       parentRoute: typeof DataRouteRoute
     }
     '/hosting/': {
@@ -746,6 +768,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/workflows/$name'
       preLoaderRoute: typeof WorkflowsNameRouteRouteImport
       parentRoute: typeof WorkflowsRouteRoute
+    }
+    '/data/$name/': {
+      id: '/data/$name/'
+      path: '/'
+      fullPath: '/data/$name/'
+      preLoaderRoute: typeof DataNameIndexRouteImport
+      parentRoute: typeof DataNameRouteRoute
+    }
+    '/data/$name/import': {
+      id: '/data/$name/import'
+      path: '/import'
+      fullPath: '/data/$name/import'
+      preLoaderRoute: typeof DataNameImportRouteImport
+      parentRoute: typeof DataNameRouteRoute
     }
     '/setup/github/callback': {
       id: '/setup/github/callback'
@@ -827,13 +863,27 @@ const ConnectorsRouteRouteWithChildren = ConnectorsRouteRoute._addFileChildren(
   ConnectorsRouteRouteChildren,
 )
 
+interface DataNameRouteRouteChildren {
+  DataNameImportRoute: typeof DataNameImportRoute
+  DataNameIndexRoute: typeof DataNameIndexRoute
+}
+
+const DataNameRouteRouteChildren: DataNameRouteRouteChildren = {
+  DataNameImportRoute: DataNameImportRoute,
+  DataNameIndexRoute: DataNameIndexRoute,
+}
+
+const DataNameRouteRouteWithChildren = DataNameRouteRoute._addFileChildren(
+  DataNameRouteRouteChildren,
+)
+
 interface DataRouteRouteChildren {
-  DataNameRoute: typeof DataNameRoute
+  DataNameRouteRoute: typeof DataNameRouteRouteWithChildren
   DataIndexRoute: typeof DataIndexRoute
 }
 
 const DataRouteRouteChildren: DataRouteRouteChildren = {
-  DataNameRoute: DataNameRoute,
+  DataNameRouteRoute: DataNameRouteRouteWithChildren,
   DataIndexRoute: DataIndexRoute,
 }
 

@@ -34,6 +34,7 @@ import { chatSteps } from "./chat-steps.ts";
 import { chatWorkflow } from "./chat-workflow.ts";
 import { followSteps } from "./follow-steps.ts";
 import { followWorkflow } from "./follow-workflow.ts";
+import { importWorkflow } from "./import-workflow.ts";
 import {
   type Collection,
   collectionsConnector,
@@ -77,6 +78,7 @@ import {
   CHAT_WORKFLOW,
   DATA_VENDOR,
   FOLLOW_WORKFLOW,
+  IMPORT_WORKFLOW,
   LOGIN_CODE_WORKFLOW,
 } from "./shared.ts";
 import { fakeSourceDriver, type RemoteHalf, SOURCE_RESOLVE, sourceDriver, sourceOps } from "./source.ts";
@@ -511,6 +513,8 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
   // Built-in: a direct call the policy holds for an approval, made a run, when any operation may be called directly.
   const call = callWorkflow(ops, drivers, types);
   if (call.uses.length) names.set(CALL_WORKFLOW, call);
+  // Built-in: a sheet's rows saved into a collection, when the config has one.
+  if (collections.size) names.set(IMPORT_WORKFLOW, importWorkflow(collections));
   // Built-in: sending a sign-in code, when the config names how.
   const login = config.login && checkLogin(config.login, ops, drivers, appName);
   if (login) names.set(LOGIN_CODE_WORKFLOW, loginCodeWorkflow(login, appName));
