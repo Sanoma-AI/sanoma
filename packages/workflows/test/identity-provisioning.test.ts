@@ -18,6 +18,7 @@ import { describeConfig } from "../src/describe.ts";
 import { runtimeDriver } from "../src/runtime-ops.ts";
 import { memoryTokens } from "../src/tokens.ts";
 import { memorySecrets, secret } from "../src/secret.ts";
+import { SecretStoreError } from "../src/secret-store.ts";
 import { rootWith } from "./harness.ts";
 
 const databaseUrl = testDatabaseUrl("identity_provisioning");
@@ -99,6 +100,20 @@ describe("declarative enrollment writer", () => {
       expect(await reader.active(input.hash)).toBeDefined();
       expect(get).toHaveBeenCalledTimes(3);
     } finally {
+      await configured.close();
+    }
+  });
+
+  it("refuses a misconfigured writer binding for good and retries an unreachable store", async () => {
+    const config = { databaseUrl: secret("IDENTITY_WRITER_URL"), maxValidityMs: 86_400_000 };
+    for (const [code, expected] of [
+      ["invalid_configuration", { code: "invalid", retryable: false }],
+      ["unavailable", { code: "unavailable", retryable: true }],
+    ] as const) {
+      const configured = configuredIdentityProvisioning(config, {
+        get: () => Promise.reject(new SecretStoreError(code)),
+      });
+      await expect(configured.store!.enroll(enrollment())).rejects.toMatchObject(expected);
       await configured.close();
     }
   });

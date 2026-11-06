@@ -46,7 +46,9 @@ export function gcpDriver(
           if (input.id && !idInProject(input.id)) throw new AuthenticationError("wrong_account");
           for (const state of [input.state, desired]) {
             if (!state) continue;
-            if (state.project != null && !projects.includes(String(state.project)))
+            // A declared project is the project ID (a service account's email is built from it);
+            // only the names Google returns may use the number.
+            if (state.project != null && state.project !== identity.project)
               throw new AuthenticationError("wrong_account");
             if (typeof state.id === "string" && !idInProject(state.id)) throw new AuthenticationError("wrong_account");
             for (const field of parents)

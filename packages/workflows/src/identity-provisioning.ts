@@ -63,7 +63,8 @@ export function configuredIdentityProvisioning(
   const { databaseUrl } = config;
   const secret = isSecret(databaseUrl) ? databaseUrl.$secret : undefined;
   const declared = isSecret(databaseUrl) ? undefined : writerUrl(databaseUrl);
-  let current: { url: string; db: Db & { $client: Pool } } | undefined;
+  // One pool per URL used: a replaced value's stays open until close, as an enrollment may hold it.
+  const pools = new Map<string, Db & { $client: Pool }>();
   let closed = false;
   let closing: Promise<void> | undefined;
   async function connectionString(): Promise<string> {
@@ -71,8 +72,11 @@ export function configuredIdentityProvisioning(
     let value: string | undefined;
     try {
       value = await secrets.get(secret);
-    } catch {
-      throw new IdentityProvisioningError("unavailable");
+    } catch (error) {
+      // A misconfigured binding is permanent; only an unreachable store is worth retrying.
+      throw new IdentityProvisioningError(
+        (error as { retryable?: unknown } | null)?.retryable === false ? "invalid" : "unavailable",
+      );
     }
     if (!value) throw new IdentityProvisioningError("unset");
     return writerUrl(value);
@@ -81,14 +85,12 @@ export function configuredIdentityProvisioning(
     if (closed) throw new IdentityProvisioningError("unavailable");
     const url = await connectionString();
     if (closed) throw new IdentityProvisioningError("unavailable");
-    if (current?.url !== url) {
-      // A replaced value: its old pool ends once its own queries are done.
-      void current?.db.$client.end().catch(() => {});
+    let db = pools.get(url);
+    if (!db) {
       const pool = new Pool({ connectionString: url, max: 5, connectionTimeoutMillis: 10_000, query_timeout: 15_000 });
       pool.on("error", () => {});
-      current = { url, db: databaseOn(pool) };
+      pools.set(url, (db = databaseOn(pool)));
     }
-    const { db } = current;
     // The control plane needs enrollment writes, never schema or database administration.
     const { rows } = await db.execute<{ allowed: boolean }>(sql`SELECT
       NOT EXISTS (SELECT FROM pg_roles WHERE rolname=current_user AND (rolsuper OR rolcreatedb OR rolcreaterole OR rolbypassrls))
@@ -108,7 +110,7 @@ export function configuredIdentityProvisioning(
     store,
     close() {
       closed = true;
-      return (closing ??= current?.db.$client.end() ?? Promise.resolve());
+      return (closing ??= Promise.all([...pools.values()].map((db) => db.$client.end())).then(() => {}));
     },
     ...(secret && { secret }),
   };

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
+import { GoogleAuth } from "google-auth-library";
 import { startBridge, type Bridge } from "@sanoma-ai/bridge";
 import { memorySecrets, verifyAuthentication, type CallContext } from "@sanoma-ai/workflows";
 import { afterAll, describe, it } from "vitest";
@@ -47,11 +48,17 @@ describe.runIf(enabled)("live GCP provisioning through the provisioning identity
       const verified = await verifyAuthentication(method, { bearer });
       assert.equal(verified.account, accountOf(identity));
       step = "denied impersonation";
+      // Google's own refusal, so an issuer or STS failure cannot pass for IAM denying the account.
       await assert.rejects(
-        verifyAuthentication(gcpAuthentication(checkIdentity({ ...identity, serviceAccount: otherAccount })), {
-          bearer,
-        }),
-        { name: "AuthenticationError" },
+        new GoogleAuth({
+          credentials: federationCredentials(checkIdentity({ ...identity, serviceAccount: otherAccount }), bearer),
+          scopes: ["https://www.googleapis.com/auth/cloud-platform"],
+        }).getAccessToken(),
+        (error: unknown) => {
+          const response = (error as { response?: { status?: number; data?: { error?: { status?: string } } } })
+            .response;
+          return response?.status === 403 && response.data?.error?.status === "PERMISSION_DENIED";
+        },
       );
       step = "provider startup";
       bridge = await startBridge({ logger: () => {}, timeoutMs: 180_000 });
@@ -102,7 +109,8 @@ describe.runIf(enabled)("live GCP provisioning through the provisioning identity
       let state = imported.resources[0]!;
       assert.ok(state);
       // The ten-minute impersonated token expires during this session; repeated real reads keep
-      // the provider session active and must renew through the issuer. No token enters output.
+      // the provider session active and must renew it. Whether the renewal called the issuer again
+      // or reused a cached subject token is not observed here. No token enters output.
       const until = Date.now() + 660_000;
       while (Date.now() < until) {
         await delay(30_000);
