@@ -402,6 +402,25 @@ describe("going live", () => {
       } finally {
         rmSync(other, { recursive: true, force: true });
       }
+      // A box another data file declares is not declared again, and the host still gets its key.
+      const declaring = mkdtempSync(join(tmpdir(), "sanoma-go-live-box-"));
+      try {
+        mkdirSync(join(declaring, "resources"));
+        writeFileSync(
+          join(declaring, "resources", "agents.ts"),
+          'import { agent37 } from "@sanoma-ai/connector-agent37/resources";\nexport const box = agent37.instance({ size: 4 });\n',
+        );
+        const elsewhere = { ...boxed, root: declaring };
+        const kept = await renderInfra(
+          { ...boxing, config: elsewhere, resolved: resolveConfig(elsewhere) },
+          choices(),
+          DEPLOY_KEY,
+        );
+        expect(kept).not.toContain("export const box");
+        expect(kept).toContain(`    AGENT37_API_KEY: secret("AGENT37_API_KEY"),\n`);
+      } finally {
+        rmSync(declaring, { recursive: true, force: true });
+      }
     } finally {
       await client.close();
     }

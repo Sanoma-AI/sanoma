@@ -93,8 +93,10 @@ export async function renderInfra(
 ) {
   const root = rootOf(step);
   const { database, host, wakeup, sandbox: connected } = chosen ?? (await choose(step));
-  // The box, unless another data file declares one already: a second would leave both out.
-  const sandbox = (await step.resolved.sandboxes()).length ? undefined : connected;
+  // The box, unless another data file declares one already: a second would leave both out. Either
+  // way the host is given its vendor's key, so that the live instance opens its boxes.
+  const [boxed] = await step.resolved.sandboxes();
+  const sandbox = boxed ? undefined : connected;
   const missing = missingTypes(step);
   if (missing.length || !host || !database) {
     throw new Error(`The config's connectors declare no ${missing.join(", ")}: add them to sanoma.config.ts`);
@@ -137,7 +139,7 @@ export async function renderInfra(
     ? hosted
     : await declaredHost(step, host, hosted, port, {
         ...wakeup.secrets,
-        ...(await vendorSecrets(step, sandbox?.vendor)),
+        ...(await vendorSecrets(step, (boxed ?? sandbox)?.vendor)),
       });
   if (!derives && !deployKey) throw new Error("A host that does not derive is declared with its deploy key");
   const woken = wakeup.type;
