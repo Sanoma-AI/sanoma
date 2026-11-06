@@ -349,7 +349,7 @@ export const CollectionEntrySchema = z.strictObject({
   fields: z.record(z.string(), FieldSchema),
   /** What `save` accepts, as JSON Schema, with `$id` `sanoma:collection/<name>`. */
   record: JsonSchema,
-  /** Its operations' ids: `data.<name>.get`, `.list`, `.save` and `.delete`. */
+  /** Its operations' ids: `data.<name>.get`, `.list`, `.count`, `.save`, `.saveMany` and `.delete`. */
   ops: z.array(z.string()),
   /** Where `resources/data.ts` declares it, read as the data files are; absent for one declared elsewhere. */
   declared: DeclaredCollectionSchema.optional(),

@@ -27,7 +27,7 @@ import {
   SanomaError,
 } from "./errors.ts";
 import type { Collection } from "./collection.ts";
-import { currentGroup, entry, skipped, write, writeFailure } from "./ledger.ts";
+import { currentGroup, entry, type LedgerBody, skipped, write, writeFailure } from "./ledger.ts";
 import { shown } from "./log.ts";
 import { type CallContext, isOp, type Op } from "./op.ts";
 import { callAt, callName, type CallNode } from "./outline.ts";
@@ -42,8 +42,10 @@ import {
   CALL_WORKFLOW,
   CHANGE_MERGE,
   DATA_VENDOR,
+  entryOpsOf,
   errorMessage,
   fitsOp,
+  isBatch,
   LOGIN_CODE_WORKFLOW,
   problemLine,
   type Saved,
@@ -302,18 +304,104 @@ export function targetOf(op: Op, input: unknown): { target?: string } {
   return { target };
 }
 
+/** One call as the policy decides it and the ledger records it: an operation and its parsed input. */
+export interface Call {
+  op: Op;
+  input: unknown;
+}
+
 /**
- * Asks the policy about one call, with the record a collection's `save` or
- * `delete` replaces as `before` (`beforeOf`). The runtime's own rule first (`runtimeHold`, over
- * the running instance's people): while it holds or denies, the company's policy is not asked.
- * Runs inside a step, so it must have no side effects of its own.
+ * The calls a call makes: a collection's `saveMany` (`isBatch`) makes one per entry, the
+ * collection's `save` or `delete` with the entry as its input, and these are what the policy
+ * decides and the ledger records, so a record's history reads the same whether it was saved
+ * alone or in a batch; any other call makes itself.
  */
+export function callsOf(op: Op, input: unknown, ops: ReadonlyMap<string, Op>): Call[] {
+  if (!isBatch(op)) return [{ op, input }];
+  const { records, deletes } = input as { records: unknown[]; deletes: unknown[] };
+  const [save, remove] = entryOpsOf(op).map((id) => ops.get(id)!);
+  return [...records.map((e) => ({ op: save!, input: e })), ...deletes.map((e) => ({ op: remove!, input: e }))];
+}
+
+/** The outputs of the calls a call made, from its output: a batch's, one per entry, in order. */
+export const outputsOf = (op: Op, output: unknown): unknown[] => (isBatch(op) ? (output as unknown[]) : [output]);
+
+/** The key of the record a collection's `save` or `delete` acts on. */
+const keyOf = (op: Op, input: unknown, collection: Collection): string =>
+  op.name === "save"
+    ? ((input as { record: Record<string, unknown> }).record[collection.key] as string)
+    : (input as { key: string }).key;
+
+/** A batch's denied entries: each one's key, with its decision. */
+function denialsOf(
+  op: Op,
+  calls: readonly Call[],
+  decisions: readonly RecordedDecision[],
+  collections: ReadonlyMap<string, Collection>,
+): { key: string; decision: Extract<RecordedDecision, { kind: "deny" }> }[] {
+  const collection = collections.get(op.resource)!;
+  return calls.flatMap((c, i) => {
+    const decision = decisions[i]!;
+    return decision.kind === "deny" ? [{ key: keyOf(c.op, c.input, collection), decision }] : [];
+  });
+}
+
+/**
+ * The decision for a call from those of the calls it makes: a batch is denied when any entry is
+ * (the reason naming each denied key), else held when any is (by the first hold), else allowed;
+ * any other call's is its own.
+ */
+export function decisionOf(
+  op: Op,
+  calls: readonly Call[],
+  decisions: readonly RecordedDecision[],
+  collections: ReadonlyMap<string, Collection>,
+): RecordedDecision {
+  if (!isBatch(op)) return decisions[0]!;
+  const version = decisions[0]?.policyVersion === undefined ? {} : { policyVersion: decisions[0].policyVersion };
+  const denied = denialsOf(op, calls, decisions, collections);
+  if (denied.length) {
+    const reasons = [...new Set(denied.flatMap(({ decision }) => decision.reasons ?? []))];
+    const reason = denied.map(({ key, decision }) => `${key}: ${decision.reason}`).join("; ");
+    return { kind: "deny", reason, ...(reasons.length && { reasons }), ...version };
+  }
+  return decisions.find((d) => d.kind === "approve") ?? { kind: "allow", ...version };
+}
+
+/** The keys of a batch's denied entries, for its `policy_denied` (`denied`); nothing for any other call. */
+export function deniedKeys(
+  op: Op,
+  calls: readonly Call[],
+  decisions: readonly RecordedDecision[],
+  collections: ReadonlyMap<string, Collection>,
+): { denied?: string[] } {
+  if (!isBatch(op)) return {};
+  return { denied: denialsOf(op, calls, decisions, collections).map(({ key }) => key) };
+}
+
+/** `decideEach` for one call. */
 export async function decide(
   run: Run,
   op: Op,
   input: unknown,
   connection?: ConnectionSnapshot,
 ): Promise<RecordedDecision> {
+  const [decision] = await decideEach(run, [{ op, input }], connection);
+  return decision!;
+}
+
+/**
+ * Asks the policy about each of the calls a call makes (`callsOf`), in order, with the record a
+ * collection's `save` or `delete` replaces as `before` (`beforeOf`, each read keyed by its place).
+ * The runtime's own rule first (`runtimeHold`, over the running instance's people): while it
+ * holds or denies a call, the company's policy is not asked about it. Runs inside a step, so it
+ * must have no side effects of its own.
+ */
+export async function decideEach(
+  run: Run,
+  calls: readonly Call[],
+  connection?: ConnectionSnapshot,
+): Promise<RecordedDecision[]> {
   const seen = {
     id: run.id,
     workflow: run.workflow,
@@ -321,20 +409,33 @@ export async function decide(
       (a) => a.requestedBy !== "policy" || a.connection === connection?.revision,
     ),
   };
-  // Only a merge is the rule's: no other call reads the people's files.
-  const held =
-    op.id === CHANGE_MERGE ? runtimeHold(op.id, input, seen.approvals, readPeople(run.state.root).people) : undefined;
-  if (held) return held;
   const { policy } = run.state;
-  // Keyed by the call (`seq` was taken for it), so a fake answers each read afresh.
-  const before = await beforeOf(policy, op, input, run.state.collections, (get, key) =>
-    driverOf(run, get)?.(
-      { key },
-      { idempotencyKey: `${run.id}:${run.seq}:before`, runId: run.id, opId: get, attempt: 1, secrets: secretsOf(run) },
-    ),
-  );
-  const call = { ...callOf(op, input, run.actor, seen), ...before, ...(connection && { connection }) };
-  return ask(policy, op.id, () => policy(call), run.state);
+  const decisions: RecordedDecision[] = [];
+  for (const [i, { op, input }] of calls.entries()) {
+    // Only a merge is the rule's: no other call reads the people's files.
+    const held =
+      op.id === CHANGE_MERGE ? runtimeHold(op.id, input, seen.approvals, readPeople(run.state.root).people) : undefined;
+    if (held) {
+      decisions.push(held);
+      continue;
+    }
+    // Keyed by the call (`seq` was taken for it) and its place, so a fake answers each read afresh.
+    const before = await beforeOf(policy, op, input, run.state.collections, (get, key) =>
+      driverOf(run, get)?.(
+        { key },
+        {
+          idempotencyKey: `${run.id}:${run.seq}:before${i ? `:${i}` : ""}`,
+          runId: run.id,
+          opId: get,
+          attempt: 1,
+          secrets: secretsOf(run),
+        },
+      ),
+    );
+    const call = { ...callOf(op, input, run.actor, seen), ...before, ...(connection && { connection }) };
+    decisions.push(ask(policy, op.id, () => policy(call), run.state));
+  }
+  return decisions;
 }
 
 /** The run's function for an operation: its own fake's in a sandbox run, never a vendor's; else the driver's. */
@@ -368,10 +469,7 @@ export async function beforeOf(
 ): Promise<{ before?: unknown }> {
   const collection = op.vendor === DATA_VENDOR ? collections.get(op.resource) : undefined;
   if (policy === allowAll || !collection || (op.name !== "save" && op.name !== "delete")) return {};
-  const key =
-    op.name === "save"
-      ? (input as { record: Record<string, unknown> }).record[collection.key]
-      : (input as { key: unknown }).key;
+  const key = keyOf(op, input, collection);
   let saved: Saved | null | undefined;
   try {
     saved = (await read(`${DATA_VENDOR}.${op.resource}.get`, key)) as Saved | null | undefined;
@@ -511,11 +609,15 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed, ref?:
     });
   }
   const parsed = parseOrThrow(op.input, input, `The input to ${op.id} does not match its schema`, { op: op.id });
+  // The calls this one makes (a batch's entries), each decided and recorded on its own.
+  const calls = callsOf(op, parsed, run.state.ops);
   // The call's identity (its ledger seq and id, and the driver's idempotency key) is taken
   // before the first await, so it depends only on the order the workflow made its calls. A
   // replay skips the step bodies but counts the same way. A call held for an approval is
-  // numbered before the approval's records, so its op.called sorts ahead of them.
-  const seq = run.seq++;
+  // numbered before the approval's records, so its op.called sorts ahead of them. A batch
+  // takes a seq per entry.
+  const seq = run.seq;
+  run.seq += calls.length;
   // The decision is recorded as a step, so a replay reuses it instead of asking a policy
   // that may have changed since. The policy must still be deterministic: a run that fails
   // before the step is recorded asks again.
@@ -536,35 +638,57 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed, ref?:
         // Read in the step, so a replay reuses the first answer, and asked again after each
         // approval, so a call made after a long wait sees the files as they are then.
         if (run.workflow !== APPLY_WORKFLOW && isChangeOp(op, run.state.types)) await refuseDeclared(run, op, parsed);
-        return decide(run, op, parsed, connection);
+        return decideEach(run, calls, connection);
       },
       { name: `policy:${op.id}` },
     );
-  let decision = await decideStep();
+  let decisions = await decideStep();
+  let decision = decisionOf(op, calls, decisions, run.state.collections);
+  // The records keep the first decisions: a hold stays a hold once its approval let the call through.
+  const decided = decisions;
   const logged = recorded(op, parsed, run.workflow);
-  const call = {
-    type: "op.called",
-    op: op.id,
-    ...place,
-    ...targetOf(op, parsed),
-    effect: op.effect,
-    input: logged,
-    decision,
-    ...(connection && { connection }),
-  } as const;
+  /** The call's records, one per call it made, numbered from `seq`, each with its decision and what `outcome` says of it. */
+  const records = (outcome: (i: number) => Partial<LedgerBody>, at?: number) =>
+    calls.map((c, i) =>
+      entry(
+        run,
+        {
+          type: "op.called",
+          op: c.op.id,
+          ...place,
+          ...targetOf(c.op, c.input),
+          effect: c.op.effect,
+          input: recorded(c.op, c.input, run.workflow),
+          decision: decided[i]!,
+          ...(connection && { connection }),
+          ...outcome(i),
+        } as LedgerBody,
+        { seq: seq + i, ...(at !== undefined && { at }) },
+      ),
+    );
+  const writeFailures = async (outcome: (i: number) => Partial<LedgerBody>, err: unknown, at?: number) => {
+    for (const record of records(outcome, at)) await writeFailure(run, record, err);
+  };
 
   // Each hold is lifted in turn: once one is approved, the policy is asked again, with it.
   for (;;) {
     if (decision.kind === "deny") {
-      const err = new PolicyDeniedError(op.id, decision.reason);
-      await writeFailure(run, entry(run, { ...call, decision, error: errorInfo(err), durationMs: 0 }, { seq }), err);
+      const err = new PolicyDeniedError(
+        op.id,
+        decision.reason,
+        deniedKeys(op, calls, decisions, run.state.collections),
+      );
+      // A deny after an approval is recorded as the deny, with its reason, not as the hold.
+      await writeFailures((i) => ({ decision: decisions[i]!, error: errorInfo(err), durationMs: 0 }), err);
       throw err;
     }
     if (decision.kind !== "approve") break;
     const title = decision.title ?? `${op.id} needs ${approverLabel(decision.approver)}`;
     try {
-      // A hold covers the call it held.
-      await awaitApproval(run, title, { approver: decision.approver, covers: [op.id] }, place, {
+      // A hold covers the call it held and the calls of a batch it held, each decided again once it is approved.
+      const held = calls.filter((_, i) => decisions[i]!.kind === "approve").map((c) => c.op.id);
+      const covers = [...new Set([op.id, ...held])];
+      await awaitApproval(run, title, { approver: decision.approver, covers }, place, {
         op: op.id,
         seq,
         input: logged,
@@ -576,12 +700,12 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed, ref?:
       const code = errorCode(err);
       if (code === "approval_rejected" || code === "approval_withdrawn") {
         const approval = (err as SanomaError).data.approvalId as string;
-        const record = entry(run, { ...call, approval, error: errorInfo(err), durationMs: 0 }, { seq });
-        await writeFailure(run, record, err);
+        await writeFailures(() => ({ approval, error: errorInfo(err), durationMs: 0 }), err);
       }
       throw err;
     }
-    decision = await decideStep();
+    decisions = await decideStep();
+    decision = decisionOf(op, calls, decisions, run.state.collections);
   }
 
   const started = Date.now();
@@ -620,27 +744,23 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed, ref?:
       },
     );
   } catch (err) {
-    // The step failed for good; on replay DBOS rethrows the recorded error, and this record
-    // gets the same id. A success record would too, so a call has one op.called at most.
-    const record = entry(
-      run,
-      { ...call, error: errorInfo(err), durationMs: Date.now() - started, ...(attempt ? { attempt } : {}) },
-      { seq, at: started },
-    );
-    if (isInfrastructureError(err, run.state)) skipped(record, `the call was interrupted (${errorMessage(err)})`);
-    else await writeFailure(run, record, err);
+    // The step failed for good; on replay DBOS rethrows the recorded error, and these records
+    // get the same ids. A success record would too, so a call has one op.called at most.
+    const failed = () => ({ error: errorInfo(err), durationMs: Date.now() - started, ...(attempt ? { attempt } : {}) });
+    if (isInfrastructureError(err, run.state)) {
+      for (const record of records(failed, started)) skipped(record, `the call was interrupted (${errorMessage(err)})`);
+    } else await writeFailures(failed, err, started);
     throw err;
   }
   const { output, at, durationMs } = result;
+  const outputs = outputsOf(op, output);
   try {
-    await write(
-      run,
-      entry(
-        run,
-        { ...call, output: recorded(op, output, run.workflow), durationMs, attempt: result.attempt },
-        { seq, at },
-      ),
-    );
+    for (const record of records(
+      (i) => ({ output: recorded(calls[i]!.op, outputs[i], run.workflow), durationMs, attempt: result.attempt }),
+      at,
+    )) {
+      await write(run, record);
+    }
   } catch (err) {
     // The vendor acted, and nothing records it. A workflow that caught this and called again
     // would repeat the side effect under a new key, so the run makes no further calls.

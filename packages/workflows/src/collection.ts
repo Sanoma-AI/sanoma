@@ -4,6 +4,7 @@ import * as drizzle from "drizzle-orm";
 import { and, eq, or, sql, type SQL } from "drizzle-orm";
 import type { Db } from "./db.ts";
 import { data } from "./db/company.ts";
+import { vendorCodeOf } from "./errors.ts";
 import { defineFake, type Fake } from "./fake.ts";
 import { isObject } from "./resource.ts";
 import {
@@ -20,8 +21,11 @@ import {
 import { callerFile } from "./define.ts";
 import { appOfFile } from "./paths.ts";
 import {
+  BATCH,
+  BATCH_LIMIT,
   checkCollection,
   DATA_VENDOR,
+  type Deleted,
   type FIELD_TYPES,
   LIST_LIMIT,
   type ListQuery,
@@ -30,9 +34,10 @@ import {
 } from "./shared.ts";
 
 // A company's own records: a collection is declared with plain values (a name, a key and typed
-// fields), and its `get`, `list`, `save` and `delete` are operations of the vendor `data`, under
-// the policy and in the ledger like any connector's. The records are JSON rows of one table the
-// runtime owns (`data`), in the config's database; a sandbox run keeps them in memory.
+// fields), and its `get`, `list`, `count`, `save`, `saveMany` and `delete` are operations of the
+// vendor `data`, under the policy and in the ledger like any connector's. The records are JSON
+// rows of one table the runtime owns (`data`), in the config's database; a sandbox run keeps
+// them in memory.
 
 export type FieldType = (typeof FIELD_TYPES)[number];
 
@@ -69,7 +74,7 @@ export type RequiredTextKeys<F extends Record<string, Field>> = {
  */
 export const COLLECTION: unique symbol = Symbol.for("sanoma.collection");
 
-/** A collection, as `collection()` declares it, with its four operations. */
+/** A collection, as `collection()` declares it, with its six operations. */
 export interface Collection<
   N extends string = string,
   F extends Record<string, Field> = Record<string, Field>,
@@ -86,6 +91,7 @@ export interface Collection<
   readonly title?: string;
   readonly get: Op<typeof DATA_VENDOR, N, "get", { key: string }, Saved<RecordOf<F>> | null>;
   readonly list: Op<typeof DATA_VENDOR, N, "list", ListQuery<RecordOf<F>>, Saved<RecordOf<F>>[]>;
+  readonly count: Op<typeof DATA_VENDOR, N, "count", Pick<ListQuery<RecordOf<F>>, "where">, { count: number }>;
   readonly save: Op<
     typeof DATA_VENDOR,
     N,
@@ -93,14 +99,24 @@ export interface Collection<
     { record: RecordOf<F>; ifAbsent?: boolean; ifRecord?: Record<string, unknown> },
     Saved<RecordOf<F>>
   >;
-  readonly delete: Op<typeof DATA_VENDOR, N, "delete", { key: string }, { deleted: boolean }>;
+  readonly saveMany: Op<
+    typeof DATA_VENDOR,
+    N,
+    "saveMany",
+    {
+      records?: { record: RecordOf<F>; ifAbsent?: boolean; ifRecord?: Record<string, unknown> }[];
+      deletes?: { key: string; ifRecord?: Record<string, unknown> }[];
+    },
+    (Saved<RecordOf<F>> | Deleted)[]
+  >;
+  readonly delete: Op<typeof DATA_VENDOR, N, "delete", { key: string; ifRecord?: Record<string, unknown> }, Deleted>;
 }
 
 /**
  * Declares a collection of records, in `resources/data.ts`:
  * `collection({ name: "outbound", key: "company", fields: { company: "text", stage: { enum: ["new", "won"] } } })`.
- * Its operations are `data.<name>.get`, `.list`, `.save` and `.delete`, which a workflow names in
- * `uses` and calls on `ctx.data.<name>`. The name is a lowercase letter then letters and digits;
+ * Its operations are `data.<name>.get`, `.list`, `.count`, `.save`, `.saveMany` and `.delete`,
+ * which a workflow names in `uses` and calls on `ctx.data.<name>`. The name is a lowercase letter then letters and digits;
  * the key is a required text field, each record's own and unique. In an app's folder
  * (`apps/<app>/resources/data.ts`) the runtime names it `<app>.<name>`: `data.<app>.<name>.get`,
  * called on `ctx.data.<app>.<name>`.
@@ -175,10 +191,21 @@ const SAVED = z.object({
   issues: z.array(z.object({ path: z.array(z.union([z.string(), z.number()])), message: z.string() })).optional(),
 });
 
-/** A collection's four operations, for `defineConnector`. */
+/** What `delete` answers, and a batch for each of its deletes: whether there was a record to delete. */
+const DELETED = z.object({ key: z.string(), deleted: z.boolean() });
+
+/** A collection's six operations, for `defineConnector`. */
 function specsOf(name: string, key: string, fields: Record<string, Field>, record: z.ZodType): Record<string, OpSpec> {
   const at = (k: string) => `${DATA_VENDOR}:${name}/${k}`;
-  const byKey = z.object({ key: z.string().min(1) });
+  const whole = `${DATA_VENDOR}:${name}`;
+  const ifRecord = z.record(z.string(), z.unknown()).optional();
+  const byKey = z.object({ key: z.string().min(1), ifRecord });
+  /** What `save` takes, and a batch for each of its records. */
+  const saving = z
+    .object({ record, ifAbsent: z.boolean().optional(), ifRecord })
+    .refine((input) => !(input.ifAbsent && input.ifRecord !== undefined), {
+      message: "Choose ifAbsent or ifRecord, not both",
+    });
   const names = Object.keys(fields);
   const where = z.strictObject(
     Object.fromEntries(
@@ -194,7 +221,7 @@ function specsOf(name: string, key: string, fields: Record<string, Field>, recor
       effect: "read",
       idempotent: true,
       description: `Get a record of ${name} by its ${key}`,
-      input: byKey,
+      input: z.object({ key: z.string().min(1) }),
       output: SAVED.nullable(),
       target: ({ key: k }: { key: string }) => at(k),
     },
@@ -208,26 +235,54 @@ function specsOf(name: string, key: string, fields: Record<string, Field>, recor
         limit: z.number().int().min(1).max(LIST_LIMIT.max).default(LIST_LIMIT.default),
       }),
       output: z.array(SAVED),
-      target: () => `${DATA_VENDOR}:${name}`,
+      target: () => whole,
+    },
+    count: {
+      effect: "read",
+      idempotent: true,
+      description: `Count the records of ${name}, or those with fields equal to a value or within a range`,
+      input: z.object({ where: where.optional() }),
+      output: z.object({ count: z.number().int() }),
+      target: () => whole,
     },
     save: {
       effect: "write",
       idempotent: true,
       description: `Save a record of ${name}: added, or replacing the one with its ${key}; ifAbsent refuses a different existing record`,
-      input: z
-        .object({ record, ifAbsent: z.boolean().optional(), ifRecord: z.record(z.string(), z.unknown()).optional() })
-        .refine((input) => !(input.ifAbsent && input.ifRecord !== undefined), {
-          message: "Choose ifAbsent or ifRecord, not both",
-        }),
+      input: saving,
       output: SAVED,
       target: ({ record: r }: { record: Record<string, string> }) => at(r[key]!),
+    },
+    [BATCH]: {
+      effect: "write",
+      idempotent: true,
+      description: `Save and delete records of ${name} together, all or none, each entry decided and recorded as its own save or delete`,
+      input: z
+        .object({
+          records: z.array(saving).default([]),
+          deletes: z.array(byKey).default([]),
+        })
+        .superRefine((batch, ctx) => {
+          const keys = [
+            ...batch.records.map((e) => (e.record as Record<string, string>)[key]!),
+            ...batch.deletes.map((e) => e.key),
+          ];
+          if (keys.length < 1 || keys.length > BATCH_LIMIT) {
+            ctx.addIssue({ code: "custom", message: `A batch has 1 to ${BATCH_LIMIT} entries` });
+          }
+          if (new Set(keys).size !== keys.length) {
+            ctx.addIssue({ code: "custom", message: `A batch names each ${key} once` });
+          }
+        }),
+      output: z.array(z.union([SAVED, DELETED])),
+      target: () => whole,
     },
     delete: {
       effect: "write",
       idempotent: true,
-      description: `Delete the record of ${name} with this ${key}`,
+      description: `Delete the record of ${name} with this ${key}; ifRecord refuses a changed or missing one`,
       input: byKey,
-      output: z.object({ deleted: z.boolean() }),
+      output: DELETED,
       target: ({ key: k }: { key: string }) => at(k),
     },
   };
@@ -265,14 +320,21 @@ const updatedBy = (call: CallContext) => call.by ?? `run:${call.runId}`;
 
 /** The vendor `data` as a connector of the collections' operations, the very ones each `collection()` made. */
 export function collectionsConnector(list: readonly Collection[]): Connector<typeof DATA_VENDOR, DataOps> {
-  const ops = list.map((c) => [c.name, { get: c.get, list: c.list, save: c.save, delete: c.delete }]);
+  const ops = list.map((c) => [
+    c.name,
+    { get: c.get, list: c.list, count: c.count, save: c.save, [BATCH]: c.saveMany, delete: c.delete },
+  ]);
   return { ...defineConnector(DATA_VENDOR, {}), ...Object.fromEntries(ops) } as Connector<typeof DATA_VENDOR, DataOps>;
 }
 
 const COLUMNS = { key: data.key, record: data.record, updatedAt: data.updatedAt, updatedBy: data.updatedBy };
-const recordExists = () =>
-  new DriverError("Collection record already exists", { retryable: false, status: 409, vendorCode: "record_exists" });
-/** The refusal of an `ifRecord` save, carrying the record as it stands (`current`), or `null` when it is gone. */
+/** The refusal of an `ifAbsent` save, carrying the record that is there (`current`). */
+const recordExists = (current: Saved) =>
+  Object.assign(
+    new DriverError("Collection record already exists", { retryable: false, status: 409, vendorCode: "record_exists" }),
+    { current },
+  );
+/** The refusal of an `ifRecord` save or delete, carrying the record as it stands (`current`), or `null` when it is gone. */
 const recordChanged = (current: Saved | null) =>
   Object.assign(
     new DriverError(current ? "Collection record changed" : "Collection record is missing", {
@@ -282,9 +344,30 @@ const recordChanged = (current: Saved | null) =>
     }),
     { current },
   );
+/** An entry of a batch its `ifRecord` refused: its key, and the record as it stands, or `null` when it is gone. */
+export type Conflict = { key: string; current: Saved | null };
+/** The refusal of a batch, carrying every entry refused (`conflicts`), with the record as each stands. */
+const recordsChanged = (conflicts: Conflict[]) =>
+  Object.assign(
+    new DriverError(`${conflicts.length} of the batch's records changed or are missing`, {
+      retryable: false,
+      status: 409,
+      vendorCode: "record_changed",
+    }),
+    { conflicts },
+  );
+/** The refusal of one entry (its `ifRecord` or `ifAbsent`), as a batch collects it; any other failure is the batch's. */
+const conflictOf = (key: string, err: unknown): Conflict => {
+  const code = vendorCodeOf(err);
+  if (code !== "record_changed" && code !== "record_exists") throw err;
+  return { key, current: (err as { current: Saved | null }).current };
+};
 const sameJson = (a: Record<string, unknown>, b: Record<string, unknown>) =>
   isDeepStrictEqual(JSON.parse(JSON.stringify(a)), JSON.parse(JSON.stringify(b)));
 type SaveInput = { record: Record<string, unknown>; ifAbsent?: boolean; ifRecord?: Record<string, unknown> };
+type DeleteInput = { key: string; ifRecord?: Record<string, unknown> };
+/** A `saveMany` input as its schema parses it. */
+type Batch = { records: SaveInput[]; deletes: DeleteInput[] };
 // By namespace: the fake names a range's bounds `gt`, `gte`, `lt` and `lte`.
 const RANGE = { gt: drizzle.gt, gte: drizzle.gte, lt: drizzle.lt, lte: drizzle.lte };
 
@@ -313,11 +396,58 @@ export function collectionsDriver(list: readonly Collection[], store: { db(): Pr
         updatedBy: row.updatedBy,
       });
     const here = (key: string) => and(eq(data.collection, c.name), eq(data.key, key));
+    /** The record on `db`, as `get` answers it and a refused save or delete carries it (`current`). */
+    const getOn = async (db: Db, key: string) => {
+      const [row] = await db.select(COLUMNS).from(data).where(here(key));
+      return row ? saved(row) : null;
+    };
+    /** One save on `db`, as `save` makes it and a batch makes each of its records. */
+    const saveOn = async (db: Db, { record, ifAbsent, ifRecord }: SaveInput, by: string) => {
+      const key = record[c.key] as string;
+      if (ifRecord !== undefined) {
+        // PostgreSQL locks and rechecks the predicate on a concurrent update. A lost-response
+        // retry may recover its own identical result, but never overwrite another actor's state.
+        const retry = and(eq(data.record, record), eq(data.updatedBy, by))!;
+        const [row] = await db
+          .update(data)
+          .set({ record, updatedAt: sql`CASE WHEN ${retry} THEN ${data.updatedAt} ELSE now() END`, updatedBy: by })
+          .where(and(here(key), or(eq(data.record, ifRecord), retry)))
+          .returning(COLUMNS);
+        if (row) return saved(row);
+        throw recordChanged(await getOn(db, key));
+      }
+      // The conflict row is locked by Postgres: never implement an insert-only claim as get + save.
+      // An identical retry by the same actor keeps the first receipt and never overwrites later progress.
+      const conflict = ifAbsent
+        ? { set: { record: sql`${data.record}` }, setWhere: and(eq(data.record, record), eq(data.updatedBy, by)) }
+        : { set: { record, updatedAt: sql`now()`, updatedBy: by } };
+      const [row] = await db
+        .insert(data)
+        .values({ collection: c.name, key, record, updatedBy: by })
+        .onConflictDoUpdate({ target: [data.collection, data.key], ...conflict })
+        .returning(COLUMNS);
+      if (row) return saved(row);
+      const current = await getOn(db, key);
+      // Gone between the refusal and this read: what refused it was a record, so it has changed since.
+      throw current ? recordExists(current) : recordChanged(null);
+    };
+    /**
+     * One delete on `db`, as `delete` makes it and a batch makes each of its deletes. A retry
+     * (`attempt` past the first) that finds no record under `ifRecord` deleted it the first time,
+     * and its answer was lost: nothing is left to recover a receipt from, so it is deleted.
+     */
+    const deleteOn = async (db: Db, { key, ifRecord }: DeleteInput, retrying: boolean): Promise<Deleted> => {
+      const gone = await db
+        .delete(data)
+        .where(ifRecord === undefined ? here(key) : and(here(key), eq(data.record, ifRecord)))
+        .returning({ key: data.key });
+      if (gone.length || ifRecord === undefined) return { key, deleted: gone.length > 0 };
+      const current = await getOn(db, key);
+      if (current === null && retrying) return { key, deleted: true };
+      throw recordChanged(current);
+    };
     const ops: Record<string, (input: any, call: CallContext) => Promise<unknown>> = {
-      get: async ({ key }: { key: string }) => {
-        const [row] = await (await store.db()).select(COLUMNS).from(data).where(here(key));
-        return row ? saved(row) : null;
-      },
+      get: async ({ key }: { key: string }) => getOn(await store.db(), key),
       list: async (listing: Listing) => {
         const { where, order } = listClauses(c, listing);
         const rows = await (
@@ -330,40 +460,35 @@ export function collectionsDriver(list: readonly Collection[], store: { db(): Pr
           .limit(listing.limit);
         return rows.map(saved);
       },
-      save: async ({ record, ifAbsent, ifRecord }: SaveInput, call) => {
-        const db = await store.db();
-        const key = record[c.key] as string;
-        const by = updatedBy(call);
-        if (ifRecord !== undefined) {
-          // PostgreSQL locks and rechecks the predicate on a concurrent update. A lost-response
-          // retry may recover its own identical result, but never overwrite another actor's state.
-          const retry = and(eq(data.record, record), eq(data.updatedBy, by))!;
-          const [row] = await db
-            .update(data)
-            .set({ record, updatedAt: sql`CASE WHEN ${retry} THEN ${data.updatedAt} ELSE now() END`, updatedBy: by })
-            .where(and(here(key), or(eq(data.record, ifRecord), retry)))
-            .returning(COLUMNS);
-          if (row) return saved(row);
-          const [current] = await db.select(COLUMNS).from(data).where(here(key));
-          throw recordChanged(current ? saved(current) : null);
-        }
-        // The conflict row is locked by Postgres: never implement an insert-only claim as get + save.
-        // An identical retry by the same actor keeps the first receipt and never overwrites later progress.
-        const conflict = ifAbsent
-          ? { set: { record: sql`${data.record}` }, setWhere: and(eq(data.record, record), eq(data.updatedBy, by)) }
-          : { set: { record, updatedAt: sql`now()`, updatedBy: by } };
-        const [row] = await db
-          .insert(data)
-          .values({ collection: c.name, key, record, updatedBy: by })
-          .onConflictDoUpdate({ target: [data.collection, data.key], ...conflict })
-          .returning(COLUMNS);
-        if (!row) throw recordExists();
-        return saved(row);
+      count: async (counting: Pick<Listing, "where">) => {
+        const [row] = await (
+          await store.db()
+        )
+          .select({ count: drizzle.count() })
+          .from(data)
+          .where(listClauses(c, counting).where);
+        return { count: row!.count };
       },
-      delete: async ({ key }: { key: string }) => {
-        const gone = await (await store.db()).delete(data).where(here(key)).returning({ key: data.key });
-        return { deleted: gone.length > 0 };
-      },
+      save: async (input: SaveInput, call) => saveOn(await store.db(), input, updatedBy(call)),
+      // One transaction: a conflict on any entry, collected so each is answered, rolls back them all.
+      [BATCH]: async ({ records, deletes }: Batch, call) =>
+        (await store.db()).transaction(async (tx) => {
+          const by = updatedBy(call);
+          const results: unknown[] = [];
+          const conflicts: Conflict[] = [];
+          const made = async (key: string, entry: Promise<unknown>) => {
+            try {
+              results.push(await entry);
+            } catch (err) {
+              conflicts.push(conflictOf(key, err));
+            }
+          };
+          for (const e of records) await made(e.record[c.key] as string, saveOn(tx, e, by));
+          for (const e of deletes) await made(e.key, deleteOn(tx, e, call.attempt > 1));
+          if (conflicts.length) throw recordsChanged(conflicts);
+          return results;
+        }),
+      delete: async (input: DeleteInput, call) => deleteOn(await store.db(), input, call.attempt > 1),
     };
     return [c.name, ops];
   });
@@ -390,7 +515,10 @@ const SQL_TYPE = { string: "text", number: "numeric", boolean: "boolean" } as co
  * compares it); a missing value, or one of another type, is SQL's null: it matches no filter and
  * sorts last.
  */
-function listClauses(c: Collection, { where = {}, order }: Listing): { where: SQL | undefined; order: SQL[] } {
+function listClauses(
+  c: Collection,
+  { where = {}, order }: Pick<Listing, "where" | "order">,
+): { where: SQL | undefined; order: SQL[] } {
   const types = jsonTypesOf(c);
   const field = (name: string) => {
     const type = types[name]!;
@@ -481,42 +609,77 @@ export function collectionsFake(list: readonly Collection[]): Fake<CollectionsSt
           const records = () => state[c.name]!;
           const types = jsonTypesOf(c);
           const saved = (stored: Stored) => answer(c, structuredClone(stored));
+          const stored = (key: string) => (Object.hasOwn(records(), key) ? records()[key] : undefined);
+          const matching = (where: Record<string, unknown> = {}) =>
+            Object.values(records()).filter((s) => matches(s.record, where, types));
+          const save = ({ record, ifAbsent, ifRecord }: SaveInput, by: string) => {
+            const key = record[c.key] as string;
+            const previous = stored(key);
+            if (ifRecord !== undefined) {
+              if (!previous) throw recordChanged(null);
+              if (previous.updatedBy === by && sameJson(previous.record, record)) return saved(previous);
+              if (!sameJson(previous.record, ifRecord)) throw recordChanged(saved(previous));
+            }
+            if (ifAbsent && previous) {
+              // Postgres jsonb ignores property order and omitted undefined fields.
+              if (previous.updatedBy !== by || !sameJson(previous.record, record)) throw recordExists(saved(previous));
+              return saved(previous);
+            }
+            const next = { key, record: structuredClone(record), updatedAt: new Date().toISOString(), updatedBy: by };
+            records()[key] = next;
+            return saved(next);
+          };
+          const remove = ({ key, ifRecord }: DeleteInput, retrying: boolean): Deleted => {
+            const previous = stored(key);
+            if (ifRecord !== undefined && !(previous && sameJson(previous.record, ifRecord))) {
+              // As the driver: a retry finding no record deleted it the first time.
+              if (!previous && retrying) return { key, deleted: true };
+              throw recordChanged(previous ? saved(previous) : null);
+            }
+            delete records()[key];
+            return { key, deleted: previous !== undefined };
+          };
           const ops: Record<string, (input: any, call: CallContext) => Promise<unknown>> = {
-            get: async ({ key }: { key: string }) => (Object.hasOwn(records(), key) ? saved(records()[key]!) : null),
-            list: async ({ where = {}, order, limit }: Listing) =>
-              Object.values(records())
-                .filter((s) => matches(s.record, where, types))
-                .toSorted(byOrder(order, types))
-                .slice(0, limit)
-                .map(saved),
-            save: async ({ record, ifAbsent, ifRecord }: SaveInput, call) => {
-              const key = record[c.key] as string;
-              if (ifRecord !== undefined) {
-                const previous = Object.hasOwn(records(), key) ? records()[key]! : undefined;
-                if (!previous) throw recordChanged(null);
-                if (previous.updatedBy === updatedBy(call) && sameJson(previous.record, record)) return saved(previous);
-                if (!sameJson(previous.record, ifRecord)) throw recordChanged(saved(previous));
-              }
-              if (ifAbsent && Object.hasOwn(records(), key)) {
-                const previous = records()[key]!;
-                // Postgres jsonb ignores property order and omitted undefined fields.
-                if (previous.updatedBy !== updatedBy(call) || !sameJson(previous.record, record)) throw recordExists();
-                return saved(previous);
-              }
-              const stored = {
-                key,
-                record: structuredClone(record),
-                updatedAt: new Date().toISOString(),
-                updatedBy: updatedBy(call),
+            get: async ({ key }: { key: string }) => {
+              const s = stored(key);
+              return s ? saved(s) : null;
+            },
+            list: async ({ where, order, limit }: Listing) =>
+              matching(where).toSorted(byOrder(order, types)).slice(0, limit).map(saved),
+            count: async ({ where }: Pick<Listing, "where">) => ({ count: matching(where).length }),
+            save: async (input: SaveInput, call) => save(input, updatedBy(call)),
+            // All or none, as the driver's transaction: a failure puts back every entry made before it.
+            [BATCH]: async ({ records: saves, deletes }: Batch, call) => {
+              const by = updatedBy(call);
+              const results: unknown[] = [];
+              const conflicts: Conflict[] = [];
+              const before = new Map<string, Stored | undefined>();
+              const restore = () => {
+                for (const [key, previous] of before) {
+                  if (previous) records()[key] = previous;
+                  else delete records()[key];
+                }
               };
-              records()[key] = stored;
-              return saved(stored);
+              const made = (key: string, entry: () => unknown) => {
+                before.set(key, stored(key));
+                try {
+                  results.push(entry());
+                } catch (err) {
+                  conflicts.push(conflictOf(key, err));
+                }
+              };
+              try {
+                for (const e of saves) made(e.record[c.key] as string, () => save(e, by));
+                for (const e of deletes) made(e.key, () => remove(e, call.attempt > 1));
+              } catch (err) {
+                restore();
+                throw err;
+              }
+              if (!conflicts.length) return results;
+              restore();
+              throw recordsChanged(conflicts);
             },
-            delete: async ({ key }: { key: string }) => {
-              const had = Object.hasOwn(records(), key);
-              delete records()[key];
-              return { deleted: had };
-            },
+            delete: async (input: DeleteInput, call) => remove(input, call.attempt > 1),
           };
           return [c.name, ops];
         }),
