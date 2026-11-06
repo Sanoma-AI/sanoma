@@ -133,18 +133,21 @@ describe("the collections' driver on Postgres", () => {
       call(leads.save, { record: { ...record, seats: 1 }, ifRecord: record }, "ada"),
       call(leads.save, { record: { ...record, seats: 2 }, ifRecord: record }, "bo"),
     ]);
-    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const won = results.find((result) => result.status === "fulfilled");
+    expect(won).toBeDefined();
+    // The refusal carries the record as the winner left it, so the loser settles the conflict without another read.
     expect(results.find((result) => result.status === "rejected")).toMatchObject({
-      reason: { status: 409, retryable: false, vendorCode: "record_changed" },
+      reason: { status: 409, retryable: false, vendorCode: "record_changed", current: won!.value },
     });
     const current = await call(leads.get, { key: "Acme" });
     await expect(call(leads.save, { record, ifRecord: record }, "late")).rejects.toMatchObject({
       vendorCode: "record_changed",
+      current,
     });
     expect(await call(leads.get, { key: "Acme" })).toEqual(current);
     await expect(
       call(leads.save, { record: { company: "Missing", stage: "new" }, ifRecord: {} }),
-    ).rejects.toMatchObject({ vendorCode: "record_changed" });
+    ).rejects.toMatchObject({ vendorCode: "record_changed", current: null });
     expect(await call(leads.get, { key: "Missing" })).toBeNull();
   });
 
@@ -275,16 +278,19 @@ unless { context has before };
       const calls = (await app.client.ledger(runId)).filter(
         (r): r is Extract<LedgerRecord, { type: "op.called" }> => r.type === "op.called",
       );
-      expect(calls.map(({ op, effect, node, input }) => ({ op, effect, node, input }))).toEqual([
-        { op: "data.outbound.get", effect: "read", node: "0", input: { key: "Acme" } },
+      expect(calls.map(({ op, effect, node, target, input }) => ({ op, effect, node, target, input }))).toEqual([
+        { op: "data.outbound.get", effect: "read", node: "0", target: "data:outbound/Acme", input: { key: "Acme" } },
         {
           op: "data.outbound.save",
           effect: "write",
           node: "1.0.0",
+          target: "data:outbound/Acme",
           input: { record: { ...lead, stage: "contacted" }, ifRecord: lead },
         },
       ]);
       expect(calls[1]!.output).toMatchObject({ key: "Acme", updatedBy: `run:${runId}` });
+      // The record's history, from the app's ledger (on disk): the run's calls on it, newest first.
+      expect((await app.client.history("data:outbound/Acme")).map((r) => r.id)).toEqual([calls[1]!.id, calls[0]!.id]);
       // A save sees the record it replaces: the policy let it through.
       expect(calls.map(({ decision }) => decision.kind)).toEqual(["allow", "allow"]);
       const rows = await store

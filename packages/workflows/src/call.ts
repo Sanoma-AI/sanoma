@@ -293,7 +293,7 @@ function strict<T extends object>(obj: T, path: string, workflow: string): T {
 }
 
 /** The resource instance the call acts on, from the operation's `target`, when it declares one. */
-function targetOf(op: Op, input: unknown): { target?: string } {
+export function targetOf(op: Op, input: unknown): { target?: string } {
   if (!op.target) return {};
   const target: unknown = op.target(input);
   if (typeof target !== "string") {
@@ -546,6 +546,7 @@ async function callOp(run: Run, id: string, input: unknown, place: Placed, ref?:
     type: "op.called",
     op: op.id,
     ...place,
+    ...targetOf(op, parsed),
     effect: op.effect,
     input: logged,
     decision,

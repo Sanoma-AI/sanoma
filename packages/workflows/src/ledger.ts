@@ -1,9 +1,9 @@
 import type { ConnectionSnapshot } from "./connection.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
-import { appendFile, mkdir, readFile, truncate } from "node:fs/promises";
+import { appendFile, mkdir, readdir, readFile, truncate } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { eq, sql } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { setTimeout as delay } from "node:timers/promises";
 import { isDeepStrictEqual } from "node:util";
 import { type Db, lazyDb, pgCode } from "./db.ts";
@@ -48,6 +48,11 @@ export type LedgerRecord = {
       type: "op.called";
       connection?: ConnectionSnapshot;
       op: string;
+      /**
+       * The instance the call acted on (`data:outbound/Acme`), from the operation's `target`: what
+       * `readByTarget` finds the record by. Absent for an operation that declares none.
+       */
+      target?: string;
       /**
        * The outline node of the call that made it (`OutlineNode.path`): where the step is in the
        * code. Absent in records written before the worker placed calls (ledgers from 0.1).
@@ -234,6 +239,8 @@ export interface LedgerStore {
   append(record: LedgerRecord): Promise<void>;
   /** A run's records in `seq` order. */
   read(runId: string): Promise<LedgerRecord[]>;
+  /** The `op.called` records whose `target` it is, across every run, newest first, at most `limit`: a record's history. */
+  readByTarget(target: string, limit: number): Promise<LedgerRecord[]>;
   /**
    * Releases what the store holds (a connection pool), for good. Called by the one owner of the
    * store: the worker's `stop` and `SanomaClient.close` close the Postgres store each made for a
@@ -260,6 +267,13 @@ export function ownedLedger(config: { ledger?: LedgerStore; databaseUrl: string 
 }
 
 const bySeq = (a: LedgerRecord, b: LedgerRecord) => a.seq - b.seq;
+
+/** The calls among `records` that acted on `target`, as `readByTarget` reads them: newest first, by `at`, then `seq`. */
+const actedOn = (records: LedgerRecord[], target: string, limit: number): LedgerRecord[] =>
+  records
+    .filter((r) => r.type === "op.called" && r.target === target)
+    .toSorted((a, b) => b.at - a.at || b.seq - a.seq)
+    .slice(0, limit);
 
 /** An error that trying again would only repeat. */
 const final = (message: string, cause: unknown) => Object.assign(new Error(message, { cause }), { retryable: false });
@@ -364,6 +378,16 @@ export function jsonlLedger(dir: string): LedgerStore {
       // A case-insensitive file system can map two run ids to one file.
       return (await load(path)).records.filter((r) => r.runId === runId).toSorted(bySeq);
     },
+    async readByTarget(target, limit) {
+      await Promise.all([...queues.values()].map((pending) => pending.catch(() => {})));
+      const files = await readdir(root).catch((err: NodeJS.ErrnoException) => {
+        if (err.code === "ENOENT") return [];
+        throw err;
+      });
+      const runs = await Promise.all(files.filter((f) => f.endsWith(".jsonl")).map((f) => load(join(root, f))));
+      const records = runs.flatMap((run) => run.records);
+      return actedOn(records, target, limit);
+    },
   };
 }
 
@@ -396,6 +420,18 @@ export function postgresLedger(databaseUrl: string): LedgerStore & { close(): Pr
         .where(eq(ledger.runId, runId))
         .orderBy(ledger.seq, ledger.n);
       // In seq order, as the other stores read; two records of one seq in write order.
+      return rows.map((r) => r.record);
+    },
+    async readByTarget(target, limit) {
+      const rows = await (
+        await store.db()
+      )
+        .select({ record: ledger.record })
+        .from(ledger)
+        .where(eq(ledger.target, target))
+        // Newest first, as the other stores read; two records of one `at` and `seq` in write order.
+        .orderBy(desc(sql`(${ledger.record} ->> 'at')::bigint`), desc(ledger.seq), desc(ledger.n))
+        .limit(limit);
       return rows.map((r) => r.record);
     },
     close: store.close,
@@ -437,6 +473,10 @@ export function memoryLedger(): LedgerStore {
     },
     async read(runId) {
       return [...(runs.get(runId)?.values() ?? [])].map((r) => structuredClone(r)).toSorted(bySeq);
+    },
+    async readByTarget(target, limit) {
+      const records = [...runs.values()].flatMap((run) => [...run.values()]);
+      return actedOn(records, target, limit).map((r) => structuredClone(r));
     },
   };
 }

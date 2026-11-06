@@ -344,7 +344,9 @@ export function resolveDatabaseUrl(config: { databaseUrl?: string }, env: NodeJS
 }
 
 const isStore = (x: unknown): x is LedgerStore =>
-  typeof (x as LedgerStore | null)?.append === "function" && typeof (x as LedgerStore).read === "function";
+  typeof (x as LedgerStore | null)?.append === "function" &&
+  typeof (x as LedgerStore).read === "function" &&
+  typeof (x as LedgerStore).readByTarget === "function";
 
 /** The config's `ledger`, checked, when it gives one. */
 function ledgerOf(config: SanomaConfig): LedgerStore | undefined {

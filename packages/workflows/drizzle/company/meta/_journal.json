@@ -22,6 +22,13 @@
       "when": 1793857547422,
       "tag": "0002_runs_tell_the_app",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1793900809955,
+      "tag": "0003_ledger_target",
+      "breakpoints": true
     }
   ]
 }

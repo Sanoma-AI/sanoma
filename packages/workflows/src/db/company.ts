@@ -45,6 +45,7 @@ export const credentials = pgTable(
 /**
  * The Postgres ledger's records. `n` is the write order, `id` the record's, which the first write
  * of takes, and `seq` the record's place in its run: a run reads in `seq` order, then write order.
+ * `target` is the JSON's (an `op.called`'s instance), kept by Postgres, for a record's history.
  */
 export const ledger = pgTable(
   "sanoma_ledger",
@@ -54,8 +55,15 @@ export const ledger = pgTable(
     runId: text().notNull(),
     seq: integer().notNull(),
     record: jsonb().$type<LedgerRecord>().notNull(),
+    target: text().generatedAlwaysAs(sql`"record" ->> 'target'`),
   },
-  (t) => [index("sanoma_ledger_run_seq").on(t.runId, t.seq, t.n)],
+  (t) => [
+    index("sanoma_ledger_run_seq").on(t.runId, t.seq, t.n),
+    // Only the `op.called` records carry a target: the others stay out of the index.
+    index("sanoma_ledger_target")
+      .on(t.target)
+      .where(sql`${t.target} is not null`),
+  ],
 );
 
 /** The collections' records (`collection.ts`): one row per collection and key, the record as JSON. */

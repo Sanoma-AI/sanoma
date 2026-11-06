@@ -272,12 +272,16 @@ export function collectionsConnector(list: readonly Collection[]): Connector<typ
 const COLUMNS = { key: data.key, record: data.record, updatedAt: data.updatedAt, updatedBy: data.updatedBy };
 const recordExists = () =>
   new DriverError("Collection record already exists", { retryable: false, status: 409, vendorCode: "record_exists" });
-const recordChanged = () =>
-  new DriverError("Collection record changed or is missing", {
-    retryable: false,
-    status: 409,
-    vendorCode: "record_changed",
-  });
+/** The refusal of an `ifRecord` save, carrying the record as it stands (`current`), or `null` when it is gone. */
+const recordChanged = (current: Saved | null) =>
+  Object.assign(
+    new DriverError(current ? "Collection record changed" : "Collection record is missing", {
+      retryable: false,
+      status: 409,
+      vendorCode: "record_changed",
+    }),
+    { current },
+  );
 const sameJson = (a: Record<string, unknown>, b: Record<string, unknown>) =>
   isDeepStrictEqual(JSON.parse(JSON.stringify(a)), JSON.parse(JSON.stringify(b)));
 type SaveInput = { record: Record<string, unknown>; ifAbsent?: boolean; ifRecord?: Record<string, unknown> };
@@ -339,8 +343,9 @@ export function collectionsDriver(list: readonly Collection[], store: { db(): Pr
             .set({ record, updatedAt: sql`CASE WHEN ${retry} THEN ${data.updatedAt} ELSE now() END`, updatedBy: by })
             .where(and(here(key), or(eq(data.record, ifRecord), retry)))
             .returning(COLUMNS);
-          if (!row) throw recordChanged();
-          return saved(row);
+          if (row) return saved(row);
+          const [current] = await db.select(COLUMNS).from(data).where(here(key));
+          throw recordChanged(current ? saved(current) : null);
         }
         // The conflict row is locked by Postgres: never implement an insert-only claim as get + save.
         // An identical retry by the same actor keeps the first receipt and never overwrites later progress.
@@ -488,9 +493,9 @@ export function collectionsFake(list: readonly Collection[]): Fake<CollectionsSt
               const key = record[c.key] as string;
               if (ifRecord !== undefined) {
                 const previous = Object.hasOwn(records(), key) ? records()[key]! : undefined;
-                if (!previous) throw recordChanged();
+                if (!previous) throw recordChanged(null);
                 if (previous.updatedBy === updatedBy(call) && sameJson(previous.record, record)) return saved(previous);
-                if (!sameJson(previous.record, ifRecord)) throw recordChanged();
+                if (!sameJson(previous.record, ifRecord)) throw recordChanged(saved(previous));
               }
               if (ifAbsent && Object.hasOwn(records(), key)) {
                 const previous = records()[key]!;

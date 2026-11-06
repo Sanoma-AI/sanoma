@@ -271,7 +271,7 @@ describe("a call the ledger cannot record", () => {
   // Records each run's start, then refuses everything after it, for good.
   const kept = memoryLedger();
   const full: LedgerStore = {
-    read: kept.read,
+    ...kept,
     async append(record) {
       if (record.type !== "run.started") throw Object.assign(new Error("disk full"), { retryable: false });
       await kept.append(record);
@@ -847,7 +847,7 @@ describe("a ledger store that fails for a while", () => {
   const store = memoryLedger();
   const appends = new Map<string, number>();
   const flaky: LedgerStore = {
-    read: (runId) => store.read(runId),
+    ...store,
     async append(record) {
       const n = (appends.get(record.id) ?? 0) + 1;
       appends.set(record.id, n);
