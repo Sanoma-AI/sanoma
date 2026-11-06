@@ -371,18 +371,21 @@ describe("the Data section", () => {
       input: { record: { ...read, stage: "contacted", seats: 3 }, ifRecord: read },
       id: crypto.randomUUID(),
     });
-    expect((await historyAs("ada", key)).body).toEqual([
-      expect.objectContaining({
-        by: "bo",
-        workflow: "call",
-        runId: expect.stringMatching(/^direct:bo:/),
-        change: [
-          { field: "stage", before: "researched", after: "contacted" },
-          { field: "seats", after: 3 },
-        ],
-      }),
-      expect.objectContaining({ by: "cy", change: "created" }),
-    ]);
+    expect((await historyAs("ada", key)).body).toEqual({
+      more: false,
+      writes: [
+        expect.objectContaining({
+          by: "bo",
+          workflow: "call",
+          runId: expect.stringMatching(/^direct:bo:/),
+          change: [
+            { field: "stage", before: "researched", after: "contacted" },
+            { field: "seats", after: 3 },
+          ],
+        }),
+        expect.objectContaining({ by: "cy", change: "created" }),
+      ],
+    });
     const { html } = await page(`/data/outbound${searchOf({ record: key })}`);
     expect(html).toContain("History · from the ledger");
     // Newest first; a direct write has no run page to link to.

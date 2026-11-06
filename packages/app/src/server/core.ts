@@ -53,6 +53,7 @@ import {
   type ErrorResponse,
   type FieldChange,
   type HistoryEntry,
+  type RecordHistory,
   type HistoryRequest,
   type PermissionsResponse,
   type PreviewQuery,
@@ -642,9 +643,14 @@ const HISTORY_CALLS = 500;
 /**
  * The record `key` of the collection `name`, its writes newest first (`HistoryEntry`), from the
  * ledger's calls on its target (`SanomaClient.history`): those that wrote it, a run's reads and
- * the failed calls left out, each save against the write before it.
+ * the failed calls left out, each save against the write before it; `more` when there were
+ * more calls than `HISTORY_CALLS`.
  */
-export async function recordHistory(app: AppContext, actor: Principal, { name, key }: HistoryRequest) {
+export async function recordHistory(
+  app: AppContext,
+  actor: Principal,
+  { name, key }: HistoryRequest,
+): Promise<RecordHistory> {
   // The ledger keeps every record a write saved, and `history` answers whoever asks: so only
   // someone the policy lets read the record reads its history, asked as `callFn` asks the read
   // (its refusal, a 403, is the answer). A direct read is not recorded, so asking adds no line.
@@ -657,10 +663,10 @@ export async function recordHistory(app: AppContext, actor: Principal, { name, k
   // Its fields in the order declared, then any a record holds that it no longer declares.
   const declared = Object.keys(app.resolved.collections.get(name)!.fields);
   const deleteOp = `data.${name}.delete`;
-  const calls = await app.client.history(target, HISTORY_CALLS);
-  // Cut at the limit, the oldest write read may not be the record's first: it is only what the next changed.
-  const cut = calls.length === HISTORY_CALLS;
-  const writes = calls.filter(
+  // One more than the limit, to know whether there are more.
+  const read = await app.client.history(target, HISTORY_CALLS + 1);
+  const more = read.length > HISTORY_CALLS;
+  const writes = read.slice(0, HISTORY_CALLS).filter(
     (r): r is Extract<LedgerRecord, { type: "op.called" }> =>
       r.type === "op.called" &&
       r.effect === "write" &&
@@ -688,7 +694,8 @@ export async function recordHistory(app: AppContext, actor: Principal, { name, k
       change: !after ? "deleted" : before ? fieldChanges(declared, before, after) : "created",
     };
   });
-  return cut ? entries.slice(0, -1) : entries;
+  // With more, the oldest write read may not be the record's first: it is only what the next changed.
+  return { writes: more ? entries.slice(0, -1) : entries, more };
 }
 
 /** The fields whose values differ between two records, those `declared` first in its order. */

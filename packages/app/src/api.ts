@@ -536,6 +536,15 @@ export interface HistoryEntry {
   change: "created" | "deleted" | FieldChange[];
 }
 
+/**
+ * A record's history (`getHistory`): its writes, newest first, and `more` when the ledger held
+ * more calls on it than were read (its reads count), so older writes are not among them.
+ */
+export interface RecordHistory {
+  writes: HistoryEntry[];
+  more: boolean;
+}
+
 /** What `previewFn` asks (`PreviewRequest` without its principal): at most 200 actions, each on a target when known. */
 export const PreviewQuery = z
   .array(

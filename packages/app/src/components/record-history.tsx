@@ -13,7 +13,10 @@ import { FROM, Value } from "./data-grid.tsx";
 // newest first, "<when> · <who> · <what changed>", and its run. Read as the person asking, whom
 // the policy must let read the record.
 
-/** The record `recordKey`'s history: its writes, "No changes yet" before any, or why it cannot be read. */
+/**
+ * The record `recordKey`'s history: its writes, "No changes yet" before any, that older ones are
+ * not shown when the ledger holds more, or why it cannot be read.
+ */
 export function RecordHistory({ name, recordKey }: { name: string; recordKey: string }) {
   const { actor } = useActor();
   // Every read is the policy's to decide as someone, as the records are.
@@ -21,14 +24,21 @@ export function RecordHistory({ name, recordKey }: { name: string; recordKey: st
   return (
     <section aria-label="History" className="flex flex-col gap-2 border-t pt-4 text-sm">
       <h3 className="text-xs font-medium text-muted-foreground">History · from the ledger</h3>
-      {history.data?.length ? (
-        <ul className="flex flex-col gap-1.5">
-          {history.data.map((entry, i) => (
-            <HistoryLine key={i} entry={entry} you={actor} />
-          ))}
-        </ul>
-      ) : history.data ? (
-        <None>No changes yet.</None>
+      {history.data ? (
+        <>
+          {history.data.writes.length > 0 && (
+            <ul className="flex flex-col gap-1.5">
+              {history.data.writes.map((entry, i) => (
+                <HistoryLine key={i} entry={entry} you={actor} />
+              ))}
+            </ul>
+          )}
+          {history.data.more ? (
+            <None>Older changes are not shown.</None>
+          ) : (
+            !history.data.writes.length && <None>No changes yet.</None>
+          )}
+        </>
       ) : history.isError ? (
         <Notice variant="destructive">{errorMessage(history.error)}</Notice>
       ) : (
