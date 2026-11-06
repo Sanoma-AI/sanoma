@@ -1,6 +1,6 @@
 {
   "name": "@sanoma-ai/app",
-  "version": "0.10.14",
+  "version": "0.10.15",
   "description": "A web UI over a Sanoma config: runs, approvals, the ledger and a start form",
   "keywords": [
     "approvals",
