@@ -6,12 +6,18 @@
 export const RUNNER_PORT = 7700;
 
 /**
- * The protocol's version, which the runner's `GET /health` answers: a backend replaces a runner
+ * Where the runner answers its health: not `/health`, which Agent37's edge answers itself on
+ * every port, so that path never reaches what listens there.
+ */
+export const RUNNER_HEALTH = "/runner/health";
+
+/**
+ * The protocol's version, which the runner's health answers: a backend replaces a runner
  * that answers another, one an earlier release started in a box that slept.
  */
 export const RUNNER_PROTOCOL = 1;
 
-/** What the runner's `GET /health` answers: its protocol, and its pid, which a backend replacing it ends. */
+/** What the runner's health (`RUNNER_HEALTH`) answers: its protocol, and its pid, which a backend replacing it ends. */
 export interface RunnerHealth {
   protocol: number;
   pid: number;
