@@ -7,7 +7,7 @@ import { createInterface } from "node:readline";
 import { checkSandbox } from "@sanoma-ai/testing/sandbox";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runnerBox, runnerHealth, runnerScript } from "../src/runner-box.ts";
-import { RUNNER_PROTOCOL } from "../src/runner-protocol.ts";
+import { RUNNER_HEALTH, RUNNER_PROTOCOL } from "../src/runner-protocol.ts";
 import type { Box, SandboxBackend } from "../src/sandbox-contract.ts";
 
 // The runner as a backend ships it (`runnerScript()`, the built `dist/sandbox-runner.cjs`), written
@@ -59,7 +59,10 @@ const text = (stream: ReadableStream<Uint8Array>) => new Response(stream).text()
 
 describe("the sandbox runner", () => {
   it("answers its health check", async () => {
-    expect(await (await fetch(`${url}/health`)).json()).toEqual({ protocol: RUNNER_PROTOCOL, pid: runner.pid });
+    expect(await (await fetch(`${url}${RUNNER_HEALTH}`)).json()).toEqual({
+      protocol: RUNNER_PROTOCOL,
+      pid: runner.pid,
+    });
     expect(await runnerHealth(url)).toEqual({ protocol: RUNNER_PROTOCOL, pid: runner.pid });
     expect(await runnerHealth(`${url}/other`)).toBeUndefined();
     expect((await fetch(`${url}/other`)).status).toBe(404);

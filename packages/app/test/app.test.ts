@@ -721,9 +721,10 @@ describe("scenarios and sandbox runs", () => {
     sandboxId = started.body.runId;
 
     // The app decides nothing: the run waits on its approval as a live run does, and the worker checks it as it waits.
+    // Until it has, the app shows the Then steps unanswered (none `ok`).
     const held = await waitFor(
       () => detail(sandboxId),
-      (d) => d.approvals.some((a) => a.status === "pending") && d.checks !== undefined,
+      (d) => d.approvals.some((a) => a.status === "pending") && d.checks?.some((check) => check.ok) === true,
     );
     expect(held.run).toMatchObject({ status: "waiting", sandbox: SCENARIO, startedBy: { id: "tester" } });
     expect(held.ledger.find((r) => r.type === "scenario.seeded")).toMatchObject({
@@ -759,7 +760,7 @@ describe("scenarios and sandbox runs", () => {
     const id = started.body.runId;
     const held = await waitFor(
       () => detail(id),
-      (d) => d.approvals.some((a) => a.status === "pending") && d.checks !== undefined,
+      (d) => d.approvals.some((a) => a.status === "pending") && d.checks?.some((check) => check.ok) === true,
     );
     // A call not made so far may still be made: not settled, though met.
     expect(held.checks).toEqual([
@@ -1140,6 +1141,21 @@ describe("the page", () => {
     expect(notice).toBeGreaterThan(-1);
     expect(notice).toBeLessThan(run.html.search(/role="region" aria-label="Graph"/));
     expect(run.html).not.toMatch(/<dt[^>]*>Error<\/dt>/);
+  });
+
+  it("says a call that failed on a secret with no value changed nothing at the vendor", async () => {
+    blog.failNext(
+      "ghost.post.create",
+      new DriverError("The secret GHOST_KEY has no value", { retryable: false, vendorCode: "secret_not_set" }),
+    );
+    const started = await startAs({ workflow: "announce", input: input("No key") }, { actor: "alice" });
+    await waitFor(
+      () => detail(started.body.runId),
+      (d) => d.run.status === "failed",
+    );
+    const run = await page(`/workflows/announce/runs/${started.body.runId}`);
+    expect(run.text).toContain("Not retried: it stopped before changing anything at Ghost.");
+    expect(run.text).not.toContain("Check Ghost before starting again");
   });
 
   it("renders the workflows on the server: a row for each linking to its page, whose About has its operations and input", async () => {

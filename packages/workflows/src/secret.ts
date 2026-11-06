@@ -101,14 +101,18 @@ export type Resolved<T> = T extends Secret
 
 /**
  * `value` with each secret marker in it replaced by the stored value: generated and stored first
- * for one with `generate` and none stored. A marker naming nothing stored fails the call, for good.
+ * for one with `generate` and none stored. A marker naming nothing stored fails the call, for good,
+ * before the driver changes anything at the vendor (`secret_not_set`, which the ledger tells).
  */
 export async function resolveSecrets<T>(value: T, secrets: Secrets): Promise<Resolved<T>> {
   const resolve = async (v: unknown): Promise<unknown> => {
     if (isSecret(v)) {
       const stored = v.generate ? await secrets.ensure(v.$secret, generateSecret) : await secrets.get(v.$secret);
       if (stored === undefined) {
-        throw new DriverError(`The secret ${v.$secret} is not set: store it before applying`, { retryable: false });
+        throw new DriverError(
+          `The secret ${v.$secret} has no value: store it (or, where sanoma.config.ts binds it, set what the binding reads), then try again`,
+          { retryable: false, vendorCode: "secret_not_set" },
+        );
       }
       return stored;
     }

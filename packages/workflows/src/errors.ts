@@ -79,8 +79,9 @@ export const isRunControlError = (err: unknown): boolean =>
 
 /** Thrown into the run when the policy denies an operation call. The run fails with it. */
 export class PolicyDeniedError extends SanomaError {
-  constructor(op: string, reason: string) {
-    super("policy_denied", `${op} was denied by policy: ${reason}`, { op, reason });
+  /** `data` adds to the error's: a batch's `denied` keys. */
+  constructor(op: string, reason: string, data: Record<string, unknown> = {}) {
+    super("policy_denied", `${op} was denied by policy: ${reason}`, { op, reason, ...data });
     this.name = "PolicyDeniedError";
   }
 }

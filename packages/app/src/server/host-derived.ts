@@ -9,7 +9,8 @@ import type { AppContext } from "../context.ts";
  * again and filled by `deriveHosts` over `hostFacts` (nothing minted), so the page never says
  * other than apply. Its image, the repository it runs (a declared one's `owner/name`, else its
  * clone URL), the declared ref or that repository's default branch, the public sites' domains,
- * and of the keys it is given (`SANOMA_…`) whether each is stored, and since when. Null when no
+ * and of the keys it is given (`SANOMA_…`, and the bindings the config gives it, `host: true`)
+ * whether each is stored, and since when. Null when no
  * declared host derives. Never a secret's value: the facts read the store only to say what is in it.
  * What the root's files and git say comes from the snapshot (`AppSnapshot.host`).
  */
@@ -30,7 +31,7 @@ export async function hostDerived({ client, resolved, snapshot }: AppContext): P
     drivers: resolved.driversByVendor,
     secrets: read,
     builtInStore: !resolved.secrets.store,
-    signingKeyBound: resolved.secrets.bindings?.SANOMA_SIGNING_KEY !== undefined,
+    bindings: resolved.secrets.bindings,
     ...(resolved.login && { sender: resolved.login.sender.vendor }),
     mint: false,
   });
@@ -45,9 +46,15 @@ export async function hostDerived({ client, resolved, snapshot }: AppContext): P
   const repository = resources.find((r) => r.id === host.refs[inputs.source]);
   const source = repository?.identity ?? text(inputs.source);
   const url = repository?.identity ? `https://github.com/${repository.identity}.git` : text(inputs.source);
-  const names = Object.entries((inputs.secrets && valueAt(host.desired, inputs.secrets)) ?? {})
-    .filter(([name, value]) => name.startsWith("SANOMA_") && isSecret(value) && name !== "SANOMA_DATABASE_URL")
-    .map(([, value]) => (value as { $secret: string }).$secret);
+  const names = [
+    ...new Set([
+      ...Object.entries((inputs.secrets && valueAt(host.desired, inputs.secrets)) ?? {})
+        .filter(([name, value]) => name.startsWith("SANOMA_") && isSecret(value) && name !== "SANOMA_DATABASE_URL")
+        .map(([, value]) => (value as { $secret: string }).$secret),
+      // Those the config gives it (`host: true`), with a value or not (then apply's problem).
+      ...Object.values(facts.hostEnvironment ?? {}),
+    ]),
+  ];
   const ref = text(inputs.ref) ?? (url ? at.branches[url] : undefined);
   const stored = await client.secrets(names);
   const domains = inputs.domains ? valueAt(host.desired, inputs.domains) : undefined;

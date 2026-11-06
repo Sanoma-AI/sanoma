@@ -344,7 +344,9 @@ export function resolveDatabaseUrl(config: { databaseUrl?: string }, env: NodeJS
 }
 
 const isStore = (x: unknown): x is LedgerStore =>
-  typeof (x as LedgerStore | null)?.append === "function" && typeof (x as LedgerStore).read === "function";
+  typeof (x as LedgerStore | null)?.append === "function" &&
+  typeof (x as LedgerStore).read === "function" &&
+  typeof (x as LedgerStore).readByTarget === "function";
 
 /** The config's `ledger`, checked, when it gives one. */
 function ledgerOf(config: SanomaConfig): LedgerStore | undefined {
@@ -479,12 +481,7 @@ export function resolveConfig(config: SanomaConfig): ResolvedConfig {
       ...options,
       drivers: driversByVendor,
       builtInStore: !config.secrets?.store,
-      signingKeyBound: config.secrets?.bindings?.SANOMA_SIGNING_KEY !== undefined,
-      hostEnvironment: Object.fromEntries(
-        Object.entries(config.secrets?.bindings ?? {}).flatMap(([name, binding]) =>
-          binding.host && binding.env !== undefined ? [[binding.env, name]] : [],
-        ),
-      ),
+      bindings: config.secrets?.bindings,
       ...(isOp(config.login?.sender) && { sender: config.login.sender.vendor }),
     });
   if (types.size) {
@@ -825,8 +822,7 @@ async function readDeclared(
   options: ReadOptions & {
     drivers: ReadonlyMap<string, Driver>;
     builtInStore: boolean;
-    signingKeyBound: boolean;
-    hostEnvironment: Readonly<Record<string, string>>;
+    bindings?: SecretConfiguration["bindings"];
     sender?: string;
   },
 ): Promise<Omit<ApplyDeclared, "rebinds">> {
@@ -847,10 +843,10 @@ async function readDeclared(
       drivers: options.drivers,
       ...(run && { secrets: run.state.secrets }),
       builtInStore: options.builtInStore,
-      signingKeyBound: options.signingKeyBound,
-      hostEnvironment: options.hostEnvironment,
+      bindings: options.bindings,
       ...(options.sender !== undefined && { sender: options.sender }),
       mint: !!options.mint && !!run && !run.sandbox,
+      sandbox: !!run?.sandbox,
     });
     if (facts) problems.push(...deriveHosts(resources, types, bindings, facts, { keep, leftOut }));
   }

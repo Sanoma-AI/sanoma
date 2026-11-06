@@ -645,6 +645,7 @@ describe("readSites", () => {
           "api.data.leads.list()",
           "api.outboundNext.start({})",
           "api.data.leads.save({ company: 'Acme', stage: 'new' })",
+          "api.data.leads.saveMany({ records: [] })",
           // Whatever the policy says: a read of runs but a result, and a built-in workflow.
           'api.outboundNext.result("run")',
           "api.outboundNext.latest()",
@@ -663,12 +664,12 @@ describe("readSites", () => {
     const readsAndBuiltIns = [
       pageProblem(
         "www",
-        13,
+        14,
         'a visitor\'s call to workflow "outbound-next" is refused: a visitor reads only the result of a run it started',
       ),
       pageProblem(
         "www",
-        14,
+        15,
         "a visitor's call to workflow \"call\" is refused: a visitor may not start the runtime's own workflows",
       ),
     ];
@@ -696,6 +697,14 @@ describe("readSites", () => {
           11,
           'a visitor\'s call to collection "leads" is refused: no permit in policies/ names anonymous for data.leads.save. ' +
             'Add: permit (principal == Sanoma::Principal::"anonymous", action == Sanoma::Action::"data.leads.save", resource);',
+        ),
+        // A batch needs a permit for each entry it may make: the save and the delete.
+        pageProblem(
+          "www",
+          12,
+          'a visitor\'s call to collection "leads" is refused: no permit in policies/ names anonymous for data.leads.save or data.leads.delete. ' +
+            'Add: permit (principal == Sanoma::Principal::"anonymous", action == Sanoma::Action::"data.leads.save", resource); ' +
+            'permit (principal == Sanoma::Principal::"anonymous", action == Sanoma::Action::"data.leads.delete", resource);',
         ),
         ...readsAndBuiltIns,
       ],

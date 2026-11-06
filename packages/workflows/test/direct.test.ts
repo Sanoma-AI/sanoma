@@ -189,6 +189,7 @@ describe("a direct call", () => {
         workflow: "call",
         type: "op.called",
         op: "data.outbound.save",
+        target: "data:outbound/Acme",
         effect: "write",
         input: { record: lead("Acme") },
         decision: { kind: "allow", reasons: ["allow-by-default"], policyVersion: expect.any(String) },
@@ -196,6 +197,163 @@ describe("a direct call", () => {
         durationMs: expect.any(Number),
       },
     ]);
+  });
+
+  it("reads a record's history from the ledger by its target, newest first, the refused write among them", async () => {
+    await client.call("data.outbound.save", { record: lead("Acme") }, { actor: ada, id: "h1" });
+    await client.call("data.outbound.save", { record: lead("Acme", "contacted") }, { actor: ada, id: "h2" });
+    await client.call("data.outbound.save", { record: lead("Other") }, { actor: ada, id: "h3" });
+    await failure(
+      client.call(
+        "data.outbound.save",
+        { record: { ...lead("Acme", "contacted"), contact: "changed@acme.test" }, ifRecord: lead("Acme") },
+        { actor: ada, id: "h4" },
+      ),
+    );
+    const history = await client.history("data:outbound/Acme");
+    expect(history.map((r) => [r.runId, r.type === "op.called" && r.error ? "failed" : "ok"])).toEqual([
+      ["direct:ada:h4", "failed"],
+      ["direct:ada:h2", "ok"],
+      ["direct:ada:h1", "ok"],
+    ]);
+    expect(await client.history("data:outbound/Acme", 1)).toMatchObject([{ runId: "direct:ada:h4" }]);
+    expect(await client.history("data:outbound/Nobody")).toEqual([]);
+  });
+
+  it("writes a batch as one op.called per entry, in one transaction with its records, and answers it again by its id", async () => {
+    const batch = {
+      records: [{ record: lead("Acme") }, { record: lead("Globex", "contacted") }],
+      deletes: [{ key: "Zed" }],
+    };
+    const saved = (await client.call("data.outbound.saveMany", batch, { actor: ada, id: "b1" })) as unknown[];
+    expect(saved).toEqual([
+      { key: "Acme", record: lead("Acme"), updatedAt: expect.any(String), updatedBy: "ada" },
+      { key: "Globex", record: lead("Globex", "contacted"), updatedAt: expect.any(String), updatedBy: "ada" },
+      { key: "Zed", deleted: false },
+    ]);
+    expect((await rows()).map((r) => r.key)).toEqual(["Acme", "Globex"]);
+    const made = (await records()).filter((r) => r.type === "op.called");
+    expect(
+      made.map(({ id, seq, op, target, input, decision, output }) => ({
+        id,
+        seq,
+        op,
+        target,
+        input,
+        decision,
+        output,
+      })),
+    ).toEqual([
+      {
+        id: "direct:ada:b1:op.called:0",
+        seq: 0,
+        op: "data.outbound.save",
+        target: "data:outbound/Acme",
+        input: { record: lead("Acme") },
+        decision: { kind: "allow", reasons: ["allow-by-default"], policyVersion: expect.any(String) },
+        output: saved[0],
+      },
+      {
+        id: "direct:ada:b1:op.called:1",
+        seq: 1,
+        op: "data.outbound.save",
+        target: "data:outbound/Globex",
+        input: { record: lead("Globex", "contacted") },
+        decision: { kind: "allow", reasons: ["allow-by-default"], policyVersion: expect.any(String) },
+        output: saved[1],
+      },
+      {
+        id: "direct:ada:b1:op.called:2",
+        seq: 2,
+        op: "data.outbound.delete",
+        target: "data:outbound/Zed",
+        input: { key: "Zed" },
+        decision: { kind: "allow", reasons: ["allow-by-default"], policyVersion: expect.any(String) },
+        output: { key: "Zed", deleted: false },
+      },
+    ]);
+    expect((await client.history("data:outbound/Globex")).map((r) => r.id)).toEqual(["direct:ada:b1:op.called:1"]);
+    // The same id again answers from the records, and refuses another batch.
+    expect(await client.call("data.outbound.saveMany", batch, { actor: ada, id: "b1" })).toEqual(saved);
+    expect(
+      await failure(client.call("data.outbound.saveMany", { records: batch.records }, { actor: ada, id: "b1" })),
+    ).toMatchObject({ code: "invalid_input", data: { differs: ["op", "input"] } });
+    expect(await records()).toHaveLength(3);
+
+    // A conflict refuses the batch with every conflict, keeps every row, and records each entry's failure.
+    const err = await failure(
+      client.call(
+        "data.outbound.saveMany",
+        {
+          records: [{ record: lead("Acme", "contacted"), ifRecord: lead("Acme") }, { record: lead("Wayne") }],
+          deletes: [{ key: "Globex", ifRecord: lead("Globex") }],
+        },
+        { actor: ada, id: "b2" },
+      ),
+    );
+    expect(err).toMatchObject({
+      code: "driver_failed",
+      vendorCode: "record_changed",
+      conflicts: [{ key: "Globex", current: expect.objectContaining({ record: lead("Globex", "contacted") }) }],
+    });
+    expect(await rows()).toEqual([
+      { key: "Acme", record: lead("Acme"), updatedBy: "ada" },
+      { key: "Globex", record: lead("Globex", "contacted"), updatedBy: "ada" },
+    ]);
+    expect(
+      (await records()).flatMap((r) =>
+        r.runId === "direct:ada:b2" && r.type === "op.called" ? [[r.target, r.error?.vendorCode]] : [],
+      ),
+    ).toEqual([
+      ["data:outbound/Acme", "record_changed"],
+      ["data:outbound/Wayne", "record_changed"],
+      ["data:outbound/Globex", "record_changed"],
+    ]);
+  });
+
+  it("denies a batch when any entry is denied, naming the denied keys, and holds it whole when one is held", async () => {
+    const denied = await failure(
+      client.call(
+        "data.outbound.saveMany",
+        { records: [{ record: lead("Acme") }, { record: lead("Lost", "lost") }, { record: lead("Gone", "lost") }] },
+        { actor: ada },
+      ),
+    );
+    expect(denied).toMatchObject({
+      code: "policy_denied",
+      message: "data.outbound.saveMany was denied by policy: Lost: leads are not lost; Gone: leads are not lost",
+      data: { op: "data.outbound.saveMany", denied: ["Lost", "Gone"] },
+    });
+    expect(await rows()).toEqual([]);
+    expect(await records()).toEqual([]);
+
+    const held = randomUUID();
+    const batch = { records: [{ record: lead("Acme") }, { record: lead("Won", "won") }] };
+    const pending = await failure(client.call("data.outbound.saveMany", batch, { actor: ada, id: held }));
+    const runId = `call:ada:${held}`;
+    expect(pending).toMatchObject({
+      code: "approval_pending",
+      data: { runId, workflow: CALL_WORKFLOW, op: "data.outbound.saveMany" },
+    });
+    expect(await rows()).toEqual([]);
+    await waitFor(async () => (await client.approvals(runId)).some((a) => a.status === "pending"));
+    expect(await client.approvals(runId)).toMatchObject([
+      // The hold covers the batch and the saves it makes, so the approval lifts each entry's hold.
+      {
+        requestedBy: "policy",
+        op: "data.outbound.saveMany",
+        covers: ["data.outbound.saveMany", "data.outbound.save"],
+        approver: "lead",
+        status: "pending",
+        input: batch,
+      },
+    ]);
+    await client.decide(runId, { decision: "approve", by: { id: "lead" } });
+    expect(await client.result(runId)).toMatchObject([
+      { key: "Acme", updatedBy: "ada" },
+      { key: "Won", updatedBy: "ada" },
+    ]);
+    expect((await rows()).map((r) => r.key)).toEqual(["Acme", "Won"]);
   });
 
   it("enforces conditional writes through policy and audits success and stale refusal", async () => {
@@ -376,10 +534,12 @@ describe("the built-in call workflow in a config", () => {
     expect(entry).toMatchObject({ builtin: true, title: "Call an operation", problems: [] });
     expect(entry?.ops).toEqual([
       "acme.customer.get",
+      "data.outbound.count",
       "data.outbound.delete",
       "data.outbound.get",
       "data.outbound.list",
       "data.outbound.save",
+      "data.outbound.saveMany",
       "sanoma.apps.list",
       "sanoma.connection.activate",
       "sanoma.connection.bind",

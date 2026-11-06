@@ -11,6 +11,7 @@ import { runtimeImage, sourceKeyId } from "./host.ts";
 import type { Bindings } from "./lockfile.ts";
 import { type Resource, valueAt } from "./resource.ts";
 import { secret, type Secret, type Secrets } from "./secret.ts";
+import type { SecretConfiguration } from "./secret-store.ts";
 import { sourceKeyPair, sshPublicKey } from "./ssh-key.ts";
 import { mintInstanceToken, WAKEUP_TOKEN } from "./wakeup-service.ts";
 
@@ -78,8 +79,10 @@ export interface HostFacts {
   unbound?: ReadonlyMap<string, readonly string[]>;
   /** True when the config binds `SANOMA_SIGNING_KEY`: the host is given that key, else its own (`HOST_SIGNING_KEY`). */
   signingKeyBound?: boolean;
-  /** Explicit environment delivery: destination variable to logical secret name, never values. */
+  /** Explicit environment delivery (`host: true`): destination variable to logical secret name, never values. */
   hostEnvironment?: Readonly<Record<string, string>>;
+  /** Of `hostEnvironment`'s logical names, those with no value where apply runs: the host cannot be given them. */
+  hostEnvironmentUnset?: readonly string[];
   /**
    * While the config has no deploy-key type, the GitHub repositories a host may clone (`origin`'s,
    * a declared `source`'s) that GitHub shows to no one: private (or not there). One GitHub does
@@ -227,8 +230,8 @@ const nameOf = (repository: string) =>
  * the caller leaves out, with what names them, so apply changes nothing it cannot give all it needs.
  * Problems: a host with no `database`, a name (none to tell, or another host's), an image or a
  * source that cannot be told, a credential its vendor's driver reads from this machine's
- * environment that nothing binds, a private repository it has no deploy key for, two hosts that
- * would attach the sites' domains.
+ * environment that nothing binds, a binding given to it (`host: true`) with no value where apply
+ * runs, a private repository it has no deploy key for, two hosts that would attach the sites' domains.
  */
 export function deriveHosts(
   resources: DeclaredResource[],
@@ -355,10 +358,16 @@ export function deriveHosts(
     const carried = [...vendors].flatMap((vendor) => facts.carried.get(vendor) ?? []);
     for (const name of [...carried, ...facts.githubApp]) secrets[name] = secret(name);
     for (const [environment, name] of Object.entries(facts.hostEnvironment ?? {})) {
-      if (Object.hasOwn(secrets, environment) && secrets[environment]!.$secret !== name)
+      const derived = Object.hasOwn(secrets, environment);
+      if (derived && secrets[environment]!.$secret !== name)
         problem(`${environment} has a derived host binding and cannot be replaced by ${name}`);
-      else if (!Object.hasOwn(secrets, environment))
-        Object.defineProperty(secrets, environment, { value: secret(name), enumerable: true });
+      // Its binding is `{ env }` (`host` takes no other, and none is generated): the variable it is
+      // read from where apply runs. Unset, it fails the host's update, a derived one's too.
+      else if (facts.hostEnvironmentUnset?.includes(name))
+        problem(
+          `${name} (\`host: true\`) has no value where apply runs, so the host cannot be given it: set ${environment}, which its binding in sanoma.config.ts reads, or take \`host: true\` off that binding`,
+        );
+      else if (!derived) Object.defineProperty(secrets, environment, { value: secret(name), enumerable: true });
     }
     // One the driver reads here from the environment alone would be left off the host, and a
     // Worker updated without it would lose it.
@@ -440,8 +449,9 @@ export async function hostRootFacts(root: string): Promise<HostRootFacts> {
  * What the declared hosts that derive (`deriveHosts`) are filled from: the root's facts
  * (`rootFacts`, asked only when a declared host derives: `hostRootFacts`, or a snapshot's), and of
  * `secrets` (none outside a run) which
- * optional credentials, App keys and source key are stored, and which credentials the drivers
- * read from this machine's environment alone (`unbound`). With `mint` (apply, never drift or a
+ * optional credentials, App keys and source key are stored, which credentials the drivers
+ * read from this machine's environment alone (`unbound`), and which bindings given to the hosts
+ * (`host: true`) have no value (`hostEnvironmentUnset`). With `mint` (apply, never drift or a
  * sandbox run), the source key (where the config has the deploy-key type) and, when a wakeup is
  * declared, the wakeup's token are minted first when none is stored, so the host is given them
  * from its first apply. With no deploy-key type, GitHub is asked which repositories a host may clone are private.
@@ -454,32 +464,41 @@ export async function hostFacts(options: {
   drivers: ReadonlyMap<string, Driver>;
   secrets?: Secrets;
   builtInStore: boolean;
-  /** True when the config binds `SANOMA_SIGNING_KEY` (`{ env }` or `{ bootstrap }`). */
-  signingKeyBound?: boolean;
-  hostEnvironment?: Readonly<Record<string, string>>;
+  /** The config's secret bindings: whether it binds `SANOMA_SIGNING_KEY`, and those given to the hosts (`host: true`). */
+  bindings?: SecretConfiguration["bindings"];
   sender?: string;
   mint: boolean;
+  /** A sandbox run's: its calls resolve no stored value, so a binding given to the hosts with none is no problem. */
+  sandbox?: boolean;
 }): Promise<HostFacts | undefined> {
   const { rootFacts, resources, types, drivers, secrets, mint } = options;
   const typeOf = (r: DeclaredResource) => types.get(`${r.vendor}.${r.type}`);
   const deriving = resources.filter((r) => typeOf(r)?.host?.derives);
   if (!deriving.length) return undefined;
   const hosts = deriving.filter((r) => !typeOf(r)?.host?.bindsBootstrap);
-  // Which optional credentials and App keys are stored: read at once, and only for a host given secrets.
+  // The store is read only in a run, and only for a host given secrets.
+  const reading = secrets !== undefined && hosts.length > 0;
+  // Which optional credentials and App keys are stored: read at once.
   const stored = async (names: readonly string[]) =>
-    secrets && hosts.length
+    reading
       ? new Set((await Promise.all(names.map(async (n) => ((await secrets.get(n)) === undefined ? [] : [n])))).flat())
       : new Set<string>();
   const statuses = [...drivers].flatMap(([vendor, { env }]) =>
     env ? statusesOf(env, () => undefined).map((c) => ({ vendor, ...c })) : [],
   );
+  const bindings = options.bindings ?? {};
+  const hostEnvironment: Record<string, string> = Object.fromEntries(
+    Object.entries(bindings).flatMap(([name, b]) => (b.host && b.env !== undefined ? [[b.env, name]] : [])),
+  );
+  const delivered = Object.values(hostEnvironment);
   // Only what the store holds: a marker for a name it does not would fail the host's deploy.
-  const held = await stored(statuses.map((c) => c.name));
+  const held = await stored([...statuses.map((c) => c.name), ...delivered]);
+  const hostEnvironmentUnset = reading && !options.sandbox ? delivered.filter((name) => !held.has(name)) : [];
   const carried = new Map<string, string[]>();
   const unbound = new Map<string, string[]>();
   for (const c of statuses) {
     // The driver reads the environment first: set there alone, it runs here and the host is not given it.
-    const into = held.has(c.name) ? carried : secrets && hosts.length && process.env[c.name] ? unbound : undefined;
+    const into = held.has(c.name) ? carried : reading && process.env[c.name] ? unbound : undefined;
     into?.set(c.vendor, [...(into.get(c.vendor) ?? []), c.name]);
   }
   const githubApp = [...(await stored(Object.values(GITHUB_APP)))];
@@ -487,7 +506,7 @@ export async function hostFacts(options: {
   const keyed = types.has(DEPLOY_KEY_TYPE);
   const [{ version, origin, domains }, sourceKey] = await Promise.all([
     rootFacts(),
-    secrets && hosts.length && keyed ? sourceKeyOf(secrets, mint) : undefined,
+    reading && keyed ? sourceKeyOf(secrets, mint) : undefined,
   ]);
   // What a host may clone: `origin`, else the `source` it declares (with no deploy-key type, no
   // GitHub repository is declared to be one).
@@ -510,8 +529,9 @@ export async function hostFacts(options: {
     builtInStore: options.builtInStore,
     carried,
     ...(unbound.size > 0 && { unbound }),
-    ...(options.signingKeyBound && { signingKeyBound: true }),
-    ...(options.hostEnvironment && { hostEnvironment: options.hostEnvironment }),
+    ...(bindings.SANOMA_SIGNING_KEY !== undefined && { signingKeyBound: true }),
+    ...(delivered.length > 0 && { hostEnvironment }),
+    ...(hostEnvironmentUnset.length > 0 && { hostEnvironmentUnset }),
     ...(options.sender !== undefined && { sender: options.sender }),
     githubApp,
     ...(sourceKey !== undefined && { sourceKey }),

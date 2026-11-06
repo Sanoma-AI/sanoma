@@ -6,7 +6,8 @@ import { afterAll, beforeEach, describe, expect, it, onTestFinished, vi } from "
 import { collection, collectionsDriver } from "../src/collection.ts";
 import { databaseOn, lazyDb } from "../src/db.ts";
 import { data } from "../src/db/company.ts";
-import { type LedgerRecord, memorySecrets, type Op } from "../src/index.ts";
+import { z } from "zod";
+import { defineWorkflow, type LedgerRecord, memorySecrets, type Op } from "../src/index.ts";
 import { check, drive, loadScenarios } from "../src/scenario.ts";
 import { outbound } from "./fixtures/outbound/resources/data.ts";
 import outboundNext from "./fixtures/outbound/workflows/outbound-next.ts";
@@ -68,9 +69,9 @@ describe("the collections' driver on Postgres", () => {
 
   let n = 0;
   /** Calls the driver as a run does: the input parsed by the operation's schema, the output too. */
-  const call = async (op: Op, input: unknown, by?: string) => {
+  const call = async (op: Op, input: unknown, by?: string, attempt = 1) => {
     const fn = driver.ops[`${op.resource}.${op.name}`]!;
-    const context = { idempotencyKey: `t:${n++}`, runId: "t", opId: op.id, attempt: 1, secrets: memorySecrets() };
+    const context = { idempotencyKey: `t:${n++}`, runId: "t", opId: op.id, attempt, secrets: memorySecrets() };
     return op.output.parse(await fn(op.input.parse(input), by === undefined ? context : { ...context, by }));
   };
   const keys = async (query: unknown) => ((await call(leads.list, query)) as { key: string }[]).map((s) => s.key);
@@ -82,11 +83,16 @@ describe("the collections' driver on Postgres", () => {
     ]);
     expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
     const failed = results.find((r) => r.status === "rejected");
+    const winner = results.find((r) => r.status === "fulfilled");
     expect(failed).toMatchObject({
       status: "rejected",
-      reason: { retryable: false, vendorCode: "record_exists", status: 409 },
+      reason: {
+        retryable: false,
+        vendorCode: "record_exists",
+        status: 409,
+        current: winner?.status === "fulfilled" ? winner.value : undefined,
+      },
     });
-    const winner = results.find((r) => r.status === "fulfilled");
     expect(await call(leads.get, { key: "Acme" })).toEqual(winner?.status === "fulfilled" ? winner.value : undefined);
   });
 
@@ -133,18 +139,21 @@ describe("the collections' driver on Postgres", () => {
       call(leads.save, { record: { ...record, seats: 1 }, ifRecord: record }, "ada"),
       call(leads.save, { record: { ...record, seats: 2 }, ifRecord: record }, "bo"),
     ]);
-    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const won = results.find((result) => result.status === "fulfilled");
+    expect(won).toBeDefined();
+    // The refusal carries the record as the winner left it, so the loser settles the conflict without another read.
     expect(results.find((result) => result.status === "rejected")).toMatchObject({
-      reason: { status: 409, retryable: false, vendorCode: "record_changed" },
+      reason: { status: 409, retryable: false, vendorCode: "record_changed", current: won!.value },
     });
     const current = await call(leads.get, { key: "Acme" });
     await expect(call(leads.save, { record, ifRecord: record }, "late")).rejects.toMatchObject({
       vendorCode: "record_changed",
+      current,
     });
     expect(await call(leads.get, { key: "Acme" })).toEqual(current);
     await expect(
       call(leads.save, { record: { company: "Missing", stage: "new" }, ifRecord: {} }),
-    ).rejects.toMatchObject({ vendorCode: "record_changed" });
+    ).rejects.toMatchObject({ vendorCode: "record_changed", current: null });
     expect(await call(leads.get, { key: "Missing" })).toBeNull();
   });
 
@@ -224,9 +233,88 @@ describe("the collections' driver on Postgres", () => {
 
   it("deletes a record by its key, saying whether there was one", async () => {
     await call(leads.save, { record: { company: "Acme", stage: "new" } });
-    expect(await call(leads.delete, { key: "Acme" })).toEqual({ deleted: true });
-    expect(await call(leads.delete, { key: "Acme" })).toEqual({ deleted: false });
+    expect(await call(leads.delete, { key: "Acme" })).toEqual({ key: "Acme", deleted: true });
+    expect(await call(leads.delete, { key: "Acme" })).toEqual({ key: "Acme", deleted: false });
     expect(await call(leads.get, { key: "Acme" })).toBeNull();
+  });
+
+  it("saves and deletes a batch in one transaction, all or none, answering in order, and counts", async () => {
+    const acme = { company: "Acme", stage: "new", seats: 1 };
+    const globex = { company: "Globex", stage: "new", seats: 3 };
+    const initech = { company: "Initech", stage: "won" };
+    for (const record of [acme, globex, initech]) await call(leads.save, { record }, "leon");
+    expect(await call(leads.count, {})).toEqual({ count: 3 });
+    expect(await call(leads.count, { where: { stage: "new", seats: { gte: 3 } } })).toEqual({ count: 1 });
+    expect(await call(leads.count, { where: { seats: { gt: 100 } } })).toEqual({ count: 0 });
+    const results = await call(
+      leads.saveMany,
+      {
+        records: [
+          { record: { ...acme, stage: "won" }, ifRecord: acme },
+          { record: { company: "Umbrella", stage: "new" } },
+        ],
+        deletes: [{ key: "Globex", ifRecord: globex }, { key: "Nobody" }],
+      },
+      "ada",
+    );
+    expect(results).toEqual([
+      { key: "Acme", record: { ...acme, stage: "won" }, updatedAt: expect.any(String), updatedBy: "ada" },
+      {
+        key: "Umbrella",
+        record: { company: "Umbrella", stage: "new" },
+        updatedAt: expect.any(String),
+        updatedBy: "ada",
+      },
+      { key: "Globex", deleted: true },
+      { key: "Nobody", deleted: false },
+    ]);
+    expect(await keys({})).toEqual(["Acme", "Initech", "Umbrella"]);
+    // A conflict on any entry rolls back every entry, each conflict answered with the record as it stands.
+    const current = await call(leads.get, { key: "Acme" });
+    await expect(
+      call(
+        leads.saveMany,
+        {
+          records: [
+            { record: { company: "Wayne", stage: "new" } },
+            { record: { ...acme, seats: 9 }, ifRecord: acme },
+            { record: { company: "Umbrella", stage: "won" }, ifAbsent: true },
+          ],
+          deletes: [
+            { key: "Initech", ifRecord: acme },
+            { key: "Gone", ifRecord: acme },
+          ],
+        },
+        "ada",
+      ),
+    ).rejects.toMatchObject({
+      status: 409,
+      retryable: false,
+      vendorCode: "record_changed",
+      conflicts: [
+        { key: "Acme", current },
+        { key: "Umbrella", current: await call(leads.get, { key: "Umbrella" }) },
+        { key: "Initech", current: await call(leads.get, { key: "Initech" }) },
+        { key: "Gone", current: null },
+      ],
+    });
+    expect(await keys({})).toEqual(["Acme", "Initech", "Umbrella"]);
+    expect(await call(leads.get, { key: "Acme" })).toEqual(current);
+    await expect(call(leads.delete, { key: "Acme", ifRecord: acme })).rejects.toMatchObject({
+      vendorCode: "record_changed",
+      current,
+    });
+    // A retry finding no record deleted it the first time; one finding another record did not.
+    expect(await call(leads.delete, { key: "Gone", ifRecord: acme }, undefined, 2)).toEqual({
+      key: "Gone",
+      deleted: true,
+    });
+    await expect(call(leads.delete, { key: "Acme", ifRecord: acme }, undefined, 2)).rejects.toMatchObject({ current });
+    expect(await call(leads.delete, { key: "Acme", ifRecord: { ...acme, stage: "won" } })).toEqual({
+      key: "Acme",
+      deleted: true,
+    });
+    expect(await call(leads.count, {})).toEqual({ count: 2 });
   });
 
   it("gives back a record saved under an older declaration as it is stored, with its issues", async () => {
@@ -261,8 +349,25 @@ unless { context has before };
     },
     fileURLToPath(new URL("./fixtures/outbound/", import.meta.url)),
   );
-  const app = useApp("data_run", () => ({ workflows: [outboundNext], collections: [outbound], root }));
+  /** Saves a lead per company and deletes the keys named, in one batch. */
+  const outboundBatch = defineWorkflow({
+    name: "outbound-batch",
+    title: "Save leads together",
+    trigger: "manual",
+    input: z.object({ companies: z.array(z.string()), deletes: z.array(z.string()).default([]) }),
+    uses: [outbound.saveMany],
+    run: async (ctx, { companies, deletes }) =>
+      ctx.data.outbound.saveMany({
+        records: companies.map((company) => ({ record: { ...lead, company, stage: "contacted" } })),
+        deletes: deletes.map((key) => ({ key })),
+      }),
+  });
+  const app = useApp("data_run", () => ({ workflows: [outboundNext, outboundBatch], collections: [outbound], root }));
   const db = () => new Pool({ connectionString: app.config.databaseUrl!, max: 1 });
+  const calls = async (runId: string) =>
+    (await app.client.ledger(runId)).filter(
+      (r): r is Extract<LedgerRecord, { type: "op.called" }> => r.type === "op.called",
+    );
 
   it("calls get and save as nodes under the policy, the save with the record it replaces, and the record says the run saved it", async () => {
     const pool = db();
@@ -272,26 +377,128 @@ unless { context has before };
       await store.insert(data).values({ collection: "outbound", key: "Acme", record: lead, updatedBy: "leon" });
       const runId = await app.client.start("outbound-next", { company: "Acme" }, { startedBy: { id: "leon" } });
       expect(await app.client.result(runId)).toBe(`run:${runId}`);
-      const calls = (await app.client.ledger(runId)).filter(
-        (r): r is Extract<LedgerRecord, { type: "op.called" }> => r.type === "op.called",
-      );
-      expect(calls.map(({ op, effect, node, input }) => ({ op, effect, node, input }))).toEqual([
-        { op: "data.outbound.get", effect: "read", node: "0", input: { key: "Acme" } },
+      const made = await calls(runId);
+      expect(made.map(({ op, effect, node, target, input }) => ({ op, effect, node, target, input }))).toEqual([
+        { op: "data.outbound.get", effect: "read", node: "0", target: "data:outbound/Acme", input: { key: "Acme" } },
         {
           op: "data.outbound.save",
           effect: "write",
           node: "1.0.0",
+          target: "data:outbound/Acme",
           input: { record: { ...lead, stage: "contacted" }, ifRecord: lead },
         },
       ]);
-      expect(calls[1]!.output).toMatchObject({ key: "Acme", updatedBy: `run:${runId}` });
+      expect(made[1]!.output).toMatchObject({ key: "Acme", updatedBy: `run:${runId}` });
+      // The record's history, from the app's ledger (on disk): the run's calls on it, newest first.
+      expect((await app.client.history("data:outbound/Acme")).map((r) => r.id)).toEqual([made[1]!.id, made[0]!.id]);
       // A save sees the record it replaces: the policy let it through.
-      expect(calls.map(({ decision }) => decision.kind)).toEqual(["allow", "allow"]);
+      expect(made.map(({ decision }) => decision.kind)).toEqual(["allow", "allow"]);
       const rows = await store
         .select({ record: data.record, updatedBy: data.updatedBy })
         .from(data)
         .where(eq(data.collection, "outbound"));
       expect(rows).toEqual([{ record: { ...lead, stage: "contacted" }, updatedBy: `run:${runId}` }]);
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it("decides and records a batch as its entries, each its own save or delete, and denies it whole when one is", async () => {
+    const pool = db();
+    const store = databaseOn(pool);
+    try {
+      await store.delete(data).where(eq(data.collection, "outbound"));
+      await store.insert(data).values({ collection: "outbound", key: "Acme", record: lead, updatedBy: "leon" });
+      const runId = await app.client.start(
+        "outbound-batch",
+        { companies: ["Acme"], deletes: ["Globex"] },
+        { startedBy: { id: "leon" } },
+      );
+      expect(await app.client.result(runId)).toEqual([
+        {
+          key: "Acme",
+          record: { ...lead, stage: "contacted" },
+          updatedAt: expect.any(String),
+          updatedBy: `run:${runId}`,
+        },
+        { key: "Globex", deleted: false },
+      ]);
+      const made = await calls(runId);
+      expect(
+        made.map(({ id, seq, op, node, target, input, decision, output }) => ({
+          id,
+          seq,
+          op,
+          node,
+          target,
+          input,
+          decision,
+          output,
+        })),
+      ).toEqual([
+        {
+          id: `${runId}:op.called:1`,
+          seq: 1,
+          op: "data.outbound.save",
+          node: "0",
+          target: "data:outbound/Acme",
+          input: { record: { ...lead, stage: "contacted" } },
+          decision: { kind: "allow", reasons: ["allow-by-default"], policyVersion: expect.any(String) },
+          output: {
+            key: "Acme",
+            record: { ...lead, stage: "contacted" },
+            updatedAt: expect.any(String),
+            updatedBy: `run:${runId}`,
+          },
+        },
+        {
+          id: `${runId}:op.called:2`,
+          seq: 2,
+          op: "data.outbound.delete",
+          node: "0",
+          target: "data:outbound/Globex",
+          input: { key: "Globex" },
+          decision: { kind: "allow", reasons: ["allow-by-default"], policyVersion: expect.any(String) },
+          output: { key: "Globex", deleted: false },
+        },
+      ]);
+      // The record's history has the batch's save of it, newest, as it would a save alone.
+      expect((await app.client.history("data:outbound/Acme")).map((r) => r.id)[0]).toBe(made[0]!.id);
+
+      // Wayne has no record before it: the policy denies its save, which denies the batch, naming the key.
+      const denied = await app.client.start(
+        "outbound-batch",
+        { companies: ["Acme", "Wayne"] },
+        { startedBy: { id: "leon" } },
+      );
+      await expect(app.client.result(denied)).rejects.toMatchObject({
+        code: "policy_denied",
+        message: "data.outbound.saveMany was denied by policy: Wayne: a save replaces a lead",
+        data: { op: "data.outbound.saveMany", denied: ["Wayne"] },
+      });
+      expect(
+        (await calls(denied)).map(({ seq, op, target, decision, error }) => ({ seq, op, target, decision, error })),
+      ).toEqual([
+        {
+          seq: 1,
+          op: "data.outbound.save",
+          target: "data:outbound/Acme",
+          decision: { kind: "allow", reasons: ["allow-by-default"], policyVersion: expect.any(String) },
+          error: expect.objectContaining({ code: "policy_denied" }),
+        },
+        {
+          seq: 2,
+          op: "data.outbound.save",
+          target: "data:outbound/Wayne",
+          decision: expect.objectContaining({ kind: "deny", reason: "a save replaces a lead" }),
+          error: expect.objectContaining({ code: "policy_denied" }),
+        },
+      ]);
+      const rows = await store
+        .select({ key: data.key, record: data.record })
+        .from(data)
+        .where(eq(data.collection, "outbound"));
+      expect(rows).toEqual([{ key: "Acme", record: { ...lead, stage: "contacted" } }]);
     } finally {
       await pool.end();
     }
@@ -326,7 +533,7 @@ unless { context has before };
       seeds: [{ op: "data.outbound.save", input: { record: { company: "Acme", stage: "researched", owner: "leon" } } }],
     });
     expect(ledgers[1]!.find((r) => r.type === "scenario.seeded")).toMatchObject({
-      seeds: [{ op: "data.outbound.delete", input: { key: "Acme" }, output: { deleted: false } }],
+      seeds: [{ op: "data.outbound.delete", input: { key: "Acme" }, output: { key: "Acme", deleted: false } }],
     });
     const pool = db();
     try {

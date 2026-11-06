@@ -7,6 +7,7 @@ import {
   ANONYMOUS,
   ANONYMOUS_PRINCIPAL,
   groupNamesOf,
+  isBatch,
   previewRequests,
   VISITORS,
   visitorPrincipal,
@@ -71,7 +72,8 @@ export function permissionsGrid(
   ];
   const opsById = new Map(description.ops.map((op) => [op.id, op]));
   const workflows = description.workflows.filter((w) => !w.builtin);
-  const direct = description.ops.filter((op) => op.direct).toSorted((a, b) => a.id.localeCompare(b.id));
+  // A batch has no row: the policy decides its entries, the save and the delete, which have theirs.
+  const direct = description.ops.filter((op) => op.direct && !isBatch(op)).toSorted((a, b) => a.id.localeCompare(b.id));
   // Every row's question, in the grid's order: each workflow's start, then the operations it may
   // call, as the run form asks them; then each direct operation.
   const asked = workflows.map((w) => previewRequests(w, opsById));

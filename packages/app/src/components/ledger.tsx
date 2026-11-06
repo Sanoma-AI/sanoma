@@ -94,11 +94,13 @@ function ErrorText({ error, then }: { error: ErrorInfo; then?: string | undefine
   );
 }
 
-/** Whether a failed call was tried again, from its attempt and the config's entry for its operation. */
-function retries(attempt: number, op: OpEntry | undefined, vendors: ConfigDescription["vendors"]) {
+/** Whether a failed call was tried again, from its attempt, its error and the config's entry for its operation. */
+function retries(attempt: number, error: ErrorInfo, op: OpEntry | undefined, vendors: ConfigDescription["vendors"]) {
   if (attempt > 1 || op?.idempotent) return `Tried ${plural(attempt, "time")}`;
   if (!op) return undefined;
   const vendor = vendors[op.vendor]?.title ?? op.vendor;
+  // A secret with no value fails the call before its driver changes anything (`resolveSecrets`).
+  if (error.vendorCode === "secret_not_set") return `Not retried: it stopped before changing anything at ${vendor}.`;
   return `Not retried: this operation is not safe to repeat. Check ${vendor} before starting again.`;
 }
 
@@ -193,7 +195,10 @@ export const LedgerRow = memo(function LedgerRow({
             </span>
           </p>
           {record.error && (
-            <ErrorText error={record.error} then={retries(record.attempt ?? 1, ops.get(record.op), vendors)} />
+            <ErrorText
+              error={record.error}
+              then={retries(record.attempt ?? 1, record.error, ops.get(record.op), vendors)}
+            />
           )}
           <Expandable label="Input" value={record.input} open={record.workflow === LOGIN_CODE_WORKFLOW} redacted />
           {"output" in record && <Expandable label="Output" value={record.output} />}

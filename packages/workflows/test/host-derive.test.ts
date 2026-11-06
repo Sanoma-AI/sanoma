@@ -1,10 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { describeConfig } from "../src/describe.ts";
-import { cloneUrl, deriveHosts, githubRepository, HOST_SIGNING_KEY, type HostFacts } from "../src/host-derive.ts";
+import {
+  cloneUrl,
+  deriveHosts,
+  githubRepository,
+  HOST_SIGNING_KEY,
+  type HostFacts,
+  hostFacts,
+} from "../src/host-derive.ts";
 import { detaching, sourceKeyId, UNNAMED } from "../src/host.ts";
 import { loadDataFiles } from "../src/resources.ts";
-import { isSecret } from "../src/secret.ts";
+import { isSecret, memorySecrets } from "../src/secret.ts";
 import { defineConnector, defineResource, type HostSpec, type Resource, RUNTIME_IMAGE } from "../src/index.ts";
 import { tree } from "./tree.ts";
 
@@ -300,6 +307,73 @@ describe("what a host that derives is given, or refused", () => {
     expect(problems).toEqual([]);
     expect(secrets.SANOMA_PROVISIONING_CREDENTIAL).toEqual({ $secret: "PROVISIONING_BOOTSTRAP" });
     expect(secrets).not.toHaveProperty("PROVISIONING_BOOTSTRAP");
+  });
+
+  it("refuses a binding given to the host with no value, naming it and where it is read, and leaves the host out", () => {
+    const { secrets, problems, out } = derived(
+      { "resources/sanoma/infra.ts": INFRA },
+      {
+        hostEnvironment: {
+          SANOMA_PROVISIONING_CREDENTIAL: "PROVISIONING_BOOTSTRAP",
+          SANOMA_IDENTITY_WRITE_DATABASE_URL: "IDENTITY_WRITER",
+        },
+        hostEnvironmentUnset: ["PROVISIONING_BOOTSTRAP"],
+      },
+    );
+    expect(problems).toEqual([
+      expect.objectContaining({
+        file: "resources/sanoma/infra.ts",
+        message:
+          "host: PROVISIONING_BOOTSTRAP (`host: true`) has no value where apply runs, so the host cannot be given it: set SANOMA_PROVISIONING_CREDENTIAL, which its binding in sanoma.config.ts reads, or take `host: true` off that binding",
+      }),
+    ]);
+    expect(out.leftOut.has("resources/sanoma/infra.ts#host")).toBe(true);
+    expect(secrets).not.toHaveProperty("SANOMA_PROVISIONING_CREDENTIAL");
+    expect(secrets.SANOMA_IDENTITY_WRITE_DATABASE_URL).toEqual({ $secret: "IDENTITY_WRITER" });
+  });
+
+  it("refuses a binding given to the host with no value that a derived binding names too", () => {
+    const { problems } = derived(
+      { "resources/sanoma/infra.ts": INFRA },
+      {
+        signingKeyBound: true,
+        hostEnvironment: { SANOMA_SIGNING_KEY: "SANOMA_SIGNING_KEY" },
+        hostEnvironmentUnset: ["SANOMA_SIGNING_KEY"],
+      },
+    );
+    expect(problems).toEqual([
+      expect.objectContaining({
+        message: expect.stringMatching(/^host: SANOMA_SIGNING_KEY \(`host: true`\) has no value/),
+      }),
+    ]);
+  });
+
+  it("tells which bindings given to the hosts have no value, except to a sandbox run", async () => {
+    const { resources } = load({ "resources/sanoma/infra.ts": INFRA });
+    const told = (sandbox: boolean) =>
+      hostFacts({
+        rootFacts: async () => ({ domains: {} }),
+        resources,
+        types,
+        drivers: new Map(),
+        secrets: memorySecrets({ IDENTITY_WRITER: "set" }),
+        builtInStore: true,
+        bindings: {
+          PROVISIONING_BOOTSTRAP: { env: "SANOMA_PROVISIONING_CREDENTIAL", host: true },
+          IDENTITY_WRITER: { env: "SANOMA_IDENTITY_WRITE_DATABASE_URL", host: true },
+          LOCAL_ONLY: { env: "LOCAL_ONLY" },
+        },
+        mint: false,
+        sandbox,
+      });
+    expect(await told(false)).toMatchObject({
+      hostEnvironment: {
+        SANOMA_PROVISIONING_CREDENTIAL: "PROVISIONING_BOOTSTRAP",
+        SANOMA_IDENTITY_WRITE_DATABASE_URL: "IDENTITY_WRITER",
+      },
+      hostEnvironmentUnset: ["PROVISIONING_BOOTSTRAP"],
+    });
+    expect(await told(true)).not.toHaveProperty("hostEnvironmentUnset");
   });
 
   it.each(["SANOMA_SIGNING_KEY", "SANOMA_DATABASE_URL", "SANOMA_SECRETS_KEY"])(
