@@ -59,8 +59,11 @@ describe("cloudflare.container meets the Host contract on the fake", () => {
     ledger: memoryLedger(),
     databaseUrl,
   };
+  // Each upload answers only after three more requests to the version before, as Cloudflare's
+  // takes a while to reach every location: the checks' deploys wait for it.
   const fake = fakeCloudflare({
     start: ({ revision, env }) => inProcessHost(config, databaseUrl)({ port: 0, revision, secrets: env }),
+    propagation: 3,
   });
   config.connectors.push(withSetup(cloudflareOps, { driver: () => fake.driver }));
   const call = caller(memorySecrets({ HOST_KEY: key, DB_URL: databaseUrl }));
@@ -287,6 +290,76 @@ describe("cloudflare.host's deploy on the fake", () => {
     ).resolves.toMatchObject({ state: { revision: "abc123", healthy: true } });
     expect(built.filter((r) => r === "abc123")).toHaveLength(2);
     expect(fake.state.scripts["sanoma-company"]!.modules).toContain("app/index.js");
+    await op("delete", { id: "company" });
+  });
+});
+
+/** Runs `deploy` while a visitor asks for a page every few milliseconds: each answer's status and the revision of the app that gave it. */
+async function visited(url: string, deploy: () => Promise<unknown>) {
+  const seen: string[] = [];
+  const done = new AbortController();
+  const asking = (async () => {
+    while (!done.signal.aborted) {
+      const res = await fetch(url).catch(() => undefined);
+      seen.push(res ? `${res.status} ${res.headers.get("x-sanoma-revision") ?? ""}` : "no answer");
+      await res?.body?.cancel();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  })();
+  try {
+    await deploy();
+  } finally {
+    done.abort();
+    await asking;
+  }
+  return [...new Set(seen)];
+}
+
+describe("cloudflare.host's deploy while an upload propagates, on the fake", () => {
+  const desired = {
+    name: "company",
+    image: "ghcr.io/sanoma-ai/runtime:0.7.0",
+    source: "https://github.com/acme/company.git",
+    ref: "main",
+    revision: "abc123",
+    port: 3000,
+    secrets: HOST_SECRETS,
+  };
+  // The version before answers the next five requests after each upload.
+  const fake = fakeCloudflare({ propagation: 5 });
+  const secrets = memorySecrets({ HOST_KEY: key, DB_URL: DATABASE_URL, OTHER_TOKEN: "swi_another-instance-token" });
+  const call = caller(secrets);
+  const op = (name: string, input: object) => fake.driver.ops[`host.${name}`]!(input, call(`cloudflare.host.${name}`));
+  afterAll(() => fake.close());
+
+  it("a deploy never answers 503 to a visitor: a new image's container builds the bundle while the app deployed answers", async () => {
+    const made = (await op("create", { desired })) as { state: Record<string, unknown> };
+    const next = { ...desired, image: "ghcr.io/sanoma-ai/runtime:0.8.0", revision: "def456" };
+    const seen = await visited(String(made.state.worker_url), () => op("update", { id: "company", desired: next }));
+    // The app at abc123 until the upload of def456's, never a page saying it is being set up.
+    expect(seen).toEqual(["200 abc123", "200 def456"]);
+    const worker = fake.state.scripts["sanoma-company"]!;
+    expect(worker.tag).toBe("def456");
+    expect(Object.values(worker.images)).toEqual([expect.stringContaining("@sha256:")]);
+    expect(await op("plan", { id: "company", desired: next })).toMatchObject({ action: "none" });
+    await op("delete", { id: "company" });
+  });
+
+  it("a deploy survives version propagation lag: the deployed Worker refuses the token, and the earlier version's answers are not yet, not stale", async () => {
+    const made = (await op("create", { desired })) as { state: Record<string, unknown> };
+    // Another instance token: the Worker deployed refuses the bundle's ask (401), so the Worker at
+    // def456 is uploaded, and the version before still answers 401 for a while after it.
+    const next = {
+      ...desired,
+      revision: "def456",
+      secrets: { ...HOST_SECRETS, SANOMA_WAKEUP_TOKEN: secret("OTHER_TOKEN") },
+    };
+    const seen = await visited(String(made.state.worker_url), () => op("update", { id: "company", desired: next }));
+    expect(seen).toEqual(["200 abc123", "200 def456"]);
+    expect(fake.state.scripts["sanoma-company"]!.tag).toBe("def456");
+    // A same-image deploy through the lag: the restart waits for the upload too.
+    await op("update", { id: "company", desired: { ...next, revision: "0a1b2c3" } });
+    expect((await fetch(String(made.state.worker_url))).headers.get("x-sanoma-revision")).toBe("0a1b2c3");
     await op("delete", { id: "company" });
   });
 });

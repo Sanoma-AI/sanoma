@@ -1,0 +1,413 @@
+[
+  {
+    "method": "GET",
+    "path": "/client/v4/accounts/0123456789abcdef0123456789abcdef/workers/scripts/sanoma-company/settings",
+    "status": 200,
+    "body": {
+      "success": true,
+      "errors": [],
+      "messages": [],
+      "result": {
+        "bindings": [
+          {
+            "type": "durable_object_namespace",
+            "name": "SANOMA_INSTANCE",
+            "class_name": "SanomaInstance",
+            "namespace_id": "0123456789abcdef0123456789abcde0"
+          },
+          {
+            "type": "plain_text",
+            "name": "SANOMA_SOURCE",
+            "text": "https://github.com/acme/company.git"
+          },
+          {
+            "type": "plain_text",
+            "name": "SANOMA_REF",
+            "text": "main"
+          },
+          {
+            "type": "plain_text",
+            "name": "SANOMA_REVISION",
+            "text": "abc123"
+          },
+          {
+            "type": "plain_text",
+            "name": "SANOMA_IMAGE",
+            "text": "registry.cloudflare.com/0123456789abcdef0123456789abcdef/sanoma-ai-runtime@sha256:7777777777777777777777777777777777777777777777777777777777777777"
+          },
+          {
+            "type": "plain_text",
+            "name": "PORT",
+            "text": "3000"
+          },
+          {
+            "type": "plain_text",
+            "name": "SANOMA_HOST_URL",
+            "text": "https://sanoma-company.example.workers.dev"
+          },
+          {
+            "type": "secret_text",
+            "name": "SANOMA_WAKEUP_TOKEN"
+          },
+          {
+            "type": "secret_text",
+            "name": "SANOMA_DATABASE_URL"
+          },
+          {
+            "type": "hyperdrive",
+            "name": "DATABASE",
+            "id": "1e2d3c4b5a69788796a5b4c3d2e1f001"
+          },
+          {
+            "type": "assets",
+            "name": "ASSETS"
+          }
+        ],
+        "compatibility_date": "2026-10-01",
+        "compatibility_flags": ["nodejs_compat"],
+        "usage_model": "standard",
+        "annotations": {
+          "workers/tag": "abc123"
+        }
+      }
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/client/v4/accounts/0123456789abcdef0123456789abcdef/containers/applications?name=sanoma-company",
+    "status": 200,
+    "body": {
+      "success": true,
+      "errors": [],
+      "messages": [],
+      "result": [
+        {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "account_id": "0123456789abcdef0123456789abcdef",
+          "name": "sanoma-company",
+          "scheduling_policy": "durable_object",
+          "created_at": "2026-10-26T12:00:00Z",
+          "updated_at": "2026-10-26T12:00:00Z",
+          "durable_objects": {
+            "namespace_id": "0123456789abcdef0123456789abcde0"
+          }
+        }
+      ],
+      "result_info": {}
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/client/v4/accounts/0123456789abcdef0123456789abcdef/workers/subdomain",
+    "status": 200,
+    "body": {
+      "success": true,
+      "errors": [],
+      "messages": [],
+      "result": {
+        "subdomain": "example"
+      }
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/client/v4/accounts/0123456789abcdef0123456789abcdef/workers/scripts/sanoma-company/settings",
+    "status": 200,
+    "body": {
+      "success": true,
+      "errors": [],
+      "messages": [],
+      "result": {
+        "bindings": [
+          {
+            "type": "durable_object_namespace",
+            "name": "SANOMA_INSTANCE",
+            "class_name": "SanomaInstance",
+            "namespace_id": "0123456789abcdef0123456789abcde0"
+          },
+          {
+            "type": "plain_text",
+            "name": "SANOMA_SOURCE",
+            "text": "https://github.com/acme/company.git"
+          },
+          {
+            "type": "plain_text",
+            "name": "SANOMA_REF",
+            "text": "main"
+          },
+          {
+            "type": "plain_text",
+            "name": "SANOMA_REVISION",
+            "text": "abc123"
+          },
+          {
+            "type": "plain_text",
+            "name": "SANOMA_IMAGE",
+            "text": "registry.cloudflare.com/0123456789abcdef0123456789abcdef/sanoma-ai-runtime@sha256:7777777777777777777777777777777777777777777777777777777777777777"
+          },
+          {
+            "type": "plain_text",
+            "name": "PORT",
+            "text": "3000"
+          },
+          {
+            "type": "plain_text",
+            "name": "SANOMA_HOST_URL",
+            "text": "https://sanoma-company.example.workers.dev"
+          },
+          {
+            "type": "secret_text",
+            "name": "SANOMA_WAKEUP_TOKEN"
+          },
+          {
+            "type": "secret_text",
+            "name": "SANOMA_DATABASE_URL"
+          },
+          {
+            "type": "hyperdrive",
+            "name": "DATABASE",
+            "id": "1e2d3c4b5a69788796a5b4c3d2e1f001"
+          },
+          {
+            "type": "assets",
+            "name": "ASSETS"
+          }
+        ],
+        "compatibility_date": "2026-10-01",
+        "compatibility_flags": ["nodejs_compat"],
+        "usage_model": "standard",
+        "annotations": {
+          "workers/tag": "abc123"
+        }
+      }
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/client/v4/accounts/0123456789abcdef0123456789abcdef/containers/image-preparations",
+    "status": 200,
+    "body": {
+      "success": true,
+      "errors": [],
+      "messages": [],
+      "result": {
+        "image": "registry.cloudflare.com/0123456789abcdef0123456789abcdef/sanoma-ai-runtime@sha256:8888888888888888888888888888888888888888888888888888888888888888",
+        "status": "ready",
+        "artifact_digest": "sha256:a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8"
+      }
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/client/v4/accounts/0123456789abcdef0123456789abcdef/hyperdrive/configs?per_page=50",
+    "status": 200,
+    "body": {
+      "success": true,
+      "errors": [],
+      "messages": [],
+      "result": [
+        {
+          "id": "1e2d3c4b5a69788796a5b4c3d2e1f001",
+          "name": "sanoma-company",
+          "origin": {
+            "database": "company",
+            "host": "db.acme.example",
+            "port": 5432,
+            "scheme": "postgresql",
+            "user": "sanoma"
+          },
+          "caching": {
+            "disabled": true
+          },
+          "created_on": "2026-11-04T12:00:00.000000Z",
+          "modified_on": "2026-11-04T12:00:00.000000Z"
+        }
+      ],
+      "result_info": {
+        "page": 1,
+        "per_page": 50,
+        "count": 1,
+        "total_count": 1
+      }
+    }
+  },
+  {
+    "method": "PUT",
+    "path": "/client/v4/accounts/0123456789abcdef0123456789abcdef/hyperdrive/configs/1e2d3c4b5a69788796a5b4c3d2e1f001",
+    "status": 200,
+    "body": {
+      "success": true,
+      "errors": [],
+      "messages": [],
+      "result": {
+        "id": "1e2d3c4b5a69788796a5b4c3d2e1f001",
+        "name": "sanoma-company",
+        "origin": {
+          "database": "company",
+          "host": "db.acme.example",
+          "port": 5432,
+          "scheme": "postgresql",
+          "user": "sanoma"
+        },
+        "caching": {
+          "disabled": true
+        },
+        "created_on": "2026-11-04T12:00:00.000000Z",
+        "modified_on": "2026-11-04T12:00:00.000000Z"
+      }
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/client/v4/accounts/0123456789abcdef0123456789abcdef/workers/scripts/sanoma-company/subdomain",
+    "status": 200,
+    "body": {
+      "success": true,
+      "errors": [],
+      "messages": [],
+      "result": {
+        "enabled": true,
+        "previews_enabled": true
+      }
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/client/v4/accounts/0123456789abcdef0123456789abcdef/containers/applications?name=sanoma-company",
+    "status": 200,
+    "body": {
+      "success": true,
+      "errors": [],
+      "messages": [],
+      "result": [
+        {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "account_id": "0123456789abcdef0123456789abcdef",
+          "name": "sanoma-company",
+          "scheduling_policy": "durable_object",
+          "created_at": "2026-10-26T12:00:00Z",
+          "updated_at": "2026-10-26T12:00:00Z",
+          "durable_objects": {
+            "namespace_id": "0123456789abcdef0123456789abcde0"
+          }
+        }
+      ],
+      "result_info": {}
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/__sanoma/app-bundle?revision=def456",
+    "status": 202,
+    "body": {
+      "building": "def456"
+    },
+    "headers": {
+      "x-sanoma-app-bundle": "1"
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/__sanoma/app-bundle?revision=def456",
+    "status": 200,
+    "body": {
+      "version": "def456",
+      "mainModule": "index.js",
+      "modules": [
+        {
+          "name": "index.js",
+          "type": "esm",
+          "content": "aW1wb3J0ICIuL2NodW5rLmpzIjsKZXhwb3J0IGRlZmF1bHQgeyBmZXRjaDogKCkgPT4gbmV3IFJlc3BvbnNlKCJhY21lIikgfTsK"
+        },
+        {
+          "name": "chunk.js",
+          "type": "esm",
+          "content": "ZXhwb3J0IGNvbnN0IGNodW5rID0gMTsK"
+        },
+        {
+          "name": "cedar.wasm",
+          "type": "wasm",
+          "content": "AGFzbQEAAAA="
+        }
+      ],
+      "assets": [
+        {
+          "path": "/assets/main-3f2a.js",
+          "content": "Y29uc29sZS5sb2coImh5ZHJhdGVkIik7Cg==",
+          "hash": "1207e131630a2015209c03062bb46ae8",
+          "size": 25
+        }
+      ],
+      "compatibilityDate": "2026-10-01",
+      "compatibilityFlags": ["nodejs_compat"],
+      "prerendered": []
+    },
+    "headers": {
+      "x-sanoma-app-bundle": "1"
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/client/v4/accounts/0123456789abcdef0123456789abcdef/workers/scripts/sanoma-company/assets-upload-session",
+    "status": 200,
+    "body": {
+      "success": true,
+      "errors": [],
+      "messages": [],
+      "result": {
+        "jwt": "eyJhbGciOiJIUzI1NiJ9.completion.signature",
+        "buckets": []
+      }
+    }
+  },
+  {
+    "method": "PUT",
+    "path": "/client/v4/accounts/0123456789abcdef0123456789abcdef/workers/scripts/sanoma-company",
+    "status": 200,
+    "body": {
+      "success": true,
+      "errors": [],
+      "messages": [],
+      "result": {
+        "id": "sanoma-company",
+        "etag": "9b1e8f2c",
+        "created_on": "2026-10-26T12:00:00.000000Z",
+        "modified_on": "2026-10-26T12:00:00.000000Z",
+        "compatibility_date": "2026-10-01",
+        "has_modules": true,
+        "usage_model": "standard"
+      }
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/__sanoma/health",
+    "status": 200,
+    "headers": {
+      "x-sanoma-deployment": "93a4552b0b51c050"
+    },
+    "body": {
+      "revision": "def456",
+      "running": true,
+      "ready": true
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/__sanoma/health?start=1",
+    "status": 202,
+    "body": {
+      "revision": "def456",
+      "running": true,
+      "ready": false
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/__sanoma/health?start=1",
+    "status": 200,
+    "body": {
+      "revision": "def456"
+    }
+  }
+]

@@ -57,11 +57,18 @@
             "type": "hyperdrive",
             "name": "DATABASE",
             "id": "1e2d3c4b5a69788796a5b4c3d2e1f001"
+          },
+          {
+            "type": "assets",
+            "name": "ASSETS"
           }
         ],
         "compatibility_date": "2026-10-01",
-        "compatibility_flags": [],
-        "usage_model": "standard"
+        "compatibility_flags": ["nodejs_compat"],
+        "usage_model": "standard",
+        "annotations": {
+          "workers/tag": "abc123"
+        }
       }
     }
   },
@@ -160,11 +167,18 @@
             "type": "hyperdrive",
             "name": "DATABASE",
             "id": "1e2d3c4b5a69788796a5b4c3d2e1f001"
+          },
+          {
+            "type": "assets",
+            "name": "ASSETS"
           }
         ],
         "compatibility_date": "2026-10-01",
-        "compatibility_flags": [],
-        "usage_model": "standard"
+        "compatibility_flags": ["nodejs_compat"],
+        "usage_model": "standard",
+        "annotations": {
+          "workers/tag": "abc123"
+        }
       }
     }
   },
@@ -283,13 +297,79 @@
   },
   {
     "method": "GET",
+    "path": "/client/v4/accounts/0123456789abcdef0123456789abcdef/workers/scripts/sanoma-company/content/v2",
+    "status": 200,
+    "headers": {
+      "content-type": "multipart/form-data; boundary=sanoma-content-boundary"
+    },
+    "body": "--sanoma-content-boundary\r\nContent-Disposition: form-data; name=\"index.js\"; filename=\"index.js\"\r\nContent-Type: application/javascript+module\r\n\r\nimport { Instance, serve } from \"./instance.js\";\nexport default { fetch: (r, e, c) => serve(r, e, c, () => import(\"./app/index.js\")) };\n\r\n--sanoma-content-boundary\r\nContent-Disposition: form-data; name=\"instance.js\"; filename=\"instance.js\"\r\nContent-Type: application/javascript+module\r\n\r\nexport class Instance {}\nexport const serve = () => {};\n\r\n--sanoma-content-boundary\r\nContent-Disposition: form-data; name=\"app/index.js\"; filename=\"app/index.js\"\r\nContent-Type: application/javascript+module\r\n\r\nexport default { fetch: () => new Response(\"abc123\") };\n\r\n--sanoma-content-boundary--\r\n"
+  },
+  {
+    "method": "PUT",
+    "path": "/client/v4/accounts/0123456789abcdef0123456789abcdef/workers/scripts/sanoma-company",
+    "status": 200,
+    "body": {
+      "success": true,
+      "errors": [],
+      "messages": [],
+      "result": {
+        "id": "sanoma-company",
+        "etag": "9b1e8f2c",
+        "created_on": "2026-10-26T12:00:00.000000Z",
+        "modified_on": "2026-10-26T12:00:00.000000Z",
+        "compatibility_date": "2026-10-01",
+        "has_modules": true,
+        "usage_model": "standard"
+      }
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/__sanoma/health",
+    "status": 200,
+    "headers": {
+      "x-sanoma-deployment": "6345e69808717982"
+    },
+    "body": {
+      "revision": "abc123",
+      "running": false,
+      "ready": false
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/__sanoma/health",
+    "status": 200,
+    "headers": {
+      "x-sanoma-deployment": "f80c7cd5cb9dffd6"
+    },
+    "body": {
+      "revision": "def456",
+      "running": false,
+      "ready": false
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/__sanoma/app-bundle?revision=def456",
+    "status": 401,
+    "headers": {
+      "x-sanoma-deployment": "6345e69808717982"
+    },
+    "body": {
+      "error": "the token is not this host's SANOMA_WAKEUP_TOKEN"
+    }
+  },
+  {
+    "method": "GET",
     "path": "/__sanoma/app-bundle?revision=def456",
     "status": 202,
     "body": {
       "building": "def456"
     },
     "headers": {
-      "x-sanoma-app-bundle": "1"
+      "x-sanoma-app-bundle": "1",
+      "x-sanoma-deployment": "f80c7cd5cb9dffd6"
     }
   },
   {
@@ -329,7 +409,8 @@
       "prerendered": []
     },
     "headers": {
-      "x-sanoma-app-bundle": "1"
+      "x-sanoma-app-bundle": "1",
+      "x-sanoma-deployment": "f80c7cd5cb9dffd6"
     }
   },
   {
@@ -367,10 +448,15 @@
   },
   {
     "method": "GET",
-    "path": "/__sanoma/health?start=1",
+    "path": "/__sanoma/health",
     "status": 200,
+    "headers": {
+      "x-sanoma-deployment": "8a9c513f51fca7a6"
+    },
     "body": {
-      "revision": "abc123"
+      "revision": "def456",
+      "running": false,
+      "ready": false
     }
   },
   {
@@ -378,7 +464,9 @@
     "path": "/__sanoma/health?start=1",
     "status": 200,
     "body": {
-      "revision": "def456"
+      "revision": "def456",
+      "running": true,
+      "ready": true
     }
   }
 ]

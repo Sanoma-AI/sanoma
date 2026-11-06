@@ -121,15 +121,18 @@ function pendingRollout(type: typeof container | typeof host, start: () => Promi
   const api = {
     workerUrl: async () => "https://retry.example.test",
     application: async () => ({ id: "owned-app" }),
-    bindings: async () => [
-      { type: "durable_object_namespace", name: "SANOMA_INSTANCE" },
-      { type: "secret_text", name: "SANOMA_MANAGED_IDENTITY_CREDENTIAL" },
-      { type: "secret_text", name: "SANOMA_DATABASE_URL" },
-      { type: "secret_text", name: "SANOMA_WAKEUP_TOKEN" },
-      // The app's upload made: the database bound.
-      { type: "hyperdrive", name: "DATABASE", id: "retry-database" },
-      ...Object.entries(text).map(([name, value]) => ({ type: "plain_text", name, text: value })),
-    ],
+    settings: async () => ({
+      bindings: [
+        { type: "durable_object_namespace", name: "SANOMA_INSTANCE" },
+        { type: "secret_text", name: "SANOMA_MANAGED_IDENTITY_CREDENTIAL" },
+        { type: "secret_text", name: "SANOMA_DATABASE_URL" },
+        { type: "secret_text", name: "SANOMA_WAKEUP_TOKEN" },
+        { type: "hyperdrive", name: "DATABASE", id: "retry-database" },
+        ...Object.entries(text).map(([name, value]) => ({ type: "plain_text", name, text: value })),
+      ],
+      // The app's upload made: its version tagged with the revision.
+      annotations: { "workers/tag": desired.revision },
+    }),
     send,
     upload,
   } as unknown as CloudflareApi;

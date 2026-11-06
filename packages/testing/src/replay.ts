@@ -9,7 +9,7 @@ export interface Exchange {
   /** The URL's path and query, decoded; the host is not compared. */
   path: string;
   status: number;
-  /** Rate-limit headers, and Sanoma's own (`x-sanoma-*`), only. */
+  /** Rate-limit headers, Sanoma's own (`x-sanoma-*`) and a multipart body's type (its boundary), only. */
   headers?: Record<string, string>;
   body: unknown;
 }
@@ -80,7 +80,10 @@ export function replay({ fixtures, needs, env, scrub, fill = (e) => e }: ReplayO
           const res = await fetch(bypass(request));
           const text = await res.text();
           const kept = Object.fromEntries(
-            [...res.headers].filter(([k]) => /^(ratelimit-|retry-after$|x-sanoma-)/.test(k)),
+            [...res.headers].filter(
+              ([k, v]) =>
+                /^(ratelimit-|retry-after$|x-sanoma-)/.test(k) || (k === "content-type" && v.startsWith("multipart/")),
+            ),
           );
           const headers = Object.keys(kept).length > 0 ? { headers: kept } : {};
           exchanges.push({ method: req.method, path, status: res.status, ...headers, body: parse(text) });

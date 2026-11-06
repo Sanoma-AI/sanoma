@@ -4,7 +4,14 @@ import { z } from "zod";
 import { cloudflareOps, host } from "./connector.ts";
 import { refused } from "./errors.ts";
 import type { WorkerModule } from "./deploy.ts";
-import { alarmOps, type CloudflareApi, containerOps, type ReadBinding, type ZoneRecord } from "./ops.ts";
+import {
+  alarmOps,
+  type CloudflareApi,
+  containerOps,
+  type ReadBinding,
+  type WorkerSettings,
+  type ZoneRecord,
+} from "./ops.ts";
 import { recordsOps } from "./records.ts";
 import { CLOUDFLARE_REGISTRY, copyImage } from "./registry.ts";
 
@@ -18,8 +25,8 @@ export interface CloudflareDriverOptions {
   /** How long one request may take, in milliseconds. Default 30 000. */
   timeoutMs?: number;
   /**
-   * How long a deploy waits for the app bundle at its revision, and then again for the container
-   * restarted at it. Default 10 minutes each: a cold start clones and installs, and a bundle is a
+   * How long a deploy waits for each upload to be live, for the app bundle at its revision, and
+   * then again for the container restarted at it. Default 10 minutes each: a cold start clones and installs, and a bundle is a
    * build of the app.
    */
   startTimeoutMs?: number;
@@ -77,6 +84,11 @@ const MODULE_TYPES: Record<NonNullable<WorkerModule["type"]>, string> = {
   data: "application/octet-stream",
 };
 
+/** A module's kind from its part's type, as the content of a Worker gives it back. */
+const TYPE_OF = new Map(
+  Object.entries(MODULE_TYPES).map(([type, part]) => [part, type as NonNullable<WorkerModule["type"]>]),
+);
+
 const isStatus = (error: unknown, status: number) => error instanceof DriverError && error.status === status;
 
 /** A request to a Worker, with a timeout: a redirect is no answer of the Worker's, and would carry the token elsewhere. */
@@ -131,11 +143,26 @@ function accountApi(timeoutMs: number, subdomains: Map<string, Promise<string>>)
       }
       return `https://${script}.${await subdomain}.workers.dev`;
     },
-    bindings: (script) =>
+    settings: (script) =>
       found(`GET workers/scripts/${script}/settings`, async (cf) => {
         const settings = await cf.workers.scripts.scriptAndVersionSettings.get(script, { account_id });
-        return (settings.bindings ?? []) as ReadBinding[];
+        return { ...settings, bindings: (settings.bindings ?? []) as ReadBinding[] } as WorkerSettings;
       }),
+    async content(script) {
+      // One part per module, named after it and typed as an upload types it, as Wrangler reads a
+      // Worker back (its `init --from-dash`).
+      const form = await calling(`GET workers/scripts/${script}/content/v2`, async (cf) =>
+        (await cf.workers.scripts.content.get(script, { account_id })).formData(),
+      );
+      const modules: WorkerModule[] = [];
+      for (const [name, part] of form) {
+        if (typeof part === "string") continue;
+        const type = TYPE_OF.get(part.type.split(";")[0]!.trim());
+        if (!type) throw refused(`${script}: its module ${name} is of a type an upload does not make: ${part.type}`);
+        modules.push({ name, type, content: new Uint8Array(await part.arrayBuffer()) });
+      }
+      return modules;
+    },
     async upload(script, { modules, ...metadata }) {
       await calling(`PUT workers/scripts/${script}`, async (cf) => {
         // The form as Cloudflare reads it (and Wrangler sends it): one part `metadata`, the JSON, and

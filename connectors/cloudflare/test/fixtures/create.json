@@ -244,10 +244,26 @@
   },
   {
     "method": "GET",
+    "path": "/__sanoma/health",
+    "status": 200,
+    "headers": {
+      "x-sanoma-deployment": "cfca4ac7862db825"
+    },
+    "body": {
+      "revision": "abc123",
+      "running": false,
+      "ready": false
+    }
+  },
+  {
+    "method": "GET",
     "path": "/__sanoma/app-bundle?revision=abc123",
     "status": 202,
     "body": {
       "starting": true
+    },
+    "headers": {
+      "x-sanoma-deployment": "cfca4ac7862db825"
     }
   },
   {
@@ -258,7 +274,8 @@
       "building": "abc123"
     },
     "headers": {
-      "x-sanoma-app-bundle": "1"
+      "x-sanoma-app-bundle": "1",
+      "x-sanoma-deployment": "cfca4ac7862db825"
     }
   },
   {
@@ -298,7 +315,8 @@
       "prerendered": []
     },
     "headers": {
-      "x-sanoma-app-bundle": "1"
+      "x-sanoma-app-bundle": "1",
+      "x-sanoma-deployment": "cfca4ac7862db825"
     }
   },
   {
@@ -345,6 +363,19 @@
         "has_modules": true,
         "usage_model": "standard"
       }
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/__sanoma/health",
+    "status": 200,
+    "headers": {
+      "x-sanoma-deployment": "6345e69808717982"
+    },
+    "body": {
+      "revision": "abc123",
+      "running": false,
+      "ready": false
     }
   },
   {
