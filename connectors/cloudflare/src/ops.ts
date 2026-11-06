@@ -29,14 +29,7 @@ import {
   type WorkerModule,
   workerModules,
 } from "./deploy.ts";
-import {
-  DEPLOYMENT_HEADER,
-  deploymentOf,
-  HEALTH_PATH,
-  IMAGE,
-  NAMESPACE,
-  VERSION_METADATA,
-} from "../worker/instance.js";
+import { DEPLOYMENT_HEADER, HEALTH_PATH, IMAGE, NAMESPACE, VERSION_METADATA } from "../worker/instance.js";
 
 // Cloudflare as the operations use it (`CloudflareApi`), and the host's and the alarm's
 // operations over it: the driver's calls its API with the SDK and the Worker over HTTP, the
@@ -205,7 +198,8 @@ export interface CloudflareApi {
   /** The modules of the Worker's latest version (`GET …/scripts/{name}/content/v2`), as an upload names them. */
   content(script: string): Promise<WorkerModule[]>;
   /** Uploads the Worker and deploys it (`PUT …/scripts/{name}`). */
-  upload(script: string, upload: Upload): Promise<void>;
+  /** The upload's version id, which its object's answers carry once it is live (`DEPLOYMENT_HEADER`). */
+  upload(script: string, upload: Upload): Promise<string>;
   /** Turns its workers.dev URL on (`POST …/scripts/{name}/subdomain { enabled }`). */
   enableSubdomain(script: string): Promise<void>;
   /** The account's id, which its registry's references name (`accountImage`). */
@@ -378,8 +372,8 @@ const same = (field: (typeof COMPARED)[number], a: unknown, b: unknown) =>
     : (a ?? null) === (b ?? null);
 
 /**
- * `{ revision }` and the deployment of the version that answered (`DEPLOYMENT_HEADER`, none from
- * a version before it was marked) when the Worker's object answers its health, else why not. A read asks without
+ * `{ revision }` and the id of the version that answered (`DEPLOYMENT_HEADER`, none from a
+ * version before it was marked) when the Worker's object answers its health, else why not. A read asks without
  * `start`: a stopped host is healthy, and stays stopped. With `start` and the instance token, only
  * once its container runs at what the Worker names and answered, which the ask starts (202
  * meanwhile). A container that ended is `exit`: asking again would only start it again, so a deploy
@@ -509,8 +503,8 @@ export interface ContainerOptions {
  *    not seen: a deploy that died in its wait, or the restart of the worker that ran it) makes this
  *    step alone.
  *
- * After each upload, before the object is asked, `live` waits until that version answers: an
- * upload reaches every location over a while. Before them, as Wrangler orders it: the image copied
+ * After each upload, before the object is asked, `live` waits until that version answers, by
+ * the id the upload answered with: an upload reaches every location over a while. Before them, as Wrangler orders it: the image copied
  * and pinned, then prepared, the Hyperdrive config made or set again, and on a create the Worker
  * uploaded without an app (`no-app.js`, the migration on its first upload), its workers.dev URL
  * turned on and its application made, then uploaded once more so its object learns the
@@ -561,8 +555,7 @@ export function containerOps(
       healthy: checkHealth && app !== undefined && "revision" in (await health(cf, url)),
     };
     const secrets = bindings.filter((b) => b.type === "secret_text").map((b) => b.name);
-    // The app at the revision its bindings name: a version without an app has no tag, and one
-    // that kept the app deployed before while R's container built R's carries that app's.
+    // The app at the revision its bindings name: only the upload with R's app is tagged with R.
     return { state, secrets, serves: settings.annotations?.["workers/tag"] === state.revision };
   };
 
@@ -617,7 +610,7 @@ export function containerOps(
   };
 
   /**
-   * Waits until the Worker version uploaded answers, its `deployment` on the object's health:
+   * Waits until the Worker version uploaded answers, its id (`deployment`) on the object's health:
    * an upload takes a while to reach every location, and until then the version before answers,
    * or none (a new Worker's workers.dev URL). Asks without `start`, so an earlier version starts
    * nothing.
@@ -758,7 +751,7 @@ export function containerOps(
     };
     const bindings: Binding[] = [
       { type: "durable_object_namespace", name: NAMESPACE, class_name: OBJECT_CLASS },
-      // Its tag, which the object's deployment names.
+      // Its id, which the object's answers carry (`DEPLOYMENT_HEADER`).
       { type: "version_metadata", name: VERSION_METADATA },
       ...Object.entries(text).map(([key, value]) => ({ type: "plain_text" as const, name: key, text: value })),
       ...Object.entries(secrets).map(([key, value]) => ({ type: "secret_text" as const, name: key, text: value })),
@@ -785,21 +778,20 @@ export function containerOps(
     };
     /**
      * The Worker at R, its object starting R's container, that serves visitors what they are served
-     * now: the app deployed (its modules, runtime, assets and tag, fetched back), or no app when the
-     * Worker never served one.
+     * now: the app deployed (its modules, runtime and assets, fetched back), or no app when the
+     * Worker never served one. Untagged: it serves no app at R, so a deploy cut off after it plans
+     * an update.
      */
     const serving = async (): Promise<Upload> => {
       if (!current || !servesApp(current.bindings)) return bare;
       const app = (await cf.content(script)).filter((m) => m.name.startsWith(APP));
       const assets = current.bindings.some((b) => b.type === "assets" && b.name === ASSETS);
-      const tag = current.annotations?.["workers/tag"];
       return {
         ...worker,
         bindings: withApp(assets),
         compatibility_date: current.compatibility_date ?? COMPATIBILITY_DATE,
         compatibility_flags: current.compatibility_flags ?? [],
         ...(assets && { keep_assets: true, assets: { config: ASSETS_CONFIG } }),
-        ...(tag && { annotations: { "workers/tag": tag } }),
         modules: [...entry, ...app],
       };
     };
@@ -811,17 +803,15 @@ export function containerOps(
     const detach = async () => {
       for (const domain of gone.splice(0)) await cf.detachDomain(domain.id);
     };
-    /** The Worker at R this put uploaded before its bundle, whose object starts R's container. */
-    let first: Upload | undefined;
+    /** The version of the Worker at R this put uploaded before its bundle, whose object starts R's container. */
+    let first: string | undefined;
     const uploadServing = async () => {
       await detach();
-      first = await serving();
-      await cf.upload(script, first);
+      first = await cf.upload(script, await serving());
       return first;
     };
     if (!current) {
-      first = bare;
-      await cf.upload(script, { ...bare, migrations: MIGRATION });
+      first = await cf.upload(script, { ...bare, migrations: MIGRATION });
     }
     await cf.enableSubdomain(script);
     let app = await cf.application(script);
@@ -838,9 +828,6 @@ export function containerOps(
     }
     const at = { script, url, token };
     const polling = { startTimeoutMs, pollMs };
-    /** The deployment `made` answers with once live (`deploymentOf`). */
-    const deploymentAt = (made: Upload) =>
-      deploymentOf(revision, configurationRevision, image, made.annotations?.["workers/tag"]);
     // 1. Build first: by the deployed Worker's container when it runs the declared image and can
     // (another token, a Worker without the route, a revision whose worker ends: stale); else by
     // R's, which the Worker at R starts, serving visitors the app deployed meanwhile, once that
@@ -850,7 +837,7 @@ export function containerOps(
         ? undefined
         : await appBundle(cf, { ...at, revision }, polling);
     const builtAtR = async () => {
-      const deployment = await deploymentAt(first ?? (await uploadServing()));
+      const deployment = first ?? (await uploadServing());
       await live(cf, at, deployment);
       return appBundle(cf, { ...at, revision, deployment }, polling);
     };
@@ -867,9 +854,9 @@ export function containerOps(
       annotations: { "workers/tag": revision },
       modules: [...entry, ...appModules(script, bundle)],
     };
-    await cf.upload(script, last);
+    const version = await cf.upload(script, last);
     for (const [domain, zone] of missing) await cf.attachDomain(script, domain, zone);
-    await live(cf, at, await deploymentAt(last));
+    await live(cf, at, version);
     // 3. Restart last.
     await restarted(cf, at, revision, configurationRevision);
     const state: ContainerState = {

@@ -672,6 +672,8 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
         if (!known && !migrations?.new_sqlite_classes.includes(OBJECT_CLASS)) {
           throw fail(400, 10061, `Cannot create binding for class ${OBJECT_CLASS}: it is not a Durable Object yet`);
         }
+        // The version's id, as Cloudflare answers an upload and the version's metadata binding names it.
+        const version = `00000000-0000-4000-9000-${String(++state.seq).padStart(12, "0")}`;
         const env: Record<string, unknown> = {};
         for (const binding of bindings) {
           if (binding.type === "durable_object_namespace") {
@@ -687,7 +689,7 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
             // The direct URL: Hyperdrive's pooled one is Cloudflare's own.
             env[binding.name] = { connectionString: url };
           } else if (binding.type === "version_metadata") {
-            env[binding.name] = { id: String(++state.seq), tag: annotations?.["workers/tag"] ?? "", timestamp: "" };
+            env[binding.name] = { id: version, tag: annotations?.["workers/tag"] ?? "", timestamp: "" };
           } else if (binding.type === "assets") {
             env[binding.name] = {
               fetch: async (request: Request) => assetOf(manifest, request) ?? new Response(null, { status: 404 }),
@@ -737,6 +739,7 @@ export function fakeCloudflare(options: FakeCloudflareOptions = {}) {
         versions.after = options.propagation ?? 0;
         workers.set(script, versions);
         if (!versions.after) promote(script, versions);
+        return version;
       },
       async enableSubdomain(script) {
         const found = state.scripts[script];

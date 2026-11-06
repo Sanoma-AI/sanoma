@@ -5,7 +5,6 @@ import { delay, http, HttpResponse } from "msw";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { container } from "../src/connector.ts";
 import { cloudflareDriver } from "../src/driver.ts";
-import { deploymentOf } from "../worker/instance.js";
 import { API, cfResult, replayOptions, TEST_ACCOUNT } from "./replay.ts";
 
 // Replays test/fixtures, written from Cloudflare's API reference (README, "Testing the driver").
@@ -70,17 +69,6 @@ const state = {
 /** `answer` to a restart's health (`?start=1`); the fixture's for an upload's wait to be live. */
 const restart = (request: Request, answer: Response) =>
   new URL(request.url).searchParams.has("start") ? answer : undefined;
-/** The create's `exchanges` with the declared `image`: each version's deployment on the answers of its object, without an app, then with abc123's. */
-const deployedAs = async (exchanges: Exchange[], image: string) => {
-  const as = new Map([
-    [CREATED["x-sanoma-deployment"], await deploymentOf("abc123", undefined, image, undefined)],
-    ["6345e69808717982", await deploymentOf("abc123", undefined, image, "abc123")],
-  ]);
-  return exchanges.map((e) => {
-    const was = e.headers?.["x-sanoma-deployment"];
-    return was ? { ...e, headers: { ...e.headers, "x-sanoma-deployment": as.get(was)! } } : e;
-  });
-};
 
 /** The exchanges of `name` that match `keep`. */
 const only = (name: string, keep: (e: Exchange, i: number) => boolean) => fixture(name).filter(keep);
@@ -94,10 +82,18 @@ const createWith = (...asks: Exchange[]) => [
   ),
   ...asks,
 ];
-/** The deployment the create's Worker without an app answers with (`deploymentOf("abc123", undefined, PINNED, undefined)`). */
-const CREATED = { "x-sanoma-deployment": "cfca4ac7862db825" };
-/** `e` answered by the Worker at def456 serving the app at abc123: `deploymentOf("def456", undefined, PINNED, "abc123")`. */
-const servingAbc = (e: Exchange) => ({ ...e, headers: { ...e.headers, "x-sanoma-deployment": "9bf8f426144b12c9" } });
+/** The version the create's Worker without an app answers with: its second upload's, after the application. */
+const CREATED = { "x-sanoma-deployment": "00000002-0000-4000-a000-000000000000" };
+/** The version of a Worker at def456 serving the app at abc123, uploaded by a stale deployment's deploy. */
+const SERVING = "00000007-0000-4000-a000-000000000000";
+/** `e` answered by the version `SERVING`, or, an upload's, answering with it. */
+const servingAbc = (e: Exchange) =>
+  e.method === "PUT"
+    ? {
+        ...e,
+        body: { ...(e.body as object), result: { ...(e.body as { result: object }).result, deployment_id: SERVING } },
+      }
+    : { ...e, headers: { ...e.headers, "x-sanoma-deployment": SERVING } };
 /** The deploy's reads of what is deployed, between its writes. */
 const reads = (r: string) => r === "GET /workers/subdomain" || r.endsWith("/settings") || r.includes(PREPARATIONS);
 /** The header the worker's bundle route marks its answers with, as the create's object passes them on. */
@@ -377,7 +373,7 @@ describe.skipIf(live)("cloudflareDriver", () => {
         },
         reply("/v2/", 200, null),
         { method: "HEAD", path: copy, status: 200, headers: { "docker-content-digest": digest }, body: null },
-        ...(await deployedAs(rest, "ghcr.io/sanoma-ai/runtime:0.7.0")),
+        ...rest,
       ]);
       const made = await op("container.create", { desired: { ...desired, image: "ghcr.io/sanoma-ai/runtime:0.7.0" } });
       expect(made).toEqual({ id: "company", state: { ...state, image: "ghcr.io/sanoma-ai/runtime:0.7.0" } });
@@ -403,7 +399,7 @@ describe.skipIf(live)("cloudflareDriver", () => {
         registryCredentials,
         reply("/v2/", 200, null),
         { method: "HEAD", path: manifest, status: 200, headers: { "docker-content-digest": digest }, body: null },
-        ...(await deployedAs(rest, `${RUNS}:0.7.0`)),
+        ...rest,
       ]);
       const made = await op("container.create", { desired: { ...desired, image: `${RUNS}:0.7.0` } });
       expect(made).toEqual({ id: "company", state: { ...state, image: `${RUNS}:0.7.0` } });
@@ -702,17 +698,17 @@ describe.skipIf(live)("cloudflareDriver", () => {
       const puts = sent.filter((r) => r.method === "PUT" && r.path.endsWith("/scripts/sanoma-company"));
       const first = await formOf(puts[0]!);
       const serving = await metadataOf(first);
-      // The app deployed, beside this package's entry and object, its runtime, assets and tag kept; R's bindings and image.
+      // The app deployed, beside this package's entry and object, its runtime and assets kept, untagged; R's bindings and image.
       expect(await (first.get("app/index.js") as File).text()).toContain('new Response("abc123")');
       expect(await (first.get("instance.js") as File).text()).toContain("DEPLOYMENT_HEADER");
       expect(serving).toMatchObject({
         compatibility_flags: ["nodejs_compat"],
         keep_assets: true,
         assets: { config: { run_worker_first: ["/*", "!/assets/*"] } },
-        annotations: { "workers/tag": "abc123" },
         containers: [{ images: { runtime: PINNED_NEXT } }],
       });
       expect(serving.assets.jwt).toBeUndefined();
+      expect(serving.annotations).toBeUndefined();
       expect(serving.bindings).toContainEqual({ type: "plain_text", name: "SANOMA_REVISION", text: "def456" });
       expect(serving.bindings).toContainEqual({
         type: "hyperdrive",
@@ -744,7 +740,7 @@ describe.skipIf(live)("cloudflareDriver", () => {
           ...updated.slice(0, 9),
           stale,
           content,
-          updated[12]!,
+          servingAbc(updated[12]!),
           servingAbc(updated[13]!),
           servingAbc(updated[9]!),
           servingAbc(updated[10]!),
@@ -778,7 +774,7 @@ describe.skipIf(live)("cloudflareDriver", () => {
       ["an error of Cloudflare's", reply(BUNDLE, 502, "bad gateway"), "answered 502"],
       [
         "the object's 503 while the container restarts",
-        reply(BUNDLE, 503, { error: "did not answer" }),
+        { ...reply(BUNDLE, 503, { error: "did not answer" }), headers: CREATED },
         "did not answer",
       ],
       ["a bundle cut off", { ...reply(BUNDLE, 200, '{"version":"abc123","mainMod'), headers: ROUTE }, "answered 200"],

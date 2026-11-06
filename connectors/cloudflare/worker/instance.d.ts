@@ -7,13 +7,13 @@ export declare const WAKE_PATH: "/__sanoma/wake";
 export declare const HEALTH_PATH: "/__sanoma/health";
 /** The worker port's route of the app bundle at `?revision=`, which the object passes on with the instance token. */
 export declare const APP_BUNDLE_PATH: "/__sanoma/app-bundle";
-/** The header on every answer of the object: the deployment of the Worker version that answered (`deploymentOf`). */
+/** The header on every answer of the object: the id of the Worker version that answered. */
 export declare const DEPLOYMENT_HEADER: "x-sanoma-deployment";
 /** The header the app reads the visitor's address from. */
 export declare const CLIENT_IP_HEADER: "x-sanoma-client-ip";
 /** How long the container keeps running after the object's last request: Cloudflare stops it then. */
 export declare const INACTIVITY_MS: number;
-/** The Worker version's metadata binding (`version_metadata`): its `tag`, the revision of the app it serves. */
+/** The Worker version's metadata binding (`version_metadata`): its `id`, which each upload answers with. */
 export declare const VERSION_METADATA: "CF_VERSION_METADATA";
 /** The binding that names the object, in the Worker's env. */
 export declare const NAMESPACE: "SANOMA_INSTANCE";
@@ -22,14 +22,6 @@ export declare const IMAGE: "runtime";
 
 /** A label of a value too long for one: a digest of it. */
 export declare function digestLabel(value: string): Promise<string>;
-
-/** What a Worker version deploys, as one label: its revision, configuration revision, declared image and the revision of the app it serves. */
-export declare function deploymentOf(
-  revision: string | undefined,
-  configurationRevision: string | null | undefined,
-  image: string | undefined,
-  app: string | undefined,
-): Promise<string>;
 
 /** What the object's code needs of a Durable Object's `ctx`: its container and its storage. */
 export interface ObjectState {

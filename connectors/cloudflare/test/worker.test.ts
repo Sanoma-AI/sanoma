@@ -9,7 +9,6 @@ import {
   APP_BUNDLE_PATH,
   CLIENT_IP_HEADER,
   DEPLOYMENT_HEADER,
-  deploymentOf,
   digestLabel,
   Instance,
   INACTIVITY_MS,
@@ -255,18 +254,16 @@ describe("the Worker's object", () => {
     },
   );
 
-  it("marks each answer with its version's deployment, the worker's passed on included, so a deploy tells its upload's from an earlier version's", async () => {
+  it("marks each answer with its version's id, the worker's passed on included, so a deploy tells its upload's from an earlier version's", async () => {
     const { ctx } = stubCtx({
       answer: (r) =>
         new URL(r.url).pathname === APP_BUNDLE_PATH
           ? Response.json({ building: "r3" }, { status: 202, headers: { "x-sanoma-app-bundle": "1" } })
           : new Response("ok"),
     });
-    const env = { ...ENV, CF_VERSION_METADATA: { id: "v2", tag: "r1", timestamp: "" } };
+    const serving = "00000002-0000-4000-a000-000000000000";
+    const env = { ...ENV, CF_VERSION_METADATA: { id: serving, tag: "", timestamp: "" } };
     const object = new Instance(ctx, env);
-    // R2's bindings serving the app at r1 (the deploy's first upload), and the deployment once r2's app is uploaded.
-    const serving = await deploymentOf("r2", undefined, ENV.SANOMA_IMAGE, "r1");
-    expect(serving).not.toBe(await deploymentOf("r2", undefined, ENV.SANOMA_IMAGE, "r2"));
     const answers = [
       await object.fetch(route("/__sanoma/health")),
       await object.fetch(route(`${APP_BUNDLE_PATH}?revision=r3`, "swi_another")),

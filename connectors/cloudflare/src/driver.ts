@@ -156,7 +156,8 @@ function accountApi(timeoutMs: number, subdomains: Map<string, Promise<string>>)
       );
       const modules: WorkerModule[] = [];
       for (const [name, part] of form) {
-        if (typeof part === "string") continue;
+        // A part without a file is a module whose type is unknown: refused, not dropped from the app.
+        if (typeof part === "string") throw refused(`${script}: its module ${name} came back without its type`);
         const type = TYPE_OF.get(part.type.split(";")[0]!.trim());
         if (!type) throw refused(`${script}: its module ${name} is of a type an upload does not make: ${part.type}`);
         modules.push({ name, type, content: new Uint8Array(await part.arrayBuffer()) });
@@ -164,7 +165,7 @@ function accountApi(timeoutMs: number, subdomains: Map<string, Promise<string>>)
       return modules;
     },
     async upload(script, { modules, ...metadata }) {
-      await calling(`PUT workers/scripts/${script}`, async (cf) => {
+      const answer = await calling(`PUT workers/scripts/${script}`, async (cf) => {
         // The form as Cloudflare reads it (and Wrangler sends it): one part `metadata`, the JSON, and
         // one part per module, named after it. The SDK's `workers.scripts.update` flattens the
         // metadata into `metadata[main_module]` parts instead, which Cloudflare refuses ("Could not
@@ -175,8 +176,15 @@ function accountApi(timeoutMs: number, subdomains: Map<string, Promise<string>>)
         for (const { name, content, type = "esm" } of modules) {
           form.append(name, new Blob([content], { type: MODULE_TYPES[type] }), name);
         }
-        await cf.put(`/accounts/${account_id}/workers/scripts/${script}`, { body: form });
+        return (await cf.put(`/accounts/${account_id}/workers/scripts/${script}`, { body: form })) as {
+          result?: { deployment_id?: string | null };
+        };
       });
+      // The version's id, which Cloudflare names `deployment_id` and may give without its hyphens
+      // (as Wrangler reads it); the object's `CF_VERSION_METADATA` has them.
+      const id = answer.result?.deployment_id;
+      if (!id) throw refused(`${script}: its upload answered no version id`);
+      return id.includes("-") ? id : id.replace(/^(.{8})(.{4})(.{4})(.{4})(.{12})$/, "$1-$2-$3-$4-$5");
     },
     async assetsSession(script, manifest) {
       const { jwt, buckets } = await calling(`POST workers/scripts/${script}/assets-upload-session`, (cf) =>

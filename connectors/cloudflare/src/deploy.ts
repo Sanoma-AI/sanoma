@@ -100,8 +100,8 @@ interface BundleAsk {
   token: string;
   revision: string;
   /**
-   * The deployment (`deploymentOf`) of the Worker version this deploy uploaded, whose answers
-   * alone count; undefined to ask whichever version is deployed, which may be `{ stale }`.
+   * The id of the Worker version this deploy uploaded, whose answers alone count; undefined to
+   * ask whichever version is deployed, which may be `{ stale }`.
    */
   deployment?: string;
 }
@@ -141,13 +141,15 @@ export function appBundle(
           signal: AbortSignal.timeout(polling.startTimeoutMs),
         });
         const route = res.headers.has(APP_BUNDLE_HEADER);
+        const by = res.headers.get(DEPLOYMENT_HEADER);
+        if (deployment !== undefined && by !== deployment) {
+          await res.body?.cancel();
+          return { last: `an earlier version (${by || "unmarked"}) answered ${res.status}` };
+        }
         // Undefined when it is none (a body cut off where the JSON is).
         const body = (await res.json().catch(() => undefined)) as { error?: unknown; exit?: unknown } | undefined;
         if (route && res.status === 200 && body !== undefined) return { value: body as unknown as AppBundle };
         const said = typeof body?.error === "string" ? body.error : `${APP_BUNDLE_PATH} answered ${res.status}`;
-        if (deployment !== undefined && res.headers.get(DEPLOYMENT_HEADER) !== deployment) {
-          return { last: `an earlier version answered: ${said}` };
-        }
         const exit = typeof body?.exit === "string";
         if (deployment === undefined && (res.status === 401 || exit || (!route && res.status === 404))) {
           return { value: { stale: said } };

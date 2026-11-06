@@ -21,16 +21,16 @@ export const APP_BUNDLE_PATH = "/__sanoma/app-bundle";
 /** The Host contract's wake: the Worker has the worker started now (a wakeup's `GET {url}/wake`). */
 const HOST_WAKE_PATH = "/wake";
 /**
- * The header on every answer of the object: the deployment of the Worker version that answered
- * (`deploymentOf`), so a deploy tells its own upload's answers from an earlier version's, and the
- * object's answers from anyone else's.
+ * The header on every answer of the object: the id of the Worker version that answered (its
+ * `VERSION_METADATA`'s), so a deploy tells its own upload's answers from an earlier version's, and
+ * the object's answers from anyone else's.
  */
 export const DEPLOYMENT_HEADER = "x-sanoma-deployment";
 /** The header the app reads the visitor's address from (`CLIENT_IP_HEADER` in `@sanoma-ai/workflows`). */
 export const CLIENT_IP_HEADER = "x-sanoma-client-ip";
 /** How long the container keeps running after the object's last request: Cloudflare stops it then. */
 export const INACTIVITY_MS = 10 * 60 * 1000;
-/** The Worker version's metadata binding (`version_metadata`): its `tag`, the revision of the app it serves. */
+/** The Worker version's metadata binding (`version_metadata`): its `id`, which each upload answers with. */
 export const VERSION_METADATA = "CF_VERSION_METADATA";
 /** The binding that names the object, in the Worker's env. */
 export const NAMESPACE = "SANOMA_INSTANCE";
@@ -76,15 +76,6 @@ export async function digestLabel(value) {
   return [...new Uint8Array(digest).slice(0, 8)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-/**
- * What a Worker version deploys, as one label: its revision, configuration revision and declared
- * image (`SANOMA_REVISION`, `SANOMA_CONFIG_REVISION`, `SANOMA_IMAGE`), and the revision of the app
- * it serves (its version's tag), none of them secret.
- */
-export function deploymentOf(revision, configurationRevision, image, app) {
-  return digestLabel(JSON.stringify([revision ?? "", configurationRevision ?? "", image ?? "", app ?? ""]));
-}
-
 /** True when two strings are equal, in a time that does not tell how much of them is. */
 function sameToken(given, expected) {
   let differ = given.length ^ expected.length;
@@ -111,9 +102,6 @@ export class Instance {
   #exit;
   /** The start whose `monitor` may set `#exit`: an earlier container's end is not this one's. */
   #started;
-  /** This version's `deploymentOf`, made at the first answer. */
-  #deployment;
-
   constructor(ctx, env) {
     this.ctx = ctx;
     this.env = env;
@@ -126,19 +114,12 @@ export class Instance {
     return Number(this.env.PORT);
   }
 
-  /** The object's routes, each answer marked with this version's deployment (`DEPLOYMENT_HEADER`). */
+  /** The object's routes, each answer marked with this version's id (`DEPLOYMENT_HEADER`). */
   async fetch(request) {
-    const env = this.env;
-    this.#deployment ??= deploymentOf(
-      env.SANOMA_REVISION,
-      env.SANOMA_CONFIG_REVISION,
-      env.SANOMA_IMAGE,
-      env[VERSION_METADATA]?.tag,
-    );
     const answer = await this.#answer(request);
     // A copy: the headers of the container's own answer cannot be changed.
     const marked = new Response(answer.body, answer);
-    marked.headers.set(DEPLOYMENT_HEADER, await this.#deployment);
+    marked.headers.set(DEPLOYMENT_HEADER, this.env[VERSION_METADATA]?.id ?? "");
     return marked;
   }
 

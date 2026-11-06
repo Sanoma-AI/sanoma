@@ -115,7 +115,8 @@
         "modified_on": "2026-10-26T12:00:00.000000Z",
         "compatibility_date": "2026-10-01",
         "has_modules": true,
-        "usage_model": "standard"
+        "usage_model": "standard",
+        "deployment_id": "0000000100004000a000000000000000"
       }
     }
   },
@@ -238,7 +239,8 @@
         "modified_on": "2026-10-26T12:00:00.000000Z",
         "compatibility_date": "2026-10-01",
         "has_modules": true,
-        "usage_model": "standard"
+        "usage_model": "standard",
+        "deployment_id": "0000000200004000a000000000000000"
       }
     }
   },
@@ -247,7 +249,7 @@
     "path": "/__sanoma/health",
     "status": 200,
     "headers": {
-      "x-sanoma-deployment": "cfca4ac7862db825"
+      "x-sanoma-deployment": "00000002-0000-4000-a000-000000000000"
     },
     "body": {
       "revision": "abc123",
@@ -263,7 +265,7 @@
       "starting": true
     },
     "headers": {
-      "x-sanoma-deployment": "cfca4ac7862db825"
+      "x-sanoma-deployment": "00000002-0000-4000-a000-000000000000"
     }
   },
   {
@@ -275,7 +277,7 @@
     },
     "headers": {
       "x-sanoma-app-bundle": "1",
-      "x-sanoma-deployment": "cfca4ac7862db825"
+      "x-sanoma-deployment": "00000002-0000-4000-a000-000000000000"
     }
   },
   {
@@ -316,7 +318,7 @@
     },
     "headers": {
       "x-sanoma-app-bundle": "1",
-      "x-sanoma-deployment": "cfca4ac7862db825"
+      "x-sanoma-deployment": "00000002-0000-4000-a000-000000000000"
     }
   },
   {
@@ -361,7 +363,8 @@
         "modified_on": "2026-10-26T12:00:00.000000Z",
         "compatibility_date": "2026-10-01",
         "has_modules": true,
-        "usage_model": "standard"
+        "usage_model": "standard",
+        "deployment_id": "0000000300004000a000000000000000"
       }
     }
   },
@@ -370,7 +373,7 @@
     "path": "/__sanoma/health",
     "status": 200,
     "headers": {
-      "x-sanoma-deployment": "6345e69808717982"
+      "x-sanoma-deployment": "00000003-0000-4000-a000-000000000000"
     },
     "body": {
       "revision": "abc123",

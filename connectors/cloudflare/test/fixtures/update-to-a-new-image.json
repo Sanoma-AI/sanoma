@@ -319,7 +319,8 @@
         "modified_on": "2026-10-26T12:00:00.000000Z",
         "compatibility_date": "2026-10-01",
         "has_modules": true,
-        "usage_model": "standard"
+        "usage_model": "standard",
+        "deployment_id": "00000005-0000-4000-a000-000000000000"
       }
     }
   },
@@ -328,7 +329,7 @@
     "path": "/__sanoma/health",
     "status": 200,
     "headers": {
-      "x-sanoma-deployment": "6345e69808717982"
+      "x-sanoma-deployment": "00000003-0000-4000-a000-000000000000"
     },
     "body": {
       "revision": "abc123",
@@ -341,7 +342,7 @@
     "path": "/__sanoma/health",
     "status": 200,
     "headers": {
-      "x-sanoma-deployment": "f80c7cd5cb9dffd6"
+      "x-sanoma-deployment": "00000005-0000-4000-a000-000000000000"
     },
     "body": {
       "revision": "def456",
@@ -354,7 +355,7 @@
     "path": "/__sanoma/app-bundle?revision=def456",
     "status": 401,
     "headers": {
-      "x-sanoma-deployment": "6345e69808717982"
+      "x-sanoma-deployment": "00000003-0000-4000-a000-000000000000"
     },
     "body": {
       "error": "the token is not this host's SANOMA_WAKEUP_TOKEN"
@@ -369,7 +370,7 @@
     },
     "headers": {
       "x-sanoma-app-bundle": "1",
-      "x-sanoma-deployment": "f80c7cd5cb9dffd6"
+      "x-sanoma-deployment": "00000005-0000-4000-a000-000000000000"
     }
   },
   {
@@ -410,7 +411,7 @@
     },
     "headers": {
       "x-sanoma-app-bundle": "1",
-      "x-sanoma-deployment": "f80c7cd5cb9dffd6"
+      "x-sanoma-deployment": "00000005-0000-4000-a000-000000000000"
     }
   },
   {
@@ -442,7 +443,8 @@
         "modified_on": "2026-10-26T12:00:00.000000Z",
         "compatibility_date": "2026-10-01",
         "has_modules": true,
-        "usage_model": "standard"
+        "usage_model": "standard",
+        "deployment_id": "00000006-0000-4000-a000-000000000000"
       }
     }
   },
@@ -451,7 +453,7 @@
     "path": "/__sanoma/health",
     "status": 200,
     "headers": {
-      "x-sanoma-deployment": "8a9c513f51fca7a6"
+      "x-sanoma-deployment": "00000006-0000-4000-a000-000000000000"
     },
     "body": {
       "revision": "def456",
